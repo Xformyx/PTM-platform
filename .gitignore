@@ -1,0 +1,57 @@
+# Environment & secrets
+.env
+.env.*
+!.env.example
+*.env.local
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+*.egg
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Node
+node_modules/
+frontend/dist/
+frontend/node_modules/
+.npm
+.yarn-integrity
+
+# Storage (Docker volumes mapped here)
+storage/mysql/
+storage/redis/
+storage/chromadb/
+storage/reports/
+storage/logs/
+
+# Data: user uploads & generated outputs
+data/inputs/
+data/outputs/
+
+# Reference data (large FASTA etc. - add back if needed)
+# data/reference/
+
+# Worker & app logs
+workers/logs/
+*.log
+
+# IDE & OS
+.cursor/
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Docker & local
+.cache/

@@ -1,0 +1,253 @@
+# =============================================================================
+# PTM Analysis Platform - Docker Compose
+# =============================================================================
+
+services:
+  # ─── Shared Infrastructure ─────────────────────────────────────────────────
+
+  mysql:
+    image: mysql:8.0
+    container_name: ptm-mysql
+    platform: linux/amd64
+    ports:
+      - "3306:3306"
+    volumes:
+      - ./storage/mysql:/var/lib/mysql
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-ptm_root_password_change_me}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-ptm_platform}
+      MYSQL_USER: ${MYSQL_USER:-ptm_user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-ptm_password_change_me}
+    networks:
+      - ptm-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: ptm-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - ./storage/redis:/data
+    networks:
+      - ptm-network
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    restart: unless-stopped
+
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: ptm-chromadb
+    platform: linux/amd64
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./storage/chromadb:/data
+    environment:
+      CHROMA_SERVER_HOST: "0.0.0.0"
+      CHROMA_SERVER_HTTP_PORT: "8000"
+      ALLOW_RESET: "true"
+      IS_PERSISTENT: "TRUE"
+    networks:
+      - ptm-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          memory: 2G
+
+  # ─── Application Services ─────────────────────────────────────────────────
+
+  api-server:
+    build:
+      context: ./api-server
+      dockerfile: Dockerfile
+    container_name: ptm-api-server
+    volumes:
+      - ./api-server/app:/app/app
+      - ./data:/app/data
+      - ./storage/reports:/app/storage/reports
+      - ./storage/logs:/app/storage/logs
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      DEBUG: ${DEBUG:-true}
+      AUTH_ENABLED: ${AUTH_ENABLED:-false}
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
+      DATABASE_URL: mysql+asyncmy://${MYSQL_USER:-ptm_user}:${MYSQL_PASSWORD:-ptm_password_change_me}@mysql:3306/${MYSQL_DATABASE:-ptm_platform}
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CHROMADB_URL: http://chromadb:8000
+      OLLAMA_URL: http://host.docker.internal:11434
+      MCP_SERVER_URL: http://mcp-server:8001
+      INPUT_DIR: /app/data/inputs
+      OUTPUT_DIR: /app/data/outputs
+      REPORTS_DIR: /app/storage/reports
+      REFERENCE_DIR: /app/data/reference
+      LOG_DIR: /app/storage/logs
+      HOST_DATA_DIR: ${HOST_DATA_DIR:-}
+      LLM_MODEL: ${LLM_MODEL:-gemma3:27b}
+    networks:
+      - ptm-network
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  mcp-server:
+    build:
+      context: ./mcp-server
+      dockerfile: Dockerfile
+    container_name: ptm-mcp-server
+    volumes:
+      - ./mcp-server/app:/app/app
+    environment:
+      REDIS_URL: redis://redis:6379/3
+      NCBI_EMAIL: ${NCBI_EMAIL:-user@example.com}
+      NCBI_API_KEY: ${NCBI_API_KEY:-}
+      NCBI_TOOL: ${NCBI_TOOL:-PTM-Platform}
+      STRINGDB_API_KEY: ${STRINGDB_API_KEY:-}
+    networks:
+      - ptm-network
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  celery-worker-preprocessing:
+    build:
+      context: ./workers
+      dockerfile: Dockerfile
+    container_name: ptm-worker-preprocessing
+    command: celery -A celery_app worker -Q preprocessing -c ${PREPROCESSING_CONCURRENCY:-2} -n preprocessing@%h -l info
+    volumes:
+      - ./workers:/app
+      - ./data:/app/data
+      - ./storage/reports:/app/storage/reports
+      - ./storage/logs:/app/storage/logs
+    environment:
+      PYTHONPATH: /app
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: mysql+asyncmy://${MYSQL_USER:-ptm_user}:${MYSQL_PASSWORD:-ptm_password_change_me}@mysql:3306/${MYSQL_DATABASE:-ptm_platform}
+      MCP_SERVER_URL: http://mcp-server:8001
+      OLLAMA_URL: http://host.docker.internal:11434
+      CHROMADB_URL: http://chromadb:8000
+      INPUT_DIR: /app/data/inputs
+      OUTPUT_DIR: /app/data/outputs
+    networks:
+      - ptm-network
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  celery-worker-rag:
+    build:
+      context: ./workers
+      dockerfile: Dockerfile
+    container_name: ptm-worker-rag
+    command: celery -A celery_app worker -Q rag_enrichment -c ${RAG_ENRICHMENT_CONCURRENCY:-3} -n rag@%h -l info
+    volumes:
+      - ./workers:/app
+      - ./data:/app/data
+      - ./storage/reports:/app/storage/reports
+      - ./storage/logs:/app/storage/logs
+    environment:
+      PYTHONPATH: /app
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: mysql+asyncmy://${MYSQL_USER:-ptm_user}:${MYSQL_PASSWORD:-ptm_password_change_me}@mysql:3306/${MYSQL_DATABASE:-ptm_platform}
+      MCP_SERVER_URL: http://mcp-server:8001
+      CHROMADB_URL: http://chromadb:8000
+      OUTPUT_DIR: /app/data/outputs
+    networks:
+      - ptm-network
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  celery-worker-report:
+    build:
+      context: ./workers
+      dockerfile: Dockerfile
+    container_name: ptm-worker-report
+    command: celery -A celery_app worker -Q report_generation -c ${REPORT_GENERATION_CONCURRENCY:-2} -n report@%h -l info
+    volumes:
+      - ./workers:/app
+      - ./data:/app/data
+      - ./storage/reports:/app/storage/reports
+      - ./storage/logs:/app/storage/logs
+    environment:
+      PYTHONPATH: /app
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: mysql+asyncmy://${MYSQL_USER:-ptm_user}:${MYSQL_PASSWORD:-ptm_password_change_me}@mysql:3306/${MYSQL_DATABASE:-ptm_platform}
+      MCP_SERVER_URL: http://mcp-server:8001
+      OLLAMA_URL: http://host.docker.internal:11434
+      CHROMADB_URL: http://chromadb:8000
+      OUTPUT_DIR: /app/data/outputs
+      LLM_MODEL: ${LLM_MODEL:-gemma3:27b}
+      CYTOSCAPE_HOST: host.docker.internal
+      CYTOSCAPE_PORT: ${CYTOSCAPE_PORT:-1234}
+    networks:
+      - ptm-network
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ─── Gateway & Frontend ────────────────────────────────────────────────────
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: ptm-frontend
+    networks:
+      - ptm-network
+    restart: unless-stopped
+
+  gateway:
+    image: nginx:alpine
+    container_name: ptm-gateway
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./gateway/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./gateway/ssl:/etc/nginx/ssl:ro
+    networks:
+      - ptm-network
+    depends_on:
+      - api-server
+      - frontend
+    restart: unless-stopped
+
+networks:
+  ptm-network:
+    driver: bridge
+    name: ptm-platform-network
