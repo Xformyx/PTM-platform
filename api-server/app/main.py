@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import events, health, llm, orders, rag, system
+from app.api import articles, events, health, llm, orders, rag, system
 from app.config import get_settings
 from app.core.database import engine, Base
 from app.core.logging import setup_logging
@@ -50,3 +50,4 @@ app.include_router(events.router, prefix="/api")
 app.include_router(rag.router, prefix="/api")
 app.include_router(llm.router, prefix="/api")
 app.include_router(system.router, prefix="/api")
+app.include_router(articles.router, prefix="/api")

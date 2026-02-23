@@ -6,6 +6,7 @@ import OrderCreate from '@/pages/OrderCreate';
 import OrderDetail from '@/pages/OrderDetail';
 import RagManagement from '@/pages/RagManagement';
 import LlmConfig from '@/pages/LlmConfig';
+import Articles from '@/pages/Articles';
 import Reports from '@/pages/Reports';
 import Logs from '@/pages/Logs';
 import Settings from '@/pages/Settings';
@@ -20,6 +21,7 @@ export default function App() {
         <Route path="orders/:id" element={<OrderDetail />} />
         <Route path="rag" element={<RagManagement />} />
         <Route path="llm" element={<LlmConfig />} />
+        <Route path="articles" element={<Articles />} />
         <Route path="reports" element={<Reports />} />
         <Route path="logs" element={<Logs />} />
         <Route path="settings" element={<Settings />} />

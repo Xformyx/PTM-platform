@@ -158,10 +158,8 @@ async def _multi_tier_search(
         tier3_query = _build_alias_query(all_names, variants, ptm_type)
         tier3_pmids = await _esearch(tier3_query, max_results)
 
-    # Europe PMC fallback
-    epmc_pmids = []
-    if len(tier1_pmids) + len(tier2_pmids) < 3:
-        epmc_pmids = await _search_europe_pmc(gene, position, ptm_type, max_results)
+    # Europe PMC — always run in parallel for maximum coverage
+    epmc_pmids = await _search_europe_pmc(gene, position, ptm_type, max_results)
 
     # Merge and deduplicate
     seen = set()
@@ -267,6 +265,8 @@ async def _esearch(query: str, max_results: int = 15) -> list[str]:
         "retmax": str(max_results),
         "retmode": "xml",
         "sort": "relevance",
+        "mindate": "2000/01/01",
+        "datetype": "pdat",
         "email": NCBI_EMAIL,
         "tool": NCBI_TOOL,
     }
@@ -495,3 +495,151 @@ async def _fetch_gene_aliases(gene: str) -> list[str]:
             return [a for a in aliases if a and a != gene][:5]
     except Exception:
         return []
+
+
+# ---------------------------------------------------------------------------
+# Article Cache Management
+# ---------------------------------------------------------------------------
+
+async def list_cached_articles(
+    redis, cursor: int = 0, count: int = 50, search: str = ""
+) -> dict:
+    """List cached articles from Redis with optional text search."""
+    import json as _json
+
+    # Scan for article keys
+    article_keys = []
+    _cursor = 0
+    while True:
+        _cursor, keys = await redis.scan(_cursor, match="pubmed:article:*", count=500)
+        article_keys.extend(keys)
+        if _cursor == 0:
+            break
+
+    # Fetch all articles
+    articles = []
+    for key in article_keys:
+        raw = await redis.get(key)
+        if raw:
+            try:
+                article = _json.loads(raw)
+                articles.append(article)
+            except _json.JSONDecodeError:
+                continue
+
+    # Sort by year descending (newest first)
+    articles.sort(key=lambda a: a.get("year", 0) or 0, reverse=True)
+
+    # Apply text search filter
+    if search:
+        search_lower = search.lower()
+        filtered = []
+        for a in articles:
+            searchable = " ".join([
+                str(a.get("title", "")),
+                str(a.get("abstract", "")),
+                str(a.get("pmid", "")),
+                str(a.get("journal", "")),
+                " ".join(a.get("authors", [])),
+                str(a.get("search_gene", "")),
+            ]).lower()
+            if search_lower in searchable:
+                filtered.append(a)
+        articles = filtered
+
+    total = len(articles)
+    page = articles[cursor : cursor + count]
+    next_cursor = cursor + count if cursor + count < total else total
+
+    return {
+        "articles": page,
+        "total": total,
+        "cursor": next_cursor,
+        "has_more": next_cursor < total,
+    }
+
+
+async def get_cached_article(redis, pmid: str) -> dict | None:
+    """Get a single cached article by PMID."""
+    import json as _json
+
+    raw = await redis.get(f"pubmed:article:{pmid}")
+    if raw:
+        try:
+            return _json.loads(raw)
+        except _json.JSONDecodeError:
+            return None
+    return None
+
+
+async def delete_cached_article(redis, pmid: str) -> bool:
+    """Delete a single cached article by PMID."""
+    deleted = await redis.delete(f"pubmed:article:{pmid}")
+    return deleted > 0
+
+
+async def clear_all_cached_articles(redis) -> int:
+    """Delete all cached articles and search results."""
+    count = 0
+    _cursor = 0
+    while True:
+        _cursor, keys = await redis.scan(_cursor, match="pubmed:*", count=500)
+        if keys:
+            count += await redis.delete(*keys)
+        if _cursor == 0:
+            break
+    return count
+
+
+async def get_cache_stats(redis) -> dict:
+    """Get statistics about the article cache."""
+    import json as _json
+
+    article_count = 0
+    search_count = 0
+    fulltext_count = 0
+    genes = set()
+
+    _cursor = 0
+    while True:
+        _cursor, keys = await redis.scan(_cursor, match="pubmed:*", count=500)
+        for key in keys:
+            key_str = key if isinstance(key, str) else key.decode()
+            if key_str.startswith("pubmed:article:"):
+                article_count += 1
+                # Try to extract gene from article data
+                raw = await redis.get(key)
+                if raw:
+                    try:
+                        data = _json.loads(raw)
+                        gene = data.get("search_gene")
+                        if gene:
+                            genes.add(gene)
+                    except _json.JSONDecodeError:
+                        pass
+            elif key_str.startswith("pubmed:search:"):
+                search_count += 1
+                # Extract gene from key pattern pubmed:search:{gene}:{position}:{ptm_type}
+                parts = key_str.split(":")
+                if len(parts) >= 3:
+                    genes.add(parts[2])
+        if _cursor == 0:
+            break
+
+    # Count PMC fulltext cache entries
+    _cursor = 0
+    while True:
+        _cursor, keys = await redis.scan(_cursor, match="pmc:fulltext:*", count=500)
+        fulltext_count += len(keys)
+        if _cursor == 0:
+            break
+
+    sample_genes = sorted(genes)[:50]
+
+    return {
+        "total_articles": article_count,
+        "total_searches": search_count,
+        "total_fulltext": fulltext_count,
+        "unique_genes": len(genes),
+        "sample_genes": sample_genes,
+    }

@@ -10,6 +10,8 @@ from pydantic import BaseModel
 from .tools import (
     query_uniprot, query_kegg, query_stringdb, query_interpro,
     search_ptm_pubmed, fetch_articles_by_pmids, get_gene_aliases,
+    list_cached_articles, get_cached_article, delete_cached_article,
+    clear_all_cached_articles, get_cache_stats,
     # v2: External API clients (ported from ptm-rag-backend)
     query_iptmnet,
     fetch_fulltext_by_pmid, fetch_fulltext_batch,
@@ -332,3 +334,49 @@ async def tool_kea3_enrich(req: KEA3Request):
         gene_list=req.gene_list, top_n=req.top_n,
         redis=app.state.redis,
     )
+
+
+# ===========================================================================
+# Article Cache Management Endpoints
+# ===========================================================================
+
+@app.get("/cache/articles")
+async def cache_list_articles(
+    cursor: int = Query(0, ge=0),
+    count: int = Query(50, ge=1, le=200),
+    search: str = Query(""),
+):
+    """List cached PubMed articles with optional text search."""
+    return await list_cached_articles(
+        app.state.redis, cursor=cursor, count=count, search=search,
+    )
+
+
+@app.get("/cache/articles/stats")
+async def cache_article_stats():
+    """Get article cache statistics."""
+    return await get_cache_stats(app.state.redis)
+
+
+@app.get("/cache/articles/{pmid}")
+async def cache_get_article(pmid: str):
+    """Get a single cached article by PMID."""
+    article = await get_cached_article(app.state.redis, pmid)
+    if article is None:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail=f"Article {pmid} not found in cache")
+    return article
+
+
+@app.delete("/cache/articles/{pmid}")
+async def cache_delete_article(pmid: str):
+    """Delete a single cached article by PMID."""
+    deleted = await delete_cached_article(app.state.redis, pmid)
+    return {"deleted": deleted, "pmid": pmid}
+
+
+@app.delete("/cache/articles")
+async def cache_clear_all_articles():
+    """Clear all cached articles and search results."""
+    count = await clear_all_cached_articles(app.state.redis)
+    return {"deleted_count": count}

@@ -5,6 +5,7 @@ import {
   ClipboardList,
   Library,
   Brain,
+  BookOpen,
   FlaskConical,
   Settings,
   type LucideIcon,
@@ -25,6 +26,7 @@ const mainNav: NavItem[] = [
   { path: "/orders", label: "Orders", icon: ClipboardList, end: true },
   { path: "/rag", label: "RAG Collections", icon: Library },
   { path: "/llm", label: "LLM Models", icon: Brain },
+  { path: "/articles", label: "Article Cache", icon: BookOpen },
 ];
 
 export default function Sidebar({ className }: { className?: string }) {
