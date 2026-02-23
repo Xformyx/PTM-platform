@@ -4,8 +4,10 @@ Ported from ptm-rag-backend/src/ragEnrichmentV2.ts.
 
 Changes from original:
   - All API calls → MCP Client
-  - LLM calls (abstractAnalyzer, llmKinasePredictor, llmFunctionalImpact) REMOVED
+  - LLM calls (abstractAnalyzer, llmKinasePredictor, llmFunctionalImpact) RESTORED
   - Pattern-based regulation extraction retained
+  - Cross-site PTM search and validation integrated
+  - Full-text analysis via PMC integrated
   - TypeScript → Python
 """
 
@@ -17,6 +19,11 @@ import pandas as pd
 
 from common.mcp_client import MCPClient
 from .regulation_extractor import RegulationExtractor
+from .abstract_analyzer import AbstractAnalyzer
+from .llm_kinase_predictor import LLMKinasePredictor
+from .llm_functional_impact import LLMFunctionalImpact
+from .fulltext_analyzer import FullTextAnalyzer
+from .ptm_validation import PTMValidator
 
 logger = logging.getLogger(__name__)
 
@@ -28,10 +35,27 @@ class RAGEnrichmentPipeline:
         self,
         mcp_client: MCPClient,
         progress_callback: Optional[Callable[[float, str], None]] = None,
+        enable_llm_analysis: bool = True,
+        enable_fulltext: bool = True,
+        enable_ptm_validation: bool = True,
     ):
         self.mcp = mcp_client
         self.reg_extractor = RegulationExtractor()
         self._progress = progress_callback or (lambda p, m: None)
+
+        # LLM-based analysis modules (restored from original)
+        self.enable_llm = enable_llm_analysis
+        self.enable_fulltext = enable_fulltext
+        self.enable_ptm_validation = enable_ptm_validation
+
+        if enable_llm_analysis:
+            self.abstract_analyzer = AbstractAnalyzer()
+            self.kinase_predictor = LLMKinasePredictor()
+            self.functional_impact = LLMFunctionalImpact()
+        if enable_fulltext:
+            self.fulltext_analyzer = FullTextAnalyzer()
+        if enable_ptm_validation:
+            self.ptm_validator = PTMValidator(mcp_client=mcp_client)
 
     def enrich_ptm_data(
         self,
@@ -101,6 +125,59 @@ class RAGEnrichmentPipeline:
         protein_id = ptm.get("protein_id") or ptm.get("Protein.Group", "")
         uniprot_info = self.mcp.query_uniprot(protein_id) if protein_id else {}
 
+        # 5a. LLM-based abstract analysis (RESTORED)
+        abstract_analysis = {}
+        if self.enable_llm and articles:
+            try:
+                abstract_analysis = self.abstract_analyzer.analyze(
+                    articles=articles, gene=gene, position=position, ptm_type=ptm_type,
+                )
+            except Exception as e:
+                logger.warning(f"Abstract analysis failed for {gene}: {e}")
+
+        # 5b. LLM-based kinase prediction (RESTORED)
+        kinase_prediction = {}
+        if self.enable_llm:
+            try:
+                kinase_prediction = self.kinase_predictor.predict(
+                    gene=gene, site=position, ptm_type=ptm_type,
+                    context=context, articles=articles,
+                )
+            except Exception as e:
+                logger.warning(f"Kinase prediction failed for {gene}: {e}")
+
+        # 5c. LLM-based functional impact analysis (RESTORED)
+        functional_impact = {}
+        if self.enable_llm:
+            try:
+                functional_impact = self.functional_impact.analyze(
+                    gene=gene, site=position, ptm_type=ptm_type,
+                    articles=articles, pathways=kegg_pathways,
+                )
+            except Exception as e:
+                logger.warning(f"Functional impact analysis failed for {gene}: {e}")
+
+        # 5d. Full-text analysis via PMC (RESTORED)
+        fulltext_results = {}
+        if self.enable_fulltext:
+            try:
+                fulltext_results = self.fulltext_analyzer.analyze(
+                    gene=gene, site=position, ptm_type=ptm_type,
+                    mcp_client=self.mcp,
+                )
+            except Exception as e:
+                logger.warning(f"Full-text analysis failed for {gene}: {e}")
+
+        # 5e. PTM validation / novelty check (RESTORED)
+        validation_result = {}
+        if self.enable_ptm_validation:
+            try:
+                validation_result = self.ptm_validator.validate(
+                    gene=gene, site=position, ptm_type=ptm_type,
+                )
+            except Exception as e:
+                logger.warning(f"PTM validation failed for {gene}: {e}")
+
         # 6. Merge regulation (KEGG + PubMed patterns)
         upstream = regulation["upstream_regulators"]
         downstream = regulation["downstream_targets"]
@@ -144,10 +221,39 @@ class RAGEnrichmentPipeline:
                 "cellular_component": uniprot_info.get("go_terms_cc", []),
             },
             "classification": classification,
+            # --- RESTORED LLM analysis results ---
+            "abstract_analysis": abstract_analysis,
+            "kinase_prediction": kinase_prediction,
+            "functional_impact": functional_impact,
+            "fulltext_analysis": fulltext_results,
+            "ptm_validation": validation_result,
         }
 
         ptm["rag_enrichment"] = enrichment
         return ptm
+
+    @staticmethod
+    def _empty_enrichment() -> dict:
+        return {
+            "search_summary": {"total_articles": 0},
+            "recent_findings": [],
+            "regulation": {
+                "upstream_regulators": [], "downstream_targets": [],
+                "kinase_substrate": [], "evidence_count": 0,
+            },
+            "pathways": [],
+            "string_interactions": [],
+            "diseases": [],
+            "localization": [],
+            "function_summary": "",
+            "go_terms": {"biological_process": [], "molecular_function": [], "cellular_component": []},
+            "classification": {"quadrant": "unknown", "interpretation": ""},
+            "abstract_analysis": {},
+            "kinase_prediction": {},
+            "functional_impact": {},
+            "fulltext_analysis": {},
+            "ptm_validation": {},
+        }
 
     def _classify_ptm(self, ptm_log2fc: float, protein_log2fc: float) -> dict:
         try:
@@ -204,18 +310,3 @@ def _extract_meaningful_words(text: str) -> List[str]:
     }
     words = re.findall(r"[A-Za-z0-9]+", text.lower())
     return [w for w in words if len(w) > 3 and w not in stopwords and not w.isdigit()]
-
-    @staticmethod
-    def _empty_enrichment() -> dict:
-        return {
-            "search_summary": {"total_articles": 0},
-            "recent_findings": [],
-            "regulation": {"upstream_regulators": [], "downstream_targets": [], "kinase_substrate": [], "evidence_count": 0},
-            "pathways": [],
-            "string_interactions": [],
-            "diseases": [],
-            "localization": [],
-            "function_summary": "",
-            "go_terms": {"biological_process": [], "molecular_function": [], "cellular_component": []},
-            "classification": {"quadrant": "unknown", "interpretation": ""},
-        }

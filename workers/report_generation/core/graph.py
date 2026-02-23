@@ -54,6 +54,13 @@ class ReportState(TypedDict, total=False):
     report_type: str
     drug_repositioning_results: dict
 
+    # Q&A Report
+    qa_report: str
+    qa_questions: List[dict]
+
+    # Citation tracking
+    citation_data: dict
+
     # Output
     final_report: str
     report_files: List[str]
@@ -115,6 +122,41 @@ def drug_repositioning(state: ReportState) -> dict:
     return run_drug_repositioning(state)
 
 
+def generate_qa_report(state: ReportState) -> dict:
+    """Generate Q&A format report from PTM data."""
+    from .nodes.qa_report_node import run_qa_report_generation
+    return run_qa_report_generation(state)
+
+
+def format_citations(state: ReportState) -> dict:
+    """Format citations and generate reference list."""
+    from .citation_formatter import CitationFormatter, ReportPostProcessor
+    logger.info("Formatting citations and post-processing report")
+
+    sections = state.get("sections", {})
+    collected_refs = state.get("collected_references", [])
+
+    formatter = CitationFormatter()
+    all_text = "\n\n".join(sections.values())
+    result = formatter.process_text(all_text, collected_refs)
+
+    # Post-process
+    processor = ReportPostProcessor()
+    processed = processor.process(result.text)
+
+    # Append references
+    if result.reference_section:
+        processed += "\n\n" + result.reference_section
+
+    return {
+        "final_report": processed,
+        "citation_data": {
+            "total_references": len(result.references),
+            "reference_section": result.reference_section,
+        },
+    }
+
+
 def edit_report(state: ReportState) -> dict:
     """Compile and edit the final report."""
     from .nodes.editor_node import run_editor
@@ -126,7 +168,14 @@ def edit_report(state: ReportState) -> dict:
 # ---------------------------------------------------------------------------
 
 def build_report_graph() -> StateGraph:
-    """Build the LangGraph StateGraph for report generation."""
+    """Build the LangGraph StateGraph for report generation.
+
+    Flow:
+      load_context → generate_questions → research → hypothesize
+        → validate_hypotheses → network_analysis → write_sections
+        → generate_qa_report → drug_repositioning → format_citations
+        → edit_report
+    """
     graph = StateGraph(ReportState)
 
     graph.add_node("load_context", load_context)
@@ -136,7 +185,9 @@ def build_report_graph() -> StateGraph:
     graph.add_node("validate_hypotheses", validate_hypotheses)
     graph.add_node("network_analysis", network_analysis)
     graph.add_node("write_sections", write_sections)
+    graph.add_node("generate_qa_report", generate_qa_report)
     graph.add_node("drug_repositioning", drug_repositioning)
+    graph.add_node("format_citations", format_citations)
     graph.add_node("edit_report", edit_report)
 
     graph.set_entry_point("load_context")
@@ -146,8 +197,10 @@ def build_report_graph() -> StateGraph:
     graph.add_edge("hypothesize", "validate_hypotheses")
     graph.add_edge("validate_hypotheses", "network_analysis")
     graph.add_edge("network_analysis", "write_sections")
-    graph.add_edge("write_sections", "drug_repositioning")
-    graph.add_edge("drug_repositioning", "edit_report")
+    graph.add_edge("write_sections", "generate_qa_report")
+    graph.add_edge("generate_qa_report", "drug_repositioning")
+    graph.add_edge("drug_repositioning", "format_citations")
+    graph.add_edge("format_citations", "edit_report")
     graph.add_edge("edit_report", END)
 
     return graph.compile()
