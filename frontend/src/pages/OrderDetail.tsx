@@ -97,6 +97,41 @@ function statusColor(status: string): string {
   }
 }
 
+function OverviewField({
+  label,
+  value,
+  capitalize,
+  mono,
+  longText,
+  truncate,
+}: {
+  label: string;
+  value: string;
+  capitalize?: boolean;
+  mono?: boolean;
+  longText?: boolean;
+  truncate?: boolean;
+}) {
+  return (
+    <div className="space-y-1 min-w-0">
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p
+        className={cn(
+          "text-sm font-medium",
+          !truncate && "break-words",
+          capitalize && "capitalize",
+          mono && "font-mono text-xs",
+          longText && "whitespace-pre-wrap",
+          truncate && "truncate"
+        )}
+        title={truncate ? value : undefined}
+      >
+        {value}
+      </p>
+    </div>
+  );
+}
+
 // ── Sub-progress parser ──────────────────────────────────────────────────────
 
 interface SubProgress {
@@ -1426,66 +1461,180 @@ export default function OrderDetail() {
         </TabsList>
 
         <TabsContent value="overview" className="space-y-4 mt-4">
+          {/* Project & Sample Info */}
           <div className="grid md:grid-cols-2 gap-4">
             <Card>
               <CardHeader className="pb-3">
-                <CardTitle className="text-sm">Sample Information</CardTitle>
+                <CardTitle className="text-sm">Project & Sample</CardTitle>
               </CardHeader>
-              <CardContent>
-                <dl className="space-y-2 text-sm">
-                  <div className="flex justify-between">
-                    <dt className="text-muted-foreground">PTM Type</dt>
-                    <dd className="font-medium capitalize">{order.ptm_type}</dd>
-                  </div>
-                  <Separator />
-                  <div className="flex justify-between">
-                    <dt className="text-muted-foreground">Species</dt>
-                    <dd className="font-medium capitalize">{order.species}</dd>
-                  </div>
-                  <Separator />
-                  <div className="flex justify-between">
-                    <dt className="text-muted-foreground">Analysis Mode</dt>
-                    <dd className="font-medium">
-                      {(order.report_options as any)?.analysis_mode === "ptm_nonptm_network"
-                        ? "PTM + Network" : "PTM-Only"}
-                    </dd>
-                  </div>
-                  <Separator />
-                  <div className="flex justify-between">
-                    <dt className="text-muted-foreground">Report Type</dt>
-                    <dd className="font-medium capitalize">
-                      {(order.report_options as any)?.report_type === "extended"
-                        ? "Extended" : "Standard"}
-                    </dd>
-                  </div>
-                  <Separator />
-                  <div className="flex justify-between">
-                    <dt className="text-muted-foreground">Created</dt>
-                    <dd className="font-medium">{new Date(order.created_at).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })}</dd>
-                  </div>
-                </dl>
+              <CardContent className="space-y-4">
+                <OverviewField label="Order Name" value={order.order_code} />
+                <OverviewField label="Project Name" value={order.project_name} />
+                <OverviewField label="PTM Type" value={order.ptm_type} capitalize />
+                <OverviewField label="Species" value={order.species} capitalize />
+                <OverviewField
+                  label="Analysis Mode"
+                  value={(order.report_options as any)?.analysis_mode === "ptm_nonptm_network" ? "PTM + Network" : "PTM-Only"}
+                />
+                <OverviewField
+                  label="Report Type"
+                  value={(order.report_options as any)?.report_type === "extended" ? "Extended (+ Drug Repositioning)" : "Standard"}
+                />
+                <OverviewField
+                  label="Created"
+                  value={new Date(order.created_at).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })}
+                />
               </CardContent>
             </Card>
 
             <Card>
               <CardHeader className="pb-3">
-                <CardTitle className="text-sm">Analysis Context</CardTitle>
+                <CardTitle className="text-sm">Sample Configuration</CardTitle>
               </CardHeader>
               <CardContent>
-                <dl className="space-y-2 text-sm">
-                  {order.analysis_context &&
-                    Object.entries(order.analysis_context).map(([key, value]) =>
-                      value ? (
-                        <div key={key}>
-                          <div className="flex justify-between">
-                            <dt className="text-muted-foreground capitalize">{key.replace(/_/g, " ")}</dt>
-                            <dd className="font-medium max-w-[200px] truncate">{String(value)}</dd>
-                          </div>
-                          <Separator className="mt-2" />
-                        </div>
-                      ) : null,
+                {order.sample_config && (order.sample_config as any).samples?.length > 0 ? (
+                  <div className="space-y-3">
+                    <OverviewField
+                      label="Source"
+                      value={(order.sample_config as any).source === "xlsx" ? "config.xlsx" : "Auto Parse"}
+                    />
+                    {(order.sample_config as any).regex_pattern && (
+                      <OverviewField label="Regex Pattern" value={(order.sample_config as any).regex_pattern} mono />
                     )}
-                </dl>
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-2">Samples ({(order.sample_config as any).samples.length})</p>
+                      <div className="max-h-[200px] overflow-y-auto rounded border bg-muted/20">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead className="text-[10px] py-1.5">File</TableHead>
+                              <TableHead className="text-[10px] py-1.5">Condition</TableHead>
+                              <TableHead className="text-[10px] py-1.5">Group</TableHead>
+                              <TableHead className="text-[10px] py-1.5 w-12">Rep</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {((order.sample_config as any).samples as any[]).map((s: any, i: number) => (
+                              <TableRow key={i}>
+                                <TableCell className="text-xs py-1.5 font-mono truncate max-w-[140px]" title={s.file_name}>
+                                  {s.file_name?.split(/[/\\]/).pop() || s.file_name}
+                                </TableCell>
+                                <TableCell className="text-xs py-1.5">{s.condition ?? "-"}</TableCell>
+                                <TableCell className="text-xs py-1.5">{s.group ?? "-"}</TableCell>
+                                <TableCell className="text-xs py-1.5">{s.replicate ?? 1}</TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">No sample configuration</p>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Analysis Context — full text, no truncation */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm">Analysis Context</CardTitle>
+              <p className="text-xs text-muted-foreground mt-1">Cell type, treatment, time points, biological question</p>
+            </CardHeader>
+            <CardContent>
+              {order.analysis_context && Object.keys(order.analysis_context).some((k) => (order.analysis_context as any)[k]) ? (
+                <div className="grid sm:grid-cols-2 gap-4">
+                  {(["cell_type", "treatment", "time_points", "biological_question", "special_conditions"] as const).map((key) => {
+                    const val = (order.analysis_context as any)?.[key];
+                    if (val == null || val === "") return null;
+                    const label = key.replace(/_/g, " ");
+                    const isLong = key === "biological_question";
+                    return (
+                      <div key={key} className={isLong ? "sm:col-span-2" : ""}>
+                        <OverviewField
+                          label={label}
+                          value={String(val)}
+                          longText={isLong}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">No analysis context provided</p>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Analysis Options & Report Options */}
+          <div className="grid md:grid-cols-2 gap-4">
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm">Analysis Options (Protein Selection)</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <OverviewField
+                  label="Mode"
+                  value={
+                    (() => {
+                      const mode = (order.analysis_options as Record<string, string> | undefined)?.mode;
+                      const labels: Record<string, string> = {
+                        full: "Full Analysis",
+                        ptm_topn: "PTM Sites + Top N",
+                        log2fc_threshold: "Log2FC Threshold",
+                        custom_count: "Custom Protein Count",
+                        protein_list: "Custom Protein List",
+                      };
+                      return (mode && labels[mode]) ?? mode ?? "Full Analysis";
+                    })()
+                  }
+                />
+                {(order.analysis_options as any)?.mode === "ptm_topn" && (
+                  <OverviewField label="Top N (proteins)" value={`${(order.analysis_options as any)?.topN ?? 500}개`} />
+                )}
+                {(order.analysis_options as any)?.mode === "log2fc_threshold" && (
+                  <OverviewField label="Log2FC Threshold" value={String((order.analysis_options as any)?.log2fcThreshold ?? 0.5)} />
+                )}
+                {(order.analysis_options as any)?.mode === "custom_count" && (
+                  <OverviewField label="Protein Count" value={String((order.analysis_options as any)?.proteinCount ?? 1000)} />
+                )}
+                {(order.analysis_options as any)?.protein_list_path && (
+                  <OverviewField
+                    label="Protein List"
+                    value={(order.analysis_options as any).protein_list_path?.split(/[/\\]/).pop() ?? (order.analysis_options as any).protein_list_path}
+                    mono
+                  />
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm">Report Options</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <OverviewField
+                  label="Top N PTMs"
+                  value={`${(order.report_options as any)?.top_n_ptms ?? 20}개`}
+                />
+                <OverviewField
+                  label="LLM Model"
+                  value={(order.report_options as any)?.llm_model || "Default"}
+                />
+                {Array.isArray((order.report_options as any)?.research_questions) &&
+                 (order.report_options as any).research_questions.length > 0 && (
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-2">Research Questions</p>
+                    <ul className="space-y-1.5 text-sm">
+                      {((order.report_options as any).research_questions as string[]).map((q, i) => (
+                        <li key={i} className="rounded border bg-muted/20 px-2 py-1.5 break-words">
+                          Q{i + 1}. {q}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>

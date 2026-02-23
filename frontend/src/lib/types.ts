@@ -8,6 +8,7 @@ export interface Order {
   organism_code?: number;
   sample_config: Record<string, unknown>;
   analysis_context?: Record<string, unknown>;
+  analysis_options?: Record<string, unknown>;
   report_options: Record<string, unknown>;
   current_stage?: string;
   progress_pct: number;
