@@ -10,6 +10,7 @@ Changes from original:
   - Full-text analysis via PMC integrated
   - HPA, GTEx, BioGRID, Isoform data collection RESTORED
   - 8-category cell-signaling classification system RESTORED
+  - LOCAL-FIRST data loading: HPA/GTEx from local files with API fallback
   - TypeScript → Python
 """
 
@@ -21,6 +22,7 @@ from typing import Callable, Dict, List, Optional
 import pandas as pd
 
 from common.mcp_client import MCPClient
+from common.local_data_loader import HPALocalLoader, GTExLocalLoader
 from .regulation_extractor import RegulationExtractor
 from .abstract_analyzer import AbstractAnalyzer
 from .llm_kinase_predictor import LLMKinasePredictor
@@ -66,6 +68,17 @@ class RAGEnrichmentPipeline:
             self.fulltext_analyzer = FullTextAnalyzer()
         if enable_ptm_validation:
             self.ptm_validator = PTMValidator(mcp_client=mcp_client)
+
+        # Log local data availability
+        if HPALocalLoader.is_available():
+            logger.info("HPA local data available — will use local-first strategy")
+        else:
+            logger.info("HPA local data not available — will use MCP API only")
+
+        if GTExLocalLoader.is_available():
+            logger.info("GTEx local data available — will use local-first strategy")
+        else:
+            logger.info("GTEx local data not available — will use MCP API only")
 
     def enrich_ptm_data(
         self,
@@ -135,19 +148,11 @@ class RAGEnrichmentPipeline:
         protein_id = ptm.get("protein_id") or ptm.get("Protein.Group", "")
         uniprot_info = self.mcp.query_uniprot(protein_id, species=species) if protein_id else {}
 
-        # 6. HPA (Human Protein Atlas) expression data via MCP
-        hpa_data = {}
-        try:
-            hpa_data = self.mcp.query_hpa(gene)
-        except Exception as e:
-            logger.warning(f"HPA query failed for {gene}: {e}")
+        # 6. HPA (Human Protein Atlas) — LOCAL-FIRST with API fallback
+        hpa_data = self._query_hpa_local_first(gene)
 
-        # 7. GTEx tissue expression data via MCP
-        gtex_data = {}
-        try:
-            gtex_data = self.mcp.query_gtex(gene)
-        except Exception as e:
-            logger.warning(f"GTEx query failed for {gene}: {e}")
+        # 7. GTEx tissue expression — LOCAL-FIRST with API fallback
+        gtex_data = self._query_gtex_local_first(gene)
 
         # 8. BioGRID interactions via MCP
         biogrid_data = {}
@@ -193,9 +198,9 @@ class RAGEnrichmentPipeline:
         fulltext_results = {}
         if self.enable_fulltext:
             try:
-                fulltext_results = self.fulltext_analyzer.analyze(
-                    gene=gene, site=position, ptm_type=ptm_type,
-                    mcp_client=self.mcp,
+                fulltext_results = self._run_fulltext_analysis(
+                    gene=gene, position=position, ptm_type=ptm_type,
+                    articles=articles,
                 )
             except Exception as e:
                 logger.warning(f"Full-text analysis failed for {gene}: {e}")
@@ -292,6 +297,139 @@ class RAGEnrichmentPipeline:
 
         ptm["rag_enrichment"] = enrichment
         return ptm
+
+    # ------------------------------------------------------------------
+    # LOCAL-FIRST Data Access: HPA
+    # ------------------------------------------------------------------
+
+    def _query_hpa_local_first(self, gene: str) -> dict:
+        """
+        Query HPA data using local-first strategy:
+        1. Try local TSV files (rna_tissue_hpa.tsv, subcellular_locations.tsv)
+        2. Fall back to MCP API if local data unavailable
+        """
+        # Try local first
+        if HPALocalLoader.is_available():
+            local_result = HPALocalLoader.query(gene)
+            if local_result and (local_result.get("locations") or local_result.get("tissue_expression")):
+                logger.debug(f"HPA local data found for {gene}")
+                return local_result
+
+        # Fallback to MCP API
+        try:
+            hpa_data = self.mcp.query_hpa(gene)
+            if hpa_data:
+                hpa_data["source"] = "mcp_api"
+            return hpa_data
+        except Exception as e:
+            logger.warning(f"HPA query failed for {gene}: {e}")
+            return {"gene": gene, "locations": [], "error": str(e)}
+
+    # ------------------------------------------------------------------
+    # LOCAL-FIRST Data Access: GTEx
+    # ------------------------------------------------------------------
+
+    def _query_gtex_local_first(self, gene: str) -> dict:
+        """
+        Query GTEx data using local-first strategy:
+        1. Try local GCT file (3.5GB expression matrix)
+        2. Fall back to MCP API if local data unavailable
+        """
+        # Try local first
+        if GTExLocalLoader.is_available():
+            local_result = GTExLocalLoader.query_expression(gene)
+            if local_result and local_result.get("expressions"):
+                logger.debug(f"GTEx local data found for {gene}")
+                return local_result
+
+        # Fallback to MCP API
+        try:
+            gtex_data = self.mcp.query_gtex(gene)
+            if gtex_data:
+                gtex_data["source"] = "mcp_api"
+            return gtex_data
+        except Exception as e:
+            logger.warning(f"GTEx query failed for {gene}: {e}")
+            return {"gene": gene, "expressions": [], "error": str(e)}
+
+    # ------------------------------------------------------------------
+    # Full-Text Analysis (corrected interface)
+    # ------------------------------------------------------------------
+
+    def _run_fulltext_analysis(
+        self, gene: str, position: str, ptm_type: str, articles: List[dict],
+    ) -> dict:
+        """
+        Run full-text analysis on articles for a PTM site.
+        Fetches full-text from PMC when available, then applies pattern matching.
+        """
+        all_results = []
+
+        for article in articles[:5]:  # Limit to top 5 articles
+            pmid = article.get("pmid", "")
+            abstract = article.get("abstract", "")
+            pmc_id = article.get("pmc_id") or article.get("pmcid", "")
+
+            # Try to get full-text from PMC via MCP
+            fulltext = None
+            if pmc_id and hasattr(self.mcp, "fetch_pmc_fulltext"):
+                try:
+                    pmc_result = self.mcp.fetch_pmc_fulltext(pmc_id)
+                    fulltext = pmc_result.get("text") or pmc_result.get("fulltext")
+                except Exception as e:
+                    logger.debug(f"PMC full-text fetch failed for {pmc_id}: {e}")
+
+            if abstract or fulltext:
+                try:
+                    analysis = self.fulltext_analyzer.analyze(
+                        pmid=pmid,
+                        gene=gene,
+                        position=position,
+                        abstract=abstract,
+                        fulltext=fulltext,
+                    )
+                    all_results.append({
+                        "pmid": pmid,
+                        "has_fulltext": bool(fulltext),
+                        "total_matches": analysis.total_matches,
+                        "high_confidence_matches": analysis.high_confidence_matches,
+                        "key_findings": analysis.key_findings,
+                        "mechanisms": analysis.mechanisms,
+                        "antibody_info": [
+                            {
+                                "target": ab.target,
+                                "company": ab.company,
+                                "catalog": ab.catalog,
+                                "western_blot_validated": ab.western_blot_validated,
+                                "confidence": ab.confidence,
+                            }
+                            for ab in analysis.antibody_info
+                        ],
+                        "quantitative_data": analysis.quantitative_data,
+                        "pattern_summary": {
+                            cat: len(matches)
+                            for cat, matches in analysis.pattern_matches.items()
+                            if matches
+                        },
+                    })
+                except Exception as e:
+                    logger.warning(f"Full-text analysis failed for PMID {pmid}: {e}")
+
+        # Aggregate results
+        total_matches = sum(r.get("total_matches", 0) for r in all_results)
+        all_findings = []
+        all_antibodies = []
+        for r in all_results:
+            all_findings.extend(r.get("key_findings", []))
+            all_antibodies.extend(r.get("antibody_info", []))
+
+        return {
+            "articles_analyzed": len(all_results),
+            "total_pattern_matches": total_matches,
+            "key_findings": all_findings[:15],
+            "antibody_info": all_antibodies,
+            "per_article": all_results,
+        }
 
     @staticmethod
     def _empty_enrichment() -> dict:

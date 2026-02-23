@@ -37,6 +37,16 @@ storage/logs/
 data/inputs/
 data/outputs/
 
+# Local data files (large, mounted via Docker volumes — NOT pushed to Git)
+# Contains: GTEx (3.5GB), HPA TSVs, pattern JSON configs
+data/local_data/*
+!data/local_data/README.md
+data/config/*
+!data/config/README.md
+
+# GTEx gene index cache (auto-generated at runtime)
+*.gtex_gene_index.json
+
 # Reference data (large FASTA etc. - add back if needed)
 # data/reference/
 
