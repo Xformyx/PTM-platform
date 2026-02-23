@@ -21,6 +21,7 @@ from typing import Callable, Dict, List, Optional
 
 import pandas as pd
 
+from common.llm_client import LLMClient
 from common.mcp_client import MCPClient
 from common.llm_client import LLMClient
 from common.local_data_loader import HPALocalLoader, GTExLocalLoader
@@ -40,10 +41,8 @@ PTM_HIGH = 2.0       # Strong PTM change threshold (|Log2FC| > 2.0 = 4x fold cha
 PTM_LOW = 0.5        # Minimal PTM change threshold (|Log2FC| <= 0.5 = <1.4x fold change)
 PROTEIN_CHANGE = 0.5  # Protein change threshold (|Log2FC| > 0.5 = >1.4x fold change)
 
-
 class RAGEnrichmentPipeline:
     """Enriches PTM vector data with literature search and pattern-based analysis."""
-
     def __init__(
         self,
         mcp_client: MCPClient,
@@ -52,18 +51,20 @@ class RAGEnrichmentPipeline:
         enable_fulltext: bool = True,
         enable_ptm_validation: bool = True,
         rag_llm_model: Optional[str] = None,
+        llm_provider: str = "ollama",
+        llm_model: Optional[str] = None,
     ):
         self.mcp = mcp_client
         self.reg_extractor = RegulationExtractor()
         self._progress = progress_callback or (lambda p, m: None)
-
         # LLM-based analysis modules (restored from original)
         self.enable_llm = enable_llm_analysis
         self.enable_fulltext = enable_fulltext
         self.enable_ptm_validation = enable_ptm_validation
-
         if enable_llm_analysis:
-            llm = LLMClient(model=rag_llm_model) if rag_llm_model else LLMClient()  # auto-detects: Ollama → OpenAI → Gemini
+            # Use rag_llm_model if specified, otherwise fall back to llm_model
+            effective_model = rag_llm_model or llm_model
+            llm = LLMClient(provider=llm_provider, model=effective_model) if effective_model else LLMClient(provider=llm_provider)
             if not llm.is_available():
                 logger.warning("No LLM provider available — disabling LLM analysis")
                 self.enable_llm = False
@@ -76,13 +77,11 @@ class RAGEnrichmentPipeline:
             self.fulltext_analyzer = FullTextAnalyzer()
         if enable_ptm_validation:
             self.ptm_validator = PTMValidator(mcp_client=mcp_client)
-
         # Log local data availability
         if HPALocalLoader.is_available():
             logger.info("HPA local data available — will use local-first strategy")
         else:
             logger.info("HPA local data not available — will use MCP API only")
-
         if GTExLocalLoader.is_available():
             logger.info("GTEx local data available — will use local-first strategy")
         else:

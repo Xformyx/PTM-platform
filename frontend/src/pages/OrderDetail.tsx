@@ -1239,11 +1239,12 @@ export default function OrderDetail() {
     if (!pendingAction) return;
     try {
       await api.patch(`/orders/${orderId}`, opts);
-      if (pendingAction.type === "start") {
-        await api.post(`/orders/${orderId}/start`);
-      } else {
-        await api.post(`/orders/${orderId}/run-stage`, { stage: pendingAction.stage });
+      const runningStatuses = ["queued", "preprocessing", "rag_enrichment", "report_generation"];
+      if (order && runningStatuses.includes(order.status)) {
+        await api.post(`/orders/${orderId}/cancel`);
+        await new Promise((r) => setTimeout(r, 1500));
       }
+      await api.post(`/orders/${orderId}/start`);
       const [o, l] = await Promise.all([
         api.get<Order>(`/orders/${orderId}`),
         api.get<{ logs: OrderLog[] }>(`/orders/${orderId}/logs`),
@@ -1275,7 +1276,7 @@ export default function OrderDetail() {
     }
   };
 
-  const handleRunStage = (stage: string) => openRerunModal({ type: "run-stage", stage });
+  const handleRunStage = (_stage: string) => openRerunModal({ type: "start" });
 
   const handleStop = async () => {
     try {
@@ -1351,6 +1352,11 @@ export default function OrderDetail() {
               <RotateCcw className="h-4 w-4" /> Retry Analysis
             </Button>
           )}
+          {["completed", "cancelled"].includes(order.status) && (
+            <Button variant="outline" onClick={handleStart} className="gap-2">
+              <RotateCcw className="h-4 w-4" /> Re-run from Beginning
+            </Button>
+          )}
         </div>
       </div>
 
@@ -1365,7 +1371,7 @@ export default function OrderDetail() {
               const isFailed = isActive && order.status === "failed";
               const canRerun =
                 !isRunning &&
-                ["completed", "failed"].includes(order.status);
+                order.status !== "pending";
 
               return (
                 <div key={stage.key} className="flex flex-1 items-center">
@@ -1656,7 +1662,7 @@ export default function OrderDetail() {
         <TabsContent value="results" className="mt-4">
           {order.result_files && (order.result_files as any)?.all_files?.length > 0 ? (
             <div className="space-y-4">
-              {!isRunning && ["completed", "failed"].includes(order.status) && (
+              {!isRunning && order.status !== "pending" && (
                 <div className="flex justify-end">
                   <Button
                     variant="outline"
@@ -1665,7 +1671,7 @@ export default function OrderDetail() {
                     onClick={() => handleRunStage("report_generation")}
                   >
                     <RotateCcw className="h-3.5 w-3.5" />
-                    Re-run Report Generation
+                    Re-run from Beginning
                   </Button>
                 </div>
               )}
@@ -1680,7 +1686,7 @@ export default function OrderDetail() {
                     ? "Report files available for download"
                     : "Results will appear here after analysis completes"}
                 </p>
-                {!isRunning && ["completed", "failed"].includes(order.status) && (
+                {!isRunning && order.status !== "pending" && (
                   <Button
                     variant="outline"
                     size="sm"
@@ -1688,7 +1694,7 @@ export default function OrderDetail() {
                     onClick={() => handleRunStage("report_generation")}
                   >
                     <RotateCcw className="h-3.5 w-3.5" />
-                    Re-run Report Generation
+                    Re-run from Beginning
                   </Button>
                 )}
               </CardContent>
@@ -1711,11 +1717,7 @@ export default function OrderDetail() {
         ollamaModels={ollamaModels}
         defaultLlmModel={llmConfig?.default_model || ""}
         onConfirm={handleRerunConfirm}
-        confirmLabel={
-          pendingAction?.type === "run-stage"
-            ? `Confirm & Re-run ${stageLabel(pendingAction.stage)}`
-            : "Confirm & Run"
-        }
+        confirmLabel="Confirm & Re-run from Beginning"
       />
     </div>
   );

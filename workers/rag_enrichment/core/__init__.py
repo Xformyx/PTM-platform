@@ -6,5 +6,4 @@ from .llm_kinase_predictor import LLMKinasePredictor
 from .llm_functional_impact import LLMFunctionalImpact
 from .fulltext_analyzer import FullTextAnalyzer
 from .ptm_validation import PTMValidator
-from .ptm_vector_analysis import PTMVectorAnalyzer
 from .cross_site_ptm_search import CrossSitePTMSearcher

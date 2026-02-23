@@ -101,6 +101,8 @@ def run_rag_enrichment(self, order_id: int, config: dict):
             mcp_client=mcp,
             progress_callback=enrich_cb,
             rag_llm_model=rag_llm_model,
+            llm_provider=config.get("llm_provider", "ollama"),
+            llm_model=config.get("llm_model"),
         )
 
         enriched_ptms = pipeline.enrich_ptm_data(
