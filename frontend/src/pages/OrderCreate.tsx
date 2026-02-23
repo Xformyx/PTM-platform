@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Check, Upload, AlertCircle, ArrowLeft, ArrowRight, Loader2,
   FileSpreadsheet, Regex, Trash2, SlidersHorizontal, Brain,
-  Plus, X, MessageSquare, Network, FlaskConical,
+  Plus, X, MessageSquare, Network, FlaskConical, BookOpen,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
@@ -157,7 +157,7 @@ export default function OrderCreate() {
   const [form, setForm] = useState({
     project_name: "", ptm_type: "phosphorylation", species: "mouse",
     cell_type: "", treatment: "", time_points: "", biological_question: "", special_conditions: "",
-    report_type: "comprehensive", top_n_ptms: 20, llm_model: "",
+    report_type: "comprehensive", top_n_ptms: 20, llm_model: "", rag_llm_model: "",
     analysis_mode: "ptm_only" as "ptm_only" | "ptm_nonptm_network",
   });
   const [researchQuestions, setResearchQuestions] = useState<string[]>([]);
@@ -293,6 +293,7 @@ export default function OrderCreate() {
       analysis_mode: form.analysis_mode,
       research_questions: researchQuestions.length > 0 ? researchQuestions : [],
       ...(form.llm_model ? { llm_model: form.llm_model, llm_provider: "ollama" } : {}),
+      ...(form.rag_llm_model ? { rag_llm_model: form.rag_llm_model } : {}),
     }));
     const { proteinListFile, ...analysisOptsForJson } = analysisOptions;
     formData.append("analysis_options", JSON.stringify(analysisOptsForJson));
@@ -747,6 +748,30 @@ export default function OrderCreate() {
                   </p>
                 </div>
 
+                {/* LLM Model for Paper Read (RAG Enrichment) */}
+                <div className="space-y-2">
+                  <Label className="flex items-center gap-2">
+                    <BookOpen className="h-4 w-4" /> LLM Model for Paper Read
+                  </Label>
+                  <Select
+                    value={form.rag_llm_model || ""}
+                    onValueChange={(v) => setForm({ ...form, rag_llm_model: v === "__default__" ? "" : v })}
+                  >
+                    <SelectTrigger><SelectValue placeholder={`Default (${defaultLlmModel || "auto"})`} /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__default__">
+                        Default ({defaultLlmModel || "auto"})
+                      </SelectItem>
+                      {ollamaModels.map((m) => (
+                        <SelectItem key={m} value={m}>{m}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    논문 읽기 및 요약(RAG Enrichment)에서 사용할 LLM 모델. Abstract 분석, 키나제 예측, 기능적 영향 분석에 사용됩니다.
+                  </p>
+                </div>
+
                 {/* Research Questions */}
                 <div className="space-y-3">
                   <Label className="flex items-center gap-2">
@@ -846,9 +871,13 @@ export default function OrderCreate() {
                     <span className="font-medium">
                       {analysisOptions.mode === "full" ? "None (Full)" : analysisOptions.mode.replace("_", " ").replace(/\b\w/g, c => c.toUpperCase())}
                     </span>
-                    <span className="text-muted-foreground">LLM Model</span>
+                    <span className="text-muted-foreground">LLM Model (Report)</span>
                     <span className="font-medium font-mono text-xs">
                       {form.llm_model || `Default (${defaultLlmModel})`}
+                    </span>
+                    <span className="text-muted-foreground">LLM Model (Paper Read)</span>
+                    <span className="font-medium font-mono text-xs">
+                      {form.rag_llm_model || `Default (${defaultLlmModel})`}
                     </span>
                   </div>
                 </div>

@@ -1619,8 +1619,12 @@ export default function OrderDetail() {
                   value={`${(order.report_options as any)?.top_n_ptms ?? 20}개`}
                 />
                 <OverviewField
-                  label="LLM Model"
+                  label="LLM Model (Report)"
                   value={(order.report_options as any)?.llm_model || "Default"}
+                />
+                <OverviewField
+                  label="LLM Model (Paper Read)"
+                  value={(order.report_options as any)?.rag_llm_model || "Default"}
                 />
                 {Array.isArray((order.report_options as any)?.research_questions) &&
                  (order.report_options as any).research_questions.length > 0 && (

@@ -51,6 +51,7 @@ class RAGEnrichmentPipeline:
         enable_llm_analysis: bool = True,
         enable_fulltext: bool = True,
         enable_ptm_validation: bool = True,
+        rag_llm_model: Optional[str] = None,
     ):
         self.mcp = mcp_client
         self.reg_extractor = RegulationExtractor()
@@ -62,7 +63,7 @@ class RAGEnrichmentPipeline:
         self.enable_ptm_validation = enable_ptm_validation
 
         if enable_llm_analysis:
-            llm = LLMClient()  # auto-detects: Ollama → OpenAI → Gemini
+            llm = LLMClient(model=rag_llm_model) if rag_llm_model else LLMClient()  # auto-detects: Ollama → OpenAI → Gemini
             if not llm.is_available():
                 logger.warning("No LLM provider available — disabling LLM analysis")
                 self.enable_llm = False

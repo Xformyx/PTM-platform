@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Brain, FlaskConical, MessageSquare, Network, Plus, SlidersHorizontal, X } from "lucide-react";
+import { Brain, BookOpen, FlaskConical, MessageSquare, Network, Plus, SlidersHorizontal, X } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { api } from "@/lib/api";
 import AnalysisOptionsModal from "./AnalysisOptionsModal";
@@ -60,6 +60,7 @@ export default function RerunOptionsModal({
   const [reportType, setReportType] = useState("comprehensive");
   const [topNptms, setTopNptms] = useState(20);
   const [llmModel, setLlmModel] = useState("");
+  const [ragLlmModel, setRagLlmModel] = useState("");
   const [researchQuestions, setResearchQuestions] = useState<string[]>([]);
   const [newQuestion, setNewQuestion] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -85,6 +86,7 @@ export default function RerunOptionsModal({
       const topN = ro.top_n_ptms;
       setTopNptms(typeof topN === "number" && !isNaN(topN) ? topN : 20);
       setLlmModel(typeof ro.llm_model === "string" ? ro.llm_model : "");
+      setRagLlmModel(typeof ro.rag_llm_model === "string" ? ro.rag_llm_model : "");
       const rq = ro.research_questions;
       setResearchQuestions(Array.isArray(rq) ? rq.filter((q): q is string => typeof q === "string") : []);
       const ao = (order.analysis_options || {}) as Record<string, unknown>;
@@ -124,6 +126,7 @@ export default function RerunOptionsModal({
           analysis_mode: analysisMode,
           research_questions: researchQuestions,
           ...(llmModel ? { llm_model: llmModel, llm_provider: "ollama" as const } : {}),
+          ...(ragLlmModel ? { rag_llm_model: ragLlmModel } : {}),
         },
       });
       onOpenChange(false);
@@ -270,10 +273,25 @@ export default function RerunOptionsModal({
                 </div>
               </div>
               <div className="space-y-1.5">
-                <Label className="text-xs">LLM Model</Label>
+                <Label className="text-xs">LLM Model (Report Generation)</Label>
                 <Select
                   value={llmModel || "__default__"}
                   onValueChange={(v) => setLlmModel(v === "__default__" ? "" : v)}
+                >
+                  <SelectTrigger className="h-8"><SelectValue placeholder={`Default (${defaultLlmModel || "auto"})`} /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__default__">Default ({defaultLlmModel || "auto"})</SelectItem>
+                    {ollamaModels.map((m) => (
+                      <SelectItem key={m} value={m}>{m}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">LLM Model (Paper Read)</Label>
+                <Select
+                  value={ragLlmModel || "__default__"}
+                  onValueChange={(v) => setRagLlmModel(v === "__default__" ? "" : v)}
                 >
                   <SelectTrigger className="h-8"><SelectValue placeholder={`Default (${defaultLlmModel || "auto"})`} /></SelectTrigger>
                   <SelectContent>

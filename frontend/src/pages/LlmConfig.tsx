@@ -327,7 +327,7 @@ export default function LlmConfig() {
           <div className="space-y-4 pt-2">
             <div className="flex gap-2">
               <Input
-                placeholder="e.g. gemma3:27b, qwen2.5:14b, llama3.2"
+                placeholder="e.g. gemma3:27b, qwen2.5:14b, llama3.1:latest"
                 value={pullModelName}
                 onChange={(e) => setPullModelName(e.target.value)}
                 disabled={pulling}
@@ -364,7 +364,7 @@ export default function LlmConfig() {
             )}
 
             <div className="text-[10px] text-muted-foreground space-y-1">
-              <p>Popular models: gemma3:27b, qwen2.5:14b, llama3.2, mistral, phi4</p>
+              <p>Popular models: gemma3:27b, qwen2.5:14b, llama3.1:latest, mistral, phi4</p>
               <p>Use <code className="px-1 bg-muted rounded">model:tag</code> format for specific versions</p>
             </div>
           </div>

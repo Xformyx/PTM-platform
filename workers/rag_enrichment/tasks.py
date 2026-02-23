@@ -96,9 +96,11 @@ def run_rag_enrichment(self, order_id: int, config: dict):
         mcp = MCPClient()
         enrich_cb = _make_progress_cb(order_id, "rag_enrichment", "enrichment", 10, 60)
 
+        rag_llm_model = config.get("rag_llm_model")
         pipeline = RAGEnrichmentPipeline(
             mcp_client=mcp,
             progress_callback=enrich_cb,
+            rag_llm_model=rag_llm_model,
         )
 
         enriched_ptms = pipeline.enrich_ptm_data(

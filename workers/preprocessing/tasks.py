@@ -356,6 +356,7 @@ def run_preprocessing(self, order_id: int, config: dict):
             "chromadb_collections": config.get("chromadb_collections", []),
             "llm_provider": config.get("llm_provider", "ollama"),
             "llm_model": config.get("llm_model"),
+            "rag_llm_model": config.get("rag_llm_model"),
             "report_title": config.get("report_title", "PTM Comprehensive Analysis Report"),
         }
         app.send_task(

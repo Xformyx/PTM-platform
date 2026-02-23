@@ -683,6 +683,7 @@ async def run_stage(
             "chromadb_collections": active_collections,
             "llm_provider": (order.report_options or {}).get("llm_provider", "ollama"),
             "llm_model": (order.report_options or {}).get("llm_model"),
+            "rag_llm_model": (order.report_options or {}).get("rag_llm_model"),
             "report_title": (order.report_options or {}).get("report_title", "PTM Comprehensive Analysis Report"),
             "chain_to_next": False,
         }
@@ -702,6 +703,7 @@ async def run_stage(
             "chromadb_collections": active_collections,
             "llm_provider": (order.report_options or {}).get("llm_provider", "ollama"),
             "llm_model": (order.report_options or {}).get("llm_model"),
+            "rag_llm_model": (order.report_options or {}).get("rag_llm_model"),
             "report_title": (order.report_options or {}).get("report_title", "PTM Comprehensive Analysis Report"),
             "chain_to_next": False,
         }
