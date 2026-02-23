@@ -117,39 +117,60 @@ class PTMValidator:
                 f"non-biological entities. Results have been filtered for biological context."
             )
 
-        # 2. iPTMnet query
+        # 2. iPTMnet query — uses MCPClient.query_iptmnet()
         try:
-            iptmnet_data = self.mcp.call_tool("query_iptmnet", {
-                "gene": gene, "position": position, "ptm_type": ptm_type,
-            })
-            result.iptmnet_hits = iptmnet_data.get("ptm_sites", [])
+            iptmnet_data = self.mcp.query_iptmnet(
+                gene=gene, position=position,
+            )
+            # iPTMnet returns novelty assessment with sites_found
+            sites_found = iptmnet_data.get("sites_found", 0)
+            novelty_info = iptmnet_data.get("novelty") or {}
 
-            # Check if exact site is known
-            for hit in result.iptmnet_hits:
-                hit_pos = str(hit.get("position", "")).upper()
-                query_pos = position.upper()
-                if hit_pos == query_pos or hit_pos in query_pos or query_pos in hit_pos:
+            if sites_found > 0:
+                result.iptmnet_hits = [{"position": position, "source": "iPTMnet"}]
+                iptmnet_status = novelty_info.get("status", "")
+
+                # Any status other than NOVEL means the site is known
+                if iptmnet_status and iptmnet_status != "NOVEL":
                     result.is_known = True
                     result.evidence_sources.append("iPTMnet")
-                    break
+
+                # Attach detailed novelty info
+                if novelty_info.get("pmids"):
+                    for pmid in novelty_info["pmids"][:5]:
+                        result.iptmnet_hits.append({
+                            "position": position,
+                            "source": "iPTMnet",
+                            "pmid": pmid,
+                        })
 
         except Exception as e:
             logger.warning(f"iPTMnet query failed for {gene} {position}: {e}")
 
-        # 3. UniProt PTM sites
+        # 3. UniProt PTM sites — uses MCPClient.query_uniprot()
         try:
-            uniprot_data = self.mcp.call_tool("query_uniprot", {"query": gene})
-            ptm_features = uniprot_data.get("ptm_features", [])
-            result.uniprot_ptm_sites = ptm_features
+            uniprot_data = self.mcp.query_uniprot(gene)
 
-            # Check UniProt for known site
-            for feat in ptm_features:
-                feat_pos = str(feat.get("position", ""))
-                if position.replace("S", "").replace("T", "").replace("Y", "").replace("K", "") in feat_pos:
-                    result.is_known = True
-                    if "UniProt" not in result.evidence_sources:
-                        result.evidence_sources.append("UniProt")
-                    break
+            # Check for PTM-related GO terms or features
+            go_bp = uniprot_data.get("go_terms_bp", [])
+            go_mf = uniprot_data.get("go_terms_mf", [])
+            function_summary = uniprot_data.get("function_summary", "")
+
+            # Look for phosphorylation-related annotations
+            ptm_keywords = ["phosphorylat", "kinase", "acetylat", "ubiquitin", "methylat"]
+            ptm_related = any(
+                kw in (function_summary or "").lower()
+                for kw in ptm_keywords
+            )
+
+            if ptm_related:
+                result.uniprot_ptm_sites.append({
+                    "gene": gene,
+                    "source": "UniProt",
+                    "function_summary": function_summary[:200] if function_summary else "",
+                })
+                if "UniProt" not in result.evidence_sources:
+                    result.evidence_sources.append("UniProt")
 
         except Exception as e:
             logger.warning(f"UniProt query failed for {gene}: {e}")
@@ -180,8 +201,9 @@ class PTMValidator:
             result.novelty_confidence = "high"
             result.evidence_count = 0
         else:
-            result.novelty = "uncertain"
-            result.novelty_confidence = "low"
+            if not result.novelty:
+                result.novelty = "uncertain"
+                result.novelty_confidence = "low"
             result.evidence_count = len(result.iptmnet_hits) + len(result.uniprot_ptm_sites)
 
         # 6. Build summary
@@ -203,23 +225,26 @@ class PTMValidator:
         """
         result = CrossSitePTMResult(gene=gene, position=position, ptm_type=ptm_type)
 
-        # Query iPTMnet for all known sites on this gene
+        # Query iPTMnet for all known sites on this gene (empty position = all sites)
         try:
-            all_sites = self.mcp.call_tool("query_iptmnet", {
-                "gene": gene, "position": "", "ptm_type": ptm_type,
-            })
-            for site in all_sites.get("ptm_sites", []):
+            all_sites_data = self.mcp.query_iptmnet(
+                gene=gene, position="",
+            )
+            sites_found = all_sites_data.get("sites_found", 0)
+            if sites_found > 0:
+                novelty_info = all_sites_data.get("novelty") or {}
+                # If iPTMnet found sites for this gene, record them
                 site_info = {
-                    "position": site.get("position", ""),
-                    "ptm_type": site.get("ptm_type", ""),
-                    "source": site.get("source", "iPTMnet"),
-                    "regulators": site.get("regulators", []),
-                    "function": site.get("function", ""),
+                    "position": "all",
+                    "ptm_type": ptm_type,
+                    "source": "iPTMnet",
+                    "sites_found": sites_found,
+                    "status": novelty_info.get("status", ""),
                 }
                 result.known_sites.append(site_info)
 
-                # If same gene + same PTM type but different position → related
-                if str(site.get("position", "")).upper() != position.upper():
+                # Sites with different position are "related"
+                if position:
                     result.related_sites.append(site_info)
 
         except Exception as e:

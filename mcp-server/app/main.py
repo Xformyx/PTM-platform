@@ -10,6 +10,11 @@ from pydantic import BaseModel
 from .tools import (
     query_uniprot, query_kegg, query_stringdb, query_interpro,
     search_ptm_pubmed, fetch_articles_by_pmids, get_gene_aliases,
+    # v2: External API clients (ported from ptm-rag-backend)
+    query_iptmnet,
+    fetch_fulltext_by_pmid, fetch_fulltext_batch,
+    query_hpa, query_gtex, query_biogrid,
+    query_kea3,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -30,7 +35,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="PTM MCP Server",
     description="Bio-Database Gateway — unified external API access with caching",
-    version="0.2.0",
+    version="0.3.0",
     lifespan=lifespan,
 )
 
@@ -55,6 +60,13 @@ async def list_tools():
             {"name": "search_ptm_pubmed", "description": "Multi-tier PubMed search for PTM literature", "status": "active"},
             {"name": "fetch_articles", "description": "Fetch PubMed article details by PMIDs", "status": "active"},
             {"name": "get_gene_aliases", "description": "Get gene aliases from MyGene.info", "status": "active"},
+            # v2 tools
+            {"name": "query_iptmnet", "description": "iPTMnet PTM novelty assessment via web scraping", "status": "active"},
+            {"name": "fetch_fulltext", "description": "Fetch PMC/EuropePMC full-text by PMID", "status": "active"},
+            {"name": "query_hpa", "description": "Human Protein Atlas subcellular localization", "status": "active"},
+            {"name": "query_gtex", "description": "GTEx tissue expression data", "status": "active"},
+            {"name": "query_biogrid", "description": "BioGRID protein-protein interactions", "status": "active"},
+            {"name": "query_kea3", "description": "KEA3 kinase enrichment analysis", "status": "active"},
         ]
     }
 
@@ -225,3 +237,98 @@ async def tool_pubmed_search_batch(req: PubMedBatchSearchRequest):
 
     results = await asyncio.gather(*[_search(q) for q in req.queries])
     return {"results": results}
+
+
+# ---------------------------------------------------------------------------
+# iPTMnet — PTM novelty assessment
+# ---------------------------------------------------------------------------
+
+class IPTMnetRequest(BaseModel):
+    gene: str
+    position: str = ""
+    organism: str = "Mouse"
+
+
+@app.post("/tools/iptmnet/search")
+async def tool_iptmnet_search(req: IPTMnetRequest):
+    return await query_iptmnet(
+        gene=req.gene, position=req.position,
+        organism=req.organism, redis=app.state.redis,
+    )
+
+
+@app.get("/tools/iptmnet/{gene}")
+async def tool_iptmnet_get(
+    gene: str,
+    position: str = Query("", description="PTM position e.g. S79"),
+    organism: str = Query("Mouse", description="Organism name"),
+):
+    return await query_iptmnet(
+        gene=gene, position=position,
+        organism=organism, redis=app.state.redis,
+    )
+
+
+# ---------------------------------------------------------------------------
+# PMC Full-Text
+# ---------------------------------------------------------------------------
+
+@app.get("/tools/pmc/fulltext/{pmid}")
+async def tool_pmc_fulltext(pmid: str):
+    return await fetch_fulltext_by_pmid(pmid, redis=app.state.redis)
+
+
+class PMCBatchRequest(BaseModel):
+    pmids: list[str]
+
+
+@app.post("/tools/pmc/fulltext/batch")
+async def tool_pmc_fulltext_batch(req: PMCBatchRequest):
+    return {"results": await fetch_fulltext_batch(req.pmids, redis=app.state.redis)}
+
+
+# ---------------------------------------------------------------------------
+# HPA — Human Protein Atlas
+# ---------------------------------------------------------------------------
+
+@app.get("/tools/hpa/{gene_name}")
+async def tool_hpa(gene_name: str):
+    return await query_hpa(gene_name, redis=app.state.redis)
+
+
+# ---------------------------------------------------------------------------
+# GTEx — Tissue Expression
+# ---------------------------------------------------------------------------
+
+@app.get("/tools/gtex/{gene_name}")
+async def tool_gtex(gene_name: str):
+    return await query_gtex(gene_name, redis=app.state.redis)
+
+
+# ---------------------------------------------------------------------------
+# BioGRID — Protein-Protein Interactions
+# ---------------------------------------------------------------------------
+
+@app.get("/tools/biogrid/{gene_name}")
+async def tool_biogrid(
+    gene_name: str,
+    organism: int = Query(10090, description="NCBI taxonomy ID (10090=mouse, 9606=human)"),
+):
+    return await query_biogrid(gene_name, organism=organism, redis=app.state.redis)
+
+
+# ---------------------------------------------------------------------------
+# KEA3 — Kinase Enrichment Analysis
+# ---------------------------------------------------------------------------
+
+class KEA3Request(BaseModel):
+    gene_list: list[str]
+    top_n: int = 10
+
+
+@app.post("/tools/kea3/enrich")
+async def tool_kea3_enrich(req: KEA3Request):
+    return await query_kea3(
+        gene_list=req.gene_list, top_n=req.top_n,
+        redis=app.state.redis,
+    )

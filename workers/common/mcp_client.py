@@ -8,7 +8,6 @@ caching (Redis), rate limiting, and response normalization.
 import logging
 import os
 from typing import Callable, Dict, List, Optional
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 
@@ -34,6 +33,54 @@ class MCPClient:
             return r.status_code == 200
         except Exception:
             return False
+
+    # ------------------------------------------------------------------
+    # Generic tool caller — allows calling any MCP tool by name
+    # ------------------------------------------------------------------
+
+    def call_tool(self, tool_name: str, params: dict) -> dict:
+        """
+        Generic tool caller that routes to the appropriate MCP endpoint.
+
+        Supports both dedicated methods and dynamic endpoint resolution.
+        This enables modules like PTMValidator to call tools by name.
+        """
+        # Route to dedicated methods when available
+        _routes = {
+            "query_uniprot": lambda p: self.query_uniprot(p.get("query", p.get("protein_id", ""))),
+            "query_kegg": lambda p: self.query_kegg(p.get("gene_name", ""), p.get("organism", "mmu")),
+            "query_stringdb": lambda p: self.query_stringdb(p.get("gene_name", ""), p.get("species", "10090")),
+            "query_interpro": lambda p: self.query_interpro(p.get("protein_id", "")),
+            "query_iptmnet": lambda p: self.query_iptmnet(
+                p.get("gene", ""), p.get("position", ""), p.get("organism", "Mouse"),
+            ),
+            "fetch_fulltext": lambda p: self.fetch_fulltext(p.get("pmid", "")),
+            "query_hpa": lambda p: self.query_hpa(p.get("gene_name", "")),
+            "query_gtex": lambda p: self.query_gtex(p.get("gene_name", "")),
+            "query_biogrid": lambda p: self.query_biogrid(
+                p.get("gene_name", ""), p.get("organism", 10090),
+            ),
+            "query_kea3": lambda p: self.query_kea3(
+                p.get("gene_list", []), p.get("top_n", 10),
+            ),
+        }
+
+        handler = _routes.get(tool_name)
+        if handler:
+            return handler(params)
+
+        # Fallback: try POST to /tools/{tool_name}
+        try:
+            r = self.session.post(
+                f"{self.base_url}/tools/{tool_name}",
+                json=params,
+                timeout=self.timeout,
+            )
+            r.raise_for_status()
+            return r.json()
+        except Exception as e:
+            logger.warning(f"MCP call_tool({tool_name}) failed: {e}")
+            return {}
 
     # ------------------------------------------------------------------
     # UniProt
@@ -158,6 +205,130 @@ class MCPClient:
             return [self.query_interpro(pid) for pid in protein_ids]
 
     # ------------------------------------------------------------------
+    # iPTMnet — PTM novelty assessment
+    # ------------------------------------------------------------------
+
+    def query_iptmnet(
+        self, gene: str, position: str = "", organism: str = "Mouse",
+    ) -> dict:
+        """Query iPTMnet for PTM novelty assessment."""
+        try:
+            r = self.session.get(
+                f"{self.base_url}/tools/iptmnet/{gene}",
+                params={"position": position, "organism": organism},
+                timeout=self.timeout,
+            )
+            r.raise_for_status()
+            return r.json()
+        except Exception as e:
+            logger.warning(f"MCP iPTMnet failed for {gene} {position}: {e}")
+            return {
+                "gene": gene, "position": position, "organism": organism,
+                "novelty": None, "sites_found": 0, "ptm_sites": [],
+            }
+
+    # ------------------------------------------------------------------
+    # PMC Full-Text
+    # ------------------------------------------------------------------
+
+    def fetch_fulltext(self, pmid: str) -> dict:
+        """Fetch PMC/EuropePMC full-text by PMID."""
+        try:
+            r = self.session.get(
+                f"{self.base_url}/tools/pmc/fulltext/{pmid}",
+                timeout=self.timeout,
+            )
+            r.raise_for_status()
+            return r.json()
+        except Exception as e:
+            logger.warning(f"MCP PMC fulltext failed for {pmid}: {e}")
+            return {"pmid": pmid, "fulltext": "", "source": "", "error": str(e)}
+
+    def fetch_fulltext_batch(self, pmids: List[str]) -> List[dict]:
+        """Fetch PMC full-text for multiple PMIDs."""
+        try:
+            r = self.session.post(
+                f"{self.base_url}/tools/pmc/fulltext/batch",
+                json={"pmids": pmids},
+                timeout=self.timeout * 3,
+            )
+            r.raise_for_status()
+            return r.json().get("results", [])
+        except Exception as e:
+            logger.warning(f"MCP PMC fulltext batch failed: {e}")
+            return [self.fetch_fulltext(pmid) for pmid in pmids]
+
+    # ------------------------------------------------------------------
+    # HPA — Human Protein Atlas
+    # ------------------------------------------------------------------
+
+    def query_hpa(self, gene_name: str) -> dict:
+        """Query Human Protein Atlas for subcellular localization."""
+        try:
+            r = self.session.get(
+                f"{self.base_url}/tools/hpa/{gene_name}",
+                timeout=self.timeout,
+            )
+            r.raise_for_status()
+            return r.json()
+        except Exception as e:
+            logger.warning(f"MCP HPA failed for {gene_name}: {e}")
+            return {"gene_name": gene_name, "subcellular_location": [], "error": str(e)}
+
+    # ------------------------------------------------------------------
+    # GTEx — Tissue Expression
+    # ------------------------------------------------------------------
+
+    def query_gtex(self, gene_name: str) -> dict:
+        """Query GTEx for tissue expression data."""
+        try:
+            r = self.session.get(
+                f"{self.base_url}/tools/gtex/{gene_name}",
+                timeout=self.timeout,
+            )
+            r.raise_for_status()
+            return r.json()
+        except Exception as e:
+            logger.warning(f"MCP GTEx failed for {gene_name}: {e}")
+            return {"gene_name": gene_name, "tissues": [], "error": str(e)}
+
+    # ------------------------------------------------------------------
+    # BioGRID — Protein-Protein Interactions
+    # ------------------------------------------------------------------
+
+    def query_biogrid(self, gene_name: str, organism: int = 10090) -> dict:
+        """Query BioGRID for protein-protein interactions."""
+        try:
+            r = self.session.get(
+                f"{self.base_url}/tools/biogrid/{gene_name}",
+                params={"organism": organism},
+                timeout=self.timeout,
+            )
+            r.raise_for_status()
+            return r.json()
+        except Exception as e:
+            logger.warning(f"MCP BioGRID failed for {gene_name}: {e}")
+            return {"gene_name": gene_name, "interactions": [], "error": str(e)}
+
+    # ------------------------------------------------------------------
+    # KEA3 — Kinase Enrichment Analysis
+    # ------------------------------------------------------------------
+
+    def query_kea3(self, gene_list: List[str], top_n: int = 10) -> dict:
+        """Query KEA3 for kinase enrichment analysis."""
+        try:
+            r = self.session.post(
+                f"{self.base_url}/tools/kea3/enrich",
+                json={"gene_list": gene_list, "top_n": top_n},
+                timeout=self.timeout * 2,
+            )
+            r.raise_for_status()
+            return r.json()
+        except Exception as e:
+            logger.warning(f"MCP KEA3 failed: {e}")
+            return {"gene_list": gene_list, "kinases": [], "error": str(e)}
+
+    # ------------------------------------------------------------------
     # Parallel helpers with concurrency + progress
     # ------------------------------------------------------------------
 
@@ -173,6 +344,7 @@ class MCPClient:
     ) -> Dict[str, dict]:
         """Generic concurrent batch processor with throttled progress reporting."""
         import time
+        from concurrent.futures import ThreadPoolExecutor, as_completed
 
         total = len(items)
         batches = [items[i: i + batch_size] for i in range(0, total, batch_size)]

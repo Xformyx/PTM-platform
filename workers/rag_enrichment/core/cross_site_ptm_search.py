@@ -18,9 +18,11 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+import httpx
+
 logger = logging.getLogger(__name__)
 
-MCP_URL = os.getenv("MCP_SERVER_URL", "http://mcp-server:8001")
+MCP_URL = os.getenv("MCP_SERVER_URL", "http://mcp-server:8100")
 
 
 @dataclass
@@ -110,7 +112,7 @@ class CrossSitePTMSearcher:
     """Searches for PTM evidence across multiple databases via MCP."""
 
     def __init__(self, mcp_base_url: str = MCP_URL):
-        self.mcp_url = mcp_base_url
+        self.mcp_url = mcp_base_url.rstrip("/")
 
     async def search(
         self,
@@ -211,27 +213,30 @@ class CrossSitePTMSearcher:
         return valid_results
 
     # -----------------------------------------------------------------------
-    # Database-specific search methods
+    # Database-specific search methods — using actual MCP endpoints
     # -----------------------------------------------------------------------
 
     async def _search_pubmed(
         self, protein: str, site: str, ptm_type: str,
     ) -> List[PTMEvidence]:
-        """Search PubMed for PTM evidence."""
+        """Search PubMed for PTM evidence via MCP /tools/pubmed/search."""
         try:
-            import httpx
-
-            query = f"{protein} {site} {ptm_type}"
             async with httpx.AsyncClient(timeout=30) as client:
                 resp = await client.post(
-                    f"{self.mcp_url}/tools/pubmed_search",
-                    json={"query": query, "max_results": 10},
+                    f"{self.mcp_url}/tools/pubmed/search",
+                    json={
+                        "gene": protein,
+                        "position": site,
+                        "ptm_type": ptm_type,
+                        "context_keywords": [],
+                        "max_results": 10,
+                    },
                 )
                 if resp.status_code != 200:
                     return []
 
                 data = resp.json()
-                articles = data.get("result", {}).get("articles", [])
+                articles = data.get("articles", [])
 
                 evidence = []
                 for art in articles:
@@ -267,25 +272,43 @@ class CrossSitePTMSearcher:
     async def _search_pmc(
         self, protein: str, site: str, ptm_type: str,
     ) -> List[PTMEvidence]:
-        """Search PMC full-text for detailed PTM evidence."""
+        """Search PMC full-text for detailed PTM evidence via MCP /tools/pmc/fulltext."""
         try:
-            import httpx
-
-            query = f"{protein} {site} {ptm_type}"
+            # First, search PubMed to get PMIDs, then fetch full-text
             async with httpx.AsyncClient(timeout=30) as client:
+                # Step 1: Get PMIDs from PubMed
                 resp = await client.post(
-                    f"{self.mcp_url}/tools/pmc_fulltext_search",
-                    json={"query": query, "max_results": 5},
+                    f"{self.mcp_url}/tools/pubmed/search",
+                    json={
+                        "gene": protein,
+                        "position": site,
+                        "ptm_type": ptm_type,
+                        "context_keywords": [],
+                        "max_results": 5,
+                    },
                 )
                 if resp.status_code != 200:
                     return []
 
                 data = resp.json()
-                articles = data.get("result", {}).get("articles", [])
+                articles = data.get("articles", [])
+                pmids = [art.get("pmid", "") for art in articles if art.get("pmid")]
 
+                if not pmids:
+                    return []
+
+                # Step 2: Fetch full-text for each PMID
                 evidence = []
-                for art in articles:
-                    fulltext = art.get("body", art.get("abstract", ""))
+                for pmid in pmids[:3]:  # Limit to 3 for performance
+                    ft_resp = await client.get(
+                        f"{self.mcp_url}/tools/pmc/fulltext/{pmid}",
+                        timeout=30,
+                    )
+                    if ft_resp.status_code != 200:
+                        continue
+
+                    ft_data = ft_resp.json()
+                    fulltext = ft_data.get("fulltext", "")
                     if not fulltext:
                         continue
 
@@ -305,12 +328,12 @@ class CrossSitePTMSearcher:
                             protein=protein,
                             site=site,
                             ptm_type=ptm_type,
-                            pmid=art.get("pmid", ""),
-                            title=art.get("title", ""),
+                            pmid=pmid,
+                            title=ft_data.get("title", ""),
                             snippet=snippet,
                             confidence=0.9,  # Full-text match is high confidence
                             antibody_info=ab_info,
-                            year=art.get("year", ""),
+                            year="",
                         )
                         evidence.append(ev)
 
@@ -323,39 +346,40 @@ class CrossSitePTMSearcher:
     async def _search_iptmnet(
         self, protein: str, site: str, ptm_type: str,
     ) -> List[PTMEvidence]:
-        """Search iPTMnet for known PTM annotations."""
+        """Search iPTMnet for known PTM annotations via MCP /tools/iptmnet."""
         try:
-            import httpx
-
             async with httpx.AsyncClient(timeout=30) as client:
-                resp = await client.post(
-                    f"{self.mcp_url}/tools/iptmnet_search",
-                    json={"query": protein, "ptm_type": ptm_type},
+                resp = await client.get(
+                    f"{self.mcp_url}/tools/iptmnet/{protein}",
+                    params={"position": site, "organism": "Mouse"},
                 )
                 if resp.status_code != 200:
                     return []
 
                 data = resp.json()
-                entries = data.get("result", {}).get("entries", [])
+                sites_found = data.get("sites_found", 0)
+                novelty_info = data.get("novelty") or {}
 
                 evidence = []
-                for entry in entries:
-                    entry_site = entry.get("site", "")
-                    # Check for exact or nearby site match
-                    if self._sites_match(site, entry_site):
-                        ev = PTMEvidence(
-                            source="iptmnet",
-                            protein=protein,
-                            site=site,
-                            ptm_type=ptm_type,
-                            title=f"iPTMnet: {entry.get('substrate', protein)} {entry_site}",
-                            snippet=(
-                                f"Enzyme: {entry.get('enzyme', 'N/A')}, "
-                                f"Score: {entry.get('score', 'N/A')}"
-                            ),
-                            confidence=0.95,  # Database annotation is high confidence
-                        )
-                        evidence.append(ev)
+                if sites_found > 0:
+                    status = novelty_info.get("status", "NOVEL")
+                    pmids = novelty_info.get("pmids", [])
+
+                    ev = PTMEvidence(
+                        source="iptmnet",
+                        protein=protein,
+                        site=site,
+                        ptm_type=ptm_type,
+                        pmid=pmids[0] if pmids else "",
+                        title=f"iPTMnet: {protein} {site} — {status}",
+                        snippet=(
+                            f"Status: {status}, "
+                            f"Sources: {novelty_info.get('source_count', 0)}, "
+                            f"PMIDs: {len(pmids)}"
+                        ),
+                        confidence=0.95 if status != "NOVEL" else 0.1,
+                    )
+                    evidence.append(ev)
 
                 return evidence
 
@@ -372,7 +396,7 @@ class CrossSitePTMSearcher:
         """
         Check if two PTM sites match.
         Handles formats: S473, Ser473, pS473, phospho-Ser473
-        Also allows nearby positions (within ±2 residues) for fuzzy matching.
+        Also allows nearby positions (within +/-2 residues) for fuzzy matching.
         """
         def _parse_site(s: str):
             m = re.match(r"(?:p(?:hospho)?-?)?\s*([STY](?:er|hr|yr)?)\s*(\d+)", s, re.IGNORECASE)
@@ -392,7 +416,7 @@ class CrossSitePTMSearcher:
         if q_aa == d_aa and q_pos == d_pos:
             return True
 
-        # Fuzzy match: same amino acid, position within ±2
+        # Fuzzy match: same amino acid, position within +/-2
         if q_aa == d_aa and abs(q_pos - d_pos) <= 2:
             return True
 
