@@ -724,30 +724,6 @@ export default function OrderCreate() {
                   </div>
                 </div>
 
-                {/* LLM Model */}
-                <div className="space-y-2">
-                  <Label className="flex items-center gap-2">
-                    <Brain className="h-4 w-4" /> LLM Model for Report Generation
-                  </Label>
-                  <Select
-                    value={form.llm_model || ""}
-                    onValueChange={(v) => setForm({ ...form, llm_model: v === "__default__" ? "" : v })}
-                  >
-                    <SelectTrigger><SelectValue placeholder={`Default (${defaultLlmModel || "auto"})`} /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__default__">
-                        Default ({defaultLlmModel || "auto"})
-                      </SelectItem>
-                      {ollamaModels.map((m) => (
-                        <SelectItem key={m} value={m}>{m}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground">
-                    Report Generation에서 사용할 LLM 모델. Default는 서버 설정({defaultLlmModel || "env"})을 따릅니다.
-                  </p>
-                </div>
-
                 {/* LLM Model for Paper Read (RAG Enrichment) */}
                 <div className="space-y-2">
                   <Label className="flex items-center gap-2">
@@ -769,6 +745,30 @@ export default function OrderCreate() {
                   </Select>
                   <p className="text-xs text-muted-foreground">
                     논문 읽기 및 요약(RAG Enrichment)에서 사용할 LLM 모델. Abstract 분석, 키나제 예측, 기능적 영향 분석에 사용됩니다.
+                  </p>
+                </div>
+
+                {/* LLM Model for Report Generation */}
+                <div className="space-y-2">
+                  <Label className="flex items-center gap-2">
+                    <Brain className="h-4 w-4" /> LLM Model for Report Generation
+                  </Label>
+                  <Select
+                    value={form.llm_model || ""}
+                    onValueChange={(v) => setForm({ ...form, llm_model: v === "__default__" ? "" : v })}
+                  >
+                    <SelectTrigger><SelectValue placeholder={`Default (${defaultLlmModel || "auto"})`} /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__default__">
+                        Default ({defaultLlmModel || "auto"})
+                      </SelectItem>
+                      {ollamaModels.map((m) => (
+                        <SelectItem key={m} value={m}>{m}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Report Generation에서 사용할 LLM 모델. Default는 서버 설정({defaultLlmModel || "env"})을 따릅니다.
                   </p>
                 </div>
 
