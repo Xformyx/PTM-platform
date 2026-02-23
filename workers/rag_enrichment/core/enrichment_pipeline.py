@@ -22,6 +22,7 @@ from typing import Callable, Dict, List, Optional
 import pandas as pd
 
 from common.mcp_client import MCPClient
+from common.llm_client import LLMClient
 from common.local_data_loader import HPALocalLoader, GTExLocalLoader
 from .regulation_extractor import RegulationExtractor
 from .abstract_analyzer import AbstractAnalyzer
@@ -61,9 +62,15 @@ class RAGEnrichmentPipeline:
         self.enable_ptm_validation = enable_ptm_validation
 
         if enable_llm_analysis:
-            self.abstract_analyzer = AbstractAnalyzer()
-            self.kinase_predictor = LLMKinasePredictor()
-            self.functional_impact = LLMFunctionalImpact()
+            llm = LLMClient()  # auto-detects: Ollama → OpenAI → Gemini
+            if not llm.is_available():
+                logger.warning("No LLM provider available — disabling LLM analysis")
+                self.enable_llm = False
+            else:
+                logger.info(f"LLM initialized: provider={llm.provider}, model={llm.model}")
+                self.abstract_analyzer = AbstractAnalyzer(llm_client=llm)
+                self.kinase_predictor = LLMKinasePredictor(llm_client=llm)
+                self.functional_impact = LLMFunctionalImpact(llm_client=llm)
         if enable_fulltext:
             self.fulltext_analyzer = FullTextAnalyzer()
         if enable_ptm_validation:

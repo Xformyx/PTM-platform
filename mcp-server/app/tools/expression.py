@@ -99,7 +99,7 @@ async def query_hpa(gene_name: str, redis=None) -> dict:
     if redis and not result["error"]:
         try:
             import json
-            await redis.set(cache_key, json.dumps(result), ex=604800)
+            await redis.set(cache_key, json.dumps(result))  # permanent cache
         except Exception:
             pass
 
@@ -173,7 +173,7 @@ async def query_gtex(gene_name: str, redis=None) -> dict:
     if redis and not result["error"]:
         try:
             import json
-            await redis.set(cache_key, json.dumps(result), ex=604800)
+            await redis.set(cache_key, json.dumps(result))  # permanent cache
         except Exception:
             pass
 
@@ -264,7 +264,7 @@ async def query_biogrid(
     if redis and not result["error"]:
         try:
             import json
-            await redis.set(cache_key, json.dumps(result), ex=604800)
+            await redis.set(cache_key, json.dumps(result))  # permanent cache
         except Exception:
             pass
 

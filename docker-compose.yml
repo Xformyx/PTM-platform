@@ -37,7 +37,7 @@ services:
       - ./storage/redis:/data
     networks:
       - ptm-network
-    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    command: redis-server --appendonly yes --maxmemory 2gb --maxmemory-policy noeviction
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -178,6 +178,12 @@ services:
       MCP_SERVER_URL: http://mcp-server:8001
       CHROMADB_URL: http://chromadb:8000
       OUTPUT_DIR: /app/data/outputs
+      OLLAMA_URL: http://host.docker.internal:11434
+      LLM_MODEL: ${LLM_MODEL:-gemma3:27b}
+      LLM_PROVIDER: ${LLM_PROVIDER:-auto}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1-mini}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
     networks:
       - ptm-network
     depends_on:
@@ -209,6 +215,10 @@ services:
       CHROMADB_URL: http://chromadb:8000
       OUTPUT_DIR: /app/data/outputs
       LLM_MODEL: ${LLM_MODEL:-gemma3:27b}
+      LLM_PROVIDER: ${LLM_PROVIDER:-auto}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1-mini}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       CYTOSCAPE_HOST: host.docker.internal
       CYTOSCAPE_PORT: ${CYTOSCAPE_PORT:-1234}
     networks:

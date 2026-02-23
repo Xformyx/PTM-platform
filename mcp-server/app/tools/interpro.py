@@ -31,7 +31,7 @@ async def query_interpro(
 
     if redis:
         import json
-        await redis.set(cache_key, json.dumps(result), ex=7 * 86400)
+        await redis.set(cache_key, json.dumps(result))  # permanent cache
 
     return result
 

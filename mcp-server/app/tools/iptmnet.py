@@ -285,7 +285,7 @@ async def query_iptmnet(
                     if redis:
                         try:
                             import json as _json
-                            await redis.set(cache_key, _json.dumps(result), ex=86400)
+                            await redis.set(cache_key, _json.dumps(result))  # permanent cache
                         except Exception:
                             pass
                     return result
@@ -316,7 +316,7 @@ async def query_iptmnet(
     if redis:
         try:
             import json as _json
-            await redis.set(cache_key, _json.dumps(result), ex=86400)
+            await redis.set(cache_key, _json.dumps(result))  # permanent cache
         except Exception:
             pass
 

@@ -145,7 +145,7 @@ async def query_kea3(
     if redis and not result["error"]:
         try:
             import json
-            await redis.set(cache_key, json.dumps(result), ex=86400)
+            await redis.set(cache_key, json.dumps(result))  # permanent cache
         except Exception:
             pass
 

@@ -43,47 +43,76 @@ async def search_ptm_pubmed(
     max_results: int = 15,
     redis=None,
 ) -> dict:
-    """Multi-tier PubMed search for a specific PTM site."""
+    """Multi-tier PubMed search for a specific PTM site.
+
+    Results are cached permanently in Redis (no TTL) so that once fetched,
+    articles are always available without re-querying PubMed.
+    """
     cache_key = f"pubmed:search:{gene}:{position}:{ptm_type}"
     if redis:
         import json
         cached = await redis.get(cache_key)
         if cached:
+            logger.debug(f"PubMed search cache hit: {cache_key}")
             return json.loads(cached)
 
     result = await _multi_tier_search(gene, position, ptm_type, context_keywords or [], max_results)
 
-    if redis:
+    if redis and result.get("articles"):
         import json
-        await redis.set(cache_key, json.dumps(result), ex=3 * 86400)
+        # Permanent cache — articles don't change once published
+        await redis.set(cache_key, json.dumps(result))
+        logger.info(f"PubMed search cached permanently: {cache_key} ({result.get('total_found', 0)} articles)")
 
     return result
 
 
 async def fetch_articles_by_pmids(pmids: list[str], redis=None) -> dict:
-    """Fetch article details by PMIDs."""
+    """Fetch article details by PMIDs.
+
+    Individual articles are cached permanently by PMID for maximum reuse.
+    """
     if not pmids:
         return {"articles": []}
 
-    cache_key = f"pubmed:fetch:{','.join(sorted(pmids[:20]))}"
+    # Check per-article cache first
+    cached_articles = []
+    uncached_pmids = []
     if redis:
         import json
-        cached = await redis.get(cache_key)
-        if cached:
-            return json.loads(cached)
+        for pmid in pmids:
+            article_key = f"pubmed:article:{pmid}"
+            cached = await redis.get(article_key)
+            if cached:
+                cached_articles.append(json.loads(cached))
+            else:
+                uncached_pmids.append(pmid)
+    else:
+        uncached_pmids = list(pmids)
 
-    articles = await _fetch_article_details(pmids)
-    result = {"articles": articles}
+    # Fetch only uncached articles
+    new_articles = []
+    if uncached_pmids:
+        new_articles = await _fetch_article_details(uncached_pmids)
+        # Cache each article individually and permanently
+        if redis and new_articles:
+            import json
+            for article in new_articles:
+                pmid = article.get("pmid")
+                if pmid:
+                    article_key = f"pubmed:article:{pmid}"
+                    await redis.set(article_key, json.dumps(article))
+            logger.info(f"Cached {len(new_articles)} new articles permanently")
 
-    if redis:
-        import json
-        await redis.set(cache_key, json.dumps(result), ex=7 * 86400)
-
-    return result
+    all_articles = cached_articles + new_articles
+    return {"articles": all_articles}
 
 
 async def get_gene_aliases(gene: str, redis=None) -> dict:
-    """Get gene aliases from MyGene.info API."""
+    """Get gene aliases from MyGene.info API.
+
+    Gene aliases are stable data — cached permanently.
+    """
     cache_key = f"pubmed:aliases:{gene}"
     if redis:
         import json
@@ -94,9 +123,9 @@ async def get_gene_aliases(gene: str, redis=None) -> dict:
     aliases = await _fetch_gene_aliases(gene)
     result = {"gene": gene, "aliases": aliases}
 
-    if redis:
+    if redis and aliases:
         import json
-        await redis.set(cache_key, json.dumps(result), ex=7 * 86400)
+        await redis.set(cache_key, json.dumps(result))
 
     return result
 

@@ -176,7 +176,7 @@ async def fetch_fulltext_by_pmid(pmid: str, redis=None) -> dict:
     if redis and result["has_fulltext"]:
         try:
             import json
-            await redis.set(cache_key, json.dumps(result), ex=604800)  # 7 days
+            await redis.set(cache_key, json.dumps(result))  # permanent cache
         except Exception:
             pass
 
