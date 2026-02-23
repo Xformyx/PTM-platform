@@ -36,6 +36,8 @@ storage/logs/
 # Data: user uploads & generated outputs
 data/inputs/
 data/outputs/
+data/config/
+data/local_data/
 
 # Local data files (large, mounted via Docker volumes — NOT pushed to Git)
 # Contains: GTEx (3.5GB), HPA TSVs, pattern JSON configs
