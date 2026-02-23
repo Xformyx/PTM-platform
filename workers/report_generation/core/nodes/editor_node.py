@@ -14,22 +14,28 @@ logger = logging.getLogger(__name__)
 
 
 def run_editor(state: dict) -> dict:
-    """Compile final report from generated sections."""
+    """Compile final report from generated sections or use pre-formatted report."""
     cb = state.get("progress_callback")
     if cb:
         cb(90, "Compiling final report")
 
-    sections = state.get("sections", {})
-    hypotheses = state.get("validated_hypotheses", [])
-    network_analysis = state.get("network_analysis", {})
-    context = state.get("experimental_context", {})
-    questions = state.get("research_questions", [])
     output_dir = state.get("output_dir", "/tmp")
     title = state.get("report_title", "PTM Comprehensive Analysis Report")
-    dr_results = state.get("drug_repositioning_results", {})
-    collected_references = state.get("collected_references", [])
 
-    report = _compile_report(title, sections, hypotheses, network_analysis, context, questions, dr_results, collected_references)
+    network_analysis = state.get("network_analysis", {})
+
+    # Use pre-formatted report from format_citations if available
+    pre_formatted = state.get("final_report")
+    if pre_formatted and isinstance(pre_formatted, str) and len(pre_formatted.strip()) > 100:
+        report = pre_formatted
+    else:
+        sections = state.get("sections", {})
+        hypotheses = state.get("validated_hypotheses", [])
+        context = state.get("experimental_context", {})
+        questions = state.get("research_questions", [])
+        dr_results = state.get("drug_repositioning_results", {})
+        collected_references = state.get("collected_references", [])
+        report = _compile_report(title, sections, hypotheses, network_analysis, context, questions, dr_results, collected_references)
 
     # Save report
     output_path = Path(output_dir)
