@@ -188,6 +188,20 @@ def _clean_text(text: str) -> str:
     return text
 
 
+def _safe_str(item) -> str:
+    """Convert any item to a string, handling dicts and other non-str types."""
+    if isinstance(item, str):
+        return item
+    if isinstance(item, dict):
+        return item.get("name") or item.get("label") or item.get("id") or str(item)
+    return str(item)
+
+
+def _safe_join(sep: str, items) -> str:
+    """Join items with separator, converting each to string safely."""
+    return sep.join(_safe_str(x) for x in items)
+
+
 def _fmt_fc(val, decimals: int = 3) -> str:
     try:
         return f"{float(val):.{decimals}f}"
@@ -466,7 +480,7 @@ class ComprehensiveReportGenerator:
         # Localization (brief)
         loc = enr.get("localization", [])
         if loc:
-            lines.append(f"**Subcellular Localization**: {', '.join(loc[:5])}\n")
+            lines.append(f"**Subcellular Localization**: {_safe_join(', ', loc[:5])}\n")
 
         return "\n".join(lines)
 
@@ -779,7 +793,7 @@ class ComprehensiveReportGenerator:
 
         # GO Cellular Component
         if go_cc:
-            lines.append(f"**GO Cellular Component**: {'; '.join(go_cc[:5])}\n")
+            lines.append(f"**GO Cellular Component**: {_safe_join('; ', go_cc[:5])}\n")
 
         return "\n".join(lines)
 
@@ -911,7 +925,7 @@ class ComprehensiveReportGenerator:
         # Disease associations
         diseases = enr.get("diseases", [])
         if diseases:
-            lines.append(f"**Disease Associations**: {', '.join(diseases)}\n")
+            lines.append(f"**Disease Associations**: {_safe_join(', ', diseases)}\n")
 
         # Evidence count
         evidence_count = enr.get("regulation", {}).get("evidence_count", 0)
@@ -974,9 +988,9 @@ class ComprehensiveReportGenerator:
         lines = ["### Regulatory Network\n"]
 
         if upstream:
-            lines.append(f"**Upstream Regulators ({terms['activator_plural']})**: {', '.join(upstream[:8])}\n")
+            lines.append(f"**Upstream Regulators ({terms['activator_plural']})**: {_safe_join(', ', upstream[:8])}\n")
         if downstream:
-            lines.append(f"**Downstream Targets**: {', '.join(downstream[:8])}\n")
+            lines.append(f"**Downstream Targets**: {_safe_join(', ', downstream[:8])}\n")
 
         if ks:
             ks_label = f"{terms['activator'].title()}-Substrate Relationships"
@@ -986,11 +1000,11 @@ class ComprehensiveReportGenerator:
             lines.append("")
 
         if pathways:
-            pw_names = [p.get("name", p) if isinstance(p, dict) else p for p in pathways[:5]]
-            lines.append(f"**KEGG Pathways**: {', '.join(pw_names)}\n")
+            pw_names = [p.get("name", p) if isinstance(p, dict) else str(p) for p in pathways[:5]]
+            lines.append(f"**KEGG Pathways**: {_safe_join(', ', pw_names)}\n")
 
         if interactions:
-            lines.append(f"**STRING-DB Interaction Partners**: {', '.join(interactions[:5])}\n")
+            lines.append(f"**STRING-DB Interaction Partners**: {_safe_join(', ', interactions[:5])}\n")
 
         # Ubiquitylation-specific sections
         if is_ubiquitylation(ptm_type):
@@ -1018,9 +1032,9 @@ class ComprehensiveReportGenerator:
         bp = go.get("biological_process", [])
         mf = go.get("molecular_function", [])
         if bp:
-            lines.append(f"**GO Biological Process**: {'; '.join(bp[:3])}\n")
+            lines.append(f"**GO Biological Process**: {_safe_join('; ', bp[:3])}\n")
         if mf:
-            lines.append(f"**GO Molecular Function**: {'; '.join(mf[:3])}\n")
+            lines.append(f"**GO Molecular Function**: {_safe_join('; ', mf[:3])}\n")
 
         if not upstream and not downstream and not ks and not pathways:
             lines.append("No regulatory information found from literature analysis.\n")
@@ -1069,7 +1083,7 @@ class ComprehensiveReportGenerator:
             partner = inter.get("partner", "?")
             score = inter.get("score", 0)
             evidence = inter.get("evidence", [])
-            ev_str = ", ".join(evidence[:3]) if evidence else "N/A"
+            ev_str = _safe_join(", ", evidence[:3]) if evidence else "N/A"
             lines.append(f"| {partner} | {score} | {ev_str} |")
 
         lines.append(f"\n[View full network on STRING-DB](https://string-db.org/network/{gene})\n")
@@ -1130,7 +1144,7 @@ class ComprehensiveReportGenerator:
         if diseases:
             lines.append(f"**{gene}** has been associated with the following diseases:\n")
             for d in diseases:
-                lines.append(f"- {d.title()}")
+                lines.append(f"- {_safe_str(d).title()}")
             lines.append("")
 
         if clinical_notes:
@@ -1362,7 +1376,7 @@ class ComprehensiveReportGenerator:
         if disease_counts:
             lines.append("### Disease Associations\n")
             for d, cnt in sorted(disease_counts.items(), key=lambda x: -x[1]):
-                lines.append(f"- **{d.title()}**: {cnt} PTM sites")
+                lines.append(f"- **{_safe_str(d).title()}**: {cnt} PTM sites")
             lines.append("")
 
         # 7. Signaling Network Summary
@@ -1411,7 +1425,8 @@ class ComprehensiveReportGenerator:
 
             # Disease counts
             for d in enr.get("diseases", []):
-                disease_counts[d] = disease_counts.get(d, 0) + 1
+                d_str = _safe_str(d)
+                disease_counts[d_str] = disease_counts.get(d_str, 0) + 1
 
             # Interaction counts
             string_db = enr.get("string_db", {})
@@ -1513,9 +1528,9 @@ class ComprehensiveReportGenerator:
             author_str = ""
             if authors:
                 if len(authors) > 3:
-                    author_str = f"{', '.join(authors[:3])}, et al. "
+                    author_str = f"{_safe_join(', ', authors[:3])}, et al. "
                 else:
-                    author_str = f"{', '.join(authors)}. "
+                    author_str = f"{_safe_join(', ', authors)}. "
 
             ref_line = f"[{c['number']}] {author_str}{title}. *{journal}* ({pub_date})."
             if pmid:

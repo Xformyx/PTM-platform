@@ -61,7 +61,9 @@ def _generate_with_llm(research: dict, context: dict, llm: LLMClient) -> list:
 
     activated_str = ", ".join(f"{p['gene']}-{p['position']} (Log2FC={p['ptm_relative_log2fc']})" for p in activated[:5])
     inhibited_str = ", ".join(f"{p['gene']}-{p['position']} (Log2FC={p['ptm_relative_log2fc']})" for p in inhibited[:5])
-    pathway_str = ", ".join(p["pathway"] for p in pathways[:5])
+    pathway_str = ", ".join(
+        p.get("pathway", p.get("name", str(p))) if isinstance(p, dict) else str(p) for p in pathways[:5]
+    )
 
     tissue = context.get("tissue") or context.get("cell_type") or "the given experimental system"
     treatment = context.get("treatment", "the applied treatment")

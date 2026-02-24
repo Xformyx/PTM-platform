@@ -203,7 +203,10 @@ IMPORTANT: Write a thorough, detailed introduction. Cite as many of the provided
                 research_str += "  Key activated: " + ", ".join(f"{p['gene']}-{p['position']}(FC={p['ptm_relative_log2fc']})" for p in top_act) + "\n"
             enriched = r.get("enriched_pathways", [])[:5]
             if enriched:
-                research_str += "  Enriched pathways: " + ", ".join(p["pathway"] for p in enriched) + "\n"
+                research_str += "  Enriched pathways: " + ", ".join(
+                    p.get("pathway", p.get("name", str(p))) if isinstance(p, dict) else str(p)
+                    for p in enriched
+                ) + "\n"
 
         network_info = ""
         net = network or {}

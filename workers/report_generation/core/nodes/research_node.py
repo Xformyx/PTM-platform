@@ -81,11 +81,19 @@ def _filter_relevant_ptms(ptms: list, keywords: list) -> list:
     relevant = []
     for ptm in ptms:
         enr = ptm.get("rag_enrichment", {})
+        pathways_raw = enr.get("pathways", [])
+        pathways_str = " ".join(
+            p.get("name", str(p)) if isinstance(p, dict) else str(p) for p in pathways_raw
+        ).lower()
+        diseases_raw = enr.get("diseases", [])
+        diseases_str = " ".join(
+            d.get("name", str(d)) if isinstance(d, dict) else str(d) for d in diseases_raw
+        ).lower()
         text = " ".join([
-            ptm["gene"].lower(),
-            ptm["ptm_type"].lower(),
-            " ".join(enr.get("pathways", [])).lower(),
-            " ".join(enr.get("diseases", [])).lower(),
+            ptm.get("gene", ptm.get("Gene.Name", "")).lower(),
+            ptm.get("ptm_type", ptm.get("PTM_Type", "")).lower(),
+            pathways_str,
+            diseases_str,
             enr.get("function_summary", "").lower(),
         ])
         score = sum(1 for kw in keywords if kw in text)
