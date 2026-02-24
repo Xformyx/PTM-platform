@@ -17,11 +17,11 @@ logger = logging.getLogger(__name__)
 SECTION_ORDER = ["introduction", "results", "discussion", "conclusion", "abstract"]
 
 SECTION_MAX_TOKENS = {
-    "abstract": 4096,
-    "introduction": 8192,
-    "results": 12288,
-    "discussion": 8192,
-    "conclusion": 4096,
+    "abstract": 6144,
+    "introduction": 12288,
+    "results": 16384,
+    "discussion": 12288,
+    "conclusion": 6144,
 }
 
 SYSTEM_PROMPT = (
@@ -140,8 +140,8 @@ def _build_section_prompt(
     # --- PubMed references from enriched PTM data ---
     pubmed_context = _format_pubmed_references(all_references, section_type, ptms)
 
-    # PTM summary (with recent findings)
-    ptm_summary = _ptm_summary_text(ptms[:30])
+    # PTM summary (with recent findings) — include all PTMs with full detail
+    ptm_summary = _ptm_summary_text(ptms[:50])
     hyp_summary = _hypothesis_summary_text(hypotheses[:5])
 
     tissue = context.get("tissue") or context.get("cell_type") or "the experimental system"
@@ -171,7 +171,11 @@ Write a comprehensive abstract that captures all major findings. Include specifi
 {combined_lit}"""
 
     elif section_type == "introduction":
-        return f"""Write a comprehensive Introduction section (~1000-1500 words) for this PTM analysis report.
+        comp_intro = ""
+        if comprehensive_summary:
+            comp_intro = f"\n\nDetailed Analysis Context (from prior comprehensive analysis):\n{comprehensive_summary[:4000]}\n"
+
+        return f"""Write a comprehensive Introduction section (~1500-2500 words) for this PTM analysis report.
 
 Experimental System: {tissue}, {treatment}{bio_focus_line}
 Research Questions:
@@ -179,16 +183,18 @@ Research Questions:
 
 Key PTM sites identified:
 {ptm_summary}
+{comp_intro}
 
-Structure (5-7 paragraphs):
+Structure (6-8 paragraphs):
 1. Background on post-translational modifications and their critical role in cellular signaling
 2. Specific background on {ptm_type_label} and its regulatory importance
 3. Relevance of the experimental system ({tissue}, {treatment})
 4. Current understanding and knowledge gaps in this area (cite the provided references)
 5. PTM analysis methodology including mass spectrometry-based proteomics
-6. Research questions and specific objectives of this study
+6. Overview of the key PTM sites identified and their known biological roles
+7. Research questions and specific objectives of this study
 
-IMPORTANT: Write a thorough, detailed introduction. Cite as many of the provided references as possible to establish context. Discuss the biological significance of each research question.
+IMPORTANT: Write a thorough, detailed introduction. Cite as many of the provided references as possible to establish context. Discuss the biological significance of each research question. Use the comprehensive analysis context provided above to enrich your writing with specific PTM data and findings.
 {combined_lit}"""
 
     elif section_type == "results":
@@ -215,9 +221,9 @@ IMPORTANT: Write a thorough, detailed introduction. Cite as many of the provided
 
         comp_ctx = ""
         if comprehensive_summary:
-            comp_ctx = f"\n\nDetailed Analysis Context (from prior comprehensive analysis):\n{comprehensive_summary[:3000]}\n"
+            comp_ctx = f"\n\nDetailed Analysis Context (from prior comprehensive analysis):\n{comprehensive_summary[:6000]}\n"
 
-        return f"""Write a detailed Results section (~2000-3000 words) for this PTM analysis report.
+        return f"""Write a detailed Results section (~3000-5000 words) for this PTM analysis report.
 
 Research Findings:
 {research_str}
@@ -242,12 +248,12 @@ IMPORTANT: Be thorough and detailed. Discuss each significant PTM site individua
 {combined_lit}"""
 
     elif section_type == "discussion":
-        results_text = prev_sections.get("results", "")[:2000]
+        results_text = prev_sections.get("results", "")[:4000]
         comp_disc = ""
         if comprehensive_summary:
-            comp_disc = f"\n\nDetailed Analysis Context:\n{comprehensive_summary[:2000]}\n"
+            comp_disc = f"\n\nDetailed Analysis Context:\n{comprehensive_summary[:4000]}\n"
 
-        return f"""Write a comprehensive Discussion section (~1200-1800 words) for this PTM analysis report.
+        return f"""Write a comprehensive Discussion section (~2000-3000 words) for this PTM analysis report.
 
 Results Summary:
 {results_text}
@@ -270,7 +276,10 @@ IMPORTANT: For each discussion point, provide evidence from your data AND from t
 {combined_lit}"""
 
     elif section_type == "conclusion":
-        return f"""Write a Conclusion section (~400-600 words) for this PTM analysis report.
+        results_text = prev_sections.get("results", "")[:2000]
+        discussion_text = prev_sections.get("discussion", "")[:2000]
+
+        return f"""Write a Conclusion section (~600-1000 words) for this PTM analysis report.
 
 Research Questions:
 {questions_str}
@@ -281,14 +290,21 @@ Key Hypotheses:
 PTM Summary:
 {ptm_summary}
 
-Summarize:
-1. Key findings and how they answer the research questions
-2. Novel insights revealed by this analysis
-3. Biological and clinical significance
-4. Limitations of the current study
-5. Specific future research directions
+Results Summary:
+{results_text}
 
-IMPORTANT: Be specific about findings — mention key PTM sites and their implications. Cite relevant references.
+Discussion Summary:
+{discussion_text}
+
+Summarize:
+1. Key findings and how they answer each research question
+2. Novel insights revealed by this analysis — what is new compared to existing literature
+3. Biological and clinical significance of the identified PTM changes
+4. Potential therapeutic implications
+5. Limitations of the current study
+6. Specific future research directions with concrete experimental suggestions
+
+IMPORTANT: Be specific about findings — mention key PTM sites and their implications. Reference the results and discussion sections. Cite relevant references.
 {combined_lit}"""
 
     return f"Write the {section_type} section for a PTM analysis report.\n{ptm_summary}"
@@ -355,7 +371,7 @@ def _ptm_summary_text(ptms: list) -> str:
     for i, p in enumerate(ptms):
         line = f"  {p['gene']}-{p['position']} ({p['ptm_type']}): PTM_FC={p['ptm_relative_log2fc']:.3f}, Prot_FC={p.get('protein_log2fc', 0):.3f}"
         enr = p.get("rag_enrichment", {})
-        if i < 15 and enr:
+        if i < 30 and enr:
             if enr.get("function_summary"):
                 line += f"\n    Function: {enr['function_summary'][:300]}"
             pathways = enr.get("pathways", [])

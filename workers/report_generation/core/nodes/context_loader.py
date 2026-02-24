@@ -142,8 +142,12 @@ def _generate_default_questions(ptms: list, context: dict) -> list:
     return questions
 
 
-def _extract_md_summary(md_path: str, max_chars: int = 3000) -> str:
-    """Extract key sections from comprehensive MD report for use in LLM prompts."""
+def _extract_md_summary(md_path: str, max_chars: int = 12000) -> str:
+    """Extract key sections from comprehensive MD report for use in LLM prompts.
+
+    Extracts a generous summary (up to 12000 chars) to provide rich context
+    for downstream LLM section writing.
+    """
     try:
         text = Path(md_path).read_text(encoding="utf-8", errors="replace")
     except Exception as e:
@@ -154,17 +158,25 @@ def _extract_md_summary(md_path: str, max_chars: int = 3000) -> str:
     summary_parts = []
     current_section = ""
     section_content: list = []
-    kept_sections = {"summary", "overview", "key findings", "significant", "regulation", "signaling"}
+    # Expanded keyword set to capture more sections from the comprehensive report
+    kept_sections = {
+        "summary", "overview", "key findings", "significant", "regulation", "signaling",
+        "pathway", "expression", "literature", "clinical", "disease", "interaction",
+        "network", "kinase", "functional", "biological", "temporal", "time-course",
+        "ptm-driven", "hyperactivation", "activation", "global", "individual",
+        "drug", "therapeutic", "mechanism", "context", "interpretation",
+    }
 
     for line in lines:
         if line.startswith("## "):
             if current_section and section_content:
                 section_text = "\n".join(section_content).strip()
                 if section_text and any(k in current_section.lower() for k in kept_sections):
-                    summary_parts.append(f"## {current_section}\n{section_text[:600]}")
+                    # Allow up to 1500 chars per section (was 600)
+                    summary_parts.append(f"## {current_section}\n{section_text[:1500]}")
             current_section = line[3:].strip()
             section_content = []
-        elif line.startswith("### ") and len(summary_parts) < 8:
+        elif line.startswith("### ") and len(summary_parts) < 20:
             section_content.append(line)
         elif current_section:
             section_content.append(line)
@@ -172,10 +184,12 @@ def _extract_md_summary(md_path: str, max_chars: int = 3000) -> str:
     if current_section and section_content:
         section_text = "\n".join(section_content).strip()
         if section_text and any(k in current_section.lower() for k in kept_sections):
-            summary_parts.append(f"## {current_section}\n{section_text[:600]}")
+            summary_parts.append(f"## {current_section}\n{section_text[:1500]}")
 
     result = "\n\n".join(summary_parts)
     if not result and lines:
-        result = "\n".join(lines[:80])
+        # Fallback: take first 200 lines instead of 80
+        result = "\n".join(lines[:200])
 
+    logger.info(f"Extracted MD summary: {len(result)} chars from {len(summary_parts)} sections")
     return result[:max_chars]
