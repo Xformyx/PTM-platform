@@ -95,7 +95,7 @@ export default function SystemMonitor() {
               <span>{error}</span>
             </div>
             <p className="mt-2 text-sm text-muted-foreground">
-              Check: <code className="rounded bg-muted px-1">docker compose ps</code> and{" "}
+              Check: <code className="rounded bg-muted px-1">docker compose ps</code> &{" "}
               <code className="rounded bg-muted px-1">docker compose restart gateway api-server</code>
             </p>
           </CardContent>
