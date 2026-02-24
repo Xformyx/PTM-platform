@@ -861,6 +861,8 @@ function TopNTimeSeriesPlot({ orderId }: { orderId: number }) {
   const [trendFilter, setTrendFilter] = useState<TrendCategory | "all">("all");
   const [yZoom, setYZoom] = useState(1); // 1 = default, <1 = zoom in (narrower range), >1 = zoom out (wider range)
   const [hoveredPtm, setHoveredPtm] = useState<string | null>(null);
+  const [yManualMin, setYManualMin] = useState<string>("");
+  const [yManualMax, setYManualMax] = useState<string>("");
 
   useEffect(() => {
     api
@@ -994,8 +996,14 @@ function TopNTimeSeriesPlot({ orderId }: { orderId: number }) {
   const yMax = allValues.length > 0 ? Math.max(...allValues) : 1;
   const yCenter = (yMin + yMax) / 2;
   const yHalfRange = Math.max((yMax - yMin) / 2, 0.5) * yZoom;
-  const yDomainMin = Math.floor(yCenter - yHalfRange - 1);
-  const yDomainMax = Math.ceil(yCenter + yHalfRange + 1);
+  const autoYMin = Math.floor(yCenter - yHalfRange - 1);
+  const autoYMax = Math.ceil(yCenter + yHalfRange + 1);
+
+  // Manual override takes priority if valid numbers are entered
+  const parsedManualMin = yManualMin !== "" ? parseFloat(yManualMin) : NaN;
+  const parsedManualMax = yManualMax !== "" ? parseFloat(yManualMax) : NaN;
+  const yDomainMin = !isNaN(parsedManualMin) ? parsedManualMin : autoYMin;
+  const yDomainMax = !isNaN(parsedManualMax) ? parsedManualMax : autoYMax;
 
   // Count per trend category
   const trendCounts: Record<string, number> = { all: uniquePtms.length };
@@ -1004,8 +1012,8 @@ function TopNTimeSeriesPlot({ orderId }: { orderId: number }) {
     trendCounts[t] = (trendCounts[t] || 0) + 1;
   });
 
-  // Chart height scales with visible lines for better separation
-  const chartHeight = Math.max(500, Math.min(800, 400 + visibleLabels.length * 8));
+  // Chart height scales with visible lines for better separation (30% taller than before)
+  const chartHeight = Math.max(650, Math.min(1040, 520 + visibleLabels.length * 10));
 
   return (
     <div className="space-y-4">
@@ -1056,14 +1064,14 @@ function TopNTimeSeriesPlot({ orderId }: { orderId: number }) {
       <div className="grid lg:grid-cols-[1fr_240px] gap-4">
         {/* Chart area — taller Y axis with zoom controls */}
         <div className="rounded-lg border bg-background p-4 relative" style={{ minHeight: `${chartHeight + 40}px` }}>
-          {/* Y-axis zoom controls */}
-          <div className="absolute top-2 right-2 flex flex-col gap-1 z-10">
+          {/* Y-axis zoom controls + manual min/max */}
+          <div className="absolute top-2 right-2 flex flex-col gap-1.5 z-10">
             <Button
               variant="outline"
               size="sm"
               className="h-7 w-7 p-0"
               title="Y축 확대 (좁히기)"
-              onClick={() => setYZoom((z) => Math.max(0.2, z * 0.7))}
+              onClick={() => { setYManualMin(""); setYManualMax(""); setYZoom((z) => Math.max(0.2, z * 0.7)); }}
             >
               <ZoomIn className="h-3.5 w-3.5" />
             </Button>
@@ -1072,10 +1080,28 @@ function TopNTimeSeriesPlot({ orderId }: { orderId: number }) {
               size="sm"
               className="h-7 w-7 p-0"
               title="Y축 축소 (넓히기)"
-              onClick={() => setYZoom((z) => Math.min(5, z * 1.4))}
+              onClick={() => { setYManualMin(""); setYManualMax(""); setYZoom((z) => Math.min(5, z * 1.4)); }}
             >
               <ZoomOut className="h-3.5 w-3.5" />
             </Button>
+            <div className="flex flex-col gap-1 mt-1 bg-background/90 rounded border p-1.5" style={{ width: "72px" }}>
+              <label className="text-[10px] text-muted-foreground leading-none">Y Max</label>
+              <Input
+                type="number"
+                placeholder={String(Math.round(autoYMax))}
+                value={yManualMax}
+                onChange={(e) => setYManualMax(e.target.value)}
+                className="h-6 text-xs px-1.5 w-full"
+              />
+              <label className="text-[10px] text-muted-foreground leading-none mt-0.5">Y Min</label>
+              <Input
+                type="number"
+                placeholder={String(Math.round(autoYMin))}
+                value={yManualMin}
+                onChange={(e) => setYManualMin(e.target.value)}
+                className="h-6 text-xs px-1.5 w-full"
+              />
+            </div>
           </div>
           <ResponsiveContainer width="100%" height={chartHeight}>
             <LineChart data={chartData} margin={{ top: 10, right: 20, left: 10, bottom: 10 }}>
