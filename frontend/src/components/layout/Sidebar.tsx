@@ -8,6 +8,7 @@ import {
   BookOpen,
   FlaskConical,
   Settings,
+  Activity,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -83,6 +84,32 @@ export default function Sidebar({ className }: { className?: string }) {
 
       {/* Resource Monitor */}
       <ResourceMonitor />
+
+      {/* System Monitor */}
+      <div className="px-3 py-2">
+        <NavLink to="/system-monitor">
+          {({ isActive }) => (
+            <div
+              className={cn(
+                "relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
+                isActive
+                  ? "bg-primary/10 text-primary"
+                  : "text-muted-foreground hover:bg-accent hover:text-foreground"
+              )}
+            >
+              {isActive && (
+                <motion.div
+                  layoutId="activeIndicator"
+                  className="absolute left-0 inset-y-1 w-[3px] rounded-r-full bg-primary"
+                  transition={{ type: "spring", stiffness: 400, damping: 30 }}
+                />
+              )}
+              <Activity className="h-4 w-4" />
+              <span>System Monitor</span>
+            </div>
+          )}
+        </NavLink>
+      </div>
 
       <Separator />
 

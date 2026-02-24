@@ -10,12 +10,14 @@ import Articles from '@/pages/Articles';
 import Reports from '@/pages/Reports';
 import Logs from '@/pages/Logs';
 import Settings from '@/pages/Settings';
+import SystemMonitor from '@/pages/SystemMonitor';
 
 export default function App() {
   return (
     <Routes>
       <Route element={<Layout />}>
         <Route index element={<Dashboard />} />
+        <Route path="system-monitor" element={<SystemMonitor />} />
         <Route path="orders" element={<OrderList />} />
         <Route path="orders/new" element={<OrderCreate />} />
         <Route path="orders/:id" element={<OrderDetail />} />
