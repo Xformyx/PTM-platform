@@ -5,6 +5,7 @@ import {
   Check, Upload, AlertCircle, ArrowLeft, ArrowRight, Loader2,
   FileSpreadsheet, Regex, Trash2, SlidersHorizontal, Brain,
   Plus, X, MessageSquare, Network, FlaskConical, BookOpen,
+  ChevronDown, ChevronUp, Settings2, RotateCcw,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
@@ -180,6 +181,22 @@ export default function OrderCreate() {
   const [analysisOptions, setAnalysisOptions] = useState<AnalysisOptions>({ ...DEFAULT_ANALYSIS_OPTIONS });
   const [analysisModalOpen, setAnalysisModalOpen] = useState(false);
 
+  // Advanced Report Config
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [reportConfig, setReportConfig] = useState({
+    md_summary_max_chars: 12000,
+    section_chars_limit: 1500,
+    llm_tokens_abstract: 4096,
+    llm_tokens_introduction: 12288,
+    llm_tokens_results: 16384,
+    llm_tokens_time_course: 8192,
+    llm_tokens_discussion: 12288,
+    llm_tokens_conclusion: 6144,
+    llm_temperature: 0.6,
+    chromadb_results_per_section: 10,
+    ptm_detail_count: 30,
+  });
+
   const goTo = useCallback((s: number) => {
     setDirection(s > step ? 1 : -1);
     setStep(s);
@@ -288,12 +305,29 @@ export default function OrderCreate() {
       time_points: form.time_points, biological_question: form.biological_question,
       special_conditions: form.special_conditions,
     }));
+    // Build nested report_config from flat state
+    const reportConfigNested = {
+      md_summary_max_chars: reportConfig.md_summary_max_chars,
+      section_chars_limit: reportConfig.section_chars_limit,
+      llm_tokens: {
+        abstract: reportConfig.llm_tokens_abstract,
+        introduction: reportConfig.llm_tokens_introduction,
+        results: reportConfig.llm_tokens_results,
+        time_course: reportConfig.llm_tokens_time_course,
+        discussion: reportConfig.llm_tokens_discussion,
+        conclusion: reportConfig.llm_tokens_conclusion,
+      },
+      llm_temperature: reportConfig.llm_temperature,
+      chromadb_results_per_section: reportConfig.chromadb_results_per_section,
+      ptm_detail_count: reportConfig.ptm_detail_count,
+    };
     formData.append("report_options", JSON.stringify({
       report_type: form.report_type, top_n_ptms: form.top_n_ptms, output_format: "md",
       analysis_mode: form.analysis_mode,
       research_questions: researchQuestions.length > 0 ? researchQuestions : [],
       ...(form.llm_model ? { llm_model: form.llm_model, llm_provider: "ollama" } : {}),
       ...(form.rag_llm_model ? { rag_llm_model: form.rag_llm_model } : {}),
+      report_config: reportConfigNested,
     }));
     const { proteinListFile, ...analysisOptsForJson } = analysisOptions;
     formData.append("analysis_options", JSON.stringify(analysisOptsForJson));
@@ -845,6 +879,111 @@ export default function OrderCreate() {
                       {analysisOptions.mode === "protein_list" && (analysisOptions.proteinListFile ? `Custom list: ${analysisOptions.proteinListFile.name}` : "Custom list (no file selected)")}
                     </span>
                   </div>
+                </div>
+
+                {/* Advanced Report Settings */}
+                <div className="rounded-lg border">
+                  <button
+                    type="button"
+                    className="flex w-full items-center justify-between px-4 py-3 text-sm font-medium hover:bg-muted/50 transition-colors"
+                    onClick={() => setAdvancedOpen(!advancedOpen)}
+                  >
+                    <span className="flex items-center gap-2">
+                      <Settings2 className="h-4 w-4" />
+                      Advanced Report Settings
+                      <span className="text-xs text-muted-foreground font-normal">(optional)</span>
+                    </span>
+                    {advancedOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                  </button>
+                  {advancedOpen && (
+                    <div className="border-t px-4 pb-4 space-y-5">
+                      {/* Reset button */}
+                      <div className="flex justify-end pt-3">
+                        <Button type="button" variant="ghost" size="sm" className="gap-1 text-xs"
+                          onClick={() => setReportConfig({
+                            md_summary_max_chars: 12000, section_chars_limit: 1500,
+                            llm_tokens_abstract: 4096, llm_tokens_introduction: 12288,
+                            llm_tokens_results: 16384, llm_tokens_time_course: 8192,
+                            llm_tokens_discussion: 12288, llm_tokens_conclusion: 6144,
+                            llm_temperature: 0.6, chromadb_results_per_section: 10,
+                            ptm_detail_count: 30,
+                          })}>
+                          <RotateCcw className="h-3 w-3" /> Reset to Defaults
+                        </Button>
+                      </div>
+
+                      {/* Context Extraction */}
+                      <div className="space-y-3">
+                        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Context Extraction</p>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="space-y-1">
+                            <Label className="text-xs">MD Summary Max Characters</Label>
+                            <Input type="number" value={reportConfig.md_summary_max_chars}
+                              onChange={(e) => setReportConfig({ ...reportConfig, md_summary_max_chars: parseInt(e.target.value) || 12000 })}
+                              min={3000} max={50000} step={1000} className="h-8 text-xs" />
+                            <p className="text-[10px] text-muted-foreground">Max chars from comprehensive MD report for LLM context</p>
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-xs">Section Characters Limit</Label>
+                            <Input type="number" value={reportConfig.section_chars_limit}
+                              onChange={(e) => setReportConfig({ ...reportConfig, section_chars_limit: parseInt(e.target.value) || 1500 })}
+                              min={500} max={5000} step={500} className="h-8 text-xs" />
+                            <p className="text-[10px] text-muted-foreground">Max chars per section keyword match</p>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* LLM Token Limits */}
+                      <div className="space-y-3">
+                        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">LLM Token Limits (per section)</p>
+                        <div className="grid grid-cols-3 gap-3">
+                          {([
+                            { key: "llm_tokens_abstract", label: "Abstract", def: 4096 },
+                            { key: "llm_tokens_introduction", label: "Introduction", def: 12288 },
+                            { key: "llm_tokens_results", label: "Results", def: 16384 },
+                            { key: "llm_tokens_time_course", label: "Time-Course", def: 8192 },
+                            { key: "llm_tokens_discussion", label: "Discussion", def: 12288 },
+                            { key: "llm_tokens_conclusion", label: "Conclusion", def: 6144 },
+                          ] as const).map(({ key, label, def }) => (
+                            <div key={key} className="space-y-1">
+                              <Label className="text-xs">{label}</Label>
+                              <Input type="number" value={reportConfig[key]}
+                                onChange={(e) => setReportConfig({ ...reportConfig, [key]: parseInt(e.target.value) || def })}
+                                min={1024} max={65536} step={1024} className="h-8 text-xs" />
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* LLM & Literature */}
+                      <div className="space-y-3">
+                        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">LLM & Literature</p>
+                        <div className="grid grid-cols-3 gap-3">
+                          <div className="space-y-1">
+                            <Label className="text-xs">LLM Temperature</Label>
+                            <Input type="number" value={reportConfig.llm_temperature}
+                              onChange={(e) => setReportConfig({ ...reportConfig, llm_temperature: parseFloat(e.target.value) || 0.6 })}
+                              min={0} max={1} step={0.1} className="h-8 text-xs" />
+                            <p className="text-[10px] text-muted-foreground">0.0 = deterministic, 1.0 = creative</p>
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-xs">ChromaDB Results/Section</Label>
+                            <Input type="number" value={reportConfig.chromadb_results_per_section}
+                              onChange={(e) => setReportConfig({ ...reportConfig, chromadb_results_per_section: parseInt(e.target.value) || 10 })}
+                              min={3} max={30} step={1} className="h-8 text-xs" />
+                            <p className="text-[10px] text-muted-foreground">Vector search results per section</p>
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-xs">PTM Detail Count</Label>
+                            <Input type="number" value={reportConfig.ptm_detail_count}
+                              onChange={(e) => setReportConfig({ ...reportConfig, ptm_detail_count: parseInt(e.target.value) || 30 })}
+                              min={5} max={100} step={5} className="h-8 text-xs" />
+                            <p className="text-[10px] text-muted-foreground">Top PTMs with full detail in prompts</p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <Separator />

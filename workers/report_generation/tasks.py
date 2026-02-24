@@ -127,6 +127,7 @@ def run_report_generation(self, order_id: int, config: dict):
             "llm_model": config.get("llm_model"),
             "report_title": config.get("report_title", "PTM Comprehensive Analysis Report"),
             "report_type": config.get("report_type", "comprehensive"),
+            "report_config": config.get("report_config", {}),
             "progress_callback": _make_progress_cb(order_id),
         }
 

@@ -34,17 +34,22 @@ def run_context_loader(state: dict) -> dict:
     # Parse PTMs into structured format
     parsed_ptms = _parse_enriched_ptms(enriched_data)
 
+    # Load report_config from state
+    report_config = state.get("report_config", {})
+    md_max_chars = report_config.get("md_summary_max_chars", 12000)
+    section_limit = report_config.get("section_chars_limit", 1500)
+
     # Load comprehensive MD report if available
     comprehensive_summary = ""
     md_path = state.get("md_report_path")
     if md_path and Path(md_path).exists():
-        comprehensive_summary = _extract_md_summary(md_path)
+        comprehensive_summary = _extract_md_summary(md_path, max_chars=md_max_chars, section_limit=section_limit)
         logger.info(f"Loaded comprehensive report summary ({len(comprehensive_summary)} chars) from {md_path}")
     else:
         output_dir_path = Path(output_dir)
         md_candidates = list(output_dir_path.glob("comprehensive_report_*.md"))
         if md_candidates:
-            comprehensive_summary = _extract_md_summary(str(md_candidates[0]))
+            comprehensive_summary = _extract_md_summary(str(md_candidates[0]), max_chars=md_max_chars, section_limit=section_limit)
             logger.info(f"Loaded comprehensive report summary ({len(comprehensive_summary)} chars) from {md_candidates[0]}")
 
     # Extract or use provided research questions
@@ -142,10 +147,10 @@ def _generate_default_questions(ptms: list, context: dict) -> list:
     return questions
 
 
-def _extract_md_summary(md_path: str, max_chars: int = 12000) -> str:
+def _extract_md_summary(md_path: str, max_chars: int = 12000, section_limit: int = 1500) -> str:
     """Extract key sections from comprehensive MD report for use in LLM prompts.
 
-    Extracts a generous summary (up to 12000 chars) to provide rich context
+    Extracts a generous summary (up to max_chars) to provide rich context
     for downstream LLM section writing.
     """
     try:
@@ -172,8 +177,7 @@ def _extract_md_summary(md_path: str, max_chars: int = 12000) -> str:
             if current_section and section_content:
                 section_text = "\n".join(section_content).strip()
                 if section_text and any(k in current_section.lower() for k in kept_sections):
-                    # Allow up to 1500 chars per section (was 600)
-                    summary_parts.append(f"## {current_section}\n{section_text[:1500]}")
+                    summary_parts.append(f"## {current_section}\n{section_text[:section_limit]}")
             current_section = line[3:].strip()
             section_content = []
         elif line.startswith("### ") and len(summary_parts) < 20:
@@ -184,7 +188,7 @@ def _extract_md_summary(md_path: str, max_chars: int = 12000) -> str:
     if current_section and section_content:
         section_text = "\n".join(section_content).strip()
         if section_text and any(k in current_section.lower() for k in kept_sections):
-            summary_parts.append(f"## {current_section}\n{section_text[:1500]}")
+            summary_parts.append(f"## {current_section}\n{section_text[:section_limit]}")
 
     result = "\n\n".join(summary_parts)
     if not result and lines:

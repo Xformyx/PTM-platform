@@ -41,6 +41,24 @@ def run_section_writing(state: dict) -> dict:
     if cb:
         cb(70, "Writing report sections")
 
+    # Load report_config from state for dynamic settings
+    report_config = state.get("report_config", {})
+    llm_tokens_cfg = report_config.get("llm_tokens", {})
+    section_max_tokens = {
+        "abstract": llm_tokens_cfg.get("abstract", SECTION_MAX_TOKENS["abstract"]),
+        "introduction": llm_tokens_cfg.get("introduction", SECTION_MAX_TOKENS["introduction"]),
+        "results": llm_tokens_cfg.get("results", SECTION_MAX_TOKENS["results"]),
+        "time_course": llm_tokens_cfg.get("time_course", 8192),
+        "discussion": llm_tokens_cfg.get("discussion", SECTION_MAX_TOKENS["discussion"]),
+        "conclusion": llm_tokens_cfg.get("conclusion", SECTION_MAX_TOKENS["conclusion"]),
+    }
+    llm_temperature = report_config.get("llm_temperature", 0.6)
+    ptm_detail_count = report_config.get("ptm_detail_count", 30)
+    chromadb_results = report_config.get("chromadb_results_per_section", 10)
+
+    logger.info(f"Report config: tokens={section_max_tokens}, temp={llm_temperature}, "
+                f"ptm_detail={ptm_detail_count}, chromadb_results={chromadb_results}")
+
     llm = LLMClient(
         provider=state.get("llm_provider", "ollama"),
         model=state.get("llm_model"),
@@ -80,11 +98,12 @@ def run_section_writing(state: dict) -> dict:
             section_type, research_results, validated_hypotheses,
             network_analysis, parsed_ptms, context, questions,
             prev_sections, retriever, comprehensive_summary,
-            all_references,
+            all_references, ptm_detail_count=ptm_detail_count,
+            chromadb_results=chromadb_results,
         )
 
-        max_tok = SECTION_MAX_TOKENS.get(section_type, 8192)
-        content = llm.generate(prompt, system_prompt=SYSTEM_PROMPT, temperature=0.6, max_tokens=max_tok)
+        max_tok = section_max_tokens.get(section_type, 8192)
+        content = llm.generate(prompt, system_prompt=SYSTEM_PROMPT, temperature=llm_temperature, max_tokens=max_tok)
 
         if content.startswith("[LLM Error"):
             content = _fallback_section(section_type, research_results, validated_hypotheses, parsed_ptms)
@@ -108,6 +127,8 @@ def _build_section_prompt(
     prev_sections: dict, retriever: RAGRetriever,
     comprehensive_summary: str = "",
     all_references: list = None,
+    ptm_detail_count: int = 30,
+    chromadb_results: int = 10,
 ) -> str:
     """Build LLM prompt for a specific report section."""
     all_references = all_references or []
@@ -123,10 +144,10 @@ def _build_section_prompt(
         "signaling",
     ]
     keywords = [k for k in keywords if k and isinstance(k, str)]
-    rag_results = retriever.search_for_section(section_type, keywords)
+    rag_results = retriever.search_for_section(section_type, keywords, n_results=chromadb_results)
     if rag_results:
         ref_lines = []
-        for idx, r in enumerate(rag_results[:10], 1):
+        for idx, r in enumerate(rag_results[:chromadb_results], 1):
             title = r.get("title", "Unknown")
             ref_lines.append(f"--- Reference [{idx}] ---\nSource: {title}\n{r['document'][:400]}")
         lit_context = (
@@ -140,8 +161,8 @@ def _build_section_prompt(
     # --- PubMed references from enriched PTM data ---
     pubmed_context = _format_pubmed_references(all_references, section_type, ptms)
 
-    # PTM summary (with recent findings) — include all PTMs with full detail
-    ptm_summary = _ptm_summary_text(ptms[:50])
+    # PTM summary (with recent findings) — configurable detail count
+    ptm_summary = _ptm_summary_text(ptms[:50], detail_count=ptm_detail_count)
     hyp_summary = _hypothesis_summary_text(hypotheses[:5])
 
     tissue = context.get("tissue") or context.get("cell_type") or "the experimental system"
@@ -366,12 +387,12 @@ def _format_pubmed_references(all_refs: list, section_type: str, ptms: list) -> 
     )
 
 
-def _ptm_summary_text(ptms: list) -> str:
+def _ptm_summary_text(ptms: list, detail_count: int = 30) -> str:
     lines = []
     for i, p in enumerate(ptms):
         line = f"  {p['gene']}-{p['position']} ({p['ptm_type']}): PTM_FC={p['ptm_relative_log2fc']:.3f}, Prot_FC={p.get('protein_log2fc', 0):.3f}"
         enr = p.get("rag_enrichment", {})
-        if i < 30 and enr:
+        if i < detail_count and enr:
             if enr.get("function_summary"):
                 line += f"\n    Function: {enr['function_summary'][:300]}"
             pathways = enr.get("pathways", [])

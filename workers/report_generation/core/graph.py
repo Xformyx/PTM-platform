@@ -38,6 +38,7 @@ class ReportState(TypedDict, total=False):
     llm_provider: str
     llm_model: str
     report_title: str
+    report_config: dict
 
     # Intermediate results
     comprehensive_summary: str

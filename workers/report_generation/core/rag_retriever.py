@@ -136,10 +136,10 @@ class RAGRetriever:
         query_text = " ".join(q for q in queries if q)
         return self.query_with_reranking(query_text, n_results=5)
 
-    def search_for_section(self, section_type: str, keywords: List[str]) -> List[dict]:
+    def search_for_section(self, section_type: str, keywords: List[str], n_results: int = 10) -> List[dict]:
         """Search for literature relevant to a specific report section."""
         query_text = f"{section_type}: {' '.join(keywords[:5])}"
-        return self.query_with_reranking(query_text, n_results=10)
+        return self.query_with_reranking(query_text, n_results=n_results)
 
     def _get_collection(self, name: str):
         if name not in self._collections:

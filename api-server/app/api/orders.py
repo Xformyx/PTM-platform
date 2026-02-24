@@ -740,6 +740,7 @@ async def run_stage(
             "report_title": report_opts.get("report_title", "PTM Comprehensive Analysis Report"),
             "analysis_mode": report_opts.get("analysis_mode", "ptm_only"),
             "report_type": report_opts.get("report_type", "comprehensive"),
+            "report_config": report_opts.get("report_config", {}),
         }
         task = celery_app.send_task(
             "report_generation.tasks.run_report_generation",
