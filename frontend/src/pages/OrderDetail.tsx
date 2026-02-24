@@ -810,11 +810,55 @@ function parseTimeOrder(cond: string): number {
   return v;
 }
 
+// ── PTM Trend Classification ─────────────────────────────────────────────────
+type TrendCategory = "sustained_high" | "volatile" | "increasing" | "decreasing" | "other";
+
+const TREND_META: Record<TrendCategory, { label: string; color: string; description: string }> = {
+  sustained_high: { label: "Sustained High", color: "#ef4444", description: "시간대별로 계속 높게 유지" },
+  volatile:       { label: "Volatile",       color: "#f59e0b", description: "급격한 변동 (올라갔다 내려갔다)" },
+  increasing:     { label: "Increasing",     color: "#22c55e", description: "시간대별 증가 추세" },
+  decreasing:     { label: "Decreasing",     color: "#3b82f6", description: "시간대별 감소 추세" },
+  other:          { label: "Other",          color: "#6b7280", description: "기타 패턴" },
+};
+
+function classifyTrend(values: number[]): TrendCategory {
+  if (values.length < 2) return "other";
+  const absMax = Math.max(...values.map(Math.abs));
+  const HIGH_THRESHOLD = absMax * 0.5 || 2;
+
+  // Sustained high: all values above threshold
+  if (values.every((v) => Math.abs(v) >= HIGH_THRESHOLD)) return "sustained_high";
+
+  // Volatile: direction changes >= 2 AND range is large
+  let dirChanges = 0;
+  for (let i = 1; i < values.length - 1; i++) {
+    const d1 = values[i] - values[i - 1];
+    const d2 = values[i + 1] - values[i];
+    if ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) dirChanges++;
+  }
+  const range = Math.max(...values) - Math.min(...values);
+  if (dirChanges >= 1 && range > HIGH_THRESHOLD * 0.5) return "volatile";
+
+  // Monotonic trend: check if mostly increasing or decreasing
+  let ups = 0;
+  let downs = 0;
+  for (let i = 1; i < values.length; i++) {
+    if (values[i] > values[i - 1] + 0.1) ups++;
+    else if (values[i] < values[i - 1] - 0.1) downs++;
+  }
+  if (ups > downs && ups >= Math.ceil((values.length - 1) / 2)) return "increasing";
+  if (downs > ups && downs >= Math.ceil((values.length - 1) / 2)) return "decreasing";
+
+  return "other";
+}
+
+// ── TopNTimeSeriesPlot ───────────────────────────────────────────────────────
 function TopNTimeSeriesPlot({ orderId }: { orderId: number }) {
   const [data, setData] = useState<{ vector_data: Array<{ gene: string; position: string; condition: string; ptm_relative_log2fc: number; ptm_absolute_log2fc: number }>; top_n_ptms: Array<{ gene: string; position: string; label: string }> } | null>(null);
   const [loading, setLoading] = useState(true);
   const [checked, setChecked] = useState<Record<string, boolean>>({});
   const [metric, setMetric] = useState<"relative" | "absolute">("relative");
+  const [trendFilter, setTrendFilter] = useState<TrendCategory | "all">("all");
 
   useEffect(() => {
     api
@@ -824,10 +868,15 @@ function TopNTimeSeriesPlot({ orderId }: { orderId: number }) {
           vector_data: (d.vector_data || []) as Array<{ gene: string; position: string; condition: string; ptm_relative_log2fc: number; ptm_absolute_log2fc: number }>,
           top_n_ptms: d.top_n_ptms || [],
         });
+        // Deduplicate by gene_position key — keep first occurrence
+        const seen = new Set<string>();
         const init: Record<string, boolean> = {};
         (d.top_n_ptms || []).forEach((p) => {
           const key = `${p.gene}_${p.position}`;
-          init[key] = true;
+          if (!seen.has(key)) {
+            seen.add(key);
+            init[key] = true;
+          }
         });
         setChecked(init);
       })
@@ -856,7 +905,17 @@ function TopNTimeSeriesPlot({ orderId }: { orderId: number }) {
   }
 
   const valueKey = metric === "relative" ? "ptm_relative_log2fc" : "ptm_absolute_log2fc";
-  const topNSet = new Set(data.top_n_ptms.map((p) => `${p.gene}_${p.position}`));
+
+  // Deduplicate top_n_ptms by gene_position
+  const seenKeys = new Set<string>();
+  const uniquePtms = data.top_n_ptms.filter((p) => {
+    const key = `${p.gene}_${p.position}`;
+    if (seenKeys.has(key)) return false;
+    seenKeys.add(key);
+    return true;
+  });
+
+  const topNSet = new Set(uniquePtms.map((p) => `${p.gene}_${p.position}`));
   const vectorByPtm = new Map<string, Array<{ condition: string; value: number }>>();
 
   data.vector_data.forEach((row) => {
@@ -870,9 +929,24 @@ function TopNTimeSeriesPlot({ orderId }: { orderId: number }) {
     new Set(data.vector_data.map((r) => r.condition).filter(Boolean))
   ).sort((a, b) => parseTimeOrder(a) - parseTimeOrder(b));
 
+  // Classify each PTM trend
+  const ptmTrends = new Map<string, TrendCategory>();
+  uniquePtms.forEach((p) => {
+    const key = `${p.gene}_${p.position}`;
+    const arr = vectorByPtm.get(key);
+    if (!arr) { ptmTrends.set(key, "other"); return; }
+    const sorted = conditions.map((c) => arr.find((r) => r.condition === c)?.value ?? 0);
+    ptmTrends.set(key, classifyTrend(sorted));
+  });
+
+  // Filter PTMs by trend category
+  const filteredPtms = trendFilter === "all"
+    ? uniquePtms
+    : uniquePtms.filter((p) => ptmTrends.get(`${p.gene}_${p.position}`) === trendFilter);
+
   const chartData = conditions.map((cond) => {
     const point: Record<string, string | number> = { condition: cond };
-    data.top_n_ptms.forEach((p) => {
+    filteredPtms.forEach((p) => {
       const key = `${p.gene}_${p.position}`;
       if (!checked[key]) return;
       const arr = vectorByPtm.get(key);
@@ -882,14 +956,52 @@ function TopNTimeSeriesPlot({ orderId }: { orderId: number }) {
     return point;
   });
 
-  const visibleLabels = data.top_n_ptms.filter((p) => checked[`${p.gene}_${p.position}`]).map((p) => p.label);
-  const COLORS = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf"];
+  const visibleLabels = filteredPtms.filter((p) => checked[`${p.gene}_${p.position}`]).map((p) => p.label);
+
+  // Extended color palette for better distinction
+  const COLORS = [
+    "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
+    "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf",
+    "#aec7e8", "#ffbb78", "#98df8a", "#ff9896", "#c5b0d5",
+    "#c49c94", "#f7b6d2", "#c7c7c7", "#dbdb8d", "#9edae5",
+  ];
 
   const toggle = (key: string) => setChecked((c) => ({ ...c, [key]: !c[key] }));
 
+  const allChecked = filteredPtms.every((p) => checked[`${p.gene}_${p.position}`]);
+  const noneChecked = filteredPtms.every((p) => !checked[`${p.gene}_${p.position}`]);
+
+  const toggleAll = () => {
+    const newVal = !allChecked;
+    setChecked((c) => {
+      const next = { ...c };
+      filteredPtms.forEach((p) => { next[`${p.gene}_${p.position}`] = newVal; });
+      return next;
+    });
+  };
+
+  // Compute Y-axis domain with padding
+  const allValues = visibleLabels.flatMap((label) =>
+    chartData.map((d) => (typeof d[label] === "number" ? (d[label] as number) : 0))
+  );
+  const yMin = allValues.length > 0 ? Math.min(...allValues) : -1;
+  const yMax = allValues.length > 0 ? Math.max(...allValues) : 1;
+  const yPadding = Math.max((yMax - yMin) * 0.15, 1);
+
+  // Count per trend category
+  const trendCounts: Record<string, number> = { all: uniquePtms.length };
+  uniquePtms.forEach((p) => {
+    const t = ptmTrends.get(`${p.gene}_${p.position}`) || "other";
+    trendCounts[t] = (trendCounts[t] || 0) + 1;
+  });
+
+  // Chart height scales with visible lines for better separation
+  const chartHeight = Math.max(500, Math.min(800, 400 + visibleLabels.length * 8));
+
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-4">
+      {/* Metric toggle + Trend filter */}
+      <div className="flex flex-wrap items-center gap-3">
         <div className="flex gap-2">
           <Button
             variant={metric === "relative" ? "default" : "outline"}
@@ -906,20 +1018,57 @@ function TopNTimeSeriesPlot({ orderId }: { orderId: number }) {
             PTM Absolute Log2FC
           </Button>
         </div>
+        <Separator orientation="vertical" className="h-6" />
+        <div className="flex flex-wrap gap-1.5">
+          <Button
+            variant={trendFilter === "all" ? "default" : "outline"}
+            size="sm"
+            className="text-xs h-7 px-2"
+            onClick={() => setTrendFilter("all")}
+          >
+            All ({trendCounts["all"] || 0})
+          </Button>
+          {(Object.keys(TREND_META) as TrendCategory[]).map((cat) => (
+            <Button
+              key={cat}
+              variant={trendFilter === cat ? "default" : "outline"}
+              size="sm"
+              className="text-xs h-7 px-2"
+              style={trendFilter === cat ? { backgroundColor: TREND_META[cat].color, borderColor: TREND_META[cat].color } : {}}
+              onClick={() => setTrendFilter(cat)}
+              title={TREND_META[cat].description}
+            >
+              {TREND_META[cat].label} ({trendCounts[cat] || 0})
+            </Button>
+          ))}
+        </div>
       </div>
-      <div className="grid lg:grid-cols-[1fr_220px] gap-4">
-        <div className="rounded-lg border bg-background p-4 min-h-[400px]">
-          <ResponsiveContainer width="100%" height={400}>
-            <LineChart data={chartData} margin={{ top: 5, right: 20, left: 5, bottom: 5 }}>
+
+      <div className="grid lg:grid-cols-[1fr_240px] gap-4">
+        {/* Chart area — taller Y axis */}
+        <div className="rounded-lg border bg-background p-4" style={{ minHeight: `${chartHeight + 40}px` }}>
+          <ResponsiveContainer width="100%" height={chartHeight}>
+            <LineChart data={chartData} margin={{ top: 10, right: 20, left: 10, bottom: 10 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
               <XAxis dataKey="condition" stroke="hsl(var(--muted-foreground))" fontSize={12} />
-              <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
+              <YAxis
+                stroke="hsl(var(--muted-foreground))"
+                fontSize={12}
+                domain={[Math.floor(yMin - yPadding), Math.ceil(yMax + yPadding)]}
+                tickCount={12}
+              />
               <Tooltip
-                contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "6px" }}
+                contentStyle={{
+                  backgroundColor: "hsl(var(--card))",
+                  border: "1px solid hsl(var(--border))",
+                  borderRadius: "6px",
+                  maxHeight: "300px",
+                  overflowY: "auto",
+                }}
                 formatter={(value, name) => [typeof value === "number" ? value.toFixed(3) : value, name]}
                 labelFormatter={(label) => `Time: ${label}`}
               />
-              <Legend />
+              {/* No <Legend /> — labels shown only on hover */}
               {visibleLabels.map((label, i) => (
                 <Line
                   key={label}
@@ -927,7 +1076,7 @@ function TopNTimeSeriesPlot({ orderId }: { orderId: number }) {
                   dataKey={label}
                   stroke={COLORS[i % COLORS.length]}
                   strokeWidth={2}
-                  dot={{ r: 4 }}
+                  dot={{ r: 3 }}
                   activeDot={{ r: 6 }}
                   name={label}
                 />
@@ -935,11 +1084,26 @@ function TopNTimeSeriesPlot({ orderId }: { orderId: number }) {
             </LineChart>
           </ResponsiveContainer>
         </div>
+
+        {/* Right sidebar — PTM checklist with Select All / Deselect All */}
         <div className="space-y-2">
-          <p className="text-xs font-medium text-muted-foreground">Top N PTMs (select to show)</p>
-          <div className="max-h-[380px] overflow-y-auto space-y-1 rounded border p-2">
-            {data.top_n_ptms.map((p) => {
+          <p className="text-xs font-medium text-muted-foreground">
+            Top N PTMs ({filteredPtms.length})
+          </p>
+          <div className="flex gap-1">
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-xs h-6 px-2 flex-1"
+              onClick={toggleAll}
+            >
+              {allChecked ? "Deselect All" : "Select All"}
+            </Button>
+          </div>
+          <div className="max-h-[calc(100vh-400px)] min-h-[300px] overflow-y-auto space-y-0.5 rounded border p-2">
+            {filteredPtms.map((p) => {
               const key = `${p.gene}_${p.position}`;
+              const trend = ptmTrends.get(key) || "other";
               return (
                 <label
                   key={key}
@@ -951,12 +1115,22 @@ function TopNTimeSeriesPlot({ orderId }: { orderId: number }) {
                     onChange={() => toggle(key)}
                     className="rounded"
                   />
-                  <span className="truncate" title={p.label}>
+                  <span
+                    className="w-2 h-2 rounded-full flex-shrink-0"
+                    style={{ backgroundColor: TREND_META[trend].color }}
+                    title={TREND_META[trend].description}
+                  />
+                  <span className="truncate" title={`${p.label} (${TREND_META[trend].label})`}>
                     {p.label}
                   </span>
                 </label>
               );
             })}
+            {filteredPtms.length === 0 && (
+              <p className="text-xs text-muted-foreground text-center py-4">
+                No PTMs match this trend filter.
+              </p>
+            )}
           </div>
         </div>
       </div>
