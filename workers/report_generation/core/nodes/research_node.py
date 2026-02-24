@@ -105,12 +105,21 @@ def _filter_relevant_ptms(ptms: list, keywords: list) -> list:
     return relevant
 
 
+def _to_str(item) -> str:
+    """Convert item to string for use as set element or dict key (handles dicts)."""
+    if isinstance(item, str):
+        return item
+    if isinstance(item, dict):
+        return item.get("name") or item.get("pathway") or item.get("label") or str(item)
+    return str(item)
+
+
 def _analyze_pathway_enrichment(ptms: list) -> list:
     """Find enriched pathways across PTMs."""
     pathway_counts: Dict[str, int] = Counter()
     for ptm in ptms:
         for pw in ptm.get("rag_enrichment", {}).get("pathways", []):
-            pathway_counts[pw] += 1
+            pathway_counts[_to_str(pw)] += 1
 
     return [
         {"pathway": pw, "count": cnt, "fraction": round(cnt / max(len(ptms), 1), 2)}
@@ -126,7 +135,7 @@ def _analyze_regulatory_patterns(ptms: list) -> list:
     for ptm in ptms:
         reg = ptm.get("rag_enrichment", {}).get("regulation", {})
         for u in reg.get("upstream_regulators", []):
-            upstream_counts[u] += 1
+            upstream_counts[_to_str(u)] += 1
 
     for regulator, count in upstream_counts.most_common(5):
         if count >= 2:

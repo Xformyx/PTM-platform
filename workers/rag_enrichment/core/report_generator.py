@@ -1414,9 +1414,9 @@ class ComprehensiveReportGenerator:
             cls = enr.get("classification", {}).get("level", "unknown")
             classification_counts[cls] = classification_counts.get(cls, 0) + 1
 
-            # Pathway counts
+            # Pathway counts (normalize to string - pathways can be dicts)
             for pw in enr.get("pathways", []):
-                pw_name = pw.get("name", pw) if isinstance(pw, dict) else pw
+                pw_name = pw.get("name", str(pw)) if isinstance(pw, dict) else str(pw)
                 if pw_name not in pathway_counts:
                     pathway_counts[pw_name] = {"count": 0, "genes": set()}
                 pathway_counts[pw_name]["count"] += 1

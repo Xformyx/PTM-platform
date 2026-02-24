@@ -127,14 +127,18 @@ def _build_network_data(parsed_ptms: list, enriched_data: list) -> dict:
                         "pathway_str": "",
                     })
 
-        # Shared pathway edges
+        # Shared pathway edges (normalize to strings - pathways can be dicts)
+        def _pw_str(p):
+            return p.get("name", str(p)) if isinstance(p, dict) else str(p)
         pathways = enr.get("pathways", [])
+        pw_set = {_pw_str(p) for p in pathways}
         for other_data in enriched_data:
             other_gene = other_data.get("gene") or other_data.get("Gene.Name", "")
             if other_gene == gene:
                 continue
             other_enr = other_data.get("rag_enrichment", {})
-            shared = set(pathways) & set(other_enr.get("pathways", []))
+            other_pw = {_pw_str(p) for p in other_enr.get("pathways", [])}
+            shared = pw_set & other_pw
             if shared:
                 other_id = f"{other_gene}-{other_data.get('position') or other_data.get('PTM_Position', '')}"
                 edges.append({

@@ -279,6 +279,15 @@ def detect_ptm_type_from_data(analysis_results: Dict, md_content: str = "") -> s
 # Utility: Clean pathway text (remove species names)
 # ============================================================================
 
+def _pathway_to_str(p) -> str:
+    """Convert pathway item to string (handles dicts from enriched data)."""
+    if isinstance(p, str):
+        return p
+    if isinstance(p, dict):
+        return p.get("name") or p.get("pathway") or str(p)
+    return str(p)
+
+
 def clean_pathway_text(pathway: str) -> str:
     """Remove species names and clean up pathway text."""
     if not pathway:
@@ -984,7 +993,7 @@ class UpstreamInferrer:
                 if gene in upstream_map:
                     pathways = node.get('pathways', [])
                     for pw in pathways:
-                        cleaned = clean_pathway_text(pw)
+                        cleaned = clean_pathway_text(_pathway_to_str(pw))
                         if cleaned and cleaned not in upstream_map[gene]['pathways']:
                             upstream_map[gene]['pathways'].append(cleaned)
         
@@ -1096,7 +1105,8 @@ class UpstreamInferrer:
                 
                 # For genes without regulators, check if they share pathways with known regulators
                 for gene in genes_without_regulators:
-                    gene_pathways = set(upstream_map[gene].get('pathways', []))
+                    raw_pathways = upstream_map[gene].get('pathways', [])
+                    gene_pathways = {_pathway_to_str(p) for p in raw_pathways}
                     if not gene_pathways:
                         continue
                     

@@ -18,6 +18,16 @@ from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger("ptm-workers.postprocessor")
 
+
+def _pathway_to_str(p) -> str:
+    """Convert pathway item to string (handles dicts from enriched data)."""
+    if isinstance(p, str):
+        return p
+    if isinstance(p, dict):
+        return p.get("name") or p.get("pathway") or str(p)
+    return str(p)
+
+
 def _sse_log(message: str, level: str = "INFO"):
     if level == "WARNING":
         logger.warning(message)
@@ -497,10 +507,11 @@ def build_cell_signaling_analysis(
                 pathways.extend([p.strip() for p in kegg.split(',') if p.strip()])
             
             for pw in pathways:
-                if pw and pw.lower() not in ('n/a', 'unknown', 'none', ''):
-                    pathway_proteins.setdefault(pw, set()).add(gene)
-                    protein_pathways.setdefault(gene, set()).add(pw)
-                    tp_pathways.add(pw)
+                pw_str = _pathway_to_str(pw)
+                if pw_str and pw_str.lower() not in ('n/a', 'unknown', 'none', ''):
+                    pathway_proteins.setdefault(pw_str, set()).add(gene)
+                    protein_pathways.setdefault(gene, set()).add(pw_str)
+                    tp_pathways.add(pw_str)
         
         temporal_pathways[tp] = tp_pathways
     
