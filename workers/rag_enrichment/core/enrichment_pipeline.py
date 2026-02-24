@@ -23,7 +23,6 @@ import pandas as pd
 
 from common.llm_client import LLMClient
 from common.mcp_client import MCPClient
-from common.llm_client import LLMClient
 from common.local_data_loader import HPALocalLoader, GTExLocalLoader
 from .regulation_extractor import RegulationExtractor
 from .abstract_analyzer import AbstractAnalyzer
@@ -106,6 +105,18 @@ class RAGEnrichmentPipeline:
         """
         total = len(ptm_data)
         logger.info(f"RAG enrichment: processing {total} PTM entries")
+
+        # MCP health check
+        mcp_healthy = self.mcp.health_check()
+        if mcp_healthy:
+            logger.info(f"MCP server is healthy at {self.mcp.base_url}")
+        else:
+            logger.error(f"MCP server is NOT reachable at {self.mcp.base_url} — enrichment will have limited data")
+
+        # Local data availability check
+        logger.info(f"HPA local data available: {HPALocalLoader.is_available()}")
+        logger.info(f"GTEx local data available: {GTExLocalLoader.is_available()}")
+
         context_keywords = self._extract_context_keywords(experimental_context)
 
         enriched = []
@@ -119,7 +130,9 @@ class RAGEnrichmentPipeline:
                 enriched.append(result)
             except Exception as e:
                 logger.warning(f"Enrichment failed for {ptm.get('gene')}/{ptm.get('position')}: {e}")
-                ptm["rag_enrichment"] = self._empty_enrichment()
+                ptm_log2fc = ptm.get("ptm_relative_log2fc") or ptm.get("PTM_Relative_Log2FC", 0)
+                protein_log2fc = ptm.get("protein_log2fc") or ptm.get("Protein_Log2FC", 0)
+                ptm["rag_enrichment"] = self._empty_enrichment(ptm_log2fc, protein_log2fc)
                 enriched.append(ptm)
 
         self._progress(1.0, f"Enrichment complete: {len(enriched)} PTMs")
@@ -134,37 +147,73 @@ class RAGEnrichmentPipeline:
         species = (context or {}).get("organism") or (context or {}).get("species", "")
 
         # 1. PubMed search via MCP
-        search_result = self.mcp.search_pubmed(
-            gene=gene, position=position, ptm_type=ptm_type,
-            context_keywords=context_keywords, max_results=15,
-        )
-        articles = search_result.get("articles", [])
+        search_result = {}
+        articles = []
+        try:
+            search_result = self.mcp.search_pubmed(
+                gene=gene, position=position, ptm_type=ptm_type,
+                context_keywords=context_keywords, max_results=15,
+            )
+            articles = search_result.get("articles", [])
+            logger.info(f"PubMed search for {gene} {position}: {len(articles)} articles found")
+        except Exception as e:
+            logger.warning(f"PubMed search failed for {gene} {position}: {e}")
 
         # 2. Pattern-based regulation extraction
-        regulation = self.reg_extractor.extract_from_articles(articles, gene, position)
+        regulation = {"upstream_regulators": [], "downstream_targets": [], "kinase_substrate": [], "regulation_evidence": [], "diseases": []}
+        try:
+            regulation = self.reg_extractor.extract_from_articles(articles, gene, position)
+        except Exception as e:
+            logger.warning(f"Regulation extraction failed for {gene}: {e}")
 
         # 3. KEGG pathway info via MCP
-        kegg_info = self.mcp.query_kegg(gene)
-        kegg_pathways = kegg_info.get("pathways", [])
+        kegg_info = {}
+        kegg_pathways = []
+        try:
+            kegg_info = self.mcp.query_kegg(gene)
+            kegg_pathways = kegg_info.get("pathways", [])
+            logger.debug(f"KEGG for {gene}: {len(kegg_pathways)} pathways")
+        except Exception as e:
+            logger.warning(f"KEGG query failed for {gene}: {e}")
 
         # 4. STRING-DB interactions via MCP
-        string_info = self.mcp.query_stringdb(gene, species=species)
-        interactions = string_info.get("interactions", [])
+        string_info = {}
+        interactions = []
+        try:
+            string_info = self.mcp.query_stringdb(gene, species=species)
+            interactions = string_info.get("interactions", [])
+            logger.debug(f"STRING-DB for {gene}: {len(interactions)} interactions")
+        except Exception as e:
+            logger.warning(f"STRING-DB query failed for {gene}: {e}")
 
         # 5. UniProt info via MCP
         protein_id = ptm.get("protein_id") or ptm.get("Protein.Group", "")
-        uniprot_info = self.mcp.query_uniprot(protein_id, species=species) if protein_id else {}
+        uniprot_info = {}
+        try:
+            if protein_id:
+                uniprot_info = self.mcp.query_uniprot(protein_id)
+                logger.debug(f"UniProt for {protein_id}: {'found' if uniprot_info else 'empty'}")
+        except Exception as e:
+            logger.warning(f"UniProt query failed for {protein_id}: {e}")
 
         # 6. HPA (Human Protein Atlas) — LOCAL-FIRST with API fallback
-        hpa_data = self._query_hpa_local_first(gene)
+        hpa_data = {}
+        try:
+            hpa_data = self._query_hpa_local_first(gene)
+        except Exception as e:
+            logger.warning(f"HPA query failed for {gene}: {e}")
 
         # 7. GTEx tissue expression — LOCAL-FIRST with API fallback
-        gtex_data = self._query_gtex_local_first(gene)
+        gtex_data = {}
+        try:
+            gtex_data = self._query_gtex_local_first(gene)
+        except Exception as e:
+            logger.warning(f"GTEx query failed for {gene}: {e}")
 
         # 8. BioGRID interactions via MCP
         biogrid_data = {}
         try:
-            biogrid_data = self.mcp.query_biogrid(gene, species=species)
+            biogrid_data = self.mcp.query_biogrid(gene)
         except Exception as e:
             logger.warning(f"BioGRID query failed for {gene}: {e}")
 
@@ -303,6 +352,17 @@ class RAGEnrichmentPipeline:
         }
 
         ptm["rag_enrichment"] = enrichment
+
+        # Log enrichment summary for debugging
+        logger.info(
+            f"Enrichment for {gene} {position}: "
+            f"articles={len(articles)}, "
+            f"pathways={len(kegg_pathways)}, "
+            f"interactions={len(interactions)}, "
+            f"hpa={'yes' if hpa_data and (hpa_data.get('rna_tissue') or hpa_data.get('locations')) else 'no'}, "
+            f"gtex={'yes' if gtex_data and gtex_data.get('expressions') else 'no'}, "
+            f"classification={classification.get('level', '?')}"
+        )
         return ptm
 
     # ------------------------------------------------------------------
@@ -439,7 +499,9 @@ class RAGEnrichmentPipeline:
         }
 
     @staticmethod
-    def _empty_enrichment() -> dict:
+    def _empty_enrichment(ptm_log2fc=0, protein_log2fc=0) -> dict:
+        """Return empty enrichment with proper classification based on Log2FC values."""
+        classification = RAGEnrichmentPipeline._classify_ptm_8cat(ptm_log2fc, protein_log2fc)
         return {
             "search_summary": {"total_articles": 0},
             "articles": [],
@@ -457,12 +519,7 @@ class RAGEnrichmentPipeline:
             "function_summary": "",
             "aliases": [],
             "go_terms": {"biological_process": [], "molecular_function": [], "cellular_component": []},
-            "classification": {
-                "level": "Baseline / low-change state",
-                "short_label": "Baseline",
-                "significance": "Low",
-                "protein_context": None,
-            },
+            "classification": classification,
             "hpa": {},
             "gtex": {},
             "biogrid": {},

@@ -13,7 +13,7 @@ import requests
 
 logger = logging.getLogger(__name__)
 
-MCP_BASE_URL = os.getenv("MCP_SERVER_URL", "http://mcp-server:8100")
+MCP_BASE_URL = os.getenv("MCP_SERVER_URL", "http://mcp-server:8001")
 
 ProgressCallback = Optional[Callable[[int, int, str], None]]
 

@@ -575,7 +575,9 @@ class ComprehensiveReportGenerator:
             lines.append("")
 
         if not hpa and not gtex and not isoform_info:
-            lines.append("No expression context data available.\n")
+            lines.append(f"No expression context data available from HPA or GTEx for **{gene}**.\n")
+            lines.append(f"Consider checking [Human Protein Atlas](https://www.proteinatlas.org/{gene}) "
+                         f"or [GTEx Portal](https://gtexportal.org/home/gene/{gene}) for expression data.\n")
 
         return "\n".join(lines)
 
@@ -761,7 +763,15 @@ class ComprehensiveReportGenerator:
     def _generate_literature_evidence(self, enr: dict) -> str:
         findings = enr.get("recent_findings", [])
         if not findings:
-            return "### Literature Evidence\n\nNo relevant literature found.\n"
+            # Still show classification-based interpretation even without literature
+            classification = enr.get("classification", {})
+            class_level = classification.get("level", "unknown")
+            significance = classification.get("significance", "Low")
+            return ("### Literature Evidence\n\n"
+                    f"No relevant literature found in PubMed for this specific PTM site.\n\n"
+                    f"**Classification**: {class_level} (Significance: {significance})\n\n"
+                    f"This classification is based on quantitative PTM and protein abundance changes. "
+                    f"Further manual literature search may reveal additional context.\n")
 
         lines = [
             "### Literature Evidence\n",
