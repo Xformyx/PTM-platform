@@ -76,15 +76,49 @@ def run_rag_enrichment(self, order_id: int, config: dict):
         df = pd.read_csv(vector_file, sep="\t", low_memory=False)
         logger.info(f"[Order {order_id}] Loaded {len(df)} PTM entries from {vector_file.name}")
 
-        # Select top-N most significant PTMs by absolute Log2FC
-        if "PTM_Relative_Log2FC" in df.columns:
-            df["_abs_fc"] = df["PTM_Relative_Log2FC"].abs()
+        # Select top-N most significant PTMs per condition (time-point),
+        # then take the union across all conditions.
+        # This ensures each time-point contributes its top PTMs and the
+        # final set contains >= N unique gene+position combinations.
+        gene_col = "Gene.Name" if "Gene.Name" in df.columns else "gene"
+        pos_col = "PTM_Position" if "PTM_Position" in df.columns else "position"
+        cond_col = "Condition" if "Condition" in df.columns else "condition"
+        fc_col = "PTM_Relative_Log2FC" if "PTM_Relative_Log2FC" in df.columns else "ptm_relative_log2fc"
+
+        if fc_col in df.columns and cond_col in df.columns:
+            df["_abs_fc"] = df[fc_col].abs()
+            conditions = df[cond_col].dropna().unique()
+            selected_keys = set()  # set of (gene, position) tuples
+
+            for cond in conditions:
+                cond_df = df[df[cond_col] == cond].sort_values("_abs_fc", ascending=False)
+                for _, row in cond_df.head(top_n).iterrows():
+                    key = (str(row.get(gene_col, "")), str(row.get(pos_col, "")))
+                    selected_keys.add(key)
+
+            # Keep all rows (all conditions) for the selected gene+position pairs
+            df["_key"] = list(zip(df[gene_col].astype(str), df[pos_col].astype(str)))
+            df = df[df["_key"].isin(selected_keys)]
+            df = df.drop(columns=["_abs_fc", "_key"])
+
+            n_unique = len(selected_keys)
+            logger.info(
+                f"[Order {order_id}] Top N selection: {top_n} per condition "
+                f"x {len(conditions)} conditions → {n_unique} unique PTMs, "
+                f"{len(df)} total rows"
+            )
+        elif fc_col in df.columns:
+            # Fallback: no Condition column — simple top-N by abs FC
+            df["_abs_fc"] = df[fc_col].abs()
             df = df.sort_values("_abs_fc", ascending=False).head(top_n)
             df = df.drop(columns=["_abs_fc"])
+            n_unique = top_n
+        else:
+            n_unique = len(df)
 
         ptm_data = df.to_dict("records")
         publish_progress(order_id, "rag_enrichment", "load_data", "completed", 10,
-                        f"Loaded {len(ptm_data)} PTM entries (top {top_n})")
+                        f"Loaded {len(ptm_data)} PTM entries ({n_unique} unique PTMs from top {top_n}/condition)")
 
         # ================================================================
         # Step 2: RAG Enrichment — PubMed + pattern matching (10% – 70%)

@@ -854,7 +854,7 @@ function classifyTrend(values: number[]): TrendCategory {
 
 // ── TopNTimeSeriesPlot ───────────────────────────────────────────────────────
 function TopNTimeSeriesPlot({ orderId }: { orderId: number }) {
-  const [data, setData] = useState<{ vector_data: Array<{ gene: string; position: string; condition: string; ptm_relative_log2fc: number; ptm_absolute_log2fc: number }>; top_n_ptms: Array<{ gene: string; position: string; label: string }> } | null>(null);
+  const [data, setData] = useState<{ vector_data: Array<{ gene: string; position: string; condition: string; ptm_relative_log2fc: number; ptm_absolute_log2fc: number }>; top_n_ptms: Array<{ gene: string; position: string; label: string }>; suggested_n?: number | null; top_n_setting?: number; source?: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [checked, setChecked] = useState<Record<string, boolean>>({});
   const [metric, setMetric] = useState<"relative" | "absolute">("relative");
@@ -866,11 +866,14 @@ function TopNTimeSeriesPlot({ orderId }: { orderId: number }) {
 
   useEffect(() => {
     api
-      .get<{ vector_data: unknown[]; top_n_ptms: Array<{ gene: string; position: string; label: string }> }>(`/orders/${orderId}/vector-plot-data`)
+      .get<{ vector_data: unknown[]; top_n_ptms: Array<{ gene: string; position: string; label: string }>; suggested_n?: number | null; top_n_setting?: number; source?: string }>(`/orders/${orderId}/vector-plot-data`)
       .then((d) => {
         setData({
           vector_data: (d.vector_data || []) as Array<{ gene: string; position: string; condition: string; ptm_relative_log2fc: number; ptm_absolute_log2fc: number }>,
           top_n_ptms: d.top_n_ptms || [],
+          suggested_n: d.suggested_n,
+          top_n_setting: d.top_n_setting,
+          source: d.source,
         });
         // Deduplicate by gene_position key — keep first occurrence
         const seen = new Set<string>();
@@ -902,7 +905,7 @@ function TopNTimeSeriesPlot({ orderId }: { orderId: number }) {
       <div className="flex flex-col items-center justify-center py-12 rounded-lg border bg-muted/20">
         <TrendingUp className="h-12 w-12 text-muted-foreground/40 mb-3" />
         <p className="text-sm text-muted-foreground text-center">
-          Top N PTM time-series data will appear here after RAG Enrichment completes.
+          Top N PTM time-series data will appear here after preprocessing completes.
         </p>
       </div>
     );
@@ -1017,6 +1020,24 @@ function TopNTimeSeriesPlot({ orderId }: { orderId: number }) {
 
   return (
     <div className="space-y-4">
+      {/* Info badges: source, suggested N */}
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <span className={`px-2 py-0.5 rounded-full font-medium ${data.source === "enriched" ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"}`}>
+          {data.source === "enriched" ? "Source: Enriched (RAG)" : "Source: Preprocessing (TSV)"}
+        </span>
+        <span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-medium">
+          Top N setting: {data.top_n_setting ?? "?"} / condition
+        </span>
+        <span className="px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 font-medium">
+          Unique PTMs: {uniquePtms.length}
+        </span>
+        {data.suggested_n != null && (
+          <span className="px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 font-medium">
+            Suggested N: {data.suggested_n} (|Log2FC| &gt; mean+2σ)
+          </span>
+        )}
+      </div>
+
       {/* Metric toggle + Trend filter */}
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex gap-2">

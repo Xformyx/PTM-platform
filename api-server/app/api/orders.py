@@ -951,24 +951,69 @@ async def get_vector_plot_data(
                     })
             break
 
-    # Load Top N PTMs from enriched_ptm_data
+    # Load Top N PTMs — prefer enriched JSON, fall back to TSV-based selection
     top_n_ptms = []
+    top_n_setting = (order.report_options or {}).get("top_n_ptms", 20)
     enriched_path = output_dir / f"enriched_ptm_data{file_suffix}.json"
+
     if enriched_path.exists():
-        import json
+        import json as _json
         with open(enriched_path, "r", encoding="utf-8") as f:
-            enriched = json.load(f)
+            enriched = _json.load(f)
+        seen = set()
         for ptm in enriched:
             gene = ptm.get("gene") or ptm.get("Gene.Name", "")
             pos = ptm.get("position") or ptm.get("PTM_Position", "")
-            if gene or pos:
+            key = f"{gene}_{pos}"
+            if key not in seen and (gene or pos):
+                seen.add(key)
                 top_n_ptms.append({
                     "gene": str(gene),
                     "position": str(pos),
                     "label": f"{gene} {pos}".strip() or f"{gene}{pos}",
                 })
+    elif vector_data:
+        # Fallback: derive Top N from TSV (available right after preprocessing)
+        import math
+        conditions = set(r["condition"] for r in vector_data if r["condition"])
+        selected_keys = set()
+        for cond in conditions:
+            cond_rows = sorted(
+                [r for r in vector_data if r["condition"] == cond],
+                key=lambda r: abs(r["ptm_relative_log2fc"]),
+                reverse=True,
+            )
+            for r in cond_rows[:top_n_setting]:
+                selected_keys.add((r["gene"], r["position"]))
+        for gene, pos in sorted(selected_keys):
+            top_n_ptms.append({
+                "gene": gene,
+                "position": pos,
+                "label": f"{gene} {pos}".strip(),
+            })
 
-    return {"vector_data": vector_data, "top_n_ptms": top_n_ptms}
+    # Calculate suggested N: count PTMs with |Log2FC| > 2*std in any condition
+    suggested_n = None
+    if vector_data:
+        import math
+        all_fc = [abs(r["ptm_relative_log2fc"]) for r in vector_data if r["ptm_relative_log2fc"] != 0]
+        if all_fc:
+            mean_fc = sum(all_fc) / len(all_fc)
+            std_fc = math.sqrt(sum((x - mean_fc) ** 2 for x in all_fc) / len(all_fc)) if len(all_fc) > 1 else 0
+            threshold = mean_fc + 2 * std_fc if std_fc > 0 else mean_fc * 2
+            significant_keys = set()
+            for r in vector_data:
+                if abs(r["ptm_relative_log2fc"]) >= threshold:
+                    significant_keys.add((r["gene"], r["position"]))
+            suggested_n = len(significant_keys) if significant_keys else None
+
+    return {
+        "vector_data": vector_data,
+        "top_n_ptms": top_n_ptms,
+        "suggested_n": suggested_n,
+        "top_n_setting": top_n_setting,
+        "source": "enriched" if enriched_path.exists() else "preprocessing",
+    }
 
 
 @router.get("/{order_id}/file-details")
