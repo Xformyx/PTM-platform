@@ -7,7 +7,7 @@ import {
   ChevronDown, ChevronUp, Download, FileSpreadsheet, FileJson, File, FolderOpen,
   Copy, Check, Eye, ArrowRightCircle, Sparkles, Plus, X,
   MessageSquare, Loader2, ToggleLeft, ToggleRight, Square,
-  ChartScatter,
+  ChartScatter, TrendingUp,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
@@ -25,6 +25,16 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { cn } from "@/lib/utils";
 import FilePreviewModal from "@/components/FilePreviewModal";
 import RerunOptionsModal from "@/components/RerunOptionsModal";
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+} from "recharts";
 
 const STAGES = [
   { key: "preprocessing", label: "Preprocessing", icon: Cog, range: [0, 33] },
@@ -791,6 +801,169 @@ function VectorPlotImage({ orderId, filename }: { orderId: number; filename: str
   );
 }
 
+function parseTimeOrder(cond: string): number {
+  const m = cond.match(/(\d+(?:\.\d+)?)\s*(h|hr|hour|min|m)?/i);
+  if (!m) return 0;
+  let v = parseFloat(m[1]);
+  const unit = (m[2] || "h").toLowerCase();
+  if (unit.startsWith("m") || unit === "min") v /= 60;
+  return v;
+}
+
+function TopNTimeSeriesPlot({ orderId }: { orderId: number }) {
+  const [data, setData] = useState<{ vector_data: Array<{ gene: string; position: string; condition: string; ptm_relative_log2fc: number; ptm_absolute_log2fc: number }>; top_n_ptms: Array<{ gene: string; position: string; label: string }> } | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [checked, setChecked] = useState<Record<string, boolean>>({});
+  const [metric, setMetric] = useState<"relative" | "absolute">("relative");
+
+  useEffect(() => {
+    api
+      .get<{ vector_data: unknown[]; top_n_ptms: Array<{ gene: string; position: string; label: string }> }>(`/orders/${orderId}/vector-plot-data`)
+      .then((d) => {
+        setData({
+          vector_data: (d.vector_data || []) as Array<{ gene: string; position: string; condition: string; ptm_relative_log2fc: number; ptm_absolute_log2fc: number }>,
+          top_n_ptms: d.top_n_ptms || [],
+        });
+        const init: Record<string, boolean> = {};
+        (d.top_n_ptms || []).forEach((p) => {
+          const key = `${p.gene}_${p.position}`;
+          init[key] = true;
+        });
+        setChecked(init);
+      })
+      .catch(() => setData({ vector_data: [], top_n_ptms: [] }))
+      .finally(() => setLoading(false));
+  }, [orderId]);
+
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center py-12">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground mb-3" />
+        <p className="text-sm text-muted-foreground">Loading time-series data...</p>
+      </div>
+    );
+  }
+
+  if (!data || data.top_n_ptms.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-12 rounded-lg border bg-muted/20">
+        <TrendingUp className="h-12 w-12 text-muted-foreground/40 mb-3" />
+        <p className="text-sm text-muted-foreground text-center">
+          Top N PTM time-series data will appear here after RAG Enrichment completes.
+        </p>
+      </div>
+    );
+  }
+
+  const valueKey = metric === "relative" ? "ptm_relative_log2fc" : "ptm_absolute_log2fc";
+  const topNSet = new Set(data.top_n_ptms.map((p) => `${p.gene}_${p.position}`));
+  const vectorByPtm = new Map<string, Array<{ condition: string; value: number }>>();
+
+  data.vector_data.forEach((row) => {
+    const key = `${row.gene}_${row.position}`;
+    if (!topNSet.has(key)) return;
+    if (!vectorByPtm.has(key)) vectorByPtm.set(key, []);
+    vectorByPtm.get(key)!.push({ condition: row.condition, value: row[valueKey as keyof typeof row] as number });
+  });
+
+  const conditions = Array.from(
+    new Set(data.vector_data.map((r) => r.condition).filter(Boolean))
+  ).sort((a, b) => parseTimeOrder(a) - parseTimeOrder(b));
+
+  const chartData = conditions.map((cond) => {
+    const point: Record<string, string | number> = { condition: cond };
+    data.top_n_ptms.forEach((p) => {
+      const key = `${p.gene}_${p.position}`;
+      if (!checked[key]) return;
+      const arr = vectorByPtm.get(key);
+      const row = arr?.find((r) => r.condition === cond);
+      point[p.label] = row ? row.value : 0;
+    });
+    return point;
+  });
+
+  const visibleLabels = data.top_n_ptms.filter((p) => checked[`${p.gene}_${p.position}`]).map((p) => p.label);
+  const COLORS = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf"];
+
+  const toggle = (key: string) => setChecked((c) => ({ ...c, [key]: !c[key] }));
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-4">
+        <div className="flex gap-2">
+          <Button
+            variant={metric === "relative" ? "default" : "outline"}
+            size="sm"
+            onClick={() => setMetric("relative")}
+          >
+            PTM Relative Log2FC
+          </Button>
+          <Button
+            variant={metric === "absolute" ? "default" : "outline"}
+            size="sm"
+            onClick={() => setMetric("absolute")}
+          >
+            PTM Absolute Log2FC
+          </Button>
+        </div>
+      </div>
+      <div className="grid lg:grid-cols-[1fr_220px] gap-4">
+        <div className="rounded-lg border bg-background p-4 min-h-[400px]">
+          <ResponsiveContainer width="100%" height={400}>
+            <LineChart data={chartData} margin={{ top: 5, right: 20, left: 5, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+              <XAxis dataKey="condition" stroke="hsl(var(--muted-foreground))" fontSize={12} />
+              <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
+              <Tooltip
+                contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "6px" }}
+                formatter={(value, name) => [typeof value === "number" ? value.toFixed(3) : value, name]}
+                labelFormatter={(label) => `Time: ${label}`}
+              />
+              <Legend />
+              {visibleLabels.map((label, i) => (
+                <Line
+                  key={label}
+                  type="monotone"
+                  dataKey={label}
+                  stroke={COLORS[i % COLORS.length]}
+                  strokeWidth={2}
+                  dot={{ r: 4 }}
+                  activeDot={{ r: 6 }}
+                  name={label}
+                />
+              ))}
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+        <div className="space-y-2">
+          <p className="text-xs font-medium text-muted-foreground">Top N PTMs (select to show)</p>
+          <div className="max-h-[380px] overflow-y-auto space-y-1 rounded border p-2">
+            {data.top_n_ptms.map((p) => {
+              const key = `${p.gene}_${p.position}`;
+              return (
+                <label
+                  key={key}
+                  className="flex items-center gap-2 cursor-pointer hover:bg-muted/50 rounded px-2 py-1 text-sm"
+                >
+                  <input
+                    type="checkbox"
+                    checked={!!checked[key]}
+                    onChange={() => toggle(key)}
+                    className="rounded"
+                  />
+                  <span className="truncate" title={p.label}>
+                    {p.label}
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function VectorPlotTab({ orderId }: { orderId: number }) {
   const [files, setFiles] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
@@ -814,57 +987,84 @@ function VectorPlotTab({ orderId }: { orderId: number }) {
     );
   }
 
-  if (files.length === 0) {
-    return (
-      <Card>
-        <CardContent className="flex flex-col items-center justify-center py-12">
-          <ChartScatter className="h-12 w-12 text-muted-foreground/40 mb-3" />
-          <p className="text-sm text-muted-foreground text-center">
-            Vector plots will appear here after preprocessing completes.
-          </p>
-          <p className="text-xs text-muted-foreground mt-1">
-            PTM vector scatter plots (Protein Log2FC vs PTM Relative/Absolute Log2FC) are generated from the vector TSV.
-          </p>
-        </CardContent>
-      </Card>
-    );
-  }
-
   const downloadUrl = (filename: string) => `/api/orders/${orderId}/files/${encodeURIComponent(filename)}`;
 
   return (
     <div className="space-y-6">
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm flex items-center gap-2">
-            <ChartScatter className="h-4 w-4" /> PTM Vector 2D Plots
-          </CardTitle>
-          <p className="text-xs text-muted-foreground">
-            Protein Log2FC vs PTM Relative/Absolute Log2FC scatter plots by condition. Generated after preprocessing.
-          </p>
-        </CardHeader>
-        <CardContent>
-          <div className="grid gap-6">
-            {files.map((f) => (
-              <div key={f} className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium">{f}</span>
-                  <a
-                    href={downloadUrl(f)}
-                    download={f}
-                    className="text-xs text-primary hover:underline flex items-center gap-1"
-                  >
-                    <Download className="h-3 w-3" /> Download
-                  </a>
+      <Tabs defaultValue="scatter">
+        <TabsList className="grid w-full max-w-md grid-cols-2">
+          <TabsTrigger value="scatter" className="gap-2">
+            <ChartScatter className="h-3.5 w-3.5" /> Scatter Plots
+          </TabsTrigger>
+          <TabsTrigger value="timeseries" className="gap-2">
+            <TrendingUp className="h-3.5 w-3.5" /> Top N PTM Time-series
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="scatter" className="mt-4">
+          {files.length === 0 ? (
+            <Card>
+              <CardContent className="flex flex-col items-center justify-center py-12">
+                <ChartScatter className="h-12 w-12 text-muted-foreground/40 mb-3" />
+                <p className="text-sm text-muted-foreground text-center">
+                  Vector plots will appear here after preprocessing completes.
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  PTM vector scatter plots (Protein Log2FC vs PTM Relative/Absolute Log2FC) are generated from the vector TSV.
+                </p>
+              </CardContent>
+            </Card>
+          ) : (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <ChartScatter className="h-4 w-4" /> PTM Vector 2D Plots
+                </CardTitle>
+                <p className="text-xs text-muted-foreground">
+                  Protein Log2FC vs PTM Relative/Absolute Log2FC scatter plots by condition. Generated after preprocessing.
+                </p>
+              </CardHeader>
+              <CardContent>
+                <div className="grid gap-6">
+                  {files.map((f) => (
+                    <div key={f} className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-medium">{f}</span>
+                        <a
+                          href={downloadUrl(f)}
+                          download={f}
+                          className="text-xs text-primary hover:underline flex items-center gap-1"
+                        >
+                          <Download className="h-3 w-3" /> Download
+                        </a>
+                      </div>
+                      <div className="rounded-lg border overflow-hidden bg-muted/20">
+                        <VectorPlotImage orderId={orderId} filename={f} />
+                      </div>
+                    </div>
+                  ))}
                 </div>
-                <div className="rounded-lg border overflow-hidden bg-muted/20">
-                  <VectorPlotImage orderId={orderId} filename={f} />
-                </div>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
+              </CardContent>
+            </Card>
+          )}
+        </TabsContent>
+
+        <TabsContent value="timeseries" className="mt-4">
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm flex items-center gap-2">
+                <TrendingUp className="h-4 w-4" /> Top N PTM Time-series
+              </CardTitle>
+              <p className="text-xs text-muted-foreground">
+                시간별 PTM 변화 추이. 마우스를 올리면 PTM명과 값을 확인할 수 있습니다.
+              </p>
+            </CardHeader>
+            <CardContent>
+              <TopNTimeSeriesPlot orderId={orderId} />
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

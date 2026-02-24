@@ -899,6 +899,78 @@ async def get_vector_plots(
     return {"files": files}
 
 
+@router.get("/{order_id}/vector-plot-data")
+async def get_vector_plot_data(
+    order_id: int,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Return ptm_vector_data and Top N PTM list for time-series plot."""
+    from app.config import get_settings
+    settings = get_settings()
+
+    result = await db.execute(select(Order).where(Order.id == order_id))
+    order = result.scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    output_dir = Path(settings.OUTPUT_DIR) / order.order_code
+    if not output_dir.exists():
+        return {"vector_data": [], "top_n_ptms": []}
+
+    file_suffix = "_phospho" if order.ptm_type == "phosphorylation" else "_ubi"
+
+    # Load ptm_vector_data TSV
+    vector_data = []
+    for name in (f"ptm_vector_data_normalized{file_suffix}.tsv", f"ptm_vector_data_with_motifs{file_suffix}.tsv"):
+        p = output_dir / name
+        if p.exists():
+            import csv
+            with open(p, "r", encoding="utf-8") as f:
+                reader = csv.DictReader(f, delimiter="\t")
+                for row in reader:
+                    gene = row.get("Gene.Name", row.get("gene", ""))
+                    pos = row.get("PTM_Position", row.get("position", ""))
+                    cond = row.get("Condition", "")
+                    rel_fc = row.get("PTM_Relative_Log2FC", "")
+                    abs_fc = row.get("PTM_Absolute_Log2FC", "")
+                    try:
+                        rel_fc = float(rel_fc) if rel_fc else 0
+                    except ValueError:
+                        rel_fc = 0
+                    try:
+                        abs_fc = float(abs_fc) if abs_fc else 0
+                    except ValueError:
+                        abs_fc = 0
+                    vector_data.append({
+                        "gene": gene,
+                        "position": str(pos),
+                        "condition": cond,
+                        "ptm_relative_log2fc": rel_fc,
+                        "ptm_absolute_log2fc": abs_fc,
+                    })
+            break
+
+    # Load Top N PTMs from enriched_ptm_data
+    top_n_ptms = []
+    enriched_path = output_dir / f"enriched_ptm_data{file_suffix}.json"
+    if enriched_path.exists():
+        import json
+        with open(enriched_path, "r", encoding="utf-8") as f:
+            enriched = json.load(f)
+        for ptm in enriched:
+            gene = ptm.get("gene") or ptm.get("Gene.Name", "")
+            pos = ptm.get("position") or ptm.get("PTM_Position", "")
+            if gene or pos:
+                top_n_ptms.append({
+                    "gene": str(gene),
+                    "position": str(pos),
+                    "label": f"{gene} {pos}".strip() or f"{gene}{pos}",
+                })
+
+    return {"vector_data": vector_data, "top_n_ptms": top_n_ptms}
+
+
 @router.get("/{order_id}/file-details")
 async def get_file_details(
     order_id: int,
