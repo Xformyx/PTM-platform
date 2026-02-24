@@ -7,7 +7,7 @@ import {
   ChevronDown, ChevronUp, Download, FileSpreadsheet, FileJson, File, FolderOpen,
   Copy, Check, Eye, ArrowRightCircle, Sparkles, Plus, X,
   MessageSquare, Loader2, ToggleLeft, ToggleRight, Square,
-  ChartScatter, TrendingUp,
+  ChartScatter, TrendingUp, ZoomIn, ZoomOut, Minus,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
@@ -859,6 +859,7 @@ function TopNTimeSeriesPlot({ orderId }: { orderId: number }) {
   const [checked, setChecked] = useState<Record<string, boolean>>({});
   const [metric, setMetric] = useState<"relative" | "absolute">("relative");
   const [trendFilter, setTrendFilter] = useState<TrendCategory | "all">("all");
+  const [yZoom, setYZoom] = useState(1); // 1 = default, <1 = zoom in (narrower range), >1 = zoom out (wider range)
 
   useEffect(() => {
     api
@@ -980,13 +981,16 @@ function TopNTimeSeriesPlot({ orderId }: { orderId: number }) {
     });
   };
 
-  // Compute Y-axis domain with padding
+  // Compute Y-axis domain with padding and zoom
   const allValues = visibleLabels.flatMap((label) =>
     chartData.map((d) => (typeof d[label] === "number" ? (d[label] as number) : 0))
   );
   const yMin = allValues.length > 0 ? Math.min(...allValues) : -1;
   const yMax = allValues.length > 0 ? Math.max(...allValues) : 1;
-  const yPadding = Math.max((yMax - yMin) * 0.15, 1);
+  const yCenter = (yMin + yMax) / 2;
+  const yHalfRange = Math.max((yMax - yMin) / 2, 0.5) * yZoom;
+  const yDomainMin = Math.floor(yCenter - yHalfRange - 1);
+  const yDomainMax = Math.ceil(yCenter + yHalfRange + 1);
 
   // Count per trend category
   const trendCounts: Record<string, number> = { all: uniquePtms.length };
@@ -1045,8 +1049,38 @@ function TopNTimeSeriesPlot({ orderId }: { orderId: number }) {
       </div>
 
       <div className="grid lg:grid-cols-[1fr_240px] gap-4">
-        {/* Chart area — taller Y axis */}
-        <div className="rounded-lg border bg-background p-4" style={{ minHeight: `${chartHeight + 40}px` }}>
+        {/* Chart area — taller Y axis with zoom controls */}
+        <div className="rounded-lg border bg-background p-4 relative" style={{ minHeight: `${chartHeight + 40}px` }}>
+          {/* Y-axis zoom controls */}
+          <div className="absolute top-2 right-2 flex flex-col gap-1 z-10">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 w-7 p-0"
+              title="Y축 확대 (좁히기)"
+              onClick={() => setYZoom((z) => Math.max(0.2, z * 0.7))}
+            >
+              <ZoomIn className="h-3.5 w-3.5" />
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 w-7 p-0"
+              title="Y축 축소 (넓히기)"
+              onClick={() => setYZoom((z) => Math.min(5, z * 1.4))}
+            >
+              <ZoomOut className="h-3.5 w-3.5" />
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 w-7 p-0"
+              title="Y축 초기화"
+              onClick={() => setYZoom(1)}
+            >
+              <Minus className="h-3.5 w-3.5" />
+            </Button>
+          </div>
           <ResponsiveContainer width="100%" height={chartHeight}>
             <LineChart data={chartData} margin={{ top: 10, right: 20, left: 10, bottom: 10 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
@@ -1054,19 +1088,32 @@ function TopNTimeSeriesPlot({ orderId }: { orderId: number }) {
               <YAxis
                 stroke="hsl(var(--muted-foreground))"
                 fontSize={12}
-                domain={[Math.floor(yMin - yPadding), Math.ceil(yMax + yPadding)]}
-                tickCount={12}
+                domain={[yDomainMin, yDomainMax]}
+                tickCount={Math.max(8, Math.round((yDomainMax - yDomainMin) / 2))}
               />
               <Tooltip
-                contentStyle={{
-                  backgroundColor: "hsl(var(--card))",
-                  border: "1px solid hsl(var(--border))",
-                  borderRadius: "6px",
-                  maxHeight: "300px",
-                  overflowY: "auto",
+                shared={false}
+                content={({ active, payload, label }) => {
+                  if (!active || !payload || payload.length === 0) return null;
+                  // Show only the single hovered PTM line
+                  const item = payload[0];
+                  if (!item) return null;
+                  return (
+                    <div style={{
+                      backgroundColor: "hsl(var(--card))",
+                      border: "1px solid hsl(var(--border))",
+                      borderRadius: "6px",
+                      padding: "8px 12px",
+                      fontSize: "13px",
+                      boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+                    }}>
+                      <p style={{ margin: 0, fontWeight: 600, marginBottom: 4 }}>Time: {label}</p>
+                      <p style={{ margin: 0, color: typeof item.color === "string" ? item.color : undefined }}>
+                        {item.name}: {typeof item.value === "number" ? item.value.toFixed(3) : item.value}
+                      </p>
+                    </div>
+                  );
                 }}
-                formatter={(value, name) => [typeof value === "number" ? value.toFixed(3) : value, name]}
-                labelFormatter={(label) => `Time: ${label}`}
               />
               {/* No <Legend /> — labels shown only on hover */}
               {visibleLabels.map((label, i) => (
