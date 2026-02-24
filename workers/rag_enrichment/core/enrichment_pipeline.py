@@ -107,19 +107,39 @@ class RAGEnrichmentPipeline:
         logger.info(f"RAG enrichment: processing {total} PTM entries")
 
         # MCP health check
-        mcp_healthy = self.mcp.health_check()
-        if mcp_healthy:
-            logger.info(f"MCP server is healthy at {self.mcp.base_url}")
-        else:
-            logger.error(f"MCP server is NOT reachable at {self.mcp.base_url} — enrichment will have limited data")
+        try:
+            mcp_healthy = self.mcp.health_check()
+            if mcp_healthy:
+                logger.info(f"MCP server is healthy at {self.mcp.base_url}")
+            else:
+                logger.error(f"MCP server is NOT reachable at {self.mcp.base_url} — enrichment will have limited data")
+        except Exception as e:
+            logger.error(f"MCP health check exception: {e}")
 
-        # Local data availability check
+        # Local data availability check with details
+        from common.local_data_loader import DATA_ROOT, LOCAL_DATA_DIR, CONFIG_DIR, PatternLoader
+        logger.info(f"DATA_ROOT = {DATA_ROOT}")
+        logger.info(f"LOCAL_DATA_DIR = {LOCAL_DATA_DIR} (exists={LOCAL_DATA_DIR.exists() if LOCAL_DATA_DIR else 'N/A'})")
+        logger.info(f"CONFIG_DIR = {CONFIG_DIR} (exists={CONFIG_DIR.exists() if CONFIG_DIR else 'N/A'})")
         logger.info(f"HPA local data available: {HPALocalLoader.is_available()}")
         logger.info(f"GTEx local data available: {GTExLocalLoader.is_available()}")
+        logger.info(f"Pattern config available: {PatternLoader.is_available()}")
+
+        # Log first PTM keys for debugging field name issues
+        if ptm_data:
+            sample = ptm_data[0]
+            logger.info(f"Sample PTM keys: {list(sample.keys())[:20]}")
+            logger.info(
+                f"Sample PTM values: gene={sample.get('gene') or sample.get('Gene.Name', '?')}, "
+                f"PTM_Relative_Log2FC={sample.get('PTM_Relative_Log2FC', 'MISSING')}, "
+                f"Protein_Log2FC={sample.get('Protein_Log2FC', 'MISSING')}"
+            )
 
         context_keywords = self._extract_context_keywords(experimental_context)
+        logger.info(f"Context keywords: {context_keywords}")
 
         enriched = []
+        stats = {"success": 0, "failed": 0, "total_articles": 0, "total_pathways": 0}
         for i, ptm in enumerate(ptm_data):
             gene = ptm.get("gene") or ptm.get("Gene.Name", "?")
             pos = ptm.get("position") or ptm.get("PTM_Position", "?")
@@ -128,13 +148,22 @@ class RAGEnrichmentPipeline:
             try:
                 result = self._enrich_single_ptm(ptm, context_keywords, experimental_context)
                 enriched.append(result)
+                stats["success"] += 1
+                enr = result.get("rag_enrichment", {})
+                stats["total_articles"] += enr.get("search_summary", {}).get("total_articles", 0)
+                stats["total_pathways"] += len(enr.get("pathways", []))
             except Exception as e:
-                logger.warning(f"Enrichment failed for {ptm.get('gene')}/{ptm.get('position')}: {e}")
+                logger.error(f"Enrichment FAILED for {gene}/{pos}: {e}", exc_info=True)
                 ptm_log2fc = ptm.get("ptm_relative_log2fc") or ptm.get("PTM_Relative_Log2FC", 0)
                 protein_log2fc = ptm.get("protein_log2fc") or ptm.get("Protein_Log2FC", 0)
                 ptm["rag_enrichment"] = self._empty_enrichment(ptm_log2fc, protein_log2fc)
                 enriched.append(ptm)
+                stats["failed"] += 1
 
+        logger.info(
+            f"Enrichment complete: {stats['success']} OK, {stats['failed']} failed, "
+            f"total articles={stats['total_articles']}, total pathways={stats['total_pathways']}"
+        )
         self._progress(1.0, f"Enrichment complete: {len(enriched)} PTMs")
         return enriched
 
@@ -276,9 +305,15 @@ class RAGEnrichmentPipeline:
         downstream = regulation["downstream_targets"]
 
         # 15. Classify PTM significance (8-category cell-signaling system)
-        ptm_log2fc = ptm.get("ptm_relative_log2fc") or ptm.get("PTM_Relative_Log2FC", 0)
-        protein_log2fc = ptm.get("protein_log2fc") or ptm.get("Protein_Log2FC", 0)
+        ptm_log2fc_raw = ptm.get("PTM_Relative_Log2FC", ptm.get("ptm_relative_log2fc"))
+        protein_log2fc_raw = ptm.get("Protein_Log2FC", ptm.get("protein_log2fc"))
+        ptm_log2fc = ptm_log2fc_raw if ptm_log2fc_raw is not None else 0
+        protein_log2fc = protein_log2fc_raw if protein_log2fc_raw is not None else 0
         classification = self._classify_ptm_8cat(ptm_log2fc, protein_log2fc)
+        logger.debug(
+            f"Classification for {gene} {position}: ptm_fc={ptm_log2fc}, prot_fc={protein_log2fc} "
+            f"→ {classification.get('level')} ({classification.get('significance')})"
+        )
 
         # 16. Extract trajectory data (time-course)
         trajectory = self._extract_trajectory(ptm)
@@ -354,14 +389,18 @@ class RAGEnrichmentPipeline:
         ptm["rag_enrichment"] = enrichment
 
         # Log enrichment summary for debugging
+        hpa_ok = bool(hpa_data and (hpa_data.get("tissue_expression") or hpa_data.get("locations")))
+        gtex_ok = bool(gtex_data and gtex_data.get("expressions"))
         logger.info(
             f"Enrichment for {gene} {position}: "
             f"articles={len(articles)}, "
             f"pathways={len(kegg_pathways)}, "
             f"interactions={len(interactions)}, "
-            f"hpa={'yes' if hpa_data and (hpa_data.get('rna_tissue') or hpa_data.get('locations')) else 'no'}, "
-            f"gtex={'yes' if gtex_data and gtex_data.get('expressions') else 'no'}, "
-            f"classification={classification.get('level', '?')}"
+            f"hpa={'yes' if hpa_ok else 'no'} (source={hpa_data.get('source', 'none') if hpa_data else 'none'}), "
+            f"gtex={'yes' if gtex_ok else 'no'} (source={gtex_data.get('source', 'none') if gtex_data else 'none'}), "
+            f"biogrid={len(biogrid_data.get('interactions', [])) if biogrid_data else 0}, "
+            f"llm_abstract={'yes' if abstract_analysis else 'no'}, "
+            f"classification={classification.get('level', '?')} ({classification.get('significance', '?')})"
         )
         return ptm
 
@@ -378,15 +417,24 @@ class RAGEnrichmentPipeline:
         # Try local first
         if HPALocalLoader.is_available():
             local_result = HPALocalLoader.query(gene)
-            if local_result and (local_result.get("locations") or local_result.get("tissue_expression")):
-                logger.debug(f"HPA local data found for {gene}")
-                return local_result
+            if local_result:
+                has_locations = bool(local_result.get("locations"))
+                has_tissue = bool(local_result.get("tissue_expression"))
+                logger.info(f"HPA local for {gene}: locations={has_locations}, tissue={has_tissue}")
+                if has_locations or has_tissue:
+                    local_result["source"] = "local_hpa"
+                    return local_result
+            else:
+                logger.debug(f"HPA local: no data for {gene}")
+        else:
+            logger.debug(f"HPA local data not available, falling back to MCP")
 
         # Fallback to MCP API
         try:
             hpa_data = self.mcp.query_hpa(gene)
             if hpa_data:
                 hpa_data["source"] = "mcp_api"
+                logger.debug(f"HPA MCP for {gene}: {list(hpa_data.keys())[:5]}")
             return hpa_data
         except Exception as e:
             logger.warning(f"HPA query failed for {gene}: {e}")
@@ -406,14 +454,19 @@ class RAGEnrichmentPipeline:
         if GTExLocalLoader.is_available():
             local_result = GTExLocalLoader.query_expression(gene)
             if local_result and local_result.get("expressions"):
-                logger.debug(f"GTEx local data found for {gene}")
+                logger.info(f"GTEx local for {gene}: {len(local_result['expressions'])} tissues")
                 return local_result
+            else:
+                logger.debug(f"GTEx local: no expression data for {gene}")
+        else:
+            logger.debug(f"GTEx local data not available, falling back to MCP")
 
         # Fallback to MCP API
         try:
             gtex_data = self.mcp.query_gtex(gene)
             if gtex_data:
                 gtex_data["source"] = "mcp_api"
+                logger.debug(f"GTEx MCP for {gene}: {list(gtex_data.keys())[:5]}")
             return gtex_data
         except Exception as e:
             logger.warning(f"GTEx query failed for {gene}: {e}")
@@ -501,6 +554,7 @@ class RAGEnrichmentPipeline:
     @staticmethod
     def _empty_enrichment(ptm_log2fc=0, protein_log2fc=0) -> dict:
         """Return empty enrichment with proper classification based on Log2FC values."""
+        logger.debug(f"_empty_enrichment called with ptm_log2fc={ptm_log2fc!r}, protein_log2fc={protein_log2fc!r}")
         classification = RAGEnrichmentPipeline._classify_ptm_8cat(ptm_log2fc, protein_log2fc)
         return {
             "search_summary": {"total_articles": 0},
@@ -540,9 +594,14 @@ class RAGEnrichmentPipeline:
     def _classify_ptm_8cat(ptm_log2fc, protein_log2fc) -> dict:
         """Classify PTM based on Log2FC values using 8-category cell-signaling system."""
         try:
-            ptm_fc = float(ptm_log2fc or 0)
-            prot_fc = float(protein_log2fc or 0)
-        except (ValueError, TypeError):
+            ptm_fc = float(ptm_log2fc) if ptm_log2fc is not None else 0.0
+            prot_fc = float(protein_log2fc) if protein_log2fc is not None else 0.0
+        except (ValueError, TypeError) as e:
+            logger.warning(
+                f"Classification float conversion failed: ptm_log2fc={ptm_log2fc!r} "
+                f"(type={type(ptm_log2fc).__name__}), protein_log2fc={protein_log2fc!r} "
+                f"(type={type(protein_log2fc).__name__}), error={e}"
+            )
             return {
                 "level": "Baseline / low-change state",
                 "short_label": "Baseline",
@@ -550,8 +609,15 @@ class RAGEnrichmentPipeline:
                 "protein_context": None,
             }
 
+        # Handle NaN values
+        if math.isnan(ptm_fc):
+            logger.warning(f"Classification: ptm_log2fc is NaN (original={ptm_log2fc!r})")
+            ptm_fc = 0.0
+        if math.isnan(prot_fc):
+            logger.warning(f"Classification: protein_log2fc is NaN (original={protein_log2fc!r})")
+            prot_fc = 0.0
+
         # Determine protein context
-        protein_context = None
         if prot_fc > PROTEIN_CHANGE:
             protein_context = "Up-regulated"
         elif prot_fc < -PROTEIN_CHANGE:
@@ -576,6 +642,10 @@ class RAGEnrichmentPipeline:
             level = "PTM-driven inactivation"
             short_label = "PTM-driven ↓↓"
             significance = "High"
+        elif ptm_high and ptm_fc > 0 and protein_down:
+            level = "Compensatory PTM hyperactivation"
+            short_label = "Compensatory ↑↑"
+            significance = "High"
         elif ptm_up and protein_up:
             level = "Coupled activation"
             short_label = "Coupled ↑"
@@ -584,10 +654,6 @@ class RAGEnrichmentPipeline:
             level = "Coupled shutdown"
             short_label = "Coupled ↓"
             significance = "Moderate"
-        elif ptm_high and ptm_fc > 0 and protein_down:
-            level = "Compensatory PTM hyperactivation"
-            short_label = "Compensatory ↑↑"
-            significance = "High"
         elif ptm_down and protein_up:
             level = "Desensitization-like pattern"
             short_label = "Desensitization"

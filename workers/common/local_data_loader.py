@@ -116,10 +116,10 @@ class HPALocalLoader:
             return None
 
         gene_upper = gene_name.upper()
-        # HPA TSV typically has columns: Gene, Gene name, Tissue, Level, TPM, etc.
-        # Try common column names
+        # HPA TSV columns: Gene (Ensembl ID), Gene name (symbol), Tissue, TPM, etc.
+        # Prefer "Gene name" (symbols like FARP1) over "Gene" (Ensembl IDs like ENSG...)
         gene_col = None
-        for col in ("Gene", "Gene name", "gene", "gene_name"):
+        for col in ("Gene name", "gene_name", "Gene", "gene"):
             if col in cls._tissue_df.columns:
                 gene_col = col
                 break
@@ -179,7 +179,7 @@ class HPALocalLoader:
 
         gene_upper = gene_name.upper()
         gene_col = None
-        for col in ("Gene", "Gene name", "gene", "gene_name"):
+        for col in ("Gene name", "gene_name", "Gene", "gene"):
             if col in cls._subcellular_df.columns:
                 gene_col = col
                 break

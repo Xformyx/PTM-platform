@@ -521,21 +521,37 @@ class ComprehensiveReportGenerator:
 
         # HPA RNA Expression
         hpa = enr.get("hpa", {})
-        if hpa:
-            lines.append("#### RNA Expression (Human Protein Atlas)\n")
-            rna_tissue = hpa.get("rna_tissue", [])
+        if hpa and not hpa.get("error"):
+            has_hpa_data = False
+
+            # RNA tissue expression (keys: tissue_expression from local, rna_tissue from MCP)
+            rna_tissue = hpa.get("tissue_expression", hpa.get("rna_tissue", []))
             if rna_tissue:
+                has_hpa_data = True
+                lines.append("#### RNA Expression (Human Protein Atlas)\n")
                 lines.append("| Tissue | nTPM | Detection |")
                 lines.append("|--------|------|-----------|")
                 for entry in rna_tissue[:10]:
                     tissue = entry.get("tissue", "?")
-                    ntpm = entry.get("value") or entry.get("nTPM", "?")
+                    ntpm = entry.get("tpm") or entry.get("value") or entry.get("nTPM", "?")
                     detection = entry.get("level") or entry.get("detection", "?")
                     lines.append(f"| {tissue} | {ntpm} | {detection} |")
                 lines.append("")
 
+            # Top tissues summary
+            top_tissues = hpa.get("top_tissues", [])
+            if top_tissues and not rna_tissue:
+                has_hpa_data = True
+                lines.append("#### Top Tissue Expression (HPA)\n")
+                for t in top_tissues[:5]:
+                    tissue = t.get("tissue", "?")
+                    tpm = t.get("tpm", "?")
+                    lines.append(f"- **{tissue}**: {tpm} nTPM")
+                lines.append("")
+
             protein_tissue = hpa.get("protein_tissue", [])
             if protein_tissue:
+                has_hpa_data = True
                 lines.append("**Protein Expression (IHC)**:\n")
                 for entry in protein_tissue[:5]:
                     tissue = entry.get("tissue", "?")
@@ -543,9 +559,14 @@ class ComprehensiveReportGenerator:
                     lines.append(f"- {tissue}: {level}")
                 lines.append("")
 
-            subcellular = hpa.get("subcellular_location", [])
+            # Subcellular location (keys: locations from local, subcellular_location from MCP)
+            subcellular = hpa.get("locations", hpa.get("subcellular_location", []))
             if subcellular:
-                lines.append(f"**HPA Subcellular Location**: {', '.join(subcellular[:5])}\n")
+                has_hpa_data = True
+                lines.append(f"**HPA Subcellular Location**: {', '.join(str(s) for s in subcellular[:5])}\n")
+
+            if hpa.get("source"):
+                lines.append(f"*Data source: {hpa['source']}*\n")
 
         # GTEx Tissue Expression
         gtex = enr.get("gtex", {})
@@ -574,7 +595,13 @@ class ComprehensiveReportGenerator:
                     lines.append(f"  - {note}")
             lines.append("")
 
-        if not hpa and not gtex and not isoform_info:
+        hpa_has_data = bool(hpa and not hpa.get("error") and
+                           (hpa.get("tissue_expression") or hpa.get("rna_tissue") or
+                            hpa.get("locations") or hpa.get("subcellular_location") or
+                            hpa.get("top_tissues")))
+        gtex_has_data = bool(gtex and not gtex.get("error") and
+                            (gtex.get("expressions") or gtex.get("tissues")))
+        if not hpa_has_data and not gtex_has_data and not isoform_info:
             lines.append(f"No expression context data available from HPA or GTEx for **{gene}**.\n")
             lines.append(f"Consider checking [Human Protein Atlas](https://www.proteinatlas.org/{gene}) "
                          f"or [GTEx Portal](https://gtexportal.org/home/gene/{gene}) for expression data.\n")
@@ -724,22 +751,22 @@ class ComprehensiveReportGenerator:
 
         lines = ["### Cellular Localization\n"]
 
-        # HPA subcellular data
-        hpa_subcell = hpa.get("subcellular_location", [])
+        # HPA subcellular data (handle both local and MCP key formats)
+        hpa_locations = hpa.get("locations", hpa.get("subcellular_location", []))
         hpa_main = hpa.get("main_location", [])
         hpa_additional = hpa.get("additional_location", [])
         hpa_single_cell = hpa.get("single_cell_variation", [])
 
-        if hpa_main or hpa_subcell:
+        if hpa_main or hpa_locations:
             lines.append("**Human Protein Atlas**:\n")
             if hpa_main:
-                lines.append(f"- Main location: {', '.join(hpa_main)}")
-            elif hpa_subcell:
-                lines.append(f"- Subcellular location: {', '.join(hpa_subcell[:5])}")
+                lines.append(f"- Main location: {', '.join(str(x) for x in hpa_main)}")
+            elif hpa_locations:
+                lines.append(f"- Subcellular location: {', '.join(str(x) for x in hpa_locations[:5])}")
             if hpa_additional:
-                lines.append(f"- Additional locations: {', '.join(hpa_additional)}")
+                lines.append(f"- Additional locations: {', '.join(str(x) for x in hpa_additional)}")
             if hpa_single_cell:
-                lines.append(f"- Single-cell variation: {', '.join(hpa_single_cell[:3])}")
+                lines.append(f"- Single-cell variation: {', '.join(str(x) for x in hpa_single_cell[:3])}")
             lines.append(f"- [View HPA images](https://www.proteinatlas.org/{gene}/subcellular)")
             lines.append("")
 
