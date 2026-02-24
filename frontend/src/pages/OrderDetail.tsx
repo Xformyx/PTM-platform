@@ -7,7 +7,7 @@ import {
   ChevronDown, ChevronUp, Download, FileSpreadsheet, FileJson, File, FolderOpen,
   Copy, Check, Eye, ArrowRightCircle, Sparkles, Plus, X,
   MessageSquare, Loader2, ToggleLeft, ToggleRight, Square,
-  ChartScatter, TrendingUp, ZoomIn, ZoomOut, Minus,
+  ChartScatter, TrendingUp, ZoomIn, ZoomOut,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
@@ -860,6 +860,7 @@ function TopNTimeSeriesPlot({ orderId }: { orderId: number }) {
   const [metric, setMetric] = useState<"relative" | "absolute">("relative");
   const [trendFilter, setTrendFilter] = useState<TrendCategory | "all">("all");
   const [yZoom, setYZoom] = useState(1); // 1 = default, <1 = zoom in (narrower range), >1 = zoom out (wider range)
+  const [hoveredPtm, setHoveredPtm] = useState<string | null>(null);
 
   useEffect(() => {
     api
@@ -967,6 +968,10 @@ function TopNTimeSeriesPlot({ orderId }: { orderId: number }) {
     "#c49c94", "#f7b6d2", "#c7c7c7", "#dbdb8d", "#9edae5",
   ];
 
+  // Fixed color map: each PTM always gets the same color based on its position in uniquePtms
+  const colorMap = new Map<string, string>();
+  uniquePtms.forEach((p, i) => { colorMap.set(p.label, COLORS[i % COLORS.length]); });
+
   const toggle = (key: string) => setChecked((c) => ({ ...c, [key]: !c[key] }));
 
   const allChecked = filteredPtms.every((p) => checked[`${p.gene}_${p.position}`]);
@@ -1071,15 +1076,6 @@ function TopNTimeSeriesPlot({ orderId }: { orderId: number }) {
             >
               <ZoomOut className="h-3.5 w-3.5" />
             </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 w-7 p-0"
-              title="Y축 초기화"
-              onClick={() => setYZoom(1)}
-            >
-              <Minus className="h-3.5 w-3.5" />
-            </Button>
           </div>
           <ResponsiveContainer width="100%" height={chartHeight}>
             <LineChart data={chartData} margin={{ top: 10, right: 20, left: 10, bottom: 10 }}>
@@ -1092,12 +1088,14 @@ function TopNTimeSeriesPlot({ orderId }: { orderId: number }) {
                 tickCount={Math.max(8, Math.round((yDomainMax - yDomainMin) / 2))}
               />
               <Tooltip
-                shared={false}
                 content={({ active, payload, label }) => {
                   if (!active || !payload || payload.length === 0) return null;
-                  // Show only the single hovered PTM line
-                  const item = payload[0];
-                  if (!item) return null;
+                  // Show only the hovered PTM, or if no specific hover, show the one closest to cursor
+                  const target = hoveredPtm
+                    ? payload.find((p) => p.name === hoveredPtm) || payload[0]
+                    : payload[0];
+                  if (!target) return null;
+                  const ptmColor = colorMap.get(target.name as string) || target.color;
                   return (
                     <div style={{
                       backgroundColor: "hsl(var(--card))",
@@ -1108,26 +1106,37 @@ function TopNTimeSeriesPlot({ orderId }: { orderId: number }) {
                       boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
                     }}>
                       <p style={{ margin: 0, fontWeight: 600, marginBottom: 4 }}>Time: {label}</p>
-                      <p style={{ margin: 0, color: typeof item.color === "string" ? item.color : undefined }}>
-                        {item.name}: {typeof item.value === "number" ? item.value.toFixed(3) : item.value}
+                      <p style={{ margin: 0, color: typeof ptmColor === "string" ? ptmColor : undefined }}>
+                        {target.name}: {typeof target.value === "number" ? target.value.toFixed(3) : target.value}
                       </p>
                     </div>
                   );
                 }}
               />
               {/* No <Legend /> — labels shown only on hover */}
-              {visibleLabels.map((label, i) => (
-                <Line
-                  key={label}
-                  type="monotone"
-                  dataKey={label}
-                  stroke={COLORS[i % COLORS.length]}
-                  strokeWidth={2}
-                  dot={{ r: 3 }}
-                  activeDot={{ r: 6 }}
-                  name={label}
-                />
-              ))}
+              {visibleLabels.map((label) => {
+                const lineColor = colorMap.get(label) || "#1f77b4";
+                return (
+                  <Line
+                    key={label}
+                    type="monotone"
+                    dataKey={label}
+                    stroke={lineColor}
+                    strokeWidth={hoveredPtm === label ? 4 : 2}
+                    dot={{ r: 3, fill: lineColor }}
+                    activeDot={{
+                      r: 7,
+                      fill: lineColor,
+                      onMouseEnter: () => setHoveredPtm(label),
+                      onMouseLeave: () => setHoveredPtm(null),
+                    }}
+                    name={label}
+                    opacity={hoveredPtm && hoveredPtm !== label ? 0.25 : 1}
+                    onMouseEnter={() => setHoveredPtm(label)}
+                    onMouseLeave={() => setHoveredPtm(null)}
+                  />
+                );
+              })}
             </LineChart>
           </ResponsiveContainer>
         </div>
@@ -1163,9 +1172,9 @@ function TopNTimeSeriesPlot({ orderId }: { orderId: number }) {
                     className="rounded"
                   />
                   <span
-                    className="w-2 h-2 rounded-full flex-shrink-0"
-                    style={{ backgroundColor: TREND_META[trend].color }}
-                    title={TREND_META[trend].description}
+                    className="w-2.5 h-2.5 rounded-full flex-shrink-0 border"
+                    style={{ backgroundColor: colorMap.get(p.label) || "#6b7280", borderColor: TREND_META[trend].color }}
+                    title={`${TREND_META[trend].label}: ${TREND_META[trend].description}`}
                   />
                   <span className="truncate" title={`${p.label} (${TREND_META[trend].label})`}>
                     {p.label}
