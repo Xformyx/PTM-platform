@@ -279,15 +279,6 @@ def detect_ptm_type_from_data(analysis_results: Dict, md_content: str = "") -> s
 # Utility: Clean pathway text (remove species names)
 # ============================================================================
 
-def _pathway_to_str(p) -> str:
-    """Convert pathway item to string (handles dicts from enriched data)."""
-    if isinstance(p, str):
-        return p
-    if isinstance(p, dict):
-        return p.get("name") or p.get("pathway") or str(p)
-    return str(p)
-
-
 def clean_pathway_text(pathway: str) -> str:
     """Remove species names and clean up pathway text."""
     if not pathway:
@@ -592,6 +583,7 @@ class RepositioningCandidate:
     clinical_trials: List[ClinicalTrial]
     repositioning_score: float = 0.0
     llm_evaluation: str = ""
+    relationship_type: str = "direct"  # 'direct' or 'indirect_via_upstream'
     
     def to_dict(self):
         d = asdict(self)
@@ -758,10 +750,10 @@ class PTMScorer:
         # 5. Network (20%): centrality from Part I
         network = self._score_network(gene, edge_count)
         
-        # 6. Conservation (10%): placeholder
-        conservation = 0.5
+        # 6. Conservation (10%): data-driven based on protein properties
+        conservation = self._score_conservation(gene, site)
         
-        # 7. Clinical (10%): placeholder
+        # 7. Clinical (10%): data-driven based on clinical associations
         clinical = self._score_clinical(gene)
         
         # Weighted composite
@@ -860,20 +852,128 @@ class PTMScorer:
         score = min(edge_count / 15.0, 1.0)
         return max(score, 0.2)
     
-    def _score_clinical(self, gene: str) -> float:
-        """Score clinical relevance"""
-        # Check if gene has known clinical associations
-        clinical_genes = {
-            'EGFR', 'ERBB2', 'BRAF', 'ALK', 'MET', 'KIT', 'PDGFRA', 'FGFR1', 'FGFR2',
-            'AKT1', 'MTOR', 'PIK3CA', 'CDK4', 'CDK6', 'BTK', 'JAK2', 'FLT3', 'RET',
-            'MDM2', 'VHL', 'BRCA1', 'BRCA2', 'TP53', 'RB1', 'PTEN', 'KRAS', 'NRAS',
-            'PARKIN', 'PRKN', 'UCHL1', 'BAP1', 'FBXW7', 'KEAP1',
+    def _score_conservation(self, gene: str, site: str) -> float:
+        """Score conservation based on protein properties and modification site.
+        
+        Uses multiple heuristics to estimate conservation:
+        - Known conserved protein families get higher scores
+        - Lysine/Serine/Threonine/Tyrosine sites on well-known proteins score higher
+        - Proteins in core metabolic/signaling pathways are more conserved
+        """
+        gene_upper = gene.upper()
+        score = 0.3  # Base score
+        
+        # Highly conserved protein families (histones, ribosomal, cytoskeletal, metabolic enzymes)
+        highly_conserved = {
+            'HIST1H', 'HIST2H', 'H2A', 'H2B', 'H3', 'H4',  # Histones
+            'RPS', 'RPL', 'RPS27A', 'UBA52',  # Ribosomal
+            'ACTB', 'ACTG', 'TUBA', 'TUBB', 'VIM', 'DES', 'LMNA', 'LMNB',  # Cytoskeletal
+            'GAPDH', 'ENO1', 'PKM', 'LDHA', 'PGK1', 'TPI1', 'ALDOA',  # Glycolysis
+            'HSP90', 'HSPA', 'HSPB', 'HSPH', 'HSPD',  # Chaperones
+            'UBB', 'UBC', 'UBA52',  # Ubiquitin
         }
         
-        if gene.upper() in clinical_genes:
-            return 0.9
+        moderately_conserved = {
+            'MAPK', 'MAP2K', 'MAP3K', 'RAF', 'RAS',  # MAPK pathway
+            'AKT', 'PIK3', 'MTOR', 'PTEN',  # PI3K/AKT
+            'STAT', 'JAK', 'SRC', 'ABL',  # Signaling kinases
+            'CDK', 'CCNA', 'CCNB', 'CCND', 'CCNE',  # Cell cycle
+            'CASP', 'BCL2', 'BAX', 'BAK',  # Apoptosis
+            'SMC', 'TOP2', 'PCNA',  # DNA replication/repair
+            'RAB', 'RAC', 'RHO', 'CDC42',  # Small GTPases
+            'PLEC', 'DSP', 'JUP',  # Structural
+        }
         
-        return 0.4
+        # Check highly conserved families (prefix match)
+        for prefix in highly_conserved:
+            if gene_upper.startswith(prefix) or gene_upper == prefix:
+                score = 0.85
+                break
+        
+        # Check moderately conserved families
+        if score < 0.5:
+            for prefix in moderately_conserved:
+                if gene_upper.startswith(prefix) or gene_upper == prefix:
+                    score = 0.65
+                    break
+        
+        # Bonus for known functional sites (K48, K63 for ubiquitin; S/T/Y for phospho)
+        if site:
+            site_upper = site.upper()
+            # Well-known ubiquitin chain sites
+            if site_upper in ('K48', 'K63', 'K11', 'K27', 'K29', 'K33', 'K6'):
+                score = min(score + 0.15, 1.0)
+            # Well-known phosphorylation motifs (S/T-P, Y)
+            elif site_upper.startswith('Y') and len(site_upper) <= 5:
+                score = min(score + 0.1, 1.0)
+        
+        # Check if gene is in pathway DB (indicates functional importance)
+        pathway_db = get_pathway_db(self.detected_ptm_type)
+        if gene_upper in pathway_db:
+            score = min(score + 0.1, 1.0)
+        
+        # Check md_context for gene mentions (more mentions = more studied = more conserved)
+        if self.md_context:
+            mention_count = self.md_context.lower().count(gene.lower())
+            if mention_count >= 5:
+                score = min(score + 0.1, 1.0)
+            elif mention_count >= 2:
+                score = min(score + 0.05, 1.0)
+        
+        return round(score, 2)
+    
+    def _score_clinical(self, gene: str) -> float:
+        """Score clinical relevance based on known disease associations.
+        
+        Uses tiered scoring:
+        - Tier 1 (0.9): Direct drug targets with FDA-approved therapies
+        - Tier 2 (0.7): Known disease genes with therapeutic potential
+        - Tier 3 (0.5): Genes in disease-associated pathways
+        - Tier 4 (0.3): No known clinical association
+        """
+        gene_upper = gene.upper()
+        
+        # Tier 1: Direct drug targets with FDA-approved therapies
+        tier1_genes = {
+            'EGFR', 'ERBB2', 'BRAF', 'ALK', 'MET', 'KIT', 'PDGFRA', 'FGFR1', 'FGFR2', 'FGFR3',
+            'AKT1', 'MTOR', 'PIK3CA', 'CDK4', 'CDK6', 'BTK', 'JAK2', 'FLT3', 'RET',
+            'BCR', 'ABL1', 'VEGFR', 'KDR', 'PDGFRB',
+        }
+        
+        # Tier 2: Known disease genes
+        tier2_genes = {
+            'TP53', 'RB1', 'PTEN', 'KRAS', 'NRAS', 'HRAS',
+            'MDM2', 'VHL', 'BRCA1', 'BRCA2', 'APC', 'SMAD4',
+            'PARKIN', 'PRKN', 'UCHL1', 'BAP1', 'FBXW7', 'KEAP1',
+            'LMNA', 'DMD', 'TTN', 'MYH7', 'SCN5A',
+            'CFTR', 'HTT', 'SMN1', 'FMR1',
+        }
+        
+        # Tier 3: Genes in disease-associated pathways
+        tier3_genes = {
+            'MAPK1', 'MAPK3', 'MAP2K1', 'MAP2K2', 'RAF1',
+            'STAT3', 'STAT5A', 'STAT5B', 'JAK1', 'JAK3',
+            'CASP3', 'CASP8', 'CASP9', 'BCL2', 'BAX',
+            'CTNNB1', 'GSK3B', 'NOTCH1', 'WNT1',
+            'HDAC1', 'HDAC2', 'HDAC3', 'SIRT1',
+            'CUL3', 'CUL4A', 'RBX1', 'SKP1',
+            'UBE2D', 'UBE2N', 'UBE2L3',
+            'HSP90AA1', 'HSP90AB1',
+        }
+        
+        if gene_upper in tier1_genes:
+            return 0.9
+        elif gene_upper in tier2_genes:
+            return 0.7
+        elif gene_upper in tier3_genes:
+            return 0.5
+        
+        # Check prefix matches for gene families
+        for prefix in ['HDAC', 'SIRT', 'CUL', 'UBE2', 'UBE3', 'RNF', 'TRIM', 'MARCH']:
+            if gene_upper.startswith(prefix):
+                return 0.5
+        
+        return 0.3
 
 
 # ============================================================================
@@ -929,6 +1029,12 @@ class UpstreamInferrer:
                     is_relevant_edge = any(kw in evidence_lower for kw in ['ppi', 'interaction', 'regulation', 'substrate'])
                 
                 if is_relevant_edge:
+                    # Filter out self-references (e.g., Plec→Plec, Vim→Vim)
+                    source_gene_name = source.split('-')[0] if '-' in source else source
+                    target_gene_name = target_node.split('-')[0] if '-' in target_node else target_node
+                    if source_gene_name.upper() == target_gene_name.upper():
+                        continue  # Skip self-referencing edges
+                    
                     if target_node not in upstream_map:
                         upstream_map[target_node] = {'regulators': [], 'pathways': [], 'evidence': []}
                     if source and source not in upstream_map[target_node]['regulators']:
@@ -959,7 +1065,9 @@ class UpstreamInferrer:
                     for edge in net.get('active_edges', []) + net.get('inhibited_edges', []):
                         if edge.get('source', '') == gene:
                             target_node = edge.get('target', '')
-                            if target_node:
+                            # Filter out self-references
+                            target_gene_name = target_node.split('-')[0] if '-' in target_node else target_node
+                            if target_node and target_gene_name.upper() != gene.upper():
                                 if target_node not in upstream_map:
                                     upstream_map[target_node] = {'regulators': [], 'pathways': [], 'evidence': []}
                                 if gene not in upstream_map[target_node]['regulators']:
@@ -993,7 +1101,7 @@ class UpstreamInferrer:
                 if gene in upstream_map:
                     pathways = node.get('pathways', [])
                     for pw in pathways:
-                        cleaned = clean_pathway_text(_pathway_to_str(pw))
+                        cleaned = clean_pathway_text(pw)
                         if cleaned and cleaned not in upstream_map[gene]['pathways']:
                             upstream_map[gene]['pathways'].append(cleaned)
         
@@ -1061,6 +1169,10 @@ class UpstreamInferrer:
                         source_gene = source.split('-')[0] if '-' in source else source
                         target_gene = target_node.split('-')[0] if '-' in target_node else target_node
                         
+                        # Filter out self-references
+                        if source_gene.upper() == target_gene.upper():
+                            continue
+                        
                         if source_gene in network_regulators and target_gene in scored_genes:
                             if target_gene not in upstream_map:
                                 upstream_map[target_gene] = {'regulators': [], 'pathways': [], 'evidence': []}
@@ -1105,12 +1217,14 @@ class UpstreamInferrer:
                 
                 # For genes without regulators, check if they share pathways with known regulators
                 for gene in genes_without_regulators:
-                    raw_pathways = upstream_map[gene].get('pathways', [])
-                    gene_pathways = {_pathway_to_str(p) for p in raw_pathways}
+                    gene_pathways = set(upstream_map[gene].get('pathways', []))
                     if not gene_pathways:
                         continue
                     
                     for reg in all_network_regulators:
+                        # Filter out self-references
+                        if reg.upper() == gene.upper():
+                            continue
                         reg_upper = reg.upper()
                         reg_pathways = set(self.pathway_db.get(reg_upper, []))
                         shared = gene_pathways & reg_pathways
@@ -1347,8 +1461,129 @@ class DrugSearcher:
         self._molecule_name_cache[chembl_id] = chembl_id
         return chembl_id
     
+    def _is_promiscuous_compound(self, molecule_chembl_id: str) -> bool:
+        """Check if a compound is promiscuous (kinobeads/chemoproteomics artifact).
+        
+        Promiscuous compounds have activity records against hundreds or thousands
+        of targets, typically from kinobeads or chemoproteomics profiling screens.
+        These are NOT meaningful drug-target interactions for repositioning.
+        
+        Criteria:
+        - Total activity count > 500 → likely kinobeads/chemoproteomics
+        - No preferred name and no max_phase → uncharacterized screening hit
+        
+        On timeout/error: returns False (non-promiscuous) to avoid
+        incorrectly filtering out valid drug candidates.
+        """
+        if not molecule_chembl_id:
+            return False
+        
+        # Check cache first
+        cache_key = f"_promiscuous_{molecule_chembl_id}"
+        if cache_key in self._molecule_name_cache:
+            return self._molecule_name_cache[cache_key]
+        
+        is_promiscuous = False
+        max_retries = 2
+        promiscuity_timeout = 30  # Longer timeout for promiscuity checks
+        
+        for attempt in range(max_retries + 1):
+            try:
+                # Check molecule metadata
+                url = f"{self.CHEMBL_BASE}/molecule/{molecule_chembl_id}.json"
+                resp = self.session.get(url, timeout=promiscuity_timeout)
+                if resp.status_code == 200:
+                    mol_data = resp.json()
+                    pref_name = mol_data.get('pref_name') or ''
+                    max_phase = mol_data.get('max_phase')
+                    molecule_type = mol_data.get('molecule_type') or ''
+                    
+                    # If it has a preferred name and max_phase, it's likely a real drug
+                    if pref_name and max_phase and max_phase >= 1:
+                        self._molecule_name_cache[cache_key] = False
+                        return False
+                
+                # Check total activity count
+                url = f"{self.CHEMBL_BASE}/activity.json"
+                params = {
+                    'molecule_chembl_id': molecule_chembl_id,
+                    'limit': 1,
+                    'format': 'json',
+                }
+                resp = self.session.get(url, params=params, timeout=promiscuity_timeout)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    total_count = data.get('page_meta', {}).get('total_count', 0)
+                    
+                    if total_count > 500:
+                        sse_log(f"  Filtering promiscuous compound {molecule_chembl_id} "
+                               f"({total_count} activities - likely kinobeads/chemoproteomics)", "INFO")
+                        is_promiscuous = True
+                
+                # Success - break out of retry loop
+                break
+                        
+            except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+                if attempt < max_retries:
+                    wait_time = 2 ** (attempt + 1)  # Exponential backoff: 2s, 4s
+                    sse_log(f"  Promiscuity check timeout for {molecule_chembl_id} "
+                           f"(attempt {attempt + 1}/{max_retries + 1}), retrying in {wait_time}s...", "WARNING")
+                    import time
+                    time.sleep(wait_time)
+                else:
+                    # All retries exhausted - assume non-promiscuous to avoid
+                    # incorrectly filtering out valid drug candidates
+                    sse_log(f"  Promiscuity check failed for {molecule_chembl_id} after "
+                           f"{max_retries + 1} attempts: {e}. Assuming non-promiscuous.", "WARNING")
+                    is_promiscuous = False
+            except Exception as e:
+                sse_log(f"  Promiscuity check error for {molecule_chembl_id}: {e}. "
+                       f"Assuming non-promiscuous.", "WARNING")
+                is_promiscuous = False
+                break
+        
+        self._molecule_name_cache[cache_key] = is_promiscuous
+        return is_promiscuous
+    
+    def _is_kinobeads_activity(self, activity: Dict) -> bool:
+        """Check if an activity record is from a kinobeads/chemoproteomics assay.
+        
+        Kinobeads assays typically have:
+        - assay_description containing 'kinobeads', 'chemoproteomics', 'affinity purification'
+        - bao_label containing 'affinity' or 'proteomics'
+        - Very large number of targets per compound
+        """
+        assay_desc = (activity.get('assay_description', '') or '').lower()
+        bao_label = (activity.get('bao_label', '') or '').lower()
+        assay_type = (activity.get('assay_type', '') or '').upper()
+        
+        kinobeads_keywords = [
+            'kinobeads', 'kinobead', 'chemoproteomics', 'chemoproteomic',
+            'affinity purification', 'affinity capture', 'pulldown',
+            'pull-down', 'bead-based', 'bead based', 'immobilized',
+            'chemical proteomics', 'target deconvolution',
+            'thermal proteome profiling', 'tpp', 'cetsa',
+        ]
+        
+        for kw in kinobeads_keywords:
+            if kw in assay_desc:
+                return True
+        
+        if 'proteomics' in bao_label or 'affinity' in bao_label:
+            return True
+        
+        return False
+    
     def _search_chembl(self, gene: str) -> List[DrugCandidate]:
-        """Search ChEMBL for drugs targeting a gene"""
+        """Search ChEMBL for drugs targeting a gene.
+        
+        v4.0: Filters out kinobeads/chemoproteomics artifacts and promiscuous compounds.
+        
+        Strategy:
+        1. Find target in ChEMBL by gene name
+        2. Search mechanism-based drug-target relationships (highest confidence)
+        3. Search bioactivities with kinobeads/promiscuity filtering
+        """
         candidates = []
         
         try:
@@ -1369,7 +1604,8 @@ class DrugSearcher:
             if not target_chembl_id:
                 return candidates
             
-            # Step 2: Find approved drugs for this target
+            # Step 2: Find approved drugs via mechanism of action (highest confidence)
+            # Mechanism-based results are curated and reliable
             url = f"{self.CHEMBL_BASE}/mechanism.json"
             params = {'target_chembl_id': target_chembl_id, 'limit': 10, 'format': 'json'}
             
@@ -1400,13 +1636,13 @@ class DrugSearcher:
                         approval_status=str(mech.get('max_phase', '')),
                     ))
             
-            # Step 3: Also search for bioactivities
+            # Step 3: Search bioactivities with kinobeads/promiscuity filtering
             if len(candidates) < 3:
                 url = f"{self.CHEMBL_BASE}/activity.json"
                 params = {
                     'target_chembl_id': target_chembl_id,
                     'pchembl_value__gte': 6,
-                    'limit': 5,
+                    'limit': 15,  # Fetch more to allow for filtering
                     'format': 'json',
                 }
                 
@@ -1416,24 +1652,48 @@ class DrugSearcher:
                     activities = data.get('activities', [])
                     
                     seen_molecules = {c.drug_id for c in candidates}
+                    filtered_count = 0
+                    
                     for act in activities:
                         mol_id = act.get('molecule_chembl_id', '')
-                        if mol_id and mol_id not in seen_molecules:
-                            raw_name = act.get('molecule_name', '') or ''
-                            if not raw_name or raw_name.startswith('CHEMBL'):
-                                drug_name = self._resolve_molecule_name(mol_id)
-                            else:
-                                drug_name = raw_name
-                            
-                            candidates.append(DrugCandidate(
-                                drug_name=drug_name or mol_id,
-                                drug_id=mol_id,
-                                source='ChEMBL',
-                                target_gene=gene,
-                                activity_type=act.get('standard_type', ''),
-                                activity_value=f"{act.get('standard_value', '')} {act.get('standard_units', '')}".strip(),
-                            ))
+                        if not mol_id or mol_id in seen_molecules:
+                            continue
+                        
+                        # Filter 1: Skip kinobeads/chemoproteomics assays
+                        if self._is_kinobeads_activity(act):
+                            sse_log(f"  Skipping kinobeads activity: {mol_id} for {gene}", "INFO")
+                            filtered_count += 1
                             seen_molecules.add(mol_id)
+                            continue
+                        
+                        # Filter 2: Skip promiscuous compounds (>500 total activities)
+                        if self._is_promiscuous_compound(mol_id):
+                            filtered_count += 1
+                            seen_molecules.add(mol_id)
+                            continue
+                        
+                        raw_name = act.get('molecule_name', '') or ''
+                        if not raw_name or raw_name.startswith('CHEMBL'):
+                            drug_name = self._resolve_molecule_name(mol_id)
+                        else:
+                            drug_name = raw_name
+                        
+                        candidates.append(DrugCandidate(
+                            drug_name=drug_name or mol_id,
+                            drug_id=mol_id,
+                            source='ChEMBL',
+                            target_gene=gene,
+                            activity_type=act.get('standard_type', ''),
+                            activity_value=f"{act.get('standard_value', '')} {act.get('standard_units', '')}".strip(),
+                        ))
+                        seen_molecules.add(mol_id)
+                        
+                        # Stop after enough valid candidates
+                        if len(candidates) >= 5:
+                            break
+                    
+                    if filtered_count > 0:
+                        sse_log(f"  Filtered {filtered_count} promiscuous/kinobeads compounds for {gene}", "INFO")
         
         except requests.exceptions.RequestException as e:
             sse_log(f"  ChEMBL search failed for {gene}: {e}", "WARNING")
@@ -1655,12 +1915,12 @@ class RepositioningEvaluator:
                     candidate.repositioning_score = self._extract_score(response)
                 else:
                     candidate.llm_evaluation = "Evaluation not available."
-                    candidate.repositioning_score = 50
+                    candidate.repositioning_score = self._calculate_fallback_score(candidate)
                     
             except Exception as e:
                 sse_log(f"  LLM evaluation failed for {candidate.target_gene}: {e}", "WARNING")
                 candidate.llm_evaluation = f"Evaluation failed: {str(e)[:100]}"
-                candidate.repositioning_score = 50
+                candidate.repositioning_score = self._calculate_fallback_score(candidate)
         
         sse_log(f"[DR-75%] LLM evaluation complete for {len(candidates)} candidates", "INFO")
         return candidates
@@ -1717,6 +1977,48 @@ Please provide:
 Format your response as a concise scientific assessment. End with "Score: XX/100"."""
         
         return prompt
+    
+    def _calculate_fallback_score(self, candidate: RepositioningCandidate) -> float:
+        """Calculate a data-driven fallback score when LLM evaluation fails.
+        
+        Uses PTM score, drug source quality, and upstream regulator availability
+        to generate a differentiated score instead of a flat 50.
+        """
+        score = 30.0  # Base score
+        
+        # PTM druggability score contribution (0-20 points)
+        ptm_contribution = min(candidate.ptm_score / 100.0 * 20, 20)
+        score += ptm_contribution
+        
+        # Drug source quality (0-15 points)
+        if candidate.drug.source == 'ChEMBL':
+            score += 10
+            if candidate.drug.mechanism_of_action:
+                score += 5
+        elif candidate.drug.source == 'PubChem':
+            score += 5
+        
+        # Upstream regulator identified (0-10 points)
+        if candidate.upstream_regulator and candidate.upstream_regulator != 'Not identified':
+            score += 10
+        
+        # Signaling pathway known (0-5 points)
+        if candidate.signaling_pathway and candidate.signaling_pathway != 'Not determined':
+            score += 5
+        
+        # Clinical trials found (0-10 points)
+        if candidate.clinical_trials:
+            score += min(len(candidate.clinical_trials) * 3, 10)
+        
+        # Drug approval status bonus (0-10 points)
+        if candidate.drug.approval_status:
+            status_lower = candidate.drug.approval_status.lower()
+            if 'approved' in status_lower:
+                score += 10
+            elif 'phase' in status_lower:
+                score += 5
+        
+        return min(max(round(score, 1), 0), 100)
     
     def _extract_score(self, response: str) -> float:
         """Extract repositioning score from LLM response"""
@@ -1884,12 +2186,10 @@ Each drug-target pair was evaluated by a large language model (LLM) to assess bi
             tier_short = tier.split(' - ')[0] if ' - ' in tier else tier
             
             regulators = target.get('all_upstream_regulators', [])
-            regulator_str = ', '.join(str(r) for r in regulators[:3]) if regulators else 'N/A'
+            regulator_str = ', '.join(regulators[:3]) if regulators else 'N/A'
             
             pathways = target.get('signaling_pathways', [])
-            pathway_str = ', '.join(
-                p.get("name", str(p)) if isinstance(p, dict) else str(p) for p in pathways[:2]
-            ) if pathways else 'N/A'
+            pathway_str = ', '.join(pathways[:2]) if pathways else 'N/A'
             
             lines.append(f"| {i} | {gene} | {site} | {score:.1f} | {raw_log2fc:.2f} | {tier_short} | {regulator_str} | {pathway_str} |")
         
@@ -1937,9 +2237,9 @@ Each drug-target pair was evaluated by a large language model (LLM) to assess bi
             if regulators or pathways:
                 lines.append(f"**{gene}** ({target.get('site', '')})")
                 if regulators:
-                    lines.append(f"- {upstream_label_plural}: {', '.join(str(r) for r in regulators)}")
+                    lines.append(f"- {upstream_label_plural}: {', '.join(regulators)}")
                 if pathways:
-                    lines.append(f"- Signaling Pathway(s): {', '.join(p.get('name', str(p)) if isinstance(p, dict) else str(p) for p in pathways[:5])}")
+                    lines.append(f"- Signaling Pathway(s): {', '.join(pathways[:5])}")
                 if evidence:
                     for ev in evidence[:2]:
                         lines.append(f"  - Evidence: {ev.get('source', '')} → {ev.get('target', '')} ({ev.get('type', '')}, {ev.get('timepoint', '')})")
@@ -2033,6 +2333,12 @@ Each drug-target pair was evaluated by a large language model (LLM) to assess bi
             lines.append(f"- **Repositioning Score**: {candidate.repositioning_score:.0f}/100")
             lines.append(f"- **{upstream_label}**: {candidate.upstream_regulator or 'Not identified'}")
             lines.append(f"- **Signaling Pathway**: {candidate.signaling_pathway or 'Not determined'}")
+            # v3.3: Show drug-target relationship type
+            rel_type = getattr(candidate, 'relationship_type', 'direct')
+            if rel_type == 'indirect_via_upstream':
+                lines.append(f"- **Drug-Target Relationship**: Indirect (via upstream {upstream_label.lower()} inhibition)")
+            else:
+                lines.append(f"- **Drug-Target Relationship**: Direct target")
             lines.append("")
             
             if candidate.llm_evaluation:
@@ -2261,17 +2567,19 @@ class DrugRepositioningPipeline:
                 gene_trials = trials.get(gene, [])
                 
                 regulators = target.get('all_upstream_regulators', [])
-                regulator_str = ', '.join(str(r) for r in regulators[:3]) if regulators else ''
+                regulator_str = ', '.join(regulators[:3]) if regulators else ''
                 pathways = target.get('signaling_pathways', [])
-                pathway_str = ', '.join(
-                    p.get("name", str(p)) if isinstance(p, dict) else str(p) for p in pathways[:3]
-                ) if pathways else ''
+                pathway_str = ', '.join(pathways[:3]) if pathways else ''
                 
                 # v3.1: Use the actual PTM type from the target, not hardcoded
                 actual_ptm_type = target.get('ptm_type', detected_ptm_type)
                 
                 if gene_drugs:
                     for drug in gene_drugs[:3]:
+                        # v3.3: Determine relationship type
+                        rel_type = self._determine_relationship_type(
+                            gene, drug, regulators, detected_ptm_type
+                        )
                         candidates.append(RepositioningCandidate(
                             target_gene=gene,
                             target_site=target.get('site', ''),
@@ -2281,6 +2589,7 @@ class DrugRepositioningPipeline:
                             signaling_pathway=pathway_str,
                             drug=drug,
                             clinical_trials=gene_trials,
+                            relationship_type=rel_type,
                         ))
                 else:
                     candidates.append(RepositioningCandidate(
@@ -2357,6 +2666,51 @@ class DrugRepositioningPipeline:
                 'report_sections': '',
                 'candidates': [],
             }
+    
+    def _determine_relationship_type(self, gene: str, drug: DrugCandidate, 
+                                      regulators: List[str], ptm_type: str) -> str:
+        """Determine the relationship type between drug and PTM target.
+        
+        Returns:
+            'direct': Drug directly targets the PTM-modified protein
+            'indirect_via_upstream': Drug targets an upstream regulator that modifies the protein
+        
+        Logic:
+        1. If drug.target_gene mentions 'upstream of', it's indirect
+        2. If drug was found via upstream regulator search, it's indirect
+        3. If the drug's known targets (from mechanism_of_action) match a regulator, it's indirect
+        4. Otherwise, it's direct
+        """
+        # Check if drug was explicitly found via upstream regulator search
+        if drug.target_gene and 'upstream of' in drug.target_gene.lower():
+            return 'indirect_via_upstream'
+        
+        # Check if drug target gene differs from the PTM target gene
+        if drug.target_gene and drug.target_gene.upper() != gene.upper():
+            # Drug targets a different gene - check if it's a known regulator
+            drug_target_upper = drug.target_gene.upper()
+            for reg in regulators:
+                if reg.upper() == drug_target_upper:
+                    return 'indirect_via_upstream'
+        
+        # Check mechanism of action for upstream regulator keywords
+        ptm_config = get_ptm_config(ptm_type)
+        if drug.mechanism_of_action:
+            moa_lower = drug.mechanism_of_action.lower()
+            # Known indirect patterns
+            indirect_keywords = [
+                'kinase inhibitor', 'e3 ligase', 'proteasome inhibitor',
+                'deubiquitinase', 'phosphatase inhibitor', 'acetyltransferase',
+                'deacetylase inhibitor', 'hdac inhibitor',
+            ]
+            for keyword in indirect_keywords:
+                if keyword in moa_lower:
+                    # Check if the drug's actual target is a regulator, not the gene itself
+                    for reg in regulators:
+                        if reg.lower() in moa_lower or reg.lower() in drug.drug_name.lower():
+                            return 'indirect_via_upstream'
+        
+        return 'direct'
 
 
 # ============================================================================
