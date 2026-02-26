@@ -279,6 +279,15 @@ def detect_ptm_type_from_data(analysis_results: Dict, md_content: str = "") -> s
 # Utility: Clean pathway text (remove species names)
 # ============================================================================
 
+def _pathway_to_str(p) -> str:
+    """Convert pathway item to string (handles dicts from enriched data)."""
+    if isinstance(p, str):
+        return p
+    if isinstance(p, dict):
+        return p.get("name") or p.get("pathway") or str(p)
+    return str(p)
+
+
 def clean_pathway_text(pathway: str) -> str:
     """Remove species names and clean up pathway text."""
     if not pathway:
@@ -1101,7 +1110,7 @@ class UpstreamInferrer:
                 if gene in upstream_map:
                     pathways = node.get('pathways', [])
                     for pw in pathways:
-                        cleaned = clean_pathway_text(pw)
+                        cleaned = clean_pathway_text(_pathway_to_str(pw))
                         if cleaned and cleaned not in upstream_map[gene]['pathways']:
                             upstream_map[gene]['pathways'].append(cleaned)
         
@@ -1217,7 +1226,8 @@ class UpstreamInferrer:
                 
                 # For genes without regulators, check if they share pathways with known regulators
                 for gene in genes_without_regulators:
-                    gene_pathways = set(upstream_map[gene].get('pathways', []))
+                    raw_pathways = upstream_map[gene].get('pathways', [])
+                    gene_pathways = {_pathway_to_str(p) for p in raw_pathways}
                     if not gene_pathways:
                         continue
                     
@@ -2186,10 +2196,12 @@ Each drug-target pair was evaluated by a large language model (LLM) to assess bi
             tier_short = tier.split(' - ')[0] if ' - ' in tier else tier
             
             regulators = target.get('all_upstream_regulators', [])
-            regulator_str = ', '.join(regulators[:3]) if regulators else 'N/A'
+            regulator_str = ', '.join(str(r) for r in regulators[:3]) if regulators else 'N/A'
             
             pathways = target.get('signaling_pathways', [])
-            pathway_str = ', '.join(pathways[:2]) if pathways else 'N/A'
+            pathway_str = ', '.join(
+                p.get("name", str(p)) if isinstance(p, dict) else str(p) for p in pathways[:2]
+            ) if pathways else 'N/A'
             
             lines.append(f"| {i} | {gene} | {site} | {score:.1f} | {raw_log2fc:.2f} | {tier_short} | {regulator_str} | {pathway_str} |")
         
@@ -2237,9 +2249,9 @@ Each drug-target pair was evaluated by a large language model (LLM) to assess bi
             if regulators or pathways:
                 lines.append(f"**{gene}** ({target.get('site', '')})")
                 if regulators:
-                    lines.append(f"- {upstream_label_plural}: {', '.join(regulators)}")
+                    lines.append(f"- {upstream_label_plural}: {', '.join(str(r) for r in regulators)}")
                 if pathways:
-                    lines.append(f"- Signaling Pathway(s): {', '.join(pathways[:5])}")
+                    lines.append(f"- Signaling Pathway(s): {', '.join(p.get('name', str(p)) if isinstance(p, dict) else str(p) for p in pathways[:5])}")
                 if evidence:
                     for ev in evidence[:2]:
                         lines.append(f"  - Evidence: {ev.get('source', '')} → {ev.get('target', '')} ({ev.get('type', '')}, {ev.get('timepoint', '')})")
@@ -2567,9 +2579,11 @@ class DrugRepositioningPipeline:
                 gene_trials = trials.get(gene, [])
                 
                 regulators = target.get('all_upstream_regulators', [])
-                regulator_str = ', '.join(regulators[:3]) if regulators else ''
+                regulator_str = ', '.join(str(r) for r in regulators[:3]) if regulators else ''
                 pathways = target.get('signaling_pathways', [])
-                pathway_str = ', '.join(pathways[:3]) if pathways else ''
+                pathway_str = ', '.join(
+                    p.get("name", str(p)) if isinstance(p, dict) else str(p) for p in pathways[:3]
+                ) if pathways else ''
                 
                 # v3.1: Use the actual PTM type from the target, not hardcoded
                 actual_ptm_type = target.get('ptm_type', detected_ptm_type)
