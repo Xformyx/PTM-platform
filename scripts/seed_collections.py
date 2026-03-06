@@ -31,13 +31,68 @@ from app.core.database import Base
 # ---------------------------------------------------------------------------
 
 DEFAULT_COLLECTIONS = [
-    # Tier 1: Cell type / Tissue
+    # =========================================================================
+    # Active Collections (migrated from ptm-chromadb-web, with actual data)
+    # =========================================================================
     {
-        "name": "Muscle Biology",
-        "description": "Skeletal and cardiac muscle biology, myogenesis, muscle fiber types, exercise physiology",
+        "name": "MUSCLE",
+        "description": "Muscle biology literature covering skeletal muscle signaling and exercise physiology",
         "tier": "cell_type",
-        "chromadb_name": "muscle_biology",
+        "chromadb_name": "MUSCLE",
     },
+    {
+        "name": "Muscle Cell Signaling",
+        "description": "Exercise-regulated mitochondrial and nuclear signaling networks in skeletal muscle",
+        "tier": "cell_type",
+        "chromadb_name": "muscle_cell_signaling",
+    },
+    {
+        "name": "Muscle Review Semantic",
+        "description": "Muscle review papers with semantic sentence-boundary chunking",
+        "tier": "cell_type",
+        "chromadb_name": "Muscle_Review_Semantic",
+    },
+    {
+        "name": "Muscle Reviews",
+        "description": "Muscle biology review papers covering muscle development and physiology",
+        "tier": "cell_type",
+        "chromadb_name": "Muscle_Reviews",
+    },
+    {
+        "name": "Osteo Review Semantic",
+        "description": "Osteocyte review papers with semantic chunking for improved contextual retrieval",
+        "tier": "cell_type",
+        "chromadb_name": "Osteo_Review_Semantic",
+    },
+    {
+        "name": "Osteocyte Review",
+        "description": "Osteocyte biology review papers covering bone cell signaling and mechanotransduction",
+        "tier": "cell_type",
+        "chromadb_name": "Osteocyte_Review",
+    },
+    {
+        "name": "Hippocampal Neurons",
+        "description": "Hippocampal neuron biology, synaptic signaling, neuronal development",
+        "tier": "cell_type",
+        "chromadb_name": "Hippocampal_Neurons",
+    },
+    {
+        "name": "Cell Signaling Book",
+        "description": "Cell signaling textbook - comprehensive reference covering signaling pathways, kinases, phosphatases",
+        "tier": "pathway",
+        "chromadb_name": "Cell_Signaling_Book",
+    },
+    {
+        "name": "Cell Signaling Semantic",
+        "description": "Cell signaling research papers with semantic sentence-boundary chunking for better retrieval",
+        "tier": "pathway",
+        "chromadb_name": "Cell_Signaling_Semantic",
+    },
+
+    # =========================================================================
+    # Template Collections (pre-defined categories for future use)
+    # =========================================================================
+    # Tier 1: Cell type / Tissue
     {
         "name": "Neuroscience",
         "description": "Neuronal signaling, synaptic plasticity, neurodegeneration, brain development",
@@ -155,6 +210,7 @@ DEFAULT_COLLECTIONS = [
         "chromadb_name": "apoptosis",
     },
     # Tier 4: General knowledge
+    # Note: Cell_Signaling_Book above serves as the primary textbook collection
     {
         "name": "Textbooks",
         "description": "General biochemistry and cell biology textbook content",
