@@ -263,6 +263,8 @@ async def create_order(
     pg_matrix: UploadFile = File(...),
     config_file: Optional[UploadFile] = File(None),
     protein_list: Optional[UploadFile] = File(None),
+    secondary_pr_matrix: Optional[UploadFile] = File(None),
+    secondary_pg_matrix: Optional[UploadFile] = File(None),
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
@@ -310,6 +312,14 @@ async def create_order(
 
     pr_path = await save_upload(pr_matrix)
     pg_path = await save_upload(pg_matrix)
+
+    # Secondary files for Cross-Talk mode
+    secondary_pr_path = None
+    secondary_pg_path = None
+    if secondary_pr_matrix and secondary_pr_matrix.filename:
+        secondary_pr_path = await save_upload(secondary_pr_matrix, "secondary")
+    if secondary_pg_matrix and secondary_pg_matrix.filename:
+        secondary_pg_path = await save_upload(secondary_pg_matrix, "secondary")
 
     fasta_path = _resolve_fasta(settings.REFERENCE_DIR, species)
     if not fasta_path:
@@ -365,6 +375,8 @@ async def create_order(
         pg_matrix_path=pg_path,
         fasta_path=fasta_path,
         config_xlsx_path=config_path,
+        secondary_pr_matrix_path=secondary_pr_path,
+        secondary_pg_matrix_path=secondary_pg_path,
     )
 
     db.add(order)
@@ -436,6 +448,8 @@ async def start_order(
         "pg_matrix_path": order.pg_matrix_path,
         "fasta_path": order.fasta_path,
         "config_xlsx_path": order.config_xlsx_path,
+        "secondary_pr_matrix_path": order.secondary_pr_matrix_path,
+        "secondary_pg_matrix_path": order.secondary_pg_matrix_path,
         "ptm_mode": ptm_mode,
         "condition_map": condition_map if condition_map else None,
         "species_tax_id": species_map.get(species_lower, "10090"),
@@ -675,6 +689,8 @@ async def run_stage(
             "pg_matrix_path": order.pg_matrix_path,
             "fasta_path": order.fasta_path,
             "config_xlsx_path": order.config_xlsx_path,
+            "secondary_pr_matrix_path": order.secondary_pr_matrix_path,
+            "secondary_pg_matrix_path": order.secondary_pg_matrix_path,
             "ptm_mode": ptm_mode,
             "condition_map": condition_map if condition_map else None,
             "species_tax_id": species_map.get(species_lower, "10090"),

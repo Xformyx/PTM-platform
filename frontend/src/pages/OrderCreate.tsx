@@ -5,7 +5,7 @@ import {
   Check, Upload, AlertCircle, ArrowLeft, ArrowRight, Loader2,
   FileSpreadsheet, Regex, Trash2, SlidersHorizontal, Brain,
   Plus, X, MessageSquare, Network, FlaskConical, BookOpen,
-  ChevronDown, ChevronUp, Settings2, RotateCcw,
+  ChevronDown, ChevronUp, Settings2, RotateCcw, GitMerge,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
@@ -159,7 +159,8 @@ export default function OrderCreate() {
     project_name: "", ptm_type: "phosphorylation", species: "mouse",
     cell_type: "", treatment: "", time_points: "", biological_question: "", special_conditions: "",
     report_type: "comprehensive", top_n_ptms: 20, llm_model: "", rag_llm_model: "",
-    analysis_mode: "ptm_only" as "ptm_only" | "ptm_nonptm_network",
+    analysis_mode: "ptm_only" as "ptm_only" | "ptm_nonptm_network" | "cross_talk",
+    secondary_ptm_type: "ubiquitination",
   });
   const [researchQuestions, setResearchQuestions] = useState<string[]>([]);
   const [newQuestion, setNewQuestion] = useState("");
@@ -168,6 +169,9 @@ export default function OrderCreate() {
   const [files, setFiles] = useState<{
     pr_matrix: File | null; pg_matrix: File | null; config_file: File | null;
   }>({ pr_matrix: null, pg_matrix: null, config_file: null });
+  const [secondaryFiles, setSecondaryFiles] = useState<{
+    pr_matrix: File | null; pg_matrix: File | null;
+  }>({ pr_matrix: null, pg_matrix: null });
 
   // Step 1: Sample Config
   const [sampleColumns, setSampleColumns] = useState<string[]>([]);
@@ -276,6 +280,10 @@ export default function OrderCreate() {
       setError("PR Matrix and PG Matrix files are required");
       return;
     }
+    if (form.analysis_mode === "cross_talk" && (!secondaryFiles.pr_matrix || !secondaryFiles.pg_matrix)) {
+      setError("Cross-Talk mode requires secondary PR Matrix and PG Matrix files");
+      return;
+    }
     if (samples.length === 0) {
       setError("Sample configuration is required. Go back to Step 2 and configure samples.");
       return;
@@ -336,6 +344,11 @@ export default function OrderCreate() {
     if (files.config_file) formData.append("config_file", files.config_file);
     if (analysisOptions.mode === "protein_list" && proteinListFile) {
       formData.append("protein_list", proteinListFile);
+    }
+    if (form.analysis_mode === "cross_talk") {
+      formData.append("secondary_ptm_type", form.secondary_ptm_type);
+      if (secondaryFiles.pr_matrix) formData.append("secondary_pr_matrix", secondaryFiles.pr_matrix);
+      if (secondaryFiles.pg_matrix) formData.append("secondary_pg_matrix", secondaryFiles.pg_matrix);
     }
 
     try {
@@ -633,7 +646,7 @@ export default function OrderCreate() {
                 {/* Analysis Mode Selection */}
                 <div className="space-y-3">
                   <Label className="text-sm font-semibold">Analysis Mode</Label>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-3 gap-3">
                     <button
                       type="button"
                       onClick={() => setForm({ ...form, analysis_mode: "ptm_only" })}
@@ -674,8 +687,66 @@ export default function OrderCreate() {
                         <Badge variant="secondary" className="text-[9px]">STRING-DB</Badge>
                       </div>
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => setForm({ ...form, analysis_mode: "cross_talk" })}
+                      className={cn(
+                        "flex flex-col items-start gap-2 rounded-lg border-2 p-4 text-left transition-all",
+                        form.analysis_mode === "cross_talk"
+                          ? "border-amber-500 bg-amber-50/50"
+                          : "border-muted hover:border-muted-foreground/30",
+                      )}
+                    >
+                      <div className="flex items-center gap-2">
+                        <GitMerge className={cn("h-5 w-5", form.analysis_mode === "cross_talk" ? "text-amber-600" : "text-muted-foreground")} />
+                        <span className="font-medium text-sm">Cross-Talk (Phos x Ub)</span>
+                        <Badge variant="outline" className="text-[9px] border-amber-300 text-amber-600">Cross-Talk</Badge>
+                      </div>
+                      <p className="text-xs text-muted-foreground leading-relaxed">
+                        Phosphorylation과 Ubiquitylation 두 PTM 데이터셋을 동시에 분석하여 Dual-PTM 단백질, Concordant/Discordant 패턴, Sequential Gating 메커니즘을 규명합니다.
+                      </p>
+                      <div className="flex gap-1 flex-wrap">
+                        <Badge variant="secondary" className="text-[9px]">Dual-PTM</Badge>
+                        <Badge variant="secondary" className="text-[9px]">Sequential Gating</Badge>
+                        <Badge variant="secondary" className="text-[9px]">TIME LAG</Badge>
+                      </div>
+                    </button>
                   </div>
                 </div>
+
+                {/* Cross-Talk: Secondary PTM Type & Files */}
+                {form.analysis_mode === "cross_talk" && (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50/30 p-4 space-y-4">
+                    <div className="flex items-center gap-2">
+                      <GitMerge className="h-4 w-4 text-amber-600" />
+                      <Label className="font-semibold text-amber-800">Secondary PTM Dataset (Cross-Talk)</Label>
+                    </div>
+                    <p className="text-xs text-amber-700">
+                      위의 기본 파일이 첫 번째 PTM ({form.ptm_type})이라면, 여기에 두 번째 PTM 데이터를 업로드하세요.
+                    </p>
+                    <div className="space-y-2">
+                      <Label className="text-xs">Secondary PTM Type</Label>
+                      <Select value={form.secondary_ptm_type} onValueChange={(v) => setForm({ ...form, secondary_ptm_type: v })}>
+                        <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="phosphorylation">Phosphorylation</SelectItem>
+                          <SelectItem value="ubiquitination">Ubiquitination</SelectItem>
+                          <SelectItem value="acetylation">Acetylation</SelectItem>
+                          <SelectItem value="methylation">Methylation</SelectItem>
+                          <SelectItem value="sumoylation">SUMOylation</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <FileDropZone label="Secondary PR Matrix (.tsv)" accept=".tsv,.csv"
+                      file={secondaryFiles.pr_matrix}
+                      onChange={(f) => setSecondaryFiles({ ...secondaryFiles, pr_matrix: f })}
+                    />
+                    <FileDropZone label="Secondary PG Matrix (.tsv)" accept=".tsv,.csv"
+                      file={secondaryFiles.pg_matrix}
+                      onChange={(f) => setSecondaryFiles({ ...secondaryFiles, pg_matrix: f })}
+                    />
+                  </div>
+                )}
 
                 <Separator />
 
@@ -999,7 +1070,9 @@ export default function OrderCreate() {
                     <span className="text-muted-foreground">Species</span>
                     <span className="font-medium capitalize">{form.species}</span>
                     <span className="text-muted-foreground">Analysis Mode</span>
-                    <span className="font-medium">{form.analysis_mode === "ptm_only" ? "PTM-Only" : "PTM + Network"}</span>
+                    <span className="font-medium">
+                      {form.analysis_mode === "ptm_only" ? "PTM-Only" : form.analysis_mode === "cross_talk" ? "Cross-Talk" : "PTM + Network"}
+                    </span>
                     <span className="text-muted-foreground">Report Type</span>
                     <span className="font-medium">{form.report_type === "extended" ? "Extended" : "Standard"}</span>
                     <span className="text-muted-foreground">Samples</span>

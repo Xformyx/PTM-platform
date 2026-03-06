@@ -7,7 +7,7 @@ import {
   ChevronDown, ChevronUp, Download, FileSpreadsheet, FileJson, File, FolderOpen,
   Copy, Check, Eye, ArrowRightCircle, Sparkles, Plus, X,
   MessageSquare, Loader2, ToggleLeft, ToggleRight, Square,
-  ChartScatter, TrendingUp, ZoomIn, ZoomOut,
+  ChartScatter, TrendingUp, ZoomIn, ZoomOut, GitMerge,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
@@ -25,6 +25,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { cn } from "@/lib/utils";
 import FilePreviewModal from "@/components/FilePreviewModal";
 import RerunOptionsModal from "@/components/RerunOptionsModal";
+import CrossTalkVennDiagram from "@/components/CrossTalkVennDiagram";
+import CrossTalkHeatmap from "@/components/CrossTalkHeatmap";
+import CrossTalkSequentialGating from "@/components/CrossTalkSequentialGating";
+import SignalPropagationTimeline from "@/components/SignalPropagationTimeline";
 import {
   LineChart,
   Line,
@@ -1940,6 +1944,12 @@ export default function OrderDetail() {
             <ChartScatter className="h-3.5 w-3.5 mr-1.5" />
             Vector Plot
           </TabsTrigger>
+          {(order.report_options as any)?.analysis_mode === "cross_talk" && (
+            <TabsTrigger value="cross-talk">
+              <GitMerge className="h-3.5 w-3.5 mr-1.5" />
+              Cross-Talk
+            </TabsTrigger>
+          )}
           <TabsTrigger value="results">Results</TabsTrigger>
         </TabsList>
 
@@ -1957,7 +1967,13 @@ export default function OrderDetail() {
                 <OverviewField label="Species" value={order.species} capitalize />
                 <OverviewField
                   label="Analysis Mode"
-                  value={(order.report_options as any)?.analysis_mode === "ptm_nonptm_network" ? "PTM + Network" : "PTM-Only"}
+                  value={
+                    (order.report_options as any)?.analysis_mode === "cross_talk"
+                      ? "Cross-Talk (Phos x Ub)"
+                      : (order.report_options as any)?.analysis_mode === "ptm_nonptm_network"
+                        ? "PTM + Network"
+                        : "PTM-Only"
+                  }
                 />
                 <OverviewField
                   label="Report Type"
@@ -2182,6 +2198,60 @@ export default function OrderDetail() {
         <TabsContent value="vector-plot" className="mt-4">
           <VectorPlotTab orderId={order.id} />
         </TabsContent>
+
+        {(order.report_options as any)?.analysis_mode === "cross_talk" && (
+          <TabsContent value="cross-talk" className="mt-4">
+            <div className="space-y-6">
+              {/* Cross-Talk Header */}
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm flex items-center gap-2">
+                    <GitMerge className="h-4 w-4 text-amber-600" />
+                    Cross-Talk Analysis (Phos x Ub)
+                  </CardTitle>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Phosphorylation과 Ubiquitylation 간의 Cross-Talk 패턴 분석 결과
+                  </p>
+                </CardHeader>
+              </Card>
+
+              {order.cross_talk_data ? (
+                <>
+                  {/* Venn Diagram */}
+                  {(order.cross_talk_data as any)?.venn && (
+                    <CrossTalkVennDiagram data={(order.cross_talk_data as any).venn} />
+                  )}
+
+                  {/* Heatmap */}
+                  {(order.cross_talk_data as any)?.heatmap && (
+                    <CrossTalkHeatmap data={(order.cross_talk_data as any).heatmap} />
+                  )}
+
+                  {/* Sequential Gating */}
+                  {(order.cross_talk_data as any)?.sequential_gating && (
+                    <CrossTalkSequentialGating data={(order.cross_talk_data as any).sequential_gating} />
+                  )}
+
+                  {/* Signal Propagation Timeline */}
+                  {order.signal_propagation_data && (
+                    <SignalPropagationTimeline data={order.signal_propagation_data as any} />
+                  )}
+                </>
+              ) : (
+                <Card>
+                  <CardContent className="flex flex-col items-center justify-center py-12 gap-4">
+                    <GitMerge className="h-12 w-12 text-muted-foreground/40" />
+                    <p className="text-sm text-muted-foreground">
+                      {order.status === "completed"
+                        ? "Cross-Talk 분석 데이터가 없습니다."
+                        : "분석 완료 후 Cross-Talk 결과가 여기에 표시됩니다."}
+                    </p>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+          </TabsContent>
+        )}
       </Tabs>
 
       <RerunOptionsModal

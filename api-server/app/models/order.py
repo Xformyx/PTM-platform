@@ -56,6 +56,10 @@ class Order(Base):
     fasta_path: Mapped[str] = mapped_column(String(500), nullable=False)
     config_xlsx_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
 
+    # Secondary file references (Cross-Talk mode)
+    secondary_pr_matrix_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    secondary_pg_matrix_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+
     # Analysis settings
     analysis_context: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     analysis_options: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
