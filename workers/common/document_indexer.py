@@ -23,6 +23,47 @@ from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
+
+# ---------------------------------------------------------------------------
+# Collection Name Sanitizer (v84)
+# ---------------------------------------------------------------------------
+
+def sanitize_collection_name(name: str) -> str:
+    """
+    ChromaDB 컬렉션 이름을 유효한 형식으로 변환.
+    ChromaDB 규칙: [a-zA-Z0-9._-], 3~512자, 시작/끝은 [a-zA-Z0-9]
+
+    예: 'Hippocampal Neurons' -> 'Hippocampal-Neurons'
+        'My Collection!@#' -> 'My-Collection'
+        '  test  ' -> 'test'
+    """
+    if not name or not name.strip():
+        return 'unnamed-collection'
+
+    # 앞뒤 공백 제거
+    sanitized = name.strip()
+    # 공백 → 하이픈
+    sanitized = sanitized.replace(' ', '-')
+    # 허용되지 않는 문자 제거 (a-zA-Z0-9._- 만 허용)
+    sanitized = re.sub(r'[^a-zA-Z0-9._-]', '', sanitized)
+    # 연속 하이픈/점 정리
+    sanitized = re.sub(r'[-]+', '-', sanitized)
+    sanitized = re.sub(r'[.]+', '.', sanitized)
+    # 시작/끝은 [a-zA-Z0-9]만 허용
+    sanitized = sanitized.strip('.-_')
+    # 최소 3자 보장
+    if len(sanitized) < 3:
+        sanitized = sanitized + '-col'
+    # 최대 512자
+    sanitized = sanitized[:512]
+    # 끝이 특수문자로 끝나면 제거
+    sanitized = sanitized.rstrip('.-_')
+
+    if not sanitized or len(sanitized) < 3:
+        return 'unnamed-collection'
+
+    return sanitized
+
 CHROMADB_URL = os.getenv("CHROMADB_URL", "http://chromadb:8000")
 
 
@@ -292,6 +333,7 @@ class DocumentIndexer:
 
         # 6. Store in ChromaDB
         try:
+            collection_name = sanitize_collection_name(collection_name)
             collection = self.chromadb_client.get_or_create_collection(name=collection_name)
 
             ids = []

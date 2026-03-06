@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.dependencies import get_current_user
 from app.models.rag_collection import RagCollection, RagDocument
+from app.utils.sanitize import sanitize_collection_name
 
 router = APIRouter(prefix="/rag", tags=["rag"])
 logger = logging.getLogger("ptm-platform.rag")
@@ -66,7 +67,9 @@ async def create_collection(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    chromadb_name = f"ptm_{body.tier}_{body.name.lower().replace(' ', '_')}"
+    chromadb_name = sanitize_collection_name(
+        f"ptm_{body.tier}_{body.name.lower().replace(' ', '_')}"
+    )
 
     collection = RagCollection(
         name=body.name,
