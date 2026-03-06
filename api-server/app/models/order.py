@@ -70,6 +70,13 @@ class Order(Base):
     result_files: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
+    # Cross-Talk analysis data (JSON)
+    # {primarySummary, secondarySummary, dualPTMProteins, gatingEvents, sharedNonPTM, ...}
+    cross_talk_data: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    # Signal Propagation Timeline data (JSON)
+    # {mode, ptm_type, timepoints, nonptm_effectors, self_timelags, cascade_timelags, summary}
+    signal_propagation_data: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+
     # Timestamps
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)

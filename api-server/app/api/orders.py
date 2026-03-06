@@ -160,6 +160,8 @@ async def get_order(
         "stage_detail": order.stage_detail,
         "result_files": order.result_files,
         "error_message": order.error_message,
+        "cross_talk_data": order.cross_talk_data,
+        "signal_propagation_data": order.signal_propagation_data,
         "started_at": order.started_at.isoformat() if order.started_at else None,
         "completed_at": order.completed_at.isoformat() if order.completed_at else None,
         "created_at": order.created_at.isoformat(),

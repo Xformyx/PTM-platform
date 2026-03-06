@@ -15,6 +15,8 @@ export interface Order {
   stage_detail?: string;
   result_files?: Record<string, string[]>;
   error_message?: string;
+  cross_talk_data?: Record<string, unknown>;
+  signal_propagation_data?: Record<string, unknown>;
   started_at?: string;
   completed_at?: string;
   created_at: string;
