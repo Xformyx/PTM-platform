@@ -267,6 +267,111 @@ class LLMClient:
     # OpenAI-compatible (OpenAI, Gemini)
     # ------------------------------------------------------------------
 
+    # ------------------------------------------------------------------
+    # v95: Retry wrapper for minimum word-count enforcement
+    # ------------------------------------------------------------------
+
+    def generate_with_retry(
+        self,
+        prompt: str,
+        system_prompt: Optional[str] = None,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        min_words: int = 200,
+        section_name: str = "Section",
+        max_retries: int = 3,
+        retry_boost_prompt: str = "",
+    ) -> Optional[str]:
+        """Generate text with automatic retry when output is too short.
+
+        If the LLM returns ``None`` or fewer than *min_words* words, retries
+        up to *max_retries* times with progressively stronger instructions.
+
+        Returns the generated text, or ``None`` if all retries fail.
+        """
+        best_result: Optional[str] = None
+        best_word_count = 0
+        base_temp = temperature if temperature is not None else self.temperature
+
+        for attempt in range(1, max_retries + 1):
+            logger.info(
+                "[v95] %s: LLM call attempt %d/%d",
+                section_name, attempt, max_retries,
+            )
+
+            current_prompt = prompt
+            if attempt > 1:
+                boost = (
+                    f"\n## CRITICAL: YOUR PREVIOUS RESPONSE WAS TOO SHORT "
+                    f"(attempt {attempt}/{max_retries})\n"
+                    f"Your previous response contained only {best_word_count} words, "
+                    f"which is FAR below the minimum requirement of {min_words} words.\n"
+                    f"You MUST write a comprehensive, detailed {section_name} section "
+                    f"with AT LEAST {min_words} words.\n"
+                    f"Do NOT summarize — provide FULL detailed analysis with specific "
+                    f"protein names, Log2FC values, and biological interpretation.\n"
+                    f"Every subsection MUST contain at least 2-3 sentences of "
+                    f"substantive content.\n"
+                )
+                if retry_boost_prompt:
+                    boost += f"\n{retry_boost_prompt}\n"
+                current_prompt = prompt + boost
+
+            current_temp = min(base_temp + (attempt - 1) * 0.1, 0.8)
+
+            result = self.generate(
+                prompt=current_prompt,
+                system_prompt=system_prompt,
+                temperature=current_temp,
+                max_tokens=max_tokens,
+            )
+
+            if result is None or result.startswith("[LLM Error"):
+                logger.warning(
+                    "[v95] %s: LLM returned error on attempt %d",
+                    section_name, attempt,
+                )
+                continue
+
+            word_count = len(result.strip().split())
+            logger.info(
+                "[v95] %s: Attempt %d produced %d words (min: %d)",
+                section_name, attempt, word_count, min_words,
+            )
+
+            if word_count > best_word_count:
+                best_result = result
+                best_word_count = word_count
+
+            if word_count >= min_words:
+                logger.info(
+                    "[v95] %s: Accepted with %d words on attempt %d",
+                    section_name, word_count, attempt,
+                )
+                return result
+
+            logger.warning(
+                "[v95] %s: %d words < %d minimum, retrying...",
+                section_name, word_count, min_words,
+            )
+
+        if best_result and best_word_count > 0:
+            logger.warning(
+                "[v95] %s: All %d retries exhausted. Using best result (%d words)",
+                section_name, max_retries, best_word_count,
+            )
+            return best_result
+
+        logger.error(
+            "[v95] %s: All %d retries failed completely",
+            section_name, max_retries,
+        )
+        return None
+
+    # ------------------------------------------------------------------
+    # OpenAI-compatible (OpenAI, Gemini)
+    # ------------------------------------------------------------------
+
     def _generate_openai_compatible(self, prompt: str, system_prompt: Optional[str], temp: float, max_tokens: int) -> str:
         return self._generate_openai_compat_with(
             prompt, system_prompt, temp, max_tokens,

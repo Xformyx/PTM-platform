@@ -15,7 +15,19 @@ CHROMADB_URL = os.getenv("CHROMADB_URL", "http://chromadb:8000")
 
 
 class RAGRetriever:
-    """ChromaDB-based retrieval with optional BM25 reranking."""
+    """ChromaDB-based retrieval with optional BM25 reranking.
+
+    v84: Includes source-type inference (textbook / review / research_article),
+    relevance boosting for textbooks and reviews, and guaranteed minimum slots
+    for high-authority sources.
+    """
+
+    # v84 constants
+    TEXTBOOK_COLLECTIONS = {"textbooks", "textbook", "books", "book"}
+    REVIEW_COLLECTIONS = {"reviews", "review", "review_papers"}
+    TEXTBOOK_BOOST = 0.15
+    REVIEW_BOOST = 0.10
+    MIN_TEXTBOOK_REVIEW_SLOTS = 5
 
     def __init__(self, collection_names: Optional[List[str]] = None):
         self.collection_names = collection_names or []
@@ -93,8 +105,89 @@ class RAGRetriever:
             except Exception as e:
                 logger.warning(f"ChromaDB query failed for collection '{coll_name}': {e}")
 
-        all_results.sort(key=lambda r: r["relevance"], reverse=True)
-        result = all_results[:n_results]
+        # v84: Infer source_type from collection name and metadata
+        for r in all_results:
+            col = r.get("collection", "").lower()
+            doc_type = r.get("metadata", {}).get("doc_type", "").lower()
+
+            if doc_type == "textbook" or col in self.TEXTBOOK_COLLECTIONS:
+                r["source_type"] = "textbook"
+            elif doc_type == "review" or col in self.REVIEW_COLLECTIONS:
+                r["source_type"] = "review"
+            else:
+                r["source_type"] = "research_article"
+
+        # v84: Apply relevance boost for textbooks and reviews
+        for r in all_results:
+            original_score = r["relevance"]
+            if r["source_type"] == "textbook":
+                r["relevance"] = min(1.0, original_score + self.TEXTBOOK_BOOST)
+                r["boosted"] = True
+            elif r["source_type"] == "review":
+                r["relevance"] = min(1.0, original_score + self.REVIEW_BOOST)
+                r["boosted"] = True
+            else:
+                r["boosted"] = False
+
+        # Deduplicate by content
+        seen = set()
+        unique = []
+        for r in sorted(all_results, key=lambda x: x["relevance"], reverse=True):
+            h = hash(r["document"][:200])
+            if h not in seen:
+                seen.add(h)
+                unique.append(r)
+
+        # v84: Guaranteed minimum slots for textbooks/reviews
+        textbook_review_results = [
+            r for r in unique if r["source_type"] in ("textbook", "review")
+        ]
+        top_n = unique[:n_results]
+        tr_in_top = sum(
+            1 for r in top_n if r["source_type"] in ("textbook", "review")
+        )
+
+        if (
+            tr_in_top < self.MIN_TEXTBOOK_REVIEW_SLOTS
+            and len(textbook_review_results) > tr_in_top
+        ):
+            needed = min(self.MIN_TEXTBOOK_REVIEW_SLOTS, len(textbook_review_results))
+            research_slots = n_results - needed
+            final_research = [
+                r for r in unique if r["source_type"] == "research_article"
+            ][:research_slots]
+            final_tr = textbook_review_results[:needed]
+            result = final_research + final_tr
+            result.sort(key=lambda x: x["relevance"], reverse=True)
+            logger.info(
+                "[ChromaDB] v84: Guaranteed %d textbook/review slots (was %d in top %d)",
+                needed, tr_in_top, n_results,
+            )
+        else:
+            result = unique[:n_results]
+
+        # Log source type distribution
+        type_counts: dict = {}
+        for r in result:
+            st = r.get("source_type", "unknown")
+            type_counts[st] = type_counts.get(st, 0) + 1
+        type_summary = ", ".join(f"{k}: {v}" for k, v in sorted(type_counts.items()))
+        logger.info(
+            "[ChromaDB] Search complete: %d total -> %d final [%s]",
+            len(all_results), len(result), type_summary,
+        )
+
+        # Log top 5 results
+        for i, r in enumerate(result[:5], 1):
+            source = r.get("metadata", {}).get(
+                "source", r.get("metadata", {}).get("title", "Unknown")
+            )
+            st = r.get("source_type", "?")
+            boosted = " BOOSTED" if r.get("boosted") else ""
+            logger.info(
+                "  Top %d: [%.2f] %s (%s%s, from: %s)",
+                i, r["relevance"], source, st, boosted, r.get("collection", "?"),
+            )
 
         self._cache[cache_key] = result
         return result

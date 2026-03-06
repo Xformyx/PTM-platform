@@ -77,6 +77,79 @@ VALID_CATEGORIES = {
     "experimental", "pathway", "temporal", "ptm_pattern",
 }
 
+# Cross-Talk specific categories
+CROSSTALK_CATEGORIES = {
+    "concordant_regulation", "discordant_regulation", "sequential_gating",
+    "shared_pathway", "kinase_e3_ligase", "proteostasis", "novel_crosstalk",
+    # Legacy categories for backward compatibility
+    *VALID_CATEGORIES,
+}
+
+
+CROSSTALK_QUESTION_GENERATION_PROMPT = """You are an expert PTM (Post-Translational Modification) researcher specializing in **PTM cross-talk analysis** between phosphorylation and ubiquitylation. You are given TWO datasets:
+- **Dataset 1 (Phosphorylation)**: Contains phosphoproteomics data
+- **Dataset 2 (Ubiquitylation)**: Contains ubiquitylation proteomics data
+Your task is to generate insightful research questions that specifically address the **cross-talk** (interplay, coordination, and regulatory relationships) between these two PTM types.
+
+## CRITICAL INSTRUCTIONS
+1. **Analyze BOTH datasets** - Extract proteins, sites, timepoints, and conditions from both files
+2. **Focus on cross-talk** - Questions MUST address the relationship BETWEEN phosphorylation and ubiquitylation
+3. **Identify shared proteins** - Find proteins that appear in both datasets and ask about their dual regulation
+4. **Consider temporal coordination** - If timepoints exist, ask about sequential or coordinated PTM events
+5. **Reference specific data** - Each question MUST mention specific proteins/sites from the actual data
+
+## Question Categories for Cross-Talk Analysis
+
+### 1. concordant_regulation (Co-directional PTM changes)
+- Focus on: Proteins showing same-direction changes in both Phos and Ub
+
+### 2. discordant_regulation (Opposing PTM changes)
+- Focus on: Proteins with opposite Phos vs Ub trends (one up, other down)
+
+### 3. sequential_gating (Temporal PTM ordering)
+- Focus on: Whether one PTM precedes and gates the other
+
+### 4. shared_pathway (Pathway-level cross-talk)
+- Focus on: Signaling pathways affected by both PTM types
+
+### 5. kinase_e3_ligase (Enzyme cross-talk)
+- Focus on: Relationships between kinases (Phos writers) and E3 ligases (Ub writers)
+
+### 6. proteostasis (Protein stability regulation)
+- Focus on: How dual PTMs regulate protein turnover
+
+### 7. novel_crosstalk (Unexpected cross-talk patterns)
+- Focus on: Surprising or novel cross-talk observations
+
+## Input Data
+### Dataset 1: Phosphorylation Data
+{primary_markdown_content}
+
+### Dataset 2: Ubiquitylation Data
+{secondary_markdown_content}
+
+## Output Requirements
+Generate exactly {max_questions} questions as a JSON array. Each question object must have:
+
+```json
+{{{{
+  "question": "Cross-talk specific question ending with ? (MUST reference proteins/sites from BOTH datasets)",
+  "category": "One of: concordant_regulation, discordant_regulation, sequential_gating, shared_pathway, kinase_e3_ligase, proteostasis, novel_crosstalk",
+  "confidence": 0.0-1.0 (based on how well BOTH datasets support this question),
+  "rationale": "1-2 sentences explaining WHY this cross-talk question is important, citing data from BOTH datasets"
+}}}}
+```
+
+## Quality Checklist
+- Each question addresses the RELATIONSHIP between phosphorylation and ubiquitylation
+- Questions reference specific proteins/sites from BOTH datasets
+- Questions are diverse across at least 4 different cross-talk categories
+- Rationales cite observations from BOTH datasets
+- At least 2 questions address shared/overlapping proteins between the datasets
+- At least 1 question addresses temporal coordination if timepoints are available
+
+Return ONLY the JSON array, no additional text or explanation."""
+
 
 def run_question_generation(state: dict) -> dict:
     """Generate AI research questions from comprehensive report and PTM data."""
@@ -301,6 +374,233 @@ def _get_fallback_questions() -> List[str]:
         "Which signaling pathways show the most significant PTM alterations?",
         "How do PTM patterns change across different timepoints?",
         "What protein-protein interaction networks are affected by the observed PTM changes?",
+    ]
+
+
+# -----------------------------------------------------------------------
+# Cross-Talk question generation
+# -----------------------------------------------------------------------
+
+def run_crosstalk_question_generation(state: dict) -> dict:
+    """Generate Cross-Talk research questions from two PTM datasets."""
+    cb = state.get("progress_callback")
+    if cb:
+        cb(6, "Generating Cross-Talk research questions")
+
+    primary_content = state.get("primary_markdown_content", "")
+    secondary_content = state.get("secondary_markdown_content", "")
+
+    if not primary_content or not secondary_content:
+        logger.warning("Missing one or both datasets for cross-talk question generation")
+        return {"research_questions": [q["question"] for q in _get_crosstalk_fallback_questions()]}
+
+    llm = LLMClient(
+        provider=state.get("llm_provider", "ollama"),
+        model=state.get("llm_model"),
+    )
+
+    if not llm.is_available():
+        logger.warning("LLM not available for cross-talk question generation")
+        if cb:
+            cb(8, "LLM not available — using default cross-talk questions")
+        return {"research_questions": [q["question"] for q in _get_crosstalk_fallback_questions()]}
+
+    max_questions = 8
+    # Truncate content if too long
+    if len(primary_content) > 15000:
+        primary_content = primary_content[:15000] + "\n\n[... content truncated ...]\n"
+    if len(secondary_content) > 15000:
+        secondary_content = secondary_content[:15000] + "\n\n[... content truncated ...]\n"
+
+    prompt = CROSSTALK_QUESTION_GENERATION_PROMPT.format(
+        max_questions=max_questions,
+        primary_markdown_content=primary_content,
+        secondary_markdown_content=secondary_content,
+    )
+
+    try:
+        if cb:
+            cb(7, f"Calling LLM ({llm.model}) for cross-talk question generation")
+
+        response = llm.generate(
+            prompt,
+            system_prompt="You are a PTM cross-talk research expert. Return ONLY valid JSON.",
+            temperature=0.7,
+            max_tokens=4096,
+        )
+
+        if response.startswith("[LLM Error"):
+            logger.warning(f"LLM error during cross-talk question generation: {response}")
+            if cb:
+                cb(8, "LLM error — using default cross-talk questions")
+            return {
+                "research_questions": [q["question"] for q in _get_crosstalk_fallback_questions()],
+                "ai_questions_metadata": _get_crosstalk_fallback_questions(),
+            }
+
+        questions_data = _parse_json_response(response)
+        if not questions_data:
+            logger.warning("Failed to parse LLM cross-talk question response")
+            if cb:
+                cb(8, "Failed to parse cross-talk questions — using defaults")
+            return {
+                "research_questions": [q["question"] for q in _get_crosstalk_fallback_questions()],
+                "ai_questions_metadata": _get_crosstalk_fallback_questions(),
+            }
+
+        validated = _validate_crosstalk_questions(questions_data, max_questions)
+        question_strings = [q["question"] for q in validated]
+
+        logger.info(f"Generated {len(question_strings)} AI cross-talk research questions")
+        if cb:
+            cb(8, f"Generated {len(question_strings)} AI cross-talk research questions")
+
+        return {
+            "research_questions": question_strings,
+            "ai_questions_metadata": validated,
+        }
+
+    except Exception as e:
+        logger.error(f"Cross-talk question generation failed: {e}")
+        if cb:
+            cb(8, "Cross-talk question generation error — using defaults")
+        return {
+            "research_questions": [q["question"] for q in _get_crosstalk_fallback_questions()],
+            "ai_questions_metadata": _get_crosstalk_fallback_questions(),
+        }
+
+
+def generate_crosstalk_questions_from_content(
+    primary_content: str,
+    secondary_content: str,
+    llm_provider: str = "ollama",
+    llm_model: Optional[str] = None,
+    max_questions: int = 8,
+) -> Dict[str, Any]:
+    """Standalone function for Cross-Talk question generation via API endpoint."""
+    llm = LLMClient(provider=llm_provider, model=llm_model)
+
+    if not llm.is_available():
+        return {
+            "success": False,
+            "error": f"LLM model '{llm.model}' not available",
+            "questions": _get_crosstalk_fallback_questions(),
+            "count": 0,
+        }
+
+    if len(primary_content) > 15000:
+        primary_content = primary_content[:15000] + "\n\n[... content truncated ...]\n"
+    if len(secondary_content) > 15000:
+        secondary_content = secondary_content[:15000] + "\n\n[... content truncated ...]\n"
+
+    prompt = CROSSTALK_QUESTION_GENERATION_PROMPT.format(
+        max_questions=max_questions,
+        primary_markdown_content=primary_content,
+        secondary_markdown_content=secondary_content,
+    )
+
+    response = llm.generate(
+        prompt,
+        system_prompt="You are a PTM cross-talk research expert. Return ONLY valid JSON.",
+        temperature=0.7,
+        max_tokens=4096,
+    )
+
+    if response.startswith("[LLM Error"):
+        return {
+            "success": False,
+            "error": response,
+            "questions": _get_crosstalk_fallback_questions(),
+            "count": 0,
+        }
+
+    questions_data = _parse_json_response(response)
+    if not questions_data:
+        return {
+            "success": False,
+            "error": "Failed to parse LLM response as JSON",
+            "questions": _get_crosstalk_fallback_questions(),
+            "count": 0,
+        }
+
+    validated = _validate_crosstalk_questions(questions_data, max_questions)
+    return {
+        "success": True,
+        "questions": validated,
+        "count": len(validated),
+    }
+
+
+def _validate_crosstalk_questions(
+    questions: List[Dict], max_questions: int
+) -> List[Dict[str, Any]]:
+    """Validate and normalize cross-talk question objects."""
+    validated = []
+    for q in questions[:max_questions]:
+        if not isinstance(q, dict):
+            continue
+        question_text = q.get("question", "")
+        if not question_text or len(question_text) < 10:
+            continue
+        if not question_text.endswith("?"):
+            question_text += "?"
+
+        category = q.get("category", "shared_pathway")
+        if category not in CROSSTALK_CATEGORIES:
+            category = "shared_pathway"
+
+        confidence = q.get("confidence", 0.7)
+        try:
+            confidence = max(0.0, min(1.0, float(confidence)))
+        except (ValueError, TypeError):
+            confidence = 0.7
+
+        validated.append({
+            "question": question_text,
+            "category": category,
+            "confidence": round(confidence, 2),
+            "rationale": q.get("rationale", "Generated by LLM cross-talk analysis"),
+            "included": True,
+            "source": "ai_crosstalk",
+        })
+    return validated
+
+
+def _get_crosstalk_fallback_questions() -> List[Dict[str, Any]]:
+    """Return fallback cross-talk questions if LLM fails."""
+    return [
+        {
+            "question": "Which proteins show both significant phosphorylation and ubiquitylation changes, and what does this dual regulation suggest about their functional role?",
+            "category": "concordant_regulation",
+            "confidence": 0.9,
+            "rationale": "Identifying dual-PTM proteins is fundamental to understanding cross-talk mechanisms",
+            "included": True,
+            "source": "fallback",
+        },
+        {
+            "question": "Are there proteins where phosphorylation increases while ubiquitylation decreases (or vice versa), suggesting antagonistic PTM regulation?",
+            "category": "discordant_regulation",
+            "confidence": 0.85,
+            "rationale": "Opposing PTM changes may indicate phospho-dependent stabilization or degradation switches",
+            "included": True,
+            "source": "fallback",
+        },
+        {
+            "question": "Does phosphorylation at early timepoints precede and trigger ubiquitylation at later timepoints for key signaling proteins?",
+            "category": "sequential_gating",
+            "confidence": 0.8,
+            "rationale": "Temporal ordering of PTMs reveals gating mechanisms in signaling cascades",
+            "included": True,
+            "source": "fallback",
+        },
+        {
+            "question": "Which signaling pathways show coordinated changes in both phosphorylation and ubiquitylation across multiple pathway members?",
+            "category": "shared_pathway",
+            "confidence": 0.75,
+            "rationale": "Pathway-level cross-talk provides systems-level understanding of dual PTM regulation",
+            "included": True,
+            "source": "fallback",
+        },
     ]
 
 
