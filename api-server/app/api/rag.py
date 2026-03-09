@@ -14,6 +14,16 @@ from app.utils.sanitize import sanitize_collection_name
 router = APIRouter(prefix="/rag", tags=["rag"])
 logger = logging.getLogger("ptm-platform.rag")
 
+# Template collections (no data in ChromaDB) — hidden from UI
+TEMPLATE_CHROMADB_NAMES = frozenset({
+    "neuroscience", "cancer_biology", "immunology", "stem_cell",
+    "cardiovascular", "metabolism", "liver_biology",
+    "phosphorylation", "acetylation", "ubiquitination", "methylation",
+    "mapk_signaling", "pi3k_akt", "wnt_signaling", "tgfb_signaling",
+    "nfkb_signaling", "calcium_signaling", "cell_cycle", "apoptosis",
+    "textbooks", "reviews", "pathway_databases", "ptm_databases",
+})
+
 
 class CollectionCreate(BaseModel):
     name: str
@@ -38,7 +48,8 @@ async def list_collections(
     result = await db.execute(
         select(RagCollection).order_by(RagCollection.tier, RagCollection.name)
     )
-    collections = result.scalars().all()
+    all_collections = result.scalars().all()
+    collections = [c for c in all_collections if c.chromadb_name not in TEMPLATE_CHROMADB_NAMES]
 
     return {
         "collections": [

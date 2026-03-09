@@ -203,8 +203,8 @@ class UnifiedProteinEnricher:
         )
 
         for pid, data in results.items():
-            domains = [d["name"] for d in data.get("domains", [])]
-            self.domain_cache[pid] = domains
+            # Store raw dicts {name, type, accession} for format flexibility
+            self.domain_cache[pid] = [d for d in data.get("domains", []) if d.get("name")]
 
         logger.info(f"Domain cache now has {len(self.domain_cache)} entries")
         return self.domain_cache
@@ -402,13 +402,22 @@ class UnifiedProteinEnricher:
         seq_windows = []
         motif_errors = []
 
+        def _format_domain(d) -> str:
+            """Format domain for Domains column: 'name (type)' to match legacy output."""
+            if isinstance(d, dict):
+                name = d.get("name", "")
+                t = d.get("type", "")
+                return f"{name} ({t})" if name and t else (name or "")
+            return str(d)  # legacy cache: plain string
+
         for _, row in unified_df.iterrows():
             pid = self.clean_protein_id(row["Protein.Group"])
 
-            # Domain info
-            domains = self.domain_cache.get(pid, [])
-            domains_list.append("; ".join(domains) if domains else "")
-            domain_counts.append(len(domains))
+            # Domain info — format as "name (type)" to match legacy ptm-preprocessing
+            raw = self.domain_cache.get(pid, [])
+            formatted = [_format_domain(d) for d in raw if d]
+            domains_list.append("; ".join(formatted) if formatted else "")
+            domain_counts.append(len(raw))
 
             # Local motif info (only for PTM rows)
             motifs = []

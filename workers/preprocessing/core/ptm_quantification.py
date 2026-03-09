@@ -257,6 +257,13 @@ class PTMQuantificationAnalyzer:
                 else:
                     self.condition_map[sample] = "Unknown"
 
+        # Normalize control aliases (Con, Ctrl, Ctr, WT, etc.) to "Control"
+        CONTROL_ALIASES = frozenset({"con", "ctrl", "ctr", "control", "wt", "wildtype", "untreated", "baseline"})
+        normalized_map = {}
+        for sample, cond in self.condition_map.items():
+            normalized_map[sample] = "Control" if (cond and cond.strip().lower() in CONTROL_ALIASES) else cond
+        self.condition_map = normalized_map
+
         condition_counts: Dict[str, int] = {}
         for cond in self.condition_map.values():
             condition_counts[cond] = condition_counts.get(cond, 0) + 1
