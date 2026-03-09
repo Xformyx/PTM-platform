@@ -257,15 +257,15 @@ class ComprehensiveReportGenerator:
         # Classification criteria
         lines.append(self._generate_classification_criteria())
 
-        # Summary table
+        # Summary table (multi-condition aware)
         lines.append(self._generate_summary_table(enriched_ptms))
+
+        # Global pathway analysis (placed BEFORE individual PTMs for overview-first)
+        lines.append(self._generate_global_pathway_analysis(enriched_ptms))
 
         # Individual PTM sections
         for i, ptm in enumerate(enriched_ptms):
             lines.append(self._generate_ptm_section(ptm, i + 1))
-
-        # Global pathway analysis
-        lines.append(self._generate_global_pathway_analysis(enriched_ptms))
 
         # References
         lines.append(self._generate_references())
@@ -328,32 +328,103 @@ class ComprehensiveReportGenerator:
     # ------------------------------------------------------------------
 
     def _generate_summary_table(self, ptms: List[dict]) -> str:
+        # Detect all conditions across PTMs
+        all_conditions = []
+        for ptm in ptms:
+            for cd in ptm.get("condition_data", []):
+                cond = cd.get("condition", "")
+                if cond and cond not in all_conditions:
+                    all_conditions.append(cond)
+
+        has_multi = len(all_conditions) >= 2
+
         lines = [
             "## Summary\n",
             f"Total PTM sites analyzed: **{len(ptms)}**\n",
-            "| # | Gene | Position | PTM Type | Classification | Protein Log2FC | PTM Relative Log2FC | Significance | Articles |",
-            "|---|------|----------|----------|----------------|---------------|---------------------|--------------|----------|",
         ]
+
+        if has_multi:
+            # Multi-condition header with Prot/PTM Log2FC per condition + Trajectory
+            cond_headers = " | ".join(f"{c} (Prot/PTM Log2FC)" for c in all_conditions)
+            lines.append(f"| # | Gene | Position | PTM Type | Classification | {cond_headers} | Trajectory | Significance | Articles |")
+            sep_cols = " | ".join(":----------" for _ in all_conditions)
+            lines.append(f"|---|------|----------|----------|----------------|{sep_cols}|:-----------|--------------|----------|")
+        else:
+            lines.append("| # | Gene | Position | PTM Type | Classification | Protein Log2FC | PTM Relative Log2FC | Significance | Articles |")
+            lines.append("|---|------|----------|----------|----------------|---------------|---------------------|--------------|----------|")
 
         for idx, ptm in enumerate(ptms, 1):
             gene = ptm.get("gene") or ptm.get("Gene.Name", "?")
             pos = ptm.get("position") or ptm.get("PTM_Position", "?")
             ptype = ptm.get("ptm_type") or ptm.get("PTM_Type", "?")
-            prot_fc = ptm.get("protein_log2fc") or ptm.get("Protein_Log2FC", 0)
-            ptm_fc = ptm.get("ptm_relative_log2fc") or ptm.get("PTM_Relative_Log2FC", 0)
             enr = ptm.get("rag_enrichment", {})
             classification = enr.get("classification", {})
             class_label = classification.get("short_label", classification.get("quadrant", "?"))
             significance = classification.get("significance", "?")
             n_articles = enr.get("search_summary", {}).get("total_articles", 0)
 
-            lines.append(
-                f"| {idx} | {gene} | {pos} | {ptype} | {class_label} | "
-                f"{_fmt_fc(prot_fc)} | {_fmt_fc(ptm_fc)} | {significance} | {n_articles} |"
-            )
+            if has_multi:
+                cond_data = {cd.get("condition", ""): cd for cd in ptm.get("condition_data", [])}
+                cond_vals = []
+                for c in all_conditions:
+                    cd = cond_data.get(c, {})
+                    prot = _fmt_fc(cd.get("protein_log2fc", 0), 2)
+                    ptm_fc = _fmt_fc(cd.get("ptm_relative_log2fc", 0), 2)
+                    cond_vals.append(f"{prot}/{ptm_fc}")
+                cond_str = " | ".join(cond_vals)
+                trajectory = self._compute_trajectory_label(ptm)
+                lines.append(
+                    f"| {idx} | {gene} | {pos} | {ptype} | {class_label} | "
+                    f"{cond_str} | {trajectory} | {significance} | {n_articles} |"
+                )
+            else:
+                prot_fc = ptm.get("protein_log2fc") or ptm.get("Protein_Log2FC", 0)
+                ptm_fc = ptm.get("ptm_relative_log2fc") or ptm.get("PTM_Relative_Log2FC", 0)
+                lines.append(
+                    f"| {idx} | {gene} | {pos} | {ptype} | {class_label} | "
+                    f"{_fmt_fc(prot_fc)} | {_fmt_fc(ptm_fc)} | {significance} | {n_articles} |"
+                )
 
         lines.append("")
         return "\n".join(lines)
+
+    @staticmethod
+    def _compute_trajectory_label(ptm: dict) -> str:
+        """Compute a trajectory label (e.g., Q1 arrow-up) from condition_data."""
+        cond_data = ptm.get("condition_data", [])
+        if len(cond_data) < 2:
+            return ""
+
+        sorted_conds = sorted(cond_data, key=lambda c: c.get("condition", ""))
+        first = sorted_conds[0]
+        last = sorted_conds[-1]
+
+        first_ptm = first.get("ptm_relative_log2fc", 0)
+        last_ptm = last.get("ptm_relative_log2fc", 0)
+        last_prot = last.get("protein_log2fc", 0)
+
+        # Determine quadrant based on last condition
+        if last_ptm > 0 and last_prot > 0:
+            q = "Q1"
+        elif last_ptm < 0 and last_prot > 0:
+            q = "Q2"
+        elif last_ptm < 0 and last_prot < 0:
+            q = "Q3"
+        elif last_ptm > 0 and last_prot < 0:
+            q = "Q4"
+        else:
+            q = "O"
+
+        # Determine direction
+        diff = last_ptm - first_ptm
+        if diff > 0.5:
+            arrow = "\u2191"  # up arrow
+        elif diff < -0.5:
+            arrow = "\u2193"  # down arrow
+        else:
+            arrow = "\u2192"  # right arrow (stable)
+
+        return f"{q}{arrow}"
 
     # ------------------------------------------------------------------
     # Individual PTM Section (FULL — 21 sub-sections)
@@ -433,6 +504,7 @@ class ComprehensiveReportGenerator:
         gene = ptm.get("gene") or ptm.get("Gene.Name", "?")
         position = ptm.get("position") or ptm.get("PTM_Position", "?")
         ptm_type = ptm.get("ptm_type") or ptm.get("PTM_Type", "Phosphorylation")
+        condition_data = ptm.get("condition_data", [])
         condition = ptm.get("Condition") or ptm.get("condition", "")
 
         classification = enr.get("classification", {})
@@ -457,14 +529,30 @@ class ComprehensiveReportGenerator:
         lines.append(f"| Gene | {gene} |")
         lines.append(f"| PTM Site | {position} |")
         lines.append(f"| PTM Type | {ptm_type} |")
-        if condition:
-            lines.append(f"| Condition | {condition} |")
+
+        # Multi-condition: show all condition values
+        if len(condition_data) >= 2:
+            cond_labels = [cd.get("condition", "") for cd in condition_data]
+            lines.append(f"| Conditions | {', '.join(cond_labels)} |")
+            for cd in condition_data:
+                c = cd.get("condition", "")
+                p_fc = cd.get("protein_log2fc", 0)
+                pt_fc = cd.get("ptm_relative_log2fc", 0)
+                lines.append(f"| {c} Protein Log2FC | {_fmt_fc(p_fc)} ({_interpret_log2fc(p_fc)}) |")
+                lines.append(f"| {c} PTM Relative Log2FC | {_fmt_fc(pt_fc)} ({_interpret_log2fc(pt_fc)}) |")
+            trajectory = self._compute_trajectory_label(ptm)
+            if trajectory:
+                lines.append(f"| Trajectory | {trajectory} |")
+        else:
+            if condition:
+                lines.append(f"| Condition | {condition} |")
+            lines.append(f"| Protein Log2FC | {_fmt_fc(prot_fc)} ({_interpret_log2fc(prot_fc)}) |")
+            lines.append(f"| PTM Relative Log2FC | {_fmt_fc(ptm_fc)} ({_interpret_log2fc(ptm_fc)}) |")
+            if ptm_abs_fc:
+                lines.append(f"| PTM Absolute Log2FC | {_fmt_fc(ptm_abs_fc)} |")
+
         lines.append(f"| Classification | **{class_level}** ({short_label}) |")
         lines.append(f"| Significance | {significance} |")
-        lines.append(f"| Protein Log2FC | {_fmt_fc(prot_fc)} ({_interpret_log2fc(prot_fc)}) |")
-        lines.append(f"| PTM Relative Log2FC | {_fmt_fc(ptm_fc)} ({_interpret_log2fc(ptm_fc)}) |")
-        if ptm_abs_fc:
-            lines.append(f"| PTM Absolute Log2FC | {_fmt_fc(ptm_abs_fc)} |")
         lines.append(f"| Protein Context | {protein_context} |")
         lines.append(f"| Evidence Level | {n_articles} articles, {evidence_count} regulatory patterns |")
         lines.append("")
@@ -941,6 +1029,40 @@ class ComprehensiveReportGenerator:
     def _generate_quantitative_data(self, ptm: dict) -> str:
         lines = ["### Quantitative Data\n"]
 
+        condition_data = ptm.get("condition_data", [])
+
+        if len(condition_data) >= 2:
+            # Multi-condition comparison table
+            cond_labels = [cd.get("condition", "") for cd in condition_data]
+            header = "| Metric | " + " | ".join(cond_labels) + " |"
+            sep = "|--------| " + " | ".join(["------"] * len(cond_labels)) + " |"
+            lines.append(header)
+            lines.append(sep)
+
+            metrics = [
+                ("protein_log2fc", "Protein Log2FC"),
+                ("ptm_relative_log2fc", "PTM Relative Log2FC"),
+                ("ptm_absolute_log2fc", "PTM Absolute Log2FC"),
+            ]
+            for key, label in metrics:
+                vals = []
+                for cd in condition_data:
+                    v = cd.get(key, 0)
+                    vals.append(_fmt_fc(v))
+                lines.append(f"| {label} | " + " | ".join(vals) + " |")
+
+            # Classification per condition
+            cls_vals = []
+            for cd in condition_data:
+                cls = cd.get("classification", {})
+                if isinstance(cls, dict):
+                    cls_vals.append(cls.get("short_label", cls.get("level", "?")))
+                else:
+                    cls_vals.append(str(cls))
+            lines.append(f"| Classification | " + " | ".join(cls_vals) + " |")
+            lines.append("")
+
+        # Also show primary entry's raw data
         data_fields = [
             ("Protein.Group", "Protein Group"),
             ("Protein.Name", "Protein Name"),
@@ -948,26 +1070,38 @@ class ComprehensiveReportGenerator:
             ("Modified.Sequence", "Modified Sequence"),
             ("PTM_Position", "PTM Position"),
             ("PTM_Type", "PTM Type"),
-            ("Condition", "Condition"),
-            ("Protein_Log2FC", "Protein Log2FC"),
-            ("PTM_Relative_Log2FC", "PTM Relative Log2FC"),
-            ("PTM_Absolute_Log2FC", "PTM Absolute Log2FC"),
-            ("Protein_Fold_Change", "Protein Fold Change"),
-            ("Protein_PValue", "Protein p-value"),
-            ("PTM_PValue", "PTM p-value"),
             ("Sample_Size", "Sample Size"),
         ]
 
-        lines.append("| Field | Value |")
-        lines.append("|-------|-------|")
+        if data_fields:
+            lines.append("| Field | Value |")
+            lines.append("|-------|-------|")
+            for key, label in data_fields:
+                val = ptm.get(key)
+                if val is not None:
+                    if isinstance(val, float):
+                        lines.append(f"| {label} | {val:.4f} |")
+                    else:
+                        lines.append(f"| {label} | {val} |")
 
-        for key, label in data_fields:
-            val = ptm.get(key)
-            if val is not None:
-                if isinstance(val, float):
-                    lines.append(f"| {label} | {val:.4f} |")
-                else:
-                    lines.append(f"| {label} | {val} |")
+            # For single-condition, also show FC values in this table
+            if len(condition_data) < 2:
+                fc_fields = [
+                    ("Condition", "Condition"),
+                    ("Protein_Log2FC", "Protein Log2FC"),
+                    ("PTM_Relative_Log2FC", "PTM Relative Log2FC"),
+                    ("PTM_Absolute_Log2FC", "PTM Absolute Log2FC"),
+                    ("Protein_Fold_Change", "Protein Fold Change"),
+                    ("Protein_PValue", "Protein p-value"),
+                    ("PTM_PValue", "PTM p-value"),
+                ]
+                for key, label in fc_fields:
+                    val = ptm.get(key)
+                    if val is not None:
+                        if isinstance(val, float):
+                            lines.append(f"| {label} | {val:.4f} |")
+                        else:
+                            lines.append(f"| {label} | {val} |")
 
         lines.append("")
         return "\n".join(lines)
@@ -1439,8 +1573,19 @@ class ComprehensiveReportGenerator:
                     interaction_counts[partner]["genes"].add(gene)
                     gene_interactions.setdefault(gene, set()).add(partner)
 
-            # Temporal data
-            if condition:
+            # Temporal data — use condition_data if available (merged PTMs)
+            condition_data = ptm.get("condition_data", [])
+            if condition_data:
+                for cd in condition_data:
+                    c = cd.get("condition", "")
+                    if c:
+                        temporal_data.setdefault(c, []).append({
+                            "gene": gene,
+                            "position": position,
+                            "ptm_log2fc": cd.get("ptm_relative_log2fc", 0),
+                            "classification": cd.get("classification", {}).get("short_label", "?") if isinstance(cd.get("classification"), dict) else str(cd.get("classification", "?")),
+                        })
+            elif condition:
                 temporal_data.setdefault(condition, []).append({
                     "gene": gene,
                     "position": position,

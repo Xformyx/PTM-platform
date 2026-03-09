@@ -158,9 +158,17 @@ def run_rag_enrichment(self, order_id: int, config: dict):
         publish_progress(order_id, "rag_enrichment", "report_generation", "started", 70, "Generating MD report")
 
         from rag_enrichment.core.report_generator import ComprehensiveReportGenerator
+        from rag_enrichment.core.ptm_merger import merge_multi_condition_ptms
+
+        # Merge multi-condition rows into unified PTM entries
+        merged_ptms = merge_multi_condition_ptms(enriched_ptms)
+        logger.info(
+            f"[Order {order_id}] Merged {len(enriched_ptms)} rows -> "
+            f"{len(merged_ptms)} unique PTMs (multi-condition merged)"
+        )
 
         generator = ComprehensiveReportGenerator(experimental_context=experimental_context)
-        report_md = generator.generate_full_report(enriched_ptms)
+        report_md = generator.generate_full_report(merged_ptms)
 
         md_path = order_output / f"comprehensive_report{file_suffix}.md"
         with open(md_path, "w", encoding="utf-8") as f:
