@@ -48,8 +48,8 @@ export default function Sidebar({ className }: { className?: string }) {
 
       <Separator />
 
-      {/* Navigation */}
-      <nav className="flex-1 space-y-1 px-3 py-4">
+      {/* Navigation - min-h-0 + overflow-y-auto so items stay visible when ResourceMonitor takes space */}
+      <nav className="flex-1 min-h-0 overflow-y-auto space-y-1 px-3 py-4">
         {mainNav.map((item) => {
           const Icon = item.icon;
           const isActive =

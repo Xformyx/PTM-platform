@@ -277,7 +277,7 @@ export default function SignalPropagationTimeline({ data }: Props) {
                       <YAxis type="category" dataKey="pattern" fontSize={10} width={120} />
                       <Tooltip
                         contentStyle={{ fontSize: 12, borderRadius: 8 }}
-                        formatter={(value: number) => [`${value} proteins`, 'Count']}
+                        formatter={(value: number | undefined) => [`${value ?? 0} proteins`, 'Count']}
                       />
                       <Bar dataKey="count" radius={[0, 4, 4, 0]}>
                         {patternBarData.map((entry, i) => (
@@ -305,7 +305,7 @@ export default function SignalPropagationTimeline({ data }: Props) {
                       <YAxis fontSize={11} />
                       <Tooltip
                         contentStyle={{ fontSize: 12, borderRadius: 8 }}
-                        formatter={(value: number) => [`${value} events`, 'Count']}
+                        formatter={(value: number | undefined) => [`${value ?? 0} events`, 'Count']}
                       />
                       <Bar dataKey="value" radius={[4, 4, 0, 0]}>
                         {mechanismData.map((entry, i) => (

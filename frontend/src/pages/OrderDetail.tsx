@@ -2217,19 +2217,34 @@ export default function OrderDetail() {
 
               {order.cross_talk_data ? (
                 <>
-                  {/* Venn Diagram */}
-                  {(order.cross_talk_data as any)?.venn && (
-                    <CrossTalkVennDiagram data={(order.cross_talk_data as any).venn} />
+                  {/* Venn Diagram - cross_talk_data is flat: dual_ptm_proteins, primary_summary, etc. */}
+                  {(order.cross_talk_data as any)?.primary_summary && (order.cross_talk_data as any)?.secondary_summary && (
+                    <CrossTalkVennDiagram
+                      dualPTMProteins={(order.cross_talk_data as any).dual_ptm_proteins ?? []}
+                      primarySummary={(order.cross_talk_data as any).primary_summary}
+                      secondarySummary={(order.cross_talk_data as any).secondary_summary}
+                      sharedNonPTM={(order.cross_talk_data as any).shared_nonptm ?? []}
+                      primaryOnlyNonPTM={(order.cross_talk_data as any).primary_only_nonptm ?? []}
+                      secondaryOnlyNonPTM={(order.cross_talk_data as any).secondary_only_nonptm ?? []}
+                    />
                   )}
 
                   {/* Heatmap */}
-                  {(order.cross_talk_data as any)?.heatmap && (
-                    <CrossTalkHeatmap data={(order.cross_talk_data as any).heatmap} />
+                  {(order.cross_talk_data as any)?.dual_ptm_proteins?.length > 0 && (
+                    <CrossTalkHeatmap
+                      dualPTMProteins={(order.cross_talk_data as any).dual_ptm_proteins}
+                      primaryPtmType={(order.cross_talk_data as any).primary_ptm_type ?? "phosphorylation"}
+                      secondaryPtmType={(order.cross_talk_data as any).secondary_ptm_type ?? "ubiquitylation"}
+                    />
                   )}
 
                   {/* Sequential Gating */}
-                  {(order.cross_talk_data as any)?.sequential_gating && (
-                    <CrossTalkSequentialGating data={(order.cross_talk_data as any).sequential_gating} />
+                  {(order.cross_talk_data as any)?.sequential_gating?.length > 0 && (
+                    <CrossTalkSequentialGating
+                      gatingEvents={(order.cross_talk_data as any).sequential_gating}
+                      primaryPtmType={(order.cross_talk_data as any).primary_ptm_type ?? "phosphorylation"}
+                      secondaryPtmType={(order.cross_talk_data as any).secondary_ptm_type ?? "ubiquitylation"}
+                    />
                   )}
 
                   {/* Signal Propagation Timeline */}
