@@ -367,3 +367,542 @@ class DynamicPromptGenerator:
             f"Q3(down/down)={q3}, Q4(down/up)={q4}\n"
             f"- Total PTMs in volcano plot: {len(self.ptms)}"
         )
+
+
+# ---------------------------------------------------------------------------
+# PTM Regulatory Context (ported from ptm_nonptm_network_command v32)
+# ---------------------------------------------------------------------------
+
+PTM_REGULATORY_CONTEXTS = {
+    "phosphorylation": {
+        "regulator_type": "Kinase/Phosphatase",
+        "activator": "Kinase",
+        "inhibitor": "Phosphatase",
+        "pathway_description": "Kinase -> Substrate -> Downstream effector",
+        "biological_role": "Signal transduction, enzyme activation/inhibition, protein-protein interactions",
+        "temporal_interpretation": "Rapid activation followed by feedback inhibition",
+        "network_focus": "Kinase-substrate relationships and signaling cascades",
+    },
+    "ubiquitylation": {
+        "regulator_type": "E3 Ligase/DUB",
+        "activator": "E3 Ligase",
+        "inhibitor": "DUB (Deubiquitinase)",
+        "pathway_description": "E3 Ligase -> Substrate -> Proteasome/Signaling",
+        "biological_role": "Protein degradation, signaling regulation, cellular localization, DNA repair",
+        "temporal_interpretation": "Protein turnover dynamics and stability regulation",
+        "network_focus": "E3 Ligase-substrate relationships and ubiquitin chain type-specific outcomes",
+        "chain_types": {
+            "K48": "Proteasomal degradation",
+            "K63": "Non-proteolytic signaling (NF-kB, DNA damage)",
+            "K11": "Cell cycle regulation (APC/C)",
+            "mono": "Endocytosis, localization, histone regulation",
+        },
+    },
+    "acetylation": {
+        "regulator_type": "HAT/HDAC",
+        "activator": "HAT (Histone Acetyltransferase)",
+        "inhibitor": "HDAC (Histone Deacetylase)",
+        "pathway_description": "HAT -> Substrate -> Chromatin/Metabolic regulation",
+        "biological_role": "Chromatin remodeling, transcription regulation, metabolic enzyme regulation",
+        "temporal_interpretation": "Epigenetic changes and metabolic adaptation",
+        "network_focus": "Acetyltransferase-substrate relationships",
+    },
+    "methylation": {
+        "regulator_type": "Methyltransferase/Demethylase",
+        "activator": "Methyltransferase",
+        "inhibitor": "Demethylase",
+        "pathway_description": "Methyltransferase -> Substrate -> Chromatin/Signaling",
+        "biological_role": "Chromatin regulation, protein-protein interactions, signaling modulation",
+        "temporal_interpretation": "Epigenetic regulation and signaling fine-tuning",
+        "network_focus": "Methyltransferase-substrate relationships",
+    },
+}
+
+
+def get_ptm_regulatory_context(ptm_type: str) -> Dict:
+    """Return PTM-specific regulatory context for LLM prompts."""
+    return PTM_REGULATORY_CONTEXTS.get(ptm_type, PTM_REGULATORY_CONTEXTS["phosphorylation"])
+
+
+# ---------------------------------------------------------------------------
+# v98: Anti-Hallucination Directive Builder
+# ---------------------------------------------------------------------------
+
+def build_anti_hallucination_directive(
+    protein_names: List[str],
+    section_name: str = "this section",
+) -> str:
+    """
+    v98: Build a strong anti-hallucination directive block for LLM prompts.
+
+    This block is inserted at the TOP of every LLM prompt to establish
+    data fidelity as the primary constraint before any writing instructions.
+
+    Args:
+        protein_names: List of verified protein/gene names from experimental data
+        section_name: Name of the section being generated
+
+    Returns:
+        Formatted directive string
+    """
+    if not protein_names:
+        return ""
+
+    unique_names = sorted(set(protein_names))
+    names_str = ", ".join(unique_names[:50])
+
+    directive = f"""## MANDATORY DATA FIDELITY DIRECTIVE (v98)
+
+**THIS IS THE MOST IMPORTANT INSTRUCTION IN THIS ENTIRE PROMPT.**
+
+You are writing {section_name} based on REAL experimental data. Every protein name,
+gene name, modification site, and Log2FC value you mention MUST come from the
+VERIFIED DATA sections provided below.
+
+### VERIFIED PROTEIN REGISTRY
+The following {len(unique_names)} proteins are confirmed present in the experimental data:
+{names_str}
+
+### ABSOLUTE RULES (violation = scientific fraud)
+1. **NEVER invent protein names** — if a protein is not in the registry above, do NOT mention it
+2. **NEVER fabricate Log2FC values** — every numerical value must come from the data tables below
+3. **NEVER use example proteins from your training data** (e.g., GSK3B, YWHAZ, HSP90, ACTB, GAPDH, MYC, TP53, EGFR, AKT1, ERK1/2, JNK, p38) UNLESS they appear in the verified registry above
+4. **NEVER write hypothetical examples** like "proteins such as X" or "for example, Y" with invented names
+5. **When in doubt, OMIT** — it is better to write fewer proteins correctly than to hallucinate
+6. **Cross-check every protein name** you write against the registry before including it
+
+### SELF-CHECK BEFORE SUBMITTING
+Before finalizing your response, verify:
+- [ ] Every protein name I mentioned appears in the VERIFIED PROTEIN REGISTRY
+- [ ] Every Log2FC value I cited comes from the data tables provided
+- [ ] I did not use any "well-known" proteins from my training data that are not in this dataset
+- [ ] I did not fabricate any numerical values or timepoints
+"""
+    return directive
+
+
+# ---------------------------------------------------------------------------
+# v98b: Dynamic Writing Example Builder
+# ---------------------------------------------------------------------------
+
+def build_dynamic_writing_example(
+    results: dict,
+    timepoints: list,
+    ptm_type: str = "phosphorylation",
+) -> str:
+    """
+    v98b: Build a GOOD EXAMPLE block using ACTUAL data from the current dataset.
+
+    Instead of hardcoded protein names that cause hallucination, this function
+    extracts the top proteins from the real data and constructs a writing example
+    using those actual proteins.
+
+    Returns:
+        Formatted example string using real data, or empty string if no data.
+    """
+    networks = results.get("networks", {})
+    if not networks or not timepoints:
+        return ""
+
+    regulatory_context = get_ptm_regulatory_context(ptm_type)
+
+    # Find the first timepoint with data
+    first_tp = None
+    first_panel = "A"
+    top_activated = []
+    top_inhibited = []
+
+    for i, tp in enumerate(timepoints):
+        net = networks.get(tp, {})
+        if not isinstance(net, dict):
+            continue
+
+        active = net.get("active_nodes", [])
+        inhibited = net.get("inhibited_nodes", [])
+
+        if active or inhibited:
+            first_tp = tp
+            first_panel = chr(65 + i)
+
+            active_sorted = sorted(
+                [n for n in active if isinstance(n, dict)],
+                key=lambda x: abs(x.get("value", x.get("ptm_log2fc", x.get("log2fc", 0)))),
+                reverse=True,
+            )
+            inhibited_sorted = sorted(
+                [n for n in inhibited if isinstance(n, dict)],
+                key=lambda x: abs(x.get("value", x.get("ptm_log2fc", x.get("log2fc", 0)))),
+                reverse=True,
+            )
+
+            top_activated = active_sorted[:3]
+            top_inhibited = inhibited_sorted[:2]
+            break
+
+    if not first_tp or not top_activated:
+        return ""
+
+    net = networks.get(first_tp, {})
+    n_active = len(net.get("active_nodes", []))
+    n_inhibited = len(net.get("inhibited_nodes", []))
+    n_nonptm = len(net.get("non_ptm_nodes", []))
+
+    # Format top proteins
+    protein_examples = []
+    for node in top_activated[:3]:
+        gene = node.get("gene", node.get("id", "Unknown"))
+        site = node.get("site", "")
+        val = node.get("value", node.get("ptm_log2fc", node.get("log2fc", 0)))
+        if site:
+            protein_examples.append(f"{gene}({site}) exhibited a PTM Log2FC of {val:.2f}")
+        else:
+            protein_examples.append(f"{gene} exhibited a PTM Log2FC of {val:.2f}")
+
+    example_proteins_text = ", ".join(protein_examples[:2])
+    if len(protein_examples) > 2:
+        example_proteins_text += f", and {protein_examples[2]}"
+
+    # Build temporal example if multiple timepoints
+    temporal_example = ""
+    if len(timepoints) >= 2 and top_activated:
+        first_gene = top_activated[0].get("gene", "Unknown")
+        first_site = top_activated[0].get("site", "")
+        first_val = top_activated[0].get("value", top_activated[0].get("ptm_log2fc", 0))
+
+        later_tp = timepoints[-1]
+        later_net = networks.get(later_tp, {})
+        if isinstance(later_net, dict):
+            later_panel = chr(65 + len(timepoints) - 1)
+            for node_type in ["active_nodes", "inhibited_nodes"]:
+                for node in later_net.get(node_type, []):
+                    if isinstance(node, dict) and node.get("gene") == first_gene:
+                        later_val = node.get("value", node.get("ptm_log2fc", 0))
+                        protein_ref = f"{first_gene}({first_site})" if first_site else first_gene
+                        if abs(later_val - first_val) > 0.5:
+                            if later_val > first_val:
+                                temporal_example = (
+                                    f"\n> {protein_ref} showed progressive increase from "
+                                    f"PTM Log2FC of {first_val:.2f} at {first_tp} to {later_val:.2f} at {later_tp} "
+                                    f"(Figure 1{later_panel}), suggesting sustained {ptm_type} signaling."
+                                )
+                            else:
+                                temporal_example = (
+                                    f"\n> In contrast, {protein_ref} showed a shift from "
+                                    f"PTM Log2FC of {first_val:.2f} at {first_tp} to {later_val:.2f} at {later_tp} "
+                                    f"(Figure 1{later_panel}), suggesting a biphasic regulatory mechanism."
+                                )
+                        break
+
+    example = f"""## CORRECT WRITING EXAMPLE (Follow this style — uses YOUR actual data)
+
+GOOD EXAMPLE:
+> The {ptm_type} signaling network at {first_tp} (Figure 1{first_panel}) revealed {n_active} activated PTMs and {n_inhibited} inhibited PTMs,
+> with {n_nonptm} non-PTM proteins forming the interaction network. Among the most strongly modified substrates,
+> {example_proteins_text},{temporal_example}
+> indicating coordinated activation of multiple signaling nodes.
+
+BAD EXAMPLE (NEVER write like this):
+> The MAPK pathway demonstrated a clear temporal profile. At 3h, we observed robust phosphorylation of
+> several key substrates, including [list specific substrates and Log2FC values from Figure 1A].
+> For example, [Specific substrate] exhibited a PTM Log2FC of [value].
+"""
+    return example
+
+
+# ---------------------------------------------------------------------------
+# v98: Structured Protein Data Builder for LLM Prompts
+# ---------------------------------------------------------------------------
+
+def build_structured_protein_data_for_llm(
+    results: dict,
+    timepoints: list,
+    ptm_type: str = "phosphorylation",
+    mode: str = "ptm_only",
+    top_n: int = 30,
+) -> Tuple[str, List[str], List[float]]:
+    """
+    v98: Build structured protein data in Markdown table + JSON format for LLM prompts.
+
+    Replaces unstructured text data with clear tabular format that makes it
+    harder for the LLM to hallucinate by providing an unambiguous data reference.
+
+    Returns:
+        Tuple of (structured_data_block, protein_names, log2fc_values)
+    """
+    import json as _json
+
+    networks = results.get("networks", {})
+    protein_names: List[str] = []
+    log2fc_values: List[float] = []
+
+    # Collect all PTM proteins across timepoints
+    ptm_data: Dict[str, dict] = {}  # {gene(site): {tp: {ptm_log2fc, protein_log2fc}}}
+
+    for tp in timepoints:
+        net = networks.get(tp, {})
+        if not isinstance(net, dict):
+            continue
+        for node_type in ["active_nodes", "inhibited_nodes"]:
+            for node in net.get(node_type, []):
+                if not isinstance(node, dict):
+                    continue
+                gene = node.get("gene", node.get("id", "Unknown"))
+                site = node.get("site", "")
+                key = f"{gene}({site})" if site else gene
+                ptm_log2fc = node.get("value", node.get("ptm_log2fc", node.get("log2fc", 0)))
+                protein_log2fc = node.get("protein_log2fc", 0)
+
+                if key not in ptm_data:
+                    ptm_data[key] = {"gene": gene, "site": site}
+                ptm_data[key][tp] = {
+                    "ptm_log2fc": round(ptm_log2fc, 2),
+                    "protein_log2fc": round(protein_log2fc, 2),
+                }
+                protein_names.append(gene)
+                log2fc_values.append(round(ptm_log2fc, 2))
+                if protein_log2fc != 0:
+                    log2fc_values.append(round(protein_log2fc, 2))
+
+    # Collect Non-PTM proteins
+    nonptm_data: Dict[str, dict] = {}
+    for tp in timepoints:
+        net = networks.get(tp, {})
+        if not isinstance(net, dict):
+            continue
+        for node in net.get("non_ptm_nodes", []):
+            if not isinstance(node, dict):
+                continue
+            gene = node.get("gene", node.get("id", "Unknown"))
+            if not gene or gene == "Unknown":
+                continue
+            plog2fc = node.get("protein_log2fc", node.get("log2fc", 0))
+            if gene not in nonptm_data:
+                nonptm_data[gene] = {}
+            nonptm_data[gene][tp] = round(plog2fc, 2)
+            protein_names.append(gene)
+            if plog2fc != 0:
+                log2fc_values.append(round(plog2fc, 2))
+
+    if not ptm_data:
+        return ("", [], [])
+
+    # Sort PTM proteins by max absolute Log2FC
+    sorted_ptms = sorted(
+        ptm_data.items(),
+        key=lambda x: max(abs(x[1].get(tp, {}).get("ptm_log2fc", 0)) for tp in timepoints if tp in x[1]),
+        reverse=True,
+    )
+
+    lines = []
+    lines.append("## " + "=" * 59)
+    lines.append("## VERIFIED EXPERIMENTAL DATA -- STRUCTURED FORMAT (v98)")
+    lines.append("## " + "=" * 59)
+    lines.append("")
+    lines.append("**INSTRUCTION**: The tables below contain ALL verified experimental data.")
+    lines.append("You MUST cite protein names and Log2FC values EXACTLY as they appear here.")
+    lines.append("Any protein or value NOT in these tables is HALLUCINATED.")
+    lines.append("")
+
+    # PTM Protein Table
+    lines.append(f"### Table A: Verified {ptm_type.capitalize()} Modification Data")
+    header = "| # | Protein | Site |"
+    for tp in timepoints:
+        header += f" {tp} PTM_Log2FC |"
+    header += " Max |PTM_Log2FC| |"
+    lines.append(header)
+
+    sep = "|---|---|---|"
+    for _ in timepoints:
+        sep += "---|"
+    sep += "---|"
+    lines.append(sep)
+
+    for i, (key, data) in enumerate(sorted_ptms[:top_n], 1):
+        gene = data.get("gene", "?")
+        site = data.get("site", "")
+        row = f"| {i} | **{gene}** | {site} |"
+        max_abs = 0
+        for tp in timepoints:
+            if tp in data and isinstance(data[tp], dict):
+                val = data[tp]["ptm_log2fc"]
+                row += f" {val:.2f} |"
+                if abs(val) > max_abs:
+                    max_abs = abs(val)
+            else:
+                row += " -- |"
+        row += f" {max_abs:.2f} |"
+        lines.append(row)
+    lines.append("")
+
+    # Non-PTM Protein Table (top 20)
+    if nonptm_data:
+        sorted_nonptm = sorted(
+            nonptm_data.items(),
+            key=lambda x: max(abs(v) for v in x[1].values()) if x[1] else 0,
+            reverse=True,
+        )
+        lines.append("### Table B: Verified Non-PTM Effector Protein Abundance Data")
+        header = "| # | Protein |"
+        for tp in timepoints:
+            header += f" {tp} Protein_Log2FC |"
+        header += " Max |Change| |"
+        lines.append(header)
+
+        sep = "|---|---|"
+        for _ in timepoints:
+            sep += "---|"
+        sep += "---|"
+        lines.append(sep)
+
+        for i, (gene, tp_data) in enumerate(sorted_nonptm[:20], 1):
+            row = f"| {i} | **{gene}** |"
+            max_abs = 0
+            for tp in timepoints:
+                val = tp_data.get(tp, 0)
+                row += f" {val:.2f} |"
+                if abs(val) > max_abs:
+                    max_abs = abs(val)
+            row += f" {max_abs:.2f} |"
+            lines.append(row)
+        lines.append("")
+
+    # JSON protein registry
+    unique_proteins = sorted(set(protein_names))
+    lines.append("### Verified Protein Name Registry (JSON)")
+    lines.append("```json")
+    lines.append(_json.dumps({
+        "verified_proteins": unique_proteins,
+        "total_ptm_proteins": len(ptm_data),
+        "total_nonptm_proteins": len(nonptm_data),
+        "instruction": "ONLY cite proteins from this list. Any other protein name is HALLUCINATED.",
+    }, indent=2))
+    lines.append("```")
+    lines.append("")
+    lines.append("## " + "=" * 59)
+    lines.append("")
+
+    return ("\n".join(lines), unique_proteins, log2fc_values)
+
+
+# ---------------------------------------------------------------------------
+# v98: Structured Cross-Talk Data Builder for LLM Prompts
+# ---------------------------------------------------------------------------
+
+def build_structured_crosstalk_data_for_llm(
+    crosstalk_data: dict,
+) -> Tuple[str, List[str], List[float]]:
+    """
+    v98: Build structured Cross-Talk data in Markdown table + JSON format.
+
+    Converts crosstalk_data dict into clear tabular format for LLM prompts.
+
+    Returns:
+        Tuple of (structured_data_block, protein_names, log2fc_values)
+    """
+    import json as _json
+
+    if not crosstalk_data:
+        return ("", [], [])
+
+    p_type = crosstalk_data.get("primary_ptm_type", "phosphorylation").capitalize()
+    s_type = crosstalk_data.get("secondary_ptm_type", "ubiquitylation").capitalize()
+
+    protein_names: List[str] = []
+    log2fc_values: List[float] = []
+
+    lines = []
+    lines.append("## " + "=" * 59)
+    lines.append("## VERIFIED CROSS-TALK DATA -- STRUCTURED FORMAT (v98)")
+    lines.append("## " + "=" * 59)
+    lines.append("")
+    lines.append("**INSTRUCTION**: The tables below contain ALL verified dual-PTM protein data.")
+    lines.append("You MUST cite protein names and Log2FC values EXACTLY as they appear here.")
+    lines.append("Any protein or value NOT in these tables is HALLUCINATED.")
+    lines.append("")
+
+    # Dual-PTM Protein Table
+    dual_ptms = crosstalk_data.get("dual_ptm_proteins", [])
+    if dual_ptms:
+        all_tps: set = set()
+        for dp in dual_ptms:
+            all_tps.update(dp.get("temporal_comparison", {}).keys())
+        sorted_tps = sorted(all_tps)
+
+        lines.append(f"### Table C: Verified Dual-PTM Protein Data ({p_type} x {s_type})")
+        header = "| # | Protein | Pattern | Concordance |"
+        for tp in sorted_tps:
+            header += f" {tp} {p_type[:4]}_Log2FC | {tp} {s_type[:4]}_Log2FC | {tp} Status |"
+        lines.append(header)
+
+        sep = "|---|---|---|---|"
+        for _ in sorted_tps:
+            sep += "---|---|---|"
+        lines.append(sep)
+
+        for i, dp in enumerate(dual_ptms[:20], 1):
+            gene = dp.get("gene", "?")
+            protein_names.append(gene)
+            pattern = dp.get("pattern", "mixed").upper()
+            conc_ratio = dp.get("concordant_ratio", 0)
+            row = f"| {i} | **{gene}** | {pattern} | {conc_ratio:.0%} |"
+
+            for tp in sorted_tps:
+                comp = dp.get("temporal_comparison", {}).get(tp, {})
+                p_val = comp.get("primary_ptm_log2fc", 0)
+                s_val = comp.get("secondary_ptm_log2fc", 0)
+                log2fc_values.extend([round(p_val, 2), round(s_val, 2)])
+
+                if comp.get("concordant") is True:
+                    status = "CONC"
+                elif comp.get("concordant") is False:
+                    status = "DISC"
+                else:
+                    status = "NEUT"
+                row += f" {p_val:.2f} | {s_val:.2f} | {status} |"
+            lines.append(row)
+        lines.append("")
+
+    # Shared Non-PTM Interactors
+    shared_nonptm = crosstalk_data.get("shared_nonptm", [])
+    if shared_nonptm:
+        protein_names.extend(shared_nonptm[:30])
+        lines.append("### Verified Shared Non-PTM Interactors")
+        lines.append(f"| # | Protein | Present in {p_type} | Present in {s_type} |")
+        lines.append("|---|---|---|---|")
+        for i, gene in enumerate(shared_nonptm[:30], 1):
+            lines.append(f"| {i} | **{gene}** | Yes | Yes |")
+        lines.append("")
+
+    # Sequential Gating Events
+    gating = crosstalk_data.get("sequential_gating", [])
+    if gating:
+        lines.append("### Verified Sequential Gating Events")
+        lines.append("| # | Protein | Leading PTM | Lagging PTM | Time Lag (min) | Mechanism |")
+        lines.append("|---|---|---|---|---|---|")
+        for i, gate in enumerate(gating[:15], 1):
+            gene = gate.get("gene", "?")
+            protein_names.append(gene)
+            lines.append(
+                f"| {i} | **{gene}** | {gate.get('leading_ptm', '?')} at {gate.get('leading_first_tp', '?')} | "
+                f"{gate.get('lagging_ptm', '?')} at {gate.get('lagging_first_tp', '?')} | "
+                f"{gate.get('time_lag_minutes', 0):.0f} | {gate.get('mechanism_hint', '?')[:50]} |"
+            )
+        lines.append("")
+
+    # JSON protein registry
+    unique_proteins = sorted(set(protein_names))
+    lines.append("### Verified Protein Name Registry (JSON)")
+    lines.append("```json")
+    lines.append(_json.dumps({
+        "verified_dual_ptm_proteins": [dp.get("gene", "") for dp in dual_ptms],
+        "verified_shared_nonptm": shared_nonptm[:30],
+        "verified_gating_proteins": [g.get("gene", "") for g in gating],
+        "all_verified_proteins": unique_proteins,
+        "instruction": "ONLY cite proteins from this list. Any other protein name is HALLUCINATED.",
+    }, indent=2))
+    lines.append("```")
+    lines.append("")
+    lines.append("## " + "=" * 59)
+    lines.append("")
+
+    return ("\n".join(lines), unique_proteins, log2fc_values)

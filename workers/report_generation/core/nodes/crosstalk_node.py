@@ -14,7 +14,6 @@ from typing import Dict, List, Optional, Tuple
 
 from common.llm_client import LLMClient
 from common.temporal_utils import tp_to_minutes, format_condition_display_name
-from common.report_postprocessor import postprocess_full_report
 from report_generation.core.rag_retriever import RAGRetriever
 from report_generation.core.temporal_analysis import (
     build_nonptm_temporal_analysis,
@@ -24,6 +23,14 @@ from report_generation.core.temporal_analysis import (
 from report_generation.core.report_utils import (
     ensure_abstract_completeness,
     merge_empty_subsections,
+)
+from report_generation.core.dynamic_prompt_generator import (
+    build_anti_hallucination_directive,
+    build_structured_crosstalk_data_for_llm,
+)
+from common.report_postprocessor import (
+    postprocess_full_report,
+    validate_llm_output_against_data,
 )
 from report_generation.core.crosstalk_fallbacks import (
     generate_crosstalk_results_fallback,
@@ -625,6 +632,14 @@ def run_crosstalk_analysis(state: dict) -> dict:
     crosstalk_context = _build_crosstalk_context_for_llm(crosstalk_data)
     _whitelist_text = _build_whitelist_text(crosstalk_data)
 
+    # v98: Build structured cross-talk data for anti-hallucination
+    v98_structured_data, v98_protein_names, v98_log2fc_values = build_structured_crosstalk_data_for_llm(
+        crosstalk_data
+    )
+    v98_directive = build_anti_hallucination_directive(
+        v98_protein_names, section_name="the Cross-Talk report"
+    )
+
     # ── Prepare shared variables ──────────────────────────────────────────
     if not research_questions:
         research_questions = [research_question] if research_question else []
@@ -910,6 +925,10 @@ Write comprehensive results organized by:
 - ONLY mention proteins from the data above
 - DATA INTEGRITY: If data shows 0 for any category, do NOT discuss it
 
+{v98_directive}
+
+{v98_structured_data}
+
 ## Results
 """
     results_result = llm.generate_with_retry(
@@ -917,6 +936,22 @@ Write comprehensive results organized by:
     )
     if results_result and len(results_result.strip()) > 100:
         results_result = re.sub(r"^#+\s*(Results|RESULTS)\s*\n*", "", results_result.strip())
+        # v98: Post-processing validation against actual data
+        if v98_protein_names:
+            try:
+                validation = validate_llm_output_against_data(
+                    results_result, v98_protein_names, v98_log2fc_values,
+                    section_name="Cross-Talk Results", strict_mode=True
+                )
+                if validation["hallucinated_proteins"]:
+                    logger.warning(
+                        f"[v98] Results: removed {len(validation['hallucinated_proteins'])} "
+                        f"hallucinated proteins: {', '.join(validation['hallucinated_proteins'][:5])}"
+                    )
+                    results_result = validation["validated_text"]
+                logger.info(f"[v98] Results validation score: {validation['validation_score']:.1%}")
+            except Exception as e:
+                logger.warning(f"[v98] Results validation failed (non-fatal): {e}")
         report_parts.append(f"## Results\n\n{results_result.strip()}\n")
     else:
         fallback_results = generate_crosstalk_results_fallback(
@@ -978,6 +1013,10 @@ You may ONLY mention the following protein/gene names:
 - ONLY mention proteins from the WHITELIST
 - DATA INTEGRITY: If data shows 0 for any category, do NOT discuss it as a finding
 
+{v98_directive}
+
+{v98_structured_data}
+
 ## Discussion
 """
     discussion_result = llm.generate_with_retry(
@@ -985,6 +1024,21 @@ You may ONLY mention the following protein/gene names:
     )
     if discussion_result and len(discussion_result.strip()) > 100:
         discussion_result = re.sub(r"^#+\s*(Discussion|DISCUSSION)\s*\n*", "", discussion_result.strip())
+        # v98: Post-processing validation against actual data
+        if v98_protein_names:
+            try:
+                validation = validate_llm_output_against_data(
+                    discussion_result, v98_protein_names, v98_log2fc_values,
+                    section_name="Cross-Talk Discussion", strict_mode=False
+                )
+                if validation["hallucinated_proteins"]:
+                    logger.warning(
+                        f"[v98] Discussion: {len(validation['hallucinated_proteins'])} "
+                        f"potentially hallucinated proteins: {', '.join(validation['hallucinated_proteins'][:5])}"
+                    )
+                logger.info(f"[v98] Discussion validation score: {validation['validation_score']:.1%}")
+            except Exception as e:
+                logger.warning(f"[v98] Discussion validation failed (non-fatal): {e}")
         report_parts.append(f"## Discussion\n\n{discussion_result.strip()}\n")
     else:
         fallback_discussion = generate_crosstalk_discussion_fallback(

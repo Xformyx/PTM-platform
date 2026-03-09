@@ -10,7 +10,13 @@ import logging
 from typing import Dict, List
 
 from common.llm_client import LLMClient
+from common.report_postprocessor import validate_llm_output_against_data
 from report_generation.core.rag_retriever import RAGRetriever
+from report_generation.core.dynamic_prompt_generator import (
+    build_anti_hallucination_directive,
+    build_dynamic_writing_example,
+    build_structured_protein_data_for_llm,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +92,21 @@ def run_section_writing(state: dict) -> dict:
     all_references = _collect_all_references(parsed_ptms)
     logger.info(f"Collected {len(all_references)} unique PubMed references from enriched PTM data")
 
+    # v98: Build structured protein data for anti-hallucination
+    ptm_type = state.get("ptm_type", "phosphorylation")
+    network_results = state.get("network_results", {})
+    timepoints = sorted(network_results.get("timepoints", []))
+    v98_structured_data, v98_protein_names, v98_log2fc_values = build_structured_protein_data_for_llm(
+        network_results, timepoints, ptm_type=ptm_type
+    )
+    v98_directive = build_anti_hallucination_directive(
+        v98_protein_names, section_name="the PTM analysis report"
+    )
+    v98_writing_example = build_dynamic_writing_example(
+        network_results, timepoints, ptm_type=ptm_type
+    )
+    logger.info(f"[v98] Built structured data: {len(v98_protein_names)} proteins, {len(v98_log2fc_values)} values")
+
     sections: Dict[str, str] = {}
     prev_sections: Dict[str, str] = {}
 
@@ -102,11 +123,36 @@ def run_section_writing(state: dict) -> dict:
             chromadb_results=chromadb_results,
         )
 
+        # v98: Enhance prompt with anti-hallucination directives
+        if v98_directive and section_type in ("results", "discussion"):
+            prompt = v98_directive + "\n\n" + v98_structured_data + "\n\n" + prompt
+            if v98_writing_example and section_type == "results":
+                prompt += "\n\n" + v98_writing_example
+
         max_tok = section_max_tokens.get(section_type, 8192)
         content = llm.generate(prompt, system_prompt=SYSTEM_PROMPT, temperature=llm_temperature, max_tokens=max_tok)
 
         if content.startswith("[LLM Error"):
             content = _fallback_section(section_type, research_results, validated_hypotheses, parsed_ptms)
+
+        # v98: Post-processing validation for results and discussion
+        if v98_protein_names and section_type in ("results", "discussion"):
+            try:
+                strict = section_type == "results"
+                validation = validate_llm_output_against_data(
+                    content, v98_protein_names, v98_log2fc_values,
+                    section_name=section_type.capitalize(), strict_mode=strict
+                )
+                if validation["hallucinated_proteins"]:
+                    logger.warning(
+                        f"[v98] {section_type}: removed {len(validation['hallucinated_proteins'])} "
+                        f"hallucinated proteins: {', '.join(validation['hallucinated_proteins'][:5])}"
+                    )
+                    if strict:
+                        content = validation["validated_text"]
+                logger.info(f"[v98] {section_type} validation score: {validation['validation_score']:.1%}")
+            except Exception as e:
+                logger.warning(f"[v98] {section_type} validation failed (non-fatal): {e}")
 
         sections[section_type] = content
         prev_sections[section_type] = content

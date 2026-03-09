@@ -11,6 +11,7 @@ Handles:
 """
 
 import html
+import json
 import logging
 import re
 from typing import Dict, List, Optional, Tuple
@@ -1232,3 +1233,382 @@ def build_available_refs_from_knowledge_context(knowledge_context: str) -> List[
                     })
     
     return refs
+
+
+# ============================================================================
+# v98: Anti-Hallucination Post-Processing Validation
+# ============================================================================
+
+def extract_protein_names_from_text(text: str) -> List[str]:
+    """
+    v98: Extract protein/gene names from LLM-generated text.
+
+    Uses a conservative regex that matches typical gene/protein naming conventions:
+    - 1+ uppercase letter followed by alphanumeric (e.g., AKT1, GSK3B, MAPK14)
+    - Mixed case gene names (e.g., Dnajc5, Farp1, Vim)
+    - Protein names with hyphens or underscores are handled
+
+    Returns: sorted list of unique protein/gene name candidates
+    """
+    if not text:
+        return []
+
+    # Pattern 1: Standard gene names (uppercase start, alphanumeric, 2-10 chars)
+    pattern_upper = re.compile(r'\b([A-Z][A-Z0-9]{1,9})\b')
+
+    # Pattern 2: Mixed-case gene names common in mouse/rat nomenclature
+    pattern_mixed = re.compile(r'\b([A-Z][a-z][a-z0-9]{1,10}[0-9]*[a-z]?)\b')
+
+    # Common English words and biology terms to exclude
+    EXCLUDE_WORDS = {
+        'THE', 'AND', 'FOR', 'NOT', 'BUT', 'ARE', 'WAS', 'HAS', 'HAD',
+        'ALL', 'CAN', 'MAY', 'DID', 'ITS', 'OUR', 'USE', 'TWO', 'ONE',
+        'NEW', 'OLD', 'SET', 'KEY', 'LOG', 'DNA', 'RNA', 'ATP', 'GTP',
+        'GDP', 'ADP', 'AMP', 'NAD', 'FAD', 'COA', 'PTM', 'UPS', 'DUB',
+        'SCF', 'RING', 'HECT',
+        'BOTH', 'EACH', 'THIS', 'THAT', 'WITH', 'FROM', 'INTO', 'UPON',
+        'OVER', 'THAN', 'ALSO', 'ONLY', 'MOST', 'SUCH', 'WHEN', 'THEN',
+        'HERE', 'THUS', 'DOES', 'BEEN', 'WERE', 'HAVE', 'WILL', 'THEY',
+        'SAME', 'MORE', 'LESS', 'VERY', 'WELL', 'JUST', 'SOME', 'MANY',
+        'MUCH', 'LIKE', 'EVEN', 'STILL', 'WHAT', 'WHICH', 'WHERE',
+        'FIGURE', 'TABLE', 'SECTION', 'RESULTS', 'DISCUSSION',
+        'CONCLUSION', 'ABSTRACT', 'INTRODUCTION', 'METHODS',
+        'CONCORDANT', 'DISCORDANT', 'NEUTRAL', 'MIXED',
+        'SIGNAL', 'SIGNALING', 'PATHWAY', 'NETWORK', 'ANALYSIS',
+        'PROTEIN', 'PROTEINS', 'MODIFICATION', 'REGULATION',
+        'TEMPORAL', 'CROSS', 'TALK', 'DUAL', 'SEQUENTIAL',
+        'CELL', 'CELLULAR', 'RESPONSE', 'MECHANISM', 'MODEL',
+        'DATA', 'TOTAL', 'RATIO', 'PATTERN', 'PATTERNS',
+        'IDENTIFIED', 'REVEALED', 'OBSERVED', 'EXHIBITED',
+        'AMONG', 'BETWEEN', 'ACROSS', 'WITHIN', 'THROUGH',
+        'FIRST', 'SECOND', 'THIRD', 'EARLY', 'LATE', 'RAPID',
+        'POST', 'TRANSLATIONAL', 'PHOSPHORYLATION', 'UBIQUITYLATION',
+        'UBIQUITINATION', 'KINASE', 'LIGASE', 'PROTEASOME',
+        'DEGRADATION', 'ACTIVATION', 'INHIBITION', 'AMPLIFICATION',
+        'ATTENUATION', 'FEEDBACK', 'FEEDFORWARD', 'INTEGRATION',
+        'CONVERGENCE', 'PROPAGATION', 'RELAY', 'CASCADE',
+        'EFFECTOR', 'SCAFFOLD', 'HUB', 'NODE', 'NODES',
+        'KEGG', 'STRING', 'GENE', 'GENES', 'SITE', 'SITES',
+        'RESIDUE', 'RESIDUES', 'DOMAIN', 'DOMAINS', 'MOTIF',
+        'TERMINUS', 'TERMINAL', 'UPSTREAM', 'DOWNSTREAM',
+    }
+
+    EXCLUDE_MIXED = {
+        'The', 'And', 'For', 'Not', 'But', 'Are', 'Was', 'Has', 'Had',
+        'All', 'Can', 'May', 'Did', 'Its', 'Our', 'Use', 'Two', 'One',
+        'New', 'Old', 'Set', 'Key', 'Log', 'Both', 'Each', 'This',
+        'That', 'With', 'From', 'Into', 'Upon', 'Over', 'Than', 'Also',
+        'Only', 'Most', 'Such', 'When', 'Then', 'Here', 'Thus', 'Does',
+        'Been', 'Were', 'Have', 'Will', 'They', 'Same', 'More', 'Less',
+        'Very', 'Well', 'Just', 'Some', 'Many', 'Much', 'Like', 'Even',
+        'Still', 'What', 'Which', 'Where', 'Figure', 'Table', 'Section',
+        'Results', 'Discussion', 'Conclusion', 'Abstract', 'Introduction',
+        'Methods', 'Concordant', 'Discordant', 'Neutral', 'Mixed',
+        'Signal', 'Signaling', 'Pathway', 'Network', 'Analysis',
+        'Protein', 'Proteins', 'Modification', 'Regulation',
+        'Temporal', 'Cross', 'Talk', 'Dual', 'Sequential',
+        'Cell', 'Cellular', 'Response', 'Mechanism', 'Model',
+        'Data', 'Total', 'Ratio', 'Pattern', 'Patterns',
+        'Identified', 'Revealed', 'Observed', 'Exhibited',
+        'Among', 'Between', 'Across', 'Within', 'Through',
+        'First', 'Second', 'Third', 'Early', 'Late', 'Rapid',
+        'Post', 'Translational', 'Phosphorylation', 'Ubiquitylation',
+        'Ubiquitination', 'Kinase', 'Ligase', 'Proteasome',
+        'Degradation', 'Activation', 'Inhibition', 'Amplification',
+        'Attenuation', 'Feedback', 'Feedforward', 'Integration',
+        'Convergence', 'Propagation', 'Relay', 'Cascade',
+        'Effector', 'Scaffold', 'Hub', 'Node', 'Nodes',
+        'However', 'Moreover', 'Furthermore', 'Therefore', 'Notably',
+        'Specifically', 'Importantly', 'Interestingly', 'Collectively',
+        'Consistent', 'Suggesting', 'Indicating', 'Demonstrating',
+    }
+
+    proteins = set()
+
+    # Extract uppercase gene names
+    for m in pattern_upper.findall(text):
+        if m not in EXCLUDE_WORDS and len(m) >= 2:
+            if any(c.isdigit() for c in m) or (2 <= len(m) <= 8):
+                proteins.add(m)
+
+    # Extract mixed-case gene names
+    for m in pattern_mixed.findall(text):
+        if m not in EXCLUDE_MIXED and len(m) >= 3:
+            if any(c.isdigit() for c in m) or len(m) <= 8:
+                proteins.add(m)
+
+    return sorted(proteins)
+
+
+def validate_llm_output_against_data(
+    llm_output: str,
+    known_protein_names: List[str],
+    known_log2fc_values: Optional[List[float]] = None,
+    section_name: str = "Section",
+    strict_mode: bool = False,
+) -> Dict:
+    """
+    v98: Validate LLM-generated text against actual experimental data.
+
+    Checks:
+    1. Protein names mentioned in the output exist in the known data
+    2. Log2FC values mentioned in the output are plausible (exist in data)
+    3. Flags hallucinated proteins and fabricated values
+
+    Args:
+        llm_output: The LLM-generated text to validate
+        known_protein_names: List of protein/gene names from the actual data
+        known_log2fc_values: Optional list of actual Log2FC values for cross-reference
+        section_name: Name of the section being validated (for logging)
+        strict_mode: If True, removes sentences containing hallucinated proteins
+
+    Returns:
+        Dict with:
+            - 'validated_text': The (optionally cleaned) text
+            - 'hallucinated_proteins': List of protein names not in data
+            - 'verified_proteins': List of protein names confirmed in data
+            - 'suspicious_values': List of Log2FC values not found in data
+            - 'validation_score': Float 0-1 (1 = all proteins verified)
+            - 'warnings': List of warning messages
+    """
+    if not llm_output or not known_protein_names:
+        return {
+            'validated_text': llm_output or '',
+            'hallucinated_proteins': [],
+            'verified_proteins': [],
+            'suspicious_values': [],
+            'validation_score': 1.0,
+            'warnings': [],
+        }
+
+    # Build case-insensitive lookup for known proteins
+    known_upper = {p.upper() for p in known_protein_names}
+
+    # Extract protein names from LLM output
+    mentioned_proteins = extract_protein_names_from_text(llm_output)
+
+    hallucinated = []
+    verified = []
+
+    for protein in mentioned_proteins:
+        protein_upper = protein.upper()
+        if protein_upper in known_upper:
+            verified.append(protein)
+        else:
+            # Check partial match (e.g., "GSK3" matches "GSK3B")
+            partial_match = False
+            for known in known_upper:
+                if protein_upper in known or known in protein_upper:
+                    partial_match = True
+                    break
+
+            if partial_match:
+                verified.append(protein)
+            else:
+                hallucinated.append(protein)
+
+    # Validate Log2FC values if provided
+    suspicious_values = []
+    if known_log2fc_values:
+        log2fc_pattern = re.compile(r'Log2FC\s*[=:]\s*(-?\d+\.?\d*)')
+        mentioned_values = log2fc_pattern.findall(llm_output)
+
+        known_values_set = set()
+        for v in known_log2fc_values:
+            known_values_set.add(round(v, 2))
+            known_values_set.add(round(v, 1))
+            known_values_set.add(round(v, 0))
+
+        for val_str in mentioned_values:
+            try:
+                val = float(val_str)
+                val_r2 = round(val, 2)
+                val_r1 = round(val, 1)
+                val_r0 = round(val, 0)
+                if (val_r2 not in known_values_set
+                        and val_r1 not in known_values_set
+                        and val_r0 not in known_values_set):
+                    found_close = False
+                    for kv in known_log2fc_values:
+                        if abs(val - kv) < 0.15:
+                            found_close = True
+                            break
+                    if not found_close:
+                        suspicious_values.append(val)
+            except ValueError:
+                continue
+
+    # Calculate validation score
+    total_mentioned = len(mentioned_proteins)
+    if total_mentioned > 0:
+        validation_score = len(verified) / total_mentioned
+    else:
+        validation_score = 1.0
+
+    # Build warnings
+    warnings = []
+    if hallucinated:
+        warnings.append(
+            f"[v98 HALLUCINATION WARNING] {section_name}: {len(hallucinated)} protein(s) "
+            f"NOT found in experimental data: {', '.join(hallucinated[:10])}"
+        )
+    if suspicious_values:
+        warnings.append(
+            f"[v98 VALUE WARNING] {section_name}: {len(suspicious_values)} Log2FC value(s) "
+            f"not found in data: {', '.join([f'{v:.2f}' for v in suspicious_values[:10]])}"
+        )
+
+    for w in warnings:
+        _sse_log(w, "WARNING")
+
+    if verified:
+        _sse_log(
+            f"[v98] {section_name}: {len(verified)}/{total_mentioned} proteins verified "
+            f"(score: {validation_score:.1%})",
+            "INFO"
+        )
+
+    # Strict mode: remove sentences containing hallucinated proteins
+    validated_text = llm_output
+    if strict_mode and hallucinated:
+        for protein in hallucinated:
+            pattern = re.compile(
+                r'[^.]*\b' + re.escape(protein) + r'\b[^.]*\.',
+                re.IGNORECASE
+            )
+            removed_count = len(pattern.findall(validated_text))
+            if removed_count > 0:
+                validated_text = pattern.sub('', validated_text)
+                _sse_log(
+                    f"[v98 STRICT] Removed {removed_count} sentence(s) mentioning "
+                    f"hallucinated protein '{protein}' from {section_name}",
+                    "WARNING"
+                )
+        validated_text = re.sub(r'  +', ' ', validated_text)
+        validated_text = re.sub(r'\n\s*\n\s*\n', '\n\n', validated_text)
+
+    return {
+        'validated_text': validated_text,
+        'hallucinated_proteins': hallucinated,
+        'verified_proteins': verified,
+        'suspicious_values': suspicious_values,
+        'validation_score': validation_score,
+        'warnings': warnings,
+    }
+
+
+def build_data_provenance_block(
+    protein_data: List[Dict],
+    ptm_type: str = "phosphorylation",
+    mode: str = "ptm_only",
+) -> str:
+    """
+    v98: Build a structured data provenance block for LLM prompts.
+
+    Converts protein data into a clear JSON-like + Markdown table format
+    that makes it unambiguous which proteins and values are in the actual data.
+
+    This block is prepended to LLM prompts to:
+    1. Make the data boundary crystal clear
+    2. Provide a machine-readable reference the LLM can directly quote
+    3. Reduce the chance of hallucination by giving structured data
+
+    Args:
+        protein_data: List of dicts with keys like 'gene', 'site', 'log2fc', 'timepoint'
+        ptm_type: Type of PTM (phosphorylation/ubiquitylation)
+        mode: 'ptm_only' or 'crosstalk'
+
+    Returns:
+        Formatted string block for LLM prompt injection
+    """
+    if not protein_data:
+        return ""
+
+    lines = []
+    lines.append("## " + "=" * 59)
+    lines.append("## VERIFIED EXPERIMENTAL DATA -- USE ONLY THESE VALUES")
+    lines.append("## " + "=" * 59)
+    lines.append("")
+    lines.append("**CRITICAL INSTRUCTION**: The following data block contains ALL proteins and")
+    lines.append("values from the actual experiment. You MUST ONLY cite proteins and Log2FC")
+    lines.append("values that appear in this block. Any protein name or numerical value NOT")
+    lines.append("listed below is HALLUCINATED and MUST NOT appear in your output.")
+    lines.append("")
+
+    if protein_data and isinstance(protein_data[0], dict):
+        all_tps = set()
+        for pd in protein_data:
+            if 'timepoint' in pd:
+                all_tps.add(pd['timepoint'])
+            if 'temporal_comparison' in pd:
+                all_tps.update(pd['temporal_comparison'].keys())
+            if 'values' in pd and isinstance(pd['values'], dict):
+                all_tps.update(pd['values'].keys())
+
+        if all_tps:
+            sorted_tps = sorted(all_tps)
+            lines.append(f"### Verified {ptm_type.capitalize()} Protein Data Table")
+            header = "| Protein | Site |"
+            for tp in sorted_tps:
+                header += f" {tp} (Log2FC) |"
+            header += " Max |Log2FC| |"
+            lines.append(header)
+
+            sep = "|---|---|"
+            for _ in sorted_tps:
+                sep += "---|"
+            sep += "---|"
+            lines.append(sep)
+
+            for pd in protein_data[:30]:
+                gene = pd.get('gene', pd.get('protein', '?'))
+                site = pd.get('site', pd.get('sites', ''))
+                if isinstance(site, list):
+                    site = ', '.join(site[:3])
+                row = f"| **{gene}** | {site} |"
+                max_abs = 0
+                for tp in sorted_tps:
+                    val = None
+                    if 'values' in pd and isinstance(pd['values'], dict):
+                        val = pd['values'].get(tp)
+                    elif 'temporal_comparison' in pd:
+                        tc = pd['temporal_comparison'].get(tp, {})
+                        val = tc.get('primary_ptm_log2fc', tc.get('log2fc'))
+                    if val is not None:
+                        row += f" {val:.2f} |"
+                        if abs(val) > max_abs:
+                            max_abs = abs(val)
+                    else:
+                        row += " -- |"
+                row += f" {max_abs:.2f} |"
+                lines.append(row)
+            lines.append("")
+        else:
+            lines.append(f"### Verified {ptm_type.capitalize()} Protein List")
+            lines.append("| # | Protein | Site | Log2FC |")
+            lines.append("|---|---|---|---|")
+            for i, pd in enumerate(protein_data[:30], 1):
+                gene = pd.get('gene', pd.get('protein', '?'))
+                site = pd.get('site', '')
+                log2fc = pd.get('log2fc', pd.get('value', 0))
+                lines.append(f"| {i} | **{gene}** | {site} | {log2fc:.2f} |")
+            lines.append("")
+
+    lines.append("### Verified Protein Name Registry (JSON)")
+    lines.append("```json")
+    protein_names = sorted(set(
+        pd.get('gene', pd.get('protein', ''))
+        for pd in protein_data if pd.get('gene') or pd.get('protein')
+    ))
+    lines.append(json.dumps({
+        "verified_proteins": protein_names,
+        "total_count": len(protein_names),
+        "data_source": "experimental_measurement",
+        "instruction": "ONLY use protein names from this list"
+    }, indent=2))
+    lines.append("```")
+    lines.append("")
+    lines.append("## " + "=" * 59)
+    lines.append("")
+
+    return "\n".join(lines)
