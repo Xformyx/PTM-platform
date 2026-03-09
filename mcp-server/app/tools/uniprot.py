@@ -63,7 +63,17 @@ async def _fetch_uniprot_info(protein_id: str, timeout: float) -> dict:
         "go_terms_bp": [],
         "go_terms_mf": [],
         "go_terms_cc": [],
+        "gene_synonyms": [],
+        "isoforms": [],
     }
+
+    # Extract gene synonyms
+    genes = data.get("genes", [])
+    for gene_entry in genes:
+        for syn in gene_entry.get("synonyms", []):
+            val = syn.get("value", "")
+            if val and val not in result["gene_synonyms"]:
+                result["gene_synonyms"].append(val)
 
     for comment in data.get("comments", []):
         ctype = comment.get("commentType", "")
@@ -76,6 +86,27 @@ async def _fetch_uniprot_info(protein_id: str, timeout: float) -> dict:
             texts = comment.get("texts", [])
             if texts:
                 result["function_summary"] = texts[0].get("value", "")[:500]
+        elif ctype == "ALTERNATIVE PRODUCTS":
+            # Extract isoform information
+            for iso_event in comment.get("isoforms", []):
+                iso_name = ""
+                iso_names = iso_event.get("name", {}).get("value", "")
+                if not iso_names:
+                    iso_names_list = iso_event.get("isoformIds", [])
+                    iso_name = iso_names_list[0] if iso_names_list else ""
+                else:
+                    iso_name = iso_names
+                iso_ids = iso_event.get("isoformIds", [])
+                iso_seq = iso_event.get("isoformSequenceStatus", "")
+                note_texts = iso_event.get("texts", [])
+                note = note_texts[0].get("value", "") if note_texts else ""
+                if iso_name or iso_ids:
+                    result["isoforms"].append({
+                        "name": iso_name,
+                        "isoform_id": iso_ids[0] if iso_ids else "",
+                        "sequence_status": iso_seq,
+                        "note": note[:200] if note else "",
+                    })
 
     for xref in data.get("uniProtKBCrossReferences", []):
         if xref.get("database") == "GO":
@@ -107,4 +138,6 @@ def _empty_result(protein_id: str) -> dict:
         "go_terms_bp": [],
         "go_terms_mf": [],
         "go_terms_cc": [],
+        "gene_synonyms": [],
+        "isoforms": [],
     }

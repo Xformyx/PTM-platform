@@ -29,6 +29,7 @@ from .abstract_analyzer import AbstractAnalyzer
 from .llm_kinase_predictor import LLMKinasePredictor
 from .llm_functional_impact import LLMFunctionalImpact
 from .fulltext_analyzer import FullTextAnalyzer
+from dataclasses import asdict as _asdict
 from .ptm_validation import PTMValidator
 
 logger = logging.getLogger(__name__)
@@ -294,9 +295,11 @@ class RAGEnrichmentPipeline:
         validation_result = {}
         if self.enable_ptm_validation:
             try:
-                validation_result = self.ptm_validator.validate(
+                raw_result = self.ptm_validator.validate(
                     gene=gene, site=position, ptm_type=ptm_type,
                 )
+                # Convert dataclass to dict for JSON serialization & report_generator compatibility
+                validation_result = _asdict(raw_result) if hasattr(raw_result, '__dataclass_fields__') else raw_result
             except Exception as e:
                 logger.warning(f"PTM validation failed for {gene}: {e}")
 

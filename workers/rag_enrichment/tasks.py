@@ -76,10 +76,10 @@ def run_rag_enrichment(self, order_id: int, config: dict):
         df = pd.read_csv(vector_file, sep="\t", low_memory=False)
         logger.info(f"[Order {order_id}] Loaded {len(df)} PTM entries from {vector_file.name}")
 
-        # Select top-N most significant PTMs per condition (time-point),
-        # then take the union across all conditions.
-        # This ensures each time-point contributes its top PTMs and the
-        # final set contains >= N unique gene+position combinations.
+        # Select top-N most significant unique PTMs across all conditions.
+        # Strategy: rank each gene+position by its max |PTM_Relative_Log2FC|
+        # across all conditions, then take the top N unique PTMs.
+        # All condition rows for the selected PTMs are kept for multi-condition comparison.
         gene_col = "Gene.Name" if "Gene.Name" in df.columns else "gene"
         pos_col = "PTM_Position" if "PTM_Position" in df.columns else "position"
         cond_col = "Condition" if "Condition" in df.columns else "condition"
@@ -88,23 +88,22 @@ def run_rag_enrichment(self, order_id: int, config: dict):
         if fc_col in df.columns and cond_col in df.columns:
             df["_abs_fc"] = df[fc_col].abs()
             conditions = df[cond_col].dropna().unique()
-            selected_keys = set()  # set of (gene, position) tuples
 
-            for cond in conditions:
-                cond_df = df[df[cond_col] == cond].sort_values("_abs_fc", ascending=False)
-                for _, row in cond_df.head(top_n).iterrows():
-                    key = (str(row.get(gene_col, "")), str(row.get(pos_col, "")))
-                    selected_keys.add(key)
+            # For each unique (gene, position), compute max |FC| across all conditions
+            df["_key"] = list(zip(df[gene_col].astype(str), df[pos_col].astype(str)))
+            key_max_fc = df.groupby("_key")["_abs_fc"].max().sort_values(ascending=False)
+
+            # Select top_n unique PTMs by max |FC|
+            selected_keys = set(key_max_fc.head(top_n).index.tolist())
 
             # Keep all rows (all conditions) for the selected gene+position pairs
-            df["_key"] = list(zip(df[gene_col].astype(str), df[pos_col].astype(str)))
             df = df[df["_key"].isin(selected_keys)]
             df = df.drop(columns=["_abs_fc", "_key"])
 
             n_unique = len(selected_keys)
             logger.info(
-                f"[Order {order_id}] Top N selection: {top_n} per condition "
-                f"x {len(conditions)} conditions → {n_unique} unique PTMs, "
+                f"[Order {order_id}] Top N selection: top {top_n} unique PTMs "
+                f"(by max |FC| across {len(conditions)} conditions) → {n_unique} unique PTMs, "
                 f"{len(df)} total rows"
             )
         elif fc_col in df.columns:

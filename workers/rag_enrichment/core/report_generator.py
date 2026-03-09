@@ -799,21 +799,62 @@ class ComprehensiveReportGenerator:
 
         lines = ["### PTM Novelty Assessment\n"]
 
+        # Support both PTMValidationResult dict (new) and legacy format
         is_known = validation.get("is_known", None)
-        novelty_score = validation.get("novelty_score", None)
-        sources = validation.get("sources", [])
-        evidence = validation.get("evidence", [])
+        novelty = validation.get("novelty", "")  # "known" | "novel" | "uncertain"
+        novelty_confidence = validation.get("novelty_confidence", "")
+        evidence_count = validation.get("evidence_count", 0)
+        evidence_sources = validation.get("evidence_sources", [])
+        validation_summary = validation.get("validation_summary", "")
+        iptmnet_hits = validation.get("iptmnet_hits", [])
+        cross_site_results = validation.get("cross_site_results", [])
 
-        if is_known is True:
+        # Status
+        if is_known is True or novelty == "known":
             lines.append(f"**Status**: This {get_modification_noun(ptm_type)} at {gene} {position} is a **known/previously reported** PTM site.\n")
-        elif is_known is False:
+        elif is_known is False or novelty == "novel":
             lines.append(f"**Status**: This {get_modification_noun(ptm_type)} at {gene} {position} appears to be a **novel/unreported** PTM site.\n")
+        elif novelty == "uncertain":
+            lines.append(f"**Status**: Novelty assessment for {gene} {position} is **uncertain** \u2014 partial matches found.\n")
         else:
             lines.append(f"**Status**: Novelty assessment could not be determined for {gene} {position}.\n")
 
-        if novelty_score is not None:
-            lines.append(f"**Novelty Score**: {novelty_score}/100 (higher = more novel)\n")
+        # Confidence and evidence count
+        if novelty_confidence:
+            lines.append(f"**Confidence**: {novelty_confidence.capitalize()}\n")
+        if evidence_count > 0:
+            lines.append(f"**Evidence Records**: {evidence_count} database entries found\n")
 
+        # Database sources
+        if evidence_sources:
+            lines.append("**Database Sources**: " + ", ".join(evidence_sources) + "\n")
+
+        # iPTMnet hits
+        if iptmnet_hits:
+            lines.append("**iPTMnet Records**:\n")
+            for hit in iptmnet_hits[:5]:
+                site = hit.get("position", hit.get("site", ""))
+                source = hit.get("source", "")
+                lines.append(f"- Site: {site}, Source: {source}")
+            lines.append("")
+
+        # Cross-site results
+        if cross_site_results:
+            lines.append(f"**Related PTM Sites on {gene}**:\n")
+            for cs in cross_site_results[:5]:
+                cs_pos = cs.get("position", "")
+                cs_source = cs.get("source", "")
+                cs_count = cs.get("sites_found", "")
+                lines.append(f"- {cs_pos} ({cs_source}, {cs_count} sites)")
+            lines.append("")
+
+        # Validation summary
+        if validation_summary:
+            lines.append(f"> {validation_summary}\n")
+
+        # Legacy format support: sources/evidence lists
+        sources = validation.get("sources", [])
+        evidence = validation.get("evidence", [])
         if sources:
             lines.append("**Database Sources**:\n")
             for src in sources:
@@ -825,7 +866,6 @@ class ComprehensiveReportGenerator:
                 if details:
                     lines.append(f"  - {details}")
             lines.append("")
-
         if evidence:
             lines.append("**Key Publications**:\n")
             for ev in evidence[:3]:
