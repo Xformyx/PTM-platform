@@ -79,17 +79,24 @@ async def _fetch_kegg_info(
             if not pathway_ids:
                 return empty
 
-            # Step 3: Get pathway names (top 5)
+            # Step 3: Get pathway names and descriptions (top 5)
             pathways = []
             for pid in pathway_ids[:5]:
                 resp3 = await client.get(f"{BASE_URL}/get/{pid}")
                 if resp3.status_code == 200:
+                    name = ""
+                    description = ""
                     for line in resp3.text.split("\n"):
                         if line.startswith("NAME"):
                             name = line.replace("NAME", "").strip()
                             name = name.split(" - ")[0].strip()
-                            pathways.append({"id": pid, "name": name})
-                            break
+                        elif line.startswith("DESCRIPTION"):
+                            description = line.replace("DESCRIPTION", "").strip()
+                    if name:
+                        pw_entry = {"id": pid, "name": name}
+                        if description:
+                            pw_entry["description"] = description
+                        pathways.append(pw_entry)
                 await asyncio.sleep(0.05)
 
             return {

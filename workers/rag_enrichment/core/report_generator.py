@@ -248,14 +248,15 @@ class ComprehensiveReportGenerator:
         lines = []
 
         lines.append("# PTM Comprehensive Analysis Report")
-        lines.append(f"\n*Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}*\n")
+        lines.append(f"\n*Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}*")
+        lines.append(f"**Total PTMs:** {len(enriched_ptms)}\n")
+
+        # Classification criteria (before context, matching reference format)
+        lines.append(self._generate_classification_criteria())
 
         # Experimental context
         if self.context:
             lines.append(self._generate_context_section())
-
-        # Classification criteria
-        lines.append(self._generate_classification_criteria())
 
         # Summary table (multi-condition aware)
         lines.append(self._generate_summary_table(enriched_ptms))
@@ -291,11 +292,28 @@ class ComprehensiveReportGenerator:
 
     def _generate_context_section(self) -> str:
         lines = ["## Experimental Context\n"]
-        for key in ("tissue", "organism", "species", "treatment", "condition",
-                     "cell_type", "biological_question", "special_conditions"):
+        # Display fields in a logical order matching the reference report format
+        field_labels = [
+            ("cell_type", "Cell Type"),
+            ("tissue", "Tissue"),
+            ("organism", "Organism"),
+            ("species", "Species"),
+            ("treatment", "Treatment"),
+            ("condition", "Condition"),
+            ("time_points", "Time Points"),
+            ("control", "Control"),
+            ("special_conditions", "Special Conditions"),
+            ("biological_question", "Biological Question"),
+        ]
+        for key, label in field_labels:
             val = self.context.get(key)
             if val:
-                lines.append(f"- **{key.replace('_', ' ').title()}**: {val}")
+                lines.append(f"- **{label}:** {val}")
+        # Also include any extra keys not in the predefined list
+        known_keys = {k for k, _ in field_labels}
+        for key, val in self.context.items():
+            if key not in known_keys and val:
+                lines.append(f"- **{key.replace('_', ' ').title()}:** {val}")
         lines.append("")
         return "\n".join(lines)
 
@@ -305,21 +323,40 @@ class ComprehensiveReportGenerator:
 
     def _generate_classification_criteria(self) -> str:
         lines = [
-            "## PTM Classification Criteria\n",
-            "This report uses an **8-category cell-signaling classification system** based on the relationship "
-            "between PTM changes (PTM Relative Log2FC) and protein abundance changes (Protein Log2FC).\n",
-            "| Category | PTM Change | Protein Change | Significance |",
-            "|----------|-----------|----------------|--------------|",
-            "| PTM-driven hyperactivation | ↑↑ (>2.0) | Stable | High |",
-            "| PTM-driven inactivation | ↓↓ (<-2.0) | Stable | High |",
-            "| Compensatory PTM hyperactivation | ↑↑ (>2.0) | ↓ | High |",
-            "| Coupled activation | ↑ (>0.5) | ↑ | Moderate |",
-            "| Coupled shutdown | ↓ (<-0.5) | ↓ | Moderate |",
-            "| Desensitization-like pattern | ↓ (<-0.5) | ↑ | Moderate |",
-            "| Expression-driven change | Minimal | ↑ or ↓ | Low |",
-            "| Baseline / low-change state | Minimal | Minimal | Low |",
+            "## PTM Classification Criteria (Cell Signaling-Based)\n",
+            "This analysis classifies PTMs based on their relative change in phosphorylation levels "
+            "(PTM_Relative_Log2FC) and protein expression (Protein_Log2FC), using a "
+            "**cell signaling-oriented 8-category system**.\n",
+            "### Thresholds\n",
+            "- **PTM High Change:** |PTM_Relative_Log2FC| > 2.0 (4x fold change)",
+            "- **PTM Minimal Change:** |PTM_Relative_Log2FC| ≤ 0.5 (< 1.4x fold change)",
+            "- **Protein Change:** |Protein_Log2FC| > 0.5 (> 1.4x fold change)",
+            "- **Protein Stable:** |Protein_Log2FC| ≤ 0.5 (< 1.4x fold change)\n",
+            "### Classification Categories\n",
+            "| Classification | PTM Change | Protein Change | Significance | Biological Meaning |",
+            "|:--------------|:-----------|:---------------|:-------------|:-------------------|",
+            "| **PTM-driven hyperactivation** | ↑↑ (>2) | Stable | High | PTM switch drives signal activation |",
+            "| **PTM-driven inactivation** | ↓↓ (<-2) | Stable | High | PTM reduction causes functional shutdown |",
+            "| **Compensatory PTM hyperactivation** | ↑↑ (>2) | ↓ (<-0.5) | High | Stress response / compensatory rewiring |",
+            "| **Coupled activation** | ↑ (>0.5) | ↑ (>0.5) | Moderate | Expression + activity co-induction |",
+            "| **Coupled shutdown** | ↓ (<-0.5) | ↓ (<-0.5) | Moderate | Module-wide down-tuning |",
+            "| **Desensitization-like pattern** | ↓ (<-0.5) | ↑ (>0.5) | Moderate | Feedback / desensitization |",
+            "| **Expression-driven change** | Minimal | ↑ or ↓ | Low | Abundance-driven regulation |",
+            "| **Baseline / low-change state** | Minimal | Minimal | Low | No significant signaling modulation |",
             "",
-            "> **Thresholds**: PTM High = |Log2FC| > 2.0, PTM Low = |Log2FC| ≤ 0.5, Protein Change = |Log2FC| > 0.5\n",
+            "### Interpretation Guide\n",
+            "**High Significance (PTM-driven):**",
+            "- These PTMs show strong phosphorylation changes independent of protein abundance",
+            "- Indicates active regulation through kinases or phosphatases",
+            "- Priority targets for mechanistic studies\n",
+            "**Moderate Significance (Coupled/Desensitization):**",
+            "- PTM changes correlate with protein expression changes",
+            "- May reflect coordinated transcriptional and post-translational regulation",
+            "- Important for understanding pathway dynamics\n",
+            "**Low Significance (Expression-driven/Baseline):**",
+            "- PTM changes are minimal or primarily driven by protein abundance",
+            "- May require additional evidence for functional significance\n",
+            "---\n",
         ]
         return "\n".join(lines)
 
@@ -1471,11 +1508,68 @@ class ComprehensiveReportGenerator:
         lines.append("### Analyzed PTMs Overview\n")
         lines.append(f"Total PTM sites: **{len(ptms)}**\n")
 
+        # Individual PTM list table with condition values
+        all_conditions = []
+        for ptm in ptms:
+            for cd in ptm.get("condition_data", []):
+                cond = cd.get("condition", "")
+                if cond and cond not in all_conditions:
+                    all_conditions.append(cond)
+
+        if all_conditions:
+            header = "| # | Gene | Position | " + " | ".join(f"{c} (Log2FC)" for c in all_conditions) + " | Trajectory | Classification |"
+            sep = "|:--|:-----|:---------|" + "|".join([": --------- " for _ in all_conditions]) + "|:-----------|:---------------|"
+            lines.append(header)
+            lines.append(sep)
+            for i, ptm in enumerate(ptms):
+                gene = ptm.get("gene") or ptm.get("Gene.Name", "?")
+                pos = ptm.get("position") or ptm.get("PTM_Position", "?")
+                cond_map = {cd.get("condition"): cd for cd in ptm.get("condition_data", [])}
+                fc_vals = []
+                row = f"| {i+1} | {gene} | {pos} | "
+                for c in all_conditions:
+                    cd = cond_map.get(c)
+                    if cd:
+                        fc = cd.get("ptm_relative_log2fc", 0)
+                        fc_vals.append(fc)
+                        row += f"{_fmt_fc(fc)} | "
+                    else:
+                        row += "- | "
+                        fc_vals.append(0)
+                # Trajectory
+                traj = ptm.get("trajectory", "")
+                if not traj and len(fc_vals) >= 2:
+                    diff = fc_vals[-1] - fc_vals[0]
+                    if diff > 0.5:
+                        traj = "Increasing"
+                    elif diff < -0.5:
+                        traj = "Decreasing"
+                    else:
+                        traj = "Stable"
+                cls_info = ptm.get("rag_enrichment", {}).get("classification", {})
+                cls_label = cls_info.get("level", "?") if isinstance(cls_info, dict) else str(cls_info)
+                row += f"{traj} | {cls_label} |"
+                lines.append(row)
+            lines.append("")
+        else:
+            # Single condition - simpler table
+            lines.append("| # | Gene | Position | PTM Log2FC | Classification |")
+            lines.append("|:--|:-----|:---------|:-----------|:---------------|")
+            for i, ptm in enumerate(ptms):
+                gene = ptm.get("gene") or ptm.get("Gene.Name", "?")
+                pos = ptm.get("position") or ptm.get("PTM_Position", "?")
+                fc = ptm.get("ptm_relative_log2fc") or ptm.get("PTM_Relative_Log2FC", 0)
+                cls_info = ptm.get("rag_enrichment", {}).get("classification", {})
+                cls_label = cls_info.get("level", "?") if isinstance(cls_info, dict) else str(cls_info)
+                lines.append(f"| {i+1} | {gene} | {pos} | {_fmt_fc(fc)} | {cls_label} |")
+            lines.append("")
+
         # Classification distribution
         class_counts = global_data["classification_counts"]
         if class_counts:
+            lines.append("**Classification Distribution:**\n")
             lines.append("| Classification | Count | Significance |")
-            lines.append("|---------------|-------|--------------|")
+            lines.append("|:--------------|:------|:-------------|")
             sig_map = {
                 "PTM-driven hyperactivation": "High",
                 "PTM-driven inactivation": "High",
@@ -1495,12 +1589,26 @@ class ComprehensiveReportGenerator:
         pathway_counts = global_data["pathway_counts"]
         if pathway_counts:
             lines.append("### Common KEGG Pathways\n")
-            lines.append("Pathways shared across multiple PTM sites:\n")
-            lines.append("| Pathway | PTM Sites | Genes |")
-            lines.append("|---------|-----------|-------|")
+            lines.append("The following KEGG pathways are enriched across the analyzed PTMs:\n")
+            # Build PTM labels for pathway display
+            ptm_label_map = {}  # gene -> list of "Gene-Position"
+            for ptm in ptms:
+                gene = ptm.get("gene") or ptm.get("Gene.Name", "?")
+                pos = ptm.get("position") or ptm.get("PTM_Position", "?")
+                ptm_label_map.setdefault(gene, []).append(f"{gene}-{pos}")
+
+            lines.append("| Pathway | PTMs Involved | Description |")
+            lines.append("|:--------|:-------------|:------------|")
             for pw, info in sorted(pathway_counts.items(), key=lambda x: -x[1]["count"])[:15]:
-                genes = ", ".join(sorted(info["genes"])[:5])
-                lines.append(f"| {pw} | {info['count']} | {genes} |")
+                # Collect PTM labels for involved genes
+                involved = []
+                for g in sorted(info["genes"]):
+                    for label in ptm_label_map.get(g, [f"{g}"]):
+                        if label not in involved:
+                            involved.append(label)
+                ptms_str = ", ".join(involved[:6])
+                desc = info.get("description", "-") or "-"
+                lines.append(f"| {pw} | {ptms_str} | {desc} |")
             lines.append("")
 
         # 3. Shared Protein Interaction Network
@@ -1508,11 +1616,13 @@ class ComprehensiveReportGenerator:
         if interaction_counts:
             lines.append("### Shared Protein Interaction Network\n")
             lines.append("Proteins that interact with multiple PTM-bearing proteins:\n")
-            lines.append("| Interaction Partner | Connected PTM Proteins | Connections |")
-            lines.append("|--------------------|-----------------------|-------------|")
+            lines.append("| Interaction Partner | Connected PTM Proteins | Connections | Avg. Confidence |")
+            lines.append("|:-------------------|:----------------------|:------------|:----------------|")
             for partner, info in sorted(interaction_counts.items(), key=lambda x: -x[1]["count"])[:15]:
                 genes = ", ".join(sorted(info["genes"])[:5])
-                lines.append(f"| {partner} | {genes} | {info['count']} |")
+                avg_conf = info.get("avg_score", 0)
+                conf_str = f"{avg_conf:.3f}" if avg_conf else "-"
+                lines.append(f"| {partner} | {genes} | {info['count']} | {conf_str} |")
             lines.append("")
 
         # 4. Temporal Signaling Cascade
@@ -1520,14 +1630,65 @@ class ComprehensiveReportGenerator:
         if temporal_data:
             lines.append("### Temporal Signaling Cascade\n")
             lines.append("Time-course analysis of PTM changes across conditions:\n")
-            for time_label, entries in sorted(temporal_data.items()):
-                lines.append(f"\n**{time_label}**:\n")
-                for entry in entries[:10]:
-                    gene = entry.get("gene", "?")
-                    pos = entry.get("position", "?")
-                    ptm_fc = _fmt_fc(entry.get("ptm_log2fc", 0))
-                    cls = entry.get("classification", "?")
-                    lines.append(f"- {gene} {pos}: PTM Log2FC = {ptm_fc} ({cls})")
+
+            # Build a unified table with all conditions as columns
+            condition_labels = sorted(temporal_data.keys())
+            # Collect all unique PTMs across conditions
+            ptm_temporal = {}  # "gene pos" -> {condition: {fc, cls}}
+            for cond, entries in temporal_data.items():
+                for entry in entries:
+                    key = f"{entry.get('gene', '?')} {entry.get('position', '?')}"
+                    ptm_temporal.setdefault(key, {})[cond] = {
+                        "fc": entry.get("ptm_log2fc", 0),
+                        "cls": entry.get("classification", "?"),
+                    }
+
+            # Build table header
+            header = "| PTM Site | " + " | ".join(condition_labels) + " | Trend |"
+            sep = "|:---------|" + "|".join([": ------- " for _ in condition_labels]) + "|:------|"
+            lines.append(header)
+            lines.append(sep)
+
+            # Sort by max absolute FC for most interesting PTMs first
+            def _max_abs_fc(item):
+                return max(abs(v.get("fc", 0)) for v in item[1].values()) if item[1] else 0
+
+            for ptm_key, cond_vals in sorted(ptm_temporal.items(), key=_max_abs_fc, reverse=True)[:20]:
+                row = f"| {ptm_key} | "
+                fc_values = []
+                for cond in condition_labels:
+                    val = cond_vals.get(cond)
+                    if val:
+                        fc = val["fc"]
+                        fc_values.append(fc)
+                        # Add directional emoji
+                        if fc > 2.0:
+                            emoji = "\U0001f534"  # red circle (strong up)
+                        elif fc > 0.5:
+                            emoji = "\U0001f7e0"  # orange circle (moderate up)
+                        elif fc < -2.0:
+                            emoji = "\U0001f535"  # blue circle (strong down)
+                        elif fc < -0.5:
+                            emoji = "\U0001f7e3"  # purple circle (moderate down)
+                        else:
+                            emoji = "\u26aa"  # white circle (minimal)
+                        row += f"{emoji} {_fmt_fc(fc)} | "
+                    else:
+                        row += "- | "
+                        fc_values.append(0)
+
+                # Calculate trend
+                if len(fc_values) >= 2 and any(v != 0 for v in fc_values):
+                    if fc_values[-1] > fc_values[0] + 0.5:
+                        trend = "\U0001f4c8 Increasing"
+                    elif fc_values[-1] < fc_values[0] - 0.5:
+                        trend = "\U0001f4c9 Decreasing"
+                    else:
+                        trend = "\u27a1\ufe0f Stable"
+                else:
+                    trend = "-"
+                row += f"{trend} |"
+                lines.append(row)
             lines.append("")
 
         # 5. PTM Connection Evidence
@@ -1591,10 +1752,14 @@ class ComprehensiveReportGenerator:
             # Pathway counts (normalize to string - pathways can be dicts)
             for pw in enr.get("pathways", []):
                 pw_name = pw.get("name", str(pw)) if isinstance(pw, dict) else str(pw)
+                pw_desc = pw.get("description", "") if isinstance(pw, dict) else ""
                 if pw_name not in pathway_counts:
-                    pathway_counts[pw_name] = {"count": 0, "genes": set()}
+                    pathway_counts[pw_name] = {"count": 0, "genes": set(), "description": pw_desc}
                 pathway_counts[pw_name]["count"] += 1
                 pathway_counts[pw_name]["genes"].add(gene)
+                # Keep the longest description found
+                if pw_desc and len(pw_desc) > len(pathway_counts[pw_name].get("description", "")):
+                    pathway_counts[pw_name]["description"] = pw_desc
                 gene_pathways.setdefault(gene, set()).add(pw_name)
 
             # Disease counts
@@ -1608,9 +1773,12 @@ class ComprehensiveReportGenerator:
                 partner = inter.get("partner", "")
                 if partner:
                     if partner not in interaction_counts:
-                        interaction_counts[partner] = {"count": 0, "genes": set()}
+                        interaction_counts[partner] = {"count": 0, "genes": set(), "scores": []}
                     interaction_counts[partner]["count"] += 1
                     interaction_counts[partner]["genes"].add(gene)
+                    score = inter.get("score", 0)
+                    if score:
+                        interaction_counts[partner]["scores"].append(score)
                     gene_interactions.setdefault(gene, set()).add(partner)
 
             # Temporal data — use condition_data if available (merged PTMs)
@@ -1632,6 +1800,11 @@ class ComprehensiveReportGenerator:
                     "ptm_log2fc": ptm.get("ptm_relative_log2fc") or ptm.get("PTM_Relative_Log2FC", 0),
                     "classification": enr.get("classification", {}).get("short_label", "?"),
                 })
+
+        # Calculate avg_score for each interaction partner
+        for partner, info in interaction_counts.items():
+            scores = info.get("scores", [])
+            info["avg_score"] = round(sum(scores) / len(scores), 3) if scores else 0
 
         # Detect PTM connections
         ptm_labels = []
