@@ -58,7 +58,9 @@ def run_rag_enrichment(self, order_id: int, config: dict):
     try:
         preprocessing_dir = Path(config.get("preprocessing_output_dir", str(order_output)))
         ptm_mode = config.get("ptm_mode", "phospho")
-        experimental_context = config.get("experimental_context")
+        single_time_point = config.get("single_time_point", False)
+        experimental_context = dict(config.get("experimental_context") or {})
+        experimental_context["single_time_point"] = single_time_point
         top_n = config.get("top_n_ptms", 50)
         file_suffix = "_phospho" if ptm_mode == "phospho" else "_ubi"
 
@@ -160,7 +162,8 @@ def run_rag_enrichment(self, order_id: int, config: dict):
         from rag_enrichment.core.ptm_merger import merge_multi_condition_ptms
 
         # Merge multi-condition rows into unified PTM entries
-        merged_ptms = merge_multi_condition_ptms(enriched_ptms)
+        # When single_time_point, conditions are not treated as timepoints (no trajectory)
+        merged_ptms = merge_multi_condition_ptms(enriched_ptms, single_time_point=single_time_point)
         logger.info(
             f"[Order {order_id}] Merged {len(enriched_ptms)} rows -> "
             f"{len(merged_ptms)} unique PTMs (multi-condition merged)"

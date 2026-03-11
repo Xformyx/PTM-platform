@@ -17,16 +17,19 @@ logger = logging.getLogger(__name__)
 
 QUESTION_GENERATION_PROMPT = """You are an expert PTM (Post-Translational Modification) researcher analyzing phosphoproteomics data. Your task is to generate insightful, data-driven research questions.
 
+{single_time_point_note}
+
 ## CRITICAL INSTRUCTIONS
 1. **Read the input data carefully** - Extract experimental conditions, cell types, treatments, and time points from the markdown content
 2. **Reference specific PTMs** - Each question MUST mention at least one specific protein and phosphorylation site from the data
 3. **Be mechanistically precise** - Questions should probe specific molecular mechanisms, not general concepts
-4. **Consider temporal dynamics** - If time points exist, ask about the progression and transition of signaling states
+4. **Consider temporal dynamics** - If time points exist (and this is NOT a single timepoint experiment), ask about the progression and transition of signaling states
 
 ## Question Categories (Generate diverse questions across these types)
 
 ### 1. temporal_pathway (Time-dependent pathway analysis)
 - Focus on: Which pathways are activated vs inhibited at each time point?
+- **SKIP this category if single_time_point_note above is present**
 
 ### 2. ecm_context (Extracellular matrix and cell-matrix interactions)
 - Focus on: How do ECM components or cell adhesion affect signaling?
@@ -178,16 +181,27 @@ def run_question_generation(state: dict) -> dict:
         model=state.get("llm_model"),
     )
 
+    context = state.get("experimental_context", {})
     if not llm.is_available():
         logger.warning("LLM not available for question generation, using defaults")
         if cb:
             cb(8, "LLM not available — using default questions")
-        return {"research_questions": _get_fallback_questions()}
+        return {"research_questions": _get_fallback_questions(context.get("single_time_point", False))}
+    single_time_point = context.get("single_time_point", False)
+    single_time_point_note = (
+        "## IMPORTANT: Single Timepoint Experiment\n"
+        "This is a **single timepoint experiment** (no temporal/time-course data). "
+        "Do NOT generate questions about temporal dynamics, time-course, sequential changes across timepoints, or trajectory patterns. "
+        "Skip the temporal_pathway category entirely.\n\n"
+        if single_time_point
+        else ""
+    )
 
     max_questions = 8
     prompt = QUESTION_GENERATION_PROMPT.format(
         max_questions=max_questions,
         markdown_content=content,
+        single_time_point_note=single_time_point_note,
     )
 
     try:
@@ -205,16 +219,19 @@ def run_question_generation(state: dict) -> dict:
             logger.warning(f"LLM error during question generation: {response}")
             if cb:
                 cb(8, "LLM error — using default questions")
-            return {"research_questions": _get_fallback_questions()}
+            return {"research_questions": _get_fallback_questions(single_time_point)}
 
         questions_data = _parse_json_response(response)
         if not questions_data:
             logger.warning("Failed to parse LLM question response")
             if cb:
                 cb(8, "Failed to parse questions — using defaults")
-            return {"research_questions": _get_fallback_questions()}
+            return {"research_questions": _get_fallback_questions(single_time_point)}
 
         validated = _validate_questions(questions_data, max_questions)
+        # Filter out temporal questions when single_time_point
+        if single_time_point:
+            validated = [q for q in validated if q.get("category") != "temporal_pathway" and "temporal" not in (q.get("category") or "").lower()]
         question_strings = [q["question"] for q in validated]
 
         logger.info(f"Generated {len(question_strings)} AI research questions")
@@ -230,7 +247,7 @@ def run_question_generation(state: dict) -> dict:
         logger.error(f"Question generation failed: {e}")
         if cb:
             cb(8, f"Question generation error — using defaults")
-        return {"research_questions": _get_fallback_questions()}
+        return {"research_questions": _get_fallback_questions(context.get("single_time_point", False))}
 
 
 def generate_questions_from_content(
@@ -256,6 +273,7 @@ def generate_questions_from_content(
     prompt = QUESTION_GENERATION_PROMPT.format(
         max_questions=max_questions,
         markdown_content=content,
+        single_time_point_note="",
     )
 
     response = llm.generate(
@@ -367,14 +385,16 @@ def _validate_questions(
     return validated
 
 
-def _get_fallback_questions() -> List[str]:
+def _get_fallback_questions(single_time_point: bool = False) -> List[str]:
     """Return fallback question strings for pipeline use."""
-    return [
+    base = [
         "What are the key PTM changes observed in the experimental conditions?",
         "Which signaling pathways show the most significant PTM alterations?",
-        "How do PTM patterns change across different timepoints?",
         "What protein-protein interaction networks are affected by the observed PTM changes?",
     ]
+    if not single_time_point:
+        base.insert(2, "How do PTM patterns change across different timepoints?")
+    return base
 
 
 # -----------------------------------------------------------------------

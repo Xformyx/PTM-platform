@@ -305,12 +305,14 @@ class ComprehensiveReportGenerator:
             ("special_conditions", "Special Conditions"),
             ("biological_question", "Biological Question"),
         ]
+        if self.context.get("single_time_point"):
+            lines.append("- **Single Timepoint:** Yes — samples are not time-series (no temporal grouping)")
         for key, label in field_labels:
             val = self.context.get(key)
             if val:
                 lines.append(f"- **{label}:** {val}")
         # Also include any extra keys not in the predefined list
-        known_keys = {k for k, _ in field_labels}
+        known_keys = {k for k, _ in field_labels} | {"single_time_point"}
         for key, val in self.context.items():
             if key not in known_keys and val:
                 lines.append(f"- **{key.replace('_', ' ').title()}:** {val}")
@@ -425,9 +427,11 @@ class ComprehensiveReportGenerator:
         lines.append("")
         return "\n".join(lines)
 
-    @staticmethod
-    def _compute_trajectory_label(ptm: dict) -> str:
-        """Compute a trajectory label (e.g., Q1 arrow-up) from condition_data."""
+    def _compute_trajectory_label(self, ptm: dict) -> str:
+        """Compute a trajectory label (e.g., Q1 arrow-up) from condition_data.
+        Returns empty when single_time_point (conditions are not temporal)."""
+        if self.context.get("single_time_point"):
+            return ""
         cond_data = ptm.get("condition_data", [])
         if len(cond_data) < 2:
             return ""

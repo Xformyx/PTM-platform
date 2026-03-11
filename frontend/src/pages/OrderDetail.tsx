@@ -1245,7 +1245,7 @@ function TopNTimeSeriesPlot({ orderId }: { orderId: number }) {
   );
 }
 
-function VectorPlotTab({ orderId }: { orderId: number }) {
+function VectorPlotTab({ orderId, singleTimePoint }: { orderId: number; singleTimePoint?: boolean }) {
   const [files, setFiles] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -1277,7 +1277,12 @@ function VectorPlotTab({ orderId }: { orderId: number }) {
           <TabsTrigger value="scatter" className="gap-2">
             <ChartScatter className="h-3.5 w-3.5" /> Scatter Plots
           </TabsTrigger>
-          <TabsTrigger value="timeseries" className="gap-2">
+          <TabsTrigger
+            value="timeseries"
+            className="gap-2"
+            disabled={singleTimePoint}
+            title={singleTimePoint ? "Single time point — time-series not available" : undefined}
+          >
             <TrendingUp className="h-3.5 w-3.5" /> Top N PTM Time-series
           </TabsTrigger>
         </TabsList>
@@ -1993,6 +1998,11 @@ export default function OrderDetail() {
               <CardContent>
                 {order.sample_config && (order.sample_config as any).samples?.length > 0 ? (
                   <div className="space-y-3">
+                    {(order.sample_config as any).single_time_point && (
+                      <div className="rounded-md bg-amber-500/10 border border-amber-500/30 px-3 py-2 text-xs font-medium text-amber-700 dark:text-amber-400">
+                        Single time point (no temporal grouping)
+                      </div>
+                    )}
                     <OverviewField
                       label="Source"
                       value={(order.sample_config as any).source === "xlsx" ? "config.xlsx" : "Auto Parse"}
@@ -2196,7 +2206,7 @@ export default function OrderDetail() {
         </TabsContent>
 
         <TabsContent value="vector-plot" className="mt-4">
-          <VectorPlotTab orderId={order.id} />
+          <VectorPlotTab orderId={order.id} singleTimePoint={(order.sample_config as any)?.single_time_point} />
         </TabsContent>
 
         {(order.report_options as any)?.analysis_mode === "cross_talk" && (

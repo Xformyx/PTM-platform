@@ -442,6 +442,7 @@ async def start_order(
     )
     active_collections = [r[0] for r in coll_result.fetchall()]
 
+    sample_cfg = order.sample_config or {}
     task_config = {
         "order_code": order.order_code,
         "pr_matrix_path": order.pr_matrix_path,
@@ -452,6 +453,7 @@ async def start_order(
         "secondary_pg_matrix_path": order.secondary_pg_matrix_path,
         "ptm_mode": ptm_mode,
         "condition_map": condition_map if condition_map else None,
+        "single_time_point": sample_cfg.get("single_time_point", False),
         "species_tax_id": species_map.get(species_lower, "10090"),
         "kegg_organism": kegg_map.get(species_lower, "mmu"),
         "analysis_options": order.analysis_options,
@@ -678,6 +680,9 @@ async def run_stage(
     kegg_map = {"mouse": "mmu", "human": "hsa", "rat": "rno"}
     species_lower = (order.species or "mouse").lower()
 
+    sample_cfg = order.sample_config or {}
+    single_time_point = sample_cfg.get("single_time_point", False)
+
     if body.stage == "preprocessing":
         # Clear preprocessing outputs so they are regenerated
         _clear_preprocessing_outputs(order_output, ptm_mode)
@@ -693,6 +698,7 @@ async def run_stage(
             "secondary_pg_matrix_path": order.secondary_pg_matrix_path,
             "ptm_mode": ptm_mode,
             "condition_map": condition_map if condition_map else None,
+            "single_time_point": single_time_point,
             "species_tax_id": species_map.get(species_lower, "10090"),
             "kegg_organism": kegg_map.get(species_lower, "mmu"),
             "analysis_options": order.analysis_options,
@@ -717,6 +723,7 @@ async def run_stage(
             "order_code": order.order_code,
             "preprocessing_output_dir": str(order_output),
             "ptm_mode": ptm_mode,
+            "single_time_point": single_time_point,
             "experimental_context": order.analysis_context,
             "chromadb_collections": active_collections,
             "llm_provider": (order.report_options or {}).get("llm_provider", "ollama"),
@@ -750,6 +757,7 @@ async def run_stage(
             "rag_output_dir": str(order_output),
             "enriched_json_path": str(enriched_json),
             "md_report_path": str(md_report) if md_report.exists() else None,
+            "single_time_point": single_time_point,
             "experimental_context": order.analysis_context,
             "research_questions": report_opts.get("research_questions", []),
             "chromadb_collections": active_collections,
