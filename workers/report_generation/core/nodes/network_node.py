@@ -6,36 +6,45 @@ Option A: connects to Cytoscape Desktop on the Docker host via host.docker.inter
 Falls back to text-based legend when Cytoscape is unavailable.
 """
 
+import base64
 import logging
 import os
 import time
 from collections import defaultdict
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
 CYTOSCAPE_HOST = os.getenv("CYTOSCAPE_HOST", "host.docker.internal")
 CYTOSCAPE_PORT = int(os.getenv("CYTOSCAPE_PORT", "1234"))
 
+# Publication-quality node colors (matching original project)
 NODE_COLORS = {
-    "high_active": "#E74C3C",
-    "moderate_active": "#F39C12",
-    "baseline": "#F7DC6F",
-    "suppressed": "#3498DB",
-    "missing": "#BDC3C7",
-    "non_ptm": "#9B59B6",
+    "activated": "#E74C3C",          # Red — high activation
+    "moderate_active": "#FF8C00",    # Dark Orange — moderate activation
+    "baseline": "#F7DC6F",           # Yellow — baseline
+    "inhibited": "#3498DB",          # Blue — inhibited/suppressed
+    "kinase_identified": "#27AE60",  # Green — identified kinase
+    "kinase_predicted": "#FFFFFF",   # White (hollow) — predicted kinase
+    "non_ptm": "#9B59B6",           # Purple — non-PTM interactor
+    "missing": "#BDC3C7",           # Gray — missing data
 }
 
+# Publication-quality edge colors
 EDGE_COLORS = {
-    "STRING-DB": "#2ECC71",
-    "KEGG": "#00BCD4",
-    "Literature": "#E91E63",
-    "Shared Pathway": "#FF9800",
-    "default": "#95A5A6",
+    "STRING-DB": "#2CA02C",                  # Green
+    "KEGG": "#17BECF",                       # Cyan
+    "Literature": "#E377C2",                 # Pink
+    "Pathway": "#8C564B",                    # Brown
+    "Shared Pathway": "#FF9800",             # Orange
+    "Predicted": "#BCBD22",                  # Yellow-green
+    "Co-activation": "#7F7F7F",              # Gray
+    "Kinase-Substrate": "#9467BD",           # Purple
+    "Kinase-Substrate-Predicted": "#D8BFD8", # Light purple
+    "Unknown": "#C7C7C7",                    # Light gray
+    "default": "#95A5A6",                    # Default gray
 }
-
-ACTIVE_THRESHOLD = 0.0
 
 
 def run_network_analysis(state: dict) -> dict:
@@ -66,7 +75,7 @@ def run_network_analysis(state: dict) -> dict:
         logger.info("Cytoscape Desktop connected via host.docker.internal")
         if cb:
             cb(62, "Generating Cytoscape network images")
-        network_images = _generate_cytoscape_networks(network_data, output_dir)
+        network_images = _generate_cytoscape_networks(network_data, output_dir, parsed_ptms)
     else:
         logger.info("Cytoscape not available — using text-based legends only")
 
@@ -105,6 +114,7 @@ def _build_network_data(parsed_ptms: list, enriched_data: list) -> dict:
             "type": "PTM",
             "value": round(fc, 3),
             "state": state,
+            "label": node_id,
         })
         gene_ptms[ptm["gene"]].append(node_id)
 
@@ -114,16 +124,24 @@ def _build_network_data(parsed_ptms: list, enriched_data: list) -> dict:
         gene = ptm_data.get("gene") or ptm_data.get("Gene.Name", "")
         source_id = f"{gene}-{ptm_data.get('position') or ptm_data.get('PTM_Position', '')}"
 
-        # STRING-DB interaction edges
-        for interaction in enr.get("string_interactions", [])[:3]:
-            partner = interaction.split("(")[0].strip() if "(" in interaction else interaction
+        # STRING-DB interaction edges (with confidence score)
+        string_interactions = enr.get("string_interactions", [])
+        for interaction in string_interactions[:5]:
+            if isinstance(interaction, dict):
+                partner = interaction.get("partner", "")
+                confidence = interaction.get("score", 0.7)
+            elif isinstance(interaction, str):
+                partner = interaction.split("(")[0].strip() if "(" in interaction else interaction
+                confidence = 0.7
+            else:
+                continue
             if partner in gene_ptms:
                 for target_id in gene_ptms[partner]:
                     edges.append({
                         "source": source_id,
                         "target": target_id,
                         "evidence_type": "STRING-DB",
-                        "confidence": 0.7,
+                        "confidence": confidence,
                         "pathway_str": "",
                     })
 
@@ -149,6 +167,21 @@ def _build_network_data(parsed_ptms: list, enriched_data: list) -> dict:
                     "pathway_str": ", ".join(list(shared)[:2]),
                 })
 
+        # Kinase-substrate edges from regulation data
+        reg = enr.get("regulation", {})
+        upstream = reg.get("upstream_regulators", [])
+        for kinase in upstream[:3]:
+            kinase_name = kinase if isinstance(kinase, str) else str(kinase)
+            if kinase_name in gene_ptms:
+                for target_id in gene_ptms[kinase_name]:
+                    edges.append({
+                        "source": target_id,
+                        "target": source_id,
+                        "evidence_type": "Kinase-Substrate",
+                        "confidence": 0.8,
+                        "pathway_str": "",
+                    })
+
     # Deduplicate edges
     seen = set()
     unique_edges = []
@@ -163,13 +196,13 @@ def _build_network_data(parsed_ptms: list, enriched_data: list) -> dict:
 
 def _classify_state(value: float) -> str:
     if value > 1:
-        return "high_active"
+        return "activated"
     elif value > 0:
         return "moderate_active"
     elif value > -1:
         return "baseline"
     else:
-        return "suppressed"
+        return "inhibited"
 
 
 # ---------------------------------------------------------------------------
@@ -181,8 +214,8 @@ def _generate_legends(network_data: dict, ptms: list) -> dict:
     nodes = network_data["nodes"]
     edges = network_data["edges"]
 
-    active = [n for n in nodes if n["state"] in ("high_active", "moderate_active")]
-    suppressed = [n for n in nodes if n["state"] == "suppressed"]
+    active = [n for n in nodes if n["state"] in ("activated", "moderate_active")]
+    suppressed = [n for n in nodes if n["state"] == "inhibited"]
 
     legend_lines = [
         "### PTM Signaling Network Legend\n",
@@ -192,10 +225,16 @@ def _generate_legends(network_data: dict, ptms: list) -> dict:
         f"**Total edges**: {len(edges)}",
         "",
         "**Node Colors**:",
-        f"- Red ({NODE_COLORS['high_active']}): High activation (Log2FC > 1)",
-        f"- Orange ({NODE_COLORS['moderate_active']}): Moderate activation (0 < Log2FC ≤ 1)",
-        f"- Yellow ({NODE_COLORS['baseline']}): Baseline (-1 ≤ Log2FC ≤ 0)",
-        f"- Blue ({NODE_COLORS['suppressed']}): Suppressed (Log2FC < -1)",
+        f"- Red ({NODE_COLORS['activated']}): High activation (Log2FC > 1)",
+        f"- Orange ({NODE_COLORS['moderate_active']}): Moderate activation (0 < Log2FC <= 1)",
+        f"- Yellow ({NODE_COLORS['baseline']}): Baseline (-1 <= Log2FC <= 0)",
+        f"- Blue ({NODE_COLORS['inhibited']}): Inhibited (Log2FC < -1)",
+        "",
+        "**Node Shapes**:",
+        "- Circle (ELLIPSE): PTM sites",
+        "- Diamond: Kinases (upstream regulators)",
+        "- Rounded Rectangle: Non-PTM interactors",
+        "- Hexagon: Pathway members",
         "",
         "**Edge Types**:",
     ]
@@ -209,6 +248,11 @@ def _generate_legends(network_data: dict, ptms: list) -> dict:
     if active:
         legend_lines.append("\n**Key Active PTMs**:")
         for n in sorted(active, key=lambda x: -x["value"])[:10]:
+            legend_lines.append(f"- {n['id']}: Log2FC = {n['value']}")
+
+    if suppressed:
+        legend_lines.append("\n**Key Inhibited PTMs**:")
+        for n in sorted(suppressed, key=lambda x: x["value"])[:5]:
             legend_lines.append(f"- {n['id']}: Log2FC = {n['value']}")
 
     return {
@@ -235,8 +279,14 @@ def _check_cytoscape() -> bool:
         return False
 
 
-def _generate_cytoscape_networks(network_data: dict, output_dir: str) -> Dict[str, str]:
-    """Generate Cytoscape network visualization and export as PNG."""
+def _generate_cytoscape_networks(
+    network_data: dict, output_dir: str, parsed_ptms: list = None
+) -> Dict[str, str]:
+    """Generate Cytoscape network visualization and export as PNG.
+    
+    Creates a single comprehensive network with all PTM nodes and edges,
+    applying publication-quality visual styling.
+    """
     try:
         import py4cytoscape as p4c
         import pandas as pd
@@ -253,9 +303,12 @@ def _generate_cytoscape_networks(network_data: dict, output_dir: str) -> Dict[st
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
+    network_images = {}
+
     try:
+        # --- Main network ---
         nodes_df = pd.DataFrame(nodes)
-        edges_df = pd.DataFrame(edges) if edges else pd.DataFrame(columns=["source", "target"])
+        edges_df = pd.DataFrame(edges) if edges else None
 
         network_name = "PTM_Signaling_Network"
         network_suid = p4c.create_network_from_data_frames(
@@ -266,91 +319,443 @@ def _generate_cytoscape_networks(network_data: dict, output_dir: str) -> Dict[st
         )
         logger.info(f"Cytoscape network created: {network_name} (SUID: {network_suid})")
 
-        _apply_visual_style(network_suid, network_name)
+        _apply_visual_style(p4c, network_suid, network_name, nodes)
         time.sleep(1)
 
-        png_path = _save_network_png(network_suid, network_name, str(output_path))
+        png_path = _save_network_png(p4c, network_suid, network_name, str(output_path))
         if png_path:
-            return {"main": png_path}
+            network_images["main"] = png_path
+            logger.info(f"Main network image saved: {png_path}")
+
+        # --- Condition-specific sub-networks (if multiple conditions) ---
+        if parsed_ptms:
+            conditions = set()
+            for ptm in parsed_ptms:
+                cond = ptm.get("condition") or ptm.get("Condition", "")
+                if cond:
+                    conditions.add(cond)
+
+            if len(conditions) > 1:
+                for cond in sorted(conditions):
+                    cond_ptm_genes = {
+                        ptm["gene"]
+                        for ptm in parsed_ptms
+                        if (ptm.get("condition") or ptm.get("Condition", "")) == cond
+                    }
+                    cond_nodes = [n for n in nodes if n["gene"] in cond_ptm_genes]
+                    if not cond_nodes:
+                        continue
+
+                    cond_node_ids = {n["id"] for n in cond_nodes}
+                    cond_edges = [
+                        e for e in edges
+                        if e["source"] in cond_node_ids and e["target"] in cond_node_ids
+                    ]
+
+                    cond_nodes_df = pd.DataFrame(cond_nodes)
+                    cond_edges_df = pd.DataFrame(cond_edges) if cond_edges else None
+
+                    safe_cond = cond.replace(" ", "_").replace("/", "_")
+                    cond_net_name = f"PTM_Network_{safe_cond}"
+                    try:
+                        cond_suid = p4c.create_network_from_data_frames(
+                            nodes=cond_nodes_df,
+                            edges=cond_edges_df,
+                            title=cond_net_name,
+                            collection=f"PTM_Networks_{safe_cond}",
+                        )
+                        _apply_visual_style(p4c, cond_suid, cond_net_name, cond_nodes)
+                        time.sleep(1)
+                        cond_png = _save_network_png(p4c, cond_suid, cond_net_name, str(output_path))
+                        if cond_png:
+                            network_images[cond] = cond_png
+                            logger.info(f"Condition network image saved: {cond} -> {cond_png}")
+                    except Exception as e:
+                        logger.warning(f"Failed to create condition network for {cond}: {e}")
 
     except Exception as e:
         logger.error(f"Cytoscape network generation failed: {e}")
 
-    return {}
+    return network_images
 
 
-def _apply_visual_style(network_suid: int, network_name: str):
-    """Apply publication-quality visual style to Cytoscape network."""
+def _apply_visual_style(p4c, network_suid: int, network_name: str, nodes: list):
+    """Apply publication-quality visual style to Cytoscape network.
+    
+    Matches the original project's visual styling:
+    - Node colors by activation state
+    - Node shapes by type (PTM=Circle, Kinase=Diamond, Interactor=RoundRect, Pathway-Member=Hexagon)
+    - Node size scaled by |Log2FC| magnitude
+    - Edge colors by evidence type
+    - Edge width by confidence score
+    - Optimized force-directed layout with overlap removal
+    """
     try:
-        import py4cytoscape as p4c
-
-        style_name = "PTM_Analysis_Style"
+        style_name = f"PTM_Pub_Style_{network_name}"
         existing = p4c.get_visual_style_names()
 
         if style_name not in existing:
             p4c.create_visual_style(style_name)
 
-            p4c.set_node_color_mapping(
+        # ========== NODE STYLING ==========
+
+        # Node color (state-based) — publication-quality palette
+        pub_node_colors = {
+            "activated": "#E74C3C",          # Red
+            "moderate_active": "#FF8C00",    # Dark Orange
+            "baseline": "#F7DC6F",           # Yellow
+            "inhibited": "#3498DB",          # Blue
+            "kinase_identified": "#27AE60",  # Green (Identified)
+            "kinase_predicted": "#FFFFFF",   # White (hollow) (Predicted)
+            "non_ptm": "#9B59B6",           # Purple
+            "missing": "#BDC3C7",           # Gray
+        }
+        p4c.set_node_color_mapping(
+            table_column="state",
+            table_column_values=list(pub_node_colors.keys()),
+            colors=list(pub_node_colors.values()),
+            mapping_type="d",
+            style_name=style_name,
+        )
+
+        # Node shape (type-based) — including Kinase, Interactor, Pathway-Member
+        p4c.set_node_shape_mapping(
+            table_column="type",
+            table_column_values=["PTM", "Non-PTM", "Kinase", "Interactor", "Pathway-Member"],
+            shapes=["ELLIPSE", "ROUND_RECTANGLE", "DIAMOND", "ROUND_RECTANGLE", "HEXAGON"],
+            style_name=style_name,
+        )
+
+        # Kinase node border styling for hollow effect
+        try:
+            p4c.set_node_border_width_mapping(
                 table_column="state",
-                table_column_values=list(NODE_COLORS.keys()),
-                colors=list(NODE_COLORS.values()),
+                table_column_values=["kinase_identified", "kinase_predicted"],
+                widths=[2.5, 4.0],
                 mapping_type="d",
                 style_name=style_name,
             )
+        except Exception:
+            pass
 
-            p4c.set_node_shape_mapping(
-                table_column="type",
-                table_column_values=["PTM", "Non-PTM"],
-                shapes=["ELLIPSE", "DIAMOND"],
-                style_name=style_name,
-            )
+        # Node size (value-based) — 10-step mapping for both positive and negative values
+        p4c.set_node_size_mapping(
+            table_column="value",
+            table_column_values=[-3, -1.5, -0.5, 0, 0.5, 1.5, 3, 5, 10, 20],
+            sizes=[80, 60, 45, 35, 45, 60, 80, 90, 100, 120],
+            mapping_type="c",
+            style_name=style_name,
+        )
 
-            p4c.set_node_size_mapping(
-                table_column="value",
-                table_column_values=[-5, 0, 5, 15],
-                sizes=[30, 40, 60, 100],
+        # Node label
+        p4c.set_node_label_mapping(table_column="label", style_name=style_name)
+        p4c.set_node_font_size_default(11, style_name=style_name)
+
+        try:
+            p4c.set_node_font_face_default("Arial Bold,plain,14", style_name=style_name)
+        except Exception:
+            pass
+
+        try:
+            p4c.set_node_label_color_default("#000000", style_name=style_name)
+        except Exception:
+            pass
+
+        # Node border — thicker for publication
+        p4c.set_node_border_width_default(2.5, style_name=style_name)
+        p4c.set_node_border_color_default("#333333", style_name=style_name)
+
+        try:
+            p4c.set_node_fill_opacity_default(230, style_name=style_name)
+        except Exception:
+            pass
+
+        # ========== EDGE STYLING ==========
+
+        pub_edge_colors = {
+            "STRING-DB": "#2CA02C",
+            "KEGG": "#17BECF",
+            "Literature": "#E377C2",
+            "Pathway": "#8C564B",
+            "Shared Pathway": "#FF9800",
+            "Predicted": "#BCBD22",
+            "Co-activation": "#7F7F7F",
+            "Kinase-Substrate": "#9467BD",
+            "Kinase-Substrate-Predicted": "#D8BFD8",
+            "Unknown": "#C7C7C7",
+        }
+        p4c.set_edge_color_mapping(
+            table_column="evidence_type",
+            table_column_values=list(pub_edge_colors.keys()),
+            colors=list(pub_edge_colors.values()),
+            mapping_type="d",
+            style_name=style_name,
+        )
+
+        # Edge width based on confidence
+        try:
+            p4c.set_edge_line_width_mapping(
+                table_column="confidence",
+                table_column_values=[0.3, 0.5, 0.7, 1.0],
+                widths=[1.5, 2.5, 3.5, 5.0],
                 mapping_type="c",
                 style_name=style_name,
             )
+        except Exception:
+            p4c.set_edge_line_width_default(2.5, style_name=style_name)
 
-            p4c.set_node_label_mapping(table_column="id", style_name=style_name)
-
-            p4c.set_edge_color_mapping(
+        # Kinase-substrate edge line style — dashed
+        try:
+            p4c.set_edge_line_style_mapping(
                 table_column="evidence_type",
-                table_column_values=list(EDGE_COLORS.keys()),
-                colors=list(EDGE_COLORS.values()),
+                table_column_values=["Kinase-Substrate", "Kinase-Substrate-Predicted"],
+                line_styles=["LONG_DASH", "DOT"],
                 mapping_type="d",
                 style_name=style_name,
             )
+        except Exception:
+            pass
 
-            p4c.set_edge_line_width_default(2.5, style_name=style_name)
+        # Edge opacity
+        try:
+            p4c.set_edge_opacity_default(200, style_name=style_name)
+        except Exception:
+            pass
 
+        # Apply style
         p4c.set_visual_style(style_name, network=network_suid)
-        p4c.layout_network("force-directed", network=network_suid)
-        logger.info(f"Visual style applied: {style_name}")
+
+        # ========== LAYOUT ==========
+        _apply_optimized_layout(p4c, network_suid, nodes)
+
+        logger.info(f"Publication-quality visual style applied: {style_name}")
 
     except Exception as e:
         logger.warning(f"Visual style application failed: {e}")
+        # Fallback
+        try:
+            p4c.set_visual_style("default", network=network_suid)
+            p4c.layout_network("force-directed", network=network_suid)
+        except Exception:
+            pass
 
 
-def _save_network_png(network_suid: int, network_name: str, output_dir: str) -> Optional[str]:
+def _apply_optimized_layout(p4c, network_suid: int, nodes: list):
+    """Apply optimized layout based on network size.
+    
+    Small dense networks use Kamada-Kawai, larger networks use force-directed
+    with optimized parameters for maximum node separation.
+    """
+    try:
+        node_count = len(nodes)
+        edge_count = len(p4c.get_all_edges(network=network_suid))
+
+        logger.info(f"Applying layout for {node_count} nodes, {edge_count} edges")
+
+        if edge_count == 0:
+            p4c.layout_network("circular", network=network_suid)
+        elif node_count <= 20 and edge_count >= node_count:
+            try:
+                p4c.layout_network("kamada-kawai", network=network_suid)
+            except Exception:
+                p4c.layout_network("force-directed", network=network_suid)
+        else:
+            # Force-directed with optimized parameters for better node separation
+            try:
+                p4c.set_layout_properties(
+                    layout_name="force-directed",
+                    properties={
+                        "defaultSpringCoefficient": 0.000005,
+                        "defaultSpringLength": 400,
+                        "defaultNodeMass": 15,
+                        "numIterations": 800,
+                        "defaultRepulsion": 50000,
+                    }
+                )
+            except Exception:
+                try:
+                    p4c.set_layout_properties(
+                        layout_name="force-directed",
+                        properties={
+                            "springCoefficient": 0.000005,
+                            "springLength": 400,
+                            "nodeMass": 15,
+                            "iterations": 800,
+                        }
+                    )
+                except Exception:
+                    pass
+
+            p4c.layout_network("force-directed", network=network_suid)
+
+        # Wait for layout to settle
+        time.sleep(2.5)
+
+        # Apply layout multiple times for better convergence
+        for _ in range(4):
+            try:
+                if edge_count > 0:
+                    p4c.layout_network("force-directed", network=network_suid)
+                    time.sleep(1.0)
+            except Exception:
+                break
+
+        # Try overlap removal
+        try:
+            p4c.layout_network("force-directed-cl", network=network_suid)
+            time.sleep(1.0)
+        except Exception:
+            pass
+
+        # Fit content with padding
+        p4c.fit_content(network=network_suid)
+
+    except Exception as e:
+        logger.warning(f"Layout optimization failed, using basic layout: {e}")
+        try:
+            p4c.layout_network("force-directed", network=network_suid)
+        except Exception:
+            try:
+                p4c.layout_network("grid", network=network_suid)
+            except Exception:
+                pass
+
+    time.sleep(1.0)
+    try:
+        p4c.fit_content(network=network_suid)
+    except Exception:
+        pass
+
+
+def _save_network_png(p4c, network_suid: int, network_name: str, output_dir: str) -> Optional[str]:
     """Export network as 300dpi PNG."""
     try:
-        import py4cytoscape as p4c
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True, exist_ok=True)
 
-        png_file = str(Path(output_dir) / f"{network_name}.png")
+        png_file = output_path / f"{network_name}.png"
+
+        # Delete existing file to avoid overwrite confirmation dialog
+        if png_file.exists():
+            try:
+                png_file.unlink()
+                logger.info(f"Deleted existing file: {png_file}")
+            except Exception as del_err:
+                logger.warning(f"Could not delete existing file: {del_err}")
+
         p4c.fit_content(network=network_suid)
         time.sleep(0.5)
+
         p4c.export_image(
-            filename=png_file,
+            filename=str(png_file),
             type="PNG",
             resolution=300,
             network=network_suid,
             overwrite_file=True,
         )
         logger.info(f"Network PNG saved: {png_file}")
-        return png_file
+        return str(png_file)
 
     except Exception as e:
         logger.warning(f"PNG export failed: {e}")
         return None
+
+
+# ---------------------------------------------------------------------------
+# Base64 image embedding for Markdown reports
+# ---------------------------------------------------------------------------
+
+def image_to_base64(image_path: str) -> Optional[str]:
+    """Convert image file to base64 data URI for Markdown embedding."""
+    try:
+        path = Path(image_path)
+        if not path.exists():
+            return None
+        with open(path, "rb") as f:
+            data = base64.b64encode(f.read()).decode("utf-8")
+        ext = path.suffix.lower()
+        mime = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg"}.get(ext.lstrip("."), "image/png")
+        return f"data:{mime};base64,{data}"
+    except Exception as e:
+        logger.warning(f"Base64 conversion failed for {image_path}: {e}")
+        return None
+
+
+def generate_network_figure_section(network_analysis: dict) -> str:
+    """Generate Markdown section with embedded network figures and legends.
+    
+    Creates Base64-embedded images in Markdown for each network image,
+    with detailed figure legends including node/edge statistics.
+    """
+    network_images = network_analysis.get("network_images", {})
+    legends = network_analysis.get("legends", {})
+    network_data = network_analysis.get("network_data", {})
+
+    if not network_images and not legends.get("full_legend"):
+        return ""
+
+    section = "## Network Visualization\n\n"
+
+    nodes = network_data.get("nodes", [])
+    edges = network_data.get("edges", [])
+
+    active_nodes = [n for n in nodes if n.get("state") in ("activated", "moderate_active")]
+    inhibited_nodes = [n for n in nodes if n.get("state") == "inhibited"]
+
+    figure_num = 1
+    for label, img_path in sorted(network_images.items()):
+        base64_img = image_to_base64(img_path)
+
+        display_label = "Combined PTM Signaling Network" if label == "main" else f"PTM Network — {label}"
+
+        if base64_img:
+            section += f"### Figure {figure_num}: {display_label}\n\n"
+            section += f"![{display_label}]({base64_img})\n\n"
+        else:
+            section += f"### Figure {figure_num}: {display_label}\n\n"
+            section += f"*[Network image: {Path(img_path).name}]*\n\n"
+
+        # Figure legend
+        section += f"**Figure {figure_num} Legend:**\n\n"
+        section += (
+            f"This network represents the PTM signaling interactions. "
+            f"The network contains **{len(active_nodes)} activated PTMs** (red/orange nodes), "
+            f"**{len(inhibited_nodes)} inhibited PTMs** (blue nodes), "
+            f"and **{len(edges)} interaction edges**.\n\n"
+        )
+
+        # Top activated PTMs
+        if active_nodes:
+            top_active = sorted(active_nodes, key=lambda x: -x.get("value", 0))[:5]
+            top_str = "; ".join(
+                f"{n.get('gene', '?')}({n.get('site', '')}): Log2FC={n.get('value', 0):.2f}"
+                for n in top_active
+            )
+            section += f"**Top Activated PTMs**: {top_str}\n\n"
+
+        # Top inhibited PTMs
+        if inhibited_nodes:
+            top_inhib = sorted(inhibited_nodes, key=lambda x: x.get("value", 0))[:5]
+            top_str = "; ".join(
+                f"{n.get('gene', '?')}({n.get('site', '')}): Log2FC={n.get('value', 0):.2f}"
+                for n in top_inhib
+            )
+            section += f"**Top Inhibited PTMs**: {top_str}\n\n"
+
+        # Edge type breakdown
+        edge_types = defaultdict(int)
+        for e in edges:
+            edge_types[e.get("evidence_type", "Unknown")] += 1
+        if edge_types:
+            section += "**Edge Types**: " + ", ".join(
+                f"{et} ({cnt})" for et, cnt in sorted(edge_types.items(), key=lambda x: -x[1])
+            ) + "\n\n"
+
+        section += "---\n\n"
+        figure_num += 1
+
+    # If no images but legends exist, include text legend
+    if not network_images and legends.get("full_legend"):
+        section += legends["full_legend"] + "\n\n"
+
+    return section

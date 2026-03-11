@@ -17,6 +17,7 @@ from report_generation.core.dynamic_prompt_generator import (
     build_dynamic_writing_example,
     build_structured_protein_data_for_llm,
 )
+from report_generation.core.figure_context import FigureInformationGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +93,13 @@ def run_section_writing(state: dict) -> dict:
     all_references = _collect_all_references(parsed_ptms)
     logger.info(f"Collected {len(all_references)} unique PubMed references from enriched PTM data")
 
+    # Figure context for LLM — enables natural figure references in Results/Discussion
+    figure_gen = FigureInformationGenerator(network_analysis, parsed_ptms)
+    if figure_gen.has_figures():
+        logger.info(f"Figure context available: {len(figure_gen.figure_map)} figures")
+    else:
+        logger.info("No Cytoscape figures available — skipping figure context")
+
     # v98: Build structured protein data for anti-hallucination
     ptm_type = state.get("ptm_type", "phosphorylation")
     network_results = state.get("network_results", {})
@@ -128,6 +136,11 @@ def run_section_writing(state: dict) -> dict:
             prompt = v98_directive + "\n\n" + v98_structured_data + "\n\n" + prompt
             if v98_writing_example and section_type == "results":
                 prompt += "\n\n" + v98_writing_example
+
+        # Inject figure context for Results/Discussion so LLM can reference figures
+        if figure_gen.has_figures() and section_type in ("results", "discussion"):
+            figure_ctx = figure_gen.generate_figure_context_for_llm(section_type)
+            prompt += "\n\n" + figure_ctx
 
         max_tok = section_max_tokens.get(section_type, 8192)
         content = llm.generate(prompt, system_prompt=SYSTEM_PROMPT, temperature=llm_temperature, max_tokens=max_tok)

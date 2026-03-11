@@ -2,13 +2,15 @@
 Editor Node — compiles sections into the final Markdown report.
 Ported from multi_agent_system/agents/editor.py.
 
-Assembles all sections, adds metadata, network figures, and references.
+Assembles all sections, adds metadata, network figures (Base64 embedded), and references.
 """
 
 import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
+
+from report_generation.core.nodes.network_node import generate_network_figure_section
 
 logger = logging.getLogger(__name__)
 
@@ -111,19 +113,24 @@ def _compile_report(
         lines.append(results)
         lines.append("")
 
-    # Network Analysis Figure
-    network_images = network.get("network_images", {})
-    legend = network.get("legends", {})
-    if network_images or legend:
-        lines.append("## Network Analysis\n")
-        if network_images:
-            for label, path in network_images.items():
-                fname = Path(path).name if path else ""
-                lines.append(f"![PTM Signaling Network — {label}]({fname})\n")
-        full_legend = legend.get("full_legend", "")
-        if full_legend:
-            lines.append(full_legend)
-        lines.append("")
+    # Network Analysis Figures — Base64 embedded or file-referenced
+    network_figure_section = generate_network_figure_section(network)
+    if network_figure_section:
+        lines.append(network_figure_section)
+    else:
+        # Fallback: file-referenced images + text legend
+        network_images = network.get("network_images", {})
+        legend = network.get("legends", {})
+        if network_images or legend:
+            lines.append("## Network Analysis\n")
+            if network_images:
+                for label, path in network_images.items():
+                    fname = Path(path).name if path else ""
+                    lines.append(f"![PTM Signaling Network — {label}]({fname})\n")
+            full_legend = legend.get("full_legend", "")
+            if full_legend:
+                lines.append(full_legend)
+            lines.append("")
 
     # Discussion
     discussion = sections.get("discussion", "")
