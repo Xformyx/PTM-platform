@@ -248,6 +248,39 @@ async def system_architecture(
             "detail": str(e)[:80],
         }
 
+    # Cytoscape (Report network visualization — host.docker.internal)
+    cytoscape_url = f"http://{settings.CYTOSCAPE_HOST}:{settings.CYTOSCAPE_PORT}/v1"
+    try:
+        async with httpx.AsyncClient(timeout=3) as client:
+            resp = await client.get(cytoscape_url)
+            if resp.status_code == 200:
+                nodes["cytoscape"] = {
+                    "id": "cytoscape",
+                    "label": "Cytoscape",
+                    "host": settings.CYTOSCAPE_HOST,
+                    "port": settings.CYTOSCAPE_PORT,
+                    "status": "ok",
+                    "detail": "Report network viz",
+                }
+            else:
+                nodes["cytoscape"] = {
+                    "id": "cytoscape",
+                    "label": "Cytoscape",
+                    "host": settings.CYTOSCAPE_HOST,
+                    "port": settings.CYTOSCAPE_PORT,
+                    "status": "error",
+                    "detail": f"HTTP {resp.status_code}",
+                }
+    except Exception as e:
+        nodes["cytoscape"] = {
+            "id": "cytoscape",
+            "label": "Cytoscape",
+            "host": settings.CYTOSCAPE_HOST,
+            "port": settings.CYTOSCAPE_PORT,
+            "status": "unavailable",
+            "detail": str(e)[:80],
+        }
+
     # Edges (connections)
     edges = [
         {"from": "client", "to": "gateway", "label": "HTTPS", "status": "ok"},
@@ -257,6 +290,7 @@ async def system_architecture(
         {"from": "api_server", "to": "chromadb", "label": "8000", "status": nodes.get("chromadb", {}).get("status", "unknown")},
         {"from": "api_server", "to": "mcp_server", "label": "8001", "status": nodes.get("mcp_server", {}).get("status", "unknown")},
         {"from": "api_server", "to": "ollama", "label": "11434", "status": nodes.get("ollama", {}).get("status", "unknown")},
+        {"from": "api_server", "to": "cytoscape", "label": "1234", "status": nodes.get("cytoscape", {}).get("status", "unknown")},
     ]
 
     # Client node (frontend)

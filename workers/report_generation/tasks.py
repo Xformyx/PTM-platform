@@ -112,14 +112,16 @@ def run_report_generation(self, order_id: int, config: dict):
             enriched_data = json.load(f)
         logger.info(f"[Order {order_id}] Loaded {len(enriched_data)} enriched PTMs from {enriched_path}")
 
-        # Build initial state
+        # Build initial state (merge single_time_point into experimental_context)
+        experimental_context = dict(config.get("experimental_context") or {})
+        experimental_context["single_time_point"] = config.get("single_time_point", False)
         initial_state = {
             "order_id": order_id,
             "enriched_ptm_data": enriched_data,
             "enriched_json_path": enriched_path,
             "md_report_path": config.get("md_report_path", ""),
             "tsv_data_path": config.get("tsv_data_path", ""),
-            "experimental_context": config.get("experimental_context") or {},
+            "experimental_context": experimental_context,
             "research_questions": config.get("research_questions", []),
             "chromadb_collections": config.get("chromadb_collections", []),
             "output_dir": str(order_output),

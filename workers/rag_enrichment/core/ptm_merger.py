@@ -16,15 +16,17 @@ from typing import Dict, List, Optional, Tuple
 logger = logging.getLogger(__name__)
 
 
-def merge_multi_condition_ptms(enriched_ptms: List[dict]) -> List[dict]:
+def merge_multi_condition_ptms(enriched_ptms: List[dict], single_time_point: bool = False) -> List[dict]:
     """
     Merge enriched PTM entries that share the same gene+position.
 
     For each unique (gene, position) pair:
       - Keep the entry with the highest |PTM_Relative_Log2FC| as the primary
       - Attach all condition-specific data as 'condition_data' list
-      - Auto-generate trajectory from multi-condition timepoints
+      - Auto-generate trajectory from multi-condition timepoints (skipped when single_time_point)
       - Merge enrichment data (articles, pathways, interactions) from all conditions
+
+    When single_time_point=True, conditions are not treated as timepoints (no trajectory).
 
     Returns:
         List of merged PTM dicts, each with an added 'condition_data' field.
@@ -98,8 +100,8 @@ def merge_multi_condition_ptms(enriched_ptms: List[dict]) -> List[dict]:
 
             primary["condition_data"] = condition_data
 
-            # Build trajectory from condition data
-            trajectory = _build_trajectory_from_conditions(condition_data)
+            # Build trajectory from condition data (skip when single_time_point — no temporal grouping)
+            trajectory = _build_trajectory_from_conditions(condition_data) if not single_time_point else {"timepoints": [], "trend": "unknown"}
             if trajectory["timepoints"]:
                 primary.setdefault("rag_enrichment", {})["trajectory"] = trajectory
 

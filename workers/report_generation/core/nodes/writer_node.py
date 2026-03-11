@@ -179,6 +179,15 @@ def _build_section_prompt(
     """Build LLM prompt for a specific report section."""
     all_references = all_references or []
 
+    single_time_point = context.get("single_time_point", False)
+    single_tp_directive = (
+        "\n**IMPORTANT: Single timepoint experiment** — This is NOT a time-course study. "
+        "Do NOT discuss temporal dynamics, time-course, sequential changes across timepoints, trajectory patterns, or progression over time. "
+        "Focus on the observed PTM changes at this single timepoint.\n\n"
+        if single_time_point
+        else ""
+    )
+
     # --- ChromaDB vector-search literature ---
     lit_context = ""
     ptm_type_label = context.get("ptm_type", "phosphorylation")
@@ -224,7 +233,7 @@ def _build_section_prompt(
         results = prev_sections.get("results", "")[:1200]
         discussion = prev_sections.get("discussion", "")[:800]
         return f"""Write an Abstract (~300-400 words) for this PTM analysis report.
-
+{single_tp_directive}
 Experimental System: {tissue}, {treatment}{bio_focus_line}
 Research Questions:
 {questions_str}
@@ -243,7 +252,7 @@ Write a comprehensive abstract that captures all major findings. Include specifi
             comp_intro = f"\n\nDetailed Analysis Context (from prior comprehensive analysis):\n{comprehensive_summary[:4000]}\n"
 
         return f"""Write a comprehensive Introduction section (~1500-2500 words) for this PTM analysis report.
-
+{single_tp_directive}
 Experimental System: {tissue}, {treatment}{bio_focus_line}
 Research Questions:
 {questions_str}
@@ -291,7 +300,7 @@ IMPORTANT: Write a thorough, detailed introduction. Cite as many of the provided
             comp_ctx = f"\n\nDetailed Analysis Context (from prior comprehensive analysis):\n{comprehensive_summary[:6000]}\n"
 
         return f"""Write a detailed Results section (~3000-5000 words) for this PTM analysis report.
-
+{single_tp_directive}
 Research Findings:
 {research_str}
 
@@ -321,7 +330,7 @@ IMPORTANT: Be thorough and detailed. Discuss each significant PTM site individua
             comp_disc = f"\n\nDetailed Analysis Context:\n{comprehensive_summary[:4000]}\n"
 
         return f"""Write a comprehensive Discussion section (~2000-3000 words) for this PTM analysis report.
-
+{single_tp_directive}
 Results Summary:
 {results_text}
 
@@ -347,7 +356,7 @@ IMPORTANT: For each discussion point, provide evidence from your data AND from t
         discussion_text = prev_sections.get("discussion", "")[:2000]
 
         return f"""Write a Conclusion section (~600-1000 words) for this PTM analysis report.
-
+{single_tp_directive}
 Research Questions:
 {questions_str}
 
@@ -374,7 +383,7 @@ Summarize:
 IMPORTANT: Be specific about findings — mention key PTM sites and their implications. Reference the results and discussion sections. Cite relevant references.
 {combined_lit}"""
 
-    return f"Write the {section_type} section for a PTM analysis report.\n{ptm_summary}"
+    return f"Write the {section_type} section for a PTM analysis report.\n{single_tp_directive}{ptm_summary}"
 
 
 # ---------------------------------------------------------------------------

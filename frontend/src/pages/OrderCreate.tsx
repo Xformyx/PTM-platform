@@ -180,6 +180,7 @@ export default function OrderCreate() {
   const [controlKeyword, setControlKeyword] = useState("control");
   const [parseTab, setParseTab] = useState("auto");
   const [configParsing, setConfigParsing] = useState(false);
+  const [singleTimePoint, setSingleTimePoint] = useState(false);
 
   // Analysis Options
   const [analysisOptions, setAnalysisOptions] = useState<AnalysisOptions>({ ...DEFAULT_ANALYSIS_OPTIONS });
@@ -295,6 +296,7 @@ export default function OrderCreate() {
     const sampleConfig = {
       source: parseTab === "auto" ? "auto_parse" : "xlsx",
       regex_pattern: parseTab === "auto" ? regexPattern : undefined,
+      single_time_point: singleTimePoint,
       samples: samples.map((s) => ({
         file_name: s.filename,
         condition: s.condition,
@@ -493,6 +495,24 @@ export default function OrderCreate() {
                   <p className="text-xs text-muted-foreground">
                     Define Condition, Group, and Replicate for each sample.
                   </p>
+                </div>
+
+                <div className="flex items-center gap-3 rounded-lg border-2 border-amber-500/40 bg-amber-500/5 px-4 py-3">
+                  <input
+                    type="checkbox"
+                    id="single-time-point"
+                    checked={singleTimePoint}
+                    onChange={(e) => setSingleTimePoint(e.target.checked)}
+                    className="h-4 w-4 rounded border-input shrink-0"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <Label htmlFor="single-time-point" className="text-sm font-medium cursor-pointer">
+                      Single time point
+                    </Label>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Check if samples are not time-series (no temporal grouping)
+                    </p>
+                  </div>
                 </div>
 
                 <Tabs value={parseTab} onValueChange={setParseTab}>

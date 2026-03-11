@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
-import { RefreshCw, AlertCircle, CheckCircle2, HelpCircle, Server, Database, Cpu } from "lucide-react";
+import { RefreshCw, AlertCircle, CheckCircle2, HelpCircle, Server, Database, Cpu, Network } from "lucide-react";
 import { api } from "@/lib/api";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -70,7 +70,7 @@ export default function SystemMonitor() {
   }, [fetchArchitecture]);
 
   const leftCol = ["client", "gateway", "api_server"];
-  const rightCol = ["mysql", "redis", "chromadb", "mcp_server", "ollama"];
+  const rightCol = ["mysql", "redis", "chromadb", "mcp_server", "ollama", "cytoscape"];
 
   return (
     <div className="space-y-6">
@@ -176,7 +176,11 @@ export default function SystemMonitor() {
                       >
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2">
-                            <Database className="h-4 w-4" />
+                            {id === "cytoscape" ? (
+                              <Network className="h-4 w-4" />
+                            ) : (
+                              <Database className="h-4 w-4" />
+                            )}
                             <span className="font-medium">{node.label}</span>
                           </div>
                           <StatusBadge status={node.status} />

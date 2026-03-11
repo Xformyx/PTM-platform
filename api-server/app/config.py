@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     # MCP Server
     MCP_SERVER_URL: str = "http://localhost:8001"
 
+    # Cytoscape (Report network visualization)
+    CYTOSCAPE_HOST: str = "host.docker.internal"
+    CYTOSCAPE_PORT: int = 1234
+
     # File paths
     INPUT_DIR: str = "/app/data/inputs"
     OUTPUT_DIR: str = "/app/data/outputs"
