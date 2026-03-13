@@ -45,6 +45,11 @@ export default function LlmConfig() {
   const [pullPct, setPullPct] = useState(0);
   const [pullError, setPullError] = useState("");
   const [deletingModel, setDeletingModel] = useState("");
+  const [addCloudOpen, setAddCloudOpen] = useState(false);
+  const [addCloudSubmitting, setAddCloudSubmitting] = useState(false);
+  const [addCloudForm, setAddCloudForm] = useState({
+    name: "", provider: "gemini" as "gemini" | "openai" | "anthropic", model_id: "", api_key: "",
+  });
   const abortRef = useRef<AbortController | null>(null);
 
   const loadAll = async () => {
@@ -143,6 +148,26 @@ export default function LlmConfig() {
       alert(e.message || "Delete failed");
     } finally {
       setDeletingModel("");
+    }
+  };
+
+  const handleAddCloudModel = async () => {
+    if (!addCloudForm.name.trim() || !addCloudForm.model_id.trim()) return;
+    setAddCloudSubmitting(true);
+    try {
+      await api.post("/llm/models", {
+        name: addCloudForm.name.trim(),
+        provider: addCloudForm.provider,
+        model_id: addCloudForm.model_id.trim(),
+        api_key: addCloudForm.api_key.trim() || undefined,
+      });
+      await loadAll();
+      setAddCloudOpen(false);
+      setAddCloudForm({ name: "", provider: "gemini", model_id: "", api_key: "" });
+    } catch (e: any) {
+      alert(e.response?.data?.detail || e.message || "Failed to add model");
+    } finally {
+      setAddCloudSubmitting(false);
     }
   };
 
@@ -273,9 +298,14 @@ export default function LlmConfig() {
 
       {/* Cloud Models */}
       <section>
-        <div className="flex items-center gap-2 mb-4">
-          <Cloud className="h-5 w-5 text-muted-foreground" />
-          <h2 className="text-lg font-semibold">Cloud Models</h2>
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <Cloud className="h-5 w-5 text-muted-foreground" />
+            <h2 className="text-lg font-semibold">Cloud Models</h2>
+          </div>
+          <Button variant="outline" size="sm" onClick={() => setAddCloudOpen(true)} className="gap-2">
+            <Plus className="h-4 w-4" /> Add Cloud Model
+          </Button>
         </div>
         {grouped.cloud.length > 0 ? (
           <StaggerContainer className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -366,6 +396,69 @@ export default function LlmConfig() {
             <div className="text-[10px] text-muted-foreground space-y-1">
               <p>Popular models: gemma3:27b, qwen2.5:14b, llama3.1:latest, mistral, phi4</p>
               <p>Use <code className="px-1 bg-muted rounded">model:tag</code> format for specific versions</p>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Cloud Model Modal */}
+      <Dialog open={addCloudOpen} onOpenChange={setAddCloudOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Cloud className="h-5 w-5" /> Add Cloud Model
+            </DialogTitle>
+            <DialogDescription>
+              Register Gemini, OpenAI, or Anthropic models. Set API key in .env (e.g. GEMINI_API_KEY) or optionally below.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 pt-2">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Display Name</label>
+              <Input
+                placeholder="e.g. Gemini 2.5 Flash"
+                value={addCloudForm.name}
+                onChange={(e) => setAddCloudForm((f) => ({ ...f, name: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Provider</label>
+              <select
+                className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm"
+                value={addCloudForm.provider}
+                onChange={(e) => setAddCloudForm((f) => ({ ...f, provider: e.target.value as "gemini" | "openai" | "anthropic" }))}
+              >
+                <option value="gemini">Gemini</option>
+                <option value="openai">OpenAI</option>
+                <option value="anthropic">Anthropic</option>
+              </select>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Model ID</label>
+              <Input
+                placeholder="e.g. gemini-2.5-flash, gpt-4.1-mini"
+                value={addCloudForm.model_id}
+                onChange={(e) => setAddCloudForm((f) => ({ ...f, model_id: e.target.value }))}
+              />
+              <p className="text-xs text-muted-foreground">
+                Gemini: gemini-2.5-flash, gemini-1.5-pro · OpenAI: gpt-4.1-mini, gpt-4o
+              </p>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">API Key (optional)</label>
+              <Input
+                type="password"
+                placeholder="Leave empty to use .env"
+                value={addCloudForm.api_key}
+                onChange={(e) => setAddCloudForm((f) => ({ ...f, api_key: e.target.value }))}
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" onClick={() => setAddCloudOpen(false)}>Cancel</Button>
+              <Button onClick={handleAddCloudModel} disabled={addCloudSubmitting || !addCloudForm.name.trim() || !addCloudForm.model_id.trim()}>
+                {addCloudSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                Add
+              </Button>
             </div>
           </div>
         </DialogContent>

@@ -132,11 +132,12 @@ def run_rag_enrichment(self, order_id: int, config: dict):
         enrich_cb = _make_progress_cb(order_id, "rag_enrichment", "enrichment", 10, 60)
 
         rag_llm_model = config.get("rag_llm_model")
+        rag_llm_provider = config.get("rag_llm_provider") or config.get("llm_provider", "ollama")
         pipeline = RAGEnrichmentPipeline(
             mcp_client=mcp,
             progress_callback=enrich_cb,
             rag_llm_model=rag_llm_model,
-            llm_provider=config.get("llm_provider", "ollama"),
+            llm_provider=rag_llm_provider,
             llm_model=config.get("llm_model"),
         )
 

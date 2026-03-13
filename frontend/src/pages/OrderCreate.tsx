@@ -164,7 +164,7 @@ export default function OrderCreate() {
   });
   const [researchQuestions, setResearchQuestions] = useState<string[]>([]);
   const [newQuestion, setNewQuestion] = useState("");
-  const [ollamaModels, setOllamaModels] = useState<string[]>([]);
+  const [llmModels, setLlmModels] = useState<{ provider: string; model_id: string; name: string }[]>([]);
   const [defaultLlmModel, setDefaultLlmModel] = useState("");
   const [files, setFiles] = useState<{
     pr_matrix: File | null; pg_matrix: File | null; config_file: File | null;
@@ -212,9 +212,13 @@ export default function OrderCreate() {
     api.get<{ default_model: string }>("/system/llm-config").then((c) => {
       setDefaultLlmModel(c.default_model);
     }).catch(() => {});
-    api.get<{ models: { name: string; is_active: boolean }[] }>("/llm/models").then((d) => {
-      const names = d.models.filter((m) => m.is_active).map((m) => m.name);
-      setOllamaModels(names);
+    api.get<{ models: { provider: string; model_id: string; name: string; is_active: boolean }[] }>("/llm/models").then((d) => {
+      const list = d.models.filter((m) => m.is_active).map((m) => ({
+        provider: m.provider,
+        model_id: m.model_id,
+        name: m.name,
+      }));
+      setLlmModels(list);
     }).catch(() => {});
   }, []);
 
@@ -335,8 +339,14 @@ export default function OrderCreate() {
       report_type: form.report_type, top_n_ptms: form.top_n_ptms, output_format: "md",
       analysis_mode: form.analysis_mode,
       research_questions: researchQuestions.length > 0 ? researchQuestions : [],
-      ...(form.llm_model ? { llm_model: form.llm_model, llm_provider: "ollama" } : {}),
-      ...(form.rag_llm_model ? { rag_llm_model: form.rag_llm_model } : {}),
+      ...(form.llm_model ? (() => {
+        const [p, m] = form.llm_model.includes(":") ? form.llm_model.split(":", 2) : ["ollama", form.llm_model];
+        return { llm_model: m, llm_provider: p };
+      })() : {}),
+      ...(form.rag_llm_model ? (() => {
+        const [p, m] = form.rag_llm_model.includes(":") ? form.rag_llm_model.split(":", 2) : ["ollama", form.rag_llm_model];
+        return { rag_llm_model: m, rag_llm_provider: p };
+      })() : {}),
       report_config: reportConfigNested,
     }));
     const { proteinListFile, ...analysisOptsForJson } = analysisOptions;
@@ -863,9 +873,14 @@ export default function OrderCreate() {
                       <SelectItem value="__default__">
                         Default ({defaultLlmModel || "auto"})
                       </SelectItem>
-                      {ollamaModels.map((m) => (
-                        <SelectItem key={m} value={m}>{m}</SelectItem>
-                      ))}
+                      {llmModels.map((m) => {
+                        const val = `${m.provider}:${m.model_id}`;
+                        return (
+                          <SelectItem key={val} value={val}>
+                            {m.name} ({m.provider})
+                          </SelectItem>
+                        );
+                      })}
                     </SelectContent>
                   </Select>
                   <p className="text-xs text-muted-foreground">
@@ -887,9 +902,14 @@ export default function OrderCreate() {
                       <SelectItem value="__default__">
                         Default ({defaultLlmModel || "auto"})
                       </SelectItem>
-                      {ollamaModels.map((m) => (
-                        <SelectItem key={m} value={m}>{m}</SelectItem>
-                      ))}
+                      {llmModels.map((m) => {
+                        const val = `${m.provider}:${m.model_id}`;
+                        return (
+                          <SelectItem key={val} value={val}>
+                            {m.name} ({m.provider})
+                          </SelectItem>
+                        );
+                      })}
                     </SelectContent>
                   </Select>
                   <p className="text-xs text-muted-foreground">
@@ -1105,11 +1125,11 @@ export default function OrderCreate() {
                     </span>
                     <span className="text-muted-foreground">LLM Model (Report)</span>
                     <span className="font-medium font-mono text-xs">
-                      {form.llm_model || `Default (${defaultLlmModel})`}
+                      {form.llm_model ? (llmModels.find((m) => `${m.provider}:${m.model_id}` === form.llm_model)?.name || form.llm_model) : `Default (${defaultLlmModel})`}
                     </span>
                     <span className="text-muted-foreground">LLM Model (Paper Read)</span>
                     <span className="font-medium font-mono text-xs">
-                      {form.rag_llm_model || `Default (${defaultLlmModel})`}
+                      {form.rag_llm_model ? (llmModels.find((m) => `${m.provider}:${m.model_id}` === form.rag_llm_model)?.name || form.rag_llm_model) : `Default (${defaultLlmModel})`}
                     </span>
                   </div>
                 </div>

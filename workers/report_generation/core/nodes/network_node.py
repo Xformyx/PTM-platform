@@ -47,8 +47,42 @@ EDGE_COLORS = {
 }
 
 
+def _build_network_results_for_writer(parsed_ptms: list, context: dict) -> dict:
+    """Build network_results structure for writer_node (ptm_only mode).
+    Enables build_structured_protein_data_for_llm to extract protein names and Log2FC values.
+    """
+    single_tp = context.get("single_time_point", True)
+    active_nodes = []
+    inhibited_nodes = []
+    for p in parsed_ptms:
+        node = {
+            "gene": p.get("gene", "Unknown"),
+            "site": str(p.get("position", "")),
+            "value": p.get("ptm_relative_log2fc", 0),
+            "ptm_log2fc": p.get("ptm_relative_log2fc", 0),
+            "protein_log2fc": p.get("protein_log2fc", 0),
+        }
+        if node["value"] > 0:
+            active_nodes.append(node)
+        elif node["value"] < 0:
+            inhibited_nodes.append(node)
+    tp_name = "default" if single_tp else "multi"
+    return {
+        "timepoints": [tp_name],
+        "networks": {
+            tp_name: {
+                "active_nodes": active_nodes,
+                "inhibited_nodes": inhibited_nodes,
+                "non_ptm_nodes": [],
+            }
+        },
+    }
+
+
 def run_network_analysis(state: dict) -> dict:
     """Analyze temporal networks and optionally generate Cytoscape images."""
+    os.environ["DEFAULT_BASE_URL"] = _cytoscape_base_url()
+
     cb = state.get("progress_callback")
     if cb:
         cb(55, "Analyzing signaling networks")
@@ -82,6 +116,9 @@ def run_network_analysis(state: dict) -> dict:
     if cb:
         cb(65, f"Network analysis complete (Cytoscape: {cytoscape_connected})")
 
+    # Build network_results for writer_node (ptm_only mode) — enables v98 structured data
+    network_results = _build_network_results_for_writer(parsed_ptms, state.get("experimental_context", {}))
+
     return {
         "network_analysis": {
             "network_data": network_data,
@@ -89,7 +126,8 @@ def run_network_analysis(state: dict) -> dict:
             "cytoscape_connected": cytoscape_connected,
             "network_images": network_images,
             "ptm_count": len(parsed_ptms),
-        }
+        },
+        "network_results": network_results,
     }
 
 
@@ -266,17 +304,49 @@ def _generate_legends(network_data: dict, ptms: list) -> dict:
 # Cytoscape integration (Option A: host.docker.internal)
 # ---------------------------------------------------------------------------
 
-def _check_cytoscape() -> bool:
-    """Check if Cytoscape Desktop is accessible."""
+def _cytoscape_base_url() -> str:
+    """Base URL for Cytoscape CyREST API (host.docker.internal from Docker)."""
+    return f"http://{CYTOSCAPE_HOST}:{CYTOSCAPE_PORT}/v1"
+
+
+def _check_cytoscape_http(base_url: str, timeout: int = 5) -> bool:
+    """Simple HTTP connectivity check to CyREST base URL."""
     try:
-        import py4cytoscape as p4c
-        p4c.cyrest.CyRestClient(base_url=f"http://{CYTOSCAPE_HOST}:{CYTOSCAPE_PORT}/v1")
-        os.environ["DEFAULT_BASE_URL"] = f"http://{CYTOSCAPE_HOST}:{CYTOSCAPE_PORT}/v1"
-        p4c.cytoscape_ping()
-        return True
+        import requests
+        r = requests.get(base_url, timeout=timeout)
+        return r.status_code == 200
     except Exception as e:
-        logger.info(f"Cytoscape not reachable: {e}")
+        logger.debug(f"Cytoscape HTTP check failed: {e}")
         return False
+
+
+def _check_cytoscape() -> bool:
+    """Check if Cytoscape Desktop is accessible. Retries with fallback to HTTP check."""
+    base_url = _cytoscape_base_url()
+    max_retries = 3
+    retry_delay = 2
+
+    for attempt in range(max_retries):
+        try:
+            import py4cytoscape as p4c
+            p4c.cytoscape_ping(base_url=base_url)
+            return True
+        except Exception as e:
+            logger.warning(
+                f"Cytoscape ping failed (attempt {attempt + 1}/{max_retries}): {type(e).__name__}: {e}"
+            )
+            if attempt < max_retries - 1:
+                time.sleep(retry_delay)
+
+    # Fallback: if py4cytoscape ping fails (e.g. version check), try simple HTTP
+    if _check_cytoscape_http(base_url):
+        logger.info("Cytoscape reachable via HTTP; py4cytoscape ping failed (may be version mismatch)")
+        return True
+
+    logger.info(
+        f"Cytoscape not reachable at {base_url} — ensure Cytoscape Desktop is running with CyREST on port {CYTOSCAPE_PORT}"
+    )
+    return False
 
 
 def _generate_cytoscape_networks(
@@ -704,16 +774,21 @@ def generate_network_figure_section(network_analysis: dict) -> str:
 
     figure_num = 1
     for label, img_path in sorted(network_images.items()):
-        base64_img = image_to_base64(img_path)
+        path_obj = Path(img_path) if img_path else None
+        # Use absolute file path for docx conversion (more reliable than base64 for large images)
+        img_ref = str(path_obj.resolve()) if path_obj and path_obj.exists() else None
+        if not img_ref:
+            base64_img = image_to_base64(img_path) if img_path else None
+            img_ref = base64_img
 
         display_label = "Combined PTM Signaling Network" if label == "main" else f"PTM Network — {label}"
 
-        if base64_img:
+        if img_ref:
             section += f"### Figure {figure_num}: {display_label}\n\n"
-            section += f"![{display_label}]({base64_img})\n\n"
+            section += f"![{display_label}]({img_ref})\n\n"
         else:
             section += f"### Figure {figure_num}: {display_label}\n\n"
-            section += f"*[Network image: {Path(img_path).name}]*\n\n"
+            section += f"*[Network image: {path_obj.name if path_obj else '?'}]*\n\n"
 
         # Figure legend
         section += f"**Figure {figure_num} Legend:**\n\n"

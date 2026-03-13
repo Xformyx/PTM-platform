@@ -22,11 +22,17 @@ interface Order {
   report_options?: Record<string, unknown>;
 }
 
+interface LlmModelOption {
+  provider: string;
+  model_id: string;
+  name: string;
+}
+
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   order: Order | null;
-  ollamaModels: string[];
+  llmModels: LlmModelOption[];
   defaultLlmModel: string;
   onConfirm: (opts: {
     analysis_context: Record<string, unknown>;
@@ -48,7 +54,7 @@ export default function RerunOptionsModal({
   open,
   onOpenChange,
   order,
-  ollamaModels,
+  llmModels,
   defaultLlmModel,
   onConfirm,
   confirmLabel = "Confirm & Run",
@@ -94,8 +100,10 @@ export default function RerunOptionsModal({
       setReportType(typeof ro.report_type === "string" ? ro.report_type : "comprehensive");
       const topN = ro.top_n_ptms;
       setTopNptms(typeof topN === "number" && !isNaN(topN) ? topN : 20);
-      setLlmModel(typeof ro.llm_model === "string" ? ro.llm_model : "");
-      setRagLlmModel(typeof ro.rag_llm_model === "string" ? ro.rag_llm_model : "");
+      const lm = ro.llm_model as string; const rp = ro.llm_provider as string;
+      const rm = ro.rag_llm_model as string; const rrp = ro.rag_llm_provider as string;
+      setLlmModel(rp && lm ? `${rp}:${lm}` : (lm || ""));
+      setRagLlmModel(rrp && rm ? `${rrp}:${rm}` : (rm || ""));
       const rq = ro.research_questions;
       setResearchQuestions(Array.isArray(rq) ? rq.filter((q): q is string => typeof q === "string") : []);
       const ao = (order.analysis_options || {}) as Record<string, unknown>;
@@ -167,8 +175,14 @@ export default function RerunOptionsModal({
           output_format: baseReportOpts.output_format ?? "md",
           analysis_mode: analysisMode,
           research_questions: researchQuestions,
-          ...(llmModel ? { llm_model: llmModel, llm_provider: "ollama" as const } : {}),
-          ...(ragLlmModel ? { rag_llm_model: ragLlmModel } : {}),
+          ...(llmModel ? (() => {
+            const [p, m] = llmModel.includes(":") ? llmModel.split(":", 2) : ["ollama", llmModel];
+            return { llm_model: m, llm_provider: p };
+          })() : {}),
+          ...(ragLlmModel ? (() => {
+            const [p, m] = ragLlmModel.includes(":") ? ragLlmModel.split(":", 2) : ["ollama", ragLlmModel];
+            return { rag_llm_model: m, rag_llm_provider: p };
+          })() : {}),
           report_config: reportConfigNested,
         },
       });
@@ -324,9 +338,10 @@ export default function RerunOptionsModal({
                   <SelectTrigger className="h-8"><SelectValue placeholder={`Default (${defaultLlmModel || "auto"})`} /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="__default__">Default ({defaultLlmModel || "auto"})</SelectItem>
-                    {ollamaModels.map((m) => (
-                      <SelectItem key={m} value={m}>{m}</SelectItem>
-                    ))}
+                    {llmModels.map((m) => {
+                      const val = `${m.provider}:${m.model_id}`;
+                      return <SelectItem key={val} value={val}>{m.name} ({m.provider})</SelectItem>;
+                    })}
                   </SelectContent>
                 </Select>
               </div>
@@ -339,9 +354,10 @@ export default function RerunOptionsModal({
                   <SelectTrigger className="h-8"><SelectValue placeholder={`Default (${defaultLlmModel || "auto"})`} /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="__default__">Default ({defaultLlmModel || "auto"})</SelectItem>
-                    {ollamaModels.map((m) => (
-                      <SelectItem key={m} value={m}>{m}</SelectItem>
-                    ))}
+                    {llmModels.map((m) => {
+                      const val = `${m.provider}:${m.model_id}`;
+                      return <SelectItem key={val} value={val}>{m.name} ({m.provider})</SelectItem>;
+                    })}
                   </SelectContent>
                 </Select>
               </div>

@@ -1,5 +1,8 @@
 import logging
+import re
+from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import httpx
 from fastapi import APIRouter, Depends
@@ -304,3 +307,136 @@ async def system_architecture(
     }
 
     return {"nodes": nodes, "edges": edges}
+
+
+# Docker log timestamp pattern (UTC): 2026-03-12T05:02:47.968Z or 2026-03-12 05:02:47.968
+_DOCKER_TS_PATTERN = re.compile(
+    r"^(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?)Z?\s*"
+)
+# Python logging format: [2026-03-12 09:30:27,976: INFO/ForkPoolWorker-2] — strip to avoid duplicate
+_PYTHON_LOG_TS_PATTERN = re.compile(
+    r"^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d+: (INFO|DEBUG|WARNING|ERROR|CRITICAL)([^\]]*)\]\s*"
+)
+
+
+def _convert_log_timestamps_to_kst(logs: str) -> str:
+    """Convert Docker's leading UTC timestamps to KST; remove duplicate Python timestamps."""
+    kst = ZoneInfo("Asia/Seoul")
+    lines = logs.split("\n")
+    result = []
+    for line in lines:
+        m = _DOCKER_TS_PATTERN.match(line)
+        if m:
+            ts_str = m.group(1).replace("T", " ")
+            try:
+                dt = datetime.fromisoformat(ts_str.replace(" ", "T"))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=ZoneInfo("UTC"))
+                dt_kst = dt.astimezone(kst)
+                kst_str = dt_kst.strftime("%Y-%m-%d %H:%M:%S")
+                rest = line[m.end() :].lstrip()
+                # Strip Python logging timestamp to avoid duplication
+                pm = _PYTHON_LOG_TS_PATTERN.match(rest)
+                if pm:
+                    rest = f"{pm.group(1)}{pm.group(2)} {rest[pm.end():].lstrip()}".rstrip()
+                result.append(f"{kst_str} {rest}" if rest else kst_str)
+            except (ValueError, TypeError):
+                result.append(line)
+        else:
+            result.append(line)
+    return "\n".join(result)
+
+
+# Container list for log viewer (PTM containers from docker-compose)
+CONTAINER_OPTIONS = [
+    {"id": "ptm-worker-preprocessing", "label": "Preprocessing Worker", "category": "pipeline"},
+    {"id": "ptm-worker-rag", "label": "RAG Enrichment Worker", "category": "pipeline"},
+    {"id": "ptm-worker-report", "label": "Report Generation Worker", "category": "pipeline"},
+    {"id": "ptm-api-server", "label": "API Server", "category": "app"},
+    {"id": "ptm-mcp-server", "label": "MCP Server", "category": "app"},
+    {"id": "ptm-gateway", "label": "Gateway (nginx)", "category": "app"},
+    {"id": "ptm-mysql", "label": "MySQL", "category": "infra"},
+    {"id": "ptm-redis", "label": "Redis", "category": "infra"},
+    {"id": "ptm-chromadb", "label": "ChromaDB", "category": "infra"},
+]
+
+
+@router.get("/health/containers")
+async def list_containers() -> dict:
+    """List PTM containers available for log viewing."""
+    return {"containers": CONTAINER_OPTIONS}
+
+
+@router.get("/health/container-status")
+async def container_status() -> dict:
+    """Return status of all PTM containers (running, exited, etc.)."""
+    result = []
+    try:
+        import docker
+        client = docker.from_env()
+        for opt in CONTAINER_OPTIONS:
+            cid = opt["id"]
+            try:
+                container = client.containers.get(cid)
+                status = container.status
+                attrs = container.attrs
+                image_obj = getattr(container, "image", None)
+                image_tags = (image_obj.tags if image_obj and image_obj.tags else None) or []
+                image_name = image_tags[0] if image_tags else (attrs.get("Config", {}).get("Image", "") or "")
+                started_at = (attrs.get("State", {}) or {}).get("StartedAt") or ""
+                result.append({
+                    "id": cid,
+                    "label": opt["label"],
+                    "category": opt["category"],
+                    "status": "ok" if status == "running" else "error",
+                    "detail": status,
+                    "image": image_name,
+                    "started_at": started_at,
+                })
+            except Exception as e:
+                result.append({
+                    "id": cid,
+                    "label": opt["label"],
+                    "category": opt["category"],
+                    "status": "unavailable",
+                    "detail": str(e)[:80],
+                    "image": "",
+                    "started_at": "",
+                })
+    except Exception as e:
+        logger.warning(f"Container status failed: {e}")
+        for opt in CONTAINER_OPTIONS:
+            result.append({
+                "id": opt["id"],
+                "label": opt["label"],
+                "category": opt["category"],
+                "status": "unavailable",
+                "detail": str(e)[:80],
+                "image": "",
+                "started_at": "",
+            })
+    return {"containers": result}
+
+
+
+
+@router.get("/health/container-logs/{container_id}")
+async def container_logs(container_id: str, tail: int = 500) -> dict:
+    """
+    Fetch recent logs from a Docker container.
+    Requires Docker socket mounted at /var/run/docker.sock.
+    """
+    allowed = {c["id"] for c in CONTAINER_OPTIONS}
+    if container_id not in allowed:
+        return {"error": f"Unknown container: {container_id}", "logs": ""}
+
+    try:
+        import docker
+        client = docker.from_env()
+        container = client.containers.get(container_id)
+        logs = container.logs(tail=tail, timestamps=True).decode("utf-8", errors="replace")
+        logs = _convert_log_timestamps_to_kst(logs)
+        return {"container": container_id, "logs": logs}
+    except Exception as e:
+        logger.warning(f"Container logs failed for {container_id}: {e}")
+        return {"container": container_id, "error": str(e), "logs": ""}

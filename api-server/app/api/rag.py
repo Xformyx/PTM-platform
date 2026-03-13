@@ -144,6 +144,34 @@ async def get_collection(
     }
 
 
+@router.patch("/collections/{collection_id}")
+async def update_collection(
+    collection_id: int,
+    body: CollectionUpdate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    result = await db.execute(
+        select(RagCollection).where(RagCollection.id == collection_id)
+    )
+    collection = result.scalar_one_or_none()
+    if not collection:
+        raise HTTPException(status_code=404, detail="Collection not found")
+
+    if body.is_active is not None:
+        collection.is_active = body.is_active
+    if body.name is not None:
+        collection.name = body.name
+    if body.description is not None:
+        collection.description = body.description
+
+    await db.commit()
+    await db.refresh(collection)
+
+    logger.info(f"RAG collection {collection_id} updated (is_active={collection.is_active})")
+    return {"id": collection.id, "is_active": collection.is_active}
+
+
 @router.delete("/collections/{collection_id}")
 async def delete_collection(
     collection_id: int,

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Library, FileText, Layers, Database, Plus, Loader2 } from "lucide-react";
+import { Library, FileText, Layers, Database, Plus, Loader2, Power, PowerOff } from "lucide-react";
 import { api } from "@/lib/api";
 import type { RagCollection } from "@/lib/types";
 import { Card, CardContent } from "@/components/ui/card";
@@ -20,6 +20,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { StaggerContainer, StaggerItem } from "@/components/motion/stagger-children";
+import { cn } from "@/lib/utils";
 
 export default function RagManagement() {
   const [collections, setCollections] = useState<RagCollection[]>([]);
@@ -59,6 +60,18 @@ export default function RagManagement() {
     }
   };
 
+  const handleToggleActive = async (c: RagCollection, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await api.patch(`/rag/collections/${c.id}`, { is_active: !c.is_active });
+      setCollections((prev) =>
+        prev.map((x) => (x.id === c.id ? { ...x, is_active: !x.is_active } : x))
+      );
+    } catch (err: any) {
+      alert(err.message || "Failed to update collection");
+    }
+  };
+
   if (loading) {
     return (
       <div className="space-y-6">
@@ -76,7 +89,9 @@ export default function RagManagement() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">RAG Collections</h1>
-          <p className="text-sm text-muted-foreground">{collections.length} knowledge bases</p>
+          <p className="text-sm text-muted-foreground">
+            {collections.filter((c) => c.is_active).length} / {collections.length} 활성 (리포트 생성 시 참조)
+          </p>
         </div>
         <Button className="gap-2" onClick={() => setDialogOpen(true)}>
           <Plus className="h-4 w-4" /> New Collection
@@ -95,7 +110,26 @@ export default function RagManagement() {
                       <Database className="h-4 w-4 text-muted-foreground" />
                       <h3 className="font-semibold text-sm">{c.name}</h3>
                     </div>
-                    <Badge variant="secondary">{c.tier}</Badge>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={(e) => handleToggleActive(c, e)}
+                        title={c.is_active ? "활성 (클릭하여 비활성화)" : "비활성 (클릭하여 활성화)"}
+                        className={cn(
+                          "flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-colors",
+                          c.is_active
+                            ? "bg-emerald-500/20 text-emerald-600 hover:bg-emerald-500/30 dark:text-emerald-400"
+                            : "bg-muted text-muted-foreground hover:bg-muted/80"
+                        )}
+                      >
+                        {c.is_active ? (
+                          <><Power className="h-3 w-3" /> 활성</>
+                        ) : (
+                          <><PowerOff className="h-3 w-3" /> 비활성</>
+                        )}
+                      </button>
+                      <Badge variant="secondary">{c.tier}</Badge>
+                    </div>
                   </div>
                   {c.description && (
                     <p className="text-sm text-muted-foreground mb-3 line-clamp-2">{c.description}</p>

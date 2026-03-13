@@ -443,6 +443,7 @@ async def start_order(
     active_collections = [r[0] for r in coll_result.fetchall()]
 
     sample_cfg = order.sample_config or {}
+    report_opts = order.report_options or {}
     task_config = {
         "order_code": order.order_code,
         "pr_matrix_path": order.pr_matrix_path,
@@ -458,6 +459,11 @@ async def start_order(
         "kegg_organism": kegg_map.get(species_lower, "mmu"),
         "analysis_options": order.analysis_options,
         "chromadb_collections": active_collections,
+        "llm_provider": report_opts.get("llm_provider", "ollama"),
+        "llm_model": report_opts.get("llm_model"),
+        "rag_llm_model": report_opts.get("rag_llm_model"),
+        "rag_llm_provider": report_opts.get("rag_llm_provider"),
+        "report_title": report_opts.get("report_title", "PTM Comprehensive Analysis Report"),
     }
 
     from celery import Celery as CeleryClass
@@ -708,6 +714,7 @@ async def run_stage(
             "llm_provider": (order.report_options or {}).get("llm_provider", "ollama"),
             "llm_model": (order.report_options or {}).get("llm_model"),
             "rag_llm_model": (order.report_options or {}).get("rag_llm_model"),
+            "rag_llm_provider": (order.report_options or {}).get("rag_llm_provider"),
             "report_title": (order.report_options or {}).get("report_title", "PTM Comprehensive Analysis Report"),
             "chain_to_next": False,
         }
@@ -729,6 +736,7 @@ async def run_stage(
             "llm_provider": (order.report_options or {}).get("llm_provider", "ollama"),
             "llm_model": (order.report_options or {}).get("llm_model"),
             "rag_llm_model": (order.report_options or {}).get("rag_llm_model"),
+            "rag_llm_provider": (order.report_options or {}).get("rag_llm_provider"),
             "report_title": (order.report_options or {}).get("report_title", "PTM Comprehensive Analysis Report"),
             "chain_to_next": False,
         }

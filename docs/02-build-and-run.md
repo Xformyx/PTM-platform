@@ -133,6 +133,8 @@ Docker 컨테이너에서 호스트의 Ollama에 접근하는 주소: `http://ho
 3. Docker 컨테이너에서 `host.docker.internal:1234`로 접근
 4. Cytoscape 미실행 시에는 텍스트 기반 fallback 사용
 
+**Docker에서 Cytoscape 연결이 안 될 때**: (1) Cytoscape Desktop이 실행 중인지 확인 (2) CyREST가 포트 1234에서 수신 중인지 확인 (3) Linux에서는 `docker-compose`에 `extra_hosts: host.docker.internal:host-gateway`가 포함되어 있는지 확인 (4) 리포트 생성 시 재시도 및 HTTP 폴백이 적용되어 있으므로, Cytoscape가 응답 지연 시 몇 초 후 재시도됩니다.
+
 ## 프론트엔드 로컬 개발
 
 ```bash

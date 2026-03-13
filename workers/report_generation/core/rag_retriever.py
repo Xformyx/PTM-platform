@@ -34,6 +34,7 @@ class RAGRetriever:
         self._client = None
         self._collections: Dict[str, object] = {}
         self._cache: Dict[str, list] = {}
+        self._resolved_names: Optional[List[str]] = None  # Filtered to existing only
 
     @property
     def client(self):
@@ -59,6 +60,29 @@ class RAGRetriever:
             pass
         return False
 
+    def _resolve_existing_collections(self) -> List[str]:
+        """Filter collection_names to only those that exist in ChromaDB. Reduces 404 log noise."""
+        if self._resolved_names is not None:
+            return self._resolved_names
+        if not self.is_available() or not self.collection_names:
+            self._resolved_names = []
+            return self._resolved_names
+        try:
+            existing = {c.name for c in self.client.list_collections()}
+            self._resolved_names = [n for n in self.collection_names if n in existing]
+            missing = set(self.collection_names) - existing
+            if missing:
+                logger.info(
+                    "[ChromaDB] Using %d/%d collections (%d not found in ChromaDB)",
+                    len(self._resolved_names),
+                    len(self.collection_names),
+                    len(missing),
+                )
+        except Exception as e:
+            logger.warning(f"[ChromaDB] Could not list collections: {e}")
+            self._resolved_names = self.collection_names
+        return self._resolved_names
+
     def query(
         self, query_text: str, n_results: int = 5, relevance_threshold: float = 0.5
     ) -> List[dict]:
@@ -71,8 +95,9 @@ class RAGRetriever:
             logger.warning("ChromaDB not available — returning empty results")
             return []
 
+        coll_names = self._resolve_existing_collections()
         all_results = []
-        for coll_name in self.collection_names:
+        for coll_name in coll_names:
             try:
                 coll = self._get_collection(coll_name)
                 if coll is None:

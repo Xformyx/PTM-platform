@@ -130,15 +130,28 @@ def generate_qa_report(state: ReportState) -> dict:
 
 
 def format_citations(state: ReportState) -> dict:
-    """Format citations and generate reference list."""
+    """Format citations and generate reference list. Includes network figures (Cytoscape) between Results and Discussion."""
     from .citation_formatter import CitationFormatter, ReportPostProcessor
+    from .nodes.network_node import generate_network_figure_section
     logger.info("Formatting citations and post-processing report")
 
     sections = state.get("sections", {})
     collected_refs = state.get("collected_references", [])
+    network_analysis = state.get("network_analysis", {})
+
+    # Build report with network section between Results and Discussion
+    section_order = ["introduction", "results", "discussion", "conclusion", "abstract"]
+    parts = []
+    for key in section_order:
+        if key in sections and sections[key]:
+            parts.append(sections[key])
+        if key == "results":
+            network_section = generate_network_figure_section(network_analysis)
+            if network_section:
+                parts.append(network_section)
 
     formatter = CitationFormatter()
-    all_text = "\n\n".join(sections.values())
+    all_text = "\n\n".join(parts)
     result = formatter.process_text(all_text, collected_refs)
 
     # Post-process

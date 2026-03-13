@@ -1618,7 +1618,7 @@ export default function OrderDetail() {
   const [logs, setLogs] = useState<OrderLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [llmConfig, setLlmConfig] = useState<LlmConfig | null>(null);
-  const [ollamaModels, setOllamaModels] = useState<string[]>([]);
+  const [llmModels, setLlmModels] = useState<{ provider: string; model_id: string; name: string }[]>([]);
   const [rerunModalOpen, setRerunModalOpen] = useState(false);
   const [pendingAction, setPendingAction] = useState<{ type: "start" } | { type: "run-stage"; stage: string } | null>(null);
   const runHandledRef = useRef(false);
@@ -1640,8 +1640,8 @@ export default function OrderDetail() {
     });
   }, [orderId]);
   useEffect(() => {
-    api.get<{ models: { name: string; is_active: boolean }[] }>("/llm/models").then((d) => {
-      setOllamaModels(d.models.filter((m) => m.is_active).map((m) => m.name));
+    api.get<{ models: { provider: string; model_id: string; name: string; is_active: boolean }[] }>("/llm/models").then((d) => {
+      setLlmModels(d.models.filter((m) => m.is_active).map((m) => ({ provider: m.provider, model_id: m.model_id, name: m.name })));
     }).catch(() => {});
   }, []);
   useEffect(() => {
@@ -2286,7 +2286,7 @@ export default function OrderDetail() {
           if (!open) setPendingAction(null);
         }}
         order={order}
-        ollamaModels={ollamaModels}
+        llmModels={llmModels}
         defaultLlmModel={llmConfig?.default_model || ""}
         onConfirm={handleRerunConfirm}
         confirmLabel="Confirm & Re-run from Beginning"
