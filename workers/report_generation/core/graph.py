@@ -48,6 +48,7 @@ class ReportState(TypedDict, total=False):
     hypotheses: List[dict]
     validated_hypotheses: List[dict]
     network_analysis: dict
+    network_results: dict
     sections: Dict[str, str]
     collected_references: List[dict]
 

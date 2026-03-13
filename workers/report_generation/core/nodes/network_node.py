@@ -698,33 +698,103 @@ def _apply_optimized_layout(p4c, network_suid: int, nodes: list):
 
 
 def _save_network_png(p4c, network_suid: int, network_name: str, output_dir: str) -> Optional[str]:
-    """Export network as 300dpi PNG."""
+    """Export network as high-resolution PNG.
+
+    Uses CyREST direct image download to avoid Docker/host path mismatch.
+    Falls back to export_image if direct download fails.
+    """
     try:
+        import requests as _requests
+
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
-
         png_file = output_path / f"{network_name}.png"
 
-        # Delete existing file to avoid overwrite confirmation dialog
+        # Delete existing file
         if png_file.exists():
             try:
                 png_file.unlink()
-                logger.info(f"Deleted existing file: {png_file}")
             except Exception as del_err:
                 logger.warning(f"Could not delete existing file: {del_err}")
 
         p4c.fit_content(network=network_suid)
         time.sleep(0.5)
 
-        p4c.export_image(
-            filename=str(png_file),
-            type="PNG",
-            resolution=300,
-            network=network_suid,
-            overwrite_file=True,
-        )
-        logger.info(f"Network PNG saved: {png_file}")
-        return str(png_file)
+        # --- Method 1: CyREST direct image download (Docker-safe) ---
+        base_url = _cytoscape_base_url()
+        try:
+            # Get first view SUID
+            views_resp = _requests.get(
+                f"{base_url}/networks/{network_suid}/views",
+                timeout=10,
+            )
+            if views_resp.status_code == 200:
+                views = views_resp.json()
+                view_suid = views[0] if views else None
+            else:
+                view_suid = None
+
+            if view_suid is not None:
+                img_resp = _requests.get(
+                    f"{base_url}/networks/{network_suid}/views/{view_suid}/export/png"
+                    f"?h=2400",
+                    timeout=60,
+                )
+                if img_resp.status_code == 200 and len(img_resp.content) > 1000:
+                    with open(png_file, "wb") as f:
+                        f.write(img_resp.content)
+                    logger.info(
+                        f"Network PNG saved via CyREST direct: {png_file} "
+                        f"({len(img_resp.content):,} bytes)"
+                    )
+                    return str(png_file)
+                else:
+                    logger.warning(
+                        f"CyREST image download returned status={img_resp.status_code}, "
+                        f"size={len(img_resp.content) if img_resp.content else 0}"
+                    )
+        except Exception as direct_err:
+            logger.warning(f"CyREST direct download failed: {direct_err}")
+
+        # --- Method 2: Fallback to export_image with host path mapping ---
+        host_data_dir = os.getenv("HOST_DATA_DIR", "")
+        if host_data_dir:
+            order_dir_name = Path(output_dir).name
+            host_png = Path(host_data_dir) / "outputs" / order_dir_name / f"{network_name}.png"
+            host_png.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                p4c.export_image(
+                    filename=str(host_png),
+                    type="PNG",
+                    resolution=300,
+                    network=network_suid,
+                    overwrite_file=True,
+                )
+                time.sleep(1.5)
+                if png_file.exists() and png_file.stat().st_size > 1000:
+                    logger.info(f"Network PNG saved via host path mapping: {png_file}")
+                    return str(png_file)
+            except Exception as host_err:
+                logger.warning(f"Host path export failed: {host_err}")
+
+        # --- Method 3: Last resort - try original export_image ---
+        try:
+            p4c.export_image(
+                filename=str(png_file),
+                type="PNG",
+                resolution=300,
+                network=network_suid,
+                overwrite_file=True,
+            )
+            time.sleep(1.5)
+            if png_file.exists() and png_file.stat().st_size > 1000:
+                logger.info(f"Network PNG saved via export_image: {png_file}")
+                return str(png_file)
+        except Exception as fallback_err:
+            logger.warning(f"export_image fallback failed: {fallback_err}")
+
+        logger.warning(f"All PNG export methods failed for {network_name}")
+        return None
 
     except Exception as e:
         logger.warning(f"PNG export failed: {e}")
@@ -775,9 +845,12 @@ def generate_network_figure_section(network_analysis: dict) -> str:
     figure_num = 1
     for label, img_path in sorted(network_images.items()):
         path_obj = Path(img_path) if img_path else None
-        # Use absolute file path for docx conversion (more reliable than base64 for large images)
-        img_ref = str(path_obj.resolve()) if path_obj and path_obj.exists() else None
-        if not img_ref:
+        # Use relative filename for Markdown (works in both browser and docx conversion)
+        # The image file is in the same output directory as final_report.md
+        if path_obj and path_obj.exists() and path_obj.stat().st_size > 1000:
+            img_ref = path_obj.name  # relative filename (e.g., "PTM_Signaling_Network.png")
+        else:
+            # Fallback: base64 inline embedding
             base64_img = image_to_base64(img_path) if img_path else None
             img_ref = base64_img
 

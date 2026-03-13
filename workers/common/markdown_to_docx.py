@@ -672,6 +672,28 @@ def convert_markdown_to_docx(markdown_content: str, output_path: str, title: str
     return output_path
 
 
+def _resolve_image_paths(md_content: str, base_dir: str) -> str:
+    """Resolve relative image paths in Markdown to absolute paths.
+
+    Converts ![alt](filename.png) to ![alt](/absolute/path/filename.png)
+    when the file exists in base_dir. Skips base64 data URIs and
+    already-absolute paths.
+    """
+    def _resolve_match(match):
+        alt = match.group(1)
+        src = match.group(2)
+        # Skip base64 data URIs and already-absolute paths and URLs
+        if src.startswith('data:') or src.startswith('/') or src.startswith('http'):
+            return match.group(0)
+        # Try to resolve relative to base_dir
+        abs_path = os.path.join(base_dir, src)
+        if os.path.isfile(abs_path):
+            return f"![{alt}]({abs_path})"
+        return match.group(0)
+
+    return re.sub(r'!\[([^\]]*)\]\(([^)]+)\)', _resolve_match, md_content)
+
+
 def convert_report_to_docx(md_file_path: str, output_dir: str = None) -> Optional[str]:
     """
     Convert a markdown report file to Word (.docx) format.
@@ -701,6 +723,10 @@ def convert_report_to_docx(md_file_path: str, output_dir: str = None) -> Optiona
         docx_path = os.path.join(output_dir, f"{base_name}.docx")
         
         sse_log(f"[96%] Converting report to Word document...", "INFO")
+        
+        # Resolve relative image paths to absolute (relative to md file directory)
+        md_dir = os.path.dirname(os.path.abspath(md_file_path))
+        md_content = _resolve_image_paths(md_content, md_dir)
         
         # Convert
         convert_markdown_to_docx(md_content, docx_path)
