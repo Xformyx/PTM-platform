@@ -6,7 +6,9 @@ Provider priority (auto mode):
   2. OpenAI — if OPENAI_API_KEY set
   3. Gemini — if GEMINI_API_KEY set
 
-Explicit provider selection via `provider` parameter still works.
+Explicit provider selection via `provider` parameter still works,
+but now includes **resilient fallback**: if the explicit provider fails,
+the client automatically tries the full fallback chain (Ollama → OpenAI → Gemini).
 
 Environment variables:
   OLLAMA_URL       — Ollama server URL (default: http://host.docker.internal:11434)
@@ -42,6 +44,70 @@ GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
 # Global provider preference
 DEFAULT_PROVIDER = os.getenv("LLM_PROVIDER", "auto")
 
+# Known valid model names per provider (for validation / normalization)
+_KNOWN_GEMINI_MODELS = {
+    "gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash",
+    "gemini-1.5-flash", "gemini-1.5-pro", "gemini-1.0-pro",
+}
+_KNOWN_OPENAI_MODELS = {
+    "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano",
+    "gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo",
+    "o3-mini",
+}
+
+
+def _normalize_model_name(provider: str, model: str) -> str:
+    """Normalize and validate model name for the given provider.
+
+    Catches common mistakes like using display names ("Gemini") instead of
+    API model IDs ("gemini-2.5-flash").
+    """
+    if not model:
+        return model
+
+    model_lower = model.strip().lower()
+
+    if provider == "gemini":
+        # Exact match
+        if model in _KNOWN_GEMINI_MODELS:
+            return model
+        # Case-insensitive match
+        for known in _KNOWN_GEMINI_MODELS:
+            if model_lower == known.lower():
+                logger.info(f"Model name normalized: '{model}' → '{known}'")
+                return known
+        # Common mistake: bare "Gemini" or "gemini" without version
+        if model_lower in ("gemini", "google gemini", "gemini flash", "gemini pro"):
+            fallback_model = GEMINI_MODEL  # Use env default (gemini-2.5-flash)
+            logger.warning(
+                f"Invalid Gemini model name '{model}' — "
+                f"normalized to '{fallback_model}'. "
+                f"Valid names: {sorted(_KNOWN_GEMINI_MODELS)}"
+            )
+            return fallback_model
+        # Unknown but specific — pass through (may be a new model)
+        logger.info(f"Gemini model '{model}' not in known list, passing through as-is")
+        return model
+
+    elif provider == "openai":
+        if model in _KNOWN_OPENAI_MODELS:
+            return model
+        for known in _KNOWN_OPENAI_MODELS:
+            if model_lower == known.lower():
+                logger.info(f"Model name normalized: '{model}' → '{known}'")
+                return known
+        # Common mistake: bare "OpenAI" or "GPT"
+        if model_lower in ("openai", "gpt", "chatgpt"):
+            fallback_model = OPENAI_MODEL
+            logger.warning(
+                f"Invalid OpenAI model name '{model}' — "
+                f"normalized to '{fallback_model}'"
+            )
+            return fallback_model
+        return model
+
+    return model
+
 
 def _check_ollama_available(base_url: str, model: str) -> bool:
     """Check if Ollama is reachable and has the requested model."""
@@ -72,11 +138,11 @@ class LLMClient:
       3. Falls back to Gemini (if GEMINI_API_KEY set)
       4. Returns error if no provider available
 
-    Explicit provider selection:
-      - provider="ollama": Ollama only (no fallback)
-      - provider="openai": OpenAI only
-      - provider="gemini": Gemini only
-      - provider="auto": Auto-detect with fallback chain
+    Explicit provider selection with resilient fallback:
+      - provider="ollama": Ollama first, then cloud fallback on failure
+      - provider="openai": OpenAI first, then Ollama/Gemini fallback on failure
+      - provider="gemini": Gemini first, then Ollama/OpenAI fallback on failure
+      - provider="auto": Auto-detect with full fallback chain
     """
 
     def __init__(
@@ -90,10 +156,11 @@ class LLMClient:
     ):
         self.temperature = temperature
         self.max_tokens = max_tokens
-        self._fallback_enabled = False
+        self._fallback_enabled = True  # Always enable fallback for resilience
+        self._requested_provider = provider or DEFAULT_PROVIDER
 
         # Resolve provider
-        requested_provider = provider or DEFAULT_PROVIDER
+        requested_provider = self._requested_provider
 
         if requested_provider == "auto":
             self._init_auto(model, base_url, api_key)
@@ -104,16 +171,21 @@ class LLMClient:
             self.api_key = ""
         elif requested_provider == "openai":
             self.provider = "openai"
-            self.model = model or OPENAI_MODEL
+            self.model = _normalize_model_name("openai", model or OPENAI_MODEL)
             self.base_url = base_url or OPENAI_BASE_URL
             self.api_key = api_key or OPENAI_API_KEY
         elif requested_provider == "gemini":
             self.provider = "gemini"
-            self.model = model or GEMINI_MODEL
+            self.model = _normalize_model_name("gemini", model or GEMINI_MODEL)
             self.base_url = base_url or GEMINI_BASE_URL
             self.api_key = api_key or GEMINI_API_KEY
         else:
             raise ValueError(f"Unknown LLM provider: {requested_provider}")
+
+        logger.info(
+            f"LLMClient initialized: provider='{self.provider}', model='{self.model}', "
+            f"fallback={'enabled' if self._fallback_enabled else 'disabled'}"
+        )
 
     def _init_auto(self, model: Optional[str], base_url: Optional[str], api_key: Optional[str]):
         """Auto-detect best available provider."""
@@ -126,7 +198,6 @@ class LLMClient:
             self.model = ollama_model
             self.base_url = ollama_url
             self.api_key = ""
-            self._fallback_enabled = True
             logger.info(f"LLMClient: auto-selected Ollama ({self.model}) with cloud fallback enabled")
             return
 
@@ -164,7 +235,8 @@ class LLMClient:
     ) -> str:
         """Generate text using the configured LLM provider.
 
-        If in auto mode with Ollama as primary, falls back to cloud on failure.
+        On failure, automatically tries the full fallback chain regardless
+        of which provider was explicitly requested.
         """
         temp = temperature if temperature is not None else self.temperature
         tokens = max_tokens if max_tokens is not None else self.max_tokens
@@ -180,7 +252,20 @@ class LLMClient:
 
             return result
         else:
-            return self._generate_openai_compatible(prompt, system_prompt, temp, tokens)
+            # Cloud provider (openai or gemini)
+            result = self._generate_openai_compatible(prompt, system_prompt, temp, tokens)
+
+            # Resilient fallback: if explicit cloud provider fails, try others
+            if result.startswith("[LLM Error") and self._fallback_enabled:
+                logger.warning(
+                    f"LLMClient: Primary provider '{self.provider}' (model='{self.model}') failed. "
+                    f"Trying full fallback chain..."
+                )
+                fallback_result = self._try_full_fallback(prompt, system_prompt, temp, tokens)
+                if fallback_result is not None:
+                    return fallback_result
+
+            return result
 
     def is_available(self) -> bool:
         """Check if any LLM provider is available."""
@@ -193,9 +278,83 @@ class LLMClient:
                     if OPENAI_API_KEY or GEMINI_API_KEY:
                         return True
                 return False
-            return bool(self.api_key)
+
+            # Cloud provider — check primary + fallback availability
+            if self.api_key:
+                return True
+            # Even if primary has no key, fallback may be available
+            if self._fallback_enabled:
+                if _check_ollama_available(OLLAMA_URL, DEFAULT_MODEL):
+                    return True
+                if OPENAI_API_KEY or GEMINI_API_KEY:
+                    return True
+            return False
         except Exception:
             return False
+
+    def _try_full_fallback(
+        self, prompt: str, system_prompt: Optional[str], temp: float, max_tokens: int,
+    ) -> Optional[str]:
+        """Try ALL providers as fallback, skipping the one that already failed."""
+        failed_provider = self.provider
+
+        # Try Ollama (if not the failed provider)
+        if failed_provider != "ollama":
+            ollama_model = DEFAULT_MODEL
+            if _check_ollama_available(OLLAMA_URL, ollama_model):
+                logger.info(f"LLMClient: Falling back to Ollama ({ollama_model})")
+                try:
+                    # Temporarily switch to Ollama
+                    orig_provider, orig_model, orig_url, orig_key = (
+                        self.provider, self.model, self.base_url, self.api_key,
+                    )
+                    self.provider = "ollama"
+                    self.model = ollama_model
+                    self.base_url = OLLAMA_URL
+                    self.api_key = ""
+
+                    result = self._generate_ollama(prompt, system_prompt, temp, max_tokens)
+
+                    # Restore original settings
+                    self.provider, self.model, self.base_url, self.api_key = (
+                        orig_provider, orig_model, orig_url, orig_key,
+                    )
+
+                    if not result.startswith("[LLM Error"):
+                        return result
+                except Exception as e:
+                    logger.warning(f"Ollama fallback failed: {e}")
+                    self.provider, self.model, self.base_url, self.api_key = (
+                        orig_provider, orig_model, orig_url, orig_key,
+                    )
+
+        # Try OpenAI (if not the failed provider)
+        if failed_provider != "openai" and OPENAI_API_KEY:
+            logger.info(f"LLMClient: Falling back to OpenAI ({OPENAI_MODEL})")
+            try:
+                result = self._generate_openai_compat_with(
+                    prompt, system_prompt, temp, max_tokens,
+                    base_url=OPENAI_BASE_URL, api_key=OPENAI_API_KEY, model=OPENAI_MODEL,
+                )
+                if not result.startswith("[LLM Error"):
+                    return result
+            except Exception as e:
+                logger.warning(f"OpenAI fallback failed: {e}")
+
+        # Try Gemini (if not the failed provider)
+        if failed_provider != "gemini" and GEMINI_API_KEY:
+            logger.info(f"LLMClient: Falling back to Gemini ({GEMINI_MODEL})")
+            try:
+                result = self._generate_openai_compat_with(
+                    prompt, system_prompt, temp, max_tokens,
+                    base_url=GEMINI_BASE_URL, api_key=GEMINI_API_KEY, model=GEMINI_MODEL,
+                )
+                if not result.startswith("[LLM Error"):
+                    return result
+            except Exception as e:
+                logger.warning(f"Gemini fallback failed: {e}")
+
+        return None
 
     def _try_cloud_fallback(
         self, prompt: str, system_prompt: Optional[str], temp: float, max_tokens: int,
@@ -262,10 +421,6 @@ class LLMClient:
         except Exception as e:
             logger.error(f"Ollama generation failed for model '{self.model}': {e}")
             return f"[LLM Error: {e}]"
-
-    # ------------------------------------------------------------------
-    # OpenAI-compatible (OpenAI, Gemini)
-    # ------------------------------------------------------------------
 
     # ------------------------------------------------------------------
     # v95: Retry wrapper for minimum word-count enforcement
