@@ -282,6 +282,7 @@ class ReportPostProcessor:
         "Abstract",
         "Introduction",
         "Results",
+        "Network Visualization",
         "Time-Course Analysis",
         "Discussion",
         "Conclusion",

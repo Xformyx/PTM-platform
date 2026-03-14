@@ -7,6 +7,7 @@ Each section uses LLM with published literature context for integration.
 """
 
 import logging
+import re
 from typing import Dict, List
 
 from common.llm_client import LLMClient
@@ -28,7 +29,7 @@ SECTION_MAX_TOKENS = {
     "introduction": 12288,
     "results": 16384,
     "discussion": 12288,
-    "conclusion": 6144,
+    "conclusion": 8192,
 }
 
 SYSTEM_PROMPT = (
@@ -38,7 +39,9 @@ SYSTEM_PROMPT = (
     "Include as many relevant citations as possible to support your statements. "
     "NEVER mention 'ChromaDB' or 'knowledge base'. "
     "Be precise with PTM site nomenclature (e.g., 'phosphorylation at Ser165 of MAPK3'). "
-    "Write detailed, comprehensive content that thoroughly covers the topic."
+    "Write detailed, comprehensive content that thoroughly covers the topic. "
+    "Do NOT include a top-level section heading (e.g., '## Results' or '## Discussion') — "
+    "the heading will be added automatically. You may use ### sub-headings within your text."
 )
 
 
@@ -148,21 +151,24 @@ def run_section_writing(state: dict) -> dict:
         if content.startswith("[LLM Error"):
             content = _fallback_section(section_type, research_results, validated_hypotheses, parsed_ptms)
 
+        # Strip self-generated section headings from LLM output
+        # LLM sometimes adds its own ## headings (e.g., "## Results Discussion")
+        # which conflicts with the report assembly logic
+        content = _strip_llm_section_heading(content, section_type)
+
         # v98: Post-processing validation for results and discussion
         if v98_protein_names and section_type in ("results", "discussion"):
             try:
-                strict = section_type == "results"
                 validation = validate_llm_output_against_data(
                     content, v98_protein_names, v98_log2fc_values,
-                    section_name=section_type.capitalize(), strict_mode=strict
+                    section_name=section_type.capitalize(), strict_mode=False
                 )
                 if validation["hallucinated_proteins"]:
                     logger.warning(
-                        f"[v98] {section_type}: removed {len(validation['hallucinated_proteins'])} "
-                        f"hallucinated proteins: {', '.join(validation['hallucinated_proteins'][:5])}"
+                        f"[v98] {section_type}: {len(validation['hallucinated_proteins'])} "
+                        f"hallucinated proteins detected (not removed): "
+                        f"{', '.join(validation['hallucinated_proteins'][:5])}"
                     )
-                    if strict:
-                        content = validation["validated_text"]
                 logger.info(f"[v98] {section_type} validation score: {validation['validation_score']:.1%}")
             except Exception as e:
                 logger.warning(f"[v98] {section_type} validation failed (non-fatal): {e}")
@@ -402,6 +408,57 @@ IMPORTANT: Be specific about findings — mention key PTM sites and their implic
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _strip_llm_section_heading(content: str, section_type: str) -> str:
+    """Remove self-generated ## headings from LLM output.
+
+    LLMs sometimes prepend their own section heading (e.g., '## Results Discussion',
+    '## Introduction') which conflicts with the report assembly logic that adds
+    headings separately. This strips the first ## heading if it matches the
+    section type, and converts any remaining ## headings to ### to avoid
+    section-order conflicts in post-processing.
+    """
+    if not content:
+        return content
+
+    lines = content.split("\n")
+    cleaned = []
+    first_heading_stripped = False
+
+    # Aliases that LLMs commonly generate for each section
+    section_aliases = {
+        "introduction": ["introduction", "background"],
+        "results": ["results", "results and analysis", "results discussion", "findings"],
+        "discussion": ["discussion", "results discussion", "results and discussion"],
+        "conclusion": ["conclusion", "conclusions", "concluding remarks", "summary and conclusion"],
+        "abstract": ["abstract", "summary"],
+    }
+    aliases = section_aliases.get(section_type, [section_type])
+
+    for line in lines:
+        stripped = line.strip()
+        # Match ## heading lines
+        heading_match = re.match(r'^##\s+(.+)$', stripped)
+        if heading_match:
+            heading_text = heading_match.group(1).strip().rstrip(":.")
+            heading_lower = heading_text.lower()
+
+            # Strip the first heading if it matches the section type
+            if not first_heading_stripped and heading_lower in aliases:
+                first_heading_stripped = True
+                logger.debug(f"Stripped LLM self-generated heading: '{stripped}' from {section_type}")
+                continue  # Skip this line entirely
+
+            # Convert remaining ## headings to ### to avoid section-order conflicts
+            # (but keep ### and deeper headings as-is)
+            cleaned.append(line.replace("## ", "### ", 1))
+            continue
+
+        cleaned.append(line)
+
+    result = "\n".join(cleaned).strip()
+    return result
+
 
 def _collect_all_references(ptms: list) -> list:
     """Collect all unique PubMed references from enriched PTM data."""

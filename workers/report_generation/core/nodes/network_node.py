@@ -9,6 +9,7 @@ Falls back to text-based legend when Cytoscape is unavailable.
 import base64
 import logging
 import os
+import re
 import time
 from collections import defaultdict
 from pathlib import Path
@@ -904,6 +905,10 @@ def generate_network_figure_section(network_analysis: dict) -> str:
 
     # If no images but legends exist, include text legend
     if not network_images and legends.get("full_legend"):
-        section += legends["full_legend"] + "\n\n"
+        full_legend = legends["full_legend"]
+        # Avoid nested ## headings: convert any ## in legend to ### to prevent
+        # _remove_empty_sections from treating "## Network Visualization" as empty
+        full_legend = re.sub(r'^## ', '### ', full_legend, flags=re.MULTILINE)
+        section += full_legend + "\n\n"
 
     return section
