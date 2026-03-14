@@ -58,6 +58,7 @@ export default function SystemMonitor() {
   const [containerStatusExpanded, setContainerStatusExpanded] = useState(true);
   const [containerStatus, setContainerStatus] = useState<{ id: string; label: string; category: string; status: string; detail: string; image?: string; started_at?: string }[]>([]);
   const logsContainerRef = useRef<HTMLDivElement>(null);
+  const logsEndRef = useRef<HTMLDivElement>(null);
 
   const fetchArchitecture = useCallback(async () => {
     setLoading(true);
@@ -78,26 +79,6 @@ export default function SystemMonitor() {
     const id = setInterval(fetchArchitecture, 15000);
     return () => clearInterval(id);
   }, [fetchArchitecture]);
-
-  const fetchLogs = useCallback(async () => {
-    if (!selectedContainer) return;
-    setLogsLoading(true);
-    setLogsError(null);
-    try {
-      const res = await api.get<{ logs: string; error?: string }>("/health/container-logs/" + selectedContainer + "?tail=500");
-      if (res.error) {
-        setLogsError(res.error);
-        setContainerLogs("");
-      } else {
-        setContainerLogs(res.logs || "");
-      }
-    } catch (e) {
-      setLogsError(e instanceof Error ? e.message : "Failed to fetch logs");
-      setContainerLogs("");
-    } finally {
-      setLogsLoading(false);
-    }
-  }, [selectedContainer]);
 
   const fetchContainerStatus = useCallback(async () => {
     try {
@@ -122,14 +103,40 @@ export default function SystemMonitor() {
     }
   }, [containerStatus, selectedContainer]);
 
+  const fetchLogs = useCallback(async () => {
+    if (!selectedContainer) return;
+    try {
+      const res = await api.get<{ logs: string; error?: string }>("/health/container-logs/" + selectedContainer + "?tail=500");
+      if (res.error) {
+        setLogsError(res.error);
+        setContainerLogs("");
+      } else {
+        setContainerLogs(res.logs || "");
+      }
+    } catch (e) {
+      setLogsError(e instanceof Error ? e.message : "Failed to fetch logs");
+      setContainerLogs("");
+    }
+  }, [selectedContainer]);
+
   useEffect(() => {
-    if (selectedContainer) fetchLogs();
-    else setContainerLogs("");
+    if (!selectedContainer) {
+      setContainerLogs("");
+      return;
+    }
+    setLogsError(null);
+    setLogsLoading(true);
+    fetchLogs().finally(() => setLogsLoading(false));
+    const id = setInterval(() => fetchLogs(), 4000);
+    return () => clearInterval(id);
   }, [selectedContainer, fetchLogs]);
 
   useEffect(() => {
-    if (containerLogs && logsContainerRef.current) {
-      logsContainerRef.current.scrollTop = logsContainerRef.current.scrollHeight;
+    if (!containerLogs || !logsContainerRef.current) return;
+    const el = logsContainerRef.current;
+    const isNearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    if (isNearBottom) {
+      logsEndRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
     }
   }, [containerLogs]);
 
@@ -414,7 +421,7 @@ export default function SystemMonitor() {
                 )}
               </CardTitle>
               <CardDescription className="text-zinc-400 mt-1">
-                Click a container above or select below to view stdout/stderr (last 500 lines, KST)
+                Click a container above. Logs refresh every 4s. Scroll stays at bottom when viewing latest.
               </CardDescription>
             </div>
             <div className="flex items-center gap-2">
@@ -433,11 +440,11 @@ export default function SystemMonitor() {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={fetchLogs}
-                disabled={logsLoading || !selectedContainer}
+                onClick={() => fetchLogs()}
+                disabled={!selectedContainer}
                 className="border-zinc-600 text-zinc-300 hover:bg-zinc-700"
               >
-                <RefreshCw className={cn("h-4 w-4 mr-2", logsLoading && "animate-spin")} />
+                <RefreshCw className="h-4 w-4 mr-2" />
                 Refresh
               </Button>
             </div>
@@ -447,6 +454,7 @@ export default function SystemMonitor() {
           <div
             ref={logsContainerRef}
             className="h-[560px] overflow-y-auto p-3 font-mono text-[11.5px] leading-[18px] text-zinc-300 scrollbar-thin whitespace-pre-wrap break-all"
+            style={{ contain: "layout" }}
           >
             {logsLoading ? (
               <div className="flex items-center justify-center h-full gap-2 text-zinc-500">
@@ -465,7 +473,10 @@ export default function SystemMonitor() {
                 <span>{containerStatus.length === 0 ? "Loading containers... (Docker socket required)" : "Select a container to view logs"}</span>
               </div>
             ) : containerLogs ? (
-              <pre className="m-0">{containerLogs}</pre>
+              <>
+                <pre className="m-0">{containerLogs}</pre>
+                <div ref={logsEndRef} aria-hidden="true" />
+              </>
             ) : (
               <div className="flex flex-col items-center justify-center h-full gap-2 text-zinc-500">
                 <Terminal className="h-8 w-8" />

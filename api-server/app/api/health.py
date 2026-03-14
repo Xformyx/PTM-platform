@@ -1,11 +1,14 @@
+import asyncio
 import logging
 import re
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
 import httpx
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
+from sse_starlette.sse import EventSourceResponse
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -464,3 +467,66 @@ async def container_logs(container_id: str, tail: int = 500) -> dict:
     except Exception as e:
         logger.warning(f"Container logs failed for {container_id}: {e}")
         return {"container": container_id, "error": str(e), "logs": ""}
+
+
+def _stream_docker_logs(container_id: str, tail: int, queue: "asyncio.Queue[str | None]", loop: asyncio.AbstractEventLoop):
+    """Run in thread: stream Docker logs with follow=True, put decoded chunks into queue."""
+    try:
+        import docker
+        client = docker.from_env()
+        container = _find_container(client, container_id)
+        if container is None:
+            loop.call_soon_threadsafe(queue.put_nowait, None)
+            return
+        for chunk in container.logs(stream=True, follow=True, tail=tail, timestamps=True):
+            decoded = chunk.decode("utf-8", errors="replace")
+            if decoded:
+                line_kst = _convert_log_timestamps_to_kst(decoded)
+                loop.call_soon_threadsafe(queue.put_nowait, line_kst)
+    except Exception as e:
+        logger.warning(f"Container log stream failed for {container_id}: {e}")
+    finally:
+        loop.call_soon_threadsafe(queue.put_nowait, None)
+
+
+@router.get("/health/container-logs/{container_id}/stream")
+async def container_logs_stream(
+    request: Request,
+    container_id: str,
+    tail: int = 100,
+):
+    """
+    Stream container logs via SSE (tail -f style).
+    Sends initial tail, then appends new lines as they arrive.
+    """
+    allowed = {c["id"] for c in CONTAINER_OPTIONS}
+    if container_id not in allowed:
+        return {"error": f"Unknown container: {container_id}"}
+
+    async def event_generator():
+        queue: asyncio.Queue[str | None] = asyncio.Queue()
+        loop = asyncio.get_running_loop()
+        executor = ThreadPoolExecutor(max_workers=1)
+
+        def run_stream():
+            _stream_docker_logs(container_id, tail, queue, loop)
+
+        future = executor.submit(run_stream)
+
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    line = await asyncio.wait_for(queue.get(), timeout=1.0)
+                except asyncio.TimeoutError:
+                    yield {"event": "ping", "data": ""}
+                    continue
+                if line is None:
+                    break
+                line_kst = _convert_log_timestamps_to_kst(line)
+                yield {"event": "log", "data": line_kst}
+        finally:
+            future.cancel()
+
+    return EventSourceResponse(event_generator())
