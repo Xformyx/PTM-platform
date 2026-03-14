@@ -303,11 +303,17 @@ class ReportPostProcessor:
         return text
 
     def _normalize_headings(self, text: str) -> str:
-        """Normalize section headings to ## level."""
-        # Fix inconsistent heading levels
-        text = re.sub(r"^#{3,}\s+", "## ", text, flags=re.MULTILINE)
+        """Normalize section headings.
+        
+        - Keep ## (h2) as main section headings
+        - Keep ### (h3) as sub-section headings (e.g., ### Figure 1:)
+        - Collapse #### and deeper to ### to avoid excessive nesting
+        - Fix headings without space after #
+        """
+        # Only collapse ####+ to ### (keep ### as valid sub-sections)
+        text = re.sub(r"^#{4,}\s+", "### ", text, flags=re.MULTILINE)
         # Fix headings without space after #
-        text = re.sub(r"^(#{1,2})([A-Z])", r"\1 \2", text, flags=re.MULTILINE)
+        text = re.sub(r"^(#{1,3})([A-Z])", r"\1 \2", text, flags=re.MULTILINE)
         return text
 
     def _remove_empty_sections(self, text: str) -> str:
