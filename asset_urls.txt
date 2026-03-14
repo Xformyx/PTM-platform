@@ -1,0 +1,9 @@
+Pipeline Flowchart: https://d2xsxph8kpxj0f.cloudfront.net/91523048/cgED92igVd7rWrNnRft4Ln/pipeline_flowchart_ba425145.png
+Hero BG Original: https://d2xsxph8kpxj0f.cloudfront.net/91523048/cgED92igVd7rWrNnRft4Ln/hero_bg-QUn22ZYgsRnZUMUzeqfwNc.png
+Hero BG Compressed: https://d2xsxph8kpxj0f.cloudfront.net/91523048/cgED92igVd7rWrNnRft4Ln/hero_bg-E8AFtvgLQ8pdZY9Td8cwPM.webp
+Preprocessing Original: https://d2xsxph8kpxj0f.cloudfront.net/91523048/cgED92igVd7rWrNnRft4Ln/preprocessing_illust-2jsiTprsWvG4stewZ87YSp.png
+Preprocessing Compressed: https://d2xsxph8kpxj0f.cloudfront.net/91523048/cgED92igVd7rWrNnRft4Ln/preprocessing_illust-D6EtmNN7WX9iSsEBYrwdi7.webp
+RAG Original: https://d2xsxph8kpxj0f.cloudfront.net/91523048/cgED92igVd7rWrNnRft4Ln/rag_illust-cCnozvtba2Uw5mUcXvSDj6.png
+RAG Compressed: https://d2xsxph8kpxj0f.cloudfront.net/91523048/cgED92igVd7rWrNnRft4Ln/rag_illust-QNV75Jp3A2HE5YUdBB27GF.webp
+Report Original: https://d2xsxph8kpxj0f.cloudfront.net/91523048/cgED92igVd7rWrNnRft4Ln/report_illust-ezx4ntag7S9UL6WBBebrtc.png
+Report Compressed: https://d2xsxph8kpxj0f.cloudfront.net/91523048/cgED92igVd7rWrNnRft4Ln/report_illust-i2BAUTzKRomTgiFhGnEhdu.webp

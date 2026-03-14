@@ -1,0 +1,8 @@
+Screenshot review:
+- Hero section: looks good, background image visible, title and badges render correctly
+- Header: sticky with PTM Platform branding, version info, date
+- TOC sidebar: visible on left side with section links
+- Content area: "1. 개요" section renders with proper typography
+- Overall: clean academic journal style, Crimson Pro headings working
+- No TypeScript errors, no build errors
+- Status: ready for checkpoint and delivery
