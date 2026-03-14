@@ -367,6 +367,20 @@ async def list_containers() -> dict:
     return {"containers": CONTAINER_OPTIONS}
 
 
+def _find_container(client, expected_id: str):
+    """Find container by id/name. Handles Docker Compose project prefix and name variants."""
+    try:
+        return client.containers.get(expected_id)
+    except Exception:
+        pass
+    # Fallback: list all and match by name (handles project prefix, e.g. ptm-platform_ptm-api-server)
+    for c in client.containers.list(all=True):
+        name = (c.name or "").lstrip("/")
+        if name == expected_id or name.endswith(f"-{expected_id}") or name.endswith(f"_{expected_id}") or expected_id in name:
+            return c
+    return None
+
+
 @router.get("/health/container-status")
 async def container_status() -> dict:
     """Return status of all PTM containers (running, exited, etc.)."""
@@ -377,12 +391,20 @@ async def container_status() -> dict:
         for opt in CONTAINER_OPTIONS:
             cid = opt["id"]
             try:
-                container = client.containers.get(cid)
+                container = _find_container(client, cid)
+                if container is None:
+                    raise Exception(f"Container {cid} not found")
                 status = container.status
                 attrs = container.attrs
-                image_obj = getattr(container, "image", None)
-                image_tags = (image_obj.tags if image_obj and image_obj.tags else None) or []
-                image_name = image_tags[0] if image_tags else (attrs.get("Config", {}).get("Image", "") or "")
+                image_name = ""
+                try:
+                    image_obj = getattr(container, "image", None)
+                    if image_obj and image_obj.tags:
+                        image_name = image_obj.tags[0]
+                except Exception:
+                    pass
+                if not image_name:
+                    image_name = attrs.get("Config", {}).get("Image", "") or ""
                 started_at = (attrs.get("State", {}) or {}).get("StartedAt") or ""
                 result.append({
                     "id": cid,
@@ -433,7 +455,9 @@ async def container_logs(container_id: str, tail: int = 500) -> dict:
     try:
         import docker
         client = docker.from_env()
-        container = client.containers.get(container_id)
+        container = _find_container(client, container_id)
+        if container is None:
+            raise Exception(f"Container {container_id} not found")
         logs = container.logs(tail=tail, timestamps=True).decode("utf-8", errors="replace")
         logs = _convert_log_timestamps_to_kst(logs)
         return {"container": container_id, "logs": logs}
