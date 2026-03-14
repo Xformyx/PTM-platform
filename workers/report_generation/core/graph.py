@@ -131,8 +131,13 @@ def generate_qa_report(state: ReportState) -> dict:
 
 
 def format_citations(state: ReportState) -> dict:
-    """Format citations and generate reference list. Includes network figures (Cytoscape) between Results and Discussion."""
-    from .citation_formatter import CitationFormatter, ReportPostProcessor
+    """Format citations and generate reference list. Includes network figures (Cytoscape) between Results and Discussion.
+
+    Fix v1.1: Convert collected_references (PubMed format from writer_node) into
+    CitationFormatter-compatible format, and build a complete References section
+    that maps LLM inline citations [N] back to the actual PubMed papers.
+    """
+    from .citation_formatter import CitationFormatter, Reference, ReportPostProcessor
     from .nodes.network_node import generate_network_figure_section
     logger.info("Formatting citations and post-processing report")
 
@@ -166,23 +171,82 @@ def format_citations(state: ReportState) -> dict:
             else:
                 logger.warning("[FORMAT-CIT] network_section is EMPTY — not included in report")
 
-    formatter = CitationFormatter()
     all_text = "\n\n".join(parts)
-    result = formatter.process_text(all_text, collected_refs)
 
-    # Post-process
+    # -----------------------------------------------------------------------
+    # v1.1 Fix: Build References section directly from collected_references
+    # instead of relying on CitationFormatter's auto-cite heuristic.
+    #
+    # The LLM writes inline citations [1], [2], ... that correspond to the
+    # reference numbers provided in the prompt (PubMed Ref [N] and ChromaDB
+    # Reference [N]).  We build a canonical reference list from
+    # collected_references and emit a ## References section.
+    # -----------------------------------------------------------------------
+    import re as _re
+
+    # Discover which citation numbers the LLM actually used in the text
+    cited_numbers = sorted(set(int(m) for m in _re.findall(r'\[(\d+)\]', all_text)))
+    logger.info(f"[FORMAT-CIT] LLM inline citation numbers found: {cited_numbers[:20]}{'...' if len(cited_numbers) > 20 else ''} (total {len(cited_numbers)})")
+    logger.info(f"[FORMAT-CIT] collected_references count: {len(collected_refs)}")
+
+    # Build Reference objects from collected_references (PubMed papers)
+    ref_objects: list = []
+    for ref_dict in collected_refs:
+        ref = Reference(
+            authors=ref_dict.get("authors", ""),
+            title=ref_dict.get("title", "Untitled"),
+            journal=ref_dict.get("journal", ""),
+            year=str(ref_dict.get("pub_date", ""))[:4],
+            pmid=str(ref_dict.get("pmid", "")),
+            doi=ref_dict.get("doi", ""),
+        )
+        ref_objects.append(ref)
+
+    # Build the ## References section
+    # Strategy: include all collected references so that every [N] the LLM
+    # used has a matching entry.  References beyond what the LLM cited are
+    # also included as supporting literature.
+    ref_lines = ["## References\n"]
+    for idx, ref in enumerate(ref_objects, 1):
+        entry_parts = []
+        if ref.authors:
+            entry_parts.append(ref.authors.rstrip("."))
+        if ref.title:
+            entry_parts.append(f"{ref.title.rstrip('.')}.")
+        journal_part = ""
+        if ref.journal:
+            journal_part = f"*{ref.journal}*"
+        if ref.year:
+            journal_part += f" ({ref.year})"
+        if journal_part:
+            entry_parts.append(journal_part.strip() + ".")
+        links = []
+        if ref.pmid:
+            links.append(f"PMID: [{ref.pmid}](https://pubmed.ncbi.nlm.nih.gov/{ref.pmid}/)")
+        if ref.doi:
+            doi_url = ref.doi if ref.doi.startswith("http") else f"https://doi.org/{ref.doi}"
+            links.append(f"DOI: [{ref.doi}]({doi_url})")
+        line = f"{idx}. " + " ".join(entry_parts)
+        if links:
+            line += " " + " | ".join(links)
+        ref_lines.append(line)
+
+    reference_section = "\n".join(ref_lines) if ref_objects else ""
+    logger.info(f"[FORMAT-CIT] Built reference section with {len(ref_objects)} entries")
+
+    # Post-process the body text (heading normalization, dedup, table fixes)
     processor = ReportPostProcessor()
-    processed = processor.process(result.text)
+    processed = processor.process(all_text)
 
     # Append references
-    if result.reference_section:
-        processed += "\n\n" + result.reference_section
+    if reference_section:
+        processed += "\n\n" + reference_section
 
     return {
         "final_report": processed,
         "citation_data": {
-            "total_references": len(result.references),
-            "reference_section": result.reference_section,
+            "total_references": len(ref_objects),
+            "reference_section": reference_section,
         },
     }
 
