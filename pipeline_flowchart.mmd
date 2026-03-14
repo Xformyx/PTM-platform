@@ -1,0 +1,45 @@
+graph TD
+    subgraph "User Input"
+        A["Raw Data (.mzML, .fasta)"] --> B("Preprocessing Worker");
+    end
+
+    subgraph "1. Preprocessing Worker"
+        direction LR
+        B --> C{"PTM Quantification"};
+        C --> D{"Unified Enrichment (Domain/Motif)"};
+        D --> E{"Biological Enrichment (KEGG/STRING)"};
+        E --> F["ptm_vector_data.tsv"];
+    end
+
+    subgraph "2. RAG Enrichment Worker"
+        direction LR
+        G["ptm_vector_data.tsv"] --> H{"Top-N PTM Selection"};
+        H --> I{"RAG Enrichment (PubMed, LLM)"};
+        I --> J{"MD Report Generation"};
+        J --> K["enriched_ptm_data.json"];
+        J --> L["comprehensive_report.md"];
+    end
+
+    subgraph "3. Report Generation Worker (LangGraph)"
+        direction TB
+        M["enriched_ptm_data.json"] --> N{"Load Context"};
+        O["comprehensive_report.md"] --> N;
+        N --> P{"Research & Hypothesize"};
+        P --> Q{"Validate (ChromaDB)"};
+        Q --> R{"Network Analysis (Cytoscape)"};
+        R --> S{"Write Sections (LLM)"};
+        S --> T{"Edit & Compile"};
+        T --> U["final_report.md / .docx"];
+        T --> V["network_images.png"];
+    end
+
+    F --> G;
+    K --> M;
+    L --> O;
+
+    style B fill:#f9f,stroke:#333,stroke-width:2px
+    style G fill:#f9f,stroke:#333,stroke-width:2px
+    style M fill:#f9f,stroke:#333,stroke-width:2px
+    style O fill:#f9f,stroke:#333,stroke-width:2px
+    style U fill:#9f9,stroke:#333,stroke-width:2px
+    style V fill:#9f9,stroke:#333,stroke-width:2px
