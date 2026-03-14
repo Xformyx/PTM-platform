@@ -969,6 +969,7 @@ async def get_vector_plot_data(
                     cond = row.get("Condition", "")
                     rel_fc = row.get("PTM_Relative_Log2FC", "")
                     abs_fc = row.get("PTM_Absolute_Log2FC", "")
+                    prot_fc = row.get("Protein_Log2FC", "")
                     try:
                         rel_fc = float(rel_fc) if rel_fc else 0
                     except ValueError:
@@ -977,10 +978,15 @@ async def get_vector_plot_data(
                         abs_fc = float(abs_fc) if abs_fc else 0
                     except ValueError:
                         abs_fc = 0
+                    try:
+                        prot_fc = float(prot_fc) if prot_fc else 0
+                    except ValueError:
+                        prot_fc = 0
                     vector_data.append({
                         "gene": gene,
                         "position": str(pos),
                         "condition": cond,
+                        "protein_log2fc": prot_fc,
                         "ptm_relative_log2fc": rel_fc,
                         "ptm_absolute_log2fc": abs_fc,
                     })

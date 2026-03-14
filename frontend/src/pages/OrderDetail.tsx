@@ -38,6 +38,9 @@ import {
   Tooltip,
   Legend,
   ResponsiveContainer,
+  ScatterChart,
+  Scatter,
+  ReferenceLine,
 } from "recharts";
 
 const STAGES = [
@@ -805,6 +808,181 @@ function VectorPlotImage({ orderId, filename }: { orderId: number; filename: str
   );
 }
 
+// ── Interactive Scatter Plots (Recharts) ──────────────────────────────────────
+
+const SCATTER_PALETTE = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf"];
+
+type VectorRow = {
+  gene: string;
+  position: string;
+  condition: string;
+  protein_log2fc: number;
+  ptm_relative_log2fc: number;
+  ptm_absolute_log2fc: number;
+};
+
+function ScatterPlotsInteractive({ orderId }: { orderId: number }) {
+  const [data, setData] = useState<{ vector_data: VectorRow[] } | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [metric, setMetric] = useState<"relative" | "absolute">("relative");
+  const [zoom, setZoom] = useState(1); // 1 = auto, zoom in = narrower range
+
+  useEffect(() => {
+    api
+      .get<{ vector_data: VectorRow[] }>(`/orders/${orderId}/vector-plot-data`)
+      .then((d) => setData({ vector_data: d.vector_data || [] }))
+      .catch(() => setData(null))
+      .finally(() => setLoading(false));
+  }, [orderId]);
+
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center py-12">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground mb-3" />
+        <p className="text-sm text-muted-foreground">Loading scatter data...</p>
+      </div>
+    );
+  }
+
+  if (!data?.vector_data?.length) {
+    return (
+      <div className="flex flex-col items-center justify-center py-12 rounded-lg border bg-muted/20">
+        <ChartScatter className="h-12 w-12 text-muted-foreground/40 mb-3" />
+        <p className="text-sm text-muted-foreground text-center">
+          Scatter data will appear here after preprocessing completes.
+        </p>
+      </div>
+    );
+  }
+
+  const conditions = Array.from(
+    new Set(data.vector_data.map((r) => r.condition).filter((c) => c && c !== "Control"))
+  ).sort();
+
+  const yKey = metric === "relative" ? "ptm_relative_log2fc" : "ptm_absolute_log2fc";
+
+  const chartsByCond = conditions.map((cond) => {
+    const rows = data.vector_data.filter((r) => r.condition === cond);
+    const points = rows.map((r) => ({
+      x: r.protein_log2fc ?? 0,
+      y: (r[yKey as keyof VectorRow] as number) ?? 0,
+      name: `${r.gene} ${r.position}`.trim() || `${r.gene}${r.position}`,
+    }));
+    return { condition: cond, points };
+  });
+
+  const allX = data.vector_data.map((r) => r.protein_log2fc ?? 0);
+  const allY = data.vector_data.map((r) => (r[yKey as keyof VectorRow] as number) ?? 0);
+  const xMin = Math.min(...allX);
+  const xMax = Math.max(...allX);
+  const yMin = Math.min(...allY);
+  const yMax = Math.max(...allY);
+  const pad = Math.max(0.3, (Math.max(xMax - xMin, yMax - yMin) || 2) * 0.1);
+  const domainPadding = pad / zoom;
+  const xDomain = [xMin - domainPadding, xMax + domainPadding];
+  const yDomain = [yMin - domainPadding, yMax + domainPadding];
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex gap-1">
+          <Button
+            variant={metric === "relative" ? "default" : "outline"}
+            size="sm"
+            onClick={() => setMetric("relative")}
+          >
+            PTM Relative
+          </Button>
+          <Button
+            variant={metric === "absolute" ? "default" : "outline"}
+            size="sm"
+            onClick={() => setMetric("absolute")}
+          >
+            PTM Absolute
+          </Button>
+        </div>
+        <div className="flex items-center gap-1">
+          <Button variant="outline" size="sm" onClick={() => setZoom((z) => Math.min(4, z + 0.5))}>
+            <ZoomIn className="h-3.5 w-3.5" /> Zoom In
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => setZoom((z) => Math.max(0.5, z - 0.5))}>
+            <ZoomOut className="h-3.5 w-3.5" /> Zoom Out
+          </Button>
+          <span className="text-xs text-muted-foreground ml-1">{zoom.toFixed(1)}x</span>
+        </div>
+      </div>
+
+      <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+        {chartsByCond.map(({ condition, points }, idx) => (
+          <Card key={condition} className="overflow-hidden">
+            <CardHeader className="py-2 px-4">
+              <CardTitle className="text-sm flex items-center gap-2">
+                <span className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: SCATTER_PALETTE[idx % SCATTER_PALETTE.length] }} />
+                {condition} ({metric === "relative" ? "PTM Relative" : "PTM Absolute"})
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-2">
+              <div className="h-[280px] w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <ScatterChart margin={{ top: 8, right: 8, bottom: 24, left: 24 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                    <XAxis
+                      type="number"
+                      dataKey="x"
+                      name="Protein Log2FC"
+                      domain={xDomain}
+                      tick={{ fontSize: 10 }}
+                    />
+                    <YAxis
+                      type="number"
+                      dataKey="y"
+                      name={metric === "relative" ? "PTM Relative Log2FC" : "PTM Absolute Log2FC"}
+                      domain={yDomain}
+                      tick={{ fontSize: 10 }}
+                    />
+                    <Tooltip
+                      cursor={{ strokeDasharray: "3 3" }}
+                      content={({ active, payload }) => {
+                        if (!active || !payload?.[0]) return null;
+                        const p = payload[0].payload;
+                        return (
+                          <div className="rounded-md border bg-background px-3 py-2 text-sm shadow-md">
+                            <p className="font-medium">{p.name}</p>
+                            <p className="text-muted-foreground">
+                              Protein: {p.x.toFixed(3)} · {metric === "relative" ? "PTM Rel" : "PTM Abs"}: {p.y.toFixed(3)}
+                            </p>
+                          </div>
+                        );
+                      }}
+                    />
+                    {metric === "relative" && [-1, -0.5, 0, 0.5, 1].map((y) => (
+                      <ReferenceLine key={y} y={y} stroke="#ef4444" strokeDasharray={y === 0 ? undefined : "3 3"} strokeOpacity={0.5} />
+                    ))}
+                    {metric === "relative" && <ReferenceLine x={0} stroke="#ef4444" strokeDasharray="3 3" strokeOpacity={0.5} />}
+                    {metric === "absolute" && (
+                      <>
+                        <ReferenceLine x={0} stroke="#ef4444" strokeDasharray="3 3" strokeOpacity={0.5} />
+                        <ReferenceLine y={0} stroke="#ef4444" strokeDasharray="3 3" strokeOpacity={0.5} />
+                        <ReferenceLine segment={[{ x: Math.min(xMin, yMin), y: Math.min(xMin, yMin) }, { x: Math.max(xMax, yMax), y: Math.max(xMax, yMax) }]} stroke="#000" strokeDasharray="3 3" strokeOpacity={0.6} />
+                      </>
+                    )}
+                    <Scatter
+                      name={condition}
+                      data={points}
+                      fill={SCATTER_PALETTE[idx % SCATTER_PALETTE.length]}
+                      fillOpacity={0.7}
+                    />
+                  </ScatterChart>
+                </ResponsiveContainer>
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function parseTimeOrder(cond: string): number {
   const m = cond.match(/(\d+(?:\.\d+)?)\s*(h|hr|hour|min|m)?/i);
   if (!m) return 0;
@@ -1288,51 +1466,36 @@ function VectorPlotTab({ orderId, singleTimePoint }: { orderId: number; singleTi
         </TabsList>
 
         <TabsContent value="scatter" className="mt-4">
-          {files.length === 0 ? (
-            <Card>
-              <CardContent className="flex flex-col items-center justify-center py-12">
-                <ChartScatter className="h-12 w-12 text-muted-foreground/40 mb-3" />
-                <p className="text-sm text-muted-foreground text-center">
-                  Vector plots will appear here after preprocessing completes.
-                </p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  PTM vector scatter plots (Protein Log2FC vs PTM Relative/Absolute Log2FC) are generated from the vector TSV.
-                </p>
-              </CardContent>
-            </Card>
-          ) : (
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm flex items-center gap-2">
-                  <ChartScatter className="h-4 w-4" /> PTM Vector 2D Plots
-                </CardTitle>
-                <p className="text-xs text-muted-foreground">
-                  Protein Log2FC vs PTM Relative/Absolute Log2FC scatter plots by condition. Generated after preprocessing.
-                </p>
-              </CardHeader>
-              <CardContent>
-                <div className="grid gap-6">
-                  {files.map((f) => (
-                    <div key={f} className="space-y-2">
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm font-medium">{f}</span>
-                        <a
-                          href={downloadUrl(f)}
-                          download={f}
-                          className="text-xs text-primary hover:underline flex items-center gap-1"
-                        >
-                          <Download className="h-3 w-3" /> Download
-                        </a>
-                      </div>
-                      <div className="rounded-lg border overflow-hidden bg-muted/20">
-                        <VectorPlotImage orderId={orderId} filename={f} />
-                      </div>
-                    </div>
-                  ))}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm flex items-center gap-2">
+                <ChartScatter className="h-4 w-4" /> PTM Vector 2D Plots
+              </CardTitle>
+              <p className="text-xs text-muted-foreground">
+                Protein Log2FC vs PTM Relative/Absolute Log2FC. Hover over dots to see sample names. Use Zoom In/Out to adjust view.
+              </p>
+            </CardHeader>
+            <CardContent>
+              <ScatterPlotsInteractive orderId={orderId} />
+              {files.length > 0 && (
+                <div className="mt-6 pt-4 border-t">
+                  <p className="text-xs text-muted-foreground mb-2">Download static report (PNG)</p>
+                  <div className="flex flex-wrap gap-2">
+                    {files.map((f) => (
+                      <a
+                        key={f}
+                        href={downloadUrl(f)}
+                        download={f}
+                        className="text-xs text-primary hover:underline flex items-center gap-1"
+                      >
+                        <Download className="h-3 w-3" /> {f}
+                      </a>
+                    ))}
+                  </div>
                 </div>
-              </CardContent>
-            </Card>
-          )}
+              )}
+            </CardContent>
+          </Card>
         </TabsContent>
 
         <TabsContent value="timeseries" className="mt-4">
