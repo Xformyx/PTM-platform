@@ -144,6 +144,7 @@ services:
       - ./storage/reports:/app/storage/reports
       - ./storage/logs:/app/storage/logs
     environment:
+      TZ: Asia/Seoul
       PYTHONPATH: /app
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/2
@@ -175,6 +176,7 @@ services:
       - ./storage/reports:/app/storage/reports
       - ./storage/logs:/app/storage/logs
     environment:
+      TZ: Asia/Seoul
       PYTHONPATH: /app
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/2
@@ -210,6 +212,7 @@ services:
       - ./storage/reports:/app/storage/reports
       - ./storage/logs:/app/storage/logs
     environment:
+      TZ: Asia/Seoul
       PYTHONPATH: /app
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/2
