@@ -28,8 +28,14 @@ def run_editor(state: dict) -> dict:
 
     # Use pre-formatted report from format_citations if available
     pre_formatted = state.get("final_report")
+    logger.info(
+        f"[EDITOR] pre_formatted: type={type(pre_formatted).__name__}, "
+        f"len={len(pre_formatted.strip()) if pre_formatted and isinstance(pre_formatted, str) else 0}, "
+        f"has_network_viz={'## Network Visualization' in pre_formatted if pre_formatted else False}"
+    )
     if pre_formatted and isinstance(pre_formatted, str) and len(pre_formatted.strip()) > 100:
         report = pre_formatted
+        logger.info(f"[EDITOR] Using pre-formatted report ({len(report)} chars)")
     else:
         sections = state.get("sections", {})
         hypotheses = state.get("validated_hypotheses", [])
@@ -49,9 +55,14 @@ def run_editor(state: dict) -> dict:
     report_files = [str(report_file)]
 
     # Copy network images to output
-    for label, img_path in network_analysis.get("network_images", {}).items():
+    net_images = network_analysis.get("network_images", {})
+    logger.info(f"[EDITOR] network_images to copy: {dict(net_images) if net_images else 'EMPTY'}")
+    for label, img_path in net_images.items():
         if img_path and Path(img_path).exists():
             report_files.append(img_path)
+            logger.info(f"[EDITOR] Network image added to report_files: {label} -> {img_path}")
+        else:
+            logger.warning(f"[EDITOR] Network image missing: {label} -> {img_path}")
 
     if cb:
         cb(100, "Report generation complete")

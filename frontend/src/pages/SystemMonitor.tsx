@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from "react";
-import { RefreshCw, AlertCircle, CheckCircle2, HelpCircle, Server, Database, Cpu, Network, Terminal, ChevronDown, ChevronUp } from "lucide-react";
+import { RefreshCw, AlertCircle, CheckCircle2, HelpCircle, Server, Database, Cpu, Network, Terminal, ChevronDown, ChevronUp, Circle } from "lucide-react";
 import { api } from "@/lib/api";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -45,21 +45,28 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
+/** Maximum number of log lines to keep in memory */
+const MAX_LOG_LINES = 5000;
+
 export default function SystemMonitor() {
   const [data, setData] = useState<SystemArchitecture | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedContainer, setSelectedContainer] = useState<string>("");
-  const [containerLogs, setContainerLogs] = useState<string>("");
+  const [logLines, setLogLines] = useState<string[]>([]);
   const [logsLoading, setLogsLoading] = useState(false);
   const [logsError, setLogsError] = useState<string | null>(null);
+  const [streaming, setStreaming] = useState(false);
   const [architectureExpanded, setArchitectureExpanded] = useState(false);
   const [connectionExpanded, setConnectionExpanded] = useState(false);
   const [containerStatusExpanded, setContainerStatusExpanded] = useState(true);
   const [containerStatus, setContainerStatus] = useState<{ id: string; label: string; category: string; status: string; detail: string; image?: string; started_at?: string }[]>([]);
   const logsContainerRef = useRef<HTMLDivElement>(null);
   const logsEndRef = useRef<HTMLDivElement>(null);
+  const eventSourceRef = useRef<EventSource | null>(null);
+  const autoScrollRef = useRef(true);
 
+  // ── Architecture & Container Status ──────────────────────────
   const fetchArchitecture = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -103,45 +110,117 @@ export default function SystemMonitor() {
     }
   }, [containerStatus, selectedContainer]);
 
-  const fetchLogs = useCallback(async () => {
+  // ── SSE Log Streaming ────────────────────────────────────────
+  const closeStream = useCallback(() => {
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+      eventSourceRef.current = null;
+    }
+    setStreaming(false);
+  }, []);
+
+  const startStream = useCallback((containerId: string) => {
+    closeStream();
+    if (!containerId) return;
+
+    setLogsLoading(true);
+    setLogsError(null);
+    setLogLines([]);
+    autoScrollRef.current = true;
+
+    // Determine base URL for SSE (same origin, under /api/)
+    const baseUrl = window.location.origin;
+    const sseUrl = `${baseUrl}/api/health/container-logs/${containerId}/stream?tail=200`;
+
+    const es = new EventSource(sseUrl);
+    eventSourceRef.current = es;
+
+    es.addEventListener("log", (event: MessageEvent) => {
+      const line = event.data;
+      if (line !== undefined && line !== null) {
+        setLogLines((prev) => {
+          const next = [...prev, line];
+          // Trim to MAX_LOG_LINES to prevent memory bloat
+          return next.length > MAX_LOG_LINES ? next.slice(-MAX_LOG_LINES) : next;
+        });
+      }
+      // First log event means loading is done
+      setLogsLoading(false);
+      setStreaming(true);
+    });
+
+    es.addEventListener("ping", () => {
+      // Keep-alive, just mark as connected
+      setLogsLoading(false);
+      setStreaming(true);
+    });
+
+    es.onerror = () => {
+      // EventSource auto-reconnects on error, but if it closes we mark it
+      if (es.readyState === EventSource.CLOSED) {
+        setStreaming(false);
+        setLogsError("Log stream disconnected. Click Reconnect to retry.");
+      }
+      setLogsLoading(false);
+    };
+
+    es.onopen = () => {
+      setLogsLoading(false);
+      setStreaming(true);
+    };
+  }, [closeStream]);
+
+  // Start/stop stream when selected container changes
+  useEffect(() => {
+    if (selectedContainer) {
+      startStream(selectedContainer);
+    } else {
+      closeStream();
+      setLogLines([]);
+    }
+    return () => closeStream();
+  }, [selectedContainer, startStream, closeStream]);
+
+  // ── Auto-scroll logic ────────────────────────────────────────
+  const handleScroll = useCallback(() => {
+    const el = logsContainerRef.current;
+    if (!el) return;
+    // If user scrolled up more than 80px from bottom, disable auto-scroll
+    autoScrollRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  }, []);
+
+  useEffect(() => {
+    if (autoScrollRef.current && logsEndRef.current) {
+      logsEndRef.current.scrollIntoView({ behavior: "auto", block: "end" });
+    }
+  }, [logLines]);
+
+  // ── Fallback: manual fetch (non-streaming) ───────────────────
+  const fetchLogsFallback = useCallback(async () => {
     if (!selectedContainer) return;
+    closeStream();
+    setLogsLoading(true);
+    setLogsError(null);
     try {
       const res = await api.get<{ logs: string; error?: string }>("/health/container-logs/" + selectedContainer + "?tail=500");
       if (res.error) {
         setLogsError(res.error);
-        setContainerLogs("");
+        setLogLines([]);
       } else {
-        setContainerLogs(res.logs || "");
+        setLogLines((res.logs || "").split("\n"));
       }
     } catch (e) {
       setLogsError(e instanceof Error ? e.message : "Failed to fetch logs");
-      setContainerLogs("");
+      setLogLines([]);
+    } finally {
+      setLogsLoading(false);
     }
-  }, [selectedContainer]);
-
-  useEffect(() => {
-    if (!selectedContainer) {
-      setContainerLogs("");
-      return;
-    }
-    setLogsError(null);
-    setLogsLoading(true);
-    fetchLogs().finally(() => setLogsLoading(false));
-    const id = setInterval(() => fetchLogs(), 4000);
-    return () => clearInterval(id);
-  }, [selectedContainer, fetchLogs]);
-
-  useEffect(() => {
-    if (!containerLogs || !logsContainerRef.current) return;
-    const el = logsContainerRef.current;
-    const isNearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-    if (isNearBottom) {
-      logsEndRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
-    }
-  }, [containerLogs]);
+  }, [selectedContainer, closeStream]);
 
   const leftCol = ["client", "gateway", "api_server"];
   const rightCol = ["mysql", "redis", "chromadb", "mcp_server", "ollama", "cytoscape"];
+
+  const containerLogs = logLines.join("\n");
 
   return (
     <div className="space-y-6">
@@ -261,7 +340,7 @@ export default function SystemMonitor() {
                       >
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2">
-                            {id === "cytoscape" ? (
+                            {id === "ollama" || id === "cytoscape" ? (
                               <Network className="h-4 w-4" />
                             ) : (
                               <Database className="h-4 w-4" />
@@ -351,7 +430,7 @@ export default function SystemMonitor() {
             <div>
               <CardTitle>Container Status</CardTitle>
               <CardDescription>
-                서비스에 필요한 컨테이너들의 실행 상태 (15초마다 갱신)
+                Click a container card to view its live logs below.
               </CardDescription>
             </div>
             {containerStatusExpanded ? (
@@ -406,7 +485,7 @@ export default function SystemMonitor() {
         )}
       </Card>
 
-      {/* Container Logs */}
+      {/* Container Logs — SSE Streaming */}
       <Card className="overflow-hidden border-zinc-700 dark:border-zinc-700">
         <CardHeader className="border-b border-zinc-700/60 bg-[#24283b]">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -419,9 +498,15 @@ export default function SystemMonitor() {
                     — {containerStatus.find((c) => c.id === selectedContainer)?.label ?? selectedContainer}
                   </span>
                 )}
+                {streaming && (
+                  <span className="inline-flex items-center gap-1 text-xs font-normal text-green-400">
+                    <Circle className="h-2 w-2 fill-green-400 animate-pulse" />
+                    Live
+                  </span>
+                )}
               </CardTitle>
               <CardDescription className="text-zinc-400 mt-1">
-                Click a container above. Logs refresh every 4s. Scroll stays at bottom when viewing latest.
+                Real-time log streaming (tail -f). Auto-scrolls when at bottom.
               </CardDescription>
             </div>
             <div className="flex items-center gap-2">
@@ -440,12 +525,23 @@ export default function SystemMonitor() {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => fetchLogs()}
+                onClick={() => startStream(selectedContainer)}
                 disabled={!selectedContainer}
                 className="border-zinc-600 text-zinc-300 hover:bg-zinc-700"
+                title="Reconnect SSE stream"
               >
                 <RefreshCw className="h-4 w-4 mr-2" />
-                Refresh
+                Reconnect
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={fetchLogsFallback}
+                disabled={!selectedContainer}
+                className="border-zinc-600 text-zinc-300 hover:bg-zinc-700"
+                title="Fetch last 500 lines (non-streaming)"
+              >
+                Snapshot
               </Button>
             </div>
           </div>
@@ -453,19 +549,28 @@ export default function SystemMonitor() {
         <CardContent className="p-0 bg-[#1a1b26]">
           <div
             ref={logsContainerRef}
+            onScroll={handleScroll}
             className="h-[560px] overflow-y-auto p-3 font-mono text-[11.5px] leading-[18px] text-zinc-300 scrollbar-thin whitespace-pre-wrap break-all"
             style={{ contain: "layout" }}
           >
             {logsLoading ? (
               <div className="flex items-center justify-center h-full gap-2 text-zinc-500">
                 <RefreshCw className="h-4 w-4 animate-spin" />
-                Loading logs...
+                Connecting to log stream...
               </div>
             ) : logsError ? (
               <div className="flex flex-col items-center justify-center h-full gap-2 text-amber-500">
                 <AlertCircle className="h-8 w-8" />
                 <span>{logsError}</span>
                 <span className="text-xs text-zinc-500">Ensure Docker socket is mounted: /var/run/docker.sock</span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => startStream(selectedContainer)}
+                  className="mt-2 border-zinc-600 text-zinc-300 hover:bg-zinc-700"
+                >
+                  Reconnect
+                </Button>
               </div>
             ) : !selectedContainer || containerStatus.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full gap-2 text-zinc-500">
@@ -480,8 +585,8 @@ export default function SystemMonitor() {
             ) : (
               <div className="flex flex-col items-center justify-center h-full gap-2 text-zinc-500">
                 <Terminal className="h-8 w-8" />
-                <span>No logs available</span>
-                <span className="text-xs">Try another container (e.g. API Server, Report Generation Worker)</span>
+                <span>Waiting for log data...</span>
+                <span className="text-xs">Logs will appear here as they are generated.</span>
               </div>
             )}
           </div>

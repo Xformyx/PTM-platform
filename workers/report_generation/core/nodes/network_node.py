@@ -120,7 +120,7 @@ def run_network_analysis(state: dict) -> dict:
     # Build network_results for writer_node (ptm_only mode) — enables v98 structured data
     network_results = _build_network_results_for_writer(parsed_ptms, state.get("experimental_context", {}))
 
-    return {
+    result = {
         "network_analysis": {
             "network_data": network_data,
             "legends": legends,
@@ -130,6 +130,16 @@ def run_network_analysis(state: dict) -> dict:
         },
         "network_results": network_results,
     }
+
+    logger.info(
+        f"[NET-NODE] run_network_analysis returning: "
+        f"cytoscape_connected={cytoscape_connected}, "
+        f"network_images={list(network_images.keys()) if network_images else 'EMPTY'}, "
+        f"network_images_paths={dict(network_images) if network_images else '{}'}, "
+        f"network_results_keys={list(network_results.keys()) if network_results else 'EMPTY'}"
+    )
+
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -447,6 +457,10 @@ def _generate_cytoscape_networks(
     except Exception as e:
         logger.error(f"Cytoscape network generation failed: {e}")
 
+    logger.info(
+        f"[CYTO-GEN] _generate_cytoscape_networks returning: "
+        f"network_images={dict(network_images) if network_images else 'EMPTY'}"
+    )
     return network_images
 
 
@@ -702,6 +716,7 @@ def _save_network_png(p4c, network_suid: int, network_name: str, output_dir: str
     """Export network as high-resolution PNG.
 
     Uses CyREST direct image download to avoid Docker/host path mismatch.
+    Tries multiple CyREST API endpoint formats for compatibility.
     Falls back to export_image if direct download fails.
     """
     try:
@@ -711,59 +726,97 @@ def _save_network_png(p4c, network_suid: int, network_name: str, output_dir: str
         output_path.mkdir(parents=True, exist_ok=True)
         png_file = output_path / f"{network_name}.png"
 
+        logger.info(
+            f"[IMG-SAVE] Starting PNG export: network_suid={network_suid}, "
+            f"name={network_name}, output_dir={output_dir}, target={png_file}"
+        )
+
         # Delete existing file
         if png_file.exists():
             try:
                 png_file.unlink()
+                logger.info(f"[IMG-SAVE] Deleted existing file: {png_file}")
             except Exception as del_err:
-                logger.warning(f"Could not delete existing file: {del_err}")
+                logger.warning(f"[IMG-SAVE] Could not delete existing file: {del_err}")
 
         p4c.fit_content(network=network_suid)
         time.sleep(0.5)
 
         # --- Method 1: CyREST direct image download (Docker-safe) ---
         base_url = _cytoscape_base_url()
+        logger.info(f"[IMG-SAVE] Method 1: CyREST direct download (base_url={base_url})")
+
         try:
             # Get first view SUID
-            views_resp = _requests.get(
-                f"{base_url}/networks/{network_suid}/views",
-                timeout=10,
-            )
+            views_url = f"{base_url}/networks/{network_suid}/views"
+            logger.info(f"[IMG-SAVE] Fetching views: GET {views_url}")
+            views_resp = _requests.get(views_url, timeout=10)
+            logger.info(f"[IMG-SAVE] Views response: status={views_resp.status_code}")
+
             if views_resp.status_code == 200:
                 views = views_resp.json()
                 view_suid = views[0] if views else None
+                logger.info(f"[IMG-SAVE] Views list: {views}, using view_suid={view_suid}")
             else:
                 view_suid = None
+                logger.warning(f"[IMG-SAVE] Views request failed: {views_resp.text[:200]}")
 
             if view_suid is not None:
-                img_resp = _requests.get(
-                    f"{base_url}/networks/{network_suid}/views/{view_suid}/export/png"
-                    f"?h=2400",
-                    timeout=60,
-                )
-                if img_resp.status_code == 200 and len(img_resp.content) > 1000:
-                    with open(png_file, "wb") as f:
-                        f.write(img_resp.content)
-                    logger.info(
-                        f"Network PNG saved via CyREST direct: {png_file} "
-                        f"({len(img_resp.content):,} bytes)"
-                    )
-                    return str(png_file)
-                else:
-                    logger.warning(
-                        f"CyREST image download returned status={img_resp.status_code}, "
-                        f"size={len(img_resp.content) if img_resp.content else 0}"
-                    )
+                # Try multiple CyREST image endpoint formats
+                image_urls = [
+                    f"{base_url}/networks/{network_suid}/views/first.png?h=2400",
+                    f"{base_url}/networks/{network_suid}/views/{view_suid}.png?h=2400",
+                    f"{base_url}/networks/{network_suid}/views/{view_suid}/export/png?h=2400",
+                ]
+
+                for img_url in image_urls:
+                    try:
+                        logger.info(f"[IMG-SAVE] Trying: GET {img_url}")
+                        img_resp = _requests.get(img_url, timeout=60)
+                        content_type = img_resp.headers.get("Content-Type", "")
+                        content_len = len(img_resp.content) if img_resp.content else 0
+                        logger.info(
+                            f"[IMG-SAVE] Response: status={img_resp.status_code}, "
+                            f"content_type={content_type}, size={content_len:,} bytes"
+                        )
+
+                        if img_resp.status_code == 200 and content_len > 1000:
+                            # Verify it looks like a PNG (starts with PNG magic bytes)
+                            is_png = img_resp.content[:4] == b'\x89PNG'
+                            logger.info(f"[IMG-SAVE] PNG magic bytes check: {is_png}")
+
+                            with open(png_file, "wb") as f:
+                                f.write(img_resp.content)
+                            logger.info(
+                                f"[IMG-SAVE] SUCCESS via CyREST direct: {png_file} "
+                                f"({content_len:,} bytes, url={img_url})"
+                            )
+                            return str(png_file)
+                        else:
+                            logger.warning(
+                                f"[IMG-SAVE] Endpoint returned status={img_resp.status_code}, "
+                                f"size={content_len} — trying next"
+                            )
+                    except Exception as url_err:
+                        logger.warning(f"[IMG-SAVE] Endpoint failed: {img_url} — {url_err}")
+                        continue
+
+                logger.warning(f"[IMG-SAVE] All CyREST image endpoints failed")
+            else:
+                logger.warning(f"[IMG-SAVE] No view SUID available, skipping CyREST direct")
+
         except Exception as direct_err:
-            logger.warning(f"CyREST direct download failed: {direct_err}")
+            logger.warning(f"[IMG-SAVE] CyREST direct download failed: {direct_err}")
 
         # --- Method 2: Fallback to export_image with host path mapping ---
         host_data_dir = os.getenv("HOST_DATA_DIR", "")
+        logger.info(f"[IMG-SAVE] Method 2: Host path mapping (HOST_DATA_DIR={host_data_dir!r})")
         if host_data_dir:
             order_dir_name = Path(output_dir).name
             host_png = Path(host_data_dir) / "outputs" / order_dir_name / f"{network_name}.png"
             host_png.parent.mkdir(parents=True, exist_ok=True)
             try:
+                logger.info(f"[IMG-SAVE] export_image to host path: {host_png}")
                 p4c.export_image(
                     filename=str(host_png),
                     type="PNG",
@@ -772,13 +825,19 @@ def _save_network_png(p4c, network_suid: int, network_name: str, output_dir: str
                     overwrite_file=True,
                 )
                 time.sleep(1.5)
-                if png_file.exists() and png_file.stat().st_size > 1000:
-                    logger.info(f"Network PNG saved via host path mapping: {png_file}")
+                exists = png_file.exists()
+                size = png_file.stat().st_size if exists else 0
+                logger.info(f"[IMG-SAVE] After host export: exists={exists}, size={size}")
+                if exists and size > 1000:
+                    logger.info(f"[IMG-SAVE] SUCCESS via host path mapping: {png_file}")
                     return str(png_file)
             except Exception as host_err:
-                logger.warning(f"Host path export failed: {host_err}")
+                logger.warning(f"[IMG-SAVE] Host path export failed: {host_err}")
+        else:
+            logger.info(f"[IMG-SAVE] HOST_DATA_DIR not set, skipping Method 2")
 
         # --- Method 3: Last resort - try original export_image ---
+        logger.info(f"[IMG-SAVE] Method 3: Direct export_image to {png_file}")
         try:
             p4c.export_image(
                 filename=str(png_file),
@@ -788,17 +847,20 @@ def _save_network_png(p4c, network_suid: int, network_name: str, output_dir: str
                 overwrite_file=True,
             )
             time.sleep(1.5)
-            if png_file.exists() and png_file.stat().st_size > 1000:
-                logger.info(f"Network PNG saved via export_image: {png_file}")
+            exists = png_file.exists()
+            size = png_file.stat().st_size if exists else 0
+            logger.info(f"[IMG-SAVE] After direct export: exists={exists}, size={size}")
+            if exists and size > 1000:
+                logger.info(f"[IMG-SAVE] SUCCESS via export_image: {png_file}")
                 return str(png_file)
         except Exception as fallback_err:
-            logger.warning(f"export_image fallback failed: {fallback_err}")
+            logger.warning(f"[IMG-SAVE] export_image fallback failed: {fallback_err}")
 
-        logger.warning(f"All PNG export methods failed for {network_name}")
+        logger.error(f"[IMG-SAVE] ALL METHODS FAILED for {network_name}")
         return None
 
     except Exception as e:
-        logger.warning(f"PNG export failed: {e}")
+        logger.error(f"[IMG-SAVE] PNG export failed with exception: {e}")
         return None
 
 
@@ -832,7 +894,15 @@ def generate_network_figure_section(network_analysis: dict) -> str:
     legends = network_analysis.get("legends", {})
     network_data = network_analysis.get("network_data", {})
 
+    logger.info(
+        f"[NET-SECTION] generate_network_figure_section called: "
+        f"network_images={list(network_images.keys()) if network_images else 'EMPTY'}, "
+        f"legends_keys={list(legends.keys()) if legends else 'EMPTY'}, "
+        f"has_full_legend={bool(legends.get('full_legend'))}"
+    )
+
     if not network_images and not legends.get("full_legend"):
+        logger.warning("[NET-SECTION] No network_images and no full_legend — returning empty")
         return ""
 
     section = "## Network Visualization\n\n"
@@ -846,14 +916,21 @@ def generate_network_figure_section(network_analysis: dict) -> str:
     figure_num = 1
     for label, img_path in sorted(network_images.items()):
         path_obj = Path(img_path) if img_path else None
+        logger.info(
+            f"[NET-SECTION] Processing image: label={label}, path={img_path}, "
+            f"exists={path_obj.exists() if path_obj else False}, "
+            f"size={path_obj.stat().st_size if path_obj and path_obj.exists() else 0}"
+        )
         # Use relative filename for Markdown (works in both browser and docx conversion)
         # The image file is in the same output directory as final_report.md
         if path_obj and path_obj.exists() and path_obj.stat().st_size > 1000:
             img_ref = path_obj.name  # relative filename (e.g., "PTM_Signaling_Network.png")
+            logger.info(f"[NET-SECTION] Using relative filename: {img_ref}")
         else:
             # Fallback: base64 inline embedding
             base64_img = image_to_base64(img_path) if img_path else None
             img_ref = base64_img
+            logger.info(f"[NET-SECTION] Fallback to base64: {'OK' if img_ref else 'FAILED'}")
 
         display_label = "Combined PTM Signaling Network" if label == "main" else f"PTM Network — {label}"
 

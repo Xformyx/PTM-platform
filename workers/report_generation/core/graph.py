@@ -143,13 +143,28 @@ def format_citations(state: ReportState) -> dict:
     # Build report with network section between Results and Discussion
     section_order = ["introduction", "results", "discussion", "conclusion", "abstract"]
     parts = []
+
+    logger.info(
+        f"[FORMAT-CIT] sections keys: {list(sections.keys())}, "
+        f"network_analysis keys: {list(network_analysis.keys()) if network_analysis else 'EMPTY'}"
+    )
+    if network_analysis:
+        logger.info(
+            f"[FORMAT-CIT] network_analysis.network_images: "
+            f"{list(network_analysis.get('network_images', {}).keys()) if network_analysis.get('network_images') else 'EMPTY'}"
+        )
+
     for key in section_order:
         if key in sections and sections[key]:
             parts.append(sections[key])
+            logger.info(f"[FORMAT-CIT] Added section: {key} ({len(sections[key])} chars)")
         if key == "results":
             network_section = generate_network_figure_section(network_analysis)
             if network_section:
                 parts.append(network_section)
+                logger.info(f"[FORMAT-CIT] Added network section ({len(network_section)} chars)")
+            else:
+                logger.warning("[FORMAT-CIT] network_section is EMPTY — not included in report")
 
     formatter = CitationFormatter()
     all_text = "\n\n".join(parts)
