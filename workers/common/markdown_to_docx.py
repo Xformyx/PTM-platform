@@ -134,6 +134,8 @@ def parse_markdown_line(line: str) -> Tuple[str, List[Tuple[str, dict]]]:
         text = list_match.group(3)
         is_ordered = bool(re.match(r'\d+\.', marker))
         segments = parse_inline_formatting(text)
+        if is_ordered:
+            return ('ordered_list_item', segments)
         return ('list_item', segments)
     
     # Regular paragraph
@@ -620,6 +622,12 @@ def convert_markdown_to_docx(markdown_content: str, output_path: str, title: str
         if line_type == 'list_item':
             # Add as bullet point
             add_formatted_paragraph(doc, segments, style='List Bullet')
+            i += 1
+            continue
+        
+        if line_type == 'ordered_list_item':
+            # Add as numbered list item
+            add_formatted_paragraph(doc, segments, style='List Number')
             i += 1
             continue
         
