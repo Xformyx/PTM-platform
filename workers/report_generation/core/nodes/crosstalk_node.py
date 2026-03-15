@@ -961,8 +961,33 @@ Write comprehensive results organized by:
         report_parts.append(f"## Results\n\n{fallback_results}\n")
     report_parts.append("\n---\n")
 
-    # ── Cross-Talk Figures (placeholder for crosstalk_figures.py integration) ──
-    # Figure generation will be handled by crosstalk_figures.py in Phase 3-3
+    # ── Cross-Talk Figures (crosstalk_figures.py integration — GAP 5) ──
+    try:
+        from report_generation.core.crosstalk_figures import (
+            generate_all_crosstalk_figures,
+            generate_crosstalk_figure_section,
+        )
+        logger.info("[CROSSTALK] Generating cross-talk figures...")
+        figure_output_dir = os.path.join(output_dir, "crosstalk_figures")
+        figure_paths = generate_all_crosstalk_figures(
+            crosstalk_data,
+            figure_output_dir,
+            primary_ptm_type=primary_ptm_type,
+            secondary_ptm_type=secondary_ptm_type,
+        )
+        logger.info(f"[CROSSTALK] Generated {len(figure_paths)} figure(s): {list(figure_paths.keys())}")
+
+        figure_section = generate_crosstalk_figure_section(
+            crosstalk_data,
+            figure_paths,
+            primary_ptm_type=primary_ptm_type,
+            secondary_ptm_type=secondary_ptm_type,
+        )
+        if figure_section:
+            report_parts.append(figure_section)
+            logger.info(f"[CROSSTALK] Added figure section ({len(figure_section)} chars)")
+    except Exception as e:
+        logger.warning(f"[CROSSTALK] Cross-talk figure generation failed (non-fatal): {e}")
 
     # ── Discussion ──
     if cb:
