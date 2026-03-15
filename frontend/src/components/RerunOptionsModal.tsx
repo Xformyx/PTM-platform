@@ -13,6 +13,13 @@ import AnalysisOptionsModal from "./AnalysisOptionsModal";
 import type { AnalysisOptions } from "@/lib/types";
 import { DEFAULT_ANALYSIS_OPTIONS } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { CLOUD_PROVIDER_SENTINEL, CLOUD_MODEL_PRESETS, type CloudProvider } from "@/lib/llm-models";
+
+const CLOUD_PROVIDERS = ["gemini", "openai", "anthropic"] as const;
+function isCloudProviderSelection(val: string): boolean {
+  const p = val?.split(":")[0];
+  return !!(p && CLOUD_PROVIDERS.includes(p as any));
+}
 
 interface Order {
   id: number;
@@ -67,6 +74,8 @@ export default function RerunOptionsModal({
   const [topNptms, setTopNptms] = useState(20);
   const [llmModel, setLlmModel] = useState("");
   const [ragLlmModel, setRagLlmModel] = useState("");
+  const [llmCloudModelVariant, setLlmCloudModelVariant] = useState("");
+  const [ragLlmCloudModelVariant, setRagLlmCloudModelVariant] = useState("");
   const [researchQuestions, setResearchQuestions] = useState<string[]>([]);
   const [newQuestion, setNewQuestion] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -102,8 +111,19 @@ export default function RerunOptionsModal({
       setTopNptms(typeof topN === "number" && !isNaN(topN) ? topN : 20);
       const lm = ro.llm_model as string; const rp = ro.llm_provider as string;
       const rm = ro.rag_llm_model as string; const rrp = ro.rag_llm_provider as string;
-      setLlmModel(rp && lm ? `${rp}:${lm}` : (lm || ""));
-      setRagLlmModel(rrp && rm ? `${rrp}:${rm}` : (rm || ""));
+      const hasProviderConfig = (p: string) => llmModels.some((m) => m.provider === p && m.model_id === CLOUD_PROVIDER_SENTINEL);
+      if (rp && lm) {
+        setLlmModel(hasProviderConfig(rp) ? `${rp}:${CLOUD_PROVIDER_SENTINEL}` : `${rp}:${lm}`);
+        setLlmCloudModelVariant(CLOUD_PROVIDERS.includes(rp as any) ? lm : "");
+      } else {
+        setLlmModel(lm || "");
+      }
+      if (rrp && rm) {
+        setRagLlmModel(hasProviderConfig(rrp) ? `${rrp}:${CLOUD_PROVIDER_SENTINEL}` : `${rrp}:${rm}`);
+        setRagLlmCloudModelVariant(CLOUD_PROVIDERS.includes(rrp as any) ? rm : "");
+      } else {
+        setRagLlmModel(rm || "");
+      }
       const rq = ro.research_questions;
       setResearchQuestions(Array.isArray(rq) ? rq.filter((q): q is string => typeof q === "string") : []);
       const ao = (order.analysis_options || {}) as Record<string, unknown>;
@@ -134,7 +154,7 @@ export default function RerunOptionsModal({
         });
       }
     }
-  }, [open, order]);
+  }, [open, order, llmModels]);
 
   const handleConfirm = async () => {
     if (!order) return;
@@ -177,11 +197,19 @@ export default function RerunOptionsModal({
           research_questions: researchQuestions,
           ...(llmModel ? (() => {
             const [p, m] = llmModel.includes(":") ? llmModel.split(":", 2) : ["ollama", llmModel];
-            return { llm_model: m, llm_provider: p };
+            const presets = CLOUD_MODEL_PRESETS[p as CloudProvider];
+            const model = isCloudProviderSelection(llmModel)
+              ? (llmCloudModelVariant || (presets?.some((x) => x.id === m) ? m : presets?.[0]?.id))
+              : m;
+            return model ? { llm_model: model, llm_provider: p } : {};
           })() : {}),
           ...(ragLlmModel ? (() => {
             const [p, m] = ragLlmModel.includes(":") ? ragLlmModel.split(":", 2) : ["ollama", ragLlmModel];
-            return { rag_llm_model: m, rag_llm_provider: p };
+            const presets = CLOUD_MODEL_PRESETS[p as CloudProvider];
+            const model = isCloudProviderSelection(ragLlmModel)
+              ? (ragLlmCloudModelVariant || (presets?.some((x) => x.id === m) ? m : presets?.[0]?.id))
+              : m;
+            return model ? { rag_llm_model: model, rag_llm_provider: p } : {};
           })() : {}),
           report_config: reportConfigNested,
         },
@@ -333,7 +361,18 @@ export default function RerunOptionsModal({
                 <Label className="text-xs">LLM Model (Report Generation)</Label>
                 <Select
                   value={llmModel || "__default__"}
-                  onValueChange={(v) => setLlmModel(v === "__default__" ? "" : v)}
+                  onValueChange={(v) => {
+                    setLlmModel(v === "__default__" ? "" : v);
+                    if (v !== "__default__" && isCloudProviderSelection(v)) {
+                      const [, m] = v.split(":", 2);
+                      const p = v.split(":")[0] as CloudProvider;
+                      const presets = CLOUD_MODEL_PRESETS[p];
+                      const validId = presets?.some((x) => x.id === m) ? m : presets?.[0]?.id || "";
+                      setLlmCloudModelVariant(validId);
+                    } else {
+                      setLlmCloudModelVariant("");
+                    }
+                  }}
                 >
                   <SelectTrigger className="h-8"><SelectValue placeholder={`Default (${defaultLlmModel || "auto"})`} /></SelectTrigger>
                   <SelectContent>
@@ -344,12 +383,39 @@ export default function RerunOptionsModal({
                     })}
                   </SelectContent>
                 </Select>
+                {isCloudProviderSelection(llmModel || "") && (
+                  <div className="flex items-center gap-2 pl-2 border-l-2 border-muted">
+                    <Label className="text-xs shrink-0">세부 모델</Label>
+                    <Select
+                      value={llmCloudModelVariant || CLOUD_MODEL_PRESETS[llmModel.split(":")[0] as CloudProvider]?.[0]?.id}
+                      onValueChange={setLlmCloudModelVariant}
+                    >
+                      <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {CLOUD_MODEL_PRESETS[llmModel.split(":")[0] as CloudProvider]?.map((x) => (
+                          <SelectItem key={x.id} value={x.id}>{x.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
               </div>
               <div className="space-y-1.5">
                 <Label className="text-xs">LLM Model (Paper Read)</Label>
                 <Select
                   value={ragLlmModel || "__default__"}
-                  onValueChange={(v) => setRagLlmModel(v === "__default__" ? "" : v)}
+                  onValueChange={(v) => {
+                    setRagLlmModel(v === "__default__" ? "" : v);
+                    if (v !== "__default__" && isCloudProviderSelection(v)) {
+                      const [, m] = v.split(":", 2);
+                      const p = v.split(":")[0] as CloudProvider;
+                      const presets = CLOUD_MODEL_PRESETS[p];
+                      const validId = presets?.some((x) => x.id === m) ? m : presets?.[0]?.id || "";
+                      setRagLlmCloudModelVariant(validId);
+                    } else {
+                      setRagLlmCloudModelVariant("");
+                    }
+                  }}
                 >
                   <SelectTrigger className="h-8"><SelectValue placeholder={`Default (${defaultLlmModel || "auto"})`} /></SelectTrigger>
                   <SelectContent>
@@ -360,6 +426,22 @@ export default function RerunOptionsModal({
                     })}
                   </SelectContent>
                 </Select>
+                {isCloudProviderSelection(ragLlmModel || "") && (
+                  <div className="flex items-center gap-2 pl-2 border-l-2 border-muted">
+                    <Label className="text-xs shrink-0">세부 모델</Label>
+                    <Select
+                      value={ragLlmCloudModelVariant || CLOUD_MODEL_PRESETS[ragLlmModel.split(":")[0] as CloudProvider]?.[0]?.id}
+                      onValueChange={setRagLlmCloudModelVariant}
+                    >
+                      <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {CLOUD_MODEL_PRESETS[ragLlmModel.split(":")[0] as CloudProvider]?.map((x) => (
+                          <SelectItem key={x.id} value={x.id}>{x.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
               </div>
               <div className="space-y-1.5">
                 <Label className="text-xs flex items-center gap-1">

@@ -80,6 +80,77 @@ async def detailed_health(
     return {"status": overall, "checks": checks}
 
 
+@router.get("/health/cloud-llm")
+async def cloud_llm_health(
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    """
+    Test Cloud LLM API connectivity (Gemini, OpenAI).
+    Uses API keys from .env. No auth required for quick pre-flight check.
+    """
+    import os
+
+    result: dict[str, Any] = {"gemini": None, "openai": None}
+
+    # Gemini
+    gemini_key = settings.GEMINI_API_KEY or os.getenv("GEMINI_API_KEY", "")
+    gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+    if gemini_key:
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.post(
+                    "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+                    headers={
+                        "Content-Type": "application/json",
+                        "Authorization": f"Bearer {gemini_key}",
+                    },
+                    json={
+                        "model": gemini_model,
+                        "messages": [{"role": "user", "content": "Reply with exactly: OK"}],
+                        "max_tokens": 10,
+                    },
+                )
+                if resp.status_code == 200:
+                    preview = (resp.json().get("choices", [{}])[0].get("message", {}).get("content", "") or "")[:50]
+                    result["gemini"] = {"status": "ok", "model": gemini_model, "response_preview": preview.strip()}
+                else:
+                    result["gemini"] = {"status": "error", "code": resp.status_code, "detail": resp.text[:200]}
+        except Exception as e:
+            result["gemini"] = {"status": "error", "detail": str(e)}
+    else:
+        result["gemini"] = {"status": "skipped", "detail": "GEMINI_API_KEY not set"}
+
+    # OpenAI (optional)
+    openai_key = settings.OPENAI_API_KEY or os.getenv("OPENAI_API_KEY", "")
+    openai_model = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
+    if openai_key:
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.post(
+                    "https://api.openai.com/v1/chat/completions",
+                    headers={
+                        "Content-Type": "application/json",
+                        "Authorization": f"Bearer {openai_key}",
+                    },
+                    json={
+                        "model": openai_model,
+                        "messages": [{"role": "user", "content": "Reply with exactly: OK"}],
+                        "max_tokens": 10,
+                    },
+                )
+                if resp.status_code == 200:
+                    preview = (resp.json().get("choices", [{}])[0].get("message", {}).get("content", "") or "")[:50]
+                    result["openai"] = {"status": "ok", "model": openai_model, "response_preview": preview.strip()}
+                else:
+                    result["openai"] = {"status": "error", "code": resp.status_code, "detail": resp.text[:200]}
+        except Exception as e:
+            result["openai"] = {"status": "error", "detail": str(e)}
+    else:
+        result["openai"] = {"status": "skipped", "detail": "OPENAI_API_KEY not set"}
+
+    return result
+
+
 @router.get("/health/system-architecture")
 async def system_architecture(
     db: AsyncSession = Depends(get_db),

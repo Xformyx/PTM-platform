@@ -54,6 +54,19 @@ _KNOWN_OPENAI_MODELS = {
 }
 
 
+def _infer_provider_from_model(provider: str, model: Optional[str]) -> str:
+    """Infer provider from model when provider is ollama/auto but model is a cloud model."""
+    if not model or not model.strip():
+        return provider or "ollama"
+    m = model.strip().lower()
+    if provider in ("ollama", "auto") or not provider:
+        if m in _KNOWN_GEMINI_MODELS or m.startswith("gemini-"):
+            return "gemini"
+        if m in _KNOWN_OPENAI_MODELS or m.startswith("gpt-") or "gpt-4" in m:
+            return "openai"
+    return provider or "ollama"
+
+
 def _normalize_model_name(provider: str, model: str) -> str:
     """Normalize and validate model name for the given provider.
 
@@ -74,8 +87,12 @@ def _normalize_model_name(provider: str, model: str) -> str:
             if model_lower == known.lower():
                 logger.info(f"Model name normalized: '{model}' → '{known}'")
                 return known
-        # Common mistake: bare "Gemini" or "gemini" without version
-        if model_lower in ("gemini", "google gemini", "gemini flash", "gemini pro"):
+        # Common mistake: bare "Gemini" or display names (e.g. "Gemini_Joseph")
+        _DISPLAY_NAME_ALIASES = (
+            "gemini", "google gemini", "gemini flash", "gemini pro",
+            "gemini_joseph", "joseph",  # DB에 표시명이 model_id로 잘못 등록된 경우
+        )
+        if model_lower in _DISPLAY_NAME_ALIASES:
             fallback_model = GEMINI_MODEL  # Use env default (gemini-2.5-flash)
             logger.warning(
                 f"Invalid Gemini model name '{model}' — "
@@ -149,8 +166,8 @@ class LLMClient:
         self.max_tokens = max_tokens
         self._requested_provider = provider or DEFAULT_PROVIDER
 
-        # Resolve provider
-        requested_provider = self._requested_provider
+        # Resolve provider — infer from model when provider is ollama but model is cloud (e.g. gemini-2.5-flash)
+        requested_provider = _infer_provider_from_model(self._requested_provider, model)
 
         if requested_provider == "auto":
             self._init_auto(model, base_url, api_key)

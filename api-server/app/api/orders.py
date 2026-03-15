@@ -250,6 +250,17 @@ async def parse_config_xlsx(
 
 # ── Create / Start / Cancel ─────────────────────────────────────────────────
 
+def _safe_json_loads(s: Optional[str], default=None):
+    """Parse JSON safely; return default on empty/invalid."""
+    if not s or not s.strip():
+        return default
+    try:
+        return json.loads(s)
+    except json.JSONDecodeError as e:
+        logger.warning(f"JSON parse error: {e}")
+        return default
+
+
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def create_order(
     project_name: str = Form(...),
@@ -268,129 +279,139 @@ async def create_order(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    import json
-    from pathlib import Path
-
     from app.config import get_settings
     settings = get_settings()
 
-    order_code = project_name.strip()
-    _validate_order_code(order_code)
+    try:
+        order_code = project_name.strip()
+        _validate_order_code(order_code)
 
-    # Must not exist in DB
-    existing = await db.execute(select(Order).where(Order.order_code == order_code))
-    if existing.scalar_one_or_none():
-        raise HTTPException(
-            status_code=400,
-            detail=f"Order '{order_code}' already exists. Choose a different name.",
+        # Must not exist in DB
+        existing = await db.execute(select(Order).where(Order.order_code == order_code))
+        if existing.scalar_one_or_none():
+            raise HTTPException(
+                status_code=400,
+                detail=f"Order '{order_code}' already exists. Choose a different name.",
+            )
+
+        # Must not exist in data/inputs or data/outputs
+        input_dir = Path(settings.INPUT_DIR) / order_code
+        output_dir = Path(settings.OUTPUT_DIR) / order_code
+        if input_dir.exists():
+            raise HTTPException(
+                status_code=400,
+                detail=f"Order '{order_code}' already has data in inputs. Choose a different name.",
+            )
+        if output_dir.exists():
+            raise HTTPException(
+                status_code=400,
+                detail=f"Order '{order_code}' already has data in outputs. Choose a different name.",
+            )
+
+        order_dir = input_dir
+        order_dir.mkdir(parents=True, exist_ok=True)
+
+        async def save_upload(upload: UploadFile, subdir: str = "") -> str:
+            target_dir = order_dir / subdir if subdir else order_dir
+            target_dir.mkdir(parents=True, exist_ok=True)
+            file_path = target_dir / upload.filename
+            content = await upload.read()
+            file_path.write_bytes(content)
+            return str(file_path)
+
+        pr_path = await save_upload(pr_matrix)
+        pg_path = await save_upload(pg_matrix)
+
+        # Secondary files for Cross-Talk mode
+        secondary_pr_path = None
+        secondary_pg_path = None
+        if secondary_pr_matrix and secondary_pr_matrix.filename:
+            secondary_pr_path = await save_upload(secondary_pr_matrix, "secondary")
+        if secondary_pg_matrix and secondary_pg_matrix.filename:
+            secondary_pg_path = await save_upload(secondary_pg_matrix, "secondary")
+
+        fasta_path = _resolve_fasta(settings.REFERENCE_DIR, species)
+        if not fasta_path:
+            raise HTTPException(
+                status_code=400,
+                detail=f"No reference FASTA found for species '{species}' in {settings.REFERENCE_DIR}/{species}",
+            )
+
+        # Sample config — prefer the JSON field from frontend; fall back to xlsx parsing
+        sample_config_data = _safe_json_loads(sample_config, {})
+
+        config_path = None
+        if config_file and config_file.filename:
+            config_path = await save_upload(config_file)
+            if not sample_config_data.get("samples"):
+                try:
+                    import pandas as pd
+                    df = pd.read_excel(config_path)
+                    if "File_Name" in df.columns and "Group" in df.columns:
+                        sample_config_data = {
+                            "source": "xlsx",
+                            "samples": [
+                                {
+                                    "file_name": str(row["File_Name"]),
+                                    "condition": str(row.get("Condition", row.get("Group", ""))),
+                                    "group": str(row["Group"]),
+                                    "replicate": int(row["Replicate"]) if "Replicate" in df.columns else 1,
+                                }
+                                for _, row in df.iterrows()
+                            ],
+                        }
+                except Exception as e:
+                    logger.warning(f"Failed to parse config xlsx: {e}")
+
+        # Analysis options (downsampling)
+        analysis_options_data = _safe_json_loads(analysis_options)
+        if protein_list and protein_list.filename:
+            protein_list_path = await save_upload(protein_list)
+            if analysis_options_data:
+                analysis_options_data["protein_list_path"] = protein_list_path
+
+        report_options_data = _safe_json_loads(report_options, {})
+        if not report_options_data:
+            raise HTTPException(status_code=400, detail="Invalid report_options JSON")
+
+        order = Order(
+            order_code=order_code,
+            user_id=user.id if user.id != 0 else None,
+            project_name=project_name,
+            ptm_type=ptm_type,
+            species=species,
+            sample_config=sample_config_data,
+            analysis_context=_safe_json_loads(analysis_context),
+            analysis_options=analysis_options_data,
+            report_options=report_options_data,
+            pr_matrix_path=pr_path,
+            pg_matrix_path=pg_path,
+            fasta_path=fasta_path,
+            config_xlsx_path=config_path,
+            secondary_pr_matrix_path=secondary_pr_path,
+            secondary_pg_matrix_path=secondary_pg_path,
         )
 
-    # Must not exist in data/inputs or data/outputs
-    input_dir = Path(settings.INPUT_DIR) / order_code
-    output_dir = Path(settings.OUTPUT_DIR) / order_code
-    if input_dir.exists():
+        db.add(order)
+        await db.commit()
+        await db.refresh(order)
+
+        logger.info(f"Order created: {order_code} ({project_name})")
+
+        return {
+            "id": order.id,
+            "order_code": order.order_code,
+            "status": order.status,
+            "message": "Order created successfully",
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Order create failed")
         raise HTTPException(
-            status_code=400,
-            detail=f"Order '{order_code}' already has data in inputs. Choose a different name.",
+            status_code=500,
+            detail=f"Order creation failed: {str(e)}",
         )
-    if output_dir.exists():
-        raise HTTPException(
-            status_code=400,
-            detail=f"Order '{order_code}' already has data in outputs. Choose a different name.",
-        )
-
-    order_dir = input_dir
-    order_dir.mkdir(parents=True, exist_ok=True)
-
-    async def save_upload(upload: UploadFile, subdir: str = "") -> str:
-        target_dir = order_dir / subdir if subdir else order_dir
-        target_dir.mkdir(parents=True, exist_ok=True)
-        file_path = target_dir / upload.filename
-        content = await upload.read()
-        file_path.write_bytes(content)
-        return str(file_path)
-
-    pr_path = await save_upload(pr_matrix)
-    pg_path = await save_upload(pg_matrix)
-
-    # Secondary files for Cross-Talk mode
-    secondary_pr_path = None
-    secondary_pg_path = None
-    if secondary_pr_matrix and secondary_pr_matrix.filename:
-        secondary_pr_path = await save_upload(secondary_pr_matrix, "secondary")
-    if secondary_pg_matrix and secondary_pg_matrix.filename:
-        secondary_pg_path = await save_upload(secondary_pg_matrix, "secondary")
-
-    fasta_path = _resolve_fasta(settings.REFERENCE_DIR, species)
-    if not fasta_path:
-        raise HTTPException(
-            status_code=400,
-            detail=f"No reference FASTA found for species '{species}' in {settings.REFERENCE_DIR}/{species}",
-        )
-
-    # Sample config — prefer the JSON field from frontend; fall back to xlsx parsing
-    sample_config_data = json.loads(sample_config) if sample_config and sample_config != "{}" else {}
-
-    config_path = None
-    if config_file and config_file.filename:
-        config_path = await save_upload(config_file)
-        if not sample_config_data.get("samples"):
-            try:
-                import pandas as pd
-                df = pd.read_excel(config_path)
-                if "File_Name" in df.columns and "Group" in df.columns:
-                    sample_config_data = {
-                        "source": "xlsx",
-                        "samples": [
-                            {
-                                "file_name": str(row["File_Name"]),
-                                "condition": str(row.get("Condition", row.get("Group", ""))),
-                                "group": str(row["Group"]),
-                                "replicate": int(row["Replicate"]) if "Replicate" in df.columns else 1,
-                            }
-                            for _, row in df.iterrows()
-                        ],
-                    }
-            except Exception as e:
-                logger.warning(f"Failed to parse config xlsx: {e}")
-
-    # Analysis options (downsampling)
-    analysis_options_data = json.loads(analysis_options) if analysis_options else None
-    if protein_list and protein_list.filename:
-        protein_list_path = await save_upload(protein_list)
-        if analysis_options_data:
-            analysis_options_data["protein_list_path"] = protein_list_path
-
-    order = Order(
-        order_code=order_code,
-        user_id=user.id if user.id != 0 else None,
-        project_name=project_name,
-        ptm_type=ptm_type,
-        species=species,
-        sample_config=sample_config_data,
-        analysis_context=json.loads(analysis_context) if analysis_context else None,
-        analysis_options=analysis_options_data,
-        report_options=json.loads(report_options),
-        pr_matrix_path=pr_path,
-        pg_matrix_path=pg_path,
-        fasta_path=fasta_path,
-        config_xlsx_path=config_path,
-        secondary_pr_matrix_path=secondary_pr_path,
-        secondary_pg_matrix_path=secondary_pg_path,
-    )
-
-    db.add(order)
-    await db.commit()
-    await db.refresh(order)
-
-    logger.info(f"Order created: {order_code} ({project_name})")
-
-    return {
-        "id": order.id,
-        "order_code": order.order_code,
-        "status": order.status,
-        "message": "Order created successfully",
-    }
 
 
 @router.post("/{order_id}/start")

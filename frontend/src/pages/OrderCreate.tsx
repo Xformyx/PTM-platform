@@ -5,7 +5,7 @@ import {
   Check, Upload, AlertCircle, ArrowLeft, ArrowRight, Loader2,
   FileSpreadsheet, Regex, Trash2, SlidersHorizontal, Brain,
   Plus, X, MessageSquare, Network, FlaskConical, BookOpen,
-  ChevronDown, ChevronUp, Settings2, RotateCcw, GitMerge,
+  ChevronDown, ChevronUp, Settings2, RotateCcw, GitMerge, Copy,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
@@ -16,6 +16,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+} from "@/components/ui/dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -25,8 +28,15 @@ import { cn } from "@/lib/utils";
 import type { AnalysisOptions } from "@/lib/types";
 import { DEFAULT_ANALYSIS_OPTIONS } from "@/lib/types";
 import AnalysisOptionsModal from "@/components/AnalysisOptionsModal";
+import { CLOUD_MODEL_PRESETS, type CloudProvider } from "@/lib/llm-models";
 
 const STEPS = ["Project & Files", "Sample Config", "Analysis Focus", "Report Options"];
+
+const CLOUD_PROVIDERS = ["gemini", "openai", "anthropic"] as const;
+function isCloudProviderSelection(val: string): boolean {
+  const p = val?.split(":")[0];
+  return !!(p && CLOUD_PROVIDERS.includes(p as any));
+}
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -166,6 +176,8 @@ export default function OrderCreate() {
   const [newQuestion, setNewQuestion] = useState("");
   const [llmModels, setLlmModels] = useState<{ provider: string; model_id: string; name: string }[]>([]);
   const [defaultLlmModel, setDefaultLlmModel] = useState("");
+  const [llmCloudModelVariant, setLlmCloudModelVariant] = useState("");
+  const [ragLlmCloudModelVariant, setRagLlmCloudModelVariant] = useState("");
   const [files, setFiles] = useState<{
     pr_matrix: File | null; pg_matrix: File | null; config_file: File | null;
   }>({ pr_matrix: null, pg_matrix: null, config_file: null });
@@ -185,6 +197,11 @@ export default function OrderCreate() {
   // Analysis Options
   const [analysisOptions, setAnalysisOptions] = useState<AnalysisOptions>({ ...DEFAULT_ANALYSIS_OPTIONS });
   const [analysisModalOpen, setAnalysisModalOpen] = useState(false);
+
+  // Copy from Order
+  const [copyFromOpen, setCopyFromOpen] = useState(false);
+  const [copyFromOrders, setCopyFromOrders] = useState<{ id: number; order_code: string; project_name: string; status: string }[]>([]);
+  const [copyFromLoading, setCopyFromLoading] = useState(false);
 
   // Advanced Report Config
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -213,13 +230,49 @@ export default function OrderCreate() {
       setDefaultLlmModel(c.default_model);
     }).catch(() => {});
     api.get<{ models: { provider: string; model_id: string; name: string; is_active: boolean }[] }>("/llm/models").then((d) => {
-      const list = d.models.filter((m) => m.is_active).map((m) => ({
-        provider: m.provider,
-        model_id: m.model_id,
-        name: m.name,
-      }));
-      setLlmModels(list);
+      const fromApi = d.models.filter((m) => m.is_active).map((m) => ({ provider: m.provider, model_id: m.model_id, name: m.name }));
+      const cloudProviders: { provider: string; model_id: string; name: string }[] = [
+        { provider: "gemini", model_id: "__provider__", name: "Gemini" },
+        { provider: "openai", model_id: "__provider__", name: "OpenAI" },
+        { provider: "anthropic", model_id: "__provider__", name: "Anthropic" },
+      ];
+      const hasProvider = (p: string) => fromApi.some((m) => m.provider === p && m.model_id === "__provider__");
+      const merged = [...fromApi];
+      for (const cp of cloudProviders) { if (!hasProvider(cp.provider)) merged.push(cp); }
+      setLlmModels(merged);
     }).catch(() => {});
+  }, []);
+
+  // Load orders for Copy from
+  useEffect(() => {
+    if (copyFromOpen) {
+      api.get<{ orders: { id: number; order_code: string; project_name: string; status: string }[] }>("/orders?page_size=50")
+        .then((d) => setCopyFromOrders(d.orders))
+        .catch(() => setCopyFromOrders([]));
+    }
+  }, [copyFromOpen]);
+
+  const handleCopyFromOrder = useCallback(async (orderId: number) => {
+    setCopyFromLoading(true);
+    try {
+      const order = await api.get<{ analysis_context: Record<string, string> }>(`/orders/${orderId}`);
+      const ctx = order.analysis_context || {};
+      const str = (v: unknown) => (v != null && typeof v === "string" ? v : "");
+
+      setForm((f) => ({
+        ...f,
+        cell_type: str(ctx.cell_type),
+        treatment: str(ctx.treatment),
+        time_points: str(ctx.time_points),
+        biological_question: str(ctx.biological_question),
+        special_conditions: str(ctx.special_conditions),
+      }));
+      setCopyFromOpen(false);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setCopyFromLoading(false);
+    }
   }, []);
 
   // When PR matrix changes, extract headers
@@ -341,11 +394,19 @@ export default function OrderCreate() {
       research_questions: researchQuestions.length > 0 ? researchQuestions : [],
       ...(form.llm_model ? (() => {
         const [p, m] = form.llm_model.includes(":") ? form.llm_model.split(":", 2) : ["ollama", form.llm_model];
-        return { llm_model: m, llm_provider: p };
+        const presets = CLOUD_MODEL_PRESETS[p as CloudProvider];
+        const model = isCloudProviderSelection(form.llm_model)
+          ? (llmCloudModelVariant || (presets?.some((x) => x.id === m) ? m : presets?.[0]?.id))
+          : m;
+        return model ? { llm_model: model, llm_provider: p } : {};
       })() : {}),
       ...(form.rag_llm_model ? (() => {
         const [p, m] = form.rag_llm_model.includes(":") ? form.rag_llm_model.split(":", 2) : ["ollama", form.rag_llm_model];
-        return { rag_llm_model: m, rag_llm_provider: p };
+        const presets = CLOUD_MODEL_PRESETS[p as CloudProvider];
+        const model = isCloudProviderSelection(form.rag_llm_model)
+          ? (ragLlmCloudModelVariant || (presets?.some((x) => x.id === m) ? m : presets?.[0]?.id))
+          : m;
+        return model ? { rag_llm_model: model, rag_llm_provider: p } : {};
       })() : {}),
       report_config: reportConfigNested,
     }));
@@ -673,6 +734,12 @@ export default function OrderCreate() {
                 initial="enter" animate="center" exit="exit"
                 transition={{ duration: 0.25, ease: "easeInOut" }} className="space-y-5"
               >
+                <div className="flex items-center justify-between gap-4">
+                  <div />
+                  <Button variant="outline" size="sm" onClick={() => setCopyFromOpen(true)} className="gap-2 shrink-0">
+                    <Copy className="h-4 w-4" /> Copy from Order
+                  </Button>
+                </div>
                 {/* Analysis Mode Selection */}
                 <div className="space-y-3">
                   <Label className="text-sm font-semibold">Analysis Mode</Label>
@@ -866,7 +933,18 @@ export default function OrderCreate() {
                   </Label>
                   <Select
                     value={form.rag_llm_model || ""}
-                    onValueChange={(v) => setForm({ ...form, rag_llm_model: v === "__default__" ? "" : v })}
+                    onValueChange={(v) => {
+                      setForm({ ...form, rag_llm_model: v === "__default__" ? "" : v });
+                      if (v === "__default__" || !isCloudProviderSelection(v)) {
+                        setRagLlmCloudModelVariant("");
+                      } else {
+                        const [, m] = v.split(":", 2);
+                        const p = v.split(":")[0] as CloudProvider;
+                        const presets = CLOUD_MODEL_PRESETS[p];
+                        const validId = presets?.some((x) => x.id === m) ? m : presets?.[0]?.id || "";
+                        setRagLlmCloudModelVariant(validId);
+                      }
+                    }}
                   >
                     <SelectTrigger><SelectValue placeholder={`Default (${defaultLlmModel || "auto"})`} /></SelectTrigger>
                     <SelectContent>
@@ -883,6 +961,22 @@ export default function OrderCreate() {
                       })}
                     </SelectContent>
                   </Select>
+                  {isCloudProviderSelection(form.rag_llm_model || "") && (
+                    <div className="flex items-center gap-2 pl-2 border-l-2 border-muted">
+                      <Label className="text-xs shrink-0">세부 모델</Label>
+                      <Select
+                        value={ragLlmCloudModelVariant || CLOUD_MODEL_PRESETS[form.rag_llm_model.split(":")[0] as CloudProvider]?.[0]?.id}
+                        onValueChange={setRagLlmCloudModelVariant}
+                      >
+                        <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {CLOUD_MODEL_PRESETS[form.rag_llm_model.split(":")[0] as CloudProvider]?.map((x) => (
+                            <SelectItem key={x.id} value={x.id}>{x.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
                   <p className="text-xs text-muted-foreground">
                     논문 읽기 및 요약(RAG Enrichment)에서 사용할 LLM 모델. Abstract 분석, 키나제 예측, 기능적 영향 분석에 사용됩니다.
                   </p>
@@ -895,7 +989,18 @@ export default function OrderCreate() {
                   </Label>
                   <Select
                     value={form.llm_model || ""}
-                    onValueChange={(v) => setForm({ ...form, llm_model: v === "__default__" ? "" : v })}
+                    onValueChange={(v) => {
+                      setForm({ ...form, llm_model: v === "__default__" ? "" : v });
+                      if (v === "__default__" || !isCloudProviderSelection(v)) {
+                        setLlmCloudModelVariant("");
+                      } else {
+                        const [, m] = v.split(":", 2);
+                        const p = v.split(":")[0] as CloudProvider;
+                        const presets = CLOUD_MODEL_PRESETS[p];
+                        const validId = presets?.some((x) => x.id === m) ? m : presets?.[0]?.id || "";
+                        setLlmCloudModelVariant(validId);
+                      }
+                    }}
                   >
                     <SelectTrigger><SelectValue placeholder={`Default (${defaultLlmModel || "auto"})`} /></SelectTrigger>
                     <SelectContent>
@@ -912,8 +1017,24 @@ export default function OrderCreate() {
                       })}
                     </SelectContent>
                   </Select>
+                  {isCloudProviderSelection(form.llm_model || "") && (
+                    <div className="flex items-center gap-2 pl-2 border-l-2 border-muted">
+                      <Label className="text-xs shrink-0">세부 모델</Label>
+                      <Select
+                        value={llmCloudModelVariant || CLOUD_MODEL_PRESETS[form.llm_model.split(":")[0] as CloudProvider]?.[0]?.id}
+                        onValueChange={setLlmCloudModelVariant}
+                      >
+                        <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {CLOUD_MODEL_PRESETS[form.llm_model.split(":")[0] as CloudProvider]?.map((x) => (
+                            <SelectItem key={x.id} value={x.id}>{x.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
                   <p className="text-xs text-muted-foreground">
-                    Report Generation에서 사용할 LLM 모델. Default는 서버 설정({defaultLlmModel || "env"})을 따릅니다.
+                    Report Generation에서 사용할 LLM 모델. Cloud 선택 시 세부 모델을 선택하세요.
                   </p>
                 </div>
 
@@ -1125,11 +1246,19 @@ export default function OrderCreate() {
                     </span>
                     <span className="text-muted-foreground">LLM Model (Report)</span>
                     <span className="font-medium font-mono text-xs">
-                      {form.llm_model ? (llmModels.find((m) => `${m.provider}:${m.model_id}` === form.llm_model)?.name || form.llm_model) : `Default (${defaultLlmModel})`}
+                      {form.llm_model
+                        ? (isCloudProviderSelection(form.llm_model)
+                          ? `${llmModels.find((m) => `${m.provider}:${m.model_id}` === form.llm_model)?.name || form.llm_model.split(":")[0]} - ${CLOUD_MODEL_PRESETS[form.llm_model.split(":")[0] as CloudProvider]?.find((x) => x.id === (llmCloudModelVariant || CLOUD_MODEL_PRESETS[form.llm_model.split(":")[0] as CloudProvider]?.[0]?.id))?.name || llmCloudModelVariant || "?"}`
+                          : (llmModels.find((m) => `${m.provider}:${m.model_id}` === form.llm_model)?.name || form.llm_model))
+                        : `Default (${defaultLlmModel})`}
                     </span>
                     <span className="text-muted-foreground">LLM Model (Paper Read)</span>
                     <span className="font-medium font-mono text-xs">
-                      {form.rag_llm_model ? (llmModels.find((m) => `${m.provider}:${m.model_id}` === form.rag_llm_model)?.name || form.rag_llm_model) : `Default (${defaultLlmModel})`}
+                      {form.rag_llm_model
+                        ? (isCloudProviderSelection(form.rag_llm_model)
+                          ? `${llmModels.find((m) => `${m.provider}:${m.model_id}` === form.rag_llm_model)?.name || form.rag_llm_model.split(":")[0]} - ${CLOUD_MODEL_PRESETS[form.rag_llm_model.split(":")[0] as CloudProvider]?.find((x) => x.id === (ragLlmCloudModelVariant || CLOUD_MODEL_PRESETS[form.rag_llm_model.split(":")[0] as CloudProvider]?.[0]?.id))?.name || ragLlmCloudModelVariant || "?"}`
+                          : (llmModels.find((m) => `${m.provider}:${m.model_id}` === form.rag_llm_model)?.name || form.rag_llm_model))
+                        : `Default (${defaultLlmModel})`}
                     </span>
                   </div>
                 </div>
@@ -1158,6 +1287,46 @@ export default function OrderCreate() {
         value={analysisOptions}
         onChange={setAnalysisOptions}
       />
+
+      {/* Copy from Order Dialog */}
+      <Dialog open={copyFromOpen} onOpenChange={setCopyFromOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Copy className="h-5 w-5" /> Copy from Order
+            </DialogTitle>
+            <DialogDescription>
+              Cell Type, Treatment, Time Points, Biological Question, Special Conditions만 가져옵니다. Order name 등 다른 정보는 새로 입력하세요.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[320px] overflow-y-auto space-y-1 py-2">
+            {copyFromOrders.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-4 text-center">등록된 Order가 없습니다.</p>
+            ) : (
+              copyFromOrders.map((o) => (
+                <button
+                  key={o.id}
+                  type="button"
+                  onClick={() => handleCopyFromOrder(o.id)}
+                  disabled={copyFromLoading}
+                  className={cn(
+                    "w-full flex items-center justify-between gap-3 rounded-lg border px-4 py-3 text-left transition-colors",
+                    "hover:bg-muted/50 hover:border-muted-foreground/30",
+                    copyFromLoading && "opacity-60 cursor-not-allowed",
+                  )}
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium text-sm truncate">{o.project_name || o.order_code}</p>
+                    <p className="text-xs text-muted-foreground truncate">{o.order_code}</p>
+                  </div>
+                  <Badge variant="secondary" className="text-[10px] shrink-0">{o.status}</Badge>
+                  {copyFromLoading && <Loader2 className="h-4 w-4 animate-spin shrink-0" />}
+                </button>
+              ))
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -75,6 +75,8 @@ services:
       context: ./api-server
       dockerfile: Dockerfile
     container_name: ptm-api-server
+    env_file:
+      - .env
     volumes:
       - ./api-server/app:/app/app
       - ./data:/app/data
@@ -101,6 +103,7 @@ services:
       LOG_DIR: /app/storage/logs
       HOST_DATA_DIR: ${HOST_DATA_DIR:-}
       LLM_MODEL: ${LLM_MODEL:-gemma3:27b}
+      # Cloud API keys come from env_file (.env) only — avoids shell env overriding
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
@@ -171,6 +174,8 @@ services:
       dockerfile: Dockerfile
     container_name: ptm-worker-rag
     command: celery -A celery_app worker -Q rag_enrichment -c ${RAG_ENRICHMENT_CONCURRENCY:-3} -n rag@%h -l info
+    env_file:
+      - .env
     volumes:
       - ./workers:/app
       - ./data:/app/data
@@ -208,6 +213,8 @@ services:
       dockerfile: Dockerfile
     container_name: ptm-worker-report
     command: celery -A celery_app worker -Q report_generation -c ${REPORT_GENERATION_CONCURRENCY:-2} -n report@%h -l info
+    env_file:
+      - .env
     volumes:
       - ./workers:/app
       - ./data:/app/data
@@ -230,6 +237,7 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1-mini}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
       CYTOSCAPE_HOST: host.docker.internal
       CYTOSCAPE_PORT: ${CYTOSCAPE_PORT:-1234}
     extra_hosts:

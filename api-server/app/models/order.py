@@ -32,7 +32,7 @@ class Order(Base):
     __tablename__ = "orders"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    order_code: Mapped[str] = mapped_column(String(20), unique=True, nullable=False)
+    order_code: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     user_id: Mapped[Optional[int]] = mapped_column(
         Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )

@@ -17,6 +17,8 @@ import {
 } from "@/components/ui/dialog";
 import { StaggerContainer, StaggerItem } from "@/components/motion/stagger-children";
 
+import { CLOUD_PROVIDER_SENTINEL } from "@/lib/llm-models";
+
 interface OllamaModel {
   name: string;
   size: number;
@@ -48,7 +50,7 @@ export default function LlmConfig() {
   const [addCloudOpen, setAddCloudOpen] = useState(false);
   const [addCloudSubmitting, setAddCloudSubmitting] = useState(false);
   const [addCloudForm, setAddCloudForm] = useState({
-    name: "", provider: "gemini" as "gemini" | "openai" | "anthropic", model_id: "", api_key: "",
+    name: "Gemini", provider: "gemini" as "gemini" | "openai" | "anthropic", api_key: "",
   });
   const abortRef = useRef<AbortController | null>(null);
 
@@ -152,18 +154,18 @@ export default function LlmConfig() {
   };
 
   const handleAddCloudModel = async () => {
-    if (!addCloudForm.name.trim() || !addCloudForm.model_id.trim()) return;
+    if (!addCloudForm.name.trim()) return;
     setAddCloudSubmitting(true);
     try {
       await api.post("/llm/models", {
         name: addCloudForm.name.trim(),
         provider: addCloudForm.provider,
-        model_id: addCloudForm.model_id.trim(),
+        model_id: CLOUD_PROVIDER_SENTINEL,
         api_key: addCloudForm.api_key.trim() || undefined,
       });
       await loadAll();
       setAddCloudOpen(false);
-      setAddCloudForm({ name: "", provider: "gemini", model_id: "", api_key: "" });
+      setAddCloudForm({ name: "Gemini", provider: "gemini", api_key: "" });
     } catch (e: any) {
       alert(e.response?.data?.detail || e.message || "Failed to add model");
     } finally {
@@ -319,7 +321,7 @@ export default function LlmConfig() {
                     </div>
                     <Separator className="mb-3" />
                     <div className="space-y-1.5 text-xs text-muted-foreground">
-                      <div>Model: <span className="font-mono">{m.model_id}</span></div>
+                      <div>Model: <span className="font-mono">{m.model_id === CLOUD_PROVIDER_SENTINEL ? "(Order 시 선택)" : m.model_id}</span></div>
                       <div>API Key: {m.has_api_key ? (
                         <Badge variant="success" className="text-[10px] ml-1">Configured</Badge>
                       ) : (
@@ -409,24 +411,20 @@ export default function LlmConfig() {
               <Cloud className="h-5 w-5" /> Add Cloud Model
             </DialogTitle>
             <DialogDescription>
-              Register Gemini, OpenAI, or Anthropic models. Set API key in .env (e.g. GEMINI_API_KEY) or optionally below.
+              Cloud LLM API 키만 등록합니다. Order Create 또는 Re-run 시 세부 모델(gemini-2.5-flash 등)을 선택할 수 있습니다.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 pt-2">
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Display Name</label>
-              <Input
-                placeholder="e.g. Gemini 2.5 Flash"
-                value={addCloudForm.name}
-                onChange={(e) => setAddCloudForm((f) => ({ ...f, name: e.target.value }))}
-              />
-            </div>
             <div className="space-y-2">
               <label className="text-sm font-medium">Provider</label>
               <select
                 className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm"
                 value={addCloudForm.provider}
-                onChange={(e) => setAddCloudForm((f) => ({ ...f, provider: e.target.value as "gemini" | "openai" | "anthropic" }))}
+                onChange={(e) => {
+                  const p = e.target.value as "gemini" | "openai" | "anthropic";
+                  const defaultName = p === "gemini" ? "Gemini" : p === "openai" ? "OpenAI" : "Anthropic";
+                  setAddCloudForm((f) => ({ ...f, provider: p, name: defaultName }));
+                }}
               >
                 <option value="gemini">Gemini</option>
                 <option value="openai">OpenAI</option>
@@ -434,15 +432,12 @@ export default function LlmConfig() {
               </select>
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium">Model ID</label>
+              <label className="text-sm font-medium">Display Name</label>
               <Input
-                placeholder="e.g. gemini-2.5-flash, gpt-4.1-mini"
-                value={addCloudForm.model_id}
-                onChange={(e) => setAddCloudForm((f) => ({ ...f, model_id: e.target.value }))}
+                placeholder="e.g. Gemini (Order Create에서 표시)"
+                value={addCloudForm.name}
+                onChange={(e) => setAddCloudForm((f) => ({ ...f, name: e.target.value }))}
               />
-              <p className="text-xs text-muted-foreground">
-                Gemini: gemini-2.5-flash, gemini-1.5-pro · OpenAI: gpt-4.1-mini, gpt-4o
-              </p>
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium">API Key (optional)</label>
@@ -455,7 +450,7 @@ export default function LlmConfig() {
             </div>
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="outline" onClick={() => setAddCloudOpen(false)}>Cancel</Button>
-              <Button onClick={handleAddCloudModel} disabled={addCloudSubmitting || !addCloudForm.name.trim() || !addCloudForm.model_id.trim()}>
+              <Button onClick={handleAddCloudModel} disabled={addCloudSubmitting || !addCloudForm.name.trim()}>
                 {addCloudSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
                 Add
               </Button>

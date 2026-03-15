@@ -1804,7 +1804,18 @@ export default function OrderDetail() {
   }, [orderId]);
   useEffect(() => {
     api.get<{ models: { provider: string; model_id: string; name: string; is_active: boolean }[] }>("/llm/models").then((d) => {
-      setLlmModels(d.models.filter((m) => m.is_active).map((m) => ({ provider: m.provider, model_id: m.model_id, name: m.name })));
+      const fromApi = d.models.filter((m) => m.is_active).map((m) => ({ provider: m.provider, model_id: m.model_id, name: m.name }));
+      const cloudProviders: { provider: string; model_id: string; name: string }[] = [
+        { provider: "gemini", model_id: "__provider__", name: "Gemini" },
+        { provider: "openai", model_id: "__provider__", name: "OpenAI" },
+        { provider: "anthropic", model_id: "__provider__", name: "Anthropic" },
+      ];
+      const hasProvider = (p: string) => fromApi.some((m) => m.provider === p && m.model_id === "__provider__");
+      const merged = [...fromApi];
+      for (const cp of cloudProviders) {
+        if (!hasProvider(cp.provider)) merged.push(cp);
+      }
+      setLlmModels(merged);
     }).catch(() => {});
   }, []);
   useEffect(() => {
