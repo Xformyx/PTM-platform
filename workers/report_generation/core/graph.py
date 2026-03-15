@@ -184,6 +184,14 @@ def format_citations(state: ReportState) -> dict:
     # -----------------------------------------------------------------------
     import re as _re
 
+    # v1.2 Fix: Normalize LLM citation formats to [N]
+    # LLM sometimes writes [PubMed Ref 1] or [Reference 1] instead of [1]
+    all_text = _re.sub(r'\[PubMed Ref\s*(\d+)\]', r'[\1]', all_text)
+    all_text = _re.sub(r'\[Reference\s*(\d+)\]', r'[\1]', all_text)
+    all_text = _re.sub(r'\[Ref\s*(\d+)\]', r'[\1]', all_text)
+    all_text = _re.sub(r'\[ChromaDB Reference\s*(\d+)\]', r'[\1]', all_text)
+    logger.info("[FORMAT-CIT] Normalized inline citation formats to [N]")
+
     # Discover which citation numbers the LLM actually used in the text
     cited_numbers = sorted(set(int(m) for m in _re.findall(r'\[(\d+)\]', all_text)))
     logger.info(f"[FORMAT-CIT] LLM inline citation numbers found: {cited_numbers[:20]}{'...' if len(cited_numbers) > 20 else ''} (total {len(cited_numbers)})")

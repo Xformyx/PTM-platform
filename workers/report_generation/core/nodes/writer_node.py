@@ -494,7 +494,7 @@ def _format_pubmed_references(all_refs: list, section_type: str, ptms: list) -> 
 
     lines = []
     for idx, ref in enumerate(selected, 1):
-        entry = f"--- PubMed Ref [{idx}] (PMID: {ref['pmid']}) ---"
+        entry = f"--- Reference [{idx}] (PMID: {ref['pmid']}) ---"
         entry += f"\nTitle: {ref['title']}"
         entry += f"\nJournal: {ref['journal']} ({ref['pub_date']})"
         entry += f"\nRelated gene: {ref['gene']}"
@@ -505,8 +505,9 @@ def _format_pubmed_references(all_refs: list, section_type: str, ptms: list) -> 
     return (
         f"\n\n**PubMed Literature References ({len(selected)} papers):**\n"
         "The following are published studies from PubMed that are directly relevant to "
-        "the PTM sites analyzed in this study. Cite these using their reference numbers "
-        "(e.g., [PubMed Ref 1]). Integrate findings from these papers into your writing "
+        "the PTM sites analyzed in this study. Cite these using numbered brackets "
+        "(e.g., [1], [2]) matching the reference numbers below. "
+        "Integrate findings from these papers into your writing "
         "to provide comprehensive biological context.\n\n"
         + "\n\n".join(lines)
     )
