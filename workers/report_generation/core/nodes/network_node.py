@@ -2,13 +2,16 @@
 Network Node — temporal PTM signaling network analysis + Cytoscape visualization.
 Ported from multi_agent_system/agents/network_analyzer.py and ptm_network_automation.py.
 
-v2.0 — Full alignment with cytoscape_network_pipeline_guide.md:
-  GAP 1: Time-point based network analysis (analyze_timepoint logic)
-  GAP 2: Non-PTM node generation from KEGG pathway / enrichment data
-  GAP 3: Enhanced FigureInformationGenerator integration
-  GAP 4: Multi-type legend generation (full, individual panel, temporal comparison)
-  GAP 5: Cross-Talk Figure integration placeholder
-  GAP 6: Color palette alignment with guide
+v3.0 — Cytoscape visualization fix (5 phases):
+  Phase 1: Edge generation rebuilt — PTM→Non-PTM edges, Kinase edges, Non-PTM limit removed
+  Phase 2: Visual style — edge type styles, node size 40-120px, label outside, arrow heads
+  Phase 3: Layout optimization — reduced iterations, kamada-kawai threshold raised
+  Phase 4: Isolated node separation + auto-crop
+  Phase 5: Network integrity validation + SIF export
+
+Previous versions:
+  v2.0: GAP 1-6 alignment with cytoscape_network_pipeline_guide.md
+  v1.0: Initial port from multi_agent_system
 
 Option A: connects to Cytoscape Desktop on the Docker host via host.docker.internal.
 Falls back to text-based legend when Cytoscape is unavailable.
@@ -29,14 +32,14 @@ CYTOSCAPE_HOST = os.getenv("CYTOSCAPE_HOST", "host.docker.internal")
 CYTOSCAPE_PORT = int(os.getenv("CYTOSCAPE_PORT", "1234"))
 
 # ---------------------------------------------------------------------------
-# GAP 6: Color palette aligned with cytoscape_network_pipeline_guide.md §4.3
+# Color palette aligned with cytoscape_network_pipeline_guide.md §4.3
 # ---------------------------------------------------------------------------
 
 NODE_COLORS = {
     "high_active": "#FF0000",       # Red — Log2FC > 1.0
     "moderate_active": "#FF8C00",   # Dark Orange — 0 < Log2FC <= 1.0
     "low_active": "#FFD700",        # Gold — weak activation
-    "inhibited": "#4169E1",         # Royal Blue — Log2FC < 0
+    "inhibited": "#4169E1",         # Royal Blue — Log2FC < -1.0
     "low_inhibited": "#87CEEB",     # Light Blue — -1 < Log2FC < 0
     "non_ptm": "#90EE90",           # Light Green — Non-PTM protein (guide §4.3)
     "neutral": "#C0C0C0",           # Silver — neutral
@@ -49,6 +52,7 @@ EDGE_COLORS = {
     "KEGG": "#228B22",              # Forest Green — KEGG pathway (guide §4.3)
     "KEA3": "#FF4500",              # Orange-Red — Kinase-substrate (guide §4.3)
     "Shared Pathway": "#228B22",    # Same as KEGG
+    "Shared-Partner": "#8B008B",    # Purple — Shared interactor (Phase 2)
     "Kinase-Substrate": "#FF4500",  # Same as KEA3
     "Kinase-Substrate-Predicted": "#D8BFD8",  # Light purple
     "Literature": "#E377C2",        # Pink
@@ -69,7 +73,7 @@ NODE_SHAPES = {
 
 
 # ---------------------------------------------------------------------------
-# GAP 6: Activation state classifier aligned with guide §7.1
+# Activation state classifier aligned with guide §7.1
 # ---------------------------------------------------------------------------
 
 def _classify_state(value: float) -> str:
@@ -140,7 +144,117 @@ def _tp_to_phase(tp: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# GAP 1: Time-point based network analysis (guide §3.1 analyze_timepoint)
+# Phase 5: Network integrity validation
+# ---------------------------------------------------------------------------
+
+def _validate_network(nodes: list, edges: list) -> dict:
+    """Validate network integrity before Cytoscape rendering.
+    
+    Checks:
+    - All edge source/target IDs exist in node list
+    - Orphan nodes (no edges)
+    - Edge type distribution
+    """
+    node_ids = {n["id"] for n in nodes}
+    edge_node_ids = set()
+    for e in edges:
+        edge_node_ids.add(e["source"])
+        edge_node_ids.add(e["target"])
+
+    missing_nodes = edge_node_ids - node_ids
+    orphan_nodes = node_ids - edge_node_ids
+
+    edge_types = defaultdict(int)
+    for e in edges:
+        edge_types[e.get("evidence_type", "Unknown")] += 1
+
+    result = {
+        "total_nodes": len(nodes),
+        "total_edges": len(edges),
+        "ptm_nodes": len([n for n in nodes if n.get("type") == "PTM"]),
+        "non_ptm_nodes": len([n for n in nodes if n.get("type") == "Non-PTM"]),
+        "connected_nodes": len(edge_node_ids & node_ids),
+        "orphan_nodes": len(orphan_nodes),
+        "orphan_node_ids": sorted(list(orphan_nodes))[:20],
+        "missing_nodes": len(missing_nodes),
+        "missing_node_ids": sorted(list(missing_nodes))[:20],
+        "edge_types": dict(edge_types),
+        "is_valid": len(missing_nodes) == 0,
+    }
+
+    logger.info(
+        f"[NET-VALIDATE] nodes={result['total_nodes']} "
+        f"(PTM={result['ptm_nodes']}, Non-PTM={result['non_ptm_nodes']}), "
+        f"edges={result['total_edges']}, "
+        f"connected={result['connected_nodes']}, orphan={result['orphan_nodes']}, "
+        f"missing={result['missing_nodes']}, "
+        f"edge_types={dict(edge_types)}, valid={result['is_valid']}"
+    )
+
+    if missing_nodes:
+        logger.warning(
+            f"[NET-VALIDATE] Missing node IDs (edges reference non-existent nodes): "
+            f"{sorted(list(missing_nodes))[:10]}"
+        )
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Phase 4: Isolated node separation
+# ---------------------------------------------------------------------------
+
+def _separate_isolated_nodes(
+    nodes: list, edges: list
+) -> Tuple[list, list]:
+    """Separate truly isolated nodes (no edges) from connected nodes.
+    
+    Returns:
+        (connected_nodes, isolated_nodes)
+    """
+    connected_ids = set()
+    for e in edges:
+        connected_ids.add(e["source"])
+        connected_ids.add(e["target"])
+
+    connected = [n for n in nodes if n["id"] in connected_ids]
+    isolated = [n for n in nodes if n["id"] not in connected_ids]
+
+    if isolated:
+        logger.info(
+            f"[NET-ISOLATE] Separated {len(isolated)} isolated nodes from "
+            f"{len(connected)} connected nodes"
+        )
+
+    return connected, isolated
+
+
+# ---------------------------------------------------------------------------
+# Phase 5: SIF export for debugging
+# ---------------------------------------------------------------------------
+
+def _export_sif(edges: list, isolated_node_ids: list, output_path: str) -> Optional[str]:
+    """Export network edges as SIF file for verification and debugging.
+    
+    SIF format: source_id\tinteraction_type\ttarget_id
+    Isolated nodes: node_id (single column)
+    """
+    try:
+        sif_path = Path(output_path) / "network.sif"
+        with open(sif_path, "w") as f:
+            for e in edges:
+                f.write(f"{e['source']}\t{e.get('evidence_type', 'pp')}\t{e['target']}\n")
+            for node_id in isolated_node_ids:
+                f.write(f"{node_id}\n")
+        logger.info(f"[SIF-EXPORT] Exported {len(edges)} edges + {len(isolated_node_ids)} isolated to {sif_path}")
+        return str(sif_path)
+    except Exception as e:
+        logger.warning(f"[SIF-EXPORT] Failed: {e}")
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Phase 1: Time-point based network analysis (REBUILT edge generation)
 # ---------------------------------------------------------------------------
 
 def _analyze_timepoint(
@@ -151,13 +265,13 @@ def _analyze_timepoint(
 ) -> dict:
     """Analyze network for a single timepoint/condition.
     
-    Implements guide §3.1 analyze_timepoint() logic:
-    1. Collect activated PTM nodes (Log2FC > threshold)
-    2. Collect active edges (both endpoints activated)
-    3. Collect Non-PTM proteins from KEGG/enrichment data
-    4. Aggregate pathway information
+    Phase 1 REBUILT: Edge generation now includes PTM→Non-PTM connections.
     
-    Returns structure matching guide §3.1 return format.
+    1. Collect activated PTM nodes (Log2FC > threshold)
+    2. Build edges: STRING (PTM↔PTM + PTM↔Non-PTM), KEGG, KEA3 (Kinase→Substrate)
+    3. Collect Non-PTM proteins from enrichment data
+    4. Only include Non-PTM nodes that have edges (Phase 1-C)
+    5. Aggregate pathway information
     """
     # Filter PTMs for this timepoint
     tp_ptms = [p for p in parsed_ptms
@@ -167,12 +281,14 @@ def _analyze_timepoint(
         return {
             "timepoint": timepoint,
             "active_ptm_nodes": [],
+            "inhibited_ptm_nodes": [],
             "non_ptm_nodes": [],
             "active_edges": [],
             "all_edges": [],
             "pathway_summary": {},
             "stats": {
                 "active_ptm_count": 0,
+                "inhibited_ptm_count": 0,
                 "non_ptm_count": 0,
                 "active_edge_count": 0,
                 "total_edge_count": 0,
@@ -183,8 +299,8 @@ def _analyze_timepoint(
     active_ptm_nodes = []
     inhibited_ptm_nodes = []
     all_ptm_nodes = []
-    gene_ptms = defaultdict(list)
-    ptm_genes = set()
+    gene_ptms = defaultdict(list)  # gene -> [node_id, ...]
+    ptm_genes = set()  # uppercase gene names
 
     for ptm in tp_ptms:
         fc = ptm.get("ptm_relative_log2fc", 0)
@@ -215,10 +331,14 @@ def _analyze_timepoint(
             else:
                 inhibited_ptm_nodes.append(node)
 
-    # 2. Build edges from enrichment data
+    # 2. Build edges from enrichment data (PHASE 1 REBUILT)
     all_edges = []
     active_edges = []
     active_node_ids = {n["id"] for n in active_ptm_nodes + inhibited_ptm_nodes}
+
+    # Candidate Non-PTM nodes (will be filtered to only those with edges)
+    candidate_non_ptm = {}  # id -> node dict
+    seen_non_ptm_upper = set()
 
     # Map enriched data by gene for this timepoint
     enriched_by_gene = {}
@@ -233,9 +353,9 @@ def _analyze_timepoint(
         pos = ptm_data.get("position") or ptm_data.get("PTM_Position", "")
         source_id = f"{gene}-{pos}"
 
-        # STRING-DB interactions
+        # --- STRING-DB interactions (PHASE 1-A: PTM→Non-PTM edges added) ---
         string_interactions = enr.get("string_interactions", [])
-        for interaction in string_interactions[:5]:
+        for interaction in string_interactions[:8]:  # Increased from 5 to 8
             if isinstance(interaction, dict):
                 partner = interaction.get("partner", "")
                 confidence = interaction.get("score", 0.7)
@@ -244,22 +364,55 @@ def _analyze_timepoint(
                 confidence = 0.7
             else:
                 continue
-            if partner in gene_ptms:
-                for target_id in gene_ptms[partner]:
+
+            partner_clean = partner.strip()
+            partner_upper = partner_clean.upper()
+            if not partner_clean:
+                continue
+
+            if partner_clean in gene_ptms:
+                # PTM-to-PTM edge (existing behavior)
+                for target_id in gene_ptms[partner_clean]:
                     edge = {
                         "source": source_id,
                         "target": target_id,
                         "evidence_type": "STRING",
                         "confidence": confidence,
                         "pathways": [],
+                        "pathway_str": "",
                     }
                     all_edges.append(edge)
                     if source_id in active_node_ids and target_id in active_node_ids:
                         edge_copy = dict(edge)
                         edge_copy["is_active_edge"] = True
                         active_edges.append(edge_copy)
+            elif partner_upper not in ptm_genes:
+                # PTM → Non-PTM edge (PHASE 1-A NEW)
+                edge = {
+                    "source": source_id,
+                    "target": partner_clean,
+                    "evidence_type": "STRING",
+                    "confidence": confidence,
+                    "pathways": [],
+                    "pathway_str": "",
+                }
+                all_edges.append(edge)
+                # Register candidate Non-PTM node
+                if partner_upper not in seen_non_ptm_upper:
+                    seen_non_ptm_upper.add(partner_upper)
+                    candidate_non_ptm[partner_clean] = {
+                        "id": partner_clean,
+                        "gene": partner_clean,
+                        "site": "",
+                        "type": "Non-PTM",
+                        "value": 0,
+                        "state": "non_ptm",
+                        "identified": True,
+                        "label": partner_clean,
+                        "source": "STRING",
+                    }
 
-        # Shared pathway edges
+        # --- Shared pathway edges (KEGG) ---
         def _pw_str(p):
             return p.get("name", str(p)) if isinstance(p, dict) else str(p)
 
@@ -281,6 +434,7 @@ def _analyze_timepoint(
                     "evidence_type": "KEGG",
                     "confidence": 0.5,
                     "pathways": list(shared)[:3],
+                    "pathway_str": ", ".join(list(shared)[:2]),
                 }
                 all_edges.append(edge)
                 if source_id in active_node_ids and other_id in active_node_ids:
@@ -288,25 +442,57 @@ def _analyze_timepoint(
                     edge_copy["is_active_edge"] = True
                     active_edges.append(edge_copy)
 
-        # Kinase-substrate edges
+        # --- Kinase-substrate edges (PHASE 1-B: Non-PTM kinase nodes) ---
         reg = enr.get("regulation", {})
         upstream = reg.get("upstream_regulators", [])
-        for kinase in upstream[:3]:
+        for kinase in upstream[:5]:  # Increased from 3 to 5
             kinase_name = kinase if isinstance(kinase, str) else str(kinase)
-            if kinase_name in gene_ptms:
-                for target_id in gene_ptms[kinase_name]:
+            kinase_clean = kinase_name.strip()
+            kinase_upper = kinase_clean.upper()
+            if not kinase_clean:
+                continue
+
+            if kinase_clean in gene_ptms:
+                # Kinase is a PTM gene — Kinase→Substrate direction
+                for kinase_node_id in gene_ptms[kinase_clean]:
                     edge = {
-                        "source": target_id,
-                        "target": source_id,
+                        "source": kinase_node_id,  # Kinase (source)
+                        "target": source_id,        # Substrate (target)
                         "evidence_type": "KEA3",
                         "confidence": 0.8,
                         "pathways": [],
+                        "pathway_str": "",
                     }
                     all_edges.append(edge)
-                    if target_id in active_node_ids and source_id in active_node_ids:
+                    if kinase_node_id in active_node_ids and source_id in active_node_ids:
                         edge_copy = dict(edge)
                         edge_copy["is_active_edge"] = True
                         active_edges.append(edge_copy)
+            else:
+                # Kinase is Non-PTM (PHASE 1-B NEW) — most kinases fall here
+                edge = {
+                    "source": kinase_clean,   # Kinase Non-PTM node (source)
+                    "target": source_id,       # PTM Substrate (target)
+                    "evidence_type": "KEA3",
+                    "confidence": 0.8,
+                    "pathways": [],
+                    "pathway_str": "",
+                }
+                all_edges.append(edge)
+                # Register candidate Non-PTM kinase node
+                if kinase_upper not in seen_non_ptm_upper:
+                    seen_non_ptm_upper.add(kinase_upper)
+                    candidate_non_ptm[kinase_clean] = {
+                        "id": kinase_clean,
+                        "gene": kinase_clean,
+                        "site": "",
+                        "type": "Non-PTM",
+                        "value": 0,
+                        "state": "non_ptm",
+                        "identified": True,
+                        "label": kinase_clean,
+                        "source": "KEA3",
+                    }
 
     # Deduplicate edges
     def _dedup_edges(edges):
@@ -322,8 +508,21 @@ def _analyze_timepoint(
     all_edges = _dedup_edges(all_edges)
     active_edges = _dedup_edges(active_edges)
 
-    # 3. GAP 2: Non-PTM node generation from enrichment data
-    non_ptm_nodes = _extract_non_ptm_nodes(enriched_by_gene, ptm_genes, timepoint)
+    # Phase 1-C: Only include Non-PTM nodes that actually have edges
+    edge_node_ids = set()
+    for e in all_edges:
+        edge_node_ids.add(e["source"])
+        edge_node_ids.add(e["target"])
+
+    non_ptm_nodes = [
+        n for n in candidate_non_ptm.values()
+        if n["id"] in edge_node_ids
+    ]
+
+    logger.info(
+        f"[NET-TP] {timepoint}: candidate_non_ptm={len(candidate_non_ptm)}, "
+        f"connected_non_ptm={len(non_ptm_nodes)}, edges={len(all_edges)}"
+    )
 
     # 4. Pathway summary
     pathway_summary = defaultdict(list)
@@ -352,108 +551,16 @@ def _analyze_timepoint(
 
 
 # ---------------------------------------------------------------------------
-# GAP 2: Non-PTM node generation (guide §3.1 step 3)
-# ---------------------------------------------------------------------------
-
-def _extract_non_ptm_nodes(
-    enriched_by_gene: dict,
-    ptm_genes: set,
-    timepoint: str,
-) -> list:
-    """Extract Non-PTM protein nodes from enrichment data.
-    
-    Non-PTM proteins are those found in KEGG pathways or STRING interactions
-    but NOT already included as PTM nodes. They represent pathway members,
-    kinases, and interactors that provide network context.
-    
-    Guide §3.1 step 3: KEGG pathway에 포함된 단백질 중 PTM으로 이미 포함되지 않은 것.
-    """
-    non_ptm_nodes = []
-    seen_genes = set()
-
-    for gene, ptm_data in enriched_by_gene.items():
-        enr = ptm_data.get("rag_enrichment", {})
-
-        # Extract from STRING interactions
-        string_interactions = enr.get("string_interactions", [])
-        for interaction in string_interactions[:8]:
-            if isinstance(interaction, dict):
-                partner = interaction.get("partner", "")
-                score = interaction.get("score", 0)
-            elif isinstance(interaction, str):
-                partner = interaction.split("(")[0].strip() if "(" in interaction else interaction
-                score = 0
-            else:
-                continue
-
-            partner_upper = partner.strip().upper()
-            if partner_upper and partner_upper not in ptm_genes and partner_upper not in seen_genes:
-                seen_genes.add(partner_upper)
-                non_ptm_nodes.append({
-                    "id": partner.strip(),
-                    "gene": partner.strip(),
-                    "site": "",
-                    "type": "Non-PTM",
-                    "value": score if score else 0,
-                    "state": "non_ptm",
-                    "identified": True,
-                    "label": partner.strip(),
-                    "source": "STRING",
-                })
-
-        # Extract from pathways
-        pathways = enr.get("pathways", [])
-        for pw in pathways:
-            if isinstance(pw, dict):
-                pw_genes = pw.get("genes", [])
-                for pg in pw_genes:
-                    pg_name = pg if isinstance(pg, str) else str(pg)
-                    pg_upper = pg_name.strip().upper()
-                    if pg_upper and pg_upper not in ptm_genes and pg_upper not in seen_genes:
-                        seen_genes.add(pg_upper)
-                        non_ptm_nodes.append({
-                            "id": pg_name.strip(),
-                            "gene": pg_name.strip(),
-                            "site": "",
-                            "type": "Non-PTM",
-                            "value": 0,
-                            "state": "non_ptm",
-                            "identified": True,
-                            "label": pg_name.strip(),
-                            "source": "KEGG",
-                        })
-
-        # Extract upstream regulators as potential kinase nodes
-        reg = enr.get("regulation", {})
-        upstream = reg.get("upstream_regulators", [])
-        for kinase in upstream[:3]:
-            kinase_name = kinase if isinstance(kinase, str) else str(kinase)
-            kinase_upper = kinase_name.strip().upper()
-            if kinase_upper and kinase_upper not in ptm_genes and kinase_upper not in seen_genes:
-                seen_genes.add(kinase_upper)
-                non_ptm_nodes.append({
-                    "id": kinase_name.strip(),
-                    "gene": kinase_name.strip(),
-                    "site": "",
-                    "type": "Non-PTM",
-                    "value": 0,
-                    "state": "non_ptm",
-                    "identified": True,
-                    "label": kinase_name.strip(),
-                    "source": "KEA3",
-                })
-
-    # Limit to top 30 Non-PTM nodes to avoid clutter
-    return non_ptm_nodes[:30]
-
-
-# ---------------------------------------------------------------------------
-# Build combined network data (backward compatible)
+# Build combined network data (PHASE 1 REBUILT)
 # ---------------------------------------------------------------------------
 
 def _build_network_data(parsed_ptms: list, enriched_data: list) -> dict:
     """Build combined network nodes and edges from all PTMs.
-    This is the backward-compatible single-network builder.
+    
+    Phase 1 REBUILT:
+    - STRING edges now connect PTM→Non-PTM (not just PTM→PTM)
+    - KEA3 edges now connect Non-PTM Kinase→PTM Substrate
+    - Non-PTM node limit removed (only edge-connected nodes included)
     """
     nodes = []
     edges = []
@@ -474,17 +581,20 @@ def _build_network_data(parsed_ptms: list, enriched_data: list) -> dict:
         })
         gene_ptms[ptm["gene"]].append(node_id)
 
-    # Build edges from enrichment data
     ptm_genes = {g.upper() for g in gene_ptms.keys()}
+
+    # Candidate Non-PTM nodes (will be filtered to only those with edges)
+    candidate_non_ptm = {}  # id -> node dict
+    seen_non_ptm_upper = set()
 
     for ptm_data in enriched_data:
         enr = ptm_data.get("rag_enrichment", {})
         gene = ptm_data.get("gene") or ptm_data.get("Gene.Name", "")
         source_id = f"{gene}-{ptm_data.get('position') or ptm_data.get('PTM_Position', '')}"
 
-        # STRING-DB
+        # --- STRING-DB (PHASE 1-A: PTM→Non-PTM edges) ---
         string_interactions = enr.get("string_interactions", [])
-        for interaction in string_interactions[:5]:
+        for interaction in string_interactions[:8]:
             if isinstance(interaction, dict):
                 partner = interaction.get("partner", "")
                 confidence = interaction.get("score", 0.7)
@@ -493,8 +603,15 @@ def _build_network_data(parsed_ptms: list, enriched_data: list) -> dict:
                 confidence = 0.7
             else:
                 continue
-            if partner in gene_ptms:
-                for target_id in gene_ptms[partner]:
+
+            partner_clean = partner.strip()
+            partner_upper = partner_clean.upper()
+            if not partner_clean:
+                continue
+
+            if partner_clean in gene_ptms:
+                # PTM-to-PTM edge
+                for target_id in gene_ptms[partner_clean]:
                     edges.append({
                         "source": source_id,
                         "target": target_id,
@@ -503,8 +620,30 @@ def _build_network_data(parsed_ptms: list, enriched_data: list) -> dict:
                         "pathways": [],
                         "pathway_str": "",
                     })
+            elif partner_upper not in ptm_genes:
+                # PTM → Non-PTM edge (PHASE 1-A NEW)
+                edges.append({
+                    "source": source_id,
+                    "target": partner_clean,
+                    "evidence_type": "STRING",
+                    "confidence": confidence,
+                    "pathways": [],
+                    "pathway_str": "",
+                })
+                if partner_upper not in seen_non_ptm_upper:
+                    seen_non_ptm_upper.add(partner_upper)
+                    candidate_non_ptm[partner_clean] = {
+                        "id": partner_clean,
+                        "gene": partner_clean,
+                        "site": "",
+                        "type": "Non-PTM",
+                        "value": 0,
+                        "state": "non_ptm",
+                        "label": partner_clean,
+                        "source": "STRING",
+                    }
 
-        # Shared pathway edges
+        # --- Shared pathway edges (KEGG) ---
         def _pw_str(p):
             return p.get("name", str(p)) if isinstance(p, dict) else str(p)
         pathways = enr.get("pathways", [])
@@ -527,23 +666,51 @@ def _build_network_data(parsed_ptms: list, enriched_data: list) -> dict:
                     "pathway_str": ", ".join(list(shared)[:2]),
                 })
 
-        # Kinase-substrate edges
+        # --- Kinase-substrate edges (PHASE 1-B: Non-PTM kinase nodes) ---
         reg = enr.get("regulation", {})
         upstream = reg.get("upstream_regulators", [])
-        for kinase in upstream[:3]:
+        for kinase in upstream[:5]:
             kinase_name = kinase if isinstance(kinase, str) else str(kinase)
-            if kinase_name in gene_ptms:
-                for target_id in gene_ptms[kinase_name]:
+            kinase_clean = kinase_name.strip()
+            kinase_upper = kinase_clean.upper()
+            if not kinase_clean:
+                continue
+
+            if kinase_clean in gene_ptms:
+                # Kinase is PTM gene — Kinase→Substrate direction
+                for kinase_node_id in gene_ptms[kinase_clean]:
                     edges.append({
-                        "source": target_id,
+                        "source": kinase_node_id,
                         "target": source_id,
                         "evidence_type": "KEA3",
                         "confidence": 0.8,
                         "pathways": [],
                         "pathway_str": "",
                     })
+            else:
+                # Kinase is Non-PTM (PHASE 1-B NEW)
+                edges.append({
+                    "source": kinase_clean,
+                    "target": source_id,
+                    "evidence_type": "KEA3",
+                    "confidence": 0.8,
+                    "pathways": [],
+                    "pathway_str": "",
+                })
+                if kinase_upper not in seen_non_ptm_upper:
+                    seen_non_ptm_upper.add(kinase_upper)
+                    candidate_non_ptm[kinase_clean] = {
+                        "id": kinase_clean,
+                        "gene": kinase_clean,
+                        "site": "",
+                        "type": "Non-PTM",
+                        "value": 0,
+                        "state": "non_ptm",
+                        "label": kinase_clean,
+                        "source": "KEA3",
+                    }
 
-    # Deduplicate
+    # Deduplicate edges
     seen = set()
     unique_edges = []
     for e in edges:
@@ -552,32 +719,25 @@ def _build_network_data(parsed_ptms: list, enriched_data: list) -> dict:
             seen.add(key)
             unique_edges.append(e)
 
-    # GAP 2: Add Non-PTM nodes to combined network
-    non_ptm_nodes = []
-    seen_non_ptm = set()
-    for ptm_data in enriched_data:
-        enr = ptm_data.get("rag_enrichment", {})
-        for interaction in enr.get("string_interactions", [])[:5]:
-            if isinstance(interaction, dict):
-                partner = interaction.get("partner", "")
-            elif isinstance(interaction, str):
-                partner = interaction.split("(")[0].strip() if "(" in interaction else interaction
-            else:
-                continue
-            partner_upper = partner.strip().upper()
-            if partner_upper and partner_upper not in ptm_genes and partner_upper not in seen_non_ptm:
-                seen_non_ptm.add(partner_upper)
-                non_ptm_nodes.append({
-                    "id": partner.strip(),
-                    "gene": partner.strip(),
-                    "site": "",
-                    "type": "Non-PTM",
-                    "value": 0,
-                    "state": "non_ptm",
-                    "label": partner.strip(),
-                })
+    # Phase 1-C: Only include Non-PTM nodes that have edges (no arbitrary limit)
+    edge_node_ids = set()
+    for e in unique_edges:
+        edge_node_ids.add(e["source"])
+        edge_node_ids.add(e["target"])
 
-    all_nodes = nodes + non_ptm_nodes[:20]
+    connected_non_ptm = [
+        n for n in candidate_non_ptm.values()
+        if n["id"] in edge_node_ids
+    ]
+
+    all_nodes = nodes + connected_non_ptm
+
+    logger.info(
+        f"[NET-BUILD] Combined network: PTM_nodes={len(nodes)}, "
+        f"Non-PTM_candidates={len(candidate_non_ptm)}, "
+        f"Non-PTM_connected={len(connected_non_ptm)}, "
+        f"edges={len(unique_edges)}"
+    )
 
     return {"nodes": all_nodes, "edges": unique_edges}
 
@@ -717,9 +877,9 @@ def _generate_legends(
     legend_lines.append("- Hexagon: Pathway members")
     legend_lines.append("")
 
-    # Node Size Legend (guide §5.2 section 5)
+    # Node Size Legend (Phase 2: updated range)
     legend_lines.append("**Node Size Legend**:")
-    legend_lines.append("- Node size is proportional to |Log2FC| magnitude (30–100px range)")
+    legend_lines.append("- Node size is proportional to |Log2FC| magnitude (40–120px range)")
     legend_lines.append("")
 
     # Edge Types
@@ -729,7 +889,9 @@ def _generate_legends(
         evidence_types[e.get("evidence_type", "Unknown")] += 1
     for et, cnt in sorted(evidence_types.items(), key=lambda x: -x[1]):
         color = EDGE_COLORS.get(et, EDGE_COLORS["default"])
-        legend_lines.append(f"- {et} ({color}): {cnt} connections")
+        style = "solid" if et in ("STRING", "STRING-DB", "KEA3", "Kinase-Substrate") else "dashed"
+        arrow = " (directed →)" if et in ("KEA3", "Kinase-Substrate") else ""
+        legend_lines.append(f"- {et} ({color}, {style}{arrow}): {cnt} connections")
     legend_lines.append("")
 
     # Key Active PTMs
@@ -850,6 +1012,7 @@ def run_network_analysis(state: dict) -> dict:
     """Analyze temporal networks and optionally generate Cytoscape images.
     
     GAP 1: Now performs per-timepoint analysis when multiple conditions exist.
+    Phase 5: Validates network integrity before Cytoscape rendering.
     """
     os.environ["DEFAULT_BASE_URL"] = _cytoscape_base_url()
 
@@ -875,13 +1038,23 @@ def run_network_analysis(state: dict) -> dict:
                 f"active={tp_result['stats']['active_ptm_count']}, "
                 f"inhibited={tp_result['stats'].get('inhibited_ptm_count', 0)}, "
                 f"non_ptm={tp_result['stats']['non_ptm_count']}, "
-                f"edges={tp_result['stats']['active_edge_count']}"
+                f"edges={tp_result['stats']['total_edge_count']}"
             )
     else:
         logger.info("[NET-NODE] Single timepoint/condition — using combined network")
 
     # Build combined network data (for backward compatibility + main network image)
     network_data = _build_network_data(parsed_ptms, enriched_data)
+
+    # Phase 5: Validate network integrity
+    validation = _validate_network(network_data["nodes"], network_data["edges"])
+
+    # Phase 5: Export SIF for debugging
+    _export_sif(
+        network_data["edges"],
+        validation.get("orphan_node_ids", []),
+        output_dir,
+    )
 
     # GAP 4: Generate multi-type legends
     legends = _generate_legends(network_data, parsed_ptms, timepoint_results)
@@ -898,7 +1071,7 @@ def run_network_analysis(state: dict) -> dict:
         logger.info("Cytoscape Desktop connected via host.docker.internal")
         if cb:
             cb(62, "Generating Cytoscape network images")
-        # GAP 1: Generate per-timepoint networks if available
+        # Phase 1/4: Generate networks with isolated node separation
         network_images = _generate_cytoscape_networks(
             network_data, output_dir, parsed_ptms, timepoint_results
         )
@@ -922,6 +1095,7 @@ def run_network_analysis(state: dict) -> dict:
             "ptm_count": len(parsed_ptms),
             "timepoint_results": timepoint_results,
             "timepoints": timepoints,
+            "validation": validation,
         },
         "network_results": network_results,
     }
@@ -931,7 +1105,9 @@ def run_network_analysis(state: dict) -> dict:
         f"cytoscape_connected={cytoscape_connected}, "
         f"timepoints={timepoints}, "
         f"network_images={list(network_images.keys()) if network_images else 'EMPTY'}, "
-        f"network_results_keys={list(network_results.keys()) if network_results else 'EMPTY'}"
+        f"network_results_keys={list(network_results.keys()) if network_results else 'EMPTY'}, "
+        f"validation={{'nodes': {validation['total_nodes']}, 'edges': {validation['total_edges']}, "
+        f"'orphan': {validation['orphan_nodes']}, 'valid': {validation['is_valid']}}}"
     )
 
     return result
@@ -994,8 +1170,8 @@ def _generate_cytoscape_networks(
 ) -> Dict[str, str]:
     """Generate Cytoscape network visualizations and export as PNG.
     
-    GAP 1: Now creates per-timepoint networks when timepoint_results are available.
-    Creates a main combined network + individual timepoint networks.
+    Phase 1/4: Creates networks with proper edge connectivity.
+    Phase 4: Separates isolated nodes before rendering.
     """
     try:
         import py4cytoscape as p4c
@@ -1016,8 +1192,34 @@ def _generate_cytoscape_networks(
     network_images = {}
 
     try:
+        # Phase 4: Separate isolated nodes from connected nodes
+        connected_nodes, isolated_nodes = _separate_isolated_nodes(nodes, edges)
+
+        # Phase 5: Add missing Non-PTM nodes that are referenced in edges but not in node list
+        node_ids = {n["id"] for n in connected_nodes}
+        edge_node_ids = set()
+        for e in edges:
+            edge_node_ids.add(e["source"])
+            edge_node_ids.add(e["target"])
+        missing_ids = edge_node_ids - node_ids
+        for mid in missing_ids:
+            connected_nodes.append({
+                "id": mid,
+                "gene": mid,
+                "site": "",
+                "type": "Non-PTM",
+                "value": 0,
+                "state": "non_ptm",
+                "label": mid,
+            })
+            logger.debug(f"[CYTO-GEN] Added missing node for edge reference: {mid}")
+
+        if not connected_nodes:
+            logger.warning("[CYTO-GEN] No connected nodes after isolation separation")
+            connected_nodes = nodes  # Fallback to all nodes
+
         # --- Main combined network ---
-        nodes_df = pd.DataFrame(nodes)
+        nodes_df = pd.DataFrame(connected_nodes)
         edges_df = pd.DataFrame(edges) if edges else None
 
         network_name = "PTM_Signaling_Network"
@@ -1029,15 +1231,17 @@ def _generate_cytoscape_networks(
         )
         logger.info(f"Cytoscape network created: {network_name} (SUID: {network_suid})")
 
-        _apply_visual_style(p4c, network_suid, network_name, nodes)
+        _apply_visual_style(p4c, network_suid, network_name, connected_nodes)
         time.sleep(1)
 
         png_path = _save_network_png(p4c, network_suid, network_name, str(output_path))
         if png_path:
+            # Phase 4: Auto-crop whitespace
+            _auto_crop_image(png_path)
             network_images["main"] = png_path
             logger.info(f"Main network image saved: {png_path}")
 
-        # --- GAP 1: Per-timepoint networks ---
+        # --- Per-timepoint networks ---
         if timepoint_results:
             for tp, tp_data in sorted(
                 timepoint_results.items(), key=lambda x: _tp_to_minutes(x[0])
@@ -1047,12 +1251,31 @@ def _generate_cytoscape_networks(
                     tp_data.get("inhibited_ptm_nodes", []) +
                     tp_data.get("non_ptm_nodes", [])
                 )
-                tp_edges = tp_data.get("active_edges", [])
+                tp_edges = tp_data.get("all_edges", [])  # Use all_edges, not just active_edges
 
                 if not tp_nodes:
                     continue
 
-                tp_nodes_df = pd.DataFrame(tp_nodes)
+                # Phase 4: Separate isolated for timepoint
+                tp_connected, tp_isolated = _separate_isolated_nodes(tp_nodes, tp_edges)
+
+                # Phase 5: Add missing nodes referenced in edges
+                tp_node_ids = {n["id"] for n in tp_connected}
+                tp_edge_ids = set()
+                for e in tp_edges:
+                    tp_edge_ids.add(e["source"])
+                    tp_edge_ids.add(e["target"])
+                tp_missing = tp_edge_ids - tp_node_ids
+                for mid in tp_missing:
+                    tp_connected.append({
+                        "id": mid, "gene": mid, "site": "", "type": "Non-PTM",
+                        "value": 0, "state": "non_ptm", "label": mid,
+                    })
+
+                if not tp_connected:
+                    tp_connected = tp_nodes
+
+                tp_nodes_df = pd.DataFrame(tp_connected)
                 tp_edges_df = pd.DataFrame(tp_edges) if tp_edges else None
 
                 safe_tp = tp.replace(" ", "_").replace("/", "_")
@@ -1062,12 +1285,13 @@ def _generate_cytoscape_networks(
                         nodes=tp_nodes_df,
                         edges=tp_edges_df,
                         title=tp_net_name,
-                        collection=f"PTM_Networks_Temporal",
+                        collection="PTM_Networks_Temporal",
                     )
-                    _apply_visual_style(p4c, tp_suid, tp_net_name, tp_nodes)
+                    _apply_visual_style(p4c, tp_suid, tp_net_name, tp_connected)
                     time.sleep(1)
                     tp_png = _save_network_png(p4c, tp_suid, tp_net_name, str(output_path))
                     if tp_png:
+                        _auto_crop_image(tp_png)
                         network_images[tp] = tp_png
                         logger.info(f"Timepoint network image saved: {tp} -> {tp_png}")
                 except Exception as e:
@@ -1088,15 +1312,24 @@ def _generate_cytoscape_networks(
                         for ptm in parsed_ptms
                         if (ptm.get("condition") or ptm.get("Condition", "")) == cond
                     }
-                    cond_nodes = [n for n in nodes if n["gene"] in cond_ptm_genes]
+                    cond_nodes = [n for n in connected_nodes if n.get("gene") in cond_ptm_genes or n.get("id") in cond_ptm_genes]
                     if not cond_nodes:
                         continue
 
                     cond_node_ids = {n["id"] for n in cond_nodes}
                     cond_edges = [
                         e for e in edges
-                        if e["source"] in cond_node_ids and e["target"] in cond_node_ids
+                        if e["source"] in cond_node_ids or e["target"] in cond_node_ids
                     ]
+                    # Include Non-PTM nodes referenced in condition edges
+                    cond_edge_ids = set()
+                    for e in cond_edges:
+                        cond_edge_ids.add(e["source"])
+                        cond_edge_ids.add(e["target"])
+                    for mid in cond_edge_ids - cond_node_ids:
+                        matching = [n for n in connected_nodes if n["id"] == mid]
+                        if matching:
+                            cond_nodes.append(matching[0])
 
                     cond_nodes_df = pd.DataFrame(cond_nodes)
                     cond_edges_df = pd.DataFrame(cond_edges) if cond_edges else None
@@ -1114,6 +1347,7 @@ def _generate_cytoscape_networks(
                         time.sleep(1)
                         cond_png = _save_network_png(p4c, cond_suid, cond_net_name, str(output_path))
                         if cond_png:
+                            _auto_crop_image(cond_png)
                             network_images[cond] = cond_png
                             logger.info(f"Condition network image saved: {cond} -> {cond_png}")
                     except Exception as e:
@@ -1129,14 +1363,19 @@ def _generate_cytoscape_networks(
     return network_images
 
 
+# ---------------------------------------------------------------------------
+# Phase 2: Visual style (REBUILT)
+# ---------------------------------------------------------------------------
+
 def _apply_visual_style(p4c, network_suid: int, network_name: str, nodes: list):
     """Apply publication-quality visual style to Cytoscape network.
     
-    GAP 6: Colors aligned with guide §4.3 and §7.2.
-    - Node colors by activation state (guide palette)
-    - Node shapes by type (PTM=Circle, Non-PTM=Diamond)
-    - Node size scaled by |Log2FC| magnitude
-    - Edge colors by evidence type (guide palette)
+    Phase 2 REBUILT:
+    - Node size range: 40-120px (was 30-100px)
+    - Edge line styles: STRING/KEA3=SOLID, KEGG/Shared-Partner=LONG_DASH
+    - KEA3 edges: directed arrow heads
+    - Label position: below node (was inside)
+    - Label font size: 9px (was 11px)
     """
     try:
         style_name = f"PTM_Pub_Style_{network_name}"
@@ -1147,7 +1386,7 @@ def _apply_visual_style(p4c, network_suid: int, network_name: str, nodes: list):
 
         # ========== NODE STYLING ==========
 
-        # GAP 6: Node color aligned with guide §4.3 / §7.2
+        # Node color aligned with guide §4.3 / §7.2
         p4c.set_node_color_mapping(
             table_column="state",
             table_column_values=list(NODE_COLORS.keys()),
@@ -1164,21 +1403,21 @@ def _apply_visual_style(p4c, network_suid: int, network_name: str, nodes: list):
             style_name=style_name,
         )
 
-        # Node size (guide §4.3 — 30~100px range)
+        # Phase 2: Node size 40-120px (was 30-100px)
         p4c.set_node_size_mapping(
             table_column="value",
             table_column_values=[-5, 0, 5, 15],
-            sizes=[30, 40, 60, 100],
+            sizes=[40, 50, 80, 120],
             mapping_type="c",
             style_name=style_name,
         )
 
-        # Node label
+        # Phase 2: Node label — below node, smaller font
         p4c.set_node_label_mapping(table_column="label", style_name=style_name)
-        p4c.set_node_font_size_default(11, style_name=style_name)
+        p4c.set_node_font_size_default(9, style_name=style_name)
 
         try:
-            p4c.set_node_font_face_default("Arial Bold,plain,14", style_name=style_name)
+            p4c.set_node_font_face_default("Arial Bold,plain,12", style_name=style_name)
         except Exception:
             pass
 
@@ -1186,6 +1425,15 @@ def _apply_visual_style(p4c, network_suid: int, network_name: str, nodes: list):
             p4c.set_node_label_color_default("#000000", style_name=style_name)
         except Exception:
             pass
+
+        # Phase 2: Label position — below node
+        try:
+            p4c.set_node_label_position_default(
+                "S,N,c,0.00,5.00",  # South of node, 5px offset
+                style_name=style_name,
+            )
+        except Exception:
+            logger.debug("set_node_label_position_default not supported in this py4cytoscape version")
 
         # Node border
         p4c.set_node_border_width_default(2.0, style_name=style_name)
@@ -1198,7 +1446,7 @@ def _apply_visual_style(p4c, network_suid: int, network_name: str, nodes: list):
 
         # ========== EDGE STYLING ==========
 
-        # GAP 6: Edge colors aligned with guide §4.3
+        # Edge colors aligned with guide §4.3
         p4c.set_edge_color_mapping(
             table_column="evidence_type",
             table_column_values=list(EDGE_COLORS.keys()),
@@ -1219,17 +1467,37 @@ def _apply_visual_style(p4c, network_suid: int, network_name: str, nodes: list):
         except Exception:
             p4c.set_edge_line_width_default(2.5, style_name=style_name)
 
-        # Kinase-substrate edge line style — dashed
+        # Phase 2: Edge line style — STRING/KEA3=SOLID, KEGG/Shared-Partner=LONG_DASH
         try:
             p4c.set_edge_line_style_mapping(
                 table_column="evidence_type",
-                table_column_values=["KEA3", "Kinase-Substrate", "Kinase-Substrate-Predicted"],
-                line_styles=["LONG_DASH", "LONG_DASH", "DOT"],
+                table_column_values=[
+                    "STRING", "STRING-DB", "KEA3", "Kinase-Substrate",
+                    "KEGG", "Shared Pathway", "Shared-Partner",
+                    "Kinase-Substrate-Predicted",
+                ],
+                line_styles=[
+                    "SOLID", "SOLID", "SOLID", "SOLID",
+                    "LONG_DASH", "LONG_DASH", "LONG_DASH",
+                    "DOT",
+                ],
                 mapping_type="d",
                 style_name=style_name,
             )
         except Exception:
             pass
+
+        # Phase 2: KEA3 edges — directed arrow heads (Kinase → Substrate)
+        try:
+            p4c.set_edge_target_arrow_shape_mapping(
+                table_column="evidence_type",
+                table_column_values=["KEA3", "Kinase-Substrate", "Kinase-Substrate-Predicted"],
+                shapes=["ARROW", "ARROW", "ARROW"],
+                mapping_type="d",
+                style_name=style_name,
+            )
+        except Exception:
+            logger.debug("set_edge_target_arrow_shape_mapping not supported")
 
         # Edge opacity
         try:
@@ -1240,7 +1508,7 @@ def _apply_visual_style(p4c, network_suid: int, network_name: str, nodes: list):
         # Apply style
         p4c.set_visual_style(style_name, network=network_suid)
 
-        # ========== LAYOUT ==========
+        # ========== LAYOUT (Phase 3) ==========
         _apply_optimized_layout(p4c, network_suid, nodes)
 
         logger.info(f"Publication-quality visual style applied: {style_name}")
@@ -1254,25 +1522,38 @@ def _apply_visual_style(p4c, network_suid: int, network_name: str, nodes: list):
             pass
 
 
+# ---------------------------------------------------------------------------
+# Phase 3: Layout optimization (REBUILT)
+# ---------------------------------------------------------------------------
+
 def _apply_optimized_layout(p4c, network_suid: int, nodes: list):
-    """Apply optimized layout based on network size (guide §4.3).
+    """Apply optimized layout based on network size.
     
-    Force-directed layout with overlap removal.
+    Phase 3 REBUILT:
+    - Kamada-Kawai threshold raised to 50 (was 20)
+    - Iteration count reduced to 2 (was 5)
+    - force-directed-cl overlap removal removed (unstable)
     """
     try:
         node_count = len(nodes)
         edge_count = len(p4c.get_all_edges(network=network_suid))
 
-        logger.info(f"Applying layout for {node_count} nodes, {edge_count} edges")
+        logger.info(f"[LAYOUT] Applying layout for {node_count} nodes, {edge_count} edges")
 
         if edge_count == 0:
+            # Truly no edges — circular layout
             p4c.layout_network("circular", network=network_suid)
-        elif node_count <= 20 and edge_count >= node_count:
+            logger.info("[LAYOUT] No edges — using circular layout")
+        elif node_count <= 50 and edge_count >= node_count:
+            # Small well-connected network: Kamada-Kawai (Phase 3: threshold 20→50)
             try:
                 p4c.layout_network("kamada-kawai", network=network_suid)
+                logger.info("[LAYOUT] Small network — using kamada-kawai")
             except Exception:
                 p4c.layout_network("force-directed", network=network_suid)
+                logger.info("[LAYOUT] kamada-kawai failed, fallback to force-directed")
         else:
+            # Large network: Force-directed with tuned parameters
             try:
                 p4c.set_layout_properties(
                     layout_name="force-directed",
@@ -1299,27 +1580,21 @@ def _apply_optimized_layout(p4c, network_suid: int, nodes: list):
                     pass
 
             p4c.layout_network("force-directed", network=network_suid)
+            logger.info("[LAYOUT] Large network — using force-directed")
 
         # Wait for layout to settle
         time.sleep(2.5)
 
-        # Apply layout multiple times for better convergence
-        for _ in range(4):
+        # Phase 3: Only 1 additional iteration (was 4)
+        if edge_count > 0:
             try:
-                if edge_count > 0:
-                    p4c.layout_network("force-directed", network=network_suid)
-                    time.sleep(1.0)
+                p4c.layout_network("force-directed", network=network_suid)
+                time.sleep(1.5)
+                logger.info("[LAYOUT] Additional force-directed iteration applied")
             except Exception:
-                break
+                pass
 
-        # Try overlap removal
-        try:
-            p4c.layout_network("force-directed-cl", network=network_suid)
-            time.sleep(1.0)
-        except Exception:
-            pass
-
-        # Fit content
+        # Fit content (no force-directed-cl — removed in Phase 3)
         p4c.fit_content(network=network_suid)
 
     except Exception as e:
@@ -1338,6 +1613,56 @@ def _apply_optimized_layout(p4c, network_suid: int, nodes: list):
     except Exception:
         pass
 
+
+# ---------------------------------------------------------------------------
+# Phase 4: Auto-crop whitespace from network images
+# ---------------------------------------------------------------------------
+
+def _auto_crop_image(image_path: str) -> str:
+    """Auto-crop whitespace from network image.
+    
+    Uses PIL to detect content bounding box and crop with 20px padding.
+    Returns the same path (modified in-place).
+    """
+    try:
+        from PIL import Image, ImageChops
+        img = Image.open(image_path)
+
+        # Create white background for comparison
+        bg = Image.new(img.mode, img.size, (255, 255, 255))
+        diff = ImageChops.difference(img, bg)
+        bbox = diff.getbbox()
+
+        if bbox:
+            # Add 20px padding around content
+            padding = 20
+            bbox = (
+                max(0, bbox[0] - padding),
+                max(0, bbox[1] - padding),
+                min(img.width, bbox[2] + padding),
+                min(img.height, bbox[3] + padding),
+            )
+            cropped = img.crop(bbox)
+            cropped.save(image_path)
+            logger.info(
+                f"[CROP] Auto-cropped {image_path}: "
+                f"{img.size} → {cropped.size}"
+            )
+        else:
+            logger.debug(f"[CROP] No content detected in {image_path}, skipping crop")
+
+        return image_path
+    except ImportError:
+        logger.debug("[CROP] PIL not available, skipping auto-crop")
+        return image_path
+    except Exception as e:
+        logger.warning(f"[CROP] Auto-crop failed for {image_path}: {e}")
+        return image_path
+
+
+# ---------------------------------------------------------------------------
+# Save network PNG (unchanged from v2.0 — all 3 methods preserved)
+# ---------------------------------------------------------------------------
 
 def _save_network_png(p4c, network_suid: int, network_name: str, output_dir: str) -> Optional[str]:
     """Export network as high-resolution PNG.
@@ -1425,9 +1750,9 @@ def _save_network_png(p4c, network_suid: int, network_name: str, output_dir: str
                         logger.warning(f"[IMG-SAVE] Endpoint failed: {img_url} — {url_err}")
                         continue
 
-                logger.warning(f"[IMG-SAVE] All CyREST image endpoints failed")
+                logger.warning("[IMG-SAVE] All CyREST image endpoints failed")
             else:
-                logger.warning(f"[IMG-SAVE] No view SUID available, skipping CyREST direct")
+                logger.warning("[IMG-SAVE] No view SUID available, skipping CyREST direct")
 
         except Exception as direct_err:
             logger.warning(f"[IMG-SAVE] CyREST direct download failed: {direct_err}")
@@ -1458,7 +1783,7 @@ def _save_network_png(p4c, network_suid: int, network_name: str, output_dir: str
             except Exception as host_err:
                 logger.warning(f"[IMG-SAVE] Host path export failed: {host_err}")
         else:
-            logger.info(f"[IMG-SAVE] HOST_DATA_DIR not set, skipping Method 2")
+            logger.info("[IMG-SAVE] HOST_DATA_DIR not set, skipping Method 2")
 
         # --- Method 3: Last resort - try original export_image ---
         logger.info(f"[IMG-SAVE] Method 3: Direct export_image to {png_file}")
@@ -1519,7 +1844,8 @@ def generate_network_figure_section(network_analysis: dict) -> str:
     Creates Base64-embedded images in Markdown for each network image,
     with detailed figure legends including node/edge statistics.
     
-    Guide §6.1: generate_network_figure_section()
+    Phase 4: Includes isolated node table when applicable.
+    Phase 5: Includes validation summary.
     """
     network_images = network_analysis.get("network_images", {})
     legends = network_analysis.get("legends", {})
@@ -1527,13 +1853,16 @@ def generate_network_figure_section(network_analysis: dict) -> str:
     timepoint_results = network_analysis.get("timepoint_results", {})
     individual_legends = legends.get("individual_legends", {})
     comparison_legend = legends.get("comparison_legend", "")
+    validation = network_analysis.get("validation", {})
 
     logger.info(
         f"[NET-SECTION] generate_network_figure_section called: "
         f"network_images={list(network_images.keys()) if network_images else 'EMPTY'}, "
         f"legends_keys={list(legends.keys()) if legends else 'EMPTY'}, "
         f"has_full_legend={bool(legends.get('full_legend'))}, "
-        f"timepoint_results={list(timepoint_results.keys()) if timepoint_results else 'EMPTY'}"
+        f"timepoint_results={list(timepoint_results.keys()) if timepoint_results else 'EMPTY'}, "
+        f"validation={{'valid': {validation.get('is_valid', '?')}, "
+        f"'orphan': {validation.get('orphan_nodes', '?')}}}"
     )
 
     if not network_images and not legends.get("full_legend"):
@@ -1549,6 +1878,25 @@ def generate_network_figure_section(network_analysis: dict) -> str:
     non_ptm_nodes = [n for n in nodes if n.get("type") == "Non-PTM"]
     active_nodes = [n for n in ptm_nodes if n.get("state") in ("high_active", "moderate_active")]
     inhibited_nodes = [n for n in ptm_nodes if n.get("state") in ("inhibited", "low_inhibited")]
+
+    # Phase 5: Network statistics summary
+    if validation:
+        section += (
+            f"**Network Statistics**: {validation.get('total_nodes', 0)} nodes "
+            f"({validation.get('ptm_nodes', 0)} PTM, {validation.get('non_ptm_nodes', 0)} Non-PTM), "
+            f"{validation.get('total_edges', 0)} edges, "
+            f"{validation.get('connected_nodes', 0)} connected nodes"
+        )
+        if validation.get("orphan_nodes", 0) > 0:
+            section += f", {validation['orphan_nodes']} isolated nodes"
+        section += "\n\n"
+
+        # Edge type breakdown
+        edge_types = validation.get("edge_types", {})
+        if edge_types:
+            section += "**Edge Distribution**: " + ", ".join(
+                f"{et}: {cnt}" for et, cnt in sorted(edge_types.items(), key=lambda x: -x[1])
+            ) + "\n\n"
 
     figure_num = 1
     panel_labels = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -1622,7 +1970,7 @@ def generate_network_figure_section(network_analysis: dict) -> str:
                     f"The network contains **{stats.get('active_ptm_count', 0)} activated PTMs**, "
                     f"**{stats.get('inhibited_ptm_count', 0)} inhibited PTMs**, "
                     f"**{stats.get('non_ptm_count', 0)} Non-PTM proteins**, "
-                    f"and **{stats.get('active_edge_count', 0)} active edges**.\n\n"
+                    f"and **{stats.get('total_edge_count', 0)} edges**.\n\n"
                 )
 
         # Top activated PTMs for this panel
@@ -1682,6 +2030,20 @@ def generate_network_figure_section(network_analysis: dict) -> str:
     # Temporal comparison legend (guide §5.1 row 3)
     if comparison_legend:
         section += comparison_legend + "\n\n---\n\n"
+
+    # Phase 4: Isolated nodes table
+    if validation and validation.get("orphan_nodes", 0) > 0:
+        orphan_ids = validation.get("orphan_node_ids", [])
+        if orphan_ids:
+            section += "### Isolated Nodes (No Network Connections)\n\n"
+            section += "The following PTM nodes had no interaction edges in the network:\n\n"
+            section += "| Node ID | Type |\n|---------|------|\n"
+            for oid in orphan_ids[:20]:
+                node_type = "PTM" if "-" in oid else "Non-PTM"
+                section += f"| {oid} | {node_type} |\n"
+            if len(orphan_ids) > 20:
+                section += f"| ... | ({len(orphan_ids) - 20} more) |\n"
+            section += "\n---\n\n"
 
     # If no images but legends exist, include text legend
     if not network_images and legends.get("full_legend"):
