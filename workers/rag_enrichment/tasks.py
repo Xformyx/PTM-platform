@@ -79,15 +79,54 @@ def run_rag_enrichment(self, order_id: int, config: dict):
         logger.info(f"[Order {order_id}] Loaded {len(df)} PTM entries from {vector_file.name}")
 
         # Select top-N most significant unique PTMs across all conditions.
-        # Strategy: rank each gene+position by its max |PTM_Relative_Log2FC|
-        # across all conditions, then take the top N unique PTMs.
-        # All condition rows for the selected PTMs are kept for multi-condition comparison.
+        # Strategy: Two modes available:
+        #   1. (Default) Rank by max |PTM_Relative_Log2FC| across conditions
+        #   2. (Classification) Use 8-category cell-signaling classification
+        #      to select High/Moderate significance PTMs first
+        use_classification = config.get("use_classification_selection", False)
+
         gene_col = "Gene.Name" if "Gene.Name" in df.columns else "gene"
         pos_col = "PTM_Position" if "PTM_Position" in df.columns else "position"
         cond_col = "Condition" if "Condition" in df.columns else "condition"
         fc_col = "PTM_Relative_Log2FC" if "PTM_Relative_Log2FC" in df.columns else "ptm_relative_log2fc"
 
-        if fc_col in df.columns and cond_col in df.columns:
+        if use_classification and fc_col in df.columns:
+            # Classification-based selection (ported from ptm-vector-ai)
+            from rag_enrichment.core.enrichment_pipeline import RAGEnrichmentPipeline
+            all_ptm_records = df.to_dict("records")
+            conditions_list = sorted(df[cond_col].dropna().unique().tolist()) if cond_col in df.columns else None
+            classified_ptms = RAGEnrichmentPipeline.select_ptms_by_classification(
+                ptm_data=all_ptm_records,
+                conditions=conditions_list,
+                include_high=True,
+                include_moderate=True,
+                include_low=False,
+                top_n=top_n,
+            )
+            # Get keys of selected PTMs and filter df to keep all condition rows
+            selected_keys = set()
+            for p in classified_ptms:
+                g = p.get("gene") or p.get("Gene.Name", "?")
+                s = p.get("position") or p.get("PTM_Position", "?")
+                selected_keys.add((str(g), str(s)))
+
+            df["_key"] = list(zip(df[gene_col].astype(str), df[pos_col].astype(str)))
+            df = df[df["_key"].isin(selected_keys)]
+            df = df.drop(columns=["_key"])
+            n_unique = len(selected_keys)
+
+            # Count by significance
+            sig_counts = {}
+            for p in classified_ptms:
+                sig = p.get("classification", {}).get("significance", "?")
+                sig_counts[sig] = sig_counts.get(sig, 0) + 1
+            logger.info(
+                f"[Order {order_id}] Classification selection: {n_unique} unique PTMs "
+                f"(High={sig_counts.get('High', 0)}, Moderate={sig_counts.get('Moderate', 0)}, "
+                f"Low={sig_counts.get('Low', 0)}), {len(df)} total rows"
+            )
+
+        elif fc_col in df.columns and cond_col in df.columns:
             df["_abs_fc"] = df[fc_col].abs()
             conditions = df[cond_col].dropna().unique()
 

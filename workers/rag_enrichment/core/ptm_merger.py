@@ -164,12 +164,16 @@ def _select_primary(entries: List[dict]) -> dict:
 
 
 def _build_trajectory_from_conditions(condition_data: List[dict]) -> dict:
-    """Build trajectory data from multi-condition entries."""
+    """Build trajectory data from multi-condition entries.
+
+    v4.0: Sort by extracted time value (not alphabetically) for correct
+    temporal ordering (e.g., '2min' < '5min' < '1h' < '24h').
+    """
     if len(condition_data) < 2:
         return {"timepoints": [], "trend": "unknown"}
 
-    # Sort conditions alphabetically (they typically represent time points)
-    sorted_conds = sorted(condition_data, key=lambda c: c.get("condition", ""))
+    # Sort conditions by extracted time value (not alphabetically)
+    sorted_conds = sorted(condition_data, key=lambda c: _extract_time_value(c.get("condition", "")))
 
     timepoints = []
     for cd in sorted_conds:
@@ -203,6 +207,31 @@ def _build_trajectory_from_conditions(condition_data: List[dict]) -> dict:
         trend = "stable"
 
     return {"timepoints": timepoints, "trend": trend}
+
+
+def _extract_time_value(label: str) -> float:
+    """Extract numeric time value from a condition/time label for sorting.
+
+    Supports: '0h', '6h', '24h', '0min', '30min', '2min', '5min',
+    and full condition strings like 'ECM_EPS_6h_vs_Control'.
+    Returns value in minutes for consistent sorting.
+    """
+    import re
+    if not label:
+        return 0.0
+    # Try hours first
+    hour_match = re.search(r'(\d+(?:\.\d+)?)\s*h', label, re.IGNORECASE)
+    if hour_match:
+        return float(hour_match.group(1)) * 60.0
+    # Try minutes
+    min_match = re.search(r'(\d+(?:\.\d+)?)\s*min', label, re.IGNORECASE)
+    if min_match:
+        return float(min_match.group(1))
+    # Try bare number
+    num_match = re.search(r'(\d+(?:\.\d+)?)', label)
+    if num_match:
+        return float(num_match.group(1))
+    return 0.0
 
 
 def _safe_float(val) -> float:

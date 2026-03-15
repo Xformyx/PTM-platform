@@ -291,12 +291,15 @@ class RAGEnrichmentPipeline:
             except Exception as e:
                 logger.warning(f"Full-text analysis failed for {gene}: {e}")
 
-        # 13. PTM validation / novelty check (RESTORED)
+        # 13. PTM validation / novelty check (RESTORED + v4.0 context-aware)
         validation_result = {}
         if self.enable_ptm_validation:
             try:
                 raw_result = self.ptm_validator.validate(
-                    gene=gene, site=position, ptm_type=ptm_type,
+                    gene=gene,
+                    position=position,
+                    ptm_type=ptm_type,
+                    experimental_context=context,  # v4.0: pass context for context-aware search
                 )
                 # Convert dataclass to dict for JSON serialization & report_generator compatibility
                 validation_result = _asdict(raw_result) if hasattr(raw_result, '__dataclass_fields__') else raw_result
@@ -743,6 +746,121 @@ class RAGEnrichmentPipeline:
     # ------------------------------------------------------------------
     # Context Keywords Extraction
     # ------------------------------------------------------------------
+
+    # ------------------------------------------------------------------
+    # Public: Classification-Based PTM Selection (ported from ptm-vector-ai)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def select_ptms_by_classification(
+        ptm_data: List[dict],
+        conditions: Optional[List[str]] = None,
+        include_high: bool = True,
+        include_moderate: bool = True,
+        include_low: bool = False,
+        top_n: Optional[int] = None,
+    ) -> List[dict]:
+        """
+        Select PTMs based on 8-category cell-signaling classification.
+        Ported from ptm-vector-ai/ragEnrichmentService.ts selectPTMsByClassification().
+
+        This method provides classification-aware PTM selection as an alternative
+        to the simple |FC| ranking used in tasks.py.  When *top_n* is set, PTMs
+        are ranked by |PTM_Relative_Log2FC| and the top N are returned regardless
+        of significance level (matching the original TypeScript behaviour).
+
+        Args:
+            ptm_data: List of PTM dicts (must contain ptm_relative_log2fc / PTM_Relative_Log2FC)
+            conditions: Optional list of conditions to filter by
+            include_high: Include High significance (PTM-driven, Compensatory)
+            include_moderate: Include Moderate significance (Coupled, Desensitization)
+            include_low: Include Low significance (Expression-driven, Baseline)
+            top_n: If set, select top N PTMs per condition by |PTM_Relative_Log2FC|
+
+        Returns:
+            List of selected PTM dicts with added 'classification' field.
+        """
+        selected: List[dict] = []
+        added_keys: set = set()
+
+        # Determine conditions
+        if conditions is None:
+            conditions_set = set()
+            for ptm in ptm_data:
+                cond = ptm.get("Condition") or ptm.get("condition", "")
+                if cond:
+                    conditions_set.add(cond)
+            conditions = sorted(conditions_set) if conditions_set else [""]
+
+        for condition in conditions:
+            # Filter vectors for this condition
+            if condition:
+                cond_vectors = [
+                    p for p in ptm_data
+                    if (p.get("Condition") or p.get("condition", "")) == condition
+                ]
+            else:
+                cond_vectors = list(ptm_data)
+
+            # Sort by |PTM_Relative_Log2FC| descending
+            def _get_fc(p):
+                val = p.get("PTM_Relative_Log2FC") or p.get("ptm_relative_log2fc")
+                try:
+                    return abs(float(val)) if val is not None else 0.0
+                except (ValueError, TypeError):
+                    return 0.0
+
+            cond_vectors.sort(key=_get_fc, reverse=True)
+
+            # Apply top_n if set
+            if top_n and top_n > 0:
+                cond_vectors = cond_vectors[:top_n]
+
+            for ptm in cond_vectors:
+                gene = ptm.get("gene") or ptm.get("Gene.Name", "?")
+                pos = ptm.get("position") or ptm.get("PTM_Position", "?")
+                key = f"{gene}_{pos}"
+
+                if key in added_keys:
+                    continue
+
+                ptm_fc = ptm.get("PTM_Relative_Log2FC") or ptm.get("ptm_relative_log2fc")
+                prot_fc = ptm.get("Protein_Log2FC") or ptm.get("protein_log2fc")
+
+                try:
+                    ptm_fc_f = float(ptm_fc) if ptm_fc is not None else 0.0
+                except (ValueError, TypeError):
+                    continue
+
+                classification = RAGEnrichmentPipeline._classify_ptm_8cat(ptm_fc_f, prot_fc)
+                sig = classification.get("significance", "Low")
+
+                # When top_n is set, include ALL PTMs (already filtered by ranking)
+                include = False
+                if top_n and top_n > 0:
+                    include = True
+                elif include_high and sig == "High":
+                    include = True
+                elif include_moderate and sig == "Moderate":
+                    include = True
+                elif include_low and sig == "Low":
+                    include = True
+
+                if include:
+                    ptm["classification"] = classification
+                    selected.append(ptm)
+                    added_keys.add(key)
+
+        # Summary logging
+        high_count = sum(1 for p in selected if p.get("classification", {}).get("significance") == "High")
+        mod_count = sum(1 for p in selected if p.get("classification", {}).get("significance") == "Moderate")
+        low_count = sum(1 for p in selected if p.get("classification", {}).get("significance") == "Low")
+        logger.info(
+            f"PTM classification selection: {len(selected)} PTMs from {len(conditions)} conditions "
+            f"(High={high_count}, Moderate={mod_count}, Low={low_count})"
+        )
+
+        return selected
 
     def _extract_context_keywords(self, context: Optional[dict]) -> List[str]:
         if not context:
