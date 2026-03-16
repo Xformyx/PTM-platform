@@ -1402,7 +1402,8 @@ def validate_llm_output_against_data(
     # Validate Log2FC values if provided
     suspicious_values = []
     if known_log2fc_values:
-        log2fc_pattern = re.compile(r'Log2FC\s*[=:]\s*(-?\d+\.?\d*)')
+        # v98d: Also match bracketed values like Log2FC of [25.07] or Log2FC = [-1.23]
+        log2fc_pattern = re.compile(r'Log2FC\s*(?:of\s*)?[=:]?\s*\[?(-?\d+\.?\d*)\]?')
         mentioned_values = log2fc_pattern.findall(llm_output)
 
         known_values_set = set()
@@ -1606,3 +1607,156 @@ def build_data_provenance_block(
     return "\n".join(lines)
 
 
+
+
+# ============================================================================
+# v98d: Log2FC Decimal Fragmentation Repair & Bracket Cleanup
+# ============================================================================
+
+def repair_log2fc_decimal_fragmentation(text: str) -> str:
+    """
+    v98d: Detect and repair Log2FC decimal fragmentation caused by LLM
+    misinterpreting decimal points as sentence terminators.
+
+    Problem pattern (35 instances in Report #293):
+        "...Log2FC of 25." → orphaned ".07 at 5min" fragment
+        "...showed a value of -1." → orphaned ".23 at 2min"
+
+    This function:
+    1. Detects fragmentation patterns like "word.XX at Ymin"
+    2. Attempts to reconstruct the original decimal value
+    3. Removes orphaned decimal fragments
+
+    Returns:
+        Repaired text with decimal fragmentation fixed
+    """
+    if not text:
+        return text
+
+    repair_count = 0
+
+    # Pattern 1: Sentence ending with a number followed by period, then orphaned decimal
+    # e.g., "Log2FC of 25.\n.07 at 5min" or "Log2FC of 25. .07 at 5min"
+    pattern1 = re.compile(
+        r'(\d+)\.\s*\n?\s*\.(\d{1,3})\s+(at\s+\d+\s*min)',
+        re.IGNORECASE
+    )
+    def _repair_split_decimal(m):
+        nonlocal repair_count
+        repair_count += 1
+        return f'{m.group(1)}.{m.group(2)} {m.group(3)}'
+    text = pattern1.sub(_repair_split_decimal, text)
+
+    # Pattern 2: Orphaned fragment at start of line: ".XX at Y min"
+    pattern2 = re.compile(
+        r'^\s*\.(\d{1,3})\s+(at\s+\d+\s*min)',
+        re.MULTILINE | re.IGNORECASE
+    )
+    def _repair_orphaned_fragment(m):
+        nonlocal repair_count
+        repair_count += 1
+        return ''
+    text = pattern2.sub(_repair_orphaned_fragment, text)
+
+    # Pattern 3: Mid-sentence fragmentation: "word.XX at Y min"
+    # e.g., "phosphorylation.61 at 5min"
+    pattern3 = re.compile(
+        r'([a-zA-Z])\.(\d{1,3})\s+(at\s+\d+\s*min)',
+        re.IGNORECASE
+    )
+    def _repair_word_decimal(m):
+        nonlocal repair_count
+        repair_count += 1
+        return m.group(1) + ' ' + m.group(3)
+    text = pattern3.sub(_repair_word_decimal, text)
+
+    # Pattern 4: Standalone orphaned fragments like ".41 at 2min"
+    pattern4 = re.compile(
+        r'\s+\.(\d{1,3})\s+(at\s+\d+\s*min)',
+        re.IGNORECASE
+    )
+    def _repair_inline_fragment(m):
+        nonlocal repair_count
+        repair_count += 1
+        return ' ' + m.group(2)
+    text = pattern4.sub(_repair_inline_fragment, text)
+
+    if repair_count > 0:
+        _sse_log(
+            f"[v98d] Repaired {repair_count} decimal fragmentation(s) in text",
+            "INFO"
+        )
+
+    # Clean up double spaces
+    text = re.sub(r'  +', ' ', text)
+
+    return text
+
+
+def strip_log2fc_brackets(text: str) -> str:
+    """
+    v98d: Remove square brackets from Log2FC values in the final output.
+
+    The brackets [25.07] were added to protect decimal points during LLM generation.
+    After generation, we strip them for clean academic prose.
+
+    Converts:
+        "Log2FC of [25.07]" → "Log2FC of 25.07"
+        "[−1.23]" → "−1.23"
+        "PTM Log2FC of [3.45]" → "PTM Log2FC of 3.45"
+
+    Does NOT strip brackets from:
+        - Citation references like [1], [2], [n]
+        - Placeholder text like [insert...]
+    """
+    if not text:
+        return text
+
+    # Match brackets containing a number with a decimal point (Log2FC values)
+    bracket_decimal_pattern = re.compile(
+        r'\[(-?\d+\.\d+)\]'
+    )
+
+    stripped_count = len(bracket_decimal_pattern.findall(text))
+    text = bracket_decimal_pattern.sub(r'\1', text)
+
+    # Also strip negative integers in brackets (e.g., [-3])
+    bracket_neg_int_pattern = re.compile(
+        r'\[(-\d+)\]'
+    )
+    stripped_count += len(bracket_neg_int_pattern.findall(text))
+    text = bracket_neg_int_pattern.sub(r'\1', text)
+
+    # Also handle unicode minus sign
+    bracket_unicode_minus = re.compile(
+        r'\[(−\d+\.?\d*)\]'
+    )
+    stripped_count += len(bracket_unicode_minus.findall(text))
+    text = bracket_unicode_minus.sub(r'\1', text)
+
+    if stripped_count > 0:
+        _sse_log(
+            f"[v98d] Stripped brackets from {stripped_count} Log2FC value(s)",
+            "INFO"
+        )
+
+    return text
+
+
+def postprocess_log2fc_formatting(text: str) -> str:
+    """
+    v98d: Combined post-processing for Log2FC formatting issues.
+
+    Applies in order:
+    1. Repair decimal fragmentation (fix broken numbers)
+    2. Strip protective brackets (clean up [25.07] → 25.07)
+
+    This should be called AFTER LLM generation but BEFORE final report assembly.
+    """
+    if not text:
+        return text
+
+    text = repair_log2fc_decimal_fragmentation(text)
+    text = strip_log2fc_brackets(text)
+
+    return text

@@ -11,7 +11,7 @@ import re
 from typing import Dict, List
 
 from common.llm_client import LLMClient
-from common.report_postprocessor import validate_llm_output_against_data
+from common.report_postprocessor import validate_llm_output_against_data, postprocess_log2fc_formatting
 from report_generation.core.rag_retriever import RAGRetriever
 from report_generation.core.dynamic_prompt_generator import (
     build_anti_hallucination_directive,
@@ -185,6 +185,13 @@ def run_section_writing(state: dict) -> dict:
         # LLM sometimes adds its own ## headings (e.g., "## Results Discussion")
         # which conflicts with the report assembly logic
         content = _strip_llm_section_heading(content, section_type)
+
+        # v98d: Fix Log2FC decimal fragmentation and strip protective brackets
+        if section_type in ("results", "discussion", "conclusion"):
+            try:
+                content = postprocess_log2fc_formatting(content)
+            except Exception as e:
+                logger.warning(f"[v98d] Log2FC formatting postprocess failed (non-fatal): {e}")
 
         # v98: Post-processing validation for results and discussion
         if v98_protein_names and section_type in ("results", "discussion"):
