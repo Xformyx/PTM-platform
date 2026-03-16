@@ -11,6 +11,7 @@ Each step checks for existing output files and skips if already completed.
 MCP API results are cached in Redis (TTL 7 days) by the MCP server.
 """
 
+import json
 import logging
 import os
 import time
@@ -212,6 +213,108 @@ def run_preprocessing(self, order_id: int, config: dict):
 
             publish_progress(order_id, "preprocessing", "ptm_quantification", "completed", 50, "PTM quantification complete")
 
+        # --- Pipeline Statistics: collect Step 1 & 2 stats ---
+        try:
+            from preprocessing.core.pipeline_statistics import PipelineStatistics
+            import pandas as pd
+
+            stats_json_path = order_output / f"pipeline_statistics{file_suffix}.json"
+            ps = PipelineStatistics(ptm_mode=ptm_mode)
+
+            # Step 1: Input stats
+            pr_df = pd.read_csv(pr_path, sep="\t", low_memory=False)
+            pg_df = pd.read_csv(pg_path, sep="\t", low_memory=False)
+            ps.collect_input_stats(pr_df, pg_df, fasta_path, condition_map or {})
+
+            # Step 2: Quantification stats from output files
+            ptm_vector_path = order_output / quant_output
+            all_protein_path = order_output / all_protein_output
+            if ptm_vector_path.exists():
+                ptm_vec_df = pd.read_csv(ptm_vector_path, sep="\t", low_memory=False)
+                if all_protein_path.exists():
+                    all_prot_df = pd.read_csv(all_protein_path, sep="\t", low_memory=False)
+                else:
+                    all_prot_df = pd.DataFrame()
+
+                # Collect normalization stats (before/after counts from PR/PG)
+                ps.stats["step2_quantification"] = {
+                    "normalization": {
+                        "pr_precursors_before": len(pr_df),
+                        "pg_proteins_before": len(pg_df),
+                    },
+                }
+
+                # PTM filtering stats
+                ptm_mask = ptm_vec_df.get("Has_PTM", pd.Series(dtype=bool)).astype(str).str.lower().isin(["true", "1", "yes"])
+                ptm_count = int(ptm_mask.sum()) if ptm_mask.any() else len(ptm_vec_df)
+                ps.stats["step2_quantification"]["ptm_filtering"] = {
+                    "total_precursors": len(pr_df),
+                    "ptm_precursors": ptm_count,
+                    "ptm_proteins": int(ptm_vec_df["Protein.Group"].nunique()) if "Protein.Group" in ptm_vec_df.columns else 0,
+                    "ptm_sites": int(ptm_vec_df["PTM_Site"].nunique()) if "PTM_Site" in ptm_vec_df.columns else 0,
+                    "ptm_ratio": round(ptm_count / max(len(pr_df), 1) * 100, 1),
+                }
+
+                # Relative quantification stats
+                ps.stats["step2_quantification"]["relative_quant"] = {
+                    "total_entries": len(ptm_vec_df),
+                    "unique_proteins": int(ptm_vec_df["Protein.Group"].nunique()) if "Protein.Group" in ptm_vec_df.columns else 0,
+                    "unique_sites": int(ptm_vec_df["PTM_Site"].nunique()) if "PTM_Site" in ptm_vec_df.columns else 0,
+                }
+
+                # Comparison stats per condition
+                if "Condition" in ptm_vec_df.columns and "PTM_Log2FC" in ptm_vec_df.columns:
+                    per_condition = {}
+                    for cond, grp in ptm_vec_df.groupby("Condition"):
+                        log2fc = grp["PTM_Log2FC"].dropna()
+                        per_condition[str(cond)] = {
+                            "total_entries": len(grp),
+                            "unique_proteins": int(grp["Protein.Group"].nunique()) if "Protein.Group" in grp.columns else 0,
+                            "up_regulated": int((log2fc > 1).sum()),
+                            "down_regulated": int((log2fc < -1).sum()),
+                            "unchanged": int(((log2fc >= -1) & (log2fc <= 1)).sum()),
+                            "mean_log2fc": round(float(log2fc.mean()), 4) if len(log2fc) > 0 else 0,
+                        }
+                    ps.stats["step2_quantification"]["comparisons"] = {
+                        "total_comparisons": len(per_condition),
+                        "per_condition": per_condition,
+                    }
+
+                # Protein changes stats
+                if not all_prot_df.empty and "Protein.Group" in all_prot_df.columns:
+                    ptm_prot_ids = set(ptm_vec_df["Protein.Group"].unique()) if "Protein.Group" in ptm_vec_df.columns else set()
+                    all_prot_ids = set(all_prot_df["Protein.Group"].unique())
+                    non_ptm_ids = all_prot_ids - ptm_prot_ids
+                    ps.stats["step2_quantification"]["protein_changes"] = {
+                        "all_proteins": {"total": len(all_prot_df), "unique_proteins": len(all_prot_ids)},
+                        "ptm_proteins": {"total": len(ptm_vec_df), "unique_proteins": len(ptm_prot_ids)},
+                        "non_ptm_proteins": len(non_ptm_ids),
+                    }
+
+                # PTM vector / quadrant analysis
+                if "Protein_Log2FC" in ptm_vec_df.columns and "PTM_Log2FC" in ptm_vec_df.columns:
+                    prot_fc = ptm_vec_df["Protein_Log2FC"].dropna()
+                    ptm_fc = ptm_vec_df["PTM_Log2FC"].dropna()
+                    valid = ptm_vec_df.dropna(subset=["Protein_Log2FC", "PTM_Log2FC"])
+                    ps.stats["step2_quantification"]["ptm_vector"] = {
+                        "total_vectors": len(valid),
+                        "unique_proteins": int(valid["Protein.Group"].nunique()) if "Protein.Group" in valid.columns else 0,
+                        "quadrant_analysis": {
+                            "Q1_up_up": int(((valid["Protein_Log2FC"] > 0) & (valid["PTM_Log2FC"] > 0)).sum()),
+                            "Q2_down_up": int(((valid["Protein_Log2FC"] < 0) & (valid["PTM_Log2FC"] > 0)).sum()),
+                            "Q3_down_down": int(((valid["Protein_Log2FC"] < 0) & (valid["PTM_Log2FC"] < 0)).sum()),
+                            "Q4_up_down": int(((valid["Protein_Log2FC"] > 0) & (valid["PTM_Log2FC"] < 0)).sum()),
+                        },
+                    }
+
+            # Save intermediate stats
+            with open(stats_json_path, "w", encoding="utf-8") as f:
+                json.dump(ps.stats, f, indent=2, ensure_ascii=False, default=str)
+            logger.info(f"[Order {order_id}] Pipeline statistics (Step 1-2) saved: {stats_json_path.name}")
+
+        except Exception as stats_err:
+            logger.warning(f"[Order {order_id}] Pipeline statistics collection failed (non-fatal): {stats_err}")
+
         # ================================================================
         # Step 1b: PTM Vector Report (2D scatter plots) — right after Step 1
         # ================================================================
@@ -266,6 +369,35 @@ def run_preprocessing(self, order_id: int, config: dict):
 
             publish_progress(order_id, "preprocessing", "unified_enrichment", "completed", 70, "Domain/motif enrichment complete")
 
+        # --- Pipeline Statistics: collect Step 3 (Enrichment) stats ---
+        try:
+            import pandas as pd
+            enriched_path = order_output / enriched_output
+            stats_json_path = order_output / f"pipeline_statistics{file_suffix}.json"
+            if enriched_path.exists() and stats_json_path.exists():
+                with open(stats_json_path, "r", encoding="utf-8") as f:
+                    existing_stats = json.load(f)
+                enriched_df = pd.read_csv(enriched_path, sep="\t", low_memory=False)
+                step3 = {
+                    "total_rows": len(enriched_df),
+                    "unique_proteins": int(enriched_df["Protein.Group"].nunique()) if "Protein.Group" in enriched_df.columns else 0,
+                }
+                if "Data_Type" in enriched_df.columns:
+                    dt_dist = enriched_df["Data_Type"].value_counts().to_dict()
+                    step3["ptm_rows"] = int(dt_dist.get("PTM_Site", dt_dist.get("PTM", 0)))
+                    step3["non_ptm_rows"] = int(dt_dist.get("Protein_Only", dt_dist.get("non_PTM", 0)))
+                    step3["data_type_distribution"] = {str(k): int(v) for k, v in dt_dist.items()}
+                if "Domains" in enriched_df.columns:
+                    step3["proteins_with_domains"] = int((enriched_df["Domains"].notna() & (enriched_df["Domains"] != "")).sum())
+                if "Matched_Motifs" in enriched_df.columns:
+                    step3["sites_with_motifs"] = int((enriched_df["Matched_Motifs"].notna() & (enriched_df["Matched_Motifs"] != "")).sum())
+                existing_stats["step3_enrichment"] = step3
+                with open(stats_json_path, "w", encoding="utf-8") as f:
+                    json.dump(existing_stats, f, indent=2, ensure_ascii=False, default=str)
+                logger.info(f"[Order {order_id}] Pipeline statistics (Step 3) updated")
+        except Exception as stats_err:
+            logger.warning(f"[Order {order_id}] Step 3 statistics collection failed (non-fatal): {stats_err}")
+
         # ================================================================
         # Step 3: Biological Enrichment — UniProt/STRING/KEGG (70% – 90%)
         # ================================================================
@@ -315,12 +447,51 @@ def run_preprocessing(self, order_id: int, config: dict):
 
             publish_progress(order_id, "preprocessing", "biological_enrichment", "completed", 90, "Biological enrichment complete")
 
+        # --- Pipeline Statistics: collect Step 4 (Biological) stats ---
+        try:
+            import pandas as pd
+            bio_path = order_output / bio_output
+            stats_json_path = order_output / f"pipeline_statistics{file_suffix}.json"
+            if bio_path.exists() and stats_json_path.exists():
+                with open(stats_json_path, "r", encoding="utf-8") as f:
+                    existing_stats = json.load(f)
+                bio_df = pd.read_csv(bio_path, sep="\t", low_memory=False)
+                step4 = {"total_rows": len(bio_df)}
+                uniprot_cols = ["Subcellular_Localization", "Protein_Function_Summary",
+                               "GO_Biological_Process", "GO_Molecular_Function", "GO_Cellular_Component"]
+                uniprot_stats = {}
+                for col in uniprot_cols:
+                    if col in bio_df.columns:
+                        uniprot_stats[col] = int((bio_df[col].notna() & (bio_df[col] != "")).sum())
+                step4["uniprot_annotations"] = uniprot_stats
+                if "STRING_Interactors" in bio_df.columns:
+                    step4["proteins_with_string"] = int((bio_df["STRING_Interactors"].notna() & (bio_df["STRING_Interactors"] != "")).sum())
+                if "KEGG_Pathways" in bio_df.columns:
+                    step4["proteins_with_kegg"] = int((bio_df["KEGG_Pathways"].notna() & (bio_df["KEGG_Pathways"] != "")).sum())
+                if "Protein.Group" in bio_df.columns:
+                    step4["unique_proteins"] = int(bio_df["Protein.Group"].nunique())
+                if "Condition" in bio_df.columns:
+                    step4["conditions_in_final"] = int(bio_df["Condition"].nunique())
+                    step4["rows_per_condition"] = {str(k): int(v) for k, v in bio_df["Condition"].value_counts().to_dict().items()}
+                existing_stats["step4_biological"] = step4
+                existing_stats["final_output"] = {
+                    "total_rows": len(bio_df),
+                    "total_columns": len(bio_df.columns),
+                    "unique_proteins": step4.get("unique_proteins", 0),
+                    "conditions": step4.get("conditions_in_final", 0),
+                }
+                with open(stats_json_path, "w", encoding="utf-8") as f:
+                    json.dump(existing_stats, f, indent=2, ensure_ascii=False, default=str)
+                logger.info(f"[Order {order_id}] Pipeline statistics (Step 4 + Final) updated")
+        except Exception as stats_err:
+            logger.warning(f"[Order {order_id}] Step 4 statistics collection failed (non-fatal): {stats_err}")
+
         # ================================================================
         # Step 4: Finalization (90% – 100%)
         # ================================================================
         publish_progress(order_id, "preprocessing", "finalization", "started", 90, "Finalizing results")
 
-        output_files = [f.name for f in order_output.iterdir() if f.is_file() and f.suffix in (".tsv", ".txt", ".png")]
+        output_files = [f.name for f in order_output.iterdir() if f.is_file() and f.suffix in (".tsv", ".txt", ".png", ".json")]
         elapsed = round(time.time() - start_time, 1)
 
         publish_progress(

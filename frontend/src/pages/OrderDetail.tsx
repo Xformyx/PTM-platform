@@ -7,12 +7,13 @@ import {
   ChevronDown, ChevronUp, Download, FileSpreadsheet, FileJson, File, FolderOpen,
   Copy, Check, Eye, ArrowRightCircle, Sparkles, Plus, X,
   MessageSquare, Loader2, ToggleLeft, ToggleRight, Square,
-  ChartScatter, TrendingUp, ZoomIn, ZoomOut, GitMerge,
+  ChartScatter, TrendingUp, ZoomIn, ZoomOut, GitMerge, BarChart3,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
 import { useOrderProgress } from "@/hooks/useSSE";
 import type { Order, OrderLog, ProgressEvent } from "@/lib/types";
+import { AnalysisStatisticsTab } from "@/components/AnalysisStatisticsTab";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -2120,6 +2121,10 @@ export default function OrderDetail() {
       <Tabs defaultValue="overview">
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="analysis-statistics">
+            <BarChart3 className="h-3.5 w-3.5 mr-1.5" />
+            Analysis Statistics
+          </TabsTrigger>
           <TabsTrigger value="vector-plot">
             <ChartScatter className="h-3.5 w-3.5 mr-1.5" />
             Vector Plot
@@ -2378,6 +2383,10 @@ export default function OrderDetail() {
               </CardContent>
             </Card>
           )}
+        </TabsContent>
+
+        <TabsContent value="analysis-statistics" className="mt-4">
+          <AnalysisStatisticsTab orderId={order.id} />
         </TabsContent>
 
         <TabsContent value="vector-plot" className="mt-4">

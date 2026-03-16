@@ -1247,3 +1247,37 @@ async def preview_order_file(
         "size_bytes": stat.st_size,
         "file_type": ext.lstrip("."),
     }
+
+
+@router.get("/{order_id}/statistics")
+async def get_order_statistics(
+    order_id: int,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Return pipeline statistics JSON collected during preprocessing."""
+    import json as _json
+    from app.config import get_settings
+    settings = get_settings()
+
+    result = await db.execute(select(Order).where(Order.id == order_id))
+    order = result.scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    output_dir = Path(settings.OUTPUT_DIR) / order.order_code
+    if not output_dir.exists():
+        return {"statistics": None, "available": False}
+
+    file_suffix = "_phospho" if order.ptm_type == "phosphorylation" else "_ubi"
+    stats_file = output_dir / f"pipeline_statistics{file_suffix}.json"
+
+    if not stats_file.exists():
+        return {"statistics": None, "available": False}
+
+    try:
+        with open(stats_file, "r", encoding="utf-8") as f:
+            stats = _json.load(f)
+        return {"statistics": stats, "available": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error reading statistics: {str(e)}")
