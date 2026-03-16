@@ -787,7 +787,9 @@ def _build_network_results_for_writer(
                     {
                         "gene": n["gene"],
                         "value": n.get("value", 0),
+                        "protein_log2fc": n.get("protein_log2fc", n.get("value", 0)),
                         "state": "non_ptm",
+                        "source": n.get("source", "STRING"),
                     }
                     for n in tp_data.get("non_ptm_nodes", [])
                 ],

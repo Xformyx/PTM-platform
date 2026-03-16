@@ -472,11 +472,20 @@ detailed, and publication-quality analysis.
 5. **Interpret extensively** — provide rich biological interpretation, mechanistic insights, and signaling pathway analysis for each finding. The more detailed your biological reasoning, the better.
 6. **Connect findings** — link individual protein changes to broader signaling cascades and cellular responses
 
+### NON-PTM / PTM SIGNALING INTERPRETATION GUIDELINES
+When discussing Non-PTM effector proteins alongside PTM-modified proteins:
+1. **Classify signaling roles** — identify whether each Non-PTM protein acts as an upstream regulator, scaffold/adaptor, signal transducer, or downstream effector in the signaling cascade
+2. **Describe relationship directionality** — explain whether the Non-PTM protein is upstream of PTM (regulating the modification), downstream of PTM (responding to the modification), or part of a feedback loop
+3. **Place in canonical pathways** — connect each PTM→Non-PTM relationship to known signaling pathways (e.g., MAPK/ERK, PI3K/AKT, JAK/STAT, NF-κB, Calcium signaling)
+4. **Interpret temporal dynamics** — when time-course data is available, discuss whether Non-PTM protein changes are immediate (suggesting direct interaction), delayed (suggesting transcriptional regulation), or sustained (suggesting stable complex formation)
+5. **Discuss cascade significance** — explain whether each signaling cascade represents signal amplification, signal relay, signal termination, or feedback regulation
+
 ### WRITING QUALITY EXPECTATIONS
 - Write at the level of a peer-reviewed journal article (e.g., Molecular Cell, Cell Reports)
 - Each paragraph should contain 5-8 sentences with specific data references
 - Provide biological context and mechanistic interpretation for every quantitative finding
 - Discuss implications for signaling pathway regulation and cellular function
+- When describing signaling cascades, always specify the canonical pathway and the biological significance (amplification/termination/relay)
 - A comprehensive, detailed section is always preferred over a brief summary
 """
     return directive
@@ -704,17 +713,17 @@ def build_structured_protein_data_for_llm(
     lines.append("Any protein or value NOT in these tables is HALLUCINATED.")
     lines.append("")
 
-    # PTM Protein Table
+    # PTM Protein Table (with both PTM_Log2FC and Prot_Log2FC per timepoint)
     lines.append(f"### Table A: Verified {ptm_type.capitalize()} Modification Data")
     header = "| # | Protein | Site |"
     for tp in timepoints:
-        header += f" {tp} PTM_Log2FC |"
+        header += f" {tp} PTM_Log2FC | {tp} Prot_Log2FC |"
     header += " Max |PTM_Log2FC| |"
     lines.append(header)
 
     sep = "|---|---|---|"
     for _ in timepoints:
-        sep += "---|"
+        sep += "---|---|"  # two columns per timepoint
     sep += "---|"
     lines.append(sep)
 
@@ -725,12 +734,13 @@ def build_structured_protein_data_for_llm(
         max_abs = 0
         for tp in timepoints:
             if tp in data and isinstance(data[tp], dict):
-                val = data[tp]["ptm_log2fc"]
-                row += f" {val:.2f} |"
-                if abs(val) > max_abs:
-                    max_abs = abs(val)
+                ptm_val = data[tp]["ptm_log2fc"]
+                prot_val = data[tp].get("protein_log2fc", 0)
+                row += f" {ptm_val:.2f} | {prot_val:.2f} |"
+                if abs(ptm_val) > max_abs:
+                    max_abs = abs(ptm_val)
             else:
-                row += " — |"
+                row += " \u2014 | \u2014 |"
         row += f" {max_abs:.2f} |"
         lines.append(row)
     lines.append("")
@@ -832,7 +842,9 @@ def build_nonptm_temporal_analysis(
 ) -> str:
     """
     GAP A-2: Build Non-PTM temporal analysis block.
-    Shows how Non-PTM effector proteins change across timepoints.
+    Shows how Non-PTM effector proteins change across timepoints,
+    including signaling role classification, PTM relationship directionality,
+    and canonical pathway context.
     """
     # Support both 'networks' (legacy) and 'timepoint_results' (network_node.py output)
     networks = network_results.get("networks", {})
@@ -861,6 +873,110 @@ def build_nonptm_temporal_analysis(
     if not nonptm_temporal:
         return ""
 
+    # Collect PTM proteins for directionality analysis
+    ptm_temporal: Dict[str, Dict[str, float]] = {}
+    for tp in timepoints:
+        net = source.get(tp, {})
+        if not isinstance(net, dict):
+            continue
+        for node_type in ["active_nodes", "inhibited_nodes", "ptm_nodes"]:
+            for node in net.get(node_type, []):
+                if not isinstance(node, dict):
+                    continue
+                gene = node.get("gene", node.get("id", ""))
+                if not gene:
+                    continue
+                ptm_fc = float(node.get("value", node.get("ptm_log2fc", node.get("ptm_relative_log2fc", 0))))
+                if gene not in ptm_temporal:
+                    ptm_temporal[gene] = {}
+                ptm_temporal[gene][tp] = ptm_fc
+
+    # Collect edges for directionality
+    ptm_nonptm_edges: Dict[str, List[str]] = {}  # nonptm_gene -> [ptm_gene, ...]
+    for tp in timepoints:
+        net = source.get(tp, {})
+        if not isinstance(net, dict):
+            continue
+        for edge in net.get("active_edges", []) + net.get("all_edges", []):
+            if not isinstance(edge, dict):
+                continue
+            src = edge.get("source", "")
+            tgt = edge.get("target", "")
+            if src in nonptm_temporal and tgt in ptm_temporal:
+                ptm_nonptm_edges.setdefault(src, []).append(tgt)
+            elif tgt in nonptm_temporal and src in ptm_temporal:
+                ptm_nonptm_edges.setdefault(tgt, []).append(src)
+
+    # --- Signaling Role Classification ---
+    SIGNALING_ROLES = {
+        "upstream_regulator": {
+            "keywords": ["mapk", "erk", "jnk", "p38", "raf", "ras", "mek", "src", "fak",
+                         "jak", "pi3k", "akt", "pkc", "pka", "camk", "rock", "cdk"],
+            "label": "Upstream Regulator",
+        },
+        "scaffold_adaptor": {
+            "keywords": ["grb", "shc", "sos", "gab", "irs", "nck", "crk", "14-3-3",
+                         "ywhaz", "ywhab", "ywhae", "ywhag", "ywhah", "ywhaq",
+                         "axin", "akap", "homer", "shank", "dlg"],
+            "label": "Scaffold/Adaptor",
+        },
+        "transducer": {
+            "keywords": ["stat", "smad", "nfkb", "rela", "relb", "creb", "nfat",
+                         "foxo", "myc", "jun", "fos", "atf"],
+            "label": "Signal Transducer",
+        },
+        "downstream_effector": {
+            "keywords": ["casp", "bax", "bcl", "mtor", "s6k", "4ebp", "eif",
+                         "rps6", "gsk3", "ctnnb", "ccn", "cdc", "chk",
+                         "p53", "tp53", "rb1", "mdm"],
+            "label": "Downstream Effector",
+        },
+    }
+
+    def _classify_signaling_role(gene: str) -> str:
+        gene_lower = gene.lower()
+        for role_key, role_info in SIGNALING_ROLES.items():
+            for kw in role_info["keywords"]:
+                if kw in gene_lower:
+                    return role_info["label"]
+        return "Effector Protein"
+
+    def _classify_directionality(nonptm_gene: str, tp_data: Dict[str, float]) -> str:
+        """Classify PTM→Non-PTM relationship directionality."""
+        connected_ptms = ptm_nonptm_edges.get(nonptm_gene, [])
+        if not connected_ptms or not ptm_temporal:
+            return "Interactor"
+
+        # Compare temporal patterns: does PTM change precede Non-PTM change?
+        nonptm_values = [tp_data.get(tp, 0) for tp in timepoints]
+        nonptm_first_change_idx = next(
+            (i for i, v in enumerate(nonptm_values) if abs(v) > 0.3), len(timepoints)
+        )
+
+        ptm_first_change_idx = len(timepoints)
+        for ptm_gene in connected_ptms:
+            ptm_vals = ptm_temporal.get(ptm_gene, {})
+            for i, tp in enumerate(timepoints):
+                if abs(ptm_vals.get(tp, 0)) > 0.3:
+                    ptm_first_change_idx = min(ptm_first_change_idx, i)
+                    break
+
+        if ptm_first_change_idx < nonptm_first_change_idx:
+            return "Downstream of PTM"
+        elif nonptm_first_change_idx < ptm_first_change_idx:
+            return "Upstream of PTM"
+        elif nonptm_first_change_idx == ptm_first_change_idx and nonptm_first_change_idx < len(timepoints):
+            # Check if Non-PTM opposes PTM direction → feedback
+            ptm_direction = sum(
+                ptm_temporal.get(pg, {}).get(timepoints[nonptm_first_change_idx], 0)
+                for pg in connected_ptms
+            )
+            nonptm_direction = nonptm_values[nonptm_first_change_idx]
+            if ptm_direction * nonptm_direction < 0:
+                return "Feedback Regulator"
+            return "Co-regulated"
+        return "Interactor"
+
     # Sort by max absolute change
     sorted_nonptm = sorted(
         nonptm_temporal.items(),
@@ -869,27 +985,34 @@ def build_nonptm_temporal_analysis(
     )
 
     lines = [
-        "## NON-PTM EFFECTOR TEMPORAL ANALYSIS",
+        "## NON-PTM EFFECTOR TEMPORAL ANALYSIS (with Signaling Role & Directionality)",
         f"Non-PTM proteins are interaction partners that do not carry {ptm_type} "
-        "modifications but show significant protein abundance changes.",
+        "modifications but show significant protein abundance changes. "
+        "Each protein is classified by its signaling role and its relationship "
+        "directionality relative to the PTM-modified proteins.",
         "",
     ]
 
     # Table header
-    header = "| # | Protein |"
+    header = "| # | Protein | Signaling Role | PTM Relationship |"
     for tp in timepoints:
         header += f" {tp} Prot_Log2FC |"
-    header += " Trend |"
+    header += " Trend | Pathway |"
     lines.append(header)
 
-    sep = "|---|---|"
+    sep = "|---|---|---|---|"
     for _ in timepoints:
         sep += "---|"
-    sep += "---|"
+    sep += "---|---|"
     lines.append(sep)
 
     for i, (gene, tp_data) in enumerate(sorted_nonptm[:15], 1):
-        row = f"| {i} | **{gene}** |"
+        role = _classify_signaling_role(gene)
+        directionality = _classify_directionality(gene, tp_data)
+        pathways = classify_gene_pathway(gene, DEFAULT_PATHWAYS)
+        pw_str = ", ".join(pathways[:2]) if pathways else "—"
+
+        row = f"| {i} | **{gene}** | {role} | {directionality} |"
         values = []
         for tp in timepoints:
             val = tp_data.get(tp, 0)
@@ -905,8 +1028,37 @@ def build_nonptm_temporal_analysis(
                 trend = "STABLE"
         else:
             trend = "N/A"
-        row += f" {trend} |"
+        row += f" {trend} | {pw_str} |"
         lines.append(row)
+
+    # Signaling role summary
+    role_counts: Dict[str, int] = {}
+    direction_counts: Dict[str, int] = {}
+    for gene, tp_data in sorted_nonptm[:15]:
+        role = _classify_signaling_role(gene)
+        directionality = _classify_directionality(gene, tp_data)
+        role_counts[role] = role_counts.get(role, 0) + 1
+        direction_counts[directionality] = direction_counts.get(directionality, 0) + 1
+
+    lines.append("")
+    lines.append("### Non-PTM Signaling Role Distribution")
+    for role, cnt in sorted(role_counts.items(), key=lambda x: x[1], reverse=True):
+        lines.append(f"- **{role}**: {cnt} proteins")
+
+    lines.append("")
+    lines.append("### PTM→Non-PTM Relationship Directionality")
+    for direction, cnt in sorted(direction_counts.items(), key=lambda x: x[1], reverse=True):
+        lines.append(f"- **{direction}**: {cnt} proteins")
+
+    lines.append("")
+    lines.append("### Interpretation Instructions")
+    lines.append(
+        "When writing about Non-PTM proteins, you MUST:\n"
+        "1. Describe each protein's signaling role (upstream regulator, scaffold/adaptor, transducer, or downstream effector)\n"
+        "2. Explain the directionality of its relationship with PTM-modified proteins (upstream, downstream, feedback, or co-regulated)\n"
+        "3. Place the protein within its canonical signaling pathway context\n"
+        "4. Discuss how the temporal pattern (immediate/delayed/sustained) relates to its signaling role\n"
+    )
 
     lines.append("")
     return "\n".join(lines)
@@ -1068,7 +1220,8 @@ def build_signal_propagation_json(
     network_results: dict, timepoints: list, ptm_type: str = "phosphorylation"
 ) -> str:
     """
-    GAP A-5: Build signal propagation JSON block.
+    GAP A-5: Build signal propagation JSON block with canonical pathway
+    annotation and biological significance interpretation.
     Provides a structured timeline of signaling events for LLM interpretation.
     """
     import json as _json
@@ -1091,7 +1244,6 @@ def build_signal_propagation_json(
         # Support both key formats: active_nodes (legacy) and ptm_nodes (network_node.py)
         active_nodes = net.get("active_nodes", [])
         if not active_nodes:
-            # From network_node.py: ptm_nodes with positive FC are active
             for n in net.get("ptm_nodes", []):
                 if isinstance(n, dict) and n.get("ptm_relative_log2fc", 0) > 0:
                     active_nodes.append(n)
@@ -1111,6 +1263,34 @@ def build_signal_propagation_json(
         new_activations = active_genes - prev_active_genes
         lost_activations = prev_active_genes - active_genes
 
+        # Classify new activations by canonical pathway
+        pathway_groups: Dict[str, List[str]] = {}
+        for gene in new_activations:
+            matched = classify_gene_pathway(gene, DEFAULT_PATHWAYS)
+            for pw in matched:
+                pathway_groups.setdefault(pw, []).append(gene)
+
+        # Classify lost activations by canonical pathway
+        lost_pathway_groups: Dict[str, List[str]] = {}
+        for gene in lost_activations:
+            matched = classify_gene_pathway(gene, DEFAULT_PATHWAYS)
+            for pw in matched:
+                lost_pathway_groups.setdefault(pw, []).append(gene)
+
+        # Determine biological significance of this timepoint transition
+        bio_significance = []
+        if len(new_activations) > len(lost_activations) * 2:
+            bio_significance.append("signal_amplification")
+        elif len(lost_activations) > len(new_activations) * 2:
+            bio_significance.append("signal_termination")
+        elif new_activations and lost_activations:
+            bio_significance.append("signal_relay")
+        if pathway_groups:
+            if len(pathway_groups) > 2:
+                bio_significance.append("pathway_divergence")
+            elif len(pathway_groups) == 1:
+                bio_significance.append("pathway_focused")
+
         tp_data = {
             "timepoint": tp,
             "n_active": len(active_nodes),
@@ -1118,15 +1298,38 @@ def build_signal_propagation_json(
             "n_nonptm": len(nonptm_nodes),
             "new_activations": sorted(new_activations)[:10],
             "lost_activations": sorted(lost_activations)[:10],
+            "canonical_pathways_activated": {
+                pw: sorted(genes) for pw, genes in sorted(pathway_groups.items(), key=lambda x: len(x[1]), reverse=True)
+            },
+            "canonical_pathways_deactivated": {
+                pw: sorted(genes) for pw, genes in sorted(lost_pathway_groups.items(), key=lambda x: len(x[1]), reverse=True)
+            },
+            "biological_significance": bio_significance,
         }
         propagation["timepoints"].append(tp_data)
 
         if prev_active_genes and new_activations:
+            # Determine cascade biological meaning
+            cascade_meaning = "signal_relay"
+            if len(new_activations) > 5:
+                cascade_meaning = "signal_amplification"
+            elif lost_activations and len(lost_activations) > len(new_activations):
+                cascade_meaning = "signal_attenuation"
+            elif not lost_activations and new_activations:
+                cascade_meaning = "signal_expansion"
+
             propagation["propagation_events"].append({
                 "from_tp": timepoints[timepoints.index(tp) - 1] if timepoints.index(tp) > 0 else tp,
                 "to_tp": tp,
                 "new_signals": sorted(new_activations)[:5],
-                "interpretation": f"Signal propagated to {len(new_activations)} new proteins at {tp}",
+                "lost_signals": sorted(lost_activations)[:5],
+                "cascade_type": cascade_meaning,
+                "pathways_involved": list(pathway_groups.keys())[:5],
+                "interpretation": (
+                    f"Signal propagated to {len(new_activations)} new proteins at {tp} "
+                    f"({cascade_meaning.replace('_', ' ')}). "
+                    f"Pathways: {', '.join(list(pathway_groups.keys())[:3]) or 'unclassified'}."
+                ),
             })
 
         prev_active_genes = active_genes
@@ -1134,15 +1337,46 @@ def build_signal_propagation_json(
     if not propagation["timepoints"]:
         return ""
 
+    # Build Markdown table summary in addition to JSON
     lines = [
-        "## SIGNAL PROPAGATION TIMELINE (JSON)",
+        "## SIGNAL PROPAGATION TIMELINE (with Canonical Pathway & Biological Significance)",
         "Use this structured timeline to describe how signaling events propagate across timepoints.",
-        "",
-        "```json",
-        _json.dumps(propagation, indent=2),
-        "```",
+        "For each cascade event, discuss: (1) which canonical pathways are involved, "
+        "(2) whether the event represents signal amplification, relay, or termination, "
+        "(3) the biological meaning of pathway activation/deactivation patterns.",
         "",
     ]
+
+    # Summary table
+    lines.append("### Propagation Summary")
+    lines.append("| Timepoint | Active | Inhibited | Non-PTM | New Activations | Lost | Significance | Top Pathways |")
+    lines.append("|---|---|---|---|---|---|---|---|")
+    for tp_d in propagation["timepoints"]:
+        pathways_str = ", ".join(list(tp_d.get("canonical_pathways_activated", {}).keys())[:3]) or "\u2014"
+        sig_str = ", ".join(tp_d.get("biological_significance", [])) or "\u2014"
+        lines.append(
+            f"| {tp_d['timepoint']} | {tp_d['n_active']} | {tp_d['n_inhibited']} | "
+            f"{tp_d['n_nonptm']} | {len(tp_d['new_activations'])} | "
+            f"{len(tp_d['lost_activations'])} | {sig_str} | {pathways_str} |"
+        )
+    lines.append("")
+
+    # Cascade events
+    if propagation["propagation_events"]:
+        lines.append("### Cascade Events")
+        for evt in propagation["propagation_events"]:
+            lines.append(
+                f"- **{evt['from_tp']} \u2192 {evt['to_tp']}**: {evt['interpretation']} "
+                f"(type: {evt['cascade_type']})"
+            )
+        lines.append("")
+
+    # Full JSON
+    lines.append("### Detailed JSON Data")
+    lines.append("```json")
+    lines.append(_json.dumps(propagation, indent=2))
+    lines.append("```")
+    lines.append("")
     return "\n".join(lines)
 
 

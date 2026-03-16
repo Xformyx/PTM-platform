@@ -436,15 +436,16 @@ PTM Biological Context:
 {comp_disc}
 {cell_signaling_block}
 
-Structure (5-6 core topics):
+Structure (7 core topics):
 1. Primary Finding: The main PTM signaling mechanism identified — discuss in detail how the observed modifications form a coherent signaling response
 2. Mechanistic Insight: How specific PTM sites contribute to the observed response — relate each key site to known kinase-substrate relationships and signaling cascades
-3. Cell Signaling Commonality: Discuss shared pathway memberships and cross-pathway interactions among the identified PTMs (use the Cell Signaling Commonality Analysis above)
-4. Comparison with Literature: Compare and contrast your findings with published studies (use the provided references extensively)
-5. Broader Implications: Relevance to disease pathology or therapeutic targeting — discuss potential clinical significance
-6. Limitations and Future Directions: Acknowledge limitations and propose follow-up experiments
+3. Non-PTM Effector Signaling: Discuss the signaling roles of Non-PTM effector proteins (upstream regulators, scaffold/adaptors, transducers, downstream effectors). For each key Non-PTM protein, explain: (a) its relationship directionality with PTM proteins (upstream/downstream/feedback), (b) the canonical signaling pathway it belongs to, (c) how its temporal dynamics relate to PTM changes
+4. Cell Signaling Commonality: Discuss shared pathway memberships and cross-pathway interactions among the identified PTMs (use the Cell Signaling Commonality Analysis above). Explain whether signaling cascades represent signal amplification, relay, or termination
+5. Comparison with Literature: Compare and contrast your findings with published studies (use the provided references extensively)
+6. Broader Implications: Relevance to disease pathology or therapeutic targeting — discuss potential clinical significance
+7. Limitations and Future Directions: Acknowledge limitations and propose follow-up experiments
 
-IMPORTANT: For each discussion point, provide evidence from your data AND from the literature. Cite the provided references extensively. Discuss alternative interpretations where appropriate.
+IMPORTANT: For each discussion point, provide evidence from your data AND from the literature. Cite the provided references extensively. Discuss alternative interpretations where appropriate. When discussing Non-PTM proteins, always classify their signaling role and explain their relationship directionality with PTM-modified proteins.
 {combined_lit}"""
 
     elif section_type == "conclusion":
