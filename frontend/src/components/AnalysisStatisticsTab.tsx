@@ -299,13 +299,13 @@ function QuantificationCard({ s2 }: { s2: Record<string, any> }) {
                     outerRadius={80}
                     paddingAngle={2}
                     dataKey="value"
-                    label={({ name, percent }) => `${name} ${(percent * 100).toFixed(1)}%`}
+                    label={({ name, percent }) => `${name} ${((percent ?? 0) * 100).toFixed(1)}%`}
                   >
                     {donutData.map((entry, i) => (
                       <Cell key={i} fill={entry.fill} />
                     ))}
                   </Pie>
-                  <ReTooltip formatter={(v: number) => fmt(v)} />
+                  <ReTooltip formatter={(v: unknown) => fmt(Number(v))} />
                 </PieChart>
               </ResponsiveContainer>
             </div>

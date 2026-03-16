@@ -1249,6 +1249,91 @@ async def preview_order_file(
     }
 
 
+def _generate_statistics_from_outputs(order: Order, output_dir: Path, file_suffix: str) -> dict | None:
+    """Generate pipeline statistics from existing output files (for orders preprocessed before stats feature)."""
+    try:
+        import pandas as pd
+        from datetime import datetime
+
+        stats = {
+            "metadata": {
+                "ptm_mode": "phospho" if "phospho" in file_suffix else "ubi",
+                "ptm_mode_name": "Phosphorylation" if "phospho" in file_suffix else "Ubiquitylation",
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            },
+            "step1_input": {},
+            "step2_quantification": {},
+            "step3_enrichment": {},
+            "step4_biological": {},
+            "final_output": {},
+        }
+
+        pr_df, pg_df = None, None
+        pr_path = Path(order.pr_matrix_path) if order.pr_matrix_path else None
+        pg_path = Path(order.pg_matrix_path) if order.pg_matrix_path else None
+        if pr_path and pr_path.exists() and pg_path and pg_path.exists():
+            pr_df = pd.read_csv(pr_path, sep="\t", low_memory=False)
+            pg_df = pd.read_csv(pg_path, sep="\t", low_memory=False)
+            sample_cols = [c for c in pr_df.columns if c not in (
+                "Protein.Group", "Protein.Ids", "Protein.Names", "Genes",
+                "First.Protein.Description", "Proteotypic", "Stripped.Sequence",
+                "Modified.Sequence", "Precursor.Charge", "Precursor.Id",
+            )]
+            stats["step1_input"] = {
+                "total_precursors": len(pr_df),
+                "total_proteins_pr": int(pr_df["Protein.Group"].nunique()) if "Protein.Group" in pr_df.columns else 0,
+                "total_protein_groups": len(pg_df),
+                "total_samples": len(sample_cols),
+            }
+
+        ptm_vector_path = output_dir / f"ptm_vector_data_normalized{file_suffix}.tsv"
+        if ptm_vector_path.exists():
+            ptm_df = pd.read_csv(ptm_vector_path, sep="\t", low_memory=False)
+            n_pr = len(pr_df) if pr_df is not None else 0
+            stats["step2_quantification"] = {
+                "normalization": {"pr_precursors_before": 0, "pg_proteins_before": 0},
+                "ptm_filtering": {
+                    "total_precursors": n_pr,
+                    "ptm_precursors": len(ptm_df),
+                    "ptm_proteins": int(ptm_df["Protein.Group"].nunique()) if "Protein.Group" in ptm_df.columns else 0,
+                    "ptm_sites": int(ptm_df["PTM_Site"].nunique()) if "PTM_Site" in ptm_df.columns else 0,
+                    "ptm_ratio": round(len(ptm_df) / max(n_pr, 1) * 100, 1),
+                },
+                "relative_quant": {
+                    "total_entries": len(ptm_df),
+                    "unique_proteins": int(ptm_df["Protein.Group"].nunique()) if "Protein.Group" in ptm_df.columns else 0,
+                    "unique_sites": int(ptm_df["PTM_Site"].nunique()) if "PTM_Site" in ptm_df.columns else 0,
+                },
+            }
+
+        enriched_path = output_dir / f"unified_protein_data_enriched{file_suffix}.tsv"
+        if enriched_path.exists():
+            en_df = pd.read_csv(enriched_path, sep="\t", low_memory=False)
+            stats["step3_enrichment"] = {
+                "total_rows": len(en_df),
+                "unique_proteins": int(en_df["Protein.Group"].nunique()) if "Protein.Group" in en_df.columns else 0,
+            }
+
+        bio_path = output_dir / f"unified_protein_data_enriched_bio_enriched{file_suffix}.tsv"
+        if bio_path.exists():
+            bio_df = pd.read_csv(bio_path, sep="\t", low_memory=False)
+            stats["step4_biological"] = {
+                "total_rows": len(bio_df),
+                "unique_proteins": int(bio_df["Protein.Group"].nunique()) if "Protein.Group" in bio_df.columns else 0,
+            }
+            stats["final_output"] = {
+                "total_rows": len(bio_df),
+                "total_columns": len(bio_df.columns),
+                "unique_proteins": int(bio_df["Protein.Group"].nunique()) if "Protein.Group" in bio_df.columns else 0,
+            }
+
+        if any(stats.get(k) for k in ("step1_input", "step2_quantification", "step3_enrichment", "step4_biological", "final_output")):
+            return stats
+    except Exception as e:
+        logger.warning(f"Failed to generate statistics from outputs: {e}")
+        return None
+
+
 @router.get("/{order_id}/statistics")
 async def get_order_statistics(
     order_id: int,
@@ -1272,12 +1357,16 @@ async def get_order_statistics(
     file_suffix = "_phospho" if order.ptm_type == "phosphorylation" else "_ubi"
     stats_file = output_dir / f"pipeline_statistics{file_suffix}.json"
 
-    if not stats_file.exists():
-        return {"statistics": None, "available": False}
+    if stats_file.exists():
+        try:
+            with open(stats_file, "r", encoding="utf-8") as f:
+                stats = _json.load(f)
+            return {"statistics": stats, "available": True}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Error reading statistics: {str(e)}")
 
-    try:
-        with open(stats_file, "r", encoding="utf-8") as f:
-            stats = _json.load(f)
+    # Fallback: generate from existing output files (for orders preprocessed before stats feature)
+    stats = _generate_statistics_from_outputs(order, output_dir, file_suffix)
+    if stats:
         return {"statistics": stats, "available": True}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error reading statistics: {str(e)}")
+    return {"statistics": None, "available": False}

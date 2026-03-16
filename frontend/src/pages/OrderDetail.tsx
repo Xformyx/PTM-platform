@@ -2117,9 +2117,9 @@ export default function OrderDetail() {
         </Alert>
       )}
 
-      {/* Tabs: Overview / Results / Vector Plot */}
+      {/* Tabs: Overview / Analysis Statistics / Vector Plot / Results */}
       <Tabs defaultValue="overview">
-        <TabsList>
+        <TabsList className="flex-wrap h-auto gap-1">
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="analysis-statistics">
             <BarChart3 className="h-3.5 w-3.5 mr-1.5" />
