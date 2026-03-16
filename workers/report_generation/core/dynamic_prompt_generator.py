@@ -785,6 +785,409 @@ def build_structured_protein_data_for_llm(
 
 
 # ---------------------------------------------------------------------------
+# GAP A: 5 Auxiliary Data Blocks for Results Prompt
+# Ported from ptm_nonptm_network_command.py
+# ---------------------------------------------------------------------------
+
+def build_ptm_data_summary(parsed_ptms: List[dict], ptm_type: str = "phosphorylation") -> str:
+    """
+    GAP A-1: Build a concise PTM data summary block.
+    Summarizes total counts, up/down regulation, top modified proteins.
+    """
+    if not parsed_ptms:
+        return ""
+
+    total = len(parsed_ptms)
+    up = sum(1 for p in parsed_ptms if float(p.get("ptm_relative_log2fc", 0)) > 0)
+    down = total - up
+
+    # Top 5 by absolute FC
+    sorted_ptms = sorted(parsed_ptms, key=lambda x: abs(float(x.get("ptm_relative_log2fc", 0))), reverse=True)
+
+    lines = [
+        "## PTM DATA SUMMARY",
+        f"- **Total {ptm_type} sites**: {total}",
+        f"- **Upregulated**: {up} ({up/total*100:.1f}%)" if total > 0 else "",
+        f"- **Downregulated**: {down} ({down/total*100:.1f}%)" if total > 0 else "",
+        "",
+        "**Top 5 Most Changed PTMs:**",
+    ]
+    for i, p in enumerate(sorted_ptms[:5], 1):
+        gene = p.get("gene", "?")
+        pos = p.get("position", "?")
+        ptm_fc = float(p.get("ptm_relative_log2fc", 0))
+        prot_fc = float(p.get("protein_log2fc", 0))
+        direction = "UP" if ptm_fc > 0 else "DOWN"
+        lines.append(
+            f"  {i}. **{gene}-{pos}**: PTM Log2FC={ptm_fc:.2f} ({direction}), "
+            f"Protein Log2FC={prot_fc:.2f}"
+        )
+    lines.append("")
+    return "\n".join(lines)
+
+
+def build_nonptm_temporal_analysis(
+    network_results: dict, timepoints: list, ptm_type: str = "phosphorylation"
+) -> str:
+    """
+    GAP A-2: Build Non-PTM temporal analysis block.
+    Shows how Non-PTM effector proteins change across timepoints.
+    """
+    # Support both 'networks' (legacy) and 'timepoint_results' (network_node.py output)
+    networks = network_results.get("networks", {})
+    tp_results = network_results.get("timepoint_results", {})
+    source = networks or tp_results
+    if not source or not timepoints:
+        return ""
+
+    # Collect Non-PTM proteins across timepoints
+    nonptm_temporal: Dict[str, Dict[str, float]] = {}
+    for tp in timepoints:
+        net = source.get(tp, {})
+        if not isinstance(net, dict):
+            continue
+        for node in net.get("non_ptm_nodes", []):
+            if not isinstance(node, dict):
+                continue
+            gene = node.get("gene", node.get("id", ""))
+            if not gene:
+                continue
+            plog2fc = float(node.get("protein_log2fc", node.get("log2fc", 0)))
+            if gene not in nonptm_temporal:
+                nonptm_temporal[gene] = {}
+            nonptm_temporal[gene][tp] = plog2fc
+
+    if not nonptm_temporal:
+        return ""
+
+    # Sort by max absolute change
+    sorted_nonptm = sorted(
+        nonptm_temporal.items(),
+        key=lambda x: max(abs(v) for v in x[1].values()),
+        reverse=True,
+    )
+
+    lines = [
+        "## NON-PTM EFFECTOR TEMPORAL ANALYSIS",
+        f"Non-PTM proteins are interaction partners that do not carry {ptm_type} "
+        "modifications but show significant protein abundance changes.",
+        "",
+    ]
+
+    # Table header
+    header = "| # | Protein |"
+    for tp in timepoints:
+        header += f" {tp} Prot_Log2FC |"
+    header += " Trend |"
+    lines.append(header)
+
+    sep = "|---|---|"
+    for _ in timepoints:
+        sep += "---|"
+    sep += "---|"
+    lines.append(sep)
+
+    for i, (gene, tp_data) in enumerate(sorted_nonptm[:15], 1):
+        row = f"| {i} | **{gene}** |"
+        values = []
+        for tp in timepoints:
+            val = tp_data.get(tp, 0)
+            row += f" {val:.2f} |"
+            values.append(val)
+        # Determine trend
+        if len(values) >= 2:
+            if values[-1] > values[0] + 0.3:
+                trend = "INCREASING"
+            elif values[-1] < values[0] - 0.3:
+                trend = "DECREASING"
+            else:
+                trend = "STABLE"
+        else:
+            trend = "N/A"
+        row += f" {trend} |"
+        lines.append(row)
+
+    lines.append("")
+    return "\n".join(lines)
+
+
+def build_ptm_protein_timelag_analysis(
+    network_results: dict, timepoints: list, ptm_type: str = "phosphorylation"
+) -> str:
+    """
+    GAP A-3: Build PTM vs Protein time-lag analysis.
+    Identifies cases where PTM change precedes or follows protein abundance change.
+    """
+    # Support both 'networks' (legacy) and 'timepoint_results' (network_node.py output)
+    networks = network_results.get("networks", {})
+    tp_results = network_results.get("timepoint_results", {})
+    source = networks or tp_results
+    if not source or len(timepoints) < 2:
+        return ""
+
+    # Collect PTM proteins across timepoints
+    ptm_temporal: Dict[str, Dict[str, dict]] = {}
+    for tp in timepoints:
+        net = source.get(tp, {})
+        if not isinstance(net, dict):
+            continue
+        # Support both legacy (active_nodes/inhibited_nodes) and network_node.py (ptm_nodes)
+        all_ptm_nodes = []
+        for node_type in ["active_nodes", "inhibited_nodes"]:
+            all_ptm_nodes.extend(net.get(node_type, []))
+        if not all_ptm_nodes:
+            all_ptm_nodes = net.get("ptm_nodes", [])
+        for node in all_ptm_nodes:
+                if not isinstance(node, dict):
+                    continue
+                gene = node.get("gene", node.get("id", ""))
+                site = node.get("site", node.get("position", ""))
+                key = f"{gene}({site})" if site else gene
+                ptm_fc = float(node.get("value", node.get("ptm_log2fc", node.get("ptm_relative_log2fc", 0))))
+                prot_fc = float(node.get("protein_log2fc", 0))
+                if key not in ptm_temporal:
+                    ptm_temporal[key] = {"gene": gene, "site": site}
+                ptm_temporal[key][tp] = {"ptm": ptm_fc, "prot": prot_fc}
+
+    if not ptm_temporal:
+        return ""
+
+    # Analyze time-lag patterns
+    timelag_cases = []
+    for key, data in ptm_temporal.items():
+        gene = data.get("gene", "?")
+        site = data.get("site", "")
+        tp_values = [(tp, data[tp]) for tp in timepoints if tp in data and isinstance(data[tp], dict)]
+        if len(tp_values) < 2:
+            continue
+
+        # Check if PTM change precedes protein change
+        first_ptm_sig = None
+        first_prot_sig = None
+        for tp, vals in tp_values:
+            if first_ptm_sig is None and abs(vals["ptm"]) > 0.5:
+                first_ptm_sig = tp
+            if first_prot_sig is None and abs(vals["prot"]) > 0.5:
+                first_prot_sig = tp
+
+        if first_ptm_sig and first_prot_sig:
+            ptm_idx = timepoints.index(first_ptm_sig) if first_ptm_sig in timepoints else -1
+            prot_idx = timepoints.index(first_prot_sig) if first_prot_sig in timepoints else -1
+            if ptm_idx >= 0 and prot_idx >= 0 and ptm_idx != prot_idx:
+                if ptm_idx < prot_idx:
+                    pattern = "PTM-first"
+                    explanation = f"{gene} {ptm_type} at {site} detected at {first_ptm_sig}, protein change at {first_prot_sig}"
+                else:
+                    pattern = "Protein-first"
+                    explanation = f"{gene} protein change at {first_prot_sig}, {ptm_type} at {site} detected at {first_ptm_sig}"
+                timelag_cases.append({
+                    "gene": gene, "site": site, "pattern": pattern,
+                    "ptm_tp": first_ptm_sig, "prot_tp": first_prot_sig,
+                    "explanation": explanation,
+                })
+
+    if not timelag_cases:
+        return ""
+
+    lines = [
+        "## PTM-PROTEIN TIME-LAG ANALYSIS",
+        "The following proteins show a temporal offset between PTM modification "
+        "and protein abundance change, suggesting causal regulatory relationships.",
+        "",
+        "| # | Protein | Site | Pattern | PTM First Detected | Protein First Changed | Interpretation |",
+        "|---|---|---|---|---|---|---|",
+    ]
+    for i, case in enumerate(timelag_cases[:15], 1):
+        lines.append(
+            f"| {i} | **{case['gene']}** | {case['site']} | {case['pattern']} | "
+            f"{case['ptm_tp']} | {case['prot_tp']} | {case['explanation'][:80]} |"
+        )
+    lines.append("")
+
+    ptm_first = sum(1 for c in timelag_cases if c["pattern"] == "PTM-first")
+    prot_first = len(timelag_cases) - ptm_first
+    lines.append(
+        f"**Summary**: {ptm_first} PTM-first cases, {prot_first} Protein-first cases. "
+        f"PTM-first cases suggest kinase/phosphatase-driven regulation; "
+        f"Protein-first cases suggest expression-driven or degradation-mediated changes."
+    )
+    lines.append("")
+    return "\n".join(lines)
+
+
+def build_pathway_context_for_llm(
+    parsed_ptms: List[dict], pathways: Optional[Dict] = None
+) -> str:
+    """
+    GAP A-4: Build pathway context block for LLM.
+    Groups PTMs by pathway and provides biological context.
+    """
+    pathways = pathways or DEFAULT_PATHWAYS
+    if not parsed_ptms:
+        return ""
+
+    pathway_ptms: Dict[str, List[dict]] = defaultdict(list)
+    for ptm in parsed_ptms:
+        gene = ptm.get("gene", "")
+        matched = classify_gene_pathway(gene, pathways)
+        for pw in matched:
+            pathway_ptms[pw].append(ptm)
+
+    if not pathway_ptms:
+        return ""
+
+    # Sort by count
+    sorted_pathways = sorted(pathway_ptms.items(), key=lambda x: len(x[1]), reverse=True)
+
+    lines = [
+        "## PATHWAY CONTEXT FOR PTM INTERPRETATION",
+        "The following pathway groupings provide biological context for interpreting PTM changes.",
+        "",
+    ]
+
+    for pw_name, ptms in sorted_pathways[:8]:
+        desc = pathways.get(pw_name, {}).get("description", "")
+        up = sum(1 for p in ptms if float(p.get("ptm_relative_log2fc", 0)) > 0)
+        down = len(ptms) - up
+        top_genes = sorted(ptms, key=lambda x: abs(float(x.get("ptm_relative_log2fc", 0))), reverse=True)
+        gene_list = ", ".join(
+            f"{p['gene']}-{p.get('position', '?')}(FC={float(p.get('ptm_relative_log2fc', 0)):.2f})"
+            for p in top_genes[:5]
+        )
+        lines.append(f"### {pw_name} ({len(ptms)} PTMs: {up} up, {down} down)")
+        if desc:
+            lines.append(f"*{desc}*")
+        lines.append(f"Key members: {gene_list}")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+def build_signal_propagation_json(
+    network_results: dict, timepoints: list, ptm_type: str = "phosphorylation"
+) -> str:
+    """
+    GAP A-5: Build signal propagation JSON block.
+    Provides a structured timeline of signaling events for LLM interpretation.
+    """
+    import json as _json
+
+    # Support both 'networks' (legacy) and 'timepoint_results' (network_node.py output)
+    networks = network_results.get("networks", {})
+    tp_results = network_results.get("timepoint_results", {})
+    source = networks or tp_results
+    if not source or not timepoints:
+        return ""
+
+    propagation = {"ptm_type": ptm_type, "timepoints": [], "propagation_events": []}
+
+    prev_active_genes = set()
+    for tp in timepoints:
+        net = source.get(tp, {})
+        if not isinstance(net, dict):
+            continue
+
+        # Support both key formats: active_nodes (legacy) and ptm_nodes (network_node.py)
+        active_nodes = net.get("active_nodes", [])
+        if not active_nodes:
+            # From network_node.py: ptm_nodes with positive FC are active
+            for n in net.get("ptm_nodes", []):
+                if isinstance(n, dict) and n.get("ptm_relative_log2fc", 0) > 0:
+                    active_nodes.append(n)
+        inhibited_nodes = net.get("inhibited_nodes", [])
+        if not inhibited_nodes:
+            for n in net.get("ptm_nodes", []):
+                if isinstance(n, dict) and n.get("ptm_relative_log2fc", 0) < 0:
+                    inhibited_nodes.append(n)
+        nonptm_nodes = net.get("non_ptm_nodes", [])
+
+        active_genes = set()
+        for n in active_nodes:
+            if isinstance(n, dict):
+                active_genes.add(n.get("gene", n.get("id", "")))
+
+        # New activations at this timepoint
+        new_activations = active_genes - prev_active_genes
+        lost_activations = prev_active_genes - active_genes
+
+        tp_data = {
+            "timepoint": tp,
+            "n_active": len(active_nodes),
+            "n_inhibited": len(inhibited_nodes),
+            "n_nonptm": len(nonptm_nodes),
+            "new_activations": sorted(new_activations)[:10],
+            "lost_activations": sorted(lost_activations)[:10],
+        }
+        propagation["timepoints"].append(tp_data)
+
+        if prev_active_genes and new_activations:
+            propagation["propagation_events"].append({
+                "from_tp": timepoints[timepoints.index(tp) - 1] if timepoints.index(tp) > 0 else tp,
+                "to_tp": tp,
+                "new_signals": sorted(new_activations)[:5],
+                "interpretation": f"Signal propagated to {len(new_activations)} new proteins at {tp}",
+            })
+
+        prev_active_genes = active_genes
+
+    if not propagation["timepoints"]:
+        return ""
+
+    lines = [
+        "## SIGNAL PROPAGATION TIMELINE (JSON)",
+        "Use this structured timeline to describe how signaling events propagate across timepoints.",
+        "",
+        "```json",
+        _json.dumps(propagation, indent=2),
+        "```",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# GAP G: Condition Display Name Formatting
+# ---------------------------------------------------------------------------
+
+def format_condition_display_name(condition: str) -> str:
+    """
+    GAP G: Convert raw condition strings to human-readable display names.
+    Examples:
+        'ECM_EPS_2min_vs_Control' -> 'ECM EPS 2 min vs Control'
+        'kbsi_af_5min' -> 'KBSI AF 5 min'
+        'treatment_6h_vs_ctrl' -> 'Treatment 6 h vs Ctrl'
+    """
+    if not condition:
+        return condition
+
+    import re as _re
+
+    # Replace underscores with spaces
+    name = condition.replace("_", " ")
+
+    # Add space between number and unit (e.g., '2min' -> '2 min', '6h' -> '6 h')
+    name = _re.sub(r'(\d+)(min|h|sec|hr|hour|s)\b', r'\1 \2', name, flags=_re.IGNORECASE)
+
+    # Capitalize first letter of each word, but keep known abbreviations uppercase
+    words = name.split()
+    formatted = []
+    upper_abbreviations = {"ecm", "eps", "kbsi", "af", "ctrl", "ko", "wt", "het"}
+    lower_keep = {"vs", "min", "h", "sec", "hr", "hour", "s"}
+    for w in words:
+        wl = w.lower()
+        if wl in lower_keep:
+            formatted.append(wl)
+        elif wl in upper_abbreviations:
+            formatted.append(w.upper())
+        elif _re.match(r'^\d+$', w):
+            formatted.append(w)  # keep numbers as-is
+        else:
+            formatted.append(w.capitalize() if not w[0].isupper() else w)
+
+    return " ".join(formatted)
+
+
+# ---------------------------------------------------------------------------
 # v98: Structured Cross-Talk Data Builder for LLM Prompts
 # ---------------------------------------------------------------------------
 

@@ -11,18 +11,24 @@ import re
 from typing import Dict, List
 
 from common.llm_client import LLMClient
-from common.report_postprocessor import validate_llm_output_against_data
+from common.report_postprocessor import validate_llm_output_against_data, validate_log2fc_interpretation_consistency
 from report_generation.core.rag_retriever import RAGRetriever
 from report_generation.core.dynamic_prompt_generator import (
     build_anti_hallucination_directive,
     build_dynamic_writing_example,
     build_structured_protein_data_for_llm,
+    build_ptm_data_summary,
+    build_nonptm_temporal_analysis,
+    build_ptm_protein_timelag_analysis,
+    build_pathway_context_for_llm,
+    build_signal_propagation_json,
+    format_condition_display_name,
 )
 from report_generation.core.figure_context import FigureInformationGenerator
 
 logger = logging.getLogger(__name__)
 
-SECTION_ORDER = ["introduction", "results", "discussion", "conclusion", "abstract"]
+SECTION_ORDER = ["introduction", "results", "discussion", "conclusion", "methods", "suggestion", "abstract"]
 
 SECTION_MAX_TOKENS = {
     "abstract": 6144,
@@ -30,6 +36,8 @@ SECTION_MAX_TOKENS = {
     "results": 16384,
     "discussion": 12288,
     "conclusion": 8192,
+    "methods": 8192,
+    "suggestion": 8192,
 }
 
 SYSTEM_PROMPT = (
@@ -140,6 +148,28 @@ def run_section_writing(state: dict) -> dict:
             if v98_writing_example and section_type == "results":
                 prompt += "\n\n" + v98_writing_example
 
+        # GAP A: Inject 5 auxiliary data blocks for Results section
+        if section_type == "results":
+            aux_blocks = []
+            ptm_data_summary = build_ptm_data_summary(parsed_ptms, ptm_type=ptm_type)
+            if ptm_data_summary:
+                aux_blocks.append(ptm_data_summary)
+            nonptm_temporal = build_nonptm_temporal_analysis(network_results, timepoints, ptm_type=ptm_type)
+            if nonptm_temporal:
+                aux_blocks.append(nonptm_temporal)
+            timelag_analysis = build_ptm_protein_timelag_analysis(network_results, timepoints, ptm_type=ptm_type)
+            if timelag_analysis:
+                aux_blocks.append(timelag_analysis)
+            pathway_ctx = build_pathway_context_for_llm(parsed_ptms)
+            if pathway_ctx:
+                aux_blocks.append(pathway_ctx)
+            signal_prop = build_signal_propagation_json(network_results, timepoints, ptm_type=ptm_type)
+            if signal_prop:
+                aux_blocks.append(signal_prop)
+            if aux_blocks:
+                prompt += "\n\n" + "\n\n".join(aux_blocks)
+                logger.info(f"[GAP-A] Injected {len(aux_blocks)} auxiliary data blocks into Results prompt")
+
         # Inject figure context for Results/Discussion so LLM can reference figures
         if figure_gen.has_figures() and section_type in ("results", "discussion"):
             figure_ctx = figure_gen.generate_figure_context_for_llm(section_type)
@@ -172,6 +202,34 @@ def run_section_writing(state: dict) -> dict:
                 logger.info(f"[v98] {section_type} validation score: {validation['validation_score']:.1%}")
             except Exception as e:
                 logger.warning(f"[v98] {section_type} validation failed (non-fatal): {e}")
+
+        # GAP D: Log2FC interpretation consistency validation
+        if section_type in ("results", "discussion") and parsed_ptms:
+            try:
+                protein_fc_map = {}
+                for ptm in parsed_ptms:
+                    gene = ptm.get("gene", "")
+                    fc = float(ptm.get("ptm_relative_log2fc", 0))
+                    if gene and gene not in protein_fc_map:
+                        protein_fc_map[gene] = fc
+                if protein_fc_map:
+                    fc_validation = validate_log2fc_interpretation_consistency(
+                        content, protein_fc_map, auto_correct=True
+                    )
+                    if fc_validation["corrections_made"] > 0:
+                        content = fc_validation["validated_text"]
+                        logger.warning(
+                            f"[GAP-D] {section_type}: {fc_validation['corrections_made']} "
+                            f"Log2FC interpretation contradictions auto-corrected "
+                            f"(consistency: {fc_validation['consistency_score']:.1%})"
+                        )
+                    elif fc_validation["contradictions"]:
+                        logger.warning(
+                            f"[GAP-D] {section_type}: {len(fc_validation['contradictions'])} "
+                            f"contradictions detected but not corrected"
+                        )
+            except Exception as e:
+                logger.warning(f"[GAP-D] {section_type} Log2FC validation failed (non-fatal): {e}")
 
         sections[section_type] = content
         prev_sections[section_type] = content
@@ -318,6 +376,24 @@ IMPORTANT: Write a thorough, detailed introduction. Cite as many of the provided
         if comprehensive_summary:
             comp_ctx = f"\n\nDetailed Analysis Context (from prior comprehensive analysis):\n{comprehensive_summary[:6000]}\n"
 
+        # GAP C: Build RQ direct-answer structure
+        rq_answer_structure = ""
+        if questions:
+            rq_lines = ["\n## RESEARCH QUESTION DIRECT ANSWER STRUCTURE"]
+            rq_lines.append("For EACH research question, you MUST provide a subsection (### heading) that includes:")
+            rq_lines.append("1. **Direct Answer**: A clear 1-2 sentence answer to the question")
+            rq_lines.append("2. **Time Course Table** (if multi-timepoint): Show how key PTMs change across timepoints")
+            rq_lines.append("3. **Functional Interpretation**: What the PTM changes mean biologically")
+            rq_lines.append("4. **Alternative Explanations**: Other possible interpretations of the data")
+            rq_lines.append("5. **Testable Prediction**: A specific prediction that could validate the finding")
+            rq_lines.append("")
+            for i, q in enumerate(questions, 1):
+                rq_lines.append(f"### Q{i}: {q}")
+                rq_lines.append(f"  → You MUST start with: 'In direct response to Q{i}, ...'")
+                rq_lines.append(f"  → Then provide the 5 elements listed above.")
+                rq_lines.append("")
+            rq_answer_structure = "\n".join(rq_lines)
+
         return f"""Write a detailed Results section (~3000-5000 words) for this PTM analysis report.
 {single_tp_directive}
 Research Findings:
@@ -329,9 +405,11 @@ PTM Data:
 {hyp_summary}
 {network_info}
 {comp_ctx}
+{rq_answer_structure}
 
 Structure:
 - Present results for each research question as subsections with ### headings
+- For EACH research question, provide: (1) Direct Answer, (2) Time Course Table, (3) Functional Interpretation, (4) Alternative Explanations, (5) Testable Prediction
 - For each PTM site, describe: the specific modification, fold-change values, known biological function, pathway involvement, and disease relevance
 - Include specific PTM sites with Log2FC values and their biological functions
 - Reference enriched pathways and protein interactions
@@ -348,6 +426,30 @@ IMPORTANT: Be thorough and detailed. Discuss each significant PTM site individua
         if comprehensive_summary:
             comp_disc = f"\n\nDetailed Analysis Context:\n{comprehensive_summary[:4000]}\n"
 
+        # GAP E: Inject Cell Signaling Commonality Analysis
+        cell_signaling_block = ""
+        from report_generation.core.dynamic_prompt_generator import classify_gene_pathway, DEFAULT_PATHWAYS
+        if ptms:
+            pathway_counts: Dict[str, int] = {}
+            for ptm in ptms:
+                gene = ptm.get("gene", "")
+                matched = classify_gene_pathway(gene, DEFAULT_PATHWAYS)
+                for pw in matched:
+                    pathway_counts[pw] = pathway_counts.get(pw, 0) + 1
+            if pathway_counts:
+                top_pathways = sorted(pathway_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+                cs_lines = ["\n## CELL SIGNALING COMMONALITY ANALYSIS"]
+                cs_lines.append("The following pathways are most represented among the identified PTMs:")
+                for pw, cnt in top_pathways:
+                    desc = DEFAULT_PATHWAYS.get(pw, {}).get("description", "")
+                    cs_lines.append(f"- **{pw}** ({cnt} PTMs): {desc}")
+                cs_lines.append("")
+                cs_lines.append("INSTRUCTION: Discuss how these shared pathway memberships suggest ")
+                cs_lines.append("coordinated signaling responses. Identify cross-pathway interactions ")
+                cs_lines.append("and potential signal integration points.")
+                cs_lines.append("")
+                cell_signaling_block = "\n".join(cs_lines)
+
         return f"""Write a comprehensive Discussion section (~2000-3000 words) for this PTM analysis report.
 {single_tp_directive}
 Results Summary:
@@ -359,13 +461,15 @@ Validated Hypotheses:
 PTM Biological Context:
 {ptm_summary}
 {comp_disc}
+{cell_signaling_block}
 
-Structure (4-5 core topics):
+Structure (5-6 core topics):
 1. Primary Finding: The main PTM signaling mechanism identified — discuss in detail how the observed modifications form a coherent signaling response
 2. Mechanistic Insight: How specific PTM sites contribute to the observed response — relate each key site to known kinase-substrate relationships and signaling cascades
-3. Comparison with Literature: Compare and contrast your findings with published studies (use the provided references extensively)
-4. Broader Implications: Relevance to disease pathology or therapeutic targeting — discuss potential clinical significance
-5. Limitations and Future Directions: Acknowledge limitations and propose follow-up experiments
+3. Cell Signaling Commonality: Discuss shared pathway memberships and cross-pathway interactions among the identified PTMs (use the Cell Signaling Commonality Analysis above)
+4. Comparison with Literature: Compare and contrast your findings with published studies (use the provided references extensively)
+5. Broader Implications: Relevance to disease pathology or therapeutic targeting — discuss potential clinical significance
+6. Limitations and Future Directions: Acknowledge limitations and propose follow-up experiments
 
 IMPORTANT: For each discussion point, provide evidence from your data AND from the literature. Cite the provided references extensively. Discuss alternative interpretations where appropriate.
 {combined_lit}"""
@@ -400,6 +504,85 @@ Summarize:
 6. Specific future research directions with concrete experimental suggestions
 
 IMPORTANT: Be specific about findings — mention key PTM sites and their implications. Reference the results and discussion sections. Cite relevant references.
+{combined_lit}"""
+
+    # GAP B: Methods section
+    elif section_type == "methods":
+        # Collect methodology details from context
+        organism = context.get("organism", "")
+        tissue_str = context.get("tissue") or context.get("cell_type", "")
+        treatment_str = context.get("treatment", "")
+        ptm_type_str = context.get("ptm_type", "phosphorylation")
+        n_ptms = len(ptms)
+        n_conditions = len(set(p.get("condition", "") for p in ptms if p.get("condition")))
+        has_network = bool(network and network.get("cytoscape_connected"))
+
+        return f"""Write a detailed Methods section (~800-1500 words) for this PTM analysis report.
+{single_tp_directive}
+Experimental System:
+- Organism: {organism}
+- Tissue/Cell type: {tissue_str}
+- Treatment: {treatment_str}
+- PTM type analyzed: {ptm_type_str}
+- Total PTM sites: {n_ptms}
+- Number of conditions: {n_conditions}
+
+The Methods section MUST cover:
+1. **Sample Preparation and Mass Spectrometry**: Describe the general proteomics workflow for {ptm_type_str} analysis (enrichment strategy, LC-MS/MS, database search)
+2. **PTM Data Processing**: Describe how PTM sites were quantified (Log2FC calculation, normalization, filtering criteria)
+3. **Bioinformatics Analysis Pipeline**:
+   a. Literature enrichment using PubMed, UniProt, KEGG, and STRING-DB databases
+   b. Kinase-substrate prediction using KEA3 (Kinase Enrichment Analysis 3)
+   c. ChromaDB vector search for published literature context
+   d. Hypothesis generation and validation against literature
+4. **Network Analysis**: {'Cytoscape-based network visualization with force-directed layout, exported at 300 DPI' if has_network else 'Network analysis was performed to identify protein-protein interactions'}
+5. **Statistical Analysis**: Describe significance thresholds and multiple testing correction
+6. **Report Generation**: LLM-assisted scientific writing with anti-hallucination validation
+
+IMPORTANT: Write in past tense. Be specific about computational tools and databases used. Do NOT include results or interpretations."""
+
+    # GAP F: Suggestion section (validation experiments)
+    elif section_type == "suggestion":
+        results_text = prev_sections.get("results", "")[:3000]
+        discussion_text = prev_sections.get("discussion", "")[:2000]
+        conclusion_text = prev_sections.get("conclusion", "")[:1500]
+
+        # Extract top PTMs for specific suggestions
+        top_ptms_str = ""
+        sorted_ptms = sorted(ptms, key=lambda x: abs(float(x.get("ptm_relative_log2fc", 0))), reverse=True)
+        for p in sorted_ptms[:10]:
+            gene = p.get("gene", "?")
+            pos = p.get("position", "?")
+            fc = float(p.get("ptm_relative_log2fc", 0))
+            top_ptms_str += f"  - {gene}-{pos}: PTM Log2FC={fc:.2f}\n"
+
+        return f"""Write a Suggested Validation Experiments section (~800-1200 words) for this PTM analysis report.
+{single_tp_directive}
+Key Findings Summary:
+{results_text[:1500]}
+
+Discussion Summary:
+{discussion_text[:1000]}
+
+Conclusion Summary:
+{conclusion_text[:800]}
+
+Top PTM sites to validate:
+{top_ptms_str}
+
+For EACH of the top 5-8 PTM findings, suggest:
+1. **Western Blot Validation**: Specific antibodies (e.g., anti-phospho-{ptm_type_label} antibody for the specific site)
+2. **Functional Assay**: How to test the biological consequence of the modification (e.g., site-directed mutagenesis, kinase assay)
+3. **Pharmacological Intervention**: Specific inhibitors or activators to test the pathway (name actual drugs/compounds)
+4. **In Vivo Validation**: Animal model or clinical sample approaches
+5. **Time-Course Experiment**: Specific timepoints and conditions to validate temporal dynamics
+
+Also include:
+- **High-Throughput Validation**: Suggest multiplexed approaches (e.g., SILAC, TMT labeling)
+- **Computational Follow-up**: Additional bioinformatics analyses (e.g., molecular dynamics, structural modeling)
+- **Clinical Translation**: Steps toward therapeutic application if applicable
+
+IMPORTANT: Be SPECIFIC — name actual antibodies, inhibitors, cell lines, and experimental conditions. Generic suggestions are not useful.
 {combined_lit}"""
 
     return f"Write the {section_type} section for a PTM analysis report.\n{single_tp_directive}{ptm_summary}"

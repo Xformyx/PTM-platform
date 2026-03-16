@@ -1612,3 +1612,170 @@ def build_data_provenance_block(
     lines.append("")
 
     return "\n".join(lines)
+
+
+# ============================================================================
+# GAP D: Log2FC Interpretation Consistency Validation
+# Ported from ptm_nonptm_network_command.py
+# ============================================================================
+
+# Contradiction patterns: (regex_pattern, expected_fc_sign, description)
+_LOG2FC_CONTRADICTION_PATTERNS = [
+    # Positive FC described as decrease/inhibition
+    (r'(\b[A-Z][A-Z0-9]{1,9}\b)\s+(?:was|showed|exhibited|demonstrated)\s+(?:decreased|reduced|diminished|inhibited|downregulated|attenuated)\s+(?:phosphorylation|ubiquitylation|modification|activity)',
+     'positive', 'Positive Log2FC described as decreased/inhibited'),
+    (r'(?:dephosphorylation|deubiquitylation|loss\s+of\s+modification)\s+(?:of|at|on)\s+(\b[A-Z][A-Z0-9]{1,9}\b)',
+     'positive', 'Positive Log2FC described as dephosphorylation/loss'),
+    # Negative FC described as increase/activation
+    (r'(\b[A-Z][A-Z0-9]{1,9}\b)\s+(?:was|showed|exhibited|demonstrated)\s+(?:increased|enhanced|elevated|activated|upregulated|amplified)\s+(?:phosphorylation|ubiquitylation|modification|activity)',
+     'negative', 'Negative Log2FC described as increased/activated'),
+    (r'(?:hyperphosphorylation|enhanced\s+modification|gain\s+of\s+modification)\s+(?:of|at|on)\s+(\b[A-Z][A-Z0-9]{1,9}\b)',
+     'negative', 'Negative Log2FC described as hyperphosphorylation/gain'),
+]
+
+
+def validate_log2fc_interpretation_consistency(
+    text: str,
+    protein_fc_map: Dict[str, float],
+    auto_correct: bool = False,
+) -> Dict:
+    """
+    GAP D: Validate that LLM text correctly interprets Log2FC direction.
+
+    Detects contradictions where:
+    - A protein with positive Log2FC is described as "decreased/inhibited/dephosphorylated"
+    - A protein with negative Log2FC is described as "increased/activated/hyperphosphorylated"
+
+    Args:
+        text: LLM-generated report text
+        protein_fc_map: Dict mapping protein names to their Log2FC values
+                        e.g., {"EGFR": 2.5, "AKT1": -1.3, "GSK3B": 0.8}
+        auto_correct: If True, automatically corrects detected contradictions
+
+    Returns:
+        Dict with:
+            - 'validated_text': The (optionally corrected) text
+            - 'contradictions': List of detected contradictions
+            - 'corrections_made': Number of auto-corrections applied
+            - 'consistency_score': Float 0-1 (1 = no contradictions)
+    """
+    if not text or not protein_fc_map:
+        return {
+            'validated_text': text or '',
+            'contradictions': [],
+            'corrections_made': 0,
+            'consistency_score': 1.0,
+        }
+
+    # Build case-insensitive lookup
+    fc_lookup = {k.upper(): v for k, v in protein_fc_map.items()}
+
+    contradictions = []
+    corrected_text = text
+
+    for pattern_str, expected_sign, description in _LOG2FC_CONTRADICTION_PATTERNS:
+        try:
+            pattern = re.compile(pattern_str, re.IGNORECASE)
+            for match in pattern.finditer(text):
+                protein = match.group(1).upper() if match.lastindex and match.lastindex >= 1 else None
+                if not protein:
+                    continue
+
+                actual_fc = fc_lookup.get(protein)
+                if actual_fc is None:
+                    # Try partial match
+                    for known_prot, known_fc in fc_lookup.items():
+                        if protein in known_prot or known_prot in protein:
+                            actual_fc = known_fc
+                            break
+
+                if actual_fc is None:
+                    continue
+
+                # Check for contradiction
+                is_contradiction = False
+                if expected_sign == 'positive' and actual_fc > 0:
+                    is_contradiction = True
+                elif expected_sign == 'negative' and actual_fc < 0:
+                    is_contradiction = True
+
+                if is_contradiction:
+                    contradictions.append({
+                        'protein': protein,
+                        'actual_log2fc': actual_fc,
+                        'text_excerpt': match.group(0)[:120],
+                        'description': description,
+                        'position': match.start(),
+                    })
+        except re.error:
+            continue
+
+    # Auto-correct if requested
+    corrections_made = 0
+    if auto_correct and contradictions:
+        # Direction word replacements
+        direction_corrections = {
+            'decreased': 'increased',
+            'reduced': 'enhanced',
+            'diminished': 'elevated',
+            'inhibited': 'activated',
+            'downregulated': 'upregulated',
+            'attenuated': 'amplified',
+            'increased': 'decreased',
+            'enhanced': 'reduced',
+            'elevated': 'diminished',
+            'activated': 'inhibited',
+            'upregulated': 'downregulated',
+            'amplified': 'attenuated',
+            'dephosphorylation': 'phosphorylation',
+            'deubiquitylation': 'ubiquitylation',
+            'hyperphosphorylation': 'reduced phosphorylation',
+        }
+
+        for contradiction in contradictions:
+            excerpt = contradiction['text_excerpt']
+            for wrong, correct in direction_corrections.items():
+                if wrong.lower() in excerpt.lower():
+                    # Case-preserving replacement in the full text
+                    corrected_text = re.sub(
+                        r'\b' + re.escape(wrong) + r'\b',
+                        correct,
+                        corrected_text,
+                        count=1,
+                        flags=re.IGNORECASE,
+                    )
+                    corrections_made += 1
+                    _sse_log(
+                        f"[GAP-D] Auto-corrected '{wrong}' -> '{correct}' for "
+                        f"{contradiction['protein']} (Log2FC={contradiction['actual_log2fc']:.2f})",
+                        "WARNING"
+                    )
+                    break
+
+    # Calculate consistency score
+    # Count total directional statements about known proteins
+    total_statements = 0
+    for pattern_str, _, _ in _LOG2FC_CONTRADICTION_PATTERNS:
+        try:
+            total_statements += len(re.findall(pattern_str, text, re.IGNORECASE))
+        except re.error:
+            continue
+
+    if total_statements > 0:
+        consistency_score = 1.0 - (len(contradictions) / total_statements)
+    else:
+        consistency_score = 1.0
+
+    if contradictions:
+        _sse_log(
+            f"[GAP-D] Log2FC interpretation: {len(contradictions)} contradictions detected "
+            f"(consistency: {consistency_score:.1%}), {corrections_made} auto-corrected",
+            "WARNING"
+        )
+
+    return {
+        'validated_text': corrected_text,
+        'contradictions': contradictions,
+        'corrections_made': corrections_made,
+        'consistency_score': consistency_score,
+    }

@@ -199,21 +199,34 @@ def _compile_report(
             lines.append(ref_line)
         lines.append("")
 
-    # Methods note
-    lines.append("## Methods\n")
-    lines.append(
-        "Post-translational modifications were identified using mass spectrometry-based proteomics. "
-        "Data was processed through the PTM Analysis Platform preprocessing pipeline. "
-        "Literature enrichment was performed using PubMed, UniProt, KEGG, and STRING-DB databases. "
-        "Hypotheses were generated and validated against the literature using ChromaDB vector search. "
-        "Report sections were written with LLM assistance and reviewed for scientific accuracy."
-    )
-    if network.get("cytoscape_connected"):
+    # Methods section — LLM-generated if available, fallback to static text
+    methods = sections.get("methods", "")
+    if methods:
+        lines.append("## Methods\n")
+        lines.append(methods)
+        lines.append("")
+    else:
+        lines.append("## Methods\n")
         lines.append(
-            " Network visualizations were generated using Cytoscape with force-directed layout "
-            "and exported at 300 DPI resolution."
+            "Post-translational modifications were identified using mass spectrometry-based proteomics. "
+            "Data was processed through the PTM Analysis Platform preprocessing pipeline. "
+            "Literature enrichment was performed using PubMed, UniProt, KEGG, and STRING-DB databases. "
+            "Hypotheses were generated and validated against the literature using ChromaDB vector search. "
+            "Report sections were written with LLM assistance and reviewed for scientific accuracy."
         )
-    lines.append("")
+        if network.get("cytoscape_connected"):
+            lines.append(
+                " Network visualizations were generated using Cytoscape with force-directed layout "
+                "and exported at 300 DPI resolution."
+            )
+        lines.append("")
+
+    # Suggested Validation Experiments — GAP F
+    suggestion = sections.get("suggestion", "")
+    if suggestion:
+        lines.append("## Suggested Validation Experiments\n")
+        lines.append(suggestion)
+        lines.append("")
 
     # Footer
     lines.append("---\n")
