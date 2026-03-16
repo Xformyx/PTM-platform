@@ -6,7 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Brain, BookOpen, FlaskConical, MessageSquare, Network, Plus, SlidersHorizontal, X, ChevronDown, ChevronUp, Settings2, RotateCcw } from "lucide-react";
+import { Brain, BookOpen, FlaskConical, MessageSquare, Network, Plus, SlidersHorizontal, X, ChevronDown, ChevronUp, Settings2, RotateCcw, Database, CheckSquare, Square, Loader2 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { api } from "@/lib/api";
 import AnalysisOptionsModal from "./AnalysisOptionsModal";
@@ -27,6 +28,7 @@ interface Order {
   analysis_context?: Record<string, unknown>;
   analysis_options?: Record<string, unknown>;
   report_options?: Record<string, unknown>;
+  rag_collections?: number[] | null;
 }
 
 interface LlmModelOption {
@@ -45,6 +47,7 @@ interface Props {
     analysis_context: Record<string, unknown>;
     analysis_options: Record<string, unknown>;
     report_options: Record<string, unknown>;
+    rag_collections?: number[] | null;
   }) => void | Promise<void>;
   confirmLabel?: string;
 }
@@ -80,6 +83,22 @@ export default function RerunOptionsModal({
   const [newQuestion, setNewQuestion] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+
+  // RAG Collection Selection
+  interface RagCollectionItem {
+    id: number;
+    name: string;
+    description: string | null;
+    tier: string;
+    chromadb_name: string;
+    document_count: number;
+    chunk_count: number;
+    is_active: boolean;
+  }
+  const [ragCollections, setRagCollections] = useState<RagCollectionItem[]>([]);
+  const [selectedCollectionIds, setSelectedCollectionIds] = useState<number[]>([]);
+  const [ragCollectionsLoading, setRagCollectionsLoading] = useState(false);
+  const [useAllCollections, setUseAllCollections] = useState(true);
   const [reportConfig, setReportConfig] = useState({
     md_summary_max_chars: 12000, section_chars_limit: 1500,
     llm_tokens_abstract: 4096, llm_tokens_introduction: 12288,
@@ -89,9 +108,32 @@ export default function RerunOptionsModal({
     ptm_detail_count: 30,
   });
 
+  // Load RAG collections when modal opens
+  useEffect(() => {
+    if (open) {
+      setRagCollectionsLoading(true);
+      api.get<{ collections: RagCollectionItem[] }>("/rag/collections")
+        .then((d) => {
+          const active = d.collections.filter((c) => c.is_active);
+          setRagCollections(active);
+        })
+        .catch(() => setRagCollections([]))
+        .finally(() => setRagCollectionsLoading(false));
+    }
+  }, [open]);
+
   // Load existing order values whenever modal opens — preserve user's previous settings
   useEffect(() => {
     if (open && order) {
+      // Restore RAG collection selection from order
+      const existingRagCols = order.rag_collections;
+      if (existingRagCols && Array.isArray(existingRagCols) && existingRagCols.length > 0) {
+        setUseAllCollections(false);
+        setSelectedCollectionIds(existingRagCols);
+      } else {
+        setUseAllCollections(true);
+        setSelectedCollectionIds([]);
+      }
       const ctx = (order.analysis_context || {}) as Record<string, unknown>;
       const str = (v: unknown) => (v != null && typeof v === "string" ? v : "");
       setAnalysisContext({
@@ -188,6 +230,7 @@ export default function RerunOptionsModal({
       await onConfirm({
         analysis_context: analysisContext,
         analysis_options: optsForApi,
+        rag_collections: useAllCollections ? null : (selectedCollectionIds.length > 0 ? selectedCollectionIds : null),
         report_options: {
           ...baseReportOpts,
           report_type: reportType,
@@ -443,6 +486,120 @@ export default function RerunOptionsModal({
                   </div>
                 )}
               </div>
+              {/* RAG Collection Selection */}
+              <div className="space-y-1.5">
+                <Label className="text-xs flex items-center gap-1">
+                  <Database className="h-3.5 w-3.5" /> RAG Literature Collections
+                </Label>
+                <p className="text-[10px] text-muted-foreground">
+                  분석에 참조할 문헌 컬렉션을 선택합니다. 전체 선택 시 모든 활성 컬렉션이 사용됩니다.
+                </p>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    className={cn(
+                      "flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs transition-colors",
+                      useAllCollections
+                        ? "border-primary bg-primary/10 text-primary"
+                        : "border-muted-foreground/25 hover:border-muted-foreground/50"
+                    )}
+                    onClick={() => {
+                      setUseAllCollections(true);
+                      setSelectedCollectionIds([]);
+                    }}
+                  >
+                    {useAllCollections ? <CheckSquare className="h-3.5 w-3.5" /> : <Square className="h-3.5 w-3.5" />}
+                    전체 사용 ({ragCollections.length}개)
+                  </button>
+                  <button
+                    type="button"
+                    className={cn(
+                      "flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs transition-colors",
+                      !useAllCollections
+                        ? "border-primary bg-primary/10 text-primary"
+                        : "border-muted-foreground/25 hover:border-muted-foreground/50"
+                    )}
+                    onClick={() => setUseAllCollections(false)}
+                  >
+                    {!useAllCollections ? <CheckSquare className="h-3.5 w-3.5" /> : <Square className="h-3.5 w-3.5" />}
+                    직접 선택
+                  </button>
+                </div>
+                {!useAllCollections && (
+                  <div className="rounded-lg border max-h-[180px] overflow-y-auto">
+                    {ragCollectionsLoading ? (
+                      <div className="flex items-center justify-center py-4">
+                        <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                      </div>
+                    ) : ragCollections.length === 0 ? (
+                      <p className="text-xs text-muted-foreground py-3 text-center">등록된 활성 컬렉션이 없습니다.</p>
+                    ) : (
+                      <div className="divide-y">
+                        <div className="flex items-center justify-between px-3 py-1.5 bg-muted/30">
+                          <span className="text-[10px] font-medium text-muted-foreground">
+                            {selectedCollectionIds.length}개 선택됨
+                          </span>
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              className="text-[10px] text-primary hover:underline"
+                              onClick={() => setSelectedCollectionIds(ragCollections.map((c) => c.id))}
+                            >
+                              전체 선택
+                            </button>
+                            <button
+                              type="button"
+                              className="text-[10px] text-muted-foreground hover:underline"
+                              onClick={() => setSelectedCollectionIds([])}
+                            >
+                              선택 해제
+                            </button>
+                          </div>
+                        </div>
+                        {ragCollections.map((c) => {
+                          const isSelected = selectedCollectionIds.includes(c.id);
+                          return (
+                            <button
+                              key={c.id}
+                              type="button"
+                              className={cn(
+                                "w-full flex items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-muted/50",
+                                isSelected && "bg-primary/5"
+                              )}
+                              onClick={() => {
+                                setSelectedCollectionIds((prev) =>
+                                  isSelected
+                                    ? prev.filter((id) => id !== c.id)
+                                    : [...prev, c.id]
+                                );
+                              }}
+                            >
+                              {isSelected ? (
+                                <CheckSquare className="h-3.5 w-3.5 text-primary shrink-0" />
+                              ) : (
+                                <Square className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                              )}
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-xs font-medium truncate">{c.name}</span>
+                                  <Badge variant="secondary" className="text-[9px] shrink-0">{c.tier}</Badge>
+                                </div>
+                                {c.description && (
+                                  <p className="text-[10px] text-muted-foreground truncate mt-0.5">{c.description}</p>
+                                )}
+                              </div>
+                              <span className="text-[10px] text-muted-foreground shrink-0">
+                                {c.document_count} docs / {c.chunk_count} chunks
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
               <div className="space-y-1.5">
                 <Label className="text-xs flex items-center gap-1">
                   <MessageSquare className="h-3.5 w-3.5" /> Research Questions (optional)

@@ -1895,6 +1895,7 @@ export default function OrderDetail() {
     analysis_context: Record<string, unknown>;
     analysis_options: Record<string, unknown>;
     report_options: Record<string, unknown>;
+    rag_collections?: number[] | null;
   }) => {
     if (!pendingAction) return;
     try {

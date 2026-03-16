@@ -17,6 +17,7 @@ export interface Order {
   error_message?: string;
   cross_talk_data?: Record<string, unknown>;
   signal_propagation_data?: Record<string, unknown>;
+  rag_collections?: number[] | null;
   started_at?: string;
   completed_at?: string;
   created_at: string;
