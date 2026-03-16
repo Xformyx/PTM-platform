@@ -65,6 +65,9 @@ class Order(Base):
     analysis_options: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     report_options: Mapped[dict] = mapped_column(JSON, nullable=False)
 
+    # RAG collection selection (list of collection IDs; null = use all active)
+    rag_collections: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+
     # Progress
     current_stage: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     progress_pct: Mapped[Decimal] = mapped_column(Numeric(5, 2), default=0)

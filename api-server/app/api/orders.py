@@ -155,6 +155,7 @@ async def get_order(
         "analysis_context": order.analysis_context,
         "analysis_options": order.analysis_options,
         "report_options": order.report_options,
+        "rag_collections": order.rag_collections,
         "current_stage": order.current_stage,
         "progress_pct": float(order.progress_pct),
         "stage_detail": order.stage_detail,
@@ -172,6 +173,7 @@ class UpdateOrderOptionsRequest(BaseModel):
     analysis_context: Optional[dict] = None
     analysis_options: Optional[dict] = None
     report_options: Optional[dict] = None
+    rag_collections: Optional[list] = None
 
 
 @router.patch("/{order_id}")
@@ -198,6 +200,8 @@ async def update_order_options(
         order.analysis_options = body.analysis_options
     if body.report_options is not None:
         order.report_options = body.report_options
+    if body.rag_collections is not None:
+        order.rag_collections = body.rag_collections
     await db.commit()
     await db.refresh(order)
     return {
@@ -206,6 +210,7 @@ async def update_order_options(
         "analysis_context": order.analysis_context,
         "analysis_options": order.analysis_options,
         "report_options": order.report_options,
+        "rag_collections": order.rag_collections,
     }
 
 
@@ -270,6 +275,7 @@ async def create_order(
     report_options: str = Form("{}"),
     analysis_context: Optional[str] = Form(None),
     analysis_options: Optional[str] = Form(None),
+    rag_collections: Optional[str] = Form(None),
     pr_matrix: UploadFile = File(...),
     pg_matrix: UploadFile = File(...),
     config_file: Optional[UploadFile] = File(None),
@@ -374,6 +380,9 @@ async def create_order(
         if not report_options_data:
             raise HTTPException(status_code=400, detail="Invalid report_options JSON")
 
+        # RAG collection selection (list of collection IDs; null = all active)
+        rag_collections_data = _safe_json_loads(rag_collections)
+
         order = Order(
             order_code=order_code,
             user_id=user.id if user.id != 0 else None,
@@ -384,6 +393,7 @@ async def create_order(
             analysis_context=_safe_json_loads(analysis_context),
             analysis_options=analysis_options_data,
             report_options=report_options_data,
+            rag_collections=rag_collections_data,
             pr_matrix_path=pr_path,
             pg_matrix_path=pg_path,
             fasta_path=fasta_path,
@@ -457,11 +467,29 @@ async def start_order(
     kegg_map = {"mouse": "mmu", "human": "hsa", "rat": "rno"}
     species_lower = (order.species or "mouse").lower()
 
-    # Gather active ChromaDB collections for RAG retrieval
-    coll_result = await db.execute(
-        select(RagCollection.chromadb_name).where(RagCollection.is_active == True)
-    )
-    active_collections = [r[0] for r in coll_result.fetchall()]
+    # Gather ChromaDB collections for RAG retrieval
+    # If user selected specific collections, use only those; otherwise use all active
+    selected_collection_ids = None
+    if order.rag_collections and isinstance(order.rag_collections, list) and len(order.rag_collections) > 0:
+        selected_collection_ids = order.rag_collections
+
+    if selected_collection_ids:
+        # User selected specific collections — resolve their chromadb_names
+        coll_result = await db.execute(
+            select(RagCollection.chromadb_name).where(
+                RagCollection.id.in_(selected_collection_ids),
+                RagCollection.is_active == True,
+            )
+        )
+        active_collections = [r[0] for r in coll_result.fetchall()]
+        logger.info(f"Order {order.order_code}: using {len(active_collections)} selected RAG collections")
+    else:
+        # No selection — use all active collections (backward compatible)
+        coll_result = await db.execute(
+            select(RagCollection.chromadb_name).where(RagCollection.is_active == True)
+        )
+        active_collections = [r[0] for r in coll_result.fetchall()]
+        logger.info(f"Order {order.order_code}: using all {len(active_collections)} active RAG collections")
 
     sample_cfg = order.sample_config or {}
     report_opts = order.report_options or {}

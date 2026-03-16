@@ -6,6 +6,7 @@ import {
   FileSpreadsheet, Regex, Trash2, SlidersHorizontal, Brain,
   Plus, X, MessageSquare, Network, FlaskConical, BookOpen,
   ChevronDown, ChevronUp, Settings2, RotateCcw, GitMerge, Copy,
+  Database, CheckSquare, Square,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
@@ -203,6 +204,22 @@ export default function OrderCreate() {
   const [copyFromOrders, setCopyFromOrders] = useState<{ id: number; order_code: string; project_name: string; status: string }[]>([]);
   const [copyFromLoading, setCopyFromLoading] = useState(false);
 
+  // RAG Collection Selection
+  interface RagCollectionItem {
+    id: number;
+    name: string;
+    description: string | null;
+    tier: string;
+    chromadb_name: string;
+    document_count: number;
+    chunk_count: number;
+    is_active: boolean;
+  }
+  const [ragCollections, setRagCollections] = useState<RagCollectionItem[]>([]);
+  const [selectedCollectionIds, setSelectedCollectionIds] = useState<number[]>([]);
+  const [ragCollectionsLoading, setRagCollectionsLoading] = useState(false);
+  const [useAllCollections, setUseAllCollections] = useState(true);
+
   // Advanced Report Config
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [reportConfig, setReportConfig] = useState({
@@ -224,11 +241,23 @@ export default function OrderCreate() {
     setStep(s);
   }, [step]);
 
+  // Load RAG collections
+  useEffect(() => {
+    setRagCollectionsLoading(true);
+    api.get<{ collections: RagCollectionItem[] }>("/rag/collections")
+      .then((d) => {
+        const active = d.collections.filter((c) => c.is_active);
+        setRagCollections(active);
+      })
+      .catch(() => setRagCollections([]))
+      .finally(() => setRagCollectionsLoading(false));
+  }, []);
+
   // Load Ollama models and default LLM config
   useEffect(() => {
     api.get<{ default_model: string }>("/system/llm-config").then((c) => {
       setDefaultLlmModel(c.default_model);
-    }).catch(() => {});
+    }).catch(() => {}); 
     api.get<{ models: { provider: string; model_id: string; name: string; is_active: boolean }[] }>("/llm/models").then((d) => {
       const fromApi = d.models.filter((m) => m.is_active).map((m) => ({ provider: m.provider, model_id: m.model_id, name: m.name }));
       const cloudProviders: { provider: string; model_id: string; name: string }[] = [
@@ -412,6 +441,10 @@ export default function OrderCreate() {
     }));
     const { proteinListFile, ...analysisOptsForJson } = analysisOptions;
     formData.append("analysis_options", JSON.stringify(analysisOptsForJson));
+    // RAG collection selection (null = all active)
+    if (!useAllCollections && selectedCollectionIds.length > 0) {
+      formData.append("rag_collections", JSON.stringify(selectedCollectionIds));
+    }
     formData.append("pr_matrix", files.pr_matrix);
     formData.append("pg_matrix", files.pg_matrix);
     if (files.config_file) formData.append("config_file", files.config_file);
@@ -1038,6 +1071,121 @@ export default function OrderCreate() {
                   </p>
                 </div>
 
+                {/* RAG Collection Selection */}
+                <div className="space-y-3">
+                  <Label className="flex items-center gap-2">
+                    <Database className="h-4 w-4" /> RAG Literature Collections
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    분석에 참조할 문헌 컬렉션을 선택합니다. 전체 선택 시 모든 활성 컬렉션이 사용됩니다.
+                  </p>
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      className={cn(
+                        "flex items-center gap-2 rounded-lg border px-4 py-2.5 text-sm transition-colors",
+                        useAllCollections
+                          ? "border-primary bg-primary/10 text-primary"
+                          : "border-muted-foreground/25 hover:border-muted-foreground/50"
+                      )}
+                      onClick={() => {
+                        setUseAllCollections(true);
+                        setSelectedCollectionIds([]);
+                      }}
+                    >
+                      {useAllCollections ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}
+                      전체 사용 ({ragCollections.length}개)
+                    </button>
+                    <button
+                      type="button"
+                      className={cn(
+                        "flex items-center gap-2 rounded-lg border px-4 py-2.5 text-sm transition-colors",
+                        !useAllCollections
+                          ? "border-primary bg-primary/10 text-primary"
+                          : "border-muted-foreground/25 hover:border-muted-foreground/50"
+                      )}
+                      onClick={() => setUseAllCollections(false)}
+                    >
+                      {!useAllCollections ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}
+                      직접 선택
+                    </button>
+                  </div>
+                  {!useAllCollections && (
+                    <div className="rounded-lg border max-h-[240px] overflow-y-auto">
+                      {ragCollectionsLoading ? (
+                        <div className="flex items-center justify-center py-6">
+                          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                        </div>
+                      ) : ragCollections.length === 0 ? (
+                        <p className="text-sm text-muted-foreground py-4 text-center">등록된 활성 컬렉션이 없습니다.</p>
+                      ) : (
+                        <div className="divide-y">
+                          {/* Select All / Deselect All */}
+                          <div className="flex items-center justify-between px-4 py-2 bg-muted/30">
+                            <span className="text-xs font-medium text-muted-foreground">
+                              {selectedCollectionIds.length}개 선택됨
+                            </span>
+                            <div className="flex gap-2">
+                              <button
+                                type="button"
+                                className="text-xs text-primary hover:underline"
+                                onClick={() => setSelectedCollectionIds(ragCollections.map((c) => c.id))}
+                              >
+                                전체 선택
+                              </button>
+                              <button
+                                type="button"
+                                className="text-xs text-muted-foreground hover:underline"
+                                onClick={() => setSelectedCollectionIds([])}
+                              >
+                                선택 해제
+                              </button>
+                            </div>
+                          </div>
+                          {ragCollections.map((c) => {
+                            const isSelected = selectedCollectionIds.includes(c.id);
+                            return (
+                              <button
+                                key={c.id}
+                                type="button"
+                                className={cn(
+                                  "w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-muted/50",
+                                  isSelected && "bg-primary/5"
+                                )}
+                                onClick={() => {
+                                  setSelectedCollectionIds((prev) =>
+                                    isSelected
+                                      ? prev.filter((id) => id !== c.id)
+                                      : [...prev, c.id]
+                                  );
+                                }}
+                              >
+                                {isSelected ? (
+                                  <CheckSquare className="h-4 w-4 text-primary shrink-0" />
+                                ) : (
+                                  <Square className="h-4 w-4 text-muted-foreground shrink-0" />
+                                )}
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-sm font-medium truncate">{c.name}</span>
+                                    <Badge variant="secondary" className="text-[10px] shrink-0">{c.tier}</Badge>
+                                  </div>
+                                  {c.description && (
+                                    <p className="text-xs text-muted-foreground truncate mt-0.5">{c.description}</p>
+                                  )}
+                                </div>
+                                <span className="text-xs text-muted-foreground shrink-0">
+                                  {c.document_count} docs / {c.chunk_count} chunks
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
                 {/* Research Questions */}
                 <div className="space-y-3">
                   <Label className="flex items-center gap-2">
@@ -1251,6 +1399,14 @@ export default function OrderCreate() {
                           ? `${llmModels.find((m) => `${m.provider}:${m.model_id}` === form.llm_model)?.name || form.llm_model.split(":")[0]} - ${CLOUD_MODEL_PRESETS[form.llm_model.split(":")[0] as CloudProvider]?.find((x) => x.id === (llmCloudModelVariant || CLOUD_MODEL_PRESETS[form.llm_model.split(":")[0] as CloudProvider]?.[0]?.id))?.name || llmCloudModelVariant || "?"}`
                           : (llmModels.find((m) => `${m.provider}:${m.model_id}` === form.llm_model)?.name || form.llm_model))
                         : `Default (${defaultLlmModel})`}
+                    </span>
+                    <span className="text-muted-foreground">RAG Collections</span>
+                    <span className="font-medium">
+                      {useAllCollections
+                        ? `전체 (${ragCollections.length}개)`
+                        : selectedCollectionIds.length > 0
+                          ? `${selectedCollectionIds.length}개 선택`
+                          : "전체 (미선택 시 기본)"}
                     </span>
                     <span className="text-muted-foreground">LLM Model (Paper Read)</span>
                     <span className="font-medium font-mono text-xs">
