@@ -433,10 +433,14 @@ def build_anti_hallucination_directive(
     section_name: str = "this section",
 ) -> str:
     """
-    v98: Build a strong anti-hallucination directive block for LLM prompts.
+    v98c: Build a data fidelity guide block for LLM prompts.
 
     This block is inserted at the TOP of every LLM prompt to establish
     data fidelity as the primary constraint before any writing instructions.
+
+    v98c: Rewritten with positive, encouraging tone to promote rich and
+    detailed writing while maintaining data accuracy. Removes threatening
+    language that caused LLM to produce overly cautious, thin output.
 
     Args:
         protein_names: List of verified protein/gene names from experimental data
@@ -451,32 +455,29 @@ def build_anti_hallucination_directive(
     unique_names = sorted(set(protein_names))
     names_str = ", ".join(unique_names[:50])
 
-    directive = f"""## MANDATORY DATA FIDELITY DIRECTIVE (v98)
+    directive = f"""## DATA FIDELITY GUIDE (v98c)
 
-**THIS IS THE MOST IMPORTANT INSTRUCTION IN THIS ENTIRE PROMPT.**
+You are writing {section_name} based on real experimental data. Use the protein names
+and Log2FC values from the VERIFIED DATA sections below to write a comprehensive,
+detailed, and publication-quality analysis.
 
-You are writing {section_name} based on REAL experimental data. Every protein name,
-gene name, modification site, and Log2FC value you mention MUST come from the
-VERIFIED DATA sections provided below.
-
-### VERIFIED PROTEIN REGISTRY
-The following {len(unique_names)} proteins are confirmed present in the experimental data:
+### VERIFIED PROTEIN REGISTRY ({len(unique_names)} proteins in this dataset)
 {names_str}
 
-### ABSOLUTE RULES (violation = scientific fraud)
-1. **NEVER invent protein names** — if a protein is not in the registry above, do NOT mention it
-2. **NEVER fabricate Log2FC values** — every numerical value must come from the data tables below
-3. **NEVER use example proteins from your training data** (e.g., GSK3B, YWHAZ, HSP90, ACTB, GAPDH, MYC, TP53, EGFR, AKT1, ERK1/2, JNK, p38) UNLESS they appear in the verified registry above
-4. **NEVER write hypothetical examples** like "proteins such as X" or "for example, Y" with invented names
-5. **When in doubt, OMIT** — it is better to write fewer proteins correctly than to hallucinate
-6. **Cross-check every protein name** you write against the registry before including it
+### DATA USAGE GUIDELINES
+1. **Use proteins from the registry above** — reference specific protein names and their Log2FC values from the data tables
+2. **Cite actual Log2FC values** from the data tables when discussing specific proteins
+3. **Prefer proteins from this dataset** over well-known examples from general knowledge (e.g., avoid GSK3B, YWHAZ, HSP90, ACTB, GAPDH unless they appear in the registry above)
+4. **Write concretely** — instead of "proteins such as X", name the actual proteins from the data
+5. **Interpret extensively** — provide rich biological interpretation, mechanistic insights, and signaling pathway analysis for each finding. The more detailed your biological reasoning, the better.
+6. **Connect findings** — link individual protein changes to broader signaling cascades and cellular responses
 
-### SELF-CHECK BEFORE SUBMITTING
-Before finalizing your response, verify:
-- [ ] Every protein name I mentioned appears in the VERIFIED PROTEIN REGISTRY
-- [ ] Every Log2FC value I cited comes from the data tables provided
-- [ ] I did not use any "well-known" proteins from my training data that are not in this dataset
-- [ ] I did not fabricate any numerical values or timepoints
+### WRITING QUALITY EXPECTATIONS
+- Write at the level of a peer-reviewed journal article (e.g., Molecular Cell, Cell Reports)
+- Each paragraph should contain 5-8 sentences with specific data references
+- Provide biological context and mechanistic interpretation for every quantitative finding
+- Discuss implications for signaling pathway regulation and cellular function
+- A comprehensive, detailed section is always preferred over a brief summary
 """
     return directive
 
@@ -694,9 +695,9 @@ def build_structured_protein_data_for_llm(
     )
 
     lines = []
-    lines.append("## " + "=" * 59)
-    lines.append("## VERIFIED EXPERIMENTAL DATA -- STRUCTURED FORMAT (v98)")
-    lines.append("## " + "=" * 59)
+    lines.append("## ═══════════════════════════════════════════════════════════")
+    lines.append("## 📊 VERIFIED EXPERIMENTAL DATA — STRUCTURED FORMAT (v98)")
+    lines.append("## ═══════════════════════════════════════════════════════════")
     lines.append("")
     lines.append("**INSTRUCTION**: The tables below contain ALL verified experimental data.")
     lines.append("You MUST cite protein names and Log2FC values EXACTLY as they appear here.")
@@ -729,7 +730,7 @@ def build_structured_protein_data_for_llm(
                 if abs(val) > max_abs:
                     max_abs = abs(val)
             else:
-                row += " -- |"
+                row += " — |"
         row += f" {max_abs:.2f} |"
         lines.append(row)
     lines.append("")
@@ -778,7 +779,7 @@ def build_structured_protein_data_for_llm(
     }, indent=2))
     lines.append("```")
     lines.append("")
-    lines.append("## " + "=" * 59)
+    lines.append("## ═══════════════════════════════════════════════════════════")
     lines.append("")
 
     return ("\n".join(lines), unique_proteins, log2fc_values)
@@ -1214,9 +1215,9 @@ def build_structured_crosstalk_data_for_llm(
     log2fc_values: List[float] = []
 
     lines = []
-    lines.append("## " + "=" * 59)
-    lines.append("## VERIFIED CROSS-TALK DATA -- STRUCTURED FORMAT (v98)")
-    lines.append("## " + "=" * 59)
+    lines.append("## ═══════════════════════════════════════════════════════════")
+    lines.append("## 📊 VERIFIED CROSS-TALK DATA — STRUCTURED FORMAT (v98)")
+    lines.append("## ═══════════════════════════════════════════════════════════")
     lines.append("")
     lines.append("**INSTRUCTION**: The tables below contain ALL verified dual-PTM protein data.")
     lines.append("You MUST cite protein names and Log2FC values EXACTLY as they appear here.")
@@ -1305,7 +1306,7 @@ def build_structured_crosstalk_data_for_llm(
     }, indent=2))
     lines.append("```")
     lines.append("")
-    lines.append("## " + "=" * 59)
+    lines.append("## ═══════════════════════════════════════════════════════════")
     lines.append("")
 
     return ("\n".join(lines), unique_proteins, log2fc_values)

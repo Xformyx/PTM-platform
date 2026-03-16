@@ -12,28 +12,20 @@ Handles:
 
 import html
 import json
-import logging
 import re
+import sys
 from typing import Dict, List, Optional, Tuple
 
 
-logger = logging.getLogger("ptm-workers.postprocessor")
-
-
-def _pathway_to_str(p) -> str:
-    """Convert pathway item to string (handles dicts from enriched data)."""
-    if isinstance(p, str):
-        return p
-    if isinstance(p, dict):
-        return p.get("name") or p.get("pathway") or str(p)
-    return str(p)
-
-
+# ---------------------------------------------------------------------------
+# SSE logging (safe fallback if called standalone)
+# ---------------------------------------------------------------------------
 def _sse_log(message: str, level: str = "INFO"):
-    if level == "WARNING":
-        logger.warning(message)
-    else:
-        logger.info(message)
+    """Print SSE-compatible JSON log message"""
+    try:
+        print(json.dumps({"type": "log", "level": level, "message": message}), file=sys.stderr, flush=True)
+    except Exception:
+        pass
 
 
 # ============================================================================
@@ -508,11 +500,10 @@ def build_cell_signaling_analysis(
                 pathways.extend([p.strip() for p in kegg.split(',') if p.strip()])
             
             for pw in pathways:
-                pw_str = _pathway_to_str(pw)
-                if pw_str and pw_str.lower() not in ('n/a', 'unknown', 'none', ''):
-                    pathway_proteins.setdefault(pw_str, set()).add(gene)
-                    protein_pathways.setdefault(gene, set()).add(pw_str)
-                    tp_pathways.add(pw_str)
+                if pw and pw.lower() not in ('n/a', 'unknown', 'none', ''):
+                    pathway_proteins.setdefault(pw, set()).add(gene)
+                    protein_pathways.setdefault(gene, set()).add(pw)
+                    tp_pathways.add(pw)
         
         temporal_pathways[tp] = tp_pathways
     
@@ -844,7 +835,7 @@ def convert_uppercase_emphasis_to_bold(text: str) -> str:
         converted += 1
         text = new_text
     
-    # Phase 3: Fix double-bold artifacts (****text**** -> **text**)
+    # Phase 3: Fix double-bold artifacts (****text**** → **text**)
     text = re.sub(r'\*{4,}([^*]+?)\*{4,}', r'**\1**', text)
     
     if converted > 0:
@@ -863,8 +854,8 @@ def _remove_duplicate_section_headings(text: str) -> str:
     immediately after the Markdown heading.
     
     Example:
-        ## Introduction\n\n**Introduction**\n  ->  ## Introduction\n\n
-        ## Discussion\n\n**Discussion**\n    ->  ## Discussion\n\n
+        ## Introduction\n\n**Introduction**\n  →  ## Introduction\n\n
+        ## Discussion\n\n**Discussion**\n    →  ## Discussion\n\n
     """
     if not text:
         return text
@@ -949,7 +940,7 @@ def _enforce_abstract_numbers(text: str, metadata: Dict) -> str:
             if found_num != correct_val:
                 abstract_text = abstract_text[:match.start(2)] + str(correct_val) + abstract_text[match.end(2):]
                 corrections += 1
-                _sse_log(f"[PostProcess] v85: Abstract dual-PTM count corrected: {found_num} -> {correct_val}")
+                _sse_log(f"[PostProcess] v85: Abstract dual-PTM count corrected: {found_num} → {correct_val}")
                 break
     
     # Pattern 2: "N concordant"
@@ -967,7 +958,7 @@ def _enforce_abstract_numbers(text: str, metadata: Dict) -> str:
             if found_num != correct_val:
                 abstract_text = abstract_text[:match.start(2)] + str(correct_val) + abstract_text[match.end(2):]
                 corrections += 1
-                _sse_log(f"[PostProcess] v85: Abstract concordant count corrected: {found_num} -> {correct_val}")
+                _sse_log(f"[PostProcess] v85: Abstract concordant count corrected: {found_num} → {correct_val}")
                 break
     
     # Pattern 3: "N discordant"
@@ -985,7 +976,7 @@ def _enforce_abstract_numbers(text: str, metadata: Dict) -> str:
             if found_num != correct_val:
                 abstract_text = abstract_text[:match.start(2)] + str(correct_val) + abstract_text[match.end(2):]
                 corrections += 1
-                _sse_log(f"[PostProcess] v85: Abstract discordant count corrected: {found_num} -> {correct_val}")
+                _sse_log(f"[PostProcess] v85: Abstract discordant count corrected: {found_num} → {correct_val}")
                 break
     
     if corrections > 0:
@@ -1117,7 +1108,7 @@ def filter_irrelevant_references(
     
     if removed_low_score > 0 or removed_off_topic > 0:
         _sse_log(
-            f"[PostProcess] v86: References filtered: {original_count} -> {len(filtered)} "
+            f"[PostProcess] v86: References filtered: {original_count} → {len(filtered)} "
             f"(removed {removed_low_score} low-score, {removed_off_topic} off-topic)"
         )
     
@@ -1383,6 +1374,7 @@ def validate_llm_output_against_data(
 
     # Build case-insensitive lookup for known proteins
     known_upper = {p.upper() for p in known_protein_names}
+    known_original = {p.upper(): p for p in known_protein_names}
 
     # Extract protein names from LLM output
     mentioned_proteins = extract_protein_names_from_text(llm_output)
@@ -1525,9 +1517,9 @@ def build_data_provenance_block(
         return ""
 
     lines = []
-    lines.append("## " + "=" * 59)
-    lines.append("## VERIFIED EXPERIMENTAL DATA -- USE ONLY THESE VALUES")
-    lines.append("## " + "=" * 59)
+    lines.append("## ═══════════════════════════════════════════════════════════")
+    lines.append("## 📊 VERIFIED EXPERIMENTAL DATA — USE ONLY THESE VALUES")
+    lines.append("## ═══════════════════════════════════════════════════════════")
     lines.append("")
     lines.append("**CRITICAL INSTRUCTION**: The following data block contains ALL proteins and")
     lines.append("values from the actual experiment. You MUST ONLY cite proteins and Log2FC")
@@ -1579,7 +1571,7 @@ def build_data_provenance_block(
                         if abs(val) > max_abs:
                             max_abs = abs(val)
                     else:
-                        row += " -- |"
+                        row += " — |"
                 row += f" {max_abs:.2f} |"
                 lines.append(row)
             lines.append("")
@@ -1608,174 +1600,9 @@ def build_data_provenance_block(
     }, indent=2))
     lines.append("```")
     lines.append("")
-    lines.append("## " + "=" * 59)
+    lines.append("## ═══════════════════════════════════════════════════════════")
     lines.append("")
 
     return "\n".join(lines)
 
 
-# ============================================================================
-# GAP D: Log2FC Interpretation Consistency Validation
-# Ported from ptm_nonptm_network_command.py
-# ============================================================================
-
-# Contradiction patterns: (regex_pattern, expected_fc_sign, description)
-_LOG2FC_CONTRADICTION_PATTERNS = [
-    # Positive FC described as decrease/inhibition
-    (r'(\b[A-Z][A-Z0-9]{1,9}\b)\s+(?:was|showed|exhibited|demonstrated)\s+(?:decreased|reduced|diminished|inhibited|downregulated|attenuated)\s+(?:phosphorylation|ubiquitylation|modification|activity)',
-     'positive', 'Positive Log2FC described as decreased/inhibited'),
-    (r'(?:dephosphorylation|deubiquitylation|loss\s+of\s+modification)\s+(?:of|at|on)\s+(\b[A-Z][A-Z0-9]{1,9}\b)',
-     'positive', 'Positive Log2FC described as dephosphorylation/loss'),
-    # Negative FC described as increase/activation
-    (r'(\b[A-Z][A-Z0-9]{1,9}\b)\s+(?:was|showed|exhibited|demonstrated)\s+(?:increased|enhanced|elevated|activated|upregulated|amplified)\s+(?:phosphorylation|ubiquitylation|modification|activity)',
-     'negative', 'Negative Log2FC described as increased/activated'),
-    (r'(?:hyperphosphorylation|enhanced\s+modification|gain\s+of\s+modification)\s+(?:of|at|on)\s+(\b[A-Z][A-Z0-9]{1,9}\b)',
-     'negative', 'Negative Log2FC described as hyperphosphorylation/gain'),
-]
-
-
-def validate_log2fc_interpretation_consistency(
-    text: str,
-    protein_fc_map: Dict[str, float],
-    auto_correct: bool = False,
-) -> Dict:
-    """
-    GAP D: Validate that LLM text correctly interprets Log2FC direction.
-
-    Detects contradictions where:
-    - A protein with positive Log2FC is described as "decreased/inhibited/dephosphorylated"
-    - A protein with negative Log2FC is described as "increased/activated/hyperphosphorylated"
-
-    Args:
-        text: LLM-generated report text
-        protein_fc_map: Dict mapping protein names to their Log2FC values
-                        e.g., {"EGFR": 2.5, "AKT1": -1.3, "GSK3B": 0.8}
-        auto_correct: If True, automatically corrects detected contradictions
-
-    Returns:
-        Dict with:
-            - 'validated_text': The (optionally corrected) text
-            - 'contradictions': List of detected contradictions
-            - 'corrections_made': Number of auto-corrections applied
-            - 'consistency_score': Float 0-1 (1 = no contradictions)
-    """
-    if not text or not protein_fc_map:
-        return {
-            'validated_text': text or '',
-            'contradictions': [],
-            'corrections_made': 0,
-            'consistency_score': 1.0,
-        }
-
-    # Build case-insensitive lookup
-    fc_lookup = {k.upper(): v for k, v in protein_fc_map.items()}
-
-    contradictions = []
-    corrected_text = text
-
-    for pattern_str, expected_sign, description in _LOG2FC_CONTRADICTION_PATTERNS:
-        try:
-            pattern = re.compile(pattern_str, re.IGNORECASE)
-            for match in pattern.finditer(text):
-                protein = match.group(1).upper() if match.lastindex and match.lastindex >= 1 else None
-                if not protein:
-                    continue
-
-                actual_fc = fc_lookup.get(protein)
-                if actual_fc is None:
-                    # Try partial match
-                    for known_prot, known_fc in fc_lookup.items():
-                        if protein in known_prot or known_prot in protein:
-                            actual_fc = known_fc
-                            break
-
-                if actual_fc is None:
-                    continue
-
-                # Check for contradiction
-                is_contradiction = False
-                if expected_sign == 'positive' and actual_fc > 0:
-                    is_contradiction = True
-                elif expected_sign == 'negative' and actual_fc < 0:
-                    is_contradiction = True
-
-                if is_contradiction:
-                    contradictions.append({
-                        'protein': protein,
-                        'actual_log2fc': actual_fc,
-                        'text_excerpt': match.group(0)[:120],
-                        'description': description,
-                        'position': match.start(),
-                    })
-        except re.error:
-            continue
-
-    # Auto-correct if requested
-    corrections_made = 0
-    if auto_correct and contradictions:
-        # Direction word replacements
-        direction_corrections = {
-            'decreased': 'increased',
-            'reduced': 'enhanced',
-            'diminished': 'elevated',
-            'inhibited': 'activated',
-            'downregulated': 'upregulated',
-            'attenuated': 'amplified',
-            'increased': 'decreased',
-            'enhanced': 'reduced',
-            'elevated': 'diminished',
-            'activated': 'inhibited',
-            'upregulated': 'downregulated',
-            'amplified': 'attenuated',
-            'dephosphorylation': 'phosphorylation',
-            'deubiquitylation': 'ubiquitylation',
-            'hyperphosphorylation': 'reduced phosphorylation',
-        }
-
-        for contradiction in contradictions:
-            excerpt = contradiction['text_excerpt']
-            for wrong, correct in direction_corrections.items():
-                if wrong.lower() in excerpt.lower():
-                    # Case-preserving replacement in the full text
-                    corrected_text = re.sub(
-                        r'\b' + re.escape(wrong) + r'\b',
-                        correct,
-                        corrected_text,
-                        count=1,
-                        flags=re.IGNORECASE,
-                    )
-                    corrections_made += 1
-                    _sse_log(
-                        f"[GAP-D] Auto-corrected '{wrong}' -> '{correct}' for "
-                        f"{contradiction['protein']} (Log2FC={contradiction['actual_log2fc']:.2f})",
-                        "WARNING"
-                    )
-                    break
-
-    # Calculate consistency score
-    # Count total directional statements about known proteins
-    total_statements = 0
-    for pattern_str, _, _ in _LOG2FC_CONTRADICTION_PATTERNS:
-        try:
-            total_statements += len(re.findall(pattern_str, text, re.IGNORECASE))
-        except re.error:
-            continue
-
-    if total_statements > 0:
-        consistency_score = 1.0 - (len(contradictions) / total_statements)
-    else:
-        consistency_score = 1.0
-
-    if contradictions:
-        _sse_log(
-            f"[GAP-D] Log2FC interpretation: {len(contradictions)} contradictions detected "
-            f"(consistency: {consistency_score:.1%}), {corrections_made} auto-corrected",
-            "WARNING"
-        )
-
-    return {
-        'validated_text': corrected_text,
-        'contradictions': contradictions,
-        'corrections_made': corrections_made,
-        'consistency_score': consistency_score,
-    }

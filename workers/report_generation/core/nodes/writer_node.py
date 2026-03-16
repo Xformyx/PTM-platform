@@ -11,7 +11,7 @@ import re
 from typing import Dict, List
 
 from common.llm_client import LLMClient
-from common.report_postprocessor import validate_llm_output_against_data, validate_log2fc_interpretation_consistency
+from common.report_postprocessor import validate_llm_output_against_data
 from report_generation.core.rag_retriever import RAGRetriever
 from report_generation.core.dynamic_prompt_generator import (
     build_anti_hallucination_directive,
@@ -34,7 +34,7 @@ SECTION_MAX_TOKENS = {
     "abstract": 6144,
     "introduction": 12288,
     "results": 16384,
-    "discussion": 12288,
+    "discussion": 16384,
     "conclusion": 8192,
     "methods": 8192,
     "suggestion": 8192,
@@ -203,33 +203,6 @@ def run_section_writing(state: dict) -> dict:
             except Exception as e:
                 logger.warning(f"[v98] {section_type} validation failed (non-fatal): {e}")
 
-        # GAP D: Log2FC interpretation consistency validation
-        if section_type in ("results", "discussion") and parsed_ptms:
-            try:
-                protein_fc_map = {}
-                for ptm in parsed_ptms:
-                    gene = ptm.get("gene", "")
-                    fc = float(ptm.get("ptm_relative_log2fc", 0))
-                    if gene and gene not in protein_fc_map:
-                        protein_fc_map[gene] = fc
-                if protein_fc_map:
-                    fc_validation = validate_log2fc_interpretation_consistency(
-                        content, protein_fc_map, auto_correct=True
-                    )
-                    if fc_validation["corrections_made"] > 0:
-                        content = fc_validation["validated_text"]
-                        logger.warning(
-                            f"[GAP-D] {section_type}: {fc_validation['corrections_made']} "
-                            f"Log2FC interpretation contradictions auto-corrected "
-                            f"(consistency: {fc_validation['consistency_score']:.1%})"
-                        )
-                    elif fc_validation["contradictions"]:
-                        logger.warning(
-                            f"[GAP-D] {section_type}: {len(fc_validation['contradictions'])} "
-                            f"contradictions detected but not corrected"
-                        )
-            except Exception as e:
-                logger.warning(f"[GAP-D] {section_type} Log2FC validation failed (non-fatal): {e}")
 
         sections[section_type] = content
         prev_sections[section_type] = content
@@ -394,7 +367,7 @@ IMPORTANT: Write a thorough, detailed introduction. Cite as many of the provided
                 rq_lines.append("")
             rq_answer_structure = "\n".join(rq_lines)
 
-        return f"""Write a detailed Results section (~3000-5000 words) for this PTM analysis report.
+        return f"""Write a detailed Results section (MINIMUM 1500 words, target 3000-5000 words) for this PTM analysis report.
 {single_tp_directive}
 Research Findings:
 {research_str}
@@ -450,7 +423,7 @@ IMPORTANT: Be thorough and detailed. Discuss each significant PTM site individua
                 cs_lines.append("")
                 cell_signaling_block = "\n".join(cs_lines)
 
-        return f"""Write a comprehensive Discussion section (~2000-3000 words) for this PTM analysis report.
+        return f"""Write a comprehensive Discussion section (MINIMUM 1500 words, target 2000-3000 words) for this PTM analysis report.
 {single_tp_directive}
 Results Summary:
 {results_text}
@@ -478,7 +451,7 @@ IMPORTANT: For each discussion point, provide evidence from your data AND from t
         results_text = prev_sections.get("results", "")[:2000]
         discussion_text = prev_sections.get("discussion", "")[:2000]
 
-        return f"""Write a Conclusion section (~600-1000 words) for this PTM analysis report.
+        return f"""Write a Conclusion section (MINIMUM 500 words, target 600-1000 words) for this PTM analysis report.
 {single_tp_directive}
 Research Questions:
 {questions_str}
