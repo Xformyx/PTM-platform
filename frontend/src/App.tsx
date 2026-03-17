@@ -5,6 +5,7 @@ import OrderList from '@/pages/OrderList';
 import OrderCreate from '@/pages/OrderCreate';
 import OrderDetail from '@/pages/OrderDetail';
 import RagManagement from '@/pages/RagManagement';
+import RagCollectionDetail from '@/pages/RagCollectionDetail';
 import LlmConfig from '@/pages/LlmConfig';
 import Articles from '@/pages/Articles';
 import Reports from '@/pages/Reports';
@@ -22,6 +23,7 @@ export default function App() {
         <Route path="orders/new" element={<OrderCreate />} />
         <Route path="orders/:id" element={<OrderDetail />} />
         <Route path="rag" element={<RagManagement />} />
+        <Route path="rag/:id" element={<RagCollectionDetail />} />
         <Route path="llm" element={<LlmConfig />} />
         <Route path="articles" element={<Articles />} />
         <Route path="reports" element={<Reports />} />

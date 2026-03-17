@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Library, FileText, Layers, Database, Plus, Loader2, Power, PowerOff } from "lucide-react";
 import { api } from "@/lib/api";
 import type { RagCollection } from "@/lib/types";
@@ -23,6 +24,7 @@ import { StaggerContainer, StaggerItem } from "@/components/motion/stagger-child
 import { cn } from "@/lib/utils";
 
 export default function RagManagement() {
+  const navigate = useNavigate();
   const [collections, setCollections] = useState<RagCollection[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -103,7 +105,7 @@ export default function RagManagement() {
         <StaggerContainer className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
           {collections.map((c) => (
             <StaggerItem key={c.id}>
-              <Card className="cursor-pointer hover:border-primary/30 transition-colors">
+              <Card className="cursor-pointer hover:border-primary/30 transition-colors" onClick={() => navigate(`/rag/${c.id}`)}>
                 <CardContent className="p-5">
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center gap-2">

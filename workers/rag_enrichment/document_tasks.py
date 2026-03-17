@@ -1,0 +1,187 @@
+"""
+RAG Document Indexing — Celery Task.
+
+Indexes uploaded documents (PDF, MD, TXT) into ChromaDB collections
+using the DocumentIndexer from common/document_indexer.py.
+
+Runs on the rag_enrichment queue alongside the main enrichment task.
+"""
+
+import logging
+import os
+import time
+import traceback
+
+from celery_app import app
+from common.document_indexer import DocumentIndexer
+
+logger = logging.getLogger("ptm-workers.document-indexing")
+
+SYNC_DATABASE_URL = os.getenv(
+    "DATABASE_URL",
+    "mysql+asyncmy://ptm_user:ptm_password@localhost:3306/ptm_platform",
+).replace("+asyncmy", "+pymysql").replace("+aiomysql", "+pymysql")
+
+
+def _update_document_status(doc_id: int, status: str, chunk_count: int = 0, error_message: str = None):
+    """Update rag_documents row with indexing result."""
+    from sqlalchemy import create_engine, text
+
+    try:
+        engine = create_engine(SYNC_DATABASE_URL, pool_pre_ping=True, pool_size=1)
+        with engine.connect() as conn:
+            conn.execute(
+                text(
+                    "UPDATE rag_documents SET status = :status, chunk_count = :chunk_count, "
+                    "error_message = :error_message WHERE id = :doc_id"
+                ),
+                {
+                    "doc_id": doc_id,
+                    "status": status,
+                    "chunk_count": chunk_count,
+                    "error_message": error_message,
+                },
+            )
+            conn.commit()
+        engine.dispose()
+    except Exception as e:
+        logger.error(f"Failed to update document {doc_id} status: {e}")
+
+
+def _update_collection_counts(collection_id: int):
+    """Recalculate and update document_count and chunk_count for a collection."""
+    from sqlalchemy import create_engine, text
+
+    try:
+        engine = create_engine(SYNC_DATABASE_URL, pool_pre_ping=True, pool_size=1)
+        with engine.connect() as conn:
+            row = conn.execute(
+                text(
+                    "SELECT COUNT(*) AS doc_count, COALESCE(SUM(chunk_count), 0) AS total_chunks "
+                    "FROM rag_documents WHERE collection_id = :cid AND status = 'indexed'"
+                ),
+                {"cid": collection_id},
+            ).fetchone()
+            if row:
+                conn.execute(
+                    text(
+                        "UPDATE rag_collections SET document_count = :doc_count, "
+                        "chunk_count = :total_chunks WHERE id = :cid"
+                    ),
+                    {"doc_count": row[0], "total_chunks": row[1], "cid": collection_id},
+                )
+            conn.commit()
+        engine.dispose()
+    except Exception as e:
+        logger.error(f"Failed to update collection {collection_id} counts: {e}")
+
+
+def _get_collection_info(collection_id: int) -> dict:
+    """Fetch collection metadata from DB."""
+    from sqlalchemy import create_engine, text
+
+    engine = create_engine(SYNC_DATABASE_URL, pool_pre_ping=True, pool_size=1)
+    with engine.connect() as conn:
+        row = conn.execute(
+            text(
+                "SELECT chromadb_name, embedding_model, chunk_size, chunk_strategy "
+                "FROM rag_collections WHERE id = :cid"
+            ),
+            {"cid": collection_id},
+        ).fetchone()
+    engine.dispose()
+    if not row:
+        raise ValueError(f"Collection {collection_id} not found")
+    return {
+        "chromadb_name": row[0],
+        "embedding_model": row[1],
+        "chunk_size": row[2],
+        "chunk_strategy": row[3],
+    }
+
+
+@app.task(bind=True, name="rag_enrichment.document_tasks.index_document", max_retries=2)
+def index_document(self, doc_id: int, collection_id: int, file_path: str):
+    """
+    Index a single uploaded document into its ChromaDB collection.
+
+    Args:
+        doc_id: rag_documents.id
+        collection_id: rag_collections.id
+        file_path: Absolute path to the uploaded file
+    """
+    start_time = time.time()
+    logger.info(f"[Doc {doc_id}] Starting indexing: {file_path}")
+
+    # Mark as processing
+    _update_document_status(doc_id, "processing")
+
+    try:
+        # Get collection settings
+        col_info = _get_collection_info(collection_id)
+        chromadb_name = col_info["chromadb_name"]
+        embedding_model = col_info["embedding_model"]
+        chunk_size = col_info["chunk_size"]
+
+        logger.info(
+            f"[Doc {doc_id}] Collection: {chromadb_name}, "
+            f"model: {embedding_model}, chunk_size: {chunk_size}"
+        )
+
+        # Create indexer
+        indexer = DocumentIndexer(
+            embedding_model=embedding_model,
+            chunk_size=chunk_size,
+            overlap_sentences=2,
+        )
+
+        # Index the document
+        result = indexer.index_document(
+            file_path=file_path,
+            collection_name=chromadb_name,
+            extra_metadata={"collection_id": collection_id, "doc_id": doc_id},
+        )
+
+        elapsed = round(time.time() - start_time, 1)
+
+        if result["status"] == "success":
+            _update_document_status(doc_id, "indexed", chunk_count=result["chunk_count"])
+            _update_collection_counts(collection_id)
+            logger.info(
+                f"[Doc {doc_id}] Indexed successfully: {result['chunk_count']} chunks "
+                f"in {elapsed}s"
+            )
+            return {
+                "doc_id": doc_id,
+                "status": "indexed",
+                "chunk_count": result["chunk_count"],
+                "elapsed_seconds": elapsed,
+            }
+        else:
+            error_msg = result.get("message", "Unknown indexing error")
+            _update_document_status(doc_id, "failed", error_message=error_msg)
+            logger.error(f"[Doc {doc_id}] Indexing failed: {error_msg}")
+            return {
+                "doc_id": doc_id,
+                "status": "failed",
+                "error": error_msg,
+                "elapsed_seconds": elapsed,
+            }
+
+    except Exception as e:
+        elapsed = round(time.time() - start_time, 1)
+        error_msg = f"Indexing error: {str(e)}"
+        logger.error(f"[Doc {doc_id}] {error_msg}", exc_info=True)
+        _update_document_status(doc_id, "failed", error_message=error_msg)
+
+        # Retry on transient errors (ChromaDB connection, etc.)
+        try:
+            self.retry(countdown=30, exc=e)
+        except self.MaxRetriesExceededError:
+            logger.error(f"[Doc {doc_id}] Max retries exceeded")
+            return {
+                "doc_id": doc_id,
+                "status": "failed",
+                "error": error_msg,
+                "elapsed_seconds": elapsed,
+            }

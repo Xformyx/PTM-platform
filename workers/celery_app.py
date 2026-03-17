@@ -24,6 +24,7 @@ app.conf.update(
     task_routes={
         "preprocessing.tasks.*": {"queue": "preprocessing"},
         "rag_enrichment.tasks.*": {"queue": "rag_enrichment"},
+        "rag_enrichment.document_tasks.*": {"queue": "rag_enrichment"},
         "report_generation.tasks.*": {"queue": "report_generation"},
     },
     task_default_queue="default",
