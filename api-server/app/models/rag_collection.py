@@ -14,7 +14,7 @@ class RagCollection(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     tier: Mapped[str] = mapped_column(
-        Enum("cell_type", "ptm_type", "pathway", "general", name="collection_tier"),
+        Enum("cell_type", "ptm_type", "pathway", "general", "domain", "project", name="collection_tier"),
         nullable=False,
     )
     chromadb_name: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
@@ -22,7 +22,7 @@ class RagCollection(Base):
         String(255), default="all-MiniLM-L6-v2"
     )
     chunk_strategy: Mapped[str] = mapped_column(
-        Enum("fixed", "semantic", "recursive", name="chunk_strategy"),
+        Enum("fixed", "semantic", "recursive", "section_aware", name="chunk_strategy"),
         default="recursive",
     )
     chunk_size: Mapped[int] = mapped_column(Integer, default=1000)

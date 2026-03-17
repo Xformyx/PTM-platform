@@ -210,6 +210,8 @@ export default function RagManagement() {
                     <SelectItem value="cell_type">Cell Type</SelectItem>
                     <SelectItem value="ptm_type">PTM Type</SelectItem>
                     <SelectItem value="pathway">Pathway</SelectItem>
+                    <SelectItem value="domain">Domain</SelectItem>
+                    <SelectItem value="project">Project</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -234,6 +236,7 @@ export default function RagManagement() {
                     <SelectItem value="recursive">Recursive</SelectItem>
                     <SelectItem value="semantic">Semantic</SelectItem>
                     <SelectItem value="fixed">Fixed</SelectItem>
+                    <SelectItem value="section_aware">Section-Aware</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

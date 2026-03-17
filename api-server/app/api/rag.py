@@ -82,18 +82,36 @@ async def create_collection(
         f"ptm_{body.tier}_{body.name.lower().replace(' ', '_')}"
     )
 
-    collection = RagCollection(
-        name=body.name,
-        description=body.description,
-        tier=body.tier,
-        chromadb_name=chromadb_name,
-        embedding_model=body.embedding_model,
-        chunk_strategy=body.chunk_strategy,
-        chunk_size=body.chunk_size,
+    # Check for duplicate chromadb_name
+    existing = await db.execute(
+        select(RagCollection).where(RagCollection.chromadb_name == chromadb_name)
     )
-    db.add(collection)
-    await db.commit()
-    await db.refresh(collection)
+    if existing.scalar_one_or_none():
+        raise HTTPException(
+            status_code=409,
+            detail=f"Collection with internal name '{chromadb_name}' already exists. Please choose a different name.",
+        )
+
+    try:
+        collection = RagCollection(
+            name=body.name,
+            description=body.description,
+            tier=body.tier,
+            chromadb_name=chromadb_name,
+            embedding_model=body.embedding_model,
+            chunk_strategy=body.chunk_strategy,
+            chunk_size=body.chunk_size,
+        )
+        db.add(collection)
+        await db.commit()
+        await db.refresh(collection)
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Failed to create collection '{body.name}': {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Database error while creating collection: {str(e)}",
+        )
 
     logger.info(f"RAG collection created: {body.name} (tier={body.tier})")
     return {"id": collection.id, "chromadb_name": chromadb_name, "message": "Collection created"}
