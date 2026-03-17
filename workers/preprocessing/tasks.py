@@ -369,34 +369,6 @@ def run_preprocessing(self, order_id: int, config: dict):
 
             publish_progress(order_id, "preprocessing", "unified_enrichment", "completed", 70, "Domain/motif enrichment complete")
 
-        # --- Pipeline Statistics: collect Step 3 (Enrichment) stats ---
-        try:
-            import pandas as pd
-            enriched_path = order_output / enriched_output
-            stats_json_path = order_output / f"pipeline_statistics{file_suffix}.json"
-            if enriched_path.exists() and stats_json_path.exists():
-                with open(stats_json_path, "r", encoding="utf-8") as f:
-                    existing_stats = json.load(f)
-                enriched_df = pd.read_csv(enriched_path, sep="\t", low_memory=False)
-                step3 = {
-                    "total_rows": len(enriched_df),
-                    "unique_proteins": int(enriched_df["Protein.Group"].nunique()) if "Protein.Group" in enriched_df.columns else 0,
-                }
-                if "Data_Type" in enriched_df.columns:
-                    dt_dist = enriched_df["Data_Type"].value_counts().to_dict()
-                    step3["ptm_rows"] = int(dt_dist.get("PTM_Site", dt_dist.get("PTM", 0)))
-                    step3["non_ptm_rows"] = int(dt_dist.get("Protein_Only", dt_dist.get("non_PTM", 0)))
-                    step3["data_type_distribution"] = {str(k): int(v) for k, v in dt_dist.items()}
-                if "Domains" in enriched_df.columns:
-                    step3["proteins_with_domains"] = int((enriched_df["Domains"].notna() & (enriched_df["Domains"] != "")).sum())
-                if "Matched_Motifs" in enriched_df.columns:
-                    step3["sites_with_motifs"] = int((enriched_df["Matched_Motifs"].notna() & (enriched_df["Matched_Motifs"] != "")).sum())
-                existing_stats["step3_enrichment"] = step3
-                with open(stats_json_path, "w", encoding="utf-8") as f:
-                    json.dump(existing_stats, f, indent=2, ensure_ascii=False, default=str)
-                logger.info(f"[Order {order_id}] Pipeline statistics (Step 3) updated")
-        except Exception as stats_err:
-            logger.warning(f"[Order {order_id}] Step 3 statistics collection failed (non-fatal): {stats_err}")
 
         # ================================================================
         # Step 3: Biological Enrichment — UniProt/STRING/KEGG (70% – 90%)
@@ -447,7 +419,7 @@ def run_preprocessing(self, order_id: int, config: dict):
 
             publish_progress(order_id, "preprocessing", "biological_enrichment", "completed", 90, "Biological enrichment complete")
 
-        # --- Pipeline Statistics: collect Step 4 (Biological) stats ---
+        # --- Pipeline Statistics: collect Final Output stats ---
         try:
             import pandas as pd
             bio_path = order_output / bio_output
@@ -456,35 +428,19 @@ def run_preprocessing(self, order_id: int, config: dict):
                 with open(stats_json_path, "r", encoding="utf-8") as f:
                     existing_stats = json.load(f)
                 bio_df = pd.read_csv(bio_path, sep="\t", low_memory=False)
-                step4 = {"total_rows": len(bio_df)}
-                uniprot_cols = ["Subcellular_Localization", "Protein_Function_Summary",
-                               "GO_Biological_Process", "GO_Molecular_Function", "GO_Cellular_Component"]
-                uniprot_stats = {}
-                for col in uniprot_cols:
-                    if col in bio_df.columns:
-                        uniprot_stats[col] = int((bio_df[col].notna() & (bio_df[col] != "")).sum())
-                step4["uniprot_annotations"] = uniprot_stats
-                if "STRING_Interactors" in bio_df.columns:
-                    step4["proteins_with_string"] = int((bio_df["STRING_Interactors"].notna() & (bio_df["STRING_Interactors"] != "")).sum())
-                if "KEGG_Pathways" in bio_df.columns:
-                    step4["proteins_with_kegg"] = int((bio_df["KEGG_Pathways"].notna() & (bio_df["KEGG_Pathways"] != "")).sum())
-                if "Protein.Group" in bio_df.columns:
-                    step4["unique_proteins"] = int(bio_df["Protein.Group"].nunique())
-                if "Condition" in bio_df.columns:
-                    step4["conditions_in_final"] = int(bio_df["Condition"].nunique())
-                    step4["rows_per_condition"] = {str(k): int(v) for k, v in bio_df["Condition"].value_counts().to_dict().items()}
-                existing_stats["step4_biological"] = step4
+                unique_proteins = int(bio_df["Protein.Group"].nunique()) if "Protein.Group" in bio_df.columns else 0
+                conditions = int(bio_df["Condition"].nunique()) if "Condition" in bio_df.columns else 0
                 existing_stats["final_output"] = {
                     "total_rows": len(bio_df),
                     "total_columns": len(bio_df.columns),
-                    "unique_proteins": step4.get("unique_proteins", 0),
-                    "conditions": step4.get("conditions_in_final", 0),
+                    "unique_proteins": unique_proteins,
+                    "conditions": conditions,
                 }
                 with open(stats_json_path, "w", encoding="utf-8") as f:
                     json.dump(existing_stats, f, indent=2, ensure_ascii=False, default=str)
-                logger.info(f"[Order {order_id}] Pipeline statistics (Step 4 + Final) updated")
+                logger.info(f"[Order {order_id}] Pipeline statistics (Final Output) updated")
         except Exception as stats_err:
-            logger.warning(f"[Order {order_id}] Step 4 statistics collection failed (non-fatal): {stats_err}")
+            logger.warning(f"[Order {order_id}] Final Output statistics collection failed (non-fatal): {stats_err}")
 
         # ================================================================
         # Step 4: Finalization (90% – 100%)
