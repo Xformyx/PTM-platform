@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Library, FileText, Layers, Database, Plus, Loader2, Power, PowerOff } from "lucide-react";
+import { Library, FileText, Layers, Database, Plus, Loader2, Power, PowerOff, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
 import type { RagCollection } from "@/lib/types";
 import { Card, CardContent } from "@/components/ui/card";
@@ -29,6 +29,9 @@ export default function RagManagement() {
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [collectionToDelete, setCollectionToDelete] = useState<RagCollection | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [form, setForm] = useState({
     name: "",
     description: "",
@@ -59,6 +62,21 @@ export default function RagManagement() {
       alert(err.message || "Failed to create collection");
     } finally {
       setCreating(false);
+    }
+  };
+
+  const handleDeleteCollection = async () => {
+    if (!collectionToDelete) return;
+    setDeleting(true);
+    try {
+      await api.delete(`/rag/collections/${collectionToDelete.id}`);
+      setDeleteDialogOpen(false);
+      setCollectionToDelete(null);
+      fetchCollections();
+    } catch (err: any) {
+      alert(err.message || "Failed to delete collection");
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -131,6 +149,18 @@ export default function RagManagement() {
                         )}
                       </button>
                       <Badge variant="secondary">{c.tier}</Badge>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setCollectionToDelete(c);
+                          setDeleteDialogOpen(true);
+                        }}
+                        title="Delete collection"
+                        className="p-1 rounded hover:bg-red-500/10 text-muted-foreground hover:text-red-500 transition-colors"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
                     </div>
                   </div>
                   {c.description && (
@@ -259,6 +289,32 @@ export default function RagManagement() {
             <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
             <Button onClick={handleCreate} disabled={creating || !form.name.trim()}>
               {creating ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Creating...</> : "Create Collection"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      {/* Delete Collection Dialog */}
+      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Collection</DialogTitle>
+            <DialogDescription>
+              <strong>{collectionToDelete?.name}</strong> 컬렉션을 삭제하시겠습니까?{" "}
+              이 작업은 되돌릴 수 없으며, 컬렉션에 포함된 모든 문서와 ChromaDB 데이터가 함께 삭제됩니다.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteDialogOpen(false)}>Cancel</Button>
+            <Button
+              variant="destructive"
+              onClick={handleDeleteCollection}
+              disabled={deleting}
+            >
+              {deleting ? (
+                <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Deleting...</>
+              ) : (
+                "Delete"
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>

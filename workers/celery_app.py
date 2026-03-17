@@ -35,3 +35,7 @@ app.autodiscover_tasks([
     "rag_enrichment",
     "report_generation",
 ])
+
+# document_tasks.py is not named 'tasks.py', so autodiscover won't find it.
+# Explicit import ensures the @app.task decorators are registered.
+import rag_enrichment.document_tasks  # noqa: F401, E402
