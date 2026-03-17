@@ -1290,19 +1290,45 @@ def _generate_statistics_from_outputs(order: Order, output_dir: Path, file_suffi
         if ptm_vector_path.exists():
             ptm_df = pd.read_csv(ptm_vector_path, sep="\t", low_memory=False)
             n_pr = len(pr_df) if pr_df is not None else 0
+            n_pg = len(pg_df) if pg_df is not None else 0
+            # Unique sites: PTM_Site column or derive from Protein.Group + PTM_Position
+            if "PTM_Site" in ptm_df.columns:
+                n_sites = int(ptm_df["PTM_Site"].nunique())
+            elif "Protein.Group" in ptm_df.columns and "PTM_Position" in ptm_df.columns:
+                n_sites = int(ptm_df.groupby(["Protein.Group", "PTM_Position"]).ngroups)
+            else:
+                n_sites = len(ptm_df)
+            norm_stats = {
+                "pr_precursors_before": n_pr,
+                "pg_proteins_before": n_pg,
+                "method": "median",
+                "batch_variation_corrected": True,
+            }
+            norm_factors_path = output_dir / "normalization_factors.tsv"
+            if norm_factors_path.exists():
+                try:
+                    nf_df = pd.read_csv(norm_factors_path, sep="\t")
+                    if "Sample" in nf_df.columns:
+                        norm_stats["samples_corrected"] = int(nf_df["Sample"].nunique())
+                    if "Normalization_Factor" in nf_df.columns:
+                        factors = nf_df["Normalization_Factor"].dropna()
+                        if len(factors) > 0:
+                            norm_stats["factor_range"] = [round(float(factors.min()), 3), round(float(factors.max()), 3)]
+                except Exception:
+                    pass
             stats["step2_quantification"] = {
-                "normalization": {"pr_precursors_before": 0, "pg_proteins_before": 0},
+                "normalization": norm_stats,
                 "ptm_filtering": {
                     "total_precursors": n_pr,
                     "ptm_precursors": len(ptm_df),
                     "ptm_proteins": int(ptm_df["Protein.Group"].nunique()) if "Protein.Group" in ptm_df.columns else 0,
-                    "ptm_sites": int(ptm_df["PTM_Site"].nunique()) if "PTM_Site" in ptm_df.columns else 0,
+                    "ptm_sites": n_sites,
                     "ptm_ratio": round(len(ptm_df) / max(n_pr, 1) * 100, 1),
                 },
                 "relative_quant": {
                     "total_entries": len(ptm_df),
                     "unique_proteins": int(ptm_df["Protein.Group"].nunique()) if "Protein.Group" in ptm_df.columns else 0,
-                    "unique_sites": int(ptm_df["PTM_Site"].nunique()) if "PTM_Site" in ptm_df.columns else 0,
+                    "unique_sites": n_sites,
                 },
             }
 
@@ -1334,6 +1360,33 @@ def _generate_statistics_from_outputs(order: Order, output_dir: Path, file_suffi
         return None
 
 
+def _merge_cross_talk_stats(phospho_stats: dict, ubi_stats: dict) -> dict:
+    """Merge phospho and ubi stats for cross-talk mode. Adds phospho_sites, ubi_sites to ptm_filtering."""
+    has_phospho = phospho_stats and (phospho_stats.get("step2_quantification") or phospho_stats.get("step1_input"))
+    has_ubi = ubi_stats and (ubi_stats.get("step2_quantification") or ubi_stats.get("step1_input"))
+    base = phospho_stats if has_phospho else (ubi_stats if has_ubi else {})
+    if not base:
+        return {}
+    merged = dict(base)
+    ptm_filt = dict(merged.get("step2_quantification", {}).get("ptm_filtering", {}))
+    if has_phospho:
+        pf = phospho_stats.get("step2_quantification", {}).get("ptm_filtering", {})
+        if pf.get("ptm_sites") is not None:
+            ptm_filt["phospho_sites"] = pf["ptm_sites"]
+    if has_ubi:
+        uf = ubi_stats.get("step2_quantification", {}).get("ptm_filtering", {})
+        if uf.get("ptm_sites") is not None:
+            ptm_filt["ubi_sites"] = uf["ptm_sites"]
+    if "step2_quantification" not in merged:
+        merged["step2_quantification"] = {}
+    merged["step2_quantification"] = dict(merged["step2_quantification"])
+    merged["step2_quantification"]["ptm_filtering"] = ptm_filt
+    merged["metadata"] = dict(merged.get("metadata") or {})
+    merged["metadata"]["ptm_mode"] = "cross_talk"
+    merged["metadata"]["ptm_mode_name"] = "Cross-Talk (Phos + Ubi)"
+    return merged
+
+
 @router.get("/{order_id}/statistics")
 async def get_order_statistics(
     order_id: int,
@@ -1354,6 +1407,36 @@ async def get_order_statistics(
     if not output_dir.exists():
         return {"statistics": None, "available": False}
 
+    report_opts = order.report_options or {}
+    is_cross_talk = report_opts.get("analysis_mode") == "cross_talk"
+
+    if is_cross_talk:
+        phospho_file = output_dir / "pipeline_statistics_phospho.json"
+        ubi_file = output_dir / "pipeline_statistics_ubi.json"
+        phospho_stats = None
+        ubi_stats = None
+        if phospho_file.exists():
+            try:
+                with open(phospho_file, "r", encoding="utf-8") as f:
+                    phospho_stats = _json.load(f)
+            except Exception:
+                pass
+        if ubi_file.exists():
+            try:
+                with open(ubi_file, "r", encoding="utf-8") as f:
+                    ubi_stats = _json.load(f)
+            except Exception:
+                pass
+        if phospho_stats or ubi_stats:
+            stats = _merge_cross_talk_stats(phospho_stats or {}, ubi_stats or {})
+            return {"statistics": stats, "available": True}
+        phospho_fallback = _generate_statistics_from_outputs(order, output_dir, "_phospho")
+        ubi_fallback = _generate_statistics_from_outputs(order, output_dir, "_ubi")
+        if phospho_fallback or ubi_fallback:
+            stats = _merge_cross_talk_stats(phospho_fallback or {}, ubi_fallback or {})
+            if stats:
+                return {"statistics": stats, "available": True}
+
     file_suffix = "_phospho" if order.ptm_type == "phosphorylation" else "_ubi"
     stats_file = output_dir / f"pipeline_statistics{file_suffix}.json"
 
@@ -1365,7 +1448,6 @@ async def get_order_statistics(
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Error reading statistics: {str(e)}")
 
-    # Fallback: generate from existing output files (for orders preprocessed before stats feature)
     stats = _generate_statistics_from_outputs(order, output_dir, file_suffix)
     if stats:
         return {"statistics": stats, "available": True}

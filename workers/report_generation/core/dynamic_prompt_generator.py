@@ -207,16 +207,18 @@ def classify_ptm_patterns(ptms: List[dict], threshold: float = 0.5) -> Dict[str,
 # ---------------------------------------------------------------------------
 
 FEW_SHOT_QUANTITATIVE = """
-**Example of good quantitative data integration:**
+**Example of good quantitative data integration (STYLE ONLY — do NOT use these proteins/sites):**
 
-"The phosphorylation of ACC1 at Ser79 showed a dramatic 18.5-fold increase (PTM Log2FC = 4.21)
-without significant change in protein abundance (Protein Log2FC = 0.03), indicating specific
-kinase-mediated activation. This is consistent with AMPK-dependent phosphorylation of ACC1 at
-Ser79, which inhibits fatty acid synthesis and promotes fatty acid oxidation [1]. The magnitude
-of this change (4.21 log2 units) suggests near-complete phosphorylation of the available ACC1
-pool, implying sustained AMPK activation under the experimental conditions."
+"The phosphorylation of [Gene]-[Site] showed a dramatic X-fold increase (PTM Log2FC = Y)
+without significant change in protein abundance (Protein Log2FC = Z), indicating specific
+kinase-mediated activation. This is consistent with [kinase]-dependent phosphorylation of [Gene] at
+[Site], which [biological function] [1]. The magnitude of this change suggests [interpretation]."
 
-Note how the example:
+CRITICAL: The above is a STYLE template. You MUST use ONLY proteins and PTM sites from the
+actual data provided in this prompt. Never mention ACC1, Ser79, AMPK, MAPK, or any other
+example proteins from prompt templates — they are placeholders for illustration only.
+
+Note how the style:
 1. Includes specific fold-change values with units
 2. Compares PTM vs protein changes to infer mechanism
 3. Cites literature with reference numbers
@@ -468,9 +470,10 @@ detailed, and publication-quality analysis.
 1. **Use proteins from the registry above** — reference specific protein names and their Log2FC values from the data tables
 2. **Cite actual Log2FC values** from the data tables when discussing specific proteins
 3. **Prefer proteins from this dataset** over well-known examples from general knowledge (e.g., avoid GSK3B, YWHAZ, HSP90, ACTB, GAPDH unless they appear in the registry above)
-4. **Write concretely** — instead of "proteins such as X", name the actual proteins from the data
-5. **Interpret extensively** — provide rich biological interpretation, mechanistic insights, and signaling pathway analysis for each finding. The more detailed your biological reasoning, the better.
-6. **Connect findings** — link individual protein changes to broader signaling cascades and cellular responses
+4. **NEVER use example proteins from prompt templates** — any proteins/sites in examples (e.g., ACC1, Ser79, MAPK3, AMPK) are for style illustration only. Use ONLY proteins from the VERIFIED PROTEIN REGISTRY above.
+5. **Write concretely** — instead of "proteins such as X", name the actual proteins from the data
+6. **Interpret extensively** — provide rich biological interpretation, mechanistic insights, and signaling pathway analysis for each finding. The more detailed your biological reasoning, the better.
+7. **Connect findings** — link individual protein changes to broader signaling cascades and cellular responses
 
 ### NON-PTM / PTM SIGNALING INTERPRETATION GUIDELINES
 When discussing Non-PTM effector proteins alongside PTM-modified proteins:
@@ -611,10 +614,10 @@ GOOD EXAMPLE:
 > {example_proteins_text},{temporal_example}
 > indicating coordinated activation of multiple signaling nodes.
 
-BAD EXAMPLE (NEVER write like this):
-> The MAPK pathway demonstrated a clear temporal profile. At 3h, we observed robust phosphorylation of
-> several key substrates, including [list specific substrates and Log2FC values from Figure 1A].
-> For example, [Specific substrate] exhibited a PTM Log2FC of [value].
+BAD EXAMPLE (NEVER write like this — and NEVER use example proteins like MAPK, ACC1, Ser79 from prompts):
+> The [pathway] pathway demonstrated a clear temporal profile. At [timepoint], we observed robust
+> phosphorylation of several key substrates, including [list from YOUR data]. Use ONLY proteins
+> and sites from the actual data provided — never copy placeholder or example names from prompts.
 """
     return example
 

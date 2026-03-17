@@ -1783,6 +1783,7 @@ export default function OrderDetail() {
   const [loading, setLoading] = useState(true);
   const [llmConfig, setLlmConfig] = useState<LlmConfig | null>(null);
   const [llmModels, setLlmModels] = useState<{ provider: string; model_id: string; name: string }[]>([]);
+  const [ragCollections, setRagCollections] = useState<{ id: number; name: string }[]>([]);
   const [rerunModalOpen, setRerunModalOpen] = useState(false);
   const [pendingAction, setPendingAction] = useState<{ type: "start" } | { type: "run-stage"; stage: string } | null>(null);
   const runHandledRef = useRef(false);
@@ -1818,6 +1819,11 @@ export default function OrderDetail() {
       }
       setLlmModels(merged);
     }).catch(() => {});
+  }, []);
+  useEffect(() => {
+    api.get<{ collections: { id: number; name: string }[] }>("/rag/collections").then((d) => {
+      setRagCollections(d.collections.map((c) => ({ id: c.id, name: c.name })));
+    }).catch(() => setRagCollections([]));
   }, []);
   useEffect(() => {
     if (runHandledRef.current) return;
@@ -2165,6 +2171,20 @@ export default function OrderDetail() {
                   value={(order.report_options as any)?.report_type === "extended" ? "Extended (+ Drug Repositioning)" : "Standard"}
                 />
                 <OverviewField
+                  label="RAG Literature Collections"
+                  value={
+                    (() => {
+                      const ids = order.rag_collections;
+                      if (!ids || !Array.isArray(ids) || ids.length === 0) return "All active collections";
+                      const toNum = (x: unknown) => (typeof x === "string" ? parseInt(x, 10) : Number(x));
+                      const names = ids
+                        .map((id) => ragCollections.find((c) => c.id === toNum(id))?.name ?? `#${id}`)
+                        .filter(Boolean);
+                      return names.length > 0 ? names.join(", ") : `${ids.length} collections`;
+                    })()
+                  }
+                />
+                <OverviewField
                   label="Created"
                   value={new Date(order.created_at).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })}
                 />
@@ -2314,6 +2334,20 @@ export default function OrderDetail() {
                 <OverviewField
                   label="LLM Model (Paper Read)"
                   value={(order.report_options as any)?.rag_llm_model || "Default"}
+                />
+                <OverviewField
+                  label="RAG Literature Collections"
+                  value={
+                    (() => {
+                      const ids = order.rag_collections;
+                      if (!ids || !Array.isArray(ids) || ids.length === 0) return "All active collections";
+                      const toNum = (x: unknown) => (typeof x === "string" ? parseInt(x, 10) : Number(x));
+                      const names = ids
+                        .map((id) => ragCollections.find((c) => c.id === toNum(id))?.name ?? `#${id}`)
+                        .filter(Boolean);
+                      return names.length > 0 ? names.join(", ") : `${ids.length} collections`;
+                    })()
+                  }
                 />
                 {Array.isArray((order.report_options as any)?.research_questions) &&
                  (order.report_options as any).research_questions.length > 0 && (
