@@ -237,21 +237,41 @@ def run_preprocessing(self, order_id: int, config: dict):
                     all_prot_df = pd.DataFrame()
 
                 # Collect normalization stats (before/after counts from PR/PG)
-                ps.stats["step2_quantification"] = {
-                    "normalization": {
-                        "pr_precursors_before": len(pr_df),
-                        "pg_proteins_before": len(pg_df),
-                    },
+                norm_stats = {
+                    "pr_precursors_before": len(pr_df),
+                    "pg_proteins_before": len(pg_df),
+                    "method": "median",
+                    "batch_variation_corrected": True,
                 }
+                norm_factors_path = order_output / "normalization_factors.tsv"
+                if norm_factors_path.exists():
+                    try:
+                        nf_df = pd.read_csv(norm_factors_path, sep="\t")
+                        if "Sample" in nf_df.columns:
+                            norm_stats["samples_corrected"] = int(nf_df["Sample"].nunique())
+                        if "Normalization_Factor" in nf_df.columns:
+                            factors = nf_df["Normalization_Factor"].dropna()
+                            if len(factors) > 0:
+                                norm_stats["factor_range"] = [round(float(factors.min()), 3), round(float(factors.max()), 3)]
+                    except Exception:
+                        pass
+                ps.stats["step2_quantification"] = {"normalization": norm_stats}
 
                 # PTM filtering stats
                 ptm_mask = ptm_vec_df.get("Has_PTM", pd.Series(dtype=bool)).astype(str).str.lower().isin(["true", "1", "yes"])
                 ptm_count = int(ptm_mask.sum()) if ptm_mask.any() else len(ptm_vec_df)
+                # Unique sites: PTM_Site column or derive from Protein.Group + PTM_Position
+                if "PTM_Site" in ptm_vec_df.columns:
+                    n_sites = int(ptm_vec_df["PTM_Site"].nunique())
+                elif "Protein.Group" in ptm_vec_df.columns and "PTM_Position" in ptm_vec_df.columns:
+                    n_sites = int(ptm_vec_df.groupby(["Protein.Group", "PTM_Position"]).ngroups)
+                else:
+                    n_sites = ptm_count
                 ps.stats["step2_quantification"]["ptm_filtering"] = {
                     "total_precursors": len(pr_df),
                     "ptm_precursors": ptm_count,
                     "ptm_proteins": int(ptm_vec_df["Protein.Group"].nunique()) if "Protein.Group" in ptm_vec_df.columns else 0,
-                    "ptm_sites": int(ptm_vec_df["PTM_Site"].nunique()) if "PTM_Site" in ptm_vec_df.columns else 0,
+                    "ptm_sites": n_sites,
                     "ptm_ratio": round(ptm_count / max(len(pr_df), 1) * 100, 1),
                 }
 
@@ -259,7 +279,7 @@ def run_preprocessing(self, order_id: int, config: dict):
                 ps.stats["step2_quantification"]["relative_quant"] = {
                     "total_entries": len(ptm_vec_df),
                     "unique_proteins": int(ptm_vec_df["Protein.Group"].nunique()) if "Protein.Group" in ptm_vec_df.columns else 0,
-                    "unique_sites": int(ptm_vec_df["PTM_Site"].nunique()) if "PTM_Site" in ptm_vec_df.columns else 0,
+                    "unique_sites": n_sites,
                 }
 
                 # Comparison stats per condition

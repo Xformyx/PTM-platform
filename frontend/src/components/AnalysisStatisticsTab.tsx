@@ -23,7 +23,16 @@ interface PipelineStats {
   metadata?: { ptm_mode?: string; ptm_mode_name?: string; timestamp?: string };
   step1_input?: Record<string, any>;
   step2_quantification?: Record<string, any>;
+  step3_enrichment?: Record<string, any>;
+  step4_biological?: Record<string, any>;
   final_output?: Record<string, any>;
+}
+
+interface PtmFiltering {
+  ptm_sites?: number;
+  phospho_sites?: number;
+  ubi_sites?: number;
+  ptm_proteins?: number;
 }
 
 /* ------------------------------------------------------------------ */
@@ -66,6 +75,22 @@ function PipelineFlowCard({ stats }: { stats: PipelineStats }) {
   const s1 = stats.step1_input ?? {};
   const s2 = stats.step2_quantification ?? {};
   const sf = stats.final_output ?? {};
+  const filt = (s2.ptm_filtering ?? {}) as PtmFiltering;
+
+  const quantLines: string[] = [];
+  if (filt.phospho_sites != null && filt.phospho_sites > 0) {
+    quantLines.push(`${fmt(filt.phospho_sites)} Phosphorylation sites`);
+  }
+  if (filt.ubi_sites != null && filt.ubi_sites > 0) {
+    quantLines.push(`${fmt(filt.ubi_sites)} Ubiquitylation sites`);
+  }
+  if (quantLines.length === 0 && filt.ptm_sites != null) {
+    const siteLabel = stats.metadata?.ptm_mode_name ? `${stats.metadata.ptm_mode_name} sites` : "PTM sites";
+    quantLines.push(`${fmt(filt.ptm_sites)} ${siteLabel}`);
+  }
+  if (filt.ptm_proteins != null) {
+    quantLines.push(`${fmt(filt.ptm_proteins)} proteins`);
+  }
 
   const steps = [
     {
@@ -78,10 +103,7 @@ function PipelineFlowCard({ stats }: { stats: PipelineStats }) {
     },
     {
       title: "Quantification",
-      lines: [
-        `${fmt(s2.ptm_filtering?.ptm_sites)} PTM sites`,
-        `${fmt(s2.ptm_filtering?.ptm_proteins)} proteins`,
-      ],
+      lines: quantLines.length > 0 ? quantLines : ["—"],
       done: !!s2.ptm_filtering,
     },
     {
@@ -194,7 +216,7 @@ function InputDataCard({ s1 }: { s1: Record<string, any> }) {
 
 const BAR_COLORS = { up: "#ef4444", down: "#3b82f6", unchanged: "#9ca3af" };
 
-function QuantificationCard({ s2 }: { s2: Record<string, any> }) {
+function QuantificationCard({ s2, ptmModeName }: { s2: Record<string, any>; ptmModeName?: string }) {
   const norm = s2.normalization ?? {};
   const filt = s2.ptm_filtering ?? {};
   const rq = s2.relative_quant ?? {};
@@ -236,24 +258,54 @@ function QuantificationCard({ s2 }: { s2: Record<string, any> }) {
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-6">
+        {/* Normalization & Batch Correction Description */}
+        <div className="rounded-lg border bg-muted/30 px-4 py-3 text-xs text-muted-foreground space-y-1.5">
+          <p className="font-medium text-foreground">Normalization & Batch Variation Correction</p>
+          <p>
+            <strong>Median normalization</strong>: Sample-wise scaling to align intensity distributions. Each sample&apos;s median is scaled to the global median to correct for technical variation.
+          </p>
+          <p>
+            <strong>Batch variation correction</strong>: The same median normalization step corrects for sample-to-sample (batch) variation, ensuring comparable intensity levels across conditions before PTM quantification.
+          </p>
+        </div>
+
         {/* Row 1: Normalization + PTM Filtering + Relative Quant */}
         <div className="grid md:grid-cols-3 gap-6">
           <div className="space-y-3">
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Normalization</p>
             <StatValue label="PR Precursors" value={norm.pr_precursors_before} />
             <StatValue label="PG Proteins" value={norm.pg_proteins_before} />
+            {norm.samples_corrected != null && (
+              <StatValue label="Samples Corrected" value={norm.samples_corrected} sub={norm.method === "median" ? "Median method" : undefined} />
+            )}
+            {Array.isArray(norm.factor_range) && norm.factor_range.length === 2 && (
+              <p className="text-[10px] text-muted-foreground">
+                Factor range: {norm.factor_range[0]} – {norm.factor_range[1]}
+              </p>
+            )}
           </div>
           <div className="space-y-3">
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">PTM Filtering</p>
             <StatValue label="PTM Precursors" value={filt.ptm_precursors} sub={`${filt.ptm_ratio ?? 0}% of total`} />
             <StatValue label="PTM Proteins" value={filt.ptm_proteins} />
-            <StatValue label="PTM Sites" value={filt.ptm_sites} />
+            {(filt.phospho_sites != null || filt.ubi_sites != null) ? (
+              <>
+                {filt.phospho_sites != null && filt.phospho_sites > 0 && (
+                  <StatValue label="Phosphorylation Sites" value={filt.phospho_sites} />
+                )}
+                {filt.ubi_sites != null && filt.ubi_sites > 0 && (
+                  <StatValue label="Ubiquitylation Sites" value={filt.ubi_sites} />
+                )}
+              </>
+            ) : (
+              <StatValue label={ptmModeName ? `${ptmModeName} Sites` : "PTM Sites"} value={filt.ptm_sites} />
+            )}
           </div>
           <div className="space-y-3">
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Relative Quantification</p>
             <StatValue label="Total Entries" value={rq.total_entries} />
             <StatValue label="Unique Proteins" value={rq.unique_proteins} />
-            <StatValue label="Unique Sites" value={rq.unique_sites} />
+            <StatValue label={ptmModeName ? `${ptmModeName} Sites` : "Unique Sites"} value={rq.unique_sites} />
           </div>
         </div>
 
@@ -460,7 +512,7 @@ export function AnalysisStatisticsTab({ orderId }: { orderId: number }) {
       {Object.keys(s1).length > 0 && <InputDataCard s1={s1} />}
 
       {/* Step 2: Quantification */}
-      {Object.keys(s2).length > 0 && <QuantificationCard s2={s2} />}
+      {Object.keys(s2).length > 0 && <QuantificationCard s2={s2} ptmModeName={stats.metadata?.ptm_mode_name} />}
 
       {/* Final Output */}
       {Object.keys(sf).length > 0 && <FinalOutputCard sf={sf} />}
