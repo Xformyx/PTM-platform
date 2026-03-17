@@ -54,6 +54,7 @@ EDGE_COLORS = {
     "Shared Pathway": "#228B22",    # Same as KEGG
     "Shared-Partner": "#8B008B",    # Purple — Shared interactor (Phase 2)
     "Kinase-Substrate": "#FF4500",  # Same as KEA3
+    "BioGRID": "#1E90FF",              # Dodger Blue — BioGRID experimental PPI (v101)
     "Kinase-Substrate-Predicted": "#D8BFD8",  # Light purple
     "Literature": "#E377C2",        # Pink
     "Co-activation": "#7F7F7F",     # Gray
@@ -354,14 +355,24 @@ def _analyze_timepoint(
         source_id = f"{gene}-{pos}"
 
         # --- STRING-DB interactions (PHASE 1-A: PTM→Non-PTM edges added) ---
-        string_interactions = enr.get("string_interactions", [])
-        for interaction in string_interactions[:8]:  # Increased from 5 to 8
+        # v101: Prefer string_db.interactions (dict with score), fallback to string_interactions
+        string_interactions = enr.get("string_db", {}).get("interactions", []) or enr.get("string_interactions", [])
+        for interaction in string_interactions:  # v101: no limit — use all available
             if isinstance(interaction, dict):
                 partner = interaction.get("partner", "")
                 confidence = interaction.get("score", 0.7)
             elif isinstance(interaction, str):
-                partner = interaction.split("(")[0].strip() if "(" in interaction else interaction
-                confidence = 0.7
+                # Legacy string format: "MAPK1(0.95)" — parse score
+                if "(" in interaction:
+                    parts = interaction.rsplit("(", 1)
+                    partner = parts[0].strip()
+                    try:
+                        confidence = float(parts[1].rstrip(")"))
+                    except (ValueError, IndexError):
+                        confidence = 0.7
+                else:
+                    partner = interaction.strip()
+                    confidence = 0.7
             else:
                 continue
 
@@ -410,6 +421,70 @@ def _analyze_timepoint(
                         "identified": True,
                         "label": partner_clean,
                         "source": "STRING",
+                    }
+
+        # --- BioGRID interactions (v101: NEW — experimental PPI evidence) ---
+        biogrid_data = enr.get("biogrid", {})
+        biogrid_interactions = biogrid_data.get("interactions", []) if isinstance(biogrid_data, dict) else []
+        for bg_int in biogrid_interactions:
+            if not isinstance(bg_int, dict):
+                continue
+            # Determine the interaction partner (the other gene)
+            int_a = bg_int.get("interactor_a", "").strip()
+            int_b = bg_int.get("interactor_b", "").strip()
+            if int_a.upper() == gene.upper():
+                partner_clean = int_b
+            elif int_b.upper() == gene.upper():
+                partner_clean = int_a
+            else:
+                continue
+            partner_upper = partner_clean.upper()
+            if not partner_clean or partner_upper == gene.upper():
+                continue
+
+            # BioGRID confidence: experimental > high-throughput
+            throughput = bg_int.get("throughput", "")
+            confidence = 0.85 if "Low" in throughput else 0.65
+
+            if partner_clean in gene_ptms:
+                # BioGRID PTM-to-PTM edge
+                for target_id in gene_ptms[partner_clean]:
+                    edge = {
+                        "source": source_id,
+                        "target": target_id,
+                        "evidence_type": "BioGRID",
+                        "confidence": confidence,
+                        "pathways": [],
+                        "pathway_str": "",
+                    }
+                    all_edges.append(edge)
+                    if source_id in active_node_ids and target_id in active_node_ids:
+                        edge_copy = dict(edge)
+                        edge_copy["is_active_edge"] = True
+                        active_edges.append(edge_copy)
+            elif partner_upper not in ptm_genes:
+                # BioGRID PTM → Non-PTM edge
+                edge = {
+                    "source": source_id,
+                    "target": partner_clean,
+                    "evidence_type": "BioGRID",
+                    "confidence": confidence,
+                    "pathways": [],
+                    "pathway_str": "",
+                }
+                all_edges.append(edge)
+                if partner_upper not in seen_non_ptm_upper:
+                    seen_non_ptm_upper.add(partner_upper)
+                    candidate_non_ptm[partner_clean] = {
+                        "id": partner_clean,
+                        "gene": partner_clean,
+                        "site": "",
+                        "type": "Non-PTM",
+                        "value": 0,
+                        "state": "non_ptm",
+                        "identified": True,
+                        "label": partner_clean,
+                        "source": "BioGRID",
                     }
 
         # --- Shared pathway edges (KEGG) ---
@@ -593,14 +668,24 @@ def _build_network_data(parsed_ptms: list, enriched_data: list) -> dict:
         source_id = f"{gene}-{ptm_data.get('position') or ptm_data.get('PTM_Position', '')}"
 
         # --- STRING-DB (PHASE 1-A: PTM→Non-PTM edges) ---
-        string_interactions = enr.get("string_interactions", [])
-        for interaction in string_interactions[:8]:
+        # v101: Prefer string_db.interactions (dict with score), fallback to string_interactions
+        string_interactions = enr.get("string_db", {}).get("interactions", []) or enr.get("string_interactions", [])
+        for interaction in string_interactions:  # v101: no limit — use all available
             if isinstance(interaction, dict):
                 partner = interaction.get("partner", "")
                 confidence = interaction.get("score", 0.7)
             elif isinstance(interaction, str):
-                partner = interaction.split("(")[0].strip() if "(" in interaction else interaction
-                confidence = 0.7
+                # Legacy string format: "MAPK1(0.95)" — parse score
+                if "(" in interaction:
+                    parts = interaction.rsplit("(", 1)
+                    partner = parts[0].strip()
+                    try:
+                        confidence = float(parts[1].rstrip(")"))
+                    except (ValueError, IndexError):
+                        confidence = 0.7
+                else:
+                    partner = interaction.strip()
+                    confidence = 0.7
             else:
                 continue
 
@@ -641,6 +726,57 @@ def _build_network_data(parsed_ptms: list, enriched_data: list) -> dict:
                         "state": "non_ptm",
                         "label": partner_clean,
                         "source": "STRING",
+                    }
+
+        # --- BioGRID interactions (v101: NEW — experimental PPI evidence) ---
+        biogrid_data = enr.get("biogrid", {})
+        biogrid_interactions = biogrid_data.get("interactions", []) if isinstance(biogrid_data, dict) else []
+        for bg_int in biogrid_interactions:
+            if not isinstance(bg_int, dict):
+                continue
+            int_a = bg_int.get("interactor_a", "").strip()
+            int_b = bg_int.get("interactor_b", "").strip()
+            if int_a.upper() == gene.upper():
+                partner_clean = int_b
+            elif int_b.upper() == gene.upper():
+                partner_clean = int_a
+            else:
+                continue
+            partner_upper = partner_clean.upper()
+            if not partner_clean or partner_upper == gene.upper():
+                continue
+            throughput = bg_int.get("throughput", "")
+            confidence = 0.85 if "Low" in throughput else 0.65
+            if partner_clean in gene_ptms:
+                for target_id in gene_ptms[partner_clean]:
+                    edges.append({
+                        "source": source_id,
+                        "target": target_id,
+                        "evidence_type": "BioGRID",
+                        "confidence": confidence,
+                        "pathways": [],
+                        "pathway_str": "",
+                    })
+            elif partner_upper not in ptm_genes:
+                edges.append({
+                    "source": source_id,
+                    "target": partner_clean,
+                    "evidence_type": "BioGRID",
+                    "confidence": confidence,
+                    "pathways": [],
+                    "pathway_str": "",
+                })
+                if partner_upper not in seen_non_ptm_upper:
+                    seen_non_ptm_upper.add(partner_upper)
+                    candidate_non_ptm[partner_clean] = {
+                        "id": partner_clean,
+                        "gene": partner_clean,
+                        "site": "",
+                        "type": "Non-PTM",
+                        "value": 0,
+                        "state": "non_ptm",
+                        "label": partner_clean,
+                        "source": "BioGRID",
                     }
 
         # --- Shared pathway edges (KEGG) ---
@@ -891,7 +1027,7 @@ def _generate_legends(
         evidence_types[e.get("evidence_type", "Unknown")] += 1
     for et, cnt in sorted(evidence_types.items(), key=lambda x: -x[1]):
         color = EDGE_COLORS.get(et, EDGE_COLORS["default"])
-        style = "solid" if et in ("STRING", "STRING-DB", "KEA3", "Kinase-Substrate") else "dashed"
+        style = "solid" if et in ("STRING", "STRING-DB", "KEA3", "Kinase-Substrate", "BioGRID") else "dashed"
         arrow = " (directed →)" if et in ("KEA3", "Kinase-Substrate") else ""
         legend_lines.append(f"- {et} ({color}, {style}{arrow}): {cnt} connections")
     legend_lines.append("")
@@ -1475,11 +1611,13 @@ def _apply_visual_style(p4c, network_suid: int, network_name: str, nodes: list):
                 table_column="evidence_type",
                 table_column_values=[
                     "STRING", "STRING-DB", "KEA3", "Kinase-Substrate",
+                    "BioGRID",
                     "KEGG", "Shared Pathway", "Shared-Partner",
                     "Kinase-Substrate-Predicted",
                 ],
                 line_styles=[
                     "SOLID", "SOLID", "SOLID", "SOLID",
+                    "SOLID",
                     "LONG_DASH", "LONG_DASH", "LONG_DASH",
                     "DOT",
                 ],

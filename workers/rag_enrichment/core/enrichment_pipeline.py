@@ -330,7 +330,7 @@ class RAGEnrichmentPipeline:
         # 18. Build enrichment result
         interaction_partners = [
             {"partner": i.get("partner", ""), "score": i.get("score", 0), "evidence": i.get("evidence", [])}
-            for i in interactions[:10]
+            for i in interactions  # No limit — store all available interactions
         ]
 
         enrichment = {
@@ -364,9 +364,7 @@ class RAGEnrichmentPipeline:
             "string_db": {
                 "interactions": interaction_partners,
             },
-            "string_interactions": [
-                f"{i.get('partner', '')}({i.get('score', 0)})" for i in interactions[:5]
-            ],
+            "string_interactions": interaction_partners,  # v101: dict format (same as string_db.interactions), no limit
             "diseases": regulation["diseases"],
             "localization": uniprot_info.get("subcellular_location", []),
             "function_summary": uniprot_info.get("function_summary", ""),
