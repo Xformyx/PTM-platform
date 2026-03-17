@@ -16,7 +16,6 @@ NCBI_EMAIL = os.getenv("NCBI_EMAIL", "")
 async def query_stringdb(
     gene_name: str,
     species: str = "10090",
-    limit: int = 10,
     redis=None,
     timeout: float = 15.0,
 ) -> dict:
@@ -28,7 +27,7 @@ async def query_stringdb(
             import json
             return json.loads(cached)
 
-    result = await _fetch_string_info(gene_name, species, limit, timeout)
+    result = await _fetch_string_info(gene_name, species, timeout)
 
     if redis:
         import json
@@ -38,7 +37,7 @@ async def query_stringdb(
 
 
 async def _fetch_string_info(
-    gene_name: str, species: str, limit: int, timeout: float
+    gene_name: str, species: str, timeout: float
 ) -> dict:
     empty = {
         "gene_name": gene_name,
@@ -51,7 +50,6 @@ async def _fetch_string_info(
     params = {
         "identifiers": gene_name,
         "species": species,
-        "limit": limit,
     }
     caller = STRINGDB_API_KEY or NCBI_EMAIL or "PTM-Platform"
     if caller:
@@ -72,7 +70,7 @@ async def _fetch_string_info(
 
             interactions = []
             total_score = 0.0
-            for item in data[:10]:
+            for item in data:
                 partner = item.get("preferredName_B", item.get("stringId_B", ""))
                 score = item.get("score", 0)
                 interactions.append({"partner": partner, "score": round(score, 3)})

@@ -520,7 +520,7 @@ def _analyze_timepoint(
         # --- Kinase-substrate edges (PHASE 1-B: Non-PTM kinase nodes) ---
         reg = enr.get("regulation", {})
         upstream = reg.get("upstream_regulators", [])
-        for kinase in upstream[:5]:  # Increased from 3 to 5
+        for kinase in upstream:  # No limit — use all available upstream regulators
             kinase_name = kinase if isinstance(kinase, str) else str(kinase)
             kinase_clean = kinase_name.strip()
             kinase_upper = kinase_clean.upper()
@@ -805,7 +805,7 @@ def _build_network_data(parsed_ptms: list, enriched_data: list) -> dict:
         # --- Kinase-substrate edges (PHASE 1-B: Non-PTM kinase nodes) ---
         reg = enr.get("regulation", {})
         upstream = reg.get("upstream_regulators", [])
-        for kinase in upstream[:5]:
+        for kinase in upstream:  # No limit — use all available upstream regulators
             kinase_name = kinase if isinstance(kinase, str) else str(kinase)
             kinase_clean = kinase_name.strip()
             kinase_upper = kinase_clean.upper()

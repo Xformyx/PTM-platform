@@ -124,8 +124,7 @@ async def _fetch_uniprot_info(protein_id: str, timeout: float) -> dict:
             elif category == "C:":
                 result["go_terms_cc"].append(entry)
 
-    for key in ("go_terms_bp", "go_terms_mf", "go_terms_cc"):
-        result[key] = result[key][:5]
+    # No limit on GO terms — return all available for comprehensive analysis
 
     return result
 
