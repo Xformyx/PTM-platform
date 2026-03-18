@@ -19,13 +19,14 @@ async def list_articles(
     cursor: int = Query(0, ge=0),
     count: int = Query(50, ge=1, le=200),
     search: str = Query(""),
+    sort_by: str = Query("cached_at"),
 ):
     """List cached PubMed articles with optional search."""
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.get(
                 f"{MCP_URL}/cache/articles",
-                params={"cursor": cursor, "count": count, "search": search},
+                params={"cursor": cursor, "count": count, "search": search, "sort_by": sort_by},
             )
             resp.raise_for_status()
             return resp.json()

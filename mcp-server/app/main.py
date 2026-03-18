@@ -345,10 +345,12 @@ async def cache_list_articles(
     cursor: int = Query(0, ge=0),
     count: int = Query(50, ge=1, le=200),
     search: str = Query(""),
+    sort_by: str = Query("cached_at", description="Sort by: cached_at or year"),
 ):
     """List cached PubMed articles with optional text search."""
     return await list_cached_articles(
         app.state.redis, cursor=cursor, count=count, search=search,
+        sort_by=sort_by,
     )
 
 

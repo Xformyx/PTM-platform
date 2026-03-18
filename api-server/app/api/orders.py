@@ -1452,3 +1452,96 @@ async def get_order_statistics(
     if stats:
         return {"statistics": stats, "available": True}
     return {"statistics": None, "available": False}
+
+
+
+# ---------------------------------------------------------------------------
+# Order Articles — articles used during analysis
+# ---------------------------------------------------------------------------
+
+@router.get("/{order_code}/articles")
+async def get_order_articles(
+    order_code: str,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Get all PubMed articles used during a specific order's analysis.
+    Extracts article data from the enriched_ptm_data JSON file.
+    """
+    import json as _json
+    from app.config import get_settings as _get_settings
+
+    _settings = _get_settings()
+
+    result = await db.execute(select(Order).where(Order.order_code == order_code))
+    order = result.scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    output_dir = Path(_settings.OUTPUT_DIR) / order.order_code
+
+    # Determine file suffix based on ptm_type
+    file_suffix = "_phospho" if order.ptm_type == "phosphorylation" else "_ubi"
+
+    # For cross-talk orders, collect articles from both modes
+    suffixes_to_check = [file_suffix]
+    analysis_mode = (order.analysis_options or {}).get("analysis_mode", "")
+    if analysis_mode == "cross_talk":
+        suffixes_to_check = ["_phospho", "_ubi"]
+
+    seen_pmids = set()
+    articles = []
+
+    for suffix in suffixes_to_check:
+        enriched_path = output_dir / f"enriched_ptm_data{suffix}.json"
+        if not enriched_path.exists():
+            continue
+
+        try:
+            with open(enriched_path, "r", encoding="utf-8") as f:
+                enriched_ptms = _json.load(f)
+        except Exception:
+            continue
+
+        for ptm in enriched_ptms:
+            gene = ptm.get("Gene.Name") or ptm.get("gene", "Unknown")
+            position = ptm.get("PTM_Position") or ptm.get("position", "")
+            ptm_type_label = ptm.get("PTM_Type") or ptm.get("ptm_type", "")
+
+            # Extract articles from enrichment data
+            enrichment = ptm.get("enrichment", {})
+            ptm_articles = enrichment.get("articles", [])
+
+            # Also check recent_findings as fallback
+            if not ptm_articles:
+                ptm_articles = enrichment.get("recent_findings", [])
+
+            for article in ptm_articles:
+                pmid = str(article.get("pmid", ""))
+                if not pmid or pmid in seen_pmids:
+                    continue
+                seen_pmids.add(pmid)
+                articles.append({
+                    "pmid": pmid,
+                    "title": article.get("title", ""),
+                    "journal": article.get("journal", ""),
+                    "year": article.get("year") or article.get("pub_date", ""),
+                    "authors": article.get("authors", []),
+                    "doi": article.get("doi", ""),
+                    "relevance_score": article.get("relevance_score"),
+                    "abstract": (article.get("abstract") or "")[:500],
+                    # Traceability: which gene/PTM search found this article
+                    "search_gene": article.get("search_gene") or gene,
+                    "search_position": article.get("search_position") or position,
+                    "search_ptm_type": article.get("search_ptm_type") or ptm_type_label,
+                })
+
+    # Sort by relevance score descending
+    articles.sort(key=lambda a: a.get("relevance_score") or 0, reverse=True)
+
+    return {
+        "order_code": order_code,
+        "project_name": order.project_name,
+        "total_articles": len(articles),
+        "articles": articles,
+    }

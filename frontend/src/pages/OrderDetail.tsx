@@ -30,6 +30,7 @@ import CrossTalkVennDiagram from "@/components/CrossTalkVennDiagram";
 import CrossTalkHeatmap from "@/components/CrossTalkHeatmap";
 import CrossTalkSequentialGating from "@/components/CrossTalkSequentialGating";
 import SignalPropagationTimeline from "@/components/SignalPropagationTimeline";
+import { OrderArticlesTab } from "@/components/OrderArticlesTab";
 import {
   LineChart,
   Line,
@@ -2142,6 +2143,10 @@ export default function OrderDetail() {
             </TabsTrigger>
           )}
           <TabsTrigger value="results">Results</TabsTrigger>
+          <TabsTrigger value="articles">
+            <BookOpen className="h-3.5 w-3.5 mr-1.5" />
+            Articles
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="space-y-4 mt-4">
@@ -2495,6 +2500,11 @@ export default function OrderDetail() {
             </div>
           </TabsContent>
         )}
+
+        {/* Articles Tab */}
+        <TabsContent value="articles" className="mt-4">
+          <OrderArticlesTab orderCode={order.order_code} orderStatus={order.status} />
+        </TabsContent>
       </Tabs>
 
       <RerunOptionsModal

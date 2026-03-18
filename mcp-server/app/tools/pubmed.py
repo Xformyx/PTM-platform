@@ -58,10 +58,28 @@ async def search_ptm_pubmed(
 
     result = await _multi_tier_search(gene, position, ptm_type, context_keywords or [], max_results)
 
+    # Stamp each article with search metadata for traceability
+    from datetime import datetime, timezone
+    now_iso = datetime.now(timezone.utc).isoformat()
+    for article in result.get("articles", []):
+        article.setdefault("search_gene", gene)
+        article.setdefault("search_position", position)
+        article.setdefault("search_ptm_type", ptm_type)
+        article.setdefault("cached_at", now_iso)
+
     if redis and result.get("articles"):
         import json
         # Permanent cache — articles don't change once published
         await redis.set(cache_key, json.dumps(result))
+        # Also cache each article individually with metadata
+        for article in result["articles"]:
+            pmid = article.get("pmid")
+            if pmid:
+                article_key = f"pubmed:article:{pmid}"
+                # Only set if not already cached (preserve original cached_at)
+                existing = await redis.get(article_key)
+                if not existing:
+                    await redis.set(article_key, json.dumps(article))
         logger.info(f"PubMed search cached permanently: {cache_key} ({result.get('total_found', 0)} articles)")
 
     return result
@@ -94,6 +112,11 @@ async def fetch_articles_by_pmids(pmids: list[str], redis=None) -> dict:
     new_articles = []
     if uncached_pmids:
         new_articles = await _fetch_article_details(uncached_pmids)
+        # Stamp with cached_at timestamp
+        from datetime import datetime, timezone
+        now_iso = datetime.now(timezone.utc).isoformat()
+        for article in new_articles:
+            article.setdefault("cached_at", now_iso)
         # Cache each article individually and permanently
         if redis and new_articles:
             import json
@@ -502,7 +525,8 @@ async def _fetch_gene_aliases(gene: str) -> list[str]:
 # ---------------------------------------------------------------------------
 
 async def list_cached_articles(
-    redis, cursor: int = 0, count: int = 50, search: str = ""
+    redis, cursor: int = 0, count: int = 50, search: str = "",
+    sort_by: str = "cached_at"
 ) -> dict:
     """List cached articles from Redis with optional text search."""
     import json as _json
@@ -527,8 +551,11 @@ async def list_cached_articles(
             except _json.JSONDecodeError:
                 continue
 
-    # Sort by year descending (newest first)
-    articles.sort(key=lambda a: a.get("year", 0) or 0, reverse=True)
+    # Sort articles
+    if sort_by == "cached_at":
+        articles.sort(key=lambda a: a.get("cached_at", "") or "", reverse=True)
+    else:
+        articles.sort(key=lambda a: a.get("year", 0) or 0, reverse=True)
 
     # Apply text search filter
     if search:
