@@ -2,6 +2,13 @@
 Network Node — temporal PTM signaling network analysis + Cytoscape visualization.
 Ported from multi_agent_system/agents/network_analyzer.py and ptm_network_automation.py.
 
+v5.0 — Color mapping fix + Kinase expansion:
+  - Non-PTM nodes: Green/Purple/Gray gradient based on actual Protein_Log2FC (was hardcoded 0)
+  - PTM nodes: Red (up) / Blue (down) gradient with intensity
+  - Kinase nodes: Amber gradient, expanded sources (KEA3 + kinase_prediction + kinase_substrate)
+  - gene_protein_fc lookup dictionary built from enriched_data + parsed_ptms
+  - Updated legends to reflect full color gradient detail
+
 v3.0 — Cytoscape visualization fix (5 phases):
   Phase 1: Edge generation rebuilt — PTM→Non-PTM edges, Kinase edges, Non-PTM limit removed
   Phase 2: Visual style — edge type styles, node size 40-120px, label outside, arrow heads
@@ -39,15 +46,15 @@ CYTOSCAPE_PORT = int(os.getenv("CYTOSCAPE_PORT", "1234"))
 # ---------------------------------------------------------------------------
 
 NODE_COLORS = {
-    # --- PTM protein states (red gradient) ---
-    "ptm_high_up": "#B71C1C",       # Dark Red — PTM Log2FC > 2.0
-    "ptm_up": "#E53935",            # Red — PTM 1.0 < Log2FC <= 2.0
-    "ptm_moderate_up": "#EF9A9A",   # Light Red — PTM 0 < Log2FC <= 1.0
-    "ptm_neutral": "#BDBDBD",       # Gray — PTM Log2FC ≈ 0
-    "ptm_moderate_down": "#EF9A9A", # Light Red — PTM -1.0 <= Log2FC < 0
-    "ptm_down": "#E53935",          # Red — PTM -2.0 <= Log2FC < -1.0
-    "ptm_high_down": "#B71C1C",     # Dark Red — PTM Log2FC < -2.0
-    # --- Non-PTM protein states (green/purple/gray) ---
+    # --- PTM protein states: UP = Red gradient, DOWN = Blue gradient ---
+    "high_active": "#B71C1C",       # Dark Red — PTM Log2FC > 2.0 (strong increase)
+    "moderate_active": "#E53935",   # Red — PTM 1.0 < Log2FC <= 2.0
+    "low_active": "#EF9A9A",        # Light Red — PTM 0 < Log2FC <= 1.0
+    "neutral": "#BDBDBD",           # Gray — PTM Log2FC ≈ 0
+    "low_inhibited": "#90CAF9",     # Light Blue — PTM -1.0 <= Log2FC < 0
+    "inhibited": "#1E88E5",         # Blue — PTM -2.0 <= Log2FC < -1.0
+    "high_inhibited": "#0D47A1",    # Dark Blue — PTM Log2FC < -2.0
+    # --- Non-PTM protein states: UP = Green gradient, DOWN = Purple gradient ---
     "nonptm_up_strong": "#1B5E20",  # Dark Green — Non-PTM Log2FC > 1.5
     "nonptm_up": "#43A047",         # Green — Non-PTM 0.5 < Log2FC <= 1.5
     "nonptm_up_weak": "#A5D6A7",    # Light Green — Non-PTM 0 < Log2FC <= 0.5
@@ -61,14 +68,7 @@ NODE_COLORS = {
     "kinase_down": "#FFB74D",       # Light Orange — Kinase with decreased activity
     # --- Legacy / fallback ---
     "non_ptm": "#9E9E9E",           # Gray — fallback for Non-PTM without FC data
-    "neutral": "#BDBDBD",           # Gray — neutral
     "missing": "#E0E0E0",           # Light Gray — missing data
-    # Legacy aliases for backward compatibility
-    "high_active": "#B71C1C",
-    "moderate_active": "#E53935",
-    "low_active": "#EF9A9A",
-    "inhibited": "#B71C1C",
-    "low_inhibited": "#E53935",
 }
 
 EDGE_COLORS = {
@@ -108,12 +108,14 @@ NODE_SHAPES = {
 def _classify_state(value: float, node_type: str = "PTM") -> str:
     """Classify node state based on Log2FC value and node type.
     
-    v4.0: Separate color schemes for PTM, Non-PTM, and Kinase nodes.
-    - PTM: Red gradient (intensity = |Log2FC|)
-    - Non-PTM: Green (up) / Purple (down) / Gray (unchanged)
+    v5.0: Separate color schemes for PTM, Non-PTM, and Kinase nodes.
+    - PTM: Red gradient (up) / Blue gradient (down) — intensity = |Log2FC|
+    - Non-PTM: Green gradient (up) / Purple gradient (down) / Gray (unchanged)
     - Kinase: Amber gradient
     """
-    if value is None:
+    try:
+        value = float(value) if value is not None else 0.0
+    except (TypeError, ValueError):
         return "missing"
     
     if node_type == "Kinase":
@@ -138,17 +140,20 @@ def _classify_state(value: float, node_type: str = "PTM") -> str:
             return "nonptm_down_weak"
         return "nonptm_neutral"
     
-    # PTM protein (red gradient) — state names kept backward-compatible
-    # with legacy names used in legends, stats, and report sections
-    if value > 1.0:
+    # PTM protein — UP = Red gradient, DOWN = Blue gradient
+    if value > 2.0:
         return "high_active"       # Dark Red — strong upregulation
+    elif value > 1.0:
+        return "moderate_active"   # Red — moderate upregulation
     elif value > 0.0:
-        return "moderate_active"   # Medium Red — moderate upregulation
+        return "low_active"        # Light Red — weak upregulation
+    elif value < -2.0:
+        return "high_inhibited"    # Dark Blue — strong downregulation
     elif value < -1.0:
-        return "inhibited"         # Dark Red (down) — strong downregulation
+        return "inhibited"         # Blue — moderate downregulation
     elif value < 0.0:
-        return "low_inhibited"     # Medium Red (down) — moderate downregulation
-    return "neutral"               # Light Gray — no change
+        return "low_inhibited"     # Light Blue — weak downregulation
+    return "neutral"               # Gray — no change
 
 
 def _classify_state_legacy(value: float) -> str:
@@ -368,6 +373,34 @@ def _analyze_timepoint(
             },
         }
 
+    # v5.0: Build gene -> Protein_Log2FC lookup from ALL parsed_ptms for this timepoint
+    # This allows Non-PTM nodes (STRING/BioGRID partners) to inherit protein-level FC
+    # when the partner gene happens to also be in the dataset (even if not a PTM site)
+    gene_protein_fc = {}  # gene_upper -> float (Protein_Log2FC)
+    for ptm in tp_ptms:
+        g = (ptm.get("gene") or "").strip().upper()
+        pfc = ptm.get("protein_log2fc") or ptm.get("Protein_Log2FC", 0)
+        try:
+            pfc = float(pfc) if pfc is not None else 0.0
+        except (TypeError, ValueError):
+            pfc = 0.0
+        if g and (g not in gene_protein_fc or abs(pfc) > abs(gene_protein_fc[g])):
+            gene_protein_fc[g] = pfc
+
+    # Also build lookup from enriched_data (covers all conditions)
+    for ed in enriched_data:
+        g = (ed.get("gene") or ed.get("Gene.Name", "")).strip().upper()
+        cond = (ed.get("Condition") or ed.get("condition", "")).strip()
+        if cond != timepoint or not g:
+            continue
+        pfc = ed.get("protein_log2fc") or ed.get("Protein_Log2FC", 0)
+        try:
+            pfc = float(pfc) if pfc is not None else 0.0
+        except (TypeError, ValueError):
+            pfc = 0.0
+        if g not in gene_protein_fc or abs(pfc) > abs(gene_protein_fc[g]):
+            gene_protein_fc[g] = pfc
+
     # 1. Collect PTM nodes
     active_ptm_nodes = []
     inhibited_ptm_nodes = []
@@ -484,13 +517,14 @@ def _analyze_timepoint(
                 # Register candidate Non-PTM node
                 if partner_upper not in seen_non_ptm_upper:
                     seen_non_ptm_upper.add(partner_upper)
+                    _pfc = gene_protein_fc.get(partner_upper, 0.0)
                     candidate_non_ptm[partner_clean] = {
                         "id": partner_clean,
                         "gene": partner_clean,
                         "site": "",
                         "type": "Non-PTM",
-                        "value": 0,
-                        "state": _classify_state(0, "Non-PTM"),
+                        "value": round(_pfc, 3),
+                        "state": _classify_state(_pfc, "Non-PTM"),
                         "identified": True,
                         "label": partner_clean,
                         "source": "STRING",
@@ -549,13 +583,14 @@ def _analyze_timepoint(
                 all_edges.append(edge)
                 if partner_upper not in seen_non_ptm_upper:
                     seen_non_ptm_upper.add(partner_upper)
+                    _pfc = gene_protein_fc.get(partner_upper, 0.0)
                     candidate_non_ptm[partner_clean] = {
                         "id": partner_clean,
                         "gene": partner_clean,
                         "site": "",
                         "type": "Non-PTM",
-                        "value": 0,
-                        "state": _classify_state(0, "Non-PTM"),
+                        "value": round(_pfc, 3),
+                        "state": _classify_state(_pfc, "Non-PTM"),
                         "identified": True,
                         "label": partner_clean,
                         "source": "BioGRID",
@@ -631,13 +666,14 @@ def _analyze_timepoint(
                 # Register candidate Non-PTM kinase node (v4.0: type=Kinase, shape=DIAMOND)
                 if kinase_upper not in seen_non_ptm_upper:
                     seen_non_ptm_upper.add(kinase_upper)
+                    _kfc = gene_protein_fc.get(kinase_upper, 0.0)
                     candidate_non_ptm[kinase_clean] = {
                         "id": kinase_clean,
                         "gene": kinase_clean,
                         "site": "",
                         "type": "Kinase",
-                        "value": 0,
-                        "state": _classify_state(0, "Kinase"),
+                        "value": round(_kfc, 3),
+                        "state": _classify_state(_kfc, "Kinase"),
                         "identified": True,
                         "label": kinase_clean,
                         "source": "KEA3",
@@ -646,6 +682,98 @@ def _analyze_timepoint(
                 if kinase_clean not in _kinase_substrates_tp:
                     _kinase_substrates_tp[kinase_clean] = []
                 _kinase_substrates_tp[kinase_clean].append(source_id)
+
+        # --- v5.0: Additional kinase sources: kinase_prediction (LLM) + kinase_substrate (pattern) ---
+        # kinase_substrate from regulation_extractor (pattern-based from articles)
+        kinase_subs = reg.get("kinase_substrate", [])
+        for ks in kinase_subs:
+            ks_kinase = (ks.get("kinase") or "").strip()
+            ks_upper = ks_kinase.upper()
+            if not ks_kinase or ks_upper == gene.upper():
+                continue
+            if ks_kinase not in gene_ptms:
+                edge = {
+                    "source": ks_kinase,
+                    "target": source_id,
+                    "evidence_type": "KEA3",
+                    "confidence": 0.7,
+                    "pathways": [],
+                    "pathway_str": "kinase-substrate (literature)",
+                }
+                all_edges.append(edge)
+                if ks_upper not in seen_non_ptm_upper:
+                    seen_non_ptm_upper.add(ks_upper)
+                    _kfc = gene_protein_fc.get(ks_upper, 0.0)
+                    candidate_non_ptm[ks_kinase] = {
+                        "id": ks_kinase,
+                        "gene": ks_kinase,
+                        "site": "",
+                        "type": "Kinase",
+                        "value": round(_kfc, 3),
+                        "state": _classify_state(_kfc, "Kinase"),
+                        "identified": True,
+                        "label": ks_kinase,
+                        "source": "Literature",
+                    }
+                if ks_kinase not in _kinase_substrates_tp:
+                    _kinase_substrates_tp[ks_kinase] = []
+                _kinase_substrates_tp[ks_kinase].append(source_id)
+
+        # kinase_prediction from LLM (predicted kinases)
+        kp = enr.get("kinase_prediction", {})
+        predicted_kinases = []
+        if hasattr(kp, "predicted_kinases"):
+            predicted_kinases = kp.predicted_kinases
+        elif isinstance(kp, dict):
+            predicted_kinases = kp.get("predicted_kinases", kp.get("predictedKinases", []))
+        for pk in predicted_kinases:
+            pk_name = ""
+            pk_conf = 0.5
+            if hasattr(pk, "kinase_name"):
+                pk_name = pk.kinase_name
+                pk_conf = getattr(pk, "confidence", 0.5)
+            elif isinstance(pk, dict):
+                pk_name = pk.get("kinase_name") or pk.get("kinaseName", "")
+                pk_conf = pk.get("confidence", 0.5)
+            elif isinstance(pk, str):
+                pk_name = pk
+            pk_name = pk_name.strip()
+            pk_upper = pk_name.upper()
+            if not pk_name or pk_upper == gene.upper():
+                continue
+            try:
+                pk_conf = float(pk_conf)
+            except (TypeError, ValueError):
+                pk_conf = 0.5
+            if pk_conf < 0.3:
+                continue  # Skip low-confidence predictions
+            if pk_name not in gene_ptms:
+                edge = {
+                    "source": pk_name,
+                    "target": source_id,
+                    "evidence_type": "KEA3",
+                    "confidence": round(pk_conf, 2),
+                    "pathways": [],
+                    "pathway_str": "LLM-predicted kinase",
+                }
+                all_edges.append(edge)
+                if pk_upper not in seen_non_ptm_upper:
+                    seen_non_ptm_upper.add(pk_upper)
+                    _kfc = gene_protein_fc.get(pk_upper, 0.0)
+                    candidate_non_ptm[pk_name] = {
+                        "id": pk_name,
+                        "gene": pk_name,
+                        "site": "",
+                        "type": "Kinase",
+                        "value": round(_kfc, 3),
+                        "state": _classify_state(_kfc, "Kinase"),
+                        "identified": True,
+                        "label": pk_name,
+                        "source": "LLM-Predicted",
+                    }
+                if pk_name not in _kinase_substrates_tp:
+                    _kinase_substrates_tp[pk_name] = []
+                _kinase_substrates_tp[pk_name].append(source_id)
 
     # v4.0: Add Shared-Regulator edges (PTM proteins sharing the same upstream kinase)
     for kinase_name, substrates in _kinase_substrates_tp.items():
@@ -733,6 +861,28 @@ def _build_network_data(parsed_ptms: list, enriched_data: list) -> dict:
     edges = []
     gene_ptms = defaultdict(list)
     _kinase_substrates = {}  # v4.0: kinase_name -> [substrate_ids]
+
+    # v5.0: Build gene -> Protein_Log2FC lookup
+    gene_protein_fc = {}
+    for ptm in parsed_ptms:
+        g = (ptm.get("gene") or "").strip().upper()
+        pfc = ptm.get("protein_log2fc") or ptm.get("Protein_Log2FC", 0)
+        try:
+            pfc = float(pfc) if pfc is not None else 0.0
+        except (TypeError, ValueError):
+            pfc = 0.0
+        if g and (g not in gene_protein_fc or abs(pfc) > abs(gene_protein_fc[g])):
+            gene_protein_fc[g] = pfc
+    for ed in enriched_data:
+        g = (ed.get("gene") or ed.get("Gene.Name", "")).strip().upper()
+        pfc = ed.get("protein_log2fc") or ed.get("Protein_Log2FC", 0)
+        try:
+            pfc = float(pfc) if pfc is not None else 0.0
+        except (TypeError, ValueError):
+            pfc = 0.0
+        if g and (g not in gene_protein_fc or abs(pfc) > abs(gene_protein_fc[g])):
+            gene_protein_fc[g] = pfc
+
     for ptm in parsed_ptms:
         fc = ptm.get("ptm_relative_log2fc", 0)
         state = _classify_state(fc, "PTM")
@@ -809,13 +959,14 @@ def _build_network_data(parsed_ptms: list, enriched_data: list) -> dict:
                 })
                 if partner_upper not in seen_non_ptm_upper:
                     seen_non_ptm_upper.add(partner_upper)
+                    _pfc = gene_protein_fc.get(partner_upper, 0.0)
                     candidate_non_ptm[partner_clean] = {
                         "id": partner_clean,
                         "gene": partner_clean,
                         "site": "",
                         "type": "Non-PTM",
-                        "value": 0,
-                        "state": _classify_state(0, "Non-PTM"),
+                        "value": round(_pfc, 3),
+                        "state": _classify_state(_pfc, "Non-PTM"),
                         "label": partner_clean,
                         "source": "STRING",
                     }
@@ -859,13 +1010,14 @@ def _build_network_data(parsed_ptms: list, enriched_data: list) -> dict:
                 })
                 if partner_upper not in seen_non_ptm_upper:
                     seen_non_ptm_upper.add(partner_upper)
+                    _pfc = gene_protein_fc.get(partner_upper, 0.0)
                     candidate_non_ptm[partner_clean] = {
                         "id": partner_clean,
                         "gene": partner_clean,
                         "site": "",
                         "type": "Non-PTM",
-                        "value": 0,
-                        "state": _classify_state(0, "Non-PTM"),
+                        "value": round(_pfc, 3),
+                        "state": _classify_state(_pfc, "Non-PTM"),
                         "label": partner_clean,
                         "source": "BioGRID",
                     }
@@ -925,13 +1077,14 @@ def _build_network_data(parsed_ptms: list, enriched_data: list) -> dict:
                 })
                 if kinase_upper not in seen_non_ptm_upper:
                     seen_non_ptm_upper.add(kinase_upper)
+                    _kfc = gene_protein_fc.get(kinase_upper, 0.0)
                     candidate_non_ptm[kinase_clean] = {
                         "id": kinase_clean,
                         "gene": kinase_clean,
                         "site": "",
                         "type": "Kinase",
-                        "value": 0,
-                        "state": _classify_state(0, "Kinase"),
+                        "value": round(_kfc, 3),
+                        "state": _classify_state(_kfc, "Kinase"),
                         "label": kinase_clean,
                         "source": "KEA3",
                     }
@@ -939,6 +1092,102 @@ def _build_network_data(parsed_ptms: list, enriched_data: list) -> dict:
                 if kinase_clean not in _kinase_substrates:
                     _kinase_substrates[kinase_clean] = []
                 _kinase_substrates[kinase_clean].append(source_id)
+
+        # --- v5.0: Kinase from kinase_prediction (LLM-predicted) ---
+        kinase_pred = enr.get("kinase_prediction", {})
+        if isinstance(kinase_pred, dict):
+            pred_kinases = kinase_pred.get("predicted_kinases", []) or kinase_pred.get("kinases", [])
+            if not pred_kinases and isinstance(kinase_pred.get("result"), list):
+                pred_kinases = kinase_pred["result"]
+            for pk in pred_kinases:
+                pk_name = pk if isinstance(pk, str) else (pk.get("kinase") or pk.get("name") or str(pk))
+                pk_clean = pk_name.strip()
+                pk_upper = pk_clean.upper()
+                if not pk_clean or pk_upper == gene.upper():
+                    continue
+                if pk_clean in gene_ptms:
+                    for pk_node_id in gene_ptms[pk_clean]:
+                        edges.append({
+                            "source": pk_node_id,
+                            "target": source_id,
+                            "evidence_type": "Kinase-Substrate-Predicted",
+                            "confidence": 0.6,
+                            "pathways": [],
+                            "pathway_str": "",
+                        })
+                else:
+                    edges.append({
+                        "source": pk_clean,
+                        "target": source_id,
+                        "evidence_type": "Kinase-Substrate-Predicted",
+                        "confidence": 0.6,
+                        "pathways": [],
+                        "pathway_str": "",
+                    })
+                    if pk_upper not in seen_non_ptm_upper:
+                        seen_non_ptm_upper.add(pk_upper)
+                        _kfc = gene_protein_fc.get(pk_upper, 0.0)
+                        candidate_non_ptm[pk_clean] = {
+                            "id": pk_clean,
+                            "gene": pk_clean,
+                            "site": "",
+                            "type": "Kinase",
+                            "value": round(_kfc, 3),
+                            "state": _classify_state(_kfc, "Kinase"),
+                            "label": pk_clean,
+                            "source": "Kinase-Prediction",
+                        }
+                    if pk_clean not in _kinase_substrates:
+                        _kinase_substrates[pk_clean] = []
+                    _kinase_substrates[pk_clean].append(source_id)
+
+        # --- v5.0: Kinase from kinase_substrate (pattern-matched) ---
+        kinase_sub = enr.get("kinase_substrate", {})
+        if isinstance(kinase_sub, dict):
+            sub_kinases = kinase_sub.get("kinases", []) or kinase_sub.get("matched_kinases", [])
+            if not sub_kinases and isinstance(kinase_sub.get("result"), list):
+                sub_kinases = kinase_sub["result"]
+            for sk in sub_kinases:
+                sk_name = sk if isinstance(sk, str) else (sk.get("kinase") or sk.get("name") or str(sk))
+                sk_clean = sk_name.strip()
+                sk_upper = sk_clean.upper()
+                if not sk_clean or sk_upper == gene.upper():
+                    continue
+                if sk_clean in gene_ptms:
+                    for sk_node_id in gene_ptms[sk_clean]:
+                        edges.append({
+                            "source": sk_node_id,
+                            "target": source_id,
+                            "evidence_type": "Kinase-Substrate",
+                            "confidence": 0.75,
+                            "pathways": [],
+                            "pathway_str": "",
+                        })
+                else:
+                    edges.append({
+                        "source": sk_clean,
+                        "target": source_id,
+                        "evidence_type": "Kinase-Substrate",
+                        "confidence": 0.75,
+                        "pathways": [],
+                        "pathway_str": "",
+                    })
+                    if sk_upper not in seen_non_ptm_upper:
+                        seen_non_ptm_upper.add(sk_upper)
+                        _kfc = gene_protein_fc.get(sk_upper, 0.0)
+                        candidate_non_ptm[sk_clean] = {
+                            "id": sk_clean,
+                            "gene": sk_clean,
+                            "site": "",
+                            "type": "Kinase",
+                            "value": round(_kfc, 3),
+                            "state": _classify_state(_kfc, "Kinase"),
+                            "label": sk_clean,
+                            "source": "Kinase-Substrate",
+                        }
+                    if sk_clean not in _kinase_substrates:
+                        _kinase_substrates[sk_clean] = []
+                    _kinase_substrates[sk_clean].append(source_id)
 
     # v4.0: Add Shared-Regulator edges (PTM proteins sharing the same upstream kinase)
     for kinase_name, substrates in _kinase_substrates.items():
@@ -1108,18 +1357,28 @@ def _generate_legends(
 
      # Color Legend v4.0
     legend_lines.append("**Node Color Legend**:")
-    legend_lines.append("*PTM Proteins (Red gradient — intensity = |Log2FC|):*")
-    legend_lines.append(f"- Dark Red ({NODE_COLORS['high_active']}): Strong change (|Log2FC| > 1.0)")
-    legend_lines.append(f"- Red ({NODE_COLORS['moderate_active']}): Moderate change (0 < |Log2FC| ≤ 1.0)")
+    legend_lines.append("*PTM Proteins (Red/Blue gradient — intensity = |Log2FC|):*")
+    legend_lines.append(f"- Dark Red ({NODE_COLORS['high_active']}): Strong upregulation (Log2FC > 2.0)")
+    legend_lines.append(f"- Red ({NODE_COLORS['moderate_active']}): Moderate upregulation (1.0 < Log2FC ≤ 2.0)")
+    legend_lines.append(f"- Light Red ({NODE_COLORS['low_active']}): Weak upregulation (0 < Log2FC ≤ 1.0)")
     legend_lines.append(f"- Gray ({NODE_COLORS['neutral']}): No significant change")
+    legend_lines.append(f"- Light Blue ({NODE_COLORS['low_inhibited']}): Weak downregulation (-1.0 ≤ Log2FC < 0)")
+    legend_lines.append(f"- Blue ({NODE_COLORS['inhibited']}): Moderate downregulation (-2.0 ≤ Log2FC < -1.0)")
+    legend_lines.append(f"- Dark Blue ({NODE_COLORS['high_inhibited']}): Strong downregulation (Log2FC < -2.0)")
     legend_lines.append("")
-    legend_lines.append("*Non-PTM Proteins (control-relative abundance):*")
-    legend_lines.append(f"- Green ({NODE_COLORS['nonptm_up']}): Increased vs control")
-    legend_lines.append(f"- Purple ({NODE_COLORS['nonptm_down']}): Decreased vs control")
+    legend_lines.append("*Non-PTM Proteins (Green/Purple gradient — Protein_Log2FC):*")
+    legend_lines.append(f"- Dark Green ({NODE_COLORS['nonptm_up_strong']}): Strong increase (Log2FC > 1.5)")
+    legend_lines.append(f"- Green ({NODE_COLORS['nonptm_up']}): Moderate increase (0.5 < Log2FC ≤ 1.5)")
+    legend_lines.append(f"- Light Green ({NODE_COLORS['nonptm_up_weak']}): Weak increase (0.1 < Log2FC ≤ 0.5)")
     legend_lines.append(f"- Gray ({NODE_COLORS['nonptm_neutral']}): No significant change")
+    legend_lines.append(f"- Light Purple ({NODE_COLORS['nonptm_down_weak']}): Weak decrease (-0.5 ≤ Log2FC < -0.1)")
+    legend_lines.append(f"- Purple ({NODE_COLORS['nonptm_down']}): Moderate decrease (-1.5 ≤ Log2FC < -0.5)")
+    legend_lines.append(f"- Dark Purple ({NODE_COLORS['nonptm_down_strong']}): Strong decrease (Log2FC < -1.5)")
     legend_lines.append("")
-    legend_lines.append("*Kinase / Upstream Regulators:*")
-    legend_lines.append(f"- Amber ({NODE_COLORS['kinase']}): Kinase / upstream regulator")
+    legend_lines.append("*Kinase / Upstream Regulators (Diamond shape):*")
+    legend_lines.append(f"- Deep Orange ({NODE_COLORS['kinase_up']}): Kinase with increased activity (Log2FC > 0.5)")
+    legend_lines.append(f"- Amber ({NODE_COLORS['kinase']}): Kinase / upstream regulator (neutral)")
+    legend_lines.append(f"- Light Orange ({NODE_COLORS['kinase_down']}): Kinase with decreased activity (Log2FC < -0.5)")
     legend_lines.append("")
     # Node Shape Legend v4.0
     legend_lines.append("**Node Shape Legend**:")
@@ -1255,6 +1514,190 @@ def _generate_legends(
 
 
 # ---------------------------------------------------------------------------
+# Canonical Pathway Distribution Bar Graph (replaces Figure 1)
+# ---------------------------------------------------------------------------
+
+def _generate_pathway_distribution_graph(
+    parsed_ptms: list,
+    enriched_data: list,
+    output_dir: str,
+) -> Optional[str]:
+    """Generate a horizontal bar graph showing canonical pathway distribution
+    for both PTM and Non-PTM proteins.
+
+    Returns the path to the saved PNG image, or None on failure.
+    """
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        import matplotlib.ticker as ticker
+        import numpy as np
+    except ImportError:
+        logger.warning("matplotlib not available — skipping pathway distribution graph")
+        return None
+
+    # Collect pathway → gene mapping, separated by PTM vs Non-PTM
+    ptm_genes = set()  # genes that have PTM sites
+    for ptm in parsed_ptms:
+        gene = (ptm.get("gene") or ptm.get("Gene.Name", "")).strip().upper()
+        if gene:
+            ptm_genes.add(gene)
+
+    # pathway_name -> {"ptm": set(genes), "non_ptm": set(genes)}
+    pathway_proteins: Dict[str, Dict[str, set]] = defaultdict(lambda: {"ptm": set(), "non_ptm": set()})
+
+    def _pw_name(p):
+        return (p.get("name", str(p)) if isinstance(p, dict) else str(p)).strip()
+
+    # From enriched_data (PTM proteins)
+    for ptm in enriched_data:
+        gene = (ptm.get("gene") or ptm.get("Gene.Name", "")).strip().upper()
+        enr = ptm.get("rag_enrichment", {})
+        pathways = enr.get("pathways", [])
+        for pw in pathways:
+            pw_name = _pw_name(pw)
+            if pw_name:
+                pathway_proteins[pw_name]["ptm"].add(gene)
+
+    # From enriched_data — Non-PTM proteins from STRING interactions
+    for ptm in enriched_data:
+        enr = ptm.get("rag_enrichment", {})
+        interactions = enr.get("string_interactions", enr.get("string_db", {}).get("interactions", []))
+        if isinstance(interactions, list):
+            for inter in interactions:
+                partner = (inter.get("gene") or inter.get("preferredName", "")).strip().upper()
+                if partner and partner not in ptm_genes:
+                    # Check if this partner has pathway info in any enriched PTM
+                    pass  # Non-PTM partners don't have their own KEGG data
+        # BioGRID interactions
+        biogrid = enr.get("biogrid", {})
+        if isinstance(biogrid, dict):
+            bg_interactions = biogrid.get("interactions", [])
+            for inter in bg_interactions:
+                partner = (inter.get("partner_gene") or "").strip().upper()
+                if partner and partner not in ptm_genes:
+                    pass
+
+    # For Non-PTM: check if any Non-PTM gene appears in KEGG pathways of PTM genes
+    # We can also check the network_data edges for shared pathway info
+    # Simpler approach: collect all genes from enriched_data and their pathways
+    all_gene_pathways: Dict[str, set] = defaultdict(set)  # gene -> set of pathway names
+    for ptm in enriched_data:
+        gene = (ptm.get("gene") or ptm.get("Gene.Name", "")).strip().upper()
+        enr = ptm.get("rag_enrichment", {})
+        pathways = enr.get("pathways", [])
+        for pw in pathways:
+            pw_name = _pw_name(pw)
+            if pw_name:
+                all_gene_pathways[gene].add(pw_name)
+
+    # Collect Non-PTM proteins from STRING/BioGRID that share pathways
+    non_ptm_in_pathways: Dict[str, set] = defaultdict(set)  # pathway -> set of non-ptm genes
+    for ptm in enriched_data:
+        enr = ptm.get("rag_enrichment", {})
+        # STRING interactions
+        interactions = enr.get("string_interactions", [])
+        if isinstance(interactions, dict):
+            interactions = list(interactions.values()) if interactions else []
+        if isinstance(interactions, list):
+            for inter in interactions:
+                partner = ""
+                if isinstance(inter, dict):
+                    partner = (inter.get("gene") or inter.get("preferredName") or inter.get("stringId", "")).strip().upper()
+                elif isinstance(inter, str):
+                    partner = inter.strip().upper()
+                if partner and partner not in ptm_genes:
+                    # Check if partner gene has known pathways from any PTM enrichment
+                    if partner in all_gene_pathways:
+                        for pw in all_gene_pathways[partner]:
+                            non_ptm_in_pathways[pw].add(partner)
+                            pathway_proteins[pw]["non_ptm"].add(partner)
+
+    if not pathway_proteins:
+        logger.warning("No pathway data found — skipping pathway distribution graph")
+        return None
+
+    # Compute counts and sort by total
+    pw_data = []
+    for pw_name, groups in pathway_proteins.items():
+        ptm_count = len(groups["ptm"])
+        non_ptm_count = len(groups["non_ptm"])
+        total = ptm_count + non_ptm_count
+        if total > 0:
+            pw_data.append({
+                "pathway": pw_name,
+                "ptm": ptm_count,
+                "non_ptm": non_ptm_count,
+                "total": total,
+            })
+
+    if not pw_data:
+        logger.warning("No pathway proteins found — skipping pathway distribution graph")
+        return None
+
+    # Sort by total count descending, take top 25
+    pw_data.sort(key=lambda x: -x["total"])
+    pw_data = pw_data[:25]
+    pw_data.reverse()  # Reverse for horizontal bar (bottom = highest)
+
+    # Generate the bar graph
+    fig, ax = plt.subplots(figsize=(12, max(6, len(pw_data) * 0.4)))
+
+    pathways_list = [d["pathway"] for d in pw_data]
+    ptm_counts = [d["ptm"] for d in pw_data]
+    non_ptm_counts = [d["non_ptm"] for d in pw_data]
+    y_pos = np.arange(len(pathways_list))
+    bar_height = 0.35
+
+    # Colors: PTM = coral/red tones, Non-PTM = teal/green tones
+    bars_ptm = ax.barh(y_pos + bar_height / 2, ptm_counts, bar_height,
+                       label="PTM Proteins", color="#E74C3C", alpha=0.85, edgecolor="white", linewidth=0.5)
+    bars_non = ax.barh(y_pos - bar_height / 2, non_ptm_counts, bar_height,
+                       label="Non-PTM Proteins", color="#2ECC71", alpha=0.85, edgecolor="white", linewidth=0.5)
+
+    # Truncate long pathway names
+    display_names = []
+    for name in pathways_list:
+        if len(name) > 50:
+            display_names.append(name[:47] + "...")
+        else:
+            display_names.append(name)
+
+    ax.set_yticks(y_pos)
+    ax.set_yticklabels(display_names, fontsize=9)
+    ax.set_xlabel("Number of Proteins", fontsize=11, fontweight="bold")
+    ax.set_title("Canonical Pathway Distribution: PTM vs Non-PTM Proteins",
+                 fontsize=13, fontweight="bold", pad=15)
+    ax.legend(loc="lower right", fontsize=10, framealpha=0.9)
+    ax.xaxis.set_major_locator(ticker.MaxNLocator(integer=True))
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.grid(axis="x", alpha=0.3, linestyle="--")
+
+    # Add count labels on bars
+    for bar in bars_ptm:
+        width = bar.get_width()
+        if width > 0:
+            ax.text(width + 0.1, bar.get_y() + bar.get_height() / 2,
+                    str(int(width)), va="center", fontsize=8, color="#C0392B")
+    for bar in bars_non:
+        width = bar.get_width()
+        if width > 0:
+            ax.text(width + 0.1, bar.get_y() + bar.get_height() / 2,
+                    str(int(width)), va="center", fontsize=8, color="#27AE60")
+
+    plt.tight_layout()
+
+    output_path = Path(output_dir) / "pathway_distribution.png"
+    fig.savefig(str(output_path), dpi=200, bbox_inches="tight", facecolor="white")
+    plt.close(fig)
+
+    logger.info(f"[NET-NODE] Pathway distribution graph saved: {output_path} ({len(pw_data)} pathways)")
+    return str(output_path)
+
+
+# ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
 
@@ -1329,6 +1772,14 @@ def run_network_analysis(state: dict) -> dict:
         logger.info("Cytoscape not available — using text-based legends only")
 
     if cb:
+        cb(63, "Generating pathway distribution graph")
+
+    # v5.0: Generate Canonical Pathway Distribution Bar Graph (replaces Figure 1)
+    pathway_graph_path = _generate_pathway_distribution_graph(
+        parsed_ptms, enriched_data, output_dir
+    )
+
+    if cb:
         cb(65, f"Network analysis complete (Cytoscape: {cytoscape_connected})")
 
     # GAP 1/3: Build network_results with timepoint data for writer_node
@@ -1342,6 +1793,7 @@ def run_network_analysis(state: dict) -> dict:
             "legends": legends,
             "cytoscape_connected": cytoscape_connected,
             "network_images": network_images,
+            "pathway_graph_path": pathway_graph_path,
             "ptm_count": len(parsed_ptms),
             "timepoint_results": timepoint_results,
             "timepoints": timepoints,
@@ -1354,6 +1806,7 @@ def run_network_analysis(state: dict) -> dict:
         f"[NET-NODE] run_network_analysis returning: "
         f"cytoscape_connected={cytoscape_connected}, "
         f"timepoints={timepoints}, "
+        f"pathway_graph={'OK' if pathway_graph_path else 'NONE'}, "
         f"network_images={list(network_images.keys()) if network_images else 'EMPTY'}, "
         f"network_results_keys={list(network_results.keys()) if network_results else 'EMPTY'}, "
         f"validation={{'nodes': {validation['total_nodes']}, 'edges': {validation['total_edges']}, "
@@ -2108,19 +2561,21 @@ def generate_network_figure_section(network_analysis: dict) -> str:
     individual_legends = legends.get("individual_legends", {})
     comparison_legend = legends.get("comparison_legend", "")
     validation = network_analysis.get("validation", {})
+    pathway_graph_path = network_analysis.get("pathway_graph_path")
 
     logger.info(
         f"[NET-SECTION] generate_network_figure_section called: "
         f"network_images={list(network_images.keys()) if network_images else 'EMPTY'}, "
         f"legends_keys={list(legends.keys()) if legends else 'EMPTY'}, "
         f"has_full_legend={bool(legends.get('full_legend'))}, "
+        f"pathway_graph={'OK' if pathway_graph_path else 'NONE'}, "
         f"timepoint_results={list(timepoint_results.keys()) if timepoint_results else 'EMPTY'}, "
         f"validation={{'valid': {validation.get('is_valid', '?')}, "
         f"'orphan': {validation.get('orphan_nodes', '?')}}}"
     )
 
-    if not network_images and not legends.get("full_legend"):
-        logger.warning("[NET-SECTION] No network_images and no full_legend — returning empty")
+    if not network_images and not legends.get("full_legend") and not pathway_graph_path:
+        logger.warning("[NET-SECTION] No network_images, no full_legend, no pathway_graph — returning empty")
         return ""
 
     section = "## Network Visualization\n\n"
@@ -2155,10 +2610,27 @@ def generate_network_figure_section(network_analysis: dict) -> str:
     figure_num = 1
     panel_labels = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
-    # Sort images: "main" first, then timepoints in order
+    # v5.0: Figure 1 = Canonical Pathway Distribution Bar Graph (replaces Combined Network)
+    if pathway_graph_path:
+        pw_path_obj = Path(pathway_graph_path)
+        if pw_path_obj.exists() and pw_path_obj.stat().st_size > 1000:
+            pw_img_ref = pw_path_obj.name
+            section += f"### Figure {figure_num}. Canonical Pathway Distribution of PTM and Non-PTM Proteins\n\n"
+            section += f"![Canonical Pathway Distribution]({pw_img_ref})\n\n"
+            section += (
+                f"**Figure Legend:** This bar graph illustrates the distribution of PTM proteins (red) "
+                f"and Non-PTM interactor proteins (green) across canonical signaling pathways identified "
+                f"via KEGG pathway analysis. Pathways are ranked by total protein count. "
+                f"The co-occurrence of PTM and Non-PTM proteins within the same pathway suggests "
+                f"coordinated regulation of signaling cascades.\n\n"
+            )
+            section += "---\n\n"
+            figure_num += 1
+            logger.info(f"[NET-SECTION] Pathway distribution graph inserted as Figure {figure_num - 1}")
+
+    # Sort images: skip "main" (replaced by pathway graph), include timepoints
     sorted_labels = []
-    if "main" in network_images:
-        sorted_labels.append("main")
+    # v5.0: Do NOT include "main" network image — replaced by pathway distribution graph
     for label in sorted(
         [k for k in network_images.keys() if k != "main"],
         key=_tp_to_minutes
@@ -2183,15 +2655,11 @@ def generate_network_figure_section(network_analysis: dict) -> str:
             img_ref = base64_img
             logger.info(f"[NET-SECTION] Fallback to base64: {'OK' if img_ref else 'FAILED'}")
 
-        # Figure title (guide §6.1)
-        if label == "main":
-            display_label = "Combined PTM Signaling Network"
-            fig_title = f"Figure {figure_num}. {display_label}"
-        else:
-            phase = _tp_to_phase(label)
-            panel = panel_labels[idx - 1] if idx > 0 and idx <= len(panel_labels) else str(idx)
-            display_label = f"PTM-NonPTM Integrated Network at {label} ({phase})"
-            fig_title = f"Figure {figure_num}{panel}. {display_label}"
+        # Figure title (guide §6.1) — v5.0: "main" is excluded from sorted_labels
+        phase = _tp_to_phase(label)
+        panel = panel_labels[idx] if idx < len(panel_labels) else str(idx + 1)
+        display_label = f"PTM-NonPTM Integrated Network at {label} ({phase})"
+        fig_title = f"Figure {figure_num}{panel}. {display_label}"
 
         if img_ref:
             section += f"### {fig_title}\n\n"
@@ -2200,18 +2668,10 @@ def generate_network_figure_section(network_analysis: dict) -> str:
             section += f"### {fig_title}\n\n"
             section += f"*[Network image: {path_obj.name if path_obj else '?'}]*\n\n"
 
-        # Figure legend (guide §6.1)
+        # Figure legend (guide §6.1) — v5.0: "main" removed, timepoint-only
         section += f"**Figure Legend ({label}):**\n\n"
 
-        if label == "main":
-            section += (
-                f"This network represents the combined PTM signaling interactions. "
-                f"The network contains **{len(active_nodes)} activated PTMs** (red/orange nodes), "
-                f"**{len(inhibited_nodes)} inhibited PTMs** (blue nodes), "
-                f"**{len(non_ptm_nodes)} Non-PTM proteins** (green diamond nodes), "
-                f"and **{len(edges)} interaction edges**.\n\n"
-            )
-        elif label in individual_legends:
+        if label in individual_legends:
             section += individual_legends[label] + "\n\n"
         else:
             # Fallback for condition-based networks
@@ -2251,32 +2711,7 @@ def generate_network_figure_section(network_analysis: dict) -> str:
                     for n in top_inhib
                 )
                 section += f"**Top Inhibited PTMs**: {top_str}\n\n"
-        elif label == "main":
-            if active_nodes:
-                top_active = sorted(active_nodes, key=lambda x: -x.get("value", 0))[:5]
-                top_str = "; ".join(
-                    f"{n.get('gene', '?')}({n.get('site', '')}): Log2FC={n.get('value', 0):.2f}"
-                    for n in top_active
-                )
-                section += f"**Top Activated PTMs**: {top_str}\n\n"
-
-            if inhibited_nodes:
-                top_inhib = sorted(inhibited_nodes, key=lambda x: x.get("value", 0))[:5]
-                top_str = "; ".join(
-                    f"{n.get('gene', '?')}({n.get('site', '')}): Log2FC={n.get('value', 0):.2f}"
-                    for n in top_inhib
-                )
-                section += f"**Top Inhibited PTMs**: {top_str}\n\n"
-
-        # Edge type breakdown
-        if label == "main":
-            edge_types = defaultdict(int)
-            for e in edges:
-                edge_types[e.get("evidence_type", "Unknown")] += 1
-            if edge_types:
-                section += "**Edge Types**: " + ", ".join(
-                    f"{et} ({cnt})" for et, cnt in sorted(edge_types.items(), key=lambda x: -x[1])
-                ) + "\n\n"
+        # v5.0: "main" label removed from sorted_labels, no fallback needed
 
         section += "---\n\n"
         figure_num += 1

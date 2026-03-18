@@ -513,6 +513,10 @@ async def start_order(
         "rag_llm_model": report_opts.get("rag_llm_model"),
         "rag_llm_provider": report_opts.get("rag_llm_provider"),
         "report_title": report_opts.get("report_title", "PTM Comprehensive Analysis Report"),
+        "research_questions": report_opts.get("research_questions", []),
+        "report_type": report_opts.get("report_type", "comprehensive"),
+        "report_config": report_opts.get("report_config", {}),
+        "analysis_mode": report_opts.get("analysis_mode", "ptm_only"),
     }
 
     from celery import Celery as CeleryClass

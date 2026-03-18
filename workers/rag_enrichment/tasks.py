@@ -247,6 +247,9 @@ def run_rag_enrichment(self, order_id: int, config: dict):
             "llm_provider": config.get("llm_provider", "ollama"),
             "llm_model": config.get("llm_model"),
             "report_title": config.get("report_title", "PTM Comprehensive Analysis Report"),
+            "report_type": config.get("report_type", "comprehensive"),
+            "report_config": config.get("report_config", {}),
+            "analysis_mode": config.get("analysis_mode", "ptm_only"),
         }
         if config.get("chain_to_next", True) and get_order_status(order_id) != "cancelled":
             app.send_task(
