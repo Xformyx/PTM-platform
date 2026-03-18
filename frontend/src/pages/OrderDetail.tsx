@@ -2142,11 +2142,11 @@ export default function OrderDetail() {
               Cross-Talk
             </TabsTrigger>
           )}
-          <TabsTrigger value="results">Results</TabsTrigger>
           <TabsTrigger value="articles">
             <BookOpen className="h-3.5 w-3.5 mr-1.5" />
             Articles
           </TabsTrigger>
+          <TabsTrigger value="results">Results</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="space-y-4 mt-4">
