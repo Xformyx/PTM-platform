@@ -82,7 +82,7 @@ function stageLabel(stage: string): string {
   switch (stage) {
     case "preprocessing": return "Preprocessing";
     case "rag_enrichment": return "RAG Enrichment";
-    case "report_generation": return "Report Gen";
+    case "report_generation": return "Report Generation";
     default: return stage;
   }
 }
