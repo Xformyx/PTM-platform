@@ -5,7 +5,7 @@ import {
   Cog, BookOpen, FileText, CheckCircle2, AlertCircle, Brain,
   Play, RotateCcw, ArrowLeft, Terminal, Circle, RefreshCw,
   ChevronDown, ChevronUp, Download, FileSpreadsheet, FileJson, File, FolderOpen,
-  Copy, Check, Eye, ArrowRightCircle, Sparkles, Plus, X,
+  Copy, Check, Eye, ArrowRightCircle, Sparkles, Plus, X, Trash2,
   MessageSquare, Loader2, ToggleLeft, ToggleRight, Square,
   ChartScatter, TrendingUp, ZoomIn, ZoomOut, GitMerge, BarChart3,
   LayoutDashboard, FileOutput,
@@ -493,7 +493,15 @@ interface FileDetail {
 
 type SortKey = "name" | "size" | "modified";
 
-function ResultFiles({ orderId, resultFiles }: { orderId: number; resultFiles: { report_files?: string[]; all_files?: string[] } }) {
+function ResultFiles({
+  orderId,
+  resultFiles,
+  onDeleted,
+}: {
+  orderId: number;
+  resultFiles: { report_files?: string[]; all_files?: string[] };
+  onDeleted?: () => void;
+}) {
   const reports = resultFiles.report_files || [];
   const allFiles = resultFiles.all_files || [];
   const dataFiles = allFiles.filter((f) => !reports.includes(f));
@@ -504,6 +512,20 @@ function ResultFiles({ orderId, resultFiles }: { orderId: number; resultFiles: {
   const [previewFile, setPreviewFile] = useState("");
   const [reportSort, setReportSort] = useState<{ key: SortKey; dir: "asc" | "desc" }>({ key: "name", dir: "asc" });
   const [dataSort, setDataSort] = useState<{ key: SortKey; dir: "asc" | "desc" }>({ key: "name", dir: "asc" });
+  const [deleting, setDeleting] = useState<string | null>(null);
+
+  const handleDeleteReport = async (filename: string) => {
+    if (!confirm(`Delete "${filename}"? This cannot be undone.`)) return;
+    setDeleting(filename);
+    try {
+      await api.delete(`/orders/${orderId}/files/${encodeURIComponent(filename)}`);
+      onDeleted?.();
+    } catch (err: any) {
+      alert(err.message || "Failed to delete file");
+    } finally {
+      setDeleting(null);
+    }
+  };
 
   useEffect(() => {
     api.get<{ files: FileDetail[]; host_output_dir: string }>(`/orders/${orderId}/file-details`).then((d) => {
@@ -602,11 +624,13 @@ function ResultFiles({ orderId, resultFiles }: { orderId: number; resultFiles: {
     sort,
     onSort,
     mono,
+    showDelete,
   }: {
     files: string[];
     sort: { key: SortKey; dir: "asc" | "desc" };
     onSort: (key: SortKey) => void;
     mono?: boolean;
+    showDelete?: boolean;
   }) => {
     const sorted = sortFiles(files, sort);
     return (
@@ -619,6 +643,7 @@ function ResultFiles({ orderId, resultFiles }: { orderId: number; resultFiles: {
             <TableHead className="whitespace-nowrap">File type</TableHead>
             <TableHead className="w-[100px] text-center">Preview</TableHead>
             <TableHead className="w-[90px] text-center">Download</TableHead>
+            {showDelete && <TableHead className="w-[70px] text-center">Delete</TableHead>}
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -678,6 +703,24 @@ function ResultFiles({ orderId, resultFiles }: { orderId: number; resultFiles: {
                     <Download className="h-3.5 w-3.5" />
                   </a>
                 </TableCell>
+                {showDelete && (
+                  <TableCell className="text-center">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 px-2 text-destructive hover:text-destructive hover:bg-destructive/10"
+                      onClick={() => handleDeleteReport(f)}
+                      disabled={deleting === f}
+                      title="Delete"
+                    >
+                      {deleting === f ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Trash2 className="h-3.5 w-3.5" />
+                      )}
+                    </Button>
+                  </TableCell>
+                )}
               </TableRow>
             );
           })}
@@ -704,6 +747,7 @@ function ResultFiles({ orderId, resultFiles }: { orderId: number; resultFiles: {
                 files={reports}
                 sort={reportSort}
                 onSort={(k) => setReportSort((s) => (s.key === k && s.dir === "asc" ? { key: k, dir: "desc" } : { key: k, dir: "asc" }))}
+                showDelete
               />
             </div>
           </CardContent>
@@ -2412,7 +2456,7 @@ export default function OrderDetail() {
                   </Button>
                 </div>
               )}
-              <ResultFiles orderId={order.id} resultFiles={order.result_files as any} />
+              <ResultFiles orderId={order.id} resultFiles={order.result_files as any} onDeleted={handleRefresh} />
             </div>
           ) : (
             <Card>

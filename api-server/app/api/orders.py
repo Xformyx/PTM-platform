@@ -1254,6 +1254,57 @@ async def preview_order_file(
     }
 
 
+@router.delete("/{order_id}/files/{filename}")
+async def delete_order_file(
+    order_id: int,
+    filename: str,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Delete a report file from an order's output directory. Only .md, .docx, .html allowed."""
+    from app.config import get_settings
+    settings = get_settings()
+
+    result = await db.execute(select(Order).where(Order.id == order_id))
+    order = result.scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    ext = Path(filename).suffix.lower()
+    if ext not in {".md", ".docx", ".html"}:
+        raise HTTPException(status_code=400, detail="Only report files (.md, .docx, .html) can be deleted")
+
+    output_dir = Path(settings.OUTPUT_DIR) / order.order_code
+    file_path = output_dir / filename
+
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(status_code=404, detail=f"File not found: {filename}")
+
+    if not file_path.resolve().is_relative_to(output_dir.resolve()):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    try:
+        file_path.unlink()
+    except OSError as e:
+        logger.warning(f"Failed to delete file {file_path}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete file: {e}")
+
+    rf = dict(order.result_files or {})
+    all_files = list(rf.get("all_files", []))
+    report_files = list(rf.get("report_files", []))
+    if filename in all_files:
+        all_files.remove(filename)
+    if filename in report_files:
+        report_files.remove(filename)
+    rf["all_files"] = all_files
+    rf["report_files"] = report_files
+    order.result_files = rf
+    await db.commit()
+    await db.refresh(order)
+
+    return {"deleted": filename}
+
+
 def _generate_statistics_from_outputs(order: Order, output_dir: Path, file_suffix: str) -> dict | None:
     """Generate pipeline statistics from existing output files (for orders preprocessed before stats feature)."""
     try:
