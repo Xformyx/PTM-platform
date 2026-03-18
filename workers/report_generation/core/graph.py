@@ -145,9 +145,29 @@ def format_citations(state: ReportState) -> dict:
     collected_refs = state.get("collected_references", [])
     network_analysis = state.get("network_analysis", {})
 
-    # Build report with network section between Results and Discussion
-    section_order = ["introduction", "results", "discussion", "conclusion", "abstract"]
-    parts = []
+    # Build report: Title → Abstract → Introduction → Results → Network → Discussion → Conclusion
+    # Title is rendered as # heading, other sections as ## headings
+    title_text = sections.get("title", "").strip()
+    report_title = state.get("report_title", "PTM Comprehensive Analysis Report")
+    if not title_text:
+        title_text = report_title
+    logger.info(f"[FORMAT-CIT] Report title: {title_text}")
+
+    from datetime import datetime as _dt
+    header_parts = [
+        f"# {title_text}\n",
+        f"*Generated: {_dt.now().strftime('%Y-%m-%d %H:%M')}*\n",
+    ]
+
+    section_order = ["abstract", "introduction", "results", "discussion", "conclusion"]
+    section_headings = {
+        "abstract": "## Abstract",
+        "introduction": "## Introduction",
+        "results": "## Results",
+        "discussion": "## Discussion",
+        "conclusion": "## Conclusion",
+    }
+    parts = header_parts[:]
 
     logger.info(
         f"[FORMAT-CIT] sections keys: {list(sections.keys())}, "
@@ -161,6 +181,8 @@ def format_citations(state: ReportState) -> dict:
 
     for key in section_order:
         if key in sections and sections[key]:
+            heading = section_headings.get(key, f"## {key.capitalize()}")
+            parts.append(f"{heading}\n")
             parts.append(sections[key])
             logger.info(f"[FORMAT-CIT] Added section: {key} ({len(sections[key])} chars)")
         if key == "results":

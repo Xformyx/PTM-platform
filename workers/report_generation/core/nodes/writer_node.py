@@ -28,7 +28,7 @@ from report_generation.core.figure_context import FigureInformationGenerator
 
 logger = logging.getLogger(__name__)
 
-SECTION_ORDER = ["introduction", "results", "discussion", "conclusion", "methods", "suggestion", "abstract"]
+SECTION_ORDER = ["introduction", "results", "discussion", "conclusion", "methods", "suggestion", "abstract", "title"]
 
 SECTION_MAX_TOKENS = {
     "abstract": 6144,
@@ -38,6 +38,7 @@ SECTION_MAX_TOKENS = {
     "conclusion": 8192,
     "methods": 8192,
     "suggestion": 8192,
+    "title": 512,
 }
 
 SYSTEM_PROMPT = (
@@ -188,6 +189,17 @@ def run_section_writing(state: dict) -> dict:
         # which conflicts with the report assembly logic
         content = _strip_llm_section_heading(content, section_type)
 
+        # Title post-processing: clean up LLM output to extract pure title text
+        if section_type == "title":
+            import re as _title_re
+            # Remove common prefixes like "Title:" or "# "
+            content = _title_re.sub(r'^(?:Title\s*:\s*|#\s+)', '', content.strip())
+            # Remove surrounding quotes
+            content = content.strip('"\'“”‘’')
+            # Take only the first line if LLM generated multiple lines
+            content = content.split('\n')[0].strip()
+            logger.info(f"[TITLE] Generated title: {content}")
+
         # v98d: Fix Log2FC decimal fragmentation and strip protective brackets
         if section_type in ("results", "discussion", "conclusion"):
             try:
@@ -288,27 +300,88 @@ def _build_section_prompt(
     combined_lit = lit_context + pubmed_context
 
     if section_type == "abstract":
-        intro = prev_sections.get("introduction", "")[:800]
-        results = prev_sections.get("results", "")[:1200]
-        discussion = prev_sections.get("discussion", "")[:800]
+        intro = prev_sections.get("introduction", "")[:1500]
+        results = prev_sections.get("results", "")[:2000]
+        discussion = prev_sections.get("discussion", "")[:1500]
+        conclusion = prev_sections.get("conclusion", "")[:800]
+
+        # Build ChromaDB high-confidence matching context for Abstract
+        chromadb_abstract_context = ""
+        if rag_results:
+            high_confidence = [r for r in rag_results if r.get("relevance", 0) >= 0.6 or r.get("combined_score", 0) >= 0.6]
+            if high_confidence:
+                match_lines = []
+                for idx, r in enumerate(high_confidence[:8], 1):
+                    title_str = r.get("title", "Unknown")
+                    score = r.get("combined_score", r.get("relevance", 0))
+                    match_lines.append(
+                        f"  [{idx}] (Confidence: {score:.2f}) {title_str}\n"
+                        f"      Key finding: {r['document'][:300]}"
+                    )
+                chromadb_abstract_context = (
+                    "\n\n**High-Confidence Literature Matches for Research Questions:**\n"
+                    "The following literature entries showed strong relevance to the research questions. "
+                    "Incorporate these findings into the abstract to highlight validated results and their significance.\n\n"
+                    + "\n\n".join(match_lines)
+                )
+
         return f"""Write an Abstract (~300-400 words) for this PTM analysis report.
 {single_tp_directive}
 Experimental System: {tissue}, {treatment}{bio_focus_line}
 Research Questions:
 {questions_str}
 
-Summary of Introduction: {intro}
-Summary of Results: {results}
-Summary of Discussion: {discussion}
+Summary of Introduction:
+{intro}
 
-The abstract should include: background, methods overview, key findings, and significance.
-Write a comprehensive abstract that captures all major findings. Include specific PTM sites and their significance.
+Summary of Results:
+{results}
+
+Summary of Discussion:
+{discussion}
+
+Summary of Conclusion:
+{conclusion}
+{chromadb_abstract_context}
+
+INSTRUCTIONS:
+- The abstract MUST include: background context, methods overview, key findings with specific PTM sites, and significance.
+- For each Research Question, identify the most significant PTM findings and their biological implications.
+- If high-confidence literature matches are provided above, explicitly mention how the experimental results align with or diverge from published literature.
+- Highlight the cell signaling commonalities among activated proteins based on PTM Vector values.
+- Write a comprehensive abstract that captures ALL major findings. Be specific about PTM sites (e.g., phosphorylation at Ser165 of GENE_NAME).
 {combined_lit}"""
 
     elif section_type == "introduction":
         comp_intro = ""
         if comprehensive_summary:
             comp_intro = f"\n\nDetailed Analysis Context (from prior comprehensive analysis):\n{comprehensive_summary[:4000]}\n"
+
+        # Enhanced ChromaDB context for Introduction — retrieve MORE results from ChromaDB
+        # For introduction, we fetch double the normal amount to provide richer background
+        intro_rag_results = retriever.search_for_section("introduction", keywords, n_results=chromadb_results * 2)
+        intro_chromadb_emphasis = ""
+        if intro_rag_results:
+            intro_ref_lines = []
+            for idx, r in enumerate(intro_rag_results[:min(chromadb_results * 2, 20)], 1):
+                title_str = r.get("title", "Unknown")
+                source_type = r.get("source_type", "research_article")
+                intro_ref_lines.append(
+                    f"--- ChromaDB Reference [{idx}] ({source_type}) ---\n"
+                    f"Source: {title_str}\n{r['document'][:500]}"
+                )
+            intro_chromadb_emphasis = (
+                "\n\n**CRITICAL — Published Literature from Collection (ChromaDB Vector Search):**\n"
+                "The following excerpts are from review papers, textbooks, and research articles in the collection. "
+                "You MUST heavily reference these in the Introduction to establish the scientific background. "
+                "Cite using numbered brackets (e.g., [1], [2]). NEVER mention 'ChromaDB' or 'knowledge base'. "
+                "Use these references to:\n"
+                "  - Explain the biological context of the experimental system\n"
+                "  - Describe known signaling pathways relevant to the research questions\n"
+                "  - Identify current knowledge gaps that this study addresses\n"
+                "  - Provide background on key proteins and PTM sites identified in the data\n\n"
+                + "\n\n".join(intro_ref_lines)
+            )
 
         return f"""Write a comprehensive Introduction section (~1500-2500 words) for this PTM analysis report.
 {single_tp_directive}
@@ -323,14 +396,15 @@ Key PTM sites identified:
 Structure (6-8 paragraphs):
 1. Background on post-translational modifications and their critical role in cellular signaling
 2. Specific background on {ptm_type_label} and its regulatory importance
-3. Relevance of the experimental system ({tissue}, {treatment})
-4. Current understanding and knowledge gaps in this area (cite the provided references)
+3. Relevance of the experimental system ({tissue}, {treatment}) — use the ChromaDB literature references below extensively
+4. Current understanding and knowledge gaps in this area — cite the provided references heavily
 5. PTM analysis methodology including mass spectrometry-based proteomics
-6. Overview of the key PTM sites identified and their known biological roles
+6. Overview of the key PTM sites identified and their known biological roles — cross-reference with ChromaDB literature
 7. Research questions and specific objectives of this study
 
-IMPORTANT: Write a thorough, detailed introduction. Cite as many of the provided references as possible to establish context. Discuss the biological significance of each research question. Use the comprehensive analysis context provided above to enrich your writing with specific PTM data and findings.
-{combined_lit}"""
+IMPORTANT: Write a thorough, detailed introduction. The ChromaDB collection references below are your PRIMARY source for background information. Cite as many of them as possible to establish context. Discuss the biological significance of each research question. Use the comprehensive analysis context provided above to enrich your writing with specific PTM data and findings.
+{intro_chromadb_emphasis}
+{pubmed_context}"""
 
     elif section_type == "results":
         research_str = ""
@@ -568,6 +642,30 @@ Also include:
 IMPORTANT: Be SPECIFIC — name actual antibodies, inhibitors, cell lines, and experimental conditions. Generic suggestions are not useful.
 {combined_lit}"""
 
+    if section_type == "title":
+        intro = prev_sections.get("introduction", "")[:600]
+        results = prev_sections.get("results", "")[:600]
+        abstract = prev_sections.get("abstract", "")[:600]
+        conclusion = prev_sections.get("conclusion", "")[:400]
+        return f"""Generate a concise, specific academic paper title for this PTM analysis report.
+
+Experimental System: {tissue}, {treatment}{bio_focus_line}
+Research Questions:
+{questions_str}
+
+Abstract Summary: {abstract}
+Introduction Summary: {intro}
+Results Summary: {results}
+Conclusion Summary: {conclusion}
+
+INSTRUCTIONS:
+- Output ONLY the title text, nothing else. No quotes, no "Title:" prefix, no explanation.
+- The title should be specific to the experimental system, treatment, and key findings.
+- Follow academic paper title conventions (e.g., "Comprehensive Phosphoproteomic Analysis Reveals ...").
+- Include the PTM type ({ptm_type_label}), the experimental system ({tissue}), and the treatment ({treatment}) if relevant.
+- The title should reflect the overall narrative and key discoveries of the report.
+- Keep it under 25 words."""
+
     return f"Write the {section_type} section for a PTM analysis report.\n{single_tp_directive}{ptm_summary}"
 
 
@@ -598,6 +696,7 @@ def _strip_llm_section_heading(content: str, section_type: str) -> str:
         "discussion": ["discussion", "results discussion", "results and discussion"],
         "conclusion": ["conclusion", "conclusions", "concluding remarks", "summary and conclusion"],
         "abstract": ["abstract", "summary"],
+        "title": ["title"],
     }
     aliases = section_aliases.get(section_type, [section_type])
 
@@ -739,4 +838,6 @@ def _fallback_section(section_type: str, research_results: list, hypotheses: lis
         return "The PTM analysis revealed significant regulatory changes."
     elif section_type == "conclusion":
         return "This analysis provides insights into PTM-mediated signaling."
+    elif section_type == "title":
+        return "Comprehensive Post-Translational Modification Analysis Report"
     return ""

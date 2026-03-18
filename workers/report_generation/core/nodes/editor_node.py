@@ -83,27 +83,13 @@ def _compile_report(
     collected_references = collected_references or []
     lines = []
 
-    # Title & metadata
-    lines.append(f"# {title}\n")
+    # Title — use LLM-generated title if available, otherwise fallback to report_title
+    llm_title = sections.get("title", "").strip()
+    final_title = llm_title if llm_title else title
+    lines.append(f"# {final_title}\n")
     lines.append(f"*Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}*\n")
 
-    # Experimental context
-    if context:
-        lines.append("## Experimental Context\n")
-        for key in ("tissue", "organism", "treatment", "condition", "cell_type", "biological_question", "special_conditions"):
-            val = context.get(key)
-            if val:
-                lines.append(f"- **{key.replace('_', ' ').title()}**: {val}")
-        lines.append("")
-
-    # Research questions
-    if questions:
-        lines.append("## Research Questions\n")
-        for i, q in enumerate(questions, 1):
-            lines.append(f"{i}. {q}")
-        lines.append("")
-
-    # Abstract
+    # Abstract (placed before Introduction for academic paper format)
     abstract = sections.get("abstract", "")
     if abstract:
         lines.append("## Abstract\n")
