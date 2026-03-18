@@ -8,6 +8,7 @@ import {
   Copy, Check, Eye, ArrowRightCircle, Sparkles, Plus, X,
   MessageSquare, Loader2, ToggleLeft, ToggleRight, Square,
   ChartScatter, TrendingUp, ZoomIn, ZoomOut, GitMerge, BarChart3,
+  LayoutDashboard, FileOutput,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
@@ -2127,7 +2128,10 @@ export default function OrderDetail() {
       {/* Tabs: Overview / Analysis Statistics / Vector Plot / Results */}
       <Tabs defaultValue="overview">
         <TabsList className="flex-wrap h-auto gap-1">
-          <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="overview">
+            <LayoutDashboard className="h-3.5 w-3.5 mr-1.5" />
+            Overview
+          </TabsTrigger>
           <TabsTrigger value="analysis-statistics">
             <BarChart3 className="h-3.5 w-3.5 mr-1.5" />
             Analysis Statistics
@@ -2146,7 +2150,10 @@ export default function OrderDetail() {
             <BookOpen className="h-3.5 w-3.5 mr-1.5" />
             Articles
           </TabsTrigger>
-          <TabsTrigger value="results">Results</TabsTrigger>
+          <TabsTrigger value="results">
+            <FileOutput className="h-3.5 w-3.5 mr-1.5" />
+            Results
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="space-y-4 mt-4">
@@ -2354,19 +2361,6 @@ export default function OrderDetail() {
                     })()
                   }
                 />
-                {Array.isArray((order.report_options as any)?.research_questions) &&
-                 (order.report_options as any).research_questions.length > 0 && (
-                  <div>
-                    <p className="text-xs text-muted-foreground mb-2">Research Questions</p>
-                    <ul className="space-y-1.5 text-sm">
-                      {((order.report_options as any).research_questions as string[]).map((q, i) => (
-                        <li key={i} className="rounded border bg-muted/20 px-2 py-1.5 break-words">
-                          Q{i + 1}. {q}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
               </CardContent>
             </Card>
           </div>

@@ -79,8 +79,6 @@ export default function RerunOptionsModal({
   const [ragLlmModel, setRagLlmModel] = useState("");
   const [llmCloudModelVariant, setLlmCloudModelVariant] = useState("");
   const [ragLlmCloudModelVariant, setRagLlmCloudModelVariant] = useState("");
-  const [researchQuestions, setResearchQuestions] = useState<string[]>([]);
-  const [newQuestion, setNewQuestion] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
@@ -166,8 +164,6 @@ export default function RerunOptionsModal({
       } else {
         setRagLlmModel(rm || "");
       }
-      const rq = ro.research_questions;
-      setResearchQuestions(Array.isArray(rq) ? rq.filter((q): q is string => typeof q === "string") : []);
       const ao = (order.analysis_options || {}) as Record<string, unknown>;
       const n = (v: unknown, def: number) => (typeof v === "number" && !isNaN(v) ? v : def);
       setAnalysisOptions({
@@ -237,7 +233,7 @@ export default function RerunOptionsModal({
           top_n_ptms: topNptms,
           output_format: baseReportOpts.output_format ?? "md",
           analysis_mode: analysisMode,
-          research_questions: researchQuestions,
+          research_questions: (baseReportOpts.research_questions as string[]) ?? [],
           ...(llmModel ? (() => {
             const [p, m] = llmModel.includes(":") ? llmModel.split(":", 2) : ["ollama", llmModel];
             const presets = CLOUD_MODEL_PRESETS[p as CloudProvider];
@@ -598,57 +594,6 @@ export default function RerunOptionsModal({
                     )}
                   </div>
                 )}
-              </div>
-
-              <div className="space-y-1.5">
-                <Label className="text-xs flex items-center gap-1">
-                  <MessageSquare className="h-3.5 w-3.5" /> Research Questions (optional)
-                </Label>
-                <div className="space-y-2">
-                  {researchQuestions.map((q, i) => (
-                    <div key={i} className="flex gap-2 group">
-                      <span className="text-[10px] text-muted-foreground mt-1.5 w-4 shrink-0">Q{i + 1}</span>
-                      <div className="flex-1 rounded border px-2 py-1.5 text-xs bg-muted/30">{q}</div>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-6 w-6 shrink-0 opacity-0 group-hover:opacity-100"
-                        onClick={() => setResearchQuestions(researchQuestions.filter((_, j) => j !== i))}
-                      >
-                        <X className="h-3 w-3" />
-                      </Button>
-                    </div>
-                  ))}
-                  <div className="flex gap-2">
-                    <Input
-                      value={newQuestion}
-                      onChange={(e) => setNewQuestion(e.target.value)}
-                      placeholder="Add research question..."
-                      className="h-8 text-xs"
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" && newQuestion.trim()) {
-                          setResearchQuestions([...researchQuestions, newQuestion.trim()]);
-                          setNewQuestion("");
-                        }
-                      }}
-                    />
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="icon"
-                      className="h-8 w-8 shrink-0"
-                      disabled={!newQuestion.trim()}
-                      onClick={() => {
-                        if (newQuestion.trim()) {
-                          setResearchQuestions([...researchQuestions, newQuestion.trim()]);
-                          setNewQuestion("");
-                        }
-                      }}
-                    >
-                      <Plus className="h-3 w-3" />
-                    </Button>
-                  </div>
-                </div>
               </div>
             </div>
 
