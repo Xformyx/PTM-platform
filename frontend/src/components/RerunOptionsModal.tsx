@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { AutoResizeTextarea } from "@/components/ui/auto-resize-textarea";
 import { Brain, BookOpen, FlaskConical, MessageSquare, Network, Plus, SlidersHorizontal, X, ChevronDown, ChevronUp, Settings2, RotateCcw, Database, CheckSquare, Square, Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -17,6 +18,7 @@ import { cn } from "@/lib/utils";
 import { CLOUD_PROVIDER_SENTINEL, CLOUD_MODEL_PRESETS, type CloudProvider } from "@/lib/llm-models";
 
 const CLOUD_PROVIDERS = ["gemini", "openai", "anthropic"] as const;
+
 function isCloudProviderSelection(val: string): boolean {
   const p = val?.split(":")[0];
   return !!(p && CLOUD_PROVIDERS.includes(p as any));
@@ -606,36 +608,37 @@ export default function RerunOptionsModal({
                 </Label>
                 <div className="space-y-2">
                   {researchQuestions.map((q, i) => (
-                    <div key={i} className="flex gap-2 group">
-                      <span className="text-[10px] text-muted-foreground mt-1.5 w-4 shrink-0">Q{i + 1}</span>
-                      <Input
+                    <div key={i} className="flex gap-2 group items-start">
+                      <span className="text-[10px] text-muted-foreground mt-2 w-4 shrink-0">Q{i + 1}</span>
+                      <AutoResizeTextarea
                         value={q}
                         onChange={(e) =>
                           setResearchQuestions(
                             researchQuestions.map((qq, j) => (j === i ? e.target.value : qq))
                           )
                         }
-                        className="flex-1 h-8 text-xs"
+                        className="flex-1 min-w-0 text-xs"
                         placeholder="Research question..."
                       />
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="h-6 w-6 shrink-0 opacity-0 group-hover:opacity-100"
+                        className="h-6 w-6 shrink-0 mt-1 opacity-0 group-hover:opacity-100"
                         onClick={() => setResearchQuestions(researchQuestions.filter((_, j) => j !== i))}
                       >
                         <X className="h-3 w-3" />
                       </Button>
                     </div>
                   ))}
-                  <div className="flex gap-2">
-                    <Input
+                  <div className="flex gap-2 items-start">
+                    <AutoResizeTextarea
                       value={newQuestion}
                       onChange={(e) => setNewQuestion(e.target.value)}
                       placeholder="Add research question..."
-                      className="h-8 text-xs"
+                      className="flex-1 min-w-0 text-xs"
                       onKeyDown={(e) => {
-                        if (e.key === "Enter" && newQuestion.trim()) {
+                        if (e.key === "Enter" && !e.shiftKey && newQuestion.trim()) {
+                          e.preventDefault();
                           setResearchQuestions([...researchQuestions, newQuestion.trim()]);
                           setNewQuestion("");
                         }
@@ -645,7 +648,7 @@ export default function RerunOptionsModal({
                       type="button"
                       variant="outline"
                       size="icon"
-                      className="h-8 w-8 shrink-0"
+                      className="h-8 w-8 shrink-0 mt-1"
                       disabled={!newQuestion.trim()}
                       onClick={() => {
                         if (newQuestion.trim()) {

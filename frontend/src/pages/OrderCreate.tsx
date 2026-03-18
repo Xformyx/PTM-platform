@@ -13,6 +13,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { AutoResizeTextarea } from "@/components/ui/auto-resize-textarea";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -1209,21 +1210,22 @@ export default function OrderCreate() {
                         </Button>
                       </div>
                     ))}
-                    <div className="flex gap-2">
-                      <Input
+                    <div className="flex gap-2 items-start">
+                      <AutoResizeTextarea
                         value={newQuestion}
                         onChange={(e) => setNewQuestion(e.target.value)}
                         placeholder="e.g., How does phosphorylation of MAPK3 at T202 regulate downstream signaling?"
-                        className="text-sm"
+                        className="flex-1 min-w-0 text-sm"
                         onKeyDown={(e) => {
-                          if (e.key === "Enter" && newQuestion.trim()) {
+                          if (e.key === "Enter" && !e.shiftKey && newQuestion.trim()) {
+                            e.preventDefault();
                             setResearchQuestions([...researchQuestions, newQuestion.trim()]);
                             setNewQuestion("");
                           }
                         }}
                       />
                       <Button
-                        type="button" variant="outline" size="icon" className="shrink-0"
+                        type="button" variant="outline" size="icon" className="shrink-0 mt-1"
                         disabled={!newQuestion.trim()}
                         onClick={() => {
                           if (newQuestion.trim()) {

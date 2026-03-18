@@ -11,6 +11,7 @@ import {
   LayoutDashboard, FileOutput,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { AutoResizeTextarea } from "@/components/ui/auto-resize-textarea";
 import { api } from "@/lib/api";
 import { useOrderProgress } from "@/hooks/useSSE";
 import type { Order, OrderLog, ProgressEvent } from "@/lib/types";
@@ -1725,21 +1726,22 @@ function ResearchQuestionsPanel({
             </div>
           ))}
           {canGenerate && (
-            <div className="flex gap-2">
-              <Input
+            <div className="flex gap-2 items-start">
+              <AutoResizeTextarea
                 value={newQuestion}
                 onChange={(e) => setNewQuestion(e.target.value)}
                 placeholder="Add a research question..."
-                className="text-sm h-8"
+                className="flex-1 min-w-0 text-sm"
                 onKeyDown={(e) => {
-                  if (e.key === "Enter" && newQuestion.trim()) {
+                  if (e.key === "Enter" && !e.shiftKey && newQuestion.trim()) {
+                    e.preventDefault();
                     setManualQuestions([...manualQuestions, newQuestion.trim()]);
                     setNewQuestion("");
                   }
                 }}
               />
               <Button
-                variant="outline" size="icon" className="h-8 w-8 shrink-0"
+                variant="outline" size="icon" className="h-8 w-8 shrink-0 mt-1"
                 disabled={!newQuestion.trim()}
                 onClick={() => {
                   if (newQuestion.trim()) {
