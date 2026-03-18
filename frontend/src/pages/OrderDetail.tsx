@@ -2367,14 +2367,33 @@ export default function OrderDetail() {
             </Card>
           </div>
 
-          {/* Research Questions */}
-          <ResearchQuestionsPanel
-            orderId={order.id}
-            orderStatus={order.status}
-            reportOptions={order.report_options}
-            isRunning={isRunning}
-            onRunReport={() => handleRunStage("report_generation")}
-          />
+          {/* Research Questions (read-only: Order 생성 시 설정한 값 표시) */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm flex items-center gap-2">
+                <MessageSquare className="h-4 w-4" /> Research Questions
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {(() => {
+                const qs = (order.report_options as any)?.research_questions;
+                const list = Array.isArray(qs) ? qs.filter((q: unknown) => typeof q === "string" && q.trim()) : [];
+                if (list.length === 0) {
+                  return <p className="text-sm text-muted-foreground">설정된 연구 질문이 없습니다.</p>;
+                }
+                return (
+                  <div className="space-y-2">
+                    {list.map((q: string, i: number) => (
+                      <div key={i} className="flex items-start gap-2">
+                        <span className="text-xs text-muted-foreground mt-1.5 w-5 shrink-0">Q{i + 1}</span>
+                        <div className="flex-1 rounded-lg border px-3 py-2 text-sm bg-muted/30 break-words">{q}</div>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+            </CardContent>
+          </Card>
         </TabsContent>
 
         <TabsContent value="results" className="mt-4">
