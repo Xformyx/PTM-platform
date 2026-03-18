@@ -608,7 +608,16 @@ export default function RerunOptionsModal({
                   {researchQuestions.map((q, i) => (
                     <div key={i} className="flex gap-2 group">
                       <span className="text-[10px] text-muted-foreground mt-1.5 w-4 shrink-0">Q{i + 1}</span>
-                      <div className="flex-1 rounded border px-2 py-1.5 text-xs bg-muted/30">{q}</div>
+                      <Input
+                        value={q}
+                        onChange={(e) =>
+                          setResearchQuestions(
+                            researchQuestions.map((qq, j) => (j === i ? e.target.value : qq))
+                          )
+                        }
+                        className="flex-1 h-8 text-xs"
+                        placeholder="Research question..."
+                      />
                       <Button
                         variant="ghost"
                         size="icon"
