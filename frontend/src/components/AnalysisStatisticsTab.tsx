@@ -11,7 +11,7 @@ import {
   ResponsiveContainer, Cell, PieChart, Pie, Legend,
 } from "recharts";
 import {
-  Database, FlaskConical, FileOutput,
+  Database, FlaskConical, Layers, Dna, FileOutput,
   ArrowRight, Loader2, BarChart3, ChevronUp, ChevronDown,
 } from "lucide-react";
 
@@ -66,14 +66,18 @@ function StatValue({ label, value, sub }: { label: string; value: string | numbe
 const STEP_COLORS = [
   "text-blue-600 bg-blue-50 border-blue-200 dark:text-blue-400 dark:bg-blue-950 dark:border-blue-800",
   "text-orange-600 bg-orange-50 border-orange-200 dark:text-orange-400 dark:bg-orange-950 dark:border-orange-800",
+  "text-emerald-600 bg-emerald-50 border-emerald-200 dark:text-emerald-400 dark:bg-emerald-950 dark:border-emerald-800",
+  "text-violet-600 bg-violet-50 border-violet-200 dark:text-violet-400 dark:bg-violet-950 dark:border-violet-800",
   "text-rose-600 bg-rose-50 border-rose-200 dark:text-rose-400 dark:bg-rose-950 dark:border-rose-800",
 ];
 
-const STEP_ICONS = [Database, FlaskConical, FileOutput];
+const STEP_ICONS = [Database, FlaskConical, Layers, Dna, FileOutput];
 
 function PipelineFlowCard({ stats }: { stats: PipelineStats }) {
   const s1 = stats.step1_input ?? {};
   const s2 = stats.step2_quantification ?? {};
+  const s3 = stats.step3_enrichment ?? {};
+  const s4 = stats.step4_biological ?? {};
   const sf = stats.final_output ?? {};
   const filt = (s2.ptm_filtering ?? {}) as PtmFiltering;
 
@@ -92,7 +96,22 @@ function PipelineFlowCard({ stats }: { stats: PipelineStats }) {
     quantLines.push(`${fmt(filt.ptm_proteins)} proteins`);
   }
 
-  const steps = [
+  const enrichmentLines: string[] = [];
+  if (s3.total_rows != null) enrichmentLines.push(`${fmt(s3.total_rows)} rows`);
+  if (s3.proteins_with_domains != null) enrichmentLines.push(`${fmt(s3.proteins_with_domains)} w/ domains`);
+  if (s3.sites_with_motifs != null) enrichmentLines.push(`${fmt(s3.sites_with_motifs)} w/ motifs`);
+  if (enrichmentLines.length === 0) enrichmentLines.push("—");
+
+  const biologicalLines: string[] = [];
+  if (s4.proteins_with_string != null) biologicalLines.push(`${fmt(s4.proteins_with_string)} STRING`);
+  if (s4.proteins_with_kegg != null) biologicalLines.push(`${fmt(s4.proteins_with_kegg)} KEGG`);
+  if (biologicalLines.length === 0 && s4.total_rows != null) biologicalLines.push(`${fmt(s4.total_rows)} rows`);
+  if (biologicalLines.length === 0) biologicalLines.push("—");
+
+  const hasStep3 = s3.total_rows != null || s3.proteins_with_domains != null;
+  const hasStep4 = s4.total_rows != null || s4.proteins_with_string != null || s4.proteins_with_kegg != null;
+
+  const steps: { title: string; lines: string[]; done: boolean; iconIdx: number }[] = [
     {
       title: "Input Data",
       lines: [
@@ -100,12 +119,26 @@ function PipelineFlowCard({ stats }: { stats: PipelineStats }) {
         `${fmt(s1.total_protein_groups)} protein groups`,
       ],
       done: !!s1.total_precursors,
+      iconIdx: 0,
     },
     {
       title: "Quantification",
       lines: quantLines.length > 0 ? quantLines : ["—"],
       done: !!s2.ptm_filtering,
+      iconIdx: 1,
     },
+    ...(hasStep3 ? [{
+      title: "Enrichment",
+      lines: enrichmentLines,
+      done: true,
+      iconIdx: 2,
+    }] : []),
+    ...(hasStep4 ? [{
+      title: "Biological",
+      lines: biologicalLines,
+      done: true,
+      iconIdx: 3,
+    }] : []),
     {
       title: "Final Output",
       lines: [
@@ -113,6 +146,7 @@ function PipelineFlowCard({ stats }: { stats: PipelineStats }) {
         `${fmt(sf.total_columns)} columns`,
       ],
       done: !!sf.total_rows,
+      iconIdx: 4,
     },
   ];
 
@@ -127,11 +161,11 @@ function PipelineFlowCard({ stats }: { stats: PipelineStats }) {
       <CardContent>
         <div className="flex items-stretch gap-1 overflow-x-auto pb-2">
           {steps.map((step, i) => {
-            const Icon = STEP_ICONS[i];
+            const Icon = STEP_ICONS[step.iconIdx];
             return (
               <div key={i} className="flex items-center gap-1 min-w-0">
                 <div
-                  className={`rounded-lg border px-3 py-2.5 min-w-[130px] transition-opacity ${STEP_COLORS[i]} ${
+                  className={`rounded-lg border px-3 py-2.5 min-w-[130px] transition-opacity ${STEP_COLORS[step.iconIdx]} ${
                     step.done ? "opacity-100" : "opacity-40"
                   }`}
                 >
@@ -415,6 +449,69 @@ function QuantificationCard({ s2, ptmModeName }: { s2: Record<string, any>; ptmM
 
 
 /* ------------------------------------------------------------------ */
+/*  Step 3 Enrichment Card                                              */
+/* ------------------------------------------------------------------ */
+
+function EnrichmentCard({ s3 }: { s3: Record<string, any> }) {
+  return (
+    <Card className="border-emerald-200 dark:border-emerald-800">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-sm flex items-center gap-2">
+          <Layers className="h-4 w-4 text-emerald-500" />
+          Step 3 — Enrichment (Domain / Motif)
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="grid md:grid-cols-4 gap-4">
+          <StatValue label="Total Rows" value={s3.total_rows} />
+          <StatValue label="PTM Rows" value={s3.ptm_rows} />
+          <StatValue label="Proteins w/ Domains" value={s3.proteins_with_domains} />
+          <StatValue label="Sites w/ Motifs" value={s3.sites_with_motifs} />
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Step 4 Biological Card                                              */
+/* ------------------------------------------------------------------ */
+
+function BiologicalCard({ s4 }: { s4: Record<string, any> }) {
+  const uniprot = s4.uniprot_annotations ?? {};
+  return (
+    <Card className="border-violet-200 dark:border-violet-800">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-sm flex items-center gap-2">
+          <Dna className="h-4 w-4 text-violet-500" />
+          Step 4 — Biological Enrichment
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="grid md:grid-cols-4 gap-4">
+          <StatValue label="Total Rows" value={s4.total_rows} />
+          <StatValue label="Proteins w/ STRING" value={s4.proteins_with_string} />
+          <StatValue label="Proteins w/ KEGG" value={s4.proteins_with_kegg} />
+          <StatValue label="Unique Proteins" value={s4.unique_proteins} />
+        </div>
+        {Object.keys(uniprot).length > 0 && (
+          <div className="mt-4 pt-4 border-t">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">UniProt Annotations</p>
+            <div className="flex flex-wrap gap-2">
+              {Object.entries(uniprot).map(([k, v]) => (
+                <Badge key={k} variant="secondary" className="text-[10px] font-mono">
+                  {k.replace(/_/g, " ")}: {fmt(v as number)}
+                </Badge>
+              ))}
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /*  Final Output Card                                                  */
 /* ------------------------------------------------------------------ */
 
@@ -501,6 +598,8 @@ export function AnalysisStatisticsTab({ orderId }: { orderId: number }) {
 
   const s1 = stats.step1_input ?? {};
   const s2 = stats.step2_quantification ?? {};
+  const s3 = stats.step3_enrichment ?? {};
+  const s4 = stats.step4_biological ?? {};
   const sf = stats.final_output ?? {};
 
   return (
@@ -513,6 +612,12 @@ export function AnalysisStatisticsTab({ orderId }: { orderId: number }) {
 
       {/* Step 2: Quantification */}
       {Object.keys(s2).length > 0 && <QuantificationCard s2={s2} ptmModeName={stats.metadata?.ptm_mode_name} />}
+
+      {/* Step 3: Enrichment */}
+      {Object.keys(s3).length > 0 && <EnrichmentCard s3={s3} />}
+
+      {/* Step 4: Biological */}
+      {Object.keys(s4).length > 0 && <BiologicalCard s4={s4} />}
 
       {/* Final Output */}
       {Object.keys(sf).length > 0 && <FinalOutputCard sf={sf} />}

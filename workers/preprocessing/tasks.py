@@ -439,26 +439,57 @@ def run_preprocessing(self, order_id: int, config: dict):
 
             publish_progress(order_id, "preprocessing", "biological_enrichment", "completed", 90, "Biological enrichment complete")
 
-        # --- Pipeline Statistics: collect Final Output stats ---
+        # --- Pipeline Statistics: collect Step 3, Step 4 & Final Output stats ---
         try:
             import pandas as pd
+            enriched_path = order_output / enriched_output
             bio_path = order_output / bio_output
             stats_json_path = order_output / f"pipeline_statistics{file_suffix}.json"
-            if bio_path.exists() and stats_json_path.exists():
+            if stats_json_path.exists():
                 with open(stats_json_path, "r", encoding="utf-8") as f:
                     existing_stats = json.load(f)
-                bio_df = pd.read_csv(bio_path, sep="\t", low_memory=False)
-                unique_proteins = int(bio_df["Protein.Group"].nunique()) if "Protein.Group" in bio_df.columns else 0
-                conditions = int(bio_df["Condition"].nunique()) if "Condition" in bio_df.columns else 0
-                existing_stats["final_output"] = {
-                    "total_rows": len(bio_df),
-                    "total_columns": len(bio_df.columns),
-                    "unique_proteins": unique_proteins,
-                    "conditions": conditions,
-                }
+                # Step 3: Unified Enrichment (domain/motif)
+                if enriched_path.exists():
+                    try:
+                        unified_df = pd.read_csv(enriched_path, sep="\t", low_memory=False)
+                        s3 = {"total_rows": len(unified_df)}
+                        if "Has_PTM" in unified_df.columns:
+                            ptm_mask = unified_df["Has_PTM"].astype(str).str.lower().isin(["true", "1", "yes"])
+                            s3["ptm_rows"] = int(ptm_mask.sum())
+                            s3["non_ptm_rows"] = len(unified_df) - s3["ptm_rows"]
+                        if "Protein.Group" in unified_df.columns:
+                            s3["unique_proteins"] = int(unified_df["Protein.Group"].nunique())
+                        if "Domains" in unified_df.columns:
+                            s3["proteins_with_domains"] = int((unified_df["Domains"].notna() & (unified_df["Domains"] != "")).sum())
+                        if "Matched_Motifs" in unified_df.columns:
+                            s3["sites_with_motifs"] = int((unified_df["Matched_Motifs"].notna() & (unified_df["Matched_Motifs"] != "")).sum())
+                        existing_stats["step3_enrichment"] = s3
+                    except Exception as e:
+                        logger.warning(f"[Order {order_id}] Step 3 stats failed: {e}")
+                # Step 4 & Final Output: Biological Enrichment
+                if bio_path.exists():
+                    bio_df = pd.read_csv(bio_path, sep="\t", low_memory=False)
+                    unique_proteins = int(bio_df["Protein.Group"].nunique()) if "Protein.Group" in bio_df.columns else 0
+                    conditions = int(bio_df["Condition"].nunique()) if "Condition" in bio_df.columns else 0
+                    s4 = {"total_rows": len(bio_df), "unique_proteins": unique_proteins}
+                    uniprot_cols = ["Subcellular_Localization", "Protein_Function_Summary",
+                                     "GO_Biological_Process", "GO_Molecular_Function", "GO_Cellular_Component"]
+                    s4["uniprot_annotations"] = {c: int((bio_df[c].notna() & (bio_df[c] != "")).sum())
+                                                  for c in uniprot_cols if c in bio_df.columns}
+                    if "STRING_Interactors" in bio_df.columns:
+                        s4["proteins_with_string"] = int((bio_df["STRING_Interactors"].notna() & (bio_df["STRING_Interactors"] != "")).sum())
+                    if "KEGG_Pathways" in bio_df.columns:
+                        s4["proteins_with_kegg"] = int((bio_df["KEGG_Pathways"].notna() & (bio_df["KEGG_Pathways"] != "")).sum())
+                    existing_stats["step4_biological"] = s4
+                    existing_stats["final_output"] = {
+                        "total_rows": len(bio_df),
+                        "total_columns": len(bio_df.columns),
+                        "unique_proteins": unique_proteins,
+                        "conditions": conditions,
+                    }
                 with open(stats_json_path, "w", encoding="utf-8") as f:
                     json.dump(existing_stats, f, indent=2, ensure_ascii=False, default=str)
-                logger.info(f"[Order {order_id}] Pipeline statistics (Final Output) updated")
+                logger.info(f"[Order {order_id}] Pipeline statistics (Step 3-4, Final Output) updated")
         except Exception as stats_err:
             logger.warning(f"[Order {order_id}] Final Output statistics collection failed (non-fatal): {stats_err}")
 

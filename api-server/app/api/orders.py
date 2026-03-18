@@ -1335,22 +1335,27 @@ def _generate_statistics_from_outputs(order: Order, output_dir: Path, file_suffi
         enriched_path = output_dir / f"unified_protein_data_enriched{file_suffix}.tsv"
         if enriched_path.exists():
             en_df = pd.read_csv(enriched_path, sep="\t", low_memory=False)
-            stats["step3_enrichment"] = {
-                "total_rows": len(en_df),
-                "unique_proteins": int(en_df["Protein.Group"].nunique()) if "Protein.Group" in en_df.columns else 0,
-            }
+            s3 = {"total_rows": len(en_df), "unique_proteins": int(en_df["Protein.Group"].nunique()) if "Protein.Group" in en_df.columns else 0}
+            if "Domains" in en_df.columns:
+                s3["proteins_with_domains"] = int((en_df["Domains"].notna() & (en_df["Domains"] != "")).sum())
+            if "Matched_Motifs" in en_df.columns:
+                s3["sites_with_motifs"] = int((en_df["Matched_Motifs"].notna() & (en_df["Matched_Motifs"] != "")).sum())
+            stats["step3_enrichment"] = s3
 
         bio_path = output_dir / f"unified_protein_data_enriched_bio_enriched{file_suffix}.tsv"
         if bio_path.exists():
             bio_df = pd.read_csv(bio_path, sep="\t", low_memory=False)
-            stats["step4_biological"] = {
-                "total_rows": len(bio_df),
-                "unique_proteins": int(bio_df["Protein.Group"].nunique()) if "Protein.Group" in bio_df.columns else 0,
-            }
+            s4 = {"total_rows": len(bio_df), "unique_proteins": int(bio_df["Protein.Group"].nunique()) if "Protein.Group" in bio_df.columns else 0}
+            if "STRING_Interactors" in bio_df.columns:
+                s4["proteins_with_string"] = int((bio_df["STRING_Interactors"].notna() & (bio_df["STRING_Interactors"] != "")).sum())
+            if "KEGG_Pathways" in bio_df.columns:
+                s4["proteins_with_kegg"] = int((bio_df["KEGG_Pathways"].notna() & (bio_df["KEGG_Pathways"] != "")).sum())
+            stats["step4_biological"] = s4
             stats["final_output"] = {
                 "total_rows": len(bio_df),
                 "total_columns": len(bio_df.columns),
                 "unique_proteins": int(bio_df["Protein.Group"].nunique()) if "Protein.Group" in bio_df.columns else 0,
+                "conditions": int(bio_df["Condition"].nunique()) if "Condition" in bio_df.columns else 0,
             }
 
         if any(stats.get(k) for k in ("step1_input", "step2_quantification", "step3_enrichment", "step4_biological", "final_output")):
@@ -1508,8 +1513,8 @@ async def get_order_articles(
             position = ptm.get("PTM_Position") or ptm.get("position", "")
             ptm_type_label = ptm.get("PTM_Type") or ptm.get("ptm_type", "")
 
-            # Extract articles from enrichment data
-            enrichment = ptm.get("enrichment", {})
+            # Extract articles from enrichment data (rag_enrichment is the key used by RAG pipeline)
+            enrichment = ptm.get("rag_enrichment", {}) or ptm.get("enrichment", {})
             ptm_articles = enrichment.get("articles", [])
 
             # Also check recent_findings as fallback
