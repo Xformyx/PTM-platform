@@ -45,10 +45,13 @@ def run_editor(state: dict) -> dict:
         collected_references = state.get("collected_references", [])
         report = _compile_report(title, sections, hypotheses, network_analysis, context, questions, dr_results, collected_references)
 
-    # Save report
+    # Save report: [Order_name]_report_[YYMMDD_HHMM].md
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
-    report_file = output_path / "final_report.md"
+    order_code = output_path.name or "report"
+    ts = datetime.now().strftime("%y%m%d_%H%M")
+    report_base = f"{order_code}_report_{ts}"
+    report_file = output_path / f"{report_base}.md"
     report_file.write_text(report, encoding="utf-8")
     logger.info(f"Final report saved: {report_file}")
 

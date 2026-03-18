@@ -164,12 +164,36 @@ def run_report_generation(self, order_id: int, config: dict):
         except Exception as docx_err:
             logger.warning(f"[Order {order_id}] Word export skipped: {docx_err}")
 
+        # Convert report to HTML (interactive: ref links, article modal, zoom, sidebar)
+        try:
+            from common.markdown_to_html import convert_report_to_html
+            refs = final_state.get("collected_references") or []
+            for rpt_path in final_state.get("report_files", []):
+                if rpt_path and Path(rpt_path).exists() and rpt_path.endswith(".md"):
+                    html_out = convert_report_to_html(
+                        rpt_path,
+                        output_dir=str(order_output),
+                        references=refs,
+                        api_base_url="/api",
+                    )
+                    if html_out:
+                        logger.info(f"[Order {order_id}] HTML export: {Path(html_out).name}")
+                        break
+        except Exception as html_err:
+            logger.warning(f"[Order {order_id}] HTML export skipped: {html_err}")
+
         # Collect output files
         report_files = final_state.get("report_files", [])
         output_file_names = [Path(f).name for f in report_files if f]
         for f in order_output.glob("*.docx"):
             if f.name not in output_file_names:
                 output_file_names.append(f.name)
+        for rpt_path in final_state.get("report_files", []):
+            if rpt_path and str(rpt_path).endswith(".md"):
+                html_name = Path(rpt_path).stem + ".html"
+                if (order_output / html_name).exists() and html_name not in output_file_names:
+                    output_file_names.append(html_name)
+                break
 
         elapsed = round(time.time() - start_time, 1)
 
@@ -185,7 +209,7 @@ def run_report_generation(self, order_id: int, config: dict):
             },
         )
 
-        all_output_files = [f.name for f in order_output.iterdir() if f.is_file() and f.suffix in (".md", ".docx", ".json", ".tsv", ".txt", ".png")]
+        all_output_files = [f.name for f in order_output.iterdir() if f.is_file() and f.suffix in (".md", ".docx", ".html", ".json", ".tsv", ".txt", ".png")]
         result_data = {
             "report_files": output_file_names,
             "all_files": all_output_files,

@@ -1188,13 +1188,14 @@ async def download_order_file(
     media_type = "application/octet-stream"
     suffix = file_path.suffix.lower()
     image_suffixes = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif"}
-    is_image = suffix in image_suffixes
-    if is_image:
+    if suffix in image_suffixes:
         media_type = image_suffixes[suffix]
+    elif suffix == ".html":
+        media_type = "text/html; charset=utf-8"
 
     return FileResponse(
         path=str(file_path),
-        filename=None if is_image else filename,
+        filename=None if suffix in image_suffixes else filename,
         media_type=media_type,
     )
 

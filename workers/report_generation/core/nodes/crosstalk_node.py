@@ -1175,8 +1175,12 @@ Biological interpretation was supported by published review papers, textbooks, a
     except Exception as e:
         logger.warning(f"Post-processing failed: {e}")
 
-    # Save report
-    report_file = os.path.join(output_dir, "final_report.md")
+    # Save report: [Order_name]_report_[YYMMDD_HHMM].md
+    from datetime import datetime as _dt
+    order_code = os.path.basename(os.path.normpath(output_dir)) or "report"
+    ts = _dt.now().strftime("%y%m%d_%H%M")
+    report_base = f"{order_code}_report_{ts}"
+    report_file = os.path.join(output_dir, f"{report_base}.md")
     with open(report_file, "w", encoding="utf-8") as f:
         f.write(full_report)
     logger.info(f"Cross-talk report saved: {report_file}")
