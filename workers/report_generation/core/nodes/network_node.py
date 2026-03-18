@@ -32,29 +32,55 @@ CYTOSCAPE_HOST = os.getenv("CYTOSCAPE_HOST", "host.docker.internal")
 CYTOSCAPE_PORT = int(os.getenv("CYTOSCAPE_PORT", "1234"))
 
 # ---------------------------------------------------------------------------
-# Color palette aligned with cytoscape_network_pipeline_guide.md §4.3
+# Color palette v4.0 — User-requested color scheme
+#   PTM protein: Red gradient (intensity = |Log2FC|)
+#   Non-PTM protein: Green (up) / Purple (down) / Gray (unchanged)
+#   Kinase/Upstream regulator: Gold/Orange (distinct from both)
 # ---------------------------------------------------------------------------
 
 NODE_COLORS = {
-    "high_active": "#FF0000",       # Red — Log2FC > 1.0
-    "moderate_active": "#FF8C00",   # Dark Orange — 0 < Log2FC <= 1.0
-    "low_active": "#FFD700",        # Gold — weak activation
-    "inhibited": "#4169E1",         # Royal Blue — Log2FC < -1.0
-    "low_inhibited": "#87CEEB",     # Light Blue — -1 < Log2FC < 0
-    "non_ptm": "#90EE90",           # Light Green — Non-PTM protein (guide §4.3)
-    "neutral": "#C0C0C0",           # Silver — neutral
-    "missing": "#BDC3C7",           # Gray — missing data
+    # --- PTM protein states (red gradient) ---
+    "ptm_high_up": "#B71C1C",       # Dark Red — PTM Log2FC > 2.0
+    "ptm_up": "#E53935",            # Red — PTM 1.0 < Log2FC <= 2.0
+    "ptm_moderate_up": "#EF9A9A",   # Light Red — PTM 0 < Log2FC <= 1.0
+    "ptm_neutral": "#BDBDBD",       # Gray — PTM Log2FC ≈ 0
+    "ptm_moderate_down": "#EF9A9A", # Light Red — PTM -1.0 <= Log2FC < 0
+    "ptm_down": "#E53935",          # Red — PTM -2.0 <= Log2FC < -1.0
+    "ptm_high_down": "#B71C1C",     # Dark Red — PTM Log2FC < -2.0
+    # --- Non-PTM protein states (green/purple/gray) ---
+    "nonptm_up_strong": "#1B5E20",  # Dark Green — Non-PTM Log2FC > 1.5
+    "nonptm_up": "#43A047",         # Green — Non-PTM 0.5 < Log2FC <= 1.5
+    "nonptm_up_weak": "#A5D6A7",    # Light Green — Non-PTM 0 < Log2FC <= 0.5
+    "nonptm_neutral": "#9E9E9E",    # Gray — Non-PTM Log2FC ≈ 0
+    "nonptm_down_weak": "#CE93D8",  # Light Purple — Non-PTM -0.5 <= Log2FC < 0
+    "nonptm_down": "#8E24AA",       # Purple — Non-PTM -1.5 <= Log2FC < -0.5
+    "nonptm_down_strong": "#4A148C",# Dark Purple — Non-PTM Log2FC < -1.5
+    # --- Kinase / Upstream regulator ---
+    "kinase": "#FF8F00",            # Amber — Kinase/upstream regulator
+    "kinase_up": "#E65100",         # Deep Orange — Kinase with increased activity
+    "kinase_down": "#FFB74D",       # Light Orange — Kinase with decreased activity
+    # --- Legacy / fallback ---
+    "non_ptm": "#9E9E9E",           # Gray — fallback for Non-PTM without FC data
+    "neutral": "#BDBDBD",           # Gray — neutral
+    "missing": "#E0E0E0",           # Light Gray — missing data
+    # Legacy aliases for backward compatibility
+    "high_active": "#B71C1C",
+    "moderate_active": "#E53935",
+    "low_active": "#EF9A9A",
+    "inhibited": "#B71C1C",
+    "low_inhibited": "#E53935",
 }
 
 EDGE_COLORS = {
-    "STRING": "#808080",            # Gray — STRING-DB PPI (guide §4.3)
+    "STRING": "#808080",            # Gray — STRING-DB PPI
     "STRING-DB": "#808080",         # Alias
-    "KEGG": "#228B22",              # Forest Green — KEGG pathway (guide §4.3)
-    "KEA3": "#FF4500",              # Orange-Red — Kinase-substrate (guide §4.3)
+    "KEGG": "#228B22",              # Forest Green — KEGG pathway
+    "KEA3": "#FF4500",              # Orange-Red — Kinase-substrate
     "Shared Pathway": "#228B22",    # Same as KEGG
-    "Shared-Partner": "#8B008B",    # Purple — Shared interactor (Phase 2)
+    "Shared-Partner": "#8B008B",    # Purple — Shared interactor
+    "Shared-Regulator": "#FF6F00",  # Amber — Shared upstream regulator (v4.0 NEW)
     "Kinase-Substrate": "#FF4500",  # Same as KEA3
-    "BioGRID": "#1E90FF",              # Dodger Blue — BioGRID experimental PPI (v101)
+    "BioGRID": "#1E90FF",           # Dodger Blue — BioGRID experimental PPI
     "Kinase-Substrate-Predicted": "#D8BFD8",  # Light purple
     "Literature": "#E377C2",        # Pink
     "Co-activation": "#7F7F7F",     # Gray
@@ -63,13 +89,15 @@ EDGE_COLORS = {
     "default": "#95A5A6",          # Default gray
 }
 
-# Node shape mapping (guide §4.3)
+# Node shape mapping v4.0
+#   Proteins (PTM + Non-PTM) = Circle (ELLIPSE)
+#   Kinase / Upstream regulator = Diamond (DIAMOND)
 NODE_SHAPES = {
-    "PTM": "ELLIPSE",              # Circle for PTM sites
-    "Non-PTM": "DIAMOND",          # Diamond for Non-PTM proteins
-    "Kinase": "DIAMOND",           # Diamond for kinases (package version)
-    "Interactor": "ROUND_RECTANGLE",
-    "Pathway-Member": "HEXAGON",
+    "PTM": "ELLIPSE",              # Circle for PTM proteins
+    "Non-PTM": "ELLIPSE",          # Circle for Non-PTM proteins (v4.0: was DIAMOND)
+    "Kinase": "DIAMOND",           # Diamond for kinases / upstream regulators
+    "Interactor": "ELLIPSE",       # Circle for interactors (v4.0: was ROUND_RECTANGLE)
+    "Pathway-Member": "ELLIPSE",   # Circle (v4.0: was HEXAGON)
 }
 
 
@@ -77,10 +105,54 @@ NODE_SHAPES = {
 # Activation state classifier aligned with guide §7.1
 # ---------------------------------------------------------------------------
 
-def _classify_state(value: float) -> str:
-    """Classify PTM activation state based on Log2FC value.
-    Aligned with guide §7.1 get_activation_state().
+def _classify_state(value: float, node_type: str = "PTM") -> str:
+    """Classify node state based on Log2FC value and node type.
+    
+    v4.0: Separate color schemes for PTM, Non-PTM, and Kinase nodes.
+    - PTM: Red gradient (intensity = |Log2FC|)
+    - Non-PTM: Green (up) / Purple (down) / Gray (unchanged)
+    - Kinase: Amber gradient
     """
+    if value is None:
+        return "missing"
+    
+    if node_type == "Kinase":
+        if value > 0.5:
+            return "kinase_up"
+        elif value < -0.5:
+            return "kinase_down"
+        return "kinase"
+    
+    if node_type == "Non-PTM":
+        if value > 1.5:
+            return "nonptm_up_strong"
+        elif value > 0.5:
+            return "nonptm_up"
+        elif value > 0.1:
+            return "nonptm_up_weak"
+        elif value < -1.5:
+            return "nonptm_down_strong"
+        elif value < -0.5:
+            return "nonptm_down"
+        elif value < -0.1:
+            return "nonptm_down_weak"
+        return "nonptm_neutral"
+    
+    # PTM protein (red gradient) — state names kept backward-compatible
+    # with legacy names used in legends, stats, and report sections
+    if value > 1.0:
+        return "high_active"       # Dark Red — strong upregulation
+    elif value > 0.0:
+        return "moderate_active"   # Medium Red — moderate upregulation
+    elif value < -1.0:
+        return "inhibited"         # Dark Red (down) — strong downregulation
+    elif value < 0.0:
+        return "low_inhibited"     # Medium Red (down) — moderate downregulation
+    return "neutral"               # Light Gray — no change
+
+
+def _classify_state_legacy(value: float) -> str:
+    """Legacy classifier for backward compatibility."""
     if value is None:
         return "missing"
     if value > 1.0:
@@ -302,10 +374,11 @@ def _analyze_timepoint(
     all_ptm_nodes = []
     gene_ptms = defaultdict(list)  # gene -> [node_id, ...]
     ptm_genes = set()  # uppercase gene names
+    _kinase_substrates_tp = {}  # v4.0: kinase_name -> [substrate_ids] for Shared-Regulator edges
 
     for ptm in tp_ptms:
         fc = ptm.get("ptm_relative_log2fc", 0)
-        state = _classify_state(fc)
+        state = _classify_state(fc, "PTM")
         gene = ptm.get("gene", "Unknown")
         site = ptm.get("position", "")
         node_id = f"{gene}-{site}"
@@ -417,11 +490,12 @@ def _analyze_timepoint(
                         "site": "",
                         "type": "Non-PTM",
                         "value": 0,
-                        "state": "non_ptm",
+                        "state": _classify_state(0, "Non-PTM"),
                         "identified": True,
                         "label": partner_clean,
                         "source": "STRING",
                     }
+
 
         # --- BioGRID interactions (v101: NEW — experimental PPI evidence) ---
         biogrid_data = enr.get("biogrid", {})
@@ -481,7 +555,7 @@ def _analyze_timepoint(
                         "site": "",
                         "type": "Non-PTM",
                         "value": 0,
-                        "state": "non_ptm",
+                        "state": _classify_state(0, "Non-PTM"),
                         "identified": True,
                         "label": partner_clean,
                         "source": "BioGRID",
@@ -554,20 +628,38 @@ def _analyze_timepoint(
                     "pathway_str": "",
                 }
                 all_edges.append(edge)
-                # Register candidate Non-PTM kinase node
+                # Register candidate Non-PTM kinase node (v4.0: type=Kinase, shape=DIAMOND)
                 if kinase_upper not in seen_non_ptm_upper:
                     seen_non_ptm_upper.add(kinase_upper)
                     candidate_non_ptm[kinase_clean] = {
                         "id": kinase_clean,
                         "gene": kinase_clean,
                         "site": "",
-                        "type": "Non-PTM",
+                        "type": "Kinase",
                         "value": 0,
-                        "state": "non_ptm",
+                        "state": _classify_state(0, "Kinase"),
                         "identified": True,
                         "label": kinase_clean,
                         "source": "KEA3",
                     }
+                # v4.0: Track kinase->substrate for Shared-Regulator edges
+                if kinase_clean not in _kinase_substrates_tp:
+                    _kinase_substrates_tp[kinase_clean] = []
+                _kinase_substrates_tp[kinase_clean].append(source_id)
+
+    # v4.0: Add Shared-Regulator edges (PTM proteins sharing the same upstream kinase)
+    for kinase_name, substrates in _kinase_substrates_tp.items():
+        if len(substrates) >= 2:
+            for i in range(len(substrates)):
+                for j in range(i + 1, len(substrates)):
+                    all_edges.append({
+                        "source": substrates[i],
+                        "target": substrates[j],
+                        "evidence_type": "Shared-Regulator",
+                        "confidence": 0.6,
+                        "pathways": [],
+                        "pathway_str": f"via {kinase_name}",
+                    })
 
     # Deduplicate edges
     def _dedup_edges(edges):
@@ -640,10 +732,10 @@ def _build_network_data(parsed_ptms: list, enriched_data: list) -> dict:
     nodes = []
     edges = []
     gene_ptms = defaultdict(list)
-
+    _kinase_substrates = {}  # v4.0: kinase_name -> [substrate_ids]
     for ptm in parsed_ptms:
         fc = ptm.get("ptm_relative_log2fc", 0)
-        state = _classify_state(fc)
+        state = _classify_state(fc, "PTM")
         node_id = f"{ptm['gene']}-{ptm['position']}"
         nodes.append({
             "id": node_id,
@@ -723,12 +815,11 @@ def _build_network_data(parsed_ptms: list, enriched_data: list) -> dict:
                         "site": "",
                         "type": "Non-PTM",
                         "value": 0,
-                        "state": "non_ptm",
+                        "state": _classify_state(0, "Non-PTM"),
                         "label": partner_clean,
                         "source": "STRING",
                     }
-
-        # --- BioGRID interactions (v101: NEW — experimental PPI evidence) ---
+        # --- BioGRID interactions (v101: NEW — experimental PPI evidence) ----
         biogrid_data = enr.get("biogrid", {})
         biogrid_interactions = biogrid_data.get("interactions", []) if isinstance(biogrid_data, dict) else []
         for bg_int in biogrid_interactions:
@@ -774,12 +865,11 @@ def _build_network_data(parsed_ptms: list, enriched_data: list) -> dict:
                         "site": "",
                         "type": "Non-PTM",
                         "value": 0,
-                        "state": "non_ptm",
+                        "state": _classify_state(0, "Non-PTM"),
                         "label": partner_clean,
                         "source": "BioGRID",
                     }
-
-        # --- Shared pathway edges (KEGG) ---
+        # --- Shared pathway edges (KEGG) ----
         def _pw_str(p):
             return p.get("name", str(p)) if isinstance(p, dict) else str(p)
         pathways = enr.get("pathways", [])
@@ -824,7 +914,7 @@ def _build_network_data(parsed_ptms: list, enriched_data: list) -> dict:
                         "pathway_str": "",
                     })
             else:
-                # Kinase is Non-PTM (PHASE 1-B NEW)
+                # Kinase is Non-PTM (v4.0: type=Kinase, shape=DIAMOND)
                 edges.append({
                     "source": kinase_clean,
                     "target": source_id,
@@ -839,14 +929,32 @@ def _build_network_data(parsed_ptms: list, enriched_data: list) -> dict:
                         "id": kinase_clean,
                         "gene": kinase_clean,
                         "site": "",
-                        "type": "Non-PTM",
+                        "type": "Kinase",
                         "value": 0,
-                        "state": "non_ptm",
+                        "state": _classify_state(0, "Kinase"),
                         "label": kinase_clean,
                         "source": "KEA3",
                     }
+                # v4.0: Track kinase->substrate for Shared-Regulator edges
+                if kinase_clean not in _kinase_substrates:
+                    _kinase_substrates[kinase_clean] = []
+                _kinase_substrates[kinase_clean].append(source_id)
 
-    # Deduplicate edges
+    # v4.0: Add Shared-Regulator edges (PTM proteins sharing the same upstream kinase)
+    for kinase_name, substrates in _kinase_substrates.items():
+        if len(substrates) >= 2:
+            for i in range(len(substrates)):
+                for j in range(i + 1, len(substrates)):
+                    edges.append({
+                        "source": substrates[i],
+                        "target": substrates[j],
+                        "evidence_type": "Shared-Regulator",
+                        "confidence": 0.6,
+                        "pathways": [],
+                        "pathway_str": f"via {kinase_name}",
+                    })
+
+    # Deduplicate edgess
     seen = set()
     unique_edges = []
     for e in edges:
@@ -924,7 +1032,7 @@ def _build_network_results_for_writer(
                         "gene": n["gene"],
                         "value": n.get("value", 0),
                         "protein_log2fc": n.get("protein_log2fc", n.get("value", 0)),
-                        "state": "non_ptm",
+                        "state": n.get("state", _classify_state(n.get("value", 0), n.get("type", "Non-PTM"))),
                         "source": n.get("source", "STRING"),
                     }
                     for n in tp_data.get("non_ptm_nodes", [])
@@ -998,21 +1106,25 @@ def _generate_legends(
         f"**{len(non_ptm_nodes)} Non-PTM proteins**, and **{len(edges)} interaction edges**.\n"
     )
 
-    # Color Legend (guide §5.2 section 3)
+     # Color Legend v4.0
     legend_lines.append("**Node Color Legend**:")
-    legend_lines.append(f"- Red ({NODE_COLORS['high_active']}): High activation (Log2FC > 1.0)")
-    legend_lines.append(f"- Orange ({NODE_COLORS['moderate_active']}): Moderate activation (0 < Log2FC ≤ 1.0)")
-    legend_lines.append(f"- Gold ({NODE_COLORS['low_active']}): Weak activation")
-    legend_lines.append(f"- Blue ({NODE_COLORS['inhibited']}): Inhibited (Log2FC < -1.0)")
-    legend_lines.append(f"- Light Green ({NODE_COLORS['non_ptm']}): Non-PTM protein")
-    legend_lines.append(f"- Gray ({NODE_COLORS['neutral']}): Neutral")
+    legend_lines.append("*PTM Proteins (Red gradient — intensity = |Log2FC|):*")
+    legend_lines.append(f"- Dark Red ({NODE_COLORS['high_active']}): Strong change (|Log2FC| > 1.0)")
+    legend_lines.append(f"- Red ({NODE_COLORS['moderate_active']}): Moderate change (0 < |Log2FC| ≤ 1.0)")
+    legend_lines.append(f"- Gray ({NODE_COLORS['neutral']}): No significant change")
     legend_lines.append("")
-
-    # Node Shape Legend (guide §5.2 section 4)
+    legend_lines.append("*Non-PTM Proteins (control-relative abundance):*")
+    legend_lines.append(f"- Green ({NODE_COLORS['nonptm_up']}): Increased vs control")
+    legend_lines.append(f"- Purple ({NODE_COLORS['nonptm_down']}): Decreased vs control")
+    legend_lines.append(f"- Gray ({NODE_COLORS['nonptm_neutral']}): No significant change")
+    legend_lines.append("")
+    legend_lines.append("*Kinase / Upstream Regulators:*")
+    legend_lines.append(f"- Amber ({NODE_COLORS['kinase']}): Kinase / upstream regulator")
+    legend_lines.append("")
+    # Node Shape Legend v4.0
     legend_lines.append("**Node Shape Legend**:")
-    legend_lines.append("- Circle (ELLIPSE): PTM modification sites")
-    legend_lines.append("- Diamond: Non-PTM proteins / Kinases")
-    legend_lines.append("- Hexagon: Pathway members")
+    legend_lines.append("- Circle (ELLIPSE): Proteins (PTM + Non-PTM)")
+    legend_lines.append("- Diamond (DIAMOND): Kinase / Upstream regulators")
     legend_lines.append("")
 
     # Node Size Legend (Phase 2: updated range)
@@ -1347,7 +1459,7 @@ def _generate_cytoscape_networks(
                 "site": "",
                 "type": "Non-PTM",
                 "value": 0,
-                "state": "non_ptm",
+                "state": _classify_state(0, "Non-PTM"),
                 "label": mid,
             })
             logger.debug(f"[CYTO-GEN] Added missing node for edge reference: {mid}")
@@ -1407,7 +1519,7 @@ def _generate_cytoscape_networks(
                 for mid in tp_missing:
                     tp_connected.append({
                         "id": mid, "gene": mid, "site": "", "type": "Non-PTM",
-                        "value": 0, "state": "non_ptm", "label": mid,
+                        "value": 0, "state": _classify_state(0, "Non-PTM"), "label": mid,
                     })
 
                 if not tp_connected:
@@ -1614,12 +1726,14 @@ def _apply_visual_style(p4c, network_suid: int, network_name: str, nodes: list):
                     "BioGRID",
                     "KEGG", "Shared Pathway", "Shared-Partner",
                     "Kinase-Substrate-Predicted",
+                    "Shared-Regulator",
                 ],
                 line_styles=[
                     "SOLID", "SOLID", "SOLID", "SOLID",
                     "SOLID",
                     "LONG_DASH", "LONG_DASH", "LONG_DASH",
                     "DOT",
+                    "EQUAL_DASH",
                 ],
                 mapping_type="d",
                 style_name=style_name,
