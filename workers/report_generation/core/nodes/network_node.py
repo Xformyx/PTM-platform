@@ -2,7 +2,7 @@
 Network Node — temporal PTM signaling network analysis + Cytoscape visualization.
 Ported from multi_agent_system/agents/network_analyzer.py and ptm_network_automation.py.
 
-v5.3 — Fix PTM proteins missing from pathway graph (wrong field name):
+v5.4 — Add try-except safety net to run_network_analysis to prevent pipeline failure:
   - Root cause: parsed_ptms uses 'ptm_relative_log2fc' not 'log2fc' or 'Log2FC'
   - Step 1 now reads correct field names from both parsed_ptms and enriched_data
   - Also checks condition_data for multi-timepoint Log2FC values
@@ -1864,6 +1864,31 @@ def run_network_analysis(state: dict) -> dict:
     if cb:
         cb(55, "Analyzing signaling networks")
 
+    try:
+        return _run_network_analysis_inner(state)
+    except Exception as net_err:
+        logger.error(f"[NET-NODE] run_network_analysis failed: {net_err}", exc_info=True)
+        if cb:
+            cb(65, f"Network analysis failed: {net_err}")
+        return {
+            "network_analysis": {
+                "network_data": {"nodes": [], "edges": []},
+                "legends": {},
+                "cytoscape_connected": False,
+                "network_images": {},
+                "pathway_graph_path": None,
+                "ptm_count": 0,
+                "timepoint_results": {},
+                "timepoints": [],
+                "validation": {"is_valid": False, "total_nodes": 0, "total_edges": 0, "orphan_nodes": 0},
+            },
+            "network_results": {},
+        }
+
+
+def _run_network_analysis_inner(state: dict) -> dict:
+    """Inner implementation of run_network_analysis."""
+    cb = state.get("progress_callback")
     parsed_ptms = state.get("parsed_ptms", [])
     enriched_data = state.get("enriched_ptm_data", [])
     output_dir = state.get("output_dir", "/tmp")
@@ -1926,9 +1951,14 @@ def run_network_analysis(state: dict) -> dict:
         cb(63, "Generating pathway distribution graph")
 
     # v5.1: Generate Canonical Pathway Distribution Bar Graph (activated only)
-    pathway_graph_path = _generate_pathway_distribution_graph(
-        parsed_ptms, enriched_data, network_data, output_dir
-    )
+    pathway_graph_path = None
+    try:
+        pathway_graph_path = _generate_pathway_distribution_graph(
+            parsed_ptms, enriched_data, network_data, output_dir
+        )
+    except Exception as pw_err:
+        logger.error(f"[NET-NODE] Pathway distribution graph failed: {pw_err}", exc_info=True)
+        pathway_graph_path = None
 
     if cb:
         cb(65, f"Network analysis complete (Cytoscape: {cytoscape_connected})")
