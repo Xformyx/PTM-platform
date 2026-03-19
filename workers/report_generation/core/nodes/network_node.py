@@ -2,6 +2,11 @@
 Network Node — temporal PTM signaling network analysis + Cytoscape visualization.
 Ported from multi_agent_system/agents/network_analyzer.py and ptm_network_automation.py.
 
+v5.2 — Pathway distribution Non-PTM fix:
+  - Fixed: Non-PTM proteins were excluded because they lack Protein_Log2FC data
+  - Now includes ALL connected Non-PTM proteins (they are biologically relevant by interaction)
+  - Three-method pathway assignment: KEGG edges, activated PTM inheritance, all PTM inheritance
+  - Comprehensive logging for debugging pathway assignment counts
 v5.1 — Pathway distribution fix + Activated-only filter:
   - Non-PTM proteins now get pathway assignments via KEGG edges + PTM partner inheritance
   - Only activated proteins (Log2FC > 0) included in pathway distribution graph
@@ -1608,34 +1613,31 @@ def _generate_pathway_distribution_graph(
                 pathway_proteins[pw_name]["ptm"].add(gene)
                 activated_ptm_pathways[gene].add(pw_name)
 
-    # ---- Step 4: Identify activated Non-PTM proteins ----
-    # Collect all Non-PTM nodes from network_data
+    # ---- Step 4: Collect ALL connected Non-PTM proteins from network_data ----
+    # Note: Non-PTM proteins don't have their own Protein_Log2FC (they are interaction
+    # partners, not in the original PTM dataset). We include ALL connected Non-PTM
+    # proteins regardless of FC value, since their presence in the network already
+    # indicates biological relevance through interaction with PTM proteins.
     non_ptm_nodes_in_network = set()
     nodes = network_data.get("nodes", [])
     for node in nodes:
         if node.get("type") == "Non-PTM":
             node_gene = node.get("gene", node.get("id", "")).strip().upper()
             if node_gene:
-                # Filter: only activated Non-PTM (Protein_Log2FC > 0)
-                node_val = 0.0
-                try:
-                    node_val = float(node.get("value", 0))
-                except (ValueError, TypeError):
-                    pass
-                if node_val == 0.0:
-                    # Fallback to gene_protein_fc lookup
-                    node_val = gene_protein_fc.get(node_gene, 0.0)
-                if node_val > 0:
-                    non_ptm_nodes_in_network.add(node_gene)
+                non_ptm_nodes_in_network.add(node_gene)
 
     logger.info(
         f"[NET-NODE] Pathway graph: activated PTM genes={len(activated_ptm_genes)}, "
-        f"activated Non-PTM genes={len(non_ptm_nodes_in_network)}"
+        f"connected Non-PTM genes={len(non_ptm_nodes_in_network)}"
     )
 
     # ---- Step 5: Assign pathways to Non-PTM proteins ----
-    # Method A: From KEGG edges in network_data
     edges = network_data.get("edges", [])
+    kegg_assigned = set()   # track Non-PTM genes assigned via KEGG edges
+    string_assigned = set() # track Non-PTM genes assigned via STRING/BioGRID inheritance
+
+    # Method A: From KEGG edges in network_data
+    # (KEGG edges are typically PTM↔PTM, but check anyway)
     for edge in edges:
         if edge.get("evidence_type") != "KEGG":
             continue
@@ -1653,10 +1655,14 @@ def _generate_pathway_distribution_graph(
                 continue
             if src_gene in non_ptm_nodes_in_network:
                 pathway_proteins[pw_name]["non_ptm"].add(src_gene)
+                kegg_assigned.add(src_gene)
             if tgt_gene in non_ptm_nodes_in_network:
                 pathway_proteins[pw_name]["non_ptm"].add(tgt_gene)
+                kegg_assigned.add(tgt_gene)
 
     # Method B: Inherit pathways from PTM interaction partners via STRING/BioGRID edges
+    # This is the primary mechanism: if a Non-PTM protein interacts with an activated
+    # PTM protein that has KEGG pathways, the Non-PTM inherits those pathways.
     for edge in edges:
         ev_type = edge.get("evidence_type", "")
         if ev_type not in ("STRING", "BioGRID"):
@@ -1666,14 +1672,58 @@ def _generate_pathway_distribution_graph(
         src_gene = src.split("-")[0] if "-" in src else src
         tgt_gene = tgt.split("-")[0] if "-" in tgt else tgt
 
-        # If one end is activated PTM and the other is activated Non-PTM,
+        # If one end is activated PTM (with pathways) and the other is Non-PTM,
         # assign the PTM's pathways to the Non-PTM
         if src_gene in activated_ptm_pathways and tgt_gene in non_ptm_nodes_in_network:
             for pw_name in activated_ptm_pathways[src_gene]:
                 pathway_proteins[pw_name]["non_ptm"].add(tgt_gene)
+            string_assigned.add(tgt_gene)
         if tgt_gene in activated_ptm_pathways and src_gene in non_ptm_nodes_in_network:
             for pw_name in activated_ptm_pathways[tgt_gene]:
                 pathway_proteins[pw_name]["non_ptm"].add(src_gene)
+            string_assigned.add(src_gene)
+
+    # Method C: For Non-PTM proteins not yet assigned, check if they interact with
+    # ANY PTM protein (not just activated ones) that has pathway data.
+    # This broadens coverage for Non-PTM proteins.
+    all_ptm_pathways: Dict[str, set] = defaultdict(set)
+    for ptm_data in enriched_data:
+        gene = (ptm_data.get("gene") or ptm_data.get("Gene.Name", "")).strip().upper()
+        if not gene:
+            continue
+        enr = ptm_data.get("rag_enrichment", {})
+        pathways = enr.get("pathways", [])
+        for pw in pathways:
+            pw_name = _pw_name(pw)
+            if pw_name:
+                all_ptm_pathways[gene].add(pw_name)
+
+    for edge in edges:
+        ev_type = edge.get("evidence_type", "")
+        if ev_type not in ("STRING", "BioGRID"):
+            continue
+        src = edge.get("source", "").strip().upper()
+        tgt = edge.get("target", "").strip().upper()
+        src_gene = src.split("-")[0] if "-" in src else src
+        tgt_gene = tgt.split("-")[0] if "-" in tgt else tgt
+
+        if src_gene in all_ptm_pathways and tgt_gene in non_ptm_nodes_in_network:
+            if tgt_gene not in string_assigned and tgt_gene not in kegg_assigned:
+                for pw_name in all_ptm_pathways[src_gene]:
+                    pathway_proteins[pw_name]["non_ptm"].add(tgt_gene)
+                string_assigned.add(tgt_gene)
+        if tgt_gene in all_ptm_pathways and src_gene in non_ptm_nodes_in_network:
+            if src_gene not in string_assigned and src_gene not in kegg_assigned:
+                for pw_name in all_ptm_pathways[tgt_gene]:
+                    pathway_proteins[pw_name]["non_ptm"].add(src_gene)
+                string_assigned.add(src_gene)
+
+    total_assigned = kegg_assigned | string_assigned
+    logger.info(
+        f"[NET-NODE] Pathway assignment: KEGG-assigned={len(kegg_assigned)}, "
+        f"STRING/BioGRID-inherited={len(string_assigned)}, "
+        f"total Non-PTM with pathways={len(total_assigned)} / {len(non_ptm_nodes_in_network)}"
+    )
 
     if not pathway_proteins:
         logger.warning("No pathway data found — skipping pathway distribution graph")
@@ -1716,7 +1766,7 @@ def _generate_pathway_distribution_graph(
                        label="Activated PTM Proteins", color="#E74C3C", alpha=0.85,
                        edgecolor="white", linewidth=0.5)
     bars_non = ax.barh(y_pos - bar_height / 2, non_ptm_counts, bar_height,
-                       label="Activated Non-PTM Proteins", color="#2ECC71", alpha=0.85,
+                       label="Non-PTM Interactor Proteins", color="#2ECC71", alpha=0.85,
                        edgecolor="white", linewidth=0.5)
 
     # Truncate long pathway names
@@ -1730,7 +1780,7 @@ def _generate_pathway_distribution_graph(
     ax.set_yticks(y_pos)
     ax.set_yticklabels(display_names, fontsize=9)
     ax.set_xlabel("Number of Proteins", fontsize=11, fontweight="bold")
-    ax.set_title("Canonical Pathway Distribution: Activated PTM vs Non-PTM Proteins",
+    ax.set_title("Canonical Pathway Distribution: Activated PTM vs Non-PTM Interactor Proteins",
                  fontsize=13, fontweight="bold", pad=15)
     ax.legend(loc="lower right", fontsize=10, framealpha=0.9)
     ax.xaxis.set_major_locator(ticker.MaxNLocator(integer=True))
@@ -2683,15 +2733,16 @@ def generate_network_figure_section(network_analysis: dict) -> str:
         pw_path_obj = Path(pathway_graph_path)
         if pw_path_obj.exists() and pw_path_obj.stat().st_size > 1000:
             pw_img_ref = pw_path_obj.name
-            section += f"### Figure {figure_num}. Canonical Pathway Distribution of Activated PTM and Non-PTM Proteins\n\n"
+            section += f"### Figure {figure_num}. Canonical Pathway Distribution of Activated PTM and Non-PTM Interactor Proteins\n\n"
             section += f"![Canonical Pathway Distribution]({pw_img_ref})\n\n"
             section += (
                 f"**Figure Legend:** This bar graph illustrates the distribution of **activated** PTM proteins (red, Log2FC > 0) "
-                f"and **activated** Non-PTM interactor proteins (green, Protein_Log2FC > 0) across canonical signaling pathways "
-                f"identified via KEGG pathway analysis. Non-PTM proteins are assigned to pathways through shared KEGG edges "
-                f"and interaction-based pathway inheritance from their PTM partners. Pathways are ranked by total protein count. "
-                f"The co-occurrence of activated PTM and Non-PTM proteins within the same pathway suggests "
-                f"coordinated upregulation of signaling cascades.\n\n"
+                f"and Non-PTM interactor proteins (green) across canonical signaling pathways "
+                f"identified via KEGG pathway analysis. Non-PTM proteins are assigned to pathways through "
+                f"interaction-based pathway inheritance from their PTM partners (STRING/BioGRID edges). "
+                f"Pathways are ranked by total protein count. "
+                f"The co-occurrence of PTM and Non-PTM proteins within the same pathway suggests "
+                f"coordinated regulation of signaling cascades.\n\n"
             )
             section += "---\n\n"
             figure_num += 1
