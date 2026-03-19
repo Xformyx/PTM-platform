@@ -6,6 +6,7 @@ import {
   Layers, Settings2, ChevronRight, X,
 } from "lucide-react";
 import { api } from "@/lib/api";
+import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -108,6 +109,7 @@ function FileTypeIcon({ type }: { type: string }) {
 export default function RagCollectionDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { isAdmin } = useAuth();
   const [collection, setCollection] = useState<CollectionDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
@@ -477,18 +479,20 @@ export default function RagCollectionDetail() {
                         <TooltipProvider>
                           <Tooltip>
                             <TooltipTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-7 w-7 text-muted-foreground hover:text-red-500"
-                                onClick={() => {
-                                  setDocToDelete(doc);
-                                  setDeleteDialogOpen(true);
-                                }}
-                                disabled={doc.status === "processing"}
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </Button>
+                              {isAdmin && (
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-7 w-7 text-muted-foreground hover:text-red-500"
+                                  onClick={() => {
+                                    setDocToDelete(doc);
+                                    setDeleteDialogOpen(true);
+                                  }}
+                                  disabled={doc.status === "processing"}
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </Button>
+                              )}
                             </TooltipTrigger>
                             <TooltipContent>Delete</TooltipContent>
                           </Tooltip>

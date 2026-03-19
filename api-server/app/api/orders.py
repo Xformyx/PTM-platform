@@ -99,15 +99,23 @@ async def list_orders(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    query = select(Order).order_by(Order.created_at.desc())
+    base_query = select(Order).order_by(Order.created_at.desc())
     if status_filter:
-        query = query.where(Order.status == status_filter)
-    query = query.offset((page - 1) * page_size).limit(page_size)
+        base_query = base_query.where(Order.status == status_filter)
+    # Non-admin users can only see their own orders
+    if getattr(user, "role", "admin") != "admin":
+        base_query = base_query.where(Order.user_id == user.id)
 
+    query = base_query.offset((page - 1) * page_size).limit(page_size)
     result = await db.execute(query)
     orders = result.scalars().all()
 
-    count_result = await db.execute(select(sqlfunc.count(Order.id)))
+    count_query = select(sqlfunc.count(Order.id))
+    if status_filter:
+        count_query = count_query.where(Order.status == status_filter)
+    if getattr(user, "role", "admin") != "admin":
+        count_query = count_query.where(Order.user_id == user.id)
+    count_result = await db.execute(count_query)
     total = count_result.scalar()
 
     return {
@@ -132,6 +140,12 @@ async def list_orders(
     }
 
 
+def _check_order_access(order, user):
+    """Raise 403 if non-admin user tries to access another user's order."""
+    if getattr(user, "role", "admin") != "admin" and order.user_id != user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to access this order")
+
+
 @router.get("/{order_id}")
 async def get_order(
     order_id: int,
@@ -142,6 +156,7 @@ async def get_order(
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+    _check_order_access(order, user)
 
     return {
         "id": order.id,
@@ -189,6 +204,7 @@ async def update_order_options(
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+    _check_order_access(order, user)
     if order.status not in ("pending", "completed", "failed", "cancelled"):
         raise HTTPException(
             status_code=400,
@@ -434,6 +450,7 @@ async def start_order(
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+    _check_order_access(order, user)
     if order.status not in ("pending", "failed", "completed", "cancelled"):
         raise HTTPException(
             status_code=400, detail=f"Cannot start order in '{order.status}' status"
@@ -698,6 +715,7 @@ async def run_stage(
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+    _check_order_access(order, user)
 
     if order.status not in ("completed", "failed"):
         raise HTTPException(
@@ -868,6 +886,7 @@ async def cancel_order(
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+    _check_order_access(order, user)
 
     running_statuses = ("queued", "running", "preprocessing", "rag_enrichment", "report_generation")
     if order.status not in running_statuses:
@@ -895,6 +914,7 @@ async def delete_order(
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+    _check_order_access(order, user)
 
     if order.status not in ("pending", "completed", "failed", "cancelled"):
         raise HTTPException(
@@ -1124,6 +1144,7 @@ async def get_file_details(
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+    _check_order_access(order, user)
 
     output_dir = Path(settings.OUTPUT_DIR) / order.order_code
     if not output_dir.exists():

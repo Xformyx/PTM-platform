@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Library, FileText, Layers, Database, Plus, Loader2, Power, PowerOff, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
+import { useAuth } from "@/contexts/AuthContext";
 import type { RagCollection } from "@/lib/types";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -25,6 +26,7 @@ import { cn } from "@/lib/utils";
 
 export default function RagManagement() {
   const navigate = useNavigate();
+  const { isAdmin } = useAuth();
   const [collections, setCollections] = useState<RagCollection[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -149,18 +151,20 @@ export default function RagManagement() {
                         )}
                       </button>
                       <Badge variant="secondary">{c.tier}</Badge>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setCollectionToDelete(c);
-                          setDeleteDialogOpen(true);
-                        }}
-                        title="Delete collection"
-                        className="p-1 rounded hover:bg-red-500/10 text-muted-foreground hover:text-red-500 transition-colors"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
+                      {isAdmin && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setCollectionToDelete(c);
+                            setDeleteDialogOpen(true);
+                          }}
+                          title="Delete collection"
+                          className="p-1 rounded hover:bg-red-500/10 text-muted-foreground hover:text-red-500 transition-colors"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      )}
                     </div>
                   </div>
                   {c.description && (

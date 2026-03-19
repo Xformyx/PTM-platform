@@ -1,14 +1,27 @@
 const API_BASE = '/api';
+const TOKEN_KEY = 'ptm-token';
+
+function getAuthHeader(): Record<string, string> {
+  const token = localStorage.getItem(TOKEN_KEY);
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const url = `${API_BASE}${path}`;
   const res = await fetch(url, {
     headers: {
       'Content-Type': 'application/json',
+      ...getAuthHeader(),
       ...options?.headers,
     },
     ...options,
   });
+
+  if (res.status === 401) {
+    localStorage.removeItem(TOKEN_KEY);
+    window.location.href = '/login';
+    throw new Error('Unauthorized');
+  }
 
   if (!res.ok) {
     const error = await res.json().catch(() => ({ detail: res.statusText }));
@@ -44,6 +57,7 @@ export const api = {
   upload: async <T>(path: string, formData: FormData): Promise<T> => {
     const res = await fetch(`${API_BASE}${path}`, {
       method: 'POST',
+      headers: { ...getAuthHeader() },
       body: formData,
     });
     if (!res.ok) {

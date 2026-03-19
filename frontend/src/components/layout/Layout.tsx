@@ -5,11 +5,12 @@ import { Menu } from "lucide-react";
 import Sidebar from "./Sidebar";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
-import { ThemeToggle } from "@/components/theme-toggle";
+import { useAuth } from "@/contexts/AuthContext";
 
 export default function Layout() {
   const location = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const { user } = useAuth();
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
@@ -38,10 +39,12 @@ export default function Layout() {
           </Button>
           <div className="flex-1" />
           <div className="flex items-center gap-2">
-            <ThemeToggle />
-            <div className="h-7 w-7 rounded-full bg-primary/10 flex items-center justify-center text-xs font-medium text-primary">
-              P
+            <div className="h-7 w-7 rounded-full bg-primary/10 flex items-center justify-center text-xs font-semibold text-primary select-none">
+              {user?.name?.charAt(0).toUpperCase() ?? "U"}
             </div>
+            <span className="hidden sm:block text-sm font-medium text-muted-foreground max-w-[120px] truncate">
+              {user?.name}
+            </span>
           </div>
         </header>
 

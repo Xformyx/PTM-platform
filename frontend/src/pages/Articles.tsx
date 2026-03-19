@@ -19,6 +19,7 @@ import {
   Tag,
 } from "lucide-react";
 import { api } from "@/lib/api";
+import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -113,6 +114,7 @@ function formatCachedAt(cachedAt?: string): string {
 }
 
 export default function Articles() {
+  const { isAdmin } = useAuth();
   const [articles, setArticles] = useState<CachedArticle[]>([]);
   const [stats, setStats] = useState<CacheStats | null>(null);
   const [loading, setLoading] = useState(true);
@@ -242,15 +244,17 @@ export default function Articles() {
             <RefreshCw className="h-4 w-4 mr-2" />
             Refresh
           </Button>
-          <Button
-            variant="destructive"
-            size="sm"
-            onClick={() => setClearConfirm(true)}
-            disabled={!stats || stats.total_articles === 0}
-          >
-            <Trash2 className="h-4 w-4 mr-2" />
-            Clear All
-          </Button>
+          {isAdmin && (
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => setClearConfirm(true)}
+              disabled={!stats || stats.total_articles === 0}
+            >
+              <Trash2 className="h-4 w-4 mr-2" />
+              Clear All
+            </Button>
+          )}
         </div>
       </div>
 
@@ -588,17 +592,19 @@ export default function Articles() {
                             </TooltipProvider>
                           </TableCell>
                           <TableCell>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setDeleteTarget(article);
-                              }}
-                            >
-                              <Trash2 className="h-4 w-4 text-destructive" />
-                            </Button>
+                            {isAdmin && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setDeleteTarget(article);
+                                }}
+                              >
+                                <Trash2 className="h-4 w-4 text-destructive" />
+                              </Button>
+                            )}
                           </TableCell>
                         </motion.tr>
                       );

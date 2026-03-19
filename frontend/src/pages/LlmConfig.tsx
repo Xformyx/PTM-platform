@@ -4,6 +4,7 @@ import {
   Thermometer, Hash, Download, Trash2, AlertCircle, HardDrive, X,
 } from "lucide-react";
 import { api } from "@/lib/api";
+import { useAuth } from "@/contexts/AuthContext";
 import type { LlmModel } from "@/lib/types";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -36,6 +37,7 @@ function formatSize(bytes: number): string {
 }
 
 export default function LlmConfig() {
+  const { isAdmin } = useAuth();
   const [models, setModels] = useState<LlmModel[]>([]);
   const [ollamaModels, setOllamaModels] = useState<OllamaModel[]>([]);
   const [loading, setLoading] = useState(true);
@@ -249,16 +251,18 @@ export default function LlmConfig() {
                           ) : (
                             <Badge variant="secondary" className="text-[10px]">Not synced</Badge>
                           )}
-                          <Button
-                            variant="ghost" size="icon"
-                            className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity text-destructive hover:text-destructive"
-                            onClick={() => handleDelete(m.name)}
-                            disabled={deletingModel === m.name}
-                          >
-                            {deletingModel === m.name
-                              ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                              : <Trash2 className="h-3.5 w-3.5" />}
-                          </Button>
+                          {isAdmin && (
+                            <Button
+                              variant="ghost" size="icon"
+                              className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity text-destructive hover:text-destructive"
+                              onClick={() => handleDelete(m.name)}
+                              disabled={deletingModel === m.name}
+                            >
+                              {deletingModel === m.name
+                                ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                : <Trash2 className="h-3.5 w-3.5" />}
+                            </Button>
+                          )}
                         </div>
                       </div>
                       <Separator className="mb-3" />
