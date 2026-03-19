@@ -75,6 +75,12 @@ services:
       context: ./api-server
       dockerfile: Dockerfile
     container_name: ptm-api-server
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/api/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
     env_file:
       - .env
     volumes:
@@ -258,6 +264,12 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     container_name: ptm-frontend
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:80/"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
     networks:
       - ptm-network
     restart: unless-stopped
@@ -274,8 +286,10 @@ services:
     networks:
       - ptm-network
     depends_on:
-      - api-server
-      - frontend
+      api-server:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
     restart: unless-stopped
 
 networks:
