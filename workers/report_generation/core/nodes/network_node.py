@@ -2,6 +2,11 @@
 Network Node — temporal PTM signaling network analysis + Cytoscape visualization.
 Ported from multi_agent_system/agents/network_analyzer.py and ptm_network_automation.py.
 
+v5.3 — Fix PTM proteins missing from pathway graph (wrong field name):
+  - Root cause: parsed_ptms uses 'ptm_relative_log2fc' not 'log2fc' or 'Log2FC'
+  - Step 1 now reads correct field names from both parsed_ptms and enriched_data
+  - Also checks condition_data for multi-timepoint Log2FC values
+  - Added Step 1 logging to track activated PTM gene count
 v5.2 — Pathway distribution Non-PTM fix:
   - Fixed: Non-PTM proteins were excluded because they lack Protein_Log2FC data
   - Now includes ALL connected Non-PTM proteins (they are biologically relevant by interaction)
@@ -1554,8 +1559,12 @@ def _generate_pathway_distribution_graph(
         return None
 
     # ---- Step 1: Identify activated PTM genes and their pathways ----
+    # Note: parsed_ptms uses 'ptm_relative_log2fc' (from context_loader),
+    # while enriched_data (raw JSON) uses 'PTM_Relative_Log2FC' or 'ptm_relative_log2fc'.
+    # For multi-condition data, condition_data may contain per-timepoint Log2FC values.
     ptm_genes = set()  # ALL PTM genes (for Non-PTM identification)
     activated_ptm_genes = set()  # Only activated PTM genes
+    # First pass: from parsed_ptms (has normalized field names)
     for ptm in parsed_ptms:
         gene = (ptm.get("gene") or ptm.get("Gene.Name", "")).strip().upper()
         if not gene:
@@ -1563,11 +1572,35 @@ def _generate_pathway_distribution_graph(
         ptm_genes.add(gene)
         log2fc = 0.0
         try:
-            log2fc = float(ptm.get("log2fc") or ptm.get("Log2FC", 0))
+            # parsed_ptms field: ptm_relative_log2fc (set by context_loader)
+            log2fc = float(ptm.get("ptm_relative_log2fc") or ptm.get("PTM_Relative_Log2FC", 0))
+        except (ValueError, TypeError):
+            pass
+        # Also check condition_data for multi-timepoint: use max absolute value
+        if log2fc == 0.0:
+            for cd in ptm.get("condition_data", []):
+                try:
+                    cd_fc = float(cd.get("PTM_Log2FC") or cd.get("ptm_log2fc") or cd.get("Log2FC", 0))
+                    if abs(cd_fc) > abs(log2fc):
+                        log2fc = cd_fc
+                except (ValueError, TypeError):
+                    pass
+        if log2fc > 0:
+            activated_ptm_genes.add(gene)
+    # Second pass: from enriched_data (raw JSON, may have different field names)
+    for ed in enriched_data:
+        gene = (ed.get("gene") or ed.get("Gene.Name", "")).strip().upper()
+        if not gene or gene in activated_ptm_genes:
+            continue
+        ptm_genes.add(gene)
+        log2fc = 0.0
+        try:
+            log2fc = float(ed.get("PTM_Relative_Log2FC") or ed.get("ptm_relative_log2fc", 0))
         except (ValueError, TypeError):
             pass
         if log2fc > 0:
             activated_ptm_genes.add(gene)
+    logger.info(f"[NET-NODE] Pathway graph Step1: total PTM genes={len(ptm_genes)}, activated={len(activated_ptm_genes)}")
 
     # ---- Step 2: Build gene -> Protein_Log2FC lookup for Non-PTM filtering ----
     gene_protein_fc: Dict[str, float] = {}
