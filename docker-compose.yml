@@ -265,7 +265,7 @@ services:
       dockerfile: Dockerfile
     container_name: ptm-frontend
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:80/"]
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:80/"]
       interval: 5s
       timeout: 3s
       retries: 3
@@ -290,6 +290,13 @@ services:
         condition: service_healthy
       frontend:
         condition: service_healthy
+    # Reload nginx when upstream IPs change (e.g. after container restarts)
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1/api/health || (nginx -s reload && exit 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
     restart: unless-stopped
 
 networks:

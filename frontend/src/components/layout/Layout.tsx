@@ -10,12 +10,17 @@ import { useAuth } from "@/contexts/AuthContext";
 export default function Layout() {
   const location = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const { user } = useAuth();
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
       {/* Desktop Sidebar */}
-      <Sidebar className="hidden lg:flex" />
+      <Sidebar
+        className="hidden lg:flex"
+        collapsed={sidebarCollapsed}
+        onToggle={() => setSidebarCollapsed((v) => !v)}
+      />
 
       {/* Mobile Sidebar */}
       <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
@@ -50,7 +55,7 @@ export default function Layout() {
 
         {/* Page Content */}
         <main className="flex-1 overflow-y-auto">
-          <div className="mx-auto max-w-7xl p-6">
+          <div className="w-full p-6">
             <AnimatePresence mode="wait">
               <motion.div
                 key={location.pathname}

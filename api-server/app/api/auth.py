@@ -126,7 +126,7 @@ async def list_users(
             "role": u.role,
             "is_active": u.is_active,
             "must_change_password": u.must_change_password,
-            "created_at": u.created_at.isoformat(),
+            "created_at": u.created_at.isoformat() + "Z",
         }
         for u in users
     ]

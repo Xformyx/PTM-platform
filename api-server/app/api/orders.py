@@ -130,7 +130,9 @@ async def list_orders(
                 "progress_pct": float(o.progress_pct),
                 "current_stage": o.current_stage,
                 "stage_detail": o.stage_detail,
-                "created_at": o.created_at.isoformat(),
+                "error_message": o.error_message,
+                "created_at": o.created_at.isoformat() + "Z",
+                "completed_at": o.completed_at.isoformat() + "Z" if o.completed_at else None,
             }
             for o in orders
         ],
@@ -178,9 +180,9 @@ async def get_order(
         "error_message": order.error_message,
         "cross_talk_data": order.cross_talk_data,
         "signal_propagation_data": order.signal_propagation_data,
-        "started_at": order.started_at.isoformat() if order.started_at else None,
-        "completed_at": order.completed_at.isoformat() if order.completed_at else None,
-        "created_at": order.created_at.isoformat(),
+        "started_at": order.started_at.isoformat() + "Z" if order.started_at else None,
+        "completed_at": order.completed_at.isoformat() + "Z" if order.completed_at else None,
+        "created_at": order.created_at.isoformat() + "Z",
     }
 
 
@@ -585,6 +587,7 @@ async def generate_questions(
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+    _check_order_access(order, user)
 
     output_dir = Path(os.getenv("OUTPUT_DIR", "/app/data/outputs")) / order.order_code
 
@@ -637,6 +640,7 @@ async def get_order_questions(
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+    _check_order_access(order, user)
 
     report_opts = order.report_options or {}
     return {
@@ -662,6 +666,7 @@ async def save_order_questions(
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+    _check_order_access(order, user)
 
     report_opts = dict(order.report_options or {})
     report_opts["research_questions"] = body.research_questions
@@ -952,6 +957,12 @@ async def get_order_logs(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
+    order_result = await db.execute(select(Order).where(Order.id == order_id))
+    order = order_result.scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    _check_order_access(order, user)
+
     query = select(OrderLog).where(OrderLog.order_id == order_id)
     if stage:
         query = query.where(OrderLog.stage == stage)
@@ -970,7 +981,7 @@ async def get_order_logs(
                 "progress_pct": float(log.progress_pct) if log.progress_pct else None,
                 "message": log.message,
                 "duration_ms": log.duration_ms,
-                "created_at": log.created_at.isoformat(),
+                "created_at": log.created_at.isoformat() + "Z",
             }
             for log in logs
         ]
@@ -994,6 +1005,7 @@ async def get_vector_plots(
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+    _check_order_access(order, user)
 
     output_dir = Path(settings.OUTPUT_DIR) / order.order_code
     if not output_dir.exists():
@@ -1021,6 +1033,7 @@ async def get_vector_plot_data(
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+    _check_order_access(order, user)
 
     output_dir = Path(settings.OUTPUT_DIR) / order.order_code
     if not output_dir.exists():
@@ -1195,6 +1208,7 @@ async def download_order_file(
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+    _check_order_access(order, user)
 
     output_dir = Path(settings.OUTPUT_DIR) / order.order_code
     file_path = output_dir / filename
@@ -1237,6 +1251,7 @@ async def preview_order_file(
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+    _check_order_access(order, user)
 
     output_dir = Path(settings.OUTPUT_DIR) / order.order_code
     file_path = output_dir / filename
@@ -1290,6 +1305,7 @@ async def delete_order_file(
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+    _check_order_access(order, user)
 
     ext = Path(filename).suffix.lower()
     if ext not in {".md", ".docx", ".html"}:
@@ -1484,6 +1500,7 @@ async def get_order_statistics(
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+    _check_order_access(order, user)
 
     output_dir = Path(settings.OUTPUT_DIR) / order.order_code
     if not output_dir.exists():
@@ -1559,6 +1576,7 @@ async def get_order_articles(
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+    _check_order_access(order, user)
 
     output_dir = Path(_settings.OUTPUT_DIR) / order.order_code
 

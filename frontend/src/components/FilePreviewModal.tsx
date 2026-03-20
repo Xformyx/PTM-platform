@@ -25,11 +25,48 @@ interface Props {
   filename: string;
 }
 
-const PREVIEWABLE = new Set(["md", "txt", "tsv", "csv", "json", "log"]);
+const TEXT_PREVIEWABLE = new Set(["md", "txt", "tsv", "csv", "json", "log"]);
+const IMAGE_PREVIEWABLE = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg"]);
 
-function isPreviewable(filename: string): boolean {
+function getFileKind(filename: string): "text" | "image" | "none" {
   const ext = filename.split(".").pop()?.toLowerCase() || "";
-  return PREVIEWABLE.has(ext);
+  if (TEXT_PREVIEWABLE.has(ext)) return "text";
+  if (IMAGE_PREVIEWABLE.has(ext)) return "image";
+  return "none";
+}
+
+function ImageViewer({ orderId, filename }: { orderId: number; filename: string }) {
+  const [src, setSrc] = useState<string | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let url = "";
+    api.fetchBlobUrl(`/orders/${orderId}/files/${encodeURIComponent(filename)}`)
+      .then((blobUrl) => { url = blobUrl; setSrc(blobUrl); })
+      .catch((e) => setError(e.message || "Failed to load image"));
+    return () => { if (url) URL.revokeObjectURL(url); };
+  }, [orderId, filename]);
+
+  if (error) return (
+    <div className="flex items-center gap-2 py-10 justify-center text-destructive">
+      <AlertCircle className="h-5 w-5" />
+      <span className="text-sm">{error}</span>
+    </div>
+  );
+  if (!src) return (
+    <div className="flex items-center justify-center py-20">
+      <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+    </div>
+  );
+  return (
+    <div className="flex items-center justify-center min-h-[200px]">
+      <img
+        src={src}
+        alt={filename}
+        className="max-w-full max-h-[65vh] object-contain rounded-lg shadow"
+      />
+    </div>
+  );
 }
 
 function formatBytes(bytes: number): string {
@@ -148,11 +185,11 @@ export default function FilePreviewModal({ open, onClose, orderId, filename }: P
   const [preview, setPreview] = useState<PreviewData | null>(null);
 
   const ext = filename.split(".").pop()?.toLowerCase() || "";
-  const canPreview = isPreviewable(filename);
+  const fileKind = getFileKind(filename);
 
   useEffect(() => {
     if (!open || !filename) return;
-    if (!canPreview) return;
+    if (fileKind !== "text") return;
 
     setLoading(true);
     setError("");
@@ -162,15 +199,10 @@ export default function FilePreviewModal({ open, onClose, orderId, filename }: P
       .then((d) => setPreview(d))
       .catch((e) => setError(e.message || "Failed to load file"))
       .finally(() => setLoading(false));
-  }, [open, orderId, filename, canPreview]);
+  }, [open, orderId, filename, fileKind]);
 
   const handleDownload = () => {
-    const link = document.createElement("a");
-    link.href = `/api/orders/${orderId}/files/${encodeURIComponent(filename)}`;
-    link.download = filename;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    api.downloadFile(`/orders/${orderId}/files/${encodeURIComponent(filename)}`, filename);
   };
 
   const renderContent = () => {
@@ -235,7 +267,11 @@ export default function FilePreviewModal({ open, onClose, orderId, filename }: P
             </div>
           )}
 
-          {!canPreview && (
+          {fileKind === "image" && open && (
+            <ImageViewer orderId={orderId} filename={filename} />
+          )}
+
+          {fileKind === "none" && (
             <div className="flex flex-col items-center gap-4 py-16">
               <FileText className="h-12 w-12 text-muted-foreground" />
               <p className="text-sm text-muted-foreground">

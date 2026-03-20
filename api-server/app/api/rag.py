@@ -79,7 +79,7 @@ async def list_collections(
                 "document_count": c.document_count,
                 "chunk_count": c.chunk_count,
                 "is_active": c.is_active,
-                "created_at": c.created_at.isoformat(),
+                "created_at": c.created_at.isoformat() + "Z",
             }
             for c in collections
         ]
@@ -172,7 +172,7 @@ async def get_collection(
                 "chunk_count": d.chunk_count,
                 "status": d.status,
                 "error_message": d.error_message,
-                "created_at": d.created_at.isoformat(),
+                "created_at": d.created_at.isoformat() + "Z",
             }
             for d in documents
         ],

@@ -573,7 +573,8 @@ function ResultFiles({
     });
   };
 
-  const downloadUrl = (filename: string) => `/api/orders/${orderId}/files/${encodeURIComponent(filename)}`;
+  const handleDownload = (filename: string) =>
+    api.downloadFile(`/orders/${orderId}/files/${encodeURIComponent(filename)}`, filename);
 
   const FolderPathBadge = () =>
     hostDir ? (
@@ -694,14 +695,13 @@ function ResultFiles({
                   </Button>
                 </TableCell>
                 <TableCell className="text-center">
-                  <a
-                    href={downloadUrl(f)}
-                    download={f}
+                  <button
+                    onClick={() => handleDownload(f)}
                     className="inline-flex items-center justify-center h-7 px-2 rounded-md hover:bg-muted transition-colors"
                     title="Download"
                   >
                     <Download className="h-3.5 w-3.5" />
-                  </a>
+                  </button>
                 </TableCell>
                 {showDelete && (
                   <TableCell className="text-center">
@@ -1494,7 +1494,8 @@ function VectorPlotTab({ orderId, singleTimePoint }: { orderId: number; singleTi
     );
   }
 
-  const downloadUrl = (filename: string) => `/api/orders/${orderId}/files/${encodeURIComponent(filename)}`;
+  const handleDownload = (filename: string) =>
+    api.downloadFile(`/orders/${orderId}/files/${encodeURIComponent(filename)}`, filename);
 
   return (
     <div className="space-y-6">
@@ -1530,14 +1531,13 @@ function VectorPlotTab({ orderId, singleTimePoint }: { orderId: number; singleTi
                   <p className="text-xs text-muted-foreground mb-2">Download static report (PNG)</p>
                   <div className="flex flex-wrap gap-2">
                     {files.map((f) => (
-                      <a
+                      <button
                         key={f}
-                        href={downloadUrl(f)}
-                        download={f}
+                        onClick={() => handleDownload(f)}
                         className="text-xs text-primary hover:underline flex items-center gap-1"
                       >
                         <Download className="h-3 w-3" /> {f}
-                      </a>
+                      </button>
                     ))}
                   </div>
                 </div>

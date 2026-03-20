@@ -17,8 +17,14 @@ import {
   Monitor,
   Shield,
   UserPlus,
+  Users,
+  RotateCcw,
+  Loader2,
+  ChevronLeft,
+  ChevronRight,
   type LucideIcon,
 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
 import ResourceMonitor from "@/components/layout/ResourceMonitor";
@@ -58,7 +64,7 @@ const mainNav: NavItem[] = [
   { path: "/articles", label: "Article Cache", icon: BookOpen },
 ];
 
-function NavItemLink({ item }: { item: NavItem }) {
+function NavItemLink({ item, collapsed = false }: { item: NavItem; collapsed?: boolean }) {
   const location = useLocation();
   const Icon = item.icon;
   const isActive = item.end
@@ -66,10 +72,11 @@ function NavItemLink({ item }: { item: NavItem }) {
     : location.pathname.startsWith(item.path);
 
   return (
-    <NavLink key={item.path} to={item.path} end={item.end}>
+    <NavLink key={item.path} to={item.path} end={item.end} title={collapsed ? item.label : undefined}>
       <div
         className={cn(
-          "group relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
+          "group relative flex items-center rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
+          collapsed ? "justify-center" : "gap-3",
           isActive
             ? "bg-primary/10 text-primary"
             : "text-muted-foreground hover:bg-accent hover:text-foreground"
@@ -83,7 +90,7 @@ function NavItemLink({ item }: { item: NavItem }) {
           />
         )}
         <Icon className="h-4 w-4 shrink-0" />
-        <span>{item.label}</span>
+        {!collapsed && <span>{item.label}</span>}
       </div>
     </NavLink>
   );
@@ -307,13 +314,128 @@ function CreateUserModal({ open, onClose }: { open: boolean; onClose: () => void
   );
 }
 
-function UserProfileSection() {
+interface ManagedUser {
+  id: number;
+  email: string;
+  name: string;
+  role: string;
+  is_active: boolean;
+  must_change_password: boolean;
+}
+
+function ManageUsersModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [users, setUsers] = useState<ManagedUser[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [resetting, setResetting] = useState<number | null>(null);
+  const [message, setMessage] = useState<{ id: number; text: string; ok: boolean } | null>(null);
+
+  const loadUsers = async () => {
+    setLoading(true);
+    try {
+      const data = await api.get<ManagedUser[]>("/auth/users");
+      setUsers(data);
+    } catch {
+      // ignore
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleReset = async (u: ManagedUser) => {
+    setResetting(u.id);
+    setMessage(null);
+    try {
+      await api.patch(`/auth/users/${u.id}`, { password: "ptm1234" });
+      setMessage({ id: u.id, text: "Reset to ptm1234", ok: true });
+    } catch (err: unknown) {
+      setMessage({ id: u.id, text: err instanceof Error ? err.message : "Failed", ok: false });
+    } finally {
+      setResetting(null);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
+      <DialogContent className="max-w-lg" onOpenAutoFocus={() => loadUsers()}>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Users className="h-4 w-4" />
+            Manage Users
+          </DialogTitle>
+          <DialogDescription>
+            Reset any user's password to the temporary password{" "}
+            <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs font-semibold">ptm1234</code>.
+            The user must change it on next login.
+          </DialogDescription>
+        </DialogHeader>
+
+        {loading ? (
+          <div className="flex justify-center py-8">
+            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+          </div>
+        ) : (
+          <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
+            {users.map((u) => (
+              <div
+                key={u.id}
+                className="flex items-center gap-3 rounded-lg border px-3 py-2.5"
+              >
+                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
+                  {u.name.charAt(0).toUpperCase()}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <p className="text-sm font-medium truncate">{u.name}</p>
+                    <Badge variant={u.role === "admin" ? "default" : "secondary"} className="text-[10px] h-4 px-1">
+                      {u.role === "admin" ? "Admin" : "User"}
+                    </Badge>
+                    {u.must_change_password && (
+                      <Badge variant="outline" className="text-[10px] h-4 px-1 text-amber-600 border-amber-400">
+                        pw change required
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-muted-foreground truncate">{u.email}</p>
+                  {message?.id === u.id && (
+                    <p className={`text-[11px] mt-0.5 ${message.ok ? "text-green-600 dark:text-green-400" : "text-destructive"}`}>
+                      {message.text}
+                    </p>
+                  )}
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 text-xs shrink-0"
+                  onClick={() => handleReset(u)}
+                  disabled={resetting === u.id}
+                >
+                  {resetting === u.id ? (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <><RotateCcw className="h-3 w-3 mr-1" />Reset PW</>
+                  )}
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="flex justify-end pt-1">
+          <Button variant="outline" size="sm" onClick={onClose}>Close</Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function UserProfileSection({ collapsed = false }: { collapsed?: boolean }) {
   const { user, isAdmin, logout } = useAuth();
   const { theme, setTheme } = useTheme();
   const navigate = useNavigate();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [createUserOpen, setCreateUserOpen] = useState(false);
+  const [manageUsersOpen, setManageUsersOpen] = useState(false);
 
   const handleLogout = () => {
     logout();
@@ -325,6 +447,32 @@ function UserProfileSection() {
     { value: "dark", label: "Dark", icon: Moon },
     { value: "system", label: "System", icon: Monitor },
   ];
+
+  if (collapsed) {
+    return (
+      <>
+        <Separator />
+        <div className="flex flex-col items-center gap-1 py-3">
+          <div
+            className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/15 text-xs font-semibold text-primary cursor-default"
+            title={`${user?.name} (${isAdmin ? "Admin" : "User"})`}
+          >
+            {user?.name?.charAt(0).toUpperCase() ?? "U"}
+          </div>
+          <button
+            onClick={handleLogout}
+            title="Sign Out"
+            className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
+          >
+            <LogOut className="h-3.5 w-3.5" />
+          </button>
+        </div>
+        <ChangePasswordModal open={passwordOpen} onClose={() => setPasswordOpen(false)} />
+        <CreateUserModal open={createUserOpen} onClose={() => setCreateUserOpen(false)} />
+        <ManageUsersModal open={manageUsersOpen} onClose={() => setManageUsersOpen(false)} />
+      </>
+    );
+  }
 
   return (
     <>
@@ -383,13 +531,22 @@ function UserProfileSection() {
             {/* Actions */}
             <div className="space-y-1">
               {isAdmin && (
-                <button
-                  onClick={() => { setCreateUserOpen(true); setSettingsOpen(false); }}
-                  className="w-full flex items-center gap-2 rounded-md px-2 py-1.5 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-                >
-                  <UserPlus className="h-3 w-3" />
-                  Create User
-                </button>
+                <>
+                  <button
+                    onClick={() => { setCreateUserOpen(true); setSettingsOpen(false); }}
+                    className="w-full flex items-center gap-2 rounded-md px-2 py-1.5 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                  >
+                    <UserPlus className="h-3 w-3" />
+                    Create User
+                  </button>
+                  <button
+                    onClick={() => { setManageUsersOpen(true); setSettingsOpen(false); }}
+                    className="w-full flex items-center gap-2 rounded-md px-2 py-1.5 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                  >
+                    <Users className="h-3 w-3" />
+                    Manage Users
+                  </button>
+                </>
               )}
               <button
                 onClick={() => { setPasswordOpen(true); setSettingsOpen(false); }}
@@ -412,46 +569,73 @@ function UserProfileSection() {
 
       <ChangePasswordModal open={passwordOpen} onClose={() => setPasswordOpen(false)} />
       <CreateUserModal open={createUserOpen} onClose={() => setCreateUserOpen(false)} />
+      <ManageUsersModal open={manageUsersOpen} onClose={() => setManageUsersOpen(false)} />
     </>
   );
 }
 
-export default function Sidebar({ className }: { className?: string }) {
+interface SidebarProps {
+  className?: string;
+  collapsed?: boolean;
+  onToggle?: () => void;
+}
+
+export default function Sidebar({ className, collapsed = false, onToggle }: SidebarProps) {
   const { isAdmin } = useAuth();
 
   return (
-    <aside className={cn("flex h-screen w-64 flex-col border-r", className)} style={{ background: "hsl(var(--sidebar))", color: "hsl(var(--sidebar-foreground))" }}>
-      {/* Logo */}
-      <div className="flex items-center gap-3 px-6 py-5">
-        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary">
+    <aside
+      className={cn(
+        "flex h-screen flex-col border-r transition-all duration-300 overflow-hidden",
+        collapsed ? "w-[60px]" : "w-64",
+        className
+      )}
+      style={{ background: "hsl(var(--sidebar))", color: "hsl(var(--sidebar-foreground))" }}
+    >
+      {/* Logo + toggle */}
+      <div className={cn("flex items-center py-5 shrink-0", collapsed ? "justify-center px-0" : "gap-3 px-4")}>
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary">
           <FlaskConical className="h-5 w-5 text-primary-foreground" />
         </div>
-        <div>
-          <h1 className="text-base font-semibold tracking-tight">PTM Platform</h1>
-          <p className="text-[11px] text-muted-foreground">Analysis & Report System</p>
-        </div>
+        {!collapsed && (
+          <div className="flex-1 min-w-0">
+            <h1 className="text-base font-semibold tracking-tight">PTM Platform</h1>
+            <p className="text-[11px] text-muted-foreground">Analysis & Report System</p>
+          </div>
+        )}
+        <button
+          onClick={onToggle}
+          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          className={cn(
+            "flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors",
+            collapsed && "mt-1"
+          )}
+        >
+          {collapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronLeft className="h-3.5 w-3.5" />}
+        </button>
       </div>
 
       <Separator />
 
       {/* Navigation */}
-      <nav className="flex-1 min-h-0 overflow-y-auto space-y-1 px-3 py-4">
+      <nav className="flex-1 min-h-0 overflow-y-auto space-y-1 px-2 py-4">
         {mainNav.map((item) => (
-          <NavItemLink key={item.path} item={item} />
+          <NavItemLink key={item.path} item={item} collapsed={collapsed} />
         ))}
       </nav>
 
-      {/* Resource Monitor — admin only */}
-      {isAdmin && <ResourceMonitor />}
+      {/* Resource Monitor — admin only, hidden when collapsed */}
+      {isAdmin && !collapsed && <ResourceMonitor />}
 
       {/* System Monitor — admin only */}
       {isAdmin && (
-        <div className="px-3 py-2">
-          <NavLink to="/system-monitor">
+        <div className="px-2 py-1">
+          <NavLink to="/system-monitor" title={collapsed ? "System Monitor" : undefined}>
             {({ isActive }) => (
               <div
                 className={cn(
-                  "relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
+                  "relative flex items-center rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
+                  collapsed ? "justify-center" : "gap-3",
                   isActive
                     ? "bg-primary/10 text-primary"
                     : "text-muted-foreground hover:bg-accent hover:text-foreground"
@@ -464,8 +648,8 @@ export default function Sidebar({ className }: { className?: string }) {
                     transition={{ type: "spring", stiffness: 400, damping: 30 }}
                   />
                 )}
-                <Activity className="h-4 w-4" />
-                <span>System Monitor</span>
+                <Activity className="h-4 w-4 shrink-0" />
+                {!collapsed && <span>System Monitor</span>}
               </div>
             )}
           </NavLink>
@@ -476,12 +660,13 @@ export default function Sidebar({ className }: { className?: string }) {
       {isAdmin && (
         <>
           <Separator />
-          <div className="px-3 py-2">
-            <NavLink to="/settings">
+          <div className="px-2 py-2">
+            <NavLink to="/settings" title={collapsed ? "Settings" : undefined}>
               {({ isActive }) => (
                 <div
                   className={cn(
-                    "relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
+                    "relative flex items-center rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
+                    collapsed ? "justify-center" : "gap-3",
                     isActive
                       ? "bg-primary/10 text-primary"
                       : "text-muted-foreground hover:bg-accent hover:text-foreground"
@@ -494,8 +679,8 @@ export default function Sidebar({ className }: { className?: string }) {
                       transition={{ type: "spring", stiffness: 400, damping: 30 }}
                     />
                   )}
-                  <Settings className="h-4 w-4" />
-                  <span>Settings</span>
+                  <Settings className="h-4 w-4 shrink-0" />
+                  {!collapsed && <span>Settings</span>}
                 </div>
               )}
             </NavLink>
@@ -504,7 +689,7 @@ export default function Sidebar({ className }: { className?: string }) {
       )}
 
       {/* User profile */}
-      <UserProfileSection />
+      <UserProfileSection collapsed={collapsed} />
     </aside>
   );
 }

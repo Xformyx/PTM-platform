@@ -66,4 +66,44 @@ export const api = {
     }
     return res.json();
   },
+
+  /** Fetch a binary resource with auth header and return an object URL for display */
+  fetchBlobUrl: async (path: string): Promise<string> => {
+    const res = await fetch(`${API_BASE}${path}`, {
+      headers: { ...getAuthHeader() },
+    });
+    if (res.status === 401) {
+      localStorage.removeItem(TOKEN_KEY);
+      window.location.href = '/login';
+      throw new Error('Unauthorized');
+    }
+    if (!res.ok) throw new Error(`Failed to load: ${res.status}`);
+    const blob = await res.blob();
+    return URL.createObjectURL(blob);
+  },
+
+  /** Fetch a file with auth header and trigger browser download */
+  downloadFile: async (path: string, filename: string): Promise<void> => {
+    const res = await fetch(`${API_BASE}${path}`, {
+      headers: { ...getAuthHeader() },
+    });
+    if (res.status === 401) {
+      localStorage.removeItem(TOKEN_KEY);
+      window.location.href = '/login';
+      throw new Error('Unauthorized');
+    }
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(error.detail || `Download failed: ${res.status}`);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  },
 };

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
-import { PlusCircle, ClipboardList, Play, ChevronDown, AlertCircle, Trash2, Square } from "lucide-react";
+import { PlusCircle, ClipboardList, Play, ChevronDown, ChevronUp, ChevronsUpDown, AlertCircle, Trash2, Square } from "lucide-react";
 import { api } from "@/lib/api";
 import type { Order } from "@/lib/types";
 import { Card, CardContent } from "@/components/ui/card";
@@ -19,6 +19,18 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
+function fmtDate(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  const fmt = new Intl.DateTimeFormat("ko-KR", {
+    timeZone: "Asia/Seoul",
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", hour12: false,
+  });
+  // "2026. 03. 19. 23:45" → "2026.03.19 23:45"
+  return fmt.format(d).replace(/\.\s*/g, ".").replace(/\.$/, "").replace(/(\d{4}\.\d{2}\.\d{2})\.(\d{2}:\d{2})/, "$1 $2");
+}
+
 const statusBadgeVariant = (s: string) => {
   switch (s) {
     case "completed": return "success" as const;
@@ -29,6 +41,15 @@ const statusBadgeVariant = (s: string) => {
 };
 
 type StatusFilter = "all" | "pending" | "running" | "completed" | "failed";
+type SortField = "created_at" | "completed_at";
+type SortDir = "asc" | "desc";
+
+function SortIcon({ field, sort }: { field: SortField; sort: { field: SortField; dir: SortDir } | null }) {
+  if (!sort || sort.field !== field) return <ChevronsUpDown className="h-3 w-3 ml-1 opacity-40" />;
+  return sort.dir === "asc"
+    ? <ChevronUp className="h-3 w-3 ml-1 text-primary" />
+    : <ChevronDown className="h-3 w-3 ml-1 text-primary" />;
+}
 
 export default function OrderList() {
   const navigate = useNavigate();
@@ -36,6 +57,7 @@ export default function OrderList() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<StatusFilter>("all");
+  const [sort, setSort] = useState<{ field: SortField; dir: SortDir } | null>({ field: "created_at", dir: "desc" });
   const [expandedError, setExpandedError] = useState<number | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ id: number; order_code: string } | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -87,7 +109,29 @@ export default function OrderList() {
   };
 
   const isRunning = (s: string) => ["running", "preprocessing", "rag_enrichment", "report_generation", "queued"].includes(s);
-  const filtered = filter === "all" ? orders : orders.filter((o) => (filter === "running" ? isRunning(o.status) : o.status === filter));
+
+  const handleSort = (field: SortField) => {
+    setSort((prev) =>
+      prev?.field === field
+        ? { field, dir: prev.dir === "asc" ? "desc" : "asc" }
+        : { field, dir: "desc" }
+    );
+  };
+
+  const filtered = (() => {
+    let list = filter === "all" ? orders : orders.filter((o) =>
+      filter === "running" ? isRunning(o.status) : o.status === filter
+    );
+    if (sort) {
+      list = [...list].sort((a, b) => {
+        const va = a[sort.field] ? new Date(a[sort.field]!).getTime() : 0;
+        const vb = b[sort.field] ? new Date(b[sort.field]!).getTime() : 0;
+        return sort.dir === "asc" ? va - vb : vb - va;
+      });
+    }
+    return list;
+  })();
+
   const filters: StatusFilter[] = ["all", "pending", "running", "completed", "failed"];
 
   if (loading) {
@@ -131,9 +175,20 @@ export default function OrderList() {
 
       {/* Table */}
       <Card>
-        <CardContent className="p-0">
+        <CardContent className="p-0 overflow-x-auto">
           {filtered.length > 0 ? (
-            <Table>
+            <Table className="w-full table-fixed">
+              <colgroup>
+                <col className="w-[14%]" />
+                <col className="w-[18%]" />
+                <col className="w-[10%]" />
+                <col className="w-[10%]" />
+                <col className="w-[10%]" />
+                <col className="w-[14%]" />
+                <col className="w-[12%]" />
+                <col className="w-[12%]" />
+                <col className="w-[10%]" />
+              </colgroup>
               <TableHeader>
                 <TableRow>
                   <TableHead>Order ID</TableHead>
@@ -142,8 +197,23 @@ export default function OrderList() {
                   <TableHead>Species</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Progress</TableHead>
-                  <TableHead>Created</TableHead>
-                  <TableHead className="w-32">Action</TableHead>
+                  <TableHead
+                    className="cursor-pointer select-none hover:bg-muted/50"
+                    onClick={() => handleSort("created_at")}
+                  >
+                    <div className="flex items-center">
+                      Created <SortIcon field="created_at" sort={sort} />
+                    </div>
+                  </TableHead>
+                  <TableHead
+                    className="cursor-pointer select-none hover:bg-muted/50"
+                    onClick={() => handleSort("completed_at")}
+                  >
+                    <div className="flex items-center">
+                      Updated <SortIcon field="completed_at" sort={sort} />
+                    </div>
+                  </TableHead>
+                  <TableHead>Action</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -153,7 +223,7 @@ export default function OrderList() {
                     className="cursor-pointer"
                     onClick={() => navigate(`/orders/${order.id}`)}
                   >
-                    <TableCell>
+                    <TableCell className="truncate">
                       <Link
                         to={`/orders/${order.id}`}
                         className="font-mono text-primary hover:underline font-medium"
@@ -162,9 +232,9 @@ export default function OrderList() {
                         {order.order_code}
                       </Link>
                     </TableCell>
-                    <TableCell>{order.project_name}</TableCell>
-                    <TableCell className="capitalize">{order.ptm_type}</TableCell>
-                    <TableCell className="capitalize">{order.species}</TableCell>
+                    <TableCell className="truncate" title={order.project_name}>{order.project_name}</TableCell>
+                    <TableCell className="capitalize truncate">{order.ptm_type}</TableCell>
+                    <TableCell className="capitalize truncate">{order.species}</TableCell>
                     <TableCell>
                       <Badge variant={statusBadgeVariant(order.status)} className="capitalize">
                         {order.status}
@@ -182,8 +252,11 @@ export default function OrderList() {
                         </span>
                       </div>
                     </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {new Date(order.created_at).toLocaleDateString("ko-KR", { timeZone: "Asia/Seoul" })}
+                    <TableCell className="text-muted-foreground whitespace-nowrap">
+                      {fmtDate(order.created_at)}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground whitespace-nowrap">
+                      {order.status === "completed" ? fmtDate(order.completed_at) : "—"}
                     </TableCell>
                     <TableCell onClick={(e) => e.stopPropagation()}>
                       <div className="flex items-center gap-1">
