@@ -70,3 +70,4 @@ git commit -m "메시지"
 
 - **1.1.1.1**: api-server, mcp-server, frontend, workers 순 (내부 저장: 001.001.001.001, 표시 시 앞의 0 생략)
 - **(3fa4c71)**: 현재 표시 중인 git commit hash
+- **이미지 태그**: 각 컴포넌트는 자기 버전만 사용 (예: ptm-frontend:001, ptm-api-server:001)

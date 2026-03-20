@@ -20,6 +20,7 @@ from pathlib import Path
 
 from celery_app import app
 from common.db_update import update_order_status
+from common.notifications import notify_order_status
 from common.progress import publish_progress
 
 logger = logging.getLogger("ptm-workers.report-generation")
@@ -216,6 +217,7 @@ def run_report_generation(self, order_id: int, config: dict):
             "output_dir": str(order_output),
         }
         update_order_status(order_id, "completed", progress_pct=100, result_files=result_data)
+        notify_order_status(order_id, "completed")
         logger.info(f"[Order {order_id}] Report generation completed in {elapsed}s — {len(output_file_names)} files")
 
         return {
@@ -231,6 +233,7 @@ def run_report_generation(self, order_id: int, config: dict):
         error_msg = f"Report generation failed: {str(e)}"
         logger.error(f"[Order {order_id}] {error_msg}", exc_info=True)
         update_order_status(order_id, "failed", error_message=error_msg)
+        notify_order_status(order_id, "failed", error_msg)
         publish_progress(
             order_id, "report_generation", "error", "failed", -1, error_msg,
             metadata={"traceback": traceback.format_exc(), "elapsed_seconds": elapsed},

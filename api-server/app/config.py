@@ -49,6 +49,14 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: Optional[str] = None
     ANTHROPIC_API_KEY: Optional[str] = None
 
+    # Email (notifications)
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM: str = "noreply@ptm-platform.local"
+    SMTP_USE_TLS: bool = True
+
     model_config = {"env_file": ".env", "extra": "ignore"}
 
 

@@ -19,6 +19,7 @@ import pandas as pd
 
 from celery_app import app
 from common.db_update import get_order_status, update_order_status
+from common.notifications import notify_order_status
 from common.mcp_client import MCPClient
 from common.progress import publish_progress
 
@@ -276,6 +277,7 @@ def run_rag_enrichment(self, order_id: int, config: dict):
         error_msg = f"RAG enrichment failed: {str(e)}"
         logger.error(f"[Order {order_id}] {error_msg}", exc_info=True)
         update_order_status(order_id, "failed", error_message=error_msg)
+        notify_order_status(order_id, "failed", error_msg)
         publish_progress(
             order_id, "rag_enrichment", "error", "failed", -1, error_msg,
             metadata={"traceback": traceback.format_exc(), "elapsed_seconds": elapsed},

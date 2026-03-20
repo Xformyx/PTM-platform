@@ -6,6 +6,7 @@ export interface AuthUser {
   name: string;
   role: "admin" | "analyst" | "viewer";
   must_change_password: boolean;
+  email_notifications_enabled?: boolean;
 }
 
 interface AuthContextType {

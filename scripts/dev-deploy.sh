@@ -54,9 +54,17 @@ else
   echo "Changed: ${CHANGED[*]}"
 fi
 
-# VERSION 파일에서 현재 버전 읽기 (올리지 않음)
-VERSION=$(cat "$VERSION_FILE" 2>/dev/null | tr -d ' \n\r' || echo "001.001.001.001")
-export VERSION
+# VERSION 파일에서 현재 버전 읽기 (올리지 않음), per-component로 export
+_v=$(cat "$VERSION_FILE" 2>/dev/null | tr -d ' \n\r' || echo "001.001.001.001")
+IFS='.' read -r _a _b _c _d _ <<< "$_v"
+_a=$(printf "%03d" $((10#${_a//[^0-9]/:-0})))
+_b=$(printf "%03d" $((10#${_b//[^0-9]/:-0})))
+_c=$(printf "%03d" $((10#${_c//[^0-9]/:-0})))
+_d=$(printf "%03d" $((10#${_d//[^0-9]/:-0})))
+export VERSION_API="$_a"
+export VERSION_MCP="$_b"
+export VERSION_FRONTEND="$_c"
+export VERSION_WORKERS="$_d"
 
 # Build
 BUILD_SERVICES=()
@@ -91,4 +99,4 @@ docker compose up -d "${RESTART_SERVICES[@]}"
 touch "$LAST_DEV_BUILD"
 # Update git hash for display
 git rev-parse --short HEAD > "$REPO_ROOT/GIT_HASH" 2>/dev/null || true
-echo "Done. (Version: $VERSION)"
+echo "Done. (Version: $_a.$_b.$_c.$_d)"

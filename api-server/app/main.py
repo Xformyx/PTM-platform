@@ -6,12 +6,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api import articles, auth, events, health, llm, orders, rag, system
+from app.api import articles, auth, events, health, llm, notifications, orders, rag, settings as settings_api, system
 from app.config import get_settings
 from app.core.database import engine, Base
 from app.core.logging import setup_logging
 from app.core.security import hash_password
-from app.models.user import User
+from app.models import Notification, User
 
 settings = get_settings()
 logger = setup_logging()
@@ -34,6 +34,10 @@ async def _run_migrations(conn) -> None:
     await _add_column_if_missing(
         conn, "users", "must_change_password",
         "must_change_password TINYINT(1) NOT NULL DEFAULT 0"
+    )
+    await _add_column_if_missing(
+        conn, "users", "email_notifications_enabled",
+        "email_notifications_enabled TINYINT(1) NOT NULL DEFAULT 1"
     )
     await _add_column_if_missing(
         conn, "orders", "run_by_user_id",
@@ -98,6 +102,8 @@ app.add_middleware(
 
 app.include_router(health.router, prefix="/api")
 app.include_router(auth.router, prefix="/api")
+app.include_router(notifications.router, prefix="/api")
+app.include_router(settings_api.router, prefix="/api")
 app.include_router(orders.router, prefix="/api")
 app.include_router(events.router, prefix="/api")
 app.include_router(rag.router, prefix="/api")

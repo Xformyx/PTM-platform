@@ -116,10 +116,13 @@ NEW_VERSION="${AA}.${BB}.${CC}.${DD}"
 write_version "$NEW_VERSION"
 echo "Version: $CURRENT -> $NEW_VERSION"
 
-# Export for docker-compose
-export VERSION="$NEW_VERSION"
+# Export per-component tags for docker-compose
+export VERSION_API="$AA"
+export VERSION_MCP="$BB"
+export VERSION_FRONTEND="$CC"
+export VERSION_WORKERS="$DD"
 
-# Build changed services
+# Build changed services (each with its own version tag)
 BUILD_SERVICES=()
 for c in "${CHANGED[@]}"; do
   case "$c" in
@@ -134,7 +137,16 @@ done
 BUILD_SERVICES=($(printf '%s\n' "${BUILD_SERVICES[@]}" | sort -u))
 
 echo "Building: ${BUILD_SERVICES[*]}"
-docker compose build --build-arg VERSION="$NEW_VERSION" "${BUILD_SERVICES[@]}"
+for svc in "${BUILD_SERVICES[@]}"; do
+  case "$svc" in
+    api-server)  arg="$AA" ;;
+    mcp-server)  arg="$BB" ;;
+    frontend)    arg="$CC" ;;
+    celery-worker-preprocessing) arg="$DD" ;;
+    *) arg="001" ;;
+  esac
+  docker compose build --build-arg VERSION="$arg" "$svc"
+done
 
 # Restart changed services
 RESTART_SERVICES=()

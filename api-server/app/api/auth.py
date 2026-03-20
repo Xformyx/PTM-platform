@@ -26,6 +26,7 @@ def _user_dict(u: User) -> dict:
         "name": u.name,
         "role": u.role,
         "must_change_password": u.must_change_password,
+        "email_notifications_enabled": getattr(u, "email_notifications_enabled", True),
     }
 
 

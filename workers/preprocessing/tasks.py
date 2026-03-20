@@ -20,6 +20,7 @@ from pathlib import Path
 
 from celery_app import app
 from common.db_update import get_order_status, update_order_status
+from common.notifications import notify_order_status
 from common.mcp_client import MCPClient
 from common.progress import publish_progress
 
@@ -516,6 +517,7 @@ def run_preprocessing(self, order_id: int, config: dict):
             logger.info(f"[Order {order_id}] Preprocessing complete (no chain — re-run only or cancelled)")
             if get_order_status(order_id) != "cancelled":
                 update_order_status(order_id, "completed", current_stage="preprocessing", progress_pct=100)
+                notify_order_status(order_id, "completed")
             return {
                 "order_id": order_id,
                 "status": "completed",
@@ -563,6 +565,7 @@ def run_preprocessing(self, order_id: int, config: dict):
         error_msg = f"Preprocessing failed: {str(e)}"
         logger.error(f"[Order {order_id}] {error_msg}", exc_info=True)
         update_order_status(order_id, "failed", error_message=error_msg)
+        notify_order_status(order_id, "failed", error_msg)
         publish_progress(
             order_id, "preprocessing", "error", "failed", -1, error_msg,
             metadata={"traceback": traceback.format_exc(), "elapsed_seconds": elapsed},
