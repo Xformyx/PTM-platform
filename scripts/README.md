@@ -71,3 +71,27 @@ git commit -m "메시지"
 - **1.1.1.1**: api-server, mcp-server, frontend, workers 순 (내부 저장: 001.001.001.001, 표시 시 앞의 0 생략)
 - **(3fa4c71)**: 현재 표시 중인 git commit hash
 - **이미지 태그**: 각 컴포넌트는 자기 버전만 사용 (예: ptm-frontend:001, ptm-api-server:001)
+
+---
+
+## Webhook (Order 이벤트)
+
+`.env`에 `WEBHOOK_URL`을 설정하면 주문 상태 변경 시 해당 URL로 POST 요청을 보냅니다.
+여러 URL은 쉼표로 구분 (예: `http://localhost:3000/hook,https://hooks.slack.com/...`).
+
+**Step**: `preprocessing` | `rag_enrichment` | `report_generation`  
+**Status**: `started` | `completed` | `failed` | `cancelled`
+
+**Payload 예시**:
+```json
+{
+  "order_id": 123,
+  "order_code": "Universe_AF",
+  "step": "preprocessing",
+  "status": "completed",
+  "error_message": null,
+  "timestamp": "2025-02-21T12:00:00.000000+00:00"
+}
+```
+
+**OpenClaw 포맷**: `[order_code] Step : Status`
