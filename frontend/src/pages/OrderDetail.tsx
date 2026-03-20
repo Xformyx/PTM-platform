@@ -1897,6 +1897,8 @@ export default function OrderDetail() {
     setRerunModalOpen(true);
   }, [searchParams, order, orderId]);
 
+  const wasRunningRef = useRef(false);
+
   useEffect(() => {
     if (!isRunning) return;
     const interval = setInterval(async () => {
@@ -1911,6 +1913,23 @@ export default function OrderDetail() {
     }, 3000);
     return () => clearInterval(interval);
   }, [isRunning, orderId]);
+
+  // When order transitions from running → completed/failed, do one final re-fetch
+  useEffect(() => {
+    if (wasRunningRef.current && !isRunning && order && ["completed", "failed"].includes(order.status)) {
+      setTimeout(async () => {
+        try {
+          const [o, l] = await Promise.all([
+            api.get<Order>(`/orders/${orderId}`),
+            api.get<{ logs: OrderLog[] }>(`/orders/${orderId}/logs`),
+          ]);
+          setOrder(o);
+          setLogs(l.logs);
+        } catch { /* ignore */ }
+      }, 1500);
+    }
+    wasRunningRef.current = isRunning;
+  }, [isRunning]);
 
   useEffect(() => {
     if (progress && order) {
