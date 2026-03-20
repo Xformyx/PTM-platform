@@ -74,14 +74,6 @@ export default function OrderList() {
 
   useEffect(() => { fetchOrders(); }, []);
 
-  // Auto-poll every 5s while any order is running
-  const hasRunning = orders.some((o) => isRunning(o.status));
-  useEffect(() => {
-    if (!hasRunning) return;
-    const interval = setInterval(fetchOrders, 5000);
-    return () => clearInterval(interval);
-  }, [hasRunning]);
-
   const handleRun = (e: React.MouseEvent, orderId: number) => {
     e.stopPropagation();
     navigate(`/orders/${orderId}?run=1`);
@@ -117,6 +109,14 @@ export default function OrderList() {
   };
 
   const isRunning = (s: string) => ["running", "preprocessing", "rag_enrichment", "report_generation", "queued"].includes(s);
+
+  // Auto-poll every 5s while any order is running
+  const hasRunning = orders.some((o) => isRunning(o.status));
+  useEffect(() => {
+    if (!hasRunning) return;
+    const interval = setInterval(fetchOrders, 5000);
+    return () => clearInterval(interval);
+  }, [hasRunning]);
 
   const handleSort = (field: SortField) => {
     setSort((prev) =>
