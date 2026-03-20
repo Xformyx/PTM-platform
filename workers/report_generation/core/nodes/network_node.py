@@ -2,7 +2,13 @@
 Network Node — temporal PTM signaling network analysis + Cytoscape visualization.
 Ported from multi_agent_system/agents/network_analyzer.py and ptm_network_automation.py.
 
-v6.0 — Compartmentalized Signaling Cascade Diagram (Figure 2):
+v6.1 — Per-condition Signaling Cascade Diagrams:
+  - When multiple timepoints/conditions exist, generate one cascade diagram per condition
+  - Each condition gets its own Figure with condition-specific data filtering
+  - Single-condition mode remains backward compatible (combined diagram)
+  - cascade_diagram_paths dict added to network_analysis output
+
+v6.0 — Add Signaling Cascade Diagram (Figure 2):
   - New: generate_signaling_cascade_diagram() in signaling_cascade.py
   - Draws cell cross-section with compartments: Extracellular → Membrane → Cytoplasm → Nucleus
   - Proteins placed by UniProt subcellular_location + GO Cellular Component + heuristic fallback
@@ -2003,6 +2009,7 @@ def run_network_analysis(state: dict) -> dict:
                 "network_images": {},
                 "pathway_graph_path": None,
                 "cascade_diagram_path": None,
+                "cascade_diagram_paths": {},
                 "ptm_count": 0,
                 "timepoint_results": {},
                 "timepoints": [],
@@ -2086,24 +2093,47 @@ def _run_network_analysis_inner(state: dict) -> dict:
         logger.error(f"[NET-NODE] Pathway distribution graph failed: {pw_err}", exc_info=True)
         pathway_graph_path = None
 
-    # v6.0: Generate Signaling Cascade Diagram (Figure 2)
-    cascade_diagram_path = None
+    # v6.1: Generate Signaling Cascade Diagrams — per-condition when multiple timepoints
+    cascade_diagram_path = None          # combined (single condition or fallback)
+    cascade_diagram_paths = {}           # condition → path (per-condition diagrams)
     try:
         from workers.report_generation.core.nodes.signaling_cascade import (
             generate_signaling_cascade_diagram,
         )
-        if cb:
-            cb(64, "Generating signaling cascade diagram")
-        cascade_diagram_path = generate_signaling_cascade_diagram(
-            parsed_ptms, enriched_data, network_data, output_dir, top_n_pathways=5
-        )
-        if cascade_diagram_path:
-            logger.info(f"[NET-NODE] Signaling cascade diagram saved: {cascade_diagram_path}")
+        if len(timepoints) > 1:
+            # Multi-condition: generate one diagram per condition
+            if cb:
+                cb(64, f"Generating signaling cascade diagrams for {len(timepoints)} conditions")
+            for tp_idx, tp in enumerate(timepoints):
+                logger.info(f"[NET-NODE] Generating cascade diagram for condition: {tp}")
+                tp_path = generate_signaling_cascade_diagram(
+                    parsed_ptms, enriched_data, network_data, output_dir,
+                    top_n_pathways=5, condition=tp,
+                )
+                if tp_path:
+                    cascade_diagram_paths[tp] = tp_path
+                    logger.info(f"[NET-NODE] Cascade diagram for '{tp}' saved: {tp_path}")
+                else:
+                    logger.info(f"[NET-NODE] Cascade diagram for '{tp}': no pathways with sufficient proteins")
+            logger.info(
+                f"[NET-NODE] Per-condition cascade diagrams: "
+                f"{len(cascade_diagram_paths)}/{len(timepoints)} generated"
+            )
         else:
-            logger.info("[NET-NODE] Signaling cascade diagram: no pathways with sufficient proteins")
+            # Single condition: generate combined diagram (backward compatible)
+            if cb:
+                cb(64, "Generating signaling cascade diagram")
+            cascade_diagram_path = generate_signaling_cascade_diagram(
+                parsed_ptms, enriched_data, network_data, output_dir, top_n_pathways=5
+            )
+            if cascade_diagram_path:
+                logger.info(f"[NET-NODE] Signaling cascade diagram saved: {cascade_diagram_path}")
+            else:
+                logger.info("[NET-NODE] Signaling cascade diagram: no pathways with sufficient proteins")
     except Exception as cascade_err:
         logger.error(f"[NET-NODE] Signaling cascade diagram failed: {cascade_err}", exc_info=True)
         cascade_diagram_path = None
+        cascade_diagram_paths = {}
 
     if cb:
         cb(65, f"Network analysis complete (Cytoscape: {cytoscape_connected})")
@@ -2121,6 +2151,7 @@ def _run_network_analysis_inner(state: dict) -> dict:
             "network_images": network_images,
             "pathway_graph_path": pathway_graph_path,
             "cascade_diagram_path": cascade_diagram_path,
+            "cascade_diagram_paths": cascade_diagram_paths,
             "ptm_count": len(parsed_ptms),
             "timepoint_results": timepoint_results,
             "timepoints": timepoints,
@@ -2135,6 +2166,7 @@ def _run_network_analysis_inner(state: dict) -> dict:
         f"timepoints={timepoints}, "
         f"pathway_graph={'OK' if pathway_graph_path else 'NONE'}, "
         f"cascade_diagram={'OK' if cascade_diagram_path else 'NONE'}, "
+        f"cascade_per_condition={list(cascade_diagram_paths.keys()) if cascade_diagram_paths else 'NONE'}, "
         f"network_images={list(network_images.keys()) if network_images else 'EMPTY'}, "
         f"network_results_keys={list(network_results.keys()) if network_results else 'EMPTY'}, "
         f"validation={{'nodes': {validation['total_nodes']}, 'edges': {validation['total_edges']}, "
@@ -2891,6 +2923,7 @@ def generate_network_figure_section(network_analysis: dict) -> str:
     validation = network_analysis.get("validation", {})
     pathway_graph_path = network_analysis.get("pathway_graph_path")
     cascade_diagram_path = network_analysis.get("cascade_diagram_path")
+    cascade_diagram_paths = network_analysis.get("cascade_diagram_paths", {})
 
     logger.info(
         f"[NET-SECTION] generate_network_figure_section called: "
@@ -2898,12 +2931,14 @@ def generate_network_figure_section(network_analysis: dict) -> str:
         f"legends_keys={list(legends.keys()) if legends else 'EMPTY'}, "
         f"has_full_legend={bool(legends.get('full_legend'))}, "
         f"pathway_graph={'OK' if pathway_graph_path else 'NONE'}, "
+        f"cascade_per_condition={list(cascade_diagram_paths.keys()) if cascade_diagram_paths else 'NONE'}, "
         f"timepoint_results={list(timepoint_results.keys()) if timepoint_results else 'EMPTY'}, "
         f"validation={{'valid': {validation.get('is_valid', '?')}, "
         f"'orphan': {validation.get('orphan_nodes', '?')}}}"
     )
 
-    if not network_images and not legends.get("full_legend") and not pathway_graph_path and not cascade_diagram_path:
+    has_cascade = cascade_diagram_path or cascade_diagram_paths
+    if not network_images and not legends.get("full_legend") and not pathway_graph_path and not has_cascade:
         logger.warning("[NET-SECTION] No network_images, no full_legend, no pathway_graph, no cascade — returning empty")
         return ""
 
@@ -2962,8 +2997,48 @@ def generate_network_figure_section(network_analysis: dict) -> str:
             figure_num += 1
             logger.info(f"[NET-SECTION] Pathway distribution graph inserted as Figure {figure_num - 1}")
 
-    # v6.0: Figure 2 = Signaling Cascade Diagram
-    if cascade_diagram_path:
+    # v6.1: Figure 2+ = Signaling Cascade Diagrams (per-condition or combined)
+    _cascade_legend_text = (
+        "**Figure Legend:** This compartmentalized signaling cascade diagram depicts "
+        "the signal transduction flow across cellular compartments (Extracellular Space, "
+        "Plasma Membrane, Cytoplasm, Nucleus) for the top 5 canonical pathways ranked by "
+        "cumulative |Log2FC| score. Each horizontal lane represents a distinct signaling "
+        "pathway, with proteins positioned in their annotated subcellular compartment "
+        "(based on UniProt subcellular location and GO Cellular Component annotations). "
+        "Protein nodes are color-coded by activation state: "
+        "**red circles** = activated PTM proteins (Log2FC > 0), "
+        "**blue circles** = inhibited PTM proteins (Log2FC < 0), "
+        "**green circles** = upregulated Non-PTM interactors, "
+        "**purple circles** = downregulated Non-PTM interactors, "
+        "**orange diamonds** = kinases. "
+        "Node size is proportional to |Log2FC| magnitude. "
+        "Gray arrows indicate the canonical signal flow direction from upstream "
+        "receptors/adaptors to downstream effectors/transcription factors. "
+        "Fold-change values (Log2FC) are annotated above each node."
+    )
+
+    if cascade_diagram_paths:
+        # Per-condition cascade diagrams (multi-condition mode)
+        cascade_timepoints = network_analysis.get("timepoints", sorted(cascade_diagram_paths.keys()))
+        for tp in cascade_timepoints:
+            tp_path = cascade_diagram_paths.get(tp)
+            if not tp_path:
+                continue
+            tp_path_obj = Path(tp_path)
+            if tp_path_obj.exists() and tp_path_obj.stat().st_size > 1000:
+                tp_img_ref = tp_path_obj.name
+                section += (
+                    f"### Figure {figure_num}. Signal Transduction Pathway Cascade Diagram "
+                    f"\u2014 {tp} "
+                    f"(Top 5 Canonical Pathways by Cumulative |Log2FC| Score)\n\n"
+                )
+                section += f"![Signal Transduction Pathway Cascade Diagram \u2014 {tp}]({tp_img_ref})\n\n"
+                section += _cascade_legend_text + f" Data shown for condition: **{tp}**.\n\n"
+                section += "---\n\n"
+                logger.info(f"[NET-SECTION] Per-condition cascade diagram for '{tp}' inserted as Figure {figure_num}")
+                figure_num += 1
+    elif cascade_diagram_path:
+        # Single combined cascade diagram (backward compatible)
         cascade_path_obj = Path(cascade_diagram_path)
         if cascade_path_obj.exists() and cascade_path_obj.stat().st_size > 1000:
             cascade_img_ref = cascade_path_obj.name
@@ -2972,24 +3047,7 @@ def generate_network_figure_section(network_analysis: dict) -> str:
                 f"(Top 5 Canonical Pathways by Cumulative |Log2FC| Score)\n\n"
             )
             section += f"![Signal Transduction Pathway Cascade Diagram]({cascade_img_ref})\n\n"
-            section += (
-                f"**Figure Legend:** This compartmentalized signaling cascade diagram depicts "
-                f"the signal transduction flow across cellular compartments (Extracellular Space, "
-                f"Plasma Membrane, Cytoplasm, Nucleus) for the top 5 canonical pathways ranked by "
-                f"cumulative |Log2FC| score. Each horizontal lane represents a distinct signaling "
-                f"pathway, with proteins positioned in their annotated subcellular compartment "
-                f"(based on UniProt subcellular location and GO Cellular Component annotations). "
-                f"Protein nodes are color-coded by activation state: "
-                f"**red circles** = activated PTM proteins (Log2FC > 0), "
-                f"**blue circles** = inhibited PTM proteins (Log2FC < 0), "
-                f"**green circles** = upregulated Non-PTM interactors, "
-                f"**purple circles** = downregulated Non-PTM interactors, "
-                f"**orange diamonds** = kinases. "
-                f"Node size is proportional to |Log2FC| magnitude. "
-                f"Gray arrows indicate the canonical signal flow direction from upstream "
-                f"receptors/adaptors to downstream effectors/transcription factors. "
-                f"Fold-change values (Log2FC) are annotated above each node.\n\n"
-            )
+            section += _cascade_legend_text + "\n\n"
             section += "---\n\n"
             figure_num += 1
             logger.info(f"[NET-SECTION] Signaling cascade diagram inserted as Figure {figure_num - 1}")

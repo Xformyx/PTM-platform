@@ -273,6 +273,7 @@ def generate_signaling_cascade_diagram(
     network_data: dict,
     output_dir: str,
     top_n_pathways: int = 5,
+    condition: Optional[str] = None,
 ) -> Optional[str]:
     """Generate a publication-quality compartmentalized signaling cascade diagram.
     
@@ -290,6 +291,10 @@ def generate_signaling_cascade_diagram(
         network_data: Network nodes and edges from _build_network_data
         output_dir: Directory to save the output image
         top_n_pathways: Number of top pathways to visualize (default: 5)
+        condition: Optional condition/timepoint string to filter data.
+                   When provided, only PTMs and enriched data matching this
+                   condition are used. The output filename and title include
+                   the condition label.
     
     Returns:
         Path to saved PNG image, or None on failure.
@@ -306,7 +311,28 @@ def generate_signaling_cascade_diagram(
         logger.warning("matplotlib not available — skipping signaling cascade diagram")
         return None
 
-    logger.info("[CASCADE] Starting signaling cascade diagram generation")
+    cond_label = condition or "combined"
+    logger.info(f"[CASCADE] Starting signaling cascade diagram generation (condition={cond_label})")
+
+    # ---- Step 0: Filter data by condition if specified ----
+    if condition:
+        # Filter parsed_ptms to this condition
+        parsed_ptms = [
+            p for p in parsed_ptms
+            if (p.get("condition") or p.get("Condition", "")).strip() == condition
+        ]
+        # Filter enriched_data to this condition
+        enriched_data = [
+            e for e in enriched_data
+            if (e.get("Condition") or e.get("condition", "")).strip() == condition
+        ]
+        logger.info(
+            f"[CASCADE] Filtered to condition '{condition}': "
+            f"{len(parsed_ptms)} parsed_ptms, {len(enriched_data)} enriched_data"
+        )
+        if not parsed_ptms and not enriched_data:
+            logger.warning(f"[CASCADE] No data for condition '{condition}' — skipping")
+            return None
 
     # ---- Step 1: Collect all proteins with their data ----
     # Build gene → enrichment data lookup
@@ -761,9 +787,12 @@ def generate_signaling_cascade_diagram(
     legend_x = margin_left + 0.3
     
     # Title
+    title_main = "Signal Transduction Pathway Cascade Diagram"
+    if condition:
+        title_main += f" — {condition}"
     ax.text(
         fig_width / 2, fig_height - 0.35,
-        "Signal Transduction Pathway Cascade Diagram",
+        title_main,
         ha="center", va="top",
         fontsize=16, fontweight="bold",
         color="#263238",
@@ -835,7 +864,13 @@ def generate_signaling_cascade_diagram(
 
     # ---- Save figure ----
     plt.tight_layout(pad=0.5)
-    output_path = Path(output_dir) / "signaling_cascade.png"
+    # Use condition-specific filename when condition is provided
+    if condition:
+        # Sanitize condition string for filename
+        safe_cond = condition.replace("/", "_").replace(" ", "_").replace("\\", "_")
+        output_path = Path(output_dir) / f"signaling_cascade_{safe_cond}.png"
+    else:
+        output_path = Path(output_dir) / "signaling_cascade.png"
     fig.savefig(
         str(output_path),
         dpi=250,
@@ -849,6 +884,6 @@ def generate_signaling_cascade_diagram(
     total_genes = len(all_pathway_genes)
     logger.info(
         f"[CASCADE] Signaling cascade diagram saved: {output_path} "
-        f"({n_pathways} pathways, {total_genes} proteins)"
+        f"(condition={cond_label}, {n_pathways} pathways, {total_genes} proteins)"
     )
     return str(output_path)
