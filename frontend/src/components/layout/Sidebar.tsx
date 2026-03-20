@@ -195,6 +195,14 @@ function ChangePasswordModal({ open, onClose }: { open: boolean; onClose: () => 
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
+/** Format version: strip leading zeros (001.001.001.001 → 1.1.1.1) */
+function formatVersionDisplay(raw: string): string {
+  return raw
+    .split(".")
+    .map((s) => String(parseInt(s, 10) || 0))
+    .join(".");
+}
+
 function VersionDisplay({ collapsed }: { collapsed?: boolean }) {
   const [version, setVersion] = useState<string>("—");
   const [gitHash, setGitHash] = useState<string>("");
@@ -202,7 +210,7 @@ function VersionDisplay({ collapsed }: { collapsed?: boolean }) {
     fetch("/api/version")
       .then((r) => r.ok ? r.json() : null)
       .then((d) => {
-        if (d?.version) setVersion(d.version);
+        if (d?.version) setVersion(formatVersionDisplay(d.version));
         if (d?.git_hash) setGitHash(d.git_hash);
       })
       .catch(() => {});

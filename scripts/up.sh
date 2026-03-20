@@ -7,7 +7,7 @@ set -e
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
-VERSION=$(cat "$REPO_ROOT/VERSION" 2>/dev/null | tr -d ' \n\r' || echo "00.00.00.00")
+VERSION=$(cat "$REPO_ROOT/VERSION" 2>/dev/null | tr -d ' \n\r' || echo "001.001.001.001")
 export VERSION
 
 # Ensure GIT_HASH exists for api-server mount

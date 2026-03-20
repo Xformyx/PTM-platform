@@ -20,7 +20,7 @@
 ```
 
 - 마지막 빌드 이후 **실제로 수정된** 컴포넌트만 빌드 & 재시작
-- 버전(AA.BB.CC.DD) 변경 없음
+- 버전 변경 없음
 - 전체 빌드가 필요하면: `./scripts/dev-deploy.sh --all`
 
 ---
@@ -48,7 +48,7 @@ git commit -m "메시지"
 ./scripts/deploy.sh
 ```
 
-- 마지막 deploy 이후 **변경된** 컴포넌트에 맞춰 버전(AA.BB.CC.DD) 증가
+- 마지막 deploy 이후 **변경된** 컴포넌트에 맞춰 버전(AAA.BBB.CCC.DDD) 증가
 - 해당 컴포넌트만 빌드 & 재시작
 - 전체 배포: `./scripts/deploy.sh --all`
 
@@ -66,7 +66,7 @@ git commit -m "메시지"
 
 ## 버전 형식
 
-`Version : AA.BB.CC.DD (3fa4c71)`
+`Version : 1.1.1.1 (3fa4c71)`
 
-- **AA.BB.CC.DD**: api-server, mcp-server, frontend, workers 순
+- **1.1.1.1**: api-server, mcp-server, frontend, workers 순 (내부 저장: 001.001.001.001, 표시 시 앞의 0 생략)
 - **(3fa4c71)**: 현재 표시 중인 git commit hash

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # PTM Platform Deploy Script
 # - Detects which components changed (api-server, mcp-server, frontend, workers)
-# - Bumps version (AA.BB.CC.DD) for changed components
+# - Bumps version (AAA.BBB.CCC.DDD) for changed components
 # - Builds only changed images
 # - Restarts only changed services
 # Usage: ./scripts/deploy.sh [--all]
@@ -15,22 +15,28 @@ VERSION_FILE="$REPO_ROOT/VERSION"
 LAST_DEPLOY_FILE="$REPO_ROOT/.last-deploy"
 
 # AA=api-server, BB=mcp-server, CC=frontend, DD=workers
+# Format: AAA.BBB.CCC.DDD (3 digits each, 000-999). Display: leading zeros omitted (e.g. 1.1.1.1)
 
-# Bump field (00-FF hex)
-bump_hex() {
-  local val="${1//[^0-9a-fA-F]/}"
+# Bump field (000-999 decimal)
+bump_dec() {
+  local val="${1//[^0-9]/}"
   val="${val:-0}"
-  local num
-  num=$(printf '%d' "0x${val}") 2>/dev/null || num=0
-  num=$(( (num + 1) % 256 ))
-  printf "%02x" $num
+  local num=$((10#$val + 1))
+  num=$((num % 1000))
+  printf "%03d" $num
 }
 
-# Parse VERSION file (AA.BB.CC.DD)
+# Parse VERSION file (AAA.BBB.CCC.DDD), normalize to 3-digit segments
 read_version() {
   local v
-  v=$(cat "$VERSION_FILE" 2>/dev/null | tr -d ' \n\r' || echo "00.00.00.00")
-  echo "$v"
+  v=$(cat "$VERSION_FILE" 2>/dev/null | tr -d ' \n\r' || echo "001.001.001.001")
+  local aa bb cc dd
+  IFS='.' read -r aa bb cc dd _ <<< "$v"
+  aa=$(printf "%03d" $((10#${aa//[^0-9]/:-0})))
+  bb=$(printf "%03d" $((10#${bb//[^0-9]/:-0})))
+  cc=$(printf "%03d" $((10#${cc//[^0-9]/:-0})))
+  dd=$(printf "%03d" $((10#${dd//[^0-9]/:-0})))
+  echo "${aa}.${bb}.${cc}.${dd}"
 }
 
 # Write VERSION file
@@ -69,13 +75,13 @@ done
 
 echo "=== PTM Platform Deploy ==="
 
-# Read current version
+# Read current version (normalized to 001.001.001.001)
 CURRENT=$(read_version)
 IFS='.' read -r AA BB CC DD _ <<< "$CURRENT"
-AA="${AA//[^0-9a-fA-F]/}"; AA="${AA:-00}"
-BB="${BB//[^0-9a-fA-F]/}"; BB="${BB:-00}"
-CC="${CC//[^0-9a-fA-F]/}"; CC="${CC:-00}"
-DD="${DD//[^0-9a-fA-F]/}"; DD="${DD:-00}"
+AA="${AA//[^0-9]/}"; AA="${AA:-000}"
+BB="${BB//[^0-9]/}"; BB="${BB:-000}"
+CC="${CC//[^0-9]/}"; CC="${CC:-000}"
+DD="${DD//[^0-9]/}"; DD="${DD:-000}"
 
 # Determine what to build
 if $FORCE_ALL; then
@@ -99,10 +105,10 @@ fi
 # Bump version for changed components
 for c in "${CHANGED[@]}"; do
   case "$c" in
-    api-server) AA=$(bump_hex "$AA") ;;
-    mcp-server) BB=$(bump_hex "$BB") ;;
-    frontend)   CC=$(bump_hex "$CC") ;;
-    workers)    DD=$(bump_hex "$DD") ;;
+    api-server) AA=$(bump_dec "$AA") ;;
+    mcp-server) BB=$(bump_dec "$BB") ;;
+    frontend)   CC=$(bump_dec "$CC") ;;
+    workers)    DD=$(bump_dec "$DD") ;;
   esac
 done
 

@@ -55,7 +55,7 @@ else
 fi
 
 # VERSION 파일에서 현재 버전 읽기 (올리지 않음)
-VERSION=$(cat "$VERSION_FILE" 2>/dev/null | tr -d ' \n\r' || echo "00.00.00.00")
+VERSION=$(cat "$VERSION_FILE" 2>/dev/null | tr -d ' \n\r' || echo "001.001.001.001")
 export VERSION
 
 # Build
