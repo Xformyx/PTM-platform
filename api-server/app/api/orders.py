@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import os
@@ -11,7 +12,9 @@ from pydantic import BaseModel
 from sqlalchemy import select, func as sqlfunc
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.core.database import get_db
+from app.core.webhook import send_order_webhook
 from app.dependencies import get_current_user
 from app.models.order import Order, OrderLog
 from app.models.rag_collection import RagCollection
@@ -901,6 +904,7 @@ async def cancel_order(
     order_id: int,
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
+    settings=Depends(get_settings),
 ):
     """Stop a running analysis. Sets order status to cancelled."""
     result = await db.execute(select(Order).where(Order.id == order_id))
@@ -920,6 +924,21 @@ async def cancel_order(
     await db.commit()
 
     logger.info(f"Order {order.order_code} cancelled (stopped)")
+
+    # Webhook: notify external systems (OpenClaw, etc.)
+    step = order.current_stage or "preprocessing"
+    if step not in ("preprocessing", "rag_enrichment", "report_generation"):
+        step = "preprocessing"
+    if settings.WEBHOOK_URL:
+        asyncio.create_task(
+            send_order_webhook(
+                order_id=order.id,
+                order_code=order.order_code,
+                step=step,
+                status="cancelled",
+                webhook_url=settings.WEBHOOK_URL,
+            )
+        )
 
     return {"order_code": order.order_code, "status": "cancelled"}
 

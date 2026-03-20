@@ -49,6 +49,9 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: Optional[str] = None
     ANTHROPIC_API_KEY: Optional[str] = None
 
+    # Webhook (order events)
+    WEBHOOK_URL: str = ""
+
     # Email (notifications)
     SMTP_HOST: str = ""
     SMTP_PORT: int = 587
