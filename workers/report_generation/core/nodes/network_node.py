@@ -2,6 +2,10 @@
 Network Node — temporal PTM signaling network analysis + Cytoscape visualization.
 Ported from multi_agent_system/agents/network_analyzer.py and ptm_network_automation.py.
 
+v5.5 — Load Non-PTM Protein_Log2FC from unified_protein_data_enriched TSV:
+  - Added _load_unified_protein_fc() helper to read ALL protein FC from preprocessing TSV
+  - _analyze_timepoint and _build_network_data now accept output_dir parameter
+  - Non-PTM nodes get real Protein_Log2FC values → Green/Purple gradient instead of gray
 v5.4 — Add try-except safety net to run_network_analysis to prevent pipeline failure:
   - Root cause: parsed_ptms uses 'ptm_relative_log2fc' not 'log2fc' or 'Log2FC'
   - Step 1 now reads correct field names from both parsed_ptms and enriched_data
@@ -346,6 +350,53 @@ def _export_sif(edges: list, isolated_node_ids: list, output_path: str) -> Optio
 
 
 # ---------------------------------------------------------------------------
+# Helper: Load ALL protein FC from unified_protein_data_enriched TSV
+# ---------------------------------------------------------------------------
+def _load_unified_protein_fc(output_dir: str, condition: str = "") -> Dict[str, float]:
+    """Load Protein_Log2FC for ALL proteins (PTM + Non-PTM) from unified TSV.
+    
+    Returns dict: gene_upper -> Protein_Log2FC (float).
+    If condition is specified, only rows matching that condition are used.
+    If condition is empty, uses the max absolute FC across all conditions.
+    """
+    import csv
+    result: Dict[str, float] = {}
+    output_path = Path(output_dir)
+    # Find the unified TSV file (try multiple naming patterns)
+    tsv_candidates = (
+        list(output_path.glob("unified_protein_data_enriched_bio_enriched*.tsv"))
+        + list(output_path.glob("unified_protein_data_enriched*.tsv"))
+    )
+    if not tsv_candidates:
+        logger.warning(f"[NET-NODE] No unified_protein_data TSV found in {output_dir}")
+        return result
+    tsv_path = tsv_candidates[0]
+    logger.info(f"[NET-NODE] Loading unified protein FC from {tsv_path.name}")
+    try:
+        with open(tsv_path, "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f, delimiter="\t")
+            for row in reader:
+                gene = (row.get("Gene.Name") or row.get("Gene_Name") or "").strip().upper()
+                if not gene:
+                    continue
+                cond = (row.get("Condition") or "").strip()
+                if condition and cond != condition:
+                    continue
+                pfc_raw = row.get("Protein_Log2FC") or row.get("Log2FC") or "0"
+                try:
+                    pfc = float(pfc_raw) if pfc_raw and pfc_raw.lower() not in ("na", "nan", "") else 0.0
+                except (TypeError, ValueError):
+                    pfc = 0.0
+                # Keep the largest absolute value per gene
+                if gene not in result or abs(pfc) > abs(result[gene]):
+                    result[gene] = pfc
+        logger.info(f"[NET-NODE] Loaded unified protein FC for {len(result)} genes (condition={condition or 'all'})")
+    except Exception as e:
+        logger.error(f"[NET-NODE] Failed to load unified protein FC: {e}", exc_info=True)
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Phase 1: Time-point based network analysis (REBUILT edge generation)
 # ---------------------------------------------------------------------------
 
@@ -354,6 +405,7 @@ def _analyze_timepoint(
     enriched_data: list,
     timepoint: str,
     threshold: float = 0.0,
+    output_dir: str = "",
 ) -> dict:
     """Analyze network for a single timepoint/condition.
     
@@ -414,6 +466,18 @@ def _analyze_timepoint(
             pfc = 0.0
         if g not in gene_protein_fc or abs(pfc) > abs(gene_protein_fc[g]):
             gene_protein_fc[g] = pfc
+
+    # v5.5: Load ALL protein FC from unified TSV (covers Non-PTM proteins)
+    if output_dir:
+        unified_fc = _load_unified_protein_fc(output_dir, condition=timepoint)
+        # Merge: unified_fc fills in genes NOT already in gene_protein_fc
+        # (PTM genes from parsed_ptms take priority)
+        merged_count = 0
+        for g, pfc in unified_fc.items():
+            if g not in gene_protein_fc:
+                gene_protein_fc[g] = pfc
+                merged_count += 1
+        logger.info(f"[NET-NODE] Merged {merged_count} Non-PTM protein FC values from unified TSV for timepoint {timepoint}")
 
     # 1. Collect PTM nodes
     active_ptm_nodes = []
@@ -863,7 +927,7 @@ def _analyze_timepoint(
 # Build combined network data (PHASE 1 REBUILT)
 # ---------------------------------------------------------------------------
 
-def _build_network_data(parsed_ptms: list, enriched_data: list) -> dict:
+def _build_network_data(parsed_ptms: list, enriched_data: list, output_dir: str = "") -> dict:
     """Build combined network nodes and edges from all PTMs.
     
     Phase 1 REBUILT:
@@ -896,6 +960,16 @@ def _build_network_data(parsed_ptms: list, enriched_data: list) -> dict:
             pfc = 0.0
         if g and (g not in gene_protein_fc or abs(pfc) > abs(gene_protein_fc[g])):
             gene_protein_fc[g] = pfc
+
+    # v5.5: Load ALL protein FC from unified TSV (covers Non-PTM proteins)
+    if output_dir:
+        unified_fc = _load_unified_protein_fc(output_dir)
+        merged_count = 0
+        for g, pfc in unified_fc.items():
+            if g not in gene_protein_fc:
+                gene_protein_fc[g] = pfc
+                merged_count += 1
+        logger.info(f"[NET-NODE] _build_network_data: Merged {merged_count} Non-PTM protein FC values from unified TSV")
 
     for ptm in parsed_ptms:
         fc = ptm.get("ptm_relative_log2fc", 0)
@@ -1900,7 +1974,7 @@ def _run_network_analysis_inner(state: dict) -> dict:
     if len(timepoints) > 1:
         logger.info(f"[NET-NODE] Detected {len(timepoints)} timepoints: {timepoints}")
         for tp in timepoints:
-            tp_result = _analyze_timepoint(parsed_ptms, enriched_data, tp)
+            tp_result = _analyze_timepoint(parsed_ptms, enriched_data, tp, output_dir=output_dir)
             timepoint_results[tp] = tp_result
             logger.info(
                 f"[NET-NODE] Timepoint {tp}: "
@@ -1913,7 +1987,7 @@ def _run_network_analysis_inner(state: dict) -> dict:
         logger.info("[NET-NODE] Single timepoint/condition — using combined network")
 
     # Build combined network data (for backward compatibility + main network image)
-    network_data = _build_network_data(parsed_ptms, enriched_data)
+    network_data = _build_network_data(parsed_ptms, enriched_data, output_dir=output_dir)
 
     # Phase 5: Validate network integrity
     validation = _validate_network(network_data["nodes"], network_data["edges"])
