@@ -924,21 +924,20 @@ async def cancel_order(
 
     logger.info(f"Order {order.order_code} cancelled (stopped)")
 
-    # Webhook: notify external systems (OpenClaw, etc.)
-    step = order.current_stage or "preprocessing"
-    if step not in ("preprocessing", "rag_enrichment", "report_generation"):
-        step = "preprocessing"
+    # Webhook: Cancelled (one of 3 events: Started, Completed, Failed/Cancelled)
     if settings.WEBHOOK_URL:
         try:
             await send_order_webhook(
                 order_id=order.id,
                 order_code=order.order_code,
-                step=step,
-                status="cancelled",
+                event="cancelled",
                 webhook_url=settings.WEBHOOK_URL,
             )
+            logger.info(f"Webhook sent for cancel: {order.order_code} -> {settings.WEBHOOK_URL}")
         except Exception as e:
             logger.warning(f"Webhook failed on cancel: {e}")
+    else:
+        logger.debug("WEBHOOK_URL not set, skipping webhook on cancel")
 
     return {"order_code": order.order_code, "status": "cancelled"}
 

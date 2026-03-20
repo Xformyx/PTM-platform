@@ -92,19 +92,15 @@ def update_order_status(
 
         logger.info(f"[Order {order_id}] DB status → {status}")
 
-        # Webhook: [order_code] Step : Status
+        # Webhook: only 3 events — Started, Completed, Failed/Cancelled
         if status == "preprocessing":
-            send_order_webhook(order_id, "preprocessing", "started")
-        elif status == "rag_enrichment":
-            send_order_webhook(order_id, "preprocessing", "completed")
-        elif status == "report_generation":
-            send_order_webhook(order_id, "rag_enrichment", "completed")
+            send_order_webhook(order_id, "started")
         elif status == "completed":
-            send_order_webhook(order_id, "report_generation", "completed")
+            send_order_webhook(order_id, "completed")
         elif status == "failed":
-            send_order_webhook(order_id, None, "failed", error_message=error_message)
+            send_order_webhook(order_id, "failed", error_message=error_message)
         elif status == "cancelled":
-            send_order_webhook(order_id, None, "cancelled")
+            send_order_webhook(order_id, "cancelled")
     except Exception as e:
         logger.warning(f"[Order {order_id}] Failed to update DB status: {e}")
 

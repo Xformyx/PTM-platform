@@ -18,21 +18,8 @@ DATABASE_URL = os.getenv(
 )
 SYNC_DATABASE_URL = DATABASE_URL.replace("+asyncmy", "+pymysql").replace("+aiomysql", "+pymysql")
 
-# step: 3 stages. status: result (started/completed/failed/cancelled)
-STEPS = ("preprocessing", "rag_enrichment", "report_generation")
-STATUSES = ("started", "completed", "failed", "cancelled")
-
-STEP_LABELS = {
-    "preprocessing": "Preprocessing",
-    "rag_enrichment": "RAG-enrichment",
-    "report_generation": "Report Generation",
-}
-STATUS_LABELS = {
-    "started": "Started",
-    "completed": "Completed",
-    "failed": "Failed",
-    "cancelled": "Cancelled",
-}
+# Events: only 3 — Started, Completed, Failed/Cancelled
+EVENTS = ("started", "completed", "failed", "cancelled")
 
 
 def _get_order_info(order_id: int) -> dict:
@@ -79,18 +66,17 @@ def _send_one(url: str, payload: dict) -> bool:
 
 def send_order_webhook(
     order_id: int,
-    step: str | None,
-    status: str,
+    event: str,
     error_message: str | None = None,
 ):
     """
-    Send order stage event to configured webhook URL(s).
-    step: preprocessing | rag_enrichment | report_generation (None = use current_stage from DB)
-    status: started | completed | failed | cancelled
+    Send order event to configured webhook URL(s).
+    event: started | completed | failed | cancelled
 
-    Format for OpenClaw: [order_code] Step : Status
+    Only 3 moments: analysis started, analysis completed, error/stop.
+    Message format: [order_code] Started | Completed | Failed | Cancelled
     """
-    if status not in STATUSES:
+    if event not in EVENTS:
         return
 
     urls = os.getenv("WEBHOOK_URL", "").strip()
@@ -102,20 +88,14 @@ def send_order_webhook(
         return
 
     info = _get_order_info(order_id)
-    if step is None:
-        step = info["current_stage"] if info["current_stage"] in STEPS else "preprocessing"
-    if step not in STEPS:
-        return
-
-    step_label = STEP_LABELS.get(step, step)
-    status_label = STATUS_LABELS.get(status, status)
-    message = f"[{info['order_code']}] {step_label} - {status_label}"
+    labels = {"started": "Started", "completed": "Completed", "failed": "Failed", "cancelled": "Cancelled"}
+    message = f"[{info['order_code']}] {labels.get(event, event)}"
 
     payload = {
         "order_id": order_id,
         "order_code": info["order_code"],
-        "step": step,
-        "status": status,
+        "event": event,
+        "status": event,
         "message": message,
         "error_message": error_message or info["error_message"],
         "timestamp": datetime.now(timezone.utc).isoformat(),
