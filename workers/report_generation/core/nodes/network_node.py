@@ -2,6 +2,12 @@
 Network Node — temporal PTM signaling network analysis + Cytoscape visualization.
 Ported from multi_agent_system/agents/network_analyzer.py and ptm_network_automation.py.
 
+v5.6 — Cumulative Weighted Score for Pathway Distribution (Figure 1):
+  - X-axis changed from 'Number of Proteins' to 'Cumulative |Log2FC| Score' (Σ|Protein_Log2FC|)
+  - Each protein weighted by its |Protein_Log2FC| magnitude instead of equal count
+  - Bar labels show 'score (n=count)' for both PTM and Non-PTM groups
+  - Pathways ranked by total cumulative score (strongest expression changes at top)
+  - Step 5.5 added: gene_fc_weight lookup from unified TSV + parsed_ptms
 v5.5 — Load Non-PTM Protein_Log2FC from unified_protein_data_enriched TSV:
   - Added _load_unified_protein_fc() helper to read ALL protein FC from preprocessing TSV
   - _analyze_timepoint and _build_network_data now accept output_dir parameter
@@ -1836,43 +1842,70 @@ def _generate_pathway_distribution_graph(
         logger.warning("No pathway data found — skipping pathway distribution graph")
         return None
 
-    # ---- Step 6: Compute counts and sort ----
+    # ---- Step 5.5: Build gene -> |Protein_Log2FC| lookup for weighting ----
+    # Load from unified TSV (covers ALL proteins including Non-PTM)
+    gene_fc_weight: Dict[str, float] = {}
+    if output_dir:
+        unified_fc = _load_unified_protein_fc(output_dir)
+        for g, pfc in unified_fc.items():
+            gene_fc_weight[g] = abs(pfc)
+    # Override/supplement with PTM-specific data (ptm_relative_log2fc for PTM genes)
+    for ptm in parsed_ptms:
+        gene = (ptm.get("gene") or ptm.get("Gene.Name", "")).strip().upper()
+        if not gene:
+            continue
+        try:
+            fc = abs(float(ptm.get("ptm_relative_log2fc") or ptm.get("PTM_Relative_Log2FC", 0)))
+        except (ValueError, TypeError):
+            fc = 0.0
+        if gene not in gene_fc_weight or fc > gene_fc_weight[gene]:
+            gene_fc_weight[gene] = fc
+    logger.info(f"[NET-NODE] Pathway graph Step5.5: FC weights available for {len(gene_fc_weight)} genes")
+
+    # ---- Step 6: Compute cumulative weighted scores and sort ----
     pw_data = []
     for pw_name, groups in pathway_proteins.items():
-        ptm_count = len(groups["ptm"])
-        non_ptm_count = len(groups["non_ptm"])
-        total = ptm_count + non_ptm_count
-        if total > 0:
+        ptm_genes_in_pw = groups["ptm"]
+        non_ptm_genes_in_pw = groups["non_ptm"]
+        ptm_count = len(ptm_genes_in_pw)
+        non_ptm_count = len(non_ptm_genes_in_pw)
+        # Cumulative |Log2FC| score: sum of absolute FC for each gene in pathway
+        ptm_score = sum(gene_fc_weight.get(g, 0.0) for g in ptm_genes_in_pw)
+        non_ptm_score = sum(gene_fc_weight.get(g, 0.0) for g in non_ptm_genes_in_pw)
+        total_score = ptm_score + non_ptm_score
+        if ptm_count + non_ptm_count > 0:
             pw_data.append({
                 "pathway": pw_name,
-                "ptm": ptm_count,
-                "non_ptm": non_ptm_count,
-                "total": total,
+                "ptm_score": round(ptm_score, 2),
+                "non_ptm_score": round(non_ptm_score, 2),
+                "total_score": round(total_score, 2),
+                "ptm_count": ptm_count,
+                "non_ptm_count": non_ptm_count,
             })
 
     if not pw_data:
         logger.warning("No pathway proteins found — skipping pathway distribution graph")
         return None
 
-    # Sort by total count descending, take top 25
-    pw_data.sort(key=lambda x: -x["total"])
+    # Sort by total cumulative score descending, take top 25
+    pw_data.sort(key=lambda x: -x["total_score"])
     pw_data = pw_data[:25]
     pw_data.reverse()  # Reverse for horizontal bar (bottom = highest)
 
-    # ---- Step 7: Generate the bar graph ----
-    fig, ax = plt.subplots(figsize=(12, max(6, len(pw_data) * 0.4)))
+    # ---- Step 7: Generate the weighted bar graph ----
+    fig, ax = plt.subplots(figsize=(14, max(7, len(pw_data) * 0.45)))
 
     pathways_list = [d["pathway"] for d in pw_data]
-    ptm_counts = [d["ptm"] for d in pw_data]
-    non_ptm_counts = [d["non_ptm"] for d in pw_data]
+    ptm_scores = [d["ptm_score"] for d in pw_data]
+    non_ptm_scores = [d["non_ptm_score"] for d in pw_data]
     y_pos = np.arange(len(pathways_list))
     bar_height = 0.35
 
     # Colors: PTM = coral/red tones, Non-PTM = teal/green tones
-    bars_ptm = ax.barh(y_pos + bar_height / 2, ptm_counts, bar_height,
+    bars_ptm = ax.barh(y_pos + bar_height / 2, ptm_scores, bar_height,
                        label="Activated PTM Proteins", color="#E74C3C", alpha=0.85,
                        edgecolor="white", linewidth=0.5)
-    bars_non = ax.barh(y_pos - bar_height / 2, non_ptm_counts, bar_height,
+    bars_non = ax.barh(y_pos - bar_height / 2, non_ptm_scores, bar_height,
                        label="Non-PTM Interactor Proteins", color="#2ECC71", alpha=0.85,
                        edgecolor="white", linewidth=0.5)
 
@@ -1886,26 +1919,32 @@ def _generate_pathway_distribution_graph(
 
     ax.set_yticks(y_pos)
     ax.set_yticklabels(display_names, fontsize=9)
-    ax.set_xlabel("Number of Proteins", fontsize=11, fontweight="bold")
-    ax.set_title("Canonical Pathway Distribution: Activated PTM vs Non-PTM Interactor Proteins",
-                 fontsize=13, fontweight="bold", pad=15)
+    ax.set_xlabel("Cumulative |Log2FC| Score", fontsize=11, fontweight="bold")
+    ax.set_title(
+        "Canonical Pathway Distribution: Activated PTM vs Non-PTM Interactor Proteins\n"
+        "(Weighted by |Protein_Log2FC|)",
+        fontsize=13, fontweight="bold", pad=15,
+    )
     ax.legend(loc="lower right", fontsize=10, framealpha=0.9)
-    ax.xaxis.set_major_locator(ticker.MaxNLocator(integer=True))
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
     ax.grid(axis="x", alpha=0.3, linestyle="--")
 
-    # Add count labels on bars
-    for bar in bars_ptm:
+    # Add score + count labels on bars: "score (n=count)"
+    max_width = max(max(ptm_scores, default=0), max(non_ptm_scores, default=0))
+    label_offset = max_width * 0.01 + 0.1  # dynamic offset
+    for bar, d in zip(bars_ptm, pw_data):
         width = bar.get_width()
-        if width > 0:
-            ax.text(width + 0.1, bar.get_y() + bar.get_height() / 2,
-                    str(int(width)), va="center", fontsize=8, color="#C0392B")
-    for bar in bars_non:
+        if width > 0 or d["ptm_count"] > 0:
+            label_text = f"{width:.1f} (n={d['ptm_count']})"
+            ax.text(max(width, 0) + label_offset, bar.get_y() + bar.get_height() / 2,
+                    label_text, va="center", fontsize=7.5, color="#C0392B", fontweight="medium")
+    for bar, d in zip(bars_non, pw_data):
         width = bar.get_width()
-        if width > 0:
-            ax.text(width + 0.1, bar.get_y() + bar.get_height() / 2,
-                    str(int(width)), va="center", fontsize=8, color="#27AE60")
+        if width > 0 or d["non_ptm_count"] > 0:
+            label_text = f"{width:.1f} (n={d['non_ptm_count']})"
+            ax.text(max(width, 0) + label_offset, bar.get_y() + bar.get_height() / 2,
+                    label_text, va="center", fontsize=7.5, color="#27AE60", fontweight="medium")
 
     plt.tight_layout()
 
@@ -1913,11 +1952,14 @@ def _generate_pathway_distribution_graph(
     fig.savefig(str(output_path), dpi=200, bbox_inches="tight", facecolor="white")
     plt.close(fig)
 
-    total_ptm = sum(d["ptm"] for d in pw_data)
-    total_non = sum(d["non_ptm"] for d in pw_data)
+    total_ptm_score = sum(d["ptm_score"] for d in pw_data)
+    total_non_score = sum(d["non_ptm_score"] for d in pw_data)
+    total_ptm_n = sum(d["ptm_count"] for d in pw_data)
+    total_non_n = sum(d["non_ptm_count"] for d in pw_data)
     logger.info(
         f"[NET-NODE] Pathway distribution graph saved: {output_path} "
-        f"({len(pw_data)} pathways, {total_ptm} activated PTM, {total_non} activated Non-PTM)"
+        f"({len(pw_data)} pathways, PTM: score={total_ptm_score:.1f} n={total_ptm_n}, "
+        f"Non-PTM: score={total_non_score:.1f} n={total_non_n})"
     )
     return str(output_path)
 
@@ -2870,16 +2912,19 @@ def generate_network_figure_section(network_analysis: dict) -> str:
         pw_path_obj = Path(pathway_graph_path)
         if pw_path_obj.exists() and pw_path_obj.stat().st_size > 1000:
             pw_img_ref = pw_path_obj.name
-            section += f"### Figure {figure_num}. Canonical Pathway Distribution of Activated PTM and Non-PTM Interactor Proteins\n\n"
+            section += f"### Figure {figure_num}. Canonical Pathway Distribution of Activated PTM and Non-PTM Interactor Proteins (Weighted by |Protein_Log2FC|)\n\n"
             section += f"![Canonical Pathway Distribution]({pw_img_ref})\n\n"
             section += (
-                f"**Figure Legend:** This bar graph illustrates the distribution of **activated** PTM proteins (red, Log2FC > 0) "
-                f"and Non-PTM interactor proteins (green) across canonical signaling pathways "
-                f"identified via KEGG pathway analysis. Non-PTM proteins are assigned to pathways through "
-                f"interaction-based pathway inheritance from their PTM partners (STRING/BioGRID edges). "
-                f"Pathways are ranked by total protein count. "
-                f"The co-occurrence of PTM and Non-PTM proteins within the same pathway suggests "
-                f"coordinated regulation of signaling cascades.\n\n"
+                f"**Figure Legend:** This bar graph illustrates the cumulative |Protein_Log2FC| score "
+                f"of **activated** PTM proteins (red, Log2FC > 0) and Non-PTM interactor proteins (green) "
+                f"across canonical signaling pathways identified via KEGG pathway analysis. "
+                f"The X-axis represents the cumulative |Log2FC| score (\u03a3|Protein_Log2FC|), which weights "
+                f"each protein by its fold-change magnitude rather than counting proteins equally. "
+                f"Bar labels show the score followed by protein count in parentheses (n=count). "
+                f"Non-PTM proteins are assigned to pathways through interaction-based pathway inheritance "
+                f"from their PTM partners (STRING/BioGRID edges). "
+                f"Pathways are ranked by total cumulative score, highlighting pathways with the "
+                f"strongest combined expression changes.\n\n"
             )
             section += "---\n\n"
             figure_num += 1
