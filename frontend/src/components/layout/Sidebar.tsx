@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
@@ -194,6 +194,34 @@ function ChangePasswordModal({ open, onClose }: { open: boolean; onClose: () => 
 }
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+
+function VersionDisplay({ collapsed }: { collapsed?: boolean }) {
+  const [version, setVersion] = useState<string>("—");
+  const [gitHash, setGitHash] = useState<string>("");
+  useEffect(() => {
+    fetch("/api/version")
+      .then((r) => r.ok ? r.json() : null)
+      .then((d) => {
+        if (d?.version) setVersion(d.version);
+        if (d?.git_hash) setGitHash(d.git_hash);
+      })
+      .catch(() => {});
+  }, []);
+  const display = gitHash ? `Version : ${version} (${gitHash})` : `Version : ${version}`;
+  return (
+    <div
+      className={cn(
+        "shrink-0 px-3 py-2 border-t",
+        collapsed ? "flex justify-center" : "text-center"
+      )}
+      title={display}
+    >
+      <span className="text-[10px] text-muted-foreground font-mono">
+        {display}
+      </span>
+    </div>
+  );
+}
 
 function CreateUserModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [email, setEmail] = useState("");
@@ -690,6 +718,9 @@ export default function Sidebar({ className, collapsed = false, onToggle }: Side
 
       {/* User profile */}
       <UserProfileSection collapsed={collapsed} />
+
+      {/* Version */}
+      <VersionDisplay collapsed={collapsed} />
     </aside>
   );
 }

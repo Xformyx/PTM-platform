@@ -25,6 +25,24 @@ async def health_check() -> dict[str, str]:
     return {"status": "ok", "service": "ptm-api-server"}
 
 
+@router.get("/version")
+async def get_version() -> dict[str, str]:
+    """Return platform version (AA.BB.CC.DD) and git hash. Read from mounted files."""
+    v = "00.00.00.00"
+    git_hash = ""
+    try:
+        with open("/app/VERSION", "r") as f:
+            v = f.read().strip() or "00.00.00.00"
+    except FileNotFoundError:
+        pass
+    try:
+        with open("/app/GIT_HASH", "r") as f:
+            git_hash = f.read().strip() or ""
+    except FileNotFoundError:
+        pass
+    return {"version": v, "git_hash": git_hash}
+
+
 @router.get("/health/detailed")
 async def detailed_health(
     db: AsyncSession = Depends(get_db),

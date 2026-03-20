@@ -74,6 +74,9 @@ services:
     build:
       context: ./api-server
       dockerfile: Dockerfile
+      args:
+        VERSION: ${VERSION:-00.00.00.00}
+    image: ptm-api-server:${VERSION:-00.00.00.00}
     container_name: ptm-api-server
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8000/api/health"]
@@ -84,6 +87,8 @@ services:
     env_file:
       - .env
     volumes:
+      - ./VERSION:/app/VERSION:ro
+      - ./GIT_HASH:/app/GIT_HASH:ro
       - ./api-server/app:/app/app
       - ./data:/app/data
       - ./storage/reports:/app/storage/reports
@@ -125,6 +130,9 @@ services:
     build:
       context: ./mcp-server
       dockerfile: Dockerfile
+      args:
+        VERSION: ${VERSION:-00.00.00.00}
+    image: ptm-mcp-server:${VERSION:-00.00.00.00}
     container_name: ptm-mcp-server
     volumes:
       - ./mcp-server/app:/app/app
@@ -145,6 +153,9 @@ services:
     build:
       context: ./workers
       dockerfile: Dockerfile
+      args:
+        VERSION: ${VERSION:-00.00.00.00}
+    image: ptm-workers:${VERSION:-00.00.00.00}
     container_name: ptm-worker-preprocessing
     command: celery -A celery_app worker -Q preprocessing -c ${PREPROCESSING_CONCURRENCY:-2} -n preprocessing@%h -l info
     volumes:
@@ -178,6 +189,9 @@ services:
     build:
       context: ./workers
       dockerfile: Dockerfile
+      args:
+        VERSION: ${VERSION:-00.00.00.00}
+    image: ptm-workers:${VERSION:-00.00.00.00}
     container_name: ptm-worker-rag
     command: celery -A celery_app worker -Q rag_enrichment -c ${RAG_ENRICHMENT_CONCURRENCY:-3} -n rag@%h -l info
     env_file:
@@ -217,6 +231,9 @@ services:
     build:
       context: ./workers
       dockerfile: Dockerfile
+      args:
+        VERSION: ${VERSION:-00.00.00.00}
+    image: ptm-workers:${VERSION:-00.00.00.00}
     container_name: ptm-worker-report
     command: celery -A celery_app worker -Q report_generation -c ${REPORT_GENERATION_CONCURRENCY:-2} -n report@%h -l info
     env_file:
@@ -263,6 +280,9 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        VERSION: ${VERSION:-00.00.00.00}
+    image: ptm-frontend:${VERSION:-00.00.00.00}
     container_name: ptm-frontend
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:80/"]
