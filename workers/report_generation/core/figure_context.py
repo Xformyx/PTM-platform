@@ -2,13 +2,18 @@
 Figure Context Generator — provides figure context for LLM report writing.
 Ported from ptm_nonptm_network_command.py FigureInformationGenerator.
 
+v3.0 — Complete figure numbering aligned with generate_network_figure_section:
+  - Figure 1: Canonical Pathway Distribution Bar Graph
+  - Figure 2+: Signaling Cascade Diagrams (per-condition or combined)
+  - Figure N+: Cytoscape Network Images (per-timepoint panels)
+  
+  LLM prompts now include ALL figures so the model can reference them naturally.
+  Previous versions only included Cytoscape images, causing figure number mismatches.
+
 v2.0 — Aligned with cytoscape_network_pipeline_guide.md:
   GAP 3: Enhanced with timepoint-based figure context
   GAP 4: Multi-type legend integration (full, individual, comparison)
   GAP 6: Updated activation state names to match guide palette
-
-Generates structured figure descriptions so that LLM-written Results/Discussion
-sections can reference "Figure 1A", "Figure 1B" etc. naturally.
 """
 
 import logging
@@ -21,11 +26,11 @@ logger = logging.getLogger(__name__)
 class FigureInformationGenerator:
     """Generate figure context for LLM prompts.
     
-    Provides structured descriptions of network figures so that
-    LLM-written sections can reference figures naturally.
+    Provides structured descriptions of ALL report figures so that
+    LLM-written sections can reference figures naturally with correct numbering.
     
-    v2.0: Now supports timepoint-based analysis, Non-PTM nodes,
-    and multi-type legends from network_node.py.
+    v3.0: Includes pathway distribution graph, cascade diagrams, AND Cytoscape
+    network images — matching the exact figure numbering in the final report.
     """
 
     # GAP 6: Updated activation state names to match guide palette
@@ -41,21 +46,68 @@ class FigureInformationGenerator:
         # GAP 1/3: Timepoint-based results from network_node.py
         self.timepoint_results = network_analysis.get("timepoint_results", {})
         self.timepoints = network_analysis.get("timepoints", [])
+        # v3.0: Cascade diagram info
+        self.pathway_graph_path = network_analysis.get("pathway_graph_path")
+        self.cascade_diagram_path = network_analysis.get("cascade_diagram_path")
+        self.cascade_diagram_paths = network_analysis.get("cascade_diagram_paths", {})
         self.figure_map = self._build_figure_map()
 
     def _build_figure_map(self) -> Dict[str, dict]:
         """Build mapping of figure labels to their descriptions.
         
-        GAP 3: Now creates panel-based figure map when timepoint data is available.
+        v3.0: Mirrors the exact figure numbering in generate_network_figure_section:
+          Figure 1 = Pathway Distribution Graph
+          Figure 2+ = Cascade Diagrams (per-condition or combined)
+          Figure N+ = Cytoscape Network Images (per-timepoint panels)
         """
         fig_map = {}
         fig_num = 1
         panel_labels = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
-        # Sort: "main" first, then timepoints in order
+        # ── Figure 1: Canonical Pathway Distribution Bar Graph ──
+        if self.pathway_graph_path:
+            fig_map["pathway_graph"] = {
+                "figure_number": fig_num,
+                "figure_label": f"Figure {fig_num}",
+                "display_name": "Canonical Pathway Distribution of Activated PTM and Non-PTM Interactor Proteins",
+                "description": self._describe_pathway_graph(),
+                "panel_index": 0,
+                "figure_type": "pathway_graph",
+            }
+            fig_num += 1
+
+        # ── Figure 2+: Signaling Cascade Diagrams ──
+        if self.cascade_diagram_paths:
+            # Per-condition cascade diagrams
+            cascade_timepoints = self.timepoints if self.timepoints else sorted(self.cascade_diagram_paths.keys())
+            for tp in cascade_timepoints:
+                if tp not in self.cascade_diagram_paths:
+                    continue
+                fig_map[f"cascade_{tp}"] = {
+                    "figure_number": fig_num,
+                    "figure_label": f"Figure {fig_num}",
+                    "display_name": f"Signal Transduction Pathway Cascade Diagram — {tp}",
+                    "description": self._describe_cascade_diagram(condition=tp),
+                    "panel_index": 0,
+                    "figure_type": "cascade_diagram",
+                    "condition": tp,
+                }
+                fig_num += 1
+        elif self.cascade_diagram_path:
+            # Single combined cascade diagram
+            fig_map["cascade_combined"] = {
+                "figure_number": fig_num,
+                "figure_label": f"Figure {fig_num}",
+                "display_name": "Signal Transduction Pathway Cascade Diagram",
+                "description": self._describe_cascade_diagram(),
+                "panel_index": 0,
+                "figure_type": "cascade_diagram",
+            }
+            fig_num += 1
+
+        # ── Figure N+: Cytoscape Network Images (per-timepoint panels) ──
+        # v5.0: "main" is excluded — replaced by pathway distribution graph
         sorted_labels = []
-        if "main" in self.network_images:
-            sorted_labels.append("main")
         for label in sorted(
             [k for k in self.network_images.keys() if k != "main"],
             key=self._tp_sort_key
@@ -63,16 +115,11 @@ class FigureInformationGenerator:
             sorted_labels.append(label)
 
         for idx, label in enumerate(sorted_labels):
-            if label == "main":
-                display = "Combined PTM-NonPTM Signaling Network"
-                description = self._describe_main_network()
-                fig_label = f"Figure {fig_num}"
-            else:
-                phase = self._tp_to_phase(label)
-                display = f"PTM-NonPTM Integrated Network at {label} ({phase})"
-                description = self._describe_timepoint_network(label)
-                panel = panel_labels[idx - 1] if idx > 0 and idx <= len(panel_labels) else str(idx)
-                fig_label = f"Figure {fig_num}{panel}"
+            phase = self._tp_to_phase(label)
+            display = f"PTM-NonPTM Integrated Network at {label} ({phase})"
+            description = self._describe_timepoint_network(label)
+            panel = panel_labels[idx] if idx < len(panel_labels) else str(idx + 1)
+            fig_label = f"Figure {fig_num}{panel}"
 
             fig_map[label] = {
                 "figure_number": fig_num,
@@ -80,26 +127,87 @@ class FigureInformationGenerator:
                 "display_name": display,
                 "description": description,
                 "panel_index": idx,
+                "figure_type": "cytoscape_network",
             }
 
         return fig_map
+
+    # ── Description generators ──
+
+    def _describe_pathway_graph(self) -> str:
+        """Generate description for the Canonical Pathway Distribution Bar Graph (Figure 1)."""
+        desc = (
+            "This bar graph shows the cumulative |Protein_Log2FC| score of activated PTM proteins "
+            "(red) and Non-PTM interactor proteins (green) across canonical signaling pathways "
+            "identified via KEGG pathway analysis. Pathways are ranked by total cumulative score, "
+            "highlighting pathways with the strongest combined expression changes. "
+            "Bar labels show the score followed by protein count in parentheses."
+        )
+        return desc
+
+    def _describe_cascade_diagram(self, condition: str = None) -> str:
+        """Generate description for Signaling Cascade Diagram(s).
+        
+        v3.0: New method providing cascade diagram context for LLM.
+        """
+        cond_str = f" for the {condition} condition" if condition else ""
+        desc = (
+            f"This compartmentalized signaling cascade diagram{cond_str} depicts the signal "
+            "transduction flow across cellular compartments (Extracellular Space, Plasma Membrane, "
+            "Cytoplasm, Nucleus) for the top canonical pathways ranked by cumulative |Log2FC| score. "
+            "Each horizontal lane represents a distinct signaling pathway, with proteins positioned "
+            "in their annotated subcellular compartment (based on UniProt and GO annotations). "
+            "Protein nodes are color-coded: red = activated PTM (Log2FC > 0), "
+            "blue = inhibited PTM (Log2FC < 0), green = upregulated Non-PTM, "
+            "purple = downregulated Non-PTM, orange diamond = kinase. "
+            "Gray arrows indicate canonical signal flow direction."
+        )
+
+        # Add condition-specific protein summary if available
+        if condition and self.parsed_ptms:
+            cond_ptms = [p for p in self.parsed_ptms
+                         if (p.get("condition") or p.get("Condition", "")) == condition]
+            if cond_ptms:
+                activated = [p for p in cond_ptms if (p.get("ptm_relative_log2fc") or 0) > 0]
+                inhibited = [p for p in cond_ptms if (p.get("ptm_relative_log2fc") or 0) < 0]
+                desc += (
+                    f" In the {condition} condition, {len(activated)} PTMs show activation "
+                    f"and {len(inhibited)} show inhibition."
+                )
+                # Top activated
+                top_act = sorted(activated, key=lambda x: -(x.get("ptm_relative_log2fc") or 0))[:5]
+                if top_act:
+                    top_str = ", ".join(
+                        f"{p.get('gene', '?')}({p.get('position', '')})"
+                        for p in top_act
+                    )
+                    desc += f" Key activated: {top_str}."
+
+        return desc
 
     def _describe_main_network(self) -> str:
         """Generate description for the main combined network.
         
         GAP 2/3: Now includes Non-PTM node counts and types.
         """
-        nodes = self.network_data.get("nodes", [])
+        nodes = self.network_data.get("nodes", {})
         edges = self.network_data.get("edges", [])
 
-        ptm_nodes = [n for n in nodes if n.get("type") == "PTM"]
-        non_ptm_nodes = [n for n in nodes if n.get("type") == "Non-PTM"]
+        # Handle nodes as dict or list
+        if isinstance(nodes, dict):
+            node_list = list(nodes.values()) if nodes else []
+        else:
+            node_list = nodes or []
+
+        ptm_nodes = [n for n in node_list if isinstance(n, dict) and n.get("type") == "PTM"]
+        non_ptm_nodes = [n for n in node_list if isinstance(n, dict) and n.get("type") == "Non-PTM"]
         active = [n for n in ptm_nodes if n.get("state") in self.ACTIVE_STATES]
         inhibited = [n for n in ptm_nodes if n.get("state") in self.INHIBITED_STATES]
 
         edge_types = defaultdict(int)
         for e in edges:
-            edge_types[e.get("evidence_type", "Unknown")] += 1
+            if isinstance(e, dict):
+                edge_types[e.get("evidence_type", "Unknown")] += 1
 
         desc = (
             f"The combined PTM-NonPTM signaling network contains "
@@ -113,12 +221,18 @@ class FigureInformationGenerator:
 
         if active:
             top = sorted(active, key=lambda x: -x.get("value", 0))[:5]
-            top_str = ", ".join(f"{n['gene']}-{n['site']} (Log2FC={n['value']:.2f})" for n in top)
+            top_str = ", ".join(
+                f"{n.get('gene', '?')}-{n.get('site', '')} (Log2FC={n.get('value', 0):.2f})"
+                for n in top
+            )
             desc += f"The most strongly activated PTMs are {top_str}. "
 
         if inhibited:
             top = sorted(inhibited, key=lambda x: x.get("value", 0))[:3]
-            top_str = ", ".join(f"{n['gene']}-{n['site']} (Log2FC={n['value']:.2f})" for n in top)
+            top_str = ", ".join(
+                f"{n.get('gene', '?')}-{n.get('site', '')} (Log2FC={n.get('value', 0):.2f})"
+                for n in top
+            )
             desc += f"The most strongly inhibited PTMs are {top_str}. "
 
         if edge_types:
@@ -197,7 +311,13 @@ class FigureInformationGenerator:
 
     def _describe_condition_network(self, condition: str) -> str:
         """Generate description for a condition-specific sub-network (backward compatible)."""
-        nodes = self.network_data.get("nodes", [])
+        nodes = self.network_data.get("nodes", {})
+
+        # Handle nodes as dict or list
+        if isinstance(nodes, dict):
+            node_list = list(nodes.values()) if nodes else []
+        else:
+            node_list = nodes or []
 
         # Filter PTMs for this condition
         cond_genes = set()
@@ -206,7 +326,7 @@ class FigureInformationGenerator:
             if cond == condition:
                 cond_genes.add(ptm.get("gene", ""))
 
-        cond_nodes = [n for n in nodes if n.get("gene") in cond_genes]
+        cond_nodes = [n for n in node_list if isinstance(n, dict) and n.get("gene") in cond_genes]
         active = [n for n in cond_nodes if n.get("state") in self.ACTIVE_STATES]
         inhibited = [n for n in cond_nodes if n.get("state") in self.INHIBITED_STATES]
 
@@ -217,15 +337,19 @@ class FigureInformationGenerator:
 
         if active:
             top = sorted(active, key=lambda x: -x.get("value", 0))[:3]
-            top_str = ", ".join(f"{n['gene']}-{n['site']}" for n in top)
+            top_str = ", ".join(f"{n.get('gene', '?')}-{n.get('site', '')}" for n in top)
             desc += f"Key activated PTMs: {top_str}. "
 
         return desc
 
+    # ── LLM context generation ──
+
     def generate_figure_context_for_llm(self, section_type: str = "results") -> str:
         """Generate figure context text to inject into LLM prompts.
         
-        GAP 3: Enhanced with timepoint-based context and temporal comparison.
+        v3.0: Now includes ALL figures (pathway graph, cascade diagrams, Cytoscape)
+        with correct numbering matching the final report.
+        
         Returns a structured text block that tells the LLM which figures
         are available and how to reference them.
         """
@@ -233,16 +357,19 @@ class FigureInformationGenerator:
             return ""
 
         lines = [
-            "\n--- NETWORK FIGURE CONTEXT ---",
-            "The following network visualization figures are included in this report.",
-            "Reference them naturally in your writing using their figure numbers.",
-            "Example: 'As shown in Figure 1, the PTM signaling network reveals...'",
+            "\n--- FIGURE CONTEXT (ALL REPORT FIGURES) ---",
+            "The following figures are included in this report's Network Visualization section.",
+            "You MUST reference these figures naturally in your writing using their exact figure numbers.",
+            "For example: 'As shown in Figure 1, the pathway distribution reveals...'",
+            "or 'The signaling cascade diagram (Figure 2) illustrates the compartmentalized signal flow...'",
             "",
         ]
 
         for label, info in self.figure_map.items():
+            fig_type = info.get("figure_type", "unknown")
             lines.append(f"**{info['figure_label']}: {info['display_name']}**")
-            lines.append(info["description"])
+            lines.append(f"  Type: {fig_type}")
+            lines.append(f"  {info['description']}")
             lines.append("")
 
         # GAP 3: Add temporal comparison context when multiple timepoints exist
@@ -265,7 +392,7 @@ class FigureInformationGenerator:
                 lines.append(comparison_legend)
                 lines.append("")
 
-        # GAP 4: Include individual panel legends
+        # Panel-by-panel summary
         individual_legends = self.legends.get("individual_legends", {})
         if individual_legends:
             lines.append("**Panel-by-Panel Summary:**")
@@ -276,17 +403,23 @@ class FigureInformationGenerator:
         # Section-specific instructions
         if section_type == "results":
             lines.append(
-                "INSTRUCTION: In the Results section, describe the network analysis findings "
-                "and reference the figures. Mention specific PTM nodes, their activation states, "
-                "Non-PTM interactors, and key interaction edges visible in the network. "
-                "If multiple timepoints are present, describe the temporal progression of "
-                "signaling network changes across early, mid, and late phases."
+                "INSTRUCTION: In the Results section, you MUST reference the figures by their "
+                "exact figure numbers. Describe the pathway distribution (Figure 1), "
+                "the signaling cascade diagrams showing compartmentalized signal flow, "
+                "and the Cytoscape network images showing protein-protein interactions. "
+                "Mention specific PTM nodes, their activation states, Non-PTM interactors, "
+                "and key interaction edges visible in the networks. "
+                "If multiple conditions/timepoints are present, describe the differences "
+                "between conditions as shown in the per-condition cascade diagrams."
             )
         elif section_type == "discussion":
             lines.append(
                 "INSTRUCTION: In the Discussion section, interpret the network topology "
                 "and discuss the biological significance of the observed interaction patterns. "
-                "Reference the figures when discussing network-level findings. "
+                "Reference the figures by their exact numbers when discussing findings. "
+                "Discuss how the pathway distribution (Figure 1) and cascade diagrams "
+                "reveal the dominant signaling axes, and how the Cytoscape networks "
+                "provide detailed protein-level interaction evidence. "
                 "If temporal data is available, discuss how the signaling network evolves "
                 "over time and the implications for cellular response mechanisms."
             )

@@ -1,6 +1,12 @@
 """
 Signaling Cascade Diagram — Publication-quality compartmentalized cell signaling visualization.
 
+v6.2 — Context-aware multi-factor pathway selection:
+  - Replaces simple cumulative |FC| TOP5 with multi-factor scoring
+  - Factors: FC magnitude, compartment diversity, template match, protein count, network connectivity
+  - Pathways that span multiple compartments and match known signal templates are prioritized
+  - Produces more biologically informative cascade diagrams
+
 v6.0 — Compartmentalized Signaling Cascade Diagram:
   - Draws a schematic cell cross-section with compartments:
     Extracellular → Plasma Membrane → Cytoplasm → Nucleus
@@ -405,19 +411,100 @@ def generate_signaling_cascade_diagram(
             for pw in ptm_pathways[tgt_gene]:
                 pathway_genes[pw].add(src_gene)
 
-    # Score pathways by cumulative |FC|
+    # ---- Context-aware multi-factor pathway scoring (v6.2) ----
+    # Instead of simple cumulative |FC|, score pathways by multiple factors:
+    #   1. Cumulative |FC| score (expression magnitude)
+    #   2. Compartment diversity (pathways spanning multiple compartments are more informative)
+    #   3. Template match (pathways matching known signal templates produce better diagrams)
+    #   4. Protein count (pathways with more proteins tell a richer story)
+    #   5. Network connectivity (pathways with more inter-protein edges are better supported)
+
+    # Pre-compute compartment assignments for all genes
+    _temp_compartments: Dict[str, str] = {}
+    for pw_genes in pathway_genes.values():
+        for g in pw_genes:
+            if g not in _temp_compartments:
+                enr_data = gene_enrichment.get(g, {})
+                enr = enr_data.get("rag_enrichment", {})
+                loc = enr.get("localization", [])
+                go_cc = enr.get("go_terms", {}).get("cellular_component", [])
+                _temp_compartments[g] = _classify_compartment(g, loc, go_cc)
+
+    # Pre-compute edge connectivity per gene pair
+    edge_gene_pairs: set = set()
+    for edge in edges:
+        src = edge.get("source", "").strip().upper().split("-")[0]
+        tgt = edge.get("target", "").strip().upper().split("-")[0]
+        if src and tgt:
+            edge_gene_pairs.add((src, tgt))
+            edge_gene_pairs.add((tgt, src))
+
     pathway_scores = []
     for pw_name, genes in pathway_genes.items():
-        score = sum(abs(gene_info.get(g, {}).get("fc", 0)) for g in genes)
-        if len(genes) >= 2:  # At least 2 proteins
-            pathway_scores.append((pw_name, score, genes))
-    
+        if len(genes) < 2:  # At least 2 proteins
+            continue
+
+        # Factor 1: Cumulative |FC| score (normalized by gene count to avoid size bias)
+        fc_score = sum(abs(gene_info.get(g, {}).get("fc", 0)) for g in genes)
+
+        # Factor 2: Compartment diversity — how many distinct compartments are covered?
+        compartments_in_pw = set(_temp_compartments.get(g, "cytoplasm") for g in genes)
+        diversity_score = len(compartments_in_pw)  # max 4
+
+        # Factor 3: Template match — does this pathway match a known signal template?
+        template_key = _match_pathway_to_template(pw_name)
+        template_score = 1.0 if template_key else 0.0
+        # Bonus: how many of the pathway's genes appear in the template?
+        if template_key and template_key in PATHWAY_SIGNAL_ORDER:
+            template_genes = set(g.upper() for g in PATHWAY_SIGNAL_ORDER[template_key])
+            overlap = len(genes & template_genes)
+            template_score += min(overlap / max(len(template_genes), 1), 1.0)
+
+        # Factor 4: Protein count (log-scaled to avoid domination by huge pathways)
+        count_score = math.log2(max(len(genes), 1))
+
+        # Factor 5: Network connectivity — edges between genes in this pathway
+        intra_edges = 0
+        gene_list = list(genes)
+        for i, g1 in enumerate(gene_list):
+            for g2 in gene_list[i+1:]:
+                if (g1, g2) in edge_gene_pairs:
+                    intra_edges += 1
+        connectivity_score = math.log2(max(intra_edges, 1))
+
+        # Composite score with weights
+        composite = (
+            0.35 * fc_score +
+            0.20 * (diversity_score / 4.0) * fc_score +  # Scale diversity relative to FC
+            0.20 * template_score * fc_score +            # Scale template match relative to FC
+            0.10 * count_score * (fc_score / max(len(genes), 1)) +  # Avg FC * log(count)
+            0.15 * connectivity_score * (fc_score / max(len(genes), 1))  # Avg FC * log(edges)
+        )
+
+        pathway_scores.append((pw_name, composite, genes, {
+            "fc_score": fc_score,
+            "diversity": diversity_score,
+            "template": template_key or "none",
+            "gene_count": len(genes),
+            "intra_edges": intra_edges,
+            "composite": composite,
+        }))
+
     pathway_scores.sort(key=lambda x: -x[1])
-    top_pathways = pathway_scores[:top_n_pathways]
+    top_pathways = [(name, score, genes) for name, score, genes, _ in pathway_scores[:top_n_pathways]]
 
     if not top_pathways:
         logger.warning("[CASCADE] No pathways with sufficient proteins — skipping diagram")
         return None
+
+    # Log detailed scoring for top pathways
+    for name, score, genes, details in pathway_scores[:top_n_pathways]:
+        logger.info(
+            f"[CASCADE] Selected: {name} (composite={details['composite']:.2f}, "
+            f"fc={details['fc_score']:.2f}, diversity={details['diversity']}/4, "
+            f"template={details['template']}, genes={details['gene_count']}, "
+            f"edges={details['intra_edges']})"
+        )
 
     logger.info(f"[CASCADE] Top {len(top_pathways)} pathways selected:")
     for pw_name, score, genes in top_pathways:
@@ -806,7 +893,7 @@ def generate_signaling_cascade_diagram(
     )
     ax.text(
         fig_width / 2, fig_height - 0.7,
-        f"Top {n_pathways} Canonical Pathways by Cumulative |Log2FC| Score",
+        f"Top {n_pathways} Canonical Pathways by Multi-factor Biological Relevance Score",
         ha="center", va="top",
         fontsize=11,
         color="#455A64",
