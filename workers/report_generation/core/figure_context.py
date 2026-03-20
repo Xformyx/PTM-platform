@@ -2,13 +2,18 @@
 Figure Context Generator — provides figure context for LLM report writing.
 Ported from ptm_nonptm_network_command.py FigureInformationGenerator.
 
-v3.0 — Complete figure numbering aligned with generate_network_figure_section:
+v7.0 — Content-driven cascade diagram pipeline:
   - Figure 1: Canonical Pathway Distribution Bar Graph
-  - Figure 2+: Signaling Cascade Diagrams (per-condition or combined)
+  - Figure 2+: Signaling Cascade Diagrams (generated AFTER writing by mediator)
   - Figure N+: Cytoscape Network Images (per-timepoint panels)
   
-  LLM prompts now include ALL figures so the model can reference them naturally.
-  Previous versions only included Cytoscape images, causing figure number mismatches.
+  v7.0: Cascade diagrams are now generated AFTER LLM writes sections, by the
+  cascade_mediator_node. The LLM is no longer forced to discuss specific pathways.
+  Instead, the LLM freely chooses which pathways to discuss based on the data,
+  and the mediator generates diagrams matching the LLM's text.
+  
+  Pathway candidates (scored list from network_node) are provided as context
+  so the LLM can make informed choices, but without MUST-discuss directives.
 
 v2.0 — Aligned with cytoscape_network_pipeline_guide.md:
   GAP 3: Enhanced with timepoint-based figure context
@@ -149,22 +154,28 @@ class FigureInformationGenerator:
     def _describe_cascade_diagram(self, condition: str = None) -> str:
         """Generate description for Signaling Cascade Diagram(s).
         
-        v3.0: New method providing cascade diagram context for LLM.
-        v3.1: Now includes specific pathway names from cascade_pathway_names.
+        v7.0: Cascade diagrams are generated AFTER writing by the mediator.
+        At write-time, we describe what the cascade diagram WILL show (a placeholder)
+        so the LLM knows the figure exists but isn't forced to discuss specific pathways.
+        After the mediator generates the actual diagrams, the figure context is updated.
         """
         cond_str = f" for the {condition} condition" if condition else ""
         
-        # Get the specific pathway names shown in this diagram
+        # v7.0: At write-time, cascade_pathway_names may be empty (mediator hasn't run yet).
+        # If populated (e.g., after mediator), include the actual pathway names.
         pw_key = condition if condition else "combined"
         pathway_names = self.cascade_pathway_names.get(pw_key, [])
         
         if pathway_names:
             pw_list_str = ", ".join(pathway_names)
             pw_sentence = (
-                f"The diagram specifically shows the following signaling pathways: {pw_list_str}. "
+                f"The diagram shows the following signaling pathways: {pw_list_str}. "
             )
         else:
-            pw_sentence = ""
+            pw_sentence = (
+                "The diagram will show the key signaling pathways discussed in the text, "
+                "depicting their compartmentalized signal transduction flow. "
+            )
         
         desc = (
             f"This compartmentalized signaling cascade diagram{cond_str} depicts the signal "
@@ -177,8 +188,7 @@ class FigureInformationGenerator:
             "blue = inhibited PTM (Log2FC < 0), green = upregulated Non-PTM, "
             "purple = downregulated Non-PTM, orange diamond = kinase. "
             "Node size is proportional to |PTM Log2FC| magnitude. "
-            "Gray arrows indicate canonical signal flow direction. "
-            "You MUST discuss these specific pathways shown in the cascade diagram in your writing."
+            "Gray arrows indicate canonical signal flow direction."
         )
 
         # Add condition-specific protein summary if available
@@ -418,20 +428,18 @@ class FigureInformationGenerator:
                 lines.append(legend_text)
             lines.append("")
 
-        # Collect all pathway names across cascade diagrams for LLM instructions
-        all_cascade_pathways = set()
-        for pw_list in self.cascade_pathway_names.values():
-            all_cascade_pathways.update(pw_list)
-        cascade_pw_str = ", ".join(sorted(all_cascade_pathways)) if all_cascade_pathways else ""
+        # v7.0: Provide pathway candidates as informational context (not forced)
+        # The LLM can use this to make informed pathway choices in its writing.
+        # The cascade_mediator will later extract which pathways were actually discussed.
+        pathway_candidates = self.network_analysis.get("pathway_candidates_summary", "")
 
-        # Section-specific instructions
+        # Section-specific instructions (v7.0: no forced pathway discussion)
         if section_type == "results":
-            pw_instruction = ""
-            if cascade_pw_str:
-                pw_instruction = (
-                    f" The cascade diagrams specifically visualize these pathways: {cascade_pw_str}. "
-                    "You MUST discuss these pathways in your results, describing the signal flow "
-                    "from extracellular to nuclear compartments as depicted in the diagrams."
+            candidate_hint = ""
+            if pathway_candidates:
+                candidate_hint = (
+                    f" Available signaling pathway data from the analysis includes: {pathway_candidates}. "
+                    "You may discuss the pathways most relevant to your analysis findings."
                 )
             lines.append(
                 "INSTRUCTION: In the Results section, you MUST reference the figures by their "
@@ -440,16 +448,18 @@ class FigureInformationGenerator:
                 "and the Cytoscape network images showing protein-protein interactions. "
                 "Mention specific PTM nodes, their activation states, Non-PTM interactors, "
                 "and key interaction edges visible in the networks. "
+                "When discussing signaling pathways, focus on those most supported by your "
+                "PTM data and enrichment analysis. The cascade diagrams will be generated "
+                "to match the pathways you discuss. "
                 "If multiple conditions/timepoints are present, describe the differences "
-                f"between conditions as shown in the per-condition cascade diagrams.{pw_instruction}"
+                f"between conditions.{candidate_hint}"
             )
         elif section_type == "discussion":
-            pw_instruction = ""
-            if cascade_pw_str:
-                pw_instruction = (
-                    f" The cascade diagrams highlight these key signaling axes: {cascade_pw_str}. "
-                    "You MUST discuss the biological significance of these specific pathways "
-                    "and how the compartmentalized signal flow reveals mechanistic insights."
+            candidate_hint = ""
+            if pathway_candidates:
+                candidate_hint = (
+                    f" Key signaling pathway candidates from the analysis: {pathway_candidates}. "
+                    "Focus on the pathways most relevant to your biological interpretation."
                 )
             lines.append(
                 "INSTRUCTION: In the Discussion section, interpret the network topology "
@@ -458,8 +468,9 @@ class FigureInformationGenerator:
                 "Discuss how the pathway distribution (Figure 1) and cascade diagrams "
                 "reveal the dominant signaling axes, and how the Cytoscape networks "
                 "provide detailed protein-level interaction evidence. "
+                "Focus your pathway discussion on those most strongly supported by the data. "
                 "If temporal data is available, discuss how the signaling network evolves "
-                f"over time and the implications for cellular response mechanisms.{pw_instruction}"
+                f"over time and the implications for cellular response mechanisms.{candidate_hint}"
             )
 
         lines.append("--- END FIGURE CONTEXT ---\n")

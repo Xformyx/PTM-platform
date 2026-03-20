@@ -1133,3 +1133,559 @@ def generate_signaling_cascade_diagram(
         f"pathways={selected_pathway_names})"
     )
     return {"path": str(output_path), "pathways": selected_pathway_names}
+
+
+# ---------------------------------------------------------------------------
+# v7.0: Content-driven cascade — accepts pre-selected pathway names
+# ---------------------------------------------------------------------------
+
+def generate_cascade_from_selected_pathways(
+    selected_pathway_names: List[str],
+    parsed_ptms: list,
+    enriched_data: list,
+    network_data: dict,
+    output_dir: str,
+    condition: Optional[str] = None,
+) -> Optional[dict]:
+    """Generate a cascade diagram using externally selected pathways.
+    
+    This is the content-driven variant called by cascade_mediator_node.
+    Instead of scoring pathways internally, it accepts a list of pathway names
+    that were extracted from the LLM-written text by the mediator.
+    
+    It reuses the same rendering engine as generate_signaling_cascade_diagram
+    but skips the internal pathway scoring (Steps 2-2b) and instead matches
+    the provided pathway names against the available data.
+    
+    Args:
+        selected_pathway_names: List of pathway names to visualize (from mediator)
+        parsed_ptms: List of parsed PTM data
+        enriched_data: List of RAG-enriched PTM data with localization info
+        network_data: Network nodes and edges from _build_network_data
+        output_dir: Directory to save the output image
+        condition: Optional condition/timepoint string to filter data
+    
+    Returns:
+        Dict with 'path' (str) and 'pathways' (list of str), or None on failure.
+    """
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        import matplotlib.patches as mpatches
+        from matplotlib.patches import FancyBboxPatch, FancyArrowPatch, Circle, RegularPolygon
+        import matplotlib.patheffects as pe
+        import numpy as np
+    except ImportError:
+        logger.warning("matplotlib not available — skipping signaling cascade diagram")
+        return None
+
+    cond_label = condition or "combined"
+    logger.info(
+        f"[CASCADE-MEDIATOR] Starting content-driven cascade diagram "
+        f"(condition={cond_label}, requested_pathways={selected_pathway_names})"
+    )
+
+    # ---- Step 0: Filter data by condition if specified ----
+    if condition:
+        parsed_ptms = [
+            p for p in parsed_ptms
+            if (p.get("condition") or p.get("Condition", "")).strip() == condition
+        ]
+        enriched_data = [
+            e for e in enriched_data
+            if (e.get("Condition") or e.get("condition", "")).strip() == condition
+        ]
+        logger.info(
+            f"[CASCADE-MEDIATOR] Filtered to condition '{condition}': "
+            f"{len(parsed_ptms)} parsed_ptms, {len(enriched_data)} enriched_data"
+        )
+        if not parsed_ptms and not enriched_data:
+            logger.warning(f"[CASCADE-MEDIATOR] No data for condition '{condition}' — skipping")
+            return None
+
+    # ---- Step 1: Collect all proteins with their data (same as original) ----
+    gene_enrichment: Dict[str, dict] = {}
+    for ptm_data in enriched_data:
+        gene = (ptm_data.get("gene") or ptm_data.get("Gene.Name", "")).strip().upper()
+        if gene:
+            gene_enrichment[gene] = ptm_data
+
+    gene_info: Dict[str, dict] = {}
+    raw_nodes = network_data.get("nodes", {})
+    if isinstance(raw_nodes, dict):
+        node_list = list(raw_nodes.values()) if raw_nodes else []
+    else:
+        node_list = raw_nodes or []
+    for node in node_list:
+        if not isinstance(node, dict):
+            continue
+        gene = (node.get("gene") or node.get("id", "")).strip().upper()
+        node_type = node.get("type", "Non-PTM")
+        fc = node.get("ptm_log2fc", 0.0) or node.get("value", 0.0) or 0.0
+        protein_fc = node.get("protein_log2fc", 0.0) or 0.0
+        site = node.get("site", "")
+        if gene not in gene_info or abs(fc) > abs(gene_info[gene].get("fc", 0)):
+            gene_info[gene] = {
+                "fc": fc,
+                "protein_log2fc": protein_fc,
+                "type": node_type,
+                "site": site,
+                "gene": node.get("gene", gene),
+            }
+
+    # ---- Step 2: Build pathway → genes mapping (same as original) ----
+    def _pw_name(p):
+        return (p.get("name", str(p)) if isinstance(p, dict) else str(p)).strip()
+
+    pathway_genes: Dict[str, Set[str]] = defaultdict(set)
+    for ptm_data in enriched_data:
+        gene = (ptm_data.get("gene") or ptm_data.get("Gene.Name", "")).strip().upper()
+        if not gene:
+            continue
+        enr = ptm_data.get("rag_enrichment", {})
+        for pw in enr.get("pathways", []):
+            pw_n = _pw_name(pw)
+            if pw_n:
+                pathway_genes[pw_n].add(gene)
+
+    # Add Non-PTM proteins from network edges
+    edges = network_data.get("edges", [])
+    ptm_genes_set = {g for g, info in gene_info.items() if info["type"] == "PTM"}
+    ptm_pathways: Dict[str, Set[str]] = defaultdict(set)
+    for pw_name_key, genes in pathway_genes.items():
+        for g in genes:
+            ptm_pathways[g].add(pw_name_key)
+    for edge in edges:
+        src = edge.get("source", "").strip().upper()
+        tgt = edge.get("target", "").strip().upper()
+        src_gene = src.split("-")[0] if "-" in src else src
+        tgt_gene = tgt.split("-")[0] if "-" in tgt else tgt
+        if src_gene in ptm_pathways and tgt_gene not in ptm_genes_set:
+            for pw in ptm_pathways[src_gene]:
+                pathway_genes[pw].add(tgt_gene)
+        if tgt_gene in ptm_pathways and src_gene not in ptm_genes_set:
+            for pw in ptm_pathways[tgt_gene]:
+                pathway_genes[pw].add(src_gene)
+
+    # ---- Step 2b: Match selected pathway names to available data ----
+    # Fuzzy match: selected names may not exactly match KEGG names
+    matched_pathways: List[Tuple[str, float, Set[str]]] = []
+    available_pw_lower = {pw.lower(): pw for pw in pathway_genes.keys()}
+
+    for sel_name in selected_pathway_names:
+        sel_lower = sel_name.lower()
+        best_match = None
+        best_score = 0
+
+        for avail_lower, avail_name in available_pw_lower.items():
+            # Exact match
+            if sel_lower == avail_lower:
+                best_match = avail_name
+                best_score = 100
+                break
+            # Substring match
+            if sel_lower in avail_lower or avail_lower in sel_lower:
+                score = 80
+                if score > best_score:
+                    best_match = avail_name
+                    best_score = score
+            # Keyword match (e.g., "MAPK" in "MAPK signaling pathway")
+            sel_keywords = set(sel_lower.replace("-", " ").replace("/", " ").split())
+            avail_keywords = set(avail_lower.replace("-", " ").replace("/", " ").split())
+            common = sel_keywords & avail_keywords - {"signaling", "pathway", "of", "the", "and", "in"}
+            if common:
+                score = len(common) * 20
+                if score > best_score:
+                    best_match = avail_name
+                    best_score = score
+
+        if best_match and best_match not in [m[0] for m in matched_pathways]:
+            genes = pathway_genes[best_match]
+            if len(genes) >= 2:
+                # Use cumulative |FC| as score for ordering
+                fc_score = sum(abs(gene_info.get(g, {}).get("fc", 0)) for g in genes)
+                matched_pathways.append((best_match, fc_score, genes))
+                logger.info(
+                    f"[CASCADE-MEDIATOR] Matched '{sel_name}' → '{best_match}' "
+                    f"(score={best_score}, genes={len(genes)}, fc={fc_score:.2f})"
+                )
+            else:
+                logger.info(
+                    f"[CASCADE-MEDIATOR] Matched '{sel_name}' → '{best_match}' "
+                    f"but only {len(genes)} genes — skipping"
+                )
+        else:
+            logger.info(f"[CASCADE-MEDIATOR] No match for '{sel_name}' in available pathways")
+
+    if not matched_pathways:
+        logger.warning("[CASCADE-MEDIATOR] No pathways matched — skipping diagram")
+        return None
+
+    # Use matched pathways as top_pathways (same format as original)
+    top_pathways = matched_pathways
+    logger.info(f"[CASCADE-MEDIATOR] {len(top_pathways)} pathways matched for diagram")
+
+    # ---- From here, reuse the SAME rendering logic as generate_signaling_cascade_diagram ----
+    # Step 3: Classify compartments
+    all_pathway_genes: Set[str] = set()
+    for _, _, genes in top_pathways:
+        all_pathway_genes.update(genes)
+
+    gene_compartments: Dict[str, str] = {}
+    for gene in all_pathway_genes:
+        enr_data = gene_enrichment.get(gene, {})
+        enr = enr_data.get("rag_enrichment", {})
+        localization = enr.get("localization", [])
+        go_cc = enr.get("go_terms", {}).get("cellular_component", [])
+        gene_compartments[gene] = _classify_compartment(gene, localization, go_cc)
+
+    compartment_counts = defaultdict(int)
+    for comp in gene_compartments.values():
+        compartment_counts[comp] += 1
+    logger.info(f"[CASCADE-MEDIATOR] Compartment distribution: {dict(compartment_counts)}")
+
+    # Step 4: Build pathway-specific protein chains
+    pathway_chains: List[dict] = []
+    for pw_name_val, score, genes in top_pathways:
+        template_key = _match_pathway_to_template(pw_name_val)
+        if template_key and template_key in PATHWAY_SIGNAL_ORDER:
+            template_order = PATHWAY_SIGNAL_ORDER[template_key]
+            ordered_genes = []
+            remaining_genes = set(genes)
+            for tg in template_order:
+                tg_upper = tg.upper()
+                if tg_upper in remaining_genes:
+                    ordered_genes.append(tg_upper)
+                    remaining_genes.discard(tg_upper)
+            compartment_order = {"extracellular": 0, "membrane": 1, "cytoplasm": 2, "nucleus": 3}
+            remaining_sorted = sorted(
+                remaining_genes,
+                key=lambda g: compartment_order.get(gene_compartments.get(g, "cytoplasm"), 2)
+            )
+            ordered_genes.extend(remaining_sorted)
+        else:
+            compartment_order = {"extracellular": 0, "membrane": 1, "cytoplasm": 2, "nucleus": 3}
+            ordered_genes = sorted(
+                genes,
+                key=lambda g: compartment_order.get(gene_compartments.get(g, "cytoplasm"), 2)
+            )
+        pathway_chains.append({
+            "name": pw_name_val,
+            "score": score,
+            "genes": ordered_genes,
+            "template": template_key,
+        })
+
+    # Step 4b: Limit proteins per pathway
+    MAX_GENES_PER_PATHWAY = 8
+    for chain in pathway_chains:
+        if len(chain["genes"]) > MAX_GENES_PER_PATHWAY:
+            genes_with_fc = [(g, abs(gene_info.get(g, {}).get("fc", 0))) for g in chain["genes"]]
+            top_genes_set = set(
+                g for g, _ in sorted(genes_with_fc, key=lambda x: -x[1])[:MAX_GENES_PER_PATHWAY]
+            )
+            chain["genes"] = [g for g in chain["genes"] if g in top_genes_set]
+            logger.info(
+                f"[CASCADE-MEDIATOR] Trimmed '{chain['name']}' to {len(chain['genes'])} genes"
+            )
+
+    # ---- Step 5: Generate the matplotlib figure ----
+    # (Identical rendering logic as generate_signaling_cascade_diagram from Step 5 onwards)
+    n_pathways = len(pathway_chains)
+    max_genes_in_lane = max((len(c["genes"]) for c in pathway_chains), default=5)
+    fig_width = max(20, min(32, 12 + max_genes_in_lane * 2.0))
+    fig_height = max(12, 5.0 + n_pathways * 2.5)
+
+    fig, ax = plt.subplots(1, 1, figsize=(fig_width, fig_height))
+    ax.set_xlim(0, fig_width)
+    ax.set_ylim(0, fig_height)
+    ax.set_aspect("equal")
+    ax.axis("off")
+
+    # ---- Draw cellular compartments ----
+    margin_left = 0.8
+    margin_right = 0.8
+    total_width = fig_width - margin_left - margin_right
+
+    comp_protein_counts = {"extracellular": 0, "membrane": 0, "cytoplasm": 0, "nucleus": 0}
+    for chain in pathway_chains:
+        for gene in chain["genes"]:
+            comp = gene_compartments.get(gene, "cytoplasm")
+            comp_protein_counts[comp] += 1
+
+    min_widths = {"extracellular": 1.5, "membrane": 1.5, "cytoplasm": 3.0, "nucleus": 2.0}
+    per_protein_width = 2.0
+    raw_widths = {}
+    for comp in ["extracellular", "membrane", "cytoplasm", "nucleus"]:
+        raw_widths[comp] = max(min_widths[comp], comp_protein_counts[comp] * per_protein_width)
+    raw_total = sum(raw_widths.values())
+    comp_widths = {}
+    for comp in ["extracellular", "membrane", "cytoplasm", "nucleus"]:
+        comp_widths[comp] = (raw_widths[comp] / raw_total) * total_width
+
+    comp_colors = {
+        "extracellular": "#E3F2FD",
+        "membrane": "#FFF3E0",
+        "cytoplasm": "#F1F8E9",
+        "nucleus": "#F3E5F5",
+    }
+    comp_labels = {
+        "extracellular": "Extracellular\nSpace",
+        "membrane": "Plasma\nMembrane",
+        "cytoplasm": "Cytoplasm",
+        "nucleus": "Nucleus",
+    }
+
+    # Vertical layout
+    comp_y_top = fig_height - 1.2
+    comp_y_bottom = 3.5
+    comp_height = comp_y_top - comp_y_bottom
+
+    x_cursor = margin_left
+    comp_boundaries = {}
+    for comp in ["extracellular", "membrane", "cytoplasm", "nucleus"]:
+        w = comp_widths[comp]
+        rect = mpatches.FancyBboxPatch(
+            (x_cursor, comp_y_bottom), w, comp_height,
+            boxstyle="round,pad=0.05",
+            facecolor=comp_colors[comp],
+            edgecolor="#B0BEC5",
+            linewidth=1.0,
+            alpha=0.6,
+            zorder=0,
+        )
+        ax.add_patch(rect)
+        ax.text(
+            x_cursor + w / 2, comp_y_top - 0.25,
+            comp_labels[comp],
+            ha="center", va="top",
+            fontsize=13, fontweight="normal",
+            color="#37474F",
+            zorder=1,
+        )
+        comp_boundaries[comp] = (x_cursor, x_cursor + w)
+        x_cursor += w
+
+    # ---- Place proteins in lanes ----
+    lane_height = (comp_height - 1.0) / max(n_pathways, 1)
+    node_positions: Dict[str, Tuple[float, float]] = {}
+    node_radii: Dict[str, float] = {}
+
+    for lane_idx, chain in enumerate(pathway_chains):
+        lane_y = comp_y_top - 0.8 - (lane_idx + 0.5) * lane_height
+        pw_label = chain["name"]
+        if len(pw_label) > 30:
+            pw_label = pw_label[:28] + "..."
+        ax.text(
+            0.15, lane_y,
+            pw_label,
+            ha="left", va="center",
+            fontsize=11, fontweight="normal",
+            color="#455A64",
+            rotation=0,
+            zorder=2,
+        )
+
+        # Group genes by compartment
+        comp_gene_groups: Dict[str, List[str]] = defaultdict(list)
+        for gene in chain["genes"]:
+            comp = gene_compartments.get(gene, "cytoplasm")
+            comp_gene_groups[comp].append(gene)
+
+        for comp in ["extracellular", "membrane", "cytoplasm", "nucleus"]:
+            genes_in_comp = comp_gene_groups.get(comp, [])
+            if not genes_in_comp:
+                continue
+            x_start, x_end = comp_boundaries[comp]
+            comp_w = x_end - x_start
+            n_genes = len(genes_in_comp)
+            spacing = comp_w / (n_genes + 1)
+
+            for gi, gene in enumerate(genes_in_comp):
+                x = x_start + spacing * (gi + 1)
+                y = lane_y
+                info = gene_info.get(gene, {})
+                fc = info.get("fc", 0)
+                node_type = info.get("type", "Non-PTM")
+                site = info.get("site", "")
+
+                # Dynamic radius based on gene name length
+                name_len = len(gene)
+                base_radius = max(0.35, min(0.55, 0.30 + name_len * 0.03))
+                fc_scale = min(abs(fc) / 3.0, 1.0) if fc else 0.3
+                radius = base_radius * (0.8 + 0.4 * fc_scale)
+                node_radii[gene] = radius
+
+                bg_color = _get_cascade_node_color(fc, node_type)
+                text_color = _get_text_color_for_bg(bg_color)
+
+                if node_type == "Kinase":
+                    diamond = RegularPolygon(
+                        (x, y), numVertices=4, radius=radius * 1.2,
+                        orientation=0,
+                        facecolor=bg_color, edgecolor="#424242",
+                        linewidth=1.2, zorder=3,
+                    )
+                    ax.add_patch(diamond)
+                else:
+                    circle = plt.Circle(
+                        (x, y), radius,
+                        facecolor=bg_color, edgecolor="#424242",
+                        linewidth=1.0, zorder=3,
+                    )
+                    ax.add_patch(circle)
+
+                # Gene name
+                gene_fontsize = max(7, min(11, 12 - name_len * 0.4))
+                ax.text(
+                    x, y + radius * 0.15,
+                    gene,
+                    ha="center", va="center",
+                    fontsize=gene_fontsize, fontweight="normal",
+                    color=text_color,
+                    zorder=4,
+                )
+
+                # FC value inside node (lower portion)
+                fc_display = f"{fc:+.1f}" if fc != 0 else "0.0"
+                fc_fontsize = max(6, min(9, 10 - name_len * 0.3))
+                ax.text(
+                    x, y - radius * 0.35,
+                    fc_display,
+                    ha="center", va="center",
+                    fontsize=fc_fontsize, fontweight="normal",
+                    color=text_color,
+                    alpha=0.85,
+                    zorder=4,
+                )
+
+                # PTM site badge
+                if site and node_type in ("PTM", "Kinase"):
+                    ax.text(
+                        x + radius * 0.7, y + radius * 0.7,
+                        site,
+                        ha="center", va="center",
+                        fontsize=7, fontweight="normal",
+                        color="#E65100",
+                        bbox=dict(boxstyle="round,pad=0.15", facecolor="white",
+                                  edgecolor="#FFB74D", linewidth=0.5, alpha=0.9),
+                        zorder=5,
+                    )
+
+                node_positions[gene] = (x, y)
+
+    # ---- Draw signal flow arrows ----
+    for chain in pathway_chains:
+        genes = chain["genes"]
+        for i in range(len(genes) - 1):
+            src = genes[i]
+            tgt = genes[i + 1]
+            if src in node_positions and tgt in node_positions:
+                sx, sy = node_positions[src]
+                tx, ty = node_positions[tgt]
+                sr = node_radii.get(src, 0.4)
+                tr = node_radii.get(tgt, 0.4)
+                dx = tx - sx
+                dy = ty - sy
+                dist = math.sqrt(dx * dx + dy * dy)
+                if dist < 0.01:
+                    continue
+                ux, uy = dx / dist, dy / dist
+                ax.annotate(
+                    "",
+                    xy=(tx - ux * tr * 1.1, ty - uy * tr * 1.1),
+                    xytext=(sx + ux * sr * 1.1, sy + uy * sr * 1.1),
+                    arrowprops=dict(
+                        arrowstyle="-|>",
+                        color="#90A4AE",
+                        lw=1.2,
+                        mutation_scale=12,
+                    ),
+                    zorder=2,
+                )
+
+    # ---- Legend ----
+    legend_y = comp_y_bottom - 0.05
+    legend_x = margin_left + 0.3
+
+    # Title — content-driven subtitle
+    title_main = "Signal Transduction Pathway Cascade Diagram"
+    if condition:
+        title_main += f" — {condition}"
+    ax.text(
+        fig_width / 2, fig_height - 0.35,
+        title_main,
+        ha="center", va="top",
+        fontsize=16, fontweight="normal",
+        color="#263238",
+    )
+    ax.text(
+        fig_width / 2, fig_height - 0.7,
+        "Key Signaling Pathways Discussed in Analysis — Compartmentalized Signal Flow",
+        ha="center", va="top",
+        fontsize=11,
+        color="#455A64",
+        fontstyle="italic",
+    )
+
+    # Color legend
+    legend_items = [
+        ("#E53935", "PTM Activated (Log2FC > 0)"),
+        ("#1E88E5", "PTM Inhibited (Log2FC < 0)"),
+        ("#43A047", "Non-PTM Upregulated"),
+        ("#8E24AA", "Non-PTM Downregulated"),
+        ("#FF8F00", "Kinase (◆)"),
+        ("#9E9E9E", "Neutral / No change"),
+    ]
+    for li, (color, label) in enumerate(legend_items):
+        lx = legend_x + (li % 3) * (total_width / 3)
+        ly = legend_y - 0.4 * (li // 3)
+        ax.add_patch(plt.Circle((lx, ly), 0.15, facecolor=color, edgecolor="#424242",
+                                linewidth=0.5, zorder=5))
+        ax.text(lx + 0.25, ly, label, ha="left", va="center",
+                fontsize=9, color="#455A64", zorder=5)
+
+    # Size legend
+    size_legend_y = legend_y - 1.2
+    size_examples = [(0.3, "|FC| < 1"), (0.4, "|FC| ~ 2"), (0.55, "|FC| > 3")]
+    for si, (r, label) in enumerate(size_examples):
+        sx = legend_x + si * 2.5
+        ax.add_patch(plt.Circle((sx, size_legend_y), r, facecolor="#E0E0E0",
+                                edgecolor="#424242", linewidth=0.5, zorder=5))
+        ax.text(sx + r + 0.2, size_legend_y, label, ha="left", va="center",
+                fontsize=9, color="#455A64", zorder=5)
+
+    ax.text(
+        fig_width / 2, size_legend_y - 0.5,
+        "Color: PTM Log2FC (PTM nodes) / Protein Log2FC (Non-PTM nodes)  \u2022  Size: |PTM Log2FC| magnitude",
+        ha="center", va="center",
+        fontsize=8.5, color="#78909C",
+        fontstyle="italic",
+        zorder=5,
+    )
+
+    # ---- Save figure ----
+    plt.tight_layout(pad=0.5)
+    if condition:
+        safe_cond = condition.replace("/", "_").replace(" ", "_").replace("\\", "_")
+        output_path = Path(output_dir) / f"signaling_cascade_{safe_cond}.png"
+    else:
+        output_path = Path(output_dir) / "signaling_cascade.png"
+    fig.savefig(
+        str(output_path),
+        dpi=250,
+        bbox_inches="tight",
+        facecolor="white",
+        edgecolor="none",
+    )
+    plt.close(fig)
+
+    selected_pathway_names_final = [chain["name"] for chain in pathway_chains]
+    total_genes = len(all_pathway_genes)
+    logger.info(
+        f"[CASCADE-MEDIATOR] Content-driven cascade diagram saved: {output_path} "
+        f"(condition={cond_label}, {n_pathways} pathways, {total_genes} proteins, "
+        f"pathways={selected_pathway_names_final})"
+    )
+    return {"path": str(output_path), "pathways": selected_pathway_names_final}

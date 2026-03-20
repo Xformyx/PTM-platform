@@ -2,9 +2,9 @@
 LangGraph StateGraph for PTM Report Generation.
 
 Replaces the custom multi-agent orchestrator with a structured state graph.
-Flow:
+Flow (v7.0):
   load_context → research → hypothesize → validate_hypotheses
-    → network_analysis → write_sections → edit_report
+    → network_analysis → write_sections → cascade_mediator → edit_report
 
 Each node reads/writes to a shared TypedDict state.
 """
@@ -49,8 +49,11 @@ class ReportState(TypedDict, total=False):
     validated_hypotheses: List[dict]
     network_analysis: dict
     network_results: dict
+    pathway_candidates: dict          # v7.0: scored pathway candidates for mediator
     sections: Dict[str, str]
     collected_references: List[dict]
+    cascade_diagrams: Dict[str, str]  # v7.0: condition → diagram path (from mediator)
+    cascade_pathway_names: Dict[str, list]  # v7.0: condition → pathway names (from mediator)
 
     # Drug repositioning (extended report)
     report_type: str
@@ -118,6 +121,12 @@ def write_sections(state: ReportState) -> dict:
     return run_section_writing(state)
 
 
+def cascade_mediator(state: ReportState) -> dict:
+    """v7.0: Extract discussed pathways from LLM text and generate cascade diagrams."""
+    from .nodes.cascade_mediator_node import run_cascade_mediator
+    return run_cascade_mediator(state)
+
+
 def drug_repositioning(state: ReportState) -> dict:
     """Run drug repositioning pipeline for extended reports."""
     from .nodes.drug_repositioning_node import run_drug_repositioning
@@ -144,6 +153,18 @@ def format_citations(state: ReportState) -> dict:
     sections = state.get("sections", {})
     collected_refs = state.get("collected_references", [])
     network_analysis = state.get("network_analysis", {})
+
+    # v7.0: Inject cascade_mediator results into network_analysis for figure insertion.
+    # The mediator generates cascade diagrams AFTER write_sections, storing them in state.
+    cascade_diagrams = state.get("cascade_diagrams", {})
+    cascade_pathway_names = state.get("cascade_pathway_names", {})
+    if cascade_diagrams:
+        logger.info(f"[FORMAT-CIT] Injecting mediator cascade diagrams: {list(cascade_diagrams.keys())}")
+        if "combined" in cascade_diagrams:
+            network_analysis["cascade_diagram_path"] = cascade_diagrams["combined"]
+        else:
+            network_analysis["cascade_diagram_paths"] = cascade_diagrams
+        network_analysis["cascade_pathway_names"] = cascade_pathway_names
 
     # Build report: Title → Abstract → Introduction → Results → Network → Discussion → Conclusion
     # Title is rendered as # heading, other sections as ## headings
@@ -294,11 +315,14 @@ def edit_report(state: ReportState) -> dict:
 def build_report_graph() -> StateGraph:
     """Build the LangGraph StateGraph for report generation.
 
-    Flow:
+    Flow (v7.0):
       load_context → generate_questions → research → hypothesize
         → validate_hypotheses → network_analysis → write_sections
-        → generate_qa_report → drug_repositioning → format_citations
-        → edit_report
+        → cascade_mediator → generate_qa_report → drug_repositioning
+        → format_citations → edit_report
+
+    v7.0: cascade_mediator inserted after write_sections to generate
+    cascade diagrams based on LLM-written text content.
     """
     graph = StateGraph(ReportState)
 
@@ -309,6 +333,7 @@ def build_report_graph() -> StateGraph:
     graph.add_node("validate_hypotheses", validate_hypotheses)
     graph.add_node("network_analysis", network_analysis)
     graph.add_node("write_sections", write_sections)
+    graph.add_node("cascade_mediator", cascade_mediator)
     graph.add_node("generate_qa_report", generate_qa_report)
     graph.add_node("drug_repositioning", drug_repositioning)
     graph.add_node("format_citations", format_citations)
@@ -321,7 +346,8 @@ def build_report_graph() -> StateGraph:
     graph.add_edge("hypothesize", "validate_hypotheses")
     graph.add_edge("validate_hypotheses", "network_analysis")
     graph.add_edge("network_analysis", "write_sections")
-    graph.add_edge("write_sections", "generate_qa_report")
+    graph.add_edge("write_sections", "cascade_mediator")
+    graph.add_edge("cascade_mediator", "generate_qa_report")
     graph.add_edge("generate_qa_report", "drug_repositioning")
     graph.add_edge("drug_repositioning", "format_citations")
     graph.add_edge("format_citations", "edit_report")

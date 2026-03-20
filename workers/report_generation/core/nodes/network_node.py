@@ -1623,6 +1623,215 @@ def _generate_legends(
 
 
 # ---------------------------------------------------------------------------
+# v7.0: Build pathway candidates for cascade_mediator_node
+# ---------------------------------------------------------------------------
+
+def _build_pathway_candidates(
+    parsed_ptms: list,
+    enriched_data: list,
+    network_data: dict,
+    output_dir: str,
+) -> dict:
+    """Build scored pathway candidate list for the cascade mediator.
+    
+    This extracts the same pathway scoring logic that was previously inside
+    signaling_cascade.py, but returns structured candidate data instead of
+    generating a diagram. The mediator will use this to match against
+    LLM-written text.
+    
+    Returns:
+        Dict with:
+            - candidates: List of dicts, each with:
+                - name: Pathway name
+                - composite_score: Multi-factor score
+                - genes: List of gene names in the pathway
+                - gene_count: Number of genes
+                - fc_score: Cumulative |FC|
+                - diversity: Compartment diversity (0-4)
+                - template: Matched template key or None
+            - gene_data: Dict of gene_name -> {fc, type, site}
+    """
+    import math
+    from collections import defaultdict
+
+    # Build gene enrichment lookup
+    gene_enrichment: Dict[str, dict] = {}
+    for ptm_data in enriched_data:
+        gene = (ptm_data.get("gene") or ptm_data.get("Gene.Name", "")).strip().upper()
+        if gene:
+            gene_enrichment[gene] = ptm_data
+
+    # Build gene info from network nodes
+    gene_info: Dict[str, dict] = {}
+    raw_nodes = network_data.get("nodes", {})
+    if isinstance(raw_nodes, dict):
+        node_list = list(raw_nodes.values()) if raw_nodes else []
+    else:
+        node_list = raw_nodes or []
+    for node in node_list:
+        if not isinstance(node, dict):
+            continue
+        gene = (node.get("gene") or node.get("id", "")).strip().upper()
+        node_type = node.get("type", "Non-PTM")
+        fc = node.get("ptm_log2fc", 0.0) or node.get("value", 0.0) or 0.0
+        protein_fc = node.get("protein_log2fc", 0.0) or 0.0
+        site = node.get("site", "")
+        if gene not in gene_info or abs(fc) > abs(gene_info[gene].get("fc", 0)):
+            gene_info[gene] = {
+                "fc": fc,
+                "protein_log2fc": protein_fc,
+                "type": node_type,
+                "site": site,
+                "gene": node.get("gene", gene),
+            }
+
+    # Collect pathway -> genes mapping
+    def _pw_name_inner(p):
+        return (p.get("name", str(p)) if isinstance(p, dict) else str(p)).strip()
+
+    pathway_genes: Dict[str, set] = defaultdict(set)
+    for ptm_data in enriched_data:
+        gene = (ptm_data.get("gene") or ptm_data.get("Gene.Name", "")).strip().upper()
+        if not gene:
+            continue
+        enr = ptm_data.get("rag_enrichment", {})
+        for pw in enr.get("pathways", []):
+            pw_n = _pw_name_inner(pw)
+            if pw_n:
+                pathway_genes[pw_n].add(gene)
+
+    # Add Non-PTM proteins from network edges
+    edges = network_data.get("edges", [])
+    ptm_genes_set = {g for g, info in gene_info.items() if info["type"] == "PTM"}
+    ptm_pathways_map: Dict[str, set] = defaultdict(set)
+    for pw_name_key, genes in pathway_genes.items():
+        for g in genes:
+            ptm_pathways_map[g].add(pw_name_key)
+    for edge in edges:
+        src = edge.get("source", "").strip().upper()
+        tgt = edge.get("target", "").strip().upper()
+        src_gene = src.split("-")[0] if "-" in src else src
+        tgt_gene = tgt.split("-")[0] if "-" in tgt else tgt
+        if src_gene in ptm_pathways_map and tgt_gene not in ptm_genes_set:
+            for pw in ptm_pathways_map[src_gene]:
+                pathway_genes[pw].add(tgt_gene)
+        if tgt_gene in ptm_pathways_map and src_gene not in ptm_genes_set:
+            for pw in ptm_pathways_map[tgt_gene]:
+                pathway_genes[pw].add(src_gene)
+
+    # Import template matching from signaling_cascade
+    try:
+        try:
+            from .signaling_cascade import (
+                _match_pathway_to_template, _classify_compartment,
+                PATHWAY_SIGNAL_ORDER, COMPARTMENT_KEYWORDS,
+            )
+        except ImportError:
+            try:
+                from report_generation.core.nodes.signaling_cascade import (
+                    _match_pathway_to_template, _classify_compartment,
+                    PATHWAY_SIGNAL_ORDER, COMPARTMENT_KEYWORDS,
+                )
+            except ImportError:
+                from signaling_cascade import (
+                    _match_pathway_to_template, _classify_compartment,
+                    PATHWAY_SIGNAL_ORDER, COMPARTMENT_KEYWORDS,
+                )
+    except ImportError:
+        logger.warning("[NET-NODE] Cannot import signaling_cascade helpers — using simple scoring")
+        # Fallback: simple scoring without template matching
+        candidates = []
+        for pw_name_key, genes in pathway_genes.items():
+            if len(genes) < 2:
+                continue
+            fc_score = sum(abs(gene_info.get(g, {}).get("fc", 0)) for g in genes)
+            candidates.append({
+                "name": pw_name_key,
+                "composite_score": fc_score,
+                "genes": sorted(genes),
+                "gene_count": len(genes),
+                "fc_score": fc_score,
+                "diversity": 0,
+                "template": None,
+            })
+        candidates.sort(key=lambda c: -c["composite_score"])
+        return {"candidates": candidates, "gene_data": gene_info}
+
+    # Pre-compute compartment assignments
+    _temp_compartments: Dict[str, str] = {}
+    for pw_genes in pathway_genes.values():
+        for g in pw_genes:
+            if g not in _temp_compartments:
+                enr_data = gene_enrichment.get(g, {})
+                enr = enr_data.get("rag_enrichment", {})
+                loc = enr.get("localization", [])
+                go_cc = enr.get("go_terms", {}).get("cellular_component", [])
+                _temp_compartments[g] = _classify_compartment(g, loc, go_cc)
+
+    # Pre-compute edge connectivity
+    edge_gene_pairs: set = set()
+    for edge in edges:
+        src = edge.get("source", "").strip().upper().split("-")[0]
+        tgt = edge.get("target", "").strip().upper().split("-")[0]
+        if src and tgt:
+            edge_gene_pairs.add((src, tgt))
+            edge_gene_pairs.add((tgt, src))
+
+    # Multi-factor scoring (same as signaling_cascade.py v6.2)
+    candidates = []
+    for pw_name_key, genes in pathway_genes.items():
+        if len(genes) < 2:
+            continue
+
+        fc_score = sum(abs(gene_info.get(g, {}).get("fc", 0)) for g in genes)
+        compartments_in_pw = set(_temp_compartments.get(g, "cytoplasm") for g in genes)
+        diversity_score = len(compartments_in_pw)
+
+        template_key = _match_pathway_to_template(pw_name_key)
+        template_score = 1.0 if template_key else 0.0
+        if template_key and template_key in PATHWAY_SIGNAL_ORDER:
+            template_genes = set(g.upper() for g in PATHWAY_SIGNAL_ORDER[template_key])
+            overlap = len(genes & template_genes)
+            template_score += min(overlap / max(len(template_genes), 1), 1.0)
+
+        count_score = math.log2(max(len(genes), 1))
+
+        intra_edges = 0
+        gene_list = list(genes)
+        for i, g1 in enumerate(gene_list):
+            for g2 in gene_list[i+1:]:
+                if (g1, g2) in edge_gene_pairs:
+                    intra_edges += 1
+        connectivity_score = math.log2(max(intra_edges, 1))
+
+        composite = (
+            0.35 * fc_score +
+            0.20 * (diversity_score / 4.0) * fc_score +
+            0.20 * template_score * fc_score +
+            0.10 * count_score * (fc_score / max(len(genes), 1)) +
+            0.15 * connectivity_score * (fc_score / max(len(genes), 1))
+        )
+
+        candidates.append({
+            "name": pw_name_key,
+            "composite_score": composite,
+            "genes": sorted(genes),
+            "gene_count": len(genes),
+            "fc_score": fc_score,
+            "diversity": diversity_score,
+            "template": template_key,
+            "intra_edges": intra_edges,
+        })
+
+    candidates.sort(key=lambda c: -c["composite_score"])
+    logger.info(
+        f"[NET-NODE] Built {len(candidates)} pathway candidates "
+        f"(top: {candidates[0]['name'] if candidates else 'none'})"
+    )
+    return {"candidates": candidates, "gene_data": gene_info}
+
+
+# ---------------------------------------------------------------------------
 # Canonical Pathway Distribution Bar Graph (replaces Figure 1)
 # ---------------------------------------------------------------------------
 
@@ -2094,71 +2303,21 @@ def _run_network_analysis_inner(state: dict) -> dict:
         logger.error(f"[NET-NODE] Pathway distribution graph failed: {pw_err}", exc_info=True)
         pathway_graph_path = None
 
-    # v6.1: Generate Signaling Cascade Diagrams — per-condition when multiple timepoints
-    cascade_diagram_path = None          # combined (single condition or fallback)
-    cascade_diagram_paths = {}           # condition → path (per-condition diagrams)
-    cascade_pathway_names = {}           # condition → list of pathway names shown in diagram
-    try:
-        # v6.1 fix: Use relative import (same package) with absolute fallback.
-        # Docker installs packages as 'report_generation.*' (no 'workers.' prefix)
-        # while local dev may have 'workers.' in sys.path.
-        try:
-            from .signaling_cascade import generate_signaling_cascade_diagram
-        except ImportError:
-            try:
-                from report_generation.core.nodes.signaling_cascade import (
-                    generate_signaling_cascade_diagram,
-                )
-            except ImportError:
-                from signaling_cascade import generate_signaling_cascade_diagram
-        logger.info("[NET-NODE] signaling_cascade module imported successfully")
+    # v7.0: Build pathway_candidates for cascade_mediator_node
+    # Instead of generating cascade diagrams here, we export all scored pathway
+    # candidates so the mediator can select pathways based on LLM-written text.
+    pathway_candidates = _build_pathway_candidates(
+        parsed_ptms, enriched_data, network_data, output_dir
+    )
+    logger.info(
+        f"[NET-NODE] Pathway candidates built: "
+        f"{len(pathway_candidates.get('candidates', []))} candidates"
+    )
 
-        if len(timepoints) > 1:
-            # Multi-condition: generate one diagram per condition
-            if cb:
-                cb(64, f"Generating signaling cascade diagrams for {len(timepoints)} conditions")
-            for tp_idx, tp in enumerate(timepoints):
-                logger.info(f"[NET-NODE] Generating cascade diagram for condition: {tp}")
-                tp_result = generate_signaling_cascade_diagram(
-                    parsed_ptms, enriched_data, network_data, output_dir,
-                    top_n_pathways=5, condition=tp,
-                )
-                if tp_result:
-                    # v6.5: result is now a dict {"path": str, "pathways": list}
-                    if isinstance(tp_result, dict):
-                        cascade_diagram_paths[tp] = tp_result["path"]
-                        cascade_pathway_names[tp] = tp_result.get("pathways", [])
-                    else:
-                        cascade_diagram_paths[tp] = tp_result  # backward compat
-                    logger.info(f"[NET-NODE] Cascade diagram for '{tp}' saved: {cascade_diagram_paths[tp]}")
-                else:
-                    logger.info(f"[NET-NODE] Cascade diagram for '{tp}': no pathways with sufficient proteins")
-            logger.info(
-                f"[NET-NODE] Per-condition cascade diagrams: "
-                f"{len(cascade_diagram_paths)}/{len(timepoints)} generated"
-            )
-        else:
-            # Single condition: generate combined diagram (backward compatible)
-            if cb:
-                cb(64, "Generating signaling cascade diagram")
-            cascade_result = generate_signaling_cascade_diagram(
-                parsed_ptms, enriched_data, network_data, output_dir, top_n_pathways=5
-            )
-            if cascade_result:
-                # v6.5: result is now a dict {"path": str, "pathways": list}
-                if isinstance(cascade_result, dict):
-                    cascade_diagram_path = cascade_result["path"]
-                    cascade_pathway_names["combined"] = cascade_result.get("pathways", [])
-                else:
-                    cascade_diagram_path = cascade_result  # backward compat
-                logger.info(f"[NET-NODE] Signaling cascade diagram saved: {cascade_diagram_path}")
-            else:
-                logger.info("[NET-NODE] Signaling cascade diagram: no pathways with sufficient proteins")
-    except Exception as cascade_err:
-        logger.error(f"[NET-NODE] Signaling cascade diagram FAILED: {cascade_err}", exc_info=True)
-        cascade_diagram_path = None
-        cascade_diagram_paths = {}
-        cascade_pathway_names = {}
+    # Legacy fields kept for backward compatibility (mediator will populate these)
+    cascade_diagram_path = None
+    cascade_diagram_paths = {}
+    cascade_pathway_names = {}
 
     if cb:
         cb(65, f"Network analysis complete (Cytoscape: {cytoscape_connected})")
@@ -2184,6 +2343,7 @@ def _run_network_analysis_inner(state: dict) -> dict:
             "validation": validation,
         },
         "network_results": network_results,
+        "pathway_candidates": pathway_candidates,
     }
 
     logger.info(
@@ -2191,8 +2351,7 @@ def _run_network_analysis_inner(state: dict) -> dict:
         f"cytoscape_connected={cytoscape_connected}, "
         f"timepoints={timepoints}, "
         f"pathway_graph={'OK' if pathway_graph_path else 'NONE'}, "
-        f"cascade_diagram={'OK' if cascade_diagram_path else 'NONE'}, "
-        f"cascade_per_condition={list(cascade_diagram_paths.keys()) if cascade_diagram_paths else 'NONE'}, "
+        f"pathway_candidates={len(pathway_candidates.get('candidates', []))}, "
         f"network_images={list(network_images.keys()) if network_images else 'EMPTY'}, "
         f"network_results_keys={list(network_results.keys()) if network_results else 'EMPTY'}, "
         f"validation={{'nodes': {validation['total_nodes']}, 'edges': {validation['total_edges']}, "
@@ -2948,8 +3107,11 @@ def generate_network_figure_section(network_analysis: dict) -> str:
     comparison_legend = legends.get("comparison_legend", "")
     validation = network_analysis.get("validation", {})
     pathway_graph_path = network_analysis.get("pathway_graph_path")
+    # v7.0: Cascade diagrams now come from cascade_mediator_node via state,
+    # not from network_analysis. Check both sources for backward compatibility.
     cascade_diagram_path = network_analysis.get("cascade_diagram_path")
     cascade_diagram_paths = network_analysis.get("cascade_diagram_paths", {})
+    cascade_pathway_names = network_analysis.get("cascade_pathway_names", {})
 
     logger.info(
         f"[NET-SECTION] generate_network_figure_section called: "
@@ -3027,11 +3189,11 @@ def generate_network_figure_section(network_analysis: dict) -> str:
     _cascade_legend_text = (
         "**Figure Legend:** This compartmentalized signaling cascade diagram depicts "
         "the signal transduction flow across cellular compartments (Extracellular Space, "
-        "Plasma Membrane, Cytoplasm, Nucleus) for the top 5 canonical pathways ranked by "
-        "cumulative |Log2FC| score. Each horizontal lane represents a distinct signaling "
-        "pathway, with proteins positioned in their annotated subcellular compartment "
-        "(based on UniProt subcellular location and GO Cellular Component annotations). "
-        "Protein nodes are color-coded by activation state: "
+        "Plasma Membrane, Cytoplasm, Nucleus) for the key signaling pathways identified "
+        "through multi-factor analysis of the PTM data. Each horizontal lane represents "
+        "a distinct signaling pathway, with proteins positioned in their annotated "
+        "subcellular compartment (based on UniProt subcellular location and GO Cellular "
+        "Component annotations). Protein nodes are color-coded by activation state: "
         "**red circles** = activated PTM proteins (Log2FC > 0), "
         "**blue circles** = inhibited PTM proteins (Log2FC < 0), "
         "**green circles** = upregulated Non-PTM interactors, "
@@ -3053,10 +3215,12 @@ def generate_network_figure_section(network_analysis: dict) -> str:
             tp_path_obj = Path(tp_path)
             if tp_path_obj.exists() and tp_path_obj.stat().st_size > 1000:
                 tp_img_ref = tp_path_obj.name
+                # v7.0: Include pathway names in figure title if available
+                pw_names = cascade_pathway_names.get(tp, [])
+                pw_subtitle = f" ({', '.join(pw_names[:3])}{' ...' if len(pw_names) > 3 else ''})" if pw_names else ""
                 section += (
                     f"### Figure {figure_num}. Signal Transduction Pathway Cascade Diagram "
-                    f"\u2014 {tp} "
-                    f"(Top 5 Canonical Pathways by Cumulative |Log2FC| Score)\n\n"
+                    f"\u2014 {tp}{pw_subtitle}\n\n"
                 )
                 section += f"![Signal Transduction Pathway Cascade Diagram \u2014 {tp}]({tp_img_ref})\n\n"
                 section += _cascade_legend_text + f" Data shown for condition: **{tp}**.\n\n"
@@ -3068,9 +3232,10 @@ def generate_network_figure_section(network_analysis: dict) -> str:
         cascade_path_obj = Path(cascade_diagram_path)
         if cascade_path_obj.exists() and cascade_path_obj.stat().st_size > 1000:
             cascade_img_ref = cascade_path_obj.name
+            pw_names = cascade_pathway_names.get("combined", [])
+            pw_subtitle = f" ({', '.join(pw_names[:3])}{' ...' if len(pw_names) > 3 else ''})" if pw_names else ""
             section += (
-                f"### Figure {figure_num}. Signal Transduction Pathway Cascade Diagram "
-                f"(Top 5 Canonical Pathways by Cumulative |Log2FC| Score)\n\n"
+                f"### Figure {figure_num}. Signal Transduction Pathway Cascade Diagram{pw_subtitle}\n\n"
             )
             section += f"![Signal Transduction Pathway Cascade Diagram]({cascade_img_ref})\n\n"
             section += _cascade_legend_text + "\n\n"
