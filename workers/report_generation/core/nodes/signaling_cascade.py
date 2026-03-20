@@ -1,7 +1,10 @@
 """
 Signaling Cascade Diagram — Publication-quality compartmentalized cell signaling visualization.
 
-v6.3 — Readability overhaul & dynamic layout:
+v6.4 — Cytoscape-consistent node styling:
+  - Node COLOR: PTM Log2FC (PTM/Kinase) / Protein Log2FC (Non-PTM)
+  - Node SIZE: proportional to |PTM Log2FC| magnitude (Cytoscape mapping)
+  - Enhanced legend with size scale and color annotation
   - Dynamic node radius scaled to gene name length
   - FC value displayed inside node (lower portion) instead of above
   - PTM site shown as small badge above-right of node
@@ -371,10 +374,12 @@ def generate_signaling_cascade_diagram(
         gene = (node.get("gene") or node.get("id", "")).strip().upper()
         node_type = node.get("type", "Non-PTM")
         fc = node.get("ptm_log2fc", 0.0) or node.get("value", 0.0) or 0.0
+        protein_fc = node.get("protein_log2fc", 0.0) or 0.0
         site = node.get("site", "")
         if gene not in gene_info or abs(fc) > abs(gene_info[gene].get("fc", 0)):
             gene_info[gene] = {
                 "fc": fc,
+                "protein_log2fc": protein_fc,
                 "type": node_type,
                 "site": site,
                 "gene": node.get("gene", gene),
@@ -599,7 +604,7 @@ def generate_signaling_cascade_diagram(
     n_pathways = len(pathway_chains)
     max_genes_in_lane = max((len(c["genes"]) for c in pathway_chains), default=5)
     fig_width = max(20, min(32, 12 + max_genes_in_lane * 2.0))
-    fig_height = max(10, 3.5 + n_pathways * 2.5)
+    fig_height = max(12, 5.0 + n_pathways * 2.5)  # Extra height for expanded legend
     
     fig, ax = plt.subplots(1, 1, figsize=(fig_width, fig_height))
     ax.set_xlim(0, fig_width)
@@ -651,7 +656,7 @@ def generate_signaling_cascade_diagram(
         x_cursor += comp_widths[comp]
 
     # Compartment vertical bounds
-    comp_y_bottom = 0.8
+    comp_y_bottom = 2.0  # Extra space for expanded legend (color + size rows)
     comp_y_top = fig_height - 0.8
     comp_height = comp_y_top - comp_y_bottom
 
@@ -862,16 +867,38 @@ def generate_signaling_cascade_diagram(
         
         # Draw protein nodes
         for gene, x, y, comp in gene_positions:
-            info = gene_info.get(gene, {"fc": 0, "type": "Non-PTM", "site": ""})
-            fc = info.get("fc", 0)
+            info = gene_info.get(gene, {"fc": 0, "protein_log2fc": 0, "type": "Non-PTM", "site": ""})
+            fc = info.get("fc", 0)  # ptm_log2fc
+            protein_fc = info.get("protein_log2fc", 0)
             node_type = info.get("type", "Non-PTM")
             site = info.get("site", "")
             
-            fill_color = _get_cascade_node_color(fc, node_type)
+            # Color mapping (Cytoscape-consistent):
+            #   PTM nodes: colored by ptm_log2fc (Red/Blue gradient)
+            #   Non-PTM nodes: colored by protein_log2fc (Green/Purple gradient)
+            #   Kinase nodes: colored by ptm_log2fc (Orange gradient)
+            if node_type == "Non-PTM":
+                color_fc = protein_fc if protein_fc != 0 else fc
+            else:
+                color_fc = fc
+            fill_color = _get_cascade_node_color(color_fc, node_type)
             text_color = _get_text_color_for_bg(fill_color)
             
-            # Use pre-computed dynamic radius
-            size = gene_radii.get(gene, base_node_radius)
+            # Size mapping (Cytoscape-consistent):
+            #   Based on |ptm_log2fc| (= value column in Cytoscape)
+            #   Cytoscape: [-5, 0, 5, 15] → [40px, 50px, 80px, 120px]
+            #   Cascade:   |fc| → radius scale factor
+            abs_fc = abs(fc)
+            if abs_fc >= 15:
+                size_scale = 1.5
+            elif abs_fc >= 5:
+                size_scale = 1.0 + (abs_fc - 5) / 20  # 1.0 → 1.5
+            elif abs_fc > 0:
+                size_scale = 0.7 + (abs_fc / 5) * 0.3  # 0.7 → 1.0
+            else:
+                size_scale = 0.7  # neutral / no change
+            
+            size = gene_radii.get(gene, base_node_radius) * size_scale
             
             if node_type == "Kinase":
                 diamond = RegularPolygon(
@@ -911,7 +938,9 @@ def generate_signaling_cascade_diagram(
             )
             
             # FC value inside node (lower portion, smaller)
-            fc_display = f"{fc:+.1f}" if fc != 0 else ""
+            # Show ptm_log2fc for PTM/Kinase, protein_log2fc for Non-PTM
+            display_fc = fc if node_type != "Non-PTM" else (protein_fc if protein_fc != 0 else fc)
+            fc_display = f"{display_fc:+.1f}" if display_fc != 0 else ""
             if fc_display:
                 fc_fontsize = max(5.0, gene_fontsize - 2.0)
                 ax.text(
@@ -977,18 +1006,18 @@ def generate_signaling_cascade_diagram(
         color="#455A64",
     )
 
-    # Legend items
+    # Legend items — color legend (Row 1)
     legend_items = [
-        ("PTM ↑", "#E53935", "circle"),
-        ("PTM ↓", "#1E88E5", "circle"),
-        ("Non-PTM ↑", "#43A047", "circle"),
-        ("Non-PTM ↓", "#8E24AA", "circle"),
+        ("PTM \u2191", "#E53935", "circle"),
+        ("PTM \u2193", "#1E88E5", "circle"),
+        ("Non-PTM \u2191", "#43A047", "circle"),
+        ("Non-PTM \u2193", "#8E24AA", "circle"),
         ("Kinase", "#FF8F00", "diamond"),
         ("Neutral", "#9E9E9E", "circle"),
     ]
     
     item_spacing = 2.5
-    legend_start_x = fig_width / 2 - (len(legend_items) * item_spacing) / 2
+    legend_start_x = fig_width / 2 - (len(legend_items) * item_spacing + 2.5) / 2
     
     for i, (label, color, shape) in enumerate(legend_items):
         lx = legend_start_x + i * item_spacing
@@ -1013,7 +1042,7 @@ def generate_signaling_cascade_diagram(
         ax.text(
             lx + 0.3, ly, label,
             ha="left", va="center",
-            fontsize=10, color="#263238",
+            fontsize=9, color="#263238",
             fontweight="medium",
             zorder=5,
         )
@@ -1029,8 +1058,47 @@ def generate_signaling_cascade_diagram(
     ax.text(
         arrow_x + 1.1, legend_y, "Signal flow",
         ha="left", va="center",
-        fontsize=10, color="#263238",
+        fontsize=9, color="#263238",
         fontweight="medium",
+        zorder=5,
+    )
+
+    # Size legend (Row 2) — shows node size reflects |Log2FC| magnitude
+    size_legend_y = legend_y - 0.7
+    size_examples = [
+        ("Low |FC|", 0.12, "#BDBDBD"),
+        ("Med |FC|", 0.20, "#E53935"),
+        ("High |FC|", 0.30, "#B71C1C"),
+    ]
+    size_start_x = fig_width / 2 - 4.5
+    ax.text(
+        size_start_x - 1.0, size_legend_y, "Node size \u221d |Log2FC|:",
+        ha="left", va="center",
+        fontsize=8.5, color="#455A64",
+        fontweight="medium",
+        zorder=5,
+    )
+    for j, (slabel, sradius, scolor) in enumerate(size_examples):
+        sx = size_start_x + 3.5 + j * 2.5
+        sc = Circle(
+            (sx, size_legend_y), radius=sradius,
+            facecolor=scolor, edgecolor="#333333", linewidth=0.8,
+            zorder=5,
+        )
+        ax.add_patch(sc)
+        ax.text(
+            sx + sradius + 0.2, size_legend_y, slabel,
+            ha="left", va="center",
+            fontsize=8, color="#455A64",
+            zorder=5,
+        )
+    # Annotation: Color = PTM Log2FC (PTM) / Protein Log2FC (Non-PTM)
+    ax.text(
+        fig_width / 2, size_legend_y - 0.5,
+        "Color: PTM Log2FC (PTM nodes) / Protein Log2FC (Non-PTM nodes)  \u2022  Size: |PTM Log2FC| magnitude",
+        ha="center", va="center",
+        fontsize=7.5, color="#78909C",
+        fontstyle="italic",
         zorder=5,
     )
 
