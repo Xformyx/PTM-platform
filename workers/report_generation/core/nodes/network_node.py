@@ -2010,6 +2010,7 @@ def run_network_analysis(state: dict) -> dict:
                 "pathway_graph_path": None,
                 "cascade_diagram_path": None,
                 "cascade_diagram_paths": {},
+                "cascade_pathway_names": {},
                 "ptm_count": 0,
                 "timepoint_results": {},
                 "timepoints": [],
@@ -2096,6 +2097,7 @@ def _run_network_analysis_inner(state: dict) -> dict:
     # v6.1: Generate Signaling Cascade Diagrams — per-condition when multiple timepoints
     cascade_diagram_path = None          # combined (single condition or fallback)
     cascade_diagram_paths = {}           # condition → path (per-condition diagrams)
+    cascade_pathway_names = {}           # condition → list of pathway names shown in diagram
     try:
         # v6.1 fix: Use relative import (same package) with absolute fallback.
         # Docker installs packages as 'report_generation.*' (no 'workers.' prefix)
@@ -2117,13 +2119,18 @@ def _run_network_analysis_inner(state: dict) -> dict:
                 cb(64, f"Generating signaling cascade diagrams for {len(timepoints)} conditions")
             for tp_idx, tp in enumerate(timepoints):
                 logger.info(f"[NET-NODE] Generating cascade diagram for condition: {tp}")
-                tp_path = generate_signaling_cascade_diagram(
+                tp_result = generate_signaling_cascade_diagram(
                     parsed_ptms, enriched_data, network_data, output_dir,
                     top_n_pathways=5, condition=tp,
                 )
-                if tp_path:
-                    cascade_diagram_paths[tp] = tp_path
-                    logger.info(f"[NET-NODE] Cascade diagram for '{tp}' saved: {tp_path}")
+                if tp_result:
+                    # v6.5: result is now a dict {"path": str, "pathways": list}
+                    if isinstance(tp_result, dict):
+                        cascade_diagram_paths[tp] = tp_result["path"]
+                        cascade_pathway_names[tp] = tp_result.get("pathways", [])
+                    else:
+                        cascade_diagram_paths[tp] = tp_result  # backward compat
+                    logger.info(f"[NET-NODE] Cascade diagram for '{tp}' saved: {cascade_diagram_paths[tp]}")
                 else:
                     logger.info(f"[NET-NODE] Cascade diagram for '{tp}': no pathways with sufficient proteins")
             logger.info(
@@ -2134,10 +2141,16 @@ def _run_network_analysis_inner(state: dict) -> dict:
             # Single condition: generate combined diagram (backward compatible)
             if cb:
                 cb(64, "Generating signaling cascade diagram")
-            cascade_diagram_path = generate_signaling_cascade_diagram(
+            cascade_result = generate_signaling_cascade_diagram(
                 parsed_ptms, enriched_data, network_data, output_dir, top_n_pathways=5
             )
-            if cascade_diagram_path:
+            if cascade_result:
+                # v6.5: result is now a dict {"path": str, "pathways": list}
+                if isinstance(cascade_result, dict):
+                    cascade_diagram_path = cascade_result["path"]
+                    cascade_pathway_names["combined"] = cascade_result.get("pathways", [])
+                else:
+                    cascade_diagram_path = cascade_result  # backward compat
                 logger.info(f"[NET-NODE] Signaling cascade diagram saved: {cascade_diagram_path}")
             else:
                 logger.info("[NET-NODE] Signaling cascade diagram: no pathways with sufficient proteins")
@@ -2145,6 +2158,7 @@ def _run_network_analysis_inner(state: dict) -> dict:
         logger.error(f"[NET-NODE] Signaling cascade diagram FAILED: {cascade_err}", exc_info=True)
         cascade_diagram_path = None
         cascade_diagram_paths = {}
+        cascade_pathway_names = {}
 
     if cb:
         cb(65, f"Network analysis complete (Cytoscape: {cytoscape_connected})")
@@ -2163,6 +2177,7 @@ def _run_network_analysis_inner(state: dict) -> dict:
             "pathway_graph_path": pathway_graph_path,
             "cascade_diagram_path": cascade_diagram_path,
             "cascade_diagram_paths": cascade_diagram_paths,
+            "cascade_pathway_names": cascade_pathway_names,
             "ptm_count": len(parsed_ptms),
             "timepoint_results": timepoint_results,
             "timepoints": timepoints,

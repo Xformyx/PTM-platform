@@ -1,0 +1,36 @@
+Reference 누락 버그 - 2차 분석
+================================
+
+흐름 재추적:
+1. format_citations() → final_report에 "## References\n" 포함하여 반환 (수정 완료)
+2. edit_report() → run_editor(state)
+   - L30: pre_formatted = state.get("final_report") → format_citations의 결과
+   - L36: if pre_formatted and len > 100 → report = pre_formatted (Reference 포함)
+   - L52: report_file.write_text(report) → final_report.md에 저장 ✓
+
+3. tasks.py L144-154: postprocess_full_report(raw, ptm_type_label)
+   - L697: text = detect_and_remove_fake_references(text)
+   → Reference 섹션의 개별 항목이 fake reference로 오탐될 가능성 있음!
+   
+   FAKE_REF_PATTERNS에 포함된 패턴:
+   - r'\bSmith\s+et\s+al\.\s*\(\d{4}\)' → 실제 Smith 저자가 있으면 제거됨!
+   - r'\bJones\s+et\s+al\.\s*\(\d{4}\)'
+   - r'\bJohnson\s+et\s+al\.\s*\(\d{4}\)'
+   - r'\bBrown\s+et\s+al\.\s*\(\d{4}\)'
+   - r'\bWilliams\s+et\s+al\.\s*\(\d{4}\)'
+   
+   하지만 이것은 일부 항목만 제거할 뿐 전체 Reference 섹션을 제거하지는 않음.
+
+4. markdown_to_docx.py → convert_markdown_to_docx()
+   - 일반 Markdown 파서로 ## References를 heading_2로 처리
+   - 이후 "1. Title ..." 형태의 줄을 list_item으로 처리
+   → docx 변환 자체는 문제없어 보임
+
+핵심 의문: "동일한 docx가 생성된다"
+→ git pull이 제대로 안 됐거나, docker compose restart가 캐시된 .pyc를 사용하고 있을 수 있음
+→ 또는 이미 생성된 기존 Order의 docx를 다시 보고 있는 것일 수 있음
+
+확인 필요:
+1. 사용자가 새 Order를 생성했는지, 기존 Order를 다시 본 것인지
+2. docker compose restart 후 실제로 새 코드가 로드되었는지
+3. Worker 로그에 [FORMAT-CIT] 로그가 찍히는지

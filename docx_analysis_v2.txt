@@ -1,0 +1,27 @@
+== final_report(14).docx 분석 결과 ==
+
+1. 본문 인라인 인용:
+   - 여전히 [PubMed Ref 10], [PubMed Ref 5, 9, 11] 형태가 남아있음
+   - graph.py의 정규화 로직이 작동하지 않았거나, writer_node.py 프롬프트 변경이 반영되지 않음
+   - 또는 이 docx가 이전 코드로 생성된 것
+
+2. Reference 섹션 (p14-18):
+   - 모든 항목이 bullet point (•)로 표시됨
+   - 번호가 전혀 없음
+   - markdown 원본은 "1. Title..." 형태로 번호가 있었음 (사용자 확인)
+
+3. 핵심 의문:
+   - markdown에 "1. Title..." 형태가 있는데 docx에서 bullet로 나옴
+   - markdown_to_docx.py에 ordered_list_item 처리 코드가 컨테이너에 반영되어 있음 (grep으로 확인)
+   - 그런데 왜 여전히 bullet?
+
+4. 가능한 원인:
+   a) convert_report_to_docx가 convert_markdown_to_docx를 호출하지 않고 다른 경로를 사용
+   b) Reference 섹션이 별도의 변환 경로를 타고 있음
+   c) markdown에서 "1. " 앞에 공백이나 다른 문자가 있어서 ordered list로 파싱되지 않음
+   d) postprocess_full_report가 "1. " 형태를 "- " 형태로 변환
+
+5. 다음 확인 사항:
+   - convert_report_to_docx 함수의 전체 경로를 다시 확인
+   - 특히 Reference 섹션이 별도로 처리되는지 확인
+   - ReportPostProcessor.process()가 번호 리스트를 변환하는지 확인

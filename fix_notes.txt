@@ -1,0 +1,26 @@
+Reference 누락 버그 수정 분석
+================================
+
+문제 흐름:
+1. writer_node._collect_all_references() → collected_references 생성
+   구조: {"pmid", "title", "journal", "pub_date", "abstract_excerpt", "relevance_score", "gene"}
+
+2. LLM 프롬프트에 PubMed references가 "PubMed Ref [1]" 형태로 전달됨
+   → LLM은 [1], [2], [3] 형태로 인라인 인용 생성
+
+3. format_citations() → CitationFormatter.process_text(all_text, collected_refs)
+   - process_text는 rag_results에서 r.get("metadata", {})로 메타데이터 추출
+   - collected_refs에는 "metadata" 키가 없음 → meta = {}
+   - authors="" (빈), year="" (빈) → auto-cite 조건 실패
+   - [REF:], [CITE:] placeholder도 LLM이 사용하지 않음
+   - 결과: self._references = [] → reference_section = ""
+
+4. graph.py L178: if result.reference_section: → False → Reference 미추가
+
+5. editor_node: pre_formatted 존재 → _compile_report() fallback 미실행
+   → _compile_report()의 collected_references 기반 Reference도 미생성
+
+수정 방안 (방법 1):
+- format_citations()에서 collected_refs를 CitationFormatter 호환 형태로 변환
+- LLM이 생성한 [N] 인라인 인용 번호를 collected_references와 매핑
+- 매핑 안 된 reference도 "## References"에 포함 (전체 reference 목록)

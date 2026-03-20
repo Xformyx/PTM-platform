@@ -1,0 +1,20 @@
+== docx 분석 결과 (final_report(13).docx) ==
+
+1. 본문 인라인 인용:
+   - 대부분 [1], [2], [3] 형태로 정상 출력됨 (수정 효과 있음)
+   - 일부 여전히 [PubMed Ref 10], [PubMed Ref 5, 9, 11] 형태 남아있음
+     → 이는 Introduction 섹션에서 발견 (page 1)
+     → Discussion 등에서는 [1], [2] 형태로 정상
+
+2. Reference 섹션:
+   - 번호가 없음! bullet point (·) 형태로 출력
+   - 예: "· Semaphorin3A signalling is mediated via..."
+   - graph.py에서 "1. Title..." 형태로 생성하는데 docx에서 bullet로 변환됨
+   
+3. 핵심 문제:
+   - markdown_to_docx.py에서 "1. " 패턴을 ordered list가 아닌 bullet list로 변환하고 있을 가능성
+   - 또는 docx 변환기가 markdown ordered list를 제대로 처리하지 못함
+   
+4. 다음 확인 사항:
+   - markdown_to_docx.py의 리스트 변환 로직
+   - final_report.md 원본에서 Reference 형식 확인 (md에서는 번호가 있는지)

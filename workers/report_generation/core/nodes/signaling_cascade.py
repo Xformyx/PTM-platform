@@ -1,7 +1,11 @@
 """
 Signaling Cascade Diagram — Publication-quality compartmentalized cell signaling visualization.
 
-v6.4 — Cytoscape-consistent node styling:
+v6.5 — Content alignment + readability improvements:
+  - Returns dict {"path": str, "pathways": list} for content alignment with LLM
+  - Subtitle updated to "Key Signaling Pathways by Multi-Factor Analysis"
+  - Bold formatting removed from all text (fontweight="normal")
+  - Font sizes: gene names 8-11pt, FC values 7-9pt, PTM sites 7pt, pathway names 11pt, compartment labels 13pt
   - Node COLOR: PTM Log2FC (PTM/Kinase) / Protein Log2FC (Non-PTM)
   - Node SIZE: proportional to |PTM Log2FC| magnitude (Cytoscape mapping)
   - Enhanced legend with size scale and color annotation
@@ -9,7 +13,7 @@ v6.4 — Cytoscape-consistent node styling:
   - FC value displayed inside node (lower portion) instead of above
   - PTM site shown as small badge above-right of node
   - Dynamic min_spacing based on actual node radii
-  - Max 10 proteins per pathway lane (top by |FC|)
+  - Max 8 proteins per pathway lane (top by |FC|)
   - Figure width auto-scales with data density (20-32 inches)
   - 5-pass overlap resolution for node positions
 
@@ -292,7 +296,7 @@ def generate_signaling_cascade_diagram(
     output_dir: str,
     top_n_pathways: int = 5,
     condition: Optional[str] = None,
-) -> Optional[str]:
+) -> Optional[dict]:
     """Generate a publication-quality compartmentalized signaling cascade diagram.
     
     This creates a cell cross-section showing:
@@ -315,7 +319,8 @@ def generate_signaling_cascade_diagram(
                    the condition label.
     
     Returns:
-        Path to saved PNG image, or None on failure.
+        Dict with 'path' (str) and 'pathways' (list of str), or None on failure.
+        Example: {"path": "/tmp/signaling_cascade_mgAF.png", "pathways": ["MAPK signaling pathway", "PI3K-Akt signaling pathway"]}
     """
     try:
         import matplotlib
@@ -695,7 +700,7 @@ def generate_signaling_cascade_diagram(
         ax.text(
             label_x, label_y, comp_labels[comp],
             ha="center", va="top",
-            fontsize=12, fontweight="bold",
+            fontsize=13, fontweight="normal",
             color="#37474F",
             fontstyle="italic",
             path_effects=[pe.withStroke(linewidth=3, foreground="white")],
@@ -730,7 +735,7 @@ def generate_signaling_cascade_diagram(
             margin_left - 0.1, lane_y,
             "",  # We'll put the label differently
             ha="right", va="center",
-            fontsize=7, fontweight="bold",
+            fontsize=8, fontweight="normal",
             color="#37474F",
         )
         
@@ -744,7 +749,7 @@ def generate_signaling_cascade_diagram(
             margin_left + total_width / 2, lane_y + lane_height * 0.38,
             pw_display,
             ha="center", va="bottom",
-            fontsize=10, fontweight="bold",
+            fontsize=11, fontweight="normal",
             color="#607D8B",
             alpha=0.7,
             fontstyle="italic",
@@ -926,15 +931,14 @@ def generate_signaling_cascade_diagram(
                 display_gene = display_gene[:7] + "."
             
             # Font size scales with node radius
-            gene_fontsize = max(6.5, min(9.0, size * 18))
+            gene_fontsize = max(8.0, min(11.0, size * 22))
             
             ax.text(
                 x, y + size * 0.12, display_gene,
                 ha="center", va="center",
-                fontsize=gene_fontsize, fontweight="bold",
+                fontsize=gene_fontsize, fontweight="normal",
                 color=text_color,
                 zorder=4,
-                path_effects=[pe.withStroke(linewidth=1.0, foreground=text_color)],
             )
             
             # FC value inside node (lower portion, smaller)
@@ -942,7 +946,7 @@ def generate_signaling_cascade_diagram(
             display_fc = fc if node_type != "Non-PTM" else (protein_fc if protein_fc != 0 else fc)
             fc_display = f"{display_fc:+.1f}" if display_fc != 0 else ""
             if fc_display:
-                fc_fontsize = max(5.0, gene_fontsize - 2.0)
+                fc_fontsize = max(7.0, gene_fontsize - 1.5)
                 ax.text(
                     x, y - size * 0.35, fc_display,
                     ha="center", va="center",
@@ -969,8 +973,8 @@ def generate_signaling_cascade_diagram(
                 ax.text(
                     badge_x, badge_y, site_display,
                     ha="center", va="center",
-                    fontsize=5.0, color="#37474F",
-                    fontweight="bold",
+                    fontsize=7.0, color="#37474F",
+                    fontweight="normal",
                     zorder=6,
                 )
         
@@ -995,12 +999,12 @@ def generate_signaling_cascade_diagram(
         fig_width / 2, fig_height - 0.35,
         title_main,
         ha="center", va="top",
-        fontsize=16, fontweight="bold",
+        fontsize=16, fontweight="normal",
         color="#263238",
     )
     ax.text(
         fig_width / 2, fig_height - 0.7,
-        f"Top {n_pathways} Canonical Pathways by Multi-factor Biological Relevance Score",
+        f"Key Signaling Pathways by Multi-Factor Analysis — Compartmentalized Signal Flow",
         ha="center", va="top",
         fontsize=11,
         color="#455A64",
@@ -1042,8 +1046,8 @@ def generate_signaling_cascade_diagram(
         ax.text(
             lx + 0.3, ly, label,
             ha="left", va="center",
-            fontsize=9, color="#263238",
-            fontweight="medium",
+            fontsize=10, color="#263238",
+            fontweight="normal",
             zorder=5,
         )
 
@@ -1058,8 +1062,8 @@ def generate_signaling_cascade_diagram(
     ax.text(
         arrow_x + 1.1, legend_y, "Signal flow",
         ha="left", va="center",
-        fontsize=9, color="#263238",
-        fontweight="medium",
+        fontsize=10, color="#263238",
+        fontweight="normal",
         zorder=5,
     )
 
@@ -1074,8 +1078,8 @@ def generate_signaling_cascade_diagram(
     ax.text(
         size_start_x - 1.0, size_legend_y, "Node size \u221d |Log2FC|:",
         ha="left", va="center",
-        fontsize=8.5, color="#455A64",
-        fontweight="medium",
+        fontsize=9.5, color="#455A64",
+        fontweight="normal",
         zorder=5,
     )
     for j, (slabel, sradius, scolor) in enumerate(size_examples):
@@ -1089,7 +1093,7 @@ def generate_signaling_cascade_diagram(
         ax.text(
             sx + sradius + 0.2, size_legend_y, slabel,
             ha="left", va="center",
-            fontsize=8, color="#455A64",
+            fontsize=9, color="#455A64",
             zorder=5,
         )
     # Annotation: Color = PTM Log2FC (PTM) / Protein Log2FC (Non-PTM)
@@ -1097,7 +1101,7 @@ def generate_signaling_cascade_diagram(
         fig_width / 2, size_legend_y - 0.5,
         "Color: PTM Log2FC (PTM nodes) / Protein Log2FC (Non-PTM nodes)  \u2022  Size: |PTM Log2FC| magnitude",
         ha="center", va="center",
-        fontsize=7.5, color="#78909C",
+        fontsize=8.5, color="#78909C",
         fontstyle="italic",
         zorder=5,
     )
@@ -1122,8 +1126,10 @@ def generate_signaling_cascade_diagram(
 
     # Log summary
     total_genes = len(all_pathway_genes)
+    selected_pathway_names = [chain["name"] for chain in pathway_chains]
     logger.info(
         f"[CASCADE] Signaling cascade diagram saved: {output_path} "
-        f"(condition={cond_label}, {n_pathways} pathways, {total_genes} proteins)"
+        f"(condition={cond_label}, {n_pathways} pathways, {total_genes} proteins, "
+        f"pathways={selected_pathway_names})"
     )
-    return str(output_path)
+    return {"path": str(output_path), "pathways": selected_pathway_names}
