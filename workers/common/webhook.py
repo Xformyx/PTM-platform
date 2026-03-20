@@ -22,6 +22,18 @@ SYNC_DATABASE_URL = DATABASE_URL.replace("+asyncmy", "+pymysql").replace("+aiomy
 STEPS = ("preprocessing", "rag_enrichment", "report_generation")
 STATUSES = ("started", "completed", "failed", "cancelled")
 
+STEP_LABELS = {
+    "preprocessing": "Preprocessing",
+    "rag_enrichment": "RAG-enrichment",
+    "report_generation": "Report Generation",
+}
+STATUS_LABELS = {
+    "started": "Started",
+    "completed": "Completed",
+    "failed": "Failed",
+    "cancelled": "Cancelled",
+}
+
 
 def _get_order_info(order_id: int) -> dict:
     """Fetch order_code, project_name for webhook payload."""
@@ -95,11 +107,16 @@ def send_order_webhook(
     if step not in STEPS:
         return
 
+    step_label = STEP_LABELS.get(step, step)
+    status_label = STATUS_LABELS.get(status, status)
+    message = f"[{info['order_code']}] {step_label} - {status_label}"
+
     payload = {
         "order_id": order_id,
         "order_code": info["order_code"],
         "step": step,
         "status": status,
+        "message": message,
         "error_message": error_message or info["error_message"],
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }

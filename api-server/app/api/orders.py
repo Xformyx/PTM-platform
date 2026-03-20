@@ -1,4 +1,3 @@
-import asyncio
 import json
 import logging
 import os
@@ -930,15 +929,16 @@ async def cancel_order(
     if step not in ("preprocessing", "rag_enrichment", "report_generation"):
         step = "preprocessing"
     if settings.WEBHOOK_URL:
-        asyncio.create_task(
-            send_order_webhook(
+        try:
+            await send_order_webhook(
                 order_id=order.id,
                 order_code=order.order_code,
                 step=step,
                 status="cancelled",
                 webhook_url=settings.WEBHOOK_URL,
             )
-        )
+        except Exception as e:
+            logger.warning(f"Webhook failed on cancel: {e}")
 
     return {"order_code": order.order_code, "status": "cancelled"}
 

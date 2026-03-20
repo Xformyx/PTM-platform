@@ -94,4 +94,4 @@ git commit -m "메시지"
 }
 ```
 
-**OpenClaw 포맷**: `[order_code] Step : Status`
+**메시지 포맷**: `[order_code] Step - Status` (한 줄)
