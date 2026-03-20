@@ -443,7 +443,7 @@ export default function Home() {
             <code className="text-xs font-mono">*.png</code> (네트워크 이미지)
           </Callout>
 
-          <SectionHeading id="report-figures" level={2}>5.6. 리포트 Figure 구성 (v6.0)</SectionHeading>
+          <SectionHeading id="report-figures" level={2}>5.6. 리포트 Figure 구성 (v6.5)</SectionHeading>
           <p className="text-base leading-relaxed text-foreground/85 mb-4">
             <code className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono">network_analysis</code> 노드는 3종류의 Figure를 순차적으로 생성하며,
             <code className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono">generate_network_figure_section()</code>에서
@@ -461,13 +461,13 @@ export default function Home() {
                 "Canonical Pathway Distribution (|Log2FC| 가중치 기반 경로 분포)",
               ],
               [
-                <strong>Figure 2</strong>,
+                <strong>Figure 2+</strong>,
                 "Cascade Diagram",
                 <code className="text-xs font-mono">generate_signaling_cascade_diagram()</code>,
-                "Compartmentalized Signaling Cascade — 세포 구획별 신호 전달 경로",
+                "Compartmentalized Signaling Cascade — Multi-Factor 스코어링, 조건별 개별 생성, cascade_pathway_names 반환",
               ],
               [
-                <strong>Figure 3+</strong>,
+                <strong>Figure N+</strong>,
                 "Network Image",
                 <code className="text-xs font-mono">_generate_cytoscape_networks()</code>,
                 "Cytoscape 네트워크 시각화 (Timepoint별)",
@@ -476,10 +476,14 @@ export default function Home() {
           />
 
           <Callout type="info">
-            <strong>Figure 2 (Signaling Cascade Diagram)</strong>는 v6.0에서 새로 추가된 기능입니다.
+            <strong>Figure 2+ (Signaling Cascade Diagram)</strong>는 v6.0에서 추가되고 v6.5에서 개선되었습니다.
             <code className="text-xs font-mono">signaling_cascade.py</code> 모듈이 세포 단면도(Extracellular → Membrane → Cytoplasm → Nucleus)를
             그리고, 각 단백질을 UniProt subcellular_location 및 GO Cellular Component 정보를 기반으로
-            정확한 구획에 배치합니다. 노드 색상은 PTM 활성화 상태(Red/Blue), Non-PTM 상호작용자(Green/Purple),
+            정확한 구획에 배치합니다. <strong>v6.5 개선사항:</strong> Multi-Factor 스코어링(FC magnitude 35%, compartment diversity 20%,
+            template match 20%, connectivity 15%, protein count 10%)으로 경로를 선별하고, 조건별 개별 다이어그램을 생성합니다.
+            <code className="text-xs font-mono">cascade_pathway_names</code>를 <code className="text-xs font-mono">figure_context.py</code>에 전달하여
+            LLM이 Results/Discussion 섹션에서 다이어그램에 표시된 구체적 pathway를 반드시 언급하도록 보장합니다.
+            노드 색상은 PTM 활성화 상태(Red/Blue), Non-PTM 상호작용자(Green/Purple),
             Kinase(Orange Diamond)로 구분되며, 화살표는 canonical pathway template에 따른 신호 전달 방향을 나타냅니다.
           </Callout>
 
