@@ -443,11 +443,12 @@ export default function Home() {
             <code className="text-xs font-mono">*.png</code> (네트워크 이미지)
           </Callout>
 
-          <SectionHeading id="report-figures" level={2}>5.6. 리포트 Figure 구성 (v6.5)</SectionHeading>
+          <SectionHeading id="report-figures" level={2}>5.6. 리포트 Figure 구성 (v7.0)</SectionHeading>
           <p className="text-base leading-relaxed text-foreground/85 mb-4">
-            <code className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono">network_analysis</code> 노드는 3종류의 Figure를 순차적으로 생성하며,
-            <code className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono">generate_network_figure_section()</code>에서
-            Figure 번호를 자동 부여하여 리포트에 삽입합니다.
+            v7.0에서 Figure 생성 아키텍처가 변경되었습니다. <code className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono">network_analysis</code> 노드는
+            Pathway Distribution Graph와 Cytoscape 네트워크만 생성하고, Signaling Cascade Diagram은
+            <code className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono">cascade_mediator</code> 노드가
+            LLM이 작성한 본문 내용을 분석하여 생성합니다.
           </p>
 
           <DataTable
@@ -463,8 +464,8 @@ export default function Home() {
               [
                 <strong>Figure 2+</strong>,
                 "Cascade Diagram",
-                <code className="text-xs font-mono">generate_signaling_cascade_diagram()</code>,
-                "Compartmentalized Signaling Cascade — Multi-Factor 스코어링, 조건별 개별 생성, cascade_pathway_names 반환",
+                <code className="text-xs font-mono">cascade_mediator → generate_cascade_from_selected_pathways()</code>,
+                "Content-Driven Signaling Cascade — LLM 본문에서 추출된 pathway 기반, 조건별 개별 생성",
               ],
               [
                 <strong>Figure N+</strong>,
@@ -476,13 +477,14 @@ export default function Home() {
           />
 
           <Callout type="info">
-            <strong>Figure 2+ (Signaling Cascade Diagram)</strong>는 v6.0에서 추가되고 v6.5에서 개선되었습니다.
-            <code className="text-xs font-mono">signaling_cascade.py</code> 모듈이 세포 단면도(Extracellular → Membrane → Cytoplasm → Nucleus)를
-            그리고, 각 단백질을 UniProt subcellular_location 및 GO Cellular Component 정보를 기반으로
-            정확한 구획에 배치합니다. <strong>v6.5 개선사항:</strong> Multi-Factor 스코어링(FC magnitude 35%, compartment diversity 20%,
-            template match 20%, connectivity 15%, protein count 10%)으로 경로를 선별하고, 조건별 개별 다이어그램을 생성합니다.
-            <code className="text-xs font-mono">cascade_pathway_names</code>를 <code className="text-xs font-mono">figure_context.py</code>에 전달하여
-            LLM이 Results/Discussion 섹션에서 다이어그램에 표시된 구체적 pathway를 반드시 언급하도록 보장합니다.
+            <strong>v7.0 아키텍처 변경: Content-Driven Cascade Diagram.</strong> 이전 버전(v6.5)에서는
+            <code className="text-xs font-mono">network_analysis</code> 노드가 cascade diagram을 먼저 생성하고,
+            LLM에게 해당 pathway를 강제로 언급하도록 지시했습니다. v7.0에서는 이 순서가 역전됩니다:
+            (1) LLM이 pathway_candidates를 참고하되 자유롭게 맥락에 맞는 pathway를 선택하여 본문을 작성,
+            (2) <code className="text-xs font-mono">cascade_mediator</code> 노드가 Results/Discussion 텍스트에서
+            실제 논의된 pathway를 3단계로 추출 (직접 이름 매칭 → Gene cluster 감지 → Alias 매칭),
+            (3) 추출된 pathway만으로 <code className="text-xs font-mono">signaling_cascade.py</code>의 렌더링 엔진을 호출하여
+            cascade diagram을 생성합니다. 이를 통해 본문 내용과 다이어그램이 자연스럽게 일치합니다.
             노드 색상은 PTM 활성화 상태(Red/Blue), Non-PTM 상호작용자(Green/Purple),
             Kinase(Orange Diamond)로 구분되며, 화살표는 canonical pathway template에 따른 신호 전달 방향을 나타냅니다.
           </Callout>

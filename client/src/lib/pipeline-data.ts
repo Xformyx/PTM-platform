@@ -30,7 +30,7 @@ export const TOC_ITEMS: TocItem[] = [
   { id: "report-goal", label: "5.1 목표", level: 2 },
   { id: "report-graph", label: "5.4 LangGraph 구조", level: 2 },
   { id: "report-nodes", label: "5.5 노드별 상세", level: 2 },
-  { id: "report-figures", label: "5.6 Figure 구성 (v6.5)", level: 2 },
+  { id: "report-figures", label: "5.6 Figure 구성 (v7.0)", level: 2 },
   { id: "dataflow", label: "6. 데이터 흐름 요약", level: 1 },
   { id: "infra", label: "7. 인프라 구성", level: 1 },
   { id: "operations", label: "8. 운영 가이드", level: 1 },
@@ -118,12 +118,13 @@ export const LANGGRAPH_NODES = [
   { id: 3, name: "research", range: "10% - 30%", file: "nodes/research_node.py", desc: "각 연구 질문에 대해 관련 PTM 데이터를 필터링하고, 활성화/억제된 PTM 패턴, 경로 농축, 조절 패턴을 분석합니다.", state: "research_results" },
   { id: 4, name: "hypothesize", range: "30% - 40%", file: "nodes/hypothesis_node.py", desc: "연구 분석 결과를 바탕으로 IF-THEN-BECAUSE 형식의 구조화된 가설을 생성합니다.", state: "hypotheses" },
   { id: 5, name: "validate_hypotheses", range: "40% - 55%", file: "nodes/validation_node.py", desc: "생성된 각 가설을 ChromaDB 벡터 데이터베이스의 문헌 데이터를 통해 검증하고 신뢰도 점수를 부여합니다.", state: "validated_hypotheses" },
-  { id: 6, name: "network_analysis", range: "55% - 65%", file: "nodes/network_node.py", desc: "PTM 데이터를 기반으로 단백질 상호작용 네트워크를 구축하고, Cytoscape Desktop의 CyREST API를 통해 시각화합니다. v6.5: Figure 1 = Canonical Pathway Distribution Bar Graph (|Log2FC| 가중치), Figure 2+ = Compartmentalized Signaling Cascade Diagram (Multi-Factor 스코어링으로 선별된 경로, 조건별 개별 생성, signaling_cascade.py), Figure N+ = Cytoscape 네트워크 이미지. cascade_pathway_names를 통해 LLM에 구체적 pathway 이름을 전달하여 리포트 텍스트-다이어그램 정합성을 보장합니다. PTM 노드는 Red/Blue 그라디언트, Non-PTM 노드는 Green/Purple 그라디언트(Protein_Log2FC 기반), Kinase 노드는 Amber 다이아몬드로 색상 매핑.", state: "network_analysis, network_results" },
-  { id: 7, name: "write_sections", range: "70% - 85%", file: "nodes/writer_node.py", desc: "검증된 가설, 네트워크 분석 결과, ChromaDB 문헌 컨텍스트를 종합하여 LLM이 리포트의 주요 섹션을 작성합니다. v6.5: figure_context.py가 cascade_pathway_names를 포함한 Figure Context를 생성하여 LLM 프롬프트에 주입, Results/Discussion 섹션에서 cascade diagram에 표시된 구체적 pathway를 반드시 언급하도록 지시합니다.", state: "sections, collected_references" },
-  { id: 8, name: "generate_qa_report", range: "85% - 88%", file: "nodes/qa_report_node.py", desc: "2-Pass 접근법으로 Q&A 형식의 보조 리포트를 생성합니다.", state: "qa_report, qa_questions" },
-  { id: 9, name: "drug_repositioning", range: "88% - 95%", file: "nodes/drug_repositioning_node.py", desc: "report_type이 extended인 경우에만 실행. PTM 분석 결과를 기반으로 약물 재배치 후보를 탐색합니다.", state: "drug_repositioning_results" },
-  { id: 10, name: "format_citations", range: "95% - 97%", file: "core/citation_formatter.py", desc: "모든 섹션을 조합하고, 인라인 인용을 정규화하며, Vancouver 스타일의 참고문헌 목록을 생성합니다.", state: "final_report, citation_data" },
-  { id: 11, name: "edit_report", range: "97% - 100%", file: "nodes/editor_node.py", desc: "최종 리포트를 저장하고, PTM 용어 교정, 인용 삽입, 가짜 참고문헌 제거 등의 후처리를 수행합니다.", state: "final output files" },
+  { id: 6, name: "network_analysis", range: "55% - 65%", file: "nodes/network_node.py", desc: "v7.0: PTM 데이터를 기반으로 단백질 상호작용 네트워크를 구축하고, Cytoscape Desktop의 CyREST API를 통해 시각화합니다. Figure 1 = Canonical Pathway Distribution Bar Graph (|Log2FC| 가중치), Figure N+ = Cytoscape 네트워크 이미지. Cascade diagram은 더 이상 이 단계에서 생성하지 않습니다. 대신 pathway_candidates (Multi-Factor 스코어링된 후보 목록)를 state에 export하여 cascade_mediator가 사용합니다. PTM 노드는 Red/Blue 그라디언트, Non-PTM 노드는 Green/Purple 그라디언트(Protein_Log2FC 기반), Kinase 노드는 Amber 다이아몬드로 색상 매핑.", state: "network_analysis, network_results, pathway_candidates" },
+  { id: 7, name: "write_sections", range: "70% - 78%", file: "nodes/writer_node.py", desc: "v7.0: 검증된 가설, 네트워크 분석 결과, ChromaDB 문헌 컨텍스트를 종합하여 LLM이 리포트의 주요 섹션을 작성합니다. figure_context.py는 pathway_candidates를 informational context로만 제공하며, LLM이 자유롭게 맥락에 맞는 pathway를 선택하여 논의합니다. 더 이상 특정 pathway를 강제로 언급하도록 지시하지 않습니다.", state: "sections, collected_references" },
+  { id: 8, name: "cascade_mediator", range: "78% - 82%", file: "nodes/cascade_mediator_node.py", desc: "v7.0 신규: Content-Driven Cascade Diagram 생성 에이전트. LLM이 작성한 Results/Discussion 텍스트에서 실제로 논의된 signaling pathway를 deterministic하게 추출합니다. 3단계 매칭: (1) 직접 pathway 이름 매칭, (2) Gene cluster 감지 (GENE_TO_PATHWAYS 매핑), (3) Alias 매칭 (ERK→MAPK, NF-κB→NF-kappa B 등). 추출된 pathway만으로 signaling_cascade.py의 렌더링 엔진을 호출하여 cascade diagram을 생성합니다. 이를 통해 본문 내용과 다이어그램이 자연스럽게 일치합니다.", state: "cascade_diagrams, cascade_pathway_names" },
+  { id: 9, name: "generate_qa_report", range: "85% - 88%", file: "nodes/qa_report_node.py", desc: "2-Pass 접근법으로 Q&A 형식의 보조 리포트를 생성합니다.", state: "qa_report, qa_questions" },
+  { id: 10, name: "drug_repositioning", range: "88% - 95%", file: "nodes/drug_repositioning_node.py", desc: "report_type이 extended인 경우에만 실행. PTM 분석 결과를 기반으로 약물 재배치 후보를 탐색합니다.", state: "drug_repositioning_results" },
+  { id: 11, name: "format_citations", range: "95% - 97%", file: "core/citation_formatter.py", desc: "모든 섹션을 조합하고, 인라인 인용을 정규화하며, Vancouver 스타일의 참고문헌 목록을 생성합니다.", state: "final_report, citation_data" },
+  { id: 12, name: "edit_report", range: "97% - 100%", file: "nodes/editor_node.py", desc: "최종 리포트를 저장하고, PTM 용어 교정, 인용 삽입, 가짜 참고문헌 제거 등의 후처리를 수행합니다.", state: "final output files" },
 ];
 
 export const REPORT_SECTIONS = [
