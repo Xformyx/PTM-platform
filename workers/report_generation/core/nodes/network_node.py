@@ -2097,9 +2097,20 @@ def _run_network_analysis_inner(state: dict) -> dict:
     cascade_diagram_path = None          # combined (single condition or fallback)
     cascade_diagram_paths = {}           # condition → path (per-condition diagrams)
     try:
-        from workers.report_generation.core.nodes.signaling_cascade import (
-            generate_signaling_cascade_diagram,
-        )
+        # v6.1 fix: Use relative import (same package) with absolute fallback.
+        # Docker installs packages as 'report_generation.*' (no 'workers.' prefix)
+        # while local dev may have 'workers.' in sys.path.
+        try:
+            from .signaling_cascade import generate_signaling_cascade_diagram
+        except ImportError:
+            try:
+                from report_generation.core.nodes.signaling_cascade import (
+                    generate_signaling_cascade_diagram,
+                )
+            except ImportError:
+                from signaling_cascade import generate_signaling_cascade_diagram
+        logger.info("[NET-NODE] signaling_cascade module imported successfully")
+
         if len(timepoints) > 1:
             # Multi-condition: generate one diagram per condition
             if cb:
@@ -2131,7 +2142,7 @@ def _run_network_analysis_inner(state: dict) -> dict:
             else:
                 logger.info("[NET-NODE] Signaling cascade diagram: no pathways with sufficient proteins")
     except Exception as cascade_err:
-        logger.error(f"[NET-NODE] Signaling cascade diagram failed: {cascade_err}", exc_info=True)
+        logger.error(f"[NET-NODE] Signaling cascade diagram FAILED: {cascade_err}", exc_info=True)
         cascade_diagram_path = None
         cascade_diagram_paths = {}
 

@@ -344,11 +344,18 @@ def generate_signaling_cascade_diagram(
 
     # Build gene → FC and type lookup from network nodes
     gene_info: Dict[str, dict] = {}  # gene_upper → {fc, type, site, ...}
-    nodes = network_data.get("nodes", [])
-    for node in nodes:
+    raw_nodes = network_data.get("nodes", {})
+    # network_data["nodes"] can be a dict {gene: node_data} or a list of dicts
+    if isinstance(raw_nodes, dict):
+        node_list = list(raw_nodes.values()) if raw_nodes else []
+    else:
+        node_list = raw_nodes or []
+    for node in node_list:
+        if not isinstance(node, dict):
+            continue
         gene = (node.get("gene") or node.get("id", "")).strip().upper()
         node_type = node.get("type", "Non-PTM")
-        fc = node.get("value", 0.0)
+        fc = node.get("ptm_log2fc", 0.0) or node.get("value", 0.0) or 0.0
         site = node.get("site", "")
         if gene not in gene_info or abs(fc) > abs(gene_info[gene].get("fc", 0)):
             gene_info[gene] = {
