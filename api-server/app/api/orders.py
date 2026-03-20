@@ -15,6 +15,7 @@ from app.core.database import get_db
 from app.dependencies import get_current_user
 from app.models.order import Order, OrderLog
 from app.models.rag_collection import RagCollection
+from app.models.user import User
 
 router = APIRouter(prefix="/orders", tags=["orders"])
 logger = logging.getLogger("ptm-platform.orders")
@@ -99,16 +100,28 @@ async def list_orders(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    base_query = select(Order).order_by(Order.created_at.desc())
+    # Alias for creator and runner
+    CreatorUser = User.__table__.alias("creator")
+    RunnerUser = User.__table__.alias("runner")
+
+    base_query = (
+        select(
+            Order,
+            CreatorUser.c.name.label("created_by_name"),
+            RunnerUser.c.name.label("run_by_name"),
+        )
+        .outerjoin(CreatorUser, Order.user_id == CreatorUser.c.id)
+        .outerjoin(RunnerUser, Order.run_by_user_id == RunnerUser.c.id)
+        .order_by(Order.created_at.desc())
+    )
     if status_filter:
         base_query = base_query.where(Order.status == status_filter)
-    # Non-admin users can only see their own orders
     if getattr(user, "role", "admin") != "admin":
         base_query = base_query.where(Order.user_id == user.id)
 
     query = base_query.offset((page - 1) * page_size).limit(page_size)
     result = await db.execute(query)
-    orders = result.scalars().all()
+    rows = result.all()
 
     count_query = select(sqlfunc.count(Order.id))
     if status_filter:
@@ -133,8 +146,10 @@ async def list_orders(
                 "error_message": o.error_message,
                 "created_at": o.created_at.isoformat() + "Z",
                 "completed_at": o.completed_at.isoformat() + "Z" if o.completed_at else None,
+                "created_by": created_by_name,
+                "run_by": run_by_name,
             }
-            for o in orders
+            for o, created_by_name, run_by_name in rows
         ],
         "total": total,
         "page": page,
@@ -476,6 +491,7 @@ async def start_order(
     order.started_at = datetime.utcnow()
     order.completed_at = None
     order.error_message = None
+    order.run_by_user_id = user.id if getattr(user, "id", 0) != 0 else None
     await db.commit()
 
     condition_map = _build_condition_map(order.sample_config)

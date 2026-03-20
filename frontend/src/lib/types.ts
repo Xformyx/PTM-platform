@@ -21,6 +21,8 @@ export interface Order {
   started_at?: string;
   completed_at?: string;
   created_at: string;
+  created_by?: string | null;
+  run_by?: string | null;
 }
 
 export type OrderStatus =

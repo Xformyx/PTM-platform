@@ -252,10 +252,16 @@ export default function OrderList() {
                         </span>
                       </div>
                     </TableCell>
-                    <TableCell className="text-muted-foreground whitespace-nowrap">
+                    <TableCell
+                      className="text-muted-foreground whitespace-nowrap"
+                      title={order.created_by ? `Created by: ${order.created_by}` : undefined}
+                    >
                       {fmtDate(order.created_at)}
                     </TableCell>
-                    <TableCell className="text-muted-foreground whitespace-nowrap">
+                    <TableCell
+                      className="text-muted-foreground whitespace-nowrap"
+                      title={order.run_by ? `Run by: ${order.run_by}` : undefined}
+                    >
                       {order.status === "completed" ? fmtDate(order.completed_at) : "—"}
                     </TableCell>
                     <TableCell onClick={(e) => e.stopPropagation()}>

@@ -1,6 +1,7 @@
 import { useState, FormEvent } from "react";
 import { KeyRound, Loader2, FlaskConical } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
+import type { AuthUser } from "@/contexts/AuthContext";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 
 export default function ForcePasswordChange() {
-  const { user, logout, refreshUser } = useAuth();
+  const { user, logout, updateUser } = useAuth();
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -28,11 +29,11 @@ export default function ForcePasswordChange() {
     }
     setLoading(true);
     try {
-      await api.post("/auth/change-password", {
+      const result = await api.post<{ message: string; user: AuthUser }>("/auth/change-password", {
         current_password: current,
         new_password: next,
       });
-      await refreshUser();
+      updateUser(result.user);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Failed to change password");
     } finally {

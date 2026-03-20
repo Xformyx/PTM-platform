@@ -17,22 +17,28 @@ settings = get_settings()
 logger = setup_logging()
 
 
-async def _run_migrations(conn) -> None:
-    """Apply incremental schema changes that create_all won't handle."""
-    # MySQL does not support ADD COLUMN IF NOT EXISTS — check manually
+async def _add_column_if_missing(conn, table: str, column: str, definition: str) -> None:
     result = await conn.execute(text(
         "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS "
         "WHERE TABLE_SCHEMA = DATABASE() "
-        "AND TABLE_NAME = 'users' "
-        "AND COLUMN_NAME = 'must_change_password'"
+        f"AND TABLE_NAME = '{table}' AND COLUMN_NAME = '{column}'"
     ))
     row = result.fetchone()
     if row and row[0] == 0:
-        await conn.execute(text(
-            "ALTER TABLE users ADD COLUMN "
-            "must_change_password TINYINT(1) NOT NULL DEFAULT 0"
-        ))
-        logger.info("Migration: added users.must_change_password column")
+        await conn.execute(text(f"ALTER TABLE `{table}` ADD COLUMN {definition}"))
+        logger.info(f"Migration: added {table}.{column}")
+
+
+async def _run_migrations(conn) -> None:
+    """Apply incremental schema changes that create_all won't handle."""
+    await _add_column_if_missing(
+        conn, "users", "must_change_password",
+        "must_change_password TINYINT(1) NOT NULL DEFAULT 0"
+    )
+    await _add_column_if_missing(
+        conn, "orders", "run_by_user_id",
+        "run_by_user_id INT NULL, ADD CONSTRAINT fk_orders_run_by FOREIGN KEY (run_by_user_id) REFERENCES users(id) ON DELETE SET NULL"
+    )
 
 
 async def _seed_admin(session: AsyncSession) -> None:
