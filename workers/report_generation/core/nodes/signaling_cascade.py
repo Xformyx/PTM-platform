@@ -1,6 +1,15 @@
 """
 Signaling Cascade Diagram — Publication-quality compartmentalized cell signaling visualization.
 
+v6.3 — Readability overhaul & dynamic layout:
+  - Dynamic node radius scaled to gene name length
+  - FC value displayed inside node (lower portion) instead of above
+  - PTM site shown as small badge above-right of node
+  - Dynamic min_spacing based on actual node radii
+  - Max 10 proteins per pathway lane (top by |FC|)
+  - Figure width auto-scales with data density (20-32 inches)
+  - 5-pass overlap resolution for node positions
+
 v6.2 — Context-aware multi-factor pathway selection:
   - Replaces simple cumulative |FC| TOP5 with multi-factor scoring
   - Factors: FC magnitude, compartment diversity, template match, protein count, network connectivity
@@ -569,11 +578,28 @@ def generate_signaling_cascade_diagram(
             "template": template_key,
         })
 
+    # ---- Step 4b: Limit proteins per pathway for readability ----
+    MAX_GENES_PER_PATHWAY = 8
+    for chain in pathway_chains:
+        if len(chain["genes"]) > MAX_GENES_PER_PATHWAY:
+            # Keep top genes by |FC|, preserving signal order
+            genes_with_fc = [(g, abs(gene_info.get(g, {}).get("fc", 0))) for g in chain["genes"]]
+            # Sort by |FC| descending, keep top N
+            top_genes_set = set(
+                g for g, _ in sorted(genes_with_fc, key=lambda x: -x[1])[:MAX_GENES_PER_PATHWAY]
+            )
+            # Preserve original signal order
+            chain["genes"] = [g for g in chain["genes"] if g in top_genes_set]
+            logger.info(
+                f"[CASCADE] Trimmed '{chain['name']}' to {len(chain['genes'])} genes (from {len(genes_with_fc)})"
+            )
+
     # ---- Step 5: Generate the matplotlib figure ----
-    # Figure dimensions
+    # Dynamic figure dimensions based on data density
     n_pathways = len(pathway_chains)
-    fig_width = 18
-    fig_height = max(10, 4 + n_pathways * 2.2)
+    max_genes_in_lane = max((len(c["genes"]) for c in pathway_chains), default=5)
+    fig_width = max(20, min(32, 12 + max_genes_in_lane * 2.0))
+    fig_height = max(10, 3.5 + n_pathways * 2.5)
     
     fig, ax = plt.subplots(1, 1, figsize=(fig_width, fig_height))
     ax.set_xlim(0, fig_width)
@@ -583,17 +609,40 @@ def generate_signaling_cascade_diagram(
 
     # ---- Draw cellular compartments ----
     # Compartment boundaries (x positions)
-    margin_left = 0.3
-    margin_right = 0.3
+    margin_left = 0.8
+    margin_right = 0.8
     total_width = fig_width - margin_left - margin_right
     
-    # Compartment widths (proportional)
-    comp_widths = {
-        "extracellular": total_width * 0.12,
-        "membrane": total_width * 0.10,
-        "cytoplasm": total_width * 0.48,
-        "nucleus": total_width * 0.30,
-    }
+    # Count proteins per compartment across all pathways for dynamic width allocation
+    comp_protein_counts = {"extracellular": 0, "membrane": 0, "cytoplasm": 0, "nucleus": 0}
+    for chain in pathway_chains:
+        for gene in chain["genes"]:
+            comp = gene_compartments.get(gene, "cytoplasm")
+            comp_protein_counts[comp] += 1
+    
+    # Dynamic compartment widths based on protein distribution
+    # Minimum widths to ensure labels fit even with 0 proteins
+    min_widths = {"extracellular": 1.5, "membrane": 1.5, "cytoplasm": 3.0, "nucleus": 2.0}
+    # Per-protein width allocation
+    per_protein_width = 2.0
+    
+    raw_widths = {}
+    for comp in ["extracellular", "membrane", "cytoplasm", "nucleus"]:
+        raw_widths[comp] = max(min_widths[comp], comp_protein_counts[comp] * per_protein_width)
+    
+    # Normalize to fit total_width
+    raw_total = sum(raw_widths.values())
+    comp_widths = {}
+    for comp in ["extracellular", "membrane", "cytoplasm", "nucleus"]:
+        comp_widths[comp] = (raw_widths[comp] / raw_total) * total_width
+    
+    logger.info(
+        f"[CASCADE] Compartment widths: "
+        f"extra={comp_widths['extracellular']:.1f} ({comp_protein_counts['extracellular']}p), "
+        f"memb={comp_widths['membrane']:.1f} ({comp_protein_counts['membrane']}p), "
+        f"cyto={comp_widths['cytoplasm']:.1f} ({comp_protein_counts['cytoplasm']}p), "
+        f"nucl={comp_widths['nucleus']:.1f} ({comp_protein_counts['nucleus']}p)"
+    )
     
     comp_x_start = {}
     x_cursor = margin_left
@@ -664,7 +713,8 @@ def generate_signaling_cascade_diagram(
     pathway_area_height = pathway_area_top - pathway_area_bottom
     lane_height = pathway_area_height / max(n_pathways, 1)
     
-    node_radius = 0.35
+    # Dynamic node radius based on figure width
+    base_node_radius = min(0.50, max(0.35, fig_width / 50))
     
     for pw_idx, chain in enumerate(pathway_chains):
         # Lane center Y
@@ -701,25 +751,26 @@ def generate_signaling_cascade_diagram(
         if n_genes == 0:
             continue
         
-        # Calculate x positions: proteins are spread across the FULL width
-        # in signal flow order (left=upstream, right=downstream).
-        # Each protein is placed at the x-center of its compartment if it's
-        # the only one there, otherwise spread evenly within the compartment.
-        # The key insight: the gene list is ALREADY in signal flow order
-        # (from Step 4), so we just need to map each gene to an x position
-        # that respects both compartment boundaries AND signal order.
-        
         gene_positions = []
         
-        # Strategy: assign x based on global index in the ordered gene list,
-        # but constrained within each gene's compartment boundaries.
-        # This preserves left-to-right signal flow while keeping proteins
-        # in their correct compartments.
-        
-        # First, compute the global x range for signal flow
-        flow_x_start = margin_left + 0.5
-        flow_x_end = margin_left + total_width - 0.5
+        # Compute the global x range for signal flow
+        flow_x_start = margin_left + 1.0
+        flow_x_end = margin_left + total_width - 0.8
         flow_width = flow_x_end - flow_x_start
+        
+        # Dynamic node radius per gene (based on name length)
+        gene_radii = {}
+        for gene in genes:
+            display_name = gene_info.get(gene, {}).get("gene", gene)
+            name_len = len(display_name)
+            # Scale radius: short names get smaller nodes, long names get bigger
+            r = base_node_radius + max(0, name_len - 4) * 0.03
+            r = min(0.60, max(base_node_radius, r))
+            gene_radii[gene] = r
+        
+        # Dynamic min_spacing based on node radii
+        avg_radius = sum(gene_radii.values()) / max(len(gene_radii), 1)
+        min_spacing = avg_radius * 2 + 0.6  # Generous spacing for labels
         
         for gene_idx, gene in enumerate(genes):
             comp = gene_compartments.get(gene, "cytoplasm")
@@ -731,7 +782,8 @@ def generate_signaling_cascade_diagram(
                 global_x = flow_x_start + (gene_idx / (n_genes - 1)) * flow_width
             
             # Constrain within compartment boundaries (with padding)
-            padding = node_radius + 0.2
+            r = gene_radii[gene]
+            padding = r + 0.3
             comp_left = comp_x_start[comp] + padding
             comp_right = comp_x_start[comp] + comp_widths[comp] - padding
             
@@ -740,21 +792,28 @@ def generate_signaling_cascade_diagram(
             
             gene_positions.append((gene, x, lane_y, comp))
         
-        # Enforce minimum spacing between consecutive nodes
-        min_spacing = node_radius * 2 + 0.3  # Minimum gap between node centers
-        for pass_num in range(3):  # Multiple passes to resolve cascading overlaps
+        # Enforce minimum spacing between consecutive nodes (multiple passes)
+        for pass_num in range(5):
             adjusted = False
             for i in range(1, len(gene_positions)):
                 g_prev, x_prev, y_prev, comp_prev = gene_positions[i - 1]
                 g_curr, x_curr, y_curr, comp_curr = gene_positions[i]
                 
-                if abs(x_curr - x_prev) < min_spacing:
-                    # Push current node to the right
-                    new_x = x_prev + min_spacing
-                    # Constrain within compartment
-                    padding = node_radius + 0.2
+                # Use the max radius of adjacent nodes for spacing
+                r_prev = gene_radii.get(g_prev, base_node_radius)
+                r_curr = gene_radii.get(g_curr, base_node_radius)
+                required_spacing = r_prev + r_curr + 0.6
+                
+                if abs(x_curr - x_prev) < required_spacing:
+                    new_x = x_prev + required_spacing
+                    # Allow slight overflow beyond compartment boundary
+                    # (better than overlapping nodes)
+                    r = gene_radii.get(g_curr, base_node_radius)
+                    padding = r + 0.2
                     comp_right = comp_x_start[comp_curr] + comp_widths[comp_curr] - padding
-                    new_x = min(new_x, comp_right)
+                    # Allow up to 1.0 unit overflow beyond compartment
+                    max_x = comp_right + 1.0
+                    new_x = min(new_x, max_x)
                     
                     if new_x != x_curr:
                         gene_positions[i] = (g_curr, new_x, y_curr, comp_curr)
@@ -767,29 +826,35 @@ def generate_signaling_cascade_diagram(
             g1, x1, y1, _ = gene_positions[i]
             g2, x2, y2, _ = gene_positions[i + 1]
             
-            # Arrow from g1 to g2
             dx = x2 - x1
             dy = y2 - y1
             dist = math.sqrt(dx**2 + dy**2)
             if dist < 0.01:
                 continue
             
-            # Shorten arrow to not overlap with nodes
-            shrink = node_radius + 0.08
-            ratio_start = shrink / dist
-            ratio_end = shrink / dist
+            # Shorten arrow using actual node radii
+            r1 = gene_radii.get(g1, base_node_radius)
+            r2 = gene_radii.get(g2, base_node_radius)
+            shrink_start = r1 + 0.10
+            shrink_end = r2 + 0.10
             
-            ax1 = x1 + dx * ratio_start
-            ay1 = y1 + dy * ratio_start
-            ax2 = x2 - dx * ratio_end
-            ay2 = y2 - dy * ratio_end
+            if dist <= (shrink_start + shrink_end):
+                continue  # Nodes too close, skip arrow
+            
+            ratio_s = shrink_start / dist
+            ratio_e = shrink_end / dist
+            
+            ax1 = x1 + dx * ratio_s
+            ay1 = y1 + dy * ratio_s
+            ax2 = x2 - dx * ratio_e
+            ay2 = y2 - dy * ratio_e
             
             arrow = FancyArrowPatch(
                 (ax1, ay1), (ax2, ay2),
-                arrowstyle="->,head_width=8,head_length=6",
+                arrowstyle="->,head_width=6,head_length=5",
                 color="#546E7A",
-                linewidth=2.2,
-                alpha=0.9,
+                linewidth=2.0,
+                alpha=0.85,
                 connectionstyle="arc3,rad=0.0",
                 zorder=1,
             )
@@ -805,13 +870,12 @@ def generate_signaling_cascade_diagram(
             fill_color = _get_cascade_node_color(fc, node_type)
             text_color = _get_text_color_for_bg(fill_color)
             
-            # Node size proportional to |FC| (min 0.25, max 0.45)
-            size = min(0.45, max(0.25, 0.25 + abs(fc) * 0.05))
+            # Use pre-computed dynamic radius
+            size = gene_radii.get(gene, base_node_radius)
             
             if node_type == "Kinase":
-                # Diamond shape
                 diamond = RegularPolygon(
-                    (x, y), numVertices=4, radius=size,
+                    (x, y), numVertices=4, radius=size * 1.1,
                     orientation=0,
                     facecolor=fill_color,
                     edgecolor="#333333",
@@ -820,7 +884,6 @@ def generate_signaling_cascade_diagram(
                 )
                 ax.add_patch(diamond)
             else:
-                # Circle shape
                 circle = Circle(
                     (x, y), radius=size,
                     facecolor=fill_color,
@@ -830,41 +893,56 @@ def generate_signaling_cascade_diagram(
                 )
                 ax.add_patch(circle)
             
-            # Gene label inside node
+            # Gene label inside node (upper half)
             display_gene = info.get("gene", gene)
-            if len(display_gene) > 7:
-                display_gene = display_gene[:6] + "."
+            if len(display_gene) > 8:
+                display_gene = display_gene[:7] + "."
+            
+            # Font size scales with node radius
+            gene_fontsize = max(6.5, min(9.0, size * 18))
             
             ax.text(
-                x, y, display_gene,
+                x, y + size * 0.12, display_gene,
                 ha="center", va="center",
-                fontsize=8.5, fontweight="bold",
+                fontsize=gene_fontsize, fontweight="bold",
                 color=text_color,
                 zorder=4,
-                path_effects=[pe.withStroke(linewidth=0.8, foreground=text_color)],
+                path_effects=[pe.withStroke(linewidth=1.0, foreground=text_color)],
             )
             
-            # PTM site label below node (if available)
-            if site and node_type == "PTM":
+            # FC value inside node (lower portion, smaller)
+            fc_display = f"{fc:+.1f}" if fc != 0 else ""
+            if fc_display:
+                fc_fontsize = max(5.0, gene_fontsize - 2.0)
                 ax.text(
-                    x, y - size - 0.12,
-                    site,
-                    ha="center", va="top",
-                    fontsize=7, color="#455A64",
-                    fontweight="medium",
+                    x, y - size * 0.35, fc_display,
+                    ha="center", va="center",
+                    fontsize=fc_fontsize, color=text_color,
+                    fontweight="normal",
+                    alpha=0.85,
                     zorder=4,
                 )
             
-            # FC value above node
-            fc_display = f"{fc:+.1f}" if fc != 0 else ""
-            if fc_display:
+            # PTM site label as small badge above-right of node
+            if site and node_type == "PTM":
+                badge_x = x + size * 0.7
+                badge_y = y + size * 0.7
+                # Small background circle for badge
+                badge_r = 0.20
+                badge_bg = Circle(
+                    (badge_x, badge_y), radius=badge_r,
+                    facecolor="#FFFFFF", edgecolor="#78909C",
+                    linewidth=0.8, zorder=5, alpha=0.9,
+                )
+                ax.add_patch(badge_bg)
+                # Truncate long site labels
+                site_display = site if len(site) <= 5 else site[:4] + "."
                 ax.text(
-                    x, y + size + 0.1,
-                    fc_display,
-                    ha="center", va="bottom",
-                    fontsize=7, color="#37474F",
+                    badge_x, badge_y, site_display,
+                    ha="center", va="center",
+                    fontsize=5.0, color="#37474F",
                     fontweight="bold",
-                    zorder=4,
+                    zorder=6,
                 )
         
         # Draw thin horizontal lane separator
