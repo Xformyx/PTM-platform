@@ -521,10 +521,10 @@ def generate_signaling_cascade_diagram(
         ax.text(
             label_x, label_y, comp_labels[comp],
             ha="center", va="top",
-            fontsize=9, fontweight="bold",
-            color="#546E7A",
+            fontsize=12, fontweight="bold",
+            color="#37474F",
             fontstyle="italic",
-            path_effects=[pe.withStroke(linewidth=2, foreground="white")],
+            path_effects=[pe.withStroke(linewidth=3, foreground="white")],
         )
 
     # Draw membrane lines (double line effect)
@@ -569,9 +569,9 @@ def generate_signaling_cascade_diagram(
             margin_left + total_width / 2, lane_y + lane_height * 0.38,
             pw_display,
             ha="center", va="bottom",
-            fontsize=7.5, fontweight="bold",
-            color="#78909C",
-            alpha=0.6,
+            fontsize=10, fontweight="bold",
+            color="#607D8B",
+            alpha=0.7,
             fontstyle="italic",
         )
         
@@ -666,10 +666,10 @@ def generate_signaling_cascade_diagram(
             
             arrow = FancyArrowPatch(
                 (ax1, ay1), (ax2, ay2),
-                arrowstyle="->,head_width=4,head_length=3",
-                color="#90A4AE",
-                linewidth=1.2,
-                alpha=0.7,
+                arrowstyle="->,head_width=8,head_length=6",
+                color="#546E7A",
+                linewidth=2.2,
+                alpha=0.9,
                 connectionstyle="arc3,rad=0.0",
                 zorder=1,
             )
@@ -718,10 +718,10 @@ def generate_signaling_cascade_diagram(
             ax.text(
                 x, y, display_gene,
                 ha="center", va="center",
-                fontsize=6.5, fontweight="bold",
+                fontsize=8.5, fontweight="bold",
                 color=text_color,
                 zorder=4,
-                path_effects=[pe.withStroke(linewidth=0.5, foreground=text_color)],
+                path_effects=[pe.withStroke(linewidth=0.8, foreground=text_color)],
             )
             
             # PTM site label below node (if available)
@@ -730,7 +730,8 @@ def generate_signaling_cascade_diagram(
                     x, y - size - 0.12,
                     site,
                     ha="center", va="top",
-                    fontsize=5, color="#616161",
+                    fontsize=7, color="#455A64",
+                    fontweight="medium",
                     zorder=4,
                 )
             
@@ -741,8 +742,8 @@ def generate_signaling_cascade_diagram(
                     x, y + size + 0.1,
                     fc_display,
                     ha="center", va="bottom",
-                    fontsize=5, color="#455A64",
-                    fontweight="medium",
+                    fontsize=7, color="#37474F",
+                    fontweight="bold",
                     zorder=4,
                 )
         
@@ -764,15 +765,15 @@ def generate_signaling_cascade_diagram(
         fig_width / 2, fig_height - 0.35,
         "Signal Transduction Pathway Cascade Diagram",
         ha="center", va="top",
-        fontsize=14, fontweight="bold",
+        fontsize=16, fontweight="bold",
         color="#263238",
     )
     ax.text(
-        fig_width / 2, fig_height - 0.65,
+        fig_width / 2, fig_height - 0.7,
         f"Top {n_pathways} Canonical Pathways by Cumulative |Log2FC| Score",
         ha="center", va="top",
-        fontsize=10,
-        color="#546E7A",
+        fontsize=11,
+        color="#455A64",
     )
 
     # Legend items
@@ -811,7 +812,8 @@ def generate_signaling_cascade_diagram(
         ax.text(
             lx + 0.3, ly, label,
             ha="left", va="center",
-            fontsize=8, color="#37474F",
+            fontsize=10, color="#263238",
+            fontweight="medium",
             zorder=5,
         )
 
@@ -819,14 +821,15 @@ def generate_signaling_cascade_diagram(
     arrow_x = legend_start_x + len(legend_items) * item_spacing
     arrow = FancyArrowPatch(
         (arrow_x, legend_y), (arrow_x + 0.8, legend_y),
-        arrowstyle="->,head_width=4,head_length=3",
-        color="#90A4AE", linewidth=1.5, zorder=5,
+        arrowstyle="->,head_width=8,head_length=6",
+        color="#546E7A", linewidth=2.5, zorder=5,
     )
     ax.add_patch(arrow)
     ax.text(
-        arrow_x + 1.0, legend_y, "Signal flow",
+        arrow_x + 1.1, legend_y, "Signal flow",
         ha="left", va="center",
-        fontsize=8, color="#37474F",
+        fontsize=10, color="#263238",
+        fontweight="medium",
         zorder=5,
     )
 
