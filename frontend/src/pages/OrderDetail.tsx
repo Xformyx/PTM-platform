@@ -1041,43 +1041,131 @@ function parseTimeOrder(cond: string): number {
 }
 
 // ── PTM Trend Classification ─────────────────────────────────────────────────
-type TrendCategory = "sustained_high" | "volatile" | "increasing" | "decreasing" | "other";
+// Aligned with backend temporal_comovement_node.py pattern classification
+type TrendCategory =
+  | "sustained_activation"
+  | "sustained_inhibition"
+  | "transient_burst"
+  | "increasing"
+  | "decreasing"
+  | "biphasic"
+  | "volatile"
+  | "other";
 
 const TREND_META: Record<TrendCategory, { label: string; color: string; description: string }> = {
-  sustained_high: { label: "Sustained High", color: "#ef4444", description: "시간대별로 계속 높게 유지" },
-  volatile:       { label: "Volatile",       color: "#f59e0b", description: "급격한 변동 (올라갔다 내려갔다)" },
-  increasing:     { label: "Increasing",     color: "#22c55e", description: "시간대별 증가 추세" },
-  decreasing:     { label: "Decreasing",     color: "#3b82f6", description: "시간대별 감소 추세" },
-  other:          { label: "Other",          color: "#6b7280", description: "기타 패턴" },
+  sustained_activation: { label: "Sustained Activation", color: "#ef4444", description: "지속적 활성화 (대부분 시간대에서 높은 양의 Log2FC)" },
+  sustained_inhibition: { label: "Sustained Inhibition", color: "#8b5cf6", description: "지속적 억제 (대부분 시간대에서 음의 Log2FC)" },
+  transient_burst:      { label: "Transient Burst",      color: "#f59e0b", description: "일시적 급등 후 복귀 (스파이크 패턴)" },
+  increasing:           { label: "Increasing",           color: "#22c55e", description: "시간에 따른 증가 추세" },
+  decreasing:           { label: "Decreasing",           color: "#3b82f6", description: "시간에 따른 감소 추세" },
+  biphasic:             { label: "Biphasic",             color: "#ec4899", description: "양↔음 전환이 있는 이중 위상 패턴" },
+  volatile:             { label: "Volatile",             color: "#f97316", description: "다수의 방향 전환 (불규칙 변동)" },
+  other:                { label: "Other",                color: "#6b7280", description: "낮은 변동 또는 미분류 패턴" },
 };
 
 function classifyTrend(values: number[]): TrendCategory {
   if (values.length < 2) return "other";
+
+  const n = values.length;
   const absMax = Math.max(...values.map(Math.abs));
-  const HIGH_THRESHOLD = absMax * 0.5 || 2;
+  const range = Math.max(...values) - Math.min(...values);
 
-  // Sustained high: all values above threshold
-  if (values.every((v) => Math.abs(v) >= HIGH_THRESHOLD)) return "sustained_high";
+  // Low-change PTMs: if max absolute value is very small, classify as other
+  if (absMax < 0.8) return "other";
 
-  // Volatile: direction changes >= 2 AND range is large
+  // ── Metrics ──
+  const posCount = values.filter((v) => v > 0.5).length;
+  const negCount = values.filter((v) => v < -0.5).length;
+
+  // Count significant direction changes (peaks/valleys)
   let dirChanges = 0;
-  for (let i = 1; i < values.length - 1; i++) {
+  for (let i = 1; i < n - 1; i++) {
     const d1 = values[i] - values[i - 1];
     const d2 = values[i + 1] - values[i];
-    if ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) dirChanges++;
+    if ((d1 > 0.3 && d2 < -0.3) || (d1 < -0.3 && d2 > 0.3)) dirChanges++;
   }
-  const range = Math.max(...values) - Math.min(...values);
-  if (dirChanges >= 1 && range > HIGH_THRESHOLD * 0.5) return "volatile";
 
-  // Monotonic trend: check if mostly increasing or decreasing
+  // Count sign changes between significant values (biphasic detection)
+  let signChanges = 0;
+  for (let i = 1; i < n; i++) {
+    if (values[i] * values[i - 1] < 0 && Math.abs(values[i]) > 0.5 && Math.abs(values[i - 1]) > 0.5) {
+      signChanges++;
+    }
+  }
+
+  // Spike ratio: fraction of timepoints above half-max (transient detection)
+  const aboveHalf = values.filter((v) => Math.abs(v) > absMax * 0.5).length;
+  const spikeRatio = aboveHalf / n;
+
+  // Sustained ratio: fraction of timepoints with |value| > 1.0
+  const sustainedCount = values.filter((v) => Math.abs(v) > 1.0).length;
+  const sustainedRatio = sustainedCount / n;
+
+  // First-half vs second-half means for trend detection
+  const half = Math.floor(n / 2);
+  const firstHalfMean = values.slice(0, half).reduce((a, b) => a + b, 0) / half;
+  const secondHalfMean = values.slice(half).reduce((a, b) => a + b, 0) / (n - half);
+  const trendDiff = secondHalfMean - firstHalfMean;
+
+  // Step-wise direction counts
   let ups = 0;
   let downs = 0;
-  for (let i = 1; i < values.length; i++) {
-    if (values[i] > values[i - 1] + 0.1) ups++;
-    else if (values[i] < values[i - 1] - 0.1) downs++;
+  for (let i = 1; i < n; i++) {
+    if (values[i] > values[i - 1] + 0.2) ups++;
+    else if (values[i] < values[i - 1] - 0.2) downs++;
   }
-  if (ups > downs && ups >= Math.ceil((values.length - 1) / 2)) return "increasing";
-  if (downs > ups && downs >= Math.ceil((values.length - 1) / 2)) return "decreasing";
+
+  // ── Classification (ordered by specificity) ──
+
+  // 1. Biphasic: clear sign change between significant values
+  if (signChanges >= 1 && range > 1.5) {
+    return "biphasic";
+  }
+
+  // 2. Transient burst: sharp spike then return to baseline
+  if (spikeRatio <= 0.4 && absMax > 2.0) {
+    return "transient_burst";
+  }
+
+  // 3. Sustained activation: most timepoints significantly positive
+  if (sustainedRatio >= 0.5 && posCount > negCount) {
+    return "sustained_activation";
+  }
+
+  // 4. Sustained inhibition: most timepoints significantly negative
+  if (sustainedRatio >= 0.5 && negCount > posCount) {
+    return "sustained_inhibition";
+  }
+
+  // 5. Increasing: clear upward trend
+  if (trendDiff > 0.8 && ups > downs && dirChanges <= 2) {
+    return "increasing";
+  }
+
+  // 6. Decreasing: clear downward trend
+  if (trendDiff < -0.8 && downs > ups && dirChanges <= 2) {
+    return "decreasing";
+  }
+
+  // 7. Volatile: many direction changes with significant range
+  if (dirChanges >= 3 && range > 1.5) {
+    return "volatile";
+  }
+
+  // 8. Fallback for moderate signals: use weaker criteria
+  if (absMax >= 1.0) {
+    if (sustainedRatio >= 0.35 && posCount > negCount) return "sustained_activation";
+    if (sustainedRatio >= 0.35 && negCount > posCount) return "sustained_inhibition";
+    if (trendDiff > 0.5 && ups >= downs) return "increasing";
+    if (trendDiff < -0.5 && downs >= ups) return "decreasing";
+    if (spikeRatio <= 0.45) return "transient_burst";
+  }
+
+  // 9. Low range = other
+  if (range < 1.0) return "other";
+
+  // 10. Default: if there's some activity but no clear pattern
+  if (dirChanges >= 2) return "volatile";
 
   return "other";
 }
