@@ -10,8 +10,13 @@ Pipeline position:
     network_analysis → temporal_comovement → write_sections → cascade_mediator
 
 Input (from state):
-    - network_analysis.networks: {tp: {active_nodes, inhibited_nodes, non_ptm_nodes, active_edges}}
-    - parsed_ptms, enriched_data, pathway_candidates
+    - network_analysis.timepoint_results: {tp: {active_ptm_nodes, inhibited_ptm_nodes, non_ptm_nodes, active_edges}}
+    - network_analysis.timepoints: list of timepoint strings
+    - enriched_ptm_data, parsed_ptms, pathway_candidates (all at state top-level)
+
+v8.3 Fix: network_node returns timepoint_results (not networks). The entry point
+now converts timepoint_results to the networks format expected by internal functions.
+Also fixed: enriched_data → enriched_ptm_data, pathway_candidates from state top-level.
 
 Output (to state):
     - comovement_analysis: {clusters, singletons, summary}
@@ -63,19 +68,33 @@ def run_temporal_comovement(state: dict) -> dict:
     """Main entry point — called from graph.py."""
     try:
         network_analysis = state.get("network_analysis", {})
-        networks = network_analysis.get("networks", {})
-        enriched_data = state.get("enriched_data", [])
+        enriched_data = state.get("enriched_ptm_data", [])
         parsed_ptms = state.get("parsed_ptms", [])
-        pathway_candidates = network_analysis.get("pathway_candidates", [])
+        # v8.3 Fix: pathway_candidates is at state top-level (returned by network_node)
+        pathway_candidates = state.get("pathway_candidates", {})
         output_dir = state.get("output_dir", "/tmp")
+
+        # v8.3 Fix: network_node returns timepoint_results (not networks)
+        # timepoint_results: {tp: {active_ptm_nodes, inhibited_ptm_nodes, non_ptm_nodes, ...}}
+        # We need to convert this to the networks format expected by _build_temporal_matrix
+        timepoint_results = network_analysis.get("timepoint_results", {})
+        networks = network_analysis.get("networks", {})
 
         # Determine timepoints
         timepoints = network_analysis.get("timepoints", [])
-        if not timepoints:
+        if not timepoints and timepoint_results:
+            timepoints = sorted(timepoint_results.keys(), key=tp_to_minutes)
+        if not timepoints and networks:
             timepoints = sorted(networks.keys(), key=tp_to_minutes)
         # Filter out condition-based keys (non-time)
         timepoints = [tp for tp in timepoints if tp_to_minutes(tp) >= 0]
         timepoints = sorted(timepoints, key=tp_to_minutes)
+
+        logger.info(
+            f"[COMOVEMENT] timepoints={timepoints}, "
+            f"timepoint_results_keys={list(timepoint_results.keys()) if timepoint_results else 'EMPTY'}, "
+            f"networks_keys={list(networks.keys()) if networks else 'EMPTY'}"
+        )
 
         if len(timepoints) < MIN_TIMEPOINTS:
             logger.info(f"Only {len(timepoints)} timepoints — skipping co-movement analysis")
@@ -84,6 +103,19 @@ def run_temporal_comovement(state: dict) -> dict:
                 "comovement_figures": [],
                 "comovement_llm_context": "",
             }
+
+        # v8.3 Fix: Use timepoint_results as the primary data source
+        # Convert timepoint_results to the networks format if networks is empty
+        if not networks and timepoint_results:
+            networks = {}
+            for tp in timepoints:
+                tp_data = timepoint_results.get(tp, {})
+                if not isinstance(tp_data, dict):
+                    continue
+                # timepoint_results uses active_ptm_nodes/inhibited_ptm_nodes
+                # _build_temporal_matrix expects active_nodes/inhibited_nodes OR active_ptm_nodes/inhibited_ptm_nodes
+                networks[tp] = tp_data
+            logger.info(f"[COMOVEMENT] Converted timepoint_results to networks: {list(networks.keys())}")
 
         # Step 1: Build temporal matrix
         ptm_matrix, ptm_meta = _build_temporal_matrix(networks, timepoints)
@@ -109,7 +141,9 @@ def run_temporal_comovement(state: dict) -> dict:
         clusters, singletons = _cluster_comoving_ptms(sig_matrix, sig_meta, timepoints)
 
         # Step 5: Annotate clusters with biological context
-        clusters = _annotate_clusters(clusters, enriched_data, pathway_candidates)
+        # pathway_candidates is a dict {"candidates": [...], "gene_data": {...}}
+        pw_candidates_list = pathway_candidates.get("candidates", []) if isinstance(pathway_candidates, dict) else pathway_candidates
+        clusters = _annotate_clusters(clusters, enriched_data, pw_candidates_list)
 
         # Step 6: Link to Non-PTM interactors
         clusters = _link_to_nonptm_interactors(clusters, networks, timepoints)
