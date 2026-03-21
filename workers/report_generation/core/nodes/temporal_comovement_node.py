@@ -743,14 +743,51 @@ def _generate_comovement_figures(
     clusters: list, singletons: list, timepoints: list,
     matrix: np.ndarray, meta: list, output_dir: str
 ) -> list:
-    """Generate publication-quality cluster visualizations."""
+    """Generate publication-quality cluster visualizations.
+
+    v8.4: Transient burst clusters are rendered as Fig 1 (Nature-style
+    composite figure) before the summary heatmap and other cluster plots.
+    """
     figures = []
     os.makedirs(output_dir, exist_ok=True)
 
     if not clusters:
         return figures
 
-    # ── Figure A: Summary Heatmap ──
+    # ── v8.4: Fig 1 — Transient Burst Composite (Nature style) ──
+    burst_clusters = [c for c in clusters if c["pattern"] in
+                      ("transient_burst", "transient_suppression")]
+    other_clusters = [c for c in clusters if c["pattern"] not in
+                      ("transient_burst", "transient_suppression")]
+
+    if burst_clusters:
+        try:
+            burst_fig_path = _generate_transient_burst_figure(
+                burst_clusters, timepoints, output_dir
+            )
+            if burst_fig_path:
+                n_sites = sum(c["member_count"] for c in burst_clusters)
+                peak_tps = set(c["peak_timepoint"] for c in burst_clusters)
+                figures.append({
+                    "path": burst_fig_path,
+                    "caption": (
+                        f"Transient phosphorylation burst dynamics. "
+                        f"{len(burst_clusters)} co-movement cluster(s) comprising "
+                        f"{n_sites} PTM sites exhibited rapid activation followed by "
+                        f"return to baseline. Peak responses observed at "
+                        f"{', '.join(sorted(peak_tps))}. "
+                        f"(a) Individual PTM time-series profiles colored by cluster membership "
+                        f"with cluster mean (bold). "
+                        f"(b) Peak Log2FC amplitude ranked by magnitude. "
+                        f"(c) Cluster mean temporal envelope showing activation-recovery kinetics."
+                    ),
+                    "type": "transient_burst_composite",
+                })
+                logger.info(f"[COMOVEMENT] Generated transient burst Fig 1: {burst_fig_path}")
+        except Exception as e:
+            logger.warning(f"Transient burst figure generation failed: {e}", exc_info=True)
+
+    # ── Summary Heatmap ──
     try:
         heatmap_path = _generate_summary_heatmap(
             clusters, singletons, timepoints, matrix, meta, output_dir
@@ -767,8 +804,8 @@ def _generate_comovement_figures(
     except Exception as e:
         logger.warning(f"Heatmap generation failed: {e}")
 
-    # ── Figure B: Per-cluster line plots ──
-    for cluster in clusters[:6]:  # Max 6 cluster detail figures
+    # ── Per-cluster line plots (non-burst clusters only, burst already in Fig 1) ──
+    for cluster in other_clusters[:4]:
         try:
             cluster_path = _generate_cluster_lineplot(
                 cluster, timepoints, output_dir
@@ -792,6 +829,248 @@ def _generate_comovement_figures(
             logger.warning(f"Cluster {cluster['cluster_id']} plot failed: {e}")
 
     return figures
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# v8.4: NATURE-STYLE TRANSIENT BURST COMPOSITE FIGURE (Fig 1)
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Nature-inspired color palette (colorblind-safe, high contrast)
+_NATURE_COLORS = [
+    "#E64B35",  # Vermillion (Nature Red)
+    "#4DBBD5",  # Cyan
+    "#00A087",  # Teal
+    "#3C5488",  # Indigo
+    "#F39B7F",  # Salmon
+    "#8491B4",  # Slate
+    "#91D1C2",  # Mint
+    "#DC9A6C",  # Amber
+    "#7E6148",  # Brown
+    "#B09C85",  # Taupe
+]
+
+
+def _generate_transient_burst_figure(
+    burst_clusters: list, timepoints: list, output_dir: str
+) -> Optional[str]:
+    """Generate a Nature-style composite figure for transient burst clusters.
+
+    Panel layout:
+        (a) Time-series profiles — individual PTM lines colored by cluster,
+            with bold cluster mean and shaded min-max envelope.
+        (b) Peak amplitude bar chart — horizontal bars ranked by |Log2FC|.
+        (c) Cluster mean envelope — overlaid mean profiles with fill_between.
+
+    Style: Nature journals — serif labels, minimal gridlines, panel letters,
+    300 DPI, white background, thin spines.
+    """
+    if not burst_clusters:
+        return None
+
+    # ── Collect all members across burst clusters ──
+    all_members = []  # (member_detail, cluster_idx, cluster_id)
+    for ci, cluster in enumerate(burst_clusters):
+        for md in cluster["member_details"]:
+            all_members.append((md, ci, cluster["cluster_id"]))
+
+    if not all_members:
+        return None
+
+    # ── Matplotlib Nature style setup ──
+    plt.rcParams.update({
+        "font.family": "serif",
+        "font.serif": ["DejaVu Serif", "Times New Roman", "serif"],
+        "font.size": 9,
+        "axes.linewidth": 0.6,
+        "axes.labelsize": 10,
+        "axes.titlesize": 11,
+        "xtick.major.width": 0.5,
+        "ytick.major.width": 0.5,
+        "xtick.labelsize": 8,
+        "ytick.labelsize": 8,
+        "legend.fontsize": 7,
+        "legend.frameon": True,
+        "legend.edgecolor": "0.8",
+        "legend.fancybox": False,
+    })
+
+    x = list(range(len(timepoints)))
+    n_clusters = len(burst_clusters)
+
+    # Determine layout based on member count
+    has_panel_c = n_clusters >= 2  # Only show envelope comparison if multiple clusters
+    n_panels = 3 if has_panel_c else 2
+
+    if has_panel_c:
+        fig = plt.figure(figsize=(14, 10))
+        gs = gridspec.GridSpec(
+            2, 2, figure=fig,
+            width_ratios=[3, 1.2],
+            height_ratios=[1, 1],
+            hspace=0.35, wspace=0.30
+        )
+        ax_a = fig.add_subplot(gs[0, :])
+        ax_b = fig.add_subplot(gs[1, 0])
+        ax_c = fig.add_subplot(gs[1, 1])
+    else:
+        fig = plt.figure(figsize=(14, 5.5))
+        gs = gridspec.GridSpec(
+            1, 2, figure=fig,
+            width_ratios=[3, 1.2],
+            hspace=0.30, wspace=0.30
+        )
+        ax_a = fig.add_subplot(gs[0, 0])
+        ax_b = fig.add_subplot(gs[0, 1])
+        ax_c = None
+
+    # ══════════════════════════════════════════════════════════════════════
+    # Panel (a): Time-series profiles
+    # ══════════════════════════════════════════════════════════════════════
+    for ci, cluster in enumerate(burst_clusters):
+        color = _NATURE_COLORS[ci % len(_NATURE_COLORS)]
+        members = cluster["member_details"]
+
+        # Individual member lines (thin, semi-transparent)
+        for mi, md in enumerate(members):
+            vals = [md["temporal_values"].get(tp, 0) for tp in timepoints]
+            label = md["key"] if len(members) <= 12 else (md["key"] if mi < 5 else None)
+            ax_a.plot(
+                x, vals, marker="o", markersize=3, linewidth=0.8,
+                alpha=0.45, color=color, label=label,
+                markeredgewidth=0.3, markeredgecolor="white",
+            )
+
+        # Cluster mean (bold line)
+        mean_vals = np.array([cluster["mean_profile"].get(tp, 0) for tp in timepoints])
+        ax_a.plot(
+            x, mean_vals, marker="o", markersize=5, linewidth=2.2,
+            color=color, alpha=0.95, zorder=10,
+            label=f"Cluster {cluster['cluster_id']} Mean",
+            markeredgewidth=0.5, markeredgecolor="white",
+        )
+
+        # Shaded envelope (min-max range)
+        all_vals = np.array([
+            [md["temporal_values"].get(tp, 0) for tp in timepoints]
+            for md in members
+        ])
+        if all_vals.shape[0] > 1:
+            min_vals = np.min(all_vals, axis=0)
+            max_vals = np.max(all_vals, axis=0)
+            ax_a.fill_between(x, min_vals, max_vals, alpha=0.12, color=color)
+
+    ax_a.axhline(y=0, color="#888888", linewidth=0.4, linestyle="-")
+    ax_a.set_xticks(x)
+    ax_a.set_xticklabels(timepoints, rotation=0)
+    ax_a.set_xlabel("Time point")
+    ax_a.set_ylabel("PTM Log\u2082FC")
+    ax_a.spines["top"].set_visible(False)
+    ax_a.spines["right"].set_visible(False)
+    ax_a.grid(axis="y", alpha=0.15, linewidth=0.3)
+
+    # Legend: show up to 15 entries, then add "..."
+    handles, labels = ax_a.get_legend_handles_labels()
+    if len(handles) > 15:
+        handles = handles[:15]
+        labels = labels[:15]
+        labels[-1] = f"... +{len(all_members) - 14} more"
+    ax_a.legend(
+        handles, labels, loc="upper right", ncol=2,
+        framealpha=0.9, borderaxespad=0.5,
+        handlelength=1.5, columnspacing=0.8,
+    )
+
+    # Panel label
+    ax_a.text(
+        -0.03, 1.05, "a", transform=ax_a.transAxes,
+        fontsize=14, fontweight="bold", va="bottom", ha="right",
+    )
+
+    # ══════════════════════════════════════════════════════════════════════
+    # Panel (b): Peak amplitude bar chart
+    # ══════════════════════════════════════════════════════════════════════
+    # Sort all members by peak |Log2FC| descending
+    sorted_members = sorted(all_members, key=lambda m: m[0]["max_fc"], reverse=True)
+    top_n = min(20, len(sorted_members))  # Show top 20
+    top_members = sorted_members[:top_n]
+
+    bar_labels = [m[0]["key"] for m in top_members]
+    bar_vals = [m[0]["max_fc"] for m in top_members]
+    bar_colors = [_NATURE_COLORS[m[1] % len(_NATURE_COLORS)] for m in top_members]
+
+    y_pos = list(range(top_n))
+    ax_b.barh(
+        y_pos, bar_vals, color=bar_colors, edgecolor="white",
+        linewidth=0.3, height=0.7, alpha=0.85,
+    )
+    ax_b.set_yticks(y_pos)
+    ax_b.set_yticklabels(bar_labels, fontsize=7)
+    ax_b.invert_yaxis()
+    ax_b.set_xlabel("Peak |Log\u2082FC|")
+    ax_b.spines["top"].set_visible(False)
+    ax_b.spines["right"].set_visible(False)
+    ax_b.grid(axis="x", alpha=0.15, linewidth=0.3)
+
+    ax_b.text(
+        -0.08, 1.05, "b", transform=ax_b.transAxes,
+        fontsize=14, fontweight="bold", va="bottom", ha="right",
+    )
+
+    # ══════════════════════════════════════════════════════════════════════
+    # Panel (c): Cluster mean envelope comparison
+    # ══════════════════════════════════════════════════════════════════════
+    if ax_c and has_panel_c:
+        for ci, cluster in enumerate(burst_clusters):
+            color = _NATURE_COLORS[ci % len(_NATURE_COLORS)]
+            mean_vals = np.array([cluster["mean_profile"].get(tp, 0) for tp in timepoints])
+            members = cluster["member_details"]
+
+            ax_c.plot(
+                x, mean_vals, marker="o", markersize=4, linewidth=1.8,
+                color=color, alpha=0.9,
+                label=f"C{cluster['cluster_id']} ({cluster['member_count']} sites)",
+                markeredgewidth=0.3, markeredgecolor="white",
+            )
+
+            # Envelope
+            all_vals = np.array([
+                [md["temporal_values"].get(tp, 0) for tp in timepoints]
+                for md in members
+            ])
+            if all_vals.shape[0] > 1:
+                min_v = np.min(all_vals, axis=0)
+                max_v = np.max(all_vals, axis=0)
+                ax_c.fill_between(x, min_v, max_v, alpha=0.15, color=color)
+
+        ax_c.axhline(y=0, color="#888888", linewidth=0.4, linestyle="-")
+        ax_c.set_xticks(x)
+        ax_c.set_xticklabels(timepoints, rotation=0)
+        ax_c.set_xlabel("Time point")
+        ax_c.set_ylabel("Mean Log\u2082FC")
+        ax_c.spines["top"].set_visible(False)
+        ax_c.spines["right"].set_visible(False)
+        ax_c.grid(axis="y", alpha=0.15, linewidth=0.3)
+        ax_c.legend(loc="upper right", framealpha=0.9)
+
+        ax_c.text(
+            -0.08, 1.05, "c", transform=ax_c.transAxes,
+            fontsize=14, fontweight="bold", va="bottom", ha="right",
+        )
+
+    # ── Save ──
+    path = os.path.join(output_dir, "fig1_transient_burst.png")
+    fig.savefig(path, dpi=300, bbox_inches="tight", facecolor="white", pad_inches=0.3)
+    plt.close(fig)
+
+    # Reset rcParams to defaults
+    plt.rcParams.update(plt.rcParamsDefault)
+    matplotlib.use("Agg")
+
+    logger.info(
+        f"[COMOVEMENT] Transient burst figure saved: {path} "
+        f"({len(burst_clusters)} clusters, {len(all_members)} members)"
+    )
+    return path
 
 
 def _generate_summary_heatmap(
@@ -1021,85 +1300,58 @@ def _pattern_display_name(pattern: str) -> str:
 def _build_comovement_llm_context(
     clusters: list, singletons: list, timepoints: list
 ) -> str:
-    """Build structured text for LLM injection into write_sections."""
+    """Build structured text for LLM injection into write_sections.
+
+    v8.4: Transient burst clusters are presented first with detailed context.
+    Other patterns receive a condensed summary. LLM instructions emphasize
+    transient burst as the primary analytical theme and require coherence
+    with the rest of the report (network analysis, cascade diagrams, etc.).
+    """
     if not clusters:
         return ""
 
+    # Separate burst vs non-burst clusters
+    burst_clusters = [c for c in clusters if c["pattern"] in
+                      ("transient_burst", "transient_suppression")]
+    other_clusters = [c for c in clusters if c["pattern"] not in
+                      ("transient_burst", "transient_suppression")]
+
     parts = [
         "\n## TEMPORAL PTM CO-MOVEMENT ANALYSIS\n",
-        "The following co-movement clusters were detected by correlation-based "
-        "hierarchical clustering of PTM Log2FC time-series vectors. Only PTMs with "
-        "significant temporal variation are included.\n",
+        "Correlation-based hierarchical clustering of PTM Log2FC time-series "
+        "vectors identified the following co-movement clusters. Transient burst "
+        "clusters are the primary focus of this analysis (Figure 1).\n",
     ]
 
-    for cluster in clusters:
-        cid = cluster["cluster_id"]
-        pattern = _pattern_display_name(cluster["pattern"])
-        members = cluster["members"]
-        ann = cluster.get("annotations", {})
-        bio_summary = ann.get("biological_summary", "No shared annotations found")
-
-        parts.append(f"### Cluster {cid}: {pattern} ({len(members)} members)")
+    # ── PRIMARY FOCUS: Transient Burst Clusters (detailed) ──
+    if burst_clusters:
+        parts.append("### \u2605 PRIMARY: Transient Phosphorylation Burst Clusters")
         parts.append(
-            f"Members: {', '.join(members[:15])}"
-            + (f" ... (+{len(members)-15} more)" if len(members) > 15 else "")
+            f"{len(burst_clusters)} cluster(s) exhibited transient burst dynamics "
+            f"(rapid activation followed by return to baseline). These are shown "
+            f"in Figure 1 of the report.\n"
         )
-        parts.append(f"Mean intra-cluster correlation: {cluster['correlation_mean']:.2f}")
-        parts.append(f"Peak timepoint: {cluster['peak_timepoint']}")
 
-        # Mean temporal profile
-        profile_str = " → ".join(
-            f"{tp}: {cluster['mean_profile'].get(tp, 0):+.1f}"
-            for tp in timepoints
+    for cluster in burst_clusters:
+        _append_cluster_detail(parts, cluster, timepoints, is_primary=True)
+
+    # ── SECONDARY: Other pattern clusters (condensed) ──
+    if other_clusters:
+        parts.append("\n### Other Co-movement Patterns (summary)")
+        parts.append(
+            f"{len(other_clusters)} additional cluster(s) with non-burst patterns "
+            f"were detected. These provide context for the broader signaling landscape.\n"
         )
-        parts.append(f"Mean profile: {profile_str}")
 
-        # Biological annotations
-        parts.append(f"\nBiological Context: {bio_summary}")
+    for cluster in other_clusters:
+        _append_cluster_detail(parts, cluster, timepoints, is_primary=False)
 
-        if ann.get("shared_pathways"):
-            pw_strs = []
-            for pw in ann["shared_pathways"][:3]:
-                pw_strs.append(
-                    f"  - {pw['name']} ({pw['overlap_count']}/{pw['total_cluster']} members: "
-                    f"{', '.join(pw['members'][:5])})"
-                )
-            parts.append("Shared Pathways:\n" + "\n".join(pw_strs))
-
-        if ann.get("shared_kinases"):
-            k_strs = []
-            for k in ann["shared_kinases"][:3]:
-                k_strs.append(
-                    f"  - {k['kinase']} → {', '.join(k['substrates'][:5])}"
-                )
-            parts.append("Predicted Upstream Kinases:\n" + "\n".join(k_strs))
-
-        if ann.get("shared_go_terms"):
-            go_strs = [f"  - {g['term']} ({g['count']} members)"
-                       for g in ann["shared_go_terms"][:3]]
-            parts.append("Shared GO Terms:\n" + "\n".join(go_strs))
-
-        # Non-PTM interactor links
-        nonptm_links = cluster.get("nonptm_links", [])
-        if nonptm_links:
-            parts.append("\nConnected Non-PTM Interactors:")
-            for link in nonptm_links[:5]:
-                parts.append(
-                    f"  - {link['gene']} ({link['role']}): "
-                    f"r={link['correlation_with_cluster']:.2f}, "
-                    f"{link['response_pattern']}, "
-                    f"lag={link['time_lag_minutes']:.0f}min, "
-                    f"max|FC|={link['max_change']:.2f}"
-                )
-
-        parts.append("")
-
-    # Singletons
+    # ── Notable singletons ──
     notable_singletons = [s for s in singletons if s["max_fc"] >= 3.0]
     if notable_singletons:
-        parts.append("### Notable Unclustered PTMs (unique temporal profiles)")
+        parts.append("\n### Notable Unclustered PTMs (unique temporal profiles)")
         for s in notable_singletons[:10]:
-            profile_str = " → ".join(
+            profile_str = " \u2192 ".join(
                 f"{tp}: {s['temporal_values'].get(tp, 0):+.1f}"
                 for tp in timepoints
             )
@@ -1109,18 +1361,131 @@ def _build_comovement_llm_context(
             )
         parts.append("")
 
-    # Instructions for LLM
+    # ── LLM Instructions (v8.4: transient burst focus + report coherence) ──
     parts.append(
-        "\nINSTRUCTIONS FOR REPORT WRITING:\n"
-        "- Discuss co-movement clusters as a central analytical theme in Results\n"
-        "- For each cluster, explain WHY these PTMs move together (shared kinase, "
-        "pathway, complex)\n"
-        "- Connect cluster temporal patterns to downstream Non-PTM interactor changes\n"
-        "- For transient bursts, discuss what triggers the rapid phosphorylation and "
-        "why it returns to baseline\n"
-        "- For sustained patterns, discuss continuous signaling vs. constitutive modification\n"
-        "- Reference the co-movement figures by their figure numbers\n"
-        "- Compare cluster findings with known signaling cascades from the literature\n"
+        "\nCRITICAL INSTRUCTIONS FOR REPORT WRITING:\n"
+        "\n"
+        "1. TRANSIENT BURST AS CENTRAL THEME:\n"
+        "   - The transient phosphorylation burst clusters MUST be the primary "
+        "analytical focus of the Results section.\n"
+        "   - Dedicate at least 2-3 paragraphs to interpreting the burst dynamics: "
+        "what triggers the rapid phosphorylation, which kinases are likely responsible, "
+        "and why the signal returns to baseline (phosphatase activity, negative feedback).\n"
+        "   - Reference Figure 1 explicitly when discussing burst clusters.\n"
+        "   - Name specific PTM proteins from the burst clusters and discuss their "
+        "known biological roles in the context of the treatment.\n"
+        "\n"
+        "2. REPORT COHERENCE:\n"
+        "   - The temporal burst analysis MUST connect logically to the network analysis "
+        "and cascade diagrams discussed elsewhere in the report.\n"
+        "   - If burst cluster members appear in the signaling network or cascade diagrams, "
+        "explicitly note this convergence as supporting evidence.\n"
+        "   - The Discussion section should synthesize burst findings with pathway-level "
+        "insights from other analyses (network topology, validated hypotheses).\n"
+        "   - The Abstract MUST mention the transient burst finding as a key result.\n"
+        "\n"
+        "3. SECONDARY PATTERNS:\n"
+        "   - Briefly mention sustained activation/inhibition and other patterns "
+        "for completeness, but keep them concise (1-2 sentences each).\n"
+        "   - Use them primarily as contrast to highlight the significance of "
+        "the transient burst response.\n"
+        "\n"
+        "4. BIOLOGICAL INTERPRETATION SCOPE:\n"
+        "   - Base all interpretations on the provided experimental data and "
+        "ChromaDB literature references ONLY.\n"
+        "   - Do NOT introduce external knowledge beyond what is provided.\n"
     )
 
     return "\n".join(parts)
+
+
+def _append_cluster_detail(
+    parts: list, cluster: dict, timepoints: list, is_primary: bool
+) -> None:
+    """Append cluster detail to LLM context parts.
+
+    Args:
+        is_primary: If True, include full detail (burst clusters).
+                    If False, include condensed summary.
+    """
+    cid = cluster["cluster_id"]
+    pattern = _pattern_display_name(cluster["pattern"])
+    members = cluster["members"]
+    ann = cluster.get("annotations", {})
+    bio_summary = ann.get("biological_summary", "No shared annotations found")
+
+    parts.append(f"\n#### Cluster {cid}: {pattern} ({len(members)} members)")
+    parts.append(
+        f"Members: {', '.join(members[:20])}"
+        + (f" ... (+{len(members)-20} more)" if len(members) > 20 else "")
+    )
+    parts.append(f"Mean intra-cluster correlation: {cluster['correlation_mean']:.2f}")
+    parts.append(f"Peak timepoint: {cluster['peak_timepoint']}")
+
+    # Mean temporal profile
+    profile_str = " \u2192 ".join(
+        f"{tp}: {cluster['mean_profile'].get(tp, 0):+.1f}"
+        for tp in timepoints
+    )
+    parts.append(f"Mean profile: {profile_str}")
+
+    # Biological annotations
+    parts.append(f"Biological Context: {bio_summary}")
+
+    if is_primary:
+        # Full detail for burst clusters
+        if ann.get("shared_pathways"):
+            pw_strs = []
+            for pw in ann["shared_pathways"][:5]:
+                pw_strs.append(
+                    f"  - {pw['name']} ({pw['overlap_count']}/{pw['total_cluster']} members: "
+                    f"{', '.join(pw['members'][:8])})"
+                )
+            parts.append("Shared Pathways:\n" + "\n".join(pw_strs))
+
+        if ann.get("shared_kinases"):
+            k_strs = []
+            for k in ann["shared_kinases"][:5]:
+                k_strs.append(
+                    f"  - {k['kinase']} \u2192 {', '.join(k['substrates'][:8])}"
+                )
+            parts.append("Predicted Upstream Kinases:\n" + "\n".join(k_strs))
+
+        if ann.get("shared_go_terms"):
+            go_strs = [f"  - {g['term']} ({g['count']} members)"
+                       for g in ann["shared_go_terms"][:5]]
+            parts.append("Shared GO Terms:\n" + "\n".join(go_strs))
+
+        # Non-PTM interactor links (important for burst interpretation)
+        nonptm_links = cluster.get("nonptm_links", [])
+        if nonptm_links:
+            parts.append("\nConnected Non-PTM Interactors:")
+            for link in nonptm_links[:8]:
+                parts.append(
+                    f"  - {link['gene']} ({link['role']}): "
+                    f"r={link['correlation_with_cluster']:.2f}, "
+                    f"{link['response_pattern']}, "
+                    f"lag={link['time_lag_minutes']:.0f}min, "
+                    f"max|FC|={link['max_change']:.2f}"
+                )
+
+        # Per-member peak details for burst clusters
+        parts.append("\nIndividual PTM Peak Details:")
+        sorted_members = sorted(
+            cluster["member_details"],
+            key=lambda m: m["max_fc"], reverse=True
+        )
+        for md in sorted_members[:15]:
+            parts.append(
+                f"  - {md['key']}: peak |Log2FC|={md['max_fc']:.1f} at {md['peak_tp']}"
+            )
+    else:
+        # Condensed for non-burst clusters
+        if ann.get("shared_pathways"):
+            pw_names = [pw["name"] for pw in ann["shared_pathways"][:3]]
+            parts.append(f"Key Pathways: {', '.join(pw_names)}")
+        if ann.get("shared_kinases"):
+            k_names = [k["kinase"] for k in ann["shared_kinases"][:3]]
+            parts.append(f"Predicted Kinases: {', '.join(k_names)}")
+
+    parts.append("")

@@ -151,9 +151,10 @@ def generate_qa_report(state: ReportState) -> dict:
 
 
 def _build_comovement_figure_section(comovement_figures: list, network_analysis: dict) -> str:
-    """v8.0: Build the co-movement figure section for the report.
+    """v8.0/v8.4: Build the co-movement figure section for the report.
     
-    Inserts heatmap and cluster line plots with captions and legends.
+    v8.4: Transient burst composite figure is placed as Figure 1 (before
+    network/cascade figures). Other co-movement figures follow after.
     """
     import base64
     from pathlib import Path
@@ -161,44 +162,52 @@ def _build_comovement_figure_section(comovement_figures: list, network_analysis:
     if not comovement_figures:
         return ""
 
+    # v8.4: Separate transient burst (Fig 1) from other figures
+    burst_figs = [f for f in comovement_figures if f.get("type") == "transient_burst_composite"]
+    other_figs = [f for f in comovement_figures if f.get("type") != "transient_burst_composite"]
+
     section = "\n## Temporal PTM Co-movement Analysis\n\n"
     section += (
         "The following figures show the results of temporal co-movement clustering analysis. "
         "PTM sites with correlated temporal dynamics were grouped into clusters using "
-        "hierarchical clustering of their Log2FC profiles across all time points. "
+        "hierarchical clustering of their Log2FC time-series profiles. "
         "Co-moving PTMs within the same cluster suggest coordinated regulation, "
         "potentially sharing upstream kinases or participating in the same signaling cascade.\n\n"
     )
 
-    # Determine figure numbering: starts after pathway graph + cascade diagrams
-    fig_num = 1  # pathway graph
+    # v8.4: Transient burst figure is ALWAYS Figure 1
+    fig_num = 1
+
+    for cf in burst_figs:
+        img_ref = _resolve_figure_path(cf, Path)
+        if img_ref:
+            cf_caption = cf.get("caption", "Transient Burst Dynamics")
+            section += f"### Figure {fig_num}. {cf_caption}\n\n"
+            section += f"![{cf_caption}]({img_ref})\n\n"
+            section += (
+                "**Legend:** Nature-style composite figure of transient phosphorylation burst clusters. "
+                "**(a)** Individual PTM time-series profiles colored by cluster membership; "
+                "bold lines indicate cluster means with shaded min-max envelopes. "
+                "**(b)** Peak Log\u2082FC amplitude ranked by magnitude. "
+                "**(c)** Cluster mean temporal envelopes showing activation-recovery kinetics. "
+                "Color palette: Nature Reviews-inspired colorblind-safe scheme.\n\n"
+            )
+            section += "---\n\n"
+            fig_num += 1
+            logger.info(f"[COMOVEMENT] Inserted transient burst as Figure 1")
+
+    # Other co-movement figures: numbering continues after network/cascade
+    # Determine figure offset for non-burst figures
     cascade_paths = network_analysis.get("cascade_diagram_paths", {})
     cascade_path = network_analysis.get("cascade_diagram_path")
-    if cascade_paths:
-        fig_num += len(cascade_paths)
-    elif cascade_path:
-        fig_num += 1
-    fig_num += 1  # move to next available
+    n_cascade = len(cascade_paths) if cascade_paths else (1 if cascade_path else 0)
+    # After burst fig(s) + pathway graph + cascade diagrams
+    fig_num = len(burst_figs) + 1 + n_cascade + 1  # +1 for pathway graph, +1 for next
 
-    for cf in comovement_figures:
-        cf_path = cf.get("path", "")
+    for cf in other_figs:
+        img_ref = _resolve_figure_path(cf, Path)
         cf_type = cf.get("type", "unknown")
         cf_caption = cf.get("caption", "Co-movement Analysis")
-
-        path_obj = Path(cf_path) if cf_path else None
-        img_ref = None
-
-        if path_obj and path_obj.exists() and path_obj.stat().st_size > 1000:
-            # Try relative filename first
-            img_ref = path_obj.name
-        elif path_obj and path_obj.exists():
-            # Fallback to base64
-            try:
-                with open(path_obj, "rb") as f:
-                    b64 = base64.b64encode(f.read()).decode()
-                img_ref = f"data:image/png;base64,{b64}"
-            except Exception:
-                img_ref = None
 
         if img_ref:
             section += f"### Figure {fig_num}. {cf_caption}\n\n"
@@ -210,9 +219,9 @@ def _build_comovement_figure_section(comovement_figures: list, network_analysis:
                     "Rows = PTM sites, columns = time points. Color intensity reflects Log2FC magnitude. "
                     "Dendrogram groups co-moving PTMs. Cluster color bars indicate membership.\n\n"
                 )
-            elif cf_type == "cluster_lineplot":
+            elif cf_type == "cluster_detail":
                 section += (
-                    "**Legend:** Temporal Log2FC profiles of cluster members. "
+                    "**Legend:** Temporal Log\u2082FC profiles of cluster members. "
                     "Solid lines = PTM proteins; dashed lines = linked Non-PTM interactors. "
                     "Shaded area = cluster envelope (min-max range).\n\n"
                 )
@@ -220,9 +229,26 @@ def _build_comovement_figure_section(comovement_figures: list, network_analysis:
             section += "---\n\n"
             fig_num += 1
         else:
-            logger.warning(f"[COMOVEMENT] Figure not found or too small: {cf_path}")
+            logger.warning(f"[COMOVEMENT] Figure not found or too small: {cf.get('path')}")
 
     return section
+
+
+def _resolve_figure_path(cf: dict, Path) -> str | None:
+    """Resolve a figure dict to an image reference (filename or base64)."""
+    import base64 as _b64
+    cf_path = cf.get("path", "")
+    path_obj = Path(cf_path) if cf_path else None
+    if path_obj and path_obj.exists() and path_obj.stat().st_size > 1000:
+        return path_obj.name
+    elif path_obj and path_obj.exists():
+        try:
+            with open(path_obj, "rb") as f:
+                b64 = _b64.b64encode(f.read()).decode()
+            return f"data:image/png;base64,{b64}"
+        except Exception:
+            return None
+    return None
 
 
 def format_citations(state: ReportState) -> dict:
