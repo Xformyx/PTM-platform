@@ -59,10 +59,10 @@ export default function Home() {
             </span>
           </div>
           <span className="text-xs text-muted-foreground font-mono hidden sm:block">
-            Pipeline Manual v1.1
+            Pipeline Manual v1.4
           </span>
           <div className="ml-auto flex items-center gap-3">
-            <span className="text-xs text-muted-foreground">2026-03-15</span>
+            <span className="text-xs text-muted-foreground">2026-03-21</span>
           </div>
         </div>
       </header>
@@ -396,7 +396,7 @@ export default function Home() {
           <SectionHeading id="report-graph" level={2}>5.4. LangGraph StateGraph 구조</SectionHeading>
           <p className="text-base leading-relaxed text-foreground/85 mb-4">
             <code className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono">ReportState</code>라는 TypedDict 상태 객체를 통해
-            모든 노드가 데이터를 공유하며, 아래의 11개 노드가 순차적으로 실행됩니다.
+            모든 노드가 데이터를 공유하며, 아래의 13개 노드가 순차적으로 실행됩니다.
           </p>
 
           {/* Node flow visualization */}
@@ -443,34 +443,93 @@ export default function Home() {
             <code className="text-xs font-mono">*.png</code> (네트워크 이미지)
           </Callout>
 
-          <SectionHeading id="report-figures" level={2}>5.6. 리포트 Figure 구성 (v7.0)</SectionHeading>
+          {/* 5.6 Temporal Co-movement Analysis (v8.0) */}
+          <SectionHeading id="report-temporal" level={2}>5.6. Temporal PTM Co-movement Analysis (v8.0)</SectionHeading>
           <p className="text-base leading-relaxed text-foreground/85 mb-4">
-            v7.0에서 Figure 생성 아키텍처가 변경되었습니다. <code className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono">network_analysis</code> 노드는
-            Pathway Distribution Graph와 Cytoscape 네트워크만 생성하고, Signaling Cascade Diagram은
-            <code className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono">cascade_mediator</code> 노드가
-            LLM이 작성한 본문 내용을 분석하여 생성합니다.
+            v8.0에서 추가된 <code className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono">temporal_comovement</code> 노드는
+            전체 PTM의 시계열 Log2FC 데이터를 분석하여 동시에 움직이는 PTM 그룹을 탐지합니다.
+            이 분석은 <code className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono">network_analysis</code> 이후,
+            <code className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono">write_sections</code> 이전에 실행됩니다.
           </p>
 
           <DataTable
-            caption="Table 5b. 리포트 Figure 구성"
-            headers={["Figure", "유형", "생성 함수", "설명"]}
+            caption="Table 5b. Temporal Co-movement 분석 파이프라인"
+            headers={["단계", "처리 내용", "알고리즘/도구"]}
+            rows={[
+              ["1. 행렬 구축", "PTM × Timepoint Log2FC 행렬 생성", "numpy array"],
+              ["2. 유의 필터링", "낮은 분산/진폭의 PTM 제거 (flat lines)", "variance ≥ 0.3, amplitude ≥ 1.0"],
+              ["3. 상관 행렬", "Pearson 상관계수 행렬 계산", "numpy corrcoef"],
+              ["4. 계층적 클러스터링", "Average linkage 기반 클러스터링", "scipy.cluster.hierarchy"],
+              ["5. 패턴 분류", "클러스터별 시계열 패턴 분류", "규칙 기반 분류기"],
+              ["6. 생물학적 주석", "Pathway, Kinase, GO term 매핑", "enrichment 데이터 활용"],
+              ["7. Non-PTM 연결", "클러스터 유전자와 Non-PTM interactor 매칭", "네트워크 엣지 데이터"],
+              ["8. 시각화", "Heatmap + Cluster Line Plot 생성", "matplotlib/seaborn"],
+            ]}
+          />
+
+          <DataTable
+            caption="Table 5c. 클러스터 패턴 분류 기준"
+            headers={["패턴", "조건", "생물학적 의미"]}
+            rows={[
+              ["transient_burst", "spike_ratio ≤ 0.4, max > 3, 양의 방향", "일시적 급등 후 기저선 복귀"],
+              ["transient_suppression", "spike_ratio ≤ 0.4, max > 3, 음의 방향", "일시적 억제 후 복귀"],
+              ["sustained_activation", "sustained_ratio ≥ 0.6, 양의 방향 우세", "지속적 활성화 유지"],
+              ["sustained_inhibition", "sustained_ratio ≥ 0.6, 음의 방향 우세", "지속적 억제 유지"],
+              ["biphasic_switch", "sign_changes ≥ 1 (양↔음 전환)", "이중 위상 반응"],
+              ["sequential_wave", "peak_spread ≥ 3, members ≥ 3", "순차적 활성화 파동"],
+              ["co_activated", "양의 방향 우세 (기타)", "공동 활성화"],
+              ["co_inhibited", "음의 방향 우세 (기타)", "공동 억제"],
+            ]}
+          />
+
+          <Callout type="info">
+            <strong>Co-movement 분석 결과물.</strong> 이 노드는 3가지 state를 출력합니다:
+            (1) <code className="text-xs font-mono">comovement_analysis</code> — 클러스터 목록, 멤버 상세, 패턴, 상관계수,
+            (2) <code className="text-xs font-mono">comovement_figures</code> — Heatmap과 Cluster Line Plot PNG 파일 경로,
+            (3) <code className="text-xs font-mono">comovement_llm_context</code> — LLM이 해석할 수 있는 텍스트 요약.
+            이 컨텍스트는 <code className="text-xs font-mono">figure_context.py</code>를 통해 write_sections 노드에 주입되어,
+            LLM이 시계열 클러스터링 결과를 리포트에 자연스럽게 통합할 수 있게 합니다.
+          </Callout>
+
+          {/* 5.7 Figure Composition (v8.0) */}
+          <SectionHeading id="report-figures" level={2}>5.7. 리포트 Figure 구성 (v8.0)</SectionHeading>
+          <p className="text-base leading-relaxed text-foreground/85 mb-4">
+            v8.0에서 Figure 구성이 확장되었습니다. 기존 Pathway Distribution, Cascade Diagram, Cytoscape 네트워크에
+            Temporal Co-movement Heatmap과 Cluster Line Plot이 추가되었습니다.
+          </p>
+
+          <DataTable
+            caption="Table 5d. 리포트 Figure 구성 (v8.0)"
+            headers={["Figure", "유형", "생성 노드", "설명"]}
             rows={[
               [
                 <strong>Figure 1</strong>,
                 "Bar Graph",
-                <code className="text-xs font-mono">_generate_pathway_distribution_graph()</code>,
-                "Canonical Pathway Distribution (|Log2FC| 가중치 기반 경로 분포)",
+                <code className="text-xs font-mono">network_analysis</code>,
+                "Canonical Pathway Distribution (Activated + Inhibited PTM 모두 포함, 3-bar 구조)",
               ],
               [
                 <strong>Figure 2+</strong>,
                 "Cascade Diagram",
-                <code className="text-xs font-mono">cascade_mediator → generate_cascade_from_selected_pathways()</code>,
-                "Content-Driven Signaling Cascade — LLM 본문에서 추출된 pathway 기반, 조건별 개별 생성",
+                <code className="text-xs font-mono">cascade_mediator</code>,
+                "Content-Driven Signaling Cascade — LLM 본문에서 추출된 pathway 기반",
               ],
               [
-                <strong>Figure N+</strong>,
+                <strong>Figure N</strong>,
+                "Heatmap",
+                <code className="text-xs font-mono">temporal_comovement</code>,
+                "PTM Co-movement Heatmap — 클러스터별 시계열 Log2FC 히트맵",
+              ],
+              [
+                <strong>Figure N+1</strong>,
+                "Line Plot",
+                <code className="text-xs font-mono">temporal_comovement</code>,
+                "Cluster Line Plot — 각 클러스터의 평균 시계열 프로파일",
+              ],
+              [
+                <strong>Figure N+2...</strong>,
                 "Network Image",
-                <code className="text-xs font-mono">_generate_cytoscape_networks()</code>,
+                <code className="text-xs font-mono">network_analysis</code>,
                 "Cytoscape 네트워크 시각화 (Timepoint별)",
               ],
             ]}
@@ -484,9 +543,56 @@ export default function Home() {
             (2) <code className="text-xs font-mono">cascade_mediator</code> 노드가 Results/Discussion 텍스트에서
             실제 논의된 pathway를 3단계로 추출 (직접 이름 매칭 → Gene cluster 감지 → Alias 매칭),
             (3) 추출된 pathway만으로 <code className="text-xs font-mono">signaling_cascade.py</code>의 렌더링 엔진을 호출하여
-            cascade diagram을 생성합니다. 이를 통해 본문 내용과 다이어그램이 자연스럽게 일치합니다.
-            노드 색상은 PTM 활성화 상태(Red/Blue), Non-PTM 상호작용자(Green/Purple),
-            Kinase(Orange Diamond)로 구분되며, 화살표는 canonical pathway template에 따른 신호 전달 방향을 나타냅니다.
+            cascade diagram을 생성합니다.
+          </Callout>
+
+          {/* 5.8 Report Quality Improvements (v8.1) */}
+          <SectionHeading id="report-quality" level={2}>5.8. 리포트 품질 개선 (v8.1)</SectionHeading>
+          <p className="text-base leading-relaxed text-foreground/85 mb-4">
+            v8.1에서는 생성된 리포트의 과학적 품질을 전반적으로 개선하는 여러 수정이 적용되었습니다.
+          </p>
+
+          <DataTable
+            caption="Table 5e. v8.1 품질 개선 항목"
+            headers={["항목", "문제", "해결"]}
+            rows={[
+              ["Vector Plot 시간 정렬", "10min이 2min 앞에 표시 (사전순 정렬)", "자연어 정렬 함수 적용 (parseTimeOrder / _natural_sort_key)"],
+              ["Treatment Name 강제", "리포트에서 'applied treatment'로만 표기", "LLM 프롬프트에 treatment name 명시적 주입"],
+              ["극단값 Log2FC 주석", "Log2FC > 15 값의 의미 설명 부재", "Binary ON/OFF switch 해석 가이드 추가"],
+              ["Fallback Kinase 예측", "enrichment에 kinase 없을 때 빈 네트워크", "LLM 기반 kinase 예측 fallback 추가"],
+              ["Figure 1 편향 보정", "Activated PTM만 포함된 bar graph", "3-bar 구조 (Activated + Inhibited + Net)"],
+              ["Off-topic 참고문헌 필터링", "관련 없는 문헌이 인용됨", "제목/초록 키워드 매칭 기반 필터링"],
+            ]}
+          />
+
+          {/* 5.9 PTM Classification System (v8.2) */}
+          <SectionHeading id="report-classification" level={2}>5.9. PTM 분류 시스템 (v8.2)</SectionHeading>
+          <p className="text-base leading-relaxed text-foreground/85 mb-4">
+            v8.2에서는 프론트엔드의 PTM 시계열 분류 로직을 백엔드의 temporal_comovement 패턴 분류와 일치시켰습니다.
+            기존 5개 카테고리에서 8개 카테고리로 확장하고, 분류 기준을 데이터 적응형으로 개선했습니다.
+          </p>
+
+          <DataTable
+            caption="Table 5f. PTM 분류 카테고리 (v8.2)"
+            headers={["카테고리", "조건", "설명"]}
+            rows={[
+              ["Sustained Activation", "sustainedRatio ≥ 0.5, 양의 방향 우세", "대부분 시간대에서 높은 양의 Log2FC"],
+              ["Sustained Inhibition", "sustainedRatio ≥ 0.5, 음의 방향 우세", "대부분 시간대에서 음의 Log2FC"],
+              ["Transient Burst", "spikeRatio ≤ 0.4, absMax > 2.0", "일시적 급등 후 기저선 복귀"],
+              ["Increasing", "trendDiff > 0.8, ups > downs, dirChanges ≤ 2", "시간에 따른 증가 추세"],
+              ["Decreasing", "trendDiff < -0.8, downs > ups, dirChanges ≤ 2", "시간에 따른 감소 추세"],
+              ["Biphasic", "signChanges ≥ 1, range > 1.5", "양↔음 전환이 있는 이중 위상 패턴"],
+              ["Volatile", "dirChanges ≥ 3, range > 1.5", "다수의 방향 전환 (불규칙 변동)"],
+              ["Other", "absMax < 0.8 또는 미분류", "낮은 변동 또는 미분류 패턴"],
+            ]}
+          />
+
+          <Callout type="warning">
+            <strong>v8.2 분류 개선 핵심.</strong> 이전 버전에서는 고정 임계값(|Log2FC| ≥ 2)을 사용하여
+            대부분의 PTM이 "Volatile"로 분류되는 문제가 있었습니다. v8.2에서는 데이터 적응형 메트릭
+            (spikeRatio, sustainedRatio, signChanges)을 도입하고, 분류 우선순위를 specificity 순서로
+            정렬하여 의미 있는 분류 분포를 달성합니다. 또한 중간 강도 신호(absMax ≥ 1.0)에 대한
+            fallback 분류 로직을 추가하여 "Other"로 빠지는 PTM 수를 최소화합니다.
           </Callout>
 
           {/* 6. Data Flow */}
@@ -644,8 +750,8 @@ docker compose up -d celery-worker-report`}
           {/* Footer */}
           <div className="mt-20 pt-8 border-t border-border">
             <div className="flex items-center justify-between text-xs text-muted-foreground">
-              <span>PTM Platform Pipeline Manual v1.1</span>
-              <span>Generated by Manus AI &middot; 2026-03-15</span>
+              <span>PTM Platform Pipeline Manual v1.4</span>
+              <span>Generated by Manus AI &middot; 2026-03-21</span>
             </div>
           </div>
         </main>
