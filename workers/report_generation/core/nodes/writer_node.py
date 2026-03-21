@@ -108,7 +108,16 @@ def run_section_writing(state: dict) -> dict:
     logger.info(f"Collected {len(all_references)} unique PubMed references from enriched PTM data")
 
     # Figure context for LLM — enables natural figure references in Results/Discussion
-    figure_gen = FigureInformationGenerator(network_analysis, parsed_ptms)
+    # v8.0: Pass co-movement analysis results to figure context
+    comovement_analysis = state.get("comovement_analysis", {})
+    comovement_figures = state.get("comovement_figures", [])
+    comovement_llm_context = state.get("comovement_llm_context", "")
+    figure_gen = FigureInformationGenerator(
+        network_analysis, parsed_ptms,
+        comovement_analysis=comovement_analysis,
+        comovement_figures=comovement_figures,
+        comovement_llm_context=comovement_llm_context,
+    )
     if figure_gen.has_figures():
         logger.info(f"Figure context available: {len(figure_gen.figure_map)} figures")
     else:

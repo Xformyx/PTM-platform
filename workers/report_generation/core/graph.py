@@ -55,6 +55,11 @@ class ReportState(TypedDict, total=False):
     cascade_diagrams: Dict[str, str]  # v7.0: condition → diagram path (from mediator)
     cascade_pathway_names: Dict[str, list]  # v7.0: condition → pathway names (from mediator)
 
+    # v8.0: Temporal co-movement analysis
+    comovement_analysis: dict              # clusters, singletons, summary
+    comovement_figures: List[dict]         # [{path, caption, type}]
+    comovement_llm_context: str            # structured text for LLM
+
     # Drug repositioning (extended report)
     report_type: str
     drug_repositioning_results: dict
@@ -121,6 +126,12 @@ def write_sections(state: ReportState) -> dict:
     return run_section_writing(state)
 
 
+def temporal_comovement(state: ReportState) -> dict:
+    """v8.0: Detect co-moving PTM clusters and generate temporal analysis."""
+    from .nodes.temporal_comovement_node import run_temporal_comovement
+    return run_temporal_comovement(state)
+
+
 def cascade_mediator(state: ReportState) -> dict:
     """v7.0: Extract discussed pathways from LLM text and generate cascade diagrams."""
     from .nodes.cascade_mediator_node import run_cascade_mediator
@@ -137,6 +148,81 @@ def generate_qa_report(state: ReportState) -> dict:
     """Generate Q&A format report from PTM data."""
     from .nodes.qa_report_node import run_qa_report_generation
     return run_qa_report_generation(state)
+
+
+def _build_comovement_figure_section(comovement_figures: list, network_analysis: dict) -> str:
+    """v8.0: Build the co-movement figure section for the report.
+    
+    Inserts heatmap and cluster line plots with captions and legends.
+    """
+    import base64
+    from pathlib import Path
+
+    if not comovement_figures:
+        return ""
+
+    section = "\n## Temporal PTM Co-movement Analysis\n\n"
+    section += (
+        "The following figures show the results of temporal co-movement clustering analysis. "
+        "PTM sites with correlated temporal dynamics were grouped into clusters using "
+        "hierarchical clustering of their Log2FC profiles across all time points. "
+        "Co-moving PTMs within the same cluster suggest coordinated regulation, "
+        "potentially sharing upstream kinases or participating in the same signaling cascade.\n\n"
+    )
+
+    # Determine figure numbering: starts after pathway graph + cascade diagrams
+    fig_num = 1  # pathway graph
+    cascade_paths = network_analysis.get("cascade_diagram_paths", {})
+    cascade_path = network_analysis.get("cascade_diagram_path")
+    if cascade_paths:
+        fig_num += len(cascade_paths)
+    elif cascade_path:
+        fig_num += 1
+    fig_num += 1  # move to next available
+
+    for cf in comovement_figures:
+        cf_path = cf.get("path", "")
+        cf_type = cf.get("type", "unknown")
+        cf_caption = cf.get("caption", "Co-movement Analysis")
+
+        path_obj = Path(cf_path) if cf_path else None
+        img_ref = None
+
+        if path_obj and path_obj.exists() and path_obj.stat().st_size > 1000:
+            # Try relative filename first
+            img_ref = path_obj.name
+        elif path_obj and path_obj.exists():
+            # Fallback to base64
+            try:
+                with open(path_obj, "rb") as f:
+                    b64 = base64.b64encode(f.read()).decode()
+                img_ref = f"data:image/png;base64,{b64}"
+            except Exception:
+                img_ref = None
+
+        if img_ref:
+            section += f"### Figure {fig_num}. {cf_caption}\n\n"
+            section += f"![{cf_caption}]({img_ref})\n\n"
+
+            if cf_type == "heatmap":
+                section += (
+                    "**Legend:** Hierarchical clustering heatmap of PTM temporal profiles. "
+                    "Rows = PTM sites, columns = time points. Color intensity reflects Log2FC magnitude. "
+                    "Dendrogram groups co-moving PTMs. Cluster color bars indicate membership.\n\n"
+                )
+            elif cf_type == "cluster_lineplot":
+                section += (
+                    "**Legend:** Temporal Log2FC profiles of cluster members. "
+                    "Solid lines = PTM proteins; dashed lines = linked Non-PTM interactors. "
+                    "Shaded area = cluster envelope (min-max range).\n\n"
+                )
+
+            section += "---\n\n"
+            fig_num += 1
+        else:
+            logger.warning(f"[COMOVEMENT] Figure not found or too small: {cf_path}")
+
+    return section
 
 
 def format_citations(state: ReportState) -> dict:
@@ -207,6 +293,13 @@ def format_citations(state: ReportState) -> dict:
             parts.append(sections[key])
             logger.info(f"[FORMAT-CIT] Added section: {key} ({len(sections[key])} chars)")
         if key == "results":
+            # v8.0: Insert co-movement figures BEFORE network section
+            comovement_figures = state.get("comovement_figures", [])
+            if comovement_figures:
+                comovement_section = _build_comovement_figure_section(comovement_figures, network_analysis)
+                if comovement_section:
+                    parts.append(comovement_section)
+                    logger.info(f"[FORMAT-CIT] Added co-movement section ({len(comovement_section)} chars)")
             network_section = generate_network_figure_section(network_analysis)
             if network_section:
                 parts.append(network_section)
@@ -315,14 +408,16 @@ def edit_report(state: ReportState) -> dict:
 def build_report_graph() -> StateGraph:
     """Build the LangGraph StateGraph for report generation.
 
-    Flow (v7.0):
+    Flow (v8.0):
       load_context → generate_questions → research → hypothesize
-        → validate_hypotheses → network_analysis → write_sections
-        → cascade_mediator → generate_qa_report → drug_repositioning
-        → format_citations → edit_report
+        → validate_hypotheses → network_analysis → temporal_comovement
+        → write_sections → cascade_mediator → generate_qa_report
+        → drug_repositioning → format_citations → edit_report
 
-    v7.0: cascade_mediator inserted after write_sections to generate
-    cascade diagrams based on LLM-written text content.
+    v8.0: temporal_comovement inserted between network_analysis and
+    write_sections to detect co-moving PTM clusters and provide
+    structured context for LLM section writing.
+    v7.0: cascade_mediator after write_sections for content-driven diagrams.
     """
     graph = StateGraph(ReportState)
 
@@ -332,6 +427,7 @@ def build_report_graph() -> StateGraph:
     graph.add_node("hypothesize", hypothesize)
     graph.add_node("validate_hypotheses", validate_hypotheses)
     graph.add_node("network_analysis", network_analysis)
+    graph.add_node("temporal_comovement", temporal_comovement)
     graph.add_node("write_sections", write_sections)
     graph.add_node("cascade_mediator", cascade_mediator)
     graph.add_node("generate_qa_report", generate_qa_report)
@@ -345,7 +441,8 @@ def build_report_graph() -> StateGraph:
     graph.add_edge("research", "hypothesize")
     graph.add_edge("hypothesize", "validate_hypotheses")
     graph.add_edge("validate_hypotheses", "network_analysis")
-    graph.add_edge("network_analysis", "write_sections")
+    graph.add_edge("network_analysis", "temporal_comovement")
+    graph.add_edge("temporal_comovement", "write_sections")
     graph.add_edge("write_sections", "cascade_mediator")
     graph.add_edge("cascade_mediator", "generate_qa_report")
     graph.add_edge("generate_qa_report", "drug_repositioning")

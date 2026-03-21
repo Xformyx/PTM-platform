@@ -2,6 +2,10 @@
 Figure Context Generator — provides figure context for LLM report writing.
 Ported from ptm_nonptm_network_command.py FigureInformationGenerator.
 
+v8.0 — Temporal Co-movement Analysis:
+  - Co-movement heatmap and cluster line plots added to figure map
+  - LLM context includes structured cluster descriptions for writing
+
 v7.0 — Content-driven cascade diagram pipeline:
   - Figure 1: Canonical Pathway Distribution Bar Graph
   - Figure 2+: Signaling Cascade Diagrams (generated AFTER writing by mediator)
@@ -42,7 +46,9 @@ class FigureInformationGenerator:
     ACTIVE_STATES = ("high_active", "moderate_active", "activated", "low_active")
     INHIBITED_STATES = ("inhibited", "low_inhibited")
 
-    def __init__(self, network_analysis: dict, parsed_ptms: list = None):
+    def __init__(self, network_analysis: dict, parsed_ptms: list = None,
+                 comovement_analysis: dict = None, comovement_figures: list = None,
+                 comovement_llm_context: str = ""):
         self.network_analysis = network_analysis
         self.network_images = network_analysis.get("network_images", {})
         self.network_data = network_analysis.get("network_data", {})
@@ -56,6 +62,10 @@ class FigureInformationGenerator:
         self.cascade_diagram_path = network_analysis.get("cascade_diagram_path")
         self.cascade_diagram_paths = network_analysis.get("cascade_diagram_paths", {})
         self.cascade_pathway_names = network_analysis.get("cascade_pathway_names", {})
+        # v8.0: Temporal co-movement analysis
+        self.comovement_analysis = comovement_analysis or {}
+        self.comovement_figures = comovement_figures or []
+        self.comovement_llm_context = comovement_llm_context
         self.figure_map = self._build_figure_map()
 
     def _build_figure_map(self) -> Dict[str, dict]:
@@ -110,6 +120,43 @@ class FigureInformationGenerator:
                 "figure_type": "cascade_diagram",
             }
             fig_num += 1
+
+        # ── Co-movement Figures (v8.0) ──
+        for cf in self.comovement_figures:
+            cf_type = cf.get("type", "unknown")
+            cf_caption = cf.get("caption", "Temporal Co-movement Analysis")
+            if cf_type == "heatmap":
+                fig_map["comovement_heatmap"] = {
+                    "figure_number": fig_num,
+                    "figure_label": f"Figure {fig_num}",
+                    "display_name": "Temporal PTM Co-movement Cluster Heatmap",
+                    "description": (
+                        "Hierarchical clustering heatmap of PTM temporal profiles. "
+                        "Rows represent individual PTM sites, columns represent time points. "
+                        "Color intensity reflects Log2FC magnitude. Dendrogram and cluster "
+                        "color bars group co-moving PTMs that share similar temporal dynamics. "
+                        "Clusters reveal coordinated phosphorylation waves."
+                    ),
+                    "panel_index": 0,
+                    "figure_type": "comovement_heatmap",
+                }
+                fig_num += 1
+            elif cf_type == "cluster_lineplot":
+                cluster_id = cf.get("cluster_id", "")
+                fig_map[f"comovement_cluster_{cluster_id}"] = {
+                    "figure_number": fig_num,
+                    "figure_label": f"Figure {fig_num}",
+                    "display_name": f"Temporal Profile — {cf_caption}",
+                    "description": (
+                        f"Line plot showing the temporal Log2FC profiles of PTM sites in {cf_caption}. "
+                        "Solid lines represent PTM proteins; dashed lines represent linked Non-PTM interactors. "
+                        "Shaded area indicates the cluster envelope. Co-moving PTMs share similar "
+                        "temporal dynamics, suggesting coordinated regulation."
+                    ),
+                    "panel_index": 0,
+                    "figure_type": "comovement_lineplot",
+                }
+                fig_num += 1
 
         # ── Figure N+: Cytoscape Network Images (per-timepoint panels) ──
         # v5.0: "main" is excluded — replaced by pathway distribution graph
@@ -426,6 +473,12 @@ class FigureInformationGenerator:
             lines.append("**Panel-by-Panel Summary:**")
             for tp, legend_text in individual_legends.items():
                 lines.append(legend_text)
+            lines.append("")
+
+        # v8.0: Add co-movement analysis context
+        if self.comovement_llm_context:
+            lines.append("**Temporal PTM Co-movement Analysis:**")
+            lines.append(self.comovement_llm_context)
             lines.append("")
 
         # v7.0: Provide pathway candidates as informational context (not forced)
