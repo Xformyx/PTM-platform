@@ -5,6 +5,7 @@ Ported from ptm-preprocessing_v2_260131. Uses matplotlib (no GUI - headless).
 """
 
 import logging
+import re
 from pathlib import Path
 
 import matplotlib
@@ -14,6 +15,19 @@ import numpy as np
 import pandas as pd
 
 logger = logging.getLogger(__name__)
+
+
+def _natural_sort_key(s: str):
+    """Sort key that extracts leading numeric value for natural ordering.
+    
+    Examples: '2min' -> (2.0, 'min'), '10min' -> (10.0, 'min'),
+              '1.5hour' -> (1.5, 'hour'), 'Control' -> (inf, 'Control')
+    """
+    s_str = str(s)
+    m = re.match(r'^([\d.]+)\s*(.*)', s_str)
+    if m:
+        return (float(m.group(1)), m.group(2))
+    return (float('inf'), s_str)
 
 
 class PTMVectorReportGenerator:
@@ -38,9 +52,12 @@ class PTMVectorReportGenerator:
             return None
 
         df = self._ensure_residual(df)
-        conditions = sorted([c for c in df["Condition"].unique() if str(c) != "Control" and pd.notna(c)])
+        conditions = sorted(
+            [c for c in df["Condition"].unique() if str(c) != "Control" and pd.notna(c)],
+            key=_natural_sort_key
+        )
         if not conditions:
-            conditions = list(df["Condition"].dropna().unique())[:6]
+            conditions = sorted(list(df["Condition"].dropna().unique())[:6], key=_natural_sort_key)
 
         # Color palette for conditions
         palette = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf"]
@@ -111,9 +128,12 @@ class PTMVectorReportGenerator:
         """Generate combined summary report (all conditions, PTM types)."""
         df = self._ensure_residual(vector_df)
         ptm_types = list(df["PTM_Type"].dropna().unique())
-        conditions = sorted([c for c in df["Condition"].unique() if str(c) != "Control" and pd.notna(c)])
+        conditions = sorted(
+            [c for c in df["Condition"].unique() if str(c) != "Control" and pd.notna(c)],
+            key=_natural_sort_key
+        )
         if not conditions:
-            conditions = list(df["Condition"].dropna().unique())
+            conditions = sorted(list(df["Condition"].dropna().unique()), key=_natural_sort_key)
 
         ptm_colors = {"Phosphorylation": "#1f77b4", "Ubiquitination": "#d62728", "Ubiquitylation": "#d62728"}
         ptm_markers = {"Phosphorylation": "o", "Ubiquitination": "s", "Ubiquitylation": "s"}

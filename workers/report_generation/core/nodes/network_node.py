@@ -3270,7 +3270,8 @@ def generate_network_figure_section(network_analysis: dict) -> str:
             img_ref = base64_img
             logger.info(f"[NET-SECTION] Fallback to base64: {'OK' if img_ref else 'FAILED'}")
 
-        # Figure title (guide §6.1) — v5.0: "main" is excluded from sorted_labels
+        # Figure title (guide §6.1) — v7.1: All Cytoscape panels share the same figure number
+        # e.g., Figure 10A, Figure 10B, Figure 10C (not Figure 10A, 11B, 12C)
         phase = _tp_to_phase(label)
         panel = panel_labels[idx] if idx < len(panel_labels) else str(idx + 1)
         display_label = f"PTM-NonPTM Integrated Network at {label} ({phase})"
@@ -3329,6 +3330,11 @@ def generate_network_figure_section(network_analysis: dict) -> str:
         # v5.0: "main" label removed from sorted_labels, no fallback needed
 
         section += "---\n\n"
+        # v7.1: Do NOT increment figure_num here — all Cytoscape panels share
+        # the same figure number with different panel letters (e.g., Figure 10A, 10B, 10C)
+
+    # After all Cytoscape panels, increment figure_num once for the next figure group
+    if sorted_labels:
         figure_num += 1
 
     # Temporal comparison legend (guide §5.1 row 3)

@@ -725,17 +725,45 @@ def _strip_llm_section_heading(content: str, section_type: str) -> str:
     return result
 
 
+# Off-topic organism keywords that indicate non-mammalian studies
+_OFF_TOPIC_KEYWORDS = [
+    "arabidopsis", "rice ", "plant ", "plants ", "maize", "wheat",
+    "drosophila", "c. elegans", "caenorhabditis", "zebrafish",
+    "yeast", "saccharomyces", "schizosaccharomyces",
+    "tobacco", "soybean", "barley", "tomato",
+    "cattle", "beef cattle", "bovine", "porcine", "poultry",
+    "insect", "nematode", "fungal", "fungi",
+]
+
+
+def _is_off_topic_reference(ref: dict) -> bool:
+    """Check if a reference is off-topic based on title/journal/abstract keywords."""
+    text = (
+        (ref.get("title", "") + " " + ref.get("journal", "") + " " + ref.get("abstract_excerpt", ""))
+        .lower()
+    )
+    for kw in _OFF_TOPIC_KEYWORDS:
+        if kw in text:
+            return True
+    return False
+
+
 def _collect_all_references(ptms: list) -> list:
-    """Collect all unique PubMed references from enriched PTM data."""
+    """Collect all unique PubMed references from enriched PTM data.
+    
+    v7.1: Added off-topic filtering to remove non-mammalian studies
+    (plant biology, veterinary, invertebrate) and low-relevance references.
+    """
     seen_pmids = set()
     refs = []
+    filtered_count = 0
     for ptm in ptms:
         enr = ptm.get("rag_enrichment", {})
         for finding in enr.get("recent_findings", []):
             pmid = finding.get("pmid", "")
             if pmid and pmid not in seen_pmids:
                 seen_pmids.add(pmid)
-                refs.append({
+                ref_entry = {
                     "pmid": pmid,
                     "title": finding.get("title", ""),
                     "journal": finding.get("journal", ""),
@@ -743,7 +771,14 @@ def _collect_all_references(ptms: list) -> list:
                     "abstract_excerpt": finding.get("abstract_excerpt", "")[:400],
                     "relevance_score": finding.get("relevance_score", 0),
                     "gene": ptm.get("gene", ""),
-                })
+                }
+                # Filter out off-topic references (non-mammalian organisms)
+                if _is_off_topic_reference(ref_entry):
+                    filtered_count += 1
+                    continue
+                refs.append(ref_entry)
+    if filtered_count > 0:
+        logger.info(f"Filtered {filtered_count} off-topic references (non-mammalian/irrelevant)")
     refs.sort(key=lambda r: r.get("relevance_score", 0), reverse=True)
     return refs
 

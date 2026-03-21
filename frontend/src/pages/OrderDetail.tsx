@@ -905,7 +905,7 @@ function ScatterPlotsInteractive({ orderId }: { orderId: number }) {
 
   const conditions = Array.from(
     new Set(data.vector_data.map((r) => r.condition).filter((c) => c && c !== "Control"))
-  ).sort();
+  ).sort((a, b) => parseTimeOrder(a) - parseTimeOrder(b));
 
   const yKey = metric === "relative" ? "ptm_relative_log2fc" : "ptm_absolute_log2fc";
 
