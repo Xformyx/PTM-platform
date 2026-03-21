@@ -874,6 +874,71 @@ def _analyze_timepoint(
                     _kinase_substrates_tp[pk_name] = []
                 _kinase_substrates_tp[pk_name].append(source_id)
 
+    # v8.1: Fallback kinase prediction using known kinase-substrate mapping
+    # If no upstream regulators were found from enrichment, use curated mapping
+    KNOWN_KINASE_SUBSTRATES = {
+        # Kinase: [known substrate genes] — curated from PhosphoSitePlus
+        "CDK1": ["LMNA", "NPM1", "HMGA1", "NOLC1", "VIM", "NUMA1", "STMN1"],
+        "CDK2": ["RB1", "CDKN1B", "NPM1", "LMNA", "FOXM1"],
+        "CK2": ["SRSF1", "SRSF6", "EIF3I", "TOP2A", "NPM1", "HDGF", "NOLC1"],
+        "MAPK1": ["RPS3A", "EIF3I", "ACTA1", "PLEC", "BAG3", "LMNA"],
+        "MAPK3": ["RPS3A", "EIF3I", "ACTA1", "PLEC", "BAG3", "LMNA"],
+        "AKT1": ["BAG3", "ACIN1", "BNIP2", "THRAP3", "LMNA"],
+        "MTOR": ["RPS13", "RPS3A", "RPL10", "EIF3I", "TARS1"],
+        "SRPK1": ["SRSF1", "SRSF6", "TRA2B", "THRAP3"],
+        "CLK1": ["SRSF1", "SRSF6", "TRA2B"],
+        "DYRK1A": ["SRSF6", "SEPTIN9", "ACIN1"],
+        "PKC": ["PLEC", "LMNA", "VIM", "ACTA1", "HDGF"],
+        "CSNK1": ["WIPI2", "SEC23IP", "BNIP2"],
+        "GSK3B": ["SEPTIN9", "ACIN1", "LIG1", "IRF2BP2"],
+    }
+    # Build reverse map: substrate → kinases
+    _substrate_to_kinases = {}
+    for _kin, _subs in KNOWN_KINASE_SUBSTRATES.items():
+        for _sub in _subs:
+            _substrate_to_kinases.setdefault(_sub, []).append(_kin)
+
+    # Check if any kinase nodes were added from enrichment
+    _has_enrichment_kinases = any(
+        v.get("type") == "Kinase" for v in candidate_non_ptm.values()
+    )
+    if not _has_enrichment_kinases:
+        logger.info(f"[NET-TP] {timepoint}: No enrichment kinases found, applying fallback kinase prediction")
+        for gene, data in enriched_by_gene.items():
+            gene_upper = gene.upper()
+            pos = data.get("position") or data.get("PTM_Position", "")
+            substrate_id = f"{gene}-{pos}"
+            known_kinases = _substrate_to_kinases.get(gene_upper, [])
+            for kinase_name in known_kinases:
+                kinase_upper = kinase_name.upper()
+                if kinase_name not in gene_ptms:
+                    edge = {
+                        "source": kinase_name,
+                        "target": substrate_id,
+                        "evidence_type": "KEA3",
+                        "confidence": 0.6,
+                        "pathways": [],
+                        "pathway_str": "PhosphoSitePlus (fallback)",
+                    }
+                    all_edges.append(edge)
+                    if kinase_upper not in seen_non_ptm_upper:
+                        seen_non_ptm_upper.add(kinase_upper)
+                        _kfc = gene_protein_fc.get(kinase_upper, 0.0)
+                        candidate_non_ptm[kinase_name] = {
+                            "id": kinase_name,
+                            "gene": kinase_name,
+                            "site": "",
+                            "type": "Kinase",
+                            "value": round(_kfc, 3),
+                            "state": _classify_state(_kfc, "Kinase"),
+                            "identified": True,
+                            "label": kinase_name,
+                            "source": "PhosphoSitePlus",
+                        }
+                    if kinase_name not in _kinase_substrates_tp:
+                        _kinase_substrates_tp[kinase_name] = []
+                    _kinase_substrates_tp[kinase_name].append(substrate_id)
+
     # v4.0: Add Shared-Regulator edges (PTM proteins sharing the same upstream kinase)
     for kinase_name, substrates in _kinase_substrates_tp.items():
         if len(substrates) >= 2:
@@ -1868,6 +1933,7 @@ def _generate_pathway_distribution_graph(
     # For multi-condition data, condition_data may contain per-timepoint Log2FC values.
     ptm_genes = set()  # ALL PTM genes (for Non-PTM identification)
     activated_ptm_genes = set()  # Only activated PTM genes
+    inhibited_ptm_genes = set()  # v8.1: Track inhibited PTM genes (Log2FC < 0)
     # First pass: from parsed_ptms (has normalized field names)
     for ptm in parsed_ptms:
         gene = (ptm.get("gene") or ptm.get("Gene.Name", "")).strip().upper()
@@ -1891,10 +1957,12 @@ def _generate_pathway_distribution_graph(
                     pass
         if log2fc > 0:
             activated_ptm_genes.add(gene)
+        elif log2fc < 0:
+            inhibited_ptm_genes.add(gene)
     # Second pass: from enriched_data (raw JSON, may have different field names)
     for ed in enriched_data:
         gene = (ed.get("gene") or ed.get("Gene.Name", "")).strip().upper()
-        if not gene or gene in activated_ptm_genes:
+        if not gene or gene in activated_ptm_genes or gene in inhibited_ptm_genes:
             continue
         ptm_genes.add(gene)
         log2fc = 0.0
@@ -1904,7 +1972,9 @@ def _generate_pathway_distribution_graph(
             pass
         if log2fc > 0:
             activated_ptm_genes.add(gene)
-    logger.info(f"[NET-NODE] Pathway graph Step1: total PTM genes={len(ptm_genes)}, activated={len(activated_ptm_genes)}")
+        elif log2fc < 0:
+            inhibited_ptm_genes.add(gene)
+    logger.info(f"[NET-NODE] Pathway graph Step1: total PTM genes={len(ptm_genes)}, activated={len(activated_ptm_genes)}, inhibited={len(inhibited_ptm_genes)}")
 
     # ---- Step 2: Build gene -> Protein_Log2FC lookup for Non-PTM filtering ----
     gene_protein_fc: Dict[str, float] = {}
@@ -1928,27 +1998,34 @@ def _generate_pathway_distribution_graph(
         if gene not in gene_protein_fc or pfc != 0.0:
             gene_protein_fc[gene] = pfc
 
-    # ---- Step 3: Collect activated PTM gene -> pathways ----
+    # ---- Step 3: Collect activated AND inhibited PTM gene -> pathways ----
     def _pw_name(p):
         return (p.get("name", str(p)) if isinstance(p, dict) else str(p)).strip()
 
-    # pathway_name -> {"ptm": set(genes), "non_ptm": set(genes)}
-    pathway_proteins: Dict[str, Dict[str, set]] = defaultdict(lambda: {"ptm": set(), "non_ptm": set()})
+    # v8.1: pathway_name -> {"activated_ptm": set, "inhibited_ptm": set, "non_ptm": set}
+    pathway_proteins: Dict[str, Dict[str, set]] = defaultdict(
+        lambda: {"activated_ptm": set(), "inhibited_ptm": set(), "non_ptm": set()}
+    )
 
-    # gene -> set of pathway names (for activated PTM genes only)
+    # gene -> set of pathway names (for activated PTM genes — used for Non-PTM inheritance)
     activated_ptm_pathways: Dict[str, set] = defaultdict(set)
 
     for ptm_data in enriched_data:
         gene = (ptm_data.get("gene") or ptm_data.get("Gene.Name", "")).strip().upper()
-        if gene not in activated_ptm_genes:
+        is_activated = gene in activated_ptm_genes
+        is_inhibited = gene in inhibited_ptm_genes
+        if not is_activated and not is_inhibited:
             continue
         enr = ptm_data.get("rag_enrichment", {})
         pathways = enr.get("pathways", [])
         for pw in pathways:
             pw_name = _pw_name(pw)
             if pw_name:
-                pathway_proteins[pw_name]["ptm"].add(gene)
-                activated_ptm_pathways[gene].add(pw_name)
+                if is_activated:
+                    pathway_proteins[pw_name]["activated_ptm"].add(gene)
+                    activated_ptm_pathways[gene].add(pw_name)
+                else:
+                    pathway_proteins[pw_name]["inhibited_ptm"].add(gene)
 
     # ---- Step 4: Collect ALL connected Non-PTM proteins from network_data ----
     # Note: Non-PTM proteins don't have their own Protein_Log2FC (they are interaction
@@ -2089,22 +2166,27 @@ def _generate_pathway_distribution_graph(
     # ---- Step 6: Compute cumulative weighted scores and sort ----
     pw_data = []
     for pw_name, groups in pathway_proteins.items():
-        ptm_genes_in_pw = groups["ptm"]
-        non_ptm_genes_in_pw = groups["non_ptm"]
-        ptm_count = len(ptm_genes_in_pw)
-        non_ptm_count = len(non_ptm_genes_in_pw)
+        act_genes = groups["activated_ptm"]
+        inh_genes = groups["inhibited_ptm"]
+        non_genes = groups["non_ptm"]
+        act_count = len(act_genes)
+        inh_count = len(inh_genes)
+        non_count = len(non_genes)
         # Cumulative |Log2FC| score: sum of absolute FC for each gene in pathway
-        ptm_score = sum(gene_fc_weight.get(g, 0.0) for g in ptm_genes_in_pw)
-        non_ptm_score = sum(gene_fc_weight.get(g, 0.0) for g in non_ptm_genes_in_pw)
-        total_score = ptm_score + non_ptm_score
-        if ptm_count + non_ptm_count > 0:
+        act_score = sum(gene_fc_weight.get(g, 0.0) for g in act_genes)
+        inh_score = sum(gene_fc_weight.get(g, 0.0) for g in inh_genes)
+        non_score = sum(gene_fc_weight.get(g, 0.0) for g in non_genes)
+        total_score = act_score + inh_score + non_score
+        if act_count + inh_count + non_count > 0:
             pw_data.append({
                 "pathway": pw_name,
-                "ptm_score": round(ptm_score, 2),
-                "non_ptm_score": round(non_ptm_score, 2),
+                "act_score": round(act_score, 2),
+                "inh_score": round(inh_score, 2),
+                "non_ptm_score": round(non_score, 2),
                 "total_score": round(total_score, 2),
-                "ptm_count": ptm_count,
-                "non_ptm_count": non_ptm_count,
+                "act_count": act_count,
+                "inh_count": inh_count,
+                "non_ptm_count": non_count,
             })
 
     if not pw_data:
@@ -2116,20 +2198,24 @@ def _generate_pathway_distribution_graph(
     pw_data = pw_data[:25]
     pw_data.reverse()  # Reverse for horizontal bar (bottom = highest)
 
-    # ---- Step 7: Generate the weighted bar graph ----
-    fig, ax = plt.subplots(figsize=(14, max(7, len(pw_data) * 0.45)))
+    # ---- Step 7: Generate the 3-bar weighted bar graph ----
+    fig, ax = plt.subplots(figsize=(14, max(7, len(pw_data) * 0.55)))
 
     pathways_list = [d["pathway"] for d in pw_data]
-    ptm_scores = [d["ptm_score"] for d in pw_data]
-    non_ptm_scores = [d["non_ptm_score"] for d in pw_data]
+    act_scores = [d["act_score"] for d in pw_data]
+    inh_scores = [d["inh_score"] for d in pw_data]
+    non_scores = [d["non_ptm_score"] for d in pw_data]
     y_pos = np.arange(len(pathways_list))
-    bar_height = 0.35
+    bar_height = 0.25  # Thinner bars for 3 groups
 
-    # Colors: PTM = coral/red tones, Non-PTM = teal/green tones
-    bars_ptm = ax.barh(y_pos + bar_height / 2, ptm_scores, bar_height,
-                       label="Activated PTM Proteins", color="#E74C3C", alpha=0.85,
+    # Colors: Activated PTM = coral/red, Inhibited PTM = blue, Non-PTM = teal/green
+    bars_act = ax.barh(y_pos + bar_height, act_scores, bar_height,
+                       label="Activated PTM (Log2FC > 0)", color="#E74C3C", alpha=0.85,
                        edgecolor="white", linewidth=0.5)
-    bars_non = ax.barh(y_pos - bar_height / 2, non_ptm_scores, bar_height,
+    bars_inh = ax.barh(y_pos, inh_scores, bar_height,
+                       label="Inhibited PTM (Log2FC < 0)", color="#3498DB", alpha=0.85,
+                       edgecolor="white", linewidth=0.5)
+    bars_non = ax.barh(y_pos - bar_height, non_scores, bar_height,
                        label="Non-PTM Interactor Proteins", color="#2ECC71", alpha=0.85,
                        edgecolor="white", linewidth=0.5)
 
@@ -2145,30 +2231,37 @@ def _generate_pathway_distribution_graph(
     ax.set_yticklabels(display_names, fontsize=9)
     ax.set_xlabel("Cumulative |Log2FC| Score", fontsize=11, fontweight="bold")
     ax.set_title(
-        "Canonical Pathway Distribution: Activated PTM vs Non-PTM Interactor Proteins\n"
-        "(Weighted by |Protein_Log2FC|)",
+        "Canonical Pathway Distribution: PTM and Non-PTM Interactor Proteins\n"
+        "(Weighted by |Protein_Log2FC|, Unbiased: Activated + Inhibited PTM)",
         fontsize=13, fontweight="bold", pad=15,
     )
-    ax.legend(loc="lower right", fontsize=10, framealpha=0.9)
+    ax.legend(loc="lower right", fontsize=9, framealpha=0.9)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
     ax.grid(axis="x", alpha=0.3, linestyle="--")
 
     # Add score + count labels on bars: "score (n=count)"
-    max_width = max(max(ptm_scores, default=0), max(non_ptm_scores, default=0))
-    label_offset = max_width * 0.01 + 0.1  # dynamic offset
-    for bar, d in zip(bars_ptm, pw_data):
+    all_scores = act_scores + inh_scores + non_scores
+    max_width = max(all_scores) if all_scores else 1.0
+    label_offset = max_width * 0.01 + 0.1
+    for bar, d in zip(bars_act, pw_data):
         width = bar.get_width()
-        if width > 0 or d["ptm_count"] > 0:
-            label_text = f"{width:.1f} (n={d['ptm_count']})"
+        if width > 0 or d["act_count"] > 0:
+            label_text = f"{width:.1f} (n={d['act_count']})"
             ax.text(max(width, 0) + label_offset, bar.get_y() + bar.get_height() / 2,
-                    label_text, va="center", fontsize=7.5, color="#C0392B", fontweight="medium")
+                    label_text, va="center", fontsize=7, color="#C0392B", fontweight="medium")
+    for bar, d in zip(bars_inh, pw_data):
+        width = bar.get_width()
+        if width > 0 or d["inh_count"] > 0:
+            label_text = f"{width:.1f} (n={d['inh_count']})"
+            ax.text(max(width, 0) + label_offset, bar.get_y() + bar.get_height() / 2,
+                    label_text, va="center", fontsize=7, color="#2980B9", fontweight="medium")
     for bar, d in zip(bars_non, pw_data):
         width = bar.get_width()
         if width > 0 or d["non_ptm_count"] > 0:
             label_text = f"{width:.1f} (n={d['non_ptm_count']})"
             ax.text(max(width, 0) + label_offset, bar.get_y() + bar.get_height() / 2,
-                    label_text, va="center", fontsize=7.5, color="#27AE60", fontweight="medium")
+                    label_text, va="center", fontsize=7, color="#27AE60", fontweight="medium")
 
     plt.tight_layout()
 
@@ -2176,13 +2269,16 @@ def _generate_pathway_distribution_graph(
     fig.savefig(str(output_path), dpi=200, bbox_inches="tight", facecolor="white")
     plt.close(fig)
 
-    total_ptm_score = sum(d["ptm_score"] for d in pw_data)
+    total_act_score = sum(d["act_score"] for d in pw_data)
+    total_inh_score = sum(d["inh_score"] for d in pw_data)
     total_non_score = sum(d["non_ptm_score"] for d in pw_data)
-    total_ptm_n = sum(d["ptm_count"] for d in pw_data)
+    total_act_n = sum(d["act_count"] for d in pw_data)
+    total_inh_n = sum(d["inh_count"] for d in pw_data)
     total_non_n = sum(d["non_ptm_count"] for d in pw_data)
     logger.info(
         f"[NET-NODE] Pathway distribution graph saved: {output_path} "
-        f"({len(pw_data)} pathways, PTM: score={total_ptm_score:.1f} n={total_ptm_n}, "
+        f"({len(pw_data)} pathways, Activated PTM: score={total_act_score:.1f} n={total_act_n}, "
+        f"Inhibited PTM: score={total_inh_score:.1f} n={total_inh_n}, "
         f"Non-PTM: score={total_non_score:.1f} n={total_non_n})"
     )
     return str(output_path)

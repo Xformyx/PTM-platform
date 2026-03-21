@@ -355,6 +355,7 @@ Summary of Conclusion:
 
 INSTRUCTIONS:
 - The abstract MUST include: background context, methods overview, key findings with specific PTM sites, and significance.
+- You MUST mention the treatment/stimulus ({treatment}) by name in the abstract. Never use generic terms like 'the treatment'.
 - For each Research Question, identify the most significant PTM findings and their biological implications.
 - If high-confidence literature matches are provided above, explicitly mention how the experimental results align with or diverge from published literature.
 - Highlight the cell signaling commonalities among activated proteins based on PTM Vector values.
@@ -459,8 +460,20 @@ IMPORTANT: Write a thorough, detailed introduction. The ChromaDB collection refe
                 rq_lines.append("")
             rq_answer_structure = "\n".join(rq_lines)
 
+        # Build treatment emphasis directive
+        treatment_emphasis = ""
+        if treatment and treatment != "the applied treatment":
+            treatment_emphasis = (
+                f"\n\n**CRITICAL \u2014 TREATMENT CONTEXT:**\n"
+                f"The treatment/stimulus in this study is: **{treatment}**\n"
+                f"You MUST mention '{treatment}' by name throughout the Results section when describing PTM changes. "
+                f"Do NOT use generic phrases like 'the treatment' or 'the stimulus' \u2014 always use the specific name '{treatment}'. "
+                f"Frame all PTM changes as responses to {treatment} stimulation.\n"
+            )
+
         return f"""Write a detailed Results section (MINIMUM 1500 words, target 3000-5000 words) for this PTM analysis report.
 {single_tp_directive}
+{treatment_emphasis}
 Research Findings:
 {research_str}
 
@@ -483,6 +496,7 @@ Structure:
 - Compare your findings with the published literature provided below
 
 IMPORTANT: Be thorough and detailed. Discuss each significant PTM site individually. Include quantitative data (Log2FC values). Cite the provided references to support your findings. This is the most important section of the report.
+- You MUST explicitly name the treatment/stimulus ({treatment}) when describing PTM responses. Never use generic terms like 'the treatment'.
 {combined_lit}"""
 
     elif section_type == "discussion":
@@ -515,8 +529,19 @@ IMPORTANT: Be thorough and detailed. Discuss each significant PTM site individua
                 cs_lines.append("")
                 cell_signaling_block = "\n".join(cs_lines)
 
+        # Build treatment emphasis for Discussion
+        treatment_emphasis_disc = ""
+        if treatment and treatment != "the applied treatment":
+            treatment_emphasis_disc = (
+                f"\n\n**CRITICAL \u2014 TREATMENT CONTEXT:**\n"
+                f"The treatment/stimulus is: **{treatment}**\n"
+                f"You MUST refer to '{treatment}' by name when discussing PTM responses. "
+                f"Never use generic terms like 'the treatment'.\n"
+            )
+
         return f"""Write a comprehensive Discussion section (MINIMUM 1500 words, target 2000-3000 words) for this PTM analysis report.
 {single_tp_directive}
+{treatment_emphasis_disc}
 Results Summary:
 {results_text}
 
@@ -538,6 +563,7 @@ Structure (7 core topics):
 7. Limitations and Future Directions: Acknowledge limitations and propose follow-up experiments
 
 IMPORTANT: For each discussion point, provide evidence from your data AND from the literature. Cite the provided references extensively. Discuss alternative interpretations where appropriate. When discussing Non-PTM proteins, always classify their signaling role and explain their relationship directionality with PTM-modified proteins.
+- You MUST explicitly name the treatment/stimulus ({treatment}) throughout the Discussion. Never use generic terms.
 {combined_lit}"""
 
     elif section_type == "conclusion":
@@ -823,9 +849,29 @@ def _format_pubmed_references(all_refs: list, section_type: str, ptms: list) -> 
 
 
 def _ptm_summary_text(ptms: list, detail_count: int = 30) -> str:
+    # Detect extreme Log2FC values and build warning
+    extreme_ptms = []
+    for p in ptms:
+        fc = abs(p.get("ptm_relative_log2fc", 0))
+        if fc > 15:
+            extreme_ptms.append(f"{p['gene']}-{p['position']} (Log2FC={p['ptm_relative_log2fc']:.1f})")
+
     lines = []
+    if extreme_ptms:
+        lines.append(
+            f"\n**IMPORTANT NOTE ON EXTREME LOG2FC VALUES:**\n"
+            f"The following PTM sites show Log2FC > 15: {', '.join(extreme_ptms[:10])}\n"
+            f"These extreme values likely represent binary ON/OFF events (absent→present or present→absent) "
+            f"rather than proportional fold-changes. When discussing these PTMs, describe them as "
+            f"'binary activation/deactivation events' or 'switch-like responses' rather than implying "
+            f"a >30,000-fold change in abundance. This is a common artifact of mass spectrometry-based "
+            f"quantification where a peptide is detected in one condition but not in the control.\n"
+        )
+
     for i, p in enumerate(ptms):
-        line = f"  {p['gene']}-{p['position']} ({p['ptm_type']}): PTM_FC={p['ptm_relative_log2fc']:.3f}, Prot_FC={p.get('protein_log2fc', 0):.3f}"
+        fc_val = p['ptm_relative_log2fc']
+        fc_note = " [BINARY EVENT]" if abs(fc_val) > 15 else ""
+        line = f"  {p['gene']}-{p['position']} ({p['ptm_type']}): PTM_FC={fc_val:.3f}, Prot_FC={p.get('protein_log2fc', 0):.3f}{fc_note}"
         enr = p.get("rag_enrichment", {})
         if i < detail_count and enr:
             if enr.get("function_summary"):
