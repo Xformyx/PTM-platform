@@ -39,8 +39,8 @@ export default function Login() {
             <FlaskConical className="h-8 w-8 text-primary-foreground" />
           </div>
           <div className="text-center">
-            <h1 className="text-2xl font-bold tracking-tight">PTM Platform</h1>
-            <p className="text-sm text-muted-foreground mt-1">Proteomics Analysis & Report System</p>
+            <h1 className="text-2xl font-bold tracking-tight">InsightOmics Platform</h1>
+            <p className="text-sm text-muted-foreground mt-1">PTM-Oriented Translational AI-driven Targeting Omics</p>
           </div>
         </div>
 

@@ -635,8 +635,7 @@ export default function Sidebar({ className, collapsed = false, onToggle }: Side
         </div>
         {!collapsed && (
           <div className="flex-1 min-w-0">
-            <h1 className="text-base font-semibold tracking-tight">PTM Platform</h1>
-            <p className="text-[11px] text-muted-foreground">Analysis & Report System</p>
+            <h1 className="text-base font-semibold tracking-tight">InsightOmics Platform</h1>
           </div>
         )}
         <button
