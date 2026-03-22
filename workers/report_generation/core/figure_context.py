@@ -73,28 +73,34 @@ class FigureInformationGenerator:
     def _build_figure_map(self) -> Dict[str, dict]:
         """Build mapping of figure labels to their descriptions.
         
-        v3.0: Mirrors the exact figure numbering in generate_network_figure_section:
-          Figure 1 = Pathway Distribution Graph
-          Figure 2+ = Cascade Diagrams (per-condition or combined)
-          Figure N+ = Cytoscape Network Images (per-timepoint panels)
+        v8.9.3: Fixed to match the ACTUAL figure numbering in
+        generate_network_figure_section (network_node.py):
+          Figure 1 = Pathway Distribution Graph (main figure)
+          Supplementary Figure 1+ = Cascade Diagrams (per-condition or combined)
+          Supplementary Figure N{A-Z} = Cytoscape Network Images (per-timepoint panels)
+        
+        IMPORTANT: Only Figure 1 is a main figure. All cascade diagrams and
+        Cytoscape network images are Supplementary Figures in the final report.
+        The LLM must reference them as "Supplementary Figure X" to match.
         """
         fig_map = {}
-        fig_num = 1
+        main_fig_num = 1
+        supp_num = 1  # Supplementary figure counter (matches network_node.py)
         panel_labels = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
-        # ── Figure 1: Canonical Pathway Distribution Bar Graph ──
+        # ── Figure 1: Canonical Pathway Distribution Bar Graph (MAIN FIGURE) ──
         if self.pathway_graph_path:
             fig_map["pathway_graph"] = {
-                "figure_number": fig_num,
-                "figure_label": f"Figure {fig_num}",
+                "figure_number": main_fig_num,
+                "figure_label": f"Figure {main_fig_num}",
                 "display_name": "Canonical Pathway Distribution of Activated PTM and Non-PTM Interactor Proteins",
                 "description": self._describe_pathway_graph(),
                 "panel_index": 0,
                 "figure_type": "pathway_graph",
             }
-            fig_num += 1
+            main_fig_num += 1
 
-        # ── Figure 2+: Signaling Cascade Diagrams ──
+        # ── Supplementary Figure 1+: Signaling Cascade Diagrams ──
         if self.cascade_diagram_paths:
             # Per-condition cascade diagrams
             cascade_timepoints = self.timepoints if self.timepoints else sorted(self.cascade_diagram_paths.keys())
@@ -102,35 +108,35 @@ class FigureInformationGenerator:
                 if tp not in self.cascade_diagram_paths:
                     continue
                 fig_map[f"cascade_{tp}"] = {
-                    "figure_number": fig_num,
-                    "figure_label": f"Figure {fig_num}",
+                    "figure_number": supp_num,
+                    "figure_label": f"Supplementary Figure {supp_num}",
                     "display_name": f"Signal Transduction Pathway Cascade Diagram — {tp}",
                     "description": self._describe_cascade_diagram(condition=tp),
                     "panel_index": 0,
                     "figure_type": "cascade_diagram",
                     "condition": tp,
                 }
-                fig_num += 1
+                supp_num += 1
         elif self.cascade_diagram_path:
             # Single combined cascade diagram
             fig_map["cascade_combined"] = {
-                "figure_number": fig_num,
-                "figure_label": f"Figure {fig_num}",
+                "figure_number": supp_num,
+                "figure_label": f"Supplementary Figure {supp_num}",
                 "display_name": "Signal Transduction Pathway Cascade Diagram",
                 "description": self._describe_cascade_diagram(),
                 "panel_index": 0,
                 "figure_type": "cascade_diagram",
             }
-            fig_num += 1
+            supp_num += 1
 
-        # ── Co-movement Figures (v8.0) ──
+        # ── Co-movement Figures (v8.0) — these remain as main figures ──
         for cf in self.comovement_figures:
             cf_type = cf.get("type", "unknown")
             cf_caption = cf.get("caption", "Temporal Co-movement Analysis")
             if cf_type == "heatmap":
                 fig_map["comovement_heatmap"] = {
-                    "figure_number": fig_num,
-                    "figure_label": f"Figure {fig_num}",
+                    "figure_number": main_fig_num,
+                    "figure_label": f"Figure {main_fig_num}",
                     "display_name": "Temporal PTM Co-movement Cluster Heatmap",
                     "description": (
                         "Hierarchical clustering heatmap of PTM temporal profiles. "
@@ -142,12 +148,12 @@ class FigureInformationGenerator:
                     "panel_index": 0,
                     "figure_type": "comovement_heatmap",
                 }
-                fig_num += 1
+                main_fig_num += 1
             elif cf_type == "cluster_lineplot":
                 cluster_id = cf.get("cluster_id", "")
                 fig_map[f"comovement_cluster_{cluster_id}"] = {
-                    "figure_number": fig_num,
-                    "figure_label": f"Figure {fig_num}",
+                    "figure_number": main_fig_num,
+                    "figure_label": f"Figure {main_fig_num}",
                     "display_name": f"Temporal Profile — {cf_caption}",
                     "description": (
                         f"Line plot showing the temporal Log2FC profiles of PTM sites in {cf_caption}. "
@@ -158,9 +164,9 @@ class FigureInformationGenerator:
                     "panel_index": 0,
                     "figure_type": "comovement_lineplot",
                 }
-                fig_num += 1
+                main_fig_num += 1
 
-        # ── Figure N+: Cytoscape Network Images (per-timepoint panels) ──
+        # ── Supplementary Figure N{A-Z}: Cytoscape Network Images (per-timepoint panels) ──
         # v5.0: "main" is excluded — replaced by pathway distribution graph
         sorted_labels = []
         for label in sorted(
@@ -174,10 +180,10 @@ class FigureInformationGenerator:
             display = f"PTM-NonPTM Integrated Network at {label} ({phase})"
             description = self._describe_timepoint_network(label)
             panel = panel_labels[idx] if idx < len(panel_labels) else str(idx + 1)
-            fig_label = f"Figure {fig_num}{panel}"
+            fig_label = f"Supplementary Figure {supp_num}{panel}"
 
             fig_map[label] = {
-                "figure_number": fig_num,
+                "figure_number": supp_num,
                 "figure_label": fig_label,
                 "display_name": display,
                 "description": description,
@@ -448,10 +454,14 @@ class FigureInformationGenerator:
 
         lines = [
             "\n--- FIGURE CONTEXT (ALL REPORT FIGURES) ---",
-            "The following figures are included in this report's Network Visualization section.",
-            "You MUST reference these figures naturally in your writing using their exact figure numbers.",
+            "The following figures are included in this report.",
+            "You MUST reference these figures naturally in your writing using their EXACT labels.",
+            "CRITICAL: Main figures use 'Figure N' (e.g., Figure 1). "
+            "Supplementary figures use 'Supplementary Figure N' (e.g., Supplementary Figure 1).",
             "For example: 'As shown in Figure 1, the pathway distribution reveals...'",
-            "or 'The signaling cascade diagram (Figure 2) illustrates the compartmentalized signal flow...'",
+            "or 'The signaling cascade diagram (Supplementary Figure 1) illustrates the compartmentalized signal flow...'",
+            "or 'The network at 2min (Supplementary Figure 9A) shows...'",
+            "NEVER use 'Figure 2' to refer to a Supplementary Figure. Always include the word 'Supplementary'.",
             "",
         ]
 
@@ -540,9 +550,12 @@ class FigureInformationGenerator:
                 )
             lines.append(
                 "INSTRUCTION: In the Results section, you MUST reference the figures by their "
-                "exact figure numbers. Describe the pathway distribution (Figure 1), "
-                "the signaling cascade diagrams showing compartmentalized signal flow, "
-                "and the Cytoscape network images showing protein-protein interactions. "
+                "exact labels (Figure N for main figures, Supplementary Figure N for supplementary). "
+                "Describe the pathway distribution (Figure 1 — the ONLY main figure in the "
+                "Network Visualization section). "
+                "Reference cascade diagrams as Supplementary Figures (e.g., Supplementary Figure 1). "
+                "Reference Cytoscape network images as Supplementary Figures with panel letters "
+                "(e.g., Supplementary Figure 9A, 9B, etc.). "
                 "Mention specific PTM nodes, their activation states, Non-PTM interactors, "
                 "and key interaction edges visible in the networks. "
                 "When discussing signaling pathways, focus on those most supported by your "
@@ -561,10 +574,12 @@ class FigureInformationGenerator:
             lines.append(
                 "INSTRUCTION: In the Discussion section, interpret the network topology "
                 "and discuss the biological significance of the observed interaction patterns. "
-                "Reference the figures by their exact numbers when discussing findings. "
+                "Reference the figures by their EXACT labels when discussing findings "
+                "(Figure 1 for main, Supplementary Figure N for supplementary). "
                 "Discuss how the pathway distribution (Figure 1) and cascade diagrams "
-                "reveal the dominant signaling axes, and how the Cytoscape networks "
-                "provide detailed protein-level interaction evidence. "
+                "(Supplementary Figures) reveal the dominant signaling axes, and how the "
+                "Cytoscape networks (Supplementary Figures with panel letters) provide "
+                "detailed protein-level interaction evidence. "
                 "Focus your pathway discussion on those most strongly supported by the data. "
                 "If temporal data is available, discuss how the signaling network evolves "
                 f"over time and the implications for cellular response mechanisms.{candidate_hint}"

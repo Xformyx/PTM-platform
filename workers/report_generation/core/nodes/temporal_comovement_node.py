@@ -1476,10 +1476,13 @@ def _build_comovement_llm_context(
     other_clusters = [c for c in clusters if c["pattern"] not in
                       ("transient_burst", "transient_suppression")]
 
-    # v8.5: Assign figure numbers — Fig 1=Pathway (from network_node), Fig 2=Burst, Fig 3+=Clusters
+    # v8.9.3: Figure numbers for co-movement figures are main figures (Figure 2+).
+    # Figure 1 = Pathway Distribution (from network_node).
+    # Co-movement heatmap/burst = Figure 2, individual clusters = Figure 3+.
+    # Cascade diagrams and Cytoscape networks are Supplementary Figures.
     fig_burst = 2  # Transient burst composite
     fig_cluster_start = 3  # Individual cluster plots start here
-    # Assign figure numbers: burst clusters → Fig 2 (composite), non-burst → Fig 3, 4, 5...
+    all_clusters = burst_clusters + other_clusters  # v8.9.3: fix undefined all_ordered
     cluster_fig_map = {}  # cluster_id -> figure number
     for c in burst_clusters:
         cluster_fig_map[c["cluster_id"]] = fig_burst  # All burst clusters share Fig 2
@@ -1559,7 +1562,7 @@ def _build_comovement_llm_context(
         "3. FIGURE-TEXT COHERENCE (CRITICAL):\n"
         "   - Figure 1 = Canonical Pathway Distribution (from network analysis).\n"
         f"   - Figure {fig_burst} = Transient Burst Composite (panels a, b, c).\n"
-        f"   - Figures {fig_cluster_start}-{fig_cluster_start + len(all_ordered) - 1} = "
+        f"   - Figures {fig_cluster_start}-{fig_cluster_start + len(all_clusters) - 1} = "
         "Individual cluster time-series plots.\n"
         "   - Cascade diagrams and Cytoscape networks are in Supplementary Figures.\n"
         "   - When discussing each cluster, ALWAYS reference its specific Figure number.\n"
