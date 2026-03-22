@@ -62,6 +62,8 @@ class FigureInformationGenerator:
         self.cascade_diagram_path = network_analysis.get("cascade_diagram_path")
         self.cascade_diagram_paths = network_analysis.get("cascade_diagram_paths", {})
         self.cascade_pathway_names = network_analysis.get("cascade_pathway_names", {})
+        # v8.9.1: Fig 1 pathway names for LLM-text consistency
+        self.fig1_pathway_names = network_analysis.get("fig1_pathway_names", [])
         # v8.0: Temporal co-movement analysis
         self.comovement_analysis = comovement_analysis or {}
         self.comovement_figures = comovement_figures or []
@@ -188,14 +190,27 @@ class FigureInformationGenerator:
     # ── Description generators ──
 
     def _describe_pathway_graph(self) -> str:
-        """Generate description for the Canonical Pathway Distribution Bar Graph (Figure 1)."""
+        """Generate description for the Canonical Pathway Distribution Bar Graph (Figure 1).
+        
+        v8.9.1: Now includes the actual pathway names shown in the figure.
+        """
         desc = (
             "This bar graph shows the cumulative |Protein_Log2FC| score of activated PTM proteins "
-            "(red) and Non-PTM interactor proteins (green) across canonical signaling pathways "
-            "identified via KEGG pathway analysis. Pathways are ranked by total cumulative score, "
-            "highlighting pathways with the strongest combined expression changes. "
+            "(red), inhibited PTM proteins (blue), and Non-PTM interactor proteins (green) across "
+            "canonical signaling pathways identified via KEGG pathway analysis. "
+            "Pathways are ranked by total cumulative score, highlighting pathways with the "
+            "strongest combined expression changes. "
             "Bar labels show the score followed by protein count in parentheses."
         )
+        if self.fig1_pathway_names:
+            top_names = self.fig1_pathway_names[:10]
+            desc += (
+                f" The top pathways shown in this figure (ranked by score) are: "
+                f"{', '.join(top_names)}"
+            )
+            if len(self.fig1_pathway_names) > 10:
+                desc += f" (and {len(self.fig1_pathway_names) - 10} more)"
+            desc += "."
         return desc
 
     def _describe_cascade_diagram(self, condition: str = None) -> str:
@@ -479,6 +494,35 @@ class FigureInformationGenerator:
         if self.comovement_llm_context:
             lines.append("**Temporal PTM Co-movement Analysis:**")
             lines.append(self.comovement_llm_context)
+            lines.append("")
+
+        # v8.9.1: Fig 1 Pathway Consistency Directive
+        # Provide the exact pathway names shown in Figure 1 so LLM can maintain
+        # consistency between text and figure.
+        if self.fig1_pathway_names:
+            lines.append("**FIGURE 1 PATHWAY LIST (KEGG Analysis Results):**")
+            lines.append(
+                "The following pathways are shown in Figure 1 (Canonical Pathway Distribution), "
+                "ranked by cumulative |Log2FC| score:"
+            )
+            for i, pw_name in enumerate(self.fig1_pathway_names, 1):
+                lines.append(f"  {i}. {pw_name}")
+            lines.append("")
+            lines.append(
+                "**PATHWAY CONSISTENCY RULE (CRITICAL):**\n"
+                "- When discussing signaling pathways in the text, you MUST primarily reference "
+                "the pathways listed above (from Figure 1 KEGG analysis).\n"
+                "- If you mention a pathway that IS in Figure 1, reference it naturally: "
+                "'As shown in Figure 1, the [pathway name] was among the most enriched...'\n"
+                "- If you mention a pathway that is NOT in Figure 1 but is supported by "
+                "ChromaDB literature or PubMed references, you MUST explicitly qualify it: "
+                "'Although not among the top KEGG-enriched pathways in Figure 1, published "
+                "literature suggests that [pathway name] may also be involved...'\n"
+                "- Do NOT describe a pathway as 'enriched' or 'identified in our analysis' "
+                "if it does not appear in Figure 1.\n"
+                "- Prioritize discussing pathways that ARE in Figure 1 before mentioning "
+                "literature-derived pathways."
+            )
             lines.append("")
 
         # v7.0: Provide pathway candidates as informational context (not forced)

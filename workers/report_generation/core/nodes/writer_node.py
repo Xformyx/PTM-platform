@@ -512,10 +512,23 @@ IMPORTANT: Write a thorough, detailed introduction. The ChromaDB collection refe
                 f"Frame all PTM changes as responses to {treatment} stimulation.\n"
             )
 
+        # v8.9.1: Inject Fig 1 pathway list into Results prompt
+        fig1_pw_results = ""
+        fig1_pw_list = network.get("fig1_pathway_names", []) if network else []
+        if fig1_pw_list:
+            pw_str = ", ".join(fig1_pw_list[:15])
+            fig1_pw_results = (
+                f"\n\n**FIGURE 1 KEGG PATHWAY LIST (for text-figure consistency):**\n"
+                f"The following pathways appear in Figure 1 (Canonical Pathway Distribution): {pw_str}.\n"
+                f"When discussing pathway enrichment in Results, reference these pathway names as they appear in Figure 1. "
+                f"Do NOT claim a pathway is 'enriched in our analysis' if it is not in this list.\n"
+            )
+
         return f"""Write a detailed Results section (MINIMUM 1500 words, target 3000-5000 words) for this PTM analysis report.
 {analysis_context_block}
 {single_tp_directive}
 {treatment_emphasis}
+{fig1_pw_results}
 Research Findings:
 {research_str}
 
@@ -548,9 +561,27 @@ IMPORTANT: Be thorough and detailed. Discuss each significant PTM site individua
             comp_disc = f"\n\nDetailed Analysis Context:\n{comprehensive_summary[:4000]}\n"
 
         # GAP E: Inject Cell Signaling Commonality Analysis
+        # v8.9.1: Use Fig 1 KEGG pathway names (from network_analysis) as primary source.
+        # Fallback to DEFAULT_PATHWAYS keyword matching only if Fig 1 data is unavailable.
         cell_signaling_block = ""
-        from report_generation.core.dynamic_prompt_generator import classify_gene_pathway, DEFAULT_PATHWAYS
-        if ptms:
+        fig1_pw_names = network.get("fig1_pathway_names", []) if network else []
+        if fig1_pw_names:
+            # Use actual KEGG pathway names from Figure 1
+            cs_lines = ["\n## CELL SIGNALING COMMONALITY ANALYSIS (from Figure 1 KEGG Analysis)"]
+            cs_lines.append("The following KEGG pathways were identified in Figure 1 as the most enriched ")
+            cs_lines.append("signaling pathways (ranked by cumulative |Log2FC| score):")
+            for i, pw_name in enumerate(fig1_pw_names[:10], 1):
+                cs_lines.append(f"  {i}. **{pw_name}**")
+            cs_lines.append("")
+            cs_lines.append("INSTRUCTION: Discuss how these KEGG-identified pathways suggest ")
+            cs_lines.append("coordinated signaling responses. Focus on pathways from this list. ")
+            cs_lines.append("If you discuss additional pathways from literature, explicitly note ")
+            cs_lines.append("they were not among the top KEGG-enriched pathways in Figure 1.")
+            cs_lines.append("")
+            cell_signaling_block = "\n".join(cs_lines)
+        elif ptms:
+            # Fallback: DEFAULT_PATHWAYS keyword matching
+            from report_generation.core.dynamic_prompt_generator import classify_gene_pathway, DEFAULT_PATHWAYS
             pathway_counts: Dict[str, int] = {}
             for ptm in ptms:
                 gene = ptm.get("gene", "")

@@ -1905,7 +1905,7 @@ def _generate_pathway_distribution_graph(
     enriched_data: list,
     network_data: dict,
     output_dir: str,
-) -> Optional[str]:
+) -> Tuple[Optional[str], List[str]]:
     """Generate a horizontal bar graph showing canonical pathway distribution
     for **activated** PTM and Non-PTM proteins only.
 
@@ -1915,7 +1915,8 @@ def _generate_pathway_distribution_graph(
       a) KEGG edges in network_data (shared pathway with PTM partner)
       b) Inheriting pathways from their PTM interaction partners
 
-    Returns the path to the saved PNG image, or None on failure.
+    Returns (path_to_PNG, list_of_pathway_names_shown_in_figure).
+    v8.9.1: Now returns pathway names for LLM context synchronization.
     """
     try:
         import matplotlib
@@ -2141,7 +2142,7 @@ def _generate_pathway_distribution_graph(
 
     if not pathway_proteins:
         logger.warning("No pathway data found — skipping pathway distribution graph")
-        return None
+        return None, []
 
     # ---- Step 5.5: Build gene -> |Protein_Log2FC| lookup for weighting ----
     # Load from unified TSV (covers ALL proteins including Non-PTM)
@@ -2191,7 +2192,7 @@ def _generate_pathway_distribution_graph(
 
     if not pw_data:
         logger.warning("No pathway proteins found — skipping pathway distribution graph")
-        return None
+        return None, []
 
     # Sort by total cumulative score descending, take top 25
     pw_data.sort(key=lambda x: -x["total_score"])
@@ -2281,7 +2282,11 @@ def _generate_pathway_distribution_graph(
         f"Inhibited PTM: score={total_inh_score:.1f} n={total_inh_n}, "
         f"Non-PTM: score={total_non_score:.1f} n={total_non_n})"
     )
-    return str(output_path)
+    # v8.9.1: Collect pathway names shown in figure (sorted by total_score descending)
+    # pw_data is currently reversed (bottom=highest), so re-reverse for descending order
+    fig1_pathway_names = [d["pathway"] for d in reversed(pw_data)]
+    logger.info(f"[NET-NODE] Fig 1 pathway names ({len(fig1_pathway_names)}): {fig1_pathway_names[:10]}")
+    return str(output_path), fig1_pathway_names
 
 
 # ---------------------------------------------------------------------------
@@ -2316,6 +2321,7 @@ def run_network_analysis(state: dict) -> dict:
                 "cascade_diagram_path": None,
                 "cascade_diagram_paths": {},
                 "cascade_pathway_names": {},
+                "fig1_pathway_names": [],  # v8.9.1
                 "ptm_count": 0,
                 "timepoint_results": {},
                 "timepoints": [],
@@ -2391,13 +2397,15 @@ def _run_network_analysis_inner(state: dict) -> dict:
 
     # v5.1: Generate Canonical Pathway Distribution Bar Graph (activated only)
     pathway_graph_path = None
+    fig1_pathway_names = []  # v8.9.1: pathway names shown in Fig 1
     try:
-        pathway_graph_path = _generate_pathway_distribution_graph(
+        pathway_graph_path, fig1_pathway_names = _generate_pathway_distribution_graph(
             parsed_ptms, enriched_data, network_data, output_dir
         )
     except Exception as pw_err:
         logger.error(f"[NET-NODE] Pathway distribution graph failed: {pw_err}", exc_info=True)
         pathway_graph_path = None
+        fig1_pathway_names = []
 
     # v7.0: Build pathway_candidates for cascade_mediator_node
     # Instead of generating cascade diagrams here, we export all scored pathway
@@ -2433,6 +2441,7 @@ def _run_network_analysis_inner(state: dict) -> dict:
             "cascade_diagram_path": cascade_diagram_path,
             "cascade_diagram_paths": cascade_diagram_paths,
             "cascade_pathway_names": cascade_pathway_names,
+            "fig1_pathway_names": fig1_pathway_names,  # v8.9.1
             "ptm_count": len(parsed_ptms),
             "timepoint_results": timepoint_results,
             "timepoints": timepoints,
