@@ -780,7 +780,7 @@ def _generate_comovement_figures(
                         f"{', '.join(sorted(peak_tps))}. "
                         f"(a) Individual PTM time-series profiles colored by cluster membership "
                         f"with cluster mean (bold). "
-                        f"(b) HPLC-style peak chromatogram showing Log2FC amplitude ranked by magnitude. "
+                        f"(b) Peak amplitude profiles showing Log2FC magnitude ranked by intensity. "
                         f"(c) Cluster mean temporal envelope showing activation-recovery kinetics."
                     ),
                     "type": "transient_burst_composite",
@@ -801,16 +801,25 @@ def _generate_comovement_figures(
                            "correlated temporal dynamics. Color intensity represents "
                            "Log2FC magnitude (red=activated, blue=inhibited). "
                            "Cluster assignments shown on left sidebar.",
-                "type": "heatmap",
+                "type": "supplementary_heatmap",
             })
     except Exception as e:
         logger.warning(f"Heatmap generation failed: {e}")
 
-    # ── Per-cluster line plots (ALL clusters for Fig 3-6+) ──
-    # v8.5: Generate individual plots for ALL clusters (burst + non-burst)
-    # Order: burst clusters first, then other clusters
-    all_ordered_clusters = burst_clusters + other_clusters
-    for cluster in all_ordered_clusters:
+    # ── Per-cluster line plots (non-burst only for Fig 3-6) ──
+    # v8.7: Burst clusters are already shown in Fig 2 composite,
+    # so individual plots are only for non-burst clusters.
+    # User-specified main figure clusters: 1, 3, 4, 5
+    # All other non-burst clusters go to supplementary.
+    # Select top N non-burst clusters as main figures (sorted by member_count desc).
+    # Remaining non-burst clusters become supplementary.
+    MAX_MAIN_CLUSTERS = 4  # Fig 3-6 (user preference: up to 4 main cluster figs)
+    sorted_other = sorted(other_clusters, key=lambda c: c["member_count"], reverse=True)
+    main_clusters = sorted_other[:MAX_MAIN_CLUSTERS]
+    supp_clusters = sorted_other[MAX_MAIN_CLUSTERS:]
+
+    # Main cluster figures first (Fig 3-6)
+    for cluster in main_clusters:
         try:
             cluster_path = _generate_cluster_lineplot(
                 cluster, timepoints, output_dir
@@ -832,6 +841,30 @@ def _generate_comovement_figures(
                 })
         except Exception as e:
             logger.warning(f"Cluster {cluster['cluster_id']} plot failed: {e}")
+
+    # Supplementary cluster figures (after main)
+    for cluster in supp_clusters:
+        try:
+            cluster_path = _generate_cluster_lineplot(
+                cluster, timepoints, output_dir
+            )
+            if cluster_path:
+                ann = cluster.get("annotations", {})
+                bio_summary = ann.get("biological_summary", "")
+                pattern_label = _pattern_display_name(cluster["pattern"])
+                figures.append({
+                    "path": cluster_path,
+                    "caption": (
+                        f"Cluster {cluster['cluster_id']}: {pattern_label} "
+                        f"({cluster['member_count']} PTM sites, "
+                        f"mean r={cluster['correlation_mean']:.2f}). "
+                        f"{bio_summary}"
+                    ),
+                    "type": "supplementary_cluster",
+                    "cluster_id": cluster["cluster_id"],
+                })
+        except Exception as e:
+            logger.warning(f"Supplementary cluster {cluster['cluster_id']} plot failed: {e}")
 
     return figures
 
@@ -863,7 +896,7 @@ def _generate_transient_burst_figure(
     Panel layout:
         (a) Time-series profiles — individual PTM lines colored by cluster,
             with bold cluster mean and shaded min-max envelope.
-        (b) Peak amplitude bar chart — horizontal bars ranked by |Log2FC|.
+        (b) Peak amplitude profiles — smooth Gaussian curves ranked by |Log2FC|.
         (c) Cluster mean envelope — overlaid mean profiles with fill_between.
 
     Style: Nature journals — serif labels, minimal gridlines, panel letters,
@@ -992,31 +1025,29 @@ def _generate_transient_burst_figure(
     )
 
     # ══════════════════════════════════════════════════════════════════════
-    # Panel (b): HPLC-style Peak Amplitude Chromatogram
+    # Panel (b): Peak Amplitude — smooth Gaussian curves (no fill)
     # ══════════════════════════════════════════════════════════════════════
     # Sort all members by peak |Log2FC| descending
     sorted_members = sorted(all_members, key=lambda m: m[0]["max_fc"], reverse=True)
     top_n = min(15, len(sorted_members))
     top_members = sorted_members[:top_n]
 
-    # Build HPLC-style chromatogram: each PTM is a Gaussian peak
-    # X-axis = retention-like index, Y-axis = peak height (|Log2FC|)
-    n_points = 500
+    # Build smooth peak curves: each PTM is a Gaussian curve (outline only)
+    # X-axis = ranked position, Y-axis = peak height (|Log2FC|)
+    n_points = 800
     x_chrom = np.linspace(0, top_n + 1, n_points)
-    y_baseline = np.zeros(n_points)
 
     peak_positions = []  # for annotation
     for pi, (md, ci, cid) in enumerate(top_members):
         center = pi + 1.0  # peak center position
-        sigma = 0.22  # peak width (narrow like HPLC)
+        sigma = 0.28  # peak width (smooth curve)
         height = md["max_fc"]
-        # Gaussian peak
+        # Gaussian peak curve
         peak = height * np.exp(-0.5 * ((x_chrom - center) / sigma) ** 2)
         color = _NATURE_COLORS[ci % len(_NATURE_COLORS)]
 
-        # Fill under curve (HPLC style)
-        ax_b.fill_between(x_chrom, y_baseline, peak, alpha=0.35, color=color, linewidth=0)
-        ax_b.plot(x_chrom, peak, color=color, linewidth=0.8, alpha=0.9)
+        # Smooth curve outline only — no fill
+        ax_b.plot(x_chrom, peak, color=color, linewidth=1.2, alpha=0.85)
         peak_positions.append((center, height, md["key"], color))
 
     # Annotate peak labels
@@ -1029,9 +1060,9 @@ def _generate_transient_burst_figure(
 
     ax_b.set_xlim(0, top_n + 1)
     ax_b.set_ylim(0, None)
-    ax_b.set_xlabel("PTM Sites (ranked)")
+    ax_b.set_xlabel("PTM Sites (ranked by amplitude)")
     ax_b.set_ylabel("Peak |Log\u2082FC|")
-    ax_b.set_xticks([])  # No x-ticks (like HPLC)
+    ax_b.set_xticks([])
     ax_b.spines["top"].set_visible(False)
     ax_b.spines["right"].set_visible(False)
     ax_b.grid(axis="y", alpha=0.15, linewidth=0.3)
@@ -1430,10 +1461,28 @@ def _build_comovement_llm_context(
         "   - The text MUST describe what is shown in each figure; do NOT introduce "
         "figures without discussing their content in the text.\n"
         "\n"
-        "4. SECONDARY PATTERNS:\n"
-        "   - Each non-burst cluster gets 1-2 sentences with its Figure reference.\n"
-        "   - Use them primarily as contrast to highlight the significance of "
-        "the transient burst response.\n"
+        "4. NON-BURST CLUSTER PATTERNS (SYSTEMS BIOLOGY INTERPRETATION):\n"
+        "   - Each non-burst cluster MUST be discussed with its Figure reference AND\n"
+        "     its systems biology significance. Dedicate 1 paragraph per main cluster.\n"
+        "   - SEQUENTIAL SIGNALING WAVE: Indicates a relay-type signal propagation\n"
+        "     where PTMs are activated in temporal sequence. Discuss which PTMs lead\n"
+        "     the wave vs. which follow, and infer the directionality of the signaling\n"
+        "     cascade (e.g., receptor → adaptor → effector). Relate to known kinase\n"
+        "     substrate relationships if available.\n"
+        "   - BIPHASIC SWITCH: Represents a regulatory toggle where PTMs switch from\n"
+        "     activation to inhibition (or vice versa). Discuss the biological meaning\n"
+        "     of this switch — e.g., negative feedback loops, pathway crosstalk, or\n"
+        "     transition between early signaling and late adaptive responses.\n"
+        "   - SUSTAINED ACTIVATION/INHIBITION: Indicates long-term regulatory changes\n"
+        "     that persist beyond the initial stimulus. Discuss implications for\n"
+        "     cellular commitment, gene expression regulation, or structural\n"
+        "     remodeling processes.\n"
+        "   - CO-ACTIVATED/CO-INHIBITED: PTMs that move together suggest shared\n"
+        "     upstream regulation (common kinase/phosphatase). Identify potential\n"
+        "     shared regulators from the network analysis data.\n"
+        "   - Compare and contrast these patterns with the transient burst to build\n"
+        "     a coherent narrative of how the treatment orchestrates multiple\n"
+        "     signaling layers over time.\n"
         "\n"
         "5. BIOLOGICAL INTERPRETATION SCOPE:\n"
         "   - Base all interpretations on the provided experimental data and "

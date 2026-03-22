@@ -3185,15 +3185,18 @@ def image_to_base64(image_path: str) -> Optional[str]:
 # Network figure section for report (guide §6.1)
 # ---------------------------------------------------------------------------
 
-def generate_network_figure_section(network_analysis: dict, supplementary_start: int = 1) -> str:
+def generate_network_figure_section(network_analysis: dict, supplementary_start: int = 1) -> tuple:
     """Generate Markdown section with embedded network figures and legends.
 
-    v8.5: Fig 1 = Canonical Pathway Distribution (main figure).
-    Cascade diagrams and Cytoscape networks are now Supplementary Figures.
+    v8.7: Returns (main_section, supplementary_section) tuple.
+    Fig 1 = Canonical Pathway Distribution (main figure).
+    Cascade diagrams and Cytoscape networks are Supplementary Figures.
 
     Args:
-        supplementary_start: Starting number for supplementary figures
-            (continues from co-movement heatmap supplementary numbering).
+        supplementary_start: Starting number for supplementary figures.
+
+    Returns:
+        Tuple of (main_section_str, supplementary_section_str).
     """
     network_images = network_analysis.get("network_images", {})
     legends = network_analysis.get("legends", {})
@@ -3224,9 +3227,10 @@ def generate_network_figure_section(network_analysis: dict, supplementary_start:
     has_cascade = cascade_diagram_path or cascade_diagram_paths
     if not network_images and not legends.get("full_legend") and not pathway_graph_path and not has_cascade:
         logger.warning("[NET-SECTION] No network_images, no full_legend, no pathway_graph, no cascade — returning empty")
-        return ""
+        return "", ""
 
-    section = "## Network Visualization\n\n"
+    main_section = "## Network Visualization\n\n"
+    supp_section = ""
 
     nodes = network_data.get("nodes", [])
     edges = network_data.get("edges", [])
@@ -3238,20 +3242,20 @@ def generate_network_figure_section(network_analysis: dict, supplementary_start:
 
     # Phase 5: Network statistics summary
     if validation:
-        section += (
+        main_section += (
             f"**Network Statistics**: {validation.get('total_nodes', 0)} nodes "
             f"({validation.get('ptm_nodes', 0)} PTM, {validation.get('non_ptm_nodes', 0)} Non-PTM), "
             f"{validation.get('total_edges', 0)} edges, "
             f"{validation.get('connected_nodes', 0)} connected nodes"
         )
         if validation.get("orphan_nodes", 0) > 0:
-            section += f", {validation['orphan_nodes']} isolated nodes"
-        section += "\n\n"
+            main_section += f", {validation['orphan_nodes']} isolated nodes"
+        main_section += "\n\n"
 
         # Edge type breakdown
         edge_types = validation.get("edge_types", {})
         if edge_types:
-            section += "**Edge Distribution**: " + ", ".join(
+            main_section += "**Edge Distribution**: " + ", ".join(
                 f"{et}: {cnt}" for et, cnt in sorted(edge_types.items(), key=lambda x: -x[1])
             ) + "\n\n"
 
@@ -3264,9 +3268,9 @@ def generate_network_figure_section(network_analysis: dict, supplementary_start:
         pw_path_obj = Path(pathway_graph_path)
         if pw_path_obj.exists() and pw_path_obj.stat().st_size > 1000:
             pw_img_ref = pw_path_obj.name
-            section += f"### Figure {figure_num}. Canonical Pathway Distribution of Activated PTM and Non-PTM Interactor Proteins (Weighted by |Protein_Log2FC|)\n\n"
-            section += f"![Canonical Pathway Distribution]({pw_img_ref})\n\n"
-            section += (
+            main_section += f"### Figure {figure_num}. Canonical Pathway Distribution of Activated PTM and Non-PTM Interactor Proteins (Weighted by |Protein_Log2FC|)\n\n"
+            main_section += f"![Canonical Pathway Distribution]({pw_img_ref})\n\n"
+            main_section += (
                 f"**Figure Legend:** This bar graph illustrates the cumulative |Protein_Log2FC| score "
                 f"of **activated** PTM proteins (red, Log2FC > 0) and Non-PTM interactor proteins (green) "
                 f"across canonical signaling pathways identified via KEGG pathway analysis. "
@@ -3278,7 +3282,7 @@ def generate_network_figure_section(network_analysis: dict, supplementary_start:
                 f"Pathways are ranked by total cumulative score, highlighting pathways with the "
                 f"strongest combined expression changes.\n\n"
             )
-            section += "---\n\n"
+            main_section += "---\n\n"
             figure_num += 1
             logger.info(f"[NET-SECTION] Pathway distribution graph inserted as Figure {figure_num - 1}")
 
@@ -3314,13 +3318,13 @@ def generate_network_figure_section(network_analysis: dict, supplementary_start:
                 tp_img_ref = tp_path_obj.name
                 pw_names = cascade_pathway_names.get(tp, [])
                 pw_subtitle = f" ({', '.join(pw_names[:3])}{' ...' if len(pw_names) > 3 else ''})" if pw_names else ""
-                section += (
+                supp_section += (
                     f"### Supplementary Figure {supp_num}. Signal Transduction Pathway Cascade Diagram "
                     f"\u2014 {tp}{pw_subtitle}\n\n"
                 )
-                section += f"![Signal Transduction Pathway Cascade Diagram \u2014 {tp}]({tp_img_ref})\n\n"
-                section += _cascade_legend_text + f" Data shown for condition: **{tp}**.\n\n"
-                section += "---\n\n"
+                supp_section += f"![Signal Transduction Pathway Cascade Diagram \u2014 {tp}]({tp_img_ref})\n\n"
+                supp_section += _cascade_legend_text + f" Data shown for condition: **{tp}**.\n\n"
+                supp_section += "---\n\n"
                 logger.info(f"[NET-SECTION] Per-condition cascade diagram for '{tp}' inserted as Supplementary Figure {supp_num}")
                 supp_num += 1
     elif cascade_diagram_path:
@@ -3330,12 +3334,12 @@ def generate_network_figure_section(network_analysis: dict, supplementary_start:
             cascade_img_ref = cascade_path_obj.name
             pw_names = cascade_pathway_names.get("combined", [])
             pw_subtitle = f" ({', '.join(pw_names[:3])}{' ...' if len(pw_names) > 3 else ''})" if pw_names else ""
-            section += (
+            supp_section += (
                 f"### Supplementary Figure {supp_num}. Signal Transduction Pathway Cascade Diagram{pw_subtitle}\n\n"
             )
-            section += f"![Signal Transduction Pathway Cascade Diagram]({cascade_img_ref})\n\n"
-            section += _cascade_legend_text + "\n\n"
-            section += "---\n\n"
+            supp_section += f"![Signal Transduction Pathway Cascade Diagram]({cascade_img_ref})\n\n"
+            supp_section += _cascade_legend_text + "\n\n"
+            supp_section += "---\n\n"
             logger.info(f"[NET-SECTION] Signaling cascade diagram inserted as Supplementary Figure {supp_num}")
             supp_num += 1
 
@@ -3373,25 +3377,25 @@ def generate_network_figure_section(network_analysis: dict, supplementary_start:
         fig_title = f"Supplementary Figure {supp_num}{panel}. {display_label}"
 
         if img_ref:
-            section += f"### {fig_title}\n\n"
-            section += f"![{display_label}]({img_ref})\n\n"
+            supp_section += f"### {fig_title}\n\n"
+            supp_section += f"![{display_label}]({img_ref})\n\n"
         else:
-            section += f"### {fig_title}\n\n"
-            section += f"*[Network image: {path_obj.name if path_obj else '?'}]*\n\n"
+            supp_section += f"### {fig_title}\n\n"
+            supp_section += f"*[Network image: {path_obj.name if path_obj else '?'}]*\n\n"
 
         # Figure legend (guide §6.1) — v5.0: "main" removed, timepoint-only
-        section += f"**Figure Legend ({label}):**\n\n"
+        supp_section += f"**Figure Legend ({label}):**\n\n"
 
         if label in individual_legends:
-            section += individual_legends[label] + "\n\n"
+            supp_section += individual_legends[label] + "\n\n"
         else:
             # Fallback for condition-based networks
-            section += (
+            supp_section += (
                 f"This network represents the PTM signaling interactions at {label}. "
             )
             if label in timepoint_results:
                 stats = timepoint_results[label].get("stats", {})
-                section += (
+                supp_section += (
                     f"The network contains **{stats.get('active_ptm_count', 0)} activated PTMs**, "
                     f"**{stats.get('inhibited_ptm_count', 0)} inhibited PTMs**, "
                     f"**{stats.get('non_ptm_count', 0)} Non-PTM proteins**, "
@@ -3410,7 +3414,7 @@ def generate_network_figure_section(network_analysis: dict, supplementary_start:
                     f"{n.get('gene', '?')}({n.get('site', '')}): Log2FC={n.get('value', 0):.2f}"
                     for n in top_active
                 )
-                section += f"**Top Activated PTMs**: {top_str}\n\n"
+                supp_section += f"**Top Activated PTMs**: {top_str}\n\n"
 
             top_inhib = sorted(
                 tp_data.get("inhibited_ptm_nodes", []),
@@ -3421,10 +3425,10 @@ def generate_network_figure_section(network_analysis: dict, supplementary_start:
                     f"{n.get('gene', '?')}({n.get('site', '')}): Log2FC={n.get('value', 0):.2f}"
                     for n in top_inhib
                 )
-                section += f"**Top Inhibited PTMs**: {top_str}\n\n"
+                supp_section += f"**Top Inhibited PTMs**: {top_str}\n\n"
         # v5.0: "main" label removed from sorted_labels, no fallback needed
 
-        section += "---\n\n"
+        supp_section += "---\n\n"
         # v7.1: Do NOT increment figure_num here — all Cytoscape panels share
         # the same figure number with different panel letters (e.g., Figure 10A, 10B, 10C)
 
@@ -3434,26 +3438,26 @@ def generate_network_figure_section(network_analysis: dict, supplementary_start:
 
     # Temporal comparison legend (guide §5.1 row 3)
     if comparison_legend:
-        section += comparison_legend + "\n\n---\n\n"
+        supp_section += comparison_legend + "\n\n---\n\n"
 
     # Phase 4: Isolated nodes table
     if validation and validation.get("orphan_nodes", 0) > 0:
         orphan_ids = validation.get("orphan_node_ids", [])
         if orphan_ids:
-            section += "### Isolated Nodes (No Network Connections)\n\n"
-            section += "The following PTM nodes had no interaction edges in the network:\n\n"
-            section += "| Node ID | Type |\n|---------|------|\n"
+            supp_section += "### Isolated Nodes (No Network Connections)\n\n"
+            supp_section += "The following PTM nodes had no interaction edges in the network:\n\n"
+            supp_section += "| Node ID | Type |\n|---------|------|\n"
             for oid in orphan_ids[:20]:
                 node_type = "PTM" if "-" in oid else "Non-PTM"
-                section += f"| {oid} | {node_type} |\n"
+                supp_section += f"| {oid} | {node_type} |\n"
             if len(orphan_ids) > 20:
-                section += f"| ... | ({len(orphan_ids) - 20} more) |\n"
-            section += "\n---\n\n"
+                supp_section += f"| ... | ({len(orphan_ids) - 20} more) |\n"
+            supp_section += "\n---\n\n"
 
     # If no images but legends exist, include text legend
     if not network_images and legends.get("full_legend"):
         full_legend = legends["full_legend"]
         full_legend = re.sub(r'^## ', '### ', full_legend, flags=re.MULTILINE)
-        section += full_legend + "\n\n"
+        supp_section += full_legend + "\n\n"
 
-    return section
+    return main_section, supp_section

@@ -150,28 +150,31 @@ def generate_qa_report(state: ReportState) -> dict:
     return run_qa_report_generation(state)
 
 
-def _build_comovement_figure_section(comovement_figures: list, network_analysis: dict) -> str:
-    """v8.5: Build the co-movement figure section for the report.
+def _build_comovement_figure_section(comovement_figures: list, network_analysis: dict) -> tuple:
+    """v8.7: Build the co-movement figure section for the report.
+
+    Returns (main_section, supplementary_section, next_fig_num, next_supp_num).
 
     Figure ordering:
         Fig 1 = Canonical Pathway Distribution (from network_node, inserted separately)
         Fig 2 = Transient Burst Composite (Nature-style, panels a/b/c)
-        Fig 3-6 = Individual cluster time-series plots
-        Supplementary = Heatmap
+        Fig 3-6 = Top 4 non-burst cluster time-series plots
+        Supplementary = Heatmap + remaining cluster plots
     """
-    import base64
     from pathlib import Path
 
     if not comovement_figures:
-        return ""
+        return "", "", 2, 1
 
     # Separate figure types
     burst_figs = [f for f in comovement_figures if f.get("type") == "transient_burst_composite"]
     cluster_figs = [f for f in comovement_figures if f.get("type") == "cluster_detail"]
-    heatmap_figs = [f for f in comovement_figures if f.get("type") == "heatmap"]
+    supp_cluster_figs = [f for f in comovement_figures if f.get("type") == "supplementary_cluster"]
+    heatmap_figs = [f for f in comovement_figures if f.get("type") in ("heatmap", "supplementary_heatmap")]
 
-    section = "\n## Temporal PTM Co-movement Analysis\n\n"
-    section += (
+    # ── Main Figures Section ──
+    main_section = "\n## Temporal PTM Co-movement Analysis\n\n"
+    main_section += (
         "The following figures show the results of temporal co-movement clustering analysis. "
         "PTM sites with correlated temporal dynamics were grouped into clusters using "
         "hierarchical clustering of their Log2FC time-series profiles. "
@@ -179,63 +182,73 @@ def _build_comovement_figure_section(comovement_figures: list, network_analysis:
         "potentially sharing upstream kinases or participating in the same signaling cascade.\n\n"
     )
 
-    # v8.5: Figure 2 = Transient Burst Composite (Fig 1 is Pathway from network_node)
-    fig_num = 2
+    fig_num = 2  # Fig 1 is Canonical Pathway from network_node
 
+    # Figure 2: Transient Burst Composite
     for cf in burst_figs:
         img_ref = _resolve_figure_path(cf, Path)
         if img_ref:
             cf_caption = cf.get("caption", "Transient Burst Dynamics")
-            section += f"### Figure {fig_num}. {cf_caption}\n\n"
-            section += f"![{cf_caption}]({img_ref})\n\n"
-            section += (
-                "**Legend:** Nature-style composite figure of transient phosphorylation burst clusters. "
+            main_section += f"### Figure {fig_num}. {cf_caption}\n\n"
+            main_section += f"![{cf_caption}]({img_ref})\n\n"
+            main_section += (
+                "**Legend:** Composite figure of transient phosphorylation burst clusters. "
                 "**(a)** Individual PTM time-series profiles colored by cluster membership; "
                 "bold lines indicate cluster means with shaded min-max envelopes. "
-                "**(b)** HPLC-style peak chromatogram showing Log\u2082FC amplitude ranked by magnitude. "
+                "**(b)** Peak amplitude profiles showing Log\u2082FC magnitude ranked by intensity. "
                 "**(c)** Cluster mean temporal envelopes showing activation-recovery kinetics. "
-                "Color palette: Nature Reviews-inspired colorblind-safe scheme.\n\n"
+                "Color palette: colorblind-safe scheme.\n\n"
             )
-            section += "---\n\n"
+            main_section += "---\n\n"
             fig_num += 1
             logger.info(f"[COMOVEMENT] Inserted transient burst as Figure 2")
 
-    # v8.5: Figures 3-6+ = Individual cluster detail plots
+    # Figures 3-6: Main cluster detail plots
     for cf in cluster_figs:
         img_ref = _resolve_figure_path(cf, Path)
         cf_caption = cf.get("caption", "Cluster Detail")
 
         if img_ref:
-            section += f"### Figure {fig_num}. {cf_caption}\n\n"
-            section += f"![{cf_caption}]({img_ref})\n\n"
-            section += (
+            main_section += f"### Figure {fig_num}. {cf_caption}\n\n"
+            main_section += f"![{cf_caption}]({img_ref})\n\n"
+            main_section += (
                 "**Legend:** Temporal Log\u2082FC profiles of cluster members. "
                 "Solid lines = PTM proteins; dashed lines = linked Non-PTM interactors. "
                 "Shaded area = cluster envelope (min-max range).\n\n"
             )
-            section += "---\n\n"
+            main_section += "---\n\n"
             fig_num += 1
         else:
             logger.warning(f"[COMOVEMENT] Cluster figure not found: {cf.get('path')}")
 
-    # v8.5: Heatmap → Supplementary Figure
-    supp_num = 1
+    # ── Supplementary Figures (returned as list for later numbering) ──
+    supp_items = []  # list of (caption, img_ref, legend_text)
+
+    # Supplementary: Heatmap
     for cf in heatmap_figs:
         img_ref = _resolve_figure_path(cf, Path)
         cf_caption = cf.get("caption", "Co-movement Heatmap")
-
         if img_ref:
-            section += f"### Supplementary Figure {supp_num}. {cf_caption}\n\n"
-            section += f"![{cf_caption}]({img_ref})\n\n"
-            section += (
+            supp_items.append((
+                cf_caption, img_ref,
                 "**Legend:** Hierarchical clustering heatmap of PTM temporal profiles. "
                 "Rows = PTM sites, columns = time points. Color intensity reflects Log2FC magnitude. "
-                "Cluster color bars on left sidebar indicate membership.\n\n"
-            )
-            section += "---\n\n"
-            supp_num += 1
+                "Cluster color bars on left sidebar indicate membership."
+            ))
 
-    return section, fig_num, supp_num
+    # Supplementary: Additional cluster plots
+    for cf in supp_cluster_figs:
+        img_ref = _resolve_figure_path(cf, Path)
+        cf_caption = cf.get("caption", "Cluster Detail")
+        if img_ref:
+            supp_items.append((
+                cf_caption, img_ref,
+                "**Legend:** Temporal Log\u2082FC profiles of cluster members. "
+                "Solid lines = PTM proteins; dashed lines = linked Non-PTM interactors. "
+                "Shaded area = cluster envelope (min-max range)."
+            ))
+
+    return main_section, supp_items, fig_num
 
 
 def _resolve_figure_path(cf: dict, Path) -> str | None:
@@ -305,6 +318,8 @@ def format_citations(state: ReportState) -> dict:
         "conclusion": "## Conclusion",
     }
     parts = header_parts[:]
+    comovement_supp_items = []  # v8.7: collect supplementary items for end of report
+    network_supp_section = ""  # v8.7: network supplementary (cascade/cytoscape)
 
     logger.info(
         f"[FORMAT-CIT] sections keys: {list(sections.keys())}, "
@@ -323,27 +338,28 @@ def format_citations(state: ReportState) -> dict:
             parts.append(sections[key])
             logger.info(f"[FORMAT-CIT] Added section: {key} ({len(sections[key])} chars)")
         if key == "results":
-            # v8.0: Insert co-movement figures BEFORE network section
+            # v8.7: Figure ordering: Fig 1 (Pathway) → Fig 2-6 (Co-movement) → Supplementary at end
+
+            # Step 1: Network MAIN section (Fig 1 = Pathway Distribution)
+            # Supplementary (cascade/cytoscape) collected separately for end
+            net_main, net_supp = generate_network_figure_section(network_analysis, supplementary_start=1)
+            if net_main:
+                parts.append(net_main)
+                logger.info(f"[FORMAT-CIT] Added network main section ({len(net_main)} chars)")
+            else:
+                logger.warning("[FORMAT-CIT] network main section is EMPTY")
+            network_supp_section = net_supp  # store for appending at end
+
+            # Step 2: Co-movement MAIN figures (Fig 2 = Burst, Fig 3-6 = Clusters)
             comovement_figures = state.get("comovement_figures", [])
-            last_main_fig = 1  # Fig 1 = Pathway (from network_node)
-            supp_start = 1
             if comovement_figures:
                 result = _build_comovement_figure_section(comovement_figures, network_analysis)
                 if result:
-                    if isinstance(result, tuple):
-                        comovement_section, last_main_fig, supp_start = result
-                    else:
-                        comovement_section = result  # backward compat
-                    if comovement_section:
-                        parts.append(comovement_section)
-                        logger.info(f"[FORMAT-CIT] Added co-movement section ({len(comovement_section)} chars), last_fig={last_main_fig}")
-            # v8.5: Cascade/Cytoscape → Supplementary Figures
-            network_section = generate_network_figure_section(network_analysis, supplementary_start=supp_start)
-            if network_section:
-                parts.append(network_section)
-                logger.info(f"[FORMAT-CIT] Added network section ({len(network_section)} chars)")
-            else:
-                logger.warning("[FORMAT-CIT] network_section is EMPTY — not included in report")
+                    main_section, supp_items, _next_fig = result
+                    if main_section:
+                        parts.append(main_section)
+                        logger.info(f"[FORMAT-CIT] Added co-movement main section ({len(main_section)} chars)")
+                    comovement_supp_items = supp_items
 
     all_text = "\n\n".join(parts)
 
@@ -423,6 +439,29 @@ def format_citations(state: ReportState) -> dict:
     # Append references
     if reference_section:
         processed += "\n\n" + reference_section
+
+    # v8.7: Append ALL supplementary figures at the very end
+    supp_combined = "\n\n## Supplementary Figures\n\n"
+    has_supp = False
+
+    # Co-movement supplementary (heatmap, extra clusters)
+    if comovement_supp_items:
+        for si, (caption, img_ref, legend) in enumerate(comovement_supp_items, 1):
+            supp_combined += f"### Supplementary Figure {si}. {caption}\n\n"
+            supp_combined += f"![{caption}]({img_ref})\n\n"
+            supp_combined += f"{legend}\n\n---\n\n"
+        has_supp = True
+        logger.info(f"[FORMAT-CIT] Collected {len(comovement_supp_items)} co-movement supplementary figures")
+
+    # Network supplementary (cascade diagrams, cytoscape networks)
+    if network_supp_section:
+        supp_combined += network_supp_section
+        has_supp = True
+        logger.info(f"[FORMAT-CIT] Collected network supplementary section ({len(network_supp_section)} chars)")
+
+    if has_supp:
+        processed += supp_combined
+        logger.info("[FORMAT-CIT] Appended all supplementary figures at end of report")
 
     return {
         "final_report": processed,
