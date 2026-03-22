@@ -960,6 +960,91 @@ def _link_to_nonptm_interactors(
         nonptm_links.sort(key=lambda x: abs(x["correlation_with_cluster"]), reverse=True)
         cluster["nonptm_links"] = nonptm_links[:10]  # Top 10
 
+        # ── v8.10: Neighborhood Concordance Score ──
+        # Detect coordinated direction changes among Non-PTM neighbors.
+        # When multiple Non-PTM proteins around a PTM cluster all move in the
+        # same direction simultaneously, this suggests a collective mechanism
+        # (complex stoichiometry, transcriptional co-regulation, or pathway
+        # feedback) rather than independent regulation.
+        if nonptm_links:
+            # Determine cluster direction at peak timepoint
+            cluster_peak_tp_idx = int(np.argmax(np.abs(mean_vals)))
+            cluster_direction = "up" if mean_vals[cluster_peak_tp_idx] > 0 else "down"
+
+            # Count Non-PTM direction at the same timepoint
+            up_count = 0
+            down_count = 0
+            simultaneous_count = 0
+            for link in nonptm_links:
+                tp_data = link["temporal_profile"]
+                tp_key = timepoints[cluster_peak_tp_idx]
+                nonptm_fc = tp_data.get(tp_key, 0)
+                if nonptm_fc > 0.1:
+                    up_count += 1
+                elif nonptm_fc < -0.1:
+                    down_count += 1
+                if link["response_pattern"] == "simultaneous":
+                    simultaneous_count += 1
+
+            total_responsive = up_count + down_count
+            if total_responsive >= 2:
+                # Concordance: fraction moving in the same direction
+                dominant_direction = "up" if up_count >= down_count else "down"
+                dominant_count = max(up_count, down_count)
+                concordance = round(dominant_count / total_responsive, 2)
+
+                # ── Time lag statistics for mechanism inference ──
+                # Collect all time lags to understand the temporal relationship
+                # between PTM changes and Non-PTM protein abundance changes.
+                lags = [l["time_lag_minutes"] for l in nonptm_links]
+                abs_lags = [abs(lg) for lg in lags]
+                median_lag = float(np.median(abs_lags)) if abs_lags else 0.0
+                mean_lag = float(np.mean(abs_lags)) if abs_lags else 0.0
+                delayed_count = sum(1 for l in nonptm_links
+                                    if l["response_pattern"] == "delayed_response")
+                precedes_count = sum(1 for l in nonptm_links
+                                     if l["response_pattern"] == "precedes_cluster")
+
+                # Mechanism hint: combine direction concordance + time lag pattern
+                # 1) Simultaneous + concordant → complex stoichiometry
+                # 2) Delayed (>15min median) + concordant → transcriptional co-regulation
+                # 3) Mixed timing → pathway-level coordination
+                if simultaneous_count >= dominant_count * 0.6 and median_lag <= 10:
+                    mechanism_hint = "protein_complex_stoichiometry"
+                elif delayed_count >= dominant_count * 0.5 and median_lag > 15:
+                    mechanism_hint = "transcriptional_coregulation"
+                elif precedes_count >= dominant_count * 0.4:
+                    mechanism_hint = "upstream_regulation"
+                else:
+                    mechanism_hint = "pathway_level_coordination"
+
+                cluster["neighborhood_concordance"] = {
+                    "total_responsive_nonptm": total_responsive,
+                    "up_count": up_count,
+                    "down_count": down_count,
+                    "dominant_direction": dominant_direction,
+                    "concordance_score": concordance,
+                    "same_as_cluster": dominant_direction == cluster_direction,
+                    "simultaneous_count": simultaneous_count,
+                    "delayed_count": delayed_count,
+                    "precedes_count": precedes_count,
+                    "median_lag_minutes": round(median_lag, 1),
+                    "mean_lag_minutes": round(mean_lag, 1),
+                    "mechanism_hint": mechanism_hint,
+                    "cluster_direction": cluster_direction,
+                }
+                logger.info(
+                    f"[COMOVEMENT] Cluster {cluster.get('cluster_id', '?')}: "
+                    f"Neighborhood concordance={concordance:.2f} "
+                    f"({dominant_count}/{total_responsive} {dominant_direction}), "
+                    f"median_lag={median_lag:.0f}min, "
+                    f"mechanism_hint={mechanism_hint}"
+                )
+            else:
+                cluster["neighborhood_concordance"] = None
+        else:
+            cluster["neighborhood_concordance"] = None
+
     return clusters
 
 
@@ -1909,6 +1994,36 @@ def _build_comovement_llm_context(
         "     honestly and discuss alternative explanations (e.g., novel interactions,\n"
         "     shared upstream kinase, or physical proximity in a protein complex).\n"
         "   - Do NOT invent pathway connections that are not in the provided data.\n"
+        "\n"
+        "11. NEIGHBORHOOD CONCORDANCE ANALYSIS (v8.10):\n"
+        "   - When a 'Neighborhood Concordance Analysis' section is provided for a\n"
+        "     cluster, it summarizes the COLLECTIVE behavior of Non-PTM protein\n"
+        "     neighbors surrounding the PTM cluster members.\n"
+        "   - The Concordance Score (0-1) indicates what fraction of responsive\n"
+        "     Non-PTM neighbors move in the SAME direction. High concordance (>0.7)\n"
+        "     indicates a coordinated neighborhood response.\n"
+        "   - CRITICAL: Use the TIME LAG information to infer the MECHANISM:\n"
+        "     * If most neighbors are SIMULTANEOUS (median lag <=10min):\n"
+        "       → Protein complex stoichiometry: these proteins likely form a\n"
+        "         physical complex whose components are co-stabilized/co-degraded.\n"
+        "       → The PTM may regulate complex assembly or stability.\n"
+        "     * If most neighbors are DELAYED (median lag >15min):\n"
+        "       → Transcriptional co-regulation: the PTM event likely activates a\n"
+        "         transcription factor, leading to new mRNA and protein synthesis\n"
+        "         of the neighbor proteins after a time delay.\n"
+        "       → Discuss which transcription factor might mediate this.\n"
+        "     * If neighbors PRECEDE the PTM cluster:\n"
+        "       → The Non-PTM abundance changes may be upstream events that\n"
+        "         trigger the downstream PTM cascade.\n"
+        "     * If timing is MIXED:\n"
+        "       → Pathway-level coordination with both direct (complex) and\n"
+        "         indirect (transcriptional) regulatory layers.\n"
+        "   - When concordance direction is SAME as cluster direction:\n"
+        "     → Positive feedback or co-activation/co-suppression.\n"
+        "   - When concordance direction is OPPOSITE to cluster direction:\n"
+        "     → Negative feedback, competitive binding, or compensatory response.\n"
+        "   - Always name the specific Non-PTM proteins involved and discuss\n"
+        "     their known biological roles in the experimental context.\n"
     )
 
     return "\n".join(parts)
@@ -2033,6 +2148,49 @@ def _append_cluster_detail(
                     f"max|FC|={link['max_change']:.2f}"
                 )
 
+        # v8.10: Neighborhood Concordance Summary (collective Non-PTM behavior)
+        nc = cluster.get("neighborhood_concordance")
+        if nc:
+            parts.append("\nNeighborhood Concordance Analysis:")
+            parts.append(
+                f"  Concordance Score: {nc['concordance_score']:.2f} "
+                f"({nc['up_count']} up / {nc['down_count']} down out of "
+                f"{nc['total_responsive_nonptm']} responsive Non-PTM neighbors)"
+            )
+            parts.append(
+                f"  Dominant direction: {nc['dominant_direction']} "
+                f"({'SAME as' if nc['same_as_cluster'] else 'OPPOSITE to'} "
+                f"PTM cluster direction: {nc['cluster_direction']})"
+            )
+            parts.append(
+                f"  Time lag pattern: {nc['simultaneous_count']} simultaneous, "
+                f"{nc['delayed_count']} delayed, {nc['precedes_count']} precedes; "
+                f"median lag={nc['median_lag_minutes']:.0f}min, "
+                f"mean lag={nc['mean_lag_minutes']:.0f}min"
+            )
+            hint_desc = {
+                "protein_complex_stoichiometry": (
+                    "Most Non-PTM neighbors change SIMULTANEOUSLY with PTM cluster, "
+                    "suggesting they belong to the same protein complex whose "
+                    "stability/abundance is co-regulated."),
+                "transcriptional_coregulation": (
+                    "Non-PTM neighbors show DELAYED response (median lag >{:.0f}min), "
+                    "suggesting PTM-driven transcriptional activation leads to "
+                    "new protein synthesis of these neighbors.".format(nc['median_lag_minutes'])),
+                "upstream_regulation": (
+                    "Non-PTM neighbors change BEFORE the PTM cluster, suggesting "
+                    "they may be upstream regulators whose abundance change "
+                    "triggers the downstream PTM events."),
+                "pathway_level_coordination": (
+                    "Mixed timing pattern among Non-PTM neighbors suggests "
+                    "pathway-level coordination with both direct and indirect "
+                    "regulatory connections."),
+            }
+            parts.append(
+                f"  Mechanism hint: {nc['mechanism_hint']} — "
+                f"{hint_desc.get(nc['mechanism_hint'], 'See individual lag values.')}"
+            )
+
         # Per-member peak details for burst clusters
         parts.append("\nIndividual PTM Peak Details:")
         sorted_members = sorted(
@@ -2073,7 +2231,30 @@ def _append_cluster_detail(
                 parts.append(
                     f"  - {link['gene']} ({link['role']}): "
                     f"r={link['correlation_with_cluster']:.2f}, "
-                    f"{link['response_pattern']}"
+                    f"{link['response_pattern']}, "
+                    f"lag={link['time_lag_minutes']:.0f}min"
                 )
+
+        # v8.10: Neighborhood Concordance Summary (also for non-burst)
+        nc = cluster.get("neighborhood_concordance")
+        if nc:
+            parts.append("\nNeighborhood Concordance Analysis:")
+            parts.append(
+                f"  Concordance Score: {nc['concordance_score']:.2f} "
+                f"({nc['up_count']} up / {nc['down_count']} down out of "
+                f"{nc['total_responsive_nonptm']} responsive Non-PTM neighbors)"
+            )
+            parts.append(
+                f"  Dominant direction: {nc['dominant_direction']} "
+                f"({'SAME as' if nc['same_as_cluster'] else 'OPPOSITE to'} "
+                f"PTM cluster direction: {nc['cluster_direction']})"
+            )
+            parts.append(
+                f"  Time lag: median={nc['median_lag_minutes']:.0f}min, "
+                f"{nc['simultaneous_count']} simultaneous / "
+                f"{nc['delayed_count']} delayed / "
+                f"{nc['precedes_count']} precedes"
+            )
+            parts.append(f"  Mechanism hint: {nc['mechanism_hint']}")
 
     parts.append("")
