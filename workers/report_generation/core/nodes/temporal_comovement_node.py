@@ -1439,6 +1439,16 @@ def _build_comovement_llm_context(
         "   - Base all interpretations on the provided experimental data and "
         "ChromaDB literature references ONLY.\n"
         "   - Do NOT introduce external knowledge beyond what is provided.\n"
+        "   - ALL interpretations MUST remain within the biological context of "
+        "the Analysis Context (cell type, treatment, timepoints) specified at "
+        "the top of the prompt.\n"
+        "   - Do NOT discuss biological processes or disease contexts that are "
+        "biologically distant from the experimental system.\n"
+        "   - Every paragraph must logically connect back to: How does the "
+        "treatment affect phosphorylation dynamics in the specified cell type?\n"
+        "   - Do NOT fabricate connections to unrelated biological systems "
+        "(e.g., if studying osteocytes, do NOT extensively discuss neuronal "
+        "or immune cell-specific pathways unless directly supported by data).\n"
     )
 
     return "\n".join(parts)

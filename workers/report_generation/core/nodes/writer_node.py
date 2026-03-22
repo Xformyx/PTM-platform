@@ -303,8 +303,39 @@ def _build_section_prompt(
     tissue = context.get("tissue") or context.get("cell_type") or "the experimental system"
     treatment = context.get("treatment", "the applied treatment")
     biological_question = (context.get("biological_question") or "").strip()
+    organism = context.get("organism", "")
+    timepoints_raw = context.get("timepoints") or context.get("conditions") or []
+    special_conditions = context.get("special_conditions", "")
     questions_str = "\n".join(f"  Q{i+1}: {q}" for i, q in enumerate(questions))
     bio_focus_line = f"\nResearch focus (Biological Question): {biological_question}\n" if biological_question else ""
+
+    # v8.6: Analysis Context Block — injected into every section prompt
+    tp_str = ", ".join(str(t) for t in timepoints_raw) if timepoints_raw else "not specified"
+    analysis_context_block = (
+        f"\n\n========== ANALYSIS CONTEXT (MUST GUIDE ALL WRITING) ==========\n"
+        f"Cell type / Tissue: {tissue}\n"
+    )
+    if organism:
+        analysis_context_block += f"Organism: {organism}\n"
+    analysis_context_block += (
+        f"Treatment / Stimulus: {treatment}\n"
+        f"Time points: {tp_str}\n"
+    )
+    if biological_question:
+        analysis_context_block += f"Biological Question: {biological_question}\n"
+    if special_conditions:
+        analysis_context_block += f"Special Conditions: {special_conditions}\n"
+    analysis_context_block += (
+        f"PTM type: {ptm_type_label}\n"
+        f"=============================================================\n\n"
+        f"**BIOLOGICAL SCOPE CONSTRAINT (CRITICAL):**\n"
+        f"- ALL interpretations MUST remain within the biological context of {tissue} responding to {treatment}.\n"
+        f"- Do NOT discuss biological processes, pathways, or disease contexts that are biologically distant from this experimental system.\n"
+        f"- For example, if the study is about osteocyte signaling, do NOT extensively discuss neuronal signaling, immune cell-specific pathways, or cancer biology unless directly relevant to the observed PTM changes.\n"
+        f"- Every paragraph must logically connect back to: How does {treatment} affect {ptm_type_label} in {tissue}?\n"
+        f"- Limit your interpretation to: (1) the experimental data (TSV/MD files), (2) ChromaDB literature, and (3) PubMed references provided below.\n"
+        f"- Do NOT fabricate connections to unrelated biological systems.\n"
+    )
 
     combined_lit = lit_context + pubmed_context
 
@@ -335,6 +366,7 @@ def _build_section_prompt(
                 )
 
         return f"""Write an Abstract (~300-400 words) for this PTM analysis report.
+{analysis_context_block}
 {single_tp_directive}
 Experimental System: {tissue}, {treatment}{bio_focus_line}
 Research Questions:
@@ -394,6 +426,7 @@ INSTRUCTIONS:
             )
 
         return f"""Write a comprehensive Introduction section (~1500-2500 words) for this PTM analysis report.
+{analysis_context_block}
 {single_tp_directive}
 Experimental System: {tissue}, {treatment}{bio_focus_line}
 Research Questions:
@@ -472,6 +505,7 @@ IMPORTANT: Write a thorough, detailed introduction. The ChromaDB collection refe
             )
 
         return f"""Write a detailed Results section (MINIMUM 1500 words, target 3000-5000 words) for this PTM analysis report.
+{analysis_context_block}
 {single_tp_directive}
 {treatment_emphasis}
 Research Findings:
@@ -540,6 +574,7 @@ IMPORTANT: Be thorough and detailed. Discuss each significant PTM site individua
             )
 
         return f"""Write a comprehensive Discussion section (MINIMUM 1500 words, target 2000-3000 words) for this PTM analysis report.
+{analysis_context_block}
 {single_tp_directive}
 {treatment_emphasis_disc}
 Results Summary:
@@ -571,6 +606,7 @@ IMPORTANT: For each discussion point, provide evidence from your data AND from t
         discussion_text = prev_sections.get("discussion", "")[:2000]
 
         return f"""Write a Conclusion section (MINIMUM 500 words, target 600-1000 words) for this PTM analysis report.
+{analysis_context_block}
 {single_tp_directive}
 Research Questions:
 {questions_str}
@@ -683,7 +719,7 @@ IMPORTANT: Be SPECIFIC — name actual antibodies, inhibitors, cell lines, and e
         abstract = prev_sections.get("abstract", "")[:600]
         conclusion = prev_sections.get("conclusion", "")[:400]
         return f"""Generate a concise, specific academic paper title for this PTM analysis report.
-
+{analysis_context_block}
 Experimental System: {tissue}, {treatment}{bio_focus_line}
 Research Questions:
 {questions_str}
@@ -695,10 +731,11 @@ Conclusion Summary: {conclusion}
 
 INSTRUCTIONS:
 - Output ONLY the title text, nothing else. No quotes, no "Title:" prefix, no explanation.
-- The title should be specific to the experimental system, treatment, and key findings.
+- The title should be BROAD enough to encompass ALL major findings in the report (temporal dynamics, transient burst, sustained changes, pathway analysis, network interactions).
+- Do NOT make the title too narrow (e.g., focusing only on one pathway or one PTM site).
 - Follow academic paper title conventions (e.g., "Comprehensive Phosphoproteomic Analysis Reveals ...").
-- Include the PTM type ({ptm_type_label}), the experimental system ({tissue}), and the treatment ({treatment}) if relevant.
-- The title should reflect the overall narrative and key discoveries of the report.
+- Include the PTM type ({ptm_type_label}), the experimental system ({tissue}), and the treatment ({treatment}).
+- The title should reflect the overall narrative: temporal {ptm_type_label} dynamics in {tissue} in response to {treatment}.
 - Keep it under 25 words."""
 
     return f"Write the {section_type} section for a PTM analysis report.\n{single_tp_directive}{ptm_summary}"
