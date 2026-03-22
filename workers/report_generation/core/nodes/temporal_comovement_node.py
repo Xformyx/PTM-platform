@@ -471,7 +471,14 @@ def _build_singleton(meta: dict, values: np.ndarray, timepoints: list) -> dict:
 def _annotate_clusters(
     clusters: list, enriched_data: list, pathway_candidates: list
 ) -> list:
-    """Annotate each cluster with shared biological features."""
+    """Annotate each cluster with shared biological features.
+
+    v8.10: Enhanced with per-gene 3-Layer pathway mapping from enriched_ptm_data.
+    Each gene's KEGG + Reactome + STRING indirect pathways are collected and
+    cross-referenced within the cluster to find shared pathways that explain
+    WHY these proteins co-move (i.e., they participate in the same signaling
+    pathways identified in Figure 1's 3-Layer enrichment).
+    """
     # Build gene → enrichment lookup
     gene_enrichment: Dict[str, dict] = {}
     for ed in enriched_data:
@@ -488,6 +495,21 @@ def _annotate_clusters(
         if pw_name and genes:
             pathway_genes[pw_name] = genes
 
+    # ── v8.10: Disease pathway filter (same as network_node / cascade_mediator) ──
+    _DISEASE_KEYWORDS = {
+        "infection", "virus", "viral", "carcinogenesis", "cancer",
+        "amoebiasis", "lupus", "leishmaniasis", "tuberculosis",
+        "malaria", "pertussis", "measles", "hepatitis", "influenza",
+        "herpes", "hiv", "htlv", "epstein-barr", "kaposi",
+        "shigellosis", "salmonella", "cholera", "diabetes",
+        "cardiomyopathy", "alzheimer", "parkinson", "huntington",
+        "prion", "asthma", "graft-versus-host",
+    }
+
+    def _is_disease_pathway(pw_name: str, pw_id: str = "") -> bool:
+        name_lower = pw_name.lower()
+        return pw_id.startswith("05") or any(kw in name_lower for kw in _DISEASE_KEYWORDS)
+
     for cluster in clusters:
         cluster_genes = set()
         for md in cluster["member_details"]:
@@ -500,9 +522,87 @@ def _annotate_clusters(
             "shared_complexes": [],
             "shared_locations": [],
             "functional_categories": [],
+            "per_gene_pathways": {},       # v8.10: gene → [pathway names]
+            "per_gene_shared_pathways": [], # v8.10: pathways shared by 2+ genes via per-gene data
         }
 
-        # --- Pathway enrichment ---
+        # --- v8.10: Per-gene 3-Layer pathway collection ---
+        # Collect ALL pathways for each gene from enriched_ptm_data
+        # (KEGG + Reactome + STRING indirect = same data that feeds Figure 1)
+        per_gene_pw: Dict[str, set] = {}  # gene → set of pathway names
+        for gene in cluster_genes:
+            ed = gene_enrichment.get(gene, {})
+            enr = ed.get("rag_enrichment", {})
+            if not enr or not isinstance(enr, dict):
+                continue
+
+            gene_pws: set = set()
+
+            # Layer 1: KEGG pathways
+            for pw in enr.get("pathways", []):
+                if isinstance(pw, dict):
+                    pw_name = pw.get("name", "")
+                    pw_id = pw.get("id", "")
+                elif isinstance(pw, str):
+                    pw_name = pw
+                    pw_id = ""
+                else:
+                    continue
+                if pw_name and not _is_disease_pathway(pw_name, pw_id):
+                    # Normalize: remove species suffix
+                    pw_clean = re.sub(r'\s*-\s*(Mus musculus|Homo sapiens|Rattus norvegicus).*$', '', pw_name).strip()
+                    gene_pws.add(pw_clean)
+
+            # Layer 1b: Reactome signaling pathways
+            reactome = enr.get("reactome", {})
+            if isinstance(reactome, dict):
+                for rpw in reactome.get("signaling_pathways", []):
+                    rpw_name = rpw.get("name", "") if isinstance(rpw, dict) else str(rpw)
+                    if rpw_name and not _is_disease_pathway(rpw_name):
+                        gene_pws.add(rpw_name)
+
+            # Layer 3: STRING indirect inferred pathways
+            string_ind = enr.get("string_indirect", {})
+            if isinstance(string_ind, dict):
+                for spw in string_ind.get("signaling_pathways", []):
+                    spw_name = spw.get("name", "") if isinstance(spw, dict) else str(spw)
+                    if spw_name and not _is_disease_pathway(spw_name):
+                        gene_pws.add(spw_name)
+
+            if gene_pws:
+                per_gene_pw[gene] = gene_pws
+
+        annotations["per_gene_pathways"] = {
+            g: sorted(pws) for g, pws in per_gene_pw.items()
+        }
+
+        # v8.10: Find pathways shared by 2+ cluster members via per-gene data
+        pw_to_genes: Dict[str, set] = defaultdict(set)
+        for gene, pws in per_gene_pw.items():
+            for pw in pws:
+                pw_to_genes[pw].add(gene)
+
+        per_gene_shared = []
+        for pw_name, pw_members in pw_to_genes.items():
+            if len(pw_members) >= 2:
+                per_gene_shared.append({
+                    "name": pw_name,
+                    "members": sorted(pw_members),
+                    "overlap_count": len(pw_members),
+                    "total_cluster": len(cluster_genes),
+                    "source": "per_gene_3layer",
+                })
+        per_gene_shared.sort(key=lambda x: x["overlap_count"], reverse=True)
+        annotations["per_gene_shared_pathways"] = per_gene_shared[:15]
+
+        logger.info(
+            f"[ANNOTATE] Cluster {cluster['cluster_id']}: "
+            f"{len(cluster_genes)} genes, "
+            f"{len(per_gene_pw)} genes with pathway data, "
+            f"{len(per_gene_shared)} shared pathways via per-gene 3-Layer"
+        )
+
+        # --- Pathway enrichment (original: from pathway_candidates) ---
         for pw_name, pw_genes in pathway_genes.items():
             overlap = cluster_genes & pw_genes
             if len(overlap) >= 2:
@@ -512,6 +612,17 @@ def _annotate_clusters(
                     "overlap_count": len(overlap),
                     "total_cluster": len(cluster_genes),
                 })
+        annotations["shared_pathways"].sort(
+            key=lambda x: x["overlap_count"], reverse=True
+        )
+
+        # v8.10: Merge per_gene_shared into shared_pathways if not already present
+        existing_pw_names = {pw["name"].lower() for pw in annotations["shared_pathways"]}
+        for pgpw in per_gene_shared:
+            if pgpw["name"].lower() not in existing_pw_names:
+                annotations["shared_pathways"].append(pgpw)
+                existing_pw_names.add(pgpw["name"].lower())
+        # Re-sort after merge
         annotations["shared_pathways"].sort(
             key=lambda x: x["overlap_count"], reverse=True
         )
@@ -527,7 +638,15 @@ def _annotate_clusters(
             enr = ed.get("rag_enrichment", ed)
 
             # GO terms
-            for go in enr.get("go_terms", enr.get("biological_process", [])):
+            go_terms_data = enr.get("go_terms", {})
+            if isinstance(go_terms_data, dict):
+                # v8.10: go_terms is a dict with biological_process, molecular_function, etc.
+                bp_terms = go_terms_data.get("biological_process", [])
+            elif isinstance(go_terms_data, list):
+                bp_terms = go_terms_data
+            else:
+                bp_terms = []
+            for go in bp_terms:
                 term = go if isinstance(go, str) else go.get("term", "")
                 if term:
                     go_term_counts[term].append(gene)
@@ -547,12 +666,13 @@ def _annotate_clusters(
                     kinase_counts[kname].append(gene)
 
             # Subcellular location
-            loc = enr.get("subcellular_location", "")
+            loc = enr.get("subcellular_location", enr.get("localization", ""))
             if isinstance(loc, list):
                 for l in loc:
-                    location_counts[l] += 1
+                    loc_str = l if isinstance(l, str) else str(l)
+                    location_counts[loc_str] += 1
             elif loc:
-                location_counts[loc] += 1
+                location_counts[str(loc)] += 1
 
             # Protein complex
             for cpx in enr.get("protein_complex", enr.get("complexes", [])):
@@ -596,12 +716,13 @@ def _annotate_clusters(
             ]
 
         # Build biological summary
+        # v8.10: Prioritize per-gene shared pathways (3-Layer data) for summary
         summary_parts = []
         if annotations["shared_pathways"]:
-            top_pw = annotations["shared_pathways"][0]
-            summary_parts.append(
-                f"{top_pw['name']} ({top_pw['overlap_count']}/{len(cluster_genes)} members)"
-            )
+            # Show top 3 shared pathways in summary
+            top_pws = annotations["shared_pathways"][:3]
+            pw_strs = [f"{pw['name']} ({pw['overlap_count']}/{len(cluster_genes)})" for pw in top_pws]
+            summary_parts.append("Pathways: " + ", ".join(pw_strs))
         if annotations["shared_kinases"]:
             top_k = annotations["shared_kinases"][0]
             summary_parts.append(
@@ -610,7 +731,7 @@ def _annotate_clusters(
         if annotations["shared_complexes"]:
             top_c = annotations["shared_complexes"][0]
             summary_parts.append(f"Complex: {top_c['name']}")
-        if annotations["shared_go_terms"]:
+        if not summary_parts and annotations["shared_go_terms"]:
             top_go = annotations["shared_go_terms"][0]
             summary_parts.append(top_go["term"])
 
@@ -1767,6 +1888,27 @@ def _build_comovement_llm_context(
         "   - Do NOT fabricate connections to unrelated biological systems "
         "(e.g., if studying osteocytes, do NOT extensively discuss neuronal "
         "or immune cell-specific pathways unless directly supported by data).\n"
+        "\n"
+        "10. CLUSTER \u2194 FIGURE 1 PATHWAY CONNECTION (CRITICAL \u2014 v8.10):\n"
+        "   - For EACH cluster (Figures 2-6), you are provided with:\n"
+        "     (a) Per-Gene Pathway Mapping: the pathways each cluster member\n"
+        "         participates in, from the same 3-Layer enrichment shown in Figure 1.\n"
+        "     (b) Shared Pathways Explaining Co-movement: pathways shared by 2+\n"
+        "         cluster members, which explain WHY they move together.\n"
+        "   - When discussing each cluster, you MUST:\n"
+        "     * Identify the shared pathways from the Per-Gene Pathway Mapping data\n"
+        "     * Explicitly state: 'These proteins co-move because they share\n"
+        "       membership in [pathway name(s)] (Figure 1), suggesting coordinated\n"
+        "       regulation within this signaling axis.'\n"
+        "     * If a cluster's shared pathways overlap with Figure 1's top pathways,\n"
+        "       reference Figure 1 explicitly to connect the two analyses.\n"
+        "   - This creates a coherent narrative arc: Figure 1 identifies the active\n"
+        "     pathways, and Figures 2-6 show HOW proteins within those pathways\n"
+        "     respond temporally as coordinated groups.\n"
+        "   - If a cluster has NO shared pathways from the 3-Layer data, state this\n"
+        "     honestly and discuss alternative explanations (e.g., novel interactions,\n"
+        "     shared upstream kinase, or physical proximity in a protein complex).\n"
+        "   - Do NOT invent pathway connections that are not in the provided data.\n"
     )
 
     return "\n".join(parts)
@@ -1831,6 +1973,29 @@ def _append_cluster_detail(
             parts.append("\nCluster Pathway Enrichment (Enrichr):")
             parts.extend(enrichr_parts)
 
+    # v8.10: Per-gene pathway mapping (for ALL clusters — explains WHY they co-move)
+    per_gene_pws = ann.get("per_gene_pathways", {})
+    if per_gene_pws:
+        parts.append("\nPer-Gene Pathway Mapping (from Figure 1 / 3-Layer Enrichment):")
+        parts.append("  (These are the pathways each cluster member participates in,")
+        parts.append("   as identified by the same 3-Layer enrichment shown in Figure 1)")
+        for gene, pws in sorted(per_gene_pws.items()):
+            pw_display = pws[:8] if isinstance(pws, list) else sorted(pws)[:8]
+            more = f" (+{len(pws)-8} more)" if len(pws) > 8 else ""
+            parts.append(f"  - {gene}: {', '.join(pw_display)}{more}")
+
+    # v8.10: Shared pathways across cluster members (from per-gene 3-Layer data)
+    per_gene_shared = ann.get("per_gene_shared_pathways", [])
+    if per_gene_shared:
+        parts.append("\nShared Pathways Explaining Co-movement (from 3-Layer Enrichment):")
+        parts.append("  (Pathways shared by 2+ cluster members — these explain")
+        parts.append("   why these proteins move together in the same temporal pattern)")
+        for pw in per_gene_shared[:8]:
+            parts.append(
+                f"  - {pw['name']} ({pw['overlap_count']}/{pw['total_cluster']} members: "
+                f"{', '.join(pw['members'][:8])})"
+            )
+
     if is_primary:
         # Full detail for burst clusters
         if ann.get("shared_pathways"):
@@ -1840,7 +2005,7 @@ def _append_cluster_detail(
                     f"  - {pw['name']} ({pw['overlap_count']}/{pw['total_cluster']} members: "
                     f"{', '.join(pw['members'][:8])})"
                 )
-            parts.append("Shared Pathways:\n" + "\n".join(pw_strs))
+            parts.append("Shared Pathways (from pathway_candidates):\n" + "\n".join(pw_strs))
 
         if ann.get("shared_kinases"):
             k_strs = []
@@ -1879,12 +2044,36 @@ def _append_cluster_detail(
                 f"  - {md['key']}: peak |Log2FC|={md['max_fc']:.1f} at {md['peak_tp']}"
             )
     else:
-        # Condensed for non-burst clusters
+        # v8.10: Enhanced non-burst cluster detail (was too condensed)
         if ann.get("shared_pathways"):
-            pw_names = [pw["name"] for pw in ann["shared_pathways"][:3]]
-            parts.append(f"Key Pathways: {', '.join(pw_names)}")
+            pw_strs = []
+            for pw in ann["shared_pathways"][:5]:
+                pw_strs.append(
+                    f"  - {pw['name']} ({pw['overlap_count']}/{pw['total_cluster']} members: "
+                    f"{', '.join(pw['members'][:6])})"
+                )
+            parts.append("Shared Pathways:\n" + "\n".join(pw_strs))
         if ann.get("shared_kinases"):
-            k_names = [k["kinase"] for k in ann["shared_kinases"][:3]]
-            parts.append(f"Predicted Kinases: {', '.join(k_names)}")
+            k_strs = []
+            for k in ann["shared_kinases"][:3]:
+                k_strs.append(
+                    f"  - {k['kinase']} \u2192 {', '.join(k['substrates'][:6])}"
+                )
+            parts.append("Predicted Kinases:\n" + "\n".join(k_strs))
+        if ann.get("shared_go_terms"):
+            go_strs = [f"  - {g['term']} ({g['count']} members)"
+                       for g in ann["shared_go_terms"][:3]]
+            parts.append("Shared GO Terms:\n" + "\n".join(go_strs))
+
+        # Non-PTM interactor links (also useful for non-burst)
+        nonptm_links = cluster.get("nonptm_links", [])
+        if nonptm_links:
+            parts.append("Connected Non-PTM Interactors:")
+            for link in nonptm_links[:5]:
+                parts.append(
+                    f"  - {link['gene']} ({link['role']}): "
+                    f"r={link['correlation_with_cluster']:.2f}, "
+                    f"{link['response_pattern']}"
+                )
 
     parts.append("")

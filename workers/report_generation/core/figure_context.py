@@ -133,7 +133,7 @@ class FigureInformationGenerator:
         for cf in self.comovement_figures:
             cf_type = cf.get("type", "unknown")
             cf_caption = cf.get("caption", "Temporal Co-movement Analysis")
-            if cf_type == "heatmap":
+            if cf_type in ("heatmap", "supplementary_heatmap"):
                 fig_map["comovement_heatmap"] = {
                     "figure_number": main_fig_num,
                     "figure_label": f"Figure {main_fig_num}",
@@ -149,12 +149,27 @@ class FigureInformationGenerator:
                     "figure_type": "comovement_heatmap",
                 }
                 main_fig_num += 1
-            elif cf_type == "cluster_lineplot":
+            elif cf_type == "transient_burst_composite":
+                fig_map["comovement_burst"] = {
+                    "figure_number": main_fig_num,
+                    "figure_label": f"Figure {main_fig_num}",
+                    "display_name": f"Transient Phosphorylation Burst Dynamics",
+                    "description": (
+                        f"{cf_caption} "
+                        "Panel (a) shows individual PTM time-series profiles colored by cluster membership "
+                        "with cluster mean (bold). Panel (b) shows peak amplitude profiles. "
+                        "Panel (c) shows cluster mean temporal envelope showing activation-recovery kinetics."
+                    ),
+                    "panel_index": 0,
+                    "figure_type": "comovement_burst",
+                }
+                main_fig_num += 1
+            elif cf_type in ("cluster_lineplot", "cluster_detail", "supplementary_cluster"):
                 cluster_id = cf.get("cluster_id", "")
                 fig_map[f"comovement_cluster_{cluster_id}"] = {
                     "figure_number": main_fig_num,
                     "figure_label": f"Figure {main_fig_num}",
-                    "display_name": f"Temporal Profile — {cf_caption}",
+                    "display_name": f"Temporal Profile \u2014 {cf_caption}",
                     "description": (
                         f"Line plot showing the temporal Log2FC profiles of PTM sites in {cf_caption}. "
                         "Solid lines represent PTM proteins; dashed lines represent linked Non-PTM interactors. "
