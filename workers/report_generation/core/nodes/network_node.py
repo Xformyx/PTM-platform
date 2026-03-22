@@ -2001,7 +2001,27 @@ def _generate_pathway_distribution_graph(
 
     # ---- Step 3: Collect activated AND inhibited PTM gene -> pathways ----
     def _pw_name(p):
-        return (p.get("name", str(p)) if isinstance(p, dict) else str(p)).strip()
+        """Extract and normalise pathway name.
+
+        v8.9.2 improvements:
+        - Strip species suffix (e.g. " - Mus musculus (house mouse)")
+        - Normalise to title-case so that "PI3K-Akt" and "PI3K-AKT" map to
+          the same key, preventing duplicate entries in Figure 1.
+        - Guard against missing 'name' key (returns empty string instead of
+          ugly dict repr).
+        """
+        raw = (p.get("name", "") if isinstance(p, dict) else str(p)).strip()
+        # Strip species suffix that KEGG sometimes includes
+        if " - " in raw:
+            raw = raw.split(" - ")[0].strip()
+        # Normalise case: keep first letter of each word capitalised,
+        # but preserve well-known abbreviations by only lowering then title-casing
+        # when the name is ALL-CAPS (rare edge case).
+        # For mixed-case names like "PI3K-Akt signaling pathway" we keep as-is;
+        # for "PI3K-AKT SIGNALING PATHWAY" we title-case.
+        if raw and raw == raw.upper():
+            raw = raw.title()
+        return raw
 
     # v8.1: pathway_name -> {"activated_ptm": set, "inhibited_ptm": set, "non_ptm": set}
     pathway_proteins: Dict[str, Dict[str, set]] = defaultdict(

@@ -79,9 +79,15 @@ async def _fetch_kegg_info(
             if not pathway_ids:
                 return empty
 
-            # Step 3: Get pathway names and descriptions (top 5)
+            # Step 3: Get pathway names and descriptions
+            # v8.9.2: Expanded from top-5 to top-15 to capture broader pathway
+            # coverage. Many signaling genes (e.g. AKT1) belong to 15+ KEGG
+            # pathways; the previous limit of 5 caused systematic under-
+            # representation of important pathways like Insulin signaling,
+            # Chemokine signaling, etc. in Figure 1.
+            MAX_PATHWAYS_PER_GENE = 15
             pathways = []
-            for pid in pathway_ids[:5]:
+            for pid in pathway_ids[:MAX_PATHWAYS_PER_GENE]:
                 resp3 = await client.get(f"{BASE_URL}/get/{pid}")
                 if resp3.status_code == 200:
                     name = ""
@@ -97,7 +103,9 @@ async def _fetch_kegg_info(
                         if description:
                             pw_entry["description"] = description
                         pathways.append(pw_entry)
-                await asyncio.sleep(0.05)
+                # Rate-limit: slightly longer sleep to respect KEGG API limits
+                # with the increased pathway count
+                await asyncio.sleep(0.08)
 
             return {
                 "gene_name": gene_name,
