@@ -454,10 +454,27 @@ def format_citations(state: ReportState) -> dict:
         logger.info(f"[FORMAT-CIT] Collected {len(comovement_supp_items)} co-movement supplementary figures")
 
     # Network supplementary (cascade diagrams, cytoscape networks)
+    # Re-number network supplementary figures to continue after comovement supp
     if network_supp_section:
+        import re as _re_supp
+        comovement_supp_count = len(comovement_supp_items) if comovement_supp_items else 0
+        if comovement_supp_count > 0:
+            # Offset all "Supplementary Figure N" in network_supp_section
+            def _renumber_supp(match):
+                old_num = match.group(1)
+                # Handle panel suffixes like "1A", "1B"
+                num_part = ''.join(c for c in old_num if c.isdigit())
+                suffix = ''.join(c for c in old_num if not c.isdigit())
+                new_num = int(num_part) + comovement_supp_count
+                return f"Supplementary Figure {new_num}{suffix}"
+            network_supp_section = _re_supp.sub(
+                r'Supplementary Figure (\d+[A-Z]?)',
+                _renumber_supp,
+                network_supp_section
+            )
         supp_combined += network_supp_section
         has_supp = True
-        logger.info(f"[FORMAT-CIT] Collected network supplementary section ({len(network_supp_section)} chars)")
+        logger.info(f"[FORMAT-CIT] Collected network supplementary section ({len(network_supp_section)} chars), offset by {comovement_supp_count}")
 
     if has_supp:
         processed += supp_combined

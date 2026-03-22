@@ -1479,10 +1479,11 @@ def _build_comovement_llm_context(
     # v8.5: Assign figure numbers — Fig 1=Pathway (from network_node), Fig 2=Burst, Fig 3+=Clusters
     fig_burst = 2  # Transient burst composite
     fig_cluster_start = 3  # Individual cluster plots start here
-    # Assign figure numbers to clusters in order: burst first, then others
-    all_ordered = burst_clusters + other_clusters
+    # Assign figure numbers: burst clusters → Fig 2 (composite), non-burst → Fig 3, 4, 5...
     cluster_fig_map = {}  # cluster_id -> figure number
-    for i, c in enumerate(all_ordered):
+    for c in burst_clusters:
+        cluster_fig_map[c["cluster_id"]] = fig_burst  # All burst clusters share Fig 2
+    for i, c in enumerate(other_clusters):
         cluster_fig_map[c["cluster_id"]] = fig_cluster_start + i
 
     parts = [
