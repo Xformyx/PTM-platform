@@ -12,8 +12,21 @@ cd "$REPO_ROOT"
 VERSION_FILE="$REPO_ROOT/VERSION"
 LAST_DEV_BUILD="$REPO_ROOT/.last-dev-build"
 
-# 수정된 컴포넌트 감지: 마지막 빌드 이후 실제로 변경된 파일만
-# (.last-dev-build 보다 mtime이 최신인 파일이 있는 디렉터리)
+# 제외할 경로 (node_modules, __pycache__ 등은 소스 변경 아님)
+FIND_EXCLUDE=(
+  -not -path "*/node_modules/*"
+  -not -path "*/__pycache__/*"
+  -not -path "*/.git/*"
+  -not -path "*/dist/*"
+  -not -path "*/build/*"
+  -not -path "*/.next/*"
+  -not -path "*/.venv/*"
+  -not -path "*/venv/*"
+  -not -name "*.pyc"
+)
+
+# 수정된 컴포넌트 감지: 마지막 빌드 이후 실제로 변경된 소스 파일만
+# (node_modules, __pycache__ 등 제외 — npm install/실행 시 불필요 빌드 방지)
 get_changed_components() {
   local result=()
   local marker="$LAST_DEV_BUILD"
@@ -23,8 +36,7 @@ get_changed_components() {
     if [[ ! -f "$marker" ]]; then
       result+=("$dir")
     else
-      # 해당 디렉터리에 marker보다 최신인 파일이 있으면 변경됨
-      if find "$REPO_ROOT/$dir" -type f -newer "$marker" 2>/dev/null | grep -q .; then
+      if find "$REPO_ROOT/$dir" -type f -newer "$marker" "${FIND_EXCLUDE[@]}" 2>/dev/null | grep -q .; then
         result+=("$dir")
       fi
     fi
