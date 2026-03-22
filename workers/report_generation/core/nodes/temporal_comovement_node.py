@@ -38,6 +38,8 @@ import matplotlib.gridspec as gridspec
 from matplotlib.lines import Line2D
 from scipy.cluster.hierarchy import linkage, fcluster
 from scipy.spatial.distance import squareform
+from scipy.interpolate import make_interp_spline
+from scipy.ndimage import gaussian_filter1d
 
 from common.temporal_utils import tp_to_minutes
 
@@ -778,7 +780,7 @@ def _generate_comovement_figures(
                         f"{', '.join(sorted(peak_tps))}. "
                         f"(a) Individual PTM time-series profiles colored by cluster membership "
                         f"with cluster mean (bold). "
-                        f"(b) Peak Log2FC amplitude ranked by magnitude. "
+                        f"(b) HPLC-style peak chromatogram showing Log2FC amplitude ranked by magnitude. "
                         f"(c) Cluster mean temporal envelope showing activation-recovery kinetics."
                     ),
                     "type": "transient_burst_composite",
@@ -804,8 +806,11 @@ def _generate_comovement_figures(
     except Exception as e:
         logger.warning(f"Heatmap generation failed: {e}")
 
-    # ── Per-cluster line plots (non-burst clusters only, burst already in Fig 1) ──
-    for cluster in other_clusters[:4]:
+    # ── Per-cluster line plots (ALL clusters for Fig 3-6+) ──
+    # v8.5: Generate individual plots for ALL clusters (burst + non-burst)
+    # Order: burst clusters first, then other clusters
+    all_ordered_clusters = burst_clusters + other_clusters
+    for cluster in all_ordered_clusters:
         try:
             cluster_path = _generate_cluster_lineplot(
                 cluster, timepoints, output_dir
@@ -987,29 +992,49 @@ def _generate_transient_burst_figure(
     )
 
     # ══════════════════════════════════════════════════════════════════════
-    # Panel (b): Peak amplitude bar chart
+    # Panel (b): HPLC-style Peak Amplitude Chromatogram
     # ══════════════════════════════════════════════════════════════════════
     # Sort all members by peak |Log2FC| descending
     sorted_members = sorted(all_members, key=lambda m: m[0]["max_fc"], reverse=True)
-    top_n = min(20, len(sorted_members))  # Show top 20
+    top_n = min(15, len(sorted_members))
     top_members = sorted_members[:top_n]
 
-    bar_labels = [m[0]["key"] for m in top_members]
-    bar_vals = [m[0]["max_fc"] for m in top_members]
-    bar_colors = [_NATURE_COLORS[m[1] % len(_NATURE_COLORS)] for m in top_members]
+    # Build HPLC-style chromatogram: each PTM is a Gaussian peak
+    # X-axis = retention-like index, Y-axis = peak height (|Log2FC|)
+    n_points = 500
+    x_chrom = np.linspace(0, top_n + 1, n_points)
+    y_baseline = np.zeros(n_points)
 
-    y_pos = list(range(top_n))
-    ax_b.barh(
-        y_pos, bar_vals, color=bar_colors, edgecolor="white",
-        linewidth=0.3, height=0.7, alpha=0.85,
-    )
-    ax_b.set_yticks(y_pos)
-    ax_b.set_yticklabels(bar_labels, fontsize=7)
-    ax_b.invert_yaxis()
-    ax_b.set_xlabel("Peak |Log\u2082FC|")
+    peak_positions = []  # for annotation
+    for pi, (md, ci, cid) in enumerate(top_members):
+        center = pi + 1.0  # peak center position
+        sigma = 0.22  # peak width (narrow like HPLC)
+        height = md["max_fc"]
+        # Gaussian peak
+        peak = height * np.exp(-0.5 * ((x_chrom - center) / sigma) ** 2)
+        color = _NATURE_COLORS[ci % len(_NATURE_COLORS)]
+
+        # Fill under curve (HPLC style)
+        ax_b.fill_between(x_chrom, y_baseline, peak, alpha=0.35, color=color, linewidth=0)
+        ax_b.plot(x_chrom, peak, color=color, linewidth=0.8, alpha=0.9)
+        peak_positions.append((center, height, md["key"], color))
+
+    # Annotate peak labels
+    for center, height, label, color in peak_positions:
+        ax_b.annotate(
+            label, xy=(center, height), xytext=(center, height + 0.3),
+            fontsize=5.5, ha="center", va="bottom", rotation=55,
+            color="#333333",
+        )
+
+    ax_b.set_xlim(0, top_n + 1)
+    ax_b.set_ylim(0, None)
+    ax_b.set_xlabel("PTM Sites (ranked)")
+    ax_b.set_ylabel("Peak |Log\u2082FC|")
+    ax_b.set_xticks([])  # No x-ticks (like HPLC)
     ax_b.spines["top"].set_visible(False)
     ax_b.spines["right"].set_visible(False)
-    ax_b.grid(axis="x", alpha=0.15, linewidth=0.3)
+    ax_b.grid(axis="y", alpha=0.15, linewidth=0.3)
 
     ax_b.text(
         -0.08, 1.05, "b", transform=ax_b.transAxes,
@@ -1316,11 +1341,20 @@ def _build_comovement_llm_context(
     other_clusters = [c for c in clusters if c["pattern"] not in
                       ("transient_burst", "transient_suppression")]
 
+    # v8.5: Assign figure numbers — Fig 1=Pathway (from network_node), Fig 2=Burst, Fig 3+=Clusters
+    fig_burst = 2  # Transient burst composite
+    fig_cluster_start = 3  # Individual cluster plots start here
+    # Assign figure numbers to clusters in order: burst first, then others
+    all_ordered = burst_clusters + other_clusters
+    cluster_fig_map = {}  # cluster_id -> figure number
+    for i, c in enumerate(all_ordered):
+        cluster_fig_map[c["cluster_id"]] = fig_cluster_start + i
+
     parts = [
         "\n## TEMPORAL PTM CO-MOVEMENT ANALYSIS\n",
         "Correlation-based hierarchical clustering of PTM Log2FC time-series "
         "vectors identified the following co-movement clusters. Transient burst "
-        "clusters are the primary focus of this analysis (Figure 1).\n",
+        f"clusters are the primary focus of this analysis (Figure {fig_burst}).\n",
     ]
 
     # ── PRIMARY FOCUS: Transient Burst Clusters (detailed) ──
@@ -1329,22 +1363,24 @@ def _build_comovement_llm_context(
         parts.append(
             f"{len(burst_clusters)} cluster(s) exhibited transient burst dynamics "
             f"(rapid activation followed by return to baseline). These are shown "
-            f"in Figure 1 of the report.\n"
+            f"in Figure {fig_burst} of the report.\n"
         )
 
     for cluster in burst_clusters:
-        _append_cluster_detail(parts, cluster, timepoints, is_primary=True)
+        cfig = cluster_fig_map.get(cluster["cluster_id"], "?")
+        _append_cluster_detail(parts, cluster, timepoints, is_primary=True, figure_num=cfig)
 
-    # ── SECONDARY: Other pattern clusters (condensed) ──
+    # ── SECONDARY: Other pattern clusters (with individual figures) ──
     if other_clusters:
-        parts.append("\n### Other Co-movement Patterns (summary)")
+        parts.append("\n### Other Co-movement Patterns")
         parts.append(
             f"{len(other_clusters)} additional cluster(s) with non-burst patterns "
-            f"were detected. These provide context for the broader signaling landscape.\n"
+            f"were detected. Each cluster has its own figure for detailed inspection.\n"
         )
 
     for cluster in other_clusters:
-        _append_cluster_detail(parts, cluster, timepoints, is_primary=False)
+        cfig = cluster_fig_map.get(cluster["cluster_id"], "?")
+        _append_cluster_detail(parts, cluster, timepoints, is_primary=False, figure_num=cfig)
 
     # ── Notable singletons ──
     notable_singletons = [s for s in singletons if s["max_fc"] >= 3.0]
@@ -1371,7 +1407,7 @@ def _build_comovement_llm_context(
         "   - Dedicate at least 2-3 paragraphs to interpreting the burst dynamics: "
         "what triggers the rapid phosphorylation, which kinases are likely responsible, "
         "and why the signal returns to baseline (phosphatase activity, negative feedback).\n"
-        "   - Reference Figure 1 explicitly when discussing burst clusters.\n"
+        f"   - Reference Figure {fig_burst} explicitly when discussing burst clusters.\n"
         "   - Name specific PTM proteins from the burst clusters and discuss their "
         "known biological roles in the context of the treatment.\n"
         "\n"
@@ -1384,13 +1420,22 @@ def _build_comovement_llm_context(
         "insights from other analyses (network topology, validated hypotheses).\n"
         "   - The Abstract MUST mention the transient burst finding as a key result.\n"
         "\n"
-        "3. SECONDARY PATTERNS:\n"
-        "   - Briefly mention sustained activation/inhibition and other patterns "
-        "for completeness, but keep them concise (1-2 sentences each).\n"
+        "3. FIGURE-TEXT COHERENCE (CRITICAL):\n"
+        "   - Figure 1 = Canonical Pathway Distribution (from network analysis).\n"
+        f"   - Figure {fig_burst} = Transient Burst Composite (panels a, b, c).\n"
+        f"   - Figures {fig_cluster_start}-{fig_cluster_start + len(all_ordered) - 1} = "
+        "Individual cluster time-series plots.\n"
+        "   - Cascade diagrams and Cytoscape networks are in Supplementary Figures.\n"
+        "   - When discussing each cluster, ALWAYS reference its specific Figure number.\n"
+        "   - The text MUST describe what is shown in each figure; do NOT introduce "
+        "figures without discussing their content in the text.\n"
+        "\n"
+        "4. SECONDARY PATTERNS:\n"
+        "   - Each non-burst cluster gets 1-2 sentences with its Figure reference.\n"
         "   - Use them primarily as contrast to highlight the significance of "
         "the transient burst response.\n"
         "\n"
-        "4. BIOLOGICAL INTERPRETATION SCOPE:\n"
+        "5. BIOLOGICAL INTERPRETATION SCOPE:\n"
         "   - Base all interpretations on the provided experimental data and "
         "ChromaDB literature references ONLY.\n"
         "   - Do NOT introduce external knowledge beyond what is provided.\n"
@@ -1400,13 +1445,15 @@ def _build_comovement_llm_context(
 
 
 def _append_cluster_detail(
-    parts: list, cluster: dict, timepoints: list, is_primary: bool
+    parts: list, cluster: dict, timepoints: list, is_primary: bool,
+    figure_num: int | str = "?"
 ) -> None:
     """Append cluster detail to LLM context parts.
 
     Args:
         is_primary: If True, include full detail (burst clusters).
                     If False, include condensed summary.
+        figure_num: The Figure number assigned to this cluster's plot.
     """
     cid = cluster["cluster_id"]
     pattern = _pattern_display_name(cluster["pattern"])
@@ -1414,7 +1461,7 @@ def _append_cluster_detail(
     ann = cluster.get("annotations", {})
     bio_summary = ann.get("biological_summary", "No shared annotations found")
 
-    parts.append(f"\n#### Cluster {cid}: {pattern} ({len(members)} members)")
+    parts.append(f"\n#### Cluster {cid}: {pattern} ({len(members)} members) [Figure {figure_num}]")
     parts.append(
         f"Members: {', '.join(members[:20])}"
         + (f" ... (+{len(members)-20} more)" if len(members) > 20 else "")

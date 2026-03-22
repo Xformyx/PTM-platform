@@ -3185,15 +3185,15 @@ def image_to_base64(image_path: str) -> Optional[str]:
 # Network figure section for report (guide §6.1)
 # ---------------------------------------------------------------------------
 
-def generate_network_figure_section(network_analysis: dict) -> str:
+def generate_network_figure_section(network_analysis: dict, supplementary_start: int = 1) -> str:
     """Generate Markdown section with embedded network figures and legends.
-    
-    GAP 1/4: Now generates per-timepoint figure panels with individual legends.
-    Creates Base64-embedded images in Markdown for each network image,
-    with detailed figure legends including node/edge statistics.
-    
-    Phase 4: Includes isolated node table when applicable.
-    Phase 5: Includes validation summary.
+
+    v8.5: Fig 1 = Canonical Pathway Distribution (main figure).
+    Cascade diagrams and Cytoscape networks are now Supplementary Figures.
+
+    Args:
+        supplementary_start: Starting number for supplementary figures
+            (continues from co-movement heatmap supplementary numbering).
     """
     network_images = network_analysis.get("network_images", {})
     legends = network_analysis.get("legends", {})
@@ -3255,7 +3255,8 @@ def generate_network_figure_section(network_analysis: dict) -> str:
                 f"{et}: {cnt}" for et, cnt in sorted(edge_types.items(), key=lambda x: -x[1])
             ) + "\n\n"
 
-    figure_num = 1
+    figure_num = 1  # Fig 1 = Pathway Distribution
+    supp_num = supplementary_start  # Supplementary figure counter
     panel_labels = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
     # v5.0: Figure 1 = Canonical Pathway Distribution Bar Graph (replaces Combined Network)
@@ -3281,7 +3282,7 @@ def generate_network_figure_section(network_analysis: dict) -> str:
             figure_num += 1
             logger.info(f"[NET-SECTION] Pathway distribution graph inserted as Figure {figure_num - 1}")
 
-    # v6.1: Figure 2+ = Signaling Cascade Diagrams (per-condition or combined)
+    # v8.5: Cascade Diagrams → Supplementary Figures
     _cascade_legend_text = (
         "**Figure Legend:** This compartmentalized signaling cascade diagram depicts "
         "the signal transduction flow across cellular compartments (Extracellular Space, "
@@ -3302,7 +3303,7 @@ def generate_network_figure_section(network_analysis: dict) -> str:
     )
 
     if cascade_diagram_paths:
-        # Per-condition cascade diagrams (multi-condition mode)
+        # Per-condition cascade diagrams → Supplementary
         cascade_timepoints = network_analysis.get("timepoints", sorted(cascade_diagram_paths.keys()))
         for tp in cascade_timepoints:
             tp_path = cascade_diagram_paths.get(tp)
@@ -3311,33 +3312,32 @@ def generate_network_figure_section(network_analysis: dict) -> str:
             tp_path_obj = Path(tp_path)
             if tp_path_obj.exists() and tp_path_obj.stat().st_size > 1000:
                 tp_img_ref = tp_path_obj.name
-                # v7.0: Include pathway names in figure title if available
                 pw_names = cascade_pathway_names.get(tp, [])
                 pw_subtitle = f" ({', '.join(pw_names[:3])}{' ...' if len(pw_names) > 3 else ''})" if pw_names else ""
                 section += (
-                    f"### Figure {figure_num}. Signal Transduction Pathway Cascade Diagram "
+                    f"### Supplementary Figure {supp_num}. Signal Transduction Pathway Cascade Diagram "
                     f"\u2014 {tp}{pw_subtitle}\n\n"
                 )
                 section += f"![Signal Transduction Pathway Cascade Diagram \u2014 {tp}]({tp_img_ref})\n\n"
                 section += _cascade_legend_text + f" Data shown for condition: **{tp}**.\n\n"
                 section += "---\n\n"
-                logger.info(f"[NET-SECTION] Per-condition cascade diagram for '{tp}' inserted as Figure {figure_num}")
-                figure_num += 1
+                logger.info(f"[NET-SECTION] Per-condition cascade diagram for '{tp}' inserted as Supplementary Figure {supp_num}")
+                supp_num += 1
     elif cascade_diagram_path:
-        # Single combined cascade diagram (backward compatible)
+        # Single combined cascade diagram → Supplementary
         cascade_path_obj = Path(cascade_diagram_path)
         if cascade_path_obj.exists() and cascade_path_obj.stat().st_size > 1000:
             cascade_img_ref = cascade_path_obj.name
             pw_names = cascade_pathway_names.get("combined", [])
             pw_subtitle = f" ({', '.join(pw_names[:3])}{' ...' if len(pw_names) > 3 else ''})" if pw_names else ""
             section += (
-                f"### Figure {figure_num}. Signal Transduction Pathway Cascade Diagram{pw_subtitle}\n\n"
+                f"### Supplementary Figure {supp_num}. Signal Transduction Pathway Cascade Diagram{pw_subtitle}\n\n"
             )
             section += f"![Signal Transduction Pathway Cascade Diagram]({cascade_img_ref})\n\n"
             section += _cascade_legend_text + "\n\n"
             section += "---\n\n"
-            figure_num += 1
-            logger.info(f"[NET-SECTION] Signaling cascade diagram inserted as Figure {figure_num - 1}")
+            logger.info(f"[NET-SECTION] Signaling cascade diagram inserted as Supplementary Figure {supp_num}")
+            supp_num += 1
 
     # Sort images: skip "main" (replaced by pathway graph), include timepoints
     sorted_labels = []
@@ -3366,12 +3366,11 @@ def generate_network_figure_section(network_analysis: dict) -> str:
             img_ref = base64_img
             logger.info(f"[NET-SECTION] Fallback to base64: {'OK' if img_ref else 'FAILED'}")
 
-        # Figure title (guide §6.1) — v7.1: All Cytoscape panels share the same figure number
-        # e.g., Figure 10A, Figure 10B, Figure 10C (not Figure 10A, 11B, 12C)
+        # v8.5: Cytoscape panels → Supplementary Figures
         phase = _tp_to_phase(label)
         panel = panel_labels[idx] if idx < len(panel_labels) else str(idx + 1)
         display_label = f"PTM-NonPTM Integrated Network at {label} ({phase})"
-        fig_title = f"Figure {figure_num}{panel}. {display_label}"
+        fig_title = f"Supplementary Figure {supp_num}{panel}. {display_label}"
 
         if img_ref:
             section += f"### {fig_title}\n\n"
@@ -3429,9 +3428,9 @@ def generate_network_figure_section(network_analysis: dict) -> str:
         # v7.1: Do NOT increment figure_num here — all Cytoscape panels share
         # the same figure number with different panel letters (e.g., Figure 10A, 10B, 10C)
 
-    # After all Cytoscape panels, increment figure_num once for the next figure group
+    # After all Cytoscape panels, increment supp_num once for the next supplementary group
     if sorted_labels:
-        figure_num += 1
+        supp_num += 1
 
     # Temporal comparison legend (guide §5.1 row 3)
     if comparison_legend:
