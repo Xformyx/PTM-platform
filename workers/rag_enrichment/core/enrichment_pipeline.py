@@ -144,7 +144,7 @@ class RAGEnrichmentPipeline:
         for i, ptm in enumerate(ptm_data):
             gene = ptm.get("gene") or ptm.get("Gene.Name", "?")
             pos = ptm.get("position") or ptm.get("PTM_Position", "?")
-            self._progress(i / total, f"Enriching {gene} {pos}")
+            self._progress(i / total, f"Enriching {gene} {pos} ({i+1}/{total})")
 
             try:
                 result = self._enrich_single_ptm(ptm, context_keywords, experimental_context)
@@ -153,6 +153,29 @@ class RAGEnrichmentPipeline:
                 enr = result.get("rag_enrichment", {})
                 stats["total_articles"] += enr.get("search_summary", {}).get("total_articles", 0)
                 stats["total_pathways"] += len(enr.get("pathways", []))
+
+                # --- Progress callback with 3-Layer pathway detail ---
+                kc = len(enr.get("pathways", []))
+                rc = enr.get("reactome", {})
+                rc_sig = rc.get("signaling_count", 0) if rc else 0
+                rc_tot = rc.get("total_count", 0) if rc else 0
+                si = enr.get("string_indirect", {})
+                si_c = len(si.get("signaling_pathways", [])) if si else 0
+                pw_total = kc + rc_tot + si_c
+                # Build compact pathway summary for UI
+                pw_parts = []
+                if kc > 0:
+                    pw_parts.append(f"KEGG:{kc}")
+                if rc_tot > 0:
+                    pw_parts.append(f"Reactome:{rc_tot}({rc_sig}sig)")
+                if si_c > 0:
+                    pw_parts.append(f"STR-Indir:{si_c}")
+                pw_summary = ", ".join(pw_parts) if pw_parts else "no pathways"
+                art_count = enr.get("search_summary", {}).get("total_articles", 0)
+                self._progress(
+                    (i + 1) / total,
+                    f"[{i+1}/{total}] {gene} {pos}: {art_count} articles, {pw_total} pathways ({pw_summary})"
+                )
             except Exception as e:
                 logger.error(f"Enrichment FAILED for {gene}/{pos}: {e}", exc_info=True)
                 ptm_log2fc = ptm.get("ptm_relative_log2fc") or ptm.get("PTM_Relative_Log2FC", 0)
@@ -232,7 +255,13 @@ class RAGEnrichmentPipeline:
             f"Enrichment complete: {stats['success']} OK, {stats['failed']} failed, "
             f"total articles={stats['total_articles']}, total pathways={stats['total_pathways']}"
         )
-        self._progress(1.0, f"Enrichment complete: {len(enriched)} PTMs")
+        # --- Final 3-Layer summary via progress callback (visible in web UI) ---
+        self._progress(0.98,
+            f"3-Layer Summary: KEGG={layer_stats['kegg']}pw/{layer_stats['kegg_genes']}genes, "
+            f"Reactome={layer_stats['reactome']}pw({layer_stats['reactome_signaling']}sig)/{layer_stats['reactome_genes']}genes, "
+            f"STRING-Indirect={layer_stats['string_indirect']}pw/{layer_stats['string_indirect_genes']}genes"
+        )
+        self._progress(1.0, f"Enrichment complete: {len(enriched)} PTMs, {stats['total_articles']} articles, {stats['total_pathways']} KEGG pathways")
         return enriched
 
     def _enrich_single_ptm(
