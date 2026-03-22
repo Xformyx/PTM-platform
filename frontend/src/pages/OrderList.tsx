@@ -31,6 +31,19 @@ function fmtDate(iso: string | null | undefined): string {
   return fmt.format(d).replace(/\.\s*/g, ".").replace(/\.$/, "").replace(/(\d{4}\.\d{2}\.\d{2})\.(\d{2}:\d{2})/, "$1 $2");
 }
 
+/** Elapsed time from started_at to completed_at (or now if still running). Format: HH:MM */
+function fmtElapsed(order: Order): string {
+  const start = order.started_at ? new Date(order.started_at).getTime() : null;
+  if (!start) return "—";
+  const end = (order.status === "completed" || order.status === "failed" || order.status === "cancelled") && order.completed_at
+    ? new Date(order.completed_at).getTime()
+    : Date.now();
+  const ms = Math.max(0, end - start);
+  const h = Math.floor(ms / 3600000);
+  const m = Math.floor((ms % 3600000) / 60000);
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
 const statusBadgeVariant = (s: string) => {
   switch (s) {
     case "completed": return "success" as const;
@@ -187,15 +200,16 @@ export default function OrderList() {
           {filtered.length > 0 ? (
             <Table className="w-full table-fixed">
               <colgroup>
-                <col className="w-[14%]" />
-                <col className="w-[18%]" />
-                <col className="w-[10%]" />
-                <col className="w-[10%]" />
-                <col className="w-[10%]" />
-                <col className="w-[14%]" />
                 <col className="w-[12%]" />
+                <col className="w-[16%]" />
+                <col className="w-[9%]" />
+                <col className="w-[9%]" />
+                <col className="w-[9%]" />
                 <col className="w-[12%]" />
-                <col className="w-[10%]" />
+                <col className="w-[8%]" />
+                <col className="w-[11%]" />
+                <col className="w-[11%]" />
+                <col className="w-[9%]" />
               </colgroup>
               <TableHeader>
                 <TableRow>
@@ -205,6 +219,7 @@ export default function OrderList() {
                   <TableHead>Species</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Progress</TableHead>
+                  <TableHead>Elapsed</TableHead>
                   <TableHead
                     className="cursor-pointer select-none hover:bg-muted/50"
                     onClick={() => handleSort("created_at")}
@@ -259,6 +274,9 @@ export default function OrderList() {
                           {Math.round(order.progress_pct)}%
                         </span>
                       </div>
+                    </TableCell>
+                    <TableCell className="font-mono text-muted-foreground whitespace-nowrap">
+                      {fmtElapsed(order)}
                     </TableCell>
                     <TableCell
                       className="text-muted-foreground whitespace-nowrap"

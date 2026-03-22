@@ -146,6 +146,7 @@ async def list_orders(
                 "current_stage": o.current_stage,
                 "stage_detail": o.stage_detail,
                 "error_message": o.error_message,
+                "started_at": o.started_at.isoformat() + "Z" if o.started_at else None,
                 "created_at": o.created_at.isoformat() + "Z",
                 "completed_at": o.completed_at.isoformat() + "Z" if o.completed_at else None,
                 "created_by": created_by_name,
