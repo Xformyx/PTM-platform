@@ -335,6 +335,14 @@ def _build_section_prompt(
         f"- Every paragraph must logically connect back to: How does {treatment} affect {ptm_type_label} in {tissue}?\n"
         f"- Limit your interpretation to: (1) the experimental data (TSV/MD files), (2) ChromaDB literature, and (3) PubMed references provided below.\n"
         f"- Do NOT fabricate connections to unrelated biological systems.\n"
+        f"\n"
+        f"**NAMING RULE (MANDATORY):**\n"
+        f"- ALWAYS use the ACTUAL names: '{tissue}' for cell type, '{treatment}' for treatment.\n"
+        f"- NEVER use generic placeholders like 'the experimental system', 'the applied treatment', "
+        f"'the stimulus', 'the biological system', or 'the treatment condition'.\n"
+        f"- Every mention of the cell type or treatment MUST use the real name.\n"
+        f"- Example: Instead of 'the applied treatment induced phosphorylation', write "
+        f"'{treatment} induced phosphorylation in {tissue}'.\n"
     )
 
     combined_lit = lit_context + pubmed_context

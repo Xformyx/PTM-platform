@@ -962,40 +962,83 @@ def _generate_transient_burst_figure(
         ax_c = None
 
     # ══════════════════════════════════════════════════════════════════════
-    # Panel (a): Time-series profiles
+    # Panel (a): Time-series profiles — smooth spline, distinct colors per PTM
     # ══════════════════════════════════════════════════════════════════════
+    # Build a per-member color palette so each PTM is visually distinct
+    _MEMBER_COLORS = [
+        "#E64B35", "#4DBBD5", "#00A087", "#3C5488", "#F39B7F",
+        "#8491B4", "#91D1C2", "#DC9A6C", "#7E6148", "#B09C85",
+        "#E377C2", "#17BECF", "#BCBD22", "#9467BD", "#D62728",
+        "#FF7F0E", "#2CA02C", "#1F77B4", "#AEC7E8", "#FFBB78",
+    ]
+    x_arr = np.array(x, dtype=float)
+    # Smooth interpolation x-axis (200 points)
+    x_smooth = np.linspace(x_arr[0], x_arr[-1], 200) if len(x_arr) >= 4 else x_arr
+
+    global_member_idx = 0
     for ci, cluster in enumerate(burst_clusters):
-        color = _NATURE_COLORS[ci % len(_NATURE_COLORS)]
+        cluster_base_color = _NATURE_COLORS[ci % len(_NATURE_COLORS)]
         members = cluster["member_details"]
 
-        # Individual member lines (thin, semi-transparent)
+        # Individual member lines (thin, semi-transparent, distinct colors)
         for mi, md in enumerate(members):
-            vals = [md["temporal_values"].get(tp, 0) for tp in timepoints]
-            label = md["key"] if len(members) <= 12 else (md["key"] if mi < 5 else None)
-            ax_a.plot(
-                x, vals, marker="o", markersize=3, linewidth=0.8,
-                alpha=0.45, color=color, label=label,
-                markeredgewidth=0.3, markeredgecolor="white",
-            )
+            vals = np.array([md["temporal_values"].get(tp, 0) for tp in timepoints], dtype=float)
+            member_color = _MEMBER_COLORS[global_member_idx % len(_MEMBER_COLORS)]
+            global_member_idx += 1
+            label = md["key"] if len(all_members) <= 15 else (md["key"] if mi < 5 else None)
 
-        # Cluster mean (bold line)
-        mean_vals = np.array([cluster["mean_profile"].get(tp, 0) for tp in timepoints])
-        ax_a.plot(
-            x, mean_vals, marker="o", markersize=5, linewidth=2.2,
-            color=color, alpha=0.95, zorder=10,
-            label=f"Cluster {cluster['cluster_id']} Mean",
-            markeredgewidth=0.5, markeredgecolor="white",
-        )
+            # Smooth spline interpolation
+            if len(x_arr) >= 4:
+                try:
+                    spl = make_interp_spline(x_arr, vals, k=3)
+                    vals_smooth = spl(x_smooth)
+                    ax_a.plot(
+                        x_smooth, vals_smooth, linewidth=1.0,
+                        alpha=0.55, color=member_color, label=label,
+                    )
+                except Exception:
+                    ax_a.plot(x, vals, linewidth=1.0, alpha=0.55, color=member_color, label=label)
+            else:
+                ax_a.plot(x, vals, linewidth=1.0, alpha=0.55, color=member_color, label=label)
+            # Small markers at actual data points
+            ax_a.scatter(x, vals, s=12, color=member_color, alpha=0.6, zorder=5, edgecolors="white", linewidths=0.3)
 
-        # Shaded envelope (min-max range)
+        # Cluster mean (bold smooth line)
+        mean_vals = np.array([cluster["mean_profile"].get(tp, 0) for tp in timepoints], dtype=float)
+        if len(x_arr) >= 4:
+            try:
+                spl_mean = make_interp_spline(x_arr, mean_vals, k=3)
+                mean_smooth = spl_mean(x_smooth)
+                ax_a.plot(
+                    x_smooth, mean_smooth, linewidth=2.5,
+                    color=cluster_base_color, alpha=0.95, zorder=10,
+                    label=f"Cluster {cluster['cluster_id']} Mean",
+                )
+            except Exception:
+                ax_a.plot(x, mean_vals, linewidth=2.5, color=cluster_base_color, alpha=0.95, zorder=10,
+                          label=f"Cluster {cluster['cluster_id']} Mean")
+        else:
+            ax_a.plot(x, mean_vals, linewidth=2.5, color=cluster_base_color, alpha=0.95, zorder=10,
+                      label=f"Cluster {cluster['cluster_id']} Mean")
+        ax_a.scatter(x, mean_vals, s=25, color=cluster_base_color, alpha=0.95, zorder=11, edgecolors="white", linewidths=0.5)
+
+        # Shaded envelope (min-max range) — smooth
         all_vals = np.array([
             [md["temporal_values"].get(tp, 0) for tp in timepoints]
             for md in members
-        ])
+        ], dtype=float)
         if all_vals.shape[0] > 1:
             min_vals = np.min(all_vals, axis=0)
             max_vals = np.max(all_vals, axis=0)
-            ax_a.fill_between(x, min_vals, max_vals, alpha=0.12, color=color)
+            if len(x_arr) >= 4:
+                try:
+                    spl_min = make_interp_spline(x_arr, min_vals, k=3)
+                    spl_max = make_interp_spline(x_arr, max_vals, k=3)
+                    ax_a.fill_between(x_smooth, spl_min(x_smooth), spl_max(x_smooth), alpha=0.10, color=cluster_base_color)
+                except Exception:
+                    ax_a.fill_between(x, min_vals, max_vals, alpha=0.10, color=cluster_base_color)
+            else:
+                ax_a.fill_between(x, min_vals, max_vals, alpha=0.10, color=cluster_base_color)
 
     ax_a.axhline(y=0, color="#888888", linewidth=0.4, linestyle="-")
     ax_a.set_xticks(x)
@@ -1078,25 +1121,43 @@ def _generate_transient_burst_figure(
     if ax_c and has_panel_c:
         for ci, cluster in enumerate(burst_clusters):
             color = _NATURE_COLORS[ci % len(_NATURE_COLORS)]
-            mean_vals = np.array([cluster["mean_profile"].get(tp, 0) for tp in timepoints])
+            mean_vals = np.array([cluster["mean_profile"].get(tp, 0) for tp in timepoints], dtype=float)
             members = cluster["member_details"]
 
-            ax_c.plot(
-                x, mean_vals, marker="o", markersize=4, linewidth=1.8,
-                color=color, alpha=0.9,
-                label=f"C{cluster['cluster_id']} ({cluster['member_count']} sites)",
-                markeredgewidth=0.3, markeredgecolor="white",
-            )
+            # Smooth spline for mean
+            if len(x_arr) >= 4:
+                try:
+                    spl_c = make_interp_spline(x_arr, mean_vals, k=3)
+                    ax_c.plot(
+                        x_smooth, spl_c(x_smooth), linewidth=1.8,
+                        color=color, alpha=0.9,
+                        label=f"C{cluster['cluster_id']} ({cluster['member_count']} sites)",
+                    )
+                except Exception:
+                    ax_c.plot(x, mean_vals, linewidth=1.8, color=color, alpha=0.9,
+                              label=f"C{cluster['cluster_id']} ({cluster['member_count']} sites)")
+            else:
+                ax_c.plot(x, mean_vals, linewidth=1.8, color=color, alpha=0.9,
+                          label=f"C{cluster['cluster_id']} ({cluster['member_count']} sites)")
+            ax_c.scatter(x, mean_vals, s=18, color=color, alpha=0.9, zorder=5, edgecolors="white", linewidths=0.3)
 
-            # Envelope
+            # Envelope — smooth
             all_vals = np.array([
                 [md["temporal_values"].get(tp, 0) for tp in timepoints]
                 for md in members
-            ])
+            ], dtype=float)
             if all_vals.shape[0] > 1:
                 min_v = np.min(all_vals, axis=0)
                 max_v = np.max(all_vals, axis=0)
-                ax_c.fill_between(x, min_v, max_v, alpha=0.15, color=color)
+                if len(x_arr) >= 4:
+                    try:
+                        spl_min_c = make_interp_spline(x_arr, min_v, k=3)
+                        spl_max_c = make_interp_spline(x_arr, max_v, k=3)
+                        ax_c.fill_between(x_smooth, spl_min_c(x_smooth), spl_max_c(x_smooth), alpha=0.12, color=color)
+                    except Exception:
+                        ax_c.fill_between(x, min_v, max_v, alpha=0.12, color=color)
+                else:
+                    ax_c.fill_between(x, min_v, max_v, alpha=0.12, color=color)
 
         ax_c.axhline(y=0, color="#888888", linewidth=0.4, linestyle="-")
         ax_c.set_xticks(x)
@@ -1252,19 +1313,49 @@ def _generate_cluster_lineplot(
         ax_nonptm = None
 
     x = list(range(len(timepoints)))
+    x_arr = np.array(x, dtype=float)
+    # Smooth interpolation x-axis
+    x_smooth = np.linspace(x_arr[0], x_arr[-1], 200) if len(x_arr) >= 4 else x_arr
 
-    # ── PTM member lines ──
+    # Distinct color palette for individual PTM members
+    _MEMBER_COLORS = [
+        "#E64B35", "#4DBBD5", "#00A087", "#3C5488", "#F39B7F",
+        "#8491B4", "#91D1C2", "#DC9A6C", "#7E6148", "#B09C85",
+        "#E377C2", "#17BECF", "#BCBD22", "#9467BD", "#D62728",
+        "#FF7F0E", "#2CA02C", "#1F77B4", "#AEC7E8", "#FFBB78",
+    ]
+
+    # ── PTM member lines (smooth spline, distinct colors) ──
     for i, md in enumerate(members):
-        vals = [md["temporal_values"].get(tp, 0) for tp in timepoints]
-        color = CLUSTER_COLORS[0] if len(members) <= 3 else \
-                plt.cm.tab20(i / max(len(members) - 1, 1))
-        ax_ptm.plot(x, vals, marker="o", markersize=4, linewidth=1.2,
-                    alpha=0.7, color=color, label=md["key"])
+        vals = np.array([md["temporal_values"].get(tp, 0) for tp in timepoints], dtype=float)
+        color = _MEMBER_COLORS[i % len(_MEMBER_COLORS)]
 
-    # Cluster mean (thick dashed)
-    mean_vals = [cluster["mean_profile"].get(tp, 0) for tp in timepoints]
-    ax_ptm.plot(x, mean_vals, "--", linewidth=2.5, color="#333333",
-                alpha=0.8, label="Cluster Mean")
+        # Smooth spline interpolation
+        if len(x_arr) >= 4:
+            try:
+                spl = make_interp_spline(x_arr, vals, k=3)
+                vals_smooth = spl(x_smooth)
+                ax_ptm.plot(x_smooth, vals_smooth, linewidth=1.2,
+                            alpha=0.7, color=color, label=md["key"])
+            except Exception:
+                ax_ptm.plot(x, vals, linewidth=1.2, alpha=0.7, color=color, label=md["key"])
+        else:
+            ax_ptm.plot(x, vals, linewidth=1.2, alpha=0.7, color=color, label=md["key"])
+        # Small markers at actual data points
+        ax_ptm.scatter(x, vals, s=16, color=color, alpha=0.7, zorder=5, edgecolors="white", linewidths=0.3)
+
+    # Cluster mean (thick dashed, smooth)
+    mean_vals = np.array([cluster["mean_profile"].get(tp, 0) for tp in timepoints], dtype=float)
+    if len(x_arr) >= 4:
+        try:
+            spl_mean = make_interp_spline(x_arr, mean_vals, k=3)
+            ax_ptm.plot(x_smooth, spl_mean(x_smooth), "--", linewidth=2.5, color="#333333",
+                        alpha=0.8, label="Cluster Mean")
+        except Exception:
+            ax_ptm.plot(x, mean_vals, "--", linewidth=2.5, color="#333333", alpha=0.8, label="Cluster Mean")
+    else:
+        ax_ptm.plot(x, mean_vals, "--", linewidth=2.5, color="#333333", alpha=0.8, label="Cluster Mean")
+    ax_ptm.scatter(x, mean_vals, s=20, color="#333333", alpha=0.8, zorder=6, edgecolors="white", linewidths=0.3)
 
     ax_ptm.axhline(y=0, color="gray", linewidth=0.5, linestyle=":")
     ax_ptm.set_ylabel("PTM Log2FC", fontsize=11)
@@ -1300,14 +1391,27 @@ def _generate_cluster_lineplot(
         title += f"\n{bio_summary}"
     ax_ptm.set_title(title, fontsize=10, fontweight="normal", loc="left", pad=8)
 
-    # ── Non-PTM interactor lines ──
+    # ── Non-PTM interactor lines (smooth spline, distinct colors) ──
+    _NONPTM_COLORS = [
+        "#636363", "#969696", "#525252", "#737373", "#A8A8A8",
+        "#4A4A4A", "#8C8C8C", "#5E5E5E",
+    ]
     if ax_nonptm and nonptm_links:
         for i, link in enumerate(nonptm_links[:8]):
-            vals = [link["temporal_profile"].get(tp, 0) for tp in timepoints]
-            color = plt.cm.Greys(0.4 + 0.4 * i / max(len(nonptm_links[:8]) - 1, 1))
+            vals = np.array([link["temporal_profile"].get(tp, 0) for tp in timepoints], dtype=float)
+            color = _NONPTM_COLORS[i % len(_NONPTM_COLORS)]
             label = f"{link['gene']} (r={link['correlation_with_cluster']:.2f})"
-            ax_nonptm.plot(x, vals, marker="s", markersize=3, linewidth=1.0,
-                           alpha=0.7, color=color, label=label)
+            # Smooth spline
+            if len(x_arr) >= 4:
+                try:
+                    spl_np = make_interp_spline(x_arr, vals, k=3)
+                    ax_nonptm.plot(x_smooth, spl_np(x_smooth), linewidth=1.0,
+                                   alpha=0.7, color=color, linestyle="--", label=label)
+                except Exception:
+                    ax_nonptm.plot(x, vals, linewidth=1.0, alpha=0.7, color=color, linestyle="--", label=label)
+            else:
+                ax_nonptm.plot(x, vals, linewidth=1.0, alpha=0.7, color=color, linestyle="--", label=label)
+            ax_nonptm.scatter(x, vals, s=12, color=color, alpha=0.7, zorder=5, marker="s", edgecolors="white", linewidths=0.3)
 
         ax_nonptm.axhline(y=0, color="gray", linewidth=0.5, linestyle=":")
         ax_nonptm.set_ylabel("Non-PTM Protein Log2FC", fontsize=10)
@@ -1484,7 +1588,63 @@ def _build_comovement_llm_context(
         "     a coherent narrative of how the treatment orchestrates multiple\n"
         "     signaling layers over time.\n"
         "\n"
-        "5. BIOLOGICAL INTERPRETATION SCOPE:\n"
+        "5. INTER-FIGURE SIGNALING RELATIONSHIPS (CRITICAL):\n"
+        "   - The report MUST explain how Figures 2-6 relate to each other from a\n"
+        "     cell signaling perspective. These figures are NOT independent observations;\n"
+        "     they represent different temporal layers of a coordinated cellular response.\n"
+        "   - Construct a SIGNALING TIMELINE narrative: e.g., 'The transient burst (Fig 2)\n"
+        "     represents the immediate kinase activation upon stimulus, while the sequential\n"
+        "     wave (Fig 3) shows the downstream propagation of this signal through adaptor\n"
+        "     and effector proteins. The biphasic switch (Fig 5) may reflect negative\n"
+        "     feedback that terminates the initial burst, and sustained changes (Fig 6)\n"
+        "     indicate commitment to long-term cellular responses.'\n"
+        "   - Identify SHARED PROTEINS or PATHWAYS across clusters — if the same kinase\n"
+        "     appears in both burst and wave clusters, this is strong evidence for a\n"
+        "     signaling cascade connecting them.\n"
+        "   - Discuss the temporal order: which cluster peaks first? Which follows?\n"
+        "     What does this sequence tell us about signal flow direction?\n"
+        "\n"
+        "6. NON-PTM PROTEIN INSIGHTS:\n"
+        "   - If non-PTM interactor proteins are shown alongside PTM members in cluster\n"
+        "     plots, their temporal profiles provide CRITICAL biological information.\n"
+        "   - Discuss whether non-PTM protein abundance changes PRECEDE, COINCIDE WITH,\n"
+        "     or FOLLOW the PTM changes — this reveals regulatory directionality.\n"
+        "   - If a non-PTM protein shows correlated movement with PTM members, discuss\n"
+        "     what this implies about protein complex formation, scaffold recruitment,\n"
+        "     or co-regulation.\n"
+        "   - If a non-PTM protein shows ANTI-correlated movement, discuss potential\n"
+        "     degradation, translocation, or competitive binding mechanisms.\n"
+        "   - Name specific non-PTM proteins and their known functions in the context\n"
+        "     of the cell type and treatment being studied.\n"
+        "\n"
+        "7. CO-MOVING PEAK COMMONALITIES:\n"
+        "   - For PTMs that peak at the SAME timepoint within a cluster, explicitly\n"
+        "     discuss what they have in common:\n"
+        "     * Do they share a common upstream kinase or phosphatase?\n"
+        "     * Are they on proteins in the same signaling complex or pathway?\n"
+        "     * Do they have similar subcellular localization?\n"
+        "     * Are they known substrates of the same kinase family?\n"
+        "   - For PTMs that peak at DIFFERENT timepoints, discuss what the temporal\n"
+        "     offset implies about signal propagation speed and mechanism.\n"
+        "   - The PEAK SHAPE (sharp vs. broad) is biologically informative:\n"
+        "     * Sharp peaks suggest rapid kinase-phosphatase cycling\n"
+        "     * Broad peaks suggest sustained kinase activity or slow phosphatase\n"
+        "     * Asymmetric peaks (fast rise, slow decay) suggest rapid activation\n"
+        "       with gradual deactivation\n"
+        "\n"
+        "8. BIOLOGICAL QUESTION ALIGNMENT (MANDATORY):\n"
+        "   - The entire report MUST directly address the biological question specified\n"
+        "     in the Analysis Context. Every section must contribute to answering it.\n"
+        "   - Use the ACTUAL cell type name (e.g., 'MLO-Y4 osteocyte-like cells'),\n"
+        "     treatment name (e.g., 'irisin'), and specific timepoints throughout.\n"
+        "   - NEVER use generic placeholders like 'the experimental system', 'the\n"
+        "     applied treatment', or 'the stimulus'. Always use the real names.\n"
+        "   - The Introduction must frame why this specific treatment on this specific\n"
+        "     cell type is biologically important.\n"
+        "   - The Discussion must synthesize how the temporal phosphorylation patterns\n"
+        "     answer the biological question about duration-dependent signaling changes.\n"
+        "\n"
+        "9. BIOLOGICAL INTERPRETATION SCOPE:\n"
         "   - Base all interpretations on the provided experimental data and "
         "ChromaDB literature references ONLY.\n"
         "   - Do NOT introduce external knowledge beyond what is provided.\n"
