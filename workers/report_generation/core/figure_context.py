@@ -203,7 +203,11 @@ class FigureInformationGenerator:
         desc = (
             "This bar graph shows the cumulative |Protein_Log2FC| score of activated PTM proteins "
             "(red), inhibited PTM proteins (blue), and Non-PTM interactor proteins (green) across "
-            "canonical signaling pathways identified via KEGG pathway analysis. "
+            "canonical signaling pathways identified via 3-Layer Pathway Enrichment: "
+            "(1) KEGG + Reactome per-gene pathway mapping, "
+            "(2) STRING interaction partner-based indirect pathway inference for genes with "
+            "limited direct pathway annotations. "
+            "Disease-related pathways (KEGG 05xxx) are excluded. "
             "Pathways are ranked by total cumulative score, highlighting pathways with the "
             "strongest combined expression changes. "
             "Bar labels show the score followed by protein count in parentheses."

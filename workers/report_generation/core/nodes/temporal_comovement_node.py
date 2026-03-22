@@ -147,6 +147,9 @@ def run_temporal_comovement(state: dict) -> dict:
         pw_candidates_list = pathway_candidates.get("candidates", []) if isinstance(pathway_candidates, dict) else pathway_candidates
         clusters = _annotate_clusters(clusters, enriched_data, pw_candidates_list)
 
+        # Step 5b: Enrichr cluster-level enrichment (Layer 2: 3-Layer Pathway Enrichment)
+        clusters = _enrich_clusters_with_enrichr(clusters)
+
         # Step 6: Link to Non-PTM interactors
         clusters = _link_to_nonptm_interactors(clusters, networks, timepoints)
 
@@ -614,6 +617,108 @@ def _annotate_clusters(
         annotations["biological_summary"] = "; ".join(summary_parts) if summary_parts else "No shared annotations found"
 
         cluster["annotations"] = annotations
+
+    return clusters
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# STEP 5b: ENRICHR CLUSTER-LEVEL ENRICHMENT (Layer 2)
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _enrich_clusters_with_enrichr(clusters: list) -> list:
+    """Enrich each cluster with Enrichr pathway enrichment analysis.
+
+    Layer 2 of 3-Layer Pathway Enrichment: submits each cluster's gene list
+    to Enrichr for pathway enrichment, providing cluster-level biological
+    context that per-gene KEGG/Reactome cannot capture.
+    """
+    try:
+        from common.mcp_client import MCPClient
+        mcp = MCPClient()
+    except Exception as e:
+        logger.warning(f"Cannot initialize MCP client for Enrichr: {e}")
+        return clusters
+
+    for cluster in clusters:
+        try:
+            # Extract unique gene names from cluster members
+            cluster_genes = list(set(
+                md["gene"] for md in cluster.get("member_details", [])
+                if md.get("gene")
+            ))
+
+            if len(cluster_genes) < 2:
+                continue
+
+            # Query Enrichr with cluster gene list
+            enrichr_result = mcp.query_enrichr(
+                gene_list=cluster_genes,
+                libraries=[
+                    "KEGG_2021_Human",
+                    "Reactome_2022",
+                    "MSigDB_Hallmark_2020",
+                    "WikiPathway_2023_Human",
+                ],
+                description=f"Cluster_{cluster['cluster_id']}_{cluster.get('pattern', 'unknown')}",
+                top_n=10,
+            )
+
+            # Also query STRING functional enrichment
+            string_enrich = mcp.query_string_enrichment(
+                gene_list=cluster_genes,
+                species=10090,
+            )
+
+            # Merge enrichment results into cluster annotations
+            annotations = cluster.get("annotations", {})
+
+            # Extract top signaling pathways from Enrichr
+            enrichr_pathways = []
+            for lib_name, terms in enrichr_result.get("results", {}).items():
+                for term in terms:
+                    name = term.get("term", "")
+                    pval = term.get("adjusted_p_value", term.get("p_value", 1.0))
+                    genes = term.get("genes", [])
+                    if pval < 0.05:  # Only significant terms
+                        enrichr_pathways.append({
+                            "name": name,
+                            "library": lib_name,
+                            "p_value": pval,
+                            "genes": genes,
+                            "gene_count": len(genes),
+                        })
+            enrichr_pathways.sort(key=lambda x: x["p_value"])
+            annotations["enrichr_pathways"] = enrichr_pathways[:15]
+
+            # Extract STRING functional enrichment
+            string_kegg = string_enrich.get("kegg_terms", [])
+            annotations["string_enrichment"] = {
+                "kegg": string_kegg[:10],
+                "all_terms": string_enrich.get("all_terms", [])[:15],
+            }
+
+            # Update biological summary with enrichment results
+            if enrichr_pathways:
+                top_enrichr = enrichr_pathways[0]
+                existing_summary = annotations.get("biological_summary", "")
+                enrichr_summary = f"Enrichr: {top_enrichr['name']} (p={top_enrichr['p_value']:.2e})"
+                if existing_summary and existing_summary != "No shared annotations found":
+                    annotations["biological_summary"] = f"{existing_summary}; {enrichr_summary}"
+                else:
+                    annotations["biological_summary"] = enrichr_summary
+
+            cluster["annotations"] = annotations
+            logger.info(
+                f"Cluster {cluster['cluster_id']}: Enrichr found "
+                f"{len(enrichr_pathways)} significant pathways, "
+                f"STRING found {len(string_kegg)} KEGG terms"
+            )
+
+        except Exception as e:
+            logger.warning(
+                f"Enrichr enrichment failed for cluster {cluster.get('cluster_id', '?')}: {e}"
+            )
+            continue
 
     return clusters
 
@@ -1701,6 +1806,30 @@ def _append_cluster_detail(
 
     # Biological annotations
     parts.append(f"Biological Context: {bio_summary}")
+
+    # v8.9.5: Enrichr cluster-level pathway enrichment results (Layer 2)
+    enrichr_results = cluster.get("enrichr_enrichment", {})
+    if enrichr_results:
+        enrichr_parts = []
+        for lib_name, terms in enrichr_results.items():
+            if terms:
+                top_terms = terms[:5] if is_primary else terms[:3]
+                term_strs = []
+                for t in top_terms:
+                    if isinstance(t, dict):
+                        term_strs.append(
+                            f"    {t.get('term', '?')} "
+                            f"(p={t.get('adjusted_p_value', t.get('p_value', '?')):.2e}, "
+                            f"genes: {', '.join(t.get('genes', [])[:6])})"
+                        )
+                    else:
+                        term_strs.append(f"    {t}")
+                if term_strs:
+                    lib_display = lib_name.replace("_", " ")
+                    enrichr_parts.append(f"  [{lib_display}]\n" + "\n".join(term_strs))
+        if enrichr_parts:
+            parts.append("\nCluster Pathway Enrichment (Enrichr):")
+            parts.extend(enrichr_parts)
 
     if is_primary:
         # Full detail for burst clusters

@@ -247,6 +247,26 @@ class RAGEnrichmentPipeline:
         except Exception as e:
             logger.warning(f"BioGRID query failed for {gene}: {e}")
 
+        # 8b. Reactome pathway info via MCP (Layer 1: 3-Layer Pathway Enrichment)
+        reactome_data = {}
+        try:
+            reactome_data = self.mcp.query_reactome(gene)
+            reactome_count = reactome_data.get("total_count", 0)
+            signaling_count = reactome_data.get("signaling_count", 0)
+            logger.debug(f"Reactome for {gene}: {reactome_count} pathways ({signaling_count} signaling)")
+        except Exception as e:
+            logger.warning(f"Reactome query failed for {gene}: {e}")
+
+        # 8c. STRING indirect pathway inference (Layer 3: for genes with few KEGG pathways)
+        string_indirect_data = {}
+        if len(kegg_pathways) < 3:  # Only for genes with sparse KEGG coverage
+            try:
+                string_indirect_data = self.mcp.query_string_indirect(gene)
+                inferred_count = len(string_indirect_data.get("signaling_pathways", []))
+                logger.debug(f"STRING indirect for {gene}: {inferred_count} inferred signaling pathways")
+            except Exception as e:
+                logger.warning(f"STRING indirect query failed for {gene}: {e}")
+
         # 9. LLM-based abstract analysis (RESTORED)
         abstract_analysis = {}
         if self.enable_llm and articles:
@@ -379,6 +399,9 @@ class RAGEnrichmentPipeline:
             "hpa": hpa_data,
             "gtex": gtex_data,
             "biogrid": biogrid_data,
+            # v8.10: 3-Layer Pathway Enrichment
+            "reactome": reactome_data,
+            "string_indirect": string_indirect_data,
             "isoform_info": isoform_info,
             # Trajectory (time-course)
             "trajectory": trajectory,
@@ -403,6 +426,9 @@ class RAGEnrichmentPipeline:
             f"hpa={'yes' if hpa_ok else 'no'} (source={hpa_data.get('source', 'none') if hpa_data else 'none'}), "
             f"gtex={'yes' if gtex_ok else 'no'} (source={gtex_data.get('source', 'none') if gtex_data else 'none'}), "
             f"biogrid={len(biogrid_data.get('interactions', [])) if biogrid_data else 0}, "
+            f"reactome={reactome_data.get('total_count', 0) if reactome_data else 0} "
+            f"(signaling={reactome_data.get('signaling_count', 0) if reactome_data else 0}), "
+            f"string_indirect={len(string_indirect_data.get('signaling_pathways', [])) if string_indirect_data else 0}, "
             f"llm_abstract={'yes' if abstract_analysis else 'no'}, "
             f"classification={classification.get('level', '?')} ({classification.get('significance', '?')})"
         )

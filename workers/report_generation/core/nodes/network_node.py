@@ -2073,6 +2073,8 @@ def _generate_pathway_distribution_graph(
         if not is_activated and not is_inhibited:
             continue
         enr = ptm_data.get("rag_enrichment", {})
+
+        # --- Layer 1a: KEGG pathways (original) ---
         pathways = enr.get("pathways", [])
         for pw in pathways:
             pw_name = _pw_name(pw)
@@ -2086,6 +2088,46 @@ def _generate_pathway_distribution_graph(
                 activated_ptm_pathways[gene].add(pw_name)
             else:
                 pathway_proteins[pw_name]["inhibited_ptm"].add(gene)
+
+        # --- Layer 1b: Reactome pathways (v8.9.5) ---
+        reactome_data = enr.get("reactome", {})
+        for rpw in reactome_data.get("signaling_pathways", []):
+            rpw_name = rpw.get("name", "").strip() if isinstance(rpw, dict) else str(rpw).strip()
+            if not rpw_name:
+                continue
+            # Reactome signaling pathways are pre-filtered, no disease filtering needed
+            if is_activated:
+                pathway_proteins[rpw_name]["activated_ptm"].add(gene)
+                activated_ptm_pathways[gene].add(rpw_name)
+            else:
+                pathway_proteins[rpw_name]["inhibited_ptm"].add(gene)
+
+        # --- Layer 3: STRING indirect pathway inference (v8.9.5) ---
+        # For genes with few/no KEGG pathways, STRING indirect provides
+        # signaling context from interaction partners' pathways.
+        string_indirect = enr.get("string_indirect", {})
+        for sipw in string_indirect.get("signaling_pathways", []):
+            sipw_name = sipw.get("name", "").strip() if isinstance(sipw, dict) else str(sipw).strip()
+            if not sipw_name:
+                continue
+            # STRING indirect pathways are inferred, mark with lower weight
+            # by only adding if gene has <3 direct pathways
+            direct_pw_count = len(activated_ptm_pathways.get(gene, set())) if is_activated else 0
+            if direct_pw_count < 3:
+                if _pw_category({"name": sipw_name}) == "disease":
+                    disease_pathway_names.add(sipw_name)
+                    continue
+                if is_activated:
+                    pathway_proteins[sipw_name]["activated_ptm"].add(gene)
+                    activated_ptm_pathways[gene].add(sipw_name)
+                else:
+                    pathway_proteins[sipw_name]["inhibited_ptm"].add(gene)
+
+    logger.info(
+        f"[NET-NODE] Pathway graph Step3 (3-Layer): "
+        f"total pathways collected={len(pathway_proteins)}, "
+        f"disease pathways filtered={len(disease_pathway_names)}"
+    )
 
     # ---- Step 4: Collect ALL connected Non-PTM proteins from network_data ----
     # Note: Non-PTM proteins don't have their own Protein_Log2FC (they are interaction
@@ -2306,7 +2348,7 @@ def _generate_pathway_distribution_graph(
     ax.set_xlabel("Cumulative |Log2FC| Score", fontsize=11, fontweight="bold")
     ax.set_title(
         "Canonical Pathway Distribution of Activated PTM and Non-PTM Interactor Proteins\n"
-        "(Weighted by |Protein_Log2FC|)",
+        "(3-Layer Enrichment: KEGG + Reactome + STRING Indirect | Weighted by |Protein_Log2FC|)",
         fontsize=13, fontweight="bold", pad=15,
     )
     ax.legend(loc="lower right", fontsize=9, framealpha=0.9)

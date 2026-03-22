@@ -11,6 +11,9 @@ from .iptmnet import query_iptmnet
 from .pmc import fetch_fulltext_by_pmid, fetch_fulltext_batch
 from .expression import query_hpa, query_gtex, query_biogrid
 from .kea3 import query_kea3
+from .reactome import query_reactome
+from .enrichr import query_enrichr, query_enrichr_string_enrichment
+from .string_enrichment import query_string_indirect_pathways
 
 __all__ = [
     "query_uniprot", "query_kegg", "query_stringdb", "query_interpro",
@@ -22,4 +25,8 @@ __all__ = [
     "fetch_fulltext_by_pmid", "fetch_fulltext_batch",
     "query_hpa", "query_gtex", "query_biogrid",
     "query_kea3",
+    # v8.10: 3-Layer Pathway Enrichment
+    "query_reactome",
+    "query_enrichr", "query_enrichr_string_enrichment",
+    "query_string_indirect_pathways",
 ]

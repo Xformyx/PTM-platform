@@ -329,6 +329,106 @@ class MCPClient:
             return {"gene_list": gene_list, "kinases": [], "error": str(e)}
 
     # ------------------------------------------------------------------
+    # Reactome — Per-gene Pathway Information (Layer 1)
+    # ------------------------------------------------------------------
+
+    def query_reactome(self, gene_name: str, organism: str = "Mus musculus") -> dict:
+        """Query Reactome pathways for a gene (via human ortholog)."""
+        try:
+            r = self.session.get(
+                f"{self.base_url}/tools/reactome/{gene_name}",
+                params={"organism": organism},
+                timeout=self.timeout,
+            )
+            r.raise_for_status()
+            return r.json()
+        except Exception as e:
+            logger.warning(f"MCP Reactome failed for {gene_name}: {e}")
+            return {"gene_name": gene_name, "pathways": [], "signaling_pathways": []}
+
+    def query_reactome_batch(self, gene_names: List[str], organism: str = "Mus musculus") -> List[dict]:
+        try:
+            r = self.session.post(
+                f"{self.base_url}/tools/reactome/batch",
+                json={"gene_names": gene_names, "organism": organism},
+                timeout=self.timeout * 3,
+            )
+            r.raise_for_status()
+            return r.json()["results"]
+        except Exception as e:
+            logger.warning(f"MCP Reactome batch failed: {e}")
+            return [self.query_reactome(g, organism) for g in gene_names]
+
+    # ------------------------------------------------------------------
+    # Enrichr — Cluster-level Gene-set Enrichment (Layer 2)
+    # ------------------------------------------------------------------
+
+    def query_enrichr(self, gene_list: List[str], libraries: List[str] = None,
+                      description: str = "", top_n: int = 15) -> dict:
+        """Submit gene list to Enrichr for pathway enrichment analysis."""
+        try:
+            payload = {"gene_list": gene_list, "top_n": top_n, "description": description}
+            if libraries:
+                payload["libraries"] = libraries
+            r = self.session.post(
+                f"{self.base_url}/tools/enrichr/enrich",
+                json=payload,
+                timeout=self.timeout * 2,
+            )
+            r.raise_for_status()
+            return r.json()
+        except Exception as e:
+            logger.warning(f"MCP Enrichr failed: {e}")
+            return {"gene_list": gene_list, "results": {}, "error": str(e)}
+
+    def query_string_enrichment(self, gene_list: List[str], species: int = 10090) -> dict:
+        """Run STRING functional enrichment on a gene set."""
+        try:
+            r = self.session.post(
+                f"{self.base_url}/tools/enrichr/string",
+                json={"gene_list": gene_list, "species": species},
+                timeout=self.timeout * 2,
+            )
+            r.raise_for_status()
+            return r.json()
+        except Exception as e:
+            logger.warning(f"MCP STRING enrichment failed: {e}")
+            return {"gene_list": gene_list, "kegg_terms": [], "all_terms": []}
+
+    # ------------------------------------------------------------------
+    # STRING Indirect Pathway Inference (Layer 3)
+    # ------------------------------------------------------------------
+
+    def query_string_indirect(self, gene_name: str, species: int = 10090,
+                              top_partners: int = 10) -> dict:
+        """Infer signaling pathways via STRING interaction partners."""
+        try:
+            r = self.session.get(
+                f"{self.base_url}/tools/string_indirect/{gene_name}",
+                params={"species": species, "top_partners": top_partners},
+                timeout=self.timeout,
+            )
+            r.raise_for_status()
+            return r.json()
+        except Exception as e:
+            logger.warning(f"MCP STRING indirect failed for {gene_name}: {e}")
+            return {"gene_name": gene_name, "inferred_pathways": [], "signaling_pathways": []}
+
+    def query_string_indirect_batch(self, gene_names: List[str], species: int = 10090,
+                                    top_partners: int = 10) -> List[dict]:
+        try:
+            r = self.session.post(
+                f"{self.base_url}/tools/string_indirect/batch",
+                json={"gene_names": gene_names, "species": species, "top_partners": top_partners},
+                timeout=self.timeout * 3,
+            )
+            r.raise_for_status()
+            return r.json()["results"]
+        except Exception as e:
+            logger.warning(f"MCP STRING indirect batch failed: {e}")
+            return [self.query_string_indirect(g, species, top_partners) for g in gene_names]
+
+    # ------------------------------------------------------------------
     # Parallel helpers with concurrency + progress
     # ------------------------------------------------------------------
 
@@ -421,6 +521,18 @@ class MCPClient:
             gene_names, batch_fn, "gene_name",
             batch_size=batch_size, max_workers=max_workers,
             progress_cb=progress_cb, label="STRING-DB",
+        )
+
+    def fetch_reactome_parallel(
+        self, gene_names: List[str], organism: str = "Mus musculus", batch_size: int = 10,
+        max_workers: int = 3, progress_cb: ProgressCallback = None,
+    ) -> Dict[str, dict]:
+        def batch_fn(batch):
+            return self.query_reactome_batch(batch, organism)
+        return self._run_batches_parallel(
+            gene_names, batch_fn, "gene_name",
+            batch_size=batch_size, max_workers=max_workers,
+            progress_cb=progress_cb, label="Reactome",
         )
 
     # ------------------------------------------------------------------

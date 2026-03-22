@@ -17,6 +17,10 @@ from .tools import (
     fetch_fulltext_by_pmid, fetch_fulltext_batch,
     query_hpa, query_gtex, query_biogrid,
     query_kea3,
+    # v8.10: 3-Layer Pathway Enrichment
+    query_reactome,
+    query_enrichr, query_enrichr_string_enrichment,
+    query_string_indirect_pathways,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -69,6 +73,10 @@ async def list_tools():
             {"name": "query_gtex", "description": "GTEx tissue expression data", "status": "active"},
             {"name": "query_biogrid", "description": "BioGRID protein-protein interactions", "status": "active"},
             {"name": "query_kea3", "description": "KEA3 kinase enrichment analysis", "status": "active"},
+            # v8.10: 3-Layer Pathway Enrichment
+            {"name": "query_reactome", "description": "Reactome pathway information per gene", "status": "active"},
+            {"name": "query_enrichr", "description": "Enrichr gene-set enrichment analysis", "status": "active"},
+            {"name": "query_string_indirect", "description": "STRING indirect pathway inference for genes with no KEGG pathways", "status": "active"},
         ]
     }
 
@@ -334,6 +342,112 @@ async def tool_kea3_enrich(req: KEA3Request):
         gene_list=req.gene_list, top_n=req.top_n,
         redis=app.state.redis,
     )
+
+
+# ---------------------------------------------------------------------------
+# Reactome — Per-gene Pathway Information (Layer 1)
+# ---------------------------------------------------------------------------
+
+@app.get("/tools/reactome/{gene_name}")
+async def tool_reactome(
+    gene_name: str,
+    organism: str = Query("Mus musculus", description="Organism name"),
+):
+    return await query_reactome(gene_name, organism=organism, redis=app.state.redis)
+
+
+class ReactomeBatchRequest(BaseModel):
+    gene_names: list[str]
+    organism: str = "Mus musculus"
+
+
+@app.post("/tools/reactome/batch")
+async def tool_reactome_batch(req: ReactomeBatchRequest):
+    import asyncio
+    sem = asyncio.Semaphore(3)
+
+    async def _fetch(g):
+        async with sem:
+            return await query_reactome(g, organism=req.organism, redis=app.state.redis)
+
+    results = await asyncio.gather(*[_fetch(g) for g in req.gene_names])
+    return {"results": results}
+
+
+# ---------------------------------------------------------------------------
+# Enrichr — Cluster-level Gene-set Enrichment (Layer 2)
+# ---------------------------------------------------------------------------
+
+class EnrichrRequest(BaseModel):
+    gene_list: list[str]
+    libraries: list[str] | None = None
+    description: str = ""
+    top_n: int = 15
+
+
+@app.post("/tools/enrichr/enrich")
+async def tool_enrichr_enrich(req: EnrichrRequest):
+    return await query_enrichr(
+        gene_list=req.gene_list,
+        libraries=req.libraries,
+        description=req.description,
+        top_n=req.top_n,
+        redis=app.state.redis,
+    )
+
+
+class StringEnrichmentRequest(BaseModel):
+    gene_list: list[str]
+    species: int = 10090
+
+
+@app.post("/tools/enrichr/string")
+async def tool_enrichr_string(req: StringEnrichmentRequest):
+    return await query_enrichr_string_enrichment(
+        gene_list=req.gene_list,
+        species=req.species,
+        redis=app.state.redis,
+    )
+
+
+# ---------------------------------------------------------------------------
+# STRING Indirect Pathway Inference (Layer 3)
+# ---------------------------------------------------------------------------
+
+@app.get("/tools/string_indirect/{gene_name}")
+async def tool_string_indirect(
+    gene_name: str,
+    species: int = Query(10090, description="NCBI taxonomy ID"),
+    top_partners: int = Query(10, description="Number of STRING partners"),
+):
+    return await query_string_indirect_pathways(
+        gene_name=gene_name,
+        species=species,
+        top_partners=top_partners,
+        redis=app.state.redis,
+    )
+
+
+class StringIndirectBatchRequest(BaseModel):
+    gene_names: list[str]
+    species: int = 10090
+    top_partners: int = 10
+
+
+@app.post("/tools/string_indirect/batch")
+async def tool_string_indirect_batch(req: StringIndirectBatchRequest):
+    import asyncio
+    sem = asyncio.Semaphore(3)
+
+    async def _fetch(g):
+        async with sem:
+            return await query_string_indirect_pathways(
+                g, species=req.species, top_partners=req.top_partners,
+                redis=app.state.redis,
+            )
+
+    results = await asyncio.gather(*[_fetch(g) for g in req.gene_names])
+    return {"results": results}
 
 
 # ===========================================================================
