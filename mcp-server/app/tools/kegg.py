@@ -102,6 +102,20 @@ async def _fetch_kegg_info(
                         pw_entry = {"id": pid, "name": name}
                         if description:
                             pw_entry["description"] = description
+                        # v8.9.4: Tag pathway category based on KEGG ID prefix
+                        # KEGG pathway numbering: 01xxx=Metabolism, 02xxx=Genetic Info,
+                        # 03xxx=Environmental Info, 04xxx=Cellular Processes/Signaling,
+                        # 05xxx=Human Diseases, 06xxx=Drug Development
+                        # Extract the numeric part (e.g. "mmu04151" → "04151")
+                        num_part = "".join(c for c in pid if c.isdigit())
+                        if num_part.startswith("05"):
+                            pw_entry["category"] = "disease"
+                        elif num_part.startswith("04"):
+                            pw_entry["category"] = "signaling"
+                        elif num_part.startswith(("01", "00")):
+                            pw_entry["category"] = "metabolism"
+                        else:
+                            pw_entry["category"] = "other"
                         pathways.append(pw_entry)
                 # Rate-limit: slightly longer sleep to respect KEGG API limits
                 # with the increased pathway count

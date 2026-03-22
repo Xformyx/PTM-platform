@@ -2023,10 +2023,45 @@ def _generate_pathway_distribution_graph(
             raw = raw.title()
         return raw
 
+    # v8.9.4: Helper to classify pathway category from KEGG data
+    def _pw_category(p) -> str:
+        """Return pathway category: 'disease', 'signaling', 'metabolism', or 'other'.
+        Uses the 'category' field added by kegg.py v8.9.4, or falls back to
+        KEGG ID prefix analysis, or keyword-based heuristic."""
+        if isinstance(p, dict):
+            cat = p.get("category", "")
+            if cat:
+                return cat
+            # Fallback: parse KEGG ID
+            pid = p.get("id", "")
+            num_part = "".join(c for c in pid if c.isdigit())
+            if num_part.startswith("05"):
+                return "disease"
+            elif num_part.startswith("04"):
+                return "signaling"
+            elif num_part.startswith(("01", "00")):
+                return "metabolism"
+        # Keyword-based heuristic for legacy data without category/id
+        name_lower = (_pw_name(p)).lower()
+        _DISEASE_KEYWORDS = (
+            "infection", "virus", "viral", "cancer", "carcinogenesis",
+            "lupus", "amoebiasis", "leishmaniasis", "tuberculosis",
+            "hepatitis", "influenza", "measles", "pertussis",
+            "shigellosis", "salmonella", "pathogenic", "disease",
+            "diabetes", "cardiomyopathy", "alzheimer", "parkinson",
+            "huntington", "prion", "asthma", "glioma", "melanoma",
+            "leukemia", "lymphoma",
+        )
+        if any(kw in name_lower for kw in _DISEASE_KEYWORDS):
+            return "disease"
+        return "other"
+
     # v8.1: pathway_name -> {"activated_ptm": set, "inhibited_ptm": set, "non_ptm": set}
     pathway_proteins: Dict[str, Dict[str, set]] = defaultdict(
         lambda: {"activated_ptm": set(), "inhibited_ptm": set(), "non_ptm": set()}
     )
+    # v8.9.4: Track disease pathways separately
+    disease_pathway_names: set = set()
 
     # gene -> set of pathway names (for activated PTM genes — used for Non-PTM inheritance)
     activated_ptm_pathways: Dict[str, set] = defaultdict(set)
@@ -2041,12 +2076,16 @@ def _generate_pathway_distribution_graph(
         pathways = enr.get("pathways", [])
         for pw in pathways:
             pw_name = _pw_name(pw)
-            if pw_name:
-                if is_activated:
-                    pathway_proteins[pw_name]["activated_ptm"].add(gene)
-                    activated_ptm_pathways[gene].add(pw_name)
-                else:
-                    pathway_proteins[pw_name]["inhibited_ptm"].add(gene)
+            if not pw_name:
+                continue
+            # v8.9.4: Track disease pathways
+            if _pw_category(pw) == "disease":
+                disease_pathway_names.add(pw_name)
+            if is_activated:
+                pathway_proteins[pw_name]["activated_ptm"].add(gene)
+                activated_ptm_pathways[gene].add(pw_name)
+            else:
+                pathway_proteins[pw_name]["inhibited_ptm"].add(gene)
 
     # ---- Step 4: Collect ALL connected Non-PTM proteins from network_data ----
     # Note: Non-PTM proteins don't have their own Protein_Log2FC (they are interaction
@@ -2185,8 +2224,22 @@ def _generate_pathway_distribution_graph(
     logger.info(f"[NET-NODE] Pathway graph Step5.5: FC weights available for {len(gene_fc_weight)} genes")
 
     # ---- Step 6: Compute cumulative weighted scores and sort ----
+    # v8.9.4: Filter out disease pathways (KEGG 05xxx) from Fig 1 display.
+    # These pathways (e.g. "Epstein-Barr virus infection", "MicroRNAs in cancer")
+    # appear because KEGG maps cytoskeletal/signaling genes to disease mechanisms,
+    # but they are misleading in experimental contexts unrelated to those diseases.
+    # Disease pathways are excluded from the main figure but logged for reference.
+    if disease_pathway_names:
+        logger.info(
+            f"[NET-NODE] v8.9.4: Filtering {len(disease_pathway_names)} disease pathways "
+            f"from Fig 1: {sorted(disease_pathway_names)}"
+        )
+
     pw_data = []
     for pw_name, groups in pathway_proteins.items():
+        # v8.9.4: Skip disease pathways in Fig 1
+        if pw_name in disease_pathway_names:
+            continue
         act_genes = groups["activated_ptm"]
         inh_genes = groups["inhibited_ptm"]
         non_genes = groups["non_ptm"]
@@ -2252,8 +2305,8 @@ def _generate_pathway_distribution_graph(
     ax.set_yticklabels(display_names, fontsize=9)
     ax.set_xlabel("Cumulative |Log2FC| Score", fontsize=11, fontweight="bold")
     ax.set_title(
-        "Canonical Pathway Distribution: PTM and Non-PTM Interactor Proteins\n"
-        "(Weighted by |Protein_Log2FC|, Unbiased: Activated + Inhibited PTM)",
+        "Canonical Pathway Distribution of Activated PTM and Non-PTM Interactor Proteins\n"
+        "(Weighted by |Protein_Log2FC|)",
         fontsize=13, fontweight="bold", pad=15,
     )
     ax.legend(loc="lower right", fontsize=9, framealpha=0.9)
