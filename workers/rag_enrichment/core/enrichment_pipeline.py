@@ -161,6 +161,73 @@ class RAGEnrichmentPipeline:
                 enriched.append(ptm)
                 stats["failed"] += 1
 
+        # ── 3-Layer Pathway Enrichment Summary Table ──
+        layer_stats = {"kegg": 0, "kegg_genes": 0, "reactome": 0, "reactome_genes": 0,
+                       "reactome_signaling": 0, "string_indirect": 0, "string_indirect_genes": 0}
+        for item in enriched:
+            enr = item.get("rag_enrichment", {})
+            kp = len(enr.get("pathways", []))
+            if kp > 0:
+                layer_stats["kegg"] += kp
+                layer_stats["kegg_genes"] += 1
+            rc = enr.get("reactome", {})
+            if rc:
+                rt = rc.get("total_count", 0)
+                rs = rc.get("signaling_count", 0)
+                if rt > 0:
+                    layer_stats["reactome"] += rt
+                    layer_stats["reactome_signaling"] += rs
+                    layer_stats["reactome_genes"] += 1
+            si = enr.get("string_indirect", {})
+            if si:
+                sp = len(si.get("signaling_pathways", []))
+                if sp > 0:
+                    layer_stats["string_indirect"] += sp
+                    layer_stats["string_indirect_genes"] += 1
+
+        logger.info("")
+        logger.info("═" * 70)
+        logger.info("  3-LAYER PATHWAY ENRICHMENT SUMMARY")
+        logger.info("═" * 70)
+        logger.info(
+            f"  Layer 1 - KEGG:             {layer_stats['kegg']:>4} pathways "
+            f"from {layer_stats['kegg_genes']:>3}/{len(enriched)} genes"
+        )
+        logger.info(
+            f"  Layer 1 - Reactome:         {layer_stats['reactome']:>4} pathways "
+            f"({layer_stats['reactome_signaling']} signaling) "
+            f"from {layer_stats['reactome_genes']:>3}/{len(enriched)} genes"
+        )
+        logger.info(
+            f"  Layer 3 - STRING Indirect:   {layer_stats['string_indirect']:>4} inferred pathways "
+            f"from {layer_stats['string_indirect_genes']:>3}/{len(enriched)} genes"
+        )
+        logger.info(
+            f"  Combined coverage: "
+            f"{layer_stats['kegg_genes'] + layer_stats['reactome_genes'] + layer_stats['string_indirect_genes']} "
+            f"gene-pathway mappings (some genes counted in multiple layers)"
+        )
+        logger.info("─" * 70)
+
+        # Per-gene pathway coverage detail
+        logger.info("  Per-Gene Pathway Coverage:")
+        logger.info(f"  {'Gene':<15} {'KEGG':>6} {'Reactome':>10} {'React-Sig':>10} {'STR-Indir':>10} {'Total':>7}")
+        logger.info(f"  {'-'*15} {'-'*6} {'-'*10} {'-'*10} {'-'*10} {'-'*7}")
+        for item in enriched:
+            enr = item.get("rag_enrichment", {})
+            g = item.get("gene") or item.get("Gene.Name", "?")
+            kc = len(enr.get("pathways", []))
+            rc_data = enr.get("reactome", {})
+            rc_total = rc_data.get("total_count", 0) if rc_data else 0
+            rc_sig = rc_data.get("signaling_count", 0) if rc_data else 0
+            si_data = enr.get("string_indirect", {})
+            si_count = len(si_data.get("signaling_pathways", [])) if si_data else 0
+            total = kc + rc_total + si_count
+            marker = " ⚠" if total == 0 else ""
+            logger.info(f"  {g:<15} {kc:>6} {rc_total:>10} {rc_sig:>10} {si_count:>10} {total:>7}{marker}")
+        logger.info("═" * 70)
+        logger.info("")
+
         logger.info(
             f"Enrichment complete: {stats['success']} OK, {stats['failed']} failed, "
             f"total articles={stats['total_articles']}, total pathways={stats['total_pathways']}"
@@ -202,7 +269,8 @@ class RAGEnrichmentPipeline:
         try:
             kegg_info = self.mcp.query_kegg(gene)
             kegg_pathways = kegg_info.get("pathways", [])
-            logger.debug(f"KEGG for {gene}: {len(kegg_pathways)} pathways")
+            kegg_pw_names = [p.get("name", str(p)) if isinstance(p, dict) else str(p) for p in kegg_pathways[:5]]
+            logger.info(f"[Layer1-KEGG] {gene}: {len(kegg_pathways)} pathways → {kegg_pw_names}")
         except Exception as e:
             logger.warning(f"KEGG query failed for {gene}: {e}")
 
@@ -212,7 +280,8 @@ class RAGEnrichmentPipeline:
         try:
             string_info = self.mcp.query_stringdb(gene, species=species)
             interactions = string_info.get("interactions", [])
-            logger.debug(f"STRING-DB for {gene}: {len(interactions)} interactions")
+            top_partners = [i.get("partner", "?") for i in interactions[:5]]
+            logger.info(f"[STRING-DB] {gene}: {len(interactions)} interactions → {top_partners}")
         except Exception as e:
             logger.warning(f"STRING-DB query failed for {gene}: {e}")
 
@@ -222,7 +291,7 @@ class RAGEnrichmentPipeline:
         try:
             if protein_id:
                 uniprot_info = self.mcp.query_uniprot(protein_id)
-                logger.debug(f"UniProt for {protein_id}: {'found' if uniprot_info else 'empty'}")
+                logger.info(f"[UniProt] {gene} ({protein_id}): {'found' if uniprot_info else 'empty'}")
         except Exception as e:
             logger.warning(f"UniProt query failed for {protein_id}: {e}")
 
@@ -253,7 +322,8 @@ class RAGEnrichmentPipeline:
             reactome_data = self.mcp.query_reactome(gene)
             reactome_count = reactome_data.get("total_count", 0)
             signaling_count = reactome_data.get("signaling_count", 0)
-            logger.debug(f"Reactome for {gene}: {reactome_count} pathways ({signaling_count} signaling)")
+            reactome_pw_names = [p.get("name", "?") for p in reactome_data.get("signaling_pathways", [])[:5]]
+            logger.info(f"[Layer1-Reactome] {gene}: {reactome_count} total, {signaling_count} signaling → {reactome_pw_names}")
         except Exception as e:
             logger.warning(f"Reactome query failed for {gene}: {e}")
 
@@ -262,8 +332,12 @@ class RAGEnrichmentPipeline:
         if len(kegg_pathways) < 3:  # Only for genes with sparse KEGG coverage
             try:
                 string_indirect_data = self.mcp.query_string_indirect(gene)
-                inferred_count = len(string_indirect_data.get("signaling_pathways", []))
-                logger.debug(f"STRING indirect for {gene}: {inferred_count} inferred signaling pathways")
+                inferred_pws = string_indirect_data.get("signaling_pathways", [])
+                inferred_names = [p.get("pathway_name", p) if isinstance(p, dict) else str(p) for p in inferred_pws[:5]]
+                logger.info(
+                    f"[Layer3-STRING-Indirect] {gene}: {len(inferred_pws)} inferred pathways "
+                    f"(from {string_indirect_data.get('partners_used', '?')} partners) → {inferred_names}"
+                )
             except Exception as e:
                 logger.warning(f"STRING indirect query failed for {gene}: {e}")
 
