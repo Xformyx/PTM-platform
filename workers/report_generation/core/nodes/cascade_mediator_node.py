@@ -412,7 +412,29 @@ def extract_discussed_pathways(
     
     # Sort by composite relevance
     scored_pathways.sort(key=lambda x: -x[1])
-    
+
+    # ---- v8.9.8: Filter out disease pathways (KEGG 05xxx) ----
+    _DISEASE_KEYWORDS = {
+        "infection", "virus", "viral", "carcinogenesis", "cancer",
+        "amoebiasis", "lupus", "leishmaniasis", "tuberculosis",
+        "malaria", "pertussis", "measles", "hepatitis", "influenza",
+        "herpes", "hiv", "htlv", "epstein-barr", "kaposi",
+        "shigellosis", "salmonella", "cholera", "diabetes",
+        "cardiomyopathy", "alzheimer", "parkinson", "huntington",
+        "prion", "asthma", "graft-versus-host",
+    }
+    filtered_pathways = []
+    for name, score, info in scored_pathways:
+        name_lower = name.lower()
+        cand = info.get("candidate", {})
+        kegg_id = cand.get("kegg_id", "") or ""
+        is_disease = kegg_id.startswith("05") or any(kw in name_lower for kw in _DISEASE_KEYWORDS)
+        if is_disease:
+            logger.info(f"[MEDIATOR] Filtered disease pathway from cascade: {name} (kegg_id={kegg_id})")
+        else:
+            filtered_pathways.append((name, score, info))
+    scored_pathways = filtered_pathways
+
     # Select top N
     selected = scored_pathways[:top_n]
     

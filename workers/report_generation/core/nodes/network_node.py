@@ -2315,7 +2315,7 @@ def _generate_pathway_distribution_graph(
     pw_data.reverse()  # Reverse for horizontal bar (bottom = highest)
 
     # ---- Step 7: Generate the 3-bar weighted bar graph ----
-    fig, ax = plt.subplots(figsize=(14, max(7, len(pw_data) * 0.55)))
+    fig, ax = plt.subplots(figsize=(18, max(7, len(pw_data) * 0.55)))
 
     pathways_list = [d["pathway"] for d in pw_data]
     act_scores = [d["act_score"] for d in pw_data]
@@ -2335,16 +2335,21 @@ def _generate_pathway_distribution_graph(
                        label="Non-PTM Interactor Proteins", color="#2ECC71", alpha=0.85,
                        edgecolor="white", linewidth=0.5)
 
-    # Truncate long pathway names
+    # Truncate long pathway names — generous limit for wider figure
     display_names = []
+    max_label_len = 75
     for name in pathways_list:
-        if len(name) > 50:
-            display_names.append(name[:47] + "...")
+        if len(name) > max_label_len:
+            display_names.append(name[:max_label_len - 3] + "...")
         else:
             display_names.append(name)
 
+    # Adaptive font size: shrink if many pathways or long names
+    longest = max((len(n) for n in display_names), default=30)
+    ytick_fontsize = 8 if longest > 55 else 9
+
     ax.set_yticks(y_pos)
-    ax.set_yticklabels(display_names, fontsize=9)
+    ax.set_yticklabels(display_names, fontsize=ytick_fontsize)
     ax.set_xlabel("Cumulative |Log2FC| Score", fontsize=11, fontweight="bold")
     ax.set_title(
         "Canonical Pathway Distribution of Activated PTM and Non-PTM Interactor Proteins\n"

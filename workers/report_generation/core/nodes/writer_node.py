@@ -516,12 +516,19 @@ IMPORTANT: Write a thorough, detailed introduction. The ChromaDB collection refe
         fig1_pw_results = ""
         fig1_pw_list = network.get("fig1_pathway_names", []) if network else []
         if fig1_pw_list:
-            pw_str = ", ".join(fig1_pw_list[:15])
+            pw_numbered = "\n".join(f"  {i}. {pw}" for i, pw in enumerate(fig1_pw_list[:20], 1))
             fig1_pw_results = (
-                f"\n\n**FIGURE 1 KEGG PATHWAY LIST (for text-figure consistency):**\n"
-                f"The following pathways appear in Figure 1 (Canonical Pathway Distribution): {pw_str}.\n"
-                f"When discussing pathway enrichment in Results, reference these pathway names as they appear in Figure 1. "
-                f"Do NOT claim a pathway is 'enriched in our analysis' if it is not in this list.\n"
+                f"\n\n**FIGURE 1 — 3-LAYER PATHWAY ENRICHMENT RESULTS (KEGG + Reactome + STRING Indirect):**\n"
+                f"The following signaling pathways were identified through multi-source enrichment analysis "
+                f"and are displayed in Figure 1 (Canonical Pathway Distribution), ranked by cumulative |Log2FC| score:\n"
+                f"{pw_numbered}\n\n"
+                f"CRITICAL INSTRUCTIONS FOR RESULTS SECTION:\n"
+                f"1. You MUST explicitly discuss the TOP 5 pathways from this list by name in the Results section.\n"
+                f"2. For each top pathway, explain which PTM proteins contribute to it and their functional significance.\n"
+                f"3. Reference 'Figure 1' when discussing pathway enrichment patterns.\n"
+                f"4. Do NOT claim a pathway is 'enriched in our analysis' if it is not in this list.\n"
+                f"5. If a pathway like 'PI3K-Akt signaling' or 'MAPK signaling' appears in this list, "
+                f"it MUST be prominently discussed as a key finding.\n"
             )
 
         return f"""Write a detailed Results section (MINIMUM 1500 words, target 3000-5000 words) for this PTM analysis report.
@@ -566,17 +573,23 @@ IMPORTANT: Be thorough and detailed. Discuss each significant PTM site individua
         cell_signaling_block = ""
         fig1_pw_names = network.get("fig1_pathway_names", []) if network else []
         if fig1_pw_names:
-            # Use actual KEGG pathway names from Figure 1
-            cs_lines = ["\n## CELL SIGNALING COMMONALITY ANALYSIS (from Figure 1 KEGG Analysis)"]
-            cs_lines.append("The following KEGG pathways were identified in Figure 1 as the most enriched ")
-            cs_lines.append("signaling pathways (ranked by cumulative |Log2FC| score):")
-            for i, pw_name in enumerate(fig1_pw_names[:10], 1):
+            # Use actual pathway names from Figure 1 (3-Layer: KEGG + Reactome + STRING Indirect)
+            cs_lines = ["\n## CELL SIGNALING COMMONALITY ANALYSIS (from Figure 1 — 3-Layer Pathway Enrichment)"]
+            cs_lines.append("The following signaling pathways were identified through multi-source enrichment ")
+            cs_lines.append("(KEGG + Reactome + STRING Indirect) and displayed in Figure 1, ")
+            cs_lines.append("ranked by cumulative |Log2FC| score:")
+            for i, pw_name in enumerate(fig1_pw_names[:15], 1):
                 cs_lines.append(f"  {i}. **{pw_name}**")
             cs_lines.append("")
-            cs_lines.append("INSTRUCTION: Discuss how these KEGG-identified pathways suggest ")
-            cs_lines.append("coordinated signaling responses. Focus on pathways from this list. ")
-            cs_lines.append("If you discuss additional pathways from literature, explicitly note ")
-            cs_lines.append("they were not among the top KEGG-enriched pathways in Figure 1.")
+            cs_lines.append("CRITICAL INSTRUCTIONS FOR DISCUSSION:")
+            cs_lines.append("1. You MUST dedicate a subsection to 'Signaling Pathway Convergence' that discusses ")
+            cs_lines.append("   how the top pathways from Figure 1 are interconnected.")
+            cs_lines.append("2. For canonical signaling pathways (e.g., PI3K-Akt, MAPK, mTOR, Focal adhesion), ")
+            cs_lines.append("   explain their biological significance in the context of this experiment.")
+            cs_lines.append("3. Discuss how the PTM proteins in this study converge on these pathways ")
+            cs_lines.append("   to produce coordinated cellular responses.")
+            cs_lines.append("4. If you discuss pathways NOT in Figure 1, explicitly note they are from literature.")
+            cs_lines.append("5. Reference 'Figure 1' when discussing pathway enrichment findings.")
             cs_lines.append("")
             cell_signaling_block = "\n".join(cs_lines)
         elif ptms:
