@@ -1371,9 +1371,9 @@ def _generate_transient_burst_figure(
         labels = labels[:15]
         labels[-1] = f"... +{len(all_members) - 14} more"
     ax_a.legend(
-        handles, labels, loc="upper right", ncol=2,
-        framealpha=0.9, borderaxespad=0.5,
-        handlelength=1.5, columnspacing=0.8,
+        handles, labels, loc="upper left", bbox_to_anchor=(1.01, 1.0),
+        ncol=1, framealpha=0.95, borderaxespad=0,
+        handlelength=1.5, columnspacing=0.8, fontsize=6.5,
     )
 
     # Panel label
@@ -1482,7 +1482,8 @@ def _generate_transient_burst_figure(
         ax_c.spines["top"].set_visible(False)
         ax_c.spines["right"].set_visible(False)
         ax_c.grid(axis="y", alpha=0.15, linewidth=0.3)
-        ax_c.legend(loc="upper right", framealpha=0.9)
+        ax_c.legend(loc="upper left", bbox_to_anchor=(1.01, 1.0),
+                    framealpha=0.95, fontsize=6.5, borderaxespad=0)
 
         ax_c.text(
             -0.08, 1.05, "c", transform=ax_c.transAxes,
@@ -1678,8 +1679,8 @@ def _generate_cluster_lineplot(
 
     # Legend
     if len(members) <= 12:
-        ax_ptm.legend(fontsize=7, loc="upper right", ncol=2,
-                      framealpha=0.8, borderaxespad=0.5)
+        ax_ptm.legend(fontsize=6.5, loc="upper left", bbox_to_anchor=(1.01, 1.0),
+                      ncol=1, framealpha=0.95, borderaxespad=0)
     else:
         # Too many members — show only top 5 by max_fc + mean
         top_members = sorted(members, key=lambda m: m["max_fc"], reverse=True)[:5]
@@ -1689,8 +1690,9 @@ def _generate_cluster_lineplot(
                                   label=md["key"], linewidth=1.2))
         handles.append(Line2D([0], [0], linestyle="--", linewidth=2.5,
                               color="#333333", label="Cluster Mean"))
-        ax_ptm.legend(handles=handles, fontsize=7, loc="upper right",
-                      ncol=2, framealpha=0.8)
+        ax_ptm.legend(handles=handles, fontsize=6.5, loc="upper left",
+                      bbox_to_anchor=(1.01, 1.0), ncol=1, framealpha=0.95,
+                      borderaxespad=0)
 
     # Title with biological annotation
     ann = cluster.get("annotations", {})
@@ -1732,7 +1734,8 @@ def _generate_cluster_lineplot(
         ax_nonptm.set_ylabel("Non-PTM Protein Log2FC", fontsize=10)
         ax_nonptm.set_xlabel("Timepoint", fontsize=11)
         ax_nonptm.grid(True, alpha=0.2)
-        ax_nonptm.legend(fontsize=7, loc="upper right", ncol=2, framealpha=0.8)
+        ax_nonptm.legend(fontsize=6.5, loc="upper left", bbox_to_anchor=(1.01, 1.0),
+                          ncol=1, framealpha=0.95, borderaxespad=0)
         ax_nonptm.set_title(
             "Connected Non-PTM Interactors (Protein Abundance)",
             fontsize=9, fontweight="normal", loc="left"
@@ -1744,7 +1747,7 @@ def _generate_cluster_lineplot(
     bottom_ax.set_xticklabels(timepoints, fontsize=9)
     bottom_ax.set_xlabel("Timepoint", fontsize=11)
 
-    plt.tight_layout()
+    fig.subplots_adjust(right=0.82)
     path = os.path.join(
         output_dir, f"comovement_cluster_{cluster['cluster_id']}.png"
     )
