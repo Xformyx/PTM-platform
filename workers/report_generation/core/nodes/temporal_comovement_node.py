@@ -298,8 +298,12 @@ def _cluster_comoving_ptms(
     # Clamp to [-1, 1]
     corr_matrix = np.clip(corr_matrix, -1.0, 1.0)
 
-    # Distance = 1 - |correlation| (anti-correlated PTMs can also cluster)
-    dist_matrix = 1.0 - np.abs(corr_matrix)
+    # v9.1: Use signed correlation for clustering — anti-correlated PTMs should NOT
+    # be in the same cluster. Previously used |correlation| which incorrectly grouped
+    # anti-correlated PTMs (r=-0.8) together, leading to "Co-activated" labels for
+    # clusters with negative mean correlation.
+    # Distance = 1 - correlation (range: 0 for r=1, 1 for r=0, 2 for r=-1)
+    dist_matrix = 1.0 - corr_matrix
     np.fill_diagonal(dist_matrix, 0.0)
     # Ensure symmetry and non-negative
     dist_matrix = (dist_matrix + dist_matrix.T) / 2

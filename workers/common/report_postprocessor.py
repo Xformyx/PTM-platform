@@ -208,13 +208,19 @@ def force_inline_citations(
 
 
 # ============================================================================
-# C2: PTM type terminology correction
+# C2: PTM type terminology correction (v9.1: vocabulary-driven)
 # ============================================================================
 
-# Mapping of PTM types to their incorrect cross-contamination terms
-PTM_TERM_CORRECTIONS = {
+# v9.1: Import from centralized PTM vocabulary dictionary
+try:
+    from common.ptm_vocabulary import build_postprocessor_corrections, get_normalized_ptm_type
+    _HAS_VOCABULARY = True
+except ImportError:
+    _HAS_VOCABULARY = False
+
+# Legacy fallback — kept for backward compatibility if ptm_vocabulary is unavailable
+_LEGACY_PTM_TERM_CORRECTIONS = {
     'ubiquitylation': {
-        # Terms that should NOT appear in ubiquitylation reports
         'wrong_terms': {
             r'\bphosphorylation sites?\b': 'ubiquitylation sites',
             r'\bphosphorylation levels?\b': 'ubiquitylation levels',
@@ -222,57 +228,25 @@ PTM_TERM_CORRECTIONS = {
             r'\bphosphorylation dynamics?\b': 'ubiquitylation dynamics',
             r'\bphosphorylation patterns?\b': 'ubiquitylation patterns',
             r'\bphosphorylation events?\b': 'ubiquitylation events',
-            r'\bphosphorylation status\b': 'ubiquitylation status',
-            r'\bphosphorylation state\b': 'ubiquitylation state',
-            r'\bphosphorylation data\b': 'ubiquitylation data',
-            r'\bphospho-?\b': 'ubiquityl-',
             r'\bkinase-substrate\b': 'E3 ligase-substrate',
-            r'\bkinase enrichment\b': 'E3 ligase enrichment',
-            r'\b(\d+)\s+phosphorylation\s+sites\b': r'\1 ubiquitylation sites',
-            # Title-level corrections
             r'\bPhosphoproteomic\b': 'Ubiquitylomics',
             r'\bphosphoproteomic\b': 'ubiquitylomics',
-            r'\bPhosphoproteomics\b': 'Ubiquitylomics',
-            r'\bphosphoproteomics\b': 'ubiquitylomics',
-            r'\bPhosphorylation Dynamics\b': 'Ubiquitylation Dynamics',
-            r'\bphosphorylation at (Lys\d+)\b': r'ubiquitylation at \1',
-            r'\bphosphorylation at (K\d+)\b': r'ubiquitylation at \1',
-            r'\bKey phosphorylation\b': 'Key ubiquitylation',
         },
-        # Context-aware exceptions: don't replace these
-        # NOTE: Patterns must be specific to avoid false positives (e.g., "phosphorylation sites in this ubiquitylation study")
         'exceptions': [
-            r'phosphorylation.{0,15}cross.?talk',  # cross-talk between PTMs
-            r'cross.?talk.{0,15}(?:between|of).{0,15}phosphorylation',  # cross-talk context
-            r'(?:between|of)\s+phosphorylation\s+and\s+ubiquitylation',  # explicit comparison
-            r'(?:between|of)\s+ubiquitylation\s+and\s+phosphorylation',  # explicit comparison
-            r'phosphorylation-dependent\s+ubiquitylation',  # mechanistic
-            r'phospho-?degron',  # specific term
-            r'phosphorylation.{0,10}priming',  # priming mechanism
+            r'oxidative\s+phosphorylation',
+            r'phosphorylation.{0,15}cross.?talk',
+            r'phospho-?degron',
         ],
     },
     'phosphorylation': {
         'wrong_terms': {
             r'\bubiquitylation sites?\b': 'phosphorylation sites',
-            r'\bubiquitylation levels?\b': 'phosphorylation levels',
-            r'\bubiquitylation changes?\b': 'phosphorylation changes',
-            r'\bubiquitylation dynamics?\b': 'phosphorylation dynamics',
-            r'\bubiquitylation patterns?\b': 'phosphorylation patterns',
-            r'\bubiquitylation events?\b': 'phosphorylation events',
-            r'\bubiquitylation status\b': 'phosphorylation status',
-            r'\bubiquitylation state\b': 'phosphorylation state',
-            r'\bubiquitylation data\b': 'phosphorylation data',
             r'\bE3 ligase-substrate\b': 'kinase-substrate',
-            r'\bproteasomal degradation\b': 'dephosphorylation',
-            r'\blysine ubiquitylation\b': 'serine/threonine phosphorylation',
+            r'\bUbiquitylomics\b': 'Phosphoproteomics',
         },
         'exceptions': [
             r'ubiquitylation.{0,15}cross.?talk',
-            r'cross.?talk.{0,15}(?:between|of).{0,15}ubiquitylation',
-            r'(?:between|of)\s+phosphorylation\s+and\s+ubiquitylation',  # explicit comparison
-            r'(?:between|of)\s+ubiquitylation\s+and\s+phosphorylation',  # explicit comparison
-            r'ubiquitin-?dependent\s+degradation',  # legitimate term
-            r'proteasome',  # can appear in phosphorylation context
+            r'proteasome',
         ],
     },
 }
@@ -282,16 +256,33 @@ def correct_ptm_terminology(text: str, ptm_type: str) -> str:
     """
     Correct PTM type terminology cross-contamination.
     
+    v9.1: Uses centralized PTM vocabulary dictionary as primary source.
+    Falls back to legacy corrections if vocabulary module is unavailable.
+    
     For ubiquitylation reports: replace incorrect "phosphorylation" terms
     For phosphorylation reports: replace incorrect "ubiquitylation" terms
     
     Context-aware: preserves legitimate cross-talk mentions.
     """
-    if not text or ptm_type not in PTM_TERM_CORRECTIONS:
+    if not text:
         return text
     
-    config = PTM_TERM_CORRECTIONS[ptm_type]
+    # v9.1: Get corrections from vocabulary dictionary (primary) or legacy (fallback)
+    if _HAS_VOCABULARY:
+        normalized = get_normalized_ptm_type(ptm_type)
+        wrong_terms, exceptions = build_postprocessor_corrections(normalized)
+        if not wrong_terms:
+            return text
+    else:
+        normalized = ptm_type.lower().strip()
+        if normalized not in _LEGACY_PTM_TERM_CORRECTIONS:
+            return text
+        config = _LEGACY_PTM_TERM_CORRECTIONS[normalized]
+        wrong_terms = config['wrong_terms']
+        exceptions = config['exceptions']
+    
     corrections_made = 0
+    correction_details = []  # Track what was corrected for logging
     
     # Split into paragraphs to check context
     paragraphs = text.split('\n')
@@ -300,7 +291,7 @@ def correct_ptm_terminology(text: str, ptm_type: str) -> str:
     for para in paragraphs:
         # Check if this paragraph contains exception patterns
         has_exception = False
-        for exc_pattern in config['exceptions']:
+        for exc_pattern in exceptions:
             if re.search(exc_pattern, para, re.IGNORECASE):
                 has_exception = True
                 break
@@ -311,9 +302,11 @@ def correct_ptm_terminology(text: str, ptm_type: str) -> str:
         
         # Apply corrections
         corrected = para
-        for wrong_pattern, replacement in config['wrong_terms'].items():
+        for wrong_pattern, replacement in wrong_terms.items():
             matches = list(re.finditer(wrong_pattern, corrected, re.IGNORECASE))
             if matches:
+                for m in matches:
+                    correction_details.append(f"'{m.group()}' -> '{replacement}'")
                 corrected = re.sub(wrong_pattern, replacement, corrected, flags=re.IGNORECASE)
                 corrections_made += len(matches)
         
@@ -322,7 +315,9 @@ def correct_ptm_terminology(text: str, ptm_type: str) -> str:
     result = '\n'.join(corrected_paragraphs)
     
     if corrections_made > 0:
-        _sse_log(f"[PostProcess] PTM terminology: corrected {corrections_made} cross-contamination terms ({ptm_type})")
+        # Log first 5 corrections for debugging
+        sample = correction_details[:5]
+        _sse_log(f"[PostProcess] PTM terminology: corrected {corrections_made} cross-contamination terms ({ptm_type}). Samples: {'; '.join(sample)}")
     
     return result
 

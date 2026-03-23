@@ -12,6 +12,7 @@ from typing import Dict, List
 
 from common.llm_client import LLMClient
 from common.report_postprocessor import validate_llm_output_against_data, postprocess_log2fc_formatting
+from common.ptm_vocabulary import get_vocabulary, get_system_prompt_for_ptm, build_vocabulary_prompt_block, get_normalized_ptm_type
 from report_generation.core.rag_retriever import RAGRetriever
 from report_generation.core.dynamic_prompt_generator import (
     build_anti_hallucination_directive,
@@ -41,6 +42,7 @@ SECTION_MAX_TOKENS = {
     "title": 512,
 }
 
+# Legacy SYSTEM_PROMPT kept as fallback; prefer get_system_prompt_for_ptm(ptm_type)
 SYSTEM_PROMPT = (
     "You are a scientific writer specializing in post-translational modification (PTM) analysis. "
     "Write in formal academic English. Use flowing prose, not bullet points. "
@@ -188,7 +190,9 @@ def run_section_writing(state: dict) -> dict:
             prompt += "\n\n" + figure_ctx
 
         max_tok = section_max_tokens.get(section_type, 8192)
-        content = llm.generate(prompt, system_prompt=SYSTEM_PROMPT, temperature=llm_temperature, max_tokens=max_tok)
+        # v9.1: Use PTM-aware system prompt from vocabulary dictionary
+        ptm_system_prompt = get_system_prompt_for_ptm(ptm_type)
+        content = llm.generate(prompt, system_prompt=ptm_system_prompt, temperature=llm_temperature, max_tokens=max_tok)
 
         if content.startswith("[LLM Error"):
             content = _fallback_section(section_type, research_results, validated_hypotheses, parsed_ptms)
@@ -346,14 +350,15 @@ def _build_section_prompt(
         f"'{treatment} induced {ptm_type_label} in {tissue}'.\n"
     )
 
-    # v8.10: PTM-type-specific interpretation framework
-    if ptm_type_label.lower().strip() in ("ubiquitylation", "ubiquitination"):
+    # v9.1: PTM-type-specific interpretation framework (from vocabulary dictionary)
+    normalized_ptm = get_normalized_ptm_type(ptm_type_label)
+    if normalized_ptm in ("ubiquitylation",):
         analysis_context_block += (
             f"\n**UBIQUITYLATION-SPECIFIC INTERPRETATION FRAMEWORK (CRITICAL):**\n"
             f"Ubiquitylation is NOT solely a degradation signal. You MUST distinguish\n"
             f"the functional outcome based on chain type, linkage, and biological context:\n\n"
             f"| Chain Type | Primary Function | Biological Process |\n"
-            f"|------------|------------------|--------------------|\n"
+            f"|------------|------------------|-----------------------|\n"
             f"| K48 polyUb | Proteasomal degradation | Protein turnover, quality control |\n"
             f"| K63 polyUb | Non-degradative signaling | NF-kB signaling, DNA damage response, endosomal sorting |\n"
             f"| K11 polyUb | Cell cycle regulation, ERAD | Mitotic degradation, ER-associated degradation |\n"
@@ -365,8 +370,8 @@ def _build_section_prompt(
             f"| Mono-Ub   | Signaling & trafficking | Histone regulation, endocytosis, membrane protein sorting |\n"
             f"| Multi-mono | Endocytosis | Receptor internalization, lysosomal targeting |\n\n"
             f"**Interpretation Rules:**\n"
-            f"1. When a ubiquitylated protein shows INCREASED modification + DECREASED protein level → likely K48 proteasomal degradation\n"
-            f"2. When a ubiquitylated protein shows INCREASED modification + STABLE protein level → likely non-degradative signaling (K63, M1, mono-Ub)\n"
+            f"1. When a ubiquitylated protein shows INCREASED modification + DECREASED protein level \u2192 likely K48 proteasomal degradation\n"
+            f"2. When a ubiquitylated protein shows INCREASED modification + STABLE protein level \u2192 likely non-degradative signaling (K63, M1, mono-Ub)\n"
             f"3. When interpreting ubiquitylation of signaling proteins (kinases, receptors), consider:\n"
             f"   - Is this activating (K63-linked) or degradative (K48-linked)?\n"
             f"   - Does the protein's known biology suggest trafficking (mono-Ub) or signal amplification (K63)?\n"
@@ -382,14 +387,12 @@ def _build_section_prompt(
             f"- If upstream E3 ligase is identified, discuss its substrate specificity and chain type preference\n"
             f"- If DUB (deubiquitylase) activity is implied (decreased ubiquitylation), discuss which DUB family may be responsible\n"
             f"- E3-substrate relationships are analogous to kinase-substrate relationships in phosphorylation\n"
-            f"\n"
-            f"**PTM TERMINOLOGY ENFORCEMENT (ABSOLUTE RULE):**\n"
-            f"- This is a UBIQUITYLATION analysis. You MUST use 'ubiquitylation' (not 'phosphorylation') when describing the PTM modifications in this study.\n"
-            f"- NEVER write 'phosphorylation sites', 'phosphorylation dynamics', 'phosphorylation events', 'phosphorylation changes' when referring to the modifications in this dataset.\n"
-            f"- NEVER write 'Phosphoproteomic' — use 'Ubiquitylomics' or 'Ubiquitylation profiling' instead.\n"
-            f"- The ONLY acceptable uses of 'phosphorylation' are: (1) 'oxidative phosphorylation' (metabolic pathway), (2) explicit cross-talk comparisons between ubiquitylation and phosphorylation, (3) phospho-degron mechanisms.\n"
-            f"- All Lys (K) sites in this dataset are UBIQUITYLATION sites, not phosphorylation sites.\n"
         )
+
+    # v9.1: Inject PTM vocabulary block for ALL PTM types (not just ubiquitylation)
+    # This is the primary mechanism to prevent cross-contamination
+    vocab_block = build_vocabulary_prompt_block(ptm_type_label)
+    analysis_context_block += vocab_block
 
     combined_lit = lit_context + pubmed_context
 
@@ -445,7 +448,7 @@ INSTRUCTIONS:
 - For each Research Question, identify the most significant PTM findings and their biological implications.
 - If high-confidence literature matches are provided above, explicitly mention how the experimental results align with or diverge from published literature.
 - Highlight the cell signaling commonalities among activated proteins based on PTM Vector values.
-- Write a comprehensive abstract that captures ALL major findings. Be specific about PTM sites (e.g., '{ptm_type_label} at Lys48 of GENE_NAME' for ubiquitylation, or 'phosphorylation at Ser165 of GENE_NAME' for phosphorylation). Match the PTM type being analyzed.
+- Write a comprehensive abstract that captures ALL major findings. Be specific about PTM sites using the correct terminology: '{get_vocabulary(ptm_type_label)["modification_at_site"].format(site=get_vocabulary(ptm_type_label)["site_prefixes"][0] + "48", gene="GENE_NAME")}'. NEVER use terminology from a different PTM type.
 {combined_lit}"""
 
     elif section_type == "introduction":
@@ -798,8 +801,8 @@ Top PTM sites to validate:
 {top_ptms_str}
 
 For EACH of the top 5-8 PTM findings, suggest:
-1. **Western Blot Validation**: Specific antibodies for the modification site. For phosphorylation: anti-phospho antibodies. For ubiquitylation: anti-ubiquitin antibodies (e.g., K48-linkage specific, K63-linkage specific) or anti-diGly remnant antibodies.
-2. **Functional Assay**: How to test the biological consequence of the modification. For phosphorylation: site-directed mutagenesis, kinase assay. For ubiquitylation: in vitro ubiquitylation assay, E3 ligase identification, proteasome inhibition (MG132).
+1. **Western Blot Validation**: Specific antibodies for the {ptm_type_str} modification site. Use appropriate detection methods for {ptm_type_str} (e.g., site-specific antibodies, anti-{ptm_type_str} antibodies).
+2. **Functional Assay**: How to test the biological consequence of the {ptm_type_str} modification. Use assays appropriate for {ptm_type_str} (e.g., {get_vocabulary(ptm_type_str)['enzyme_substrate_term']} analysis, {get_vocabulary(ptm_type_str)['enzyme_writer_generic']} identification).
 3. **Pharmacological Intervention**: Specific inhibitors or activators to test the pathway (name actual drugs/compounds)
 4. **In Vivo Validation**: Animal model or clinical sample approaches
 5. **Time-Course Experiment**: Specific timepoints and conditions to validate temporal dynamics
@@ -832,7 +835,7 @@ INSTRUCTIONS:
 - Output ONLY the title text, nothing else. No quotes, no "Title:" prefix, no explanation.
 - The title should be BROAD enough to encompass ALL major findings in the report (temporal dynamics, transient burst, sustained changes, pathway analysis, network interactions).
 - Do NOT make the title too narrow (e.g., focusing only on one pathway or one PTM site).
-- Follow academic paper title conventions. For phosphorylation: e.g., "Comprehensive Phosphoproteomic Analysis Reveals ...". For ubiquitylation: e.g., "Quantitative Ubiquitylation Profiling Reveals ...". Match the title to the actual PTM type.
+- Follow academic paper title conventions. Use the correct omics term for this PTM type: '{get_vocabulary(ptm_type_label)["omics_name"]}'. Example: 'Comprehensive {get_vocabulary(ptm_type_label)["omics_name"]} Analysis Reveals ...'. NEVER use an omics term from a different PTM type.
 - Include the PTM type ({ptm_type_label}), the experimental system ({tissue}), and the treatment ({treatment}).
 - The title should reflect the overall narrative: temporal {ptm_type_label} dynamics in {tissue} in response to {treatment}.
 - Keep it under 25 words."""
