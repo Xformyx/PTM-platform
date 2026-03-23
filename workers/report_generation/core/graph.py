@@ -151,7 +151,7 @@ def generate_qa_report(state: ReportState) -> dict:
     return run_qa_report_generation(state)
 
 
-def _build_comovement_figure_section(comovement_figures: list, network_analysis: dict) -> tuple:
+def _build_comovement_figure_section(comovement_figures: list, network_analysis: dict, ptm_type: str = "phosphorylation") -> tuple:
     """v8.7: Build the co-movement figure section for the report.
 
     Returns (main_section, supplementary_section, next_fig_num, next_supp_num).
@@ -180,7 +180,7 @@ def _build_comovement_figure_section(comovement_figures: list, network_analysis:
         "PTM sites with correlated temporal dynamics were grouped into clusters using "
         "hierarchical clustering of their Log2FC time-series profiles. "
         "Co-moving PTMs within the same cluster suggest coordinated regulation, "
-        "potentially sharing upstream kinases or participating in the same signaling cascade.\n\n"
+        f"potentially sharing upstream {'E3 ligases' if ptm_type.lower().strip() in ('ubiquitylation', 'ubiquitination') else 'kinases'} or participating in the same signaling cascade.\n\n"
     )
 
     fig_num = 2  # Fig 1 is Canonical Pathway from network_node
@@ -193,7 +193,7 @@ def _build_comovement_figure_section(comovement_figures: list, network_analysis:
             main_section += f"### Figure {fig_num}. {cf_caption}\n\n"
             main_section += f"![{cf_caption}]({img_ref})\n\n"
             main_section += (
-                "**Legend:** Composite figure of transient phosphorylation burst clusters. "
+                f"**Legend:** Composite figure of transient {ptm_type} burst clusters. "
                 "**(a)** Individual PTM time-series profiles colored by cluster membership; "
                 "bold lines indicate cluster means with shaded min-max envelopes. "
                 "**(b)** Peak amplitude profiles showing Log\u2082FC magnitude ranked by intensity. "
@@ -343,7 +343,7 @@ def format_citations(state: ReportState) -> dict:
 
             # Step 1: Network MAIN section (Fig 1 = Pathway Distribution)
             # Supplementary (cascade/cytoscape) collected separately for end
-            net_main, net_supp = generate_network_figure_section(network_analysis, supplementary_start=1)
+            net_main, net_supp = generate_network_figure_section(network_analysis, supplementary_start=1, ptm_type=state.get('ptm_type', 'phosphorylation'))
             if net_main:
                 parts.append(net_main)
                 logger.info(f"[FORMAT-CIT] Added network main section ({len(net_main)} chars)")
@@ -354,7 +354,7 @@ def format_citations(state: ReportState) -> dict:
             # Step 2: Co-movement MAIN figures (Fig 2 = Burst, Fig 3-6 = Clusters)
             comovement_figures = state.get("comovement_figures", [])
             if comovement_figures:
-                result = _build_comovement_figure_section(comovement_figures, network_analysis)
+                result = _build_comovement_figure_section(comovement_figures, network_analysis, ptm_type=state.get('ptm_type', 'phosphorylation'))
                 if result:
                     main_section, supp_items, _next_fig = result
                     if main_section:

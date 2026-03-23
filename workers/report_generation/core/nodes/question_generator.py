@@ -15,13 +15,13 @@ from common.llm_client import LLMClient
 
 logger = logging.getLogger(__name__)
 
-QUESTION_GENERATION_PROMPT = """You are an expert PTM (Post-Translational Modification) researcher analyzing phosphoproteomics data. Your task is to generate insightful, data-driven research questions.
+QUESTION_GENERATION_PROMPT = """You are an expert PTM (Post-Translational Modification) researcher analyzing {ptm_type_display} data. Your task is to generate insightful, data-driven research questions.
 
 {single_time_point_note}
 
 ## CRITICAL INSTRUCTIONS
 1. **Read the input data carefully** - Extract experimental conditions, cell types, treatments, and time points from the markdown content
-2. **Reference specific PTMs** - Each question MUST mention at least one specific protein and phosphorylation site from the data
+2. **Reference specific PTMs** - Each question MUST mention at least one specific protein and modification site from the data
 3. **Be mechanistically precise** - Questions should probe specific molecular mechanisms, not general concepts
 4. **Consider temporal dynamics** - If time points exist (and this is NOT a single timepoint experiment), ask about the progression and transition of signaling states
 
@@ -38,7 +38,7 @@ QUESTION_GENERATION_PROMPT = """You are an expert PTM (Post-Translational Modifi
 - Focus on: How do different signaling cascades interact or regulate each other?
 
 ### 4. kinase_phosphatase (Enzyme-substrate relationships)
-- Focus on: Which kinases/phosphatases drive the observed PTM changes?
+- Focus on: Which {enzyme_type} drive the observed PTM changes?
 
 ### 5. adaptation_mechanism (Functional consequences)
 - Focus on: How do PTM changes relate to cellular adaptation or phenotype?
@@ -65,7 +65,7 @@ Generate exactly {max_questions} questions as a JSON array. Each question object
 ```
 
 ## Quality Checklist (Self-verify before output)
-- Each question mentions specific protein names and phosphorylation sites from the input data
+- Each question mentions specific protein names and modification sites from the input data
 - Questions are diverse across at least 4 different categories
 - Rationales cite specific observations from the data
 - Questions are testable and mechanistically focused
@@ -182,6 +182,10 @@ def run_question_generation(state: dict) -> dict:
     )
 
     context = state.get("experimental_context", {})
+    ptm_type = state.get("ptm_type", "phosphorylation")
+    is_ubi = ptm_type.lower().strip() in ("ubiquitylation", "ubiquitination")
+    ptm_type_display = "ubiquitylomics" if is_ubi else "phosphoproteomics"
+    enzyme_type = "E3 ligases/DUBs" if is_ubi else "kinases/phosphatases"
     if not llm.is_available():
         logger.warning("LLM not available for question generation, using defaults")
         if cb:
@@ -202,6 +206,8 @@ def run_question_generation(state: dict) -> dict:
         max_questions=max_questions,
         markdown_content=content,
         single_time_point_note=single_time_point_note,
+        ptm_type_display=ptm_type_display,
+        enzyme_type=enzyme_type,
     )
 
     try:

@@ -114,7 +114,7 @@ def _compile_report(
         lines.append("")
 
     # Network Analysis Figures — Base64 embedded or file-referenced
-    network_figure_section = generate_network_figure_section(network)
+    network_figure_section = generate_network_figure_section(network, ptm_type=state.get('ptm_type', 'phosphorylation'))
     if network_figure_section:
         lines.append(network_figure_section)
     else:

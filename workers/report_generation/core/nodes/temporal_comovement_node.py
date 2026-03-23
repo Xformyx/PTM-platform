@@ -146,7 +146,7 @@ def run_temporal_comovement(state: dict) -> dict:
         # Step 5: Annotate clusters with biological context
         # pathway_candidates is a dict {"candidates": [...], "gene_data": {...}}
         pw_candidates_list = pathway_candidates.get("candidates", []) if isinstance(pathway_candidates, dict) else pathway_candidates
-        clusters = _annotate_clusters(clusters, enriched_data, pw_candidates_list)
+        clusters = _annotate_clusters(clusters, enriched_data, pw_candidates_list, ptm_type=ptm_type)
 
         # Step 5b: Enrichr cluster-level enrichment (Layer 2: 3-Layer Pathway Enrichment)
         clusters = _enrich_clusters_with_enrichr(clusters)
@@ -471,7 +471,8 @@ def _build_singleton(meta: dict, values: np.ndarray, timepoints: list) -> dict:
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _annotate_clusters(
-    clusters: list, enriched_data: list, pathway_candidates: list
+    clusters: list, enriched_data: list, pathway_candidates: list,
+    ptm_type: str = "phosphorylation",
 ) -> list:
     """Annotate each cluster with shared biological features.
 
@@ -728,7 +729,7 @@ def _annotate_clusters(
         if annotations["shared_kinases"]:
             top_k = annotations["shared_kinases"][0]
             summary_parts.append(
-                f"Kinase: {top_k['kinase']} ({top_k['count']} substrates)"
+                f"{'E3 Ligase' if ptm_type.lower().strip() in ('ubiquitylation', 'ubiquitination') else 'Kinase'}: {top_k['kinase']} ({top_k['count']} substrates)"
             )
         if annotations["shared_complexes"]:
             top_c = annotations["shared_complexes"][0]
@@ -1888,11 +1889,11 @@ def _build_comovement_llm_context(
         "\nCRITICAL INSTRUCTIONS FOR REPORT WRITING:\n"
         "\n"
         "1. TRANSIENT BURST AS CENTRAL THEME:\n"
-        "   - The transient phosphorylation burst clusters MUST be the primary "
+        f"   - The transient {ptm_type} burst clusters MUST be the primary "
         "analytical focus of the Results section.\n"
         "   - Dedicate at least 2-3 paragraphs to interpreting the burst dynamics: "
-        "what triggers the rapid phosphorylation, which kinases are likely responsible, "
-        "and why the signal returns to baseline (phosphatase activity, negative feedback).\n"
+        f"what triggers the rapid {ptm_type}, which {'E3 ligases are' if ptm_type.lower().strip() in ('ubiquitylation', 'ubiquitination') else 'kinases are'} likely responsible, "
+        f"and why the signal returns to baseline ({'DUB activity' if ptm_type.lower().strip() in ('ubiquitylation', 'ubiquitination') else 'phosphatase activity'}, negative feedback).\n"
         f"   - Reference Figure {fig_burst} explicitly when discussing burst clusters.\n"
         "   - Name specific PTM proteins from the burst clusters and discuss their "
         "known biological roles in the context of the treatment.\n"
@@ -1922,7 +1923,7 @@ def _build_comovement_llm_context(
         "   - SEQUENTIAL SIGNALING WAVE: Indicates a relay-type signal propagation\n"
         "     where PTMs are activated in temporal sequence. Discuss which PTMs lead\n"
         "     the wave vs. which follow, and infer the directionality of the signaling\n"
-        "     cascade (e.g., receptor → adaptor → effector). Relate to known kinase\n"
+        f"     cascade (e.g., receptor \u2192 adaptor \u2192 effector). Relate to known {'E3 ligase-substrate' if ptm_type.lower().strip() in ('ubiquitylation', 'ubiquitination') else 'kinase'}\n"
         "     substrate relationships if available.\n"
         "   - BIPHASIC SWITCH: Represents a regulatory toggle where PTMs switch from\n"
         "     activation to inhibition (or vice versa). Discuss the biological meaning\n"
@@ -1933,7 +1934,7 @@ def _build_comovement_llm_context(
         "     cellular commitment, gene expression regulation, or structural\n"
         "     remodeling processes.\n"
         "   - CO-ACTIVATED/CO-INHIBITED: PTMs that move together suggest shared\n"
-        "     upstream regulation (common kinase/phosphatase). Identify potential\n"
+        f"     upstream regulation (common {'E3 ligase/DUB' if ptm_type.lower().strip() in ('ubiquitylation', 'ubiquitination') else 'kinase/phosphatase'}). Identify potential\n"
         "     shared regulators from the network analysis data.\n"
         "   - Compare and contrast these patterns with the transient burst to build\n"
         "     a coherent narrative of how the treatment orchestrates multiple\n"
@@ -1944,12 +1945,12 @@ def _build_comovement_llm_context(
         "     cell signaling perspective. These figures are NOT independent observations;\n"
         "     they represent different temporal layers of a coordinated cellular response.\n"
         "   - Construct a SIGNALING TIMELINE narrative: e.g., 'The transient burst (Fig 2)\n"
-        "     represents the immediate kinase activation upon stimulus, while the sequential\n"
+        f"     represents the immediate {'E3 ligase' if ptm_type.lower().strip() in ('ubiquitylation', 'ubiquitination') else 'kinase'} activation upon stimulus, while the sequential\n"
         "     wave (Fig 3) shows the downstream propagation of this signal through adaptor\n"
         "     and effector proteins. The biphasic switch (Fig 5) may reflect negative\n"
         "     feedback that terminates the initial burst, and sustained changes (Fig 6)\n"
         "     indicate commitment to long-term cellular responses.'\n"
-        "   - Identify SHARED PROTEINS or PATHWAYS across clusters — if the same kinase\n"
+        f"   - Identify SHARED PROTEINS or PATHWAYS across clusters \u2014 if the same {'E3 ligase' if ptm_type.lower().strip() in ('ubiquitylation', 'ubiquitination') else 'kinase'}\n"
         "     appears in both burst and wave clusters, this is strong evidence for a\n"
         "     signaling cascade connecting them.\n"
         "   - Discuss the temporal order: which cluster peaks first? Which follows?\n"
@@ -1971,15 +1972,15 @@ def _build_comovement_llm_context(
         "7. CO-MOVING PEAK COMMONALITIES:\n"
         "   - For PTMs that peak at the SAME timepoint within a cluster, explicitly\n"
         "     discuss what they have in common:\n"
-        "     * Do they share a common upstream kinase or phosphatase?\n"
+        f"     * Do they share a common upstream {'E3 ligase or DUB' if ptm_type.lower().strip() in ('ubiquitylation', 'ubiquitination') else 'kinase or phosphatase'}?\n"
         "     * Are they on proteins in the same signaling complex or pathway?\n"
         "     * Do they have similar subcellular localization?\n"
-        "     * Are they known substrates of the same kinase family?\n"
+        f"     * Are they known substrates of the same {'E3 ligase' if ptm_type.lower().strip() in ('ubiquitylation', 'ubiquitination') else 'kinase'} family?\n"
         "   - For PTMs that peak at DIFFERENT timepoints, discuss what the temporal\n"
         "     offset implies about signal propagation speed and mechanism.\n"
         "   - The PEAK SHAPE (sharp vs. broad) is biologically informative:\n"
-        "     * Sharp peaks suggest rapid kinase-phosphatase cycling\n"
-        "     * Broad peaks suggest sustained kinase activity or slow phosphatase\n"
+        f"     * Sharp peaks suggest rapid {'E3 ligase-DUB' if ptm_type.lower().strip() in ('ubiquitylation', 'ubiquitination') else 'kinase-phosphatase'} cycling\n"
+        f"     * Broad peaks suggest sustained {'E3 ligase activity or slow DUB' if ptm_type.lower().strip() in ('ubiquitylation', 'ubiquitination') else 'kinase activity or slow phosphatase'}\n"
         "     * Asymmetric peaks (fast rise, slow decay) suggest rapid activation\n"
         "       with gradual deactivation\n"
         "\n"
@@ -1992,7 +1993,7 @@ def _build_comovement_llm_context(
         "     applied treatment', or 'the stimulus'. Always use the real names.\n"
         "   - The Introduction must frame why this specific treatment on this specific\n"
         "     cell type is biologically important.\n"
-        "   - The Discussion must synthesize how the temporal phosphorylation patterns\n"
+        f"   - The Discussion must synthesize how the temporal {ptm_type} patterns\n"
         "     answer the biological question about duration-dependent signaling changes.\n"
         "\n"
         "9. BIOLOGICAL INTERPRETATION SCOPE:\n"
@@ -2005,7 +2006,7 @@ def _build_comovement_llm_context(
         "   - Do NOT discuss biological processes or disease contexts that are "
         "biologically distant from the experimental system.\n"
         "   - Every paragraph must logically connect back to: How does the "
-        "treatment affect phosphorylation dynamics in the specified cell type?\n"
+        f"treatment affect {ptm_type} dynamics in the specified cell type?\n"
         "   - Do NOT fabricate connections to unrelated biological systems "
         "(e.g., if studying osteocytes, do NOT extensively discuss neuronal "
         "or immune cell-specific pathways unless directly supported by data).\n"
@@ -2028,7 +2029,7 @@ def _build_comovement_llm_context(
         "     respond temporally as coordinated groups.\n"
         "   - If a cluster has NO shared pathways from the 3-Layer data, state this\n"
         "     honestly and discuss alternative explanations (e.g., novel interactions,\n"
-        "     shared upstream kinase, or physical proximity in a protein complex).\n"
+        f"     shared upstream {'E3 ligase' if ptm_type.lower().strip() in ('ubiquitylation', 'ubiquitination') else 'kinase'}, or physical proximity in a protein complex).\n"
         "   - Do NOT invent pathway connections that are not in the provided data.\n"
         "\n"
         "11. NEIGHBORHOOD CONCORDANCE ANALYSIS (v8.10):\n"
@@ -2164,7 +2165,8 @@ def _append_cluster_detail(
                 k_strs.append(
                     f"  - {k['kinase']} \u2192 {', '.join(k['substrates'][:8])}"
                 )
-            parts.append("Predicted Upstream Kinases:\n" + "\n".join(k_strs))
+            regulator_label = 'Predicted Upstream E3 Ligases' if ptm_type.lower().strip() in ('ubiquitylation', 'ubiquitination') else 'Predicted Upstream Kinases'
+            parts.append(f"{regulator_label}:\n" + "\n".join(k_strs))
 
         if ann.get("shared_go_terms"):
             go_strs = [f"  - {g['term']} ({g['count']} members)"
@@ -2253,7 +2255,8 @@ def _append_cluster_detail(
                 k_strs.append(
                     f"  - {k['kinase']} \u2192 {', '.join(k['substrates'][:6])}"
                 )
-            parts.append("Predicted Kinases:\n" + "\n".join(k_strs))
+            regulator_label = 'Predicted E3 Ligases' if ptm_type.lower().strip() in ('ubiquitylation', 'ubiquitination') else 'Predicted Kinases'
+            parts.append(f"{regulator_label}:\n" + "\n".join(k_strs))
         if ann.get("shared_go_terms"):
             go_strs = [f"  - {g['term']} ({g['count']} members)"
                        for g in ann["shared_go_terms"][:3]]

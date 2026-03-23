@@ -3366,7 +3366,7 @@ def image_to_base64(image_path: str) -> Optional[str]:
 # Network figure section for report (guide §6.1)
 # ---------------------------------------------------------------------------
 
-def generate_network_figure_section(network_analysis: dict, supplementary_start: int = 1) -> tuple:
+def generate_network_figure_section(network_analysis: dict, supplementary_start: int = 1, ptm_type: str = "phosphorylation") -> tuple:
     """Generate Markdown section with embedded network figures and legends.
 
     v8.7: Returns (main_section, supplementary_section) tuple.
@@ -3480,7 +3480,7 @@ def generate_network_figure_section(network_analysis: dict, supplementary_start:
         "**blue circles** = inhibited PTM proteins (Log2FC < 0), "
         "**green circles** = upregulated Non-PTM interactors, "
         "**purple circles** = downregulated Non-PTM interactors, "
-        "**orange diamonds** = kinases. "
+        f"**orange diamonds** = {'E3 ligases' if ptm_type.lower().strip() in ('ubiquitylation', 'ubiquitination') else 'kinases'}. "
         "Node size is proportional to |Log2FC| magnitude. "
         "Gray arrows indicate the canonical signal flow direction from upstream "
         "receptors/adaptors to downstream effectors/transcription factors. "

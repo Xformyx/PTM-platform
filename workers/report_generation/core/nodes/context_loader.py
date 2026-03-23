@@ -289,7 +289,7 @@ def _generate_default_questions(ptms: list, context: dict) -> list:
     if upregulated:
         top_genes = ", ".join(sorted(set(p["gene"] for p in upregulated[:5])))
         questions.append(
-            f"What are the key signaling pathways activated by upregulated phosphorylation sites "
+            f"What are the key signaling pathways activated by upregulated {context.get('ptm_type', 'phosphorylation')} sites "
             f"({top_genes}){context_desc}?"
         )
 

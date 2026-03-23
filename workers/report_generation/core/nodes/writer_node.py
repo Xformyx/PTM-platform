@@ -47,7 +47,7 @@ SYSTEM_PROMPT = (
     "Cite references using numbered brackets (e.g., [1], [2]) matching the provided reference list. "
     "Include as many relevant citations as possible to support your statements. "
     "NEVER mention 'ChromaDB' or 'knowledge base'. "
-    "Be precise with PTM site nomenclature (e.g., 'phosphorylation at Ser165 of GENE_NAME'). "
+    "Be precise with PTM site nomenclature. For phosphorylation use e.g. 'phosphorylation at Ser165 of GENE_NAME'; for ubiquitylation use e.g. 'ubiquitylation at Lys48 of GENE_NAME'. Match the PTM type being analyzed. "
     "CRITICAL: Use ONLY proteins and PTM sites from the actual data provided in the prompt. "
     "Never use example or placeholder proteins (e.g., ACC1, MAPK3, Ser79) from prompt templates — they are for illustration only. "
     "Write detailed, comprehensive content that thoroughly covers the topic. "
@@ -341,8 +341,8 @@ def _build_section_prompt(
         f"- NEVER use generic placeholders like 'the experimental system', 'the applied treatment', "
         f"'the stimulus', 'the biological system', or 'the treatment condition'.\n"
         f"- Every mention of the cell type or treatment MUST use the real name.\n"
-        f"- Example: Instead of 'the applied treatment induced phosphorylation', write "
-        f"'{treatment} induced phosphorylation in {tissue}'.\n"
+        f"- Example: Instead of 'the applied treatment induced {ptm_type_label}', write "
+        f"'{treatment} induced {ptm_type_label} in {tissue}'.\n"
     )
 
     # v8.10: PTM-type-specific interpretation framework
@@ -437,7 +437,7 @@ INSTRUCTIONS:
 - For each Research Question, identify the most significant PTM findings and their biological implications.
 - If high-confidence literature matches are provided above, explicitly mention how the experimental results align with or diverge from published literature.
 - Highlight the cell signaling commonalities among activated proteins based on PTM Vector values.
-- Write a comprehensive abstract that captures ALL major findings. Be specific about PTM sites (e.g., phosphorylation at Ser165 of GENE_NAME).
+- Write a comprehensive abstract that captures ALL major findings. Be specific about PTM sites (e.g., '{ptm_type_label} at Lys48 of GENE_NAME' for ubiquitylation, or 'phosphorylation at Ser165 of GENE_NAME' for phosphorylation). Match the PTM type being analyzed.
 {combined_lit}"""
 
     elif section_type == "introduction":
@@ -680,7 +680,7 @@ PTM Biological Context:
 
 Structure (7 core topics):
 1. Primary Finding: The main PTM signaling mechanism identified — discuss in detail how the observed modifications form a coherent signaling response
-2. Mechanistic Insight: How specific PTM sites contribute to the observed response — relate each key site to known kinase-substrate relationships and signaling cascades
+2. Mechanistic Insight: How specific PTM sites contribute to the observed response — relate each key site to known {('E3 ligase-substrate' if ptm_type_str.lower().strip() in ('ubiquitylation', 'ubiquitination') else 'kinase-substrate')} relationships and signaling cascades
 3. Non-PTM Effector Signaling: Discuss the signaling roles of Non-PTM effector proteins (upstream regulators, scaffold/adaptors, transducers, downstream effectors). For each key Non-PTM protein, explain: (a) its relationship directionality with PTM proteins (upstream/downstream/feedback), (b) the canonical signaling pathway it belongs to, (c) how its temporal dynamics relate to PTM changes
 4. Cell Signaling Commonality: Discuss shared pathway memberships and cross-pathway interactions among the identified PTMs (use the Cell Signaling Commonality Analysis above). Explain whether signaling cascades represent signal amplification, relay, or termination
 5. Comparison with Literature: Compare and contrast your findings with published studies (use the provided references extensively)
@@ -750,7 +750,7 @@ The Methods section MUST cover:
 2. **PTM Data Processing**: Describe how PTM sites were quantified (Log2FC calculation, normalization, filtering criteria)
 3. **Bioinformatics Analysis Pipeline**:
    a. Literature enrichment using PubMed, UniProt, KEGG, and STRING-DB databases
-   b. Kinase-substrate prediction using KEA3 (Kinase Enrichment Analysis 3)
+   b. {'E3 ligase-substrate prediction using UbiBrowser and literature mining' if ptm_type_str.lower().strip() in ('ubiquitylation', 'ubiquitination') else 'Kinase-substrate prediction using KEA3 (Kinase Enrichment Analysis 3)'}
    c. ChromaDB vector search for published literature context
    d. Hypothesis generation and validation against literature
 4. **Network Analysis**: {'Cytoscape-based network visualization with force-directed layout, exported at 300 DPI' if has_network else 'Network analysis was performed to identify protein-protein interactions'}
@@ -789,8 +789,8 @@ Top PTM sites to validate:
 {top_ptms_str}
 
 For EACH of the top 5-8 PTM findings, suggest:
-1. **Western Blot Validation**: Specific antibodies (e.g., anti-phospho-{ptm_type_label} antibody for the specific site)
-2. **Functional Assay**: How to test the biological consequence of the modification (e.g., site-directed mutagenesis, kinase assay)
+1. **Western Blot Validation**: Specific antibodies for the modification site. For phosphorylation: anti-phospho antibodies. For ubiquitylation: anti-ubiquitin antibodies (e.g., K48-linkage specific, K63-linkage specific) or anti-diGly remnant antibodies.
+2. **Functional Assay**: How to test the biological consequence of the modification. For phosphorylation: site-directed mutagenesis, kinase assay. For ubiquitylation: in vitro ubiquitylation assay, E3 ligase identification, proteasome inhibition (MG132).
 3. **Pharmacological Intervention**: Specific inhibitors or activators to test the pathway (name actual drugs/compounds)
 4. **In Vivo Validation**: Animal model or clinical sample approaches
 5. **Time-Course Experiment**: Specific timepoints and conditions to validate temporal dynamics
@@ -823,7 +823,7 @@ INSTRUCTIONS:
 - Output ONLY the title text, nothing else. No quotes, no "Title:" prefix, no explanation.
 - The title should be BROAD enough to encompass ALL major findings in the report (temporal dynamics, transient burst, sustained changes, pathway analysis, network interactions).
 - Do NOT make the title too narrow (e.g., focusing only on one pathway or one PTM site).
-- Follow academic paper title conventions (e.g., "Comprehensive Phosphoproteomic Analysis Reveals ...").
+- Follow academic paper title conventions. For phosphorylation: e.g., "Comprehensive Phosphoproteomic Analysis Reveals ...". For ubiquitylation: e.g., "Quantitative Ubiquitylation Profiling Reveals ...". Match the title to the actual PTM type.
 - Include the PTM type ({ptm_type_label}), the experimental system ({tissue}), and the treatment ({treatment}).
 - The title should reflect the overall narrative: temporal {ptm_type_label} dynamics in {tissue} in response to {treatment}.
 - Keep it under 25 words."""

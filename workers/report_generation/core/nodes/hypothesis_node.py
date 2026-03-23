@@ -24,6 +24,7 @@ def run_hypothesis_generation(state: dict) -> dict:
 
     research_results = state.get("research_results", [])
     context = state.get("experimental_context", {})
+    ptm_type = state.get("ptm_type", "phosphorylation")
 
     llm = LLMClient(
         provider=state.get("llm_provider", "ollama"),
@@ -36,7 +37,7 @@ def run_hypothesis_generation(state: dict) -> dict:
             pct = 30 + (i / max(len(research_results), 1)) * 10
             cb(pct, f"Hypothesis for Q{i+1}")
 
-        new_hyps = _generate_hypotheses(result, context, llm)
+        new_hyps = _generate_hypotheses(result, context, llm, ptm_type=ptm_type)
         hypotheses.extend(new_hyps)
 
     if cb:
@@ -45,11 +46,11 @@ def run_hypothesis_generation(state: dict) -> dict:
     return {"hypotheses": hypotheses}
 
 
-def _generate_hypotheses(research: dict, context: dict, llm: LLMClient) -> list:
+def _generate_hypotheses(research: dict, context: dict, llm: LLMClient, ptm_type: str = "phosphorylation") -> list:
     """Generate hypotheses for a single research result."""
     if llm.is_available():
         return _generate_with_llm(research, context, llm)
-    return _generate_rule_based(research, context)
+    return _generate_rule_based(research, context, ptm_type=ptm_type)
 
 
 def _generate_with_llm(research: dict, context: dict, llm: LLMClient) -> list:
@@ -151,12 +152,13 @@ def _parse_llm_hypotheses(response: str, research: dict) -> list:
     return hypotheses
 
 
-def _generate_rule_based(research: dict, context: dict) -> list:
+def _generate_rule_based(research: dict, context: dict, ptm_type: str = "phosphorylation") -> list:
     """Fallback: generate hypotheses from rules."""
     hypotheses = []
     activated = research.get("activated", [])
     inhibited = research.get("inhibited", [])
     pathways = research.get("enriched_pathways", [])
+    ptm_label = ptm_type.capitalize() if ptm_type else "Phosphorylation"
 
     if activated and pathways:
         top = activated[0]
@@ -164,11 +166,11 @@ def _generate_rule_based(research: dict, context: dict) -> list:
         hypotheses.append({
             "id": str(uuid.uuid4())[:8],
             "question": research["question"],
-            "condition": f"Phosphorylation of {top['gene']} at {top['position']} is upregulated (Log2FC={top['ptm_relative_log2fc']})",
+            "condition": f"{ptm_label} of {top['gene']} at {top['position']} is upregulated (Log2FC={top['ptm_relative_log2fc']})",
             "prediction": f"The {pw} pathway is activated",
-            "mechanism": f"{top['gene']} {top['position']} phosphorylation activates downstream signaling through {pw}",
+            "mechanism": f"{top['gene']} {top['position']} {ptm_label.lower()} activates downstream signaling through {pw}",
             "supporting_ptms": [f"{top['gene']}-{top['position']}"],
-            "testable_prediction": f"Inhibition of {top['gene']} phosphorylation should reduce {pw} pathway activity",
+            "testable_prediction": f"Inhibition of {top['gene']} {ptm_label.lower()} should reduce {pw} pathway activity",
             "confidence": min(0.7, research.get("confidence", 0.5)),
             "status": "generated",
         })
@@ -183,7 +185,7 @@ def _generate_rule_based(research: dict, context: dict) -> list:
             "prediction": f"A signaling switch from {down['gene']} to {up['gene']} axis is occurring",
             "mechanism": f"Reciprocal regulation of {up['gene']} and {down['gene']} indicates a coordinated signaling transition",
             "supporting_ptms": [f"{up['gene']}-{up['position']}", f"{down['gene']}-{down['position']}"],
-            "testable_prediction": f"Restoring {down['gene']} activity should attenuate {up['gene']} phosphorylation",
+            "testable_prediction": f"Restoring {down['gene']} activity should attenuate {up['gene']} {ptm_label.lower()}",
             "confidence": 0.5,
             "status": "generated",
         })
