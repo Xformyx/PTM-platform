@@ -382,6 +382,13 @@ def _build_section_prompt(
             f"- If upstream E3 ligase is identified, discuss its substrate specificity and chain type preference\n"
             f"- If DUB (deubiquitylase) activity is implied (decreased ubiquitylation), discuss which DUB family may be responsible\n"
             f"- E3-substrate relationships are analogous to kinase-substrate relationships in phosphorylation\n"
+            f"\n"
+            f"**PTM TERMINOLOGY ENFORCEMENT (ABSOLUTE RULE):**\n"
+            f"- This is a UBIQUITYLATION analysis. You MUST use 'ubiquitylation' (not 'phosphorylation') when describing the PTM modifications in this study.\n"
+            f"- NEVER write 'phosphorylation sites', 'phosphorylation dynamics', 'phosphorylation events', 'phosphorylation changes' when referring to the modifications in this dataset.\n"
+            f"- NEVER write 'Phosphoproteomic' — use 'Ubiquitylomics' or 'Ubiquitylation profiling' instead.\n"
+            f"- The ONLY acceptable uses of 'phosphorylation' are: (1) 'oxidative phosphorylation' (metabolic pathway), (2) explicit cross-talk comparisons between ubiquitylation and phosphorylation, (3) phospho-degron mechanisms.\n"
+            f"- All Lys (K) sites in this dataset are UBIQUITYLATION sites, not phosphorylation sites.\n"
         )
 
     combined_lit = lit_context + pubmed_context

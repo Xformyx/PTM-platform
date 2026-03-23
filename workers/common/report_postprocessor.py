@@ -229,6 +229,15 @@ PTM_TERM_CORRECTIONS = {
             r'\bkinase-substrate\b': 'E3 ligase-substrate',
             r'\bkinase enrichment\b': 'E3 ligase enrichment',
             r'\b(\d+)\s+phosphorylation\s+sites\b': r'\1 ubiquitylation sites',
+            # Title-level corrections
+            r'\bPhosphoproteomic\b': 'Ubiquitylomics',
+            r'\bphosphoproteomic\b': 'ubiquitylomics',
+            r'\bPhosphoproteomics\b': 'Ubiquitylomics',
+            r'\bphosphoproteomics\b': 'ubiquitylomics',
+            r'\bPhosphorylation Dynamics\b': 'Ubiquitylation Dynamics',
+            r'\bphosphorylation at (Lys\d+)\b': r'ubiquitylation at \1',
+            r'\bphosphorylation at (K\d+)\b': r'ubiquitylation at \1',
+            r'\bKey phosphorylation\b': 'Key ubiquitylation',
         },
         # Context-aware exceptions: don't replace these
         # NOTE: Patterns must be specific to avoid false positives (e.g., "phosphorylation sites in this ubiquitylation study")

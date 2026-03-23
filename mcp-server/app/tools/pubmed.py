@@ -161,11 +161,11 @@ async def _multi_tier_search(
     gene: str, position: str, ptm_type: str,
     context_keywords: list[str], max_results: int,
 ) -> dict:
-    variants = _generate_position_variants(position)
+    variants = _generate_position_variants(position, ptm_type)
     aliases_data = await _fetch_gene_aliases(gene)
     all_names = [gene] + aliases_data
 
-    # Tier 1: General phosphorylation query
+    # Tier 1: General PTM query (gene + ptm_type + position variants)
     tier1_query = _build_general_query(gene, variants, ptm_type)
     tier1_pmids = await _esearch(tier1_query, max_results)
 
@@ -184,10 +184,25 @@ async def _multi_tier_search(
     # Europe PMC — always run in parallel for maximum coverage
     epmc_pmids = await _search_europe_pmc(gene, position, ptm_type, max_results)
 
+    # Tier 4: Broad fallback — gene + PTM type only (no position) when results are scarce
+    # This is especially important for ubiquitylation where site-specific literature is rare
+    tier4_pmids = []
+    total_so_far = len(set(tier1_pmids + tier2_pmids + tier3_pmids + epmc_pmids))
+    if total_so_far < 3:
+        ptm_terms = {
+            "Phosphorylation": "phosphorylation",
+            "Ubiquitylation": "ubiquitination OR ubiquitylation OR ubiquitin",
+            "Acetylation": "acetylation",
+        }
+        ptm_term = ptm_terms.get(ptm_type, "post-translational modification")
+        tier4_query = f'({gene}[Title/Abstract]) AND ({ptm_term}[Title/Abstract])'
+        tier4_pmids = await _esearch(tier4_query, max_results)
+        logger.info(f"Tier 4 broad fallback for {gene}/{ptm_type}: {len(tier4_pmids)} PMIDs")
+
     # Merge and deduplicate
     seen = set()
     merged = []
-    for pmid in tier1_pmids + tier2_pmids + tier3_pmids + epmc_pmids:
+    for pmid in tier1_pmids + tier2_pmids + tier3_pmids + epmc_pmids + tier4_pmids:
         if pmid not in seen:
             seen.add(pmid)
             merged.append(pmid)
@@ -216,6 +231,7 @@ async def _multi_tier_search(
             "tier2_context": len(tier2_pmids),
             "tier3_alias": len(tier3_pmids),
             "europe_pmc": len(epmc_pmids),
+            "tier4_broad_fallback": len(tier4_pmids),
         },
         "articles": scored,
     }
@@ -253,8 +269,11 @@ def _build_alias_query(aliases: list[str], variants: list[str], ptm_type: str) -
     return f"({gene_str}) AND ({ptm_term}[Title/Abstract]) AND ({variant_str})"
 
 
-def _generate_position_variants(position: str) -> list[str]:
-    """Generate position search variants: S165 → Ser165, pS165, etc."""
+def _generate_position_variants(position: str, ptm_type: str = "Phosphorylation") -> list[str]:
+    """Generate position search variants, PTM-type aware.
+    For phosphorylation: S165 → Ser165, pS165, phospho-S165, etc.
+    For ubiquitylation: K48 → Lys48, ub-K48, diGly-K48, GG-K48, etc.
+    """
     if not position or position in ("Unknown", "N-term", "N/A"):
         return [position] if position else []
 
@@ -267,14 +286,41 @@ def _generate_position_variants(position: str) -> list[str]:
     aa, num = m.group(1), m.group(2)
     full_name = residue_map.get(aa, aa)
 
-    return [
-        position,                    # S165
-        f"{full_name}{num}",         # Ser165
-        f"{full_name}-{num}",        # Ser-165
-        f"{full_name} {num}",        # Ser 165
-        f"p{aa}{num}",              # pS165
-        f"phospho-{aa}{num}",       # phospho-S165
+    # Common variants for all PTM types
+    variants = [
+        position,                    # K48 / S165
+        f"{full_name}{num}",         # Lys48 / Ser165
+        f"{full_name}-{num}",        # Lys-48 / Ser-165
+        f"{full_name} {num}",        # Lys 48 / Ser 165
     ]
+
+    pt = ptm_type.lower().strip() if ptm_type else "phosphorylation"
+    if pt in ("ubiquitylation", "ubiquitination"):
+        # Ubiquitylation-specific variants
+        variants.extend([
+            f"ub-{aa}{num}",             # ub-K48
+            f"Ub-{full_name}{num}",      # Ub-Lys48
+            f"diGly-{aa}{num}",          # diGly-K48
+            f"diGly-{full_name}{num}",   # diGly-Lys48
+            f"GG-{aa}{num}",             # GG-K48
+            f"GG-{full_name}{num}",      # GG-Lys48
+            f"ubiquitin-{aa}{num}",      # ubiquitin-K48
+            f"ubiquitylated {full_name}{num}",  # ubiquitylated Lys48
+        ])
+    elif pt == "acetylation":
+        variants.extend([
+            f"ac-{aa}{num}",             # ac-K48
+            f"acetyl-{aa}{num}",         # acetyl-K48
+            f"acetylated {full_name}{num}",
+        ])
+    else:
+        # Default: phosphorylation variants
+        variants.extend([
+            f"p{aa}{num}",              # pS165
+            f"phospho-{aa}{num}",       # phospho-S165
+        ])
+
+    return variants
 
 
 # ---------------------------------------------------------------------------
