@@ -271,6 +271,7 @@ def _build_section_prompt(
     # --- ChromaDB vector-search literature ---
     lit_context = ""
     ptm_type_label = context.get("ptm_type", "phosphorylation")
+    ptm_type_str = ptm_type_label  # alias for backward compat across all sections
     keywords = [
         context.get("tissue") or context.get("cell_type", ""),
         context.get("treatment", ""),
