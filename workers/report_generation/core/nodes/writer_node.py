@@ -600,6 +600,7 @@ IMPORTANT: Be thorough and detailed. Discuss each significant PTM site individua
 {combined_lit}"""
 
     elif section_type == "discussion":
+        ptm_type_str = context.get("ptm_type", "phosphorylation")
         results_text = prev_sections.get("results", "")[:4000]
         comp_disc = ""
         if comprehensive_summary:
