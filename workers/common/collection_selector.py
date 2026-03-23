@@ -175,9 +175,9 @@ PTM_TYPE_MAPPING = {
         "collection": "acetylation",
         "weight": 0.9,
     },
-    "ubiquitination": {
-        "keywords": ["ubiquitination", "e3 ligase", "proteasome", "degradation", "ubiquitin"],
-        "collection": "ubiquitination",
+    "ubiquitylation": {
+        "keywords": ["ubiquitylation", "ubiquitination", "e3 ligase", "proteasome", "degradation", "ubiquitin"],
+        "collection": "ubiquitylation",
         "weight": 0.9,
     },
     "methylation": {

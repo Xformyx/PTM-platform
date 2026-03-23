@@ -105,6 +105,13 @@ NODE_COLORS = {
     "kinase": "#FF8F00",            # Amber — Kinase/upstream regulator
     "kinase_up": "#E65100",         # Deep Orange — Kinase with increased activity
     "kinase_down": "#FFB74D",       # Light Orange — Kinase with decreased activity
+    # --- v8.10: E3 Ligase / DUB (ubiquitylation mode) ---
+    "e3_ligase": "#FF8F00",         # Amber — E3 Ligase (same palette as kinase)
+    "e3_ligase_up": "#E65100",      # Deep Orange — E3 Ligase with increased activity
+    "e3_ligase_down": "#FFB74D",    # Light Orange — E3 Ligase with decreased activity
+    "dub": "#00897B",               # Teal — DUB (deubiquitylase)
+    "dub_up": "#004D40",            # Dark Teal — DUB with increased activity
+    "dub_down": "#80CBC4",          # Light Teal — DUB with decreased activity
     # --- Legacy / fallback ---
     "non_ptm": "#9E9E9E",           # Gray — fallback for Non-PTM without FC data
     "missing": "#E0E0E0",           # Light Gray — missing data
@@ -114,11 +121,13 @@ EDGE_COLORS = {
     "STRING": "#808080",            # Gray — STRING-DB PPI
     "STRING-DB": "#808080",         # Alias
     "KEGG": "#228B22",              # Forest Green — KEGG pathway
-    "KEA3": "#FF4500",              # Orange-Red — Kinase-substrate
+    "KEA3": "#FF4500",              # Orange-Red — Kinase-substrate / E3-substrate
     "Shared Pathway": "#228B22",    # Same as KEGG
     "Shared-Partner": "#8B008B",    # Purple — Shared interactor
     "Shared-Regulator": "#FF6F00",  # Amber — Shared upstream regulator (v4.0 NEW)
     "Kinase-Substrate": "#FF4500",  # Same as KEA3
+    "E3-Substrate": "#FF4500",       # v8.10: E3 ligase-substrate (same as KEA3)
+    "DUB-Substrate": "#00897B",      # v8.10: DUB-substrate (Teal)
     "BioGRID": "#1E90FF",           # Dodger Blue — BioGRID experimental PPI
     "Kinase-Substrate-Predicted": "#D8BFD8",  # Light purple
     "Literature": "#E377C2",        # Pink
@@ -135,6 +144,8 @@ NODE_SHAPES = {
     "PTM": "ELLIPSE",              # Circle for PTM proteins
     "Non-PTM": "ELLIPSE",          # Circle for Non-PTM proteins (v4.0: was DIAMOND)
     "Kinase": "DIAMOND",           # Diamond for kinases / upstream regulators
+    "E3_Ligase": "DIAMOND",         # v8.10: Diamond for E3 ligases
+    "DUB": "TRIANGLE",              # v8.10: Triangle for DUBs
     "Interactor": "ELLIPSE",       # Circle for interactors (v4.0: was ROUND_RECTANGLE)
     "Pathway-Member": "ELLIPSE",   # Circle (v4.0: was HEXAGON)
 }
@@ -163,6 +174,21 @@ def _classify_state(value: float, node_type: str = "PTM") -> str:
         elif value < -0.5:
             return "kinase_down"
         return "kinase"
+
+    # v8.10: E3 Ligase and DUB node types
+    if node_type == "E3_Ligase":
+        if value > 0.5:
+            return "e3_ligase_up"
+        elif value < -0.5:
+            return "e3_ligase_down"
+        return "e3_ligase"
+
+    if node_type == "DUB":
+        if value > 0.5:
+            return "dub_up"
+        elif value < -0.5:
+            return "dub_down"
+        return "dub"
     
     if node_type == "Non-PTM":
         if value > 1.5:
@@ -427,6 +453,7 @@ def _analyze_timepoint(
     timepoint: str,
     threshold: float = 0.0,
     output_dir: str = "",
+    ptm_type: str = "phosphorylation",
 ) -> dict:
     """Analyze network for a single timepoint/condition.
     
@@ -725,7 +752,12 @@ def _analyze_timepoint(
                     edge_copy["is_active_edge"] = True
                     active_edges.append(edge_copy)
 
-        # --- Kinase-substrate edges (PHASE 1-B: Non-PTM kinase nodes) ---
+        # --- Upstream regulator edges (PHASE 1-B) ---
+        # v8.10: Dynamic labeling based on ptm_type
+        _is_ubi = ptm_type.lower().strip() in ("ubiquitylation", "ubiquitination")
+        _regulator_type = "E3_Ligase" if _is_ubi else "Kinase"
+        _edge_evidence = "E3-Substrate" if _is_ubi else "KEA3"
+
         reg = enr.get("regulation", {})
         upstream = reg.get("upstream_regulators", [])
         for kinase in upstream:  # No limit — use all available upstream regulators
@@ -736,12 +768,12 @@ def _analyze_timepoint(
                 continue
 
             if kinase_clean in gene_ptms:
-                # Kinase is a PTM gene — Kinase→Substrate direction
+                # Regulator is a PTM gene — Regulator→Substrate direction
                 for kinase_node_id in gene_ptms[kinase_clean]:
                     edge = {
-                        "source": kinase_node_id,  # Kinase (source)
-                        "target": source_id,        # Substrate (target)
-                        "evidence_type": "KEA3",
+                        "source": kinase_node_id,
+                        "target": source_id,
+                        "evidence_type": _edge_evidence,
                         "confidence": 0.8,
                         "pathways": [],
                         "pathway_str": "",
@@ -752,17 +784,17 @@ def _analyze_timepoint(
                         edge_copy["is_active_edge"] = True
                         active_edges.append(edge_copy)
             else:
-                # Kinase is Non-PTM (PHASE 1-B NEW) — most kinases fall here
+                # Regulator is Non-PTM (PHASE 1-B) — most regulators fall here
                 edge = {
-                    "source": kinase_clean,   # Kinase Non-PTM node (source)
-                    "target": source_id,       # PTM Substrate (target)
-                    "evidence_type": "KEA3",
+                    "source": kinase_clean,
+                    "target": source_id,
+                    "evidence_type": _edge_evidence,
                     "confidence": 0.8,
                     "pathways": [],
                     "pathway_str": "",
                 }
                 all_edges.append(edge)
-                # Register candidate Non-PTM kinase node (v4.0: type=Kinase, shape=DIAMOND)
+                # Register candidate Non-PTM regulator node
                 if kinase_upper not in seen_non_ptm_upper:
                     seen_non_ptm_upper.add(kinase_upper)
                     _kfc = gene_protein_fc.get(kinase_upper, 0.0)
@@ -770,34 +802,38 @@ def _analyze_timepoint(
                         "id": kinase_clean,
                         "gene": kinase_clean,
                         "site": "",
-                        "type": "Kinase",
+                        "type": _regulator_type,
                         "value": round(_kfc, 3),
-                        "state": _classify_state(_kfc, "Kinase"),
+                        "state": _classify_state(_kfc, _regulator_type),
                         "identified": True,
                         "label": kinase_clean,
-                        "source": "KEA3",
+                        "source": _edge_evidence,
                     }
-                # v4.0: Track kinase->substrate for Shared-Regulator edges
+                # Track regulator->substrate for Shared-Regulator edges
                 if kinase_clean not in _kinase_substrates_tp:
                     _kinase_substrates_tp[kinase_clean] = []
                 _kinase_substrates_tp[kinase_clean].append(source_id)
 
         # --- v5.0: Additional kinase sources: kinase_prediction (LLM) + kinase_substrate (pattern) ---
-        # kinase_substrate from regulation_extractor (pattern-based from articles)
+        # kinase/E3-substrate from regulation_extractor (pattern-based from articles)
+        # v8.10: Also check e3_substrate for ubiquitylation mode
         kinase_subs = reg.get("kinase_substrate", [])
+        if _is_ubi:
+            kinase_subs = kinase_subs + reg.get("e3_substrate", [])
         for ks in kinase_subs:
-            ks_kinase = (ks.get("kinase") or "").strip()
+            ks_kinase = (ks.get("kinase") or ks.get("e3_ligase") or "").strip()
             ks_upper = ks_kinase.upper()
             if not ks_kinase or ks_upper == gene.upper():
                 continue
             if ks_kinase not in gene_ptms:
+                _lit_label = "E3-substrate (literature)" if _is_ubi else "kinase-substrate (literature)"
                 edge = {
                     "source": ks_kinase,
                     "target": source_id,
-                    "evidence_type": "KEA3",
+                    "evidence_type": _edge_evidence,
                     "confidence": 0.7,
                     "pathways": [],
-                    "pathway_str": "kinase-substrate (literature)",
+                    "pathway_str": _lit_label,
                 }
                 all_edges.append(edge)
                 if ks_upper not in seen_non_ptm_upper:
@@ -807,9 +843,9 @@ def _analyze_timepoint(
                         "id": ks_kinase,
                         "gene": ks_kinase,
                         "site": "",
-                        "type": "Kinase",
+                        "type": _regulator_type,
                         "value": round(_kfc, 3),
-                        "state": _classify_state(_kfc, "Kinase"),
+                        "state": _classify_state(_kfc, _regulator_type),
                         "identified": True,
                         "label": ks_kinase,
                         "source": "Literature",
@@ -863,9 +899,9 @@ def _analyze_timepoint(
                         "id": pk_name,
                         "gene": pk_name,
                         "site": "",
-                        "type": "Kinase",
+                        "type": _regulator_type,
                         "value": round(_kfc, 3),
-                        "state": _classify_state(_kfc, "Kinase"),
+                        "state": _classify_state(_kfc, _regulator_type),
                         "identified": True,
                         "label": pk_name,
                         "source": "LLM-Predicted",
@@ -1013,7 +1049,7 @@ def _analyze_timepoint(
 # Build combined network data (PHASE 1 REBUILT)
 # ---------------------------------------------------------------------------
 
-def _build_network_data(parsed_ptms: list, enriched_data: list, output_dir: str = "") -> dict:
+def _build_network_data(parsed_ptms: list, enriched_data: list, output_dir: str = "", ptm_type: str = "phosphorylation") -> dict:
     """Build combined network nodes and edges from all PTMs.
     
     Phase 1 REBUILT:
@@ -1218,7 +1254,12 @@ def _build_network_data(parsed_ptms: list, enriched_data: list, output_dir: str 
                     "pathway_str": ", ".join(list(shared)[:2]),
                 })
 
-        # --- Kinase-substrate edges (PHASE 1-B: Non-PTM kinase nodes) ---
+        # --- Upstream regulator edges (PHASE 1-B) ---
+        # v8.10: Dynamic labeling based on ptm_type
+        _is_ubi_bn = ptm_type.lower().strip() in ("ubiquitylation", "ubiquitination")
+        _reg_type_bn = "E3_Ligase" if _is_ubi_bn else "Kinase"
+        _edge_ev_bn = "E3-Substrate" if _is_ubi_bn else "KEA3"
+
         reg = enr.get("regulation", {})
         upstream = reg.get("upstream_regulators", [])
         for kinase in upstream:  # No limit — use all available upstream regulators
@@ -1229,22 +1270,22 @@ def _build_network_data(parsed_ptms: list, enriched_data: list, output_dir: str 
                 continue
 
             if kinase_clean in gene_ptms:
-                # Kinase is PTM gene — Kinase→Substrate direction
+                # Regulator is PTM gene — Regulator→Substrate direction
                 for kinase_node_id in gene_ptms[kinase_clean]:
                     edges.append({
                         "source": kinase_node_id,
                         "target": source_id,
-                        "evidence_type": "KEA3",
+                        "evidence_type": _edge_ev_bn,
                         "confidence": 0.8,
                         "pathways": [],
                         "pathway_str": "",
                     })
             else:
-                # Kinase is Non-PTM (v4.0: type=Kinase, shape=DIAMOND)
+                # Regulator is Non-PTM
                 edges.append({
                     "source": kinase_clean,
                     "target": source_id,
-                    "evidence_type": "KEA3",
+                    "evidence_type": _edge_ev_bn,
                     "confidence": 0.8,
                     "pathways": [],
                     "pathway_str": "",
@@ -1256,13 +1297,13 @@ def _build_network_data(parsed_ptms: list, enriched_data: list, output_dir: str 
                         "id": kinase_clean,
                         "gene": kinase_clean,
                         "site": "",
-                        "type": "Kinase",
+                        "type": _reg_type_bn,
                         "value": round(_kfc, 3),
-                        "state": _classify_state(_kfc, "Kinase"),
+                        "state": _classify_state(_kfc, _reg_type_bn),
                         "label": kinase_clean,
-                        "source": "KEA3",
+                        "source": _edge_ev_bn,
                     }
-                # v4.0: Track kinase->substrate for Shared-Regulator edges
+                # Track regulator->substrate for Shared-Regulator edges
                 if kinase_clean not in _kinase_substrates:
                     _kinase_substrates[kinase_clean] = []
                 _kinase_substrates[kinase_clean].append(source_id)
@@ -1305,9 +1346,9 @@ def _build_network_data(parsed_ptms: list, enriched_data: list, output_dir: str 
                             "id": pk_clean,
                             "gene": pk_clean,
                             "site": "",
-                            "type": "Kinase",
+                            "type": _reg_type_bn,
                             "value": round(_kfc, 3),
-                            "state": _classify_state(_kfc, "Kinase"),
+                            "state": _classify_state(_kfc, _reg_type_bn),
                             "label": pk_clean,
                             "source": "Kinase-Prediction",
                         }
@@ -1315,7 +1356,7 @@ def _build_network_data(parsed_ptms: list, enriched_data: list, output_dir: str 
                         _kinase_substrates[pk_clean] = []
                     _kinase_substrates[pk_clean].append(source_id)
 
-        # --- v5.0: Kinase from kinase_substrate (pattern-matched) ---
+        # --- v5.0: Regulator from kinase_substrate (pattern-matched) ---
         kinase_sub = enr.get("kinase_substrate", {})
         if isinstance(kinase_sub, dict):
             sub_kinases = kinase_sub.get("kinases", []) or kinase_sub.get("matched_kinases", [])
@@ -1353,9 +1394,9 @@ def _build_network_data(parsed_ptms: list, enriched_data: list, output_dir: str 
                             "id": sk_clean,
                             "gene": sk_clean,
                             "site": "",
-                            "type": "Kinase",
+                            "type": _reg_type_bn,
                             "value": round(_kfc, 3),
-                            "state": _classify_state(_kfc, "Kinase"),
+                            "state": _classify_state(_kfc, _reg_type_bn),
                             "label": sk_clean,
                             "source": "Kinase-Substrate",
                         }
@@ -1500,6 +1541,7 @@ def _generate_legends(
     network_data: dict,
     ptms: list,
     timepoint_results: dict = None,
+    ptm_type: str = "phosphorylation",
 ) -> dict:
     """Generate multi-type figure legends (guide §5.1).
     
@@ -1549,15 +1591,24 @@ def _generate_legends(
     legend_lines.append(f"- Purple ({NODE_COLORS['nonptm_down']}): Moderate decrease (-1.5 ≤ Log2FC < -0.5)")
     legend_lines.append(f"- Dark Purple ({NODE_COLORS['nonptm_down_strong']}): Strong decrease (Log2FC < -1.5)")
     legend_lines.append("")
-    legend_lines.append("*Kinase / Upstream Regulators (Diamond shape):*")
-    legend_lines.append(f"- Deep Orange ({NODE_COLORS['kinase_up']}): Kinase with increased activity (Log2FC > 0.5)")
-    legend_lines.append(f"- Amber ({NODE_COLORS['kinase']}): Kinase / upstream regulator (neutral)")
-    legend_lines.append(f"- Light Orange ({NODE_COLORS['kinase_down']}): Kinase with decreased activity (Log2FC < -0.5)")
+    # v8.10: Dynamic regulator label based on ptm_type
+    _is_ubi_leg = ptm_type.lower().strip() in ("ubiquitylation", "ubiquitination")
+    _reg_label = "E3 Ligase" if _is_ubi_leg else "Kinase"
+    legend_lines.append(f"*{_reg_label} / Upstream Regulators (Diamond shape):*")
+    legend_lines.append(f"- Deep Orange ({NODE_COLORS['kinase_up']}): {_reg_label} with increased activity (Log2FC > 0.5)")
+    legend_lines.append(f"- Amber ({NODE_COLORS['kinase']}): {_reg_label} / upstream regulator (neutral)")
+    legend_lines.append(f"- Light Orange ({NODE_COLORS['kinase_down']}): {_reg_label} with decreased activity (Log2FC < -0.5)")
+    if _is_ubi_leg:
+        legend_lines.append(f"- Dark Teal ({NODE_COLORS['dub_up']}): DUB with increased activity (Log2FC > 0.5)")
+        legend_lines.append(f"- Teal ({NODE_COLORS['dub']}): DUB / deubiquitylase (neutral)")
+        legend_lines.append(f"- Light Teal ({NODE_COLORS['dub_down']}): DUB with decreased activity (Log2FC < -0.5)")
     legend_lines.append("")
     # Node Shape Legend v4.0
     legend_lines.append("**Node Shape Legend**:")
     legend_lines.append("- Circle (ELLIPSE): Proteins (PTM + Non-PTM)")
-    legend_lines.append("- Diamond (DIAMOND): Kinase / Upstream regulators")
+    legend_lines.append(f"- Diamond (DIAMOND): {_reg_label} / Upstream regulators")
+    if _is_ubi_leg:
+        legend_lines.append("- Triangle (TRIANGLE): DUB / Deubiquitylases")
     legend_lines.append("")
 
     # Node Size Legend (Phase 2: updated range)
@@ -2457,6 +2508,7 @@ def _run_network_analysis_inner(state: dict) -> dict:
     parsed_ptms = state.get("parsed_ptms", [])
     enriched_data = state.get("enriched_ptm_data", [])
     output_dir = state.get("output_dir", "/tmp")
+    ptm_type = state.get("ptm_type", "phosphorylation")  # v8.10
 
     # GAP 1: Detect timepoints and perform per-timepoint analysis
     timepoints = _detect_timepoints(parsed_ptms)
@@ -2465,7 +2517,7 @@ def _run_network_analysis_inner(state: dict) -> dict:
     if len(timepoints) > 1:
         logger.info(f"[NET-NODE] Detected {len(timepoints)} timepoints: {timepoints}")
         for tp in timepoints:
-            tp_result = _analyze_timepoint(parsed_ptms, enriched_data, tp, output_dir=output_dir)
+            tp_result = _analyze_timepoint(parsed_ptms, enriched_data, tp, output_dir=output_dir, ptm_type=ptm_type)
             timepoint_results[tp] = tp_result
             logger.info(
                 f"[NET-NODE] Timepoint {tp}: "
@@ -2478,7 +2530,7 @@ def _run_network_analysis_inner(state: dict) -> dict:
         logger.info("[NET-NODE] Single timepoint/condition — using combined network")
 
     # Build combined network data (for backward compatibility + main network image)
-    network_data = _build_network_data(parsed_ptms, enriched_data, output_dir=output_dir)
+    network_data = _build_network_data(parsed_ptms, enriched_data, output_dir=output_dir, ptm_type=ptm_type)
 
     # Phase 5: Validate network integrity
     validation = _validate_network(network_data["nodes"], network_data["edges"])
@@ -2491,7 +2543,7 @@ def _run_network_analysis_inner(state: dict) -> dict:
     )
 
     # GAP 4: Generate multi-type legends
-    legends = _generate_legends(network_data, parsed_ptms, timepoint_results)
+    legends = _generate_legends(network_data, parsed_ptms, timepoint_results, ptm_type=ptm_type)
 
     # Attempt Cytoscape visualization
     network_images = {}

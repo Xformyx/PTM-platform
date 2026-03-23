@@ -39,6 +39,7 @@ class ReportState(TypedDict, total=False):
     llm_model: str
     report_title: str
     report_config: dict
+    ptm_type: str  # v8.10: detected from data or experimental_context
 
     # Intermediate results
     comprehensive_summary: str

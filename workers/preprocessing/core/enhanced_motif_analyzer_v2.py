@@ -112,7 +112,7 @@ class EnhancedMotifAnalyzerV2:
             "Ubiquitin_binding_domain": r"[ILVM].{0,1}[ILVM].[ILVM]", # Ubiquitin binding domain
             "K48_polyubiquitin_linkage": r"K.{1,3}[ED]",        # K48 polyubiquitin linkage
             "K63_polyubiquitin_linkage": r"K.{1,3}[KR]",        # K63 polyubiquitin linkage
-            "Lysine_ubiquitination_general": r"K[AVILM]",       # General lysine ubiquitination
+            "Lysine_ubiquitylation_general": r"K[AVILM]",       # General lysine ubiquitylation
             "SUMO_consensus_motif": r"[VILMF]K.E",              # SUMOylation consensus (related)
         }
     

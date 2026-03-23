@@ -135,8 +135,8 @@ class PTMVectorReportGenerator:
         if not conditions:
             conditions = sorted(list(df["Condition"].dropna().unique()), key=_natural_sort_key)
 
-        ptm_colors = {"Phosphorylation": "#1f77b4", "Ubiquitination": "#d62728", "Ubiquitylation": "#d62728"}
-        ptm_markers = {"Phosphorylation": "o", "Ubiquitination": "s", "Ubiquitylation": "s"}
+        ptm_colors = {"Phosphorylation": "#1f77b4", "Ubiquitylation": "#d62728", "Ubiquitination": "#d62728"}  # Ubiquitination kept for backward compat
+        ptm_markers = {"Phosphorylation": "o", "Ubiquitylation": "s", "Ubiquitination": "s"}
 
         fig, axes = plt.subplots(2, 2, figsize=(12, 10))
         fig.suptitle("PTM Vector Analysis: Summary", fontsize=14, fontweight="bold")

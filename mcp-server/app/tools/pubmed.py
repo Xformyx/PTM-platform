@@ -245,7 +245,7 @@ def _build_context_query(gene: str, variants: list[str], ptm_type: str, keywords
 def _build_alias_query(aliases: list[str], variants: list[str], ptm_type: str) -> str:
     ptm_terms = {
         "Phosphorylation": "phosphorylation",
-        "Ubiquitylation": "ubiquitination",
+        "Ubiquitylation": "ubiquitination OR ubiquitylation",
     }
     ptm_term = ptm_terms.get(ptm_type, "post-translational modification")
     gene_str = " OR ".join(f'"{a}"[Title/Abstract]' for a in aliases[:5])
@@ -421,7 +421,7 @@ def _parse_single_article(pa) -> dict | None:
 # ---------------------------------------------------------------------------
 
 async def _search_europe_pmc(gene: str, position: str, ptm_type: str, max_results: int) -> list[str]:
-    ptm_terms = {"Phosphorylation": "phosphorylation", "Ubiquitylation": "ubiquitination"}
+    ptm_terms = {"Phosphorylation": "phosphorylation", "Ubiquitylation": "ubiquitylation OR ubiquitination"}
     ptm = ptm_terms.get(ptm_type, "modification")
     query = f'"{gene}" AND "{ptm}" AND ("{position}")'
 

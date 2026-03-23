@@ -172,7 +172,7 @@ export default function OrderCreate() {
     cell_type: "", treatment: "", time_points: "", biological_question: "", special_conditions: "",
     report_type: "comprehensive", top_n_ptms: 20, llm_model: "", rag_llm_model: "",
     analysis_mode: "ptm_only" as "ptm_only" | "ptm_nonptm_network" | "cross_talk",
-    secondary_ptm_type: "ubiquitination",
+    secondary_ptm_type: "ubiquitylation",
   });
   const [researchQuestions, setResearchQuestions] = useState<string[]>([]);
   const [newQuestion, setNewQuestion] = useState("");
@@ -538,7 +538,7 @@ export default function OrderCreate() {
                       <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="phosphorylation">Phosphorylation</SelectItem>
-                        <SelectItem value="ubiquitination">Ubiquitination</SelectItem>
+                        <SelectItem value="ubiquitylation">Ubiquitylation</SelectItem>
                         <SelectItem value="acetylation">Acetylation</SelectItem>
                         <SelectItem value="methylation">Methylation</SelectItem>
                         <SelectItem value="sumoylation">SUMOylation</SelectItem>
@@ -861,7 +861,7 @@ export default function OrderCreate() {
                         <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
                         <SelectContent>
                           <SelectItem value="phosphorylation">Phosphorylation</SelectItem>
-                          <SelectItem value="ubiquitination">Ubiquitination</SelectItem>
+                          <SelectItem value="ubiquitylation">Ubiquitylation</SelectItem>
                           <SelectItem value="acetylation">Acetylation</SelectItem>
                           <SelectItem value="methylation">Methylation</SelectItem>
                           <SelectItem value="sumoylation">SUMOylation</SelectItem>

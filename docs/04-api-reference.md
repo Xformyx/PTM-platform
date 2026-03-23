@@ -55,7 +55,7 @@ Order 생성 (multipart/form-data).
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `project_name` | string | Yes | 프로젝트 이름 |
-| `ptm_type` | string | Yes | `phosphorylation` / `ubiquitination` |
+| `ptm_type` | string | Yes | `phosphorylation` / `ubiquitylation` |
 | `species` | string | Yes | `human` / `mouse` / `rat` |
 | `sample_config` | JSON string | Yes | 샘플 그룹 설정 (control/experiment 매핑) |
 | `report_options` | JSON string | Yes | 리포트 생성 옵션 |

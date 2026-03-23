@@ -70,11 +70,24 @@ def run_context_loader(state: dict) -> dict:
     if cb:
         cb(5, f"Context loaded: {len(parsed_ptms)} PTMs, {len(questions)} questions")
 
+    # Detect dominant ptm_type from parsed data (for downstream nodes)
+    ptm_type_counts = {}
+    for p in parsed_ptms:
+        pt = p.get("ptm_type", "Phosphorylation").lower()
+        ptm_type_counts[pt] = ptm_type_counts.get(pt, 0) + 1
+    dominant_ptm_type = max(ptm_type_counts, key=ptm_type_counts.get) if ptm_type_counts else "phosphorylation"
+    # Also check experimental_context override
+    ptm_type_from_context = context.get("ptm_type", "").lower().strip()
+    if ptm_type_from_context:
+        dominant_ptm_type = ptm_type_from_context
+    logger.info(f"Detected ptm_type: {dominant_ptm_type}")
+
     return {
         "parsed_ptms": parsed_ptms,
         "enriched_ptm_data": enriched_data,
         "research_questions": questions,
         "comprehensive_summary": comprehensive_summary,
+        "ptm_type": dominant_ptm_type,
     }
 
 

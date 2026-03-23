@@ -3,7 +3,7 @@ export interface Order {
   order_code: string;
   project_name: string;
   status: OrderStatus;
-  ptm_type: 'phosphorylation' | 'ubiquitination';
+  ptm_type: 'phosphorylation' | 'ubiquitylation';
   species: string;
   organism_code?: number;
   sample_config: Record<string, unknown>;

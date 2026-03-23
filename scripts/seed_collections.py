@@ -149,10 +149,10 @@ DEFAULT_COLLECTIONS = [
         "chromadb_name": "acetylation",
     },
     {
-        "name": "Ubiquitination",
-        "description": "Protein ubiquitination, E3 ligases, proteasome, protein degradation, UPS",
+        "name": "Ubiquitylation",
+        "description": "Protein ubiquitylation, E3 ligases, proteasome, protein degradation, UPS, signaling, DNA repair, trafficking",
         "tier": "ptm_type",
-        "chromadb_name": "ubiquitination",
+        "chromadb_name": "ubiquitylation",
     },
     {
         "name": "Methylation",

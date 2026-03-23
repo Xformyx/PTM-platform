@@ -47,7 +47,7 @@ class Order(Base):
 
     # Sample info
     ptm_type: Mapped[str] = mapped_column(
-        Enum("phosphorylation", "ubiquitination", name="ptm_type"), nullable=False
+        Enum("phosphorylation", "ubiquitylation", "ubiquitination", name="ptm_type"), nullable=False  # ubiquitination kept for backward compat
     )
     species: Mapped[str] = mapped_column(String(50), nullable=False)
     organism_code: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)

@@ -81,7 +81,7 @@ PTM_PATTERNS = {
     "gene_name": re.compile(r"\b[A-Z][A-Z0-9]{1,5}\d*\b"),
     # PTM types
     "ptm_type": re.compile(
-        r"\b(?:phosphorylation|acetylation|ubiquitination|methylation|"
+        r"\b(?:phosphorylation|acetylation|ubiquitylation|ubiquitination|methylation|"
         r"sumoylation|glycosylation|nitrosylation)\b",
         re.IGNORECASE,
     ),

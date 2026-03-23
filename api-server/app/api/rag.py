@@ -19,7 +19,7 @@ logger = logging.getLogger("ptm-platform.rag")
 TEMPLATE_CHROMADB_NAMES = frozenset({
     "neuroscience", "cancer_biology", "immunology", "stem_cell",
     "cardiovascular", "metabolism", "liver_biology",
-    "phosphorylation", "acetylation", "ubiquitination", "methylation",
+    "phosphorylation", "acetylation", "ubiquitylation", "methylation",
     "mapk_signaling", "pi3k_akt", "wnt_signaling", "tgfb_signaling",
     "nfkb_signaling", "calcium_signaling", "cell_cycle", "apoptosis",
     "textbooks", "reviews", "pathway_databases", "ptm_databases",

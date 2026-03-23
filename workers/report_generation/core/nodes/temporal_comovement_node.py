@@ -75,6 +75,7 @@ def run_temporal_comovement(state: dict) -> dict:
         # v8.3 Fix: pathway_candidates is at state top-level (returned by network_node)
         pathway_candidates = state.get("pathway_candidates", {})
         output_dir = state.get("output_dir", "/tmp")
+        ptm_type = state.get("ptm_type", "phosphorylation")  # v8.10
 
         # v8.3 Fix: network_node returns timepoint_results (not networks)
         # timepoint_results: {tp: {active_ptm_nodes, inhibited_ptm_nodes, non_ptm_nodes, ...}}
@@ -155,11 +156,12 @@ def run_temporal_comovement(state: dict) -> dict:
 
         # Step 7: Generate visualizations
         figures = _generate_comovement_figures(
-            clusters, singletons, timepoints, sig_matrix, sig_meta, output_dir
+            clusters, singletons, timepoints, sig_matrix, sig_meta, output_dir,
+            ptm_type=ptm_type,
         )
 
         # Step 8: Build LLM context
-        llm_context = _build_comovement_llm_context(clusters, singletons, timepoints)
+        llm_context = _build_comovement_llm_context(clusters, singletons, timepoints, ptm_type=ptm_type)
 
         # Build summary
         summary = {
@@ -1054,7 +1056,8 @@ def _link_to_nonptm_interactors(
 
 def _generate_comovement_figures(
     clusters: list, singletons: list, timepoints: list,
-    matrix: np.ndarray, meta: list, output_dir: str
+    matrix: np.ndarray, meta: list, output_dir: str,
+    ptm_type: str = "phosphorylation",
 ) -> list:
     """Generate publication-quality cluster visualizations.
 
@@ -1084,7 +1087,7 @@ def _generate_comovement_figures(
                 figures.append({
                     "path": burst_fig_path,
                     "caption": (
-                        f"Transient phosphorylation burst dynamics. "
+                        f"Transient {ptm_type} burst dynamics. "
                         f"{len(burst_clusters)} co-movement cluster(s) comprising "
                         f"{n_sites} PTM sites exhibited rapid activation followed by "
                         f"return to baseline. Peak responses observed at "
@@ -1138,7 +1141,7 @@ def _generate_comovement_figures(
             if cluster_path:
                 ann = cluster.get("annotations", {})
                 bio_summary = ann.get("biological_summary", "")
-                pattern_label = _pattern_display_name(cluster["pattern"])
+                pattern_label = _pattern_display_name(cluster["pattern"], ptm_type)
                 figures.append({
                     "path": cluster_path,
                     "caption": (
@@ -1162,7 +1165,7 @@ def _generate_comovement_figures(
             if cluster_path:
                 ann = cluster.get("annotations", {})
                 bio_summary = ann.get("biological_summary", "")
-                pattern_label = _pattern_display_name(cluster["pattern"])
+                pattern_label = _pattern_display_name(cluster["pattern"], ptm_type)
                 figures.append({
                     "path": cluster_path,
                     "caption": (
@@ -1749,19 +1752,52 @@ def _generate_cluster_lineplot(
     return path
 
 
-def _pattern_display_name(pattern: str) -> str:
-    """Convert pattern code to human-readable display name."""
-    return {
+def _pattern_display_name(pattern: str, ptm_type: str = "phosphorylation") -> str:
+    """Convert pattern code to human-readable display name.
+
+    v8.10: PTM-type-aware labels. For ubiquitylation, uses
+    'Ubiquitylation Burst' instead of 'Phosphorylation Burst', etc.
+    """
+    pt = ptm_type.lower().strip()
+    # PTM-specific burst/suppression labels
+    _PTM_LABELS = {
+        "phosphorylation": {
+            "burst": "Transient Phosphorylation Burst",
+            "suppression": "Transient Dephosphorylation",
+        },
+        "ubiquitylation": {
+            "burst": "Transient Ubiquitylation Burst",
+            "suppression": "Transient Deubiquitylation",
+        },
+        "acetylation": {
+            "burst": "Transient Acetylation Burst",
+            "suppression": "Transient Deacetylation",
+        },
+        "methylation": {
+            "burst": "Transient Methylation Burst",
+            "suppression": "Transient Demethylation",
+        },
+        "sumoylation": {
+            "burst": "Transient SUMOylation Burst",
+            "suppression": "Transient DeSUMOylation",
+        },
+    }
+    labels = _PTM_LABELS.get(pt, {
+        "burst": f"Transient {ptm_type.title()} Burst",
+        "suppression": f"Transient De-{ptm_type.lower()}",
+    })
+    base = {
         "co_activated": "Co-activated",
         "co_inhibited": "Co-inhibited",
-        "transient_burst": "Transient Phosphorylation Burst",
-        "transient_suppression": "Transient Dephosphorylation",
+        "transient_burst": labels["burst"],
+        "transient_suppression": labels["suppression"],
         "sustained_activation": "Sustained Activation",
         "sustained_inhibition": "Sustained Inhibition",
         "biphasic_switch": "Biphasic Switch",
         "sequential_wave": "Sequential Signaling Wave",
         "mixed_response": "Mixed Response",
-    }.get(pattern, pattern.replace("_", " ").title())
+    }
+    return base.get(pattern, pattern.replace("_", " ").title())
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1769,14 +1805,13 @@ def _pattern_display_name(pattern: str) -> str:
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _build_comovement_llm_context(
-    clusters: list, singletons: list, timepoints: list
+    clusters: list, singletons: list, timepoints: list,
+    ptm_type: str = "phosphorylation",
 ) -> str:
     """Build structured text for LLM injection into write_sections.
 
     v8.4: Transient burst clusters are presented first with detailed context.
-    Other patterns receive a condensed summary. LLM instructions emphasize
-    transient burst as the primary analytical theme and require coherence
-    with the rest of the report (network analysis, cascade diagrams, etc.).
+    v8.10: PTM-type-aware labels and ubiquitylation-specific interpretation.
     """
     if not clusters:
         return ""
@@ -1809,7 +1844,8 @@ def _build_comovement_llm_context(
 
     # ── PRIMARY FOCUS: Transient Burst Clusters (detailed) ──
     if burst_clusters:
-        parts.append("### \u2605 PRIMARY: Transient Phosphorylation Burst Clusters")
+        burst_label = _pattern_display_name("transient_burst", ptm_type)
+        parts.append(f"### \u2605 PRIMARY: Transient {burst_label} Clusters")
         parts.append(
             f"{len(burst_clusters)} cluster(s) exhibited transient burst dynamics "
             f"(rapid activation followed by return to baseline). These are shown "
@@ -1818,7 +1854,7 @@ def _build_comovement_llm_context(
 
     for cluster in burst_clusters:
         cfig = cluster_fig_map.get(cluster["cluster_id"], "?")
-        _append_cluster_detail(parts, cluster, timepoints, is_primary=True, figure_num=cfig)
+        _append_cluster_detail(parts, cluster, timepoints, is_primary=True, figure_num=cfig, ptm_type=ptm_type)
 
     # ── SECONDARY: Other pattern clusters (with individual figures) ──
     if other_clusters:
@@ -1830,7 +1866,7 @@ def _build_comovement_llm_context(
 
     for cluster in other_clusters:
         cfig = cluster_fig_map.get(cluster["cluster_id"], "?")
-        _append_cluster_detail(parts, cluster, timepoints, is_primary=False, figure_num=cfig)
+        _append_cluster_detail(parts, cluster, timepoints, is_primary=False, figure_num=cfig, ptm_type=ptm_type)
 
     # ── Notable singletons ──
     notable_singletons = [s for s in singletons if s["max_fc"] >= 3.0]
@@ -2031,7 +2067,7 @@ def _build_comovement_llm_context(
 
 def _append_cluster_detail(
     parts: list, cluster: dict, timepoints: list, is_primary: bool,
-    figure_num: int | str = "?"
+    figure_num: int | str = "?", ptm_type: str = "phosphorylation",
 ) -> None:
     """Append cluster detail to LLM context parts.
 
@@ -2041,7 +2077,7 @@ def _append_cluster_detail(
         figure_num: The Figure number assigned to this cluster's plot.
     """
     cid = cluster["cluster_id"]
-    pattern = _pattern_display_name(cluster["pattern"])
+    pattern = _pattern_display_name(cluster["pattern"], ptm_type)
     members = cluster["members"]
     ann = cluster.get("annotations", {})
     bio_summary = ann.get("biological_summary", "No shared annotations found")

@@ -345,6 +345,44 @@ def _build_section_prompt(
         f"'{treatment} induced phosphorylation in {tissue}'.\n"
     )
 
+    # v8.10: PTM-type-specific interpretation framework
+    if ptm_type_label.lower().strip() in ("ubiquitylation", "ubiquitination"):
+        analysis_context_block += (
+            f"\n**UBIQUITYLATION-SPECIFIC INTERPRETATION FRAMEWORK (CRITICAL):**\n"
+            f"Ubiquitylation is NOT solely a degradation signal. You MUST distinguish\n"
+            f"the functional outcome based on chain type, linkage, and biological context:\n\n"
+            f"| Chain Type | Primary Function | Biological Process |\n"
+            f"|------------|------------------|--------------------|\n"
+            f"| K48 polyUb | Proteasomal degradation | Protein turnover, quality control |\n"
+            f"| K63 polyUb | Non-degradative signaling | NF-kB signaling, DNA damage response, endosomal sorting |\n"
+            f"| K11 polyUb | Cell cycle regulation, ERAD | Mitotic degradation, ER-associated degradation |\n"
+            f"| K27 polyUb | Innate immune signaling | STING/MAVS pathway, interferon response |\n"
+            f"| K29 polyUb | Wnt signaling regulation | Proteasomal & lysosomal degradation |\n"
+            f"| K33 polyUb | Kinase regulation | TCR signaling, AMPK regulation, intracellular trafficking |\n"
+            f"| K6 polyUb  | DNA repair | Mitophagy, BRCA1/BARD1-mediated DNA repair |\n"
+            f"| M1 (linear) | NF-kB activation | LUBAC-mediated immune signaling, TNF response |\n"
+            f"| Mono-Ub   | Signaling & trafficking | Histone regulation, endocytosis, membrane protein sorting |\n"
+            f"| Multi-mono | Endocytosis | Receptor internalization, lysosomal targeting |\n\n"
+            f"**Interpretation Rules:**\n"
+            f"1. When a ubiquitylated protein shows INCREASED modification + DECREASED protein level → likely K48 proteasomal degradation\n"
+            f"2. When a ubiquitylated protein shows INCREASED modification + STABLE protein level → likely non-degradative signaling (K63, M1, mono-Ub)\n"
+            f"3. When interpreting ubiquitylation of signaling proteins (kinases, receptors), consider:\n"
+            f"   - Is this activating (K63-linked) or degradative (K48-linked)?\n"
+            f"   - Does the protein's known biology suggest trafficking (mono-Ub) or signal amplification (K63)?\n"
+            f"4. For nuclear proteins: consider histone ubiquitylation (H2A-K119, H2B-K120) and its role in transcription regulation\n"
+            f"5. For mitochondrial proteins: consider mitophagy signaling (PINK1/Parkin, K6/K63 chains)\n"
+            f"6. ALWAYS state which functional category you are interpreting (degradation vs signaling vs trafficking vs DNA repair vs immune response)\n"
+            f"7. If chain type is unknown from the data, discuss the MOST LIKELY functional outcome based on:\n"
+            f"   - The substrate protein's known biology\n"
+            f"   - Whether protein abundance changes correlate with ubiquitylation changes\n"
+            f"   - The biological context of {tissue} responding to {treatment}\n"
+            f"\n"
+            f"**Key E3 Ligase / DUB Interpretation:**\n"
+            f"- If upstream E3 ligase is identified, discuss its substrate specificity and chain type preference\n"
+            f"- If DUB (deubiquitylase) activity is implied (decreased ubiquitylation), discuss which DUB family may be responsible\n"
+            f"- E3-substrate relationships are analogous to kinase-substrate relationships in phosphorylation\n"
+        )
+
     combined_lit = lit_context + pubmed_context
 
     if section_type == "abstract":
