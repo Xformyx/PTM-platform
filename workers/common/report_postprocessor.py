@@ -284,31 +284,37 @@ def correct_ptm_terminology(text: str, ptm_type: str) -> str:
     corrections_made = 0
     correction_details = []  # Track what was corrected for logging
     
-    # Split into paragraphs to check context
+    # v9.2: Match-level exception checking instead of paragraph-level skip.
+    # Previously, if a paragraph contained "oxidative phosphorylation" (exception),
+    # ALL corrections in that paragraph were skipped — including real errors like
+    # "kinase-substrate". Now we protect only the specific exception spans.
+    
+    def _is_within_exception(match_start: int, match_end: int, line: str) -> bool:
+        """Check if a match overlaps with any exception pattern span."""
+        for exc_pattern in exceptions:
+            for exc_match in re.finditer(exc_pattern, line, re.IGNORECASE):
+                # Check overlap: exception span [es, ee) vs match span [ms, me)
+                if match_start < exc_match.end() and match_end > exc_match.start():
+                    return True
+        return False
+    
     paragraphs = text.split('\n')
     corrected_paragraphs = []
     
     for para in paragraphs:
-        # Check if this paragraph contains exception patterns
-        has_exception = False
-        for exc_pattern in exceptions:
-            if re.search(exc_pattern, para, re.IGNORECASE):
-                has_exception = True
-                break
-        
-        if has_exception:
-            corrected_paragraphs.append(para)
-            continue
-        
-        # Apply corrections
         corrected = para
         for wrong_pattern, replacement in wrong_terms.items():
+            # Process matches in reverse order to preserve indices
             matches = list(re.finditer(wrong_pattern, corrected, re.IGNORECASE))
-            if matches:
-                for m in matches:
-                    correction_details.append(f"'{m.group()}' -> '{replacement}'")
-                corrected = re.sub(wrong_pattern, replacement, corrected, flags=re.IGNORECASE)
-                corrections_made += len(matches)
+            if not matches:
+                continue
+            # Reverse to replace from end to start (preserves earlier indices)
+            for m in reversed(matches):
+                if _is_within_exception(m.start(), m.end(), corrected):
+                    continue  # Skip this specific match — it's within an exception span
+                correction_details.append(f"'{m.group()}' -> '{replacement}'")
+                corrected = corrected[:m.start()] + replacement + corrected[m.end():]
+                corrections_made += 1
         
         corrected_paragraphs.append(corrected)
     
