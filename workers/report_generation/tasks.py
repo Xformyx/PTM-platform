@@ -144,8 +144,27 @@ def run_report_generation(self, order_id: int, config: dict):
         # Post-process: PTM terminology + citation insertion + fake ref removal
         try:
             from common.report_postprocessor import postprocess_full_report
-            ptm_type_label = (config.get("experimental_context") or {}).get("ptm_type", "phosphorylation")
-            logger.info(f"[Order {order_id}] Post-process: ptm_type_label='{ptm_type_label}', report_files={final_state.get('report_files', [])}")
+            # Resolve ptm_type with priority chain:
+            # 1. final_state["ptm_type"] — set by context_loader after analyzing actual data
+            # 2. config["experimental_context"]["ptm_type"] — from order DB
+            # 3. Detect from enriched_data — scan PTM_Type field in actual data
+            # 4. Default "phosphorylation"
+            ptm_type_label = final_state.get("ptm_type", "").strip()
+            if not ptm_type_label:
+                ptm_type_label = (config.get("experimental_context") or {}).get("ptm_type", "").strip()
+            if not ptm_type_label:
+                # Fallback: detect from enriched data
+                _ptm_counts = {}
+                for _ptm in enriched_data:
+                    _pt = (_ptm.get("ptm_type") or _ptm.get("PTM_Type", "phosphorylation")).lower().strip()
+                    _ptm_counts[_pt] = _ptm_counts.get(_pt, 0) + 1
+                if _ptm_counts:
+                    ptm_type_label = max(_ptm_counts, key=_ptm_counts.get)
+                    logger.info(f"[Order {order_id}] Post-process: ptm_type detected from enriched data: '{ptm_type_label}' (counts={_ptm_counts})")
+                else:
+                    ptm_type_label = "phosphorylation"
+            logger.info(f"[Order {order_id}] Post-process: ptm_type_label='{ptm_type_label}' (source: {'final_state' if final_state.get('ptm_type') else 'config/enriched'}), report_files={final_state.get('report_files', [])}")
+            logger.info(f"[Order {order_id}] Post-process: final_state.ptm_type='{final_state.get('ptm_type', 'N/A')}', config.experimental_context.ptm_type='{(config.get('experimental_context') or {}).get('ptm_type', 'N/A')}'")
             for rpt_path in final_state.get("report_files", []):
                 if rpt_path and Path(rpt_path).exists() and rpt_path.endswith(".md"):
                     raw = Path(rpt_path).read_text(encoding="utf-8")
