@@ -196,6 +196,14 @@ export default function OrderCreate() {
   const [configParsing, setConfigParsing] = useState(false);
   const [singleTimePoint, setSingleTimePoint] = useState(false);
 
+  // Secondary Sample Config (Cross-Talk mode)
+  const [secondarySampleColumns, setSecondarySampleColumns] = useState<string[]>([]);
+  const [secondarySamples, setSecondarySamples] = useState<SampleEntry[]>([]);
+  const [secondaryRegexPattern, setSecondaryRegexPattern] = useState("_([^_]+?)_(\\d+)\\.\\w+$");
+  const [secondaryControlKeyword, setSecondaryControlKeyword] = useState("control");
+  const [secondaryParseTab, setSecondaryParseTab] = useState("auto");
+  const [secondarySingleTimePoint, setSecondarySingleTimePoint] = useState(false);
+
   // Analysis Options
   const [analysisOptions, setAnalysisOptions] = useState<AnalysisOptions>({ ...DEFAULT_ANALYSIS_OPTIONS });
   const [analysisModalOpen, setAnalysisModalOpen] = useState(false);
@@ -328,6 +336,37 @@ export default function OrderCreate() {
     setSamples(parsed);
   }, [sampleColumns, regexPattern, controlKeyword]);
 
+  // Secondary PR Matrix header parsing for Cross-Talk mode
+  const handleSecondaryPrChange = useCallback(async (file: File | null) => {
+    setSecondaryFiles((prev) => ({ ...prev, pr_matrix: file }));
+    if (file) {
+      try {
+        const headers = await readTsvHeaders(file);
+        const cols = extractSampleColumns(headers);
+        setSecondarySampleColumns(cols);
+        setSecondarySamples([]);
+      } catch {
+        setSecondarySampleColumns([]);
+      }
+    } else {
+      setSecondarySampleColumns([]);
+      setSecondarySamples([]);
+    }
+  }, []);
+
+  const handleSecondaryAutoParse = useCallback(() => {
+    const parsed = autoParseColumns(secondarySampleColumns, secondaryRegexPattern, secondaryControlKeyword);
+    setSecondarySamples(parsed);
+  }, [secondarySampleColumns, secondaryRegexPattern, secondaryControlKeyword]);
+
+  const updateSecondarySample = useCallback((idx: number, field: keyof SampleEntry, value: string | number) => {
+    setSecondarySamples((prev) => prev.map((s, i) => i === idx ? { ...s, [field]: value } : s));
+  }, []);
+
+  const removeSecondarySample = useCallback((idx: number) => {
+    setSecondarySamples((prev) => prev.filter((_, i) => i !== idx));
+  }, []);
+
   const handleConfigUpload = useCallback(async (file: File | null) => {
     setFiles((prev) => ({ ...prev, config_file: file }));
     if (!file) return;
@@ -370,6 +409,10 @@ export default function OrderCreate() {
     }
     if (form.analysis_mode === "cross_talk" && (!secondaryFiles.pr_matrix || !secondaryFiles.pg_matrix)) {
       setError("Cross-Talk mode requires secondary PR Matrix and PG Matrix files");
+      return;
+    }
+    if (form.analysis_mode === "cross_talk" && secondarySamples.length === 0) {
+      setError("Cross-Talk mode requires secondary sample configuration. Go back to Step 3 and configure secondary samples.");
       return;
     }
     if (samples.length === 0) {
@@ -456,6 +499,19 @@ export default function OrderCreate() {
       formData.append("secondary_ptm_type", form.secondary_ptm_type);
       if (secondaryFiles.pr_matrix) formData.append("secondary_pr_matrix", secondaryFiles.pr_matrix);
       if (secondaryFiles.pg_matrix) formData.append("secondary_pg_matrix", secondaryFiles.pg_matrix);
+      // Secondary sample configuration
+      const secondarySampleConfig = {
+        source: secondaryParseTab === "auto" ? "auto_parse" : "manual",
+        regex_pattern: secondaryParseTab === "auto" ? secondaryRegexPattern : undefined,
+        single_time_point: secondarySingleTimePoint,
+        samples: secondarySamples.map((s) => ({
+          file_name: s.filename,
+          condition: s.condition,
+          group: s.group,
+          replicate: s.replicate,
+        })),
+      };
+      formData.append("secondary_sample_config", JSON.stringify(secondarySampleConfig));
     }
 
     try {
@@ -870,12 +926,127 @@ export default function OrderCreate() {
                     </div>
                     <FileDropZone label="Secondary PR Matrix (.tsv)" accept=".tsv,.csv"
                       file={secondaryFiles.pr_matrix}
-                      onChange={(f) => setSecondaryFiles({ ...secondaryFiles, pr_matrix: f })}
+                      onChange={handleSecondaryPrChange}
                     />
                     <FileDropZone label="Secondary PG Matrix (.tsv)" accept=".tsv,.csv"
                       file={secondaryFiles.pg_matrix}
-                      onChange={(f) => setSecondaryFiles({ ...secondaryFiles, pg_matrix: f })}
+                      onChange={(f) => setSecondaryFiles((prev) => ({ ...prev, pg_matrix: f }))}
                     />
+
+                    {/* Secondary Sample Configuration */}
+                    {secondarySampleColumns.length > 0 && (
+                      <div className="rounded-lg border border-amber-300 bg-white/60 p-4 space-y-3">
+                        <div className="flex items-center gap-2">
+                          <SlidersHorizontal className="h-4 w-4 text-amber-600" />
+                          <Label className="font-semibold text-amber-800 text-sm">Secondary Sample Configuration</Label>
+                          <Badge variant="outline" className="text-[9px] border-amber-300 text-amber-600">
+                            {secondarySampleColumns.length} columns detected
+                          </Badge>
+                        </div>
+                        <p className="text-xs text-amber-700">
+                          Secondary PR Matrix에서 {secondarySampleColumns.length}개의 샘플 컬럼이 감지되었습니다. 각 샘플의 Condition과 Group을 설정하세요.
+                        </p>
+
+                        <Tabs value={secondaryParseTab} onValueChange={setSecondaryParseTab}>
+                          <TabsList className="h-8">
+                            <TabsTrigger value="auto" className="text-xs gap-1"><Regex className="h-3 w-3" /> Auto Parse</TabsTrigger>
+                            <TabsTrigger value="manual" className="text-xs gap-1"><SlidersHorizontal className="h-3 w-3" /> Manual</TabsTrigger>
+                          </TabsList>
+                          <TabsContent value="auto" className="space-y-2 mt-2">
+                            <div className="grid grid-cols-2 gap-2">
+                              <div className="space-y-1">
+                                <Label className="text-[10px]">Regex Pattern</Label>
+                                <Input className="h-7 text-xs font-mono" value={secondaryRegexPattern}
+                                  onChange={(e) => setSecondaryRegexPattern(e.target.value)} />
+                              </div>
+                              <div className="space-y-1">
+                                <Label className="text-[10px]">Control Keyword</Label>
+                                <Input className="h-7 text-xs" value={secondaryControlKeyword}
+                                  onChange={(e) => setSecondaryControlKeyword(e.target.value)} />
+                              </div>
+                            </div>
+                            <Button size="sm" variant="outline" className="h-7 text-xs" onClick={handleSecondaryAutoParse}>
+                              <Regex className="mr-1 h-3 w-3" /> Parse Secondary Samples
+                            </Button>
+                          </TabsContent>
+                        </Tabs>
+
+                        <div className="flex items-center gap-2">
+                          <input type="checkbox" id="sec-single-tp" checked={secondarySingleTimePoint}
+                            onChange={(e) => setSecondarySingleTimePoint(e.target.checked)}
+                            className="rounded border-amber-300" />
+                          <Label htmlFor="sec-single-tp" className="text-xs text-amber-700 cursor-pointer">
+                            Single Time Point (non-temporal comparison)
+                          </Label>
+                        </div>
+
+                        {secondarySamples.length > 0 && (
+                          <div className="rounded border border-amber-200 overflow-hidden">
+                            <Table>
+                              <TableHeader>
+                                <TableRow className="bg-amber-50/50">
+                                  <TableHead className="text-[10px] py-1 px-2 w-[200px]">File Name</TableHead>
+                                  <TableHead className="text-[10px] py-1 px-2">Condition</TableHead>
+                                  <TableHead className="text-[10px] py-1 px-2">Group</TableHead>
+                                  <TableHead className="text-[10px] py-1 px-2 w-[60px]">Rep</TableHead>
+                                  <TableHead className="text-[10px] py-1 px-2 w-[30px]"></TableHead>
+                                </TableRow>
+                              </TableHeader>
+                              <TableBody>
+                                {secondarySamples.map((s, i) => (
+                                  <TableRow key={i} className="hover:bg-amber-50/30">
+                                    <TableCell className="text-[10px] py-0.5 px-2 font-mono truncate max-w-[200px]" title={s.filename}>
+                                      {s.shortname}
+                                    </TableCell>
+                                    <TableCell className="py-0.5 px-1">
+                                      <Input className="h-6 text-[10px]" value={s.condition}
+                                        onChange={(e) => updateSecondarySample(i, "condition", e.target.value)} />
+                                    </TableCell>
+                                    <TableCell className="py-0.5 px-1">
+                                      <Select value={s.group} onValueChange={(v) => updateSecondarySample(i, "group", v)}>
+                                        <SelectTrigger className="h-6 text-[10px]"><SelectValue /></SelectTrigger>
+                                        <SelectContent>
+                                          <SelectItem value="Control">Control</SelectItem>
+                                          <SelectItem value="Treatment">Treatment</SelectItem>
+                                        </SelectContent>
+                                      </Select>
+                                    </TableCell>
+                                    <TableCell className="py-0.5 px-1">
+                                      <Input type="number" className="h-6 text-[10px] w-12" value={s.replicate}
+                                        onChange={(e) => updateSecondarySample(i, "replicate", parseInt(e.target.value) || 1)} min={1} />
+                                    </TableCell>
+                                    <TableCell className="py-0.5 px-1">
+                                      <button onClick={() => removeSecondarySample(i)} className="text-red-400 hover:text-red-600">
+                                        <Trash2 className="h-3 w-3" />
+                                      </button>
+                                    </TableCell>
+                                  </TableRow>
+                                ))}
+                              </TableBody>
+                            </Table>
+                          </div>
+                        )}
+
+                        {secondarySamples.length > 0 && (
+                          <div className="flex flex-wrap gap-1">
+                            {Object.entries(
+                              secondarySamples.reduce<Record<string, number>>((acc, s) => {
+                                const key = `${s.group}:${s.condition}`;
+                                acc[key] = (acc[key] || 0) + 1;
+                                return acc;
+                              }, {})
+                            ).map(([key, count]) => {
+                              const [group, cond] = key.split(":");
+                              return (
+                                <Badge key={key} variant={group === "Control" ? "secondary" : "outline"} className="text-[9px]">
+                                  {cond || group} (n={count})
+                                </Badge>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
 

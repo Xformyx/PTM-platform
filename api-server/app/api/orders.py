@@ -318,6 +318,7 @@ async def create_order(
     protein_list: Optional[UploadFile] = File(None),
     secondary_pr_matrix: Optional[UploadFile] = File(None),
     secondary_pg_matrix: Optional[UploadFile] = File(None),
+    secondary_sample_config: Optional[str] = Form(None),
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
@@ -421,6 +422,7 @@ async def create_order(
 
         # Determine secondary_ptm_type from report_options or analysis_context
         secondary_ptm_type_val = None
+        secondary_sample_config_data = _safe_json_loads(secondary_sample_config) if secondary_sample_config else None
         if secondary_pr_path or secondary_pg_path:
             secondary_ptm_type_val = (
                 report_options_data.get("secondary_ptm_type")
@@ -446,6 +448,7 @@ async def create_order(
             secondary_pr_matrix_path=secondary_pr_path,
             secondary_pg_matrix_path=secondary_pg_path,
             secondary_ptm_type=secondary_ptm_type_val,
+            secondary_sample_config=secondary_sample_config_data,
         )
 
         db.add(order)
@@ -566,6 +569,8 @@ async def start_order(
         "report_config": report_opts.get("report_config", {}),
         "analysis_mode": report_opts.get("analysis_mode", "ptm_only"),
         "secondary_ptm_type": order.secondary_ptm_type,
+        "secondary_sample_config": order.secondary_sample_config,
+        "secondary_condition_map": _build_condition_map(order.secondary_sample_config) if order.secondary_sample_config else None,
     }
 
     from celery import Celery as CeleryClass
@@ -882,6 +887,8 @@ async def run_stage(
             "report_type": report_opts.get("report_type", "comprehensive"),
             "report_config": report_opts.get("report_config", {}),
             "secondary_ptm_type": order.secondary_ptm_type,
+            "secondary_sample_config": order.secondary_sample_config,
+            "secondary_condition_map": _build_condition_map(order.secondary_sample_config) if order.secondary_sample_config else None,
         }
         task = celery_app.send_task(
             "report_generation.tasks.run_report_generation",

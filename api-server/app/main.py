@@ -47,6 +47,10 @@ async def _run_migrations(conn) -> None:
         conn, "orders", "secondary_ptm_type",
         "secondary_ptm_type VARCHAR(50) NULL"
     )
+    await _add_column_if_missing(
+        conn, "orders", "secondary_sample_config",
+        "secondary_sample_config JSON NULL"
+    )
 
 
 async def _seed_admin(session: AsyncSession) -> None:

@@ -554,6 +554,23 @@ def run_preprocessing(self, order_id: int, config: dict):
                 secondary_quant_output = f"ptm_vector_data_normalized{secondary_file_suffix}.tsv"
                 secondary_all_protein_output = f"all_protein_level_changes_normalized{secondary_file_suffix}.tsv"
 
+                # Build secondary condition_map from secondary_sample_config if available
+                secondary_condition_map = config.get("secondary_condition_map")
+                if not secondary_condition_map:
+                    # Fallback: try building from secondary_sample_config
+                    sec_sample_cfg = config.get("secondary_sample_config")
+                    if sec_sample_cfg and sec_sample_cfg.get("samples"):
+                        secondary_condition_map = {}
+                        for s in sec_sample_cfg["samples"]:
+                            fname = s.get("file_name", "")
+                            cond = s.get("condition", "Unknown")
+                            secondary_condition_map[fname] = cond
+                        logger.info(f"[Order {order_id}] Built secondary_condition_map from secondary_sample_config: {len(secondary_condition_map)} entries")
+                    else:
+                        # Last resort: use primary condition_map (may cause mismatches)
+                        secondary_condition_map = condition_map
+                        logger.warning(f"[Order {order_id}] No secondary_sample_config — falling back to primary condition_map")
+
                 if _has_output(secondary_output_dir, secondary_quant_output, secondary_all_protein_output):
                     logger.info(f"[Order {order_id}] Secondary Step 1 skipped — outputs already exist")
                 else:
@@ -566,7 +583,7 @@ def run_preprocessing(self, order_id: int, config: dict):
                         fasta_path=fasta_path,
                         output_dir=str(secondary_output_dir),
                         ptm_mode=secondary_ptm_mode,
-                        condition_map=condition_map,
+                        condition_map=secondary_condition_map,
                         progress_callback=secondary_quant_cb,
                     )
                     secondary_success = secondary_analyzer.run_analysis(secondary_pr_path, secondary_pg_path)
