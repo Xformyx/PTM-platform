@@ -145,14 +145,20 @@ def run_report_generation(self, order_id: int, config: dict):
         try:
             from common.report_postprocessor import postprocess_full_report
             ptm_type_label = (config.get("experimental_context") or {}).get("ptm_type", "phosphorylation")
+            logger.info(f"[Order {order_id}] Post-process: ptm_type_label='{ptm_type_label}', report_files={final_state.get('report_files', [])}")
             for rpt_path in final_state.get("report_files", []):
                 if rpt_path and Path(rpt_path).exists() and rpt_path.endswith(".md"):
                     raw = Path(rpt_path).read_text(encoding="utf-8")
+                    logger.info(f"[Order {order_id}] Post-process: raw length={len(raw)}, ptm_type='{ptm_type_label}'")
                     processed = postprocess_full_report(raw, ptm_type_label)
                     Path(rpt_path).write_text(processed, encoding="utf-8")
-                    logger.info(f"[Order {order_id}] Post-processed {Path(rpt_path).name}")
+                    logger.info(f"[Order {order_id}] Post-processed {Path(rpt_path).name} ({len(raw)} -> {len(processed)} chars)")
+                else:
+                    logger.warning(f"[Order {order_id}] Post-process: skipped rpt_path='{rpt_path}' (exists={Path(rpt_path).exists() if rpt_path else 'N/A'}, endswith_md={rpt_path.endswith('.md') if rpt_path else 'N/A'})")
         except Exception as pp_err:
+            import traceback
             logger.warning(f"[Order {order_id}] Post-processing skipped: {pp_err}")
+            logger.warning(f"[Order {order_id}] Post-processing traceback:\n{traceback.format_exc()}")
 
         # Convert report to Word (.docx)
         try:

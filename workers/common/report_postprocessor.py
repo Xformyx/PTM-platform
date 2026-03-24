@@ -267,6 +267,8 @@ def correct_ptm_terminology(text: str, ptm_type: str) -> str:
     if not text:
         return text
     
+    _sse_log(f"[PostProcess] correct_ptm_terminology called: ptm_type='{ptm_type}', _HAS_VOCABULARY={_HAS_VOCABULARY}, text_len={len(text)}")
+    
     # v9.1: Get corrections from vocabulary dictionary (primary) or legacy (fallback)
     if _HAS_VOCABULARY:
         normalized = get_normalized_ptm_type(ptm_type)
