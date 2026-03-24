@@ -3366,15 +3366,25 @@ def image_to_base64(image_path: str) -> Optional[str]:
 # Network figure section for report (guide §6.1)
 # ---------------------------------------------------------------------------
 
-def generate_network_figure_section(network_analysis: dict, supplementary_start: int = 1, ptm_type: str = "phosphorylation") -> tuple:
+def generate_network_figure_section(
+    network_analysis: dict,
+    supplementary_start: int = 1,
+    ptm_type: str = "phosphorylation",
+    *,
+    has_comovement: bool = True,
+) -> tuple:
     """Generate Markdown section with embedded network figures and legends.
 
     v8.7: Returns (main_section, supplementary_section) tuple.
     Fig 1 = Canonical Pathway Distribution (main figure).
     Cascade diagrams and Cytoscape networks are Supplementary Figures.
 
+    v9.4: If has_comovement is False (no co-movement figures, e.g. <3 timepoints),
+    cascade and Cytoscape panels are promoted to main figures instead of supplementary.
+
     Args:
         supplementary_start: Starting number for supplementary figures.
+        has_comovement: When False, promote cascade/Cytoscape to main body (graph.format_citations).
 
     Returns:
         Tuple of (main_section_str, supplementary_section_str).
@@ -3443,6 +3453,8 @@ def generate_network_figure_section(network_analysis: dict, supplementary_start:
     figure_num = 1  # Fig 1 = Pathway Distribution
     supp_num = supplementary_start  # Supplementary figure counter
     panel_labels = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    # v9.4: Co-movement absent → main text figures; present → supplementary (room for Fig 2–6 co-movement)
+    promote_to_main = not has_comovement
 
     # v5.0: Figure 1 = Canonical Pathway Distribution Bar Graph (replaces Combined Network)
     if pathway_graph_path:
