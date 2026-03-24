@@ -362,19 +362,25 @@ def format_citations(state: ReportState) -> dict:
             logger.info(f"[FORMAT-CIT] Added section: {key} ({len(sections[key])} chars)")
         if key == "results":
             # v8.7: Figure ordering: Fig 1 (Pathway) → Fig 2-6 (Co-movement) → Supplementary at end
+            # v9.4: When co-movement is absent (< 3 timepoints), promote cascade/cytoscape to main figures
+            comovement_figures = state.get("comovement_figures", [])
+            has_comovement = bool(comovement_figures)
 
-            # Step 1: Network MAIN section (Fig 1 = Pathway Distribution)
-            # Supplementary (cascade/cytoscape) collected separately for end
-            net_main, net_supp = generate_network_figure_section(network_analysis, supplementary_start=1, ptm_type=state.get('ptm_type', 'phosphorylation'))
+            # Step 1: Network section (Fig 1 = Pathway; cascade/cytoscape = main or supp based on co-movement)
+            net_main, net_supp = generate_network_figure_section(
+                network_analysis,
+                supplementary_start=1,
+                ptm_type=state.get('ptm_type', 'phosphorylation'),
+                has_comovement=has_comovement,
+            )
             if net_main:
                 parts.append(net_main)
-                logger.info(f"[FORMAT-CIT] Added network main section ({len(net_main)} chars)")
+                logger.info(f"[FORMAT-CIT] Added network main section ({len(net_main)} chars, has_comovement={has_comovement})")
             else:
                 logger.warning("[FORMAT-CIT] network main section is EMPTY")
-            network_supp_section = net_supp  # store for appending at end
+            network_supp_section = net_supp  # store for appending at end (empty when promoted to main)
 
             # Step 2: Co-movement MAIN figures (Fig 2 = Burst, Fig 3-6 = Clusters)
-            comovement_figures = state.get("comovement_figures", [])
             if comovement_figures:
                 result = _build_comovement_figure_section(comovement_figures, network_analysis, ptm_type=state.get('ptm_type', 'phosphorylation'))
                 if result:
