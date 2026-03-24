@@ -62,6 +62,7 @@ class Order(Base):
     # Secondary file references (Cross-Talk mode)
     secondary_pr_matrix_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     secondary_pg_matrix_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    secondary_ptm_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # e.g. "ubiquitylation", "phosphorylation"
 
     # Analysis settings
     analysis_context: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)

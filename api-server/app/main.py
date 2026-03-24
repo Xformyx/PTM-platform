@@ -43,6 +43,10 @@ async def _run_migrations(conn) -> None:
         conn, "orders", "run_by_user_id",
         "run_by_user_id INT NULL, ADD CONSTRAINT fk_orders_run_by FOREIGN KEY (run_by_user_id) REFERENCES users(id) ON DELETE SET NULL"
     )
+    await _add_column_if_missing(
+        conn, "orders", "secondary_ptm_type",
+        "secondary_ptm_type VARCHAR(50) NULL"
+    )
 
 
 async def _seed_admin(session: AsyncSession) -> None:

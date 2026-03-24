@@ -927,11 +927,23 @@ def generate_all_crosstalk_figures(
     # Only Figure B (Temporal Heatmap) is generated as an image.
     logger.info("Figure A/C replaced by tables (Table 2A/2C) for better readability")
 
-    # Figure B: Temporal Heatmap (the only image-based figure)
+    # Figure B: Temporal Heatmap
     path_b = generate_temporal_heatmap(
         crosstalk_data, output_dir, primary_ptm_type, secondary_ptm_type)
     if path_b:
         figures['figure_b'] = path_b
+
+    # Figure D: Sankey Flow Diagram
+    path_d = generate_crosstalk_sankey(
+        crosstalk_data, output_dir, primary_ptm_type, secondary_ptm_type)
+    if path_d:
+        figures['figure_d'] = path_d
+
+    # Figure E: Dual Volcano Plot
+    path_e = generate_dual_volcano(
+        crosstalk_data, output_dir, primary_ptm_type, secondary_ptm_type)
+    if path_e:
+        figures['figure_e'] = path_e
 
     logger.info(f"=== Cross-Talk Figures Complete: {len(figures)} image(s) + 2 tables ===")
     return figures
@@ -1101,6 +1113,258 @@ def _generate_table_2c(crosstalk_data, ptype, stype):
     return section
 
 
+# ============================================================================
+# Figure D: Cross-Talk Sankey Diagram (PTM Flow)
+# ============================================================================
+
+def generate_crosstalk_sankey(
+    crosstalk_data: Dict[str, Any],
+    output_dir: str,
+    primary_ptm_type: str = "phosphorylation",
+    secondary_ptm_type: str = "ubiquitylation",
+) -> Optional[str]:
+    """
+    Generate a Sankey-style flow diagram showing PTM cross-talk relationships.
+    Left: Primary PTM categories (concordant/discordant/gating)
+    Center: Dual-PTM proteins
+    Right: Secondary PTM categories
+    
+    Returns: path to saved PNG file, or None on failure.
+    """
+    try:
+        plt, mpatches, mcolors, _, FancyBboxPatch, _ = _import_matplotlib()
+        np = _import_numpy()
+    except ImportError as e:
+        logger.warning(f"Cannot generate Sankey diagram: missing dependency ({e})")
+        return None
+
+    dual_ptm = crosstalk_data.get('dual_ptm_proteins', [])
+    gating = crosstalk_data.get('sequential_gating', [])
+    shared_nonptm = crosstalk_data.get('shared_nonptm', [])
+
+    if not dual_ptm:
+        logger.warning("No dual-PTM proteins for Sankey diagram")
+        return None
+
+    ptype = primary_ptm_type.capitalize()
+    stype = secondary_ptm_type.capitalize()
+
+    # Categorize proteins
+    concordant = [p for p in dual_ptm if p.get('pattern') == 'concordant']
+    discordant = [p for p in dual_ptm if p.get('pattern') == 'discordant']
+    mixed = [p for p in dual_ptm if p.get('pattern') == 'mixed']
+    gated = [g.get('gene', '') for g in gating]
+
+    fig, ax = plt.subplots(1, 1, figsize=(16, 10), dpi=300)
+    fig.patch.set_facecolor('white')
+    ax.set_facecolor('white')
+    ax.set_xlim(-0.5, 3.5)
+    ax.set_ylim(-0.5, max(len(dual_ptm), 6) + 0.5)
+    ax.axis('off')
+
+    # Left column: PTM categories
+    categories = [
+        (f"Concordant\n({len(concordant)})", COLORS['concordant'], len(concordant)),
+        (f"Discordant\n({len(discordant)})", COLORS['discordant'], len(discordant)),
+        (f"Mixed\n({len(mixed)})", COLORS['mixed'], len(mixed)),
+    ]
+    if gating:
+        categories.append((f"Sequential\nGating ({len(gating)})", '#9C27B0', len(gating)))
+
+    total = sum(c[2] for c in categories)
+    if total == 0:
+        plt.close(fig)
+        return None
+
+    # Draw category boxes on left
+    y_pos = 0
+    cat_positions = []
+    for label, color, count in categories:
+        height = max(0.5, count / total * len(dual_ptm))
+        box = FancyBboxPatch((0, y_pos), 0.6, height,
+                             boxstyle="round,pad=0.05",
+                             facecolor=color, edgecolor='white',
+                             alpha=0.85, linewidth=1.5)
+        ax.add_patch(box)
+        ax.text(0.3, y_pos + height/2, label, ha='center', va='center',
+                fontsize=9, fontweight='bold', color='white')
+        cat_positions.append((y_pos, height, color))
+        y_pos += height + 0.2
+
+    # Center: Top dual-PTM protein names
+    display_proteins = sorted(dual_ptm, key=lambda p: p.get('concordant_ratio', 0.5), reverse=True)[:20]
+    protein_y_positions = {}
+    for i, p in enumerate(display_proteins):
+        gene = p.get('gene', '?')
+        pattern = p.get('pattern', 'mixed')
+        color = COLORS.get(pattern, COLORS['mixed'])
+        y = i * (y_pos / max(len(display_proteins), 1))
+        ax.text(1.75, y, gene, ha='center', va='center',
+                fontsize=8, fontweight='bold', color=color,
+                bbox=dict(boxstyle='round,pad=0.3', facecolor='white',
+                         edgecolor=color, alpha=0.8))
+        protein_y_positions[gene] = y
+
+    # Right column: Functional outcomes
+    outcomes = [
+        (f"Co-regulated\nSignaling", COLORS['concordant']),
+        (f"Opposing\nRegulation", COLORS['discordant']),
+        (f"Hub\nConvergence\n({len(shared_nonptm)})", COLORS['shared_protein']),
+    ]
+    y_out = 0
+    out_height = y_pos / max(len(outcomes), 1)
+    for label, color in outcomes:
+        box = FancyBboxPatch((2.8, y_out), 0.6, out_height * 0.8,
+                             boxstyle="round,pad=0.05",
+                             facecolor=color, edgecolor='white',
+                             alpha=0.85, linewidth=1.5)
+        ax.add_patch(box)
+        ax.text(3.1, y_out + out_height * 0.4, label, ha='center', va='center',
+                fontsize=8, fontweight='bold', color='white')
+        y_out += out_height
+
+    # Draw flow lines
+    for gene, y in protein_y_positions.items():
+        p_data = next((p for p in dual_ptm if p.get('gene') == gene), None)
+        if p_data:
+            pattern = p_data.get('pattern', 'mixed')
+            color = COLORS.get(pattern, COLORS['mixed'])
+            # Left to center
+            ax.annotate('', xy=(1.3, y), xytext=(0.6, y),
+                       arrowprops=dict(arrowstyle='->', color=color, alpha=0.4, lw=1))
+            # Center to right
+            ax.annotate('', xy=(2.8, y), xytext=(2.2, y),
+                       arrowprops=dict(arrowstyle='->', color=color, alpha=0.4, lw=1))
+
+    # Title
+    ax.set_title(f"{ptype}–{stype} Cross-Talk Flow Diagram",
+                 fontsize=14, fontweight='bold', pad=20)
+
+    # Save
+    out_path = os.path.join(output_dir, "crosstalk_sankey.png")
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=300, bbox_inches='tight', facecolor='white')
+    plt.close(fig)
+    logger.info(f"Sankey diagram saved: {out_path}")
+    return out_path
+
+
+# ============================================================================
+# Figure E: Dual Volcano Plot
+# ============================================================================
+
+def generate_dual_volcano(
+    crosstalk_data: Dict[str, Any],
+    output_dir: str,
+    primary_ptm_type: str = "phosphorylation",
+    secondary_ptm_type: str = "ubiquitylation",
+) -> Optional[str]:
+    """
+    Generate a dual volcano plot showing primary vs secondary PTM fold-changes
+    for dual-PTM proteins. Each point = one dual-PTM protein.
+    X-axis: Primary PTM max |log2FC|
+    Y-axis: Secondary PTM max |log2FC|
+    Color: concordant/discordant/mixed
+    
+    Returns: path to saved PNG file, or None on failure.
+    """
+    try:
+        plt, mpatches, mcolors, _, _, _ = _import_matplotlib()
+        np = _import_numpy()
+    except ImportError as e:
+        logger.warning(f"Cannot generate dual volcano: missing dependency ({e})")
+        return None
+
+    dual_ptm = crosstalk_data.get('dual_ptm_proteins', [])
+    if not dual_ptm:
+        logger.warning("No dual-PTM proteins for dual volcano plot")
+        return None
+
+    ptype = primary_ptm_type.capitalize()
+    stype = secondary_ptm_type.capitalize()
+
+    # Extract max fold-changes
+    x_vals, y_vals, colors, labels = [], [], [], []
+    for p in dual_ptm:
+        gene = p.get('gene', '?')
+        pattern = p.get('pattern', 'mixed')
+        
+        # Get max absolute fold-change for primary and secondary
+        p_fc = 0
+        s_fc = 0
+        details = p.get('details', [])
+        for d in details:
+            pfc = abs(d.get('primary_fc', 0) or 0)
+            sfc = abs(d.get('secondary_fc', 0) or 0)
+            p_fc = max(p_fc, pfc)
+            s_fc = max(s_fc, sfc)
+        
+        if p_fc == 0 and s_fc == 0:
+            # Try alternative data structure
+            p_fc = abs(p.get('max_primary_fc', 0) or 0)
+            s_fc = abs(p.get('max_secondary_fc', 0) or 0)
+        
+        x_vals.append(p_fc)
+        y_vals.append(s_fc)
+        colors.append(COLORS.get(pattern, COLORS['mixed']))
+        labels.append(gene)
+
+    if not x_vals:
+        return None
+
+    fig, ax = plt.subplots(1, 1, figsize=(10, 10), dpi=300)
+    fig.patch.set_facecolor('white')
+    ax.set_facecolor('#FAFAFA')
+
+    # Scatter plot
+    scatter = ax.scatter(x_vals, y_vals, c=colors, s=80, alpha=0.7,
+                         edgecolors='white', linewidths=0.8, zorder=3)
+
+    # Label top proteins
+    max_fc = max(max(x_vals) if x_vals else 1, max(y_vals) if y_vals else 1)
+    threshold = max_fc * 0.4
+    for i, (x, y, label) in enumerate(zip(x_vals, y_vals, labels)):
+        if x > threshold or y > threshold:
+            ax.annotate(label, (x, y), textcoords="offset points",
+                       xytext=(5, 5), fontsize=7, fontweight='bold',
+                       color=colors[i], alpha=0.9)
+
+    # Diagonal line (equal regulation)
+    max_val = max(max(x_vals) if x_vals else 1, max(y_vals) if y_vals else 1) * 1.1
+    ax.plot([0, max_val], [0, max_val], '--', color='#CCCCCC', alpha=0.5, zorder=1)
+
+    # Quadrant labels
+    ax.text(max_val * 0.75, max_val * 0.25, f"{ptype}\ndominant",
+            ha='center', va='center', fontsize=9, color='#999999', style='italic')
+    ax.text(max_val * 0.25, max_val * 0.75, f"{stype}\ndominant",
+            ha='center', va='center', fontsize=9, color='#999999', style='italic')
+
+    ax.set_xlabel(f"{ptype} max |log2FC|", fontsize=12, fontweight='bold')
+    ax.set_ylabel(f"{stype} max |log2FC|", fontsize=12, fontweight='bold')
+    ax.set_title(f"Dual-PTM Regulation Magnitude: {ptype} vs {stype}",
+                 fontsize=13, fontweight='bold', pad=15)
+
+    # Legend
+    legend_elements = [
+        mpatches.Patch(facecolor=COLORS['concordant'], label='Concordant'),
+        mpatches.Patch(facecolor=COLORS['discordant'], label='Discordant'),
+        mpatches.Patch(facecolor=COLORS['mixed'], label='Mixed'),
+    ]
+    ax.legend(handles=legend_elements, loc='upper left', fontsize=9,
+             framealpha=0.9, edgecolor='#CCCCCC')
+
+    ax.grid(True, alpha=0.3, linestyle='--')
+    ax.set_xlim(-0.1, max_val)
+    ax.set_ylim(-0.1, max_val)
+
+    out_path = os.path.join(output_dir, "crosstalk_dual_volcano.png")
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=300, bbox_inches='tight', facecolor='white')
+    plt.close(fig)
+    logger.info(f"Dual volcano plot saved: {out_path}")
+    return out_path
+
+
 def generate_crosstalk_figure_section(
     crosstalk_data: Dict[str, Any],
     figure_paths: Dict[str, str],
@@ -1152,6 +1416,35 @@ def generate_crosstalk_figure_section(
     # Table 2C: Regulatory Relationships (replaces circuit diagram)
     if crosstalk_data.get('non_ptm_interactors'):
         section += _generate_table_2c(crosstalk_data, ptype, stype)
+
+    # Figure 2D: Sankey Flow Diagram
+    if 'figure_d' in figure_paths:
+        base64_img = convert_image_to_base64(figure_paths['figure_d'])
+        if base64_img:
+            section += f"### Figure 2D. {ptype}–{stype} Cross-Talk Flow Diagram\n\n"
+            section += f"![Cross-Talk Flow Diagram]({base64_img})\n\n"
+            section += f"**Figure Legend (2D):** "
+            section += f"Sankey-style flow diagram illustrating the regulatory relationships "
+            section += f"between {ptype.lower()} and {stype.lower()} modifications. "
+            section += f"Left: PTM cross-talk categories (concordant, discordant, mixed, sequential gating). "
+            section += f"Center: Dual-PTM proteins. "
+            section += f"Right: Functional outcomes (co-regulated signaling, opposing regulation, hub convergence). "
+            section += f"Line colors indicate the cross-talk pattern for each protein.\n\n"
+
+    # Figure 2E: Dual Volcano Plot
+    if 'figure_e' in figure_paths:
+        base64_img = convert_image_to_base64(figure_paths['figure_e'])
+        if base64_img:
+            section += f"### Figure 2E. Dual-PTM Regulation Magnitude Plot\n\n"
+            section += f"![Dual Volcano Plot]({base64_img})\n\n"
+            section += f"**Figure Legend (2E):** "
+            section += f"Scatter plot comparing the maximum absolute log2 fold-change "
+            section += f"of {ptype.lower()} (x-axis) and {stype.lower()} (y-axis) "
+            section += f"for each dual-PTM protein. "
+            section += f"Green = concordant, red = discordant, gray = mixed pattern. "
+            section += f"Proteins above the diagonal are {stype.lower()}-dominant; "
+            section += f"those below are {ptype.lower()}-dominant. "
+            section += f"Labeled proteins exceed 40% of the maximum fold-change threshold.\n\n"
 
     if not dual_ptm_proteins and not figure_paths:
         section += "*Cross-talk visualization data could not be generated.*\n\n"

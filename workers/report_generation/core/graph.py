@@ -76,6 +76,22 @@ class ReportState(TypedDict, total=False):
     final_report: str
     report_files: List[str]
 
+    # Cross-talk analysis (Phos x Ub)
+    analysis_mode: str                         # "ptm_only" | "ptm_nonptm_network" | "cross_talk"
+    secondary_results: dict                    # secondary PTM network_results
+    secondary_ptm_type: str                    # e.g. "ubiquitylation"
+    secondary_md_content: str                  # secondary comprehensive_report md
+    secondary_tsv_path: str                    # secondary enriched TSV path
+    primary_results: dict                      # alias for network_results (primary)
+    primary_ptm_type: str                      # alias for ptm_type (primary)
+    primary_md_content: str                    # alias for md_content (primary)
+    primary_tsv_path: str                      # primary enriched TSV path
+    crosstalk_data: dict                       # cross-talk analysis output
+    crosstalk_report: str                      # cross-talk full report text
+    cross_talk_data: dict                      # cross-talk data for DB storage
+    report_file: str                           # final report file path
+    collection_names: List[str]                # ChromaDB collection names
+
     # Progress tracking
     progress_callback: Any
     error: Optional[str]
@@ -137,6 +153,12 @@ def cascade_mediator(state: ReportState) -> dict:
     """v7.0: Extract discussed pathways from LLM text and generate cascade diagrams."""
     from .nodes.cascade_mediator_node import run_cascade_mediator
     return run_cascade_mediator(state)
+
+
+def crosstalk_analysis(state: ReportState) -> dict:
+    """Run Cross-Talk (Phos x Ub) analysis pipeline."""
+    from .nodes.crosstalk_node import run_crosstalk_analysis
+    return run_crosstalk_analysis(state)
 
 
 def drug_repositioning(state: ReportState) -> dict:
@@ -500,18 +522,35 @@ def edit_report(state: ReportState) -> dict:
 # Graph builder
 # ---------------------------------------------------------------------------
 
+def _route_after_cascade(state: ReportState) -> str:
+    """Route after cascade_mediator: if cross_talk mode, go to crosstalk_analysis; else continue."""
+    mode = state.get("analysis_mode", "ptm_only")
+    if mode == "cross_talk":
+        logger.info("[GRAPH] Routing to crosstalk_analysis (cross_talk mode)")
+        return "crosstalk_analysis"
+    return "generate_qa_report"
+
+
 def build_report_graph() -> StateGraph:
     """Build the LangGraph StateGraph for report generation.
 
-    Flow (v8.0):
-      load_context → generate_questions → research → hypothesize
-        → validate_hypotheses → network_analysis → temporal_comovement
-        → write_sections → cascade_mediator → generate_qa_report
-        → drug_repositioning → format_citations → edit_report
+    Flow (v9.0):
+      Standard (ptm_only / ptm_nonptm_network):
+        load_context → generate_questions → research → hypothesize
+          → validate_hypotheses → network_analysis → temporal_comovement
+          → write_sections → cascade_mediator → generate_qa_report
+          → drug_repositioning → format_citations → edit_report
 
-    v8.0: temporal_comovement inserted between network_analysis and
-    write_sections to detect co-moving PTM clusters and provide
-    structured context for LLM section writing.
+      Cross-Talk (cross_talk):
+        load_context → generate_questions → research → hypothesize
+          → validate_hypotheses → network_analysis → temporal_comovement
+          → write_sections → cascade_mediator → crosstalk_analysis
+          → generate_qa_report → drug_repositioning → format_citations
+          → edit_report
+
+    v9.0: crosstalk_analysis conditionally inserted after cascade_mediator
+    when analysis_mode == "cross_talk".
+    v8.0: temporal_comovement between network_analysis and write_sections.
     v7.0: cascade_mediator after write_sections for content-driven diagrams.
     """
     graph = StateGraph(ReportState)
@@ -525,6 +564,7 @@ def build_report_graph() -> StateGraph:
     graph.add_node("temporal_comovement", temporal_comovement)
     graph.add_node("write_sections", write_sections)
     graph.add_node("cascade_mediator", cascade_mediator)
+    graph.add_node("crosstalk_analysis", crosstalk_analysis)
     graph.add_node("generate_qa_report", generate_qa_report)
     graph.add_node("drug_repositioning", drug_repositioning)
     graph.add_node("format_citations", format_citations)
@@ -539,7 +579,18 @@ def build_report_graph() -> StateGraph:
     graph.add_edge("network_analysis", "temporal_comovement")
     graph.add_edge("temporal_comovement", "write_sections")
     graph.add_edge("write_sections", "cascade_mediator")
-    graph.add_edge("cascade_mediator", "generate_qa_report")
+
+    # Conditional: cross_talk mode inserts crosstalk_analysis before qa_report
+    graph.add_conditional_edges(
+        "cascade_mediator",
+        _route_after_cascade,
+        {
+            "crosstalk_analysis": "crosstalk_analysis",
+            "generate_qa_report": "generate_qa_report",
+        },
+    )
+    graph.add_edge("crosstalk_analysis", "generate_qa_report")
+
     graph.add_edge("generate_qa_report", "drug_repositioning")
     graph.add_edge("drug_repositioning", "format_citations")
     graph.add_edge("format_citations", "edit_report")

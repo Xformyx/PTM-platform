@@ -32,6 +32,11 @@ from common.report_postprocessor import (
     postprocess_full_report,
     validate_llm_output_against_data,
 )
+try:
+    from common.ptm_vocabulary import build_crosstalk_vocabulary_prompt_block
+    _HAS_CROSSTALK_VOCAB = True
+except ImportError:
+    _HAS_CROSSTALK_VOCAB = False
 from report_generation.core.crosstalk_fallbacks import (
     generate_crosstalk_results_fallback,
     generate_crosstalk_discussion_fallback,
@@ -764,6 +769,16 @@ def run_crosstalk_analysis(state: dict) -> dict:
         "Be precise with PTM site nomenclature."
     )
 
+    # v9.3: Inject cross-talk vocabulary block into system prompt
+    if _HAS_CROSSTALK_VOCAB:
+        try:
+            vocab_block = build_crosstalk_vocabulary_prompt_block(
+                primary_ptm_type, secondary_ptm_type
+            )
+            system_prompt += "\n" + vocab_block
+        except Exception as e:
+            logger.warning(f"Failed to build cross-talk vocabulary block: {e}")
+
     # ── Title & Header ──
     report_parts.append(f"# {p_type}–{s_type} Post-Translational Modification Cross-Talk Analysis\n")
     report_parts.append(
@@ -1113,6 +1128,66 @@ Write 2-3 paragraphs:
         report_parts.append(f"## Conclusion\n\n{fallback_conclusion}\n")
     report_parts.append("\n---\n")
 
+    # ── Cross-Talk Q&A Section (Q1–Q10) ──
+    if cb:
+        cb(85, "Generating Cross-Talk Q&A section")
+
+    crosstalk_questions = [
+        f"Q1. Which proteins exhibit dual {p_type}–{s_type} modifications, and what is the biological significance of their co-regulation?",
+        f"Q2. Among the concordantly regulated dual-PTM proteins, which signaling pathways are most enriched, and how does simultaneous {p_type} and {s_type} amplify pathway activation?",
+        f"Q3. What are the key discordantly regulated dual-PTM proteins, and what opposing regulatory mechanisms (e.g., stabilization vs. degradation) do they reveal?",
+        f"Q4. What sequential gating events (e.g., {p_type} preceding {s_type}) are observed, and what are the inferred molecular mechanisms (phosphodegron, kinase-E3 relay)?",
+        f"Q5. Which shared non-PTM interactors serve as convergence hubs for {p_type} and {s_type} signaling, and what are their functional roles?",
+        f"Q6. How does the temporal dynamics of {p_type}–{s_type} cross-talk evolve across the time course ({', '.join(all_timepoints[:3])}{'...' if len(all_timepoints) > 3 else ''})?",
+        f"Q7. Are there proteins where {s_type} appears to gate or license subsequent {p_type} events? What is the evidence for ubiquitin-dependent kinase activation?",
+        f"Q8. What are the therapeutic implications of the identified cross-talk patterns? Which dual-PTM proteins represent potential drug targets or biomarkers?",
+        f"Q9. How do the cross-talk patterns compare with known {p_type}–{s_type} regulatory paradigms in the literature (e.g., SCF-βTrCP phosphodegron, AMPK-mTOR axis)?",
+        f"Q10. What testable predictions emerge from this cross-talk analysis, and what experimental approaches would validate the identified regulatory relationships?",
+    ]
+
+    qa_parts = ["## Investigator Q&A: Cross-Talk Analysis\n"]
+    qa_parts.append(f"The following questions address key aspects of {p_type}–{s_type} cross-talk identified in this analysis.\n")
+
+    for qi, question in enumerate(crosstalk_questions, 1):
+        qa_prompt = f"""You are a PTM cross-talk expert writing a Q&A section for a research report.
+
+{v98_directive}
+
+=== CROSS-TALK DATA ===
+{crosstalk_context[:6000]}
+
+=== STRUCTURED DATA ===
+{v98_structured_data[:4000]}
+
+=== QUESTION ===
+{question}
+
+Write a detailed answer (200–400 words) that:
+1. **Direct response**: Answer the question with specific proteins, values, and mechanisms from the data above.
+2. **Alternative explanation**: Provide an alternative interpretation or competing hypothesis.
+3. **Testable prediction**: Propose a specific experiment to validate the finding.
+
+Use ONLY protein names from the whitelist: {_whitelist_text[:2000]}
+Do NOT invent protein names, fold-change values, or timepoints not present in the data.
+Cite relevant literature using [N] format where appropriate.
+"""
+        try:
+            qa_answer = llm.generate(qa_prompt, system_prompt=system_prompt, max_tokens=3072)
+            if qa_answer and len(qa_answer.strip()) > 80:
+                qa_parts.append(f"### {question}\n")
+                qa_parts.append(qa_answer.strip())
+                qa_parts.append("")
+            else:
+                qa_parts.append(f"### {question}\n")
+                qa_parts.append(f"*This question requires further investigation with additional experimental data.*\n")
+        except Exception as qa_err:
+            logger.warning(f"Q&A Q{qi} generation failed: {qa_err}")
+            qa_parts.append(f"### {question}\n")
+            qa_parts.append(f"*Analysis pending — additional data required for comprehensive answer.*\n")
+
+    report_parts.append("\n".join(qa_parts))
+    report_parts.append("\n---\n")
+
     # ── Methods ──
     if cb:
         cb(90, "Writing Methods")
@@ -1168,6 +1243,7 @@ Biological interpretation was supported by published review papers, textbooks, a
             "n_disc": n_disc,
             "n_gate": n_gate,
             "n_shared_nonptm": n_shared_nonptm,
+            "is_crosstalk": True,
         }
         full_report = postprocess_full_report(
             full_report, ptm_type=primary_ptm_type, crosstalk_metadata=crosstalk_metadata

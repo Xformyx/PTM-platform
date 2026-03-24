@@ -419,6 +419,15 @@ async def create_order(
         # RAG collection selection (list of collection IDs; null = all active)
         rag_collections_data = _safe_json_loads(rag_collections)
 
+        # Determine secondary_ptm_type from report_options or analysis_context
+        secondary_ptm_type_val = None
+        if secondary_pr_path or secondary_pg_path:
+            secondary_ptm_type_val = (
+                report_options_data.get("secondary_ptm_type")
+                or (_safe_json_loads(analysis_context) or {}).get("secondary_ptm_type")
+                or ("ubiquitylation" if ptm_type == "phosphorylation" else "phosphorylation")
+            )
+
         order = Order(
             order_code=order_code,
             user_id=user.id if user.id != 0 else None,
@@ -436,6 +445,7 @@ async def create_order(
             config_xlsx_path=config_path,
             secondary_pr_matrix_path=secondary_pr_path,
             secondary_pg_matrix_path=secondary_pg_path,
+            secondary_ptm_type=secondary_ptm_type_val,
         )
 
         db.add(order)
@@ -555,6 +565,7 @@ async def start_order(
         "report_type": report_opts.get("report_type", "comprehensive"),
         "report_config": report_opts.get("report_config", {}),
         "analysis_mode": report_opts.get("analysis_mode", "ptm_only"),
+        "secondary_ptm_type": order.secondary_ptm_type,
     }
 
     from celery import Celery as CeleryClass
@@ -870,6 +881,7 @@ async def run_stage(
             "analysis_mode": report_opts.get("analysis_mode", "ptm_only"),
             "report_type": report_opts.get("report_type", "comprehensive"),
             "report_config": report_opts.get("report_config", {}),
+            "secondary_ptm_type": order.secondary_ptm_type,
         }
         task = celery_app.send_task(
             "report_generation.tasks.run_report_generation",

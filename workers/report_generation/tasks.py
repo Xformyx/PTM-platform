@@ -116,6 +116,7 @@ def run_report_generation(self, order_id: int, config: dict):
         # Build initial state (merge single_time_point into experimental_context)
         experimental_context = dict(config.get("experimental_context") or {})
         experimental_context["single_time_point"] = config.get("single_time_point", False)
+        analysis_mode = config.get("analysis_mode", "ptm_only")
         initial_state = {
             "order_id": order_id,
             "enriched_ptm_data": enriched_data,
@@ -125,14 +126,108 @@ def run_report_generation(self, order_id: int, config: dict):
             "experimental_context": experimental_context,
             "research_questions": config.get("research_questions", []),
             "chromadb_collections": config.get("chromadb_collections", []),
+            "collection_names": config.get("chromadb_collections", []),
             "output_dir": str(order_output),
             "llm_provider": config.get("llm_provider", "ollama"),
             "llm_model": config.get("llm_model"),
             "report_title": config.get("report_title", "PTM Comprehensive Analysis Report"),
             "report_type": config.get("report_type", "comprehensive"),
             "report_config": config.get("report_config", {}),
+            "analysis_mode": analysis_mode,
             "progress_callback": _make_progress_cb(order_id),
         }
+
+        # ── Cross-Talk mode: load secondary PTM data into initial_state ──
+        if analysis_mode == "cross_talk":
+            logger.info(f"[Order {order_id}] Cross-Talk mode: loading secondary PTM data")
+            secondary_ptm_type = config.get("secondary_ptm_type", "ubiquitylation")
+            secondary_output_dir = config.get("secondary_output_dir")
+            secondary_enriched_json = config.get("secondary_enriched_json_path")
+            secondary_md_path = config.get("secondary_md_report_path", "")
+            secondary_tsv_path = config.get("secondary_tsv_data_path", "")
+
+            # Try to find secondary enriched JSON if not explicitly provided
+            if not secondary_enriched_json and secondary_output_dir:
+                sec_dir = Path(secondary_output_dir)
+                sec_candidates = list(sec_dir.glob("enriched_ptm_data_*.json"))
+                if sec_candidates:
+                    secondary_enriched_json = str(sec_candidates[0])
+                    logger.info(f"[Order {order_id}] Found secondary enriched JSON: {secondary_enriched_json}")
+
+            # Also check in the main order output's secondary_ptm subdirectory
+            if not secondary_enriched_json:
+                sec_subdir = order_output / "secondary_ptm"
+                if sec_subdir.exists():
+                    sec_candidates = list(sec_subdir.glob("enriched_ptm_data_*.json"))
+                    if sec_candidates:
+                        secondary_enriched_json = str(sec_candidates[0])
+                        logger.info(f"[Order {order_id}] Found secondary enriched JSON in secondary_ptm/: {secondary_enriched_json}")
+
+            # Load secondary enriched data
+            secondary_enriched_data = []
+            if secondary_enriched_json and Path(secondary_enriched_json).exists():
+                try:
+                    with open(secondary_enriched_json, "r") as f:
+                        secondary_enriched_data = json.load(f)
+                    logger.info(f"[Order {order_id}] Loaded {len(secondary_enriched_data)} secondary enriched PTMs")
+                except Exception as sec_err:
+                    logger.warning(f"[Order {order_id}] Failed to load secondary enriched JSON: {sec_err}")
+
+            # Find secondary TSV path if not provided
+            if not secondary_tsv_path and secondary_output_dir:
+                sec_dir = Path(secondary_output_dir)
+                sec_suffix = "_ubi" if secondary_ptm_type.startswith("ubiquit") else "_phospho"
+                sec_bio_tsv = sec_dir / f"unified_protein_data_enriched_bio_enriched{sec_suffix}.tsv"
+                if sec_bio_tsv.exists():
+                    secondary_tsv_path = str(sec_bio_tsv)
+                else:
+                    sec_tsv_candidates = list(sec_dir.glob("*bio_enriched*.tsv"))
+                    if sec_tsv_candidates:
+                        secondary_tsv_path = str(sec_tsv_candidates[0])
+
+            # Find secondary MD report if not provided
+            if not secondary_md_path and secondary_output_dir:
+                sec_dir = Path(secondary_output_dir)
+                sec_md_candidates = list(sec_dir.glob("comprehensive_report*.md"))
+                if sec_md_candidates:
+                    secondary_md_path = str(sec_md_candidates[0])
+
+            # Build secondary_results dict (mimicking network_results structure)
+            secondary_results = {}
+            if secondary_enriched_data:
+                # Extract summary and timepoints from secondary enriched data
+                timepoints = set()
+                proteins = set()
+                for item in secondary_enriched_data:
+                    tp = item.get("condition") or item.get("Condition", "")
+                    if tp:
+                        timepoints.add(tp)
+                    pg = item.get("protein_group") or item.get("Protein.Group", "")
+                    if pg:
+                        proteins.add(pg)
+                secondary_results = {
+                    "enriched_data": secondary_enriched_data,
+                    "timepoints": sorted(list(timepoints)),
+                    "proteins": list(proteins),
+                    "summary": {
+                        "total_ptms": len(secondary_enriched_data),
+                        "total_proteins": len(proteins),
+                        "total_timepoints": len(timepoints),
+                    },
+                }
+                logger.info(
+                    f"[Order {order_id}] Secondary results: {len(secondary_enriched_data)} PTMs, "
+                    f"{len(proteins)} proteins, {len(timepoints)} timepoints"
+                )
+
+            initial_state.update({
+                "secondary_results": secondary_results,
+                "secondary_ptm_type": secondary_ptm_type,
+                "secondary_md_content": secondary_md_path,
+                "secondary_tsv_path": secondary_tsv_path,
+                "primary_tsv_path": config.get("tsv_data_path", ""),
+            })
+            logger.info(f"[Order {order_id}] Cross-Talk state prepared: secondary_ptm_type={secondary_ptm_type}")
 
         # Execute LangGraph pipeline
         publish_progress(order_id, "report_generation", "graph", "started", 2, "Executing LangGraph pipeline")

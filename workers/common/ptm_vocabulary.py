@@ -360,8 +360,65 @@ def get_normalized_ptm_type(ptm_type: str) -> str:
         "ac": "acetylation",
         "me": "methylation",
         "sumo": "sumoylation",
+        "cross_talk": "cross_talk",
+        "crosstalk": "cross_talk",
     }
     return _ALIASES.get(normalized, normalized)
+
+
+def build_crosstalk_vocabulary_prompt_block(
+    primary_ptm_type: str = "phosphorylation",
+    secondary_ptm_type: str = "ubiquitylation",
+) -> str:
+    """Build a vocabulary block for cross-talk mode LLM prompts.
+    
+    In cross-talk mode, BOTH PTM types are legitimate and should be used.
+    The vocabulary block instructs the LLM to use correct terminology for both.
+    """
+    p_vocab = get_vocabulary(primary_ptm_type)
+    s_vocab = get_vocabulary(secondary_ptm_type)
+    
+    lines = [
+        f"\n{'='*70}",
+        f"PTM CROSS-TALK VOCABULARY REFERENCE (MANDATORY)",
+        f"{'='*70}",
+        f"",
+        f"This is a **Cross-Talk Analysis** between {p_vocab['modification_name_cap']} and {s_vocab['modification_name_cap']}.",
+        f"BOTH PTM types are legitimate in this report.",
+        f"",
+        f"PRIMARY PTM ({p_vocab['modification_name_cap']}):",
+        f"  - Modification: {p_vocab['modification_name']}",
+        f"  - Verb form: {p_vocab['modification_verb']}",
+        f"  - Writer enzyme: {p_vocab['enzyme_writer_generic']}",
+        f"  - Eraser enzyme: {p_vocab['enzyme_eraser_generic']}",
+        f"  - Enzyme-substrate: {p_vocab['enzyme_substrate_term']}",
+        f"  - Target residues: {', '.join(p_vocab['target_residues'])}",
+        f"",
+        f"SECONDARY PTM ({s_vocab['modification_name_cap']}):",
+        f"  - Modification: {s_vocab['modification_name']}",
+        f"  - Verb form: {s_vocab['modification_verb']}",
+        f"  - Writer enzyme: {s_vocab['enzyme_writer_generic']}",
+        f"  - Eraser enzyme: {s_vocab['enzyme_eraser_generic']}",
+        f"  - Enzyme-substrate: {s_vocab['enzyme_substrate_term']}",
+        f"  - Target residues: {', '.join(s_vocab['target_residues'])}",
+        f"",
+        f"CROSS-TALK SPECIFIC TERMS (USE THESE):",
+        f"  - 'PTM cross-talk' or 'cross-talk between {p_vocab['modification_name']} and {s_vocab['modification_name']}'",
+        f"  - 'dual-PTM protein' (protein bearing both modifications)",
+        f"  - 'concordant regulation' (both PTMs change in same direction)",
+        f"  - 'discordant regulation' (PTMs change in opposite directions)",
+        f"  - 'sequential gating' (one PTM precedes and gates the other)",
+        f"  - 'phosphodegron' (phosphorylation-dependent ubiquitylation)",
+        f"  - 'shared non-PTM interactor' (protein interacting with both PTM networks)",
+        f"",
+        f"FORBIDDEN TERMS:",
+        f"  - NEVER mention 'ChromaDB', 'knowledge base', 'database'",
+        f"  - NEVER confuse which PTM type belongs to which dataset",
+        f"  - NEVER use 'ubiquitination' (use 'ubiquitylation')",
+        f"",
+        f"{'='*70}",
+    ]
+    return "\n".join(lines)
 
 
 def build_vocabulary_prompt_block(ptm_type: str) -> str:

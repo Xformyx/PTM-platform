@@ -218,7 +218,101 @@ def run_rag_enrichment(self, order_id: int, config: dict):
             f.write(report_md)
         logger.info(f"[Order {order_id}] Saved report: {md_path.name}")
 
-        publish_progress(order_id, "rag_enrichment", "report_generation", "completed", 95, "MD report generated")
+        publish_progress(order_id, "rag_enrichment", "report_generation", "completed", 90, "MD report generated")
+
+        # ================================================================
+        # Step 3.5: Secondary PTM enrichment for Cross-Talk mode (90% – 95%)
+        # ================================================================
+        analysis_mode = config.get("analysis_mode", "ptm_only")
+        secondary_enriched_json_path = None
+        secondary_md_path_out = None
+        secondary_tsv_path = None
+
+        if analysis_mode == "cross_talk":
+            secondary_ptm_type = config.get("secondary_ptm_type", "ubiquitylation")
+            secondary_ptm_mode = "ubi" if secondary_ptm_type.startswith("ubiquit") else "phospho"
+            secondary_file_suffix = "_ubi" if secondary_ptm_mode == "ubi" else "_phospho"
+
+            # Look for secondary preprocessing output
+            secondary_output_dir = config.get("secondary_output_dir")
+            if not secondary_output_dir:
+                secondary_output_dir = str(order_output / "secondary_ptm")
+
+            sec_dir = Path(secondary_output_dir)
+            sec_vector_file = sec_dir / f"ptm_vector_data_normalized{secondary_file_suffix}.tsv"
+            if not sec_vector_file.exists():
+                sec_vector_file = sec_dir / f"ptm_vector_data_with_motifs{secondary_file_suffix}.tsv"
+
+            if sec_vector_file.exists():
+                publish_progress(order_id, "rag_enrichment", "secondary_enrichment", "started", 90,
+                                f"Enriching secondary {secondary_ptm_type} data")
+
+                sec_df = pd.read_csv(sec_vector_file, sep="\t", low_memory=False)
+                logger.info(f"[Order {order_id}] Secondary: Loaded {len(sec_df)} entries from {sec_vector_file.name}")
+
+                # Select top-N secondary PTMs
+                sec_gene_col = "Gene.Name" if "Gene.Name" in sec_df.columns else "gene"
+                sec_pos_col = "PTM_Position" if "PTM_Position" in sec_df.columns else "position"
+                sec_fc_col = "PTM_Relative_Log2FC" if "PTM_Relative_Log2FC" in sec_df.columns else "ptm_relative_log2fc"
+                sec_cond_col = "Condition" if "Condition" in sec_df.columns else "condition"
+
+                if sec_fc_col in sec_df.columns and sec_cond_col in sec_df.columns:
+                    sec_df["_abs_fc"] = sec_df[sec_fc_col].abs()
+                    sec_df["_key"] = list(zip(sec_df[sec_gene_col].astype(str), sec_df[sec_pos_col].astype(str)))
+                    sec_key_max = sec_df.groupby("_key")["_abs_fc"].max().sort_values(ascending=False)
+                    sec_selected = set(sec_key_max.head(top_n).index.tolist())
+                    sec_df = sec_df[sec_df["_key"].isin(sec_selected)]
+                    sec_df = sec_df.drop(columns=["_abs_fc", "_key"])
+                    logger.info(f"[Order {order_id}] Secondary: selected {len(sec_selected)} unique PTMs")
+
+                sec_ptm_data = sec_df.to_dict("records")
+
+                # Enrich secondary PTMs
+                sec_enrich_cb = _make_progress_cb(order_id, "rag_enrichment", "secondary_enrichment", 90, 3)
+                sec_pipeline = RAGEnrichmentPipeline(
+                    mcp_client=mcp,
+                    progress_callback=sec_enrich_cb,
+                    rag_llm_model=rag_llm_model,
+                    llm_provider=rag_llm_provider,
+                    llm_model=config.get("llm_model"),
+                )
+                sec_enriched = sec_pipeline.enrich_ptm_data(
+                    ptm_data=sec_ptm_data,
+                    experimental_context={**experimental_context, "ptm_type": secondary_ptm_type},
+                )
+
+                # Save secondary enriched JSON
+                secondary_enriched_json_path = order_output / f"enriched_ptm_data{secondary_file_suffix}.json"
+                with open(secondary_enriched_json_path, "w", encoding="utf-8") as f:
+                    json.dump(sec_enriched, f, indent=2, default=str)
+                logger.info(f"[Order {order_id}] Saved secondary enriched data: {secondary_enriched_json_path.name}")
+
+                # Generate secondary MD report
+                sec_merged = merge_multi_condition_ptms(sec_enriched, single_time_point=single_time_point)
+                sec_generator = ComprehensiveReportGenerator(
+                    experimental_context={**experimental_context, "ptm_type": secondary_ptm_type}
+                )
+                sec_report_md = sec_generator.generate_full_report(sec_merged)
+                secondary_md_path_out = order_output / f"comprehensive_report{secondary_file_suffix}.md"
+                with open(secondary_md_path_out, "w", encoding="utf-8") as f:
+                    f.write(sec_report_md)
+                logger.info(f"[Order {order_id}] Saved secondary report: {secondary_md_path_out.name}")
+
+                # Find secondary TSV path
+                sec_bio_tsv = sec_dir / f"unified_protein_data_enriched_bio_enriched{secondary_file_suffix}.tsv"
+                if sec_bio_tsv.exists():
+                    secondary_tsv_path = str(sec_bio_tsv)
+                else:
+                    sec_tsv_candidates = list(sec_dir.glob("*bio_enriched*.tsv"))
+                    if sec_tsv_candidates:
+                        secondary_tsv_path = str(sec_tsv_candidates[0])
+
+                publish_progress(order_id, "rag_enrichment", "secondary_enrichment", "completed", 95,
+                                f"Secondary {secondary_ptm_type} enrichment complete ({len(sec_enriched)} PTMs)")
+            else:
+                logger.warning(f"[Order {order_id}] Cross-Talk: secondary vector file not found at {sec_vector_file}")
+                publish_progress(order_id, "rag_enrichment", "secondary_enrichment", "skipped", 95,
+                                "Secondary PTM vector file not found — skipping secondary enrichment")
 
         # ================================================================
         # Step 4: Finalization (95% – 100%)
@@ -242,6 +336,7 @@ def run_rag_enrichment(self, order_id: int, config: dict):
             "rag_output_dir": str(order_output),
             "enriched_json_path": str(enriched_json_path),
             "md_report_path": str(md_path),
+            "tsv_data_path": config.get("tsv_data_path", ""),
             "experimental_context": experimental_context,
             "research_questions": config.get("research_questions", []),
             "chromadb_collections": config.get("chromadb_collections", []),
@@ -250,8 +345,16 @@ def run_rag_enrichment(self, order_id: int, config: dict):
             "report_title": config.get("report_title", "PTM Comprehensive Analysis Report"),
             "report_type": config.get("report_type", "comprehensive"),
             "report_config": config.get("report_config", {}),
-            "analysis_mode": config.get("analysis_mode", "ptm_only"),
+            "analysis_mode": analysis_mode,
+            "secondary_ptm_type": config.get("secondary_ptm_type"),
         }
+        # Cross-Talk: add secondary paths to report_config
+        if analysis_mode == "cross_talk":
+            report_config["secondary_enriched_json_path"] = str(secondary_enriched_json_path) if secondary_enriched_json_path else None
+            report_config["secondary_md_report_path"] = str(secondary_md_path_out) if secondary_md_path_out else None
+            report_config["secondary_tsv_data_path"] = secondary_tsv_path
+            report_config["secondary_output_dir"] = str(order_output / "secondary_ptm") if (order_output / "secondary_ptm").exists() else str(order_output)
+            logger.info(f"[Order {order_id}] Cross-Talk report_config: secondary_enriched={secondary_enriched_json_path}, secondary_md={secondary_md_path_out}")
         if config.get("chain_to_next", True) and get_order_status(order_id) != "cancelled":
             app.send_task(
                 "report_generation.tasks.run_report_generation",

@@ -698,7 +698,16 @@ def postprocess_full_report(
     text = full_report_text
     text = decode_html_entities(text)
     text = detect_and_remove_fake_references(text)
-    text = correct_ptm_terminology(text, ptm_type)
+    
+    # v9.3: Cross-talk mode: skip PTM terminology correction since BOTH PTM types
+    # are legitimate. Only correct 'ubiquitination' -> 'ubiquitylation' spelling.
+    if crosstalk_metadata and crosstalk_metadata.get("is_crosstalk", False):
+        import re as _re
+        text = _re.sub(r'\bubiquitination\b', 'ubiquitylation', text)
+        text = _re.sub(r'\bUbiquitination\b', 'Ubiquitylation', text)
+        _sse_log("[PostProcess] Cross-talk mode: skipping PTM terminology correction (both PTM types are legitimate)")
+    else:
+        text = correct_ptm_terminology(text, ptm_type)
     
     # v85: Remove duplicate section headings (e.g., ## Introduction followed by **Introduction**)
     text = _remove_duplicate_section_headings(text)

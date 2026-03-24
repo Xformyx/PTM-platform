@@ -526,6 +526,117 @@ def run_preprocessing(self, order_id: int, config: dict):
                 "output_files": output_files,
             }
 
+        # ================================================================
+        # Step 5: Secondary PTM Preprocessing (Cross-Talk mode only)
+        # ================================================================
+        analysis_mode = config.get("analysis_mode", "ptm_only")
+        secondary_pr_path = config.get("secondary_pr_matrix_path")
+        secondary_pg_path = config.get("secondary_pg_matrix_path")
+        secondary_output_dir = None
+
+        if analysis_mode == "cross_talk" and secondary_pr_path and secondary_pg_path:
+            if os.path.exists(secondary_pr_path) and os.path.exists(secondary_pg_path):
+                logger.info(f"[Order {order_id}] Cross-Talk mode: processing secondary PTM dataset")
+                publish_progress(order_id, "preprocessing", "secondary_preprocessing", "started", 92, "Processing secondary PTM dataset")
+
+                # Determine secondary PTM mode from report_options or config
+                report_opts = config.get("report_options") or {}
+                secondary_ptm_type = config.get("secondary_ptm_type") or report_opts.get("secondary_ptm_type", "")
+                # Infer from primary: if primary is phospho, secondary is likely ubi and vice versa
+                if not secondary_ptm_type:
+                    secondary_ptm_type = "ubiquitylation" if ptm_mode == "phospho" else "phosphorylation"
+                secondary_ptm_mode = "ubi" if secondary_ptm_type.startswith("ubiquit") else "phospho"
+
+                secondary_output_dir = order_output / "secondary_ptm"
+                secondary_output_dir.mkdir(parents=True, exist_ok=True)
+
+                secondary_file_suffix = "_phospho" if secondary_ptm_mode == "phospho" else "_ubi"
+                secondary_quant_output = f"ptm_vector_data_normalized{secondary_file_suffix}.tsv"
+                secondary_all_protein_output = f"all_protein_level_changes_normalized{secondary_file_suffix}.tsv"
+
+                if _has_output(secondary_output_dir, secondary_quant_output, secondary_all_protein_output):
+                    logger.info(f"[Order {order_id}] Secondary Step 1 skipped — outputs already exist")
+                else:
+                    from preprocessing.core.ptm_quantification import PTMQuantificationAnalyzer
+
+                    secondary_quant_cb = _make_progress_callback(
+                        order_id, "preprocessing", "secondary_preprocessing", 92, 3
+                    )
+                    secondary_analyzer = PTMQuantificationAnalyzer(
+                        fasta_path=fasta_path,
+                        output_dir=str(secondary_output_dir),
+                        ptm_mode=secondary_ptm_mode,
+                        condition_map=condition_map,
+                        progress_callback=secondary_quant_cb,
+                    )
+                    secondary_success = secondary_analyzer.run_analysis(secondary_pr_path, secondary_pg_path)
+                    if not secondary_success:
+                        logger.warning(f"[Order {order_id}] Secondary PTM quantification failed — continuing without")
+                        secondary_output_dir = None
+                    else:
+                        logger.info(f"[Order {order_id}] Secondary PTM quantification complete")
+
+                # Secondary Step 2: Unified Enrichment
+                if secondary_output_dir:
+                    secondary_enriched_output = f"unified_protein_data_enriched{secondary_file_suffix}.tsv"
+                    if _has_output(secondary_output_dir, secondary_enriched_output):
+                        logger.info(f"[Order {order_id}] Secondary Step 2 skipped — enrichment output exists")
+                    else:
+                        secondary_ptm_vector_file = str(secondary_output_dir / secondary_quant_output)
+                        secondary_all_protein_file = str(secondary_output_dir / secondary_all_protein_output)
+                        if os.path.exists(secondary_ptm_vector_file) and os.path.exists(secondary_all_protein_file):
+                            from preprocessing.core.unified_enricher import UnifiedProteinEnricher
+                            if "mcp" not in dir():
+                                mcp = MCPClient()
+                            secondary_enricher = UnifiedProteinEnricher(
+                                fasta_path=fasta_path,
+                                output_dir=str(secondary_output_dir),
+                                cache_dir=str(secondary_output_dir / "cache"),
+                                file_suffix=secondary_file_suffix,
+                                ptm_mode=secondary_ptm_mode,
+                                mcp_client=mcp,
+                            )
+                            secondary_enricher.run_unified_enrichment(secondary_ptm_vector_file, secondary_all_protein_file)
+                            logger.info(f"[Order {order_id}] Secondary unified enrichment complete")
+
+                # Secondary Step 3: Biological Enrichment
+                if secondary_output_dir:
+                    secondary_bio_output = f"unified_protein_data_enriched_bio_enriched{secondary_file_suffix}.tsv"
+                    if _has_output(secondary_output_dir, secondary_bio_output):
+                        logger.info(f"[Order {order_id}] Secondary Step 3 skipped — bio enrichment output exists")
+                    else:
+                        secondary_enriched_file = secondary_output_dir / secondary_enriched_output
+                        if secondary_enriched_file.exists():
+                            import pandas as pd
+                            from preprocessing.core.biological_enricher import BiologicalEnricher
+                            if "mcp" not in dir():
+                                mcp = MCPClient()
+                            secondary_bio_cb = _make_progress_callback(
+                                order_id, "preprocessing", "secondary_preprocessing", 95, 3
+                            )
+                            secondary_df = pd.read_csv(secondary_enriched_file, sep="\t", low_memory=False)
+                            secondary_bio_enricher = BiologicalEnricher(
+                                mcp_client=mcp,
+                                cache_dir=str(secondary_output_dir / "cache"),
+                                progress_callback=secondary_bio_cb,
+                            )
+                            secondary_enriched_df = secondary_bio_enricher.enrich_dataframe(
+                                secondary_df, species_tax_id=species, kegg_organism=kegg_org
+                            )
+                            secondary_bio_out = secondary_output_dir / secondary_bio_output
+                            secondary_enriched_df.to_csv(secondary_bio_out, sep="\t", index=False)
+                            logger.info(f"[Order {order_id}] Secondary biological enrichment saved: {secondary_bio_out.name}")
+
+                publish_progress(
+                    order_id, "preprocessing", "secondary_preprocessing", "completed", 98,
+                    "Secondary PTM preprocessing complete"
+                )
+            else:
+                logger.warning(
+                    f"[Order {order_id}] Cross-Talk mode: secondary files not found "
+                    f"(PR={secondary_pr_path}, PG={secondary_pg_path})"
+                )
+
         # Chain to Stage 2: RAG Enrichment
         rag_config = {
             "order_code": order_code,
@@ -543,6 +654,10 @@ def run_preprocessing(self, order_id: int, config: dict):
             "report_type": config.get("report_type", "comprehensive"),
             "report_config": config.get("report_config", {}),
             "analysis_mode": config.get("analysis_mode", "ptm_only"),
+            "secondary_output_dir": str(secondary_output_dir) if secondary_output_dir else None,
+            "secondary_ptm_type": config.get("secondary_ptm_type", ""),
+            "secondary_pr_matrix_path": secondary_pr_path,
+            "secondary_pg_matrix_path": secondary_pg_path,
         }
         app.send_task(
             "rag_enrichment.tasks.run_rag_enrichment",
