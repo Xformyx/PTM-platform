@@ -3,15 +3,17 @@
  * ────────────────────────────────────────────────────────────────────────────
  * Kinase Module Analysis panel for the TOP N Time-series tab.
  *
- * Three core functions:
+ * Core functions:
  *   1. Co-wave Kinase Module Detection — auto-detect PTM groups co-moving
  *   2. Amplitude Rank Preservation Score — Spearman correlation of amplitude ordering
  *   3. Interactive Kinase Lookup — KEA3 enrichment for selected PTMs
+ *   4. Motif-based Kinase Annotation — per-PTM kinase status (known / motif / novel)
+ *   5. Concordance Analysis — motif vs known kinase agreement
  *
  * Receives time-series data + selected PTMs from the parent TopNTimeSeriesPlot.
  */
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import {
   Loader2,
   Search,
@@ -24,6 +26,12 @@ import {
   Info,
   BarChart3,
   GitMerge,
+  FlaskConical,
+  Sparkles,
+  HelpCircle,
+  ShieldCheck,
+  ShieldAlert,
+  ShieldQuestion,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -46,7 +54,7 @@ interface PtmTimeSeriesRow {
   gene: string;
   position: string;
   condition: string;
-  value: number; // ptm_relative_log2fc or ptm_absolute_log2fc
+  value: number;
 }
 
 interface PtmInfo {
@@ -102,23 +110,55 @@ interface KinaseEnrichmentResponse {
   double_validated_kinases: string[];
 }
 
+// ── Motif Annotation Types ──────────────────────────────────────────────────
+
+interface MotifPredictedKinase {
+  kinase_family: string;
+  motif: string;
+  source: string;
+}
+
+interface KnownKinase {
+  kinase: string;
+  confidence: string;
+  mechanism: string;
+  source: string;
+  pmid?: string;
+}
+
+interface PtmAnnotation {
+  gene: string;
+  position: string;
+  label: string;
+  status: "known" | "motif_only" | "novel_candidate";
+  known_kinases: KnownKinase[];
+  motif_predicted_kinases: MotifPredictedKinase[];
+  sequence_window: string;
+  concordance: "concordant" | "discordant" | "not_applicable";
+  concordance_details: string[];
+}
+
+interface MotifAnnotationResponse {
+  order_id: number;
+  ptm_count: number;
+  annotations: PtmAnnotation[];
+  summary: {
+    status_counts: Record<string, number>;
+    concordance_counts: Record<string, number>;
+  };
+}
+
 interface KinaseModuleAnalysisProps {
   orderId: number;
-  /** All vector data rows for the top N PTMs */
   vectorData: PtmTimeSeriesRow[];
-  /** Unique top N PTMs */
   topNPtms: PtmInfo[];
-  /** Currently checked PTMs (key = gene_position) */
   checkedPtms: Record<string, boolean>;
-  /** Sorted condition labels (time points) */
   conditions: string[];
-  /** Callback to update checked PTMs from module selection */
   onSelectPtms?: (keys: string[]) => void;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-/** Spearman rank correlation between two arrays */
 function spearmanCorrelation(a: number[], b: number[]): number | null {
   if (a.length !== b.length || a.length < 3) return null;
   const n = a.length;
@@ -134,16 +174,13 @@ function spearmanCorrelation(a: number[], b: number[]): number | null {
 
   const ra = rank(a);
   const rb = rank(b);
-
   let d2 = 0;
   for (let i = 0; i < n; i++) {
     d2 += (ra[i] - rb[i]) ** 2;
   }
-
   return 1 - (6 * d2) / (n * (n * n - 1));
 }
 
-/** Detect co-wave modules: group PTMs that peak at the same time point */
 function detectCoWaveModules(
   ptms: PtmInfo[],
   vectorData: PtmTimeSeriesRow[],
@@ -151,7 +188,6 @@ function detectCoWaveModules(
 ): CoWaveModule[] {
   if (conditions.length < 2 || ptms.length < 2) return [];
 
-  // Build per-PTM time series
   const ptmSeries = new Map<string, number[]>();
   ptms.forEach((p) => {
     const key = `${p.gene}_${p.position}`;
@@ -164,7 +200,6 @@ function detectCoWaveModules(
     ptmSeries.set(key, series);
   });
 
-  // Group by peak condition (condition with max |value|)
   const peakGroups = new Map<string, PtmInfo[]>();
   ptms.forEach((p) => {
     const key = `${p.gene}_${p.position}`;
@@ -178,11 +213,9 @@ function detectCoWaveModules(
     peakGroups.get(peakCond)!.push(p);
   });
 
-  // Build modules from groups with 2+ PTMs
   const modules: CoWaveModule[] = [];
   let moduleId = 0;
 
-  // Sort by condition order
   const sortedPeaks = Array.from(peakGroups.entries()).sort(
     (a, b) => conditions.indexOf(a[0]) - conditions.indexOf(b[0])
   );
@@ -191,7 +224,6 @@ function detectCoWaveModules(
     if (groupPtms.length < 2) continue;
     moduleId++;
 
-    // Calculate average amplitude at peak
     const amplitudes = groupPtms.map((p) => {
       const key = `${p.gene}_${p.position}`;
       const series = ptmSeries.get(key) || [];
@@ -200,14 +232,11 @@ function detectCoWaveModules(
     });
     const avgAmplitude = amplitudes.reduce((s, v) => s + v, 0) / amplitudes.length;
 
-    // Amplitude ranking (sorted by absolute amplitude descending)
     const amplitudeRanking = amplitudes
       .map((v, i) => ({ v: Math.abs(v), i }))
       .sort((a, b) => b.v - a.v)
       .map((x) => x.i);
 
-    // Spearman score: compare amplitude ordering across all conditions
-    // For each pair of conditions, check if amplitude ordering is preserved
     let spearmanScore: number | null = null;
     if (conditions.length >= 3 && groupPtms.length >= 3) {
       const condAmplitudes = conditions.map((cond) =>
@@ -219,7 +248,6 @@ function detectCoWaveModules(
         })
       );
 
-      // Average pairwise Spearman between consecutive conditions
       const scores: number[] = [];
       for (let i = 0; i < condAmplitudes.length - 1; i++) {
         const s = spearmanCorrelation(condAmplitudes[i], condAmplitudes[i + 1]);
@@ -244,7 +272,34 @@ function detectCoWaveModules(
   return modules;
 }
 
-// ── Confidence badge ─────────────────────────────────────────────────────────
+// ── Status icon/badge helpers ───────────────────────────────────────────────
+
+const STATUS_CONFIG = {
+  known: {
+    icon: ShieldCheck,
+    label: "Known Kinase",
+    color: "text-green-600 dark:text-green-400",
+    bg: "bg-green-50 dark:bg-green-900/20",
+    border: "border-green-300 dark:border-green-700",
+    badgeCls: "border-green-500 text-green-700 dark:text-green-400",
+  },
+  motif_only: {
+    icon: FlaskConical,
+    label: "Motif Predicted",
+    color: "text-amber-600 dark:text-amber-400",
+    bg: "bg-amber-50 dark:bg-amber-900/20",
+    border: "border-amber-300 dark:border-amber-700",
+    badgeCls: "border-amber-500 text-amber-700 dark:text-amber-400",
+  },
+  novel_candidate: {
+    icon: Sparkles,
+    label: "Novel Candidate",
+    color: "text-purple-600 dark:text-purple-400",
+    bg: "bg-purple-50 dark:bg-purple-900/20",
+    border: "border-purple-300 dark:border-purple-700",
+    badgeCls: "border-purple-500 text-purple-700 dark:text-purple-400",
+  },
+} as const;
 
 function ConfidenceBadge({ level }: { level: string }) {
   const styles: Record<string, string> = {
@@ -277,6 +332,10 @@ export default function KinaseModuleAnalysis({
   const [manualSelection, setManualSelection] = useState<Set<string>>(new Set());
   const [manualEnrichment, setManualEnrichment] = useState<KinaseEnrichmentResponse | null>(null);
   const [manualLoading, setManualLoading] = useState(false);
+
+  // ── Motif annotation state ──────────────────────────────────────────────
+  const [motifAnnotations, setMotifAnnotations] = useState<Record<string, MotifAnnotationResponse>>({});
+  const [motifLoading, setMotifLoading] = useState<string | null>(null);
 
   // ── Co-wave module detection ─────────────────────────────────────────────
   const checkedPtmList = useMemo(
@@ -330,6 +389,28 @@ export default function KinaseModuleAnalysis({
     }
   }, [orderId, manualSelection, topNPtms]);
 
+  // ── Motif annotation call ────────────────────────────────────────────────
+  const runMotifAnnotation = useCallback(
+    async (moduleKey: string, ptms: PtmInfo[], kea3TopKinases: string[]) => {
+      setMotifLoading(moduleKey);
+      try {
+        const result = await api.post<MotifAnnotationResponse>(
+          `/orders/${orderId}/motif-kinase-annotation`,
+          {
+            ptms: ptms.map((p) => ({ gene: p.gene, position: p.position })),
+            kea3_top_kinases: kea3TopKinases,
+          }
+        );
+        setMotifAnnotations((prev) => ({ ...prev, [moduleKey]: result }));
+      } catch (err) {
+        console.error("Motif annotation failed:", err);
+      } finally {
+        setMotifLoading(null);
+      }
+    },
+    [orderId]
+  );
+
   const toggleModuleExpand = (key: string) => {
     setExpandedModules((prev) => {
       const next = new Set(prev);
@@ -344,7 +425,6 @@ export default function KinaseModuleAnalysis({
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
       else next.add(key);
-      // Sync chart: show only selected PTMs in the parent chart
       if (onSelectPtms && next.size > 0) {
         onSelectPtms(Array.from(next));
       }
@@ -365,7 +445,7 @@ export default function KinaseModuleAnalysis({
           </Badge>
         </CardTitle>
         <p className="text-xs text-muted-foreground">
-          Co-wave module detection, KEA3 kinase enrichment, and cascade inference.
+          Co-wave module detection, KEA3 kinase enrichment, motif-based kinase prediction, and cascade inference.
           PTMs co-moving in the same time-point waves likely share common upstream kinases.
         </p>
       </CardHeader>
@@ -422,7 +502,9 @@ export default function KinaseModuleAnalysis({
               const moduleKey = `module_${mod.id}`;
               const isExpanded = expandedModules.has(moduleKey);
               const enrichment = enrichmentResults[moduleKey];
+              const annotation = motifAnnotations[moduleKey];
               const isLoading = loadingModule === moduleKey;
+              const isMotifLoading = motifLoading === moduleKey;
               const genes = mod.ptms.map((p) => p.gene);
               const uniqueGenes = [...new Set(genes)];
 
@@ -465,6 +547,29 @@ export default function KinaseModuleAnalysis({
                           ρ = {mod.spearmanScore.toFixed(2)}
                         </Badge>
                       )}
+                      {/* Annotation summary badges */}
+                      {annotation && (
+                        <div className="flex gap-1">
+                          {annotation.summary.status_counts.known > 0 && (
+                            <Badge variant="outline" className="text-[9px] border-green-500 text-green-600 dark:text-green-400">
+                              <ShieldCheck className="h-2.5 w-2.5 mr-0.5" />
+                              {annotation.summary.status_counts.known} Known
+                            </Badge>
+                          )}
+                          {annotation.summary.status_counts.motif_only > 0 && (
+                            <Badge variant="outline" className="text-[9px] border-amber-500 text-amber-600 dark:text-amber-400">
+                              <FlaskConical className="h-2.5 w-2.5 mr-0.5" />
+                              {annotation.summary.status_counts.motif_only} Motif
+                            </Badge>
+                          )}
+                          {annotation.summary.status_counts.novel_candidate > 0 && (
+                            <Badge variant="outline" className="text-[9px] border-purple-500 text-purple-600 dark:text-purple-400">
+                              <Sparkles className="h-2.5 w-2.5 mr-0.5" />
+                              {annotation.summary.status_counts.novel_candidate} Novel
+                            </Badge>
+                          )}
+                        </div>
+                      )}
                     </div>
                     <div className="flex items-center gap-2">
                       {onSelectPtms && (
@@ -493,22 +598,70 @@ export default function KinaseModuleAnalysis({
                         )}
                         Run KEA3
                       </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="text-[10px] h-6 px-2"
+                        disabled={isMotifLoading}
+                        onClick={() => {
+                          const kea3Top = enrichment?.kea3_results?.slice(0, 10).map((k) => k.kinase) || [];
+                          runMotifAnnotation(moduleKey, mod.ptms, kea3Top);
+                        }}
+                      >
+                        {isMotifLoading ? (
+                          <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                        ) : (
+                          <FlaskConical className="h-3 w-3 mr-1" />
+                        )}
+                        Annotate
+                      </Button>
                     </div>
                   </div>
 
                   {/* Expanded content */}
                   {isExpanded && (
                     <div className="space-y-3 pt-2">
-                      {/* PTM list */}
+                      {/* PTM list with annotation status */}
                       <div className="flex flex-wrap gap-1">
-                        {mod.ptms.map((p) => (
-                          <span
-                            key={`${p.gene}_${p.position}`}
-                            className="px-2 py-0.5 rounded-full bg-muted text-xs"
-                          >
-                            {p.label}
-                          </span>
-                        ))}
+                        {mod.ptms.map((p) => {
+                          const ptmKey = `${p.gene}_${p.position}`;
+                          const ann = annotation?.annotations?.find(
+                            (a) => a.gene === p.gene && a.position === p.position
+                          );
+                          const statusCfg = ann ? STATUS_CONFIG[ann.status] : null;
+                          const StatusIcon = statusCfg?.icon;
+
+                          return (
+                            <span
+                              key={ptmKey}
+                              className={`px-2 py-0.5 rounded-full text-xs flex items-center gap-1 border ${
+                                statusCfg
+                                  ? `${statusCfg.bg} ${statusCfg.border} ${statusCfg.color}`
+                                  : "bg-muted"
+                              }`}
+                              title={
+                                ann
+                                  ? `${statusCfg?.label}${
+                                      ann.known_kinases.length > 0
+                                        ? ` | Known: ${ann.known_kinases.map((k) => k.kinase).join(", ")}`
+                                        : ""
+                                    }${
+                                      ann.motif_predicted_kinases.length > 0
+                                        ? ` | Motif: ${ann.motif_predicted_kinases.map((m) => m.kinase_family).join(", ")}`
+                                        : ""
+                                    }${
+                                      ann.concordance !== "not_applicable"
+                                        ? ` | ${ann.concordance}`
+                                        : ""
+                                    }`
+                                  : p.label
+                              }
+                            >
+                              {StatusIcon && <StatusIcon className="h-3 w-3" />}
+                              {p.label}
+                            </span>
+                          );
+                        })}
                       </div>
 
                       {/* Amplitude Rank Preservation */}
@@ -530,6 +683,11 @@ export default function KinaseModuleAnalysis({
                             </span>
                           )}
                         </div>
+                      )}
+
+                      {/* ── Motif Annotation Detail Panel ────────────────── */}
+                      {annotation && (
+                        <MotifAnnotationPanel annotation={annotation} />
                       )}
 
                       {/* KEA3 Results */}
@@ -592,7 +750,6 @@ export default function KinaseModuleAnalysis({
                   className="text-xs"
                   onClick={() => {
                     setManualSelection(new Set());
-                    // Restore all checked PTMs in the parent chart
                     if (onSelectPtms) {
                       onSelectPtms(topNPtms.map((p) => `${p.gene}_${p.position}`));
                     }
@@ -623,11 +780,241 @@ export default function KinaseModuleAnalysis({
           <CascadeView
             modules={coWaveModules}
             enrichmentResults={enrichmentResults}
+            motifAnnotations={motifAnnotations}
             conditions={conditions}
           />
         )}
       </CardContent>
     </Card>
+  );
+}
+
+// ── Motif Annotation Panel ──────────────────────────────────────────────────
+
+function MotifAnnotationPanel({ annotation }: { annotation: MotifAnnotationResponse }) {
+  const { summary, annotations } = annotation;
+  const [showAll, setShowAll] = useState(false);
+
+  const novelCandidates = annotations.filter((a) => a.status === "novel_candidate");
+  const motifOnly = annotations.filter((a) => a.status === "motif_only");
+  const known = annotations.filter((a) => a.status === "known");
+  const concordant = annotations.filter((a) => a.concordance === "concordant");
+  const discordant = annotations.filter((a) => a.concordance === "discordant");
+
+  return (
+    <div className="space-y-3 border rounded-lg p-3 bg-muted/30">
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-medium flex items-center gap-1">
+          <FlaskConical className="h-3.5 w-3.5 text-amber-500" />
+          Kinase Annotation Summary
+        </p>
+        <div className="flex gap-2 text-[10px]">
+          <span className="flex items-center gap-0.5 text-green-600 dark:text-green-400">
+            <ShieldCheck className="h-3 w-3" /> {summary.status_counts.known || 0} Known
+          </span>
+          <span className="flex items-center gap-0.5 text-amber-600 dark:text-amber-400">
+            <FlaskConical className="h-3 w-3" /> {summary.status_counts.motif_only || 0} Motif-only
+          </span>
+          <span className="flex items-center gap-0.5 text-purple-600 dark:text-purple-400">
+            <Sparkles className="h-3 w-3" /> {summary.status_counts.novel_candidate || 0} Novel
+          </span>
+        </div>
+      </div>
+
+      {/* Novel Candidates highlight */}
+      {novelCandidates.length > 0 && (
+        <div className="bg-purple-50 dark:bg-purple-900/20 rounded-lg p-3 space-y-1.5">
+          <div className="flex items-center gap-1 text-xs font-medium text-purple-700 dark:text-purple-400">
+            <Sparkles className="h-3.5 w-3.5" />
+            Novel Substrate Candidates ({novelCandidates.length})
+          </div>
+          <p className="text-[10px] text-purple-600 dark:text-purple-300">
+            These PTMs co-move with the module but have no known kinase in any database.
+            They represent potential novel kinase-substrate relationships for experimental validation.
+          </p>
+          <div className="flex flex-wrap gap-1 mt-1">
+            {novelCandidates.map((a) => (
+              <span
+                key={`${a.gene}_${a.position}`}
+                className="px-2 py-0.5 rounded-full text-[10px] bg-purple-100 dark:bg-purple-800/40 text-purple-700 dark:text-purple-300 border border-purple-300 dark:border-purple-600"
+              >
+                <Sparkles className="h-2.5 w-2.5 inline mr-0.5" />
+                {a.label}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Motif-only with concordance info */}
+      {motifOnly.length > 0 && (
+        <div className="bg-amber-50 dark:bg-amber-900/20 rounded-lg p-3 space-y-1.5">
+          <div className="flex items-center gap-1 text-xs font-medium text-amber-700 dark:text-amber-400">
+            <FlaskConical className="h-3.5 w-3.5" />
+            Motif-Predicted Only ({motifOnly.length})
+          </div>
+          <p className="text-[10px] text-amber-600 dark:text-amber-300">
+            Kinase family predicted from flanking sequence motif, but no literature-confirmed kinase.
+          </p>
+          <div className="space-y-1 mt-1">
+            {motifOnly.map((a) => (
+              <div key={`${a.gene}_${a.position}`} className="flex items-start gap-2 text-[10px]">
+                <span className="font-medium min-w-[80px] text-amber-700 dark:text-amber-300">
+                  {a.label}
+                </span>
+                <div className="flex flex-wrap gap-1">
+                  {a.motif_predicted_kinases.map((m, i) => (
+                    <span key={i} className="px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-800/30 text-amber-800 dark:text-amber-200">
+                      {m.kinase_family} <span className="opacity-60">({m.motif})</span>
+                    </span>
+                  ))}
+                </div>
+                {a.concordance === "concordant" && (
+                  <Badge variant="outline" className="text-[9px] border-green-500 text-green-600 h-4">
+                    <CheckCircle2 className="h-2.5 w-2.5 mr-0.5" /> Concordant
+                  </Badge>
+                )}
+                {a.concordance === "discordant" && (
+                  <Badge variant="outline" className="text-[9px] border-red-500 text-red-600 h-4">
+                    <ShieldAlert className="h-2.5 w-2.5 mr-0.5" /> Discordant
+                  </Badge>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Known kinases with concordance */}
+      {known.length > 0 && (
+        <div className="bg-green-50 dark:bg-green-900/20 rounded-lg p-3 space-y-1.5">
+          <div className="flex items-center gap-1 text-xs font-medium text-green-700 dark:text-green-400">
+            <ShieldCheck className="h-3.5 w-3.5" />
+            Known Kinase Substrates ({known.length})
+          </div>
+          <div className="space-y-1 mt-1">
+            {known.map((a) => (
+              <div key={`${a.gene}_${a.position}`} className="flex items-start gap-2 text-[10px]">
+                <span className="font-medium min-w-[80px] text-green-700 dark:text-green-300">
+                  {a.label}
+                </span>
+                <div className="flex flex-wrap gap-1">
+                  {a.known_kinases.slice(0, 3).map((k, i) => (
+                    <span key={i} className="px-1.5 py-0.5 rounded bg-green-100 dark:bg-green-800/30 text-green-800 dark:text-green-200">
+                      {k.kinase} <span className="opacity-60">({k.confidence})</span>
+                    </span>
+                  ))}
+                  {a.motif_predicted_kinases.length > 0 && (
+                    <>
+                      <span className="text-muted-foreground">|</span>
+                      {a.motif_predicted_kinases.slice(0, 2).map((m, i) => (
+                        <span key={`m${i}`} className="px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-800/30 text-amber-800 dark:text-amber-200">
+                          Motif: {m.kinase_family}
+                        </span>
+                      ))}
+                    </>
+                  )}
+                </div>
+                {a.concordance === "concordant" && (
+                  <Badge variant="outline" className="text-[9px] border-green-500 text-green-600 h-4">
+                    <CheckCircle2 className="h-2.5 w-2.5 mr-0.5" /> Match
+                  </Badge>
+                )}
+                {a.concordance === "discordant" && (
+                  <Badge variant="outline" className="text-[9px] border-red-500 text-red-600 h-4">
+                    <ShieldAlert className="h-2.5 w-2.5 mr-0.5" /> Mismatch
+                  </Badge>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Concordance summary */}
+      {(concordant.length > 0 || discordant.length > 0) && (
+        <div className="text-xs text-muted-foreground bg-muted/50 rounded p-2">
+          <strong>Concordance Summary:</strong>{" "}
+          {concordant.length > 0 && (
+            <span className="text-green-600">
+              {concordant.length} PTM(s) where motif prediction matches known/KEA3 kinase.{" "}
+            </span>
+          )}
+          {discordant.length > 0 && (
+            <span className="text-red-600">
+              {discordant.length} PTM(s) where motif prediction differs from known/KEA3 kinase
+              — may indicate context-dependent regulation or novel mechanism.
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Detailed annotation table (collapsible) */}
+      <button
+        onClick={() => setShowAll(!showAll)}
+        className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+      >
+        {showAll ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+        Full Annotation Table ({annotations.length} PTMs)
+      </button>
+      {showAll && (
+        <div className="max-h-64 overflow-y-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="text-[10px]">PTM</TableHead>
+                <TableHead className="text-[10px] w-20">Status</TableHead>
+                <TableHead className="text-[10px]">Known Kinase</TableHead>
+                <TableHead className="text-[10px]">Motif Prediction</TableHead>
+                <TableHead className="text-[10px] w-20">Concordance</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {annotations.map((a) => {
+                const cfg = STATUS_CONFIG[a.status];
+                const Icon = cfg.icon;
+                return (
+                  <TableRow key={`${a.gene}_${a.position}`} className={cfg.bg}>
+                    <TableCell className="text-[10px] font-medium">{a.label}</TableCell>
+                    <TableCell className="text-[10px]">
+                      <span className={`flex items-center gap-0.5 ${cfg.color}`}>
+                        <Icon className="h-3 w-3" />
+                        {cfg.label}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-[10px]">
+                      {a.known_kinases.length > 0
+                        ? a.known_kinases.map((k) => k.kinase).join(", ")
+                        : <span className="text-muted-foreground">—</span>}
+                    </TableCell>
+                    <TableCell className="text-[10px]">
+                      {a.motif_predicted_kinases.length > 0
+                        ? a.motif_predicted_kinases.map((m) => m.kinase_family).join(", ")
+                        : <span className="text-muted-foreground">—</span>}
+                    </TableCell>
+                    <TableCell className="text-[10px]">
+                      {a.concordance === "concordant" && (
+                        <span className="text-green-600 flex items-center gap-0.5">
+                          <CheckCircle2 className="h-3 w-3" /> Match
+                        </span>
+                      )}
+                      {a.concordance === "discordant" && (
+                        <span className="text-red-600 flex items-center gap-0.5">
+                          <ShieldAlert className="h-3 w-3" /> Mismatch
+                        </span>
+                      )}
+                      {a.concordance === "not_applicable" && (
+                        <span className="text-muted-foreground">N/A</span>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -676,7 +1063,7 @@ function EnrichmentResultPanel({ result }: { result: KinaseEnrichmentResponse })
       {/* KEA3 Integrated results */}
       <div>
         <p className="text-xs font-medium mb-1">
-          KEA3 Integrated Ranking (Top 15)
+          KEA3 Integrated Ranking (Top 15) <span className="text-muted-foreground font-normal">(lower score = stronger evidence)</span>
         </p>
         <div className="max-h-64 overflow-y-auto">
           <Table>
@@ -783,10 +1170,12 @@ function EnrichmentResultPanel({ result }: { result: KinaseEnrichmentResponse })
 function CascadeView({
   modules,
   enrichmentResults,
+  motifAnnotations,
   conditions,
 }: {
   modules: CoWaveModule[];
   enrichmentResults: Record<string, KinaseEnrichmentResponse>;
+  motifAnnotations: Record<string, MotifAnnotationResponse>;
   conditions: string[];
 }) {
   if (modules.length === 0) {
@@ -799,7 +1188,6 @@ function CascadeView({
     );
   }
 
-  // Sort modules by peak condition order
   const sortedModules = [...modules].sort(
     (a, b) => conditions.indexOf(a.peakCondition) - conditions.indexOf(b.peakCondition)
   );
@@ -814,12 +1202,12 @@ function CascadeView({
         {sortedModules.map((mod, idx) => {
           const moduleKey = `module_${mod.id}`;
           const enrichment = enrichmentResults[moduleKey];
+          const annotation = motifAnnotations[moduleKey];
           const topKinase = enrichment?.kea3_results?.[0];
           const doubleValidated = enrichment?.double_validated_kinases || [];
 
           return (
             <div key={moduleKey} className="flex items-center">
-              {/* Module card */}
               <div className="rounded-lg border bg-card p-3 min-w-[180px] space-y-1.5">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-medium">{mod.label}</span>
@@ -846,6 +1234,26 @@ function CascadeView({
                     Rank preservation: ρ={mod.spearmanScore.toFixed(2)}
                   </div>
                 )}
+                {/* Annotation status in cascade */}
+                {annotation && (
+                  <div className="flex gap-1 flex-wrap">
+                    {annotation.summary.status_counts.novel_candidate > 0 && (
+                      <span className="text-[9px] px-1 py-0 rounded bg-purple-100 dark:bg-purple-800/30 text-purple-600 dark:text-purple-300">
+                        {annotation.summary.status_counts.novel_candidate} novel
+                      </span>
+                    )}
+                    {annotation.summary.status_counts.motif_only > 0 && (
+                      <span className="text-[9px] px-1 py-0 rounded bg-amber-100 dark:bg-amber-800/30 text-amber-600 dark:text-amber-300">
+                        {annotation.summary.status_counts.motif_only} motif
+                      </span>
+                    )}
+                    {annotation.summary.status_counts.known > 0 && (
+                      <span className="text-[9px] px-1 py-0 rounded bg-green-100 dark:bg-green-800/30 text-green-600 dark:text-green-300">
+                        {annotation.summary.status_counts.known} known
+                      </span>
+                    )}
+                  </div>
+                )}
                 <div className="flex flex-wrap gap-0.5">
                   {mod.ptms.slice(0, 4).map((p) => (
                     <span
@@ -863,7 +1271,6 @@ function CascadeView({
                 </div>
               </div>
 
-              {/* Arrow between modules */}
               {idx < sortedModules.length - 1 && (
                 <div className="flex items-center px-2 text-muted-foreground">
                   <ArrowRight className="h-4 w-4" />

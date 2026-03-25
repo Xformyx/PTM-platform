@@ -1857,3 +1857,255 @@ async def kinase_enrichment(
         "per_ptm_kinases": per_ptm_kinases,
         "double_validated_kinases": double_validated,
     }
+
+
+# ── Motif-based Kinase Annotation ────────────────────────────────────────────
+@router.post("/{order_id}/motif-kinase-annotation")
+async def motif_kinase_annotation(
+    order_id: int,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Annotate each PTM with motif-based kinase predictions and known kinase info.
+
+    For each PTM in the request, returns:
+      - motif_predicted_kinases: kinase families predicted from flanking sequence motif
+      - known_kinases: kinases from enriched_ptm_data (RAG enrichment)
+      - status: "known" | "motif_only" | "novel_candidate"
+      - concordance: whether motif prediction agrees with known kinase info
+
+    Request body:
+        {
+            "ptms": [
+                {"gene": "Nolc1", "position": "S564"},
+                ...
+            ],
+            "kea3_top_kinases": ["CK2A1", "CDK1", ...]  // optional, from KEA3 results
+        }
+    """
+    import json as _json
+    import re
+    from app.config import get_settings
+
+    settings = get_settings()
+
+    result = await db.execute(select(Order).where(Order.id == order_id))
+    order = result.scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    _check_order_access(order, user)
+
+    ptms = body.get("ptms", [])
+    kea3_top_kinases = [k.upper() for k in body.get("kea3_top_kinases", [])]
+
+    if not ptms:
+        raise HTTPException(status_code=400, detail="ptms list is required")
+
+    # ── 1. Load enriched_ptm_data for known kinase info ──────────────────
+    output_dir = Path(settings.OUTPUT_DIR) / order.order_code
+    file_suffix = "_phospho" if order.ptm_type == "phosphorylation" else "_ubi"
+    enriched_path = output_dir / f"enriched_ptm_data{file_suffix}.json"
+
+    enriched_map = {}  # key: "GENE_POSITION" -> enriched data
+    if enriched_path.exists():
+        try:
+            with open(enriched_path, "r", encoding="utf-8") as f:
+                enriched = _json.load(f)
+            for ptm_entry in enriched:
+                gene = ptm_entry.get("gene") or ptm_entry.get("Gene.Name", "")
+                pos = ptm_entry.get("position") or ptm_entry.get("PTM_Position", "")
+                key = f"{gene.upper()}_{str(pos).upper()}"
+                enriched_map[key] = ptm_entry
+        except Exception:
+            pass
+
+    # ── 2. Load motif data from TSV (Matched_Motifs, Predicted_Regulator) ─
+    motif_map = {}  # key: "GENE_POSITION" -> {"motifs": str, "regulators": str}
+    for name in (
+        f"ptm_vector_data_with_motifs{file_suffix}.tsv",
+        f"ptm_vector_data_normalized{file_suffix}.tsv",
+    ):
+        p = output_dir / name
+        if p.exists():
+            try:
+                import csv
+                with open(p, "r", encoding="utf-8") as f:
+                    reader = csv.DictReader(f, delimiter="\t")
+                    for row in reader:
+                        gene = row.get("Gene.Name", row.get("gene", ""))
+                        pos = row.get("PTM_Position", row.get("position", ""))
+                        key = f"{gene.upper()}_{str(pos).upper()}"
+                        if key not in motif_map:
+                            motif_map[key] = {
+                                "matched_motifs": row.get("Matched_Motifs", ""),
+                                "predicted_regulator": row.get("Predicted_Regulator", ""),
+                                "sequence_window": row.get("Motifs_Sequence_Window", row.get("Sequence_Window", "")),
+                            }
+            except Exception:
+                pass
+            break
+
+    # ── 3. Motif DB for fallback prediction (inline, matching EnhancedMotifAnalyzerV2) ─
+    phospho_motif_db = {
+        "CDK/MAPK": r"[ST]P",
+        "GSK3": r"[ST].[ST]P",
+        "PKA/PKC/AKT": r"[RK].{1,2}[ST]",
+        "PKB/AKT": r"R.{2}[ST]",
+        "PKC": r"[RK].[ST]",
+        "CK2": r"[ST].{1,2}[ED]",
+        "CK1": r"[ST].[DE]",
+        "Src-family": r"Y.{1,2}[DE]",
+        "EGFR-family": r"[DE].[Y]",
+        "ATM/ATR": r"[ST]Q",
+        "CAMK": r"[ST].[RK]",
+    }
+    ubi_motif_db = {
+        "SCF_complex": r"[DE].{0,2}[ST].[DE]",
+        "APC/C_D-box": r"R..L.{2,4}[ILVM]",
+        "APC/C_KEN-box": r"KEN",
+        "HECT_E3": r"[LP]P.Y",
+        "VHL": r"LA.{1,2}[ILVM]P",
+    }
+    motif_db = phospho_motif_db if order.ptm_type == "phosphorylation" else ubi_motif_db
+
+    # ── 4. Annotate each PTM ─────────────────────────────────────────────
+    annotations = []
+    for ptm in ptms:
+        gene = ptm.get("gene", "")
+        position = ptm.get("position", "")
+        key = f"{gene.upper()}_{str(position).upper()}"
+
+        # Known kinases from enriched data
+        known_kinases = []
+        enriched_entry = enriched_map.get(key, {})
+        rag = enriched_entry.get("rag_enrichment", {})
+        if rag:
+            kp = rag.get("kinase_prediction", {})
+            if isinstance(kp, dict):
+                for k in kp.get("predicted_kinases", []):
+                    if isinstance(k, dict) and k.get("kinase"):
+                        known_kinases.append({
+                            "kinase": k["kinase"],
+                            "confidence": k.get("confidence", ""),
+                            "mechanism": k.get("mechanism", ""),
+                            "source": "rag_enrichment",
+                        })
+            # Also check kinase_substrate pairs
+            reg = rag.get("regulation", {})
+            if isinstance(reg, dict):
+                for ks in reg.get("kinase_substrate", []):
+                    if isinstance(ks, dict) and ks.get("kinase"):
+                        known_kinases.append({
+                            "kinase": ks["kinase"],
+                            "confidence": "literature",
+                            "mechanism": f"substrate: {ks.get('substrate', '')}",
+                            "source": "kinase_substrate_pair",
+                            "pmid": ks.get("pmid", ""),
+                        })
+
+        # Motif-predicted kinases
+        motif_predicted = []
+        motif_info = motif_map.get(key, {})
+        matched_motifs_str = motif_info.get("matched_motifs", "")
+        predicted_regulator_str = motif_info.get("predicted_regulator", "")
+        seq_window = motif_info.get("sequence_window", "")
+
+        if matched_motifs_str and matched_motifs_str != "No motif match":
+            for motif_name in matched_motifs_str.split("; "):
+                motif_name = motif_name.strip()
+                if motif_name:
+                    # Map motif name to kinase family
+                    kinase_family = motif_name.split("(")[0].strip().split("_")[0]
+                    motif_predicted.append({
+                        "kinase_family": kinase_family,
+                        "motif": motif_name,
+                        "source": "motif_analysis",
+                    })
+        elif seq_window and seq_window != "No sequence":
+            # Fallback: run inline motif matching
+            for kinase_name, pattern in motif_db.items():
+                try:
+                    if re.search(pattern, seq_window):
+                        motif_predicted.append({
+                            "kinase_family": kinase_name,
+                            "motif": f"{kinase_name} motif ({pattern})",
+                            "source": "inline_motif_match",
+                        })
+                except re.error:
+                    continue
+
+        # Determine status
+        has_known = len(known_kinases) > 0
+        has_motif = len(motif_predicted) > 0
+
+        if has_known:
+            status = "known"
+        elif has_motif:
+            status = "motif_only"
+        else:
+            status = "novel_candidate"
+
+        # Concordance analysis: do motif predictions agree with known kinases or KEA3 results?
+        concordance = "not_applicable"
+        concordance_details = []
+
+        if has_motif and (has_known or kea3_top_kinases):
+            known_kinase_names = set(
+                k["kinase"].upper() for k in known_kinases
+            )
+            motif_families = set(
+                m["kinase_family"].upper().replace("/", " ").split()
+                for m in motif_predicted
+            )
+            # Flatten
+            motif_family_tokens = set()
+            for fam in motif_families:
+                for token in fam:
+                    motif_family_tokens.add(token)
+
+            # Check against known kinases
+            for kn in known_kinase_names:
+                for token in motif_family_tokens:
+                    if token in kn or kn in token:
+                        concordance_details.append(f"Motif '{token}' matches known kinase '{kn}'")
+
+            # Check against KEA3 top kinases
+            for kea3k in kea3_top_kinases[:10]:
+                for token in motif_family_tokens:
+                    if token in kea3k or kea3k.startswith(token[:3]):
+                        concordance_details.append(f"Motif '{token}' matches KEA3 kinase '{kea3k}'")
+
+            if concordance_details:
+                concordance = "concordant"
+            else:
+                concordance = "discordant"
+
+        annotations.append({
+            "gene": gene,
+            "position": position,
+            "label": f"{gene} {position}",
+            "status": status,
+            "known_kinases": known_kinases,
+            "motif_predicted_kinases": motif_predicted,
+            "sequence_window": seq_window or "",
+            "concordance": concordance,
+            "concordance_details": concordance_details,
+        })
+
+    # ── 5. Summary statistics ────────────────────────────────────────────
+    status_counts = {"known": 0, "motif_only": 0, "novel_candidate": 0}
+    concordance_counts = {"concordant": 0, "discordant": 0, "not_applicable": 0}
+    for a in annotations:
+        status_counts[a["status"]] = status_counts.get(a["status"], 0) + 1
+        concordance_counts[a["concordance"]] = concordance_counts.get(a["concordance"], 0) + 1
+
+    return {
+        "order_id": order_id,
+        "ptm_count": len(annotations),
+        "annotations": annotations,
+        "summary": {
+            "status_counts": status_counts,
+            "concordance_counts": concordance_counts,
+        },
+    }
