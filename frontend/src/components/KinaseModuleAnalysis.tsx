@@ -549,7 +549,7 @@ export default function KinaseModuleAnalysis({
               Select PTMs below to highlight them in the chart above. Click "Run KEA3 Enrichment" to find common upstream kinases.
             </p>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-1 max-h-48 overflow-y-auto border rounded p-2">
-              {checkedPtmList.map((p) => {
+              {topNPtms.map((p) => {
                 const key = `${p.gene}_${p.position}`;
                 const isSelected = manualSelection.has(key);
                 return (
