@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { PlusCircle, ClipboardList, Play, ChevronDown, ChevronUp, ChevronsUpDown, AlertCircle, Trash2, Square } from "lucide-react";
@@ -64,6 +64,55 @@ function SortIcon({ field, sort }: { field: SortField; sort: { field: SortField;
     : <ChevronDown className="h-3 w-3 ml-1 text-primary" />;
 }
 
+const ORDER_LIST_COL_WIDTHS_KEY = "ptm-order-list-col-pct-v1";
+/** Percent widths — must sum to 100 */
+const DEFAULT_COL_PCT = [12, 16, 9, 9, 9, 12, 8, 11, 11, 5] as const;
+const N_COLS = DEFAULT_COL_PCT.length;
+const MIN_COL_PCT = 4;
+
+function loadOrderListColWidths(): number[] {
+  try {
+    const raw = localStorage.getItem(ORDER_LIST_COL_WIDTHS_KEY);
+    if (!raw) return [...DEFAULT_COL_PCT];
+    const arr = JSON.parse(raw) as unknown;
+    if (!Array.isArray(arr) || arr.length !== N_COLS) return [...DEFAULT_COL_PCT];
+    const nums = arr.map((x) => Number(x));
+    if (nums.some((n) => !Number.isFinite(n) || n < MIN_COL_PCT)) return [...DEFAULT_COL_PCT];
+    const sum = nums.reduce((a, b) => a + b, 0);
+    if (Math.abs(sum - 100) > 0.5) return [...DEFAULT_COL_PCT];
+    return nums;
+  } catch {
+    return [...DEFAULT_COL_PCT];
+  }
+}
+
+function saveOrderListColWidths(widths: number[]) {
+  try {
+    localStorage.setItem(ORDER_LIST_COL_WIDTHS_KEY, JSON.stringify(widths));
+  } catch {
+    /* ignore quota / private mode */
+  }
+}
+
+function ColResizeHandle({
+  colIndex,
+  onStart,
+}: {
+  colIndex: number;
+  onStart: (colIndex: number, e: React.MouseEvent) => void;
+}) {
+  return (
+    <span
+      role="separator"
+      aria-hidden
+      title="열 경계를 드래그해 너비 조정"
+      className="absolute right-0 top-0 z-20 h-full w-1.5 cursor-col-resize select-none hover:bg-primary/30 active:bg-primary/50"
+      onClick={(e) => e.stopPropagation()}
+      onMouseDown={(e) => onStart(colIndex, e)}
+    />
+  );
+}
+
 export default function OrderList() {
   const navigate = useNavigate();
   const [orders, setOrders] = useState<Order[]>([]);
@@ -74,6 +123,75 @@ export default function OrderList() {
   const [expandedError, setExpandedError] = useState<number | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ id: number; order_code: string } | null>(null);
   const [deleting, setDeleting] = useState(false);
+
+  const [colWidths, setColWidths] = useState<number[]>(() => loadOrderListColWidths());
+  const colWidthsRef = useRef(colWidths);
+  colWidthsRef.current = colWidths;
+  const tableRef = useRef<HTMLTableElement>(null);
+  const dragRef = useRef<{ index: number; startX: number; startWidths: number[] } | null>(null);
+
+  const onColResizeMove = useCallback((e: MouseEvent) => {
+    const d = dragRef.current;
+    const tableEl = tableRef.current;
+    if (!d || !tableEl) return;
+    const tw = tableEl.offsetWidth || 1;
+    const deltaPct = ((e.clientX - d.startX) / tw) * 100;
+    const i = d.index;
+    const a0 = d.startWidths[i];
+    const b0 = d.startWidths[i + 1];
+    let newA = a0 + deltaPct;
+    let newB = b0 - deltaPct;
+    if (newA < MIN_COL_PCT) {
+      newB -= MIN_COL_PCT - newA;
+      newA = MIN_COL_PCT;
+    }
+    if (newB < MIN_COL_PCT) {
+      newA -= MIN_COL_PCT - newB;
+      newB = MIN_COL_PCT;
+    }
+    newA = Math.max(MIN_COL_PCT, newA);
+    newB = Math.max(MIN_COL_PCT, newB);
+    const pairSum = a0 + b0;
+    const scale = pairSum / (newA + newB);
+    newA *= scale;
+    newB = pairSum - newA;
+    const next = [...d.startWidths];
+    next[i] = Math.round(newA * 1000) / 1000;
+    next[i + 1] = Math.round(newB * 1000) / 1000;
+    setColWidths(next);
+  }, []);
+
+  const onColResizeEnd = useCallback(() => {
+    window.removeEventListener("mousemove", onColResizeMove);
+    window.removeEventListener("mouseup", onColResizeEnd);
+    document.body.style.cursor = "";
+    document.body.style.userSelect = "";
+    dragRef.current = null;
+    saveOrderListColWidths(colWidthsRef.current);
+  }, [onColResizeMove]);
+
+  const startColResize = (colIndex: number, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragRef.current = {
+      index: colIndex,
+      startX: e.clientX,
+      startWidths: [...colWidthsRef.current],
+    };
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    window.addEventListener("mousemove", onColResizeMove);
+    window.addEventListener("mouseup", onColResizeEnd);
+  };
+
+  useEffect(() => {
+    return () => {
+      window.removeEventListener("mousemove", onColResizeMove);
+      window.removeEventListener("mouseup", onColResizeEnd);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+  }, [onColResizeMove, onColResizeEnd]);
 
   const fetchOrders = () => {
     api
@@ -198,43 +316,59 @@ export default function OrderList() {
       <Card>
         <CardContent className="p-0 overflow-x-auto">
           {filtered.length > 0 ? (
-            <Table className="w-full table-fixed">
+            <Table ref={tableRef} className="w-full table-fixed min-w-[920px]">
               <colgroup>
-                <col className="w-[12%]" />
-                <col className="w-[16%]" />
-                <col className="w-[9%]" />
-                <col className="w-[9%]" />
-                <col className="w-[9%]" />
-                <col className="w-[12%]" />
-                <col className="w-[8%]" />
-                <col className="w-[11%]" />
-                <col className="w-[11%]" />
-                <col className="w-[9%]" />
+                {colWidths.map((pct, i) => (
+                  <col key={i} style={{ width: `${pct}%` }} />
+                ))}
               </colgroup>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Order ID</TableHead>
-                  <TableHead>Project</TableHead>
-                  <TableHead>PTM Type</TableHead>
-                  <TableHead>Species</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Progress</TableHead>
-                  <TableHead>Elapsed</TableHead>
-                  <TableHead
-                    className="cursor-pointer select-none hover:bg-muted/50"
-                    onClick={() => handleSort("created_at")}
-                  >
-                    <div className="flex items-center">
-                      Created <SortIcon field="created_at" sort={sort} />
-                    </div>
+                  <TableHead className="relative">
+                    Order ID
+                    <ColResizeHandle colIndex={0} onStart={startColResize} />
+                  </TableHead>
+                  <TableHead className="relative">
+                    Project
+                    <ColResizeHandle colIndex={1} onStart={startColResize} />
+                  </TableHead>
+                  <TableHead className="relative">
+                    PTM Type
+                    <ColResizeHandle colIndex={2} onStart={startColResize} />
+                  </TableHead>
+                  <TableHead className="relative">
+                    Species
+                    <ColResizeHandle colIndex={3} onStart={startColResize} />
+                  </TableHead>
+                  <TableHead className="relative">
+                    Status
+                    <ColResizeHandle colIndex={4} onStart={startColResize} />
+                  </TableHead>
+                  <TableHead className="relative">
+                    Progress
+                    <ColResizeHandle colIndex={5} onStart={startColResize} />
+                  </TableHead>
+                  <TableHead className="relative">
+                    Elapsed
+                    <ColResizeHandle colIndex={6} onStart={startColResize} />
                   </TableHead>
                   <TableHead
-                    className="cursor-pointer select-none hover:bg-muted/50"
+                    className="relative cursor-pointer select-none hover:bg-muted/50"
+                    onClick={() => handleSort("created_at")}
+                  >
+                    <div className="flex items-center pr-1">
+                      Created <SortIcon field="created_at" sort={sort} />
+                    </div>
+                    <ColResizeHandle colIndex={7} onStart={startColResize} />
+                  </TableHead>
+                  <TableHead
+                    className="relative cursor-pointer select-none hover:bg-muted/50"
                     onClick={() => handleSort("completed_at")}
                   >
-                    <div className="flex items-center">
+                    <div className="flex items-center pr-1">
                       Updated <SortIcon field="completed_at" sort={sort} />
                     </div>
+                    <ColResizeHandle colIndex={8} onStart={startColResize} />
                   </TableHead>
                   <TableHead>Action</TableHead>
                 </TableRow>
