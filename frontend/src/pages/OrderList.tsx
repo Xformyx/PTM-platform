@@ -76,11 +76,20 @@ function loadOrderListColWidths(): number[] {
     if (!raw) return [...DEFAULT_COL_PCT];
     const arr = JSON.parse(raw) as unknown;
     if (!Array.isArray(arr) || arr.length !== N_COLS) return [...DEFAULT_COL_PCT];
-    const nums = arr.map((x) => Number(x));
-    if (nums.some((n) => !Number.isFinite(n) || n < MIN_COL_PCT)) return [...DEFAULT_COL_PCT];
-    const sum = nums.reduce((a, b) => a + b, 0);
-    if (Math.abs(sum - 100) > 1.25) return [...DEFAULT_COL_PCT];
-    return nums;
+    let nums = arr.map((x) => Number(x));
+    if (nums.some((n) => !Number.isFinite(n) || n <= 0)) return [...DEFAULT_COL_PCT];
+    let sum = nums.reduce((a, b) => a + b, 0);
+    if (sum <= 0) return [...DEFAULT_COL_PCT];
+    if (Math.abs(sum - 100) > 2) {
+      nums = nums.map((n) => (n / sum) * 100);
+      sum = 100;
+    }
+    nums = nums.map((n) => Math.max(MIN_COL_PCT, n));
+    sum = nums.reduce((a, b) => a + b, 0);
+    nums = nums.map((n) => (n / sum) * 100);
+    const drift = 100 - nums.reduce((a, b) => a + b, 0);
+    nums[N_COLS - 1] = nums[N_COLS - 1] + drift;
+    return nums.map((n) => Math.round(n * 1000) / 1000);
   } catch {
     return [...DEFAULT_COL_PCT];
   }
@@ -88,15 +97,9 @@ function loadOrderListColWidths(): number[] {
 
 function saveOrderListColWidths(widths: number[]) {
   try {
-    const sum = widths.reduce((a, b) => a + b, 0);
-    if (sum <= 0 || widths.length !== N_COLS) return;
-    const scaled = widths.map((w) => (w / sum) * 100);
-    const rounded = scaled.map((w) => Math.round(w * 1000) / 1000);
-    const drift = 100 - rounded.reduce((a, b) => a + b, 0);
-    if (rounded.length > 0) {
-      rounded[rounded.length - 1] = Math.round((rounded[rounded.length - 1] + drift) * 1000) / 1000;
-    }
-    localStorage.setItem(ORDER_LIST_COL_WIDTHS_KEY, JSON.stringify(rounded));
+    if (!Array.isArray(widths) || widths.length !== N_COLS) return;
+    if (widths.some((w) => !Number.isFinite(w))) return;
+    localStorage.setItem(ORDER_LIST_COL_WIDTHS_KEY, JSON.stringify(widths));
   } catch {
     /* ignore quota / private mode */
   }
@@ -107,16 +110,23 @@ function ColResizeHandle({
   onStart,
 }: {
   colIndex: number;
-  onStart: (colIndex: number, e: React.MouseEvent) => void;
+  onStart: (colIndex: number, e: React.PointerEvent<HTMLSpanElement>) => void;
 }) {
   return (
     <span
       role="separator"
       aria-hidden
       title="열 경계를 드래그해 너비 조정"
-      className="absolute right-0 top-0 z-20 h-full w-1.5 cursor-col-resize select-none hover:bg-primary/30 active:bg-primary/50"
+      tabIndex={-1}
+      className="absolute right-0 top-0 z-20 h-full w-1.5 touch-none cursor-col-resize select-none hover:bg-primary/30 active:bg-primary/50"
       onClick={(e) => e.stopPropagation()}
-      onMouseDown={(e) => onStart(colIndex, e)}
+      onPointerDown={(e) => {
+        if (!e.isPrimary) return;
+        e.preventDefault();
+        e.stopPropagation();
+        (e.currentTarget as HTMLSpanElement).setPointerCapture(e.pointerId);
+        onStart(colIndex, e);
+      }}
     />
   );
 }
@@ -133,15 +143,34 @@ export default function OrderList() {
   const [deleting, setDeleting] = useState(false);
 
   const [colWidths, setColWidths] = useState<number[]>(() => loadOrderListColWidths());
-  const colWidthsRef = useRef(colWidths);
-  colWidthsRef.current = colWidths;
+  const colWidthsRef = useRef<number[]>(colWidths);
   const tableRef = useRef<HTMLTableElement>(null);
-  const dragRef = useRef<{ index: number; startX: number; startWidths: number[] } | null>(null);
+  const dragRef = useRef<{
+    index: number;
+    startX: number;
+    startWidths: number[];
+    pointerId: number;
+    handle: HTMLElement;
+  } | null>(null);
+  const persistColsTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const onColResizeMove = useCallback((e: MouseEvent) => {
+  /** After React commits colWidths — ref + localStorage (avoids Firefox losing mouseup vs state). */
+  useEffect(() => {
+    colWidthsRef.current = colWidths;
+    if (persistColsTimer.current) clearTimeout(persistColsTimer.current);
+    persistColsTimer.current = setTimeout(() => {
+      persistColsTimer.current = null;
+      saveOrderListColWidths(colWidths);
+    }, 120);
+    return () => {
+      if (persistColsTimer.current) clearTimeout(persistColsTimer.current);
+    };
+  }, [colWidths]);
+
+  const onColResizeMove = useCallback((e: PointerEvent) => {
     const d = dragRef.current;
     const tableEl = tableRef.current;
-    if (!d || !tableEl) return;
+    if (!d || !tableEl || e.pointerId !== d.pointerId) return;
     const tw = tableEl.offsetWidth || 1;
     const deltaPct = ((e.clientX - d.startX) / tw) * 100;
     const i = d.index;
@@ -170,33 +199,52 @@ export default function OrderList() {
     setColWidths(next);
   }, []);
 
-  const onColResizeEnd = useCallback(() => {
-    window.removeEventListener("mousemove", onColResizeMove);
-    window.removeEventListener("mouseup", onColResizeEnd);
+  const onColResizeEnd = useCallback((e: PointerEvent) => {
+    const d = dragRef.current;
+    if (!d || e.pointerId !== d.pointerId) return;
+    window.removeEventListener("pointermove", onColResizeMove);
+    window.removeEventListener("pointerup", onColResizeEnd);
+    window.removeEventListener("pointercancel", onColResizeEnd);
     document.body.style.cursor = "";
     document.body.style.userSelect = "";
+    try {
+      d.handle.releasePointerCapture(d.pointerId);
+    } catch {
+      /* already released */
+    }
     dragRef.current = null;
-    saveOrderListColWidths(colWidthsRef.current);
   }, [onColResizeMove]);
 
-  const startColResize = (colIndex: number, e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
+  const startColResize = (colIndex: number, e: React.PointerEvent<HTMLSpanElement>) => {
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    const handle = e.currentTarget;
     dragRef.current = {
       index: colIndex,
       startX: e.clientX,
       startWidths: [...colWidthsRef.current],
+      pointerId: e.pointerId,
+      handle,
     };
-    document.body.style.cursor = "col-resize";
-    document.body.style.userSelect = "none";
-    window.addEventListener("mousemove", onColResizeMove);
-    window.addEventListener("mouseup", onColResizeEnd);
+    window.addEventListener("pointermove", onColResizeMove);
+    window.addEventListener("pointerup", onColResizeEnd);
+    window.addEventListener("pointercancel", onColResizeEnd);
   };
 
   useEffect(() => {
     return () => {
-      window.removeEventListener("mousemove", onColResizeMove);
-      window.removeEventListener("mouseup", onColResizeEnd);
+      const d = dragRef.current;
+      if (d) {
+        try {
+          d.handle.releasePointerCapture(d.pointerId);
+        } catch {
+          /* ignore */
+        }
+        dragRef.current = null;
+      }
+      window.removeEventListener("pointermove", onColResizeMove);
+      window.removeEventListener("pointerup", onColResizeEnd);
+      window.removeEventListener("pointercancel", onColResizeEnd);
       document.body.style.cursor = "";
       document.body.style.userSelect = "";
     };
