@@ -1699,3 +1699,161 @@ async def get_order_articles(
         "total_articles": len(articles),
         "articles": articles,
     }
+
+
+
+# ── Kinase Enrichment (KEA3) ─────────────────────────────────────────────────
+@router.post("/{order_id}/kinase-enrichment")
+async def kinase_enrichment(
+    order_id: int,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Call KEA3 API with a gene list and return ranked kinase enrichment results.
+
+    Request body:
+        {
+            "genes": ["Nolc1", "Bnip2", "Lig1", ...],
+            "module_label": "optional label for the co-wave module"
+        }
+
+    Returns ranked kinases from KEA3 Integrated--meanRank plus per-PTM
+    kinase predictions from enriched_ptm_data if available.
+    """
+    import httpx
+    import json as _json
+    from app.config import get_settings
+
+    settings = get_settings()
+
+    result = await db.execute(select(Order).where(Order.id == order_id))
+    order = result.scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    _check_order_access(order, user)
+
+    genes = body.get("genes", [])
+    if not genes or not isinstance(genes, list):
+        raise HTTPException(status_code=400, detail="genes list is required")
+
+    module_label = body.get("module_label", "")
+
+    # ── 1. KEA3 API call ──────────────────────────────────────────────────
+    kea3_url = "https://maayanlab.cloud/kea3/api/enrich/"
+    kea3_results = []
+    kea3_libraries = {}
+    kea3_error = None
+    confidence_level = "high" if len(genes) >= 10 else ("medium" if len(genes) >= 3 else "low")
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                kea3_url,
+                json={"query_name": module_label or "co_wave_module", "gene_set": genes},
+            )
+            resp.raise_for_status()
+            kea3_data = resp.json()
+
+            # Extract Integrated--meanRank (primary) results
+            integrated = kea3_data.get("Integrated--meanRank", [])
+            for entry in integrated[:20]:  # Top 20 kinases
+                kea3_results.append({
+                    "kinase": entry.get("TF", ""),
+                    "rank": entry.get("Rank", 0),
+                    "score": entry.get("Score", 0),
+                    "overlapping_genes": entry.get("Overlapping_Genes", "").split(",") if entry.get("Overlapping_Genes") else [],
+                    "library": "Integrated--meanRank",
+                })
+
+            # Also collect top results from key individual libraries
+            for lib_name in ["PTMsigDB", "The_Kinase_Library", "PhosDAll", "ChengKSIN"]:
+                lib_data = kea3_data.get(lib_name, [])
+                lib_top = []
+                for entry in lib_data[:10]:
+                    lib_top.append({
+                        "kinase": entry.get("TF", ""),
+                        "rank": entry.get("Rank", 0),
+                        "score": entry.get("Score", 0),
+                        "overlapping_genes": entry.get("Overlapping_Genes", "").split(",") if entry.get("Overlapping_Genes") else [],
+                    })
+                if lib_top:
+                    kea3_libraries[lib_name] = lib_top
+
+    except Exception as e:
+        kea3_error = str(e)
+
+    # ── 2. Per-PTM kinase predictions from enriched data ──────────────────
+    per_ptm_kinases = {}
+    output_dir = Path(settings.OUTPUT_DIR) / order.order_code
+    file_suffix = "_phospho" if order.ptm_type == "phosphorylation" else "_ubi"
+    enriched_path = output_dir / f"enriched_ptm_data{file_suffix}.json"
+
+    if enriched_path.exists():
+        try:
+            with open(enriched_path, "r", encoding="utf-8") as f:
+                enriched = _json.load(f)
+            gene_set = set(g.upper() for g in genes)
+            for ptm in enriched:
+                gene = ptm.get("gene") or ptm.get("Gene.Name", "")
+                if gene.upper() not in gene_set:
+                    continue
+                position = ptm.get("position") or ptm.get("PTM_Position", "")
+                rag = ptm.get("rag_enrichment", {})
+
+                # Extract kinase predictions
+                kp = rag.get("kinase_prediction", {})
+                predicted = kp.get("predicted_kinases", []) if isinstance(kp, dict) else []
+
+                # Extract upstream regulators
+                reg = rag.get("regulation", {})
+                upstream = reg.get("upstream_regulators", []) if isinstance(reg, dict) else []
+                ks_pairs = reg.get("kinase_substrate", []) if isinstance(reg, dict) else []
+
+                per_ptm_kinases[f"{gene} {position}"] = {
+                    "gene": gene,
+                    "position": position,
+                    "predicted_kinases": [
+                        {
+                            "kinase": k.get("kinase", ""),
+                            "confidence": k.get("confidence", ""),
+                            "mechanism": k.get("mechanism", ""),
+                            "score": k.get("score", 0),
+                        }
+                        for k in (predicted if isinstance(predicted, list) else [])
+                    ],
+                    "upstream_regulators": upstream[:10] if isinstance(upstream, list) else [],
+                    "kinase_substrate": [
+                        {
+                            "kinase": ks.get("kinase", ""),
+                            "substrate": ks.get("substrate", ""),
+                            "pmid": ks.get("pmid", ""),
+                        }
+                        for ks in (ks_pairs if isinstance(ks_pairs, list) else [])
+                    ],
+                }
+        except Exception:
+            pass  # Enriched data parsing failure is non-fatal
+
+    # ── 3. Cross-validate: find kinases that appear in both KEA3 and per-PTM ──
+    kea3_kinase_set = set(r["kinase"].upper() for r in kea3_results)
+    per_ptm_kinase_set = set()
+    for ptm_data in per_ptm_kinases.values():
+        for k in ptm_data.get("predicted_kinases", []):
+            per_ptm_kinase_set.add(k["kinase"].upper())
+        for k in ptm_data.get("kinase_substrate", []):
+            per_ptm_kinase_set.add(k["kinase"].upper())
+
+    double_validated = sorted(kea3_kinase_set & per_ptm_kinase_set)
+
+    return {
+        "module_label": module_label,
+        "gene_count": len(genes),
+        "genes": genes,
+        "confidence_level": confidence_level,
+        "kea3_results": kea3_results,
+        "kea3_libraries": kea3_libraries,
+        "kea3_error": kea3_error,
+        "per_ptm_kinases": per_ptm_kinases,
+        "double_validated_kinases": double_validated,
+    }

@@ -33,6 +33,7 @@ import CrossTalkHeatmap from "@/components/CrossTalkHeatmap";
 import CrossTalkSequentialGating from "@/components/CrossTalkSequentialGating";
 import SignalPropagationTimeline from "@/components/SignalPropagationTimeline";
 import { OrderArticlesTab } from "@/components/OrderArticlesTab";
+import KinaseModuleAnalysis from "@/components/KinaseModuleAnalysis";
 import {
   LineChart,
   Line,
@@ -1555,6 +1556,30 @@ function TopNTimeSeriesPlot({ orderId }: { orderId: number }) {
           </div>
         </div>
       </div>
+
+      {/* ── Kinase Module Analysis Panel ── */}
+      {conditions.length >= 3 && (
+        <KinaseModuleAnalysis
+          orderId={orderId}
+          vectorData={data.vector_data.map((row) => ({
+            gene: row.gene,
+            position: row.position,
+            condition: row.condition,
+            value: row[valueKey as keyof typeof row] as number,
+          }))}
+          topNPtms={uniquePtms}
+          checkedPtms={checked}
+          conditions={conditions}
+          onSelectPtms={(keys) => {
+            setChecked((c) => {
+              const next: Record<string, boolean> = {};
+              Object.keys(c).forEach((k) => { next[k] = false; });
+              keys.forEach((k) => { next[k] = true; });
+              return next;
+            });
+          }}
+        />
+      )}
     </div>
   );
 }
