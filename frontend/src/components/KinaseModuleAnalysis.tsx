@@ -344,6 +344,10 @@ export default function KinaseModuleAnalysis({
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
       else next.add(key);
+      // Sync chart: show only selected PTMs in the parent chart
+      if (onSelectPtms && next.size > 0) {
+        onSelectPtms(Array.from(next));
+      }
       return next;
     });
   };
@@ -542,7 +546,7 @@ export default function KinaseModuleAnalysis({
         {activeTab === "lookup" && (
           <div className="space-y-3">
             <p className="text-xs text-muted-foreground">
-              Select PTMs below, then click "Run KEA3 Enrichment" to find common upstream kinases.
+              Select PTMs below to highlight them in the chart above. Click "Run KEA3 Enrichment" to find common upstream kinases.
             </p>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-1 max-h-48 overflow-y-auto border rounded p-2">
               {checkedPtmList.map((p) => {
@@ -586,9 +590,15 @@ export default function KinaseModuleAnalysis({
                   variant="ghost"
                   size="sm"
                   className="text-xs"
-                  onClick={() => setManualSelection(new Set())}
+                  onClick={() => {
+                    setManualSelection(new Set());
+                    // Restore all checked PTMs in the parent chart
+                    if (onSelectPtms) {
+                      onSelectPtms(topNPtms.map((p) => `${p.gene}_${p.position}`));
+                    }
+                  }}
                 >
-                  Clear
+                  Clear (Show All)
                 </Button>
               )}
             </div>
