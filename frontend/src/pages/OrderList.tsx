@@ -79,7 +79,7 @@ function loadOrderListColWidths(): number[] {
     const nums = arr.map((x) => Number(x));
     if (nums.some((n) => !Number.isFinite(n) || n < MIN_COL_PCT)) return [...DEFAULT_COL_PCT];
     const sum = nums.reduce((a, b) => a + b, 0);
-    if (Math.abs(sum - 100) > 0.5) return [...DEFAULT_COL_PCT];
+    if (Math.abs(sum - 100) > 1.25) return [...DEFAULT_COL_PCT];
     return nums;
   } catch {
     return [...DEFAULT_COL_PCT];
@@ -88,7 +88,15 @@ function loadOrderListColWidths(): number[] {
 
 function saveOrderListColWidths(widths: number[]) {
   try {
-    localStorage.setItem(ORDER_LIST_COL_WIDTHS_KEY, JSON.stringify(widths));
+    const sum = widths.reduce((a, b) => a + b, 0);
+    if (sum <= 0 || widths.length !== N_COLS) return;
+    const scaled = widths.map((w) => (w / sum) * 100);
+    const rounded = scaled.map((w) => Math.round(w * 1000) / 1000);
+    const drift = 100 - rounded.reduce((a, b) => a + b, 0);
+    if (rounded.length > 0) {
+      rounded[rounded.length - 1] = Math.round((rounded[rounded.length - 1] + drift) * 1000) / 1000;
+    }
+    localStorage.setItem(ORDER_LIST_COL_WIDTHS_KEY, JSON.stringify(rounded));
   } catch {
     /* ignore quota / private mode */
   }
@@ -158,6 +166,7 @@ export default function OrderList() {
     const next = [...d.startWidths];
     next[i] = Math.round(newA * 1000) / 1000;
     next[i + 1] = Math.round(newB * 1000) / 1000;
+    colWidthsRef.current = next;
     setColWidths(next);
   }, []);
 
