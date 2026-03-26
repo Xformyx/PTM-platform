@@ -2032,6 +2032,137 @@ async def motif_kinase_annotation(
 
     _log.warning(f"[ANNOTATION DEBUG] iPTMnet cache: {len(iptmnet_cache)} genes cached")
 
+    # ── 1c. UniProt API lookup for site-specific kinase annotations ──────
+    # UniProt Swiss-Prot entries contain "Modified residue" features with
+    # descriptions like "Phosphoserine; by CDK1 and CDK2" — very high quality.
+    UNIPROT_BASE = "https://rest.uniprot.org/uniprotkb"
+    # Determine UniProt organism_id
+    uniprot_organism_id = (
+        "10090" if "mouse" in species_lower or "mus" in species_lower
+        else "9606" if "human" in species_lower or "homo" in species_lower
+        else "10116" if "rat" in species_lower or "rattus" in species_lower
+        else ""
+    )
+
+    uniprot_cache: dict = {}  # gene_upper -> {pos_int -> [kinase_name, ...]}
+
+    async def _uniprot_lookup_gene(client: httpx.AsyncClient, gene: str) -> dict:
+        """Query UniProt for a gene and extract kinase annotations from Modified residue features."""
+        result = {}  # pos_int -> [kinase_names]
+        try:
+            # First try to get the UniProt AC from iPTMnet cache (already resolved)
+            iptm_data = iptmnet_cache.get(gene.upper(), {})
+            uniprot_ac = iptm_data.get("uniprot_ac", "")
+
+            if uniprot_ac:
+                # Direct lookup by accession (fastest)
+                resp = await client.get(
+                    f"{UNIPROT_BASE}/{uniprot_ac}",
+                    params={"fields": "ft_mod_res,cc_ptm", "format": "json"},
+                )
+            else:
+                # Search by gene name + organism
+                query = f"gene_exact:{gene}"
+                if uniprot_organism_id:
+                    query += f"+AND+organism_id:{uniprot_organism_id}"
+                query += "+AND+reviewed:true"
+                resp = await client.get(
+                    f"{UNIPROT_BASE}/search",
+                    params={"query": query, "fields": "accession,ft_mod_res,cc_ptm", "format": "json", "size": "1"},
+                )
+
+            if resp.status_code != 200:
+                return result
+
+            data = resp.json()
+            # Handle search vs direct lookup
+            if "results" in data:
+                entries = data.get("results", [])
+                entry = entries[0] if entries else {}
+            else:
+                entry = data
+
+            if not entry:
+                return result
+
+            # Parse "Modified residue" features for kinase annotations
+            # Example: {type: "Modified residue", location: {start: {value: 198}}, description: "Phosphothreonine; by CDK1 and CDK2"}
+            import re as _re
+            by_pattern = _re.compile(r'by\s+(.+)', _re.IGNORECASE)
+
+            for feat in entry.get("features", []):
+                if feat.get("type") != "Modified residue":
+                    continue
+                desc = feat.get("description", "")
+                pos_val = feat.get("location", {}).get("start", {}).get("value")
+                if not pos_val or not desc:
+                    continue
+
+                # Filter by PTM type
+                desc_lower = desc.lower()
+                if order.ptm_type == "phosphorylation":
+                    if not any(kw in desc_lower for kw in ("phospho", "phosph")):
+                        continue
+                elif order.ptm_type == "ubiquitylation":
+                    if "ubiquit" not in desc_lower:
+                        continue
+
+                # Extract kinase names from "by KINASE1 and KINASE2" pattern
+                by_match = by_pattern.search(desc)
+                if by_match:
+                    kinase_str = by_match.group(1).strip()
+                    # Split by " and ", ", ", "/"
+                    kinase_names = _re.split(r'\s+and\s+|,\s*|/', kinase_str)
+                    kinase_names = [k.strip() for k in kinase_names if k.strip() and len(k.strip()) > 1]
+                    if kinase_names:
+                        result[int(pos_val)] = kinase_names
+
+            # Also parse PTM comments for additional kinase info
+            # Example: "Phosphorylated at Ser-4 by PLK1 and PLK2."
+            ptm_comment_pattern = _re.compile(
+                r'(?:phosphorylated|ubiquitinated)\s+(?:at\s+)?(?:Ser|Thr|Tyr|Lys)-?(\d+)\s+by\s+([^.;]+)',
+                _re.IGNORECASE,
+            )
+            for comment in entry.get("comments", []):
+                if comment.get("commentType") != "PTM":
+                    continue
+                for text_obj in comment.get("texts", []):
+                    text_val = text_obj.get("value", "")
+                    for cm in ptm_comment_pattern.finditer(text_val):
+                        c_pos = int(cm.group(1))
+                        c_kinases_str = cm.group(2).strip()
+                        c_kinases = _re.split(r'\s+and\s+|,\s*|/', c_kinases_str)
+                        c_kinases = [k.strip() for k in c_kinases if k.strip() and len(k.strip()) > 1]
+                        if c_kinases:
+                            if c_pos in result:
+                                existing = set(k.upper() for k in result[c_pos])
+                                for ck in c_kinases:
+                                    if ck.upper() not in existing:
+                                        result[c_pos].append(ck)
+                            else:
+                                result[c_pos] = c_kinases
+
+        except Exception as e:
+            _log.warning(f"[ANNOTATION DEBUG] UniProt lookup failed for {gene}: {e}")
+        return result
+
+    try:
+        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+            for i in range(0, len(unique_genes), 5):
+                batch = unique_genes[i:i+5]
+                tasks = [_uniprot_lookup_gene(client, g) for g in batch]
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                for gene_name, res in zip(batch, results):
+                    if isinstance(res, dict) and res:
+                        uniprot_cache[gene_name.upper()] = res
+                        _log.warning(f"[ANNOTATION DEBUG] UniProt {gene_name}: {len(res)} sites with kinase annotations")
+                if i + 5 < len(unique_genes):
+                    await asyncio.sleep(0.3)  # Rate limiting
+    except Exception as e:
+        _log.warning(f"[ANNOTATION DEBUG] UniProt batch lookup error: {e}")
+
+    _log.warning(f"[ANNOTATION DEBUG] UniProt cache: {len(uniprot_cache)} genes cached")
+
     # ── 2. Load motif data from TSV (Matched_Motifs, Predicted_Regulator) ─
     motif_map = {}  # key: "GENE_POSITION" -> {"motifs": str, "regulators": str}
     for name in (
@@ -2383,6 +2514,27 @@ async def motif_kinase_annotation(
                                 })
                     break  # Found matching site, no need to continue
 
+        # ── Source 8: UniProt API (site-specific "by KINASE" annotations) ──
+        # UniProt Swiss-Prot entries contain curated kinase info per residue position
+        gene_upper_for_uniprot = gene.upper()
+        uniprot_sites = uniprot_cache.get(gene_upper_for_uniprot, {})
+        if uniprot_sites:
+            # Extract numeric position from PTM position string (e.g., "S564" -> 564, "T232" -> 232)
+            pos_str = str(position)
+            pos_num = None
+            try:
+                pos_num = int(''.join(c for c in pos_str if c.isdigit()))
+            except (ValueError, TypeError):
+                pass
+            if pos_num and pos_num in uniprot_sites:
+                for kinase_name in uniprot_sites[pos_num]:
+                    known_kinases.append({
+                        "kinase": kinase_name,
+                        "confidence": "curated",
+                        "mechanism": f"UniProt Swiss-Prot annotation (pos {pos_num})",
+                        "source": "UniProt",
+                    })
+
         # ── Deduplicate known_kinases by kinase name ──
         seen_kinases = set()
         unique_known = []
@@ -2468,65 +2620,43 @@ async def motif_kinase_annotation(
         else:
             status = "novel_candidate"
 
-        # Concordance analysis: do motif predictions agree with known kinases or KEA3 results?
-        # RULE: concordance requires BOTH motif prediction AND known kinase info for this specific PTM.
-        # KEA3 results alone (gene-set level) are NOT sufficient for per-PTM concordance.
+        # Concordance analysis: do motif predictions agree with known kinases?
+        # Simple 3-state: concordant (Match) / discordant (Mismatch) / not_applicable (N/A)
+        # KEA3 results are used as supporting evidence alongside per-PTM known kinases.
         concordance = "not_applicable"
         concordance_details = []
 
-        if has_motif and has_known:
-            # ── Primary concordance: motif vs per-PTM known kinases ──
-            known_kinase_names = set(
-                k["kinase"].upper() for k in known_kinases
-            )
+        if has_motif:
             # Flatten motif family names into individual tokens
-            motif_family_tokens = set()
-            for m in motif_predicted:
-                family = m.get("kinase_family", "")
-                for token in family.upper().replace("/", " ").split():
-                    if token and len(token) >= 2:  # Skip single-char tokens
-                        motif_family_tokens.add(token)
-
-            # Check against known kinases (strict matching)
-            for kn in known_kinase_names:
-                for token in motif_family_tokens:
-                    # Require meaningful overlap: token in kinase name or vice versa
-                    # but both must be at least 3 chars for substring match
-                    if len(token) >= 3 and len(kn) >= 3 and (token in kn or kn in token):
-                        concordance_details.append(f"Motif '{token}' matches known kinase '{kn}'")
-                    elif token == kn:  # Exact match for short names
-                        concordance_details.append(f"Motif '{token}' matches known kinase '{kn}'")
-
-            # ── Secondary: also check KEA3 but only as supporting evidence, not sole basis ──
-            if kea3_top_kinases:
-                kea3_matches = []
-                for kea3k in kea3_top_kinases[:10]:
-                    kea3k_upper = kea3k.upper()
-                    for token in motif_family_tokens:
-                        # Strict matching: require at least 3-char overlap
-                        if len(token) >= 3 and len(kea3k_upper) >= 3 and (token in kea3k_upper or kea3k_upper in token):
-                            kea3_matches.append(f"Motif '{token}' also supported by KEA3 kinase '{kea3k}'")
-                concordance_details.extend(kea3_matches)
-
-            if concordance_details:
-                concordance = "concordant"
-            else:
-                concordance = "discordant"
-
-        elif has_motif and not has_known and kea3_top_kinases:
-            # Motif exists but no per-PTM known kinase → mark as "kea3_only" (not a true concordance)
-            concordance = "kea3_suggestive"
             motif_family_tokens = set()
             for m in motif_predicted:
                 family = m.get("kinase_family", "")
                 for token in family.upper().replace("/", " ").split():
                     if token and len(token) >= 2:
                         motif_family_tokens.add(token)
-            for kea3k in kea3_top_kinases[:10]:
-                kea3k_upper = kea3k.upper()
-                for token in motif_family_tokens:
-                    if len(token) >= 3 and len(kea3k_upper) >= 3 and (token in kea3k_upper or kea3k_upper in token):
-                        concordance_details.append(f"Motif '{token}' suggested by KEA3 kinase '{kea3k}' (no per-PTM known kinase)")
+
+            # Collect all reference kinase names (per-PTM known + KEA3 top)
+            reference_kinases = set()
+            if has_known:
+                for k in known_kinases:
+                    reference_kinases.add(k["kinase"].upper())
+            if kea3_top_kinases:
+                for kea3k in kea3_top_kinases[:10]:
+                    reference_kinases.add(kea3k.upper())
+
+            if reference_kinases and motif_family_tokens:
+                # Check motif tokens against all reference kinases
+                for ref_k in reference_kinases:
+                    for token in motif_family_tokens:
+                        if len(token) >= 3 and len(ref_k) >= 3 and (token in ref_k or ref_k in token):
+                            concordance_details.append(f"Motif '{token}' matches '{ref_k}'")
+                        elif token == ref_k:
+                            concordance_details.append(f"Motif '{token}' matches '{ref_k}'")
+
+                if concordance_details:
+                    concordance = "concordant"
+                else:
+                    concordance = "discordant"
 
         annotations.append({
             "gene": gene,
@@ -2542,7 +2672,7 @@ async def motif_kinase_annotation(
 
     # ── 5. Summary statistics ────────────────────────────────────────────
     status_counts = {"known": 0, "motif_only": 0, "novel_candidate": 0}
-    concordance_counts = {"concordant": 0, "discordant": 0, "kea3_suggestive": 0, "not_applicable": 0}
+    concordance_counts = {"concordant": 0, "discordant": 0, "not_applicable": 0}
     for a in annotations:
         status_counts[a["status"]] = status_counts.get(a["status"], 0) + 1
         concordance_counts[a["concordance"]] = concordance_counts.get(a["concordance"], 0) + 1
