@@ -6,14 +6,14 @@
  * Core functions:
  *   1. Co-wave Kinase Module Detection — auto-detect PTM groups co-moving
  *   2. Amplitude Rank Preservation Score — Spearman correlation of amplitude ordering
- *   3. Interactive Kinase Lookup — KEA3 enrichment for selected PTMs
+ *   3. Interactive Kinase Lookup — multi-source kinase annotation for selected PTMs
  *   4. Motif-based Kinase Annotation — per-PTM kinase status (known / motif / novel)
  *   5. Concordance Analysis — motif vs known kinase agreement
  *
  * Receives time-series data + selected PTMs from the parent TopNTimeSeriesPlot.
  */
 
-import { useState, useMemo, useCallback, useEffect } from "react";
+import { useState, useMemo, useCallback } from "react";
 import {
   Loader2,
   Search,
@@ -71,43 +71,6 @@ interface CoWaveModule {
   avgAmplitude: number;
   amplitudeRanking: number[];
   spearmanScore: number | null;
-}
-
-interface Kea3Kinase {
-  kinase: string;
-  rank: number;
-  score: number;
-  overlapping_genes: string[];
-  library?: string;
-}
-
-interface PerPtmKinaseData {
-  gene: string;
-  position: string;
-  predicted_kinases: Array<{
-    kinase: string;
-    confidence: string;
-    mechanism: string;
-    score: number;
-  }>;
-  upstream_regulators: string[];
-  kinase_substrate: Array<{
-    kinase: string;
-    substrate: string;
-    pmid: string;
-  }>;
-}
-
-interface KinaseEnrichmentResponse {
-  module_label: string;
-  gene_count: number;
-  genes: string[];
-  confidence_level: string;
-  kea3_results: Kea3Kinase[];
-  kea3_libraries: Record<string, Kea3Kinase[]>;
-  kea3_error: string | null;
-  per_ptm_kinases: Record<string, PerPtmKinaseData>;
-  double_validated_kinases: string[];
 }
 
 // ── Motif Annotation Types ──────────────────────────────────────────────────
@@ -350,20 +313,6 @@ const STATUS_CONFIG = {
   },
 } as const;
 
-function ConfidenceBadge({ level }: { level: string }) {
-  const styles: Record<string, string> = {
-    low: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300",
-    medium: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
-    high: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300",
-    very_high: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300",
-  };
-  return (
-    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${styles[level] || styles.medium}`}>
-      {level === "very_high" ? "Very High" : level.charAt(0).toUpperCase() + level.slice(1)} Confidence
-    </span>
-  );
-}
-
 // ── Main Component ───────────────────────────────────────────────────────────
 
 export default function KinaseModuleAnalysis({
@@ -375,12 +324,8 @@ export default function KinaseModuleAnalysis({
   onSelectPtms,
 }: KinaseModuleAnalysisProps) {
   const [activeTab, setActiveTab] = useState<"cowave" | "lookup" | "cascade">("cowave");
-  const [enrichmentResults, setEnrichmentResults] = useState<Record<string, KinaseEnrichmentResponse>>({});
-  const [loadingModule, setLoadingModule] = useState<string | null>(null);
   const [expandedModules, setExpandedModules] = useState<Set<string>>(new Set());
   const [manualSelection, setManualSelection] = useState<Set<string>>(new Set());
-  const [manualEnrichment, setManualEnrichment] = useState<KinaseEnrichmentResponse | null>(null);
-  const [manualLoading, setManualLoading] = useState(false);
 
   // ── Motif annotation state ──────────────────────────────────────────────
   const [motifAnnotations, setMotifAnnotations] = useState<Record<string, MotifAnnotationResponse>>({});
@@ -404,48 +349,9 @@ export default function KinaseModuleAnalysis({
     [checkedPtmList, vectorRows, conditions]
   );
 
-  // ── KEA3 enrichment call ─────────────────────────────────────────────────
-  const runEnrichment = useCallback(
-    async (moduleKey: string, genes: string[], label: string) => {
-      setLoadingModule(moduleKey);
-      try {
-        const result = await api.post<KinaseEnrichmentResponse>(
-          `/orders/${orderId}/kinase-enrichment`,
-          { genes, module_label: label }
-        );
-        setEnrichmentResults((prev) => ({ ...prev, [moduleKey]: result }));
-      } catch (err) {
-        console.error("KEA3 enrichment failed:", err);
-      } finally {
-        setLoadingModule(null);
-      }
-    },
-    [orderId]
-  );
-
-  const runManualEnrichment = useCallback(async () => {
-    const genes = Array.from(manualSelection).map((key) => {
-      const ptm = topNPtms.find((p) => `${p.gene}_${p.position}` === key);
-      return ptm?.gene || key.split("_")[0];
-    });
-    if (genes.length === 0) return;
-    setManualLoading(true);
-    try {
-      const result = await api.post<KinaseEnrichmentResponse>(
-        `/orders/${orderId}/kinase-enrichment`,
-        { genes, module_label: "manual_selection" }
-      );
-      setManualEnrichment(result);
-    } catch (err) {
-      console.error("Manual KEA3 enrichment failed:", err);
-    } finally {
-      setManualLoading(false);
-    }
-  }, [orderId, manualSelection, topNPtms]);
-
   // ── Motif annotation call ────────────────────────────────────────────
   const runMotifAnnotation = useCallback(
-    async (moduleKey: string, ptms: PtmInfo[], kea3TopKinases: string[]) => {
+    async (moduleKey: string, ptms: PtmInfo[]) => {
       setMotifLoading(moduleKey);
       setMotifError(null);
       // Auto-expand the module so results are visible
@@ -459,7 +365,6 @@ export default function KinaseModuleAnalysis({
           `/orders/${orderId}/motif-kinase-annotation`,
           {
             ptms: ptms.map((p) => ({ gene: p.gene, position: p.position })),
-            kea3_top_kinases: kea3TopKinases,
           }
         );
         setMotifAnnotations((prev) => ({ ...prev, [moduleKey]: result }));
@@ -480,12 +385,10 @@ export default function KinaseModuleAnalysis({
     setManualAnnotationLoading(true);
     setMotifError(null);
     try {
-      const kea3Top = manualEnrichment?.kea3_results?.slice(0, 10).map((k) => k.kinase) || [];
       const result = await api.post<MotifAnnotationResponse>(
         `/orders/${orderId}/motif-kinase-annotation`,
         {
           ptms: selectedPtms.map((p) => ({ gene: p.gene, position: p.position })),
-          kea3_top_kinases: kea3Top,
         }
       );
       setManualAnnotation(result);
@@ -495,7 +398,7 @@ export default function KinaseModuleAnalysis({
     } finally {
       setManualAnnotationLoading(false);
     }
-  }, [orderId, manualSelection, topNPtms, manualEnrichment]);
+  }, [orderId, manualSelection, topNPtms]);
 
   const toggleModuleExpand = (key: string) => {
     setExpandedModules((prev) => {
@@ -531,7 +434,7 @@ export default function KinaseModuleAnalysis({
           </Badge>
         </CardTitle>
         <p className="text-xs text-muted-foreground">
-          Co-wave module detection, KEA3 kinase enrichment, motif-based kinase prediction, and cascade inference.
+          Co-wave module detection, multi-source kinase annotation (8 sources + motif prediction), and cascade inference.
           PTMs co-moving in the same time-point waves likely share common upstream kinases.
         </p>
       </CardHeader>
@@ -587,9 +490,7 @@ export default function KinaseModuleAnalysis({
             {coWaveModules.map((mod) => {
               const moduleKey = `module_${mod.id}`;
               const isExpanded = expandedModules.has(moduleKey);
-              const enrichment = enrichmentResults[moduleKey];
               const annotation = motifAnnotations[moduleKey];
-              const isLoading = loadingModule === moduleKey;
               const isMotifLoading = motifLoading === moduleKey;
               const genes = mod.ptms.map((p) => p.gene);
               const uniqueGenes = [...new Set(genes)];
@@ -674,25 +575,8 @@ export default function KinaseModuleAnalysis({
                         variant="default"
                         size="sm"
                         className="text-[10px] h-6 px-2"
-                        disabled={isLoading || uniqueGenes.length === 0}
-                        onClick={() => runEnrichment(moduleKey, uniqueGenes, mod.label)}
-                      >
-                        {isLoading ? (
-                          <Loader2 className="h-3 w-3 animate-spin mr-1" />
-                        ) : (
-                          <Zap className="h-3 w-3 mr-1" />
-                        )}
-                        Run KEA3
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="text-[10px] h-6 px-2"
                         disabled={isMotifLoading}
-                        onClick={() => {
-                          const kea3Top = enrichment?.kea3_results?.slice(0, 10).map((k) => k.kinase) || [];
-                          runMotifAnnotation(moduleKey, mod.ptms, kea3Top);
-                        }}
+                        onClick={() => runMotifAnnotation(moduleKey, mod.ptms)}
                       >
                         {isMotifLoading ? (
                           <Loader2 className="h-3 w-3 animate-spin mr-1" />
@@ -793,8 +677,6 @@ export default function KinaseModuleAnalysis({
                         <MotifAnnotationPanel annotation={annotation} />
                       )}
 
-                      {/* KEA3 Results */}
-                      {enrichment && <EnrichmentResultPanel result={enrichment} />}
                     </div>
                   )}
                 </div>
@@ -807,8 +689,7 @@ export default function KinaseModuleAnalysis({
         {activeTab === "lookup" && (
           <div className="space-y-3">
             <p className="text-xs text-muted-foreground">
-              Select PTMs below to highlight them in the chart above. Click "Run KEA3 Enrichment" to find common upstream kinases,
-              or "Annotate" to check motif-based kinase predictions and identify novel substrate candidates.
+              Select PTMs below to highlight them in the chart above. Click "Annotate" to collect kinase information from 8 sources (iPTMnet, UniProt, RAG, motif prediction, etc.) and identify novel substrate candidates.
             </p>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-1 max-h-48 overflow-y-auto border rounded p-2">
               {topNPtms.map((p) => {
@@ -835,20 +716,6 @@ export default function KinaseModuleAnalysis({
             <div className="flex items-center gap-2">
               <Button
                 variant="default"
-                size="sm"
-                className="text-xs"
-                disabled={manualSelection.size === 0 || manualLoading}
-                onClick={runManualEnrichment}
-              >
-                {manualLoading ? (
-                  <Loader2 className="h-3 w-3 animate-spin mr-1" />
-                ) : (
-                  <Zap className="h-3 w-3 mr-1" />
-                )}
-                Run KEA3 Enrichment ({manualSelection.size} PTMs)
-              </Button>
-              <Button
-                variant="outline"
                 size="sm"
                 className="text-xs"
                 disabled={manualSelection.size === 0 || manualAnnotationLoading}
@@ -879,17 +746,6 @@ export default function KinaseModuleAnalysis({
               )}
             </div>
 
-            {manualSelection.size > 0 && manualSelection.size < 3 && (
-              <Alert>
-                <AlertTriangle className="h-4 w-4" />
-                <AlertTitle>Low Confidence Warning</AlertTitle>
-                <AlertDescription className="text-xs">
-                  KEA3 results with fewer than 3 genes have low statistical confidence.
-                  Consider selecting more PTMs for reliable kinase predictions.
-                </AlertDescription>
-              </Alert>
-            )}
-
             {/* Motif error in lookup tab */}
             {motifError && !manualAnnotationLoading && (
               <Alert variant="destructive">
@@ -907,8 +763,6 @@ export default function KinaseModuleAnalysis({
               </div>
             )}
 
-            {manualEnrichment && <EnrichmentResultPanel result={manualEnrichment} />}
-
             {/* Manual Annotation Results */}
             {manualAnnotation && (
               <div className="mt-2">
@@ -923,12 +777,9 @@ export default function KinaseModuleAnalysis({
         {activeTab === "cascade" && (
           <CascadeView
             modules={coWaveModules}
-            enrichmentResults={enrichmentResults}
             motifAnnotations={motifAnnotations}
             conditions={conditions}
-            runEnrichment={runEnrichment}
             runMotifAnnotation={runMotifAnnotation}
-            loadingModule={loadingModule}
             motifLoading={motifLoading}
             motifError={motifError}
           />
@@ -1343,152 +1194,6 @@ function GroupInferencePanel({ inference }: { inference: GroupInference }) {
   );
 }
 
-// ── Enrichment Result Panel ──────────────────────────────────────────────────────
-
-function EnrichmentResultPanel({ result }: { result: KinaseEnrichmentResponse }) {
-  const [showLibraries, setShowLibraries] = useState(false);
-
-  if (result.kea3_error) {
-    return (
-      <Alert variant="destructive">
-        <AlertTriangle className="h-4 w-4" />
-        <AlertTitle>KEA3 API Error</AlertTitle>
-        <AlertDescription className="text-xs">{result.kea3_error}</AlertDescription>
-      </Alert>
-    );
-  }
-
-  return (
-    <div className="space-y-3 border-t pt-3">
-      {/* Header info */}
-      <div className="flex flex-wrap items-center gap-2 text-xs">
-        <ConfidenceBadge level={result.confidence_level} />
-        <span className="text-muted-foreground">
-          {result.gene_count} genes queried: {result.genes.join(", ")}
-        </span>
-      </div>
-
-      {/* Double-validated kinases */}
-      {result.double_validated_kinases.length > 0 && (
-        <div className="bg-green-50 dark:bg-green-900/20 rounded-lg p-3 space-y-1">
-          <div className="flex items-center gap-1 text-xs font-medium text-green-700 dark:text-green-400">
-            <CheckCircle2 className="h-3.5 w-3.5" />
-            Double-Validated Kinases (KEA3 + Per-PTM Predictions)
-          </div>
-          <div className="flex flex-wrap gap-1">
-            {result.double_validated_kinases.map((k) => (
-              <Badge key={k} variant="outline" className="text-[10px] border-green-500 text-green-700 dark:text-green-400">
-                {k}
-              </Badge>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* KEA3 Integrated results */}
-      <div>
-        <p className="text-xs font-medium mb-1">
-          KEA3 Integrated Ranking (Top 15) <span className="text-muted-foreground font-normal">(lower score = stronger evidence)</span>
-        </p>
-        <div className="max-h-64 overflow-y-auto">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="text-[10px] w-10">#</TableHead>
-                <TableHead className="text-[10px]">Kinase</TableHead>
-                <TableHead className="text-[10px] w-16">Score</TableHead>
-                <TableHead className="text-[10px]">Overlapping Genes</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {result.kea3_results.slice(0, 15).map((k, i) => {
-                const isDoubleValidated = result.double_validated_kinases.includes(k.kinase.toUpperCase()) ||
-                  result.double_validated_kinases.includes(k.kinase);
-                return (
-                  <TableRow
-                    key={`${k.kinase}_${i}`}
-                    className={isDoubleValidated ? "bg-green-50/50 dark:bg-green-900/10" : ""}
-                  >
-                    <TableCell className="text-[10px] font-mono">{k.rank}</TableCell>
-                    <TableCell className="text-[10px] font-medium">
-                      {k.kinase}
-                      {isDoubleValidated && (
-                        <CheckCircle2 className="h-3 w-3 inline ml-1 text-green-500" />
-                      )}
-                    </TableCell>
-                    <TableCell className="text-[10px] font-mono">
-                      {typeof k.score === "number" ? k.score.toFixed(2) : k.score}
-                    </TableCell>
-                    <TableCell className="text-[10px] text-muted-foreground">
-                      {k.overlapping_genes.filter(Boolean).join(", ") || "—"}
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        </div>
-      </div>
-
-      {/* Individual library results (collapsible) */}
-      {Object.keys(result.kea3_libraries).length > 0 && (
-        <div>
-          <button
-            onClick={() => setShowLibraries(!showLibraries)}
-            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
-          >
-            {showLibraries ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-            Individual Library Results ({Object.keys(result.kea3_libraries).length} libraries)
-          </button>
-          {showLibraries && (
-            <div className="mt-2 space-y-2">
-              {Object.entries(result.kea3_libraries).map(([lib, kinases]) => (
-                <div key={lib} className="border rounded p-2">
-                  <p className="text-[10px] font-medium mb-1">{lib}</p>
-                  <div className="flex flex-wrap gap-1">
-                    {kinases.slice(0, 5).map((k, i) => (
-                      <span key={`${k.kinase}_${i}`} className="text-[10px] px-1.5 py-0.5 rounded bg-muted">
-                        #{k.rank} {k.kinase}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Per-PTM kinase predictions */}
-      {Object.keys(result.per_ptm_kinases).length > 0 && (
-        <div>
-          <p className="text-xs font-medium mb-1">
-            Per-PTM Kinase Predictions (from RAG Enrichment)
-          </p>
-          <div className="max-h-48 overflow-y-auto space-y-1">
-            {Object.entries(result.per_ptm_kinases).map(([ptmKey, data]) => (
-              <div key={ptmKey} className="flex items-start gap-2 text-[10px] border-b pb-1">
-                <span className="font-medium min-w-[80px]">{ptmKey}</span>
-                <div className="flex flex-wrap gap-1">
-                  {data.predicted_kinases.slice(0, 3).map((k, i) => (
-                    <span key={i} className="px-1.5 py-0.5 rounded bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300">
-                      {k.kinase} ({k.confidence})
-                    </span>
-                  ))}
-                  {data.kinase_substrate.slice(0, 2).map((ks, i) => (
-                    <span key={`ks_${i}`} className="px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300">
-                      {ks.kinase}→{ks.substrate}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
 
 // ── Cascade View ─────────────────────────────────────────────────────────────
 
@@ -1518,22 +1223,16 @@ function collectAllKinases(annotation: MotifAnnotationResponse | undefined): { k
 
 function CascadeView({
   modules,
-  enrichmentResults,
   motifAnnotations,
   conditions,
-  runEnrichment,
   runMotifAnnotation,
-  loadingModule,
   motifLoading,
   motifError,
 }: {
   modules: CoWaveModule[];
-  enrichmentResults: Record<string, KinaseEnrichmentResponse>;
   motifAnnotations: Record<string, MotifAnnotationResponse>;
   conditions: string[];
-  runEnrichment: (moduleKey: string, genes: string[], label: string) => void;
-  runMotifAnnotation: (moduleKey: string, ptms: PtmInfo[], kea3TopKinases: string[]) => void;
-  loadingModule: string | null;
+  runMotifAnnotation: (moduleKey: string, ptms: PtmInfo[]) => void;
   motifLoading: string | null;
   motifError: string | null;
 }) {
@@ -1566,7 +1265,6 @@ function CascadeView({
   const kinaseModuleMap: Record<string, { modules: string[]; sources: Set<string> }> = {};
   for (const mod of sortedModules) {
     const moduleKey = `module_${mod.id}`;
-    const enrichment = enrichmentResults[moduleKey];
     const annotation = motifAnnotations[moduleKey];
 
     // From annotation (8 sources + motif + group inference)
@@ -1576,16 +1274,6 @@ function CascadeView({
       if (!kinaseModuleMap[key]) kinaseModuleMap[key] = { modules: [], sources: new Set() };
       if (!kinaseModuleMap[key].modules.includes(mod.label)) kinaseModuleMap[key].modules.push(mod.label);
       kinaseModuleMap[key].sources.add(k.source);
-    }
-
-    // From KEA3 top 10
-    if (enrichment?.kea3_results) {
-      for (const k of enrichment.kea3_results.slice(0, 10)) {
-        const key = k.kinase.toUpperCase();
-        if (!kinaseModuleMap[key]) kinaseModuleMap[key] = { modules: [], sources: new Set() };
-        if (!kinaseModuleMap[key].modules.includes(mod.label)) kinaseModuleMap[key].modules.push(mod.label);
-        kinaseModuleMap[key].sources.add("KEA3");
-      }
     }
   }
 
@@ -1605,15 +1293,9 @@ function CascadeView({
       if (!ann) return;
       for (const k of collectAllKinases(ann)) target.add(k.kinase.toUpperCase());
     };
-    const addFromKEA3 = (enr: KinaseEnrichmentResponse | undefined, target: Set<string>) => {
-      if (!enr?.kea3_results) return;
-      for (const k of enr.kea3_results.slice(0, 10)) target.add(k.kinase.toUpperCase());
-    };
 
     addFromAnnotation(motifAnnotations[keyA], kinasesA);
-    addFromKEA3(enrichmentResults[keyA], kinasesA);
     addFromAnnotation(motifAnnotations[keyB], kinasesB);
-    addFromKEA3(enrichmentResults[keyB], kinasesB);
 
     return [...kinasesA].filter((k) => kinasesB.has(k));
   };
@@ -1621,27 +1303,21 @@ function CascadeView({
   return (
     <div className="space-y-4">
       <p className="text-xs text-muted-foreground">
-        Proposed cascade order based on peak timing. Run <strong>Annotate</strong> on each module to collect kinase information from all 8 sources (iPTMnet, UniProt, RAG, motif prediction, etc.), not just KEA3.
+        Proposed cascade order based on peak timing. Run <strong>Annotate</strong> on each module to collect kinase information from all 8 sources (iPTMnet, UniProt, RAG, motif prediction, etc.).
       </p>
 
       {/* ── Cascade Flow Diagram ── */}
       <div className="flex items-start gap-0 overflow-x-auto pb-2">
         {sortedModules.map((mod, idx) => {
           const moduleKey = `module_${mod.id}`;
-          const enrichment = enrichmentResults[moduleKey];
           const annotation = motifAnnotations[moduleKey];
           const isExpanded = expandedCascade.has(moduleKey);
-          const isLoading = loadingModule === moduleKey;
           const isMotifLoading = motifLoading === moduleKey;
-          const genes = mod.ptms.map((p) => p.gene);
-          const uniqueGenes = [...new Set(genes)];
 
           // All kinases from all sources for this module
           const allKinases = collectAllKinases(annotation);
-          const kea3Top = enrichment?.kea3_results?.slice(0, 5) || [];
-          const doubleValidated = enrichment?.double_validated_kinases || [];
 
-          // Merge: known kinases from annotation + KEA3 top
+          // Merge kinases with source tracking
           const mergedKinases: { kinase: string; sources: string[] }[] = [];
           const mergedSeen = new Set<string>();
           for (const k of allKinases) {
@@ -1652,16 +1328,6 @@ function CascadeView({
             } else {
               const existing = mergedKinases.find((m) => m.kinase.toUpperCase() === key);
               if (existing && !existing.sources.includes(k.source)) existing.sources.push(k.source);
-            }
-          }
-          for (const k of kea3Top) {
-            const key = k.kinase.toUpperCase();
-            if (!mergedSeen.has(key)) {
-              mergedSeen.add(key);
-              mergedKinases.push({ kinase: k.kinase, sources: ["KEA3"] });
-            } else {
-              const existing = mergedKinases.find((m) => m.kinase.toUpperCase() === key);
-              if (existing && !existing.sources.includes("KEA3")) existing.sources.push("KEA3");
             }
           }
 
@@ -1705,20 +1371,20 @@ function CascadeView({
                     <div className="flex flex-wrap gap-1">
                       {mergedKinases.slice(0, 6).map((mk) => {
                         const isShared = kinaseModuleMap[mk.kinase.toUpperCase()]?.modules.length >= 2;
-                        const isDoubleVal = doubleValidated.includes(mk.kinase.toUpperCase()) || doubleValidated.includes(mk.kinase);
+                        const isMultiSource = mk.sources.length >= 2;
                         return (
                           <span
                             key={mk.kinase}
                             className={`text-[9px] px-1.5 py-0.5 rounded inline-flex items-center gap-0.5 ${
-                              isDoubleVal
+                              isMultiSource
                                 ? "bg-green-100 dark:bg-green-800/30 text-green-700 dark:text-green-300 border border-green-400"
                                 : isShared
                                 ? "bg-blue-100 dark:bg-blue-800/30 text-blue-700 dark:text-blue-300 border border-blue-300"
                                 : "bg-muted text-foreground"
                             }`}
-                            title={`Sources: ${mk.sources.map((s) => SOURCE_LABELS[s]?.label || s).join(", ")}${isShared ? " | Shared across modules" : ""}${isDoubleVal ? " | Double-validated" : ""}`}
+                            title={`Sources: ${mk.sources.map((s) => SOURCE_LABELS[s]?.label || s).join(", ")}${isShared ? " | Shared across modules" : ""}${isMultiSource ? " | Multi-source validated" : ""}`}
                           >
-                            {isDoubleVal && <CheckCircle2 className="h-2.5 w-2.5 text-green-500" />}
+                            {isMultiSource && <CheckCircle2 className="h-2.5 w-2.5 text-green-500" />}
                             {mk.kinase}
                             <span className="opacity-50 text-[8px]">({mk.sources.length})</span>
                           </span>
@@ -1756,27 +1422,14 @@ function CascadeView({
                   </div>
                 )}
 
-                {/* Action buttons */}
+                {/* Action button */}
                 <div className="flex gap-1 pt-1">
                   <Button
                     variant="default"
                     size="sm"
                     className="text-[9px] h-5 px-1.5"
-                    disabled={isLoading || uniqueGenes.length === 0}
-                    onClick={() => runEnrichment(moduleKey, uniqueGenes, mod.label)}
-                  >
-                    {isLoading ? <Loader2 className="h-2.5 w-2.5 animate-spin mr-0.5" /> : <Zap className="h-2.5 w-2.5 mr-0.5" />}
-                    KEA3
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="text-[9px] h-5 px-1.5"
                     disabled={isMotifLoading}
-                    onClick={() => {
-                      const kea3Top = enrichment?.kea3_results?.slice(0, 10).map((k) => k.kinase) || [];
-                      runMotifAnnotation(moduleKey, mod.ptms, kea3Top);
-                    }}
+                    onClick={() => runMotifAnnotation(moduleKey, mod.ptms)}
                   >
                     {isMotifLoading ? <Loader2 className="h-2.5 w-2.5 animate-spin mr-0.5" /> : <FlaskConical className="h-2.5 w-2.5 mr-0.5" />}
                     Annotate
@@ -1835,8 +1488,6 @@ function CascadeView({
                     {/* Full Motif Annotation Panel */}
                     {annotation && <MotifAnnotationPanel annotation={annotation} />}
 
-                    {/* KEA3 Results */}
-                    {enrichment && <EnrichmentResultPanel result={enrichment} />}
                   </div>
                 )}
               </div>
@@ -1905,20 +1556,21 @@ function CascadeView({
             {sortedModules.map((m) => {
               const moduleKey = `module_${m.id}`;
               const annotation = motifAnnotations[moduleKey];
-              const enrichment = enrichmentResults[moduleKey];
               const topKinases: string[] = [];
-              // Prioritize annotation known kinases
+              // Collect from all annotation sources
               if (annotation) {
                 const known = annotation.annotations.flatMap((a) => a.known_kinases.map((k) => k.kinase));
                 const unique = [...new Set(known.map((k) => k.toUpperCase()))];
                 topKinases.push(...unique.slice(0, 2));
-              }
-              // Fill with KEA3 if needed
-              if (topKinases.length < 2 && enrichment?.kea3_results) {
-                for (const k of enrichment.kea3_results) {
-                  if (!topKinases.includes(k.kinase.toUpperCase())) {
-                    topKinases.push(k.kinase.toUpperCase());
-                    if (topKinases.length >= 2) break;
+                // Fill with motif predicted if needed
+                if (topKinases.length < 2) {
+                  const motifPred = annotation.annotations.flatMap((a) => a.motif_predicted_kinases.map((m) => m.kinase_family));
+                  const uniqueMotif = [...new Set(motifPred.map((k) => k.toUpperCase()))];
+                  for (const mk of uniqueMotif) {
+                    if (!topKinases.includes(mk)) {
+                      topKinases.push(mk);
+                      if (topKinases.length >= 2) break;
+                    }
                   }
                 }
               }
