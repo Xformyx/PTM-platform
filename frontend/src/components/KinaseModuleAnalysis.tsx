@@ -124,7 +124,20 @@ interface KnownKinase {
   mechanism: string;
   source: string;
   pmid?: string;
+  pmids?: string[];
+  uniprot_ac?: string;
 }
+
+const SOURCE_LABELS: Record<string, { label: string; color: string }> = {
+  iPTMnet_direct: { label: "iPTMnet", color: "text-blue-600 bg-blue-100 dark:bg-blue-900/30 dark:text-blue-300" },
+  iPTMnet: { label: "iPTMnet (cached)", color: "text-blue-600 bg-blue-100 dark:bg-blue-900/30 dark:text-blue-300" },
+  rag_kinase_prediction: { label: "LLM Prediction", color: "text-violet-600 bg-violet-100 dark:bg-violet-900/30 dark:text-violet-300" },
+  kinase_substrate_pair: { label: "Literature", color: "text-emerald-600 bg-emerald-100 dark:bg-emerald-900/30 dark:text-emerald-300" },
+  upstream_regulator: { label: "Upstream Reg.", color: "text-teal-600 bg-teal-100 dark:bg-teal-900/30 dark:text-teal-300" },
+  fulltext_analysis: { label: "Text Mining", color: "text-orange-600 bg-orange-100 dark:bg-orange-900/30 dark:text-orange-300" },
+  abstract_analysis: { label: "Abstract", color: "text-pink-600 bg-pink-100 dark:bg-pink-900/30 dark:text-pink-300" },
+  string_db: { label: "STRING DB", color: "text-cyan-600 bg-cyan-100 dark:bg-cyan-900/30 dark:text-cyan-300" },
+};
 
 interface PtmAnnotation {
   gene: string;
@@ -1003,11 +1016,15 @@ function MotifAnnotationPanel({ annotation }: { annotation: MotifAnnotationRespo
                   {a.label}
                 </span>
                 <div className="flex flex-wrap gap-1">
-                  {a.known_kinases.slice(0, 3).map((k, i) => (
-                    <span key={i} className="px-1.5 py-0.5 rounded bg-green-100 dark:bg-green-800/30 text-green-800 dark:text-green-200">
-                      {k.kinase} <span className="opacity-60">({k.confidence})</span>
-                    </span>
-                  ))}
+                  {a.known_kinases.slice(0, 4).map((k, i) => {
+                    const srcCfg = SOURCE_LABELS[k.source] || { label: k.source, color: "text-gray-600 bg-gray-100 dark:bg-gray-800/30 dark:text-gray-300" };
+                    return (
+                      <span key={i} className="px-1.5 py-0.5 rounded bg-green-100 dark:bg-green-800/30 text-green-800 dark:text-green-200 inline-flex items-center gap-1">
+                        {k.kinase}
+                        <span className={`text-[8px] px-1 rounded ${srcCfg.color}`}>{srcCfg.label}</span>
+                      </span>
+                    );
+                  })}
                   {a.motif_predicted_kinases.length > 0 && (
                     <>
                       <span className="text-muted-foreground">|</span>
@@ -1088,7 +1105,20 @@ function MotifAnnotationPanel({ annotation }: { annotation: MotifAnnotationRespo
                     </TableCell>
                     <TableCell className="text-[10px]">
                       {a.known_kinases.length > 0
-                        ? a.known_kinases.map((k) => k.kinase).join(", ")
+                        ? (
+                          <div className="flex flex-wrap gap-0.5">
+                            {a.known_kinases.map((k, ki) => {
+                              const srcCfg = SOURCE_LABELS[k.source] || { label: k.source, color: "text-gray-600 bg-gray-100 dark:bg-gray-800/30" };
+                              return (
+                                <span key={ki} className="inline-flex items-center gap-0.5">
+                                  <span className="font-medium">{k.kinase}</span>
+                                  <span className={`text-[8px] px-0.5 rounded ${srcCfg.color}`}>{srcCfg.label}</span>
+                                  {ki < a.known_kinases.length - 1 && <span className="text-muted-foreground">,</span>}
+                                </span>
+                              );
+                            })}
+                          </div>
+                        )
                         : <span className="text-muted-foreground">—</span>}
                     </TableCell>
                     <TableCell className="text-[10px]">

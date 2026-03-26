@@ -1938,6 +1938,100 @@ async def motif_kinase_annotation(
     else:
         _log.warning(f"[ANNOTATION DEBUG] enriched_path does NOT exist")
 
+    # ── 1b. iPTMnet direct API lookup for site-specific kinase info ──────
+    # Query iPTMnet REST API for each unique gene to get enzyme (kinase) data
+    # per phosphorylation site. This covers PSP + Signor + phospho.ELM data.
+    import httpx
+    import asyncio
+
+    IPTMNET_BASE = "https://research.bioinformatics.udel.edu/iptmnet/api"
+    # Determine organism code from order species
+    species_lower = (order.species or "").lower()
+    organism_code = (
+        "10090" if "mouse" in species_lower or "mus" in species_lower
+        else "9606" if "human" in species_lower or "homo" in species_lower
+        else "10116" if "rat" in species_lower or "rattus" in species_lower
+        else ""
+    )
+
+    iptmnet_cache: dict = {}  # gene_upper -> {"uniprot_ac": str, "sites": [{site, enzymes, ...}]}
+    unique_genes = list(set(p.get("gene", "") for p in ptms if p.get("gene")))
+    _log.warning(f"[ANNOTATION DEBUG] iPTMnet lookup: {len(unique_genes)} unique genes, organism={organism_code}")
+
+    async def _iptmnet_lookup_gene(client: httpx.AsyncClient, gene: str) -> dict:
+        """Search iPTMnet for a gene and fetch its substrate site data."""
+        result = {"uniprot_ac": "", "sites": []}
+        try:
+            # Step 1: Search for the gene
+            search_params = {
+                "search_term": gene,
+                "term_type": "All",
+                "ptm_type": "Phosphorylation" if order.ptm_type == "phosphorylation" else "Ubiquitination",
+                "role": "Substrate",
+            }
+            if organism_code:
+                search_params["organism"] = organism_code
+
+            resp = await client.get(f"{IPTMNET_BASE}/search", params=search_params)
+            if resp.status_code != 200:
+                return result
+
+            search_data = resp.json()
+            if not search_data or not isinstance(search_data, list):
+                return result
+
+            # Find best match (exact gene name match preferred)
+            best_match = None
+            for entry in search_data:
+                if entry.get("gene_name", "").upper() == gene.upper():
+                    best_match = entry
+                    break
+            if not best_match and search_data:
+                best_match = search_data[0]
+
+            if not best_match:
+                return result
+
+            uniprot_ac = best_match.get("iptm_id", "")
+            result["uniprot_ac"] = uniprot_ac
+
+            if not uniprot_ac:
+                return result
+
+            # Step 2: Get substrate sites with enzyme info
+            await asyncio.sleep(0.3)  # Rate limiting
+            resp2 = await client.get(f"{IPTMNET_BASE}/{uniprot_ac}/substrate")
+            if resp2.status_code != 200:
+                return result
+
+            substrate_data = resp2.json()
+            sites_list = substrate_data.get(uniprot_ac, [])
+            if isinstance(sites_list, list):
+                result["sites"] = sites_list
+
+        except Exception as e:
+            _log.warning(f"[ANNOTATION DEBUG] iPTMnet lookup failed for {gene}: {e}")
+        return result
+
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            # Process genes in batches of 5 with rate limiting
+            for i in range(0, len(unique_genes), 5):
+                batch = unique_genes[i:i+5]
+                tasks = [_iptmnet_lookup_gene(client, g) for g in batch]
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                for gene_name, res in zip(batch, results):
+                    if isinstance(res, dict):
+                        iptmnet_cache[gene_name.upper()] = res
+                        sites_with_enz = [s for s in res.get("sites", []) if s.get("enzymes")]
+                        _log.warning(f"[ANNOTATION DEBUG] iPTMnet {gene_name}: uniprot={res.get('uniprot_ac','')}, total_sites={len(res.get('sites',[]))}, sites_with_enzymes={len(sites_with_enz)}")
+                if i + 5 < len(unique_genes):
+                    await asyncio.sleep(0.5)  # Rate limiting between batches
+    except Exception as e:
+        _log.warning(f"[ANNOTATION DEBUG] iPTMnet batch lookup error: {e}")
+
+    _log.warning(f"[ANNOTATION DEBUG] iPTMnet cache: {len(iptmnet_cache)} genes cached")
+
     # ── 2. Load motif data from TSV (Matched_Motifs, Predicted_Regulator) ─
     motif_map = {}  # key: "GENE_POSITION" -> {"motifs": str, "regulators": str}
     for name in (
@@ -2258,6 +2352,36 @@ async def motif_kinase_annotation(
                                     "mechanism": "protein-protein interaction",
                                     "source": "string_db",
                                 })
+
+        # ── Source 7: iPTMnet direct API (site-specific enzyme/kinase) ──
+        # This provides PSP + Signor + phospho.ELM + RLIMS-P + UniProt data
+        gene_upper = gene.upper()
+        iptmnet_data = iptmnet_cache.get(gene_upper, {})
+        if iptmnet_data.get("sites"):
+            pos_upper = str(position).upper()
+            for site_entry in iptmnet_data["sites"]:
+                site_name = str(site_entry.get("site", "")).upper()
+                # Match position (e.g., "S564" == "S564", or "T232" == "T232")
+                if site_name == pos_upper:
+                    ptm_type_match = site_entry.get("ptm_type", "").lower()
+                    expected_type = "phosphorylation" if order.ptm_type == "phosphorylation" else "ubiquitination"
+                    if expected_type in ptm_type_match.lower():
+                        for enz in site_entry.get("enzymes", []):
+                            if isinstance(enz, dict) and enz.get("name"):
+                                enz_name = enz["name"]
+                                enz_id = enz.get("id", "")
+                                # Collect sources for this site
+                                site_sources = [s.get("name", "") for s in site_entry.get("sources", []) if isinstance(s, dict)]
+                                pmids = site_entry.get("pmids", [])
+                                known_kinases.append({
+                                    "kinase": enz_name,
+                                    "confidence": "database",
+                                    "mechanism": f"iPTMnet site-specific (UniProt: {enz_id}, Sources: {', '.join(site_sources)})",
+                                    "source": "iPTMnet_direct",
+                                    "pmids": pmids[:5] if pmids else [],
+                                    "uniprot_ac": iptmnet_data.get("uniprot_ac", ""),
+                                })
+                    break  # Found matching site, no need to continue
 
         # ── Deduplicate known_kinases by kinase name ──
         seen_kinases = set()
