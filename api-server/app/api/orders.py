@@ -1907,18 +1907,36 @@ async def motif_kinase_annotation(
     file_suffix = "_phospho" if order.ptm_type == "phosphorylation" else "_ubi"
     enriched_path = output_dir / f"enriched_ptm_data{file_suffix}.json"
 
+    import logging
+    _log = logging.getLogger("motif_annotation")
+
     enriched_map = {}  # key: "GENE_POSITION" -> enriched data
+    _log.warning(f"[ANNOTATION DEBUG] enriched_path={enriched_path}, exists={enriched_path.exists()}")
     if enriched_path.exists():
         try:
             with open(enriched_path, "r", encoding="utf-8") as f:
                 enriched = _json.load(f)
+            _log.warning(f"[ANNOTATION DEBUG] Loaded {len(enriched)} entries from enriched JSON")
             for ptm_entry in enriched:
                 gene = ptm_entry.get("gene") or ptm_entry.get("Gene.Name", "")
                 pos = ptm_entry.get("position") or ptm_entry.get("PTM_Position", "")
                 key = f"{gene.upper()}_{str(pos).upper()}"
                 enriched_map[key] = ptm_entry
-        except Exception:
-            pass
+            # Log sample keys and rag_enrichment structure
+            sample_keys = list(enriched_map.keys())[:5]
+            _log.warning(f"[ANNOTATION DEBUG] enriched_map sample keys: {sample_keys}")
+            if enriched_map:
+                sample_entry = list(enriched_map.values())[0]
+                rag_sample = sample_entry.get("rag_enrichment", {})
+                _log.warning(f"[ANNOTATION DEBUG] sample rag_enrichment keys: {list(rag_sample.keys()) if isinstance(rag_sample, dict) else type(rag_sample)}")
+                kp_sample = rag_sample.get("kinase_prediction", "MISSING") if isinstance(rag_sample, dict) else "NOT_DICT"
+                _log.warning(f"[ANNOTATION DEBUG] sample kinase_prediction type={type(kp_sample).__name__}, value={str(kp_sample)[:500]}")
+                reg_sample = rag_sample.get("regulation", "MISSING") if isinstance(rag_sample, dict) else "NOT_DICT"
+                _log.warning(f"[ANNOTATION DEBUG] sample regulation type={type(reg_sample).__name__}, value={str(reg_sample)[:500]}")
+        except Exception as e:
+            _log.warning(f"[ANNOTATION DEBUG] Failed to load enriched JSON: {e}")
+    else:
+        _log.warning(f"[ANNOTATION DEBUG] enriched_path does NOT exist")
 
     # ── 2. Load motif data from TSV (Matched_Motifs, Predicted_Regulator) ─
     motif_map = {}  # key: "GENE_POSITION" -> {"motifs": str, "regulators": str}
@@ -1971,6 +1989,7 @@ async def motif_kinase_annotation(
 
     # ── 4. Annotate each PTM ─────────────────────────────────────────────
     annotations = []
+    _debug_count = 0
     for ptm in ptms:
         gene = ptm.get("gene", "")
         position = ptm.get("position", "")
@@ -1980,6 +1999,19 @@ async def motif_kinase_annotation(
         known_kinases = []
         enriched_entry = enriched_map.get(key, {})
         rag = enriched_entry.get("rag_enrichment", {})
+        if _debug_count < 3:
+            _log.warning(f"[ANNOTATION DEBUG] PTM={gene} {position}, key={key}, enriched_entry_found={bool(enriched_entry)}, rag_found={bool(rag)}, rag_type={type(rag).__name__}")
+            if rag and isinstance(rag, dict):
+                _log.warning(f"[ANNOTATION DEBUG]   rag keys={list(rag.keys())}")
+                kp_val = rag.get("kinase_prediction", "MISSING")
+                _log.warning(f"[ANNOTATION DEBUG]   kinase_prediction type={type(kp_val).__name__}, value={str(kp_val)[:300]}")
+                reg_val = rag.get("regulation", "MISSING")
+                if isinstance(reg_val, dict):
+                    _log.warning(f"[ANNOTATION DEBUG]   regulation.upstream_regulators={reg_val.get('upstream_regulators', 'MISSING')}")
+                    _log.warning(f"[ANNOTATION DEBUG]   regulation.kinase_substrate={reg_val.get('kinase_substrate', 'MISSING')}")
+                else:
+                    _log.warning(f"[ANNOTATION DEBUG]   regulation type={type(reg_val).__name__}, value={str(reg_val)[:300]}")
+            _debug_count += 1
         if rag:
             kp = rag.get("kinase_prediction", {})
             # Handle dataclass serialized as string by json.dump(default=str)
