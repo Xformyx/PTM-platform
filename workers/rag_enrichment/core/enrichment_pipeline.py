@@ -510,8 +510,8 @@ class RAGEnrichmentPipeline:
             "trajectory": trajectory,
             # --- RESTORED LLM analysis results ---
             "abstract_analysis": abstract_analysis,
-            "kinase_prediction": kinase_prediction,
-            "functional_impact": functional_impact,
+            "kinase_prediction": _asdict(kinase_prediction) if hasattr(kinase_prediction, '__dataclass_fields__') else kinase_prediction,
+            "functional_impact": _asdict(functional_impact) if hasattr(functional_impact, '__dataclass_fields__') else functional_impact,
             "fulltext_analysis": fulltext_results,
             "ptm_validation": validation_result,
         }

@@ -1982,6 +1982,13 @@ async def motif_kinase_annotation(
         rag = enriched_entry.get("rag_enrichment", {})
         if rag:
             kp = rag.get("kinase_prediction", {})
+            # Handle dataclass serialized as string by json.dump(default=str)
+            if isinstance(kp, str):
+                import ast
+                try:
+                    kp = ast.literal_eval(kp) if kp.startswith("{") else {}
+                except Exception:
+                    kp = {}
             if isinstance(kp, dict):
                 for k in kp.get("predicted_kinases", []):
                     if isinstance(k, dict) and k.get("kinase"):
@@ -1989,6 +1996,13 @@ async def motif_kinase_annotation(
                             "kinase": k["kinase"],
                             "confidence": k.get("confidence", ""),
                             "mechanism": k.get("mechanism", ""),
+                            "source": "rag_enrichment",
+                        })
+                    elif isinstance(k, str) and k:
+                        known_kinases.append({
+                            "kinase": k,
+                            "confidence": "predicted",
+                            "mechanism": "",
                             "source": "rag_enrichment",
                         })
             # Also check kinase_substrate pairs
@@ -2002,6 +2016,24 @@ async def motif_kinase_annotation(
                             "mechanism": f"substrate: {ks.get('substrate', '')}",
                             "source": "kinase_substrate_pair",
                             "pmid": ks.get("pmid", ""),
+                        })
+                # Also check upstream_regulators for kinase info
+                for ur in reg.get("upstream_regulators", []):
+                    if isinstance(ur, dict) and ur.get("regulator"):
+                        # Only include if it looks like a kinase (contains kinase-related terms)
+                        reg_name = ur["regulator"]
+                        known_kinases.append({
+                            "kinase": reg_name,
+                            "confidence": ur.get("confidence", "literature"),
+                            "mechanism": ur.get("mechanism", ur.get("evidence", "")),
+                            "source": "upstream_regulator",
+                        })
+                    elif isinstance(ur, str) and ur:
+                        known_kinases.append({
+                            "kinase": ur,
+                            "confidence": "literature",
+                            "mechanism": "",
+                            "source": "upstream_regulator",
                         })
 
         # Motif-predicted kinases
