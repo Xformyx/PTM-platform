@@ -949,20 +949,28 @@ function MotifAnnotationPanel({ annotation }: { annotation: MotifAnnotationRespo
             Motif-Predicted Only ({motifOnly.length})
           </div>
           <p className="text-[10px] text-amber-600 dark:text-amber-300">
-            Kinase family predicted from flanking sequence motif, but no literature-confirmed kinase.
+            Kinase family predicted from flanking sequence motif or residue type, but no literature-confirmed kinase.
           </p>
           <div className="space-y-1 mt-1">
-            {motifOnly.map((a) => (
+            {motifOnly.map((a) => {
+              const seqMotifs = a.motif_predicted_kinases.filter((m) => m.source !== "residue_prediction");
+              const resMotifs = a.motif_predicted_kinases.filter((m) => m.source === "residue_prediction");
+              return (
               <div key={`${a.gene}_${a.position}`} className="flex items-start gap-2 text-[10px]">
                 <span className="font-medium min-w-[80px] text-amber-700 dark:text-amber-300">
                   {a.label}
                 </span>
                 <div className="flex flex-wrap gap-1">
-                  {a.motif_predicted_kinases.map((m, i) => (
-                    <span key={i} className="px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-800/30 text-amber-800 dark:text-amber-200">
+                  {seqMotifs.map((m, i) => (
+                    <span key={`s${i}`} className="px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-800/30 text-amber-800 dark:text-amber-200">
                       {m.kinase_family} <span className="opacity-60">({m.motif})</span>
                     </span>
                   ))}
+                  {resMotifs.length > 0 && seqMotifs.length === 0 && (
+                    <span className="px-1.5 py-0.5 rounded bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 italic">
+                      Residue-based: {resMotifs.map((m) => m.kinase_family).join(", ")}
+                    </span>
+                  )}
                 </div>
                 {a.concordance === "concordant" && (
                   <Badge variant="outline" className="text-[9px] border-green-500 text-green-600 h-4">
@@ -975,7 +983,8 @@ function MotifAnnotationPanel({ annotation }: { annotation: MotifAnnotationRespo
                   </Badge>
                 )}
               </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}

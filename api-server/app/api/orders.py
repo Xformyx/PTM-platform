@@ -1965,27 +1965,99 @@ async def motif_kinase_annotation(
             break
 
     # ── 3. Motif DB for fallback prediction (inline, matching EnhancedMotifAnalyzerV2) ─
+    # ── Expanded Phosphorylation Motif DB (~50 kinase families) ──
     phospho_motif_db = {
-        "CDK/MAPK": r"[ST]P",
-        "GSK3": r"[ST].[ST]P",
-        "PKA/PKC/AKT": r"[RK].{1,2}[ST]",
-        "PKB/AKT": r"R.{2}[ST]",
-        "PKC": r"[RK].[ST]",
-        "CK2": r"[ST].{1,2}[ED]",
-        "CK1": r"[ST].[DE]",
-        "Src-family": r"Y.{1,2}[DE]",
-        "EGFR-family": r"[DE].[Y]",
-        "ATM/ATR": r"[ST]Q",
-        "CAMK": r"[ST].[RK]",
+        # === Proline-directed kinases ===
+        "CDK1/CDK2": r"[ST]P.[KR]",          # CDK consensus (S/T-P-x-K/R)
+        "CDK/MAPK": r"[ST]P",                 # Minimal Pro-directed
+        "ERK1/ERK2": r"P.[ST]P",              # ERK preferred (P-x-S/T-P)
+        "JNK": r"[ST]P",                       # JNK (Pro-directed, similar to MAPK)
+        "p38": r"[ST]P",                       # p38 MAPK
+        "DYRK1A/DYRK1B": r"R..[ST]P",         # DYRK (R-x-x-S/T-P)
+        # === Basophilic kinases ===
+        "PKA": r"[RK][RK].[ST]",               # PKA (R/K-R/K-x-S/T)
+        "PKC": r"[RK].[ST][RK]",               # PKC (R/K-x-S/T-R/K)
+        "AKT/PKB": r"R.R..[ST]",               # AKT (R-x-R-x-x-S/T)
+        "RSK": r"[RK].[RK]..[ST]",             # RSK (R/K-x-R/K-x-x-S/T)
+        "SGK": r"R.R..[ST]",                   # SGK (similar to AKT)
+        "PIM1/PIM2": r"[RK].[RK].[ST]",        # PIM kinases
+        "PKD": r"[LI].[RK]..[ST]",             # PKD
+        "MARK/PAR1": r"[LI].[RK]..[ST]",       # MARK/PAR1
+        "CAMK2": r"[RK]..[ST]..[RK]",          # CaMKII
+        "CAMK": r"[ST].[RK]",                  # General CaMK
+        "AMPK": r"[LMVIF].[RK]..[ST]",         # AMPK
+        "CHK1/CHK2": r"[LM].[RK]..[ST]",       # Checkpoint kinases
+        "PAK1/PAK2": r"[KR].[ST]",             # PAK
+        # === Acidophilic kinases ===
+        "CK2": r"[ST].{1,2}[ED]",              # CK2 (S/T-x-x-E/D)
+        "CK2_extended": r"[ST]..E.E",          # CK2 extended (multiple acidic)
+        "CK1": r"[ST]..[ST]",                  # CK1 (pS/pT priming)
+        "CK1_canonical": r"[ST].[DE]",         # CK1 canonical
+        "GSK3": r"[ST]...[ST]P",               # GSK3 (primed, S-x-x-x-pS-P)
+        "GSK3_minimal": r"[ST].[ST]P",         # GSK3 minimal
+        "GRK": r"[DE].[ST]...[DE]",            # GRK
+        "PLK1": r"[DE].[ST][ILVM]",            # PLK1 (D/E-x-S/T-hydrophobic)
+        "PLK1_extended": r"[DNE].{1,2}[ST][FLIVMYW]",  # PLK1 extended
+        # === Mitotic/cell cycle kinases ===
+        "Aurora_A/B": r"[RK].[ST][ILVM]",      # Aurora kinases
+        "NEK2/NEK6": r"[LM].[ST]",             # NEK family
+        "LATS1/LATS2": r"H.[RK]...[ST]",       # Hippo pathway
+        "MST1/MST2": r"[MVLI]..T",             # Hippo pathway
+        "BUB1": r"[ST].[DE].[DE]",             # BUB1
+        # === DNA damage response ===
+        "ATM/ATR": r"[ST]Q",                   # ATM/ATR (S/T-Q)
+        "DNA-PK": r"[ST]Q..",                  # DNA-PK (S/T-Q-x-x)
+        "HIPK2": r"[ST]Y",                     # HIPK2
+        # === Tyrosine kinases (receptor) ===
+        "EGFR": r"[DE].[Y]",                   # EGFR
+        "PDGFR/FGFR": r"Y..[DE]",              # PDGFR/FGFR
+        "INSR/IGF1R": r"Y...[YF]",             # Insulin receptor
+        "VEGFR": r"Y..[ILVM]",                 # VEGFR
+        # === Tyrosine kinases (non-receptor) ===
+        "Src/Fyn/Yes": r"[EDAY].[YF].{1,3}[PGAS]",  # Src family
+        "Src-family": r"Y.{1,2}[DE]",          # Src family minimal
+        "ABL": r"[IVLA]Y..[PG]",               # ABL
+        "JAK1/JAK2": r"Y..[LIV]",              # JAK family
+        "SYK/ZAP70": r"Y..[LMIV]",             # SYK/ZAP70
+        "BTK": r"Y..[LIVM]",                   # BTK
+        "FAK": r"Y...[DEST]",                  # FAK
+        "FLT3": r"Y..[LIVM]",                  # FLT3
+        # === Splicing/RNA-related kinases ===
+        "CLK1-4": r"[RS].[ST]",                # CLK family
+        "SRPK1/SRPK2": r"[RS].[ST]",           # SRPK family
+        # === AGC kinases ===
+        "mTOR": r"[ST]F",                      # mTOR (S/T-F)
+        "S6K": r"[RK].[RK]..[ST]",             # S6K (similar to RSK)
+        "ROCK1/ROCK2": r"[RK]...[ST]",         # ROCK
+        "MRCK": r"[RK]...[ST]",                # MRCK
+        # === Other kinases ===
+        "CKII_like": r"[ST][DE][DE]",           # CK2-like (S/T-D/E-D/E)
+        "TBK1/IKKe": r"[ST]...[DE][DE]",       # TBK1/IKKe
+        "IKKa/IKKb": r"DS[GLIVMF][ST]",        # IKK
     }
+    # ── Expanded Ubiquitylation Motif DB ──
     ubi_motif_db = {
         "SCF_complex": r"[DE].{0,2}[ST].[DE]",
         "APC/C_D-box": r"R..L.{2,4}[ILVM]",
         "APC/C_KEN-box": r"KEN",
         "HECT_E3": r"[LP]P.Y",
         "VHL": r"LA.{1,2}[ILVM]P",
+        "MDM2": r"F..W..L",
+        "CHIP/STUB1": r"[ILVM].{1,2}[ILVM]",
+        "NEDD4/ITCH": r"[LP]P.Y",
+        "TRAF6": r"P.E..[AQEG]",
+        "KEAP1/CUL3": r"[DE][ST]GE",
+        "BTRC/FBXW": r"DS[GS][ILVM][ST]",
+        "SMURF1/2": r"[LP]P.Y",
     }
     motif_db = phospho_motif_db if order.ptm_type == "phosphorylation" else ubi_motif_db
+
+    # ── Residue-based kinase family prediction (fallback when no sequence) ──
+    residue_kinase_families = {
+        "S": ["CK2", "CK1", "CDK/MAPK", "PKA", "PKC", "AKT", "GSK3", "PLK1", "Aurora", "ATM/ATR", "AMPK", "mTOR"],
+        "T": ["CDK/MAPK", "CK2", "GSK3", "PKC", "AMPK", "PLK1", "Aurora", "NEK", "MST1/2", "CAMK"],
+        "Y": ["Src-family", "EGFR", "ABL", "JAK", "SYK", "FAK", "PDGFR", "VEGFR", "BTK", "FLT3"],
+    }
 
     # ── 4. Annotate each PTM ─────────────────────────────────────────────
     annotations = []
@@ -2208,25 +2280,58 @@ async def motif_kinase_annotation(
             for motif_name in matched_motifs_str.split("; "):
                 motif_name = motif_name.strip()
                 if motif_name:
-                    # Map motif name to kinase family
                     kinase_family = motif_name.split("(")[0].strip().split("_")[0]
                     motif_predicted.append({
                         "kinase_family": kinase_family,
                         "motif": motif_name,
                         "source": "motif_analysis",
                     })
-        elif seq_window and seq_window != "No sequence":
-            # Fallback: run inline motif matching
-            for kinase_name, pattern in motif_db.items():
-                try:
-                    if re.search(pattern, seq_window):
-                        motif_predicted.append({
-                            "kinase_family": kinase_name,
-                            "motif": f"{kinase_name} motif ({pattern})",
-                            "source": "inline_motif_match",
-                        })
-                except re.error:
-                    continue
+
+        # If no TSV motifs, try inline motif matching with sequence
+        if not motif_predicted:
+            # Try multiple sequence sources
+            effective_seq = seq_window
+            if not effective_seq or effective_seq == "No sequence":
+                # Fallback 1: try enriched_ptm_data for sequence info
+                if enriched_entry:
+                    # Check for modified_sequence or sequence_window in enriched data
+                    for seq_key in ("modified_sequence", "Modified.Sequence", "sequence_window",
+                                    "Sequence_Window", "flanking_sequence"):
+                        val = enriched_entry.get(seq_key, "")
+                        if val and isinstance(val, str) and len(val) > 3:
+                            # Clean UniMod annotations
+                            effective_seq = re.sub(r'\(UniMod:\d+\)', '', val).strip()
+                            break
+                    # Also check inside rag_enrichment
+                    if (not effective_seq or effective_seq == "No sequence") and rag and isinstance(rag, dict):
+                        for seq_key in ("sequence_window", "flanking_sequence"):
+                            val = rag.get(seq_key, "")
+                            if val and isinstance(val, str) and len(val) > 3:
+                                effective_seq = val
+                                break
+
+            if effective_seq and effective_seq != "No sequence" and len(effective_seq) > 2:
+                for kinase_name, pattern in motif_db.items():
+                    try:
+                        if re.search(pattern, effective_seq):
+                            motif_predicted.append({
+                                "kinase_family": kinase_name,
+                                "motif": f"{kinase_name} motif ({pattern})",
+                                "source": "inline_motif_match",
+                            })
+                    except re.error:
+                        continue
+
+        # Fallback 2: residue-based kinase family prediction (when no sequence at all)
+        if not motif_predicted and position:
+            residue = str(position)[0].upper() if position else ""
+            if residue in residue_kinase_families:
+                for family in residue_kinase_families[residue]:
+                    motif_predicted.append({
+                        "kinase_family": family,
+                        "motif": f"Residue-based ({residue}-site → {family} family)",
+                        "source": "residue_prediction",
+                    })
 
         # Determine status
         has_known = len(known_kinases) > 0

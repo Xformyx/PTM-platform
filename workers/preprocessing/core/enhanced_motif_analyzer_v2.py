@@ -77,43 +77,102 @@ class EnhancedMotifAnalyzerV2:
             self.logger.warning(f"FASTA 로딩 실패: {e}")
     
     def _load_simple_motif_database(self) -> Dict:
-        """pasted_content.txt 스타일의 간단한 motif 데이터베이스 (Phosphorylation + Acetylation + Ubiquitylation)"""
+        """Expanded motif database (~60 kinase families + acetylation + ubiquitylation)"""
         return {
-            # Phosphorylation motifs
-            "CDK/MAPK (Pro-directed)": r"[ST]P",        # Ser/Thr followed by Pro
-            "GSK3": r"[ST].[ST]P",                      # primed site
-            "PKA/PKC/AKT (Basophilic)": r"[RK].{1,2}[ST]",
-            "PKB/AKT": r"R.{2}[ST]",
-            "PKC": r"[RK].[ST]",
-            "CK2 (Acidophilic)": r"[ST].{1,2}[ED]",
-            "Casein Kinase-like": r"[ST].[DE]",
-            "Src-family TK": r"Y.{1,2}[DE]",
-            "EGFR-family TK": r"[DE].[Y]",
-            "ATM/ATR (DNA damage)": r"[ST]Q",
+            # ═══ Phosphorylation motifs (expanded ~50 kinase families) ═══
+            # --- Proline-directed kinases ---
+            "CDK1/CDK2 (Pro-directed)": r"[ST]P.[KR]",
+            "CDK/MAPK (Pro-directed)": r"[ST]P",
+            "ERK1/ERK2 (Pro-directed)": r"P.[ST]P",
+            "JNK (Pro-directed)": r"[ST]P",
+            "p38 (Pro-directed)": r"[ST]P",
+            "DYRK1A/DYRK1B": r"R..[ST]P",
+            # --- Basophilic kinases ---
+            "PKA (Basophilic)": r"[RK][RK].[ST]",
+            "PKC (Basophilic)": r"[RK].[ST][RK]",
+            "AKT/PKB (Basophilic)": r"R.R..[ST]",
+            "RSK (Basophilic)": r"[RK].[RK]..[ST]",
+            "SGK (Basophilic)": r"R.R..[ST]",
+            "PIM1/PIM2 (Basophilic)": r"[RK].[RK].[ST]",
+            "PKD (Basophilic)": r"[LI].[RK]..[ST]",
+            "MARK/PAR1 (Basophilic)": r"[LI].[RK]..[ST]",
+            "CAMK2 (Basophilic)": r"[RK]..[ST]..[RK]",
             "CAMK (Calcium/Calmodulin)": r"[ST].[RK]",
+            "AMPK (Basophilic)": r"[LMVIF].[RK]..[ST]",
+            "CHK1/CHK2 (Basophilic)": r"[LM].[RK]..[ST]",
+            "PAK1/PAK2 (Basophilic)": r"[KR].[ST]",
+            # --- Acidophilic kinases ---
+            "CK2 (Acidophilic)": r"[ST].{1,2}[ED]",
+            "CK2_extended (Acidophilic)": r"[ST]..E.E",
+            "CK1 (Acidophilic)": r"[ST]..[ST]",
+            "CK1_canonical (Acidophilic)": r"[ST].[DE]",
+            "GSK3 (Primed)": r"[ST]...[ST]P",
+            "GSK3_minimal (Primed)": r"[ST].[ST]P",
+            "GRK (Acidophilic)": r"[DE].[ST]...[DE]",
+            "PLK1 (Acidophilic)": r"[DE].[ST][ILVM]",
+            "PLK1_extended": r"[DNE].{1,2}[ST][FLIVMYW]",
+            # --- Mitotic/cell cycle kinases ---
+            "Aurora_A/B (Mitotic)": r"[RK].[ST][ILVM]",
+            "NEK2/NEK6 (Mitotic)": r"[LM].[ST]",
+            "LATS1/LATS2 (Hippo)": r"H.[RK]...[ST]",
+            "MST1/MST2 (Hippo)": r"[MVLI]..T",
+            "BUB1 (Mitotic)": r"[ST].[DE].[DE]",
+            # --- DNA damage response ---
+            "ATM/ATR (DNA damage)": r"[ST]Q",
+            "DNA-PK (DNA damage)": r"[ST]Q..",
+            "HIPK2 (DNA damage)": r"[ST]Y",
+            # --- Tyrosine kinases (receptor) ---
+            "EGFR-family TK": r"[DE].[Y]",
+            "PDGFR/FGFR TK": r"Y..[DE]",
+            "INSR/IGF1R TK": r"Y...[YF]",
+            "VEGFR TK": r"Y..[ILVM]",
+            # --- Tyrosine kinases (non-receptor) ---
+            "Src/Fyn/Yes TK": r"[EDAY].[YF].{1,3}[PGAS]",
+            "Src-family TK": r"Y.{1,2}[DE]",
+            "ABL TK": r"[IVLA]Y..[PG]",
+            "JAK1/JAK2 TK": r"Y..[LIV]",
+            "SYK/ZAP70 TK": r"Y..[LMIV]",
+            "BTK TK": r"Y..[LIVM]",
+            "FAK TK": r"Y...[DEST]",
+            "FLT3 TK": r"Y..[LIVM]",
+            # --- Splicing/RNA-related kinases ---
+            "CLK1-4 (Splicing)": r"[RS].[ST]",
+            "SRPK1/SRPK2 (Splicing)": r"[RS].[ST]",
+            # --- AGC kinases ---
+            "mTOR (AGC)": r"[ST]F",
+            "S6K (AGC)": r"[RK].[RK]..[ST]",
+            "ROCK1/ROCK2 (AGC)": r"[RK]...[ST]",
+            # --- Other kinases ---
+            "CKII_like": r"[ST][DE][DE]",
+            "TBK1/IKKe": r"[ST]...[DE][DE]",
+            "IKKa/IKKb": r"DS[GLIVMF][ST]",
             
-            # Acetylation motifs (확장)
-            "N-terminal_acetylation": r"^[ASGM]",       # N-terminal acetylation consensus
-            "Lysine_acetylation_basic": r"K[GAVS]",     # Basic lysine acetylation
-            "p300/CBP_motif": r"[RK]K[KR]",             # p300/CBP preferred motif
-            "PCAF_motif": r"[KR].K",                    # PCAF preferred motif
-            "Histone_acetylation": r"K[STAG]",          # Histone lysine acetylation
-            "Transcription_factor_acetylation": r"[KR]K[KR]", # Transcription factor acetylation
-            "Metabolic_enzyme_acetylation": r"K[AVILM]", # Metabolic enzyme acetylation
+            # ═══ Acetylation motifs ═══
+            "N-terminal_acetylation": r"^[ASGM]",
+            "Lysine_acetylation_basic": r"K[GAVS]",
+            "p300/CBP_motif": r"[RK]K[KR]",
+            "PCAF_motif": r"[KR].K",
+            "Histone_acetylation": r"K[STAG]",
+            "Transcription_factor_acetylation": r"[KR]K[KR]",
+            "Metabolic_enzyme_acetylation": r"K[AVILM]",
             
-            # Ubiquitylation motifs (신규 추가)
-            "SCF_complex_degron": r"[DE].{0,2}[ST].[DE]",      # SCF E3 ligase phosphodegron
-            "APC/C_D-box_degron": r"R..L.{2,4}[ILVM]",         # APC/C D-box degron
-            "APC/C_KEN-box_degron": r"KEN",                     # APC/C KEN-box degron
-            "HECT_E3_PY_motif": r"[LP]P.Y",                     # HECT E3 ligase PY motif
-            "VHL_oxygen_degron": r"LA.{1,2}[ILVM]P",            # VHL oxygen-dependent degron
-            "MDM2_binding_motif": r"F..W..L",                   # MDM2 binding motif (p53)
-            "RING_E3_hydrophobic": r"[ILVM].{1,2}[ILVM]",       # General RING E3 motif
-            "Ubiquitin_binding_domain": r"[ILVM].{0,1}[ILVM].[ILVM]", # Ubiquitin binding domain
-            "K48_polyubiquitin_linkage": r"K.{1,3}[ED]",        # K48 polyubiquitin linkage
-            "K63_polyubiquitin_linkage": r"K.{1,3}[KR]",        # K63 polyubiquitin linkage
-            "Lysine_ubiquitylation_general": r"K[AVILM]",       # General lysine ubiquitylation
-            "SUMO_consensus_motif": r"[VILMF]K.E",              # SUMOylation consensus (related)
+            # ═══ Ubiquitylation motifs (expanded) ═══
+            "SCF_complex_degron": r"[DE].{0,2}[ST].[DE]",
+            "APC/C_D-box_degron": r"R..L.{2,4}[ILVM]",
+            "APC/C_KEN-box_degron": r"KEN",
+            "HECT_E3_PY_motif": r"[LP]P.Y",
+            "VHL_oxygen_degron": r"LA.{1,2}[ILVM]P",
+            "MDM2_binding_motif": r"F..W..L",
+            "CHIP/STUB1_motif": r"[ILVM].{1,2}[ILVM]",
+            "NEDD4/ITCH_PY_motif": r"[LP]P.Y",
+            "TRAF6_motif": r"P.E..[AQEG]",
+            "KEAP1/CUL3_motif": r"[DE][ST]GE",
+            "BTRC/FBXW_degron": r"DS[GS][ILVM][ST]",
+            "SMURF1/2_PY_motif": r"[LP]P.Y",
+            "K48_polyubiquitin_linkage": r"K.{1,3}[ED]",
+            "K63_polyubiquitin_linkage": r"K.{1,3}[KR]",
+            "Lysine_ubiquitylation_general": r"K[AVILM]",
+            "SUMO_consensus_motif": r"[VILMF]K.E",
         }
     
     def extract_ptm_window(self, seq_window: str, ptm_position: str, protein_id: str = None, modified_sequence: str = None) -> Optional[str]:
