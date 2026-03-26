@@ -926,6 +926,11 @@ export default function KinaseModuleAnalysis({
             enrichmentResults={enrichmentResults}
             motifAnnotations={motifAnnotations}
             conditions={conditions}
+            runEnrichment={runEnrichment}
+            runMotifAnnotation={runMotifAnnotation}
+            loadingModule={loadingModule}
+            motifLoading={motifLoading}
+            motifError={motifError}
           />
         )}
       </CardContent>
@@ -1487,17 +1492,62 @@ function EnrichmentResultPanel({ result }: { result: KinaseEnrichmentResponse })
 
 // ── Cascade View ─────────────────────────────────────────────────────────────
 
+/** Collect all unique kinases from an annotation (known + motif + group inference) */
+function collectAllKinases(annotation: MotifAnnotationResponse | undefined): { kinase: string; source: string }[] {
+  if (!annotation) return [];
+  const seen = new Set<string>();
+  const result: { kinase: string; source: string }[] = [];
+  for (const a of annotation.annotations) {
+    for (const k of a.known_kinases) {
+      const key = k.kinase.toUpperCase();
+      if (!seen.has(key)) { seen.add(key); result.push({ kinase: k.kinase, source: k.source }); }
+    }
+    for (const m of a.motif_predicted_kinases) {
+      const key = m.kinase_family.toUpperCase();
+      if (!seen.has(key)) { seen.add(key); result.push({ kinase: m.kinase_family, source: "motif_prediction" }); }
+    }
+  }
+  if (annotation.group_inference) {
+    for (const ak of annotation.group_inference.anchor_kinases) {
+      const key = ak.kinase.toUpperCase();
+      if (!seen.has(key)) { seen.add(key); result.push({ kinase: ak.kinase, source: ak.sources[0] || "group_inference" }); }
+    }
+  }
+  return result;
+}
+
 function CascadeView({
   modules,
   enrichmentResults,
   motifAnnotations,
   conditions,
+  runEnrichment,
+  runMotifAnnotation,
+  loadingModule,
+  motifLoading,
+  motifError,
 }: {
   modules: CoWaveModule[];
   enrichmentResults: Record<string, KinaseEnrichmentResponse>;
   motifAnnotations: Record<string, MotifAnnotationResponse>;
   conditions: string[];
+  runEnrichment: (moduleKey: string, genes: string[], label: string) => void;
+  runMotifAnnotation: (moduleKey: string, ptms: PtmInfo[], kea3TopKinases: string[]) => void;
+  loadingModule: string | null;
+  motifLoading: string | null;
+  motifError: string | null;
 }) {
+  const [expandedCascade, setExpandedCascade] = useState<Set<string>>(new Set());
+
+  const toggleCascadeExpand = (key: string) => {
+    setExpandedCascade((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
   if (modules.length === 0) {
     return (
       <div className="text-center py-6 text-sm text-muted-foreground">
@@ -1512,88 +1562,301 @@ function CascadeView({
     (a, b) => conditions.indexOf(a.peakCondition) - conditions.indexOf(b.peakCondition)
   );
 
+  // ── Build cross-module kinase map ──
+  const kinaseModuleMap: Record<string, { modules: string[]; sources: Set<string> }> = {};
+  for (const mod of sortedModules) {
+    const moduleKey = `module_${mod.id}`;
+    const enrichment = enrichmentResults[moduleKey];
+    const annotation = motifAnnotations[moduleKey];
+
+    // From annotation (8 sources + motif + group inference)
+    const allKinases = collectAllKinases(annotation);
+    for (const k of allKinases) {
+      const key = k.kinase.toUpperCase();
+      if (!kinaseModuleMap[key]) kinaseModuleMap[key] = { modules: [], sources: new Set() };
+      if (!kinaseModuleMap[key].modules.includes(mod.label)) kinaseModuleMap[key].modules.push(mod.label);
+      kinaseModuleMap[key].sources.add(k.source);
+    }
+
+    // From KEA3 top 10
+    if (enrichment?.kea3_results) {
+      for (const k of enrichment.kea3_results.slice(0, 10)) {
+        const key = k.kinase.toUpperCase();
+        if (!kinaseModuleMap[key]) kinaseModuleMap[key] = { modules: [], sources: new Set() };
+        if (!kinaseModuleMap[key].modules.includes(mod.label)) kinaseModuleMap[key].modules.push(mod.label);
+        kinaseModuleMap[key].sources.add("KEA3");
+      }
+    }
+  }
+
+  // Shared kinases (appear in 2+ modules)
+  const sharedKinases = Object.entries(kinaseModuleMap)
+    .filter(([, v]) => v.modules.length >= 2)
+    .sort((a, b) => b[1].modules.length - a[1].modules.length);
+
+  // Find shared kinases between adjacent modules for arrow labels
+  const getSharedBetween = (modA: CoWaveModule, modB: CoWaveModule): string[] => {
+    const keyA = `module_${modA.id}`;
+    const keyB = `module_${modB.id}`;
+    const kinasesA = new Set<string>();
+    const kinasesB = new Set<string>();
+
+    const addFromAnnotation = (ann: MotifAnnotationResponse | undefined, target: Set<string>) => {
+      if (!ann) return;
+      for (const k of collectAllKinases(ann)) target.add(k.kinase.toUpperCase());
+    };
+    const addFromKEA3 = (enr: KinaseEnrichmentResponse | undefined, target: Set<string>) => {
+      if (!enr?.kea3_results) return;
+      for (const k of enr.kea3_results.slice(0, 10)) target.add(k.kinase.toUpperCase());
+    };
+
+    addFromAnnotation(motifAnnotations[keyA], kinasesA);
+    addFromKEA3(enrichmentResults[keyA], kinasesA);
+    addFromAnnotation(motifAnnotations[keyB], kinasesB);
+    addFromKEA3(enrichmentResults[keyB], kinasesB);
+
+    return [...kinasesA].filter((k) => kinasesB.has(k));
+  };
+
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       <p className="text-xs text-muted-foreground">
-        Proposed cascade order based on peak timing. Earlier peaks suggest upstream position in signaling cascade.
+        Proposed cascade order based on peak timing. Run <strong>Annotate</strong> on each module to collect kinase information from all 8 sources (iPTMnet, UniProt, RAG, motif prediction, etc.), not just KEA3.
       </p>
 
-      <div className="flex items-center gap-0 overflow-x-auto pb-2">
+      {/* ── Cascade Flow Diagram ── */}
+      <div className="flex items-start gap-0 overflow-x-auto pb-2">
         {sortedModules.map((mod, idx) => {
           const moduleKey = `module_${mod.id}`;
           const enrichment = enrichmentResults[moduleKey];
           const annotation = motifAnnotations[moduleKey];
-          const topKinase = enrichment?.kea3_results?.[0];
+          const isExpanded = expandedCascade.has(moduleKey);
+          const isLoading = loadingModule === moduleKey;
+          const isMotifLoading = motifLoading === moduleKey;
+          const genes = mod.ptms.map((p) => p.gene);
+          const uniqueGenes = [...new Set(genes)];
+
+          // All kinases from all sources for this module
+          const allKinases = collectAllKinases(annotation);
+          const kea3Top = enrichment?.kea3_results?.slice(0, 5) || [];
           const doubleValidated = enrichment?.double_validated_kinases || [];
 
+          // Merge: known kinases from annotation + KEA3 top
+          const mergedKinases: { kinase: string; sources: string[] }[] = [];
+          const mergedSeen = new Set<string>();
+          for (const k of allKinases) {
+            const key = k.kinase.toUpperCase();
+            if (!mergedSeen.has(key)) {
+              mergedSeen.add(key);
+              mergedKinases.push({ kinase: k.kinase, sources: [k.source] });
+            } else {
+              const existing = mergedKinases.find((m) => m.kinase.toUpperCase() === key);
+              if (existing && !existing.sources.includes(k.source)) existing.sources.push(k.source);
+            }
+          }
+          for (const k of kea3Top) {
+            const key = k.kinase.toUpperCase();
+            if (!mergedSeen.has(key)) {
+              mergedSeen.add(key);
+              mergedKinases.push({ kinase: k.kinase, sources: ["KEA3"] });
+            } else {
+              const existing = mergedKinases.find((m) => m.kinase.toUpperCase() === key);
+              if (existing && !existing.sources.includes("KEA3")) existing.sources.push("KEA3");
+            }
+          }
+
+          // Shared kinases with next module
+          const sharedWithNext = idx < sortedModules.length - 1
+            ? getSharedBetween(mod, sortedModules[idx + 1])
+            : [];
+
           return (
-            <div key={moduleKey} className="flex items-center">
-              <div className="rounded-lg border bg-card p-3 min-w-[180px] space-y-1.5">
+            <div key={moduleKey} className="flex items-start">
+              <div className="rounded-lg border bg-card p-3 min-w-[220px] max-w-[280px] space-y-2">
+                {/* Module header */}
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-medium">{mod.label}</span>
-                  <Badge variant="outline" className="text-[9px]">
-                    {mod.ptms.length} PTMs
-                  </Badge>
+                  <button
+                    onClick={() => toggleCascadeExpand(moduleKey)}
+                    className="flex items-center gap-1 text-xs font-medium hover:text-primary"
+                  >
+                    {isExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                    {mod.label}
+                  </button>
+                  <div className="flex items-center gap-1">
+                    <Badge variant="outline" className="text-[9px]">
+                      {mod.ptms.length} PTMs
+                    </Badge>
+                    <Badge variant="outline" className="text-[9px] text-muted-foreground">
+                      Peak: {mod.peakCondition}
+                    </Badge>
+                  </div>
                 </div>
-                <div className="text-[10px] text-muted-foreground">
-                  Avg amplitude: {mod.avgAmplitude.toFixed(2)}
+
+                {/* Quick stats */}
+                <div className="text-[10px] text-muted-foreground flex gap-2">
+                  <span>Amp: {mod.avgAmplitude.toFixed(2)}</span>
+                  {mod.spearmanScore !== null && <span>ρ={mod.spearmanScore.toFixed(2)}</span>}
                 </div>
-                {topKinase && (
-                  <div className="text-[10px]">
-                    <span className="text-muted-foreground">Top kinase: </span>
-                    <span className="font-medium text-amber-600 dark:text-amber-400">
-                      {topKinase.kinase}
-                    </span>
-                    {doubleValidated.includes(topKinase.kinase.toUpperCase()) && (
-                      <CheckCircle2 className="h-3 w-3 inline ml-0.5 text-green-500" />
-                    )}
+
+                {/* ── Integrated Kinase Summary (all sources) ── */}
+                {mergedKinases.length > 0 ? (
+                  <div className="space-y-1">
+                    <div className="text-[10px] font-medium text-muted-foreground">Kinases (all sources):</div>
+                    <div className="flex flex-wrap gap-1">
+                      {mergedKinases.slice(0, 6).map((mk) => {
+                        const isShared = kinaseModuleMap[mk.kinase.toUpperCase()]?.modules.length >= 2;
+                        const isDoubleVal = doubleValidated.includes(mk.kinase.toUpperCase()) || doubleValidated.includes(mk.kinase);
+                        return (
+                          <span
+                            key={mk.kinase}
+                            className={`text-[9px] px-1.5 py-0.5 rounded inline-flex items-center gap-0.5 ${
+                              isDoubleVal
+                                ? "bg-green-100 dark:bg-green-800/30 text-green-700 dark:text-green-300 border border-green-400"
+                                : isShared
+                                ? "bg-blue-100 dark:bg-blue-800/30 text-blue-700 dark:text-blue-300 border border-blue-300"
+                                : "bg-muted text-foreground"
+                            }`}
+                            title={`Sources: ${mk.sources.map((s) => SOURCE_LABELS[s]?.label || s).join(", ")}${isShared ? " | Shared across modules" : ""}${isDoubleVal ? " | Double-validated" : ""}`}
+                          >
+                            {isDoubleVal && <CheckCircle2 className="h-2.5 w-2.5 text-green-500" />}
+                            {mk.kinase}
+                            <span className="opacity-50 text-[8px]">({mk.sources.length})</span>
+                          </span>
+                        );
+                      })}
+                      {mergedKinases.length > 6 && (
+                        <span className="text-[9px] text-muted-foreground">+{mergedKinases.length - 6}</span>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-[10px] text-muted-foreground italic">
+                    No kinase data yet — click Annotate below
                   </div>
                 )}
-                {mod.spearmanScore !== null && (
-                  <div className="text-[10px] text-muted-foreground">
-                    Rank preservation: ρ={mod.spearmanScore.toFixed(2)}
-                  </div>
-                )}
-                {/* Annotation status in cascade */}
+
+                {/* Annotation status badges */}
                 {annotation && (
                   <div className="flex gap-1 flex-wrap">
-                    {annotation.summary.status_counts.novel_candidate > 0 && (
-                      <span className="text-[9px] px-1 py-0 rounded bg-purple-100 dark:bg-purple-800/30 text-purple-600 dark:text-purple-300">
-                        {annotation.summary.status_counts.novel_candidate} novel
+                    {annotation.summary.status_counts.known > 0 && (
+                      <span className="text-[9px] px-1 py-0 rounded bg-green-100 dark:bg-green-800/30 text-green-600 dark:text-green-300">
+                        <ShieldCheck className="h-2.5 w-2.5 inline mr-0.5" />{annotation.summary.status_counts.known} known
                       </span>
                     )}
                     {annotation.summary.status_counts.motif_only > 0 && (
                       <span className="text-[9px] px-1 py-0 rounded bg-amber-100 dark:bg-amber-800/30 text-amber-600 dark:text-amber-300">
-                        {annotation.summary.status_counts.motif_only} motif
+                        <FlaskConical className="h-2.5 w-2.5 inline mr-0.5" />{annotation.summary.status_counts.motif_only} motif
                       </span>
                     )}
-                    {annotation.summary.status_counts.known > 0 && (
-                      <span className="text-[9px] px-1 py-0 rounded bg-green-100 dark:bg-green-800/30 text-green-600 dark:text-green-300">
-                        {annotation.summary.status_counts.known} known
+                    {annotation.summary.status_counts.novel_candidate > 0 && (
+                      <span className="text-[9px] px-1 py-0 rounded bg-purple-100 dark:bg-purple-800/30 text-purple-600 dark:text-purple-300">
+                        <Sparkles className="h-2.5 w-2.5 inline mr-0.5" />{annotation.summary.status_counts.novel_candidate} novel
                       </span>
                     )}
                   </div>
                 )}
-                <div className="flex flex-wrap gap-0.5">
-                  {mod.ptms.slice(0, 4).map((p) => (
-                    <span
-                      key={`${p.gene}_${p.position}`}
-                      className="text-[9px] px-1 py-0 rounded bg-muted"
-                    >
-                      {p.gene}
-                    </span>
-                  ))}
-                  {mod.ptms.length > 4 && (
-                    <span className="text-[9px] text-muted-foreground">
-                      +{mod.ptms.length - 4}
-                    </span>
-                  )}
+
+                {/* Action buttons */}
+                <div className="flex gap-1 pt-1">
+                  <Button
+                    variant="default"
+                    size="sm"
+                    className="text-[9px] h-5 px-1.5"
+                    disabled={isLoading || uniqueGenes.length === 0}
+                    onClick={() => runEnrichment(moduleKey, uniqueGenes, mod.label)}
+                  >
+                    {isLoading ? <Loader2 className="h-2.5 w-2.5 animate-spin mr-0.5" /> : <Zap className="h-2.5 w-2.5 mr-0.5" />}
+                    KEA3
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-[9px] h-5 px-1.5"
+                    disabled={isMotifLoading}
+                    onClick={() => {
+                      const kea3Top = enrichment?.kea3_results?.slice(0, 10).map((k) => k.kinase) || [];
+                      runMotifAnnotation(moduleKey, mod.ptms, kea3Top);
+                    }}
+                  >
+                    {isMotifLoading ? <Loader2 className="h-2.5 w-2.5 animate-spin mr-0.5" /> : <FlaskConical className="h-2.5 w-2.5 mr-0.5" />}
+                    Annotate
+                  </Button>
                 </div>
+
+                {/* Loading / error indicators */}
+                {isMotifLoading && (
+                  <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                    <Loader2 className="h-3 w-3 animate-spin" /> Annotating {mod.ptms.length} PTMs...
+                  </div>
+                )}
+                {motifError && motifLoading === null && (
+                  <div className="text-[10px] text-red-500">{motifError}</div>
+                )}
+
+                {/* ── Expanded Detail Panel ── */}
+                {isExpanded && (
+                  <div className="space-y-2 pt-1 border-t">
+                    {/* PTM list with status */}
+                    <div className="flex flex-wrap gap-0.5">
+                      {mod.ptms.map((p) => {
+                        const ptmKey = `${p.gene}_${p.position}`;
+                        const ann = annotation?.annotations?.find(
+                          (a) => a.gene === p.gene && a.position === p.position
+                        );
+                        const statusCfg = ann ? STATUS_CONFIG[ann.status] : null;
+                        const StatusIcon = statusCfg?.icon;
+                        return (
+                          <span
+                            key={ptmKey}
+                            className={`px-1.5 py-0.5 rounded text-[9px] flex items-center gap-0.5 border ${
+                              statusCfg ? `${statusCfg.bg} ${statusCfg.border} ${statusCfg.color}` : "bg-muted"
+                            }`}
+                            title={
+                              ann
+                                ? `${statusCfg?.label}${
+                                    ann.known_kinases.length > 0
+                                      ? ` | Known: ${ann.known_kinases.map((k) => k.kinase).join(", ")}`
+                                      : ""
+                                  }${
+                                    ann.motif_predicted_kinases.length > 0
+                                      ? ` | Motif: ${ann.motif_predicted_kinases.map((m) => m.kinase_family).join(", ")}`
+                                      : ""
+                                  }`
+                                : p.label
+                            }
+                          >
+                            {StatusIcon && <StatusIcon className="h-2.5 w-2.5" />}
+                            {p.label}
+                          </span>
+                        );
+                      })}
+                    </div>
+
+                    {/* Full Motif Annotation Panel */}
+                    {annotation && <MotifAnnotationPanel annotation={annotation} />}
+
+                    {/* KEA3 Results */}
+                    {enrichment && <EnrichmentResultPanel result={enrichment} />}
+                  </div>
+                )}
               </div>
 
+              {/* Arrow between modules with shared kinases */}
               {idx < sortedModules.length - 1 && (
-                <div className="flex items-center px-2 text-muted-foreground">
-                  <ArrowRight className="h-4 w-4" />
+                <div className="flex flex-col items-center px-2 min-w-[60px] pt-6">
+                  <ArrowRight className="h-5 w-5 text-muted-foreground" />
+                  {sharedWithNext.length > 0 && (
+                    <div className="flex flex-col items-center gap-0.5 mt-1">
+                      {sharedWithNext.slice(0, 3).map((k) => (
+                        <span key={k} className="text-[8px] px-1 py-0 rounded bg-blue-100 dark:bg-blue-800/30 text-blue-600 dark:text-blue-300 whitespace-nowrap">
+                          {k}
+                        </span>
+                      ))}
+                      {sharedWithNext.length > 3 && (
+                        <span className="text-[8px] text-muted-foreground">+{sharedWithNext.length - 3}</span>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -1601,13 +1864,78 @@ function CascadeView({
         })}
       </div>
 
-      {/* Cascade hypothesis */}
+      {/* ── Cross-Module Kinase Map ── */}
+      {sharedKinases.length > 0 && (
+        <div className="bg-gradient-to-br from-blue-50/50 to-indigo-50/50 dark:from-blue-950/20 dark:to-indigo-950/20 rounded-lg p-3 space-y-2">
+          <div className="flex items-center gap-1 text-xs font-medium">
+            <GitMerge className="h-3.5 w-3.5 text-blue-500" />
+            Cross-Module Kinase Map
+            <span className="text-muted-foreground font-normal">— kinases shared across 2+ modules</span>
+          </div>
+          <div className="space-y-1">
+            {sharedKinases.slice(0, 10).map(([kinase, data]) => {
+              const srcLabels = [...data.sources].map((s) => SOURCE_LABELS[s]?.label || s);
+              return (
+                <div key={kinase} className="flex items-center gap-2 text-[10px]">
+                  <span className="font-medium min-w-[70px] text-blue-700 dark:text-blue-300">{kinase}</span>
+                  <div className="flex gap-1">
+                    {data.modules.map((m) => (
+                      <span key={m} className="px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-800/30 text-blue-600 dark:text-blue-300">
+                        {m}
+                      </span>
+                    ))}
+                  </div>
+                  <span className="text-muted-foreground">via {srcLabels.join(", ")}</span>
+                </div>
+              );
+            })}
+            {sharedKinases.length > 10 && (
+              <div className="text-[10px] text-muted-foreground">...and {sharedKinases.length - 10} more shared kinases</div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Cascade Kinase Flow Summary ── */}
       {sortedModules.length >= 2 && (
-        <div className="bg-muted/50 rounded-lg p-3 text-xs text-muted-foreground">
-          <strong>Cascade Hypothesis:</strong> Based on peak timing,{" "}
-          {sortedModules.map((m) => m.label).join(" → ")} represents the proposed
-          signaling cascade order. PTMs peaking earlier are likely upstream in the
-          kinase cascade. Verify with KEA3 enrichment results for each module.
+        <div className="bg-muted/50 rounded-lg p-3 space-y-2">
+          <div className="text-xs font-medium">Cascade Kinase Flow Summary</div>
+          <div className="text-[10px] text-muted-foreground">
+            <strong>Temporal order:</strong>{" "}
+            {sortedModules.map((m) => {
+              const moduleKey = `module_${m.id}`;
+              const annotation = motifAnnotations[moduleKey];
+              const enrichment = enrichmentResults[moduleKey];
+              const topKinases: string[] = [];
+              // Prioritize annotation known kinases
+              if (annotation) {
+                const known = annotation.annotations.flatMap((a) => a.known_kinases.map((k) => k.kinase));
+                const unique = [...new Set(known.map((k) => k.toUpperCase()))];
+                topKinases.push(...unique.slice(0, 2));
+              }
+              // Fill with KEA3 if needed
+              if (topKinases.length < 2 && enrichment?.kea3_results) {
+                for (const k of enrichment.kea3_results) {
+                  if (!topKinases.includes(k.kinase.toUpperCase())) {
+                    topKinases.push(k.kinase.toUpperCase());
+                    if (topKinases.length >= 2) break;
+                  }
+                }
+              }
+              return `${m.label}${topKinases.length > 0 ? ` [${topKinases.join(", ")}]` : ""}`;
+            }).join(" → ")}
+          </div>
+          <div className="text-[10px] text-muted-foreground">
+            <strong>Shared regulators:</strong>{" "}
+            {sharedKinases.length > 0
+              ? sharedKinases.slice(0, 5).map(([k, v]) => `${k} (${v.modules.join("+")})`).join(", ")
+              : "None detected — run Annotate on all modules to discover shared kinases"}
+          </div>
+          {sharedKinases.length === 0 && (
+            <div className="text-[10px] text-amber-600 dark:text-amber-400">
+              Tip: Click "Annotate" on each module card above to collect kinase data from iPTMnet, UniProt, RAG enrichment, motif prediction, and more.
+            </div>
+          )}
         </div>
       )}
     </div>
