@@ -77,12 +77,18 @@ interface CoWaveModule {
 
 interface MotifPredictedKinase {
   kinase_family: string;
+  canonical_family?: string;
+  display_family?: string;
   motif: string;
   source: string;
 }
 
 interface KnownKinase {
   kinase: string;
+  canonical_name?: string;
+  display_name?: string;
+  original_name?: string;
+  merged_sources?: string[];
   confidence: string;
   mechanism: string;
   source: string;
@@ -120,6 +126,7 @@ interface InferredAssignment {
   gene: string;
   position: string;
   inferred_kinase: string;
+  inferred_canonical?: string;
   evidence: string;
   motif_predictions: string[];
 }
@@ -134,6 +141,7 @@ interface NovelCandidate {
 
 interface KinaseModule {
   kinase: string;
+  canonical?: string;
   sources: string[];
   confirmed_ptms: string[];
   confirmed_count: number;
@@ -630,11 +638,11 @@ export default function KinaseModuleAnalysis({
                                 ann
                                   ? `${statusCfg?.label}${
                                       ann.known_kinases.length > 0
-                                        ? ` | Known: ${ann.known_kinases.map((k) => k.kinase).join(", ")}`
+                                        ? ` | Known: ${ann.known_kinases.map((k) => k.display_name || k.kinase).join(", ")}`
                                         : ""
                                     }${
                                       ann.motif_predicted_kinases.length > 0
-                                        ? ` | Motif: ${ann.motif_predicted_kinases.map((m) => m.kinase_family).join(", ")}`
+                                        ? ` | Motif: ${ann.motif_predicted_kinases.map((m) => m.canonical_family || m.kinase_family).join(", ")}`
                                         : ""
                                     }${
                                       ann.concordance !== "not_applicable"
@@ -868,13 +876,13 @@ function MotifAnnotationPanel({ annotation }: { annotation: MotifAnnotationRespo
                 </span>
                 <div className="flex flex-wrap gap-1">
                   {seqMotifs.map((m, i) => (
-                    <span key={`s${i}`} className="px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-800/30 text-amber-800 dark:text-amber-200">
-                      {m.kinase_family} <span className="opacity-60">({m.motif})</span>
+                    <span key={`s${i}`} className="px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-800/30 text-amber-800 dark:text-amber-200 cursor-help" title={`Canonical: ${m.canonical_family || m.kinase_family}\nRaw: ${m.kinase_family}\nMotif: ${m.motif}`}>
+                      {m.canonical_family || m.kinase_family} <span className="opacity-60">({m.motif})</span>
                     </span>
                   ))}
                   {resMotifs.length > 0 && seqMotifs.length === 0 && (
                     <span className="px-1.5 py-0.5 rounded bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 italic">
-                      Residue-based: {resMotifs.map((m) => m.kinase_family).join(", ")}
+                      Residue-based: {resMotifs.map((m) => m.canonical_family || m.kinase_family).join(", ")}
                     </span>
                   )}
                 </div>
@@ -911,9 +919,14 @@ function MotifAnnotationPanel({ annotation }: { annotation: MotifAnnotationRespo
                 <div className="flex flex-wrap gap-1">
                   {a.known_kinases.slice(0, 4).map((k, i) => {
                     const srcCfg = SOURCE_LABELS[k.source] || { label: k.source, color: "text-gray-600 bg-gray-100 dark:bg-gray-800/30 dark:text-gray-300" };
+                    const displayName = k.display_name || k.kinase;
+                    const canonicalName = k.canonical_name || k.kinase.toUpperCase();
+                    const allSources = k.merged_sources ? [k.source, ...k.merged_sources] : [k.source];
+                    const tooltip = `${canonicalName}${k.original_name && k.original_name !== displayName ? ` (raw: ${k.original_name})` : ""}\nSources: ${allSources.map(s => SOURCE_LABELS[s]?.label || s).join(", ")}`;
                     return (
-                      <span key={i} className="px-1.5 py-0.5 rounded bg-green-100 dark:bg-green-800/30 text-green-800 dark:text-green-200 inline-flex items-center gap-1">
-                        {k.kinase}
+                      <span key={i} className="px-1.5 py-0.5 rounded bg-green-100 dark:bg-green-800/30 text-green-800 dark:text-green-200 inline-flex items-center gap-1 cursor-help" title={tooltip}>
+                        {displayName}
+                        {allSources.length > 1 && <span className="text-[8px] text-green-600 dark:text-green-400">({allSources.length})</span>}
                         <span className={`text-[8px] px-1 rounded ${srcCfg.color}`}>{srcCfg.label}</span>
                       </span>
                     );
@@ -922,8 +935,8 @@ function MotifAnnotationPanel({ annotation }: { annotation: MotifAnnotationRespo
                     <>
                       <span className="text-muted-foreground">|</span>
                       {a.motif_predicted_kinases.slice(0, 2).map((m, i) => (
-                        <span key={`m${i}`} className="px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-800/30 text-amber-800 dark:text-amber-200">
-                          Motif: {m.kinase_family}
+                        <span key={`m${i}`} className="px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-800/30 text-amber-800 dark:text-amber-200 cursor-help" title={`Canonical: ${m.canonical_family || m.kinase_family}\nMotif: ${m.motif}`}>
+                          Motif: {m.canonical_family || m.kinase_family}
                         </span>
                       ))}
                     </>
@@ -1014,8 +1027,8 @@ function MotifAnnotationPanel({ annotation }: { annotation: MotifAnnotationRespo
                             {a.known_kinases.map((k, ki) => {
                               const srcCfg = SOURCE_LABELS[k.source] || { label: k.source, color: "text-gray-600 bg-gray-100 dark:bg-gray-800/30" };
                               return (
-                                <span key={ki} className="inline-flex items-center gap-0.5">
-                                  <span className="font-medium">{k.kinase}</span>
+                                <span key={ki} className="inline-flex items-center gap-0.5 cursor-help" title={`Canonical: ${k.canonical_name || k.kinase}${k.original_name && k.original_name !== (k.display_name || k.kinase) ? ` (raw: ${k.original_name})` : ""}`}>
+                                  <span className="font-medium">{k.display_name || k.kinase}</span>
                                   <span className={`text-[8px] px-0.5 rounded ${srcCfg.color}`}>{srcCfg.label}</span>
                                   {ki < a.known_kinases.length - 1 && <span className="text-muted-foreground">,</span>}
                                 </span>
@@ -1027,7 +1040,7 @@ function MotifAnnotationPanel({ annotation }: { annotation: MotifAnnotationRespo
                     </TableCell>
                     <TableCell className="text-[10px]">
                       {a.motif_predicted_kinases.length > 0
-                        ? a.motif_predicted_kinases.map((m) => m.kinase_family).join(", ")
+                        ? a.motif_predicted_kinases.map((m) => m.canonical_family || m.kinase_family).join(", ")
                         : <span className="text-muted-foreground">—</span>}
                     </TableCell>
                     <TableCell className="text-[10px]">
@@ -1086,7 +1099,7 @@ function GroupInferencePanel({ inference }: { inference: GroupInference }) {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Zap className="h-4 w-4 text-yellow-500" />
-              <span className="text-sm font-bold text-foreground">{km.kinase}</span>
+              <span className="text-sm font-bold text-foreground" title={km.canonical ? `Canonical: ${km.canonical}` : ""}>{km.kinase}</span>
               <Badge variant="outline" className="text-[10px] h-5">
                 {km.total_count} PTMs total
               </Badge>
@@ -1147,7 +1160,7 @@ function GroupInferencePanel({ inference }: { inference: GroupInference }) {
               {/* Evidence details for inferred */}
               <div className="mt-1 space-y-0.5">
                 {inferred_assignments
-                  .filter((ia) => ia.inferred_kinase.toUpperCase() === km.kinase.toUpperCase())
+                  .filter((ia) => (ia.inferred_canonical || ia.inferred_kinase.toUpperCase()) === (km.canonical || km.kinase.toUpperCase()))
                   .map((ia) => (
                     <p key={ia.ptm} className="text-[9px] text-muted-foreground ml-4">
                       {ia.ptm}: {ia.evidence}
@@ -1197,25 +1210,25 @@ function GroupInferencePanel({ inference }: { inference: GroupInference }) {
 
 // ── Cascade View ─────────────────────────────────────────────────────────────
 
-/** Collect all unique kinases from an annotation (known + motif + group inference) */
-function collectAllKinases(annotation: MotifAnnotationResponse | undefined): { kinase: string; source: string }[] {
+/** Collect all unique kinases from an annotation (known + motif + group inference), using canonical names for dedup */
+function collectAllKinases(annotation: MotifAnnotationResponse | undefined): { kinase: string; canonical: string; source: string }[] {
   if (!annotation) return [];
   const seen = new Set<string>();
-  const result: { kinase: string; source: string }[] = [];
+  const result: { kinase: string; canonical: string; source: string }[] = [];
   for (const a of annotation.annotations) {
     for (const k of a.known_kinases) {
-      const key = k.kinase.toUpperCase();
-      if (!seen.has(key)) { seen.add(key); result.push({ kinase: k.kinase, source: k.source }); }
+      const key = (k.canonical_name || k.kinase).toUpperCase();
+      if (!seen.has(key)) { seen.add(key); result.push({ kinase: k.display_name || k.kinase, canonical: key, source: k.source }); }
     }
     for (const m of a.motif_predicted_kinases) {
-      const key = m.kinase_family.toUpperCase();
-      if (!seen.has(key)) { seen.add(key); result.push({ kinase: m.kinase_family, source: "motif_prediction" }); }
+      const key = (m.canonical_family || m.kinase_family).toUpperCase();
+      if (!seen.has(key)) { seen.add(key); result.push({ kinase: m.canonical_family || m.kinase_family, canonical: key, source: "motif_prediction" }); }
     }
   }
   if (annotation.group_inference) {
     for (const ak of annotation.group_inference.anchor_kinases) {
-      const key = ak.kinase.toUpperCase();
-      if (!seen.has(key)) { seen.add(key); result.push({ kinase: ak.kinase, source: ak.sources[0] || "group_inference" }); }
+      const key = (ak.canonical || ak.kinase).toUpperCase();
+      if (!seen.has(key)) { seen.add(key); result.push({ kinase: ak.kinase, canonical: key, source: ak.sources[0] || "group_inference" }); }
     }
   }
   return result;
@@ -1270,7 +1283,7 @@ function CascadeView({
     // From annotation (8 sources + motif + group inference)
     const allKinases = collectAllKinases(annotation);
     for (const k of allKinases) {
-      const key = k.kinase.toUpperCase();
+      const key = k.canonical || k.kinase.toUpperCase();
       if (!kinaseModuleMap[key]) kinaseModuleMap[key] = { modules: [], sources: new Set() };
       if (!kinaseModuleMap[key].modules.includes(mod.label)) kinaseModuleMap[key].modules.push(mod.label);
       kinaseModuleMap[key].sources.add(k.source);
@@ -1291,7 +1304,7 @@ function CascadeView({
 
     const addFromAnnotation = (ann: MotifAnnotationResponse | undefined, target: Set<string>) => {
       if (!ann) return;
-      for (const k of collectAllKinases(ann)) target.add(k.kinase.toUpperCase());
+      for (const k of collectAllKinases(ann)) target.add(k.canonical || k.kinase.toUpperCase());
     };
 
     addFromAnnotation(motifAnnotations[keyA], kinasesA);
@@ -1317,16 +1330,16 @@ function CascadeView({
           // All kinases from all sources for this module
           const allKinases = collectAllKinases(annotation);
 
-          // Merge kinases with source tracking
-          const mergedKinases: { kinase: string; sources: string[] }[] = [];
+          // Merge kinases with source tracking (using canonical names)
+          const mergedKinases: { kinase: string; canonical: string; sources: string[] }[] = [];
           const mergedSeen = new Set<string>();
           for (const k of allKinases) {
-            const key = k.kinase.toUpperCase();
+            const key = k.canonical || k.kinase.toUpperCase();
             if (!mergedSeen.has(key)) {
               mergedSeen.add(key);
-              mergedKinases.push({ kinase: k.kinase, sources: [k.source] });
+              mergedKinases.push({ kinase: k.kinase, canonical: key, sources: [k.source] });
             } else {
-              const existing = mergedKinases.find((m) => m.kinase.toUpperCase() === key);
+              const existing = mergedKinases.find((m) => m.canonical === key);
               if (existing && !existing.sources.includes(k.source)) existing.sources.push(k.source);
             }
           }
@@ -1370,7 +1383,7 @@ function CascadeView({
                     <div className="text-[10px] font-medium text-muted-foreground">Kinases (all sources):</div>
                     <div className="flex flex-wrap gap-1">
                       {mergedKinases.slice(0, 6).map((mk) => {
-                        const isShared = kinaseModuleMap[mk.kinase.toUpperCase()]?.modules.length >= 2;
+                        const isShared = kinaseModuleMap[mk.canonical]?.modules.length >= 2;
                         const isMultiSource = mk.sources.length >= 2;
                         return (
                           <span
@@ -1468,11 +1481,11 @@ function CascadeView({
                               ann
                                 ? `${statusCfg?.label}${
                                     ann.known_kinases.length > 0
-                                      ? ` | Known: ${ann.known_kinases.map((k) => k.kinase).join(", ")}`
+                                      ? ` | Known: ${ann.known_kinases.map((k) => k.display_name || k.kinase).join(", ")}`
                                       : ""
                                   }${
                                     ann.motif_predicted_kinases.length > 0
-                                      ? ` | Motif: ${ann.motif_predicted_kinases.map((m) => m.kinase_family).join(", ")}`
+                                      ? ` | Motif: ${ann.motif_predicted_kinases.map((m) => m.canonical_family || m.kinase_family).join(", ")}`
                                       : ""
                                   }`
                                 : p.label
@@ -1559,13 +1572,13 @@ function CascadeView({
               const topKinases: string[] = [];
               // Collect from all annotation sources
               if (annotation) {
-                const known = annotation.annotations.flatMap((a) => a.known_kinases.map((k) => k.kinase));
-                const unique = [...new Set(known.map((k) => k.toUpperCase()))];
+                const known = annotation.annotations.flatMap((a) => a.known_kinases.map((k) => k.canonical_name || k.display_name || k.kinase));
+                const unique = [...new Set(known)];
                 topKinases.push(...unique.slice(0, 2));
                 // Fill with motif predicted if needed
                 if (topKinases.length < 2) {
-                  const motifPred = annotation.annotations.flatMap((a) => a.motif_predicted_kinases.map((m) => m.kinase_family));
-                  const uniqueMotif = [...new Set(motifPred.map((k) => k.toUpperCase()))];
+                  const motifPred = annotation.annotations.flatMap((a) => a.motif_predicted_kinases.map((m) => m.canonical_family || m.kinase_family));
+                  const uniqueMotif = [...new Set(motifPred)];
                   for (const mk of uniqueMotif) {
                     if (!topKinases.includes(mk)) {
                       topKinases.push(mk);

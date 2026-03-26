@@ -1859,6 +1859,218 @@ async def kinase_enrichment(
     }
 
 
+# ── Kinase Name Normalization ────────────────────────────────────────────────
+
+# Canonical kinase name mapping: alias/variant → official gene symbol (HGNC)
+# This resolves inconsistencies across data sources (LLM, UniProt, iPTMnet, text mining, motif DB)
+_KINASE_ALIAS_MAP: dict[str, str] = {
+    # CDK family
+    "CDK": "CDK",  # family-level, keep as-is
+    "CDK1/CDK2": "CDK1/CDK2",  # motif DB composite
+    "CDK/MAPK": "CDK/MAPK",  # motif DB composite
+    "CDC2": "CDK1", "CDK1": "CDK1", "CDC28": "CDK1",
+    "CDK2": "CDK2",
+    "CDK4": "CDK4", "CDK6": "CDK6",
+    "CDK5": "CDK5", "CDK5R1": "CDK5",
+    "CDK7": "CDK7", "CDK9": "CDK9",
+    # CK (Casein Kinase) family
+    "CK1": "CSNK1",  # family-level
+    "CK1_CANONICAL": "CSNK1",
+    "CSNK1A1": "CSNK1A1", "CSNK1D": "CSNK1D", "CSNK1E": "CSNK1E",
+    "CK2": "CSNK2",  # family-level
+    "CK2_EXTENDED": "CSNK2",
+    "CKII_LIKE": "CSNK2",
+    "CSNK2A1": "CSNK2A1", "CSNK2A2": "CSNK2A2", "CSNK2B": "CSNK2B",
+    "CASEIN KINASE II": "CSNK2", "CASEIN KINASE 2": "CSNK2",
+    "CASEIN KINASE I": "CSNK1", "CASEIN KINASE 1": "CSNK1",
+    # MAPK family
+    "MAPK": "MAPK",  # family-level
+    "ERK1": "MAPK3", "MAPK3": "MAPK3",
+    "ERK2": "MAPK1", "MAPK1": "MAPK1",
+    "ERK1/ERK2": "MAPK3/MAPK1",
+    "JNK": "MAPK8", "JNK1": "MAPK8", "MAPK8": "MAPK8",
+    "JNK2": "MAPK9", "MAPK9": "MAPK9",
+    "JNK3": "MAPK10", "MAPK10": "MAPK10",
+    "P38": "MAPK14", "P38A": "MAPK14", "P38ALPHA": "MAPK14", "MAPK14": "MAPK14",
+    "P38B": "MAPK11", "P38BETA": "MAPK11",
+    # PKA / PKC / AKT
+    "PKA": "PRKACA", "PRKACA": "PRKACA", "PRKACB": "PRKACB",
+    "PKC": "PKC",  # family-level
+    "PKCA": "PRKCA", "PRKCA": "PRKCA",
+    "PKCB": "PRKCB", "PRKCB": "PRKCB",
+    "PKCD": "PRKCD", "PRKCD": "PRKCD",
+    "AKT": "AKT1", "AKT/PKB": "AKT1",
+    "AKT1": "AKT1", "AKT2": "AKT2", "AKT3": "AKT3",
+    "PKB": "AKT1",
+    # GSK3
+    "GSK3": "GSK3B", "GSK3_MINIMAL": "GSK3B",
+    "GSK3A": "GSK3A", "GSK3B": "GSK3B",
+    "GSK-3": "GSK3B", "GSK-3BETA": "GSK3B", "GSK-3ALPHA": "GSK3A",
+    # PLK family
+    "PLK1": "PLK1", "PLK1_EXTENDED": "PLK1",
+    "PLK2": "PLK2", "PLK3": "PLK3", "PLK4": "PLK4",
+    # Aurora family
+    "AURORA": "AURKA",
+    "AURORA_A/B": "AURKA/AURKB",
+    "AURKA": "AURKA", "AURORA A": "AURKA", "AURORA-A": "AURKA",
+    "AURKB": "AURKB", "AURORA B": "AURKB", "AURORA-B": "AURKB",
+    "AURKC": "AURKC",
+    # ATM/ATR/DNA-PK
+    "ATM": "ATM", "ATR": "ATR", "ATM/ATR": "ATM/ATR",
+    "DNA-PK": "PRKDC", "DNAPK": "PRKDC", "PRKDC": "PRKDC",
+    # NEK family
+    "NEK": "NEK",  # family-level
+    "NEK2": "NEK2", "NEK6": "NEK6", "NEK2/NEK6": "NEK2/NEK6",
+    # CAMK family
+    "CAMK": "CAMK",  # family-level
+    "CAMK2": "CAMK2",  # family-level
+    "CAMK2A": "CAMK2A", "CAMK2B": "CAMK2B", "CAMK2D": "CAMK2D", "CAMK2G": "CAMK2G",
+    "CAMKII": "CAMK2",
+    # AMPK
+    "AMPK": "PRKAA1", "PRKAA1": "PRKAA1", "PRKAA2": "PRKAA2",
+    # mTOR
+    "MTOR": "MTOR", "FRAP1": "MTOR",
+    # Src family
+    "SRC": "SRC", "SRC-FAMILY": "SRC",
+    "SRC/FYN/YES": "SRC",
+    "FYN": "FYN", "YES": "YES1", "YES1": "YES1",
+    "LYN": "LYN", "LCK": "LCK", "HCK": "HCK",
+    # Other tyrosine kinases
+    "ABL": "ABL1", "ABL1": "ABL1", "ABL2": "ABL2",
+    "JAK1": "JAK1", "JAK2": "JAK2", "JAK1/JAK2": "JAK1/JAK2",
+    "JAK3": "JAK3", "TYK2": "TYK2",
+    "SYK": "SYK", "ZAP70": "ZAP70", "SYK/ZAP70": "SYK/ZAP70",
+    "BTK": "BTK",
+    "FAK": "PTK2", "PTK2": "PTK2",
+    "FLT3": "FLT3",
+    # Receptor TKs
+    "EGFR": "EGFR", "ERBB1": "EGFR", "HER1": "EGFR",
+    "ERBB2": "ERBB2", "HER2": "ERBB2",
+    "PDGFR": "PDGFRA", "PDGFRA": "PDGFRA", "PDGFRB": "PDGFRB",
+    "PDGFR/FGFR": "PDGFRA",
+    "FGFR": "FGFR1", "FGFR1": "FGFR1", "FGFR2": "FGFR2",
+    "VEGFR": "KDR", "KDR": "KDR", "VEGFR2": "KDR",
+    "INSR": "INSR", "IGF1R": "IGF1R", "INSR/IGF1R": "INSR/IGF1R",
+    # Other kinases
+    "RSK": "RPS6KA1", "RSK1": "RPS6KA1", "RSK2": "RPS6KA3",
+    "SGK": "SGK1", "SGK1": "SGK1",
+    "PIM1": "PIM1", "PIM2": "PIM2", "PIM1/PIM2": "PIM1/PIM2",
+    "PKD": "PRKD1", "PRKD1": "PRKD1",
+    "MARK": "MARK2", "MARK/PAR1": "MARK2",
+    "CHK1": "CHEK1", "CHEK1": "CHEK1",
+    "CHK2": "CHEK2", "CHEK2": "CHEK2",
+    "CHK1/CHK2": "CHEK1/CHEK2",
+    "PAK1": "PAK1", "PAK2": "PAK2", "PAK1/PAK2": "PAK1/PAK2",
+    "DYRK1A": "DYRK1A", "DYRK1B": "DYRK1B", "DYRK1A/DYRK1B": "DYRK1A/DYRK1B",
+    "CLK1": "CLK1", "CLK1-4": "CLK",
+    "SRPK1": "SRPK1", "SRPK2": "SRPK2", "SRPK1/SRPK2": "SRPK1/SRPK2",
+    "S6K": "RPS6KB1", "RPS6KB1": "RPS6KB1",
+    "ROCK1": "ROCK1", "ROCK2": "ROCK2", "ROCK1/ROCK2": "ROCK1/ROCK2",
+    "LATS1": "LATS1", "LATS2": "LATS2", "LATS1/LATS2": "LATS1/LATS2",
+    "MST1": "STK4", "MST2": "STK3", "MST1/MST2": "STK4/STK3",
+    "HIPK2": "HIPK2",
+    "BUB1": "BUB1",
+    "TBK1": "TBK1", "IKKE": "IKBKE", "TBK1/IKKE": "TBK1/IKBKE",
+    "IKKA": "CHUK", "IKKB": "IKBKB", "IKKA/IKKB": "CHUK/IKBKB",
+    "GRK": "GRK",  # family-level
+    "MRCK": "CDC42BPA",
+    # Ubiquitin E3 ligases
+    "SCF_COMPLEX": "SCF", "APC/C_D-BOX": "APC/C", "APC/C_KEN-BOX": "APC/C",
+    "HECT_E3": "HECT", "VHL": "VHL", "MDM2": "MDM2",
+    "CHIP/STUB1": "STUB1", "NEDD4/ITCH": "NEDD4",
+    "TRAF6": "TRAF6", "KEAP1/CUL3": "KEAP1",
+    "BTRC/FBXW": "BTRC", "SMURF1/2": "SMURF1",
+}
+
+# Build reverse lookup: canonical → set of aliases (for family-level matching)
+_KINASE_FAMILY_MEMBERS: dict[str, set[str]] = {}
+for _alias, _canonical in _KINASE_ALIAS_MAP.items():
+    _canonical_upper = _canonical.upper()
+    if _canonical_upper not in _KINASE_FAMILY_MEMBERS:
+        _KINASE_FAMILY_MEMBERS[_canonical_upper] = set()
+    _KINASE_FAMILY_MEMBERS[_canonical_upper].add(_alias.upper())
+
+
+def normalize_kinase_name(raw_name: str) -> tuple[str, str]:
+    """Normalize a kinase name to its canonical form.
+
+    Returns (canonical_name, display_name):
+      - canonical_name: HGNC gene symbol or standardized family name (uppercase)
+      - display_name: human-readable form for UI display
+
+    Strategy:
+      1. Exact match in alias map (case-insensitive)
+      2. Strip common suffixes (" kinase", " family") and retry
+      3. Try prefix matching for numbered isoforms (e.g., "CDK" matches "CDK1")
+      4. Fallback: uppercase the raw name
+    """
+    if not raw_name or not raw_name.strip():
+        return ("", "")
+
+    name = raw_name.strip()
+    name_upper = name.upper()
+
+    # 1. Exact match
+    if name_upper in _KINASE_ALIAS_MAP:
+        canonical = _KINASE_ALIAS_MAP[name_upper]
+        return (canonical.upper(), canonical)
+
+    # 2. Strip common suffixes and retry
+    import re as _re_norm
+    cleaned = _re_norm.sub(r'\s*(kinase|family|protein|enzyme)\s*$', '', name_upper, flags=_re_norm.IGNORECASE).strip()
+    if cleaned and cleaned != name_upper and cleaned in _KINASE_ALIAS_MAP:
+        canonical = _KINASE_ALIAS_MAP[cleaned]
+        return (canonical.upper(), canonical)
+
+    # 3. Handle hyphenated/spaced variants (e.g., "CDK-1" → "CDK1")
+    no_sep = _re_norm.sub(r'[-\s]+', '', name_upper)
+    if no_sep != name_upper and no_sep in _KINASE_ALIAS_MAP:
+        canonical = _KINASE_ALIAS_MAP[no_sep]
+        return (canonical.upper(), canonical)
+
+    # 4. Fallback: return uppercase
+    return (name_upper, name)
+
+
+def are_kinases_same_family(name_a: str, name_b: str) -> bool:
+    """Check if two kinase names belong to the same family.
+
+    Handles cases like:
+      - 'CDK' (family) vs 'CDK1' (isoform) → True
+      - 'CK2' vs 'CSNK2A1' → True (both normalize to CSNK2 family)
+      - 'MAPK' vs 'ERK2' → True (ERK2 = MAPK1)
+    """
+    canon_a, _ = normalize_kinase_name(name_a)
+    canon_b, _ = normalize_kinase_name(name_b)
+
+    if not canon_a or not canon_b:
+        return False
+
+    # Exact match after normalization
+    if canon_a == canon_b:
+        return True
+
+    # Check if one is a prefix of the other (family vs isoform)
+    # e.g., "CDK" vs "CDK1", "MAPK" vs "MAPK14"
+    if canon_a.startswith(canon_b) or canon_b.startswith(canon_a):
+        return True
+
+    # Check composite names (e.g., "CDK1/CDK2" contains "CDK1")
+    parts_a = set(canon_a.split('/'))
+    parts_b = set(canon_b.split('/'))
+    if parts_a & parts_b:  # intersection
+        return True
+
+    # Check if either is contained in the other's composite
+    for pa in parts_a:
+        for pb in parts_b:
+            if pa and pb and len(pa) >= 3 and len(pb) >= 3:
+                if pa.startswith(pb) or pb.startswith(pa):
+                    return True
+
+    return False
+
+
 # ── Motif-based Kinase Annotation ────────────────────────────────────────────
 @router.post("/{order_id}/motif-kinase-annotation")
 async def motif_kinase_annotation(
@@ -2535,17 +2747,33 @@ async def motif_kinase_annotation(
                         "source": "UniProt",
                     })
 
-        # ── Deduplicate known_kinases by kinase name ──
-        seen_kinases = set()
+        # ── Normalize & Deduplicate known_kinases by canonical name ──
+        for kk in known_kinases:
+            canonical, display = normalize_kinase_name(kk["kinase"])
+            kk["canonical_name"] = canonical
+            kk["display_name"] = display
+            kk["original_name"] = kk["kinase"]  # preserve raw name from source
+
+        seen_canonical = set()
         unique_known = []
         for kk in known_kinases:
-            name_upper = kk["kinase"].upper()
-            if name_upper not in seen_kinases:
-                seen_kinases.add(name_upper)
+            canon = kk["canonical_name"]
+            if canon not in seen_canonical:
+                seen_canonical.add(canon)
                 unique_known.append(kk)
+            else:
+                # Merge source info into existing entry
+                for existing in unique_known:
+                    if existing["canonical_name"] == canon:
+                        # Append source if different
+                        if kk.get("source") and kk["source"] != existing.get("source"):
+                            if "merged_sources" not in existing:
+                                existing["merged_sources"] = [existing.get("source", "")]
+                            existing["merged_sources"].append(kk["source"])
+                        break
         known_kinases = unique_known
 
-        # Motif-predicted kinases
+        # Motif-predicted kinases (also normalize family names)
         motif_predicted = []
         motif_info = motif_map.get(key, {})
         matched_motifs_str = motif_info.get("matched_motifs", "")
@@ -2557,8 +2785,11 @@ async def motif_kinase_annotation(
                 motif_name = motif_name.strip()
                 if motif_name:
                     kinase_family = motif_name.split("(")[0].strip().split("_")[0]
+                    canonical_family, display_family = normalize_kinase_name(kinase_family)
                     motif_predicted.append({
                         "kinase_family": kinase_family,
+                        "canonical_family": canonical_family,
+                        "display_family": display_family,
                         "motif": motif_name,
                         "source": "motif_analysis",
                     })
@@ -2590,8 +2821,11 @@ async def motif_kinase_annotation(
                 for kinase_name, pattern in motif_db.items():
                     try:
                         if re.search(pattern, effective_seq):
+                            canonical_family, display_family = normalize_kinase_name(kinase_name)
                             motif_predicted.append({
                                 "kinase_family": kinase_name,
+                                "canonical_family": canonical_family,
+                                "display_family": display_family,
                                 "motif": f"{kinase_name} motif ({pattern})",
                                 "source": "inline_motif_match",
                             })
@@ -2603,8 +2837,11 @@ async def motif_kinase_annotation(
             residue = str(position)[0].upper() if position else ""
             if residue in residue_kinase_families:
                 for family in residue_kinase_families[residue]:
+                    canonical_family, display_family = normalize_kinase_name(family)
                     motif_predicted.append({
                         "kinase_family": family,
+                        "canonical_family": canonical_family,
+                        "display_family": display_family,
                         "motif": f"Residue-based ({residue}-site → {family} family)",
                         "source": "residue_prediction",
                     })
@@ -2621,37 +2858,39 @@ async def motif_kinase_annotation(
             status = "novel_candidate"
 
         # Concordance analysis: do motif predictions agree with known kinases?
-        # Simple 3-state: concordant (Match) / discordant (Mismatch) / not_applicable (N/A)
-        # KEA3 results are used as supporting evidence alongside per-PTM known kinases.
+        # Uses canonical name normalization for accurate family-level matching
+        # 3-state: concordant (Match) / discordant (Mismatch) / not_applicable (N/A)
         concordance = "not_applicable"
         concordance_details = []
 
         if has_motif:
-            # Flatten motif family names into individual tokens
-            motif_family_tokens = set()
+            # Collect canonical names from motif predictions
+            motif_canonical_set = set()
             for m in motif_predicted:
-                family = m.get("kinase_family", "")
-                for token in family.upper().replace("/", " ").split():
-                    if token and len(token) >= 2:
-                        motif_family_tokens.add(token)
+                canon = m.get("canonical_family", "")
+                if canon:
+                    # Split composite canonical names (e.g., "CDK1/CDK2")
+                    for part in canon.split("/"):
+                        if part and len(part) >= 2:
+                            motif_canonical_set.add(part)
 
-            # Collect all reference kinase names (per-PTM known + KEA3 top)
-            reference_kinases = set()
+            # Collect canonical names from known kinases
+            known_canonical_set = set()
             if has_known:
                 for k in known_kinases:
-                    reference_kinases.add(k["kinase"].upper())
-            if kea3_top_kinases:
-                for kea3k in kea3_top_kinases[:10]:
-                    reference_kinases.add(kea3k.upper())
+                    canon = k.get("canonical_name", k["kinase"].upper())
+                    for part in canon.split("/"):
+                        if part and len(part) >= 2:
+                            known_canonical_set.add(part)
 
-            if reference_kinases and motif_family_tokens:
-                # Check motif tokens against all reference kinases
-                for ref_k in reference_kinases:
-                    for token in motif_family_tokens:
-                        if len(token) >= 3 and len(ref_k) >= 3 and (token in ref_k or ref_k in token):
-                            concordance_details.append(f"Motif '{token}' matches '{ref_k}'")
-                        elif token == ref_k:
-                            concordance_details.append(f"Motif '{token}' matches '{ref_k}'")
+            if known_canonical_set and motif_canonical_set:
+                # Use are_kinases_same_family for robust matching
+                for known_c in known_canonical_set:
+                    for motif_c in motif_canonical_set:
+                        if are_kinases_same_family(known_c, motif_c):
+                            concordance_details.append(
+                                f"Motif '{motif_c}' matches known '{known_c}'"
+                            )
 
                 if concordance_details:
                     concordance = "concordant"
@@ -2679,20 +2918,21 @@ async def motif_kinase_annotation(
     #
     # Multiple anchor kinases are supported (e.g., CDK1 + CK2 in same group)
 
-    # Step 5a: Collect all anchor kinases from the group
-    anchor_kinases: dict = {}  # kinase_name_upper -> {"kinase": name, "confirmed_ptms": [labels], "sources": set()}
+    # Step 5a: Collect all anchor kinases from the group (using canonical names)
+    anchor_kinases: dict = {}  # canonical_name -> {"kinase": display_name, "canonical": canonical_name, "confirmed_ptms": [labels], "sources": set()}
     for a in annotations:
         for kk in a.get("known_kinases", []):
-            k_name = kk["kinase"]
-            k_upper = k_name.upper()
-            if k_upper not in anchor_kinases:
-                anchor_kinases[k_upper] = {
-                    "kinase": k_name,
+            canonical = kk.get("canonical_name", kk["kinase"].upper())
+            display = kk.get("display_name", kk["kinase"])
+            if canonical not in anchor_kinases:
+                anchor_kinases[canonical] = {
+                    "kinase": display,
+                    "canonical": canonical,
                     "confirmed_ptms": [],
                     "sources": set(),
                 }
-            anchor_kinases[k_upper]["confirmed_ptms"].append(a["label"])
-            anchor_kinases[k_upper]["sources"].add(kk.get("source", "unknown"))
+            anchor_kinases[canonical]["confirmed_ptms"].append(a["label"])
+            anchor_kinases[canonical]["sources"].add(kk.get("source", "unknown"))
 
     # Step 5b: For each PTM without known kinase, try to infer from anchor kinases via motif match
     inferred_assignments: list = []  # [{"ptm": label, "inferred_kinase": name, "evidence": str}]
@@ -2712,21 +2952,23 @@ async def motif_kinase_annotation(
                 if token and len(token) >= 2:
                     motif_tokens.add(token)
 
-        # Try to match motif tokens against anchor kinases
+        # Try to match motif predictions against anchor kinases using canonical name matching
         matched_anchors = []
-        for anchor_upper, anchor_info in anchor_kinases.items():
-            for token in motif_tokens:
-                if len(token) >= 3 and len(anchor_upper) >= 3:
-                    if token in anchor_upper or anchor_upper in token:
-                        matched_anchors.append({
-                            "kinase": anchor_info["kinase"],
-                            "matched_motif_token": token,
-                        })
-                        break
-                elif token == anchor_upper:
+        motif_canonical_names = set()
+        for m in motif_preds:
+            canon = m.get("canonical_family", "")
+            if canon:
+                for part in canon.split("/"):
+                    if part:
+                        motif_canonical_names.add(part)
+
+        for anchor_canonical, anchor_info in anchor_kinases.items():
+            for motif_canon in motif_canonical_names:
+                if are_kinases_same_family(anchor_canonical, motif_canon):
                     matched_anchors.append({
                         "kinase": anchor_info["kinase"],
-                        "matched_motif_token": token,
+                        "canonical": anchor_canonical,
+                        "matched_motif_canonical": motif_canon,
                     })
                     break
 
@@ -2737,7 +2979,8 @@ async def motif_kinase_annotation(
                     "gene": a["gene"],
                     "position": a["position"],
                     "inferred_kinase": ma["kinase"],
-                    "evidence": f"co-wave pattern + motif match ('{ma['matched_motif_token']}' ↔ '{ma['kinase']}')",
+                    "inferred_canonical": ma.get("canonical", ""),
+                    "evidence": f"co-wave pattern + canonical motif match ('{ma.get('matched_motif_canonical', '')}' ↔ '{ma.get('canonical', '')}' [{ma['kinase']}])",
                     "motif_predictions": motif_families_raw,
                 })
         else:
@@ -2751,11 +2994,12 @@ async def motif_kinase_annotation(
 
     # Step 5c: Build per-kinase module summary
     kinase_modules: list = []
-    for k_upper, anchor_info in anchor_kinases.items():
+    for k_canonical, anchor_info in anchor_kinases.items():
         confirmed = list(set(anchor_info["confirmed_ptms"]))
-        inferred = [ia["ptm"] for ia in inferred_assignments if ia["inferred_kinase"].upper() == k_upper]
+        inferred = [ia["ptm"] for ia in inferred_assignments if ia.get("inferred_canonical", "") == k_canonical or are_kinases_same_family(ia.get("inferred_canonical", ""), k_canonical)]
         kinase_modules.append({
             "kinase": anchor_info["kinase"],
+            "canonical": k_canonical,
             "sources": list(anchor_info["sources"]),
             "confirmed_ptms": confirmed,
             "confirmed_count": len(confirmed),
