@@ -2670,7 +2670,120 @@ async def motif_kinase_annotation(
             "concordance_details": concordance_details,
         })
 
-    # ── 5. Summary statistics ────────────────────────────────────────────
+    # ── 5. Group-level Anchor Kinase Inference ────────────────────────────
+    # Logic: within this co-wave group of PTMs,
+    #   1. Collect all known kinases from any PTM → these are "Anchor Kinases"
+    #   2. For each PTM without known kinase, check if its motif prediction
+    #      matches any Anchor Kinase → if yes, "Inferred" as same kinase
+    #   3. PTMs with no known kinase AND no motif match → "Novel Candidate"
+    #
+    # Multiple anchor kinases are supported (e.g., CDK1 + CK2 in same group)
+
+    # Step 5a: Collect all anchor kinases from the group
+    anchor_kinases: dict = {}  # kinase_name_upper -> {"kinase": name, "confirmed_ptms": [labels], "sources": set()}
+    for a in annotations:
+        for kk in a.get("known_kinases", []):
+            k_name = kk["kinase"]
+            k_upper = k_name.upper()
+            if k_upper not in anchor_kinases:
+                anchor_kinases[k_upper] = {
+                    "kinase": k_name,
+                    "confirmed_ptms": [],
+                    "sources": set(),
+                }
+            anchor_kinases[k_upper]["confirmed_ptms"].append(a["label"])
+            anchor_kinases[k_upper]["sources"].add(kk.get("source", "unknown"))
+
+    # Step 5b: For each PTM without known kinase, try to infer from anchor kinases via motif match
+    inferred_assignments: list = []  # [{"ptm": label, "inferred_kinase": name, "evidence": str}]
+    novel_candidates: list = []  # [{"ptm": label, "motif_predictions": [...]}]
+
+    for a in annotations:
+        if a.get("known_kinases"):  # Already has known kinase, skip
+            continue
+
+        motif_preds = a.get("motif_predicted_kinases", [])
+        motif_tokens = set()
+        motif_families_raw = []
+        for m in motif_preds:
+            family = m.get("kinase_family", "")
+            motif_families_raw.append(family)
+            for token in family.upper().replace("/", " ").split():
+                if token and len(token) >= 2:
+                    motif_tokens.add(token)
+
+        # Try to match motif tokens against anchor kinases
+        matched_anchors = []
+        for anchor_upper, anchor_info in anchor_kinases.items():
+            for token in motif_tokens:
+                if len(token) >= 3 and len(anchor_upper) >= 3:
+                    if token in anchor_upper or anchor_upper in token:
+                        matched_anchors.append({
+                            "kinase": anchor_info["kinase"],
+                            "matched_motif_token": token,
+                        })
+                        break
+                elif token == anchor_upper:
+                    matched_anchors.append({
+                        "kinase": anchor_info["kinase"],
+                        "matched_motif_token": token,
+                    })
+                    break
+
+        if matched_anchors:
+            for ma in matched_anchors:
+                inferred_assignments.append({
+                    "ptm": a["label"],
+                    "gene": a["gene"],
+                    "position": a["position"],
+                    "inferred_kinase": ma["kinase"],
+                    "evidence": f"co-wave pattern + motif match ('{ma['matched_motif_token']}' ↔ '{ma['kinase']}')",
+                    "motif_predictions": motif_families_raw,
+                })
+        else:
+            novel_candidates.append({
+                "ptm": a["label"],
+                "gene": a["gene"],
+                "position": a["position"],
+                "motif_predictions": motif_families_raw,
+                "status": a["status"],
+            })
+
+    # Step 5c: Build per-kinase module summary
+    kinase_modules: list = []
+    for k_upper, anchor_info in anchor_kinases.items():
+        confirmed = list(set(anchor_info["confirmed_ptms"]))
+        inferred = [ia["ptm"] for ia in inferred_assignments if ia["inferred_kinase"].upper() == k_upper]
+        kinase_modules.append({
+            "kinase": anchor_info["kinase"],
+            "sources": list(anchor_info["sources"]),
+            "confirmed_ptms": confirmed,
+            "confirmed_count": len(confirmed),
+            "inferred_ptms": inferred,
+            "inferred_count": len(inferred),
+            "total_count": len(confirmed) + len(inferred),
+        })
+    # Sort by total_count descending
+    kinase_modules.sort(key=lambda x: x["total_count"], reverse=True)
+
+    group_inference = {
+        "anchor_kinases": kinase_modules,
+        "inferred_assignments": inferred_assignments,
+        "novel_candidates": novel_candidates,
+        "summary_text": "",
+    }
+
+    # Build human-readable summary
+    summary_parts = []
+    for km in kinase_modules:
+        summary_parts.append(
+            f"{km['kinase']}: {km['confirmed_count']} confirmed + {km['inferred_count']} inferred = {km['total_count']} PTMs"
+        )
+    if novel_candidates:
+        summary_parts.append(f"{len(novel_candidates)} PTM(s) are novel candidates (no anchor kinase match)")
+    group_inference["summary_text"] = "; ".join(summary_parts) if summary_parts else "No anchor kinases found in this group"
+
+    # ── 6. Summary statistics ────────────────────────────────────────────
     status_counts = {"known": 0, "motif_only": 0, "novel_candidate": 0}
     concordance_counts = {"concordant": 0, "discordant": 0, "not_applicable": 0}
     for a in annotations:
@@ -2681,6 +2794,7 @@ async def motif_kinase_annotation(
         "order_id": order_id,
         "ptm_count": len(annotations),
         "annotations": annotations,
+        "group_inference": group_inference,
         "summary": {
             "status_counts": status_counts,
             "concordance_counts": concordance_counts,

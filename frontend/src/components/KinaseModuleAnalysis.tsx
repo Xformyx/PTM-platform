@@ -152,10 +152,45 @@ interface PtmAnnotation {
   concordance_details: string[];
 }
 
+interface InferredAssignment {
+  ptm: string;
+  gene: string;
+  position: string;
+  inferred_kinase: string;
+  evidence: string;
+  motif_predictions: string[];
+}
+
+interface NovelCandidate {
+  ptm: string;
+  gene: string;
+  position: string;
+  motif_predictions: string[];
+  status: string;
+}
+
+interface KinaseModule {
+  kinase: string;
+  sources: string[];
+  confirmed_ptms: string[];
+  confirmed_count: number;
+  inferred_ptms: string[];
+  inferred_count: number;
+  total_count: number;
+}
+
+interface GroupInference {
+  anchor_kinases: KinaseModule[];
+  inferred_assignments: InferredAssignment[];
+  novel_candidates: NovelCandidate[];
+  summary_text: string;
+}
+
 interface MotifAnnotationResponse {
   order_id: number;
   ptm_count: number;
   annotations: PtmAnnotation[];
+  group_inference?: GroupInference;
   summary: {
     status_counts: Record<string, number>;
     concordance_counts: Record<string, number>;
@@ -1069,7 +1104,17 @@ function MotifAnnotationPanel({ annotation }: { annotation: MotifAnnotationRespo
               — may indicate context-dependent regulation or novel mechanism.{" "}
             </span>
           )}
+        </div>
+      )}
 
+      {/* ── Group-level Anchor Kinase Inference ── */}
+      {annotation.group_inference && annotation.group_inference.anchor_kinases.length > 0 && (
+        <GroupInferencePanel inference={annotation.group_inference} />
+      )}
+      {annotation.group_inference && annotation.group_inference.anchor_kinases.length === 0 && (
+        <div className="text-xs text-muted-foreground bg-muted/50 rounded p-2">
+          <strong>Group Inference:</strong> No anchor kinases found in this group.
+          Run annotation on more PTMs or include PTMs with known kinase information.
         </div>
       )}
 
@@ -1155,7 +1200,145 @@ function MotifAnnotationPanel({ annotation }: { annotation: MotifAnnotationRespo
   );
 }
 
-// ── Enrichment Result Panel ──────────────────────────────────────────────────
+// ── Group Inference Panel ────────────────────────────────────────────────────────
+
+function GroupInferencePanel({ inference }: { inference: GroupInference }) {
+  const { anchor_kinases, inferred_assignments, novel_candidates, summary_text } = inference;
+
+  return (
+    <div className="space-y-3 border rounded-lg p-3 bg-gradient-to-br from-blue-50/50 to-indigo-50/50 dark:from-blue-950/20 dark:to-indigo-950/20">
+      {/* Header */}
+      <div className="flex items-center gap-2">
+        <GitMerge className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+        <p className="text-xs font-semibold text-blue-700 dark:text-blue-300">
+          Group-level Kinase Inference
+        </p>
+      </div>
+
+      {/* Summary text */}
+      <p className="text-[11px] text-blue-600 dark:text-blue-300 bg-blue-100/50 dark:bg-blue-900/30 rounded p-2">
+        {summary_text}
+      </p>
+
+      {/* Per-kinase module cards */}
+      {anchor_kinases.map((km) => (
+        <div
+          key={km.kinase}
+          className="border rounded-lg p-3 bg-white/70 dark:bg-gray-900/50 space-y-2"
+        >
+          {/* Kinase header */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Zap className="h-4 w-4 text-yellow-500" />
+              <span className="text-sm font-bold text-foreground">{km.kinase}</span>
+              <Badge variant="outline" className="text-[10px] h-5">
+                {km.total_count} PTMs total
+              </Badge>
+            </div>
+            <div className="flex gap-1">
+              {km.sources.map((s) => {
+                const srcCfg = SOURCE_LABELS[s] || { label: s, color: "text-gray-600 bg-gray-100 dark:bg-gray-800/30 dark:text-gray-300" };
+                return (
+                  <span key={s} className={`text-[8px] px-1.5 py-0.5 rounded ${srcCfg.color}`}>
+                    {srcCfg.label}
+                  </span>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Confirmed PTMs */}
+          <div className="space-y-1">
+            <p className="text-[10px] font-medium text-green-700 dark:text-green-400 flex items-center gap-1">
+              <CheckCircle2 className="h-3 w-3" />
+              Confirmed ({km.confirmed_count})
+            </p>
+            <div className="flex flex-wrap gap-1">
+              {km.confirmed_ptms.map((ptm) => (
+                <span
+                  key={ptm}
+                  className="px-2 py-0.5 rounded-full text-[10px] bg-green-100 dark:bg-green-800/40 text-green-700 dark:text-green-300 border border-green-300 dark:border-green-600"
+                >
+                  <CheckCircle2 className="h-2.5 w-2.5 inline mr-0.5" />
+                  {ptm}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          {/* Inferred PTMs */}
+          {km.inferred_count > 0 && (
+            <div className="space-y-1">
+              <p className="text-[10px] font-medium text-blue-700 dark:text-blue-400 flex items-center gap-1">
+                <ArrowRight className="h-3 w-3" />
+                Inferred by co-wave + motif match ({km.inferred_count})
+              </p>
+              <div className="flex flex-wrap gap-1">
+                {km.inferred_ptms.map((ptm) => {
+                  const ia = inferred_assignments.find((a) => a.ptm === ptm);
+                  return (
+                    <span
+                      key={ptm}
+                      className="px-2 py-0.5 rounded-full text-[10px] bg-blue-100 dark:bg-blue-800/40 text-blue-700 dark:text-blue-300 border border-blue-300 dark:border-blue-600 cursor-help"
+                      title={ia?.evidence || ""}
+                    >
+                      <ArrowRight className="h-2.5 w-2.5 inline mr-0.5" />
+                      {ptm}
+                    </span>
+                  );
+                })}
+              </div>
+              {/* Evidence details for inferred */}
+              <div className="mt-1 space-y-0.5">
+                {inferred_assignments
+                  .filter((ia) => ia.inferred_kinase.toUpperCase() === km.kinase.toUpperCase())
+                  .map((ia) => (
+                    <p key={ia.ptm} className="text-[9px] text-muted-foreground ml-4">
+                      {ia.ptm}: {ia.evidence}
+                    </p>
+                  ))}
+              </div>
+            </div>
+          )}
+        </div>
+      ))}
+
+      {/* Novel Candidates (not matching any anchor) */}
+      {novel_candidates.length > 0 && (
+        <div className="border rounded-lg p-3 bg-purple-50/50 dark:bg-purple-950/20 space-y-2">
+          <div className="flex items-center gap-2">
+            <Sparkles className="h-4 w-4 text-purple-500" />
+            <span className="text-xs font-semibold text-purple-700 dark:text-purple-300">
+              Novel Candidates — No Anchor Kinase Match ({novel_candidates.length})
+            </span>
+          </div>
+          <p className="text-[10px] text-purple-600 dark:text-purple-300">
+            These PTMs share the same temporal pattern but their motif predictions
+            do not match any confirmed kinase in the group. They may be substrates of
+            an uncharacterized kinase or a kinase not yet in the databases.
+          </p>
+          <div className="flex flex-wrap gap-1">
+            {novel_candidates.map((nc) => (
+              <span
+                key={nc.ptm}
+                className="px-2 py-0.5 rounded-full text-[10px] bg-purple-100 dark:bg-purple-800/40 text-purple-700 dark:text-purple-300 border border-purple-300 dark:border-purple-600 cursor-help"
+                title={nc.motif_predictions.length > 0 ? `Motif: ${nc.motif_predictions.join(", ")}` : "No motif prediction"}
+              >
+                <Sparkles className="h-2.5 w-2.5 inline mr-0.5" />
+                {nc.ptm}
+                {nc.motif_predictions.length > 0 && (
+                  <span className="opacity-60 ml-1">({nc.motif_predictions.slice(0, 2).join(", ")})</span>
+                )}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Enrichment Result Panel ──────────────────────────────────────────────────────
 
 function EnrichmentResultPanel({ result }: { result: KinaseEnrichmentResponse }) {
   const [showLibraries, setShowLibraries] = useState(false);
