@@ -2054,15 +2054,13 @@ async def motif_kinase_annotation(
             known_kinase_names = set(
                 k["kinase"].upper() for k in known_kinases
             )
-            motif_families = set(
-                m["kinase_family"].upper().replace("/", " ").split()
-                for m in motif_predicted
-            )
-            # Flatten
+            # Flatten motif family names into individual tokens
             motif_family_tokens = set()
-            for fam in motif_families:
-                for token in fam:
-                    motif_family_tokens.add(token)
+            for m in motif_predicted:
+                family = m.get("kinase_family", "")
+                for token in family.upper().replace("/", " ").split():
+                    if token:
+                        motif_family_tokens.add(token)
 
             # Check against known kinases
             for kn in known_kinase_names:
