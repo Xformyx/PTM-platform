@@ -147,7 +147,7 @@ interface PtmAnnotation {
   known_kinases: KnownKinase[];
   motif_predicted_kinases: MotifPredictedKinase[];
   sequence_window: string;
-  concordance: "concordant" | "discordant" | "not_applicable";
+  concordance: "concordant" | "discordant" | "kea3_suggestive" | "not_applicable";
   concordance_details: string[];
 }
 
@@ -908,6 +908,7 @@ function MotifAnnotationPanel({ annotation }: { annotation: MotifAnnotationRespo
   const known = annotations.filter((a) => a.status === "known");
   const concordant = annotations.filter((a) => a.concordance === "concordant");
   const discordant = annotations.filter((a) => a.concordance === "discordant");
+  const kea3Suggestive = annotations.filter((a) => a.concordance === "kea3_suggestive");
 
   return (
     <div className="space-y-3 border rounded-lg p-3 bg-muted/30">
@@ -1053,18 +1054,23 @@ function MotifAnnotationPanel({ annotation }: { annotation: MotifAnnotationRespo
       )}
 
       {/* Concordance summary */}
-      {(concordant.length > 0 || discordant.length > 0) && (
+      {(concordant.length > 0 || discordant.length > 0 || kea3Suggestive.length > 0) && (
         <div className="text-xs text-muted-foreground bg-muted/50 rounded p-2">
           <strong>Concordance Summary:</strong>{" "}
           {concordant.length > 0 && (
             <span className="text-green-600">
-              {concordant.length} PTM(s) where motif prediction matches known/KEA3 kinase.{" "}
+              {concordant.length} PTM(s) where motif prediction matches known kinase.{" "}
             </span>
           )}
           {discordant.length > 0 && (
             <span className="text-red-600">
-              {discordant.length} PTM(s) where motif prediction differs from known/KEA3 kinase
-              — may indicate context-dependent regulation or novel mechanism.
+              {discordant.length} PTM(s) where motif prediction differs from known kinase
+              — may indicate context-dependent regulation or novel mechanism.{" "}
+            </span>
+          )}
+          {kea3Suggestive.length > 0 && (
+            <span className="text-amber-500">
+              {kea3Suggestive.length} PTM(s) with motif-KEA3 overlap but no per-PTM known kinase (suggestive only).{" "}
             </span>
           )}
         </div>
@@ -1135,6 +1141,11 @@ function MotifAnnotationPanel({ annotation }: { annotation: MotifAnnotationRespo
                       {a.concordance === "discordant" && (
                         <span className="text-red-600 flex items-center gap-0.5">
                           <ShieldAlert className="h-3 w-3" /> Mismatch
+                        </span>
+                      )}
+                      {a.concordance === "kea3_suggestive" && (
+                        <span className="text-amber-500 flex items-center gap-0.5">
+                          <ShieldQuestion className="h-3 w-3" /> KEA3 only
                         </span>
                       )}
                       {a.concordance === "not_applicable" && (

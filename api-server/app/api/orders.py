@@ -2469,10 +2469,13 @@ async def motif_kinase_annotation(
             status = "novel_candidate"
 
         # Concordance analysis: do motif predictions agree with known kinases or KEA3 results?
+        # RULE: concordance requires BOTH motif prediction AND known kinase info for this specific PTM.
+        # KEA3 results alone (gene-set level) are NOT sufficient for per-PTM concordance.
         concordance = "not_applicable"
         concordance_details = []
 
-        if has_motif and (has_known or kea3_top_kinases):
+        if has_motif and has_known:
+            # ── Primary concordance: motif vs per-PTM known kinases ──
             known_kinase_names = set(
                 k["kinase"].upper() for k in known_kinases
             )
@@ -2481,25 +2484,49 @@ async def motif_kinase_annotation(
             for m in motif_predicted:
                 family = m.get("kinase_family", "")
                 for token in family.upper().replace("/", " ").split():
-                    if token:
+                    if token and len(token) >= 2:  # Skip single-char tokens
                         motif_family_tokens.add(token)
 
-            # Check against known kinases
+            # Check against known kinases (strict matching)
             for kn in known_kinase_names:
                 for token in motif_family_tokens:
-                    if token in kn or kn in token:
+                    # Require meaningful overlap: token in kinase name or vice versa
+                    # but both must be at least 3 chars for substring match
+                    if len(token) >= 3 and len(kn) >= 3 and (token in kn or kn in token):
+                        concordance_details.append(f"Motif '{token}' matches known kinase '{kn}'")
+                    elif token == kn:  # Exact match for short names
                         concordance_details.append(f"Motif '{token}' matches known kinase '{kn}'")
 
-            # Check against KEA3 top kinases
-            for kea3k in kea3_top_kinases[:10]:
-                for token in motif_family_tokens:
-                    if token in kea3k or kea3k.startswith(token[:3]):
-                        concordance_details.append(f"Motif '{token}' matches KEA3 kinase '{kea3k}'")
+            # ── Secondary: also check KEA3 but only as supporting evidence, not sole basis ──
+            if kea3_top_kinases:
+                kea3_matches = []
+                for kea3k in kea3_top_kinases[:10]:
+                    kea3k_upper = kea3k.upper()
+                    for token in motif_family_tokens:
+                        # Strict matching: require at least 3-char overlap
+                        if len(token) >= 3 and len(kea3k_upper) >= 3 and (token in kea3k_upper or kea3k_upper in token):
+                            kea3_matches.append(f"Motif '{token}' also supported by KEA3 kinase '{kea3k}'")
+                concordance_details.extend(kea3_matches)
 
             if concordance_details:
                 concordance = "concordant"
             else:
                 concordance = "discordant"
+
+        elif has_motif and not has_known and kea3_top_kinases:
+            # Motif exists but no per-PTM known kinase → mark as "kea3_only" (not a true concordance)
+            concordance = "kea3_suggestive"
+            motif_family_tokens = set()
+            for m in motif_predicted:
+                family = m.get("kinase_family", "")
+                for token in family.upper().replace("/", " ").split():
+                    if token and len(token) >= 2:
+                        motif_family_tokens.add(token)
+            for kea3k in kea3_top_kinases[:10]:
+                kea3k_upper = kea3k.upper()
+                for token in motif_family_tokens:
+                    if len(token) >= 3 and len(kea3k_upper) >= 3 and (token in kea3k_upper or kea3k_upper in token):
+                        concordance_details.append(f"Motif '{token}' suggested by KEA3 kinase '{kea3k}' (no per-PTM known kinase)")
 
         annotations.append({
             "gene": gene,
@@ -2515,7 +2542,7 @@ async def motif_kinase_annotation(
 
     # ── 5. Summary statistics ────────────────────────────────────────────
     status_counts = {"known": 0, "motif_only": 0, "novel_candidate": 0}
-    concordance_counts = {"concordant": 0, "discordant": 0, "not_applicable": 0}
+    concordance_counts = {"concordant": 0, "discordant": 0, "kea3_suggestive": 0, "not_applicable": 0}
     for a in annotations:
         status_counts[a["status"]] = status_counts.get(a["status"], 0) + 1
         concordance_counts[a["concordance"]] = concordance_counts.get(a["concordance"], 0) + 1
