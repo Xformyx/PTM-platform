@@ -336,6 +336,11 @@ export default function KinaseModuleAnalysis({
   // ── Motif annotation state ──────────────────────────────────────────────
   const [motifAnnotations, setMotifAnnotations] = useState<Record<string, MotifAnnotationResponse>>({});
   const [motifLoading, setMotifLoading] = useState<string | null>(null);
+  const [motifError, setMotifError] = useState<string | null>(null);
+
+  // ── Manual (Kinase Lookup) annotation state ────────────────────────────
+  const [manualAnnotation, setManualAnnotation] = useState<MotifAnnotationResponse | null>(null);
+  const [manualAnnotationLoading, setManualAnnotationLoading] = useState(false);
 
   // ── Co-wave module detection ─────────────────────────────────────────────
   const checkedPtmList = useMemo(
@@ -389,10 +394,17 @@ export default function KinaseModuleAnalysis({
     }
   }, [orderId, manualSelection, topNPtms]);
 
-  // ── Motif annotation call ────────────────────────────────────────────────
+  // ── Motif annotation call ────────────────────────────────────────────
   const runMotifAnnotation = useCallback(
     async (moduleKey: string, ptms: PtmInfo[], kea3TopKinases: string[]) => {
       setMotifLoading(moduleKey);
+      setMotifError(null);
+      // Auto-expand the module so results are visible
+      setExpandedModules((prev) => {
+        const next = new Set(prev);
+        next.add(moduleKey);
+        return next;
+      });
       try {
         const result = await api.post<MotifAnnotationResponse>(
           `/orders/${orderId}/motif-kinase-annotation`,
@@ -402,14 +414,39 @@ export default function KinaseModuleAnalysis({
           }
         );
         setMotifAnnotations((prev) => ({ ...prev, [moduleKey]: result }));
-      } catch (err) {
+      } catch (err: any) {
         console.error("Motif annotation failed:", err);
+        setMotifError(err?.message || "Motif annotation request failed");
       } finally {
         setMotifLoading(null);
       }
     },
     [orderId]
   );
+
+  // ── Manual (Kinase Lookup) motif annotation call ────────────────────────
+  const runManualAnnotation = useCallback(async () => {
+    const selectedPtms = topNPtms.filter((p) => manualSelection.has(`${p.gene}_${p.position}`));
+    if (selectedPtms.length === 0) return;
+    setManualAnnotationLoading(true);
+    setMotifError(null);
+    try {
+      const kea3Top = manualEnrichment?.kea3_results?.slice(0, 10).map((k) => k.kinase) || [];
+      const result = await api.post<MotifAnnotationResponse>(
+        `/orders/${orderId}/motif-kinase-annotation`,
+        {
+          ptms: selectedPtms.map((p) => ({ gene: p.gene, position: p.position })),
+          kea3_top_kinases: kea3Top,
+        }
+      );
+      setManualAnnotation(result);
+    } catch (err: any) {
+      console.error("Manual annotation failed:", err);
+      setMotifError(err?.message || "Motif annotation request failed");
+    } finally {
+      setManualAnnotationLoading(false);
+    }
+  }, [orderId, manualSelection, topNPtms, manualEnrichment]);
 
   const toggleModuleExpand = (key: string) => {
     setExpandedModules((prev) => {
@@ -618,6 +655,23 @@ export default function KinaseModuleAnalysis({
                     </div>
                   </div>
 
+                  {/* Motif error display */}
+                  {motifError && motifLoading === null && (
+                    <Alert variant="destructive" className="mt-2">
+                      <AlertTriangle className="h-4 w-4" />
+                      <AlertTitle>Annotation Error</AlertTitle>
+                      <AlertDescription className="text-xs">{motifError}</AlertDescription>
+                    </Alert>
+                  )}
+
+                  {/* Loading indicator */}
+                  {isMotifLoading && (
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground mt-2 py-2">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Running motif annotation for {mod.ptms.length} PTMs...
+                    </div>
+                  )}
+
                   {/* Expanded content */}
                   {isExpanded && (
                     <div className="space-y-3 pt-2">
@@ -704,7 +758,8 @@ export default function KinaseModuleAnalysis({
         {activeTab === "lookup" && (
           <div className="space-y-3">
             <p className="text-xs text-muted-foreground">
-              Select PTMs below to highlight them in the chart above. Click "Run KEA3 Enrichment" to find common upstream kinases.
+              Select PTMs below to highlight them in the chart above. Click "Run KEA3 Enrichment" to find common upstream kinases,
+              or "Annotate" to check motif-based kinase predictions and identify novel substrate candidates.
             </p>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-1 max-h-48 overflow-y-auto border rounded p-2">
               {topNPtms.map((p) => {
@@ -743,6 +798,20 @@ export default function KinaseModuleAnalysis({
                 )}
                 Run KEA3 Enrichment ({manualSelection.size} PTMs)
               </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-xs"
+                disabled={manualSelection.size === 0 || manualAnnotationLoading}
+                onClick={runManualAnnotation}
+              >
+                {manualAnnotationLoading ? (
+                  <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                ) : (
+                  <FlaskConical className="h-3 w-3 mr-1" />
+                )}
+                Annotate ({manualSelection.size} PTMs)
+              </Button>
               {manualSelection.size > 0 && (
                 <Button
                   variant="ghost"
@@ -750,6 +819,7 @@ export default function KinaseModuleAnalysis({
                   className="text-xs"
                   onClick={() => {
                     setManualSelection(new Set());
+                    setManualAnnotation(null);
                     if (onSelectPtms) {
                       onSelectPtms(topNPtms.map((p) => `${p.gene}_${p.position}`));
                     }
@@ -771,7 +841,32 @@ export default function KinaseModuleAnalysis({
               </Alert>
             )}
 
+            {/* Motif error in lookup tab */}
+            {motifError && !manualAnnotationLoading && (
+              <Alert variant="destructive">
+                <AlertTriangle className="h-4 w-4" />
+                <AlertTitle>Annotation Error</AlertTitle>
+                <AlertDescription className="text-xs">{motifError}</AlertDescription>
+              </Alert>
+            )}
+
+            {/* Loading indicator for manual annotation */}
+            {manualAnnotationLoading && (
+              <div className="flex items-center gap-2 text-xs text-muted-foreground py-2">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Running motif annotation for {manualSelection.size} PTMs...
+              </div>
+            )}
+
             {manualEnrichment && <EnrichmentResultPanel result={manualEnrichment} />}
+
+            {/* Manual Annotation Results */}
+            {manualAnnotation && (
+              <div className="mt-2">
+                <Separator className="mb-3" />
+                <MotifAnnotationPanel annotation={manualAnnotation} />
+              </div>
+            )}
           </div>
         )}
 
