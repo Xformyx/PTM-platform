@@ -2000,21 +2000,29 @@ async def motif_kinase_annotation(
         enriched_entry = enriched_map.get(key, {})
         rag = enriched_entry.get("rag_enrichment", {})
         if _debug_count < 3:
-            _log.warning(f"[ANNOTATION DEBUG] PTM={gene} {position}, key={key}, enriched_entry_found={bool(enriched_entry)}, rag_found={bool(rag)}, rag_type={type(rag).__name__}")
+            _log.warning(f"[ANNOTATION DEBUG] PTM={gene} {position}, key={key}, enriched_entry_found={bool(enriched_entry)}, rag_found={bool(rag)}")
             if rag and isinstance(rag, dict):
-                _log.warning(f"[ANNOTATION DEBUG]   rag keys={list(rag.keys())}")
-                kp_val = rag.get("kinase_prediction", "MISSING")
-                _log.warning(f"[ANNOTATION DEBUG]   kinase_prediction type={type(kp_val).__name__}, value={str(kp_val)[:300]}")
-                reg_val = rag.get("regulation", "MISSING")
-                if isinstance(reg_val, dict):
-                    _log.warning(f"[ANNOTATION DEBUG]   regulation.upstream_regulators={reg_val.get('upstream_regulators', 'MISSING')}")
-                    _log.warning(f"[ANNOTATION DEBUG]   regulation.kinase_substrate={reg_val.get('kinase_substrate', 'MISSING')}")
-                else:
-                    _log.warning(f"[ANNOTATION DEBUG]   regulation type={type(reg_val).__name__}, value={str(reg_val)[:300]}")
+                kp_val = rag.get("kinase_prediction", {})
+                reg_val = rag.get("regulation", {})
+                ptm_val = rag.get("ptm_validation", {})
+                ft_val = rag.get("fulltext_analysis", {})
+                aa_val = rag.get("abstract_analysis", {})
+                si_val = rag.get("string_interactions", [])
+                _log.warning(f"[ANNOTATION DEBUG]   kinase_prediction={str(kp_val)[:200]}")
+                _log.warning(f"[ANNOTATION DEBUG]   regulation.upstream_regulators={reg_val.get('upstream_regulators', []) if isinstance(reg_val, dict) else 'N/A'}")
+                _log.warning(f"[ANNOTATION DEBUG]   regulation.kinase_substrate={reg_val.get('kinase_substrate', []) if isinstance(reg_val, dict) else 'N/A'}")
+                _log.warning(f"[ANNOTATION DEBUG]   ptm_validation type={type(ptm_val).__name__}, keys={list(ptm_val.keys()) if isinstance(ptm_val, dict) else 'N/A'}")
+                if isinstance(ptm_val, dict):
+                    _log.warning(f"[ANNOTATION DEBUG]   ptm_validation.iptmnet_hits={str(ptm_val.get('iptmnet_hits', []))[:300]}")
+                    _log.warning(f"[ANNOTATION DEBUG]   ptm_validation.novelty={str(ptm_val.get('novelty', {}))[:300]}")
+                    _log.warning(f"[ANNOTATION DEBUG]   ptm_validation.is_known={ptm_val.get('is_known', 'N/A')}")
+                _log.warning(f"[ANNOTATION DEBUG]   fulltext_analysis.key_findings={str(ft_val.get('key_findings', []) if isinstance(ft_val, dict) else 'N/A')[:300]}")
+                _log.warning(f"[ANNOTATION DEBUG]   abstract_analysis keys={list(aa_val.keys()) if isinstance(aa_val, dict) else 'N/A'}, value={str(aa_val)[:200]}")
+                _log.warning(f"[ANNOTATION DEBUG]   string_interactions count={len(si_val) if isinstance(si_val, list) else 'N/A'}")
             _debug_count += 1
         if rag:
+            # ── Source 1: kinase_prediction (LLM-based) ──
             kp = rag.get("kinase_prediction", {})
-            # Handle dataclass serialized as string by json.dump(default=str)
             if isinstance(kp, str):
                 import ast
                 try:
@@ -2028,16 +2036,15 @@ async def motif_kinase_annotation(
                             "kinase": k["kinase"],
                             "confidence": k.get("confidence", ""),
                             "mechanism": k.get("mechanism", ""),
-                            "source": "rag_enrichment",
+                            "source": "rag_kinase_prediction",
                         })
                     elif isinstance(k, str) and k:
                         known_kinases.append({
-                            "kinase": k,
-                            "confidence": "predicted",
-                            "mechanism": "",
-                            "source": "rag_enrichment",
+                            "kinase": k, "confidence": "predicted",
+                            "mechanism": "", "source": "rag_kinase_prediction",
                         })
-            # Also check kinase_substrate pairs
+
+            # ── Source 2: regulation (pattern-based) ──
             reg = rag.get("regulation", {})
             if isinstance(reg, dict):
                 for ks in reg.get("kinase_substrate", []):
@@ -2049,24 +2056,146 @@ async def motif_kinase_annotation(
                             "source": "kinase_substrate_pair",
                             "pmid": ks.get("pmid", ""),
                         })
-                # Also check upstream_regulators for kinase info
                 for ur in reg.get("upstream_regulators", []):
                     if isinstance(ur, dict) and ur.get("regulator"):
-                        # Only include if it looks like a kinase (contains kinase-related terms)
-                        reg_name = ur["regulator"]
                         known_kinases.append({
-                            "kinase": reg_name,
+                            "kinase": ur["regulator"],
                             "confidence": ur.get("confidence", "literature"),
                             "mechanism": ur.get("mechanism", ur.get("evidence", "")),
                             "source": "upstream_regulator",
                         })
                     elif isinstance(ur, str) and ur:
                         known_kinases.append({
-                            "kinase": ur,
-                            "confidence": "literature",
-                            "mechanism": "",
-                            "source": "upstream_regulator",
+                            "kinase": ur, "confidence": "literature",
+                            "mechanism": "", "source": "upstream_regulator",
                         })
+
+            # ── Source 3: ptm_validation → iPTMnet enzyme info ──
+            ptm_val = rag.get("ptm_validation", {})
+            if isinstance(ptm_val, dict):
+                # Check iptmnet_hits for enzyme info
+                for hit in ptm_val.get("iptmnet_hits", []):
+                    if isinstance(hit, dict):
+                        enz = hit.get("enzyme") or {}
+                        if isinstance(enz, dict) and enz.get("name"):
+                            known_kinases.append({
+                                "kinase": enz["name"],
+                                "confidence": "database",
+                                "mechanism": f"iPTMnet enzyme (ID: {enz.get('id', '')})",
+                                "source": "iPTMnet",
+                            })
+                # Check novelty info for enzyme
+                novelty = ptm_val.get("novelty") if isinstance(ptm_val.get("novelty"), dict) else {}
+                if not novelty:
+                    # ptm_validation might be stored as flat dict with enzyme at top level
+                    pass
+                if novelty:
+                    enz = novelty.get("enzyme") or {}
+                    if isinstance(enz, dict) and enz.get("name"):
+                        known_kinases.append({
+                            "kinase": enz["name"],
+                            "confidence": "database",
+                            "mechanism": f"iPTMnet validated (ID: {enz.get('id', '')})",
+                            "source": "iPTMnet",
+                        })
+
+            # ── Source 4: fulltext_analysis → key_findings (kinase mentions) ──
+            ft = rag.get("fulltext_analysis", {})
+            if isinstance(ft, dict):
+                kinase_pattern = re.compile(
+                    r'(?:substrate\s+of|phosphorylated\s+by|target\s+of|regulated\s+by)'
+                    r'\s+([A-Z][A-Za-z0-9]{1,10}(?:\s+kinase)?)',
+                    re.IGNORECASE,
+                )
+                for finding in ft.get("key_findings", []):
+                    if isinstance(finding, str):
+                        for m in kinase_pattern.finditer(finding):
+                            kinase_name = m.group(1).strip()
+                            if kinase_name and len(kinase_name) > 1:
+                                known_kinases.append({
+                                    "kinase": kinase_name,
+                                    "confidence": "text_mining",
+                                    "mechanism": finding[:150],
+                                    "source": "fulltext_analysis",
+                                })
+                # Also check per-article key_findings
+                for article_result in ft.get("per_article", []):
+                    if isinstance(article_result, dict):
+                        for finding in article_result.get("key_findings", []):
+                            if isinstance(finding, str):
+                                for m in kinase_pattern.finditer(finding):
+                                    kinase_name = m.group(1).strip()
+                                    if kinase_name and len(kinase_name) > 1:
+                                        known_kinases.append({
+                                            "kinase": kinase_name,
+                                            "confidence": "text_mining",
+                                            "mechanism": finding[:150],
+                                            "source": "fulltext_analysis",
+                                            "pmid": article_result.get("pmid", ""),
+                                        })
+
+            # ── Source 5: abstract_analysis (LLM-based) ──
+            aa = rag.get("abstract_analysis", {})
+            if isinstance(aa, dict):
+                for kinase_info in aa.get("kinases", []):
+                    if isinstance(kinase_info, dict) and kinase_info.get("name"):
+                        known_kinases.append({
+                            "kinase": kinase_info["name"],
+                            "confidence": kinase_info.get("confidence", "predicted"),
+                            "mechanism": kinase_info.get("evidence", ""),
+                            "source": "abstract_analysis",
+                        })
+                    elif isinstance(kinase_info, str) and kinase_info:
+                        known_kinases.append({
+                            "kinase": kinase_info, "confidence": "predicted",
+                            "mechanism": "", "source": "abstract_analysis",
+                        })
+                # Some abstract_analysis formats store kinase info differently
+                for key_name in ("upstream_kinases", "predicted_kinases", "regulators"):
+                    for item in aa.get(key_name, []):
+                        if isinstance(item, str) and item:
+                            known_kinases.append({
+                                "kinase": item, "confidence": "predicted",
+                                "mechanism": "", "source": "abstract_analysis",
+                            })
+                        elif isinstance(item, dict) and (item.get("kinase") or item.get("name")):
+                            known_kinases.append({
+                                "kinase": item.get("kinase") or item.get("name"),
+                                "confidence": item.get("confidence", "predicted"),
+                                "mechanism": item.get("evidence", item.get("mechanism", "")),
+                                "source": "abstract_analysis",
+                            })
+
+            # ── Source 6: string_interactions (protein-protein interactions) ──
+            # STRING DB interactions may include kinases
+            string_ints = rag.get("string_interactions", [])
+            if isinstance(string_ints, list):
+                kinase_keywords = {"kinase", "phosphotransferase", "CK1", "CK2", "CDK", "MAPK",
+                                   "PKA", "PKC", "GSK", "AKT", "mTOR", "ATM", "ATR", "PLK",
+                                   "AURK", "NEK", "DYRK", "CLK", "SRPK", "CAMK", "AMPK"}
+                for si in string_ints:
+                    if isinstance(si, dict):
+                        partner = si.get("preferredName_B") or si.get("partner") or si.get("name", "")
+                        score = si.get("score", 0)
+                        if partner and score >= 700:  # High confidence STRING interaction
+                            partner_upper = partner.upper()
+                            if any(kw.upper() in partner_upper for kw in kinase_keywords):
+                                known_kinases.append({
+                                    "kinase": partner,
+                                    "confidence": f"STRING (score={score})",
+                                    "mechanism": "protein-protein interaction",
+                                    "source": "string_db",
+                                })
+
+        # ── Deduplicate known_kinases by kinase name ──
+        seen_kinases = set()
+        unique_known = []
+        for kk in known_kinases:
+            name_upper = kk["kinase"].upper()
+            if name_upper not in seen_kinases:
+                seen_kinases.add(name_upper)
+                unique_known.append(kk)
+        known_kinases = unique_known
 
         # Motif-predicted kinases
         motif_predicted = []
