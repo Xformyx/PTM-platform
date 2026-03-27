@@ -114,6 +114,7 @@ def run_section_writing(state: dict) -> dict:
     comovement_analysis = state.get("comovement_analysis", {})
     comovement_figures = state.get("comovement_figures", [])
     comovement_llm_context = state.get("comovement_llm_context", "")
+    temporal_kinase_cascade_llm_context = state.get("temporal_kinase_cascade_llm_context", "")
     figure_gen = FigureInformationGenerator(
         network_analysis, parsed_ptms,
         comovement_analysis=comovement_analysis,
@@ -183,6 +184,11 @@ def run_section_writing(state: dict) -> dict:
             if aux_blocks:
                 prompt += "\n\n" + "\n\n".join(aux_blocks)
                 logger.info(f"[GAP-A] Injected {len(aux_blocks)} auxiliary data blocks into Results prompt")
+
+        # v9.11: Inject temporal kinase cascade context for Results/Discussion
+        if temporal_kinase_cascade_llm_context and section_type in ("results", "discussion"):
+            prompt += "\n\n" + temporal_kinase_cascade_llm_context
+            logger.info(f"[v9.11] Injected temporal kinase cascade context into {section_type} prompt ({len(temporal_kinase_cascade_llm_context)} chars)")
 
         # Inject figure context for Results/Discussion so LLM can reference figures
         if figure_gen.has_figures() and section_type in ("results", "discussion"):

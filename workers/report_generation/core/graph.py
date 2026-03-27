@@ -61,6 +61,10 @@ class ReportState(TypedDict, total=False):
     comovement_figures: List[dict]         # [{path, caption, type}]
     comovement_llm_context: str            # structured text for LLM
 
+    # v9.11: Temporal kinase cascade (multi-source annotation)
+    temporal_kinase_cascade: dict           # timepoint_order, timepoint_kinase_map, cross-tp inferences
+    temporal_kinase_cascade_llm_context: str  # structured text for LLM signaling interpretation
+
     # Drug repositioning (extended report)
     report_type: str
     drug_repositioning_results: dict
@@ -147,6 +151,12 @@ def temporal_comovement(state: ReportState) -> dict:
     """v8.0: Detect co-moving PTM clusters and generate temporal analysis."""
     from .nodes.temporal_comovement_node import run_temporal_comovement
     return run_temporal_comovement(state)
+
+
+def kinase_annotation(state: ReportState) -> dict:
+    """v9.11: Multi-source kinase annotation + temporal cascade for co-wave clusters."""
+    from .nodes.kinase_annotation_node import run_kinase_annotation
+    return run_kinase_annotation(state)
 
 
 def cascade_mediator(state: ReportState) -> dict:
@@ -540,20 +550,22 @@ def _route_after_cascade(state: ReportState) -> str:
 def build_report_graph() -> StateGraph:
     """Build the LangGraph StateGraph for report generation.
 
-    Flow (v9.0):
+    Flow (v9.11):
       Standard (ptm_only / ptm_nonptm_network):
         load_context → generate_questions → research → hypothesize
           → validate_hypotheses → network_analysis → temporal_comovement
-          → write_sections → cascade_mediator → generate_qa_report
-          → drug_repositioning → format_citations → edit_report
+          → kinase_annotation → write_sections → cascade_mediator
+          → generate_qa_report → drug_repositioning → format_citations
+          → edit_report
 
       Cross-Talk (cross_talk):
         load_context → generate_questions → research → hypothesize
           → validate_hypotheses → network_analysis → temporal_comovement
-          → write_sections → cascade_mediator → crosstalk_analysis
-          → generate_qa_report → drug_repositioning → format_citations
-          → edit_report
+          → kinase_annotation → write_sections → cascade_mediator
+          → crosstalk_analysis → generate_qa_report → drug_repositioning
+          → format_citations → edit_report
 
+    v9.11: kinase_annotation between temporal_comovement and write_sections.
     v9.0: crosstalk_analysis conditionally inserted after cascade_mediator
     when analysis_mode == "cross_talk".
     v8.0: temporal_comovement between network_analysis and write_sections.
@@ -568,6 +580,7 @@ def build_report_graph() -> StateGraph:
     graph.add_node("validate_hypotheses", validate_hypotheses)
     graph.add_node("network_analysis", network_analysis)
     graph.add_node("temporal_comovement", temporal_comovement)
+    graph.add_node("kinase_annotation", kinase_annotation)
     graph.add_node("write_sections", write_sections)
     graph.add_node("cascade_mediator", cascade_mediator)
     graph.add_node("crosstalk_analysis", crosstalk_analysis)
@@ -583,7 +596,8 @@ def build_report_graph() -> StateGraph:
     graph.add_edge("hypothesize", "validate_hypotheses")
     graph.add_edge("validate_hypotheses", "network_analysis")
     graph.add_edge("network_analysis", "temporal_comovement")
-    graph.add_edge("temporal_comovement", "write_sections")
+    graph.add_edge("temporal_comovement", "kinase_annotation")
+    graph.add_edge("kinase_annotation", "write_sections")
     graph.add_edge("write_sections", "cascade_mediator")
 
     # Conditional: cross_talk mode inserts crosstalk_analysis before qa_report
