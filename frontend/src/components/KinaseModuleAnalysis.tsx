@@ -168,6 +168,76 @@ interface MotifAnnotationResponse {
   };
 }
 
+// ── Global Kinase Module Types ──────────────────────────────────────────────
+
+interface GlobalModuleMember {
+  key: string;
+  gene: string;
+  position: string;
+  membership: "confirmed" | "inferred";
+  evidence: string;
+}
+
+interface CowaveOverlap {
+  cowave_id: number;
+  cowave_label: string;
+  shared_ptms: string[];
+}
+
+interface GlobalKinaseModule {
+  kinase: string;
+  canonical: string;
+  sources: string[];
+  source_count: number;
+  members: GlobalModuleMember[];
+  confirmed_count: number;
+  inferred_count: number;
+  total_count: number;
+  cowave_overlap: CowaveOverlap[];
+}
+
+interface CowaveCrossEntry {
+  cowave_id: number;
+  cowave_label: string;
+  total_ptms: number;
+  overlapping_kinases: {
+    kinase: string;
+    canonical: string;
+    shared_count: number;
+    shared_ptms: string[];
+  }[];
+}
+
+interface GlobalKinaseModuleResponse {
+  order_id: number;
+  kinase_modules: GlobalKinaseModule[];
+  unassigned_ptms: { key: string; gene: string; position: string; motif_families: string[] }[];
+  annotation_details: PtmAnnotation[];
+  summary: {
+    total_ptms: number;
+    total_kinase_modules: number;
+    total_confirmed: number;
+    total_inferred: number;
+    total_unassigned: number;
+    status_counts: Record<string, number>;
+    top_kinases: { kinase: string; canonical: string; total: number }[];
+  };
+  cowave_cross_analysis: Record<string, CowaveCrossEntry>;
+}
+
+// ── Kinase Module Colors ───────────────────────────────────────────────────
+
+const KINASE_MODULE_COLORS = [
+  { bg: "bg-blue-100 dark:bg-blue-900/30", border: "border-blue-400", text: "text-blue-700 dark:text-blue-300", hex: "#3b82f6" },
+  { bg: "bg-rose-100 dark:bg-rose-900/30", border: "border-rose-400", text: "text-rose-700 dark:text-rose-300", hex: "#f43f5e" },
+  { bg: "bg-emerald-100 dark:bg-emerald-900/30", border: "border-emerald-400", text: "text-emerald-700 dark:text-emerald-300", hex: "#10b981" },
+  { bg: "bg-amber-100 dark:bg-amber-900/30", border: "border-amber-400", text: "text-amber-700 dark:text-amber-300", hex: "#f59e0b" },
+  { bg: "bg-violet-100 dark:bg-violet-900/30", border: "border-violet-400", text: "text-violet-700 dark:text-violet-300", hex: "#8b5cf6" },
+  { bg: "bg-cyan-100 dark:bg-cyan-900/30", border: "border-cyan-400", text: "text-cyan-700 dark:text-cyan-300", hex: "#06b6d4" },
+  { bg: "bg-pink-100 dark:bg-pink-900/30", border: "border-pink-400", text: "text-pink-700 dark:text-pink-300", hex: "#ec4899" },
+  { bg: "bg-teal-100 dark:bg-teal-900/30", border: "border-teal-400", text: "text-teal-700 dark:text-teal-300", hex: "#14b8a6" },
+];
+
 interface KinaseModuleAnalysisProps {
   orderId: number;
   vectorData: PtmTimeSeriesRow[];
@@ -331,7 +401,7 @@ export default function KinaseModuleAnalysis({
   conditions,
   onSelectPtms,
 }: KinaseModuleAnalysisProps) {
-  const [activeTab, setActiveTab] = useState<"cowave" | "lookup" | "cascade">("cowave");
+  const [activeTab, setActiveTab] = useState<"cowave" | "lookup" | "cascade" | "kinaseModules">("cowave");
   const [expandedModules, setExpandedModules] = useState<Set<string>>(new Set());
   const [manualSelection, setManualSelection] = useState<Set<string>>(new Set());
 
@@ -343,6 +413,11 @@ export default function KinaseModuleAnalysis({
   // ── Manual (Kinase Lookup) annotation state ────────────────────────────
   const [manualAnnotation, setManualAnnotation] = useState<MotifAnnotationResponse | null>(null);
   const [manualAnnotationLoading, setManualAnnotationLoading] = useState(false);
+
+  // ── Global Kinase Module state ─────────────────────────────────────────
+  const [globalKinaseResult, setGlobalKinaseResult] = useState<GlobalKinaseModuleResponse | null>(null);
+  const [globalKinaseLoading, setGlobalKinaseLoading] = useState(false);
+  const [globalKinaseError, setGlobalKinaseError] = useState<string | null>(null);
 
   // ── Co-wave module detection ─────────────────────────────────────────────
   const checkedPtmList = useMemo(
@@ -407,6 +482,34 @@ export default function KinaseModuleAnalysis({
       setManualAnnotationLoading(false);
     }
   }, [orderId, manualSelection, topNPtms]);
+
+  // ── Global Kinase Module annotation call ────────────────────────────────
+  const runGlobalKinaseModules = useCallback(async () => {
+    setGlobalKinaseLoading(true);
+    setGlobalKinaseError(null);
+    try {
+      const allPtms = checkedPtmList.length > 0 ? checkedPtmList : topNPtms;
+      const cowaveModulesPayload = coWaveModules.map((m) => ({
+        id: m.id,
+        label: m.label,
+        ptms: m.ptms.map((p) => `${p.gene}_${p.position}`),
+      }));
+      const result = await api.post<GlobalKinaseModuleResponse>(
+        `/orders/${orderId}/global-kinase-modules`,
+        {
+          ptms: allPtms.map((p) => ({ gene: p.gene, position: p.position })),
+          cowave_modules: cowaveModulesPayload,
+        }
+      );
+      setGlobalKinaseResult(result);
+      setActiveTab("kinaseModules");
+    } catch (err: any) {
+      console.error("Global kinase module failed:", err);
+      setGlobalKinaseError(err?.message || "Global kinase module request failed");
+    } finally {
+      setGlobalKinaseLoading(false);
+    }
+  }, [orderId, checkedPtmList, topNPtms, coWaveModules]);
 
   const toggleModuleExpand = (key: string) => {
     setExpandedModules((prev) => {
@@ -473,7 +576,54 @@ export default function KinaseModuleAnalysis({
           >
             <BarChart3 className="h-3 w-3 mr-1" /> Cascade View
           </Button>
+          <Button
+            variant={activeTab === "kinaseModules" ? "default" : "ghost"}
+            size="sm"
+            className="text-xs h-7"
+            onClick={() => setActiveTab("kinaseModules")}
+          >
+            <Sparkles className="h-3 w-3 mr-1" /> Kinase Modules
+            {globalKinaseResult && (
+              <Badge variant="secondary" className="text-[9px] ml-1 h-4 px-1">
+                {globalKinaseResult.kinase_modules.length}
+              </Badge>
+            )}
+          </Button>
+          <div className="ml-auto">
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-xs h-7 border-amber-400 text-amber-700 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-900/20"
+              disabled={globalKinaseLoading || checkedPtmList.length === 0}
+              onClick={runGlobalKinaseModules}
+            >
+              {globalKinaseLoading ? (
+                <Loader2 className="h-3 w-3 animate-spin mr-1" />
+              ) : (
+                <Sparkles className="h-3 w-3 mr-1" />
+              )}
+              {globalKinaseLoading ? "Analyzing..." : "Global Annotate"}
+              <Badge variant="outline" className="text-[9px] ml-1 h-4 px-1">
+                {checkedPtmList.length} PTMs
+              </Badge>
+            </Button>
+          </div>
         </div>
+
+        {/* Global annotation loading/error */}
+        {globalKinaseLoading && (
+          <div className="flex items-center gap-2 text-xs text-muted-foreground py-3 px-2 bg-amber-50 dark:bg-amber-900/10 rounded">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Running global kinase module analysis for {checkedPtmList.length} PTMs across all sources...
+          </div>
+        )}
+        {globalKinaseError && (
+          <Alert variant="destructive">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertTitle>Global Annotation Error</AlertTitle>
+            <AlertDescription className="text-xs">{globalKinaseError}</AlertDescription>
+          </Alert>
+        )}
 
         {/* ── Tab: Co-wave Modules ──────────────────────────────────────── */}
         {activeTab === "cowave" && (
@@ -790,6 +940,19 @@ export default function KinaseModuleAnalysis({
             runMotifAnnotation={runMotifAnnotation}
             motifLoading={motifLoading}
             motifError={motifError}
+          />
+        )}
+
+        {/* ── Tab: Kinase Modules ──────────────────────────────────────────── */}
+        {activeTab === "kinaseModules" && (
+          <GlobalKinaseModulesPanel
+            result={globalKinaseResult}
+            loading={globalKinaseLoading}
+            onRun={runGlobalKinaseModules}
+            ptmCount={checkedPtmList.length}
+            vectorData={vectorData}
+            conditions={conditions}
+            onSelectPtms={onSelectPtms}
           />
         )}
       </CardContent>
@@ -1603,6 +1766,378 @@ function CascadeView({
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+
+// ── Global Kinase Modules Panel ──────────────────────────────────────────────
+
+function GlobalKinaseModulesPanel({
+  result,
+  loading,
+  onRun,
+  ptmCount,
+  vectorData,
+  conditions,
+  onSelectPtms,
+}: {
+  result: GlobalKinaseModuleResponse | null;
+  loading: boolean;
+  onRun: () => void;
+  ptmCount: number;
+  vectorData: PtmTimeSeriesRow[];
+  conditions: string[];
+  onSelectPtms?: (keys: string[]) => void;
+}) {
+  const [expandedKinase, setExpandedKinase] = useState<string | null>(null);
+  const [showCrossAnalysis, setShowCrossAnalysis] = useState(false);
+
+  if (!result && !loading) {
+    return (
+      <div className="text-center py-8 space-y-3">
+        <Sparkles className="h-10 w-10 mx-auto text-amber-400 opacity-50" />
+        <div className="text-sm text-muted-foreground">
+          <strong>Global Kinase Module Analysis</strong>
+        </div>
+        <p className="text-xs text-muted-foreground max-w-md mx-auto">
+          Annotate all checked PTMs at once using 8 sources (iPTMnet, UniProt, RAG, motif prediction, etc.),
+          then group them by regulating kinase — regardless of time-point.
+          This reveals kinase-centric modules that complement co-wave (time-based) grouping.
+        </p>
+        <Button
+          variant="default"
+          size="sm"
+          className="text-xs"
+          disabled={ptmCount === 0}
+          onClick={onRun}
+        >
+          <Sparkles className="h-3 w-3 mr-1" />
+          Run Global Annotate ({ptmCount} PTMs)
+        </Button>
+      </div>
+    );
+  }
+
+  if (loading || !result) {
+    return (
+      <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground py-8">
+        <Loader2 className="h-5 w-5 animate-spin" />
+        Analyzing {ptmCount} PTMs across 8 sources + motif prediction...
+      </div>
+    );
+  }
+
+  const { kinase_modules, unassigned_ptms, summary, cowave_cross_analysis } = result;
+
+  return (
+    <div className="space-y-4">
+      {/* Summary */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        <div className="rounded-lg border p-3 text-center">
+          <div className="text-2xl font-bold text-primary">{summary.total_kinase_modules}</div>
+          <div className="text-[10px] text-muted-foreground">Kinase Modules</div>
+        </div>
+        <div className="rounded-lg border p-3 text-center">
+          <div className="text-2xl font-bold text-green-600">{summary.total_confirmed}</div>
+          <div className="text-[10px] text-muted-foreground">Confirmed (Known)</div>
+        </div>
+        <div className="rounded-lg border p-3 text-center">
+          <div className="text-2xl font-bold text-blue-600">{summary.total_inferred}</div>
+          <div className="text-[10px] text-muted-foreground">Inferred (Motif)</div>
+        </div>
+        <div className="rounded-lg border p-3 text-center">
+          <div className="text-2xl font-bold text-muted-foreground">{summary.total_unassigned}</div>
+          <div className="text-[10px] text-muted-foreground">Unassigned</div>
+        </div>
+      </div>
+
+      {/* Top kinases bar */}
+      {summary.top_kinases && summary.top_kinases.length > 0 && (
+        <div className="text-xs text-muted-foreground bg-muted/50 rounded p-2">
+          <strong>Top Kinases:</strong>{" "}
+          {summary.top_kinases.map((k, i) => (
+            <span key={k.canonical}>
+              {i > 0 && " · "}
+              <span className="font-medium text-foreground">{k.canonical}</span>
+              <span className="text-[10px]"> ({k.total} PTMs)</span>
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* Kinase Module Cards */}
+      <div className="space-y-2">
+        {kinase_modules.map((mod, idx) => {
+          const colorIdx = idx % KINASE_MODULE_COLORS.length;
+          const color = KINASE_MODULE_COLORS[colorIdx];
+          const isExpanded = expandedKinase === mod.canonical;
+          const memberKeys = mod.members.map((m) => m.key);
+
+          return (
+            <div
+              key={mod.canonical}
+              className={`rounded-lg border-2 ${color.border} ${color.bg} p-3 space-y-2`}
+            >
+              {/* Module header */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setExpandedKinase(isExpanded ? null : mod.canonical)}
+                    className={`flex items-center gap-1 text-sm font-bold ${color.text} hover:opacity-80`}
+                  >
+                    {isExpanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                    {mod.canonical}
+                  </button>
+                  <Badge variant="outline" className="text-[9px]">
+                    {mod.total_count} PTMs
+                  </Badge>
+                  <Badge variant="outline" className="text-[9px] border-green-500 text-green-600 dark:text-green-400">
+                    <ShieldCheck className="h-2.5 w-2.5 mr-0.5" />
+                    {mod.confirmed_count} confirmed
+                  </Badge>
+                  {mod.inferred_count > 0 && (
+                    <Badge variant="outline" className="text-[9px] border-blue-500 text-blue-600 dark:text-blue-400">
+                      <FlaskConical className="h-2.5 w-2.5 mr-0.5" />
+                      {mod.inferred_count} inferred
+                    </Badge>
+                  )}
+                  <Badge variant="outline" className="text-[9px]">
+                    {mod.source_count} sources
+                  </Badge>
+                </div>
+                <div className="flex items-center gap-1">
+                  {onSelectPtms && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="text-[10px] h-6 px-2"
+                      onClick={() => onSelectPtms(memberKeys)}
+                    >
+                      Highlight in Chart
+                    </Button>
+                  )}
+                </div>
+              </div>
+
+              {/* Member PTMs as badges */}
+              <div className="flex flex-wrap gap-1">
+                {mod.members.map((m) => (
+                  <span
+                    key={m.key}
+                    className={`px-2 py-0.5 rounded-full text-[10px] flex items-center gap-0.5 border ${
+                      m.membership === "confirmed"
+                        ? "bg-green-100 dark:bg-green-900/30 border-green-400 text-green-700 dark:text-green-300"
+                        : "bg-blue-100 dark:bg-blue-900/30 border-blue-400 text-blue-700 dark:text-blue-300"
+                    }`}
+                    title={`${m.gene} ${m.position} — ${m.membership}: ${m.evidence}`}
+                  >
+                    {m.membership === "confirmed" ? (
+                      <ShieldCheck className="h-2.5 w-2.5" />
+                    ) : (
+                      <FlaskConical className="h-2.5 w-2.5" />
+                    )}
+                    {m.gene} {m.position}
+                  </span>
+                ))}
+              </div>
+
+              {/* Co-wave overlap badges */}
+              {mod.cowave_overlap && mod.cowave_overlap.length > 0 && (
+                <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                  <GitMerge className="h-3 w-3" />
+                  Co-wave overlap:
+                  {mod.cowave_overlap.map((ov) => (
+                    <Badge key={ov.cowave_id} variant="outline" className="text-[9px]">
+                      {ov.cowave_label} ({ov.shared_ptms.length} PTMs)
+                    </Badge>
+                  ))}
+                </div>
+              )}
+
+              {/* Expanded: time-series mini-profile */}
+              {isExpanded && (
+                <div className="space-y-2 pt-2 border-t">
+                  {/* Sources */}
+                  <div className="text-[10px] text-muted-foreground">
+                    <strong>Evidence sources:</strong>{" "}
+                    {mod.sources.map((s) => {
+                      const sl = SOURCE_LABELS[s];
+                      return sl ? (
+                        <span key={s} className={`inline-block px-1 py-0 rounded text-[9px] mr-1 ${sl.color}`}>
+                          {sl.label}
+                        </span>
+                      ) : (
+                        <span key={s} className="inline-block px-1 py-0 rounded text-[9px] mr-1 bg-muted">
+                          {s}
+                        </span>
+                      );
+                    })}
+                  </div>
+
+                  {/* Member detail table */}
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="text-[10px] h-7">PTM</TableHead>
+                        <TableHead className="text-[10px] h-7">Status</TableHead>
+                        <TableHead className="text-[10px] h-7">Evidence</TableHead>
+                        <TableHead className="text-[10px] h-7">Time Profile</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {mod.members.map((m) => {
+                        const timeValues = conditions.map((c) => {
+                          const row = vectorData.find(
+                            (v) => v.gene === m.gene && v.position === m.position && v.condition === c
+                          );
+                          return row?.value ?? 0;
+                        });
+                        const maxVal = Math.max(...timeValues.map(Math.abs), 1);
+
+                        return (
+                          <TableRow key={m.key}>
+                            <TableCell className="text-[10px] font-medium py-1">
+                              {m.gene} {m.position}
+                            </TableCell>
+                            <TableCell className="text-[10px] py-1">
+                              <Badge
+                                variant="outline"
+                                className={`text-[9px] ${
+                                  m.membership === "confirmed"
+                                    ? "border-green-500 text-green-600"
+                                    : "border-blue-500 text-blue-600"
+                                }`}
+                              >
+                                {m.membership}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-[10px] py-1 max-w-[200px] truncate" title={m.evidence}>
+                              {m.evidence}
+                            </TableCell>
+                            <TableCell className="py-1">
+                              <div className="flex items-end gap-[2px] h-5">
+                                {timeValues.map((v, ti) => (
+                                  <div
+                                    key={ti}
+                                    className={`w-2 rounded-t ${v >= 0 ? "bg-blue-400" : "bg-red-400"}`}
+                                    style={{ height: `${Math.max(2, (Math.abs(v) / maxVal) * 20)}px` }}
+                                    title={`${conditions[ti]}: ${v.toFixed(2)}`}
+                                  />
+                                ))}
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Unassigned PTMs */}
+      {unassigned_ptms.length > 0 && (
+        <div className="rounded-lg border border-dashed p-3 space-y-2">
+          <div className="flex items-center gap-2 text-xs">
+            <HelpCircle className="h-3.5 w-3.5 text-muted-foreground" />
+            <span className="font-medium">Unassigned PTMs</span>
+            <Badge variant="outline" className="text-[9px]">{unassigned_ptms.length}</Badge>
+          </div>
+          <div className="flex flex-wrap gap-1">
+            {unassigned_ptms.map((p) => (
+              <span
+                key={p.key}
+                className="px-2 py-0.5 rounded-full text-[10px] bg-muted border"
+                title={p.motif_families.length > 0 ? `Motif: ${p.motif_families.join(", ")}` : "No kinase match"}
+              >
+                {p.gene} {p.position}
+                {p.motif_families.length > 0 && (
+                  <span className="text-[8px] ml-1 text-muted-foreground">({p.motif_families.join(", ")})</span>
+                )}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Co-wave × Kinase Module Cross Analysis */}
+      {cowave_cross_analysis && Object.keys(cowave_cross_analysis).length > 0 && (
+        <div className="space-y-2">
+          <button
+            onClick={() => setShowCrossAnalysis(!showCrossAnalysis)}
+            className="flex items-center gap-1 text-xs font-medium hover:text-primary"
+          >
+            {showCrossAnalysis ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+            <GitMerge className="h-3.5 w-3.5" />
+            Co-wave × Kinase Module Cross Analysis
+          </button>
+
+          {showCrossAnalysis && (
+            <div className="space-y-2">
+              <p className="text-[10px] text-muted-foreground">
+                PTMs that belong to the <strong>same kinase module</strong> AND the <strong>same co-wave group</strong> have the strongest evidence for shared regulation — they are regulated by the same kinase AND move together temporally.
+              </p>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="text-[10px] h-7">Co-wave Module</TableHead>
+                    <TableHead className="text-[10px] h-7">Total PTMs</TableHead>
+                    <TableHead className="text-[10px] h-7">Overlapping Kinase Modules</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {Object.values(cowave_cross_analysis).map((entry) => (
+                    <TableRow key={entry.cowave_id}>
+                      <TableCell className="text-[10px] font-medium py-1">{entry.cowave_label}</TableCell>
+                      <TableCell className="text-[10px] py-1">{entry.total_ptms}</TableCell>
+                      <TableCell className="text-[10px] py-1">
+                        {entry.overlapping_kinases.length > 0 ? (
+                          <div className="flex flex-wrap gap-1">
+                            {entry.overlapping_kinases.map((ok) => {
+                              const modIdx = kinase_modules.findIndex((m) => m.canonical === ok.canonical);
+                              const colorIdx = modIdx >= 0 ? modIdx % KINASE_MODULE_COLORS.length : 0;
+                              const c = KINASE_MODULE_COLORS[colorIdx];
+                              return (
+                                <span
+                                  key={ok.canonical}
+                                  className={`px-1.5 py-0.5 rounded text-[9px] border ${c.border} ${c.bg} ${c.text}`}
+                                  title={`Shared PTMs: ${ok.shared_ptms.join(", ")}`}
+                                >
+                                  {ok.canonical} ({ok.shared_count})
+                                </span>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <span className="text-muted-foreground">No overlap</span>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Refresh button */}
+      <div className="flex justify-end">
+        <Button
+          variant="outline"
+          size="sm"
+          className="text-xs"
+          disabled={loading}
+          onClick={onRun}
+        >
+          {loading ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Sparkles className="h-3 w-3 mr-1" />}
+          Re-run Analysis
+        </Button>
+      </div>
     </div>
   );
 }

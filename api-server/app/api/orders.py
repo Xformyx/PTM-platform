@@ -1863,6 +1863,10 @@ async def kinase_enrichment(
 
 # Canonical kinase name mapping: alias/variant → official gene symbol (HGNC)
 # This resolves inconsistencies across data sources (LLM, UniProt, iPTMnet, text mining, motif DB)
+# ── Kinase normalization (shared module) ─────────────────────────────────────
+# Import from workers/common/kinase_utils.py for consistency.
+# We keep a local copy of the alias map + functions so the API server
+# doesn't need workers/ on sys.path at runtime.
 _KINASE_ALIAS_MAP: dict[str, str] = {
     # CDK family
     "CDK": "CDK",  # family-level, keep as-is
@@ -3043,4 +3047,293 @@ async def motif_kinase_annotation(
             "status_counts": status_counts,
             "concordance_counts": concordance_counts,
         },
+    }
+
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# GLOBAL KINASE MODULE — kinase-centric grouping across all PTMs
+# ═══════════════════════════════════════════════════════════════════════════
+
+@router.post("/{order_id}/global-kinase-modules")
+async def global_kinase_modules(
+    order_id: int,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Build kinase-centric modules across ALL significant PTMs.
+
+    Unlike motif-kinase-annotation (which annotates a single co-wave group),
+    this endpoint:
+      1. Runs the full 8-source annotation + motif prediction on ALL provided PTMs
+      2. Groups PTMs by their regulating kinase (not by timepoint)
+      3. Provides cross-module overlap with co-wave modules
+
+    Request body:
+        {
+            "ptms": [{"gene": "Nolc1", "position": "S564"}, ...],
+            "cowave_modules": [                       // optional, for cross-analysis
+                {"id": 1, "label": "Module 1 (peak: 5min)", "ptm_keys": ["NOLC1_S564", ...]},
+                ...
+            ]
+        }
+
+    Returns:
+        {
+            "kinase_modules": [
+                {
+                    "kinase": "CDK5",
+                    "canonical": "CDK5",
+                    "sources": ["iPTMnet", "Literature", ...],
+                    "source_count": 3,
+                    "members": [
+                        {"key": "NOLC1_S564", "gene": "Nolc1", "position": "S564",
+                         "membership": "confirmed", "evidence": "iPTMnet direct"},
+                        {"key": "NPM1_T199", "gene": "Npm1", "position": "T199",
+                         "membership": "inferred", "evidence": "CDK motif match"},
+                        ...
+                    ],
+                    "confirmed_count": 2,
+                    "inferred_count": 3,
+                    "total_count": 5,
+                    "cowave_overlap": [
+                        {"cowave_id": 1, "cowave_label": "Module 1 (peak: 5min)", "shared_ptms": ["NOLC1_S564"]}
+                    ]
+                },
+                ...
+            ],
+            "unassigned_ptms": [...],
+            "annotation_details": [...],    // per-PTM annotation (same as motif-kinase-annotation)
+            "summary": {...},
+            "cowave_cross_analysis": {...}  // overlap statistics
+        }
+    """
+    import json as _json
+    import re
+    import logging
+    from app.config import get_settings
+
+    _log = logging.getLogger("global_kinase_modules")
+    settings = get_settings()
+
+    result = await db.execute(select(Order).where(Order.id == order_id))
+    order = result.scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    _check_order_access(order, user)
+
+    ptms = body.get("ptms", [])
+    cowave_modules_input = body.get("cowave_modules", [])
+
+    if not ptms:
+        raise HTTPException(status_code=400, detail="ptms list is required")
+
+    _log.info(f"[GLOBAL-KINASE] Starting global kinase module analysis: {len(ptms)} PTMs")
+
+    # ── 1. Run full annotation (reuse motif-kinase-annotation logic) ────────
+    # Call the existing annotation endpoint internally
+    annotation_result = await motif_kinase_annotation(
+        order_id=order_id,
+        body={"ptms": ptms},
+        db=db,
+        user=user,
+    )
+
+    annotations = annotation_result.get("annotations", [])
+    _log.info(f"[GLOBAL-KINASE] Annotation complete: {len(annotations)} PTMs annotated")
+
+    # ── 2. Build kinase-centric modules ─────────────────────────────────────
+    # Collect ALL kinases across ALL PTMs (known + motif predicted)
+    kinase_members: dict = {}  # canonical → {kinase, sources, confirmed: [], inferred: []}
+
+    for ann in annotations:
+        ptm_key = ann.get("label", f"{ann.get('gene', '')}_{ann.get('position', '')}")
+        gene = ann.get("gene", "")
+        position = ann.get("position", "")
+
+        # Known kinases → confirmed members
+        for kk in ann.get("known_kinases", []):
+            canon = kk.get("canonical_name", kk.get("kinase", "").upper())
+            display = kk.get("display_name", kk.get("kinase", ""))
+            source = kk.get("source", "unknown")
+            if not canon or len(canon) < 2:
+                continue
+
+            if canon not in kinase_members:
+                kinase_members[canon] = {
+                    "kinase": display,
+                    "canonical": canon,
+                    "sources": set(),
+                    "confirmed": [],
+                    "inferred": [],
+                }
+            kinase_members[canon]["sources"].add(source)
+            if ptm_key not in [m["key"] for m in kinase_members[canon]["confirmed"]]:
+                kinase_members[canon]["confirmed"].append({
+                    "key": ptm_key,
+                    "gene": gene,
+                    "position": position,
+                    "membership": "confirmed",
+                    "evidence": source,
+                })
+
+    # Now assign PTMs without known kinase → inferred via motif match
+    for ann in annotations:
+        if ann.get("known_kinases"):
+            continue  # Already assigned as confirmed
+
+        ptm_key = ann.get("label", f"{ann.get('gene', '')}_{ann.get('position', '')}")
+        gene = ann.get("gene", "")
+        position = ann.get("position", "")
+
+        motif_families = set()
+        for mp in ann.get("motif_predicted_kinases", []):
+            cf = mp.get("canonical_family", mp.get("kinase_family", ""))
+            for part in cf.split("/"):
+                if part and len(part) >= 2:
+                    motif_families.add(part)
+
+        # Try to match with existing kinase modules
+        matched_kinases = []
+        for canon, info in kinase_members.items():
+            for mf in motif_families:
+                if are_kinases_same_family(canon, mf):
+                    matched_kinases.append(canon)
+                    break
+
+        if matched_kinases:
+            # Assign to the kinase module with most confirmed members
+            best_canon = max(matched_kinases, key=lambda c: len(kinase_members[c]["confirmed"]))
+            if ptm_key not in [m["key"] for m in kinase_members[best_canon]["inferred"]]:
+                kinase_members[best_canon]["inferred"].append({
+                    "key": ptm_key,
+                    "gene": gene,
+                    "position": position,
+                    "membership": "inferred",
+                    "evidence": f"motif match ({', '.join(motif_families)})",
+                })
+
+    # ── 3. Build unassigned list ────────────────────────────────────────────
+    all_assigned_keys = set()
+    for info in kinase_members.values():
+        for m in info["confirmed"]:
+            all_assigned_keys.add(m["key"])
+        for m in info["inferred"]:
+            all_assigned_keys.add(m["key"])
+
+    unassigned = []
+    for ann in annotations:
+        ptm_key = ann.get("label", f"{ann.get('gene', '')}_{ann.get('position', '')}")
+        if ptm_key not in all_assigned_keys:
+            motif_fams = [mp.get("canonical_family", mp.get("kinase_family", ""))
+                          for mp in ann.get("motif_predicted_kinases", [])]
+            unassigned.append({
+                "key": ptm_key,
+                "gene": ann.get("gene", ""),
+                "position": ann.get("position", ""),
+                "motif_families": motif_fams,
+            })
+
+    # ── 4. Co-wave cross-analysis ───────────────────────────────────────────
+    cowave_ptm_map: dict = {}  # ptm_key → [{cowave_id, cowave_label}]
+    for cw in cowave_modules_input:
+        cw_id = cw.get("id", 0)
+        cw_label = cw.get("label", f"Module {cw_id}")
+        for pk in cw.get("ptm_keys", []):
+            if pk not in cowave_ptm_map:
+                cowave_ptm_map[pk] = []
+            cowave_ptm_map[pk].append({"cowave_id": cw_id, "cowave_label": cw_label})
+
+    # ── 5. Format kinase modules ────────────────────────────────────────────
+    kinase_module_list = []
+    for canon, info in kinase_members.items():
+        members = info["confirmed"] + info["inferred"]
+
+        # Co-wave overlap
+        cowave_overlap: dict = {}  # cowave_id → {label, shared_ptms}
+        for m in members:
+            for cw_info in cowave_ptm_map.get(m["key"], []):
+                cw_id = cw_info["cowave_id"]
+                if cw_id not in cowave_overlap:
+                    cowave_overlap[cw_id] = {
+                        "cowave_id": cw_id,
+                        "cowave_label": cw_info["cowave_label"],
+                        "shared_ptms": [],
+                    }
+                cowave_overlap[cw_id]["shared_ptms"].append(m["key"])
+
+        kinase_module_list.append({
+            "kinase": info["kinase"],
+            "canonical": canon,
+            "sources": sorted(info["sources"]),
+            "source_count": len(info["sources"]),
+            "members": members,
+            "confirmed_count": len(info["confirmed"]),
+            "inferred_count": len(info["inferred"]),
+            "total_count": len(members),
+            "cowave_overlap": list(cowave_overlap.values()),
+        })
+
+    # Sort by total_count descending
+    kinase_module_list.sort(key=lambda x: x["total_count"], reverse=True)
+
+    # ── 6. Cowave cross-analysis summary ────────────────────────────────────
+    cowave_cross = {}
+    if cowave_modules_input:
+        # For each co-wave module, which kinase modules overlap?
+        for cw in cowave_modules_input:
+            cw_id = cw.get("id", 0)
+            cw_label = cw.get("label", f"Module {cw_id}")
+            cw_ptm_set = set(cw.get("ptm_keys", []))
+            overlapping_kinases = []
+            for km in kinase_module_list:
+                km_ptm_set = set(m["key"] for m in km["members"])
+                shared = cw_ptm_set & km_ptm_set
+                if shared:
+                    overlapping_kinases.append({
+                        "kinase": km["kinase"],
+                        "canonical": km["canonical"],
+                        "shared_count": len(shared),
+                        "shared_ptms": sorted(shared),
+                    })
+            cowave_cross[str(cw_id)] = {
+                "cowave_id": cw_id,
+                "cowave_label": cw_label,
+                "total_ptms": len(cw_ptm_set),
+                "overlapping_kinases": overlapping_kinases,
+            }
+
+    # ── 7. Summary ──────────────────────────────────────────────────────────
+    status_counts = {"known": 0, "motif_only": 0, "novel_candidate": 0}
+    for ann in annotations:
+        status_counts[ann.get("status", "novel_candidate")] = \
+            status_counts.get(ann.get("status", "novel_candidate"), 0) + 1
+
+    summary = {
+        "total_ptms": len(annotations),
+        "total_kinase_modules": len(kinase_module_list),
+        "total_confirmed": sum(km["confirmed_count"] for km in kinase_module_list),
+        "total_inferred": sum(km["inferred_count"] for km in kinase_module_list),
+        "total_unassigned": len(unassigned),
+        "status_counts": status_counts,
+        "top_kinases": [
+            {"kinase": km["kinase"], "canonical": km["canonical"], "total": km["total_count"]}
+            for km in kinase_module_list[:10]
+        ],
+    }
+
+    _log.info(
+        f"[GLOBAL-KINASE] Complete: {len(kinase_module_list)} kinase modules, "
+        f"{summary['total_confirmed']} confirmed, {summary['total_inferred']} inferred, "
+        f"{len(unassigned)} unassigned"
+    )
+
+    return {
+        "order_id": order_id,
+        "kinase_modules": kinase_module_list,
+        "unassigned_ptms": unassigned,
+        "annotation_details": annotations,
+        "summary": summary,
+        "cowave_cross_analysis": cowave_cross,
     }
