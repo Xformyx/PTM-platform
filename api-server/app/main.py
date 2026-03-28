@@ -51,6 +51,10 @@ async def _run_migrations(conn) -> None:
         conn, "orders", "secondary_sample_config",
         "secondary_sample_config JSON NULL"
     )
+    await _add_column_if_missing(
+        conn, "orders", "kinase_analysis_data",
+        "kinase_analysis_data JSON NULL"
+    )
 
 
 async def _seed_admin(session: AsyncSession) -> None:

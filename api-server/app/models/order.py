@@ -88,6 +88,9 @@ class Order(Base):
     # Signal Propagation Timeline data (JSON)
     # {mode, ptm_type, timepoints, nonptm_effectors, self_timelags, cascade_timelags, summary}
     signal_propagation_data: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    # Kinase Analysis data (JSON) — saved from Global Kinase Modules frontend analysis
+    # {kinase_modules, temporal_cascade, cowave_cross_analysis, summary, saved_at}
+    kinase_analysis_data: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
     # Timestamps
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)

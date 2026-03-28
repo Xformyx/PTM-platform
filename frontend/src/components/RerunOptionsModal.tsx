@@ -31,6 +31,7 @@ interface Order {
   analysis_options?: Record<string, unknown>;
   report_options?: Record<string, unknown>;
   rag_collections?: number[] | null;
+  kinase_analysis_data?: Record<string, unknown>;
 }
 
 interface LlmModelOption {
@@ -771,6 +772,16 @@ export default function RerunOptionsModal({
           </div>
 
           <DialogFooter>
+            <div className="flex items-center gap-2 mr-auto">
+              {order?.kinase_analysis_data && (order.kinase_analysis_data as any)?.kinase_modules?.length > 0 && (
+                <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-xs">
+                  <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  Kinase analysis included ({(order.kinase_analysis_data as any).kinase_modules.length} modules)
+                </div>
+              )}
+            </div>
             <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>
               Cancel
             </Button>

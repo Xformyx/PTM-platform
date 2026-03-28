@@ -889,6 +889,8 @@ async def run_stage(
             "secondary_ptm_type": order.secondary_ptm_type,
             "secondary_sample_config": order.secondary_sample_config,
             "secondary_condition_map": _build_condition_map(order.secondary_sample_config) if order.secondary_sample_config else None,
+            # v9.12: Pass frontend kinase analysis results to report pipeline
+            "kinase_analysis_data": order.kinase_analysis_data or {},
         }
         task = celery_app.send_task(
             "report_generation.tasks.run_report_generation",
@@ -3459,6 +3461,24 @@ async def global_kinase_modules(
         f"{len(unassigned)} unassigned, "
         f"{len(temporal_cascade.get('timepoints', []))} cascade timepoints"
     )
+
+    # ── Persist kinase analysis data to DB for use in report generation ──
+    try:
+        from datetime import datetime as _dt
+        result_obj = await db.execute(select(Order).where(Order.id == order_id))
+        order_obj = result_obj.scalar_one_or_none()
+        if order_obj:
+            order_obj.kinase_analysis_data = {
+                "kinase_modules": kinase_module_list,
+                "temporal_cascade": temporal_cascade,
+                "cowave_cross_analysis": cowave_cross,
+                "summary": summary,
+                "saved_at": _dt.utcnow().isoformat(),
+            }
+            await db.commit()
+            _log.info(f"[GLOBAL-KINASE] Saved kinase_analysis_data to order {order_id} DB")
+    except Exception as _e:
+        _log.warning(f"[GLOBAL-KINASE] Failed to save kinase_analysis_data to DB: {_e}")
 
     return {
         "order_id": order_id,

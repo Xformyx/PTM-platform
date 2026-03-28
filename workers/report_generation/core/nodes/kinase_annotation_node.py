@@ -85,7 +85,11 @@ RESIDUE_KINASE_FAMILIES = {
 # ═══════════════════════════════════════════════════════════════════════════
 
 def run_kinase_annotation(state: dict) -> dict:
-    """Annotate co-wave clusters with multi-source kinase info and build temporal cascade."""
+    """Annotate co-wave clusters with multi-source kinase info and build temporal cascade.
+
+    v9.12: If frontend_kinase_analysis is available (from Global Kinase Modules),
+    use it to enrich the LLM context with the more comprehensive 8-source analysis.
+    """
     try:
         comovement = state.get("comovement_analysis", {})
         clusters = comovement.get("clusters", [])
@@ -93,8 +97,24 @@ def run_kinase_annotation(state: dict) -> dict:
         ptm_type = state.get("ptm_type", "phosphorylation")
         network_analysis = state.get("network_analysis", {})
 
+        # v9.12: Check for frontend kinase analysis (Global Kinase Modules result)
+        frontend_kinase = state.get("frontend_kinase_analysis", {})
+        has_frontend_kinase = bool(
+            frontend_kinase
+            and frontend_kinase.get("kinase_modules")
+            and len(frontend_kinase["kinase_modules"]) > 0
+        )
+
         if not clusters:
             logger.info("[KINASE-ANNOTATION] No co-wave clusters — skipping")
+            # v9.12: Even without clusters, if frontend kinase data exists, build context from it
+            if has_frontend_kinase:
+                logger.info("[KINASE-ANNOTATION] Using frontend kinase analysis as standalone context")
+                llm_context = _build_frontend_kinase_llm_context(frontend_kinase, ptm_type)
+                return {
+                    "temporal_kinase_cascade": {},
+                    "temporal_kinase_cascade_llm_context": llm_context,
+                }
             return {
                 "temporal_kinase_cascade": {},
                 "temporal_kinase_cascade_llm_context": "",
@@ -124,10 +144,19 @@ def run_kinase_annotation(state: dict) -> dict:
         # Step 3: Cross-timepoint inference
         temporal_cascade = _cross_timepoint_inference(temporal_cascade)
 
-        # Step 4: Build LLM context
+        # Step 4: Build LLM context (pipeline-internal cascade)
         llm_context = _build_temporal_kinase_llm_context(
             temporal_cascade, cluster_annotations, clusters, ptm_type
         )
+
+        # v9.12: Enrich with frontend Global Kinase Modules data if available
+        if has_frontend_kinase:
+            logger.info(
+                f"[KINASE-ANNOTATION] Enriching LLM context with frontend kinase analysis "
+                f"({len(frontend_kinase['kinase_modules'])} kinase modules)"
+            )
+            frontend_ctx = _build_frontend_kinase_llm_context(frontend_kinase, ptm_type)
+            llm_context = llm_context + "\n\n" + frontend_ctx
 
         logger.info(
             f"[KINASE-ANNOTATION] Temporal cascade: {len(temporal_cascade['timepoint_order'])} timepoints, "
@@ -899,6 +928,198 @@ def _build_temporal_kinase_llm_context(
         f"5. INTEGRATE WITH CO-MOVEMENT ANALYSIS:\n"
         f"   - The {regulator_label.lower()} cascade data complements the co-movement cluster analysis.\n"
         f"   - Use both to build a coherent narrative of the signaling response.\n"
+    )
+
+    return "\n".join(parts)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# v9.12: FRONTEND GLOBAL KINASE MODULES → LLM CONTEXT
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _build_frontend_kinase_llm_context(frontend_kinase: dict, ptm_type: str) -> str:
+    """Build structured LLM context from the frontend Global Kinase Modules analysis.
+
+    This supplements the pipeline-internal kinase annotation with the more
+    comprehensive 8-source analysis performed interactively by the user.
+
+    Args:
+        frontend_kinase: Result from global_kinase_modules API
+            {kinase_modules, temporal_cascade, cowave_cross_analysis, summary, saved_at}
+        ptm_type: 'phosphorylation' or 'ubiquitylation'
+
+    Returns:
+        Structured markdown string for LLM injection
+    """
+    if not frontend_kinase:
+        return ""
+
+    regulator_label = "E3 Ligase" if ptm_type.lower().strip() in ("ubiquitylation", "ubiquitination") else "Kinase"
+    kinase_modules = frontend_kinase.get("kinase_modules", [])
+    temporal_cascade = frontend_kinase.get("temporal_cascade", {})
+    summary = frontend_kinase.get("summary", {})
+    saved_at = frontend_kinase.get("saved_at", "")
+
+    if not kinase_modules:
+        return ""
+
+    parts = [
+        f"\n## GLOBAL {regulator_label.upper()} MODULE ANALYSIS (User-Performed, 8-Source Integration)",
+        "",
+        f"The following {regulator_label.lower()} module analysis was performed interactively using "
+        f"8 independent annotation sources: LLM-based prediction, literature kinase-substrate pairs, "
+        f"upstream regulators, iPTMnet database, text mining, abstract NER, STRING PPI, and motif prediction.",
+        "",
+    ]
+
+    if saved_at:
+        parts.append(f"*Analysis performed: {saved_at[:10]}*")
+        parts.append("")
+
+    # ── Section A: Summary statistics ──
+    parts.append(f"### A. Analysis Summary")
+    parts.append("")
+    total_km = summary.get("total_kinase_modules", len(kinase_modules))
+    total_confirmed = summary.get("total_confirmed", 0)
+    total_inferred = summary.get("total_inferred", 0)
+    parts.append(
+        f"- Total {regulator_label} Modules identified: **{total_km}**\n"
+        f"- Confirmed substrate assignments: **{total_confirmed}**\n"
+        f"- Inferred substrate assignments: **{total_inferred}**"
+    )
+    parts.append("")
+
+    # ── Section B: Top kinase modules ──
+    parts.append(f"### B. Top {regulator_label} Modules (by substrate count)")
+    parts.append("")
+
+    for km in kinase_modules[:15]:  # Top 15 kinase modules
+        kinase_name = km.get("kinase", "Unknown")
+        canonical = km.get("canonical", kinase_name)
+        sources = km.get("sources", [])
+        source_count = km.get("source_count", len(sources))
+        confirmed = km.get("confirmed_count", 0)
+        inferred = km.get("inferred_count", 0)
+        total = km.get("total_count", confirmed + inferred)
+        members = km.get("members", [])
+
+        # Build member summary (top 8 substrates)
+        member_names = []
+        for m in members[:8]:
+            gene = m.get("gene", "")
+            pos = m.get("position", "")
+            if gene and pos:
+                member_names.append(f"{gene}_{pos}")
+            elif gene:
+                member_names.append(gene)
+        member_str = ", ".join(member_names)
+        if len(members) > 8:
+            member_str += f" (+{len(members) - 8} more)"
+
+        sources_str = ", ".join(sources[:5])
+        parts.append(
+            f"**{kinase_name}** (canonical: {canonical}) — "
+            f"{total} substrates ({confirmed} confirmed, {inferred} inferred), "
+            f"{source_count} sources: [{sources_str}]"
+        )
+        if member_str:
+            parts.append(f"  Substrates: {member_str}")
+        parts.append("")
+
+    # ── Section C: Temporal cascade from frontend ──
+    tc_timepoints = temporal_cascade.get("timepoints", [])
+    if tc_timepoints:
+        parts.append(f"### C. Temporal {regulator_label} Activation Order")
+        parts.append("")
+        parts.append(
+            f"Based on co-wave module peak timepoints, the {regulator_label.lower()} activation "
+            f"order is as follows:"
+        )
+        parts.append("")
+
+        # Build cascade flow string
+        flow_parts = []
+        for tp_data in tc_timepoints:
+            tp_label = tp_data.get("timepoint", "")
+            active_kinases = tp_data.get("active_kinases", [])
+            if active_kinases:
+                k_names = [k.get("kinase", k) if isinstance(k, dict) else str(k) for k in active_kinases[:4]]
+                k_str = ", ".join(k_names)
+                if len(active_kinases) > 4:
+                    k_str += f" (+{len(active_kinases) - 4})"
+                flow_parts.append(f"{tp_label} [{k_str}]")
+            else:
+                flow_parts.append(f"{tp_label} [unknown]")
+
+        parts.append("  " + " → ".join(flow_parts))
+        parts.append("")
+
+        # Per-timepoint detail
+        for tp_data in tc_timepoints:
+            tp_label = tp_data.get("timepoint", "")
+            active_kinases = tp_data.get("active_kinases", [])
+            ptm_count = tp_data.get("ptm_count", 0)
+            module_count = tp_data.get("module_count", 0)
+
+            parts.append(f"**{tp_label}** ({ptm_count} PTMs, {module_count} modules):")
+            if active_kinases:
+                for k in active_kinases[:6]:
+                    if isinstance(k, dict):
+                        k_name = k.get("kinase", "")
+                        k_confirmed = k.get("confirmed", 0)
+                        k_inferred = k.get("inferred", 0)
+                        parts.append(f"  - {k_name}: {k_confirmed} confirmed, {k_inferred} inferred")
+                    else:
+                        parts.append(f"  - {k}")
+            parts.append("")
+
+    # ── Section D: Cascade flow transitions ──
+    cascade_flow = temporal_cascade.get("cascade_flow", [])
+    if cascade_flow:
+        parts.append(f"### D. {regulator_label} Transition Between Timepoints")
+        parts.append("")
+        for flow in cascade_flow:
+            from_tp = flow.get("from_timepoint", "")
+            to_tp = flow.get("to_timepoint", "")
+            persistent = flow.get("persistent_kinases", [])
+            new_kinases = flow.get("new_kinases", [])
+            lost_kinases = flow.get("lost_kinases", [])
+
+            parts.append(f"**{from_tp} → {to_tp}:**")
+            if persistent:
+                parts.append(f"  Persistent: {', '.join(persistent[:5])}")
+            if new_kinases:
+                parts.append(f"  Newly activated: {', '.join(new_kinases[:5])}")
+            if lost_kinases:
+                parts.append(f"  Deactivated: {', '.join(lost_kinases[:5])}")
+            parts.append("")
+
+    # ── LLM Instructions ──
+    parts.append(f"### INSTRUCTIONS FOR USING GLOBAL {regulator_label.upper()} MODULE DATA")
+    parts.append("")
+    parts.append(
+        f"1. INTEGRATE KINASE MODULES WITH TEMPORAL DATA:\n"
+        f"   - Use the {regulator_label} Module data above to identify the key signaling regulators.\n"
+        f"   - Cross-reference with the temporal activation order to build a coherent cascade narrative.\n"
+        f"   - Prioritize {regulator_label.lower()}s with high substrate counts and multiple source evidence.\n"
+    )
+    parts.append(
+        f"2. EXPLAIN SUBSTRATE SPECIFICITY:\n"
+        f"   - For each major {regulator_label.lower()}, explain why it phosphorylates its specific substrates.\n"
+        f"   - Connect substrate identities to their biological functions in the signaling context.\n"
+    )
+    parts.append(
+        f"3. TEMPORAL NARRATIVE:\n"
+        f"   - Use the temporal activation order (Section C) to describe early vs. late signaling events.\n"
+        f"   - Explain how {regulator_label.lower()} activity at early timepoints primes downstream responses.\n"
+        f"   - Discuss {regulator_label.lower()}s active across multiple timepoints as sustained regulators.\n"
+    )
+    parts.append(
+        f"4. CROSS-VALIDATE WITH PIPELINE ANALYSIS:\n"
+        f"   - The Global {regulator_label} Modules data was computed from all significant PTMs.\n"
+        f"   - The pipeline-internal cascade (above) was computed from co-wave clusters only.\n"
+        f"   - Where both analyses agree, this represents high-confidence signaling events.\n"
+        f"   - Discrepancies may indicate context-specific or cluster-specific regulation.\n"
     )
 
     return "\n".join(parts)

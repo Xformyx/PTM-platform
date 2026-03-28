@@ -135,6 +135,8 @@ def run_report_generation(self, order_id: int, config: dict):
             "report_config": config.get("report_config", {}),
             "analysis_mode": analysis_mode,
             "progress_callback": _make_progress_cb(order_id),
+            # v9.12: Frontend kinase analysis results (Global Kinase Modules)
+            "frontend_kinase_analysis": config.get("kinase_analysis_data", {}),
         }
 
         # ── Cross-Talk mode: load secondary PTM data into initial_state ──
