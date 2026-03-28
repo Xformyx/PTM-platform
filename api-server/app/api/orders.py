@@ -3148,9 +3148,9 @@ async def global_kinase_modules(
     kinase_members: dict = {}  # canonical → {kinase, sources, confirmed: [], inferred: []}
 
     for ann in annotations:
-        ptm_key = ann.get("label", f"{ann.get('gene', '')}_{ann.get('position', '')}")
         gene = ann.get("gene", "")
         position = ann.get("position", "")
+        ptm_key = f"{gene}_{position}"  # Use gene_position format to match frontend chart keys
 
         # Known kinases → confirmed members
         for kk in ann.get("known_kinases", []):
@@ -3183,9 +3183,9 @@ async def global_kinase_modules(
         if ann.get("known_kinases"):
             continue  # Already assigned as confirmed
 
-        ptm_key = ann.get("label", f"{ann.get('gene', '')}_{ann.get('position', '')}")
         gene = ann.get("gene", "")
         position = ann.get("position", "")
+        ptm_key = f"{gene}_{position}"  # Use gene_position format to match frontend chart keys
 
         motif_families = set()
         for mp in ann.get("motif_predicted_kinases", []):
@@ -3224,7 +3224,7 @@ async def global_kinase_modules(
 
     unassigned = []
     for ann in annotations:
-        ptm_key = ann.get("label", f"{ann.get('gene', '')}_{ann.get('position', '')}")
+        ptm_key = f"{ann.get('gene', '')}_{ann.get('position', '')}"  # Use gene_position format
         if ptm_key not in all_assigned_keys:
             motif_fams = [mp.get("canonical_family", mp.get("kinase_family", ""))
                           for mp in ann.get("motif_predicted_kinases", [])]
