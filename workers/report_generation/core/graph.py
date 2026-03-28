@@ -65,6 +65,10 @@ class ReportState(TypedDict, total=False):
     temporal_kinase_cascade: dict           # timepoint_order, timepoint_kinase_map, cross-tp inferences
     temporal_kinase_cascade_llm_context: str  # structured text for LLM signaling interpretation
 
+    # v9.13: Global Kinase Modules (kinase-centric, all PTMs)
+    global_kinase_modules: dict             # kinase_modules, temporal_cascade, summary (auto-built in pipeline)
+    frontend_kinase_analysis: dict          # pre-computed result from DB (optional, skips recomputation)
+
     # Drug repositioning (extended report)
     report_type: str
     drug_repositioning_results: dict

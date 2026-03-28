@@ -1,10 +1,19 @@
 """
-Kinase Annotation Node — v9.11
+Kinase Annotation Node — v9.13
 
 Runs after temporal_comovement and before write_sections.
 Collects kinase information from 8 sources for each co-wave cluster,
 builds a temporal kinase cascade, performs cross-timepoint inference,
 and generates structured LLM context for cell signaling interpretation.
+
+v9.13: Auto-build Global Kinase Modules inside the pipeline.
+  - Step 5 now builds kinase-centric modules from ALL enriched_ptm_data
+    (not just co-wave cluster members), equivalent to the frontend
+    'Global Kinase Modules' analysis.
+  - If frontend_kinase_analysis is already available (pre-computed),
+    it is used directly (no re-computation).
+  - Result is stored in state["global_kinase_modules"] and appended
+    to the LLM context automatically — no manual user action required.
 
 Pipeline position:
     temporal_comovement → kinase_annotation → write_sections
@@ -14,10 +23,12 @@ Input (from state):
     - enriched_ptm_data: List[dict]  (with rag_enrichment per PTM)
     - experimental_context: dict
     - network_analysis: dict  (for timepoint info)
+    - frontend_kinase_analysis: dict  (optional, from DB if pre-computed)
 
 Output (to state):
     - temporal_kinase_cascade: dict  (structured cascade data)
     - temporal_kinase_cascade_llm_context: str  (for LLM injection)
+    - global_kinase_modules: dict  (kinase-centric module analysis, all PTMs)
 """
 
 import logging
@@ -106,18 +117,31 @@ def run_kinase_annotation(state: dict) -> dict:
         )
 
         if not clusters:
-            logger.info("[KINASE-ANNOTATION] No co-wave clusters — skipping")
-            # v9.12: Even without clusters, if frontend kinase data exists, build context from it
+            logger.info("[KINASE-ANNOTATION] No co-wave clusters — building Global Kinase Modules from all enriched PTMs")
+            enriched_map = _build_enriched_map(enriched_data)
+            motif_db = PHOSPHO_MOTIF_DB if ptm_type == "phosphorylation" else UBI_MOTIF_DB
+
             if has_frontend_kinase:
-                logger.info("[KINASE-ANNOTATION] Using frontend kinase analysis as standalone context")
-                llm_context = _build_frontend_kinase_llm_context(frontend_kinase, ptm_type)
-                return {
-                    "temporal_kinase_cascade": {},
-                    "temporal_kinase_cascade_llm_context": llm_context,
-                }
+                global_km = frontend_kinase
+                logger.info("[KINASE-ANNOTATION] Using pre-computed frontend kinase analysis (no clusters)")
+            else:
+                global_km = _build_global_kinase_modules(
+                    enriched_data=enriched_data,
+                    cluster_annotations=[],
+                    clusters=[],
+                    motif_db=motif_db,
+                    ptm_type=ptm_type,
+                )
+                logger.info(
+                    f"[KINASE-ANNOTATION] Global Kinase Modules (no clusters): "
+                    f"{global_km['summary']['total_kinase_modules']} modules"
+                )
+
+            llm_context = _build_frontend_kinase_llm_context(global_km, ptm_type)
             return {
                 "temporal_kinase_cascade": {},
-                "temporal_kinase_cascade_llm_context": "",
+                "temporal_kinase_cascade_llm_context": llm_context,
+                "global_kinase_modules": global_km,
             }
 
         # Build gene → enriched_ptm_data lookup
@@ -149,14 +173,38 @@ def run_kinase_annotation(state: dict) -> dict:
             temporal_cascade, cluster_annotations, clusters, ptm_type
         )
 
-        # v9.12: Enrich with frontend Global Kinase Modules data if available
+        # Step 5: Build Global Kinase Modules from ALL enriched_ptm_data
+        # v9.13: If frontend already has pre-computed data, use it directly.
+        # Otherwise, build it here automatically — no manual user action needed.
         if has_frontend_kinase:
+            global_km = frontend_kinase
             logger.info(
-                f"[KINASE-ANNOTATION] Enriching LLM context with frontend kinase analysis "
+                f"[KINASE-ANNOTATION] Using pre-computed frontend kinase analysis "
                 f"({len(frontend_kinase['kinase_modules'])} kinase modules)"
             )
-            frontend_ctx = _build_frontend_kinase_llm_context(frontend_kinase, ptm_type)
-            llm_context = llm_context + "\n\n" + frontend_ctx
+        else:
+            logger.info(
+                f"[KINASE-ANNOTATION] Auto-building Global Kinase Modules from "
+                f"{len(enriched_data)} enriched PTMs (v9.13)"
+            )
+            global_km = _build_global_kinase_modules(
+                enriched_data=enriched_data,
+                cluster_annotations=cluster_annotations,
+                clusters=clusters,
+                motif_db=motif_db,
+                ptm_type=ptm_type,
+            )
+            logger.info(
+                f"[KINASE-ANNOTATION] Global Kinase Modules built: "
+                f"{global_km['summary']['total_kinase_modules']} modules, "
+                f"{global_km['summary']['total_confirmed']} confirmed, "
+                f"{global_km['summary']['total_inferred']} inferred"
+            )
+
+        # Append Global Kinase Modules context to LLM context
+        global_km_ctx = _build_frontend_kinase_llm_context(global_km, ptm_type)
+        if global_km_ctx:
+            llm_context = llm_context + "\n\n" + global_km_ctx
 
         logger.info(
             f"[KINASE-ANNOTATION] Temporal cascade: {len(temporal_cascade['timepoint_order'])} timepoints, "
@@ -167,6 +215,7 @@ def run_kinase_annotation(state: dict) -> dict:
         return {
             "temporal_kinase_cascade": temporal_cascade,
             "temporal_kinase_cascade_llm_context": llm_context,
+            "global_kinase_modules": global_km,
         }
 
     except Exception as e:
@@ -1123,3 +1172,255 @@ def _build_frontend_kinase_llm_context(frontend_kinase: dict, ptm_type: str) -> 
     )
 
     return "\n".join(parts)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# v9.13: AUTO-BUILD GLOBAL KINASE MODULES FROM ENRICHED PTM DATA
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _build_global_kinase_modules(
+    enriched_data: list,
+    cluster_annotations: list,
+    clusters: list,
+    motif_db: dict,
+    ptm_type: str,
+) -> dict:
+    """Build kinase-centric modules from ALL enriched_ptm_data.
+
+    This replicates the logic of the frontend 'Global Kinase Modules' API
+    (orders.py::global_kinase_modules) but runs inside the pipeline worker,
+    so no manual user action is required.
+
+    Args:
+        enriched_data: Full enriched_ptm_data list from state
+        cluster_annotations: Per-cluster annotation results (from Step 1)
+        clusters: Co-wave cluster list (for temporal cascade)
+        motif_db: PHOSPHO_MOTIF_DB or UBI_MOTIF_DB
+        ptm_type: 'phosphorylation' or 'ubiquitylation'
+
+    Returns:
+        Dict with keys: kinase_modules, temporal_cascade, summary
+        (same structure as global_kinase_modules API response)
+    """
+    enriched_map = _build_enriched_map(enriched_data)
+
+    # ── Step A: Annotate ALL PTMs (not just cluster members) ─────────────
+    # Collect gene+position from enriched_data
+    all_ptm_entries = []
+    for ed in enriched_data:
+        gene = (ed.get("gene") or ed.get("Gene.Name", "")).strip()
+        pos = ed.get("position") or ed.get("PTM_Position", "")
+        if gene and pos:
+            all_ptm_entries.append((gene, str(pos), ed))
+
+    # ── Step B: Build kinase-centric modules ─────────────────────────────
+    kinase_members: Dict[str, dict] = {}  # canonical → {kinase, sources, confirmed, inferred}
+
+    for gene, pos, enriched_entry in all_ptm_entries:
+        ptm_key = f"{gene.upper()}_{str(pos).upper()}"
+
+        # Collect known kinases (Sources 1-6)
+        known = _collect_known_kinases_from_enriched(gene, pos, enriched_entry)
+
+        for kk in known:
+            canon = kk.get("canonical_name", "")
+            display = kk.get("display_name", kk.get("kinase", ""))
+            source = kk.get("source", "unknown")
+            if not canon or len(canon) < 2:
+                continue
+
+            if canon not in kinase_members:
+                kinase_members[canon] = {
+                    "kinase": display,
+                    "canonical": canon,
+                    "sources": set(),
+                    "confirmed": [],
+                    "inferred": [],
+                }
+            kinase_members[canon]["sources"].add(source)
+            if ptm_key not in [m["key"] for m in kinase_members[canon]["confirmed"]]:
+                kinase_members[canon]["confirmed"].append({
+                    "key": ptm_key,
+                    "gene": gene.upper(),
+                    "position": pos,
+                    "membership": "confirmed",
+                    "evidence": source,
+                })
+
+    # ── Step C: Infer kinases for PTMs without known kinase ──────────────
+    for gene, pos, enriched_entry in all_ptm_entries:
+        ptm_key = f"{gene.upper()}_{str(pos).upper()}"
+
+        # Skip if already confirmed
+        already_confirmed = any(
+            ptm_key in [m["key"] for m in info["confirmed"]]
+            for info in kinase_members.values()
+        )
+        if already_confirmed:
+            continue
+
+        # Motif prediction
+        motif_pred = _predict_motif_kinases(pos, enriched_entry, motif_db)
+        motif_families: Set[str] = set()
+        for mp in motif_pred:
+            for part in mp.get("canonical_family", "").split("/"):
+                if part and len(part) >= 2:
+                    motif_families.add(part)
+
+        if not motif_families:
+            continue
+
+        # Match to existing kinase modules
+        matched_kinases = []
+        for canon in kinase_members:
+            for mf in motif_families:
+                if are_kinases_same_family(canon, mf):
+                    matched_kinases.append(canon)
+                    break
+
+        if matched_kinases:
+            best_canon = max(matched_kinases, key=lambda c: len(kinase_members[c]["confirmed"]))
+            if ptm_key not in [m["key"] for m in kinase_members[best_canon]["inferred"]]:
+                kinase_members[best_canon]["inferred"].append({
+                    "key": ptm_key,
+                    "gene": gene.upper(),
+                    "position": pos,
+                    "membership": "inferred",
+                    "evidence": f"motif match ({', '.join(sorted(motif_families))})",
+                })
+
+    # ── Step D: Format kinase module list ────────────────────────────────
+    kinase_module_list = []
+    for canon, info in kinase_members.items():
+        members = info["confirmed"] + info["inferred"]
+        kinase_module_list.append({
+            "kinase": info["kinase"],
+            "canonical": canon,
+            "sources": sorted(info["sources"]),
+            "source_count": len(info["sources"]),
+            "members": members,
+            "confirmed_count": len(info["confirmed"]),
+            "inferred_count": len(info["inferred"]),
+            "total_count": len(members),
+        })
+
+    kinase_module_list.sort(key=lambda x: x["total_count"], reverse=True)
+
+    # ── Step E: Build temporal cascade from cluster peak timepoints ───────
+    temporal_cascade = {"timepoints": [], "kinase_activity": [], "cascade_flow": []}
+
+    if clusters and cluster_annotations:
+        # Build peak_timepoint → kinases map
+        tp_kinase_map: Dict[str, dict] = {}
+
+        for cluster, ca in zip(clusters, cluster_annotations):
+            peak_tp = cluster.get("peak_timepoint", "")
+            if not peak_tp:
+                continue
+
+            member_keys = set(md.get("key", "") for md in cluster.get("member_details", []))
+
+            if peak_tp not in tp_kinase_map:
+                tp_kinase_map[peak_tp] = {
+                    "kinases": {},
+                    "ptm_count": 0,
+                    "module_count": 0,
+                }
+
+            tp_kinase_map[peak_tp]["ptm_count"] += len(member_keys)
+            tp_kinase_map[peak_tp]["module_count"] += 1
+
+            for km in kinase_module_list:
+                km_keys = set(m["key"] for m in km["members"])
+                shared = member_keys & km_keys
+                if shared:
+                    canon = km["canonical"]
+                    if canon not in tp_kinase_map[peak_tp]["kinases"]:
+                        tp_kinase_map[peak_tp]["kinases"][canon] = {
+                            "kinase": km["kinase"],
+                            "canonical": canon,
+                            "sources": km["sources"],
+                            "ptm_count": len(shared),
+                            "confirmed": sum(1 for m in km["members"] if m["key"] in shared and m["membership"] == "confirmed"),
+                            "inferred": sum(1 for m in km["members"] if m["key"] in shared and m["membership"] == "inferred"),
+                        }
+                    else:
+                        tp_kinase_map[peak_tp]["kinases"][canon]["ptm_count"] += len(shared)
+
+        # Sort timepoints chronologically
+        sorted_tps = sorted(tp_kinase_map.keys(), key=lambda t: tp_to_minutes(t))
+
+        temporal_cascade["timepoints"] = [
+            {
+                "timepoint": tp,
+                "minutes": tp_to_minutes(tp),
+                "ptm_count": tp_kinase_map[tp]["ptm_count"],
+                "module_count": tp_kinase_map[tp]["module_count"],
+                "active_kinases": sorted(
+                    tp_kinase_map[tp]["kinases"].values(),
+                    key=lambda k: k["ptm_count"],
+                    reverse=True,
+                ),
+            }
+            for tp in sorted_tps
+        ]
+
+        # Kinase activity swimlane
+        all_kinase_tps: Dict[str, dict] = {}
+        for tp_data in temporal_cascade["timepoints"]:
+            for k in tp_data["active_kinases"]:
+                canon = k["canonical"]
+                if canon not in all_kinase_tps:
+                    all_kinase_tps[canon] = {
+                        "kinase": k["kinase"],
+                        "canonical": canon,
+                        "timepoints": [],
+                    }
+                all_kinase_tps[canon]["timepoints"].append({
+                    "timepoint": tp_data["timepoint"],
+                    "ptm_count": k["ptm_count"],
+                    "confirmed": k.get("confirmed", 0),
+                    "inferred": k.get("inferred", 0),
+                })
+
+        temporal_cascade["kinase_activity"] = sorted(
+            all_kinase_tps.values(),
+            key=lambda x: len(x["timepoints"]),
+            reverse=True,
+        )
+
+        # Cascade flow between adjacent timepoints
+        cascade_flow = []
+        for i in range(len(sorted_tps) - 1):
+            tp_a = sorted_tps[i]
+            tp_b = sorted_tps[i + 1]
+            kinases_a = set(tp_kinase_map[tp_a]["kinases"].keys())
+            kinases_b = set(tp_kinase_map[tp_b]["kinases"].keys())
+            cascade_flow.append({
+                "from_timepoint": tp_a,
+                "to_timepoint": tp_b,
+                "persistent_kinases": sorted(kinases_a & kinases_b),
+                "new_kinases": sorted(kinases_b - kinases_a),
+                "lost_kinases": sorted(kinases_a - kinases_b),
+            })
+
+        temporal_cascade["cascade_flow"] = cascade_flow
+
+    # ── Step F: Summary ───────────────────────────────────────────────────
+    summary = {
+        "total_ptms": len(all_ptm_entries),
+        "total_kinase_modules": len(kinase_module_list),
+        "total_confirmed": sum(km["confirmed_count"] for km in kinase_module_list),
+        "total_inferred": sum(km["inferred_count"] for km in kinase_module_list),
+        "top_kinases": [
+            {"kinase": km["kinase"], "canonical": km["canonical"], "total": km["total_count"]}
+            for km in kinase_module_list[:10]
+        ],
+    }
+
+    return {
+        "kinase_modules": kinase_module_list,
+        "temporal_cascade": temporal_cascade,
+        "summary": summary,
+        "source": "pipeline_auto",  # Distinguish from frontend-computed
+    }
