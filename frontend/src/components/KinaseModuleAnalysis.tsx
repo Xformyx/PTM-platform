@@ -32,6 +32,12 @@ import {
   ShieldCheck,
   ShieldAlert,
   ShieldQuestion,
+  Clock,
+  Timer,
+  Network,
+  TrendingUp,
+  Layers,
+  GitBranch,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -208,6 +214,47 @@ interface CowaveCrossEntry {
   }[];
 }
 
+// ── Temporal Cascade Types ─────────────────────────────────────────────────
+
+interface TemporalCascadeKinase {
+  kinase: string;
+  canonical: string;
+  sources: string[];
+  ptm_count: number;
+  confirmed: number;
+  inferred: number;
+}
+
+interface TemporalCascadeTimepoint {
+  condition: string;
+  minutes: number;
+  ptm_count: number;
+  cowave_ids: number[];
+  cowave_labels: string[];
+  kinases: TemporalCascadeKinase[];
+}
+
+interface KinaseActivityEntry {
+  kinase: string;
+  canonical: string;
+  sources: string[];
+  timepoints: { condition: string; ptm_count: number; confirmed: number; inferred: number }[];
+}
+
+interface CascadeFlowEntry {
+  from: string;
+  to: string;
+  shared_kinases: string[];
+  new_kinases: string[];
+  lost_kinases: string[];
+}
+
+interface TemporalCascade {
+  timepoints: TemporalCascadeTimepoint[];
+  kinase_activity: KinaseActivityEntry[];
+  cascade_flow: CascadeFlowEntry[];
+}
+
 interface GlobalKinaseModuleResponse {
   order_id: number;
   kinase_modules: GlobalKinaseModule[];
@@ -223,6 +270,7 @@ interface GlobalKinaseModuleResponse {
     top_kinases: { kinase: string; canonical: string; total: number }[];
   };
   cowave_cross_analysis: Record<string, CowaveCrossEntry>;
+  temporal_cascade?: TemporalCascade;
 }
 
 // ── Kinase Module Colors ───────────────────────────────────────────────────
@@ -940,6 +988,9 @@ export default function KinaseModuleAnalysis({
             runMotifAnnotation={runMotifAnnotation}
             motifLoading={motifLoading}
             motifError={motifError}
+            globalKinaseResult={globalKinaseResult}
+            globalKinaseLoading={globalKinaseLoading}
+            onRunGlobalKinase={runGlobalKinaseModules}
           />
         )}
 
@@ -1404,6 +1455,9 @@ function CascadeView({
   runMotifAnnotation,
   motifLoading,
   motifError,
+  globalKinaseResult,
+  globalKinaseLoading,
+  onRunGlobalKinase,
 }: {
   modules: CoWaveModule[];
   motifAnnotations: Record<string, MotifAnnotationResponse>;
@@ -1411,17 +1465,12 @@ function CascadeView({
   runMotifAnnotation: (moduleKey: string, ptms: PtmInfo[]) => void;
   motifLoading: string | null;
   motifError: string | null;
+  globalKinaseResult: GlobalKinaseModuleResponse | null;
+  globalKinaseLoading: boolean;
+  onRunGlobalKinase: () => void;
 }) {
-  const [expandedCascade, setExpandedCascade] = useState<Set<string>>(new Set());
-
-  const toggleCascadeExpand = (key: string) => {
-    setExpandedCascade((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  };
+  const [expandedTimepoint, setExpandedTimepoint] = useState<string | null>(null);
+  const [showSwimlane, setShowSwimlane] = useState(true);
 
   if (modules.length === 0) {
     return (
@@ -1433,338 +1482,433 @@ function CascadeView({
     );
   }
 
+  const tc = globalKinaseResult?.temporal_cascade;
+  const hasTemporalData = tc && tc.timepoints && tc.timepoints.length > 0;
+
+  // Fallback: build basic temporal info from co-wave modules if no global kinase result
   const sortedModules = [...modules].sort(
     (a, b) => conditions.indexOf(a.peakCondition) - conditions.indexOf(b.peakCondition)
   );
 
-  // ── Build cross-module kinase map ──
-  const kinaseModuleMap: Record<string, { modules: string[]; sources: Set<string> }> = {};
-  for (const mod of sortedModules) {
-    const moduleKey = `module_${mod.id}`;
-    const annotation = motifAnnotations[moduleKey];
-
-    // From annotation (8 sources + motif + group inference)
-    const allKinases = collectAllKinases(annotation);
-    for (const k of allKinases) {
-      const key = k.canonical || k.kinase.toUpperCase();
-      if (!kinaseModuleMap[key]) kinaseModuleMap[key] = { modules: [], sources: new Set() };
-      if (!kinaseModuleMap[key].modules.includes(mod.label)) kinaseModuleMap[key].modules.push(mod.label);
-      kinaseModuleMap[key].sources.add(k.source);
-    }
-  }
-
-  // Shared kinases (appear in 2+ modules)
-  const sharedKinases = Object.entries(kinaseModuleMap)
-    .filter(([, v]) => v.modules.length >= 2)
-    .sort((a, b) => b[1].modules.length - a[1].modules.length);
-
-  // Find shared kinases between adjacent modules for arrow labels
-  const getSharedBetween = (modA: CoWaveModule, modB: CoWaveModule): string[] => {
-    const keyA = `module_${modA.id}`;
-    const keyB = `module_${modB.id}`;
-    const kinasesA = new Set<string>();
-    const kinasesB = new Set<string>();
-
-    const addFromAnnotation = (ann: MotifAnnotationResponse | undefined, target: Set<string>) => {
-      if (!ann) return;
-      for (const k of collectAllKinases(ann)) target.add(k.canonical || k.kinase.toUpperCase());
-    };
-
-    addFromAnnotation(motifAnnotations[keyA], kinasesA);
-    addFromAnnotation(motifAnnotations[keyB], kinasesB);
-
-    return [...kinasesA].filter((k) => kinasesB.has(k));
-  };
+  // Color palette for kinases in swimlane
+  const SWIMLANE_COLORS = [
+    { bg: "bg-blue-500", text: "text-white", light: "bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300", hex: "#3b82f6" },
+    { bg: "bg-rose-500", text: "text-white", light: "bg-rose-100 dark:bg-rose-900/40 text-rose-700 dark:text-rose-300", hex: "#f43f5e" },
+    { bg: "bg-emerald-500", text: "text-white", light: "bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300", hex: "#10b981" },
+    { bg: "bg-amber-500", text: "text-white", light: "bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300", hex: "#f59e0b" },
+    { bg: "bg-violet-500", text: "text-white", light: "bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300", hex: "#8b5cf6" },
+    { bg: "bg-cyan-500", text: "text-white", light: "bg-cyan-100 dark:bg-cyan-900/40 text-cyan-700 dark:text-cyan-300", hex: "#06b6d4" },
+    { bg: "bg-pink-500", text: "text-white", light: "bg-pink-100 dark:bg-pink-900/40 text-pink-700 dark:text-pink-300", hex: "#ec4899" },
+    { bg: "bg-teal-500", text: "text-white", light: "bg-teal-100 dark:bg-teal-900/40 text-teal-700 dark:text-teal-300", hex: "#14b8a6" },
+  ];
 
   return (
     <div className="space-y-4">
-      <p className="text-xs text-muted-foreground">
-        Proposed cascade order based on peak timing. Run <strong>Annotate</strong> on each module to collect kinase information from all 8 sources (iPTMnet, UniProt, RAG, motif prediction, etc.).
-      </p>
+      {/* ── Header ── */}
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-muted-foreground">
+          <Clock className="h-3 w-3 inline mr-1" />
+          Temporal kinase cascade: shows which kinases are active at each timepoint and how signaling flows over time.
+        </p>
+        {!hasTemporalData && (
+          <Button
+            variant="default"
+            size="sm"
+            className="text-xs h-7"
+            disabled={globalKinaseLoading}
+            onClick={onRunGlobalKinase}
+          >
+            {globalKinaseLoading ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Network className="h-3 w-3 mr-1" />}
+            Build Temporal Cascade
+          </Button>
+        )}
+      </div>
 
-      {/* ── Cascade Flow Diagram ── */}
-      <div className="flex items-start gap-0 overflow-x-auto pb-2">
-        {sortedModules.map((mod, idx) => {
-          const moduleKey = `module_${mod.id}`;
-          const annotation = motifAnnotations[moduleKey];
-          const isExpanded = expandedCascade.has(moduleKey);
-          const isMotifLoading = motifLoading === moduleKey;
+      {/* ── Loading state ── */}
+      {globalKinaseLoading && (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground py-4 justify-center">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Building temporal kinase cascade from all PTM annotations...
+        </div>
+      )}
 
-          // All kinases from all sources for this module
-          const allKinases = collectAllKinases(annotation);
+      {/* ── No temporal data yet ── */}
+      {!hasTemporalData && !globalKinaseLoading && (
+        <div className="space-y-3">
+          <Alert>
+            <Info className="h-4 w-4" />
+            <AlertTitle>Temporal Cascade Not Yet Built</AlertTitle>
+            <AlertDescription className="text-xs">
+              Click <strong>"Build Temporal Cascade"</strong> above (or run <strong>"Global Kinase Modules"</strong> from the Kinase Modules tab) to generate the temporal kinase cascade.
+              This will annotate all PTMs with 8 sources and build a time-ordered kinase activation map.
+            </AlertDescription>
+          </Alert>
 
-          // Merge kinases with source tracking (using canonical names)
-          const mergedKinases: { kinase: string; canonical: string; sources: string[] }[] = [];
-          const mergedSeen = new Set<string>();
-          for (const k of allKinases) {
-            const key = k.canonical || k.kinase.toUpperCase();
-            if (!mergedSeen.has(key)) {
-              mergedSeen.add(key);
-              mergedKinases.push({ kinase: k.kinase, canonical: key, sources: [k.source] });
-            } else {
-              const existing = mergedKinases.find((m) => m.canonical === key);
-              if (existing && !existing.sources.includes(k.source)) existing.sources.push(k.source);
-            }
-          }
-
-          // Shared kinases with next module
-          const sharedWithNext = idx < sortedModules.length - 1
-            ? getSharedBetween(mod, sortedModules[idx + 1])
-            : [];
-
-          return (
-            <div key={moduleKey} className="flex items-start">
-              <div className="rounded-lg border bg-card p-3 min-w-[220px] max-w-[280px] space-y-2">
-                {/* Module header */}
-                <div className="flex items-center justify-between">
-                  <button
-                    onClick={() => toggleCascadeExpand(moduleKey)}
-                    className="flex items-center gap-1 text-xs font-medium hover:text-primary"
-                  >
-                    {isExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-                    {mod.label}
-                  </button>
+          {/* Fallback: basic co-wave module timeline */}
+          <div className="text-xs font-medium text-muted-foreground mb-2">Basic Co-wave Module Timeline (preview):</div>
+          <div className="flex items-center gap-0 overflow-x-auto pb-2">
+            {sortedModules.map((mod, idx) => (
+              <div key={mod.id} className="flex items-center">
+                <div className="rounded-lg border bg-card p-2.5 min-w-[160px] space-y-1">
+                  <div className="text-[10px] font-medium">{mod.label}</div>
                   <div className="flex items-center gap-1">
-                    <Badge variant="outline" className="text-[9px]">
-                      {mod.ptms.length} PTMs
-                    </Badge>
-                    <Badge variant="outline" className="text-[9px] text-muted-foreground">
-                      Peak: {mod.peakCondition}
-                    </Badge>
+                    <Badge variant="outline" className="text-[9px]">{mod.ptms.length} PTMs</Badge>
+                    <Badge variant="outline" className="text-[9px] text-muted-foreground">Peak: {mod.peakCondition}</Badge>
                   </div>
                 </div>
-
-                {/* Quick stats */}
-                <div className="text-[10px] text-muted-foreground flex gap-2">
-                  <span>Amp: {mod.avgAmplitude.toFixed(2)}</span>
-                  {mod.spearmanScore !== null && <span>ρ={mod.spearmanScore.toFixed(2)}</span>}
-                </div>
-
-                {/* ── Integrated Kinase Summary (all sources) ── */}
-                {mergedKinases.length > 0 ? (
-                  <div className="space-y-1">
-                    <div className="text-[10px] font-medium text-muted-foreground">Kinases (all sources):</div>
-                    <div className="flex flex-wrap gap-1">
-                      {mergedKinases.slice(0, 6).map((mk) => {
-                        const isShared = kinaseModuleMap[mk.canonical]?.modules.length >= 2;
-                        const isMultiSource = mk.sources.length >= 2;
-                        return (
-                          <span
-                            key={mk.kinase}
-                            className={`text-[9px] px-1.5 py-0.5 rounded inline-flex items-center gap-0.5 ${
-                              isMultiSource
-                                ? "bg-green-100 dark:bg-green-800/30 text-green-700 dark:text-green-300 border border-green-400"
-                                : isShared
-                                ? "bg-blue-100 dark:bg-blue-800/30 text-blue-700 dark:text-blue-300 border border-blue-300"
-                                : "bg-muted text-foreground"
-                            }`}
-                            title={`Sources: ${mk.sources.map((s) => SOURCE_LABELS[s]?.label || s).join(", ")}${isShared ? " | Shared across modules" : ""}${isMultiSource ? " | Multi-source validated" : ""}`}
-                          >
-                            {isMultiSource && <CheckCircle2 className="h-2.5 w-2.5 text-green-500" />}
-                            {mk.kinase}
-                            <span className="opacity-50 text-[8px]">({mk.sources.length})</span>
-                          </span>
-                        );
-                      })}
-                      {mergedKinases.length > 6 && (
-                        <span className="text-[9px] text-muted-foreground">+{mergedKinases.length - 6}</span>
-                      )}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="text-[10px] text-muted-foreground italic">
-                    No kinase data yet — click Annotate below
-                  </div>
-                )}
-
-                {/* Annotation status badges */}
-                {annotation && (
-                  <div className="flex gap-1 flex-wrap">
-                    {annotation.summary.status_counts.known > 0 && (
-                      <span className="text-[9px] px-1 py-0 rounded bg-green-100 dark:bg-green-800/30 text-green-600 dark:text-green-300">
-                        <ShieldCheck className="h-2.5 w-2.5 inline mr-0.5" />{annotation.summary.status_counts.known} known
-                      </span>
-                    )}
-                    {annotation.summary.status_counts.motif_only > 0 && (
-                      <span className="text-[9px] px-1 py-0 rounded bg-amber-100 dark:bg-amber-800/30 text-amber-600 dark:text-amber-300">
-                        <FlaskConical className="h-2.5 w-2.5 inline mr-0.5" />{annotation.summary.status_counts.motif_only} motif
-                      </span>
-                    )}
-                    {annotation.summary.status_counts.novel_candidate > 0 && (
-                      <span className="text-[9px] px-1 py-0 rounded bg-purple-100 dark:bg-purple-800/30 text-purple-600 dark:text-purple-300">
-                        <Sparkles className="h-2.5 w-2.5 inline mr-0.5" />{annotation.summary.status_counts.novel_candidate} novel
-                      </span>
-                    )}
-                  </div>
-                )}
-
-                {/* Action button */}
-                <div className="flex gap-1 pt-1">
-                  <Button
-                    variant="default"
-                    size="sm"
-                    className="text-[9px] h-5 px-1.5"
-                    disabled={isMotifLoading}
-                    onClick={() => runMotifAnnotation(moduleKey, mod.ptms)}
-                  >
-                    {isMotifLoading ? <Loader2 className="h-2.5 w-2.5 animate-spin mr-0.5" /> : <FlaskConical className="h-2.5 w-2.5 mr-0.5" />}
-                    Annotate
-                  </Button>
-                </div>
-
-                {/* Loading / error indicators */}
-                {isMotifLoading && (
-                  <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
-                    <Loader2 className="h-3 w-3 animate-spin" /> Annotating {mod.ptms.length} PTMs...
-                  </div>
-                )}
-                {motifError && motifLoading === null && (
-                  <div className="text-[10px] text-red-500">{motifError}</div>
-                )}
-
-                {/* ── Expanded Detail Panel ── */}
-                {isExpanded && (
-                  <div className="space-y-2 pt-1 border-t">
-                    {/* PTM list with status */}
-                    <div className="flex flex-wrap gap-0.5">
-                      {mod.ptms.map((p) => {
-                        const ptmKey = `${p.gene}_${p.position}`;
-                        const ann = annotation?.annotations?.find(
-                          (a) => a.gene === p.gene && a.position === p.position
-                        );
-                        const statusCfg = ann ? STATUS_CONFIG[ann.status] : null;
-                        const StatusIcon = statusCfg?.icon;
-                        return (
-                          <span
-                            key={ptmKey}
-                            className={`px-1.5 py-0.5 rounded text-[9px] flex items-center gap-0.5 border ${
-                              statusCfg ? `${statusCfg.bg} ${statusCfg.border} ${statusCfg.color}` : "bg-muted"
-                            }`}
-                            title={
-                              ann
-                                ? `${statusCfg?.label}${
-                                    ann.known_kinases.length > 0
-                                      ? ` | Known: ${ann.known_kinases.map((k) => k.display_name || k.kinase).join(", ")}`
-                                      : ""
-                                  }${
-                                    ann.motif_predicted_kinases.length > 0
-                                      ? ` | Motif: ${ann.motif_predicted_kinases.map((m) => m.canonical_family || m.kinase_family).join(", ")}`
-                                      : ""
-                                  }`
-                                : p.label
-                            }
-                          >
-                            {StatusIcon && <StatusIcon className="h-2.5 w-2.5" />}
-                            {p.label}
-                          </span>
-                        );
-                      })}
-                    </div>
-
-                    {/* Full Motif Annotation Panel */}
-                    {annotation && <MotifAnnotationPanel annotation={annotation} />}
-
-                  </div>
+                {idx < sortedModules.length - 1 && (
+                  <ArrowRight className="h-4 w-4 text-muted-foreground mx-1 shrink-0" />
                 )}
               </div>
+            ))}
+          </div>
+        </div>
+      )}
 
-              {/* Arrow between modules with shared kinases */}
-              {idx < sortedModules.length - 1 && (
-                <div className="flex flex-col items-center px-2 min-w-[60px] pt-6">
-                  <ArrowRight className="h-5 w-5 text-muted-foreground" />
-                  {sharedWithNext.length > 0 && (
-                    <div className="flex flex-col items-center gap-0.5 mt-1">
-                      {sharedWithNext.slice(0, 3).map((k) => (
-                        <span key={k} className="text-[8px] px-1 py-0 rounded bg-blue-100 dark:bg-blue-800/30 text-blue-600 dark:text-blue-300 whitespace-nowrap">
-                          {k}
-                        </span>
-                      ))}
-                      {sharedWithNext.length > 3 && (
-                        <span className="text-[8px] text-muted-foreground">+{sharedWithNext.length - 3}</span>
+      {/* ──────────────────────────────────────────────────────────────────────────── */}
+      {/* TEMPORAL CASCADE VISUALIZATION                                            */}
+      {/* ──────────────────────────────────────────────────────────────────────────── */}
+      {hasTemporalData && tc && (
+        <>
+          {/* ── Section 1: Timeline with Kinase Cards ── */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 text-xs font-medium">
+              <Timer className="h-3.5 w-3.5 text-blue-500" />
+              Temporal Kinase Activation Timeline
+              <span className="text-muted-foreground font-normal">— {tc.timepoints.length} timepoints</span>
+            </div>
+
+            {/* Timeline bar */}
+            <div className="relative">
+              {/* Timeline axis line */}
+              <div className="absolute top-[28px] left-0 right-0 h-[2px] bg-border" />
+
+              <div className="flex items-start overflow-x-auto pb-2" style={{ gap: 0 }}>
+                {tc.timepoints.map((tp, tpIdx) => {
+                  const isExpanded = expandedTimepoint === tp.condition;
+                  const flow = tc.cascade_flow?.[tpIdx]; // flow FROM this tp to next
+
+                  return (
+                    <div key={tp.condition} className="flex items-start">
+                      {/* Timepoint column */}
+                      <div className="flex flex-col items-center min-w-[200px] max-w-[280px]">
+                        {/* Time label */}
+                        <div className="text-[11px] font-semibold text-foreground mb-1">{tp.condition}</div>
+
+                        {/* Timeline dot */}
+                        <div className="w-4 h-4 rounded-full bg-blue-500 border-2 border-background shadow-sm z-10 mb-2" />
+
+                        {/* Kinase card */}
+                        <div
+                          className="rounded-lg border bg-card p-2.5 w-full space-y-2 cursor-pointer hover:border-blue-400 transition-colors"
+                          onClick={() => setExpandedTimepoint(isExpanded ? null : tp.condition)}
+                        >
+                          {/* Card header */}
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-1">
+                              <Badge variant="outline" className="text-[9px]">
+                                {tp.ptm_count} PTMs
+                              </Badge>
+                              <Badge variant="outline" className="text-[9px] text-blue-600 dark:text-blue-400 border-blue-300">
+                                {tp.kinases.length} kinases
+                              </Badge>
+                            </div>
+                            {isExpanded ? <ChevronUp className="h-3 w-3 text-muted-foreground" /> : <ChevronDown className="h-3 w-3 text-muted-foreground" />}
+                          </div>
+
+                          {/* Top kinases */}
+                          <div className="flex flex-wrap gap-1">
+                            {tp.kinases.slice(0, 5).map((k, ki) => {
+                              const colorIdx = ki % SWIMLANE_COLORS.length;
+                              const isPersistent = (tc.kinase_activity || []).some(
+                                (ka) => ka.canonical === k.canonical && ka.timepoints.length >= 2
+                              );
+                              return (
+                                <span
+                                  key={k.canonical}
+                                  className={`text-[9px] px-1.5 py-0.5 rounded inline-flex items-center gap-0.5 ${
+                                    isPersistent
+                                      ? "bg-blue-100 dark:bg-blue-800/30 text-blue-700 dark:text-blue-300 border border-blue-400"
+                                      : SWIMLANE_COLORS[colorIdx].light
+                                  }`}
+                                  title={`${k.kinase}: ${k.ptm_count} PTMs (${k.confirmed} confirmed, ${k.inferred} inferred)\nSources: ${k.sources.join(", ")}${isPersistent ? "\nPersistent across timepoints" : ""}`}
+                                >
+                                  {isPersistent && <Layers className="h-2.5 w-2.5" />}
+                                  {k.kinase}
+                                  <span className="opacity-60">({k.ptm_count})</span>
+                                </span>
+                              );
+                            })}
+                            {tp.kinases.length > 5 && (
+                              <span className="text-[9px] text-muted-foreground">+{tp.kinases.length - 5}</span>
+                            )}
+                          </div>
+
+                          {/* Co-wave module labels */}
+                          <div className="text-[9px] text-muted-foreground">
+                            {tp.cowave_labels.join(", ")}
+                          </div>
+
+                          {/* Expanded detail */}
+                          {isExpanded && (
+                            <div className="space-y-2 pt-2 border-t">
+                              <div className="text-[10px] font-medium">All Kinases at {tp.condition}:</div>
+                              <Table>
+                                <TableHeader>
+                                  <TableRow>
+                                    <TableHead className="text-[9px] py-1 h-auto">Kinase</TableHead>
+                                    <TableHead className="text-[9px] py-1 h-auto">PTMs</TableHead>
+                                    <TableHead className="text-[9px] py-1 h-auto">Confirmed</TableHead>
+                                    <TableHead className="text-[9px] py-1 h-auto">Inferred</TableHead>
+                                    <TableHead className="text-[9px] py-1 h-auto">Sources</TableHead>
+                                  </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                  {tp.kinases.map((k) => (
+                                    <TableRow key={k.canonical}>
+                                      <TableCell className="text-[9px] py-0.5 font-medium">{k.kinase}</TableCell>
+                                      <TableCell className="text-[9px] py-0.5">{k.ptm_count}</TableCell>
+                                      <TableCell className="text-[9px] py-0.5">
+                                        <span className="text-green-600 dark:text-green-400">{k.confirmed}</span>
+                                      </TableCell>
+                                      <TableCell className="text-[9px] py-0.5">
+                                        <span className="text-amber-600 dark:text-amber-400">{k.inferred}</span>
+                                      </TableCell>
+                                      <TableCell className="text-[9px] py-0.5">
+                                        <div className="flex flex-wrap gap-0.5">
+                                          {k.sources.slice(0, 3).map((s) => (
+                                            <span key={s} className={`px-1 py-0 rounded text-[8px] ${SOURCE_LABELS[s]?.color || "bg-muted"}`}>
+                                              {SOURCE_LABELS[s]?.label || s}
+                                            </span>
+                                          ))}
+                                          {k.sources.length > 3 && <span className="text-[8px] text-muted-foreground">+{k.sources.length - 3}</span>}
+                                        </div>
+                                      </TableCell>
+                                    </TableRow>
+                                  ))}
+                                </TableBody>
+                              </Table>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Arrow + flow info between timepoints */}
+                      {tpIdx < tc.timepoints.length - 1 && flow && (
+                        <div className="flex flex-col items-center px-2 pt-6 min-w-[80px]">
+                          <ArrowRight className="h-5 w-5 text-blue-400" />
+                          {flow.shared_kinases.length > 0 && (
+                            <div className="flex flex-col items-center gap-0.5 mt-1">
+                              <span className="text-[8px] text-blue-500 font-medium">Persistent:</span>
+                              {flow.shared_kinases.slice(0, 3).map((k) => (
+                                <span key={k} className="text-[8px] px-1 py-0 rounded bg-blue-100 dark:bg-blue-800/30 text-blue-600 dark:text-blue-300 whitespace-nowrap">
+                                  {k}
+                                </span>
+                              ))}
+                              {flow.shared_kinases.length > 3 && (
+                                <span className="text-[8px] text-muted-foreground">+{flow.shared_kinases.length - 3}</span>
+                              )}
+                            </div>
+                          )}
+                          {flow.new_kinases.length > 0 && (
+                            <div className="flex flex-col items-center gap-0.5 mt-1">
+                              <span className="text-[8px] text-green-500 font-medium">New:</span>
+                              {flow.new_kinases.slice(0, 2).map((k) => (
+                                <span key={k} className="text-[8px] px-1 py-0 rounded bg-green-100 dark:bg-green-800/30 text-green-600 dark:text-green-300 whitespace-nowrap">
+                                  {k}
+                                </span>
+                              ))}
+                              {flow.new_kinases.length > 2 && (
+                                <span className="text-[8px] text-muted-foreground">+{flow.new_kinases.length - 2}</span>
+                              )}
+                            </div>
+                          )}
+                          {flow.lost_kinases.length > 0 && (
+                            <div className="flex flex-col items-center gap-0.5 mt-1">
+                              <span className="text-[8px] text-red-400 font-medium">Lost:</span>
+                              {flow.lost_kinases.slice(0, 2).map((k) => (
+                                <span key={k} className="text-[8px] px-1 py-0 rounded bg-red-100 dark:bg-red-800/30 text-red-500 dark:text-red-400 whitespace-nowrap line-through">
+                                  {k}
+                                </span>
+                              ))}
+                              {flow.lost_kinases.length > 2 && (
+                                <span className="text-[8px] text-muted-foreground">+{flow.lost_kinases.length - 2}</span>
+                              )}
+                            </div>
+                          )}
+                        </div>
                       )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          <Separator />
+
+          {/* ── Section 2: Kinase Activity Swimlane ── */}
+          {tc.kinase_activity && tc.kinase_activity.length > 0 && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-xs font-medium">
+                  <TrendingUp className="h-3.5 w-3.5 text-emerald-500" />
+                  Kinase Activity Swimlane
+                  <span className="text-muted-foreground font-normal">— when each kinase is active</span>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-[10px] h-6"
+                  onClick={() => setShowSwimlane(!showSwimlane)}
+                >
+                  {showSwimlane ? "Hide" : "Show"}
+                </Button>
+              </div>
+
+              {showSwimlane && (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-[10px]">
+                    <thead>
+                      <tr className="border-b">
+                        <th className="text-left py-1.5 px-2 min-w-[100px] font-medium text-muted-foreground">Kinase</th>
+                        {tc.timepoints.map((tp) => (
+                          <th key={tp.condition} className="text-center py-1.5 px-2 min-w-[80px] font-medium text-muted-foreground">
+                            {tp.condition}
+                          </th>
+                        ))}
+                        <th className="text-center py-1.5 px-2 min-w-[60px] font-medium text-muted-foreground">Span</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {tc.kinase_activity.slice(0, 20).map((ka, kaIdx) => {
+                        const colorIdx = kaIdx % SWIMLANE_COLORS.length;
+                        const activeTps = new Set(ka.timepoints.map((t) => t.condition));
+                        const isPersistent = ka.timepoints.length >= 2;
+
+                        return (
+                          <tr key={ka.canonical} className={`border-b border-border/50 ${isPersistent ? "bg-blue-50/30 dark:bg-blue-950/10" : ""}`}>
+                            <td className="py-1 px-2 font-medium">
+                              <div className="flex items-center gap-1">
+                                {isPersistent && <Layers className="h-2.5 w-2.5 text-blue-500" />}
+                                <span className={isPersistent ? "text-blue-700 dark:text-blue-300" : ""}>{ka.kinase}</span>
+                              </div>
+                            </td>
+                            {tc.timepoints.map((tp) => {
+                              const tpData = ka.timepoints.find((t) => t.condition === tp.condition);
+                              if (!tpData) {
+                                return (
+                                  <td key={tp.condition} className="py-1 px-2 text-center">
+                                    <span className="text-muted-foreground/30">—</span>
+                                  </td>
+                                );
+                              }
+                              return (
+                                <td key={tp.condition} className="py-1 px-2 text-center">
+                                  <div className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded ${SWIMLANE_COLORS[colorIdx].light}`}>
+                                    <span className="font-medium">{tpData.ptm_count}</span>
+                                    <span className="opacity-60">PTMs</span>
+                                  </div>
+                                </td>
+                              );
+                            })}
+                            <td className="py-1 px-2 text-center">
+                              <span className={`px-1.5 py-0.5 rounded text-[9px] ${
+                                isPersistent
+                                  ? "bg-blue-100 dark:bg-blue-800/30 text-blue-600 dark:text-blue-300 font-medium"
+                                  : "bg-muted text-muted-foreground"
+                              }`}>
+                                {ka.timepoints.length}/{tc.timepoints.length}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                  {tc.kinase_activity.length > 20 && (
+                    <div className="text-[10px] text-muted-foreground text-center py-1">
+                      Showing top 20 of {tc.kinase_activity.length} kinases
                     </div>
                   )}
                 </div>
               )}
             </div>
-          );
-        })}
-      </div>
+          )}
 
-      {/* ── Cross-Module Kinase Map ── */}
-      {sharedKinases.length > 0 && (
-        <div className="bg-gradient-to-br from-blue-50/50 to-indigo-50/50 dark:from-blue-950/20 dark:to-indigo-950/20 rounded-lg p-3 space-y-2">
-          <div className="flex items-center gap-1 text-xs font-medium">
-            <GitMerge className="h-3.5 w-3.5 text-blue-500" />
-            Cross-Module Kinase Map
-            <span className="text-muted-foreground font-normal">— kinases shared across 2+ modules</span>
-          </div>
-          <div className="space-y-1">
-            {sharedKinases.slice(0, 10).map(([kinase, data]) => {
-              const srcLabels = [...data.sources].map((s) => SOURCE_LABELS[s]?.label || s);
+          <Separator />
+
+          {/* ── Section 3: Cascade Flow Summary ── */}
+          <div className="bg-gradient-to-br from-blue-50/50 to-indigo-50/50 dark:from-blue-950/20 dark:to-indigo-950/20 rounded-lg p-3 space-y-3">
+            <div className="flex items-center gap-2 text-xs font-medium">
+              <GitBranch className="h-3.5 w-3.5 text-indigo-500" />
+              Signaling Cascade Flow Summary
+            </div>
+
+            {/* Flow text */}
+            <div className="text-[11px] text-foreground leading-relaxed">
+              <strong>Temporal order:</strong>{" "}
+              {tc.timepoints.map((tp) => {
+                const topK = tp.kinases.slice(0, 3).map((k) => k.kinase);
+                return `${tp.condition} [${topK.length > 0 ? topK.join(", ") : "unknown"}]`;
+              }).join(" \u2192 ")}
+            </div>
+
+            {/* Persistent kinases */}
+            {tc.kinase_activity && (() => {
+              const persistent = tc.kinase_activity.filter((ka) => ka.timepoints.length >= 2);
+              if (persistent.length === 0) return null;
               return (
-                <div key={kinase} className="flex items-center gap-2 text-[10px]">
-                  <span className="font-medium min-w-[70px] text-blue-700 dark:text-blue-300">{kinase}</span>
-                  <div className="flex gap-1">
-                    {data.modules.map((m) => (
-                      <span key={m} className="px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-800/30 text-blue-600 dark:text-blue-300">
-                        {m}
+                <div className="space-y-1">
+                  <div className="text-[10px] font-medium text-blue-700 dark:text-blue-300">
+                    <Layers className="h-3 w-3 inline mr-1" />
+                    Persistent Kinases (active across 2+ timepoints):
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    {persistent.map((ka) => (
+                      <span
+                        key={ka.canonical}
+                        className="text-[9px] px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-800/30 text-blue-700 dark:text-blue-300 border border-blue-300"
+                        title={`Active at: ${ka.timepoints.map((t) => t.condition).join(", ")}`}
+                      >
+                        {ka.kinase} ({ka.timepoints.map((t) => t.condition).join(" \u2192 ")})
                       </span>
                     ))}
                   </div>
-                  <span className="text-muted-foreground">via {srcLabels.join(", ")}</span>
                 </div>
               );
-            })}
-            {sharedKinases.length > 10 && (
-              <div className="text-[10px] text-muted-foreground">...and {sharedKinases.length - 10} more shared kinases</div>
+            })()}
+
+            {/* Cascade flow transitions */}
+            {tc.cascade_flow && tc.cascade_flow.length > 0 && (
+              <div className="space-y-1.5">
+                <div className="text-[10px] font-medium">Transition Details:</div>
+                {tc.cascade_flow.map((flow, fi) => (
+                  <div key={fi} className="text-[10px] flex items-start gap-2 pl-2">
+                    <span className="font-medium whitespace-nowrap">{flow.from} \u2192 {flow.to}:</span>
+                    <div className="flex flex-wrap gap-1">
+                      {flow.shared_kinases.length > 0 && (
+                        <span className="text-blue-600 dark:text-blue-400">
+                          Persistent: {flow.shared_kinases.slice(0, 4).join(", ")}{flow.shared_kinases.length > 4 ? ` (+${flow.shared_kinases.length - 4})` : ""}
+                        </span>
+                      )}
+                      {flow.new_kinases.length > 0 && (
+                        <span className="text-green-600 dark:text-green-400">
+                          | New: {flow.new_kinases.slice(0, 4).join(", ")}{flow.new_kinases.length > 4 ? ` (+${flow.new_kinases.length - 4})` : ""}
+                        </span>
+                      )}
+                      {flow.lost_kinases.length > 0 && (
+                        <span className="text-red-500 dark:text-red-400">
+                          | Lost: {flow.lost_kinases.slice(0, 4).join(", ")}{flow.lost_kinases.length > 4 ? ` (+${flow.lost_kinases.length - 4})` : ""}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
             )}
           </div>
-        </div>
-      )}
-
-      {/* ── Cascade Kinase Flow Summary ── */}
-      {sortedModules.length >= 2 && (
-        <div className="bg-muted/50 rounded-lg p-3 space-y-2">
-          <div className="text-xs font-medium">Cascade Kinase Flow Summary</div>
-          <div className="text-[10px] text-muted-foreground">
-            <strong>Temporal order:</strong>{" "}
-            {sortedModules.map((m) => {
-              const moduleKey = `module_${m.id}`;
-              const annotation = motifAnnotations[moduleKey];
-              const topKinases: string[] = [];
-              // Collect from all annotation sources
-              if (annotation) {
-                const known = annotation.annotations.flatMap((a) => a.known_kinases.map((k) => k.canonical_name || k.display_name || k.kinase));
-                const unique = [...new Set(known)];
-                topKinases.push(...unique.slice(0, 2));
-                // Fill with motif predicted if needed
-                if (topKinases.length < 2) {
-                  const motifPred = annotation.annotations.flatMap((a) => a.motif_predicted_kinases.map((m) => m.canonical_family || m.kinase_family));
-                  const uniqueMotif = [...new Set(motifPred)];
-                  for (const mk of uniqueMotif) {
-                    if (!topKinases.includes(mk)) {
-                      topKinases.push(mk);
-                      if (topKinases.length >= 2) break;
-                    }
-                  }
-                }
-              }
-              return `${m.label}${topKinases.length > 0 ? ` [${topKinases.join(", ")}]` : ""}`;
-            }).join(" → ")}
-          </div>
-          <div className="text-[10px] text-muted-foreground">
-            <strong>Shared regulators:</strong>{" "}
-            {sharedKinases.length > 0
-              ? sharedKinases.slice(0, 5).map(([k, v]) => `${k} (${v.modules.join("+")})`).join(", ")
-              : "None detected — run Annotate on all modules to discover shared kinases"}
-          </div>
-          {sharedKinases.length === 0 && (
-            <div className="text-[10px] text-amber-600 dark:text-amber-400">
-              Tip: Click "Annotate" on each module card above to collect kinase data from iPTMnet, UniProt, RAG enrichment, motif prediction, and more.
-            </div>
-          )}
-        </div>
+        </>
       )}
     </div>
   );

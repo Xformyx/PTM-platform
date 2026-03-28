@@ -3240,7 +3240,9 @@ async def global_kinase_modules(
     for cw in cowave_modules_input:
         cw_id = cw.get("id", 0)
         cw_label = cw.get("label", f"Module {cw_id}")
-        for pk in cw.get("ptm_keys", []):
+        # Accept both "ptm_keys" and "ptms" field names (frontend sends "ptms")
+        ptm_key_list = cw.get("ptm_keys", []) or cw.get("ptms", [])
+        for pk in ptm_key_list:
             if pk not in cowave_ptm_map:
                 cowave_ptm_map[pk] = []
             cowave_ptm_map[pk].append({"cowave_id": cw_id, "cowave_label": cw_label})
@@ -3285,7 +3287,7 @@ async def global_kinase_modules(
         for cw in cowave_modules_input:
             cw_id = cw.get("id", 0)
             cw_label = cw.get("label", f"Module {cw_id}")
-            cw_ptm_set = set(cw.get("ptm_keys", []))
+            cw_ptm_set = set(cw.get("ptm_keys", []) or cw.get("ptms", []))
             overlapping_kinases = []
             for km in kinase_module_list:
                 km_ptm_set = set(m["key"] for m in km["members"])
@@ -3323,10 +3325,139 @@ async def global_kinase_modules(
         ],
     }
 
+    # ── 8. Temporal Kinase Cascade ──────────────────────────────────────────
+    # Build temporal cascade: for each co-wave module (peak timepoint),
+    # which kinases are active? This shows kinase activation ORDER over time.
+    def _parse_time_minutes(cond: str) -> float:
+        """Parse condition string like '5min', '1h', '24h' to minutes."""
+        m = re.match(r'([\d.]+)\s*(h|hr|hour|min|m)?', cond, re.IGNORECASE)
+        if not m:
+            return 0.0
+        val = float(m.group(1))
+        unit = (m.group(2) or 'h').lower()
+        if unit.startswith('m'):
+            return val  # already minutes
+        return val * 60  # hours to minutes
+
+    temporal_cascade = {"timepoints": [], "kinase_activity": [], "cascade_flow": []}
+
+    if cowave_modules_input:
+        # Build timepoint → kinases map from co-wave modules + kinase module assignments
+        tp_kinase_map: dict = {}  # peak_condition → {kinases: set, ptm_count, cowave_ids}
+
+        for cw in cowave_modules_input:
+            cw_id = cw.get("id", 0)
+            cw_label = cw.get("label", f"Module {cw_id}")
+            cw_ptm_keys = set(cw.get("ptm_keys", []) or cw.get("ptms", []))
+
+            # Extract peak condition from label (e.g., "Module 1 (peak: 5min)" → "5min")
+            peak_match = re.search(r'peak:\s*([\w.]+)', cw_label)
+            peak_cond = peak_match.group(1) if peak_match else ""
+            if not peak_cond:
+                continue
+
+            if peak_cond not in tp_kinase_map:
+                tp_kinase_map[peak_cond] = {
+                    "kinases": {},  # canonical → {display, sources, ptms, membership_counts}
+                    "ptm_count": 0,
+                    "cowave_ids": [],
+                    "cowave_labels": [],
+                }
+
+            tp_kinase_map[peak_cond]["cowave_ids"].append(cw_id)
+            tp_kinase_map[peak_cond]["cowave_labels"].append(cw_label)
+            tp_kinase_map[peak_cond]["ptm_count"] += len(cw_ptm_keys)
+
+            # Find which kinase modules contain these PTMs
+            for km in kinase_module_list:
+                km_ptm_keys = set(m["key"] for m in km["members"])
+                shared = cw_ptm_keys & km_ptm_keys
+                if shared:
+                    canon = km["canonical"]
+                    if canon not in tp_kinase_map[peak_cond]["kinases"]:
+                        tp_kinase_map[peak_cond]["kinases"][canon] = {
+                            "kinase": km["kinase"],
+                            "canonical": canon,
+                            "sources": list(km["sources"]),
+                            "ptm_count": len(shared),
+                            "confirmed": sum(1 for m in km["members"] if m["key"] in shared and m["membership"] == "confirmed"),
+                            "inferred": sum(1 for m in km["members"] if m["key"] in shared and m["membership"] == "inferred"),
+                        }
+                    else:
+                        tp_kinase_map[peak_cond]["kinases"][canon]["ptm_count"] += len(shared)
+
+        # Sort timepoints chronologically
+        sorted_tps = sorted(tp_kinase_map.keys(), key=lambda t: _parse_time_minutes(t))
+
+        temporal_cascade["timepoints"] = [
+            {
+                "condition": tp,
+                "minutes": _parse_time_minutes(tp),
+                "ptm_count": tp_kinase_map[tp]["ptm_count"],
+                "cowave_ids": tp_kinase_map[tp]["cowave_ids"],
+                "cowave_labels": tp_kinase_map[tp]["cowave_labels"],
+                "kinases": sorted(
+                    tp_kinase_map[tp]["kinases"].values(),
+                    key=lambda k: k["ptm_count"],
+                    reverse=True,
+                ),
+            }
+            for tp in sorted_tps
+        ]
+
+        # Build kinase activity swimlane: for each kinase, which timepoints is it active?
+        all_kinase_tps: dict = {}  # canonical → {kinase, timepoints: [{condition, ptm_count}]}
+        for tp_data in temporal_cascade["timepoints"]:
+            for k in tp_data["kinases"]:
+                canon = k["canonical"]
+                if canon not in all_kinase_tps:
+                    all_kinase_tps[canon] = {
+                        "kinase": k["kinase"],
+                        "canonical": canon,
+                        "sources": k["sources"],
+                        "timepoints": [],
+                    }
+                all_kinase_tps[canon]["timepoints"].append({
+                    "condition": tp_data["condition"],
+                    "ptm_count": k["ptm_count"],
+                    "confirmed": k.get("confirmed", 0),
+                    "inferred": k.get("inferred", 0),
+                })
+
+        temporal_cascade["kinase_activity"] = sorted(
+            all_kinase_tps.values(),
+            key=lambda x: (
+                _parse_time_minutes(x["timepoints"][0]["condition"]) if x["timepoints"] else 999,
+                -len(x["timepoints"]),
+            ),
+        )
+
+        # Build cascade flow: kinases shared between adjacent timepoints
+        cascade_flow = []
+        for i in range(len(sorted_tps) - 1):
+            tp_a = sorted_tps[i]
+            tp_b = sorted_tps[i + 1]
+            kinases_a = set(tp_kinase_map[tp_a]["kinases"].keys())
+            kinases_b = set(tp_kinase_map[tp_b]["kinases"].keys())
+            shared = kinases_a & kinases_b
+            new_at_b = kinases_b - kinases_a
+            lost_at_b = kinases_a - kinases_b
+
+            cascade_flow.append({
+                "from": tp_a,
+                "to": tp_b,
+                "shared_kinases": sorted(shared),
+                "new_kinases": sorted(new_at_b),
+                "lost_kinases": sorted(lost_at_b),
+            })
+
+        temporal_cascade["cascade_flow"] = cascade_flow
+
     _log.info(
         f"[GLOBAL-KINASE] Complete: {len(kinase_module_list)} kinase modules, "
         f"{summary['total_confirmed']} confirmed, {summary['total_inferred']} inferred, "
-        f"{len(unassigned)} unassigned"
+        f"{len(unassigned)} unassigned, "
+        f"{len(temporal_cascade.get('timepoints', []))} cascade timepoints"
     )
 
     return {
@@ -3336,4 +3467,5 @@ async def global_kinase_modules(
         "annotation_details": annotations,
         "summary": summary,
         "cowave_cross_analysis": cowave_cross,
+        "temporal_cascade": temporal_cascade,
     }
