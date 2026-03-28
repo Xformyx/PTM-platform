@@ -676,7 +676,7 @@ export default function KinaseModuleAnalysis({
         {globalKinaseLoading && (
           <div className="flex items-center gap-2 text-xs text-muted-foreground py-3 px-2 bg-amber-50 dark:bg-amber-900/10 rounded">
             <Loader2 className="h-4 w-4 animate-spin" />
-            Running global kinase module analysis for {checkedPtmList.length} PTMs across all sources...
+            {isUbi ? `Running E3 Ligase module analysis for ${checkedPtmList.length} ubiquitylation sites across all sources...` : `Running global kinase module analysis for ${checkedPtmList.length} PTMs across all sources...`}
           </div>
         )}
         {globalKinaseError && (
@@ -878,7 +878,7 @@ export default function KinaseModuleAnalysis({
                           ρ = {mod.spearmanScore.toFixed(3)}
                           {mod.spearmanScore > 0.7 ? (
                             <span className="text-green-600 ml-1">
-                              — High preservation: likely same kinase module
+                              — High preservation: likely same {isUbi ? "E3 ligase module" : "kinase module"}
                             </span>
                           ) : mod.spearmanScore > 0.3 ? (
                             <span className="text-amber-600 ml-1">
@@ -894,7 +894,7 @@ export default function KinaseModuleAnalysis({
 
                       {/* ── Motif Annotation Detail Panel ────────────────── */}
                       {annotation && (
-                        <MotifAnnotationPanel annotation={annotation} />
+                        <MotifAnnotationPanel annotation={annotation} isUbi={isUbi} />
                       )}
 
                     </div>
@@ -987,7 +987,7 @@ export default function KinaseModuleAnalysis({
             {manualAnnotation && (
               <div className="mt-2">
                 <Separator className="mb-3" />
-                <MotifAnnotationPanel annotation={manualAnnotation} />
+                <MotifAnnotationPanel annotation={manualAnnotation} isUbi={isUbi} />
               </div>
             )}
           </div>
@@ -1029,7 +1029,7 @@ export default function KinaseModuleAnalysis({
 
 // ── Motif Annotation Panel ──────────────────────────────────────────────────
 
-function MotifAnnotationPanel({ annotation }: { annotation: MotifAnnotationResponse }) {
+function MotifAnnotationPanel({ annotation, isUbi = false }: { annotation: MotifAnnotationResponse; isUbi?: boolean }) {
   const { summary, annotations } = annotation;
   const [showAll, setShowAll] = useState(false);
 
@@ -1045,7 +1045,7 @@ function MotifAnnotationPanel({ annotation }: { annotation: MotifAnnotationRespo
       <div className="flex items-center justify-between">
         <p className="text-xs font-medium flex items-center gap-1">
           <FlaskConical className="h-3.5 w-3.5 text-amber-500" />
-          Kinase Annotation Summary
+          {isUbi ? "E3 Ligase Annotation Summary" : "Kinase Annotation Summary"}
         </p>
         <div className="flex gap-2 text-[10px]">
           <span className="flex items-center gap-0.5 text-green-600 dark:text-green-400">
@@ -1068,8 +1068,9 @@ function MotifAnnotationPanel({ annotation }: { annotation: MotifAnnotationRespo
             Novel Substrate Candidates ({novelCandidates.length})
           </div>
           <p className="text-[10px] text-purple-600 dark:text-purple-300">
-            These PTMs co-move with the module but have no known kinase in any database.
-            They represent potential novel kinase-substrate relationships for experimental validation.
+            {isUbi
+            ? "These ubiquitylation sites co-move with the module but have no known E3 ligase in any database. They represent potential novel E3 ligase-substrate relationships for experimental validation."
+            : "These PTMs co-move with the module but have no known kinase in any database. They represent potential novel kinase-substrate relationships for experimental validation."}
           </p>
           <div className="flex flex-wrap gap-1 mt-1">
             {novelCandidates.map((a) => (
@@ -1093,7 +1094,9 @@ function MotifAnnotationPanel({ annotation }: { annotation: MotifAnnotationRespo
             Motif-Predicted Only ({motifOnly.length})
           </div>
           <p className="text-[10px] text-amber-600 dark:text-amber-300">
-            Kinase family predicted from flanking sequence motif or residue type, but no literature-confirmed kinase.
+            {isUbi
+            ? "E3 ligase predicted from degron motif or sequence context, but no literature-confirmed E3 ligase."
+            : "Kinase family predicted from flanking sequence motif or residue type, but no literature-confirmed kinase."}
           </p>
           <div className="space-y-1 mt-1">
             {motifOnly.map((a) => {
@@ -1232,8 +1235,8 @@ function MotifAnnotationPanel({ annotation }: { annotation: MotifAnnotationRespo
               <TableRow>
                 <TableHead className="text-[10px]">PTM</TableHead>
                 <TableHead className="text-[10px] w-20">Status</TableHead>
-                <TableHead className="text-[10px]">Known Kinase</TableHead>
-                <TableHead className="text-[10px]">Motif Prediction</TableHead>
+                <TableHead className="text-[10px]">{isUbi ? "Known E3 Ligase" : "Known Kinase"}</TableHead>
+                <TableHead className="text-[10px]">{isUbi ? "Motif/Degron Prediction" : "Motif Prediction"}</TableHead>
                 <TableHead className="text-[10px] w-20">Concordance</TableHead>
               </TableRow>
             </TableHeader>
@@ -1495,7 +1498,7 @@ function CascadeView({
       <div className="text-center py-6 text-sm text-muted-foreground">
         <BarChart3 className="h-8 w-8 mx-auto mb-2 opacity-40" />
         Run co-wave detection first (enable PTMs in the chart above).
-        Cascade view shows temporal ordering of kinase modules.
+        {isUbi ? "Cascade view shows temporal ordering of E3 ligase modules and ubiquitylation dynamics." : "Cascade view shows temporal ordering of kinase modules."}
       </div>
     );
   }
@@ -1674,12 +1677,12 @@ function CascadeView({
                           {/* Expanded detail */}
                           {isExpanded && (
                             <div className="space-y-2 pt-2 border-t">
-                              <div className="text-[10px] font-medium">All Kinases at {tp.condition}:</div>
+                              <div className="text-[10px] font-medium">{isUbi ? `All E3 Ligases at ${tp.condition}:` : `All Kinases at ${tp.condition}:`}</div>
                               <Table>
                                 <TableHeader>
                                   <TableRow>
-                                    <TableHead className="text-[9px] py-1 h-auto">Kinase</TableHead>
-                                    <TableHead className="text-[9px] py-1 h-auto">PTMs</TableHead>
+                                    <TableHead className="text-[9px] py-1 h-auto">{isUbi ? "E3 Ligase" : "Kinase"}</TableHead>
+                                    <TableHead className="text-[9px] py-1 h-auto">{isUbi ? "Sites" : "PTMs"}</TableHead>
                                     <TableHead className="text-[9px] py-1 h-auto">Confirmed</TableHead>
                                     <TableHead className="text-[9px] py-1 h-auto">Inferred</TableHead>
                                     <TableHead className="text-[9px] py-1 h-auto">Sources</TableHead>

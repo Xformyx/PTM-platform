@@ -1172,7 +1172,8 @@ function classifyTrend(values: number[]): TrendCategory {
 }
 
 // ── TopNTimeSeriesPlot ───────────────────────────────────────────────────────
-function TopNTimeSeriesPlot({ orderId }: { orderId: number }) {
+function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId: number; ptmType?: string }) {
+  const isUbi = ptmType.toLowerCase().includes("ubiquityl") || ptmType.toLowerCase().includes("ubiquitin");
   const [data, setData] = useState<{ vector_data: Array<{ gene: string; position: string; condition: string; ptm_relative_log2fc: number; ptm_absolute_log2fc: number }>; top_n_ptms: Array<{ gene: string; position: string; label: string }>; suggested_n?: number | null; top_n_setting?: number; source?: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [checked, setChecked] = useState<Record<string, boolean>>({});
@@ -1224,7 +1225,9 @@ function TopNTimeSeriesPlot({ orderId }: { orderId: number }) {
       <div className="flex flex-col items-center justify-center py-12 rounded-lg border bg-muted/20">
         <TrendingUp className="h-12 w-12 text-muted-foreground/40 mb-3" />
         <p className="text-sm text-muted-foreground text-center">
-          Top N PTM time-series data will appear here after preprocessing completes.
+          {isUbi
+            ? "Top N Ubiquitylation site time-series data will appear here after preprocessing completes."
+            : "Top N PTM time-series data will appear here after preprocessing completes."}
         </p>
       </div>
     );
@@ -1348,7 +1351,7 @@ function TopNTimeSeriesPlot({ orderId }: { orderId: number }) {
           Top N setting: {data.top_n_setting ?? "?"} / condition
         </span>
         <span className="px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 font-medium">
-          Unique PTMs: {uniquePtms.length}
+          {isUbi ? "Unique Sites" : "Unique PTMs"}: {uniquePtms.length}
         </span>
         {data.suggested_n != null && (
           <span className="px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 font-medium">
@@ -1365,14 +1368,14 @@ function TopNTimeSeriesPlot({ orderId }: { orderId: number }) {
             size="sm"
             onClick={() => setMetric("relative")}
           >
-            PTM Relative Log2FC
+            {isUbi ? "Ubi Site Relative Log2FC" : "PTM Relative Log2FC"}
           </Button>
           <Button
             variant={metric === "absolute" ? "default" : "outline"}
             size="sm"
             onClick={() => setMetric("absolute")}
           >
-            PTM Absolute Log2FC
+            {isUbi ? "Ubi Site Absolute Log2FC" : "PTM Absolute Log2FC"}
           </Button>
         </div>
         <Separator orientation="vertical" className="h-6" />
@@ -1510,7 +1513,7 @@ function TopNTimeSeriesPlot({ orderId }: { orderId: number }) {
         {/* Right sidebar — PTM checklist with Select All / Deselect All */}
         <div className="space-y-2">
           <p className="text-xs font-medium text-muted-foreground">
-            Top N PTMs ({filteredPtms.length})
+            {isUbi ? "Top N Ubi Sites" : "Top N PTMs"} ({filteredPtms.length})
           </p>
           <div className="flex gap-1">
             <Button
@@ -1550,17 +1553,18 @@ function TopNTimeSeriesPlot({ orderId }: { orderId: number }) {
             })}
             {filteredPtms.length === 0 && (
               <p className="text-xs text-muted-foreground text-center py-4">
-                No PTMs match this trend filter.
+                {isUbi ? "No Ubi sites match this trend filter." : "No PTMs match this trend filter."}
               </p>
             )}
           </div>
         </div>
       </div>
 
-      {/* ── Kinase Module Analysis Panel ── */}
+      {/* ── Kinase / E3 Ligase Module Analysis Panel ── */}
       {conditions.length >= 3 && (
         <KinaseModuleAnalysis
           orderId={orderId}
+          ptmType={ptmType}
           vectorData={data.vector_data.map((row) => ({
             gene: row.gene,
             position: row.position,
@@ -1584,7 +1588,8 @@ function TopNTimeSeriesPlot({ orderId }: { orderId: number }) {
   );
 }
 
-function VectorPlotTab({ orderId, singleTimePoint }: { orderId: number; singleTimePoint?: boolean }) {
+function VectorPlotTab({ orderId, singleTimePoint, ptmType = "phosphorylation" }: { orderId: number; singleTimePoint?: boolean; ptmType?: string }) {
+  const isUbi = ptmType.toLowerCase().includes("ubiquityl") || ptmType.toLowerCase().includes("ubiquitin");
   const [files, setFiles] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -1623,7 +1628,7 @@ function VectorPlotTab({ orderId, singleTimePoint }: { orderId: number; singleTi
             disabled={singleTimePoint}
             title={singleTimePoint ? "Single time point — time-series not available" : undefined}
           >
-            <TrendingUp className="h-3.5 w-3.5" /> Top N PTM Time-series
+            <TrendingUp className="h-3.5 w-3.5" /> {isUbi ? "Top N Ubi Site Time-series" : "Top N PTM Time-series"}
           </TabsTrigger>
         </TabsList>
 
@@ -1663,14 +1668,16 @@ function VectorPlotTab({ orderId, singleTimePoint }: { orderId: number; singleTi
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-sm flex items-center gap-2">
-                <TrendingUp className="h-4 w-4" /> Top N PTM Time-series
+                <TrendingUp className="h-4 w-4" /> {isUbi ? "Top N Ubiquitylation Site Time-series" : "Top N PTM Time-series"}
               </CardTitle>
               <p className="text-xs text-muted-foreground">
-                시간별 PTM 변화 추이. 마우스를 올리면 PTM명과 값을 확인할 수 있습니다.
+                {isUbi
+                  ? "시간별 Ubiquitylation site 변화 추이. 마우스를 올리면 site명과 값을 확인할 수 있습니다."
+                  : "시간별 PTM 변화 추이. 마우스를 올리면 PTM명과 값을 확인할 수 있습니다."}
               </p>
             </CardHeader>
             <CardContent>
-              <TopNTimeSeriesPlot orderId={orderId} />
+              <TopNTimeSeriesPlot orderId={orderId} ptmType={ptmType} />
             </CardContent>
           </Card>
         </TabsContent>
@@ -2620,7 +2627,7 @@ export default function OrderDetail() {
         </TabsContent>
 
         <TabsContent value="vector-plot" className="mt-4">
-          <VectorPlotTab orderId={order.id} singleTimePoint={(order.sample_config as any)?.single_time_point} />
+          <VectorPlotTab orderId={order.id} singleTimePoint={(order.sample_config as any)?.single_time_point} ptmType={order.ptm_type} />
         </TabsContent>
 
         {(order.report_options as any)?.analysis_mode === "cross_talk" && (
