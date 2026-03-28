@@ -38,6 +38,10 @@ import {
   TrendingUp,
   Layers,
   GitBranch,
+  Link2,
+  Scissors,
+  Activity,
+  Boxes,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -293,6 +297,7 @@ interface KinaseModuleAnalysisProps {
   checkedPtms: Record<string, boolean>;
   conditions: string[];
   onSelectPtms?: (keys: string[]) => void;
+  ptmType?: string; // v9.14: 'phosphorylation' | 'ubiquitylation'
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -448,7 +453,9 @@ export default function KinaseModuleAnalysis({
   checkedPtms,
   conditions,
   onSelectPtms,
+  ptmType = "phosphorylation",
 }: KinaseModuleAnalysisProps) {
+  const isUbi = ptmType.toLowerCase().includes("ubiquityl") || ptmType.toLowerCase().includes("ubiquitin");
   const [activeTab, setActiveTab] = useState<"cowave" | "lookup" | "cascade" | "kinaseModules">("cowave");
   const [expandedModules, setExpandedModules] = useState<Set<string>>(new Set());
   const [manualSelection, setManualSelection] = useState<Set<string>>(new Set());
@@ -586,15 +593,21 @@ export default function KinaseModuleAnalysis({
     <Card className="mt-6 border-dashed border-2 border-blue-200 dark:border-blue-800">
       <CardHeader className="pb-3">
         <CardTitle className="text-sm flex items-center gap-2">
-          <Zap className="h-4 w-4 text-amber-500" />
-          Kinase Module Analysis
+          {isUbi ? <Link2 className="h-4 w-4 text-orange-500" /> : <Zap className="h-4 w-4 text-amber-500" />}
+          {isUbi ? "E3 Ligase & Ubiquitylation Module Analysis" : "Kinase Module Analysis"}
           <Badge variant="outline" className="text-[10px] ml-2">
             Experimental
           </Badge>
+          {isUbi && (
+            <Badge className="text-[10px] ml-1 bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300 border-orange-300">
+              Ubiquitylation Mode
+            </Badge>
+          )}
         </CardTitle>
         <p className="text-xs text-muted-foreground">
-          Co-wave module detection, multi-source kinase annotation (8 sources + motif prediction), and cascade inference.
-          PTMs co-moving in the same time-point waves likely share common upstream kinases.
+          {isUbi
+            ? "Co-wave module detection, E3 Ligase annotation (RING/HECT/RBR), Ubiquitin chain type classification (K48/K63/Mono), and Phospho-Ub cross-talk inference."
+            : "Co-wave module detection, multi-source kinase annotation (8 sources + motif prediction), and cascade inference. PTMs co-moving in the same time-point waves likely share common upstream kinases."}
         </p>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -622,7 +635,7 @@ export default function KinaseModuleAnalysis({
             className="text-xs h-7"
             onClick={() => setActiveTab("cascade")}
           >
-            <BarChart3 className="h-3 w-3 mr-1" /> Cascade View
+            <BarChart3 className="h-3 w-3 mr-1" /> {isUbi ? "Ubi Cascade" : "Cascade View"}
           </Button>
           <Button
             variant={activeTab === "kinaseModules" ? "default" : "ghost"}
@@ -630,7 +643,8 @@ export default function KinaseModuleAnalysis({
             className="text-xs h-7"
             onClick={() => setActiveTab("kinaseModules")}
           >
-            <Sparkles className="h-3 w-3 mr-1" /> Kinase Modules
+            {isUbi ? <Boxes className="h-3 w-3 mr-1" /> : <Sparkles className="h-3 w-3 mr-1" />}
+            {isUbi ? "E3 Modules" : "Kinase Modules"}
             {globalKinaseResult && (
               <Badge variant="secondary" className="text-[9px] ml-1 h-4 px-1">
                 {globalKinaseResult.kinase_modules.length}
@@ -650,7 +664,7 @@ export default function KinaseModuleAnalysis({
               ) : (
                 <Sparkles className="h-3 w-3 mr-1" />
               )}
-              {globalKinaseLoading ? "Analyzing..." : "Global Annotate"}
+              {globalKinaseLoading ? "Analyzing..." : isUbi ? "E3 Annotate" : "Global Annotate"}
               <Badge variant="outline" className="text-[9px] ml-1 h-4 px-1">
                 {checkedPtmList.length} PTMs
               </Badge>
@@ -979,7 +993,7 @@ export default function KinaseModuleAnalysis({
           </div>
         )}
 
-        {/* ── Tab: Cascade View ─────────────────────────────────────────── */}
+        {/* ── Tab: Cascade View / Ubi Cascade ─────────────────────────── */}
         {activeTab === "cascade" && (
           <CascadeView
             modules={coWaveModules}
@@ -991,10 +1005,11 @@ export default function KinaseModuleAnalysis({
             globalKinaseResult={globalKinaseResult}
             globalKinaseLoading={globalKinaseLoading}
             onRunGlobalKinase={runGlobalKinaseModules}
+            isUbi={isUbi}
           />
         )}
 
-        {/* ── Tab: Kinase Modules ──────────────────────────────────────────── */}
+        {/* ── Tab: Kinase Modules / E3 Modules ──────────────────────────────── */}
         {activeTab === "kinaseModules" && (
           <GlobalKinaseModulesPanel
             result={globalKinaseResult}
@@ -1004,6 +1019,7 @@ export default function KinaseModuleAnalysis({
             vectorData={vectorData}
             conditions={conditions}
             onSelectPtms={onSelectPtms}
+            isUbi={isUbi}
           />
         )}
       </CardContent>
@@ -1458,6 +1474,7 @@ function CascadeView({
   globalKinaseResult,
   globalKinaseLoading,
   onRunGlobalKinase,
+  isUbi = false,
 }: {
   modules: CoWaveModule[];
   motifAnnotations: Record<string, MotifAnnotationResponse>;
@@ -1468,6 +1485,7 @@ function CascadeView({
   globalKinaseResult: GlobalKinaseModuleResponse | null;
   globalKinaseLoading: boolean;
   onRunGlobalKinase: () => void;
+  isUbi?: boolean;
 }) {
   const [expandedTimepoint, setExpandedTimepoint] = useState<string | null>(null);
   const [showSwimlane, setShowSwimlane] = useState(true);
@@ -1508,18 +1526,20 @@ function CascadeView({
       <div className="flex items-center justify-between">
         <p className="text-xs text-muted-foreground">
           <Clock className="h-3 w-3 inline mr-1" />
-          Temporal kinase cascade: shows which kinases are active at each timepoint and how signaling flows over time.
+          {isUbi
+            ? "Temporal ubiquitylation cascade: shows which E3 ligases are active at each timepoint, chain type dynamics, and DUB activity inference."
+            : "Temporal kinase cascade: shows which kinases are active at each timepoint and how signaling flows over time."}
         </p>
         {!hasTemporalData && (
           <Button
             variant="default"
             size="sm"
-            className="text-xs h-7"
+            className={`text-xs h-7 ${isUbi ? "bg-orange-600 hover:bg-orange-700" : ""}`}
             disabled={globalKinaseLoading}
             onClick={onRunGlobalKinase}
           >
             {globalKinaseLoading ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Network className="h-3 w-3 mr-1" />}
-            Build Temporal Cascade
+            {isUbi ? "Build Ubi Cascade" : "Build Temporal Cascade"}
           </Button>
         )}
       </div>
@@ -1528,7 +1548,9 @@ function CascadeView({
       {globalKinaseLoading && (
         <div className="flex items-center gap-2 text-sm text-muted-foreground py-4 justify-center">
           <Loader2 className="h-4 w-4 animate-spin" />
-          Building temporal kinase cascade from all PTM annotations...
+          {isUbi
+            ? "Building temporal ubiquitylation cascade — E3 ligases, chain types, DUB activity..."
+            : "Building temporal kinase cascade from all PTM annotations..."}
         </div>
       )}
 
@@ -1537,9 +1559,9 @@ function CascadeView({
         <div className="space-y-3">
           <Alert>
             <Info className="h-4 w-4" />
-            <AlertTitle>Temporal Cascade Not Yet Built</AlertTitle>
+            <AlertTitle>{isUbi ? "Ubiquitylation Cascade Not Yet Built" : "Temporal Cascade Not Yet Built"}</AlertTitle>
             <AlertDescription className="text-xs">
-              Click <strong>"Build Temporal Cascade"</strong> above (or run <strong>"Global Kinase Modules"</strong> from the Kinase Modules tab) to generate the temporal kinase cascade.
+              Click <strong>{isUbi ? "\"Build Ubi Cascade\"" : "\"Build Temporal Cascade\""}</strong> above (or run <strong>{isUbi ? "\"E3 Modules\"" : "\"Global Kinase Modules\""}</strong> from the {isUbi ? "E3 Modules" : "Kinase Modules"} tab) to generate the temporal {isUbi ? "ubiquitylation" : "kinase"} cascade.
               This will annotate all PTMs with 8 sources and build a time-ordered kinase activation map.
             </AlertDescription>
           </Alert>
@@ -1570,11 +1592,11 @@ function CascadeView({
       {/* ──────────────────────────────────────────────────────────────────────────── */}
       {hasTemporalData && tc && (
         <>
-          {/* ── Section 1: Timeline with Kinase Cards ── */}
+          {/* ── Section 1: Timeline with Kinase/E3 Cards ── */}
           <div className="space-y-3">
             <div className="flex items-center gap-2 text-xs font-medium">
-              <Timer className="h-3.5 w-3.5 text-blue-500" />
-              Temporal Kinase Activation Timeline
+              <Timer className={`h-3.5 w-3.5 ${isUbi ? "text-orange-500" : "text-blue-500"}`} />
+              {isUbi ? "Temporal E3 Ligase Activation Timeline" : "Temporal Kinase Activation Timeline"}
               <span className="text-muted-foreground font-normal">— {tc.timepoints.length} timepoints</span>
             </div>
 
@@ -1747,14 +1769,14 @@ function CascadeView({
 
           <Separator />
 
-          {/* ── Section 2: Kinase Activity Swimlane ── */}
+          {/* ── Section 2: Kinase/E3 Activity Swimlane ── */}
           {tc.kinase_activity && tc.kinase_activity.length > 0 && (
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 text-xs font-medium">
-                  <TrendingUp className="h-3.5 w-3.5 text-emerald-500" />
-                  Kinase Activity Swimlane
-                  <span className="text-muted-foreground font-normal">— when each kinase is active</span>
+                  <TrendingUp className={`h-3.5 w-3.5 ${isUbi ? "text-orange-500" : "text-emerald-500"}`} />
+                  {isUbi ? "E3 Ligase Activity Swimlane" : "Kinase Activity Swimlane"}
+                  <span className="text-muted-foreground font-normal">— when each {isUbi ? "E3 ligase" : "kinase"} is active</span>
                 </div>
                 <Button
                   variant="ghost"
@@ -1771,7 +1793,7 @@ function CascadeView({
                   <table className="w-full text-[10px]">
                     <thead>
                       <tr className="border-b">
-                        <th className="text-left py-1.5 px-2 min-w-[100px] font-medium text-muted-foreground">Kinase</th>
+                        <th className="text-left py-1.5 px-2 min-w-[100px] font-medium text-muted-foreground">{isUbi ? "E3 Ligase" : "Kinase"}</th>
                         {tc.timepoints.map((tp) => (
                           <th key={tp.condition} className="text-center py-1.5 px-2 min-w-[80px] font-medium text-muted-foreground">
                             {tp.condition}
@@ -1828,7 +1850,7 @@ function CascadeView({
                   </table>
                   {tc.kinase_activity.length > 20 && (
                     <div className="text-[10px] text-muted-foreground text-center py-1">
-                      Showing top 20 of {tc.kinase_activity.length} kinases
+                      Showing top 20 of {tc.kinase_activity.length} {isUbi ? "E3 ligases" : "kinases"}
                     </div>
                   )}
                 </div>
@@ -1839,10 +1861,10 @@ function CascadeView({
           <Separator />
 
           {/* ── Section 3: Cascade Flow Summary ── */}
-          <div className="bg-gradient-to-br from-blue-50/50 to-indigo-50/50 dark:from-blue-950/20 dark:to-indigo-950/20 rounded-lg p-3 space-y-3">
+          <div className={`bg-gradient-to-br ${isUbi ? "from-orange-50/50 to-amber-50/50 dark:from-orange-950/20 dark:to-amber-950/20" : "from-blue-50/50 to-indigo-50/50 dark:from-blue-950/20 dark:to-indigo-950/20"} rounded-lg p-3 space-y-3`}>
             <div className="flex items-center gap-2 text-xs font-medium">
-              <GitBranch className="h-3.5 w-3.5 text-indigo-500" />
-              Signaling Cascade Flow Summary
+              <GitBranch className={`h-3.5 w-3.5 ${isUbi ? "text-orange-500" : "text-indigo-500"}`} />
+              {isUbi ? "Ubiquitylation Cascade Flow Summary" : "Signaling Cascade Flow Summary"}
             </div>
 
             {/* Flow text */}
@@ -1854,15 +1876,15 @@ function CascadeView({
               }).join(" \u2192 ")}
             </div>
 
-            {/* Persistent kinases */}
+            {/* Persistent kinases / E3 ligases */}
             {tc.kinase_activity && (() => {
               const persistent = tc.kinase_activity.filter((ka) => ka.timepoints.length >= 2);
               if (persistent.length === 0) return null;
               return (
                 <div className="space-y-1">
-                  <div className="text-[10px] font-medium text-blue-700 dark:text-blue-300">
+                  <div className={`text-[10px] font-medium ${isUbi ? "text-orange-700 dark:text-orange-300" : "text-blue-700 dark:text-blue-300"}`}>
                     <Layers className="h-3 w-3 inline mr-1" />
-                    Persistent Kinases (active across 2+ timepoints):
+                    {isUbi ? "Persistent E3 Ligases (active across 2+ timepoints):" : "Persistent Kinases (active across 2+ timepoints):"}
                   </div>
                   <div className="flex flex-wrap gap-1">
                     {persistent.map((ka) => (
@@ -1917,6 +1939,29 @@ function CascadeView({
 
 // ── Global Kinase Modules Panel ──────────────────────────────────────────────
 
+// ── Chain type color mapping ────────────────────────────────────────────────
+const CHAIN_TYPE_COLORS: Record<string, { bg: string; text: string; border: string; label: string }> = {
+  K48: { bg: "bg-red-100 dark:bg-red-900/30", text: "text-red-700 dark:text-red-300", border: "border-red-400", label: "K48 (Degradation)" },
+  K63: { bg: "bg-blue-100 dark:bg-blue-900/30", text: "text-blue-700 dark:text-blue-300", border: "border-blue-400", label: "K63 (Signaling)" },
+  K11: { bg: "bg-purple-100 dark:bg-purple-900/30", text: "text-purple-700 dark:text-purple-300", border: "border-purple-400", label: "K11 (Cell Cycle)" },
+  K27: { bg: "bg-green-100 dark:bg-green-900/30", text: "text-green-700 dark:text-green-300", border: "border-green-400", label: "K27 (Chromatin)" },
+  K29: { bg: "bg-yellow-100 dark:bg-yellow-900/30", text: "text-yellow-700 dark:text-yellow-300", border: "border-yellow-400", label: "K29 (Stress)" },
+  K33: { bg: "bg-cyan-100 dark:bg-cyan-900/30", text: "text-cyan-700 dark:text-cyan-300", border: "border-cyan-400", label: "K33 (Kinase)" },
+  K6:  { bg: "bg-orange-100 dark:bg-orange-900/30", text: "text-orange-700 dark:text-orange-300", border: "border-orange-400", label: "K6 (DNA Repair)" },
+  mono: { bg: "bg-teal-100 dark:bg-teal-900/30", text: "text-teal-700 dark:text-teal-300", border: "border-teal-400", label: "Mono-Ub (Signaling)" },
+  mixed: { bg: "bg-gray-100 dark:bg-gray-800", text: "text-gray-600 dark:text-gray-400", border: "border-gray-400", label: "Mixed" },
+  unknown: { bg: "bg-gray-50 dark:bg-gray-900", text: "text-gray-500", border: "border-gray-300", label: "Unknown" },
+};
+
+const E3_FAMILY_COLORS: Record<string, { bg: string; text: string; border: string }> = {
+  RING: { bg: "bg-violet-100 dark:bg-violet-900/30", text: "text-violet-700 dark:text-violet-300", border: "border-violet-400" },
+  HECT: { bg: "bg-rose-100 dark:bg-rose-900/30", text: "text-rose-700 dark:text-rose-300", border: "border-rose-400" },
+  RBR:  { bg: "bg-amber-100 dark:bg-amber-900/30", text: "text-amber-700 dark:text-amber-300", border: "border-amber-400" },
+  SCF:  { bg: "bg-emerald-100 dark:bg-emerald-900/30", text: "text-emerald-700 dark:text-emerald-300", border: "border-emerald-400" },
+  APC:  { bg: "bg-sky-100 dark:bg-sky-900/30", text: "text-sky-700 dark:text-sky-300", border: "border-sky-400" },
+  unknown: { bg: "bg-gray-100 dark:bg-gray-800", text: "text-gray-500", border: "border-gray-300" },
+};
+
 function GlobalKinaseModulesPanel({
   result,
   loading,
@@ -1925,6 +1970,7 @@ function GlobalKinaseModulesPanel({
   vectorData,
   conditions,
   onSelectPtms,
+  isUbi = false,
 }: {
   result: GlobalKinaseModuleResponse | null;
   loading: boolean;
@@ -1933,6 +1979,7 @@ function GlobalKinaseModulesPanel({
   vectorData: PtmTimeSeriesRow[];
   conditions: string[];
   onSelectPtms?: (keys: string[]) => void;
+  isUbi?: boolean;
 }) {
   const [expandedKinase, setExpandedKinase] = useState<string | null>(null);
   const [showCrossAnalysis, setShowCrossAnalysis] = useState(false);
@@ -1940,24 +1987,26 @@ function GlobalKinaseModulesPanel({
   if (!result && !loading) {
     return (
       <div className="text-center py-8 space-y-3">
-        <Sparkles className="h-10 w-10 mx-auto text-amber-400 opacity-50" />
+        {isUbi
+          ? <Boxes className="h-10 w-10 mx-auto text-orange-400 opacity-50" />
+          : <Sparkles className="h-10 w-10 mx-auto text-amber-400 opacity-50" />}
         <div className="text-sm text-muted-foreground">
-          <strong>Global Kinase Module Analysis</strong>
+          <strong>{isUbi ? "E3 Ligase Module Analysis" : "Global Kinase Module Analysis"}</strong>
         </div>
         <p className="text-xs text-muted-foreground max-w-md mx-auto">
-          Annotate all checked PTMs at once using 8 sources (iPTMnet, UniProt, RAG, motif prediction, etc.),
-          then group them by regulating kinase — regardless of time-point.
-          This reveals kinase-centric modules that complement co-wave (time-based) grouping.
+          {isUbi
+            ? "Annotate all checked ubiquitylation sites using 8 sources, classify Ubiquitin chain types (K48/K63/Mono), group by E3 Ligase (RING/HECT/RBR), and detect degron motifs."
+            : "Annotate all checked PTMs at once using 8 sources (iPTMnet, UniProt, RAG, motif prediction, etc.), then group them by regulating kinase — regardless of time-point."}
         </p>
         <Button
           variant="default"
           size="sm"
-          className="text-xs"
+          className={`text-xs ${isUbi ? "bg-orange-600 hover:bg-orange-700" : ""}`}
           disabled={ptmCount === 0}
           onClick={onRun}
         >
-          <Sparkles className="h-3 w-3 mr-1" />
-          Run Global Annotate ({ptmCount} PTMs)
+          {isUbi ? <Boxes className="h-3 w-3 mr-1" /> : <Sparkles className="h-3 w-3 mr-1" />}
+          {isUbi ? `Run E3 Annotate (${ptmCount} sites)` : `Run Global Annotate (${ptmCount} PTMs)`}
         </Button>
       </div>
     );
@@ -1967,7 +2016,9 @@ function GlobalKinaseModulesPanel({
     return (
       <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground py-8">
         <Loader2 className="h-5 w-5 animate-spin" />
-        Analyzing {ptmCount} PTMs across 8 sources + motif prediction...
+        {isUbi
+          ? `Classifying ${ptmCount} ubiquitylation sites — chain types, E3 families, degron motifs...`
+          : `Analyzing ${ptmCount} PTMs across 8 sources + motif prediction...`}
       </div>
     );
   }
@@ -1980,15 +2031,15 @@ function GlobalKinaseModulesPanel({
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
         <div className="rounded-lg border p-3 text-center">
           <div className="text-2xl font-bold text-primary">{summary.total_kinase_modules}</div>
-          <div className="text-[10px] text-muted-foreground">Kinase Modules</div>
+          <div className="text-[10px] text-muted-foreground">{isUbi ? "E3 Ligase Modules" : "Kinase Modules"}</div>
         </div>
         <div className="rounded-lg border p-3 text-center">
           <div className="text-2xl font-bold text-green-600">{summary.total_confirmed}</div>
-          <div className="text-[10px] text-muted-foreground">Confirmed (Known)</div>
+          <div className="text-[10px] text-muted-foreground">{isUbi ? "Literature Evidence" : "Confirmed (Known)"}</div>
         </div>
         <div className="rounded-lg border p-3 text-center">
           <div className="text-2xl font-bold text-blue-600">{summary.total_inferred}</div>
-          <div className="text-[10px] text-muted-foreground">Inferred (Motif)</div>
+          <div className="text-[10px] text-muted-foreground">{isUbi ? "Degron Motif" : "Inferred (Motif)"}</div>
         </div>
         <div className="rounded-lg border p-3 text-center">
           <div className="text-2xl font-bold text-muted-foreground">{summary.total_unassigned}</div>
@@ -1996,15 +2047,52 @@ function GlobalKinaseModulesPanel({
         </div>
       </div>
 
-      {/* Top kinases bar */}
+      {/* Ubiquitylation: Chain Type Distribution */}
+      {isUbi && (() => {
+        // Collect chain type distribution from members
+        const chainCounts: Record<string, number> = {};
+        kinase_modules.forEach(mod => {
+          mod.members.forEach((m: any) => {
+            const ct = (m.chain_type || "unknown").toLowerCase();
+            const key = ct.startsWith("k") ? ct.toUpperCase() : ct;
+            chainCounts[key] = (chainCounts[key] || 0) + 1;
+          });
+        });
+        const total = Object.values(chainCounts).reduce((a, b) => a + b, 0);
+        if (total === 0) return null;
+        return (
+          <div className="rounded-lg border p-3 space-y-2">
+            <div className="text-xs font-semibold text-muted-foreground flex items-center gap-1">
+              <Link2 className="h-3 w-3" /> Ubiquitin Chain Type Distribution
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {Object.entries(chainCounts).sort((a, b) => b[1] - a[1]).map(([ct, cnt]) => {
+                const color = CHAIN_TYPE_COLORS[ct] || CHAIN_TYPE_COLORS.unknown;
+                const pct = Math.round((cnt / total) * 100);
+                return (
+                  <div key={ct} className={`flex items-center gap-1 rounded px-2 py-1 border text-[10px] font-medium ${color.bg} ${color.text} ${color.border}`}>
+                    <span>{color.label || ct}</span>
+                    <span className="opacity-70">{cnt} ({pct}%)</span>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="text-[10px] text-muted-foreground mt-1">
+              K48 → proteasomal degradation &nbsp;|&nbsp; K63 → signaling/DNA repair &nbsp;|&nbsp; K11 → cell cycle &nbsp;|&nbsp; Mono → gene regulation
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Top kinases / E3 ligases bar */}
       {summary.top_kinases && summary.top_kinases.length > 0 && (
         <div className="text-xs text-muted-foreground bg-muted/50 rounded p-2">
-          <strong>Top Kinases:</strong>{" "}
+          <strong>{isUbi ? "Top E3 Ligases:" : "Top Kinases:"}</strong>{" "}
           {summary.top_kinases.map((k, i) => (
             <span key={k.canonical}>
               {i > 0 && " · "}
               <span className="font-medium text-foreground">{k.canonical}</span>
-              <span className="text-[10px]"> ({k.total} PTMs)</span>
+              <span className="text-[10px]"> ({k.total} {isUbi ? "sites" : "PTMs"})</span>
             </span>
           ))}
         </div>
@@ -2034,16 +2122,43 @@ function GlobalKinaseModulesPanel({
                     {mod.canonical}
                   </button>
                   <Badge variant="outline" className="text-[9px]">
-                    {mod.total_count} PTMs
+                    {mod.total_count} {isUbi ? "sites" : "PTMs"}
                   </Badge>
+                  {/* E3 family badge (ubiquitylation mode) */}
+                  {isUbi && (() => {
+                    const family = (mod as any).e3_family || "unknown";
+                    const fc = E3_FAMILY_COLORS[family] || E3_FAMILY_COLORS.unknown;
+                    return (
+                      <Badge className={`text-[9px] border ${fc.bg} ${fc.text} ${fc.border}`}>
+                        {family}
+                      </Badge>
+                    );
+                  })()}
+                  {/* Chain type badges (ubiquitylation mode) */}
+                  {isUbi && (() => {
+                    const chainTypes: Record<string, number> = {};
+                    mod.members.forEach((m: any) => {
+                      const ct = (m.chain_type || "unknown").toLowerCase();
+                      const key = ct.startsWith("k") ? ct.toUpperCase() : ct;
+                      chainTypes[key] = (chainTypes[key] || 0) + 1;
+                    });
+                    return Object.entries(chainTypes).slice(0, 3).map(([ct, cnt]) => {
+                      const color = CHAIN_TYPE_COLORS[ct] || CHAIN_TYPE_COLORS.unknown;
+                      return (
+                        <Badge key={ct} className={`text-[9px] border ${color.bg} ${color.text} ${color.border}`}>
+                          {ct} ×{cnt}
+                        </Badge>
+                      );
+                    });
+                  })()}
                   <Badge variant="outline" className="text-[9px] border-green-500 text-green-600 dark:text-green-400">
                     <ShieldCheck className="h-2.5 w-2.5 mr-0.5" />
-                    {mod.confirmed_count} confirmed
+                    {mod.confirmed_count} {isUbi ? "lit." : "confirmed"}
                   </Badge>
                   {mod.inferred_count > 0 && (
                     <Badge variant="outline" className="text-[9px] border-blue-500 text-blue-600 dark:text-blue-400">
                       <FlaskConical className="h-2.5 w-2.5 mr-0.5" />
-                      {mod.inferred_count} inferred
+                      {mod.inferred_count} {isUbi ? "degron" : "inferred"}
                     </Badge>
                   )}
                   <Badge variant="outline" className="text-[9px]">
@@ -2066,24 +2181,34 @@ function GlobalKinaseModulesPanel({
 
               {/* Member PTMs as badges */}
               <div className="flex flex-wrap gap-1">
-                {mod.members.map((m) => (
-                  <span
-                    key={m.key}
-                    className={`px-2 py-0.5 rounded-full text-[10px] flex items-center gap-0.5 border ${
-                      m.membership === "confirmed"
-                        ? "bg-green-100 dark:bg-green-900/30 border-green-400 text-green-700 dark:text-green-300"
-                        : "bg-blue-100 dark:bg-blue-900/30 border-blue-400 text-blue-700 dark:text-blue-300"
-                    }`}
-                    title={`${m.gene} ${m.position} — ${m.membership}: ${m.evidence}`}
-                  >
-                    {m.membership === "confirmed" ? (
-                      <ShieldCheck className="h-2.5 w-2.5" />
-                    ) : (
-                      <FlaskConical className="h-2.5 w-2.5" />
-                    )}
-                    {m.gene} {m.position}
-                  </span>
-                ))}
+                {mod.members.map((m) => {
+                  const chainType = isUbi ? ((m as any).chain_type || "unknown").toLowerCase() : null;
+                  const chainKey = chainType ? (chainType.startsWith("k") ? chainType.toUpperCase() : chainType) : null;
+                  const chainColor = chainKey ? (CHAIN_TYPE_COLORS[chainKey] || CHAIN_TYPE_COLORS.unknown) : null;
+                  return (
+                    <span
+                      key={m.key}
+                      className={`px-2 py-0.5 rounded-full text-[10px] flex items-center gap-0.5 border ${
+                        m.membership === "confirmed"
+                          ? "bg-green-100 dark:bg-green-900/30 border-green-400 text-green-700 dark:text-green-300"
+                          : "bg-blue-100 dark:bg-blue-900/30 border-blue-400 text-blue-700 dark:text-blue-300"
+                      }`}
+                      title={`${m.gene} ${m.position} — ${m.membership}: ${m.evidence}${chainKey ? ` | Chain: ${chainKey}` : ""}`}
+                    >
+                      {m.membership === "confirmed" ? (
+                        <ShieldCheck className="h-2.5 w-2.5" />
+                      ) : (
+                        <FlaskConical className="h-2.5 w-2.5" />
+                      )}
+                      {m.gene} {m.position}
+                      {isUbi && chainKey && chainKey !== "unknown" && (
+                        <span className={`ml-0.5 px-1 rounded text-[8px] font-bold ${chainColor?.bg} ${chainColor?.text}`}>
+                          {chainKey}
+                        </span>
+                      )}
+                    </span>
+                  );
+                })}
               </div>
 
               {/* Co-wave overlap badges */}
@@ -2102,6 +2227,55 @@ function GlobalKinaseModulesPanel({
               {/* Expanded: time-series mini-profile */}
               {isExpanded && (
                 <div className="space-y-2 pt-2 border-t">
+
+                  {/* Ubiquitylation-specific: E3 family, degron motifs, E2 partners */}
+                  {isUbi && (() => {
+                    const modAny = mod as any;
+                    const family = modAny.e3_family || "unknown";
+                    const degrons = modAny.degron_motifs || [];
+                    const e2Partners = modAny.e2_partners || [];
+                    const chainPreference = modAny.chain_preference || "unknown";
+                    const fc = E3_FAMILY_COLORS[family] || E3_FAMILY_COLORS.unknown;
+                    return (
+                      <div className="rounded border p-2 space-y-1.5 bg-orange-50 dark:bg-orange-900/10 border-orange-200 dark:border-orange-800">
+                        <div className="text-[10px] font-semibold text-orange-700 dark:text-orange-300 flex items-center gap-1">
+                          <Boxes className="h-3 w-3" /> E3 Ligase Properties
+                        </div>
+                        <div className="flex flex-wrap gap-2 text-[10px]">
+                          <span className="text-muted-foreground">Family:</span>
+                          <span className={`px-1.5 py-0.5 rounded border font-medium ${fc.bg} ${fc.text} ${fc.border}`}>{family}</span>
+                          {chainPreference !== "unknown" && (
+                            <>
+                              <span className="text-muted-foreground">Chain preference:</span>
+                              {(() => {
+                                const cc = CHAIN_TYPE_COLORS[chainPreference.toUpperCase()] || CHAIN_TYPE_COLORS.unknown;
+                                return <span className={`px-1.5 py-0.5 rounded border font-medium ${cc.bg} ${cc.text} ${cc.border}`}>{chainPreference}</span>;
+                              })()}
+                            </>
+                          )}
+                        </div>
+                        {degrons.length > 0 && (
+                          <div className="flex items-center gap-1 flex-wrap">
+                            <span className="text-[10px] text-muted-foreground">Degron motifs:</span>
+                            {degrons.map((d: string) => (
+                              <Badge key={d} className="text-[9px] bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border-amber-400">
+                                <Scissors className="h-2.5 w-2.5 mr-0.5" />{d}
+                              </Badge>
+                            ))}
+                          </div>
+                        )}
+                        {e2Partners.length > 0 && (
+                          <div className="flex items-center gap-1 flex-wrap">
+                            <span className="text-[10px] text-muted-foreground">E2 partners:</span>
+                            {e2Partners.map((e2: string) => (
+                              <Badge key={e2} variant="outline" className="text-[9px]">{e2}</Badge>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+
                   {/* Sources */}
                   <div className="text-[10px] text-muted-foreground">
                     <strong>Evidence sources:</strong>{" "}
@@ -2125,6 +2299,7 @@ function GlobalKinaseModulesPanel({
                       <TableRow>
                         <TableHead className="text-[10px] h-7">PTM</TableHead>
                         <TableHead className="text-[10px] h-7">Status</TableHead>
+                        {isUbi && <TableHead className="text-[10px] h-7">Chain Type</TableHead>}
                         <TableHead className="text-[10px] h-7">Evidence</TableHead>
                         <TableHead className="text-[10px] h-7">Time Profile</TableHead>
                       </TableRow>
@@ -2138,6 +2313,9 @@ function GlobalKinaseModulesPanel({
                           return row?.value ?? 0;
                         });
                         const maxVal = Math.max(...timeValues.map(Math.abs), 1);
+                        const chainType = isUbi ? ((m as any).chain_type || "unknown").toLowerCase() : null;
+                        const chainKey = chainType ? (chainType.startsWith("k") ? chainType.toUpperCase() : chainType) : null;
+                        const chainColor = chainKey ? (CHAIN_TYPE_COLORS[chainKey] || CHAIN_TYPE_COLORS.unknown) : null;
 
                         return (
                           <TableRow key={m.key}>
@@ -2153,9 +2331,20 @@ function GlobalKinaseModulesPanel({
                                     : "border-blue-500 text-blue-600"
                                 }`}
                               >
-                                {m.membership}
+                                {m.membership === "confirmed" ? (isUbi ? "literature" : "confirmed") : (isUbi ? "degron" : "inferred")}
                               </Badge>
                             </TableCell>
+                            {isUbi && (
+                              <TableCell className="text-[10px] py-1">
+                                {chainKey && chainKey !== "unknown" ? (
+                                  <span className={`px-1.5 py-0.5 rounded border text-[9px] font-bold ${chainColor?.bg} ${chainColor?.text} ${chainColor?.border}`}>
+                                    {chainKey}
+                                  </span>
+                                ) : (
+                                  <span className="text-muted-foreground text-[9px]">?</span>
+                                )}
+                              </TableCell>
+                            )}
                             <TableCell className="text-[10px] py-1 max-w-[200px] truncate" title={m.evidence}>
                               {m.evidence}
                             </TableCell>
@@ -2217,20 +2406,22 @@ function GlobalKinaseModulesPanel({
           >
             {showCrossAnalysis ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
             <GitMerge className="h-3.5 w-3.5" />
-            Co-wave × Kinase Module Cross Analysis
+            {isUbi ? "Co-wave × E3 Ligase Module Cross Analysis" : "Co-wave × Kinase Module Cross Analysis"}
           </button>
 
           {showCrossAnalysis && (
             <div className="space-y-2">
               <p className="text-[10px] text-muted-foreground">
-                PTMs that belong to the <strong>same kinase module</strong> AND the <strong>same co-wave group</strong> have the strongest evidence for shared regulation — they are regulated by the same kinase AND move together temporally.
+                {isUbi
+                  ? "Ubiquitylation sites that belong to the same E3 ligase module AND the same co-wave group have the strongest evidence for coordinated ubiquitylation — regulated by the same E3 AND moving together temporally."
+                  : "PTMs that belong to the same kinase module AND the same co-wave group have the strongest evidence for shared regulation — they are regulated by the same kinase AND move together temporally."}
               </p>
               <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead className="text-[10px] h-7">Co-wave Module</TableHead>
-                    <TableHead className="text-[10px] h-7">Total PTMs</TableHead>
-                    <TableHead className="text-[10px] h-7">Overlapping Kinase Modules</TableHead>
+                    <TableHead className="text-[10px] h-7">{isUbi ? "Total Sites" : "Total PTMs"}</TableHead>
+                    <TableHead className="text-[10px] h-7">{isUbi ? "Overlapping E3 Modules" : "Overlapping Kinase Modules"}</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>

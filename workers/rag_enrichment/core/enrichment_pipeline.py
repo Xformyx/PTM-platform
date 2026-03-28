@@ -480,6 +480,9 @@ class RAGEnrichmentPipeline:
                 "upstream_regulators": upstream,
                 "downstream_targets": downstream,
                 "kinase_substrate": regulation["kinase_substrate"],
+                "e3_substrate": regulation.get("e3_substrate", []),       # v9.14: E3 ligase-substrate pairs
+                "dub_substrate": regulation.get("dub_substrate", []),     # v9.14: DUB-substrate pairs
+                "chain_types": regulation.get("chain_types", []),         # v9.14: Detected ubiquitin chain types
                 "evidence_count": len(regulation["regulation_evidence"]),
                 "regulation_evidence": regulation["regulation_evidence"],
             },

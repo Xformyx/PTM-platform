@@ -1,5 +1,5 @@
 """
-Kinase Annotation Node — v9.13
+Kinase Annotation Node — v9.14
 
 Runs after temporal_comovement and before write_sections.
 Collects kinase information from 8 sources for each co-wave cluster,
@@ -14,6 +14,12 @@ v9.13: Auto-build Global Kinase Modules inside the pipeline.
     it is used directly (no re-computation).
   - Result is stored in state["global_kinase_modules"] and appended
     to the LLM context automatically — no manual user action required.
+
+v9.14: Ubiquitylation Analysis Suite — 3-module integration.
+  - Module 1: Ubiquitin Chain Type Classifier (chain_type per site)
+  - Module 2: E3 Ligase Module (RING/HECT/RBR family, degron motifs, E2 partners)
+  - Module 3: Temporal Ubiquitylation Cascade (Phospho-Ub cross-talk, DUB inference)
+  All three modules run automatically when ptm_type == 'ubiquitylation'.
 
 Pipeline position:
     temporal_comovement → kinase_annotation → write_sections
@@ -35,6 +41,10 @@ import logging
 import re
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Set, Tuple
+
+from core.nodes.ubiquitin_chain_classifier import classify_ubiquitin_chain_types
+from core.nodes.e3_ligase_module import build_e3_ligase_modules
+from core.nodes.temporal_ubiquitylation_cascade import build_temporal_ubiquitylation_cascade
 
 from common.kinase_utils import (
     normalize_kinase_name,
@@ -206,6 +216,59 @@ def run_kinase_annotation(state: dict) -> dict:
         if global_km_ctx:
             llm_context = llm_context + "\n\n" + global_km_ctx
 
+        # ── Step 6 (v9.14): Ubiquitylation Analysis Suite ──────────────────
+        ubi_chain_classifications = {}
+        ubi_e3_modules_result = {}
+        ubi_temporal_cascade_result = {}
+
+        if ptm_type.lower().strip() in ("ubiquitylation", "ubiquitination"):
+            logger.info("[KINASE-ANNOTATION] Running Ubiquitylation Analysis Suite (v9.14)")
+
+            # Module 1: Chain Type Classifier
+            ubi_chain_classifications = classify_ubiquitin_chain_types(
+                enriched_data=enriched_data,
+                ptm_type=ptm_type,
+            )
+            logger.info(
+                f"[KINASE-ANNOTATION] Module 1 (Chain Type): "
+                f"{len(ubi_chain_classifications)} sites classified"
+            )
+
+            # Module 2: E3 Ligase Module
+            ubi_e3_modules_result = build_e3_ligase_modules(
+                enriched_data=enriched_data,
+                chain_classifications=ubi_chain_classifications,
+                clusters=clusters,
+                ptm_type=ptm_type,
+            )
+            logger.info(
+                f"[KINASE-ANNOTATION] Module 2 (E3 Ligase): "
+                f"{ubi_e3_modules_result.get('summary', {}).get('total_e3_modules', 0)} modules"
+            )
+
+            # Module 3: Temporal Ubiquitylation Cascade
+            ubi_temporal_cascade_result = build_temporal_ubiquitylation_cascade(
+                enriched_data=enriched_data,
+                chain_classifications=ubi_chain_classifications,
+                e3_modules=ubi_e3_modules_result.get("e3_modules", []),
+                clusters=clusters,
+                comovement_analysis=state.get("comovement_analysis", {}),
+                ptm_type=ptm_type,
+            )
+            logger.info(
+                f"[KINASE-ANNOTATION] Module 3 (Temporal Ubi Cascade): "
+                f"{ubi_temporal_cascade_result.get('summary', {}).get('total_phospho_ub_crosstalk', 0)} "
+                f"phospho-ub crosstalk events"
+            )
+
+            # Append ubiquitylation contexts to LLM context
+            e3_ctx = ubi_e3_modules_result.get("llm_context", "")
+            ubi_cascade_ctx = ubi_temporal_cascade_result.get("llm_context", "")
+            if e3_ctx:
+                llm_context = llm_context + "\n\n" + e3_ctx
+            if ubi_cascade_ctx:
+                llm_context = llm_context + "\n\n" + ubi_cascade_ctx
+
         logger.info(
             f"[KINASE-ANNOTATION] Temporal cascade: {len(temporal_cascade['timepoint_order'])} timepoints, "
             f"{len(temporal_cascade.get('cross_timepoint_inferences', []))} cross-timepoint inferences, "
@@ -216,6 +279,9 @@ def run_kinase_annotation(state: dict) -> dict:
             "temporal_kinase_cascade": temporal_cascade,
             "temporal_kinase_cascade_llm_context": llm_context,
             "global_kinase_modules": global_km,
+            "ubi_chain_classifications": ubi_chain_classifications,
+            "ubi_e3_modules": ubi_e3_modules_result,
+            "ubi_temporal_cascade": ubi_temporal_cascade_result,
         }
 
     except Exception as e:

@@ -69,6 +69,11 @@ class ReportState(TypedDict, total=False):
     global_kinase_modules: dict             # kinase_modules, temporal_cascade, summary (auto-built in pipeline)
     frontend_kinase_analysis: dict          # pre-computed result from DB (optional, skips recomputation)
 
+    # v9.14: Ubiquitylation Analysis Suite (auto-built when ptm_type == 'ubiquitylation')
+    ubi_chain_classifications: dict         # Module 1: per-site chain type classification
+    ubi_e3_modules: dict                    # Module 2: E3 ligase-centric substrate modules (RING/HECT/RBR)
+    ubi_temporal_cascade: dict              # Module 3: Phospho-Ub cross-talk, DUB inference, degradation timeline
+
     # Drug repositioning (extended report)
     report_type: str
     drug_repositioning_results: dict
