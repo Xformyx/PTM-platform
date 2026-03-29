@@ -2480,27 +2480,67 @@ async def motif_kinase_annotation(
     }
     # ── Expanded Ubiquitylation Motif DB ──
     ubi_motif_db = {
-        "SCF_complex": r"[DE].{0,2}[ST].[DE]",
-        "APC/C_D-box": r"R..L.{2,4}[ILVM]",
-        "APC/C_KEN-box": r"KEN",
-        "HECT_E3": r"[LP]P.Y",
-        "VHL": r"LA.{1,2}[ILVM]P",
-        "MDM2": r"F..W..L",
-        "CHIP/STUB1": r"[ILVM].{1,2}[ILVM]",
+        # SCF complex degrons (phosphodegron-based)
+        "SCF_FBXW7": r"[LI]...[ST]P..[ST]",       # Cyclin E, c-Myc, c-Jun phosphodegron
+        "SCF_BTRC": r"DS[GA][ILVM][ST]",            # IkB, beta-catenin phosphodegron
+        "SCF_SKP2": r"[RK]..[ILVM]..[ST]P",        # p27, p21 phosphodegron
+        "SCF_FBXO4": r"[DE].{0,2}[ST].[DE]",       # Cyclin D1
+        "SCF_FBXO31": r"[DE].{1,3}[ST].[DE]",      # CDH1
+        "SCF_complex": r"[DE].{0,2}[ST].[DE]",     # generic SCF degron
+        # APC/C degrons
+        "APC/C_D-box": r"R..L.{2,4}[ILVM]",        # D-box: RXXL
+        "APC/C_KEN-box": r"KEN",                    # KEN-box
+        "APC/C_ABBA": r"[FY]..[FY].{3,5}[FY]",     # ABBA motif
+        # CRL2/VHL
+        "VHL": r"LA.{1,2}[ILVM]P",                 # HIF-1alpha
+        # MDM2
+        "MDM2": r"F..W..L",                         # p53 MDM2-binding
+        # NEDD4 family (HECT)
+        "NEDD4L": r"[LP]P.Y",                       # PY motif (PPXY)
         "NEDD4/ITCH": r"[LP]P.Y",
-        "TRAF6": r"P.E..[AQEG]",
-        "KEAP1/CUL3": r"[DE][ST]GE",
-        "BTRC/FBXW": r"DS[GS][ILVM][ST]",
+        "WWP1/2": r"[LP]P.Y",
         "SMURF1/2": r"[LP]P.Y",
+        # CHIP/STUB1
+        "CHIP/STUB1": r"[ILVM].{1,2}[ILVM]",       # hydrophobic patch (misfolded proteins)
+        # TRAF family
+        "TRAF6": r"P.E..[AQEG]",                    # TRAF6 binding motif
+        "TRAF2/5": r"P.Q.T",                        # TRAF2/5 binding motif
+        # KEAP1/CUL3
+        "KEAP1/CUL3": r"[DE][ST]GE",               # NRF2 ETGE/DLG motif
+        "KEAP1_DLG": r"DLG.{1,3}[DE]",             # NRF2 DLG motif
+        # SPOP/CUL3
+        "SPOP": r"[ST].{0,2}[ST].{0,2}[ST]",       # SPOP SBC degron
+        # PARKIN (RBR)
+        "PARKIN": r"[ILVM].{2,4}[KR].{2,4}[ILVM]", # mitochondrial substrates
+        # TRIM family
+        "TRIM25": r"[DE].{2,4}[DE]",               # TRIM25 substrates
+        "TRIM21": r"[FY].{1,3}[FY]",               # TRIM21 substrates
+        "TRIM32": r"[ILVM].{3,5}[ILVM]",           # TRIM32 substrates
+        # HUWE1/MULE
+        "HUWE1": r"[DE].{3,6}[DE]",                # HUWE1 acidic degron
+        # CBL (RING)
+        "CBL": r"[FY].{1,2}[FY].{1,2}[FY]",       # CBL pTyr recognition
+        # p62/SQSTM1 (autophagy receptor)
+        "p62/SQSTM1": r"[ILVM].{1,3}[ILVM].{1,3}[ILVM]",  # LIR motif region
+        # Generic phosphodegron
+        "phosphodegron": r"[ST]P.{1,3}[ST]P",      # proline-directed phosphodegron
     }
     motif_db = phospho_motif_db if order.ptm_type == "phosphorylation" else ubi_motif_db
 
-    # ── Residue-based kinase family prediction (fallback when no sequence) ──
-    residue_kinase_families = {
-        "S": ["CK2", "CK1", "CDK/MAPK", "PKA", "PKC", "AKT", "GSK3", "PLK1", "Aurora", "ATM/ATR", "AMPK", "mTOR"],
-        "T": ["CDK/MAPK", "CK2", "GSK3", "PKC", "AMPK", "PLK1", "Aurora", "NEK", "MST1/2", "CAMK"],
-        "Y": ["Src-family", "EGFR", "ABL", "JAK", "SYK", "FAK", "PDGFR", "VEGFR", "BTK", "FLT3"],
-    }
+    # ── Residue-based kinase/E3 family prediction (fallback when no sequence) ──
+    is_ubi_order = order.ptm_type == "ubiquitylation"
+    if is_ubi_order:
+        residue_kinase_families = {
+            # Ubiquitylation always occurs on K (Lysine)
+            "K": ["SCF_complex", "APC/C", "MDM2", "NEDD4", "CHIP/STUB1",
+                  "TRAF6", "PARKIN", "TRIM25", "VHL", "KEAP1/CUL3"],
+        }
+    else:
+        residue_kinase_families = {
+            "S": ["CK2", "CK1", "CDK/MAPK", "PKA", "PKC", "AKT", "GSK3", "PLK1", "Aurora", "ATM/ATR", "AMPK", "mTOR"],
+            "T": ["CDK/MAPK", "CK2", "GSK3", "PKC", "AMPK", "PLK1", "Aurora", "NEK", "MST1/2", "CAMK"],
+            "Y": ["Src-family", "EGFR", "ABL", "JAK", "SYK", "FAK", "PDGFR", "VEGFR", "BTK", "FLT3"],
+        }
 
     # ── 4. Annotate each PTM ─────────────────────────────────────────────
     annotations = []
@@ -2584,6 +2624,24 @@ async def motif_kinase_annotation(
                             "kinase": ur, "confidence": "literature",
                             "mechanism": "", "source": "upstream_regulator",
                         })
+                # ── Source 2b: e3_substrate (ubiquitylation-specific) ──
+                for e3pair in reg.get("e3_substrate", []):
+                    if isinstance(e3pair, dict) and e3pair.get("e3_ligase"):
+                        known_kinases.append({
+                            "kinase": e3pair["e3_ligase"],
+                            "confidence": "literature",
+                            "mechanism": f"E3 ligase → substrate: {e3pair.get('substrate', '')} ({e3pair.get('context', '')})",
+                            "source": "e3_substrate_pair",
+                        })
+                # ── Source 2c: dub_substrate (ubiquitylation-specific) ──
+                for dubpair in reg.get("dub_substrate", []):
+                    if isinstance(dubpair, dict) and dubpair.get("dub"):
+                        known_kinases.append({
+                            "kinase": dubpair["dub"],
+                            "confidence": "literature",
+                            "mechanism": f"DUB → substrate: {dubpair.get('substrate', '')} ({dubpair.get('context', '')})",
+                            "source": "dub_substrate_pair",
+                        })
 
             # ── Source 3: ptm_validation → iPTMnet enzyme info ──
             ptm_val = rag.get("ptm_validation", {})
@@ -2614,14 +2672,25 @@ async def motif_kinase_annotation(
                             "source": "iPTMnet",
                         })
 
-            # ── Source 4: fulltext_analysis → key_findings (kinase mentions) ──
+            # ── Source 4: fulltext_analysis → key_findings (kinase/E3 mentions) ──
             ft = rag.get("fulltext_analysis", {})
             if isinstance(ft, dict):
-                kinase_pattern = re.compile(
-                    r'(?:substrate\s+of|phosphorylated\s+by|target\s+of|regulated\s+by)'
-                    r'\s+([A-Z][A-Za-z0-9]{1,10}(?:\s+kinase)?)',
-                    re.IGNORECASE,
-                )
+                is_ubi_mode = order.ptm_type == "ubiquitylation"
+                if is_ubi_mode:
+                    kinase_pattern = re.compile(
+                        r'(?:ubiquitylated\s+by|ubiquitinated\s+by|substrate\s+of|target\s+of'
+                        r'|ubiquitylates?|ubiquitinates?|E3\s+ligase\s+(?:for|of)'
+                        r'|targets?\s+for\s+(?:proteasomal\s+)?degradation\s+by'
+                        r'|mediated\s+by|regulated\s+by)'
+                        r'\s+([A-Z][A-Za-z0-9]{1,15}(?:\s+(?:ligase|E3|RING|HECT|RBR))?)',
+                        re.IGNORECASE,
+                    )
+                else:
+                    kinase_pattern = re.compile(
+                        r'(?:substrate\s+of|phosphorylated\s+by|target\s+of|regulated\s+by)'
+                        r'\s+([A-Z][A-Za-z0-9]{1,10}(?:\s+kinase)?)',
+                        re.IGNORECASE,
+                    )
                 for finding in ft.get("key_findings", []):
                     if isinstance(finding, str):
                         for m in kinase_pattern.finditer(finding):
@@ -2680,14 +2749,41 @@ async def motif_kinase_annotation(
                                 "mechanism": item.get("evidence", item.get("mechanism", "")),
                                 "source": "abstract_analysis",
                             })
+                # ── Source 5b: abstract_analysis E3 ligase fields (ubiquitylation) ──
+                for key_name in ("e3_ligases", "ubiquitin_ligases", "ligases", "e3_ligase",
+                                 "upstream_e3", "predicted_e3", "dubs", "deubiquitylases"):
+                    for item in aa.get(key_name, []):
+                        if isinstance(item, str) and item:
+                            known_kinases.append({
+                                "kinase": item, "confidence": "predicted",
+                                "mechanism": "", "source": "abstract_e3",
+                            })
+                        elif isinstance(item, dict) and (item.get("name") or item.get("e3") or item.get("ligase")):
+                            known_kinases.append({
+                                "kinase": item.get("name") or item.get("e3") or item.get("ligase"),
+                                "confidence": item.get("confidence", "predicted"),
+                                "mechanism": item.get("evidence", item.get("mechanism", "")),
+                                "source": "abstract_e3",
+                            })
 
             # ── Source 6: string_interactions (protein-protein interactions) ──
-            # STRING DB interactions may include kinases
+            # STRING DB interactions may include kinases/E3 ligases
             string_ints = rag.get("string_interactions", [])
             if isinstance(string_ints, list):
-                kinase_keywords = {"kinase", "phosphotransferase", "CK1", "CK2", "CDK", "MAPK",
-                                   "PKA", "PKC", "GSK", "AKT", "mTOR", "ATM", "ATR", "PLK",
-                                   "AURK", "NEK", "DYRK", "CLK", "SRPK", "CAMK", "AMPK"}
+                if order.ptm_type == "ubiquitylation":
+                    kinase_keywords = {
+                        "ligase", "ubiquitin", "RING", "HECT", "RBR",
+                        "NEDD4", "TRIM", "RNF", "MDM2", "FBXW", "FBXO", "BTRC", "SKP",
+                        "CUL", "VHL", "CHIP", "STUB", "PARKIN", "PRKN", "HUWE", "HERC",
+                        "UBR", "MARCH", "ZNRF", "SMURF", "WWP", "ITCH", "NDFIP",
+                        "SPOP", "KEAP", "BIRC", "XIAP", "TRAF", "HACE", "CBL",
+                        "USP", "UCH", "OTU", "JAMM", "MINDY", "ZUFSP",  # DUBs
+                        "deubiquityl", "deubiquitin",
+                    }
+                else:
+                    kinase_keywords = {"kinase", "phosphotransferase", "CK1", "CK2", "CDK", "MAPK",
+                                       "PKA", "PKC", "GSK", "AKT", "mTOR", "ATM", "ATR", "PLK",
+                                       "AURK", "NEK", "DYRK", "CLK", "SRPK", "CAMK", "AMPK"}
                 for si in string_ints:
                     if isinstance(si, dict):
                         partner = si.get("preferredName_B") or si.get("partner") or si.get("name", "")
@@ -3181,6 +3277,7 @@ async def global_kinase_modules(
                 })
 
     # Now assign PTMs without known kinase → inferred via motif match
+    is_ubi_global = order.ptm_type == "ubiquitylation"
     for ann in annotations:
         if ann.get("known_kinases"):
             continue  # Already assigned as confirmed
@@ -3190,11 +3287,14 @@ async def global_kinase_modules(
         ptm_key = f"{gene}_{position}"  # Use gene_position format to match frontend chart keys
 
         motif_families = set()
+        motif_display_names = {}  # canonical → display name
         for mp in ann.get("motif_predicted_kinases", []):
             cf = mp.get("canonical_family", mp.get("kinase_family", ""))
+            display = mp.get("kinase_family", cf)
             for part in cf.split("/"):
                 if part and len(part) >= 2:
                     motif_families.add(part)
+                    motif_display_names[part] = display
 
         # Try to match with existing kinase modules
         matched_kinases = []
@@ -3215,6 +3315,30 @@ async def global_kinase_modules(
                     "membership": "inferred",
                     "evidence": f"motif match ({', '.join(motif_families)})",
                 })
+        elif motif_families and is_ubi_global:
+            # Ubiquitylation: if motif prediction exists but no anchor module yet,
+            # create a new E3 module from the motif prediction itself
+            # (phosphorylation requires anchor kinase from literature; ubi relies more on motif/degron)
+            for mf in sorted(motif_families):
+                display = motif_display_names.get(mf, mf)
+                if mf not in kinase_members:
+                    kinase_members[mf] = {
+                        "kinase": display,
+                        "canonical": mf,
+                        "sources": set(),
+                        "confirmed": [],
+                        "inferred": [],
+                    }
+                kinase_members[mf]["sources"].add("motif_prediction")
+                if ptm_key not in [m["key"] for m in kinase_members[mf]["inferred"]]:
+                    kinase_members[mf]["inferred"].append({
+                        "key": ptm_key,
+                        "gene": gene,
+                        "position": position,
+                        "membership": "inferred",
+                        "evidence": f"degron/motif prediction ({display})",
+                    })
+                break  # Assign to the first (best) motif prediction only
 
     # ── 3. Build unassigned list ────────────────────────────────────────────
     all_assigned_keys = set()
