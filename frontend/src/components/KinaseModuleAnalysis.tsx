@@ -627,7 +627,7 @@ export default function KinaseModuleAnalysis({
             className="text-xs h-7"
             onClick={() => setActiveTab("lookup")}
           >
-            <Search className="h-3 w-3 mr-1" /> Kinase Lookup
+            <Search className="h-3 w-3 mr-1" /> {isUbi ? "E3 Lookup" : "Kinase Lookup"}
           </Button>
           <Button
             variant={activeTab === "cascade" ? "default" : "ghost"}
@@ -909,7 +909,9 @@ export default function KinaseModuleAnalysis({
         {activeTab === "lookup" && (
           <div className="space-y-3">
             <p className="text-xs text-muted-foreground">
-              Select PTMs below to highlight them in the chart above. Click "Annotate" to collect kinase information from 8 sources (iPTMnet, UniProt, RAG, motif prediction, etc.) and identify novel substrate candidates.
+              {isUbi
+                ? 'Select ubiquitylation sites below to highlight them in the chart above. Click "Annotate" to collect E3 ligase information from 8 sources (iPTMnet, UniProt, RAG, degron motif prediction, etc.) and identify novel E3-substrate relationships.'
+                : 'Select PTMs below to highlight them in the chart above. Click "Annotate" to collect kinase information from 8 sources (iPTMnet, UniProt, RAG, motif prediction, etc.) and identify novel substrate candidates.'}
             </p>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-1 max-h-48 overflow-y-auto border rounded p-2">
               {topNPtms.map((p) => {
@@ -946,7 +948,7 @@ export default function KinaseModuleAnalysis({
                 ) : (
                   <FlaskConical className="h-3 w-3 mr-1" />
                 )}
-                Annotate ({manualSelection.size} PTMs)
+                {isUbi ? `E3 Annotate (${manualSelection.size} sites)` : `Annotate (${manualSelection.size} PTMs)`}
               </Button>
               {manualSelection.size > 0 && (
                 <Button
