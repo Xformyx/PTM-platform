@@ -1605,11 +1605,17 @@ async def get_vector_plot_data(
                 "label": f"{gene} {pos}".strip(),
             })
 
-    # ── v9.18: Infer upstream receptors from upstream_regulators ──────────────
+    # ── v9.18 + v9.19: Infer upstream receptors ──────────────────────────────
+    # Two sources:
+    #   (A) upstream_regulators from enriched data (text-based, biased)
+    #   (B) Reactome pathway mapping: kinase → receptor (unbiased, cached)
     inferred_receptors = []
+
+    # --- Source A: upstream_regulators (existing, kept for backward compat) ---
+    literature_receptors: dict = {}  # receptor_name -> {ptm_labels, class}
     if enriched_path.exists():
         from collections import defaultdict
-        receptor_ptm_map: dict = defaultdict(list)  # receptor_name -> [ptm_label, ...]
+        receptor_ptm_map: dict = defaultdict(list)
         for ptm in enriched:
             gene = ptm.get("gene") or ptm.get("Gene.Name", "")
             pos  = ptm.get("position") or ptm.get("PTM_Position", "")
@@ -1623,8 +1629,6 @@ async def get_vector_plot_data(
                 ur_name = ur.strip() if isinstance(ur, str) else ""
                 if not ur_name:
                     continue
-                # Classify upstream regulator — use lightweight text check
-                # (no enriched data available for non-PTM proteins)
                 ur_lower = ur_name.lower()
                 is_receptor = any(kw in ur_lower for kw in (
                     "receptor", "egfr", "erbb", "vegfr", "fgfr", "igf1r", "insr",
@@ -1632,15 +1636,14 @@ async def get_vector_plot_data(
                     "trkb", "trka", "trkc", "ntrk", "ros1", "musk",
                     "integrin", "notch", "frizzled", "fzd", "smoothened", "smo",
                     "gpcr", "adrb", "adra", "chrm", "htr", "drd", "oprm",
-                    "tlr", "il", "tnfr", "ifnar", "ifngr", "tgfbr", "bmpr",
+                    "tlr", "il-", "tnfr", "ifnar", "ifngr", "tgfbr", "bmpr",
+                    "growth factor receptor", "hormone receptor", "cytokine receptor",
+                    "immune receptor", "toll-like",
                 ))
                 if is_receptor:
                     receptor_ptm_map[ur_name].append(label)
-
-        # Sort by number of downstream PTMs (most influential first)
         for rec_name, ptm_labels in sorted(receptor_ptm_map.items(),
                                             key=lambda x: len(x[1]), reverse=True):
-            # Classify receptor type
             rec_lower = rec_name.lower()
             if any(kw in rec_lower for kw in ("egfr","erbb","vegfr","fgfr","igf1r",
                                                "insr","pdgfr","met","ret","kit",
@@ -1653,18 +1656,131 @@ async def get_vector_plot_data(
                 rec_class = "Developmental"
             elif any(kw in rec_lower for kw in ("gpcr","adrb","adra","chrm","htr","drd","oprm")):
                 rec_class = "GPCR"
-            elif any(kw in rec_lower for kw in ("tlr","tnfr","il","ifnar","ifngr")):
+            elif any(kw in rec_lower for kw in ("tlr","tnfr","il-","ifnar","ifngr")):
                 rec_class = "Cytokine/Immune"
             elif any(kw in rec_lower for kw in ("tgfbr","bmpr")):
                 rec_class = "TGFβ"
             else:
                 rec_class = "Receptor"
-            inferred_receptors.append({
+            literature_receptors[rec_name] = {
                 "name": rec_name,
                 "receptor_class": rec_class,
                 "downstream_ptm_count": len(ptm_labels),
-                "downstream_ptms": ptm_labels[:10],  # preview first 10
+                "downstream_ptms": ptm_labels[:10],
+                "source": "literature",
+            }
+
+    # --- Source B: Reactome pathway mapping (kinase → receptor) ---
+    reactome_receptors: dict = {}  # receptor_name -> {info}
+    try:
+        # Collect kinase names from enriched data (kinase_prediction + regulation)
+        kinase_names_set: set = set()
+        if enriched_path.exists():
+            for ptm in enriched:
+                rag = ptm.get("rag_enrichment", {})
+                if not isinstance(rag, dict):
+                    continue
+                # From kinase_prediction
+                kp = rag.get("kinase_prediction", {})
+                if isinstance(kp, dict):
+                    for pk in kp.get("predicted_kinases", []):
+                        if isinstance(pk, dict) and pk.get("kinase"):
+                            kinase_names_set.add(pk["kinase"].strip())
+                # From regulation.upstream_regulators (non-receptor kinases)
+                reg = rag.get("regulation", {})
+                if isinstance(reg, dict):
+                    for ur in reg.get("upstream_regulators", []):
+                        if isinstance(ur, str) and ur.strip():
+                            ur_lower = ur.strip().lower()
+                            # Only add if it looks like a kinase (not a receptor)
+                            if any(kw in ur_lower for kw in (
+                                "kinase", "cdk", "mapk", "erk", "akt", "pkc", "pkb",
+                                "gsk", "ck1", "ck2", "dyrk", "hipk", "mtor", "ampk",
+                                "plk", "aur", "nek", "chk", "atm", "atr", "dna-pk",
+                                "jak", "src", "abl", "lyn", "fyn", "lck", "syk",
+                                "raf", "mek", "jnk", "p38", "pi3k", "pdk",
+                                "cam", "rock", "pak", "rsk", "s6k", "sgk",
+                            )):
+                                kinase_names_set.add(ur.strip())
+
+        if kinase_names_set:
+            from app.services.reactome_client import get_receptors_for_kinases
+            kinase_list = sorted(kinase_names_set)[:20]  # limit to top 20 kinases
+            kinase_receptor_map = await get_receptors_for_kinases(kinase_list)
+
+            # Aggregate: receptor → {kinases that link to it, total PTM count}
+            from collections import defaultdict
+            receptor_kinase_map: dict = defaultdict(lambda: {
+                "kinases": [], "receptor_class": "", "pathway": "", "signaling_pathway": ""
             })
+            for kinase_name, receptors in kinase_receptor_map.items():
+                for rec in receptors:
+                    rec_name = rec["receptor"]
+                    receptor_kinase_map[rec_name]["kinases"].append(kinase_name)
+                    if not receptor_kinase_map[rec_name]["receptor_class"]:
+                        receptor_kinase_map[rec_name]["receptor_class"] = rec["receptor_class"]
+                    if not receptor_kinase_map[rec_name]["pathway"]:
+                        receptor_kinase_map[rec_name]["pathway"] = rec.get("pathway", "")
+                    if not receptor_kinase_map[rec_name]["signaling_pathway"]:
+                        receptor_kinase_map[rec_name]["signaling_pathway"] = rec.get("signaling_pathway", "")
+
+            # Count downstream PTMs per receptor (via kinase → PTMs)
+            # Build kinase → PTM label map from enriched data
+            kinase_ptm_map: dict = defaultdict(set)
+            if enriched_path.exists():
+                for ptm in enriched:
+                    gene = ptm.get("gene") or ptm.get("Gene.Name", "")
+                    pos  = ptm.get("position") or ptm.get("PTM_Position", "")
+                    label = f"{gene} {pos}".strip()
+                    rag = ptm.get("rag_enrichment", {})
+                    if not isinstance(rag, dict):
+                        continue
+                    kp = rag.get("kinase_prediction", {})
+                    if isinstance(kp, dict):
+                        for pk in kp.get("predicted_kinases", []):
+                            if isinstance(pk, dict) and pk.get("kinase"):
+                                kinase_ptm_map[pk["kinase"].strip()].add(label)
+
+            for rec_name, info in receptor_kinase_map.items():
+                # Count PTMs reachable via this receptor's kinases
+                downstream_ptms = set()
+                for kin in info["kinases"]:
+                    downstream_ptms.update(kinase_ptm_map.get(kin, set()))
+                unique_kinases = sorted(set(info["kinases"]))
+                reactome_receptors[rec_name] = {
+                    "name": rec_name,
+                    "receptor_class": info["receptor_class"],
+                    "downstream_ptm_count": len(downstream_ptms),
+                    "downstream_ptms": sorted(downstream_ptms)[:10],
+                    "via_kinases": unique_kinases,
+                    "pathway": info["pathway"],
+                    "signaling_pathway": info["signaling_pathway"],
+                    "source": "reactome",
+                }
+    except Exception as e:
+        logging.getLogger("vector_plot").warning(f"Reactome receptor lookup failed: {e}")
+
+    # --- Merge both sources (Reactome takes priority, literature supplements) ---
+    merged: dict = {}
+    for rec_name, info in reactome_receptors.items():
+        merged[rec_name] = info
+    for rec_name, info in literature_receptors.items():
+        if rec_name not in merged:
+            merged[rec_name] = info
+        else:
+            # Supplement Reactome result with literature PTM count
+            existing = merged[rec_name]
+            lit_ptms = set(info.get("downstream_ptms", []))
+            existing_ptms = set(existing.get("downstream_ptms", []))
+            combined = existing_ptms | lit_ptms
+            existing["downstream_ptm_count"] = max(existing["downstream_ptm_count"], len(combined))
+            existing["downstream_ptms"] = sorted(combined)[:10]
+
+    inferred_receptors = sorted(
+        merged.values(),
+        key=lambda x: x.get("downstream_ptm_count", 0),
+        reverse=True,
+    )
 
     # Calculate suggested N: count PTMs with |Log2FC| > 2*std in any condition
     suggested_n = None

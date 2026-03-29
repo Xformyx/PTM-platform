@@ -1218,7 +1218,7 @@ function RoleBadge({ role, ubiContext, confidence, isUbi }: { role: string; ubiC
 // ── TopNTimeSeriesPlot ───────────────────────────────────────────────────────
 function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId: number; ptmType?: string }) {
   const isUbi = ptmType.toLowerCase().includes("ubiquityl") || ptmType.toLowerCase().includes("ubiquitin");
-  const [data, setData] = useState<{ vector_data: Array<{ gene: string; position: string; condition: string; ptm_relative_log2fc: number; ptm_absolute_log2fc: number }>; top_n_ptms: Array<{ gene: string; position: string; label: string; protein_class?: { role: string; confidence: string; tags: string[]; ubi_context?: string } }>; suggested_n?: number | null; top_n_setting?: number; source?: string; inferred_receptors?: Array<{ name: string; receptor_class: string; downstream_ptm_count: number; downstream_ptms: string[] }> } | null>(null);
+  const [data, setData] = useState<{ vector_data: Array<{ gene: string; position: string; condition: string; ptm_relative_log2fc: number; ptm_absolute_log2fc: number }>; top_n_ptms: Array<{ gene: string; position: string; label: string; protein_class?: { role: string; confidence: string; tags: string[]; ubi_context?: string } }>; suggested_n?: number | null; top_n_setting?: number; source?: string; inferred_receptors?: Array<{ name: string; receptor_class: string; downstream_ptm_count: number; downstream_ptms: string[]; via_kinases?: string[]; pathway?: string; signaling_pathway?: string; source?: string }> } | null>(null);
   const [loading, setLoading] = useState(true);
   const [checked, setChecked] = useState<Record<string, boolean>>({});
   const [metric, setMetric] = useState<"relative" | "absolute">("relative");
@@ -1230,7 +1230,7 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
 
   useEffect(() => {
     api
-      .get<{ vector_data: unknown[]; top_n_ptms: Array<{ gene: string; position: string; label: string; protein_class?: { role: string; confidence: string; tags: string[]; ubi_context?: string } }>; suggested_n?: number | null; top_n_setting?: number; source?: string; inferred_receptors?: Array<{ name: string; receptor_class: string; downstream_ptm_count: number; downstream_ptms: string[] }> }>(`/orders/${orderId}/vector-plot-data`)
+      .get<{ vector_data: unknown[]; top_n_ptms: Array<{ gene: string; position: string; label: string; protein_class?: { role: string; confidence: string; tags: string[]; ubi_context?: string } }>; suggested_n?: number | null; top_n_setting?: number; source?: string; inferred_receptors?: Array<{ name: string; receptor_class: string; downstream_ptm_count: number; downstream_ptms: string[]; via_kinases?: string[]; pathway?: string; signaling_pathway?: string; source?: string }> }>(`/orders/${orderId}/vector-plot-data`)
       .then((d) => {
         setData({
           vector_data: (d.vector_data || []) as Array<{ gene: string; position: string; condition: string; ptm_relative_log2fc: number; ptm_absolute_log2fc: number }>,
@@ -1669,42 +1669,75 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
           <div className="mt-4 rounded-lg border border-border/60 bg-card/50 p-4">
             <div className="flex items-center gap-2 mb-3">
               <span className="text-sm font-semibold">Inferred Upstream Receptors</span>
-              <span className="text-xs text-muted-foreground">(from upstream regulator annotations)</span>
+              <span className="text-xs text-muted-foreground">(from Reactome pathway mapping + literature)</span>
             </div>
-            <div className="space-y-2">
+            <div className="space-y-2.5">
               {receptors.map((rec) => {
                 const style = classColor[rec.receptor_class] || classColor["Receptor"];
                 const barPct = Math.round((rec.downstream_ptm_count / maxCount) * 100);
+                const viaKinases = (rec as any).via_kinases as string[] | undefined;
+                const pathway = (rec as any).pathway as string | undefined;
+                const sigPathway = (rec as any).signaling_pathway as string | undefined;
+                const source = (rec as any).source as string | undefined;
+                const tooltipParts: string[] = [];
+                if (viaKinases?.length) tooltipParts.push(`via: ${viaKinases.join(", ")}`);
+                if (sigPathway) tooltipParts.push(`pathway: ${sigPathway}`);
+                if (rec.downstream_ptms?.length) tooltipParts.push(`PTMs: ${rec.downstream_ptms.join(", ")}`);
+                const tooltip = tooltipParts.join("\n");
                 return (
-                  <div key={rec.name} className="flex items-center gap-3">
-                    {/* Class badge */}
-                    <span className={`inline-flex items-center px-1.5 py-0 rounded text-[10px] font-semibold leading-4 border flex-shrink-0 w-16 justify-center ${style.bg} ${style.text} ${style.border}`}>
-                      {rec.receptor_class}
-                    </span>
-                    {/* Receptor name */}
-                    <span
-                      className="text-sm font-medium w-24 flex-shrink-0 truncate"
-                      title={`Downstream PTMs: ${rec.downstream_ptms.join(", ")}`}
-                    >
-                      {rec.name}
-                    </span>
-                    {/* Bar */}
-                    <div className="flex-1 h-2 rounded-full bg-muted overflow-hidden">
-                      <div
-                        className={`h-full rounded-full transition-all duration-500 ${style.text.replace("text-", "bg-")}`}
-                        style={{ width: `${barPct}%`, opacity: 0.7 }}
-                      />
+                  <div key={rec.name} className="group">
+                    <div className="flex items-center gap-3">
+                      {/* Class badge */}
+                      <span className={`inline-flex items-center px-1.5 py-0 rounded text-[10px] font-semibold leading-4 border flex-shrink-0 w-16 justify-center ${style.bg} ${style.text} ${style.border}`}>
+                        {rec.receptor_class}
+                      </span>
+                      {/* Receptor name */}
+                      <span
+                        className="text-sm font-medium w-24 flex-shrink-0 truncate cursor-help"
+                        title={tooltip}
+                      >
+                        {rec.name}
+                      </span>
+                      {/* Bar */}
+                      <div className="flex-1 h-2 rounded-full bg-muted overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all duration-500 ${style.text.replace("text-", "bg-")}`}
+                          style={{ width: `${barPct}%`, opacity: 0.7 }}
+                        />
+                      </div>
+                      {/* Count */}
+                      <span className="text-xs text-muted-foreground w-16 text-right flex-shrink-0">
+                        {rec.downstream_ptm_count} PTM{rec.downstream_ptm_count !== 1 ? "s" : ""}
+                      </span>
+                      {/* Source indicator */}
+                      {source === "reactome" && (
+                        <span className="text-[9px] text-emerald-500/70 flex-shrink-0" title="Mapped via Reactome pathway database">
+                          R
+                        </span>
+                      )}
                     </div>
-                    {/* Count */}
-                    <span className="text-xs text-muted-foreground w-16 text-right flex-shrink-0">
-                      {rec.downstream_ptm_count} PTM{rec.downstream_ptm_count !== 1 ? "s" : ""}
-                    </span>
+                    {/* Expanded detail on hover — via kinases + pathway */}
+                    {(viaKinases?.length || pathway) && (
+                      <div className="hidden group-hover:flex items-center gap-1.5 ml-[76px] mt-0.5">
+                        {viaKinases?.length ? (
+                          <span className="text-[10px] text-muted-foreground">
+                            via {viaKinases.join(" → ")}
+                          </span>
+                        ) : null}
+                        {sigPathway ? (
+                          <span className="text-[10px] text-blue-400/60 ml-1">
+                            ({sigPathway})
+                          </span>
+                        ) : null}
+                      </div>
+                    )}
                   </div>
                 );
               })}
             </div>
             <p className="text-[10px] text-muted-foreground mt-2">
-              Receptors inferred from LLM-annotated upstream regulators. Hover receptor name to see downstream PTMs.
+              Receptors inferred from Reactome pathway mapping (kinase → receptor) and literature annotations.
+              <span className="text-emerald-500/70 ml-1">R</span> = Reactome source. Hover receptor name for details.
             </p>
           </div>
         );
