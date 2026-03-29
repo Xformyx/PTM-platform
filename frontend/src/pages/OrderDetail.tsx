@@ -1216,7 +1216,7 @@ function RoleBadge({ role, ubiContext, confidence, isUbi }: { role: string; ubiC
 // ── TopNTimeSeriesPlot ───────────────────────────────────────────────────────
 function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId: number; ptmType?: string }) {
   const isUbi = ptmType.toLowerCase().includes("ubiquityl") || ptmType.toLowerCase().includes("ubiquitin");
-  const [data, setData] = useState<{ vector_data: Array<{ gene: string; position: string; condition: string; ptm_relative_log2fc: number; ptm_absolute_log2fc: number }>; top_n_ptms: Array<{ gene: string; position: string; label: string; protein_class?: { role: string; confidence: string; tags: string[]; ubi_context?: string } }>; suggested_n?: number | null; top_n_setting?: number; source?: string } | null>(null);
+  const [data, setData] = useState<{ vector_data: Array<{ gene: string; position: string; condition: string; ptm_relative_log2fc: number; ptm_absolute_log2fc: number }>; top_n_ptms: Array<{ gene: string; position: string; label: string; protein_class?: { role: string; confidence: string; tags: string[]; ubi_context?: string } }>; suggested_n?: number | null; top_n_setting?: number; source?: string; inferred_receptors?: Array<{ name: string; receptor_class: string; downstream_ptm_count: number; downstream_ptms: string[] }> } | null>(null);
   const [loading, setLoading] = useState(true);
   const [checked, setChecked] = useState<Record<string, boolean>>({});
   const [metric, setMetric] = useState<"relative" | "absolute">("relative");
@@ -1228,7 +1228,7 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
 
   useEffect(() => {
     api
-      .get<{ vector_data: unknown[]; top_n_ptms: Array<{ gene: string; position: string; label: string; protein_class?: { role: string; confidence: string; tags: string[]; ubi_context?: string } }>; suggested_n?: number | null; top_n_setting?: number; source?: string }>(`/orders/${orderId}/vector-plot-data`)
+      .get<{ vector_data: unknown[]; top_n_ptms: Array<{ gene: string; position: string; label: string; protein_class?: { role: string; confidence: string; tags: string[]; ubi_context?: string } }>; suggested_n?: number | null; top_n_setting?: number; source?: string; inferred_receptors?: Array<{ name: string; receptor_class: string; downstream_ptm_count: number; downstream_ptms: string[] }> }>(`/orders/${orderId}/vector-plot-data`)
       .then((d) => {
         setData({
           vector_data: (d.vector_data || []) as Array<{ gene: string; position: string; condition: string; ptm_relative_log2fc: number; ptm_absolute_log2fc: number }>,
@@ -1236,6 +1236,7 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
           suggested_n: d.suggested_n,
           top_n_setting: d.top_n_setting,
           source: d.source,
+          inferred_receptors: d.inferred_receptors || [],
         });
         // Deduplicate by gene_position key — keep first occurrence
         const seen = new Set<string>();
@@ -1645,6 +1646,65 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
           </div>
         </div>
       </div>
+
+      {/* ── v9.18: Inferred Upstream Receptors Panel ── */}
+      {(data.inferred_receptors ?? []).length > 0 && (() => {
+        const receptors = data.inferred_receptors!;
+        // color map per receptor class
+        const classColor: Record<string, { bg: string; text: string; border: string }> = {
+          RTK:             { bg: "bg-rose-500/15",    text: "text-rose-400",    border: "border-rose-500/30" },
+          GPCR:            { bg: "bg-violet-500/15",  text: "text-violet-400",  border: "border-violet-500/30" },
+          Integrin:        { bg: "bg-cyan-500/15",    text: "text-cyan-400",    border: "border-cyan-500/30" },
+          Developmental:   { bg: "bg-emerald-500/15", text: "text-emerald-400", border: "border-emerald-500/30" },
+          "Cytokine/Immune": { bg: "bg-amber-500/15", text: "text-amber-400",   border: "border-amber-500/30" },
+          "TGFβ":          { bg: "bg-orange-500/15",  text: "text-orange-400",  border: "border-orange-500/30" },
+          Receptor:        { bg: "bg-slate-500/15",   text: "text-slate-400",   border: "border-slate-500/30" },
+        };
+        const maxCount = receptors[0]?.downstream_ptm_count || 1;
+        return (
+          <div className="mt-4 rounded-lg border border-border/60 bg-card/50 p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <span className="text-sm font-semibold">Inferred Upstream Receptors</span>
+              <span className="text-xs text-muted-foreground">(from upstream regulator annotations)</span>
+            </div>
+            <div className="space-y-2">
+              {receptors.map((rec) => {
+                const style = classColor[rec.receptor_class] || classColor["Receptor"];
+                const barPct = Math.round((rec.downstream_ptm_count / maxCount) * 100);
+                return (
+                  <div key={rec.name} className="flex items-center gap-3">
+                    {/* Class badge */}
+                    <span className={`inline-flex items-center px-1.5 py-0 rounded text-[10px] font-semibold leading-4 border flex-shrink-0 w-16 justify-center ${style.bg} ${style.text} ${style.border}`}>
+                      {rec.receptor_class}
+                    </span>
+                    {/* Receptor name */}
+                    <span
+                      className="text-sm font-medium w-24 flex-shrink-0 truncate"
+                      title={`Downstream PTMs: ${rec.downstream_ptms.join(", ")}`}
+                    >
+                      {rec.name}
+                    </span>
+                    {/* Bar */}
+                    <div className="flex-1 h-2 rounded-full bg-muted overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all duration-500 ${style.text.replace("text-", "bg-")}`}
+                        style={{ width: `${barPct}%`, opacity: 0.7 }}
+                      />
+                    </div>
+                    {/* Count */}
+                    <span className="text-xs text-muted-foreground w-16 text-right flex-shrink-0">
+                      {rec.downstream_ptm_count} PTM{rec.downstream_ptm_count !== 1 ? "s" : ""}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+            <p className="text-[10px] text-muted-foreground mt-2">
+              Receptors inferred from LLM-annotated upstream regulators. Hover receptor name to see downstream PTMs.
+            </p>
+          </div>
+        );
+      })()}
 
       {/* ── Kinase / E3 Ligase Module Analysis Panel ── */}
       {conditions.length >= 3 && (

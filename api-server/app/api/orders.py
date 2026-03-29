@@ -1538,6 +1538,67 @@ async def get_vector_plot_data(
                 "label": f"{gene} {pos}".strip(),
             })
 
+    # ── v9.18: Infer upstream receptors from upstream_regulators ──────────────
+    inferred_receptors = []
+    if enriched_path.exists():
+        from collections import defaultdict
+        receptor_ptm_map: dict = defaultdict(list)  # receptor_name -> [ptm_label, ...]
+        for ptm in enriched:
+            gene = ptm.get("gene") or ptm.get("Gene.Name", "")
+            pos  = ptm.get("position") or ptm.get("PTM_Position", "")
+            label = f"{gene} {pos}".strip()
+            rag = ptm.get("rag_enrichment", {})
+            reg = rag.get("regulation", {}) if isinstance(rag, dict) else {}
+            upstream = reg.get("upstream_regulators", []) if isinstance(reg, dict) else []
+            if not isinstance(upstream, list):
+                upstream = []
+            for ur in upstream:
+                ur_name = ur.strip() if isinstance(ur, str) else ""
+                if not ur_name:
+                    continue
+                # Classify upstream regulator — use lightweight text check
+                # (no enriched data available for non-PTM proteins)
+                ur_lower = ur_name.lower()
+                is_receptor = any(kw in ur_lower for kw in (
+                    "receptor", "egfr", "erbb", "vegfr", "fgfr", "igf1r", "insr",
+                    "pdgfr", "met", "ret", "kit", "axl", "tie", "ror", "alk",
+                    "trkb", "trka", "trkc", "ntrk", "ros1", "musk",
+                    "integrin", "notch", "frizzled", "fzd", "smoothened", "smo",
+                    "gpcr", "adrb", "adra", "chrm", "htr", "drd", "oprm",
+                    "tlr", "il", "tnfr", "ifnar", "ifngr", "tgfbr", "bmpr",
+                ))
+                if is_receptor:
+                    receptor_ptm_map[ur_name].append(label)
+
+        # Sort by number of downstream PTMs (most influential first)
+        for rec_name, ptm_labels in sorted(receptor_ptm_map.items(),
+                                            key=lambda x: len(x[1]), reverse=True):
+            # Classify receptor type
+            rec_lower = rec_name.lower()
+            if any(kw in rec_lower for kw in ("egfr","erbb","vegfr","fgfr","igf1r",
+                                               "insr","pdgfr","met","ret","kit",
+                                               "axl","tie","ror","alk","trkb","trka",
+                                               "trkc","ntrk","ros1","musk")):
+                rec_class = "RTK"
+            elif any(kw in rec_lower for kw in ("integrin",)):
+                rec_class = "Integrin"
+            elif any(kw in rec_lower for kw in ("notch","frizzled","fzd","smoothened","smo")):
+                rec_class = "Developmental"
+            elif any(kw in rec_lower for kw in ("gpcr","adrb","adra","chrm","htr","drd","oprm")):
+                rec_class = "GPCR"
+            elif any(kw in rec_lower for kw in ("tlr","tnfr","il","ifnar","ifngr")):
+                rec_class = "Cytokine/Immune"
+            elif any(kw in rec_lower for kw in ("tgfbr","bmpr")):
+                rec_class = "TGFβ"
+            else:
+                rec_class = "Receptor"
+            inferred_receptors.append({
+                "name": rec_name,
+                "receptor_class": rec_class,
+                "downstream_ptm_count": len(ptm_labels),
+                "downstream_ptms": ptm_labels[:10],  # preview first 10
+            })
+
     # Calculate suggested N: count PTMs with |Log2FC| > 2*std in any condition
     suggested_n = None
     if vector_data:
@@ -1559,6 +1620,7 @@ async def get_vector_plot_data(
         "suggested_n": suggested_n,
         "top_n_setting": top_n_setting,
         "source": "enriched" if enriched_path.exists() else "preprocessing",
+        "inferred_receptors": inferred_receptors,  # v9.18
     }
 
 
