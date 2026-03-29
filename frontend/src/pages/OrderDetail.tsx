@@ -1567,6 +1567,46 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
               {allChecked ? "Deselect All" : "Select All"}
             </Button>
           </div>
+          {/* ── Badge Legend ── */}
+          <details className="rounded border border-border/50 text-xs">
+            <summary className="cursor-pointer px-2 py-1.5 text-muted-foreground hover:text-foreground select-none flex items-center gap-1.5 font-medium">
+              <span className="text-[9px] transition-transform">&#9654;</span> Badge Legend
+            </summary>
+            <div className="px-2 pb-2 pt-1 grid grid-cols-1 gap-y-1">
+              {(isUbi ? [
+                { role: "E3 ligase",          short: "E3",     desc: "E3 Ubiquitin Ligase" },
+                { role: "DUB",               short: "DUB",    desc: "Deubiquitinase" },
+                { role: "RTK",               short: "RTK",    desc: "Receptor Tyrosine Kinase" },
+                { role: "Receptor",          short: "Rec",    desc: "Cell-surface Receptor" },
+                { role: "Kinase",            short: "Kin",    desc: "Protein Kinase" },
+                { role: "TF",                short: "TF",     desc: "Transcription Factor" },
+                { role: "Autophagy receptor",short: "Atg-R",  desc: "Autophagy Receptor" },
+                { role: "Chaperone",         short: "Chap",   desc: "Chaperone / HSP" },
+                { role: "Cytoskeletal",      short: "Cyto",   desc: "Cytoskeletal Protein" },
+                { role: "Membrane protein",  short: "Mem",    desc: "Membrane Protein" },
+              ] : [
+                { role: "RTK",               short: "RTK",    desc: "Receptor Tyrosine Kinase" },
+                { role: "Receptor",          short: "Rec",    desc: "Cell-surface Receptor" },
+                { role: "Kinase",            short: "Kin",    desc: "Protein Kinase" },
+                { role: "TF",                short: "TF",     desc: "Transcription Factor" },
+                { role: "Phosphatase",       short: "PPase",  desc: "Protein Phosphatase" },
+                { role: "Adaptor",           short: "Adpt",   desc: "Adaptor / Scaffold" },
+                { role: "Chaperone",         short: "Chap",   desc: "Chaperone / HSP" },
+                { role: "Cytoskeletal",      short: "Cyto",   desc: "Cytoskeletal Protein" },
+                { role: "Membrane protein",  short: "Mem",    desc: "Membrane Protein" },
+              ]).map(({ role, short, desc }) => {
+                const style = ROLE_COLORS[role] || { bg: "bg-zinc-500/15", text: "text-zinc-400", border: "border-zinc-500/30" };
+                return (
+                  <div key={role} className="flex items-center gap-2">
+                    <span className={`inline-flex items-center px-1.5 py-0 rounded text-[10px] font-semibold leading-4 border flex-shrink-0 w-10 justify-center ${style.bg} ${style.text} ${style.border}`}>
+                      {short}
+                    </span>
+                    <span className="text-muted-foreground">{desc}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </details>
           <div className="max-h-[calc(100vh-400px)] min-h-[300px] overflow-y-auto space-y-0.5 rounded border p-2">
             {filteredPtms.map((p) => {
               const key = `${p.gene}_${p.position}`;
