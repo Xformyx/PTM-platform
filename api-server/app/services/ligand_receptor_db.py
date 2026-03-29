@@ -944,6 +944,178 @@ LIGAND_RECEPTOR_DB: list[dict] = [
 ]
 
 
+# ── Receptor → downstream kinase mapping (for activity-based scoring) ──────────
+# Maps receptor gene names / common names to the kinases they canonically activate.
+# Used to score UniProt fallback receptors against the current PTM kinase set.
+_RECEPTOR_DOWNSTREAM_KINASES: dict[str, list[str]] = {
+    # RTKs
+    "EGFR":    ["EGFR", "ERK1", "ERK2", "MAPK1", "MAPK3", "AKT1", "AKT2", "PI3K", "SRC", "JAK1"],
+    "ERBB2":   ["MAPK1", "MAPK3", "AKT1", "SRC", "FAK"],
+    "ERBB3":   ["AKT1", "PI3K", "MAPK1"],
+    "ERBB4":   ["AKT1", "MAPK1", "JAK2"],
+    "FGFR1":   ["MAPK1", "MAPK3", "AKT1", "PLCγ", "SRC", "PI3K"],
+    "FGFR2":   ["MAPK1", "MAPK3", "AKT1", "PI3K"],
+    "FGFR3":   ["MAPK1", "MAPK3", "STAT3"],
+    "FGFR4":   ["MAPK1", "STAT3"],
+    "PDGFRA":  ["MAPK1", "MAPK3", "AKT1", "PI3K", "SRC"],
+    "PDGFRB":  ["MAPK1", "MAPK3", "AKT1", "PI3K", "SRC"],
+    "VEGFR1":  ["MAPK1", "AKT1", "PI3K", "SRC"],
+    "VEGFR2":  ["MAPK1", "MAPK3", "AKT1", "PI3K", "SRC", "FAK"],
+    "KDR":     ["MAPK1", "MAPK3", "AKT1", "PI3K", "SRC", "FAK"],
+    "MET":     ["MAPK1", "MAPK3", "AKT1", "PI3K", "SRC", "FAK", "RAC1"],
+    "IGF1R":   ["AKT1", "AKT2", "MAPK1", "MAPK3", "PI3K", "IRS1", "mTOR", "MTOR", "S6K1"],
+    "INSR":    ["AKT1", "AKT2", "MAPK1", "PI3K", "IRS1", "GSK3B", "mTOR", "MTOR"],
+    "NTRK1":   ["MAPK1", "MAPK3", "AKT1", "PI3K", "PLCγ", "CDK5", "RSK"],
+    "TRKA":    ["MAPK1", "MAPK3", "AKT1", "CDK5", "RSK"],
+    "NTRK2":   ["MAPK1", "MAPK3", "AKT1", "PI3K", "CDK5"],
+    "TRKB":    ["MAPK1", "MAPK3", "AKT1", "CDK5"],
+    "NTRK3":   ["MAPK1", "AKT1", "PI3K"],
+    "RET":     ["MAPK1", "MAPK3", "AKT1", "PI3K", "SRC"],
+    "KIT":     ["MAPK1", "AKT1", "PI3K", "SRC", "JAK2"],
+    "ALK":     ["MAPK1", "MAPK3", "AKT1", "JAK", "STAT3"],
+    "ROS1":    ["MAPK1", "AKT1", "PI3K", "SRC"],
+    "AXL":     ["AKT1", "MAPK1", "PI3K", "SRC"],
+    "MERTK":   ["AKT1", "MAPK1", "PI3K", "FAK"],
+    "TYRO3":   ["AKT1", "MAPK1", "FAK"],
+    "ROR1":    ["AKT1", "MAPK1", "PI3K"],
+    "ROR2":    ["JNK", "MAPK8", "WNT"],
+    "EPHA2":   ["SRC", "FAK", "AKT1", "MAPK1"],
+    "EPHB2":   ["SRC", "FAK", "MAPK1"],
+    # TGFβ / BMP receptors
+    "TGFBR1":  ["SMAD2", "SMAD3", "TAK1", "MAP3K7", "p38", "MAPK14", "JNK"],
+    "TGFBR2":  ["SMAD2", "SMAD3", "TAK1"],
+    "BMPR1A":  ["SMAD1", "SMAD5", "SMAD8", "p38", "MAPK14"],
+    "BMPR1B":  ["SMAD1", "SMAD5"],
+    "BMPR2":   ["SMAD1", "SMAD5", "LIMK"],
+    "ACVR1":   ["SMAD1", "SMAD5"],
+    "ACVR2A":  ["SMAD2", "SMAD3"],
+    "ACVR2B":  ["SMAD2", "SMAD3"],
+    # Cytokine receptors (JAK-STAT)
+    "IL6R":    ["JAK1", "JAK2", "STAT3", "MAPK1", "AKT1"],
+    "IL6ST":   ["JAK1", "JAK2", "STAT3"],
+    "IFNAR1":  ["JAK1", "TYK2", "STAT1", "STAT2"],
+    "IFNAR2":  ["JAK1", "TYK2", "STAT1"],
+    "IFNGR1":  ["JAK1", "JAK2", "STAT1"],
+    "IL2RA":   ["JAK1", "JAK3", "STAT5"],
+    "IL4R":    ["JAK1", "JAK3", "STAT6"],
+    "IL10RA":  ["JAK1", "TYK2", "STAT3"],
+    "IL12RB1": ["JAK2", "TYK2", "STAT4"],
+    "TNFRSF1A":["RIPK1", "IKK", "JNK", "MAPK8", "p38", "MAPK14", "CASP8"],
+    "TNFRSF1B":["TRAF2", "IKK", "MAPK1"],
+    # GPCRs
+    "ADRB1":   ["PKA", "PRKACA", "MAPK1", "PI3K"],
+    "ADRB2":   ["PKA", "PRKACA", "MAPK1", "GRK2", "ERK"],
+    "ADRA1A":  ["PKC", "PRKCA", "MAPK1", "CaMKII"],
+    "CHRM1":   ["PKC", "PRKCA", "MAPK1"],
+    "DRD1":    ["PKA", "PRKACA", "DARPP32", "MAPK1"],
+    "DRD2":    ["AKT1", "GSK3B", "MAPK1"],
+    "HTR2A":   ["PKC", "PRKCA", "MAPK1"],
+    "PTGER2":  ["PKA", "PRKACA", "MAPK1"],
+    "PTGER4":  ["PKA", "PRKACA", "PI3K", "AKT1"],
+    "LPAR1":   ["MAPK1", "ROCK1", "ROCK2", "PI3K", "AKT1"],
+    "S1PR1":   ["PI3K", "AKT1", "MAPK1", "ROCK1"],
+    # Integrin receptors
+    "ITGAV":   ["FAK", "PTK2", "SRC", "AKT1", "MAPK1", "ILK", "PAK1"],
+    "ITGB1":   ["FAK", "PTK2", "SRC", "ILK", "AKT1", "MAPK1", "PAK1"],
+    "ITGB3":   ["FAK", "PTK2", "SRC", "AKT1", "MAPK1"],
+    "ITGB5":   ["FAK", "PTK2", "SRC", "AKT1", "MAPK1"],
+    "ITGA4":   ["FAK", "PTK2", "SRC", "PI3K", "AKT1"],
+    "ITGA5":   ["FAK", "PTK2", "SRC", "MAPK1"],
+    "ITGA6":   ["FAK", "PTK2", "SRC", "AKT1"],
+    # Wnt / Notch / Hedgehog
+    "FZD1":    ["GSK3B", "CK1", "CSNK1A1", "DYRK1A", "MAPK1"],
+    "FZD4":    ["GSK3B", "CK1", "DYRK1A"],
+    "LRP5":    ["GSK3B", "CK1"],
+    "LRP6":    ["GSK3B", "CK1", "CSNK1A1"],
+    "NOTCH1":  ["CDK8", "HIPK2", "MAPK1"],
+    "NOTCH2":  ["CDK8", "HIPK2", "MAPK1"],
+    # Insulin / metabolic
+    "LEPR":    ["JAK2", "STAT3", "MAPK1", "AKT1", "PI3K", "AMPK"],
+    "ADIPOR1": ["AMPK", "PRKAA1", "PRKAA2", "p38", "MAPK14"],
+    "ADIPOR2": ["AMPK", "PRKAA1", "PRKAA2", "p38", "MAPK14"],
+    # Miscellaneous
+    "LRP1":    ["SRC", "FAK", "AKT1", "MAPK1", "CDK5"],
+    "PTPN11":  ["MAPK1", "MAPK3", "PI3K", "AKT1"],
+    "NOTCH3":  ["CDK8", "HIPK2"],
+    "NOTCH4":  ["CDK8"],
+}
+
+# Normalised lookup: lowercase gene name → canonical name
+_RECEPTOR_DOWNSTREAM_KINASES_LOWER: dict[str, list[str]] = {
+    k.lower(): v for k, v in _RECEPTOR_DOWNSTREAM_KINASES.items()
+}
+
+
+def score_uniprot_receptor(
+    receptor_name: str,
+    receptor_class: str,
+    active_kinases: set[str],
+    reactome_receptor_names: set[str],
+    uniprot_rank: int = 0,
+) -> int:
+    """
+    Score a UniProt-fallback receptor based on its relevance to the current
+    PTM analysis context.
+
+    Scoring criteria:
+      +3 per active kinase that is a known downstream target of this receptor
+      +5 if this receptor also appears in Reactome (Source B) results
+      +1 if receptor class is RTK or Integrin (directly phosphorylation-relevant)
+      +2/+1/+0 for UniProt rank 0/1/2+ (top results are more relevant)
+
+    Returns an integer score. Receptors with score == 0 and no kinase overlap
+    should be filtered out.
+    """
+    score = 0
+
+    # Normalise active kinase names for comparison
+    active_lower = {k.lower() for k in active_kinases}
+
+    # Extract gene tokens from receptor_name (e.g. "ALK tyrosine kinase receptor" → "alk")
+    import re
+    name_tokens = set(re.split(r"[\s\-/—()]+", receptor_name.lower()))
+
+    # Find downstream kinases for this receptor
+    downstream: list[str] = []
+    for token in name_tokens:
+        if token in _RECEPTOR_DOWNSTREAM_KINASES_LOWER:
+            downstream = _RECEPTOR_DOWNSTREAM_KINASES_LOWER[token]
+            break
+    # Also try full name lookup
+    if not downstream:
+        for key, kinases in _RECEPTOR_DOWNSTREAM_KINASES_LOWER.items():
+            if key in receptor_name.lower():
+                downstream = kinases
+                break
+
+    # +3 per matching downstream kinase
+    downstream_lower = {k.lower() for k in downstream}
+    matched_kinases = active_lower & downstream_lower
+    score += 3 * len(matched_kinases)
+
+    # +5 if also in Reactome
+    reactome_lower = {r.lower() for r in reactome_receptor_names}
+    if any(token in reactome_lower for token in name_tokens):
+        score += 5
+    # Also check partial match
+    for rn in reactome_receptor_names:
+        if receptor_name.lower() in rn.lower() or rn.lower() in receptor_name.lower():
+            score += 5
+            break
+
+    # +1 for phospho-relevant class
+    if receptor_class in ("RTK", "Integrin"):
+        score += 1
+
+    # +2/+1/+0 for UniProt rank
+    if uniprot_rank == 0:
+        score += 2
+    elif uniprot_rank == 1:
+        score += 1
+
+    return score
+
+
 # ── Receptor class inference from UniProt keywords ───────────────────────────
 _UNIPROT_CLASS_MAP: dict[str, str] = {
     "KW-0067": "RTK",           # Tyrosine-protein kinase

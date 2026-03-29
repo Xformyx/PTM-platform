@@ -1817,29 +1817,64 @@ async def get_vector_plot_data(
         logging.getLogger("vector_plot").warning(f"Reactome receptor lookup failed: {e}")
 
     # --- Source C: Treatment-context-based receptor inference ---
-    # Uses order.analysis_context.treatment to look up known ligand→receptor pairs
+    # Uses order.analysis_context.treatment to look up known ligand→receptor pairs.
+    # UniProt fallback results are scored against the current PTM kinase set
+    # and filtered to keep only biologically relevant receptors.
     treatment_receptors: dict = {}  # receptor_name -> {info}
     try:
         ctx = order.analysis_context or {}
         treatment_text = ctx.get("treatment", "") or ""
         if treatment_text.strip():
-            from app.services.ligand_receptor_db import lookup_receptors_for_treatment
+            from app.services.ligand_receptor_db import (
+                lookup_receptors_for_treatment,
+                score_uniprot_receptor,
+            )
             matches = lookup_receptors_for_treatment(treatment_text)
-            for m in matches:
+            # Reactome receptor names for cross-validation bonus
+            reactome_names: set[str] = set(reactome_receptors.keys())
+
+            for rank, m in enumerate(matches):
                 rec_name = m["receptor_name"]
+                is_curated = m.get("source") == "treatment_context"  # internal DB
+                is_uniprot = m.get("source") == "treatment_context_uniprot"
+
+                # Score UniProt fallback results against active kinases
+                relevance_score = 0
+                if is_uniprot:
+                    relevance_score = score_uniprot_receptor(
+                        receptor_name=rec_name,
+                        receptor_class=m["receptor_class"],
+                        active_kinases=kinase_names_set,
+                        reactome_receptor_names=reactome_names,
+                        uniprot_rank=rank,
+                    )
+                    # Filter: skip if score is 0 (no kinase overlap, not in Reactome)
+                    if relevance_score == 0:
+                        logging.getLogger("vector_plot").debug(
+                            f"Source C: Filtered out UniProt receptor '{rec_name}' "
+                            f"(score=0, no kinase overlap with active set {sorted(kinase_names_set)[:5]})"
+                        )
+                        continue
+                else:
+                    # Curated internal DB: always include, score = PTM count
+                    relevance_score = len(top_n_ptms)
+
                 treatment_receptors[rec_name] = {
                     "name": rec_name,
                     "receptor_class": m["receptor_class"],
-                    "downstream_ptm_count": len(top_n_ptms),  # treatment affects all analyzed PTMs
+                    "downstream_ptm_count": relevance_score,
                     "downstream_ptms": [p["label"] for p in top_n_ptms[:10]],
                     "pathway": m.get("pathway", ""),
                     "evidence": m.get("evidence", ""),
                     "matched_ligand": m.get("ligand", ""),
-                    "source": "treatment_context",
+                    "source": m.get("source", "treatment_context"),
+                    "relevance_score": relevance_score,
                 }
-            if matches:
+
+            if treatment_receptors:
                 logging.getLogger("vector_plot").info(
-                    f"Source C: Found {len(matches)} receptor(s) for treatment '{treatment_text}'"
+                    f"Source C: Kept {len(treatment_receptors)}/{len(matches)} receptor(s) "
+                    f"for treatment '{treatment_text}' after kinase-activity scoring"
                 )
     except Exception as e:
         logging.getLogger("vector_plot").warning(f"Treatment-context receptor lookup failed: {e}")
