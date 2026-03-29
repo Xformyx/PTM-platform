@@ -42,9 +42,9 @@ import re
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from core.nodes.ubiquitin_chain_classifier import classify_ubiquitin_chain_types
-from core.nodes.e3_ligase_module import build_e3_ligase_modules
-from core.nodes.temporal_ubiquitylation_cascade import build_temporal_ubiquitylation_cascade
+from report_generation.core.nodes.ubiquitin_chain_classifier import classify_ubiquitin_chain_types
+from report_generation.core.nodes.e3_ligase_module import build_e3_ligase_modules
+from report_generation.core.nodes.temporal_ubiquitylation_cascade import build_temporal_ubiquitylation_cascade
 
 from common.kinase_utils import (
     normalize_kinase_name,
