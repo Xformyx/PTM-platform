@@ -86,18 +86,48 @@ PHOSPHO_MOTIF_DB = {
 }
 
 UBI_MOTIF_DB = {
+    # SCF complex degrons
     "SCF_complex": r"[DE].{0,2}[ST].[DE]",
+    "SCF-FBXW7": r"[LI].{0,1}[ST]P.{0,2}[ED]",
+    "SCF-BTRC": r"DS.{1,2}[AG][IL]D",
+    "SCF-SKP2": r"[LI].[KR].{1,2}[ST]P",
+    # APC/C degrons
     "APC/C_D-box": r"R..L.{2,4}[ILVM]",
     "APC/C_KEN-box": r"KEN",
-    "HECT_E3": r"[LP]P.Y",
+    "APC/C_ABBA": r"[FY].{0,2}[ILVM].{0,2}[FY]",
+    # HECT E3 ligases
+    "NEDD4/HECT": r"[LP]P.Y",
+    "NEDD4L": r"[LP]P.Y",
+    "SMURF1/2": r"[LP]P.Y",
+    "WWP1/2": r"[LP]P.Y",
+    "ITCH": r"[LP]P.[YF]",
+    # RING E3 ligases
     "VHL": r"LA.{1,2}[ILVM]P",
     "MDM2": r"F..W..L",
+    "CHIP/STUB1": r"[RK].{0,2}[ILVM].{0,2}[ED]",
+    "PARKIN": r"[RK].{1,3}[ST].{1,3}[DE]",
+    "TRAF6": r"[ST].{0,2}[KR].{0,2}[ED]",
+    "TRIM21": r"[ILVM].{0,2}[KR].{0,2}[FY]",
+    "TRIM25": r"[FY].{1,3}[KR]",
+    # Phosphodegron-dependent E3s
+    "SCF_phosphodegron": r"[ST]P.{0,2}[ST]P",
+    "FBXO4": r"[DE].{1,2}[ST].{1,2}[DE]",
+    "FBXO31": r"[ST].{1,3}[DE].{1,3}[ST]",
+    # Autophagy/selective autophagy receptors
+    "p62/SQSTM1": r"[ILVM].{0,2}[KR].{0,2}[ILVM]",
+    "NBR1": r"[FY].{0,2}[ILVM].{0,2}[FY]",
+    # Ubiquitin-binding domain degrons
+    "UBR1/UBR2_N-degron": r"^[RKHFYWLIV]",
+    "KEAP1": r"[DE].{1,3}[ST][GS][ED]",
+    "SPOP": r"[ST].{0,1}[ST].{0,2}[ST]",
 }
 
 RESIDUE_KINASE_FAMILIES = {
     "S": ["CK2", "CK1", "CDK/MAPK", "PKA", "PKC", "AKT", "GSK3", "PLK1", "Aurora", "ATM/ATR", "AMPK", "mTOR"],
     "T": ["CDK/MAPK", "CK2", "GSK3", "PKC", "AMPK", "PLK1", "Aurora", "NEK", "MST1/2", "CAMK"],
     "Y": ["Src-family", "EGFR", "ABL", "JAK", "SYK", "FAK", "PDGFR", "VEGFR", "BTK", "FLT3"],
+    # Ubiquitylation: Lysine is the primary ubiquitylation site
+    "K": ["SCF_complex", "APC/C", "MDM2", "NEDD4", "CHIP/STUB1", "TRAF6", "PARKIN", "TRIM25", "VHL"],
 }
 
 
@@ -356,6 +386,24 @@ def _collect_known_kinases_from_enriched(
                 })
             elif isinstance(ur, str) and ur:
                 known.append({"kinase": ur, "confidence": "literature", "source": "upstream_regulator"})
+        # Source 2b: E3 ligase-substrate pairs (ubiquitylation)
+        for e3s in reg.get("e3_substrate", []):
+            if isinstance(e3s, dict) and e3s.get("e3_ligase"):
+                known.append({
+                    "kinase": e3s["e3_ligase"],
+                    "confidence": "literature",
+                    "source": "e3_substrate_pair",
+                    "pmid": e3s.get("pmid", ""),
+                })
+        # Source 2c: DUB-substrate pairs (ubiquitylation)
+        for dubs in reg.get("dub_substrate", []):
+            if isinstance(dubs, dict) and dubs.get("dub"):
+                known.append({
+                    "kinase": dubs["dub"],
+                    "confidence": "literature",
+                    "source": "dub_substrate_pair",
+                    "pmid": dubs.get("pmid", ""),
+                })
 
     # Source 3: ptm_validation (iPTMnet cached)
     ptm_val = rag.get("ptm_validation", {})
@@ -382,34 +430,62 @@ def _collect_known_kinases_from_enriched(
     # Source 4: fulltext_analysis
     ft = rag.get("fulltext_analysis", {})
     if isinstance(ft, dict):
+        # Phosphorylation pattern
         kinase_pattern = re.compile(
             r'(?:substrate\s+of|phosphorylated\s+by|target\s+of|regulated\s+by)'
             r'\s+([A-Z][A-Za-z0-9]{1,10}(?:\s+kinase)?)',
             re.IGNORECASE,
         )
-        for finding in ft.get("key_findings", []):
-            if isinstance(finding, str):
-                for m in kinase_pattern.finditer(finding):
-                    kname = m.group(1).strip()
-                    if kname and len(kname) > 1:
-                        known.append({
-                            "kinase": kname,
-                            "confidence": "text_mining",
-                            "source": "fulltext_analysis",
-                        })
+        # Ubiquitylation-specific patterns
+        e3_pattern = re.compile(
+            r'(?:ubiquitylated\s+by|ubiquitinated\s+by|ubiquitylation\s+by|ubiquitination\s+by'
+            r'|E3\s+ligase\s+([A-Z][A-Za-z0-9]{1,15})'
+            r'|([A-Z][A-Za-z0-9]{1,15})\s+(?:E3|ligase|RING|HECT|RBR)'
+            r'|([A-Z][A-Za-z0-9]{1,15})\s+(?:ubiquitylates?|ubiquitinates?|mediates?\s+ubiquitylation)'
+            r'|degradation\s+(?:of\s+\w+\s+)?(?:by|via|through)\s+([A-Z][A-Za-z0-9]{1,15}))'
+            r'(?:\s+([A-Z][A-Za-z0-9]{1,15}))?',
+            re.IGNORECASE,
+        )
+        e3_simple_pattern = re.compile(
+            r'([A-Z][A-Za-z0-9]{1,15})\s+(?:ubiquitylates?|ubiquitinates?|poly-?ubiquitylates?'
+            r'|mono-?ubiquitylates?|promotes?\s+ubiquitylation|mediates?\s+ubiquitylation'
+            r'|catalyzes?\s+ubiquitylation|targets?\s+\w+\s+for\s+(?:proteasomal\s+)?degradation)',
+            re.IGNORECASE,
+        )
+        all_findings = list(ft.get("key_findings", []))
         for article in ft.get("per_article", []):
             if isinstance(article, dict):
-                for finding in article.get("key_findings", []):
-                    if isinstance(finding, str):
-                        for m in kinase_pattern.finditer(finding):
-                            kname = m.group(1).strip()
-                            if kname and len(kname) > 1:
-                                known.append({
-                                    "kinase": kname,
-                                    "confidence": "text_mining",
-                                    "source": "fulltext_analysis",
-                                    "pmid": article.get("pmid", ""),
-                                })
+                all_findings.extend([(f, article.get("pmid", "")) for f in article.get("key_findings", [])])
+
+        for item in all_findings:
+            if isinstance(item, tuple):
+                finding, pmid = item
+            else:
+                finding, pmid = item, ""
+            if not isinstance(finding, str):
+                continue
+            # Phosphorylation kinase extraction
+            for m in kinase_pattern.finditer(finding):
+                kname = m.group(1).strip()
+                if kname and len(kname) > 1:
+                    known.append({
+                        "kinase": kname,
+                        "confidence": "text_mining",
+                        "source": "fulltext_analysis",
+                        "pmid": pmid,
+                    })
+            # E3 ligase extraction (ubiquitylation)
+            for m in e3_simple_pattern.finditer(finding):
+                kname = m.group(1).strip()
+                if kname and len(kname) > 1 and kname.upper() not in (
+                    "THE", "THIS", "THAT", "THESE", "THOSE", "WHICH", "WHEN", "WITH"
+                ):
+                    known.append({
+                        "kinase": kname,
+                        "confidence": "text_mining",
+                        "source": "fulltext_e3_extraction",
+                        "pmid": pmid,
+                    })
 
     # Source 5: abstract_analysis (LLM NER)
     aa = rag.get("abstract_analysis", {})
@@ -433,6 +509,17 @@ def _collect_known_kinases_from_enriched(
                         "confidence": item.get("confidence", "predicted"),
                         "source": "abstract_analysis",
                     })
+        # Source 5b: E3 ligase fields from abstract_analysis (ubiquitylation)
+        for key_name in ("e3_ligases", "ubiquitin_ligases", "e3_ligase", "ligases"):
+            for item in aa.get(key_name, []):
+                if isinstance(item, str) and item:
+                    known.append({"kinase": item, "confidence": "predicted", "source": "abstract_e3_analysis"})
+                elif isinstance(item, dict) and (item.get("e3_ligase") or item.get("name") or item.get("kinase")):
+                    known.append({
+                        "kinase": item.get("e3_ligase") or item.get("name") or item.get("kinase"),
+                        "confidence": item.get("confidence", "predicted"),
+                        "source": "abstract_e3_analysis",
+                    })
 
     # Source 6: STRING DB interactions
     string_ints = rag.get("string_interactions", [])
@@ -441,6 +528,13 @@ def _collect_known_kinases_from_enriched(
             "kinase", "phosphotransferase", "CK1", "CK2", "CDK", "MAPK",
             "PKA", "PKC", "GSK", "AKT", "mTOR", "ATM", "ATR", "PLK",
             "AURK", "NEK", "DYRK", "CLK", "SRPK", "CAMK", "AMPK",
+        }
+        # E3 ligase keywords for ubiquitylation
+        e3_keywords = {
+            "ligase", "RING", "HECT", "RBR", "SCF", "APC", "MDM2", "NEDD4",
+            "CHIP", "SIAH", "FBXW", "FBXL", "FBXO", "BTRC", "KEAP1", "VHL",
+            "TRAF", "BIRC", "XIAP", "ITCH", "WWP", "SMURF", "HUWE", "HERC",
+            "UBR", "TRIM", "RNF", "ZNRF", "MARCH", "PARK", "PARKIN",
         }
         for si in string_ints:
             if isinstance(si, dict):
@@ -453,6 +547,12 @@ def _collect_known_kinases_from_enriched(
                             "kinase": partner,
                             "confidence": f"STRING (score={score})",
                             "source": "string_db",
+                        })
+                    elif any(kw.upper() in partner_upper for kw in e3_keywords):
+                        known.append({
+                            "kinase": partner,
+                            "confidence": f"STRING_E3 (score={score})",
+                            "source": "string_db_e3",
                         })
 
     # Normalize & deduplicate

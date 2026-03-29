@@ -72,6 +72,7 @@ def _build_analysis_prompt(
     position: str,
     pattern_matches: Optional[Dict[str, List[PatternMatch]]] = None,
     experimental_context: Optional[dict] = None,
+    ptm_type: str = "phosphorylation",
 ) -> str:
     """Build the LLM prompt for abstract analysis."""
 
@@ -122,8 +123,16 @@ Return a JSON object with these keys:
 {{
   "signalingNetwork": {{
     "upstreamRegulators": [
-      {{"name": "...", "type": "kinase|phosphatase|...", "evidence": "direct|indirect|predicted",
+      {{"name": "...", "type": "kinase|phosphatase|e3_ligase|dub|...", "evidence": "direct|indirect|predicted",
         "mechanism": "...", "conditions": "...", "quantitativeData": "..."}}
+    ],
+    "e3Ligases": [
+      {{"name": "...", "family": "RING|HECT|RBR", "evidence": "direct|indirect|predicted",
+        "chainType": "K48|K63|K11|K27|mono|...", "function": "degradation|signaling|DNA_repair|..."}}
+    ],
+    "dubs": [
+      {{"name": "...", "family": "USP|OTU|UCH|JAMM|...", "evidence": "direct|indirect|predicted",
+        "function": "stabilization|deubiquitylation|..."}}
     ],
     "downstreamEffects": [
       {{"target": "...", "effect": "activation|inhibition|...", "mechanism": "...",
@@ -167,6 +176,21 @@ Return a JSON object with these keys:
 
 Output JSON only, no markdown code blocks."""
 
+    # Add ubiquitylation-specific instructions
+    ptm_lower = (ptm_type or "").lower()
+    if "ubiquityl" in ptm_lower or "ubiquitin" in ptm_lower:
+        prompt = prompt.replace(
+            "Output JSON only, no markdown code blocks.",
+            """IMPORTANT for ubiquitylation analysis:
+- In signalingNetwork.e3Ligases: list ALL E3 ubiquitin ligases mentioned (RING/HECT/RBR families, SCF complex, APC/C, MDM2, NEDD4, CHIP, PARKIN, TRAF6, TRIM proteins, FBXW proteins, RNF proteins, etc.)
+- In signalingNetwork.dubs: list ALL deubiquitylases mentioned (USP, UCH, OTU, JAMM family members)
+- In signalingNetwork.upstreamRegulators: include E3 ligases and DUBs with type='e3_ligase' or type='dub'
+- Identify ubiquitin chain types (K48=degradation, K63=signaling, K11=cell cycle, mono=signaling)
+- Note if ubiquitylation leads to proteasomal degradation or non-degradative signaling
+
+Output JSON only, no markdown code blocks."""
+        )
+
     return prompt
 
 
@@ -182,12 +206,55 @@ class AbstractAnalyzer:
 
     def analyze(
         self,
+        pmid: str = "",
+        abstract: str = "",
+        gene: str = "",
+        position: str = "",
+        pattern_analysis: Optional[FullTextAnalysis] = None,
+        experimental_context: Optional[dict] = None,
+        ptm_type: str = "phosphorylation",
+        articles: Optional[list] = None,
+    ) -> AbstractAnalysis:
+        """Analyze PTM signaling from abstract(s). Accepts either pmid+abstract or articles list."""
+        # If articles list is provided, analyze each and return merged result
+        if articles:
+            merged = AbstractAnalysis(pmid="merged", gene=gene, position=position)
+            for art in articles:
+                if not isinstance(art, dict):
+                    continue
+                art_pmid = art.get("pmid", "")
+                art_abstract = art.get("abstract", "") or art.get("text", "")
+                if not art_abstract or len(art_abstract.strip()) < 50:
+                    continue
+                result = self._analyze_single(
+                    pmid=art_pmid, abstract=art_abstract, gene=gene,
+                    position=position, ptm_type=ptm_type,
+                )
+                # Merge results
+                merged.upstream_regulators.extend(result.upstream_regulators)
+                merged.downstream_effects.extend(result.downstream_effects)
+                merged.key_findings.extend(result.key_findings)
+                if result.relevance_score > merged.relevance_score:
+                    merged.relevance_score = result.relevance_score
+                    merged.signaling_pathways = result.signaling_pathways
+                    merged.cellular_processes = result.cellular_processes
+            return merged
+        # Single abstract mode
+        return self._analyze_single(
+            pmid=pmid, abstract=abstract, gene=gene, position=position,
+            pattern_analysis=pattern_analysis, experimental_context=experimental_context,
+            ptm_type=ptm_type,
+        )
+
+    def _analyze_single(
+        self,
         pmid: str,
         abstract: str,
         gene: str,
         position: str,
         pattern_analysis: Optional[FullTextAnalysis] = None,
         experimental_context: Optional[dict] = None,
+        ptm_type: str = "phosphorylation",
     ) -> AbstractAnalysis:
         """
         Analyze a PubMed abstract using LLM.
@@ -212,7 +279,7 @@ class AbstractAnalyzer:
         # Build prompt
         pattern_matches = pattern_analysis.pattern_matches if pattern_analysis else None
         prompt = _build_analysis_prompt(
-            abstract, gene, position, pattern_matches, experimental_context,
+            abstract, gene, position, pattern_matches, experimental_context, ptm_type,
         )
 
         # Call LLM with retry
@@ -265,6 +332,28 @@ class AbstractAnalyzer:
         result.upstream_regulators = network.get("upstreamRegulators", [])
         result.downstream_effects = network.get("downstreamEffects", [])
         result.co_regulators = network.get("coRegulators", [])
+
+        # Ubiquitylation-specific: merge E3 ligases and DUBs into upstream_regulators
+        e3_ligases = network.get("e3Ligases", [])
+        dubs = network.get("dubs", [])
+        if e3_ligases:
+            for e3 in e3_ligases:
+                if isinstance(e3, dict) and e3.get("name"):
+                    result.upstream_regulators.append({
+                        "name": e3["name"],
+                        "type": "e3_ligase",
+                        "evidence": e3.get("evidence", "predicted"),
+                        "mechanism": f"E3 ligase ({e3.get('family', 'unknown')} family), chain: {e3.get('chainType', 'unknown')}, function: {e3.get('function', 'unknown')}",
+                    })
+        if dubs:
+            for dub in dubs:
+                if isinstance(dub, dict) and dub.get("name"):
+                    result.upstream_regulators.append({
+                        "name": dub["name"],
+                        "type": "dub",
+                        "evidence": dub.get("evidence", "predicted"),
+                        "mechanism": f"DUB ({dub.get('family', 'unknown')} family), function: {dub.get('function', 'unknown')}",
+                    })
 
         # Functional consequences
         result.functional_consequences = data.get("functionalConsequences", {})
