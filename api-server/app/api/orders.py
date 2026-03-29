@@ -1672,36 +1672,115 @@ async def get_vector_plot_data(
 
     # --- Source B: Reactome pathway mapping (kinase → receptor) ---
     reactome_receptors: dict = {}  # receptor_name -> {info}
+    _kinase_keywords = {
+        "kinase", "cdk", "mapk", "erk", "akt", "pkc", "pkb",
+        "gsk", "ck1", "ck2", "dyrk", "hipk", "mtor", "ampk",
+        "plk", "aur", "nek", "chk", "atm", "atr", "dna-pk",
+        "jak", "src", "abl", "lyn", "fyn", "lck", "syk",
+        "raf", "mek", "jnk", "p38", "pi3k", "pdk",
+        "cam", "rock", "pak", "rsk", "s6k", "sgk",
+    }
+    def _looks_like_kinase(name: str) -> bool:
+        nl = name.lower()
+        return any(kw in nl for kw in _kinase_keywords)
+
     try:
-        # Collect kinase names from enriched data (kinase_prediction + regulation)
+        # Collect kinase names from ALL enriched data sources (mirrors motif_kinase_annotation)
         kinase_names_set: set = set()
         if enriched_path.exists():
             for ptm in enriched:
                 rag = ptm.get("rag_enrichment", {})
                 if not isinstance(rag, dict):
                     continue
-                # From kinase_prediction
+
+                # Source 1: kinase_prediction (LLM-based)
                 kp = rag.get("kinase_prediction", {})
+                if isinstance(kp, str):
+                    import ast
+                    try:
+                        kp = ast.literal_eval(kp) if kp.startswith("{") else {}
+                    except Exception:
+                        kp = {}
                 if isinstance(kp, dict):
                     for pk in kp.get("predicted_kinases", []):
                         if isinstance(pk, dict) and pk.get("kinase"):
                             kinase_names_set.add(pk["kinase"].strip())
-                # From regulation.upstream_regulators (non-receptor kinases)
+                        elif isinstance(pk, str) and pk.strip():
+                            kinase_names_set.add(pk.strip())
+
+                # Source 2: regulation (kinase_substrate + upstream_regulators)
                 reg = rag.get("regulation", {})
                 if isinstance(reg, dict):
+                    for ks in reg.get("kinase_substrate", []):
+                        if isinstance(ks, dict) and ks.get("kinase"):
+                            kinase_names_set.add(ks["kinase"].strip())
                     for ur in reg.get("upstream_regulators", []):
-                        if isinstance(ur, str) and ur.strip():
-                            ur_lower = ur.strip().lower()
-                            # Only add if it looks like a kinase (not a receptor)
-                            if any(kw in ur_lower for kw in (
-                                "kinase", "cdk", "mapk", "erk", "akt", "pkc", "pkb",
-                                "gsk", "ck1", "ck2", "dyrk", "hipk", "mtor", "ampk",
-                                "plk", "aur", "nek", "chk", "atm", "atr", "dna-pk",
-                                "jak", "src", "abl", "lyn", "fyn", "lck", "syk",
-                                "raf", "mek", "jnk", "p38", "pi3k", "pdk",
-                                "cam", "rock", "pak", "rsk", "s6k", "sgk",
-                            )):
+                        if isinstance(ur, dict) and ur.get("regulator"):
+                            name = ur["regulator"].strip()
+                            if _looks_like_kinase(name):
+                                kinase_names_set.add(name)
+                        elif isinstance(ur, str) and ur.strip():
+                            if _looks_like_kinase(ur.strip()):
                                 kinase_names_set.add(ur.strip())
+
+                # Source 3: ptm_validation → iPTMnet enzyme info
+                ptm_val = rag.get("ptm_validation", {})
+                if isinstance(ptm_val, dict):
+                    for hit in ptm_val.get("iptmnet_hits", []):
+                        if isinstance(hit, dict):
+                            enz = hit.get("enzyme") or {}
+                            if isinstance(enz, dict) and enz.get("name"):
+                                kinase_names_set.add(enz["name"].strip())
+                    novelty = ptm_val.get("novelty") if isinstance(ptm_val.get("novelty"), dict) else {}
+                    if novelty:
+                        enz = novelty.get("enzyme") or {}
+                        if isinstance(enz, dict) and enz.get("name"):
+                            kinase_names_set.add(enz["name"].strip())
+
+                # Source 4: fulltext_analysis → key_findings (kinase mentions via regex)
+                ft = rag.get("fulltext_analysis", {})
+                if isinstance(ft, dict):
+                    _ft_kinase_re = re.compile(
+                        r'(?:substrate\s+of|phosphorylated\s+by|target\s+of|regulated\s+by)'
+                        r'\s+([A-Z][A-Za-z0-9]{1,10}(?:\s+kinase)?)',
+                        re.IGNORECASE,
+                    )
+                    for finding in ft.get("key_findings", []):
+                        if isinstance(finding, str):
+                            for m in _ft_kinase_re.finditer(finding):
+                                kname = m.group(1).strip()
+                                if kname and len(kname) > 1:
+                                    kinase_names_set.add(kname)
+                    for article_result in ft.get("per_article", []):
+                        if isinstance(article_result, dict):
+                            for finding in article_result.get("key_findings", []):
+                                if isinstance(finding, str):
+                                    for m in _ft_kinase_re.finditer(finding):
+                                        kname = m.group(1).strip()
+                                        if kname and len(kname) > 1:
+                                            kinase_names_set.add(kname)
+
+                # Source 5: abstract_analysis (LLM-based kinase fields)
+                aa = rag.get("abstract_analysis", {})
+                if isinstance(aa, dict):
+                    for key_name in ("kinases", "upstream_kinases", "predicted_kinases", "regulators"):
+                        for item in aa.get(key_name, []):
+                            if isinstance(item, str) and item.strip():
+                                kinase_names_set.add(item.strip())
+                            elif isinstance(item, dict):
+                                kname = item.get("kinase") or item.get("name") or ""
+                                if kname.strip():
+                                    kinase_names_set.add(kname.strip())
+
+                # Source 6: string_interactions (high-confidence kinase partners)
+                string_ints = rag.get("string_interactions", [])
+                if isinstance(string_ints, list):
+                    for si in string_ints:
+                        if isinstance(si, dict):
+                            partner = si.get("preferredName_B") or si.get("partner") or si.get("name", "")
+                            score = si.get("score", 0)
+                            if partner and score >= 700 and _looks_like_kinase(partner):
+                                kinase_names_set.add(partner.strip())
 
         if kinase_names_set:
             from app.services.reactome_client import get_receptors_for_kinases
