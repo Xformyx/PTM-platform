@@ -1110,6 +1110,9 @@ _KW_METABOLIC = {
 }
 _KW_RIBOSOMAL = {"KW-0687", "KW-0689"}  # Ribosomal protein (large/small subunit)
 _KW_STRUCTURAL = {"KW-0206"}            # Cytoskeleton (already in _KW_CYTOSKELETAL)
+_KW_NUCLEAR = {"KW-0539", "KW-0547", "KW-0597"}  # Nucleus, Nucleolus, Phosphoprotein(nuclear)
+_KW_RNA_BINDING = {"KW-0694"}          # RNA-binding
+_KW_SPLICING = {"KW-0747"}             # mRNA splicing
 
 # GO molecular function terms for DUB detection (KW does not cover DUBs well)
 _GO_DUB_TERMS = {
@@ -1229,7 +1232,23 @@ def _predict_protein_class(ptm: dict, ptm_type: str) -> dict:
     )
     is_ribosomal = bool(
         (kw_ids & _KW_RIBOSOMAL) or
-        any(w in function_summary for w in ("ribosomal protein", "ribosome", "translation"))
+        any(w in function_summary for w in ("ribosomal protein", "ribosome", "translation",
+                                             "40s ribosomal", "60s ribosomal"))
+    )
+    # RNA helicase / RNA-binding (Dhx9, Ddx etc.) — should not be Cyto or Chap
+    is_rna_helicase = bool(
+        any(w in function_summary for w in ("rna helicase", "rna-dependent", "helicase activity",
+                                             "dead-box", "deah-box", "rna unwinding",
+                                             "rna binding", "rna-binding")) or
+        (kw_ids & _KW_RNA_BINDING) or
+        (kw_ids & _KW_SPLICING)
+    )
+    # Splicing factors (Srsf1, Srsf6, Tra2b etc.)
+    is_splicing_factor = bool(
+        any(w in function_summary for w in ("splicing factor", "pre-mrna splicing",
+                                             "serine/arginine-rich", "sr protein",
+                                             "rna splicing", "mrna processing")) or
+        (kw_ids & _KW_SPLICING)
     )
     # Structural proteins (actin, tubulin, vimentin, lamin, etc.)
     is_structural = bool(
@@ -1237,13 +1256,32 @@ def _predict_protein_class(ptm: dict, ptm_type: str) -> dict:
                                              "actin", "tubulin", "intermediate filament",
                                              "nuclear lamina", "lamin"))
     )
+    # Nuclear/nucleolar proteins (Lmna, Nolc1, Tcof1, Npm1, etc.)
+    # RNA helicases are excluded even if they localize to nucleus (Dhx9 false positive)
+    is_nuclear = bool(
+        not is_rna_helicase and (
+            (kw_ids & _KW_NUCLEAR) or
+            any(w in loc_lower for w in ("nucleus", "nucleolus", "nucleoplasm", "nuclear")) or
+            any(w in function_summary for w in ("nucleolar", "nucleolus", "nuclear body",
+                                                 "chromatin", "histone", "nuclear pore",
+                                                 "nuclear lamina", "lamin"))
+        )
+    )
+    # Nucleolar proteins (Nolc1, Tcof1, Npm1): ribosome biogenesis in nucleolus
+    # These are ribosome-related but NOT ribosomal proteins — they should get Nuc badge
+    is_nucleolar_non_ribosomal = bool(
+        is_ribosomal and  # flagged as ribosomal due to 'ribosome biogenesis' keyword
+        any(w in loc_lower for w in ("nucleolus",)) and
+        not any(w in function_summary for w in ("ribosomal protein", "40s ribosomal", "60s ribosomal",
+                                                  "component of the"))
+    )
 
     tags = []
     confidence_scores = {}  # role -> score (higher = more confident)
 
     # ── Receptor ──────────────────────────────────────────────────────────────
     receptor_score = 0
-    if not (is_metabolic_enzyme or is_ribosomal):
+    if not (is_metabolic_enzyme or is_ribosomal or is_rna_helicase or is_splicing_factor):
         if kw_ids & _KW_RECEPTOR:
             receptor_score += 4  # UniProt KW is most authoritative
         if go_mf_ids & _GO_RECEPTOR_TERMS:
@@ -1251,11 +1289,21 @@ def _predict_protein_class(ptm: dict, ptm_type: str) -> dict:
         # Require CC confirmation: must be on plasma membrane / cell surface
         if go_cc_ids & _GO_RECEPTOR_CC_TERMS:
             receptor_score += 2
-        if "receptor" in function_summary and "receptor" not in ["co-receptor"]:
-            # Avoid false positives from "co-receptor" or "nuclear receptor" in metabolic context
-            if not any(w in function_summary for w in ("nuclear receptor coactivator", "co-receptor")):
+        if "receptor" in function_summary:
+            if not any(w in function_summary for w in ("nuclear receptor coactivator", "co-receptor",
+                                                        "receptor-associated", "receptor-interacting")):
                 receptor_score += 2
         if "receptor" in protein_families:
+            receptor_score += 2
+        # v9.18: additional receptor family keywords in function_summary
+        if any(w in function_summary for w in (
+            "growth factor receptor", "hormone receptor", "cytokine receptor",
+            "tyrosine kinase receptor", "receptor tyrosine kinase",
+            "g protein-coupled", "gpcr", "integrin", "toll-like receptor",
+            "notch", "frizzled", "smoothened", "tgf-beta receptor",
+            "insulin receptor", "igf", "epidermal growth factor receptor",
+            "fibroblast growth factor receptor", "vascular endothelial growth factor receptor",
+        )):
             receptor_score += 2
     # Threshold raised to 5 to require at least 2 strong signals
     if receptor_score >= 5:
@@ -1328,15 +1376,34 @@ def _predict_protein_class(ptm: dict, ptm_type: str) -> dict:
         confidence_scores["Adaptor"] = adaptor_score
 
     # ── Chaperone ─────────────────────────────────────────────────────────────
-    if kw_ids & _KW_CHAPERONE or "chaperone" in function_summary:
-        tags.append("Chaperone")
-        confidence_scores["Chaperone"] = 3
+    # Exclude ribosomal proteins and RNA helicases from Chaperone classification
+    if not (is_ribosomal or is_rna_helicase):
+        if kw_ids & _KW_CHAPERONE or "chaperone" in function_summary:
+            tags.append("Chaperone")
+            confidence_scores["Chaperone"] = 3
 
     # ── Cytoskeletal ──────────────────────────────────────────────────────────
-    if kw_ids & _KW_CYTOSKELETAL or "cytoskeleton" in loc_lower:
-        tags.append("Cytoskeletal")
-        confidence_scores["Cytoskeletal"] = 2
+    # Exclude RNA helicases from Cytoskeletal classification (Dhx9 false positive)
+    if not (is_rna_helicase or is_splicing_factor):
+        if kw_ids & _KW_CYTOSKELETAL or "cytoskeleton" in loc_lower:
+            tags.append("Cytoskeletal")
+            confidence_scores["Cytoskeletal"] = 2
 
+    # ── Nuclear / Nucleolar ───────────────────────────────────────────────────
+    # Nuclear — only if no strong functional badge
+    # Exclude metabolic enzymes and ribosomal proteins (in nucleus but not 'nuclear proteins')
+    # RNA helicases already excluded via is_nuclear flag
+    if not is_metabolic_enzyme and is_nuclear:
+        if not any(r in confidence_scores for r in ("RTK", "Receptor", "Kinase", "TF",
+                                                     "Phosphatase", "E3 ligase", "DUB")):
+            tags.append("Nuclear")
+            confidence_scores["Nuclear"] = 2
+    # Nucleolar non-ribosomal proteins (Nolc1, Tcof1 etc.)
+    elif is_nucleolar_non_ribosomal and not is_metabolic_enzyme:
+        if not any(r in confidence_scores for r in ("RTK", "Receptor", "Kinase", "TF",
+                                                     "Phosphatase", "E3 ligase", "DUB")):
+            tags.append("Nuclear")
+            confidence_scores["Nuclear"] = 2
     # ── Ubiquitylation-specific roles ─────────────────────────────────────────
     ubi_context = None
     if ptm_type in ("ubiquitylation", "ubiquitination"):
@@ -1402,7 +1469,7 @@ def _predict_protein_class(ptm: dict, ptm_type: str) -> dict:
     # Priority order for primary role display
     priority = ["RTK", "E3 ligase", "DUB", "Receptor", "Kinase", "TF",
                 "Phosphatase", "Adaptor", "Chaperone", "Autophagy receptor",
-                "Cytoskeletal"]
+                "Cytoskeletal", "Nuclear"]
     primary_role = None
     for p in priority:
         if p in confidence_scores:

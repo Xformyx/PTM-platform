@@ -1185,6 +1185,7 @@ const ROLE_COLORS: Record<string, { bg: string; text: string; border: string }> 
   DUB:                { bg: "bg-lime-500/15",    text: "text-lime-400",    border: "border-lime-500/30" },
   "Autophagy receptor": { bg: "bg-pink-500/15", text: "text-pink-400",    border: "border-pink-500/30" },
   "Membrane protein": { bg: "bg-slate-500/15",   text: "text-slate-400",   border: "border-slate-500/30" },
+  Nuclear:            { bg: "bg-indigo-500/15",  text: "text-indigo-400",  border: "border-indigo-500/30" },
 };
 
 const ROLE_SHORT: Record<string, string> = {
@@ -1192,6 +1193,7 @@ const ROLE_SHORT: Record<string, string> = {
   Phosphatase: "PPase", Adaptor: "Adpt", Chaperone: "Chap",
   Cytoskeletal: "Cyto", "E3 ligase": "E3", DUB: "DUB",
   "Autophagy receptor": "Atg-R", "Membrane protein": "Mem",
+  Nuclear: "Nuc",
 };
 
 function RoleBadge({ role, ubiContext, confidence, isUbi }: { role: string; ubiContext?: string; confidence: string; isUbi: boolean }) {
@@ -1584,6 +1586,7 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
                 { role: "Autophagy receptor",short: "Atg-R",  desc: "Autophagy Receptor" },
                 { role: "Chaperone",         short: "Chap",   desc: "Chaperone / HSP" },
                 { role: "Cytoskeletal",      short: "Cyto",   desc: "Cytoskeletal Protein" },
+                { role: "Nuclear",           short: "Nuc",    desc: "Nuclear / Nucleolar Protein" },
                 { role: "Membrane protein",  short: "Mem",    desc: "Membrane Protein" },
               ] : [
                 { role: "RTK",               short: "RTK",    desc: "Receptor Tyrosine Kinase" },
@@ -1594,6 +1597,7 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
                 { role: "Adaptor",           short: "Adpt",   desc: "Adaptor / Scaffold" },
                 { role: "Chaperone",         short: "Chap",   desc: "Chaperone / HSP" },
                 { role: "Cytoskeletal",      short: "Cyto",   desc: "Cytoskeletal Protein" },
+                { role: "Nuclear",           short: "Nuc",    desc: "Nuclear / Nucleolar Protein" },
                 { role: "Membrane protein",  short: "Mem",    desc: "Membrane Protein" },
               ]).map(({ role, short, desc }) => {
                 const style = ROLE_COLORS[role] || { bg: "bg-zinc-500/15", text: "text-zinc-400", border: "border-zinc-500/30" };
