@@ -1268,7 +1268,16 @@ def _predict_protein_class(ptm: dict, ptm_type: str) -> dict:
         kinase_score += 3
     if go_mf_ids & _GO_KINASE_TERMS:
         kinase_score += 3
-    if "kinase" in function_summary or "kinase" in protein_families:
+    # v9.17.3: expanded function_summary matching — covers cases where keywords are absent
+    # (existing enriched data before v9.17 lacks keywords field)
+    _KINASE_FUNC_PATTERNS = (
+        "protein kinase", "serine/threonine-protein kinase", "tyrosine-protein kinase",
+        "serine/threonine kinase", "tyrosine kinase", "cyclin-dependent kinase",
+        "map kinase", "mitogen-activated protein kinase", "receptor kinase",
+        "dual-specificity kinase", "dual specificity kinase",
+        "phosphorylates", "autophosphorylat",
+    )
+    if any(p in function_summary for p in _KINASE_FUNC_PATTERNS) or "kinase" in protein_families:
         kinase_score += 2
     # RTK = Receptor + Kinase + confirmed membrane
     if kinase_score >= 3 and receptor_score >= 3:
@@ -1401,13 +1410,10 @@ def _predict_protein_class(ptm: dict, ptm_type: str) -> dict:
             break
 
     if primary_role is None:
-        # Fallback: membrane protein or unknown
-        if kw_ids & _KW_MEMBRANE or "membrane" in loc_lower:
-            primary_role = "Membrane protein"
-            tags.append("Membrane protein")
-            confidence_scores["Membrane protein"] = 1
-        else:
-            primary_role = "Other"
+        # v9.17.3: Remove Membrane protein fallback — too generic and misleading
+        # (Anxa2, Eno1 etc. have 'Cell membrane' keyword but are not membrane-signaling proteins)
+        # Only show badge if there is a meaningful functional classification
+        primary_role = "Other"
 
     # Confidence based on top score
     top_score = confidence_scores.get(primary_role, 0)
