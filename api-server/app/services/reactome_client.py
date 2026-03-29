@@ -225,7 +225,7 @@ async def get_receptors_for_kinase(gene_name: str) -> list[dict]:
         logger.warning(f"Redis cache read failed: {e}")
 
     # Cache miss — call Reactome API
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(verify=False) as client:
         receptors = await _lookup_receptors_for_kinase(client, gene_name)
 
     # Store in cache (even empty results to avoid repeated lookups)

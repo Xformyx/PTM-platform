@@ -1661,7 +1661,11 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
           Integrin:        { bg: "bg-cyan-500/15",    text: "text-cyan-400",    border: "border-cyan-500/30" },
           Developmental:   { bg: "bg-emerald-500/15", text: "text-emerald-400", border: "border-emerald-500/30" },
           "Cytokine/Immune": { bg: "bg-amber-500/15", text: "text-amber-400",   border: "border-amber-500/30" },
+          Immune:          { bg: "bg-amber-500/15",   text: "text-amber-400",   border: "border-amber-500/30" },
+          Cytokine:        { bg: "bg-yellow-500/15",  text: "text-yellow-400",  border: "border-yellow-500/30" },
           "TGFβ":          { bg: "bg-orange-500/15",  text: "text-orange-400",  border: "border-orange-500/30" },
+          "Nuclear Receptor": { bg: "bg-fuchsia-500/15", text: "text-fuchsia-400", border: "border-fuchsia-500/30" },
+          "Ion Channel":   { bg: "bg-teal-500/15",    text: "text-teal-400",    border: "border-teal-500/30" },
           Receptor:        { bg: "bg-slate-500/15",   text: "text-slate-400",   border: "border-slate-500/30" },
         };
         const maxCount = receptors[0]?.downstream_ptm_count || 1;
