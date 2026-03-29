@@ -374,9 +374,11 @@ class RAGEnrichmentPipeline:
         abstract_analysis = {}
         if self.enable_llm and articles:
             try:
-                abstract_analysis = self.abstract_analyzer.analyze(
+                raw_abstract = self.abstract_analyzer.analyze(
                     articles=articles, gene=gene, position=position, ptm_type=ptm_type,
                 )
+                # Convert AbstractAnalysis dataclass to dict for JSON serialization
+                abstract_analysis = _asdict(raw_abstract) if hasattr(raw_abstract, '__dataclass_fields__') else (raw_abstract if isinstance(raw_abstract, dict) else {})
             except Exception as e:
                 logger.warning(f"Abstract analysis failed for {gene}: {e}")
 
