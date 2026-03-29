@@ -1719,9 +1719,19 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
                           R
                         </span>
                       )}
+                      {source === "treatment_context" && (
+                        <span className="text-[9px] text-sky-400/70 flex-shrink-0" title="Known receptor for treatment ligand (from experimental context)">
+                          T
+                        </span>
+                      )}
+                      {source === "literature" && (
+                        <span className="text-[9px] text-amber-400/70 flex-shrink-0" title="Extracted from literature annotations">
+                          L
+                        </span>
+                      )}
                     </div>
                     {/* Expanded detail on hover — via kinases + pathway */}
-                    {(viaKinases?.length || pathway) && (
+                    {(viaKinases?.length || pathway || (rec as any).matched_ligand || (rec as any).evidence) && (
                       <div className="hidden group-hover:flex items-center gap-1.5 ml-[76px] mt-0.5">
                         {viaKinases?.length ? (
                           <span className="text-[10px] text-muted-foreground">
@@ -1733,6 +1743,21 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
                             ({sigPathway})
                           </span>
                         ) : null}
+                        {(rec as any).matched_ligand ? (
+                          <span className="text-[10px] text-sky-400/60">
+                            ligand: {(rec as any).matched_ligand}
+                          </span>
+                        ) : null}
+                        {(rec as any).pathway && !sigPathway ? (
+                          <span className="text-[10px] text-blue-400/60 ml-1">
+                            ({(rec as any).pathway})
+                          </span>
+                        ) : null}
+                        {(rec as any).evidence ? (
+                          <span className="text-[10px] text-muted-foreground/50 ml-1">
+                            [{(rec as any).evidence}]
+                          </span>
+                        ) : null}
                       </div>
                     )}
                   </div>
@@ -1740,8 +1765,10 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
               })}
             </div>
             <p className="text-[10px] text-muted-foreground mt-2">
-              Receptors inferred from Reactome pathway mapping (kinase → receptor) and literature annotations.
-              <span className="text-emerald-500/70 ml-1">R</span> = Reactome source. Hover receptor name for details.
+              Receptors inferred from treatment context, Reactome pathway mapping, and literature annotations.
+              <span className="text-sky-400/70 ml-1">T</span> = Treatment context
+              <span className="text-emerald-500/70 ml-1">R</span> = Reactome
+              <span className="text-amber-400/70 ml-1">L</span> = Literature. Hover receptor name for details.
             </p>
           </div>
         );

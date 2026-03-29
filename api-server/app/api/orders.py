@@ -1606,9 +1606,10 @@ async def get_vector_plot_data(
             })
 
     # ── v9.18 + v9.19: Infer upstream receptors ──────────────────────────────
-    # Two sources:
+    # Three sources:
     #   (A) upstream_regulators from enriched data (text-based, biased)
     #   (B) Reactome pathway mapping: kinase → receptor (unbiased, cached)
+    #   (C) Treatment-context: order.analysis_context.treatment → known ligand-receptor DB
     inferred_receptors = []
 
     # --- Source A: upstream_regulators (existing, kept for backward compat) ---
@@ -1815,15 +1816,56 @@ async def get_vector_plot_data(
     except Exception as e:
         logging.getLogger("vector_plot").warning(f"Reactome receptor lookup failed: {e}")
 
-    # --- Merge both sources (Reactome takes priority, literature supplements) ---
+    # --- Source C: Treatment-context-based receptor inference ---
+    # Uses order.analysis_context.treatment to look up known ligand→receptor pairs
+    treatment_receptors: dict = {}  # receptor_name -> {info}
+    try:
+        ctx = order.analysis_context or {}
+        treatment_text = ctx.get("treatment", "") or ""
+        if treatment_text.strip():
+            from app.services.ligand_receptor_db import lookup_receptors_for_treatment
+            matches = lookup_receptors_for_treatment(treatment_text)
+            for m in matches:
+                rec_name = m["receptor_name"]
+                treatment_receptors[rec_name] = {
+                    "name": rec_name,
+                    "receptor_class": m["receptor_class"],
+                    "downstream_ptm_count": len(top_n_ptms),  # treatment affects all analyzed PTMs
+                    "downstream_ptms": [p["label"] for p in top_n_ptms[:10]],
+                    "pathway": m.get("pathway", ""),
+                    "evidence": m.get("evidence", ""),
+                    "matched_ligand": m.get("ligand", ""),
+                    "source": "treatment_context",
+                }
+            if matches:
+                logging.getLogger("vector_plot").info(
+                    f"Source C: Found {len(matches)} receptor(s) for treatment '{treatment_text}'"
+                )
+    except Exception as e:
+        logging.getLogger("vector_plot").warning(f"Treatment-context receptor lookup failed: {e}")
+
+    # --- Merge all three sources (C > B > A priority) ---
     merged: dict = {}
-    for rec_name, info in reactome_receptors.items():
+    # Source C first (treatment context — most directly relevant)
+    for rec_name, info in treatment_receptors.items():
         merged[rec_name] = info
+    # Source B (Reactome pathway inference)
+    for rec_name, info in reactome_receptors.items():
+        if rec_name not in merged:
+            merged[rec_name] = info
+        else:
+            # Supplement with Reactome kinase info
+            existing = merged[rec_name]
+            if not existing.get("via_kinases") and info.get("via_kinases"):
+                existing["via_kinases"] = info["via_kinases"]
+            if not existing.get("signaling_pathway") and info.get("signaling_pathway"):
+                existing["signaling_pathway"] = info["signaling_pathway"]
+    # Source A (literature — least reliable)
     for rec_name, info in literature_receptors.items():
         if rec_name not in merged:
             merged[rec_name] = info
         else:
-            # Supplement Reactome result with literature PTM count
+            # Supplement with literature PTM count
             existing = merged[rec_name]
             lit_ptms = set(info.get("downstream_ptms", []))
             existing_ptms = set(existing.get("downstream_ptms", []))
