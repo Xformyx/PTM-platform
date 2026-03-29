@@ -1092,6 +1092,24 @@ _KW_PROTEASE = {"KW-0645"}           # Protease
 _KW_CHAPERONE = {"KW-0143"}          # Chaperone
 _KW_CYTOSKELETAL = {"KW-0206"}       # Cytoskeleton
 _KW_AUTOPHAGY = {"KW-0072"}          # Autophagy
+# Exclusion keywords: metabolic enzymes, structural proteins, ribosomal, etc.
+# These proteins should NOT be classified as Receptor/TF even if they have moonlighting GO terms
+_KW_METABOLIC = {
+    "KW-0324",  # Glycolysis
+    "KW-0274",  # FAD
+    "KW-0560",  # Oxidoreductase
+    "KW-0456",  # Lyase
+    "KW-0808",  # Transferase
+    "KW-0413",  # Isomerase
+    "KW-0378",  # Hydrolase
+    "KW-0436",  # Ligase
+    "KW-0443",  # Lipid metabolism
+    "KW-0665",  # Pyridoxal phosphate
+    "KW-0816",  # Tricarboxylic acid cycle
+    "KW-0312",  # Gluconeogenesis
+}
+_KW_RIBOSOMAL = {"KW-0687", "KW-0689"}  # Ribosomal protein (large/small subunit)
+_KW_STRUCTURAL = {"KW-0206"}            # Cytoskeleton (already in _KW_CYTOSKELETAL)
 
 # GO molecular function terms for DUB detection (KW does not cover DUBs well)
 _GO_DUB_TERMS = {
@@ -1105,27 +1123,52 @@ _GO_E3_TERMS = {
     "GO:0004842",  # ubiquitin-protein transferase activity
     "GO:0019787",  # ubiquitin-like protein transferase activity
 }
+# Strict receptor GO terms: only transmembrane/cell-surface signaling receptors
 _GO_RECEPTOR_TERMS = {
     "GO:0004888",  # transmembrane signaling receptor activity
-    "GO:0038023",  # signaling receptor activity
     "GO:0004930",  # G protein-coupled receptor activity
     "GO:0004872",  # receptor activity
-    "GO:0005057",  # signal transducer activity (receptor)
+    # GO:0038023 (signaling receptor) and GO:0005057 (signal transducer) removed:
+    # too broad, causes false positives for metabolic enzymes with moonlighting roles
 }
 _GO_KINASE_TERMS = {
     "GO:0004672",  # protein kinase activity
     "GO:0004713",  # protein tyrosine kinase activity
     "GO:0004674",  # protein serine/threonine kinase activity
+    "GO:0004675",  # receptor protein serine/threonine kinase activity
+    "GO:0004714",  # transmembrane receptor protein tyrosine kinase activity
 }
+# Strict TF GO terms: require primary TF function, not moonlighting
 _GO_TF_TERMS = {
     "GO:0003700",  # DNA-binding transcription factor activity
-    "GO:0001228",  # DNA-binding transcription activator activity
-    "GO:0001227",  # DNA-binding transcription repressor activity
+    "GO:0001228",  # DNA-binding transcription activator activity, RNA pol II-specific
+    # GO:0001227 removed: DNA-binding transcription repressor — too broad,
+    # many metabolic enzymes (Eno1, Pkm) carry this as moonlighting annotation
 }
 _GO_PHOSPHATASE_TERMS = {
     "GO:0004721",  # phosphoprotein phosphatase activity
     "GO:0004725",  # protein tyrosine phosphatase activity
     "GO:0004722",  # protein serine/threonine phosphatase activity
+    "GO:0004726",  # non-membrane spanning protein tyrosine phosphatase activity
+    "GO:0017018",  # myosin phosphatase activity
+}
+# GO terms that indicate metabolic enzyme (used for exclusion)
+_GO_METABOLIC_ENZYME_TERMS = {
+    "GO:0004634",  # phosphopyruvate hydratase activity (Enolase)
+    "GO:0004332",  # fructose-bisphosphate aldolase activity
+    "GO:0004743",  # pyruvate kinase activity
+    "GO:0004396",  # hexokinase activity
+    "GO:0004616",  # phosphoglucose isomerase activity
+    "GO:0004369",  # glycerol-3-phosphate dehydrogenase activity
+    "GO:0004738",  # pyruvate decarboxylase activity
+    "GO:0003824",  # catalytic activity (broad — only used as secondary exclusion)
+}
+# GO CC terms that confirm true receptor localization
+_GO_RECEPTOR_CC_TERMS = {
+    "GO:0005886",  # plasma membrane
+    "GO:0009986",  # cell surface
+    "GO:0005887",  # integral component of plasma membrane
+    "GO:0016021",  # integral component of membrane
 }
 
 
@@ -1174,20 +1217,48 @@ def _predict_protein_class(ptm: dict, ptm_type: str) -> dict:
     # Normalize localization strings
     loc_lower = " ".join(localization).lower()
 
+    # ── v9.17.1: Exclusion flags — prevent moonlighting GO terms from causing false positives
+    # Metabolic enzymes (Eno1, Pkm, Aldoa, etc.) carry TF/receptor GO terms as moonlighting
+    is_metabolic_enzyme = bool(
+        (kw_ids & _KW_METABOLIC) or
+        (go_mf_ids & _GO_METABOLIC_ENZYME_TERMS) or
+        any(w in function_summary for w in ("glycolysis", "gluconeogenesis", "glycolytic", "enolase",
+                                             "aldolase", "pyruvate", "phosphoglycerate",
+                                             "oxidoreductase", "dehydrogenase", "isomerase",
+                                             "hydratase", "lyase", "aminotransferase"))
+    )
+    is_ribosomal = bool(
+        (kw_ids & _KW_RIBOSOMAL) or
+        any(w in function_summary for w in ("ribosomal protein", "ribosome", "translation"))
+    )
+    # Structural proteins (actin, tubulin, vimentin, lamin, etc.)
+    is_structural = bool(
+        any(w in function_summary for w in ("cytoskeletal", "structural constituent",
+                                             "actin", "tubulin", "intermediate filament",
+                                             "nuclear lamina", "lamin"))
+    )
+
     tags = []
     confidence_scores = {}  # role -> score (higher = more confident)
 
     # ── Receptor ──────────────────────────────────────────────────────────────
     receptor_score = 0
-    if kw_ids & _KW_RECEPTOR:
-        receptor_score += 3
-    if go_mf_ids & _GO_RECEPTOR_TERMS:
-        receptor_score += 3
-    if "receptor" in function_summary or "receptor" in protein_families:
-        receptor_score += 2
-    if "receptor" in loc_lower or "cell membrane" in loc_lower:
-        receptor_score += 1
-    if receptor_score >= 3:
+    if not (is_metabolic_enzyme or is_ribosomal):
+        if kw_ids & _KW_RECEPTOR:
+            receptor_score += 4  # UniProt KW is most authoritative
+        if go_mf_ids & _GO_RECEPTOR_TERMS:
+            receptor_score += 3
+        # Require CC confirmation: must be on plasma membrane / cell surface
+        if go_cc_ids & _GO_RECEPTOR_CC_TERMS:
+            receptor_score += 2
+        if "receptor" in function_summary and "receptor" not in ["co-receptor"]:
+            # Avoid false positives from "co-receptor" or "nuclear receptor" in metabolic context
+            if not any(w in function_summary for w in ("nuclear receptor coactivator", "co-receptor")):
+                receptor_score += 2
+        if "receptor" in protein_families:
+            receptor_score += 2
+    # Threshold raised to 5 to require at least 2 strong signals
+    if receptor_score >= 5:
         tags.append("Receptor")
         confidence_scores["Receptor"] = receptor_score
 
@@ -1199,8 +1270,8 @@ def _predict_protein_class(ptm: dict, ptm_type: str) -> dict:
         kinase_score += 3
     if "kinase" in function_summary or "kinase" in protein_families:
         kinase_score += 2
-    # RTK = Receptor + Kinase + Membrane
-    if kinase_score >= 3 and receptor_score >= 2:
+    # RTK = Receptor + Kinase + confirmed membrane
+    if kinase_score >= 3 and receptor_score >= 3:
         tags.append("RTK")
         confidence_scores["RTK"] = kinase_score + receptor_score
     elif kinase_score >= 3:
@@ -1209,15 +1280,17 @@ def _predict_protein_class(ptm: dict, ptm_type: str) -> dict:
 
     # ── Transcription Factor ──────────────────────────────────────────────────
     tf_score = 0
-    if kw_ids & _KW_TF:
-        tf_score += 3
-    if go_mf_ids & _GO_TF_TERMS:
-        tf_score += 3
-    if "transcription factor" in function_summary or "transcription factor" in protein_families:
-        tf_score += 2
-    if "nucleus" in loc_lower:
-        tf_score += 1
-    if tf_score >= 3:
+    if not (is_metabolic_enzyme or is_ribosomal or is_structural):
+        if kw_ids & _KW_TF:
+            tf_score += 4  # UniProt KW-0823 is authoritative
+        if go_mf_ids & _GO_TF_TERMS:  # strict set: GO:0003700, GO:0001228 only
+            tf_score += 3
+        if "transcription factor" in function_summary or "transcription factor" in protein_families:
+            tf_score += 2
+        if "nucleus" in loc_lower and not is_metabolic_enzyme:
+            tf_score += 1
+    # Threshold raised to 4 to require KW or GO confirmation
+    if tf_score >= 4:
         tags.append("TF")
         confidence_scores["TF"] = tf_score
 
