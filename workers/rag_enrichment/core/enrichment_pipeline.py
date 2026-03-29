@@ -497,6 +497,8 @@ class RAGEnrichmentPipeline:
             "localization": uniprot_info.get("subcellular_location", []),
             "function_summary": uniprot_info.get("function_summary", ""),
             "aliases": uniprot_info.get("gene_synonyms", []),
+            "keywords": uniprot_info.get("keywords", []),           # v9.17: UniProt keywords for protein class
+            "protein_families": uniprot_info.get("protein_families", []),  # v9.17: family annotations
             "go_terms": {
                 "biological_process": uniprot_info.get("go_terms_bp", []),
                 "molecular_function": uniprot_info.get("go_terms_mf", []),

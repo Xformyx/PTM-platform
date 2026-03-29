@@ -1171,10 +1171,52 @@ function classifyTrend(values: number[]): TrendCategory {
   return "other";
 }
 
+// ── v9.17: RoleBadge — protein class badge for Top N legend ─────────────────
+const ROLE_COLORS: Record<string, { bg: string; text: string; border: string }> = {
+  RTK:                { bg: "bg-rose-500/15",    text: "text-rose-400",    border: "border-rose-500/30" },
+  Receptor:           { bg: "bg-rose-500/10",    text: "text-rose-300",    border: "border-rose-400/25" },
+  Kinase:             { bg: "bg-blue-500/15",    text: "text-blue-400",    border: "border-blue-500/30" },
+  TF:                 { bg: "bg-violet-500/15",  text: "text-violet-400",  border: "border-violet-500/30" },
+  Phosphatase:        { bg: "bg-amber-500/15",   text: "text-amber-400",   border: "border-amber-500/30" },
+  Adaptor:            { bg: "bg-cyan-500/15",    text: "text-cyan-400",    border: "border-cyan-500/30" },
+  Chaperone:          { bg: "bg-teal-500/15",    text: "text-teal-400",    border: "border-teal-500/30" },
+  Cytoskeletal:       { bg: "bg-stone-500/15",   text: "text-stone-400",   border: "border-stone-500/30" },
+  "E3 ligase":        { bg: "bg-orange-500/15",  text: "text-orange-400",  border: "border-orange-500/30" },
+  DUB:                { bg: "bg-lime-500/15",    text: "text-lime-400",    border: "border-lime-500/30" },
+  "Autophagy receptor": { bg: "bg-pink-500/15", text: "text-pink-400",    border: "border-pink-500/30" },
+  "Membrane protein": { bg: "bg-slate-500/15",   text: "text-slate-400",   border: "border-slate-500/30" },
+};
+
+const ROLE_SHORT: Record<string, string> = {
+  RTK: "RTK", Receptor: "Rec", Kinase: "Kin", TF: "TF",
+  Phosphatase: "PPase", Adaptor: "Adpt", Chaperone: "Chap",
+  Cytoskeletal: "Cyto", "E3 ligase": "E3", DUB: "DUB",
+  "Autophagy receptor": "Atg-R", "Membrane protein": "Mem",
+};
+
+function RoleBadge({ role, ubiContext, confidence, isUbi }: { role: string; ubiContext?: string; confidence: string; isUbi: boolean }) {
+  const style = ROLE_COLORS[role] || { bg: "bg-zinc-500/15", text: "text-zinc-400", border: "border-zinc-500/30" };
+  const short = ROLE_SHORT[role] || role;
+  const tooltipParts = [role];
+  if (ubiContext && isUbi) tooltipParts.push(ubiContext);
+  tooltipParts.push(`[${confidence}]`);
+  return (
+    <span
+      className={`inline-flex items-center gap-0.5 px-1.5 py-0 rounded text-[10px] font-semibold leading-4 border flex-shrink-0 ${style.bg} ${style.text} ${style.border}`}
+      title={tooltipParts.join(" — ")}
+    >
+      {short}
+      {ubiContext && isUbi && (
+        <span className="opacity-70 text-[9px]"> {ubiContext.split(" ")[0]}</span>
+      )}
+    </span>
+  );
+}
+
 // ── TopNTimeSeriesPlot ───────────────────────────────────────────────────────
 function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId: number; ptmType?: string }) {
   const isUbi = ptmType.toLowerCase().includes("ubiquityl") || ptmType.toLowerCase().includes("ubiquitin");
-  const [data, setData] = useState<{ vector_data: Array<{ gene: string; position: string; condition: string; ptm_relative_log2fc: number; ptm_absolute_log2fc: number }>; top_n_ptms: Array<{ gene: string; position: string; label: string }>; suggested_n?: number | null; top_n_setting?: number; source?: string } | null>(null);
+  const [data, setData] = useState<{ vector_data: Array<{ gene: string; position: string; condition: string; ptm_relative_log2fc: number; ptm_absolute_log2fc: number }>; top_n_ptms: Array<{ gene: string; position: string; label: string; protein_class?: { role: string; confidence: string; tags: string[]; ubi_context?: string } }>; suggested_n?: number | null; top_n_setting?: number; source?: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [checked, setChecked] = useState<Record<string, boolean>>({});
   const [metric, setMetric] = useState<"relative" | "absolute">("relative");
@@ -1186,7 +1228,7 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
 
   useEffect(() => {
     api
-      .get<{ vector_data: unknown[]; top_n_ptms: Array<{ gene: string; position: string; label: string }>; suggested_n?: number | null; top_n_setting?: number; source?: string }>(`/orders/${orderId}/vector-plot-data`)
+      .get<{ vector_data: unknown[]; top_n_ptms: Array<{ gene: string; position: string; label: string; protein_class?: { role: string; confidence: string; tags: string[]; ubi_context?: string } }>; suggested_n?: number | null; top_n_setting?: number; source?: string }>(`/orders/${orderId}/vector-plot-data`)
       .then((d) => {
         setData({
           vector_data: (d.vector_data || []) as Array<{ gene: string; position: string; condition: string; ptm_relative_log2fc: number; ptm_absolute_log2fc: number }>,
@@ -1529,25 +1571,29 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
             {filteredPtms.map((p) => {
               const key = `${p.gene}_${p.position}`;
               const trend = ptmTrends.get(key) || "other";
+              const pc = p.protein_class;
               return (
                 <label
                   key={key}
-                  className="flex items-center gap-2 cursor-pointer hover:bg-muted/50 rounded px-2 py-1 text-sm"
+                  className="flex items-center gap-1.5 cursor-pointer hover:bg-muted/50 rounded px-2 py-1 text-sm"
                 >
                   <input
                     type="checkbox"
                     checked={!!checked[key]}
                     onChange={() => toggle(key)}
-                    className="rounded"
+                    className="rounded flex-shrink-0"
                   />
                   <span
                     className="w-2.5 h-2.5 rounded-full flex-shrink-0 border"
                     style={{ backgroundColor: colorMap.get(p.label) || "#6b7280", borderColor: TREND_META[trend].color }}
                     title={`${TREND_META[trend].label}: ${TREND_META[trend].description}`}
                   />
-                  <span className="truncate" title={`${p.label} (${TREND_META[trend].label})`}>
+                  <span className="truncate flex-1 min-w-0" title={pc ? `${p.label} \u2014 ${pc.role}${pc.ubi_context ? ` (${pc.ubi_context})` : ''} [${pc.confidence}]` : `${p.label} (${TREND_META[trend].label})`}>
                     {p.label}
                   </span>
+                  {pc && pc.role !== "Other" && (
+                    <RoleBadge role={pc.role} ubiContext={pc.ubi_context} confidence={pc.confidence} isUbi={isUbi} />
+                  )}
                 </label>
               );
             })}

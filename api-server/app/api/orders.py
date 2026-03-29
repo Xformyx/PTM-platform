@@ -1075,6 +1075,286 @@ async def get_vector_plots(
     return {"files": files}
 
 
+# ── v9.17: Protein class prediction from enriched UniProt/GO data ───────────
+
+# UniProt keyword IDs that indicate specific protein classes
+_KW_RECEPTOR = {"KW-0675"}           # Receptor
+_KW_KINASE = {"KW-0418"}             # Kinase
+_KW_TF = {"KW-0823"}                 # Transcription factor
+_KW_PHOSPHATASE = {"KW-0904"}        # Phosphatase
+_KW_MEMBRANE = {"KW-0472", "KW-1003"}  # Membrane, Cell membrane
+_KW_TRANSDUCER = {"KW-0807"}         # Signal transducer
+_KW_ADAPTOR = {"KW-0021"}            # Adaptor protein
+_KW_UBIQUITIN = {"KW-0832"}          # Ubl conjugation (substrate)
+_KW_E3_LIGASE = {"KW-0833"}          # Ubiquitin ligase (E3)
+_KW_DUB = {"KW-0256"}                # Deubiquitinase — note: KW-0256 is ER but we use GO for DUB
+_KW_PROTEASE = {"KW-0645"}           # Protease
+_KW_CHAPERONE = {"KW-0143"}          # Chaperone
+_KW_CYTOSKELETAL = {"KW-0206"}       # Cytoskeleton
+_KW_AUTOPHAGY = {"KW-0072"}          # Autophagy
+
+# GO molecular function terms for DUB detection (KW does not cover DUBs well)
+_GO_DUB_TERMS = {
+    "GO:0004843",  # thiol-dependent ubiquitinyl hydrolase activity
+    "GO:0036459",  # thiol-dependent deubiquitinase activity
+    "GO:0101005",  # deubiquitinase activity
+    "GO:0004221",  # obsolete ubiquitin thiolesterase activity
+}
+_GO_E3_TERMS = {
+    "GO:0061630",  # ubiquitin protein ligase activity
+    "GO:0004842",  # ubiquitin-protein transferase activity
+    "GO:0019787",  # ubiquitin-like protein transferase activity
+}
+_GO_RECEPTOR_TERMS = {
+    "GO:0004888",  # transmembrane signaling receptor activity
+    "GO:0038023",  # signaling receptor activity
+    "GO:0004930",  # G protein-coupled receptor activity
+    "GO:0004872",  # receptor activity
+    "GO:0005057",  # signal transducer activity (receptor)
+}
+_GO_KINASE_TERMS = {
+    "GO:0004672",  # protein kinase activity
+    "GO:0004713",  # protein tyrosine kinase activity
+    "GO:0004674",  # protein serine/threonine kinase activity
+}
+_GO_TF_TERMS = {
+    "GO:0003700",  # DNA-binding transcription factor activity
+    "GO:0001228",  # DNA-binding transcription activator activity
+    "GO:0001227",  # DNA-binding transcription repressor activity
+}
+_GO_PHOSPHATASE_TERMS = {
+    "GO:0004721",  # phosphoprotein phosphatase activity
+    "GO:0004725",  # protein tyrosine phosphatase activity
+    "GO:0004722",  # protein serine/threonine phosphatase activity
+}
+
+
+def _predict_protein_class(ptm: dict, ptm_type: str) -> dict:
+    """Predict protein class from enriched UniProt/GO data.
+
+    Returns a dict with:
+      - role: primary role label (e.g. 'Receptor', 'Kinase', 'E3 ligase')
+      - confidence: 'high' | 'medium' | 'low'
+      - tags: list of all applicable role tags for multi-label display
+      - ubi_context: ubiquitylation-specific context (only for ubi mode)
+    """
+    rag = ptm.get("rag_enrichment", {})
+    if not rag:
+        # Older enriched files may store fields at top level
+        rag = ptm
+
+    localization = rag.get("localization", []) or []
+    function_summary = (rag.get("function_summary", "") or "").lower()
+    go_mf_raw = rag.get("go_terms", {}).get("molecular_function", []) or []
+    go_cc_raw = rag.get("go_terms", {}).get("cellular_component", []) or []
+    go_bp_raw = rag.get("go_terms", {}).get("biological_process", []) or []
+    keywords_raw = rag.get("keywords", []) or []
+    protein_families = " ".join(rag.get("protein_families", []) or []).lower()
+
+    # Normalize: extract GO IDs from "GO:xxxxxxx:label" strings
+    def _go_ids(terms):
+        ids = set()
+        for t in terms:
+            if isinstance(t, str) and t.startswith("GO:"):
+                ids.add(t.split(":")[0] + ":" + t.split(":")[1])
+        return ids
+
+    go_mf_ids = _go_ids(go_mf_raw)
+    go_cc_ids = _go_ids(go_cc_raw)
+    go_bp_ids = _go_ids(go_bp_raw)
+
+    # Normalize keyword IDs
+    kw_ids = set()
+    for kw in keywords_raw:
+        if isinstance(kw, dict):
+            kw_ids.add(kw.get("id", ""))
+        elif isinstance(kw, str):
+            kw_ids.add(kw)
+
+    # Normalize localization strings
+    loc_lower = " ".join(localization).lower()
+
+    tags = []
+    confidence_scores = {}  # role -> score (higher = more confident)
+
+    # ── Receptor ──────────────────────────────────────────────────────────────
+    receptor_score = 0
+    if kw_ids & _KW_RECEPTOR:
+        receptor_score += 3
+    if go_mf_ids & _GO_RECEPTOR_TERMS:
+        receptor_score += 3
+    if "receptor" in function_summary or "receptor" in protein_families:
+        receptor_score += 2
+    if "receptor" in loc_lower or "cell membrane" in loc_lower:
+        receptor_score += 1
+    if receptor_score >= 3:
+        tags.append("Receptor")
+        confidence_scores["Receptor"] = receptor_score
+
+    # ── Kinase ────────────────────────────────────────────────────────────────
+    kinase_score = 0
+    if kw_ids & _KW_KINASE:
+        kinase_score += 3
+    if go_mf_ids & _GO_KINASE_TERMS:
+        kinase_score += 3
+    if "kinase" in function_summary or "kinase" in protein_families:
+        kinase_score += 2
+    # RTK = Receptor + Kinase + Membrane
+    if kinase_score >= 3 and receptor_score >= 2:
+        tags.append("RTK")
+        confidence_scores["RTK"] = kinase_score + receptor_score
+    elif kinase_score >= 3:
+        tags.append("Kinase")
+        confidence_scores["Kinase"] = kinase_score
+
+    # ── Transcription Factor ──────────────────────────────────────────────────
+    tf_score = 0
+    if kw_ids & _KW_TF:
+        tf_score += 3
+    if go_mf_ids & _GO_TF_TERMS:
+        tf_score += 3
+    if "transcription factor" in function_summary or "transcription factor" in protein_families:
+        tf_score += 2
+    if "nucleus" in loc_lower:
+        tf_score += 1
+    if tf_score >= 3:
+        tags.append("TF")
+        confidence_scores["TF"] = tf_score
+
+    # ── Phosphatase ───────────────────────────────────────────────────────────
+    phos_score = 0
+    if kw_ids & _KW_PHOSPHATASE:
+        phos_score += 3
+    if go_mf_ids & _GO_PHOSPHATASE_TERMS:
+        phos_score += 3
+    if "phosphatase" in function_summary or "phosphatase" in protein_families:
+        phos_score += 2
+    if phos_score >= 3:
+        tags.append("Phosphatase")
+        confidence_scores["Phosphatase"] = phos_score
+
+    # ── Adaptor / Scaffold ────────────────────────────────────────────────────
+    adaptor_score = 0
+    if kw_ids & _KW_ADAPTOR:
+        adaptor_score += 3
+    if "adaptor" in function_summary or "scaffold" in function_summary:
+        adaptor_score += 2
+    if "adapter" in function_summary or "docking" in function_summary:
+        adaptor_score += 1
+    if adaptor_score >= 2:
+        tags.append("Adaptor")
+        confidence_scores["Adaptor"] = adaptor_score
+
+    # ── Chaperone ─────────────────────────────────────────────────────────────
+    if kw_ids & _KW_CHAPERONE or "chaperone" in function_summary:
+        tags.append("Chaperone")
+        confidence_scores["Chaperone"] = 3
+
+    # ── Cytoskeletal ──────────────────────────────────────────────────────────
+    if kw_ids & _KW_CYTOSKELETAL or "cytoskeleton" in loc_lower:
+        tags.append("Cytoskeletal")
+        confidence_scores["Cytoskeletal"] = 2
+
+    # ── Ubiquitylation-specific roles ─────────────────────────────────────────
+    ubi_context = None
+    if ptm_type in ("ubiquitylation", "ubiquitination"):
+        # E3 Ligase
+        e3_score = 0
+        if kw_ids & _KW_E3_LIGASE:
+            e3_score += 3
+        if go_mf_ids & _GO_E3_TERMS:
+            e3_score += 3
+        if "e3 ligase" in function_summary or "ubiquitin ligase" in function_summary:
+            e3_score += 2
+        if "ring" in protein_families or "hect" in protein_families or "rbr" in protein_families:
+            e3_score += 2
+        if e3_score >= 3:
+            tags.append("E3 ligase")
+            confidence_scores["E3 ligase"] = e3_score
+
+        # DUB (Deubiquitinase)
+        dub_score = 0
+        if go_mf_ids & _GO_DUB_TERMS:
+            dub_score += 3
+        if "deubiquitin" in function_summary or "deubiquitylat" in function_summary:
+            dub_score += 3
+        if "ubiquitin" in protein_families and ("hydrolase" in protein_families or "protease" in protein_families):
+            dub_score += 2
+        if dub_score >= 3:
+            tags.append("DUB")
+            confidence_scores["DUB"] = dub_score
+
+        # Autophagy receptor
+        if kw_ids & _KW_AUTOPHAGY or "autophagy" in function_summary:
+            if "receptor" in function_summary or "cargo" in function_summary:
+                tags.append("Autophagy receptor")
+                confidence_scores["Autophagy receptor"] = 3
+
+        # Determine ubi_context from chain types + localization
+        chain_types = []
+        regulation = rag.get("regulation", {})
+        if isinstance(regulation, dict):
+            chain_types = regulation.get("chain_types", []) or []
+        # Also check ubi_chain_classification if present
+        ubi_chain = rag.get("ubi_chain_classification", {})
+        if isinstance(ubi_chain, dict) and ubi_chain.get("chain_type"):
+            chain_types = list(set(chain_types + [ubi_chain["chain_type"]]))
+
+        if chain_types:
+            is_membrane = "cell membrane" in loc_lower or "plasma membrane" in loc_lower
+            is_receptor_tag = "Receptor" in tags or "RTK" in tags
+            if "K63" in chain_types and (is_membrane or is_receptor_tag):
+                ubi_context = "K63 endocytosis"
+            elif "K48" in chain_types and (is_membrane or is_receptor_tag):
+                ubi_context = "K48 degradation"
+            elif "K48" in chain_types:
+                ubi_context = "K48 proteasomal"
+            elif "K63" in chain_types:
+                ubi_context = "K63 signaling"
+            elif "K27" in chain_types or "K29" in chain_types or "K33" in chain_types:
+                ubi_context = "atypical chain"
+            elif any(ct in chain_types for ct in ("Mono", "monoubiquitin", "mono")):
+                ubi_context = "mono-Ub endocytosis"
+
+    # ── Determine primary role and confidence ─────────────────────────────────
+    # Priority order for primary role display
+    priority = ["RTK", "E3 ligase", "DUB", "Receptor", "Kinase", "TF",
+                "Phosphatase", "Adaptor", "Chaperone", "Autophagy receptor",
+                "Cytoskeletal"]
+    primary_role = None
+    for p in priority:
+        if p in confidence_scores:
+            primary_role = p
+            break
+
+    if primary_role is None:
+        # Fallback: membrane protein or unknown
+        if kw_ids & _KW_MEMBRANE or "membrane" in loc_lower:
+            primary_role = "Membrane protein"
+            tags.append("Membrane protein")
+            confidence_scores["Membrane protein"] = 1
+        else:
+            primary_role = "Other"
+
+    # Confidence based on top score
+    top_score = confidence_scores.get(primary_role, 0)
+    if top_score >= 5:
+        confidence = "high"
+    elif top_score >= 3:
+        confidence = "medium"
+    else:
+        confidence = "low"
+
+    result = {
+        "role": primary_role,
+        "confidence": confidence,
+        "tags": tags,
+    }
+    if ubi_context:
+        result["ubi_context"] = ubi_context
+    return result
+
+
 @router.get("/{order_id}/vector-plot-data")
 async def get_vector_plot_data(
     order_id: int,
@@ -1138,6 +1418,7 @@ async def get_vector_plot_data(
     top_n_ptms = []
     top_n_setting = (order.report_options or {}).get("top_n_ptms", 20)
     enriched_path = output_dir / f"enriched_ptm_data{file_suffix}.json"
+    ptm_type_str = (order.ptm_type or "phosphorylation").lower().strip()
 
     if enriched_path.exists():
         import json as _json
@@ -1150,10 +1431,13 @@ async def get_vector_plot_data(
             key = f"{gene}_{pos}"
             if key not in seen and (gene or pos):
                 seen.add(key)
+                # v9.17: Predict protein class from enriched UniProt/GO data
+                protein_class = _predict_protein_class(ptm, ptm_type_str)
                 top_n_ptms.append({
                     "gene": str(gene),
                     "position": str(pos),
                     "label": f"{gene} {pos}".strip() or f"{gene}{pos}",
+                    "protein_class": protein_class,
                 })
     elif vector_data:
         # Fallback: derive Top N from TSV (available right after preprocessing)

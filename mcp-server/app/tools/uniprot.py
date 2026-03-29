@@ -65,6 +65,8 @@ async def _fetch_uniprot_info(protein_id: str, timeout: float) -> dict:
         "go_terms_cc": [],
         "gene_synonyms": [],
         "isoforms": [],
+        "keywords": [],          # v9.17: UniProt keyword IDs + names for protein class prediction
+        "protein_families": [],  # v9.17: protein family annotations (from SIMILARITY comments)
     }
 
     # Extract gene synonyms
@@ -107,6 +109,13 @@ async def _fetch_uniprot_info(protein_id: str, timeout: float) -> dict:
                         "sequence_status": iso_seq,
                         "note": note[:200] if note else "",
                     })
+        elif ctype == "SIMILARITY":
+            # v9.17: protein family information
+            texts = comment.get("texts", [])
+            if texts:
+                family_text = texts[0].get("value", "")[:200]
+                if family_text:
+                    result["protein_families"].append(family_text)
 
     for xref in data.get("uniProtKBCrossReferences", []):
         if xref.get("database") == "GO":
@@ -124,8 +133,17 @@ async def _fetch_uniprot_info(protein_id: str, timeout: float) -> dict:
             elif category == "C:":
                 result["go_terms_cc"].append(entry)
 
-    # No limit on GO terms — return all available for comprehensive analysis
+    # v9.17: Extract UniProt keywords for protein class prediction
+    # Key keywords: KW-0675 Receptor, KW-0418 Kinase, KW-0823 Transcription factor,
+    # KW-0472 Membrane, KW-1003 Cell membrane, KW-0597 Phosphoprotein,
+    # KW-0832 Ubl conjugation, KW-0656 Proto-oncogene, KW-0807 Transducer
+    for kw in data.get("keywords", []):
+        kw_id = kw.get("id", "")
+        kw_name = kw.get("name", "")
+        if kw_id and kw_name:
+            result["keywords"].append({"id": kw_id, "name": kw_name})
 
+    # No limit on GO terms — return all available for comprehensive analysis
     return result
 
 
@@ -139,4 +157,6 @@ def _empty_result(protein_id: str) -> dict:
         "go_terms_cc": [],
         "gene_synonyms": [],
         "isoforms": [],
+        "keywords": [],
+        "protein_families": [],
     }
