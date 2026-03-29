@@ -944,10 +944,172 @@ LIGAND_RECEPTOR_DB: list[dict] = [
 ]
 
 
+# ── Receptor class inference from UniProt keywords ───────────────────────────
+_UNIPROT_CLASS_MAP: dict[str, str] = {
+    "KW-0067": "RTK",           # Tyrosine-protein kinase
+    "KW-0418": "RTK",           # Kinase
+    "KW-0675": "Receptor",      # Receptor
+    "KW-0297": "GPCR",          # G-protein coupled receptor
+    "KW-0407": "Ion Channel",   # Ion channel
+    "KW-0472": "Integrin",      # Membrane
+    "KW-0945": "Cytokine/Immune",  # T cell
+    "KW-0406": "Cytokine/Immune",  # Interleukin
+    "KW-0539": "Nuclear Receptor", # Nuclear protein
+}
+
+_PROTEIN_NAME_CLASS_PATTERNS: list[tuple[str, str]] = [
+    ("epidermal growth factor receptor", "RTK"),
+    ("tyrosine kinase", "RTK"),
+    ("receptor tyrosine kinase", "RTK"),
+    ("g protein-coupled receptor", "GPCR"),
+    ("g-protein coupled receptor", "GPCR"),
+    ("adenosine receptor", "GPCR"),
+    ("adrenergic receptor", "GPCR"),
+    ("dopamine receptor", "GPCR"),
+    ("serotonin receptor", "GPCR"),
+    ("chemokine receptor", "Cytokine/Immune"),
+    ("cytokine receptor", "Cytokine/Immune"),
+    ("interleukin receptor", "Cytokine/Immune"),
+    ("tumor necrosis factor receptor", "Cytokine/Immune"),
+    ("interferon receptor", "Cytokine/Immune"),
+    ("ion channel", "Ion Channel"),
+    ("potassium channel", "Ion Channel"),
+    ("sodium channel", "Ion Channel"),
+    ("calcium channel", "Ion Channel"),
+    ("chloride channel", "Ion Channel"),
+    ("nuclear receptor", "Nuclear Receptor"),
+    ("steroid receptor", "Nuclear Receptor"),
+    ("integrin", "Integrin"),
+    ("serine/threonine-protein kinase receptor", "RTK"),
+    ("bone morphogenetic protein receptor", "RTK"),
+    ("activin receptor", "RTK"),
+    ("transforming growth factor", "RTK"),
+    ("fibroblast growth factor receptor", "RTK"),
+    ("vascular endothelial growth factor receptor", "RTK"),
+    ("platelet-derived growth factor receptor", "RTK"),
+    ("hepatocyte growth factor receptor", "RTK"),
+    ("insulin receptor", "RTK"),
+    ("insulin-like growth factor", "RTK"),
+]
+
+
+def _classify_receptor_from_uniprot(protein_name: str, keywords: list[dict]) -> str:
+    """Infer receptor class from UniProt protein name and keywords."""
+    name_lower = protein_name.lower()
+    for pattern, cls in _PROTEIN_NAME_CLASS_PATTERNS:
+        if pattern in name_lower:
+            return cls
+    for kw in keywords:
+        kw_id = kw.get("id", "")
+        if kw_id in _UNIPROT_CLASS_MAP:
+            return _UNIPROT_CLASS_MAP[kw_id]
+    return "Receptor"
+
+
+def _extract_tokens_from_treatment(treatment_text: str) -> list[str]:
+    """
+    Extract candidate ligand tokens from a treatment string.
+    e.g. "EGF 10ng/ml + TNFα 20ng/ml" → ["EGF", "TNFα", "EGF 10ng/ml + TNFα 20ng/ml"]
+    """
+    import re
+    # Split on common delimiters: +, ,, ;, and, with, &
+    parts = re.split(r"[+,;&]|\band\b|\bwith\b", treatment_text, flags=re.IGNORECASE)
+    tokens = []
+    for part in parts:
+        # Strip concentration suffixes (e.g., "100ng/ml", "10 nM", "1 μM")
+        cleaned = re.sub(
+            r"\s*\d+[\d.]*\s*(?:ng|ug|μg|mg|nm|μm|mm|um|nM|μM|mM|ng/ml|ug/ml|μg/ml|mg/ml|IU|U/ml|%)?\s*/\s*(?:ml|L|ul|μl)?\s*$",
+            "", part.strip(), flags=re.IGNORECASE
+        ).strip()
+        if cleaned and len(cleaned) >= 2:
+            tokens.append(cleaned)
+    # Also add the full text as a fallback
+    tokens.append(treatment_text.strip())
+    return list(dict.fromkeys(tokens))  # deduplicate while preserving order
+
+
+def _lookup_uniprot_fallback(ligand_token: str, max_results: int = 5) -> list[dict]:
+    """
+    Fallback: search UniProt for receptors of a given ligand.
+    Uses query: '{ligand} receptor AND organism_id:9606 AND reviewed:true AND keyword:KW-0675'
+    Returns list of receptor dicts or empty list.
+    """
+    import urllib.request
+    import urllib.parse
+    import json
+    import logging
+
+    logger = logging.getLogger("ligand_receptor_db")
+
+    if not ligand_token or len(ligand_token) < 2:
+        return []
+
+    query = f"{ligand_token} receptor AND organism_id:9606 AND reviewed:true AND keyword:KW-0675"
+    url = (
+        "https://rest.uniprot.org/uniprotkb/search"
+        f"?query={urllib.parse.quote(query)}"
+        "&format=json"
+        "&fields=id,gene_names,protein_name,keyword"
+        f"&size={max_results}"
+    )
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "PTM-Platform/1.0"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+    except Exception as e:
+        logger.warning(f"UniProt fallback failed for '{ligand_token}': {e}")
+        return []
+
+    results = []
+    seen = set()
+    for entry in data.get("results", []):
+        genes = [
+            g.get("geneName", {}).get("value", "")
+            for g in entry.get("genes", [])
+            if g.get("geneName")
+        ]
+        protein_name = (
+            entry.get("proteinDescription", {})
+            .get("recommendedName", {})
+            .get("fullName", {})
+            .get("value", "")
+        )
+        keywords = entry.get("keywords", [])
+        if not protein_name:
+            continue
+        # Build display name: prefer gene name + protein name
+        gene_str = genes[0] if genes else ""
+        display_name = f"{gene_str} ({protein_name[:50]})".strip(" ()")
+        if gene_str and not protein_name.startswith(gene_str):
+            display_name = f"{gene_str} — {protein_name[:50]}"
+        else:
+            display_name = protein_name[:60]
+        if display_name in seen:
+            continue
+        seen.add(display_name)
+        receptor_class = _classify_receptor_from_uniprot(protein_name, keywords)
+        results.append({
+            "ligand": ligand_token,
+            "receptor_name": display_name,
+            "receptor_class": receptor_class,
+            "pathway": "",
+            "evidence": f"UniProt reviewed (Swiss-Prot): {entry.get('primaryAccession', '')}",
+            "source": "treatment_context_uniprot",
+        })
+    if results:
+        logger.info(f"UniProt fallback: found {len(results)} receptor(s) for '{ligand_token}'")
+    return results
+
+
 def lookup_receptors_for_treatment(treatment_text: str) -> list[dict]:
     """
     Given a treatment text (e.g., "irisin 100ng/ml" or "EGF + TNFα"),
     find matching ligands and return their known receptors.
+
+    Priority:
+        1. Internal LIGAND_RECEPTOR_DB (fast, curated)
+        2. UniProt API fallback (for ligands not in internal DB)
+        3. Empty list (if neither source finds anything)
 
     Returns a list of dicts with keys:
         ligand, receptor_name, receptor_class, pathway, evidence, source
@@ -957,11 +1119,12 @@ def lookup_receptors_for_treatment(treatment_text: str) -> list[dict]:
 
     text_lower = treatment_text.lower().strip()
     results = []
-    seen_receptors = set()
+    seen_receptors: set[str] = set()
+    matched_ligands: set[str] = set()  # track which tokens were matched by internal DB
 
+    # ── Step 1: Internal DB lookup ────────────────────────────────────────────
     for entry in LIGAND_RECEPTOR_DB:
         for alias in entry["ligand_aliases"]:
-            # Match whole word or substring (for compound treatments like "irisin 100ng/ml")
             if alias in text_lower:
                 for rec in entry["receptors"]:
                     rec_key = rec["name"]
@@ -975,6 +1138,28 @@ def lookup_receptors_for_treatment(treatment_text: str) -> list[dict]:
                             "evidence": rec.get("evidence", ""),
                             "source": "treatment_context",
                         })
+                matched_ligands.add(alias)
                 break  # Found matching alias, no need to check others for this entry
+
+    # ── Step 2: UniProt fallback for unmatched tokens ─────────────────────────
+    # Extract candidate tokens from treatment text
+    tokens = _extract_tokens_from_treatment(treatment_text)
+    for token in tokens:
+        token_lower = token.lower()
+        # Skip if this token was already matched by internal DB
+        if any(token_lower == ml or ml in token_lower for ml in matched_ligands):
+            continue
+        # Skip very short tokens or pure numbers/concentrations
+        import re
+        if re.fullmatch(r"[\d.]+\s*(?:ng|ug|μg|mg|nm|μm|mm|%|IU|U).*", token, re.IGNORECASE):
+            continue
+        if len(token) < 2:
+            continue
+        # Query UniProt
+        uniprot_results = _lookup_uniprot_fallback(token, max_results=5)
+        for r in uniprot_results:
+            if r["receptor_name"] not in seen_receptors:
+                seen_receptors.add(r["receptor_name"])
+                results.append(r)
 
     return results
