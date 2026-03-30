@@ -2703,7 +2703,7 @@ function SignalFlowView({
                                 <span>{ptms.length} substrates:</span>
                               </div>
                               <div className="flex flex-wrap gap-1 ml-3">
-                                {ptms.slice(0, 5).map(ptm => (
+                                {ptms.map(ptm => (
                                   <span
                                     key={`${ptm.gene}_${ptm.position}`}
                                     className={`text-[9px] px-1.5 py-0.5 rounded ${
@@ -2716,9 +2716,6 @@ function SignalFlowView({
                                     {ptm.label || `${ptm.gene}_${ptm.position}`}
                                   </span>
                                 ))}
-                                {ptms.length > 5 && (
-                                  <span className="text-[9px] text-muted-foreground">+{ptms.length - 5}</span>
-                                )}
                               </div>
                             </div>
                           )}
