@@ -1668,7 +1668,20 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
           "Ion Channel":   { bg: "bg-teal-500/15",    text: "text-teal-400",    border: "border-teal-500/30" },
           Receptor:        { bg: "bg-slate-500/15",   text: "text-slate-400",   border: "border-slate-500/30" },
         };
-        const maxCount = receptors[0]?.downstream_ptm_count || 1;
+        // Source-specific scaling: T/C always 100%, R and U scale within their own group
+        const maxBySource: Record<string, number> = {};
+        for (const r of receptors) {
+          const src = (r as any).source as string || "unknown";
+          maxBySource[src] = Math.max(maxBySource[src] || 0, r.downstream_ptm_count);
+        }
+        const getBarPct = (rec: typeof receptors[0]) => {
+          const src = (rec as any).source as string || "unknown";
+          // Treatment context (curated DB) → always full bar
+          if (src === "treatment_context" || src === "treatment_context_uniprot") return 100;
+          // Other sources: scale within their own source group
+          const groupMax = maxBySource[src] || 1;
+          return Math.max(Math.round((rec.downstream_ptm_count / groupMax) * 100), 8);
+        };
         return (
           <div className="mt-4 rounded-lg border border-border/60 bg-card/50 p-4">
             <div className="flex items-center gap-2 mb-3">
@@ -1678,7 +1691,7 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
             <div className="space-y-2.5">
               {receptors.map((rec) => {
                 const style = classColor[rec.receptor_class] || classColor["Receptor"];
-                const barPct = Math.round((rec.downstream_ptm_count / maxCount) * 100);
+                const barPct = getBarPct(rec);
                 const viaKinases = (rec as any).via_kinases as string[] | undefined;
                 const pathway = (rec as any).pathway as string | undefined;
                 const sigPathway = (rec as any).signaling_pathway as string | undefined;
