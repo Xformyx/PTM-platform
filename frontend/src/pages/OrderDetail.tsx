@@ -1701,7 +1701,8 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
                       </span>
                       {/* Receptor name */}
                       <span
-                        className="text-sm font-medium w-40 flex-shrink-0 truncate cursor-help"
+                        className="text-sm font-medium min-w-[180px] max-w-[260px] flex-shrink-0 cursor-help"
+                        style={{ wordBreak: "break-word", lineHeight: "1.3" }}
                         title={tooltip}
                       >
                         {rec.name}
