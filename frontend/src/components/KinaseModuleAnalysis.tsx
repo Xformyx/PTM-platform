@@ -290,6 +290,17 @@ const KINASE_MODULE_COLORS = [
   { bg: "bg-teal-100 dark:bg-teal-900/30", border: "border-teal-400", text: "text-teal-700 dark:text-teal-300", hex: "#14b8a6" },
 ];
 
+interface InferredReceptor {
+  name: string;
+  receptor_class: string;
+  downstream_ptm_count: number;
+  downstream_ptms: string[];
+  via_kinases?: string[];
+  pathway?: string;
+  signaling_pathway?: string;
+  source?: string;
+}
+
 interface KinaseModuleAnalysisProps {
   orderId: number;
   vectorData: PtmTimeSeriesRow[];
@@ -298,6 +309,8 @@ interface KinaseModuleAnalysisProps {
   conditions: string[];
   onSelectPtms?: (keys: string[]) => void;
   ptmType?: string; // v9.14: 'phosphorylation' | 'ubiquitylation'
+  highlightedKinase?: string | null; // v9.21: from receptor panel click
+  inferredReceptors?: InferredReceptor[]; // v9.21: for Signal Flow tab + receptor badges
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -454,9 +467,11 @@ export default function KinaseModuleAnalysis({
   conditions,
   onSelectPtms,
   ptmType = "phosphorylation",
+  highlightedKinase,
+  inferredReceptors = [],
 }: KinaseModuleAnalysisProps) {
   const isUbi = ptmType.toLowerCase().includes("ubiquityl") || ptmType.toLowerCase().includes("ubiquitin");
-  const [activeTab, setActiveTab] = useState<"cowave" | "lookup" | "cascade" | "kinaseModules">("cowave");
+  const [activeTab, setActiveTab] = useState<"cowave" | "lookup" | "cascade" | "kinaseModules" | "signalFlow">("cowave");
   const [expandedModules, setExpandedModules] = useState<Set<string>>(new Set());
   const [manualSelection, setManualSelection] = useState<Set<string>>(new Set());
 
@@ -473,6 +488,20 @@ export default function KinaseModuleAnalysis({
   const [globalKinaseResult, setGlobalKinaseResult] = useState<GlobalKinaseModuleResponse | null>(null);
   const [globalKinaseLoading, setGlobalKinaseLoading] = useState(false);
   const [globalKinaseError, setGlobalKinaseError] = useState<string | null>(null);
+
+  // ── Receptor→Kinase reverse mapping (v9.21) ─────────────────────────────
+  // Maps canonical kinase name (uppercase) → list of receptor names that route through it
+  const kinaseToReceptors = useMemo(() => {
+    const map: Record<string, string[]> = {};
+    for (const rec of inferredReceptors) {
+      for (const k of (rec.via_kinases || [])) {
+        const key = k.toUpperCase();
+        if (!map[key]) map[key] = [];
+        if (!map[key].includes(rec.name)) map[key].push(rec.name);
+      }
+    }
+    return map;
+  }, [inferredReceptors]);
 
   // ── Co-wave module detection ─────────────────────────────────────────────
   const checkedPtmList = useMemo(
@@ -651,6 +680,16 @@ export default function KinaseModuleAnalysis({
               </Badge>
             )}
           </Button>
+          {!isUbi && inferredReceptors.length > 0 && (
+            <Button
+              variant={activeTab === "signalFlow" ? "default" : "ghost"}
+              size="sm"
+              className="text-xs h-7"
+              onClick={() => setActiveTab("signalFlow")}
+            >
+              <GitBranch className="h-3 w-3 mr-1" /> Signal Flow
+            </Button>
+          )}
           <div className="ml-auto">
             <Button
               variant="outline"
@@ -993,9 +1032,7 @@ export default function KinaseModuleAnalysis({
               </div>
             )}
           </div>
-        )}
-
-        {/* ── Tab: Cascade View / Ubi Cascade ─────────────────────────── */}
+         {/* ── Tab: Cascade View / Ubi Cascade ────────────────────────────────────── */}
         {activeTab === "cascade" && (
           <CascadeView
             modules={coWaveModules}
@@ -1008,6 +1045,17 @@ export default function KinaseModuleAnalysis({
             globalKinaseLoading={globalKinaseLoading}
             onRunGlobalKinase={runGlobalKinaseModules}
             isUbi={isUbi}
+            highlightedKinase={highlightedKinase}
+            kinaseToReceptors={kinaseToReceptors}
+          />
+        )}
+
+        {/* ── Tab: Signal Flow ────────────────────────────────────────────────────── */}
+        {activeTab === "signalFlow" && (
+          <SignalFlowView
+            inferredReceptors={inferredReceptors}
+            globalKinaseResult={globalKinaseResult}
+            topNPtms={topNPtms}
           />
         )}
 
@@ -1480,6 +1528,8 @@ function CascadeView({
   globalKinaseLoading,
   onRunGlobalKinase,
   isUbi = false,
+  highlightedKinase,
+  kinaseToReceptors = {},
 }: {
   modules: CoWaveModule[];
   motifAnnotations: Record<string, MotifAnnotationResponse>;
@@ -1491,6 +1541,8 @@ function CascadeView({
   globalKinaseLoading: boolean;
   onRunGlobalKinase: () => void;
   isUbi?: boolean;
+  highlightedKinase?: string | null;
+  kinaseToReceptors?: Record<string, string[]>;
 }) {
   const [expandedTimepoint, setExpandedTimepoint] = useState<string | null>(null);
   const [showSwimlane, setShowSwimlane] = useState(true);
@@ -1650,19 +1702,40 @@ function CascadeView({
                               const isPersistent = (tc.kinase_activity || []).some(
                                 (ka) => ka.canonical === k.canonical && ka.timepoints.length >= 2
                               );
+                              // v9.21: highlight if matches receptor-clicked kinase
+                              const kinaseKey = (k.canonical || k.kinase).toUpperCase();
+                              const isHighlighted = highlightedKinase
+                                ? kinaseKey === highlightedKinase.toUpperCase() ||
+                                  k.kinase.toUpperCase() === highlightedKinase.toUpperCase()
+                                : false;
+                              // v9.21: receptor badges
+                              const receptorSources = kinaseToReceptors[kinaseKey] || [];
                               return (
                                 <span
                                   key={k.canonical}
-                                  className={`text-[9px] px-1.5 py-0.5 rounded inline-flex items-center gap-0.5 ${
-                                    isPersistent
-                                      ? "bg-blue-100 dark:bg-blue-800/30 text-blue-700 dark:text-blue-300 border border-blue-400"
-                                      : SWIMLANE_COLORS[colorIdx].light
+                                  className={`text-[9px] px-1.5 py-0.5 rounded inline-flex items-center gap-0.5 transition-all ${
+                                    isHighlighted
+                                      ? "bg-yellow-200 dark:bg-yellow-700/60 text-yellow-900 dark:text-yellow-100 border border-yellow-400 ring-1 ring-yellow-400 scale-110"
+                                      : isPersistent
+                                        ? "bg-blue-100 dark:bg-blue-800/30 text-blue-700 dark:text-blue-300 border border-blue-400"
+                                        : SWIMLANE_COLORS[colorIdx].light
                                   }`}
-                                  title={`${k.kinase}: ${k.ptm_count} PTMs (${k.confirmed} confirmed, ${k.inferred} inferred)\nSources: ${k.sources.join(", ")}${isPersistent ? "\nPersistent across timepoints" : ""}`}
+                                  title={`${k.kinase}: ${k.ptm_count} PTMs (${k.confirmed} confirmed, ${k.inferred} inferred)\nSources: ${k.sources.join(", ")}${isPersistent ? "\nPersistent across timepoints" : ""}${receptorSources.length ? "\nUpstream receptors: " + receptorSources.join(", ") : ""}`}
                                 >
                                   {isPersistent && <Layers className="h-2.5 w-2.5" />}
+                                  {isHighlighted && <Activity className="h-2.5 w-2.5 text-yellow-600 dark:text-yellow-300" />}
                                   {k.kinase}
                                   <span className="opacity-60">({k.ptm_count})</span>
+                                  {receptorSources.length > 0 && (
+                                    <span
+                                      className="ml-0.5 text-[8px] bg-sky-200 dark:bg-sky-800/50 text-sky-700 dark:text-sky-300 px-0.5 rounded"
+                                      title={`Downstream of: ${receptorSources.join(", ")}`}
+                                    >
+                                      {receptorSources.length === 1
+                                        ? receptorSources[0].split(" ")[0]
+                                        : `${receptorSources.length}R`}
+                                    </span>
+                                  )}
                                 </span>
                               );
                             })}
@@ -2477,6 +2550,219 @@ function GlobalKinaseModulesPanel({
           {loading ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Sparkles className="h-3 w-3 mr-1" />}
           Re-run Analysis
         </Button>
+      </div>
+    </div>
+  );
+}
+
+
+// ── Signal Flow View (v9.21) ──────────────────────────────────────────────────
+// Visualizes Receptor → Kinase → PTM signal chain
+
+function SignalFlowView({
+  inferredReceptors,
+  globalKinaseResult,
+  topNPtms,
+}: {
+  inferredReceptors: InferredReceptor[];
+  globalKinaseResult: GlobalKinaseModuleResponse | null;
+  topNPtms: { gene: string; position: string; label: string }[];
+}) {
+  const [selectedReceptor, setSelectedReceptor] = useState<string | null>(null);
+
+  // Build kinase → PTM mapping from globalKinaseResult
+  const kinaseToPtms = useMemo(() => {
+    const map: Record<string, { gene: string; position: string; label: string; membership: string }[]> = {};
+    if (!globalKinaseResult) return map;
+    for (const mod of globalKinaseResult.kinase_modules) {
+      const key = (mod.canonical || mod.kinase).toUpperCase();
+      if (!map[key]) map[key] = [];
+      for (const member of mod.members) {
+        const ptmInfo = topNPtms.find(p => p.gene === member.gene && p.position === member.position);
+        map[key].push({
+          gene: member.gene,
+          position: member.position,
+          label: ptmInfo?.label || `${member.gene}_${member.position}`,
+          membership: member.membership,
+        });
+      }
+    }
+    return map;
+  }, [globalKinaseResult, topNPtms]);
+
+  // Source color
+  const sourceColor = (src?: string) => {
+    if (src === "treatment_context" || src === "treatment_context_uniprot") return "#38bdf8";
+    if (src === "reactome") return "#fb7185";
+    return "#a78bfa";
+  };
+
+  const receptorsToShow = selectedReceptor
+    ? inferredReceptors.filter(r => r.name === selectedReceptor)
+    : inferredReceptors.slice(0, 6); // show top 6 by default
+
+  if (inferredReceptors.length === 0) {
+    return (
+      <div className="text-center py-8 text-sm text-muted-foreground">
+        <GitBranch className="h-8 w-8 mx-auto mb-2 opacity-40" />
+        No inferred receptors available. Visit the Vector Plot page to generate receptor inference.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-muted-foreground flex items-center gap-1">
+          <GitBranch className="h-3.5 w-3.5 text-sky-400" />
+          Signal chain: Upstream Receptor → Kinase → PTM substrate
+        </p>
+        {!globalKinaseResult && (
+          <span className="text-[10px] text-amber-500 bg-amber-50 dark:bg-amber-900/20 px-2 py-0.5 rounded border border-amber-300">
+            Run Global Annotate to see Kinase→PTM links
+          </span>
+        )}
+      </div>
+
+      {/* Receptor selector */}
+      <div className="flex flex-wrap gap-1.5">
+        <button
+          className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${
+            selectedReceptor === null
+              ? "bg-foreground text-background border-foreground"
+              : "border-border text-muted-foreground hover:border-foreground/50"
+          }`}
+          onClick={() => setSelectedReceptor(null)}
+        >
+          All (top 6)
+        </button>
+        {inferredReceptors.map(r => (
+          <button
+            key={r.name}
+            className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${
+              selectedReceptor === r.name
+                ? "bg-foreground text-background border-foreground"
+                : "border-border text-muted-foreground hover:border-foreground/50"
+            }`}
+            onClick={() => setSelectedReceptor(r.name === selectedReceptor ? null : r.name)}
+          >
+            {r.name.length > 20 ? r.name.slice(0, 18) + "…" : r.name}
+          </button>
+        ))}
+      </div>
+
+      {/* Flow chains */}
+      <div className="space-y-3">
+        {receptorsToShow.map(rec => {
+          const viaKinases = rec.via_kinases || [];
+          const color = sourceColor(rec.source);
+
+          return (
+            <div key={rec.name} className="rounded-lg border bg-card/50 p-3 space-y-2">
+              {/* Receptor node */}
+              <div className="flex items-center gap-2">
+                <div
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border-2 text-xs font-semibold"
+                  style={{ borderColor: color, color, backgroundColor: `${color}18` }}
+                >
+                  <Activity className="h-3 w-3" />
+                  {rec.name}
+                </div>
+                <span className="text-[10px] text-muted-foreground">
+                  {rec.receptor_class} · {rec.downstream_ptm_count} PTMs ·{" "}
+                  <span style={{ color }}>
+                    {rec.source === "treatment_context" ? "T" : rec.source === "reactome" ? "R" : "L"}
+                  </span>
+                </span>
+              </div>
+
+              {/* Kinase layer */}
+              {viaKinases.length > 0 ? (
+                <div className="ml-4 space-y-2">
+                  <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                    <ArrowRight className="h-3 w-3" />
+                    <span>via kinases:</span>
+                  </div>
+                  <div className="flex flex-wrap gap-2 ml-4">
+                    {viaKinases.map(kinase => {
+                      const kinaseKey = kinase.toUpperCase();
+                      const ptms = kinaseToPtms[kinaseKey] || [];
+                      return (
+                        <div key={kinase} className="space-y-1">
+                          {/* Kinase node */}
+                          <div className="flex items-center gap-1 px-2 py-0.5 rounded border border-amber-400 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 text-[10px] font-medium">
+                            <Zap className="h-2.5 w-2.5" />
+                            {kinase}
+                          </div>
+                          {/* PTM substrates */}
+                          {ptms.length > 0 && (
+                            <div className="ml-2 space-y-0.5">
+                              <div className="flex items-center gap-0.5 text-[9px] text-muted-foreground">
+                                <ArrowRight className="h-2.5 w-2.5" />
+                                <span>{ptms.length} substrates:</span>
+                              </div>
+                              <div className="flex flex-wrap gap-1 ml-3">
+                                {ptms.slice(0, 5).map(ptm => (
+                                  <span
+                                    key={`${ptm.gene}_${ptm.position}`}
+                                    className={`text-[9px] px-1.5 py-0.5 rounded ${
+                                      ptm.membership === "confirmed"
+                                        ? "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 border border-green-400"
+                                        : "bg-muted text-muted-foreground border border-border"
+                                    }`}
+                                    title={`${ptm.gene} ${ptm.position} (${ptm.membership})`}
+                                  >
+                                    {ptm.label || `${ptm.gene}_${ptm.position}`}
+                                  </span>
+                                ))}
+                                {ptms.length > 5 && (
+                                  <span className="text-[9px] text-muted-foreground">+{ptms.length - 5}</span>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                          {ptms.length === 0 && globalKinaseResult && (
+                            <div className="ml-2 text-[9px] text-muted-foreground/50">
+                              no annotated substrates in current PTM set
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : (
+                <div className="ml-4 text-[10px] text-muted-foreground/50 flex items-center gap-1">
+                  <ArrowRight className="h-3 w-3" />
+                  Direct receptor (no intermediate kinase mapping)
+                  {rec.downstream_ptms?.length > 0 && (
+                    <span className="ml-1">→ {rec.downstream_ptms.slice(0, 3).join(", ")}{rec.downstream_ptms.length > 3 ? ` +${rec.downstream_ptms.length - 3}` : ""}</span>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Legend */}
+      <div className="flex items-center gap-3 text-[10px] text-muted-foreground pt-1 border-t">
+        <span className="flex items-center gap-1">
+          <span className="w-2 h-2 rounded-full bg-sky-400 inline-block" /> Treatment context (T)
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="w-2 h-2 rounded-full bg-rose-400 inline-block" /> Reactome (R)
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="w-2 h-2 rounded-full bg-violet-400 inline-block" /> Literature (L)
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="w-2 h-2 rounded bg-green-100 border border-green-400 inline-block" /> Confirmed substrate
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="w-2 h-2 rounded bg-muted border border-border inline-block" /> Inferred substrate
+        </span>
       </div>
     </div>
   );

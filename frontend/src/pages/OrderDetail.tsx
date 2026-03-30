@@ -1227,6 +1227,8 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
   const [hoveredPtm, setHoveredPtm] = useState<string | null>(null);
   const [yManualMin, setYManualMin] = useState<string>("");
   const [yManualMax, setYManualMax] = useState<string>("");
+  // v9.21: receptor → kinase highlight linkage
+  const [selectedHighlightKinase, setSelectedHighlightKinase] = useState<string | null>(null);
 
   useEffect(() => {
     api
@@ -1747,8 +1749,22 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
                     {(viaKinases?.length || pathway || (rec as any).matched_ligand || (rec as any).evidence) && (
                       <div className="hidden group-hover:flex items-center gap-1.5 ml-[76px] mt-0.5">
                         {viaKinases?.length ? (
-                          <span className="text-[10px] text-muted-foreground">
-                            via {viaKinases.join(" → ")}
+                          <span className="text-[10px] text-muted-foreground flex items-center gap-1 flex-wrap">
+                            via{" "}
+                            {viaKinases.map((k, ki) => (
+                              <button
+                                key={k}
+                                onClick={() => setSelectedHighlightKinase(prev => prev === k ? null : k)}
+                                className={`px-1 py-0 rounded text-[10px] border transition-colors ${
+                                  selectedHighlightKinase === k
+                                    ? "bg-yellow-200 dark:bg-yellow-700/60 text-yellow-900 dark:text-yellow-100 border-yellow-400"
+                                    : "bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 border-amber-400 hover:bg-amber-100 dark:hover:bg-amber-800/30"
+                                }`}
+                                title={`Click to highlight ${k} in Cascade View timeline`}
+                              >
+                                {ki > 0 && <span className="mr-0.5 opacity-50">→</span>}{k}
+                              </button>
+                            ))}
                           </span>
                         ) : null}
                         {sigPathway ? (
@@ -1792,6 +1808,8 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
         <KinaseModuleAnalysis
           orderId={orderId}
           ptmType={ptmType}
+          highlightedKinase={selectedHighlightKinase}
+          inferredReceptors={data.inferred_receptors || []}
           vectorData={data.vector_data.map((row) => ({
             gene: row.gene,
             position: row.position,
