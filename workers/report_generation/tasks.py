@@ -117,6 +117,26 @@ def run_report_generation(self, order_id: int, config: dict):
         experimental_context = dict(config.get("experimental_context") or {})
         experimental_context["single_time_point"] = config.get("single_time_point", False)
         analysis_mode = config.get("analysis_mode", "ptm_only")
+
+        # v9.20: Load receptor_inference_data from DB
+        inferred_receptors_from_db = []
+        try:
+            from common.db_update import _get_engine
+            from sqlalchemy import text as _text
+            _engine = _get_engine()
+            with _engine.connect() as _conn:
+                _row = _conn.execute(
+                    _text("SELECT receptor_inference_data FROM orders WHERE id = :oid"),
+                    {"oid": order_id},
+                ).fetchone()
+            if _row and _row[0]:
+                import json as _json
+                _rid = _row[0] if isinstance(_row[0], dict) else _json.loads(_row[0])
+                inferred_receptors_from_db = _rid.get("receptors", [])
+                logger.info(f"[Order {order_id}] Loaded {len(inferred_receptors_from_db)} inferred receptors from DB")
+        except Exception as _rec_err:
+            logger.warning(f"[Order {order_id}] Could not load receptor_inference_data from DB: {_rec_err}")
+
         initial_state = {
             "order_id": order_id,
             "enriched_ptm_data": enriched_data,
@@ -137,6 +157,8 @@ def run_report_generation(self, order_id: int, config: dict):
             "progress_callback": _make_progress_cb(order_id),
             # v9.12: Frontend kinase analysis results (Global Kinase Modules)
             "frontend_kinase_analysis": config.get("kinase_analysis_data", {}),
+            # v9.20: Inferred upstream receptors from vector-plot-data analysis
+            "inferred_receptors": inferred_receptors_from_db,
         }
 
         # ── Cross-Talk mode: load secondary PTM data into initial_state ──

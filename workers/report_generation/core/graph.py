@@ -105,6 +105,10 @@ class ReportState(TypedDict, total=False):
     report_file: str                           # final report file path
     collection_names: List[str]                # ChromaDB collection names
 
+    # v9.20: Inferred upstream receptors (from vector-plot-data analysis, stored in DB)
+    # List of {name, receptor_class, downstream_ptm_count, downstream_ptms, via_kinases, source, ...}
+    inferred_receptors: List[dict]
+
     # Progress tracking
     progress_callback: Any
     error: Optional[str]

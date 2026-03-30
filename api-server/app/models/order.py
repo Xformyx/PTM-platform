@@ -91,6 +91,9 @@ class Order(Base):
     # Kinase Analysis data (JSON) — saved from Global Kinase Modules frontend analysis
     # {kinase_modules, temporal_cascade, cowave_cross_analysis, summary, saved_at}
     kinase_analysis_data: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    # Receptor Inference data (JSON) — saved from vector-plot-data endpoint
+    # [{name, receptor_class, downstream_ptm_count, downstream_ptms, via_kinases, source, ...}]
+    receptor_inference_data: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
     # Timestamps
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)

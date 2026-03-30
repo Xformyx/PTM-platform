@@ -198,6 +198,7 @@ async def get_order(
         "error_message": order.error_message,
         "cross_talk_data": order.cross_talk_data,
         "signal_propagation_data": order.signal_propagation_data,
+        "receptor_inference_data": order.receptor_inference_data,
         "started_at": order.started_at.isoformat() + "Z" if order.started_at else None,
         "completed_at": order.completed_at.isoformat() + "Z" if order.completed_at else None,
         "created_at": order.created_at.isoformat() + "Z",
@@ -1913,6 +1914,21 @@ async def get_vector_plot_data(
         key=lambda x: x.get("downstream_ptm_count", 0),
         reverse=True,
     )
+
+    # v9.20: Persist receptor inference to DB so report_generation can use it
+    try:
+        order.receptor_inference_data = {
+            "receptors": inferred_receptors,
+            "saved_at": __import__('datetime').datetime.utcnow().isoformat(),
+        }
+        await db.commit()
+        logging.getLogger("vector_plot").info(
+            f"Saved {len(inferred_receptors)} inferred receptors to DB for order {order.id}"
+        )
+    except Exception as _save_err:
+        logging.getLogger("vector_plot").warning(
+            f"Failed to save receptor_inference_data to DB: {_save_err}"
+        )
 
     # Calculate suggested N: count PTMs with |Log2FC| > 2*std in any condition
     suggested_n = None

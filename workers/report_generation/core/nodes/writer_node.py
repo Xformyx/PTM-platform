@@ -115,6 +115,45 @@ def run_section_writing(state: dict) -> dict:
     comovement_figures = state.get("comovement_figures", [])
     comovement_llm_context = state.get("comovement_llm_context", "")
     temporal_kinase_cascade_llm_context = state.get("temporal_kinase_cascade_llm_context", "")
+
+    # v9.20: Build inferred receptor context for LLM
+    inferred_receptors = state.get("inferred_receptors", []) or []
+    receptor_llm_context = ""
+    if inferred_receptors:
+        lines = [
+            "=== INFERRED UPSTREAM RECEPTORS (from Reactome pathway mapping + treatment context) ===",
+            "The following upstream receptors were computationally inferred based on the active kinases",
+            "detected in this experiment. Use this information to contextualize the signaling cascade",
+            "from ligand/receptor activation down to the observed PTM changes.",
+            "",
+        ]
+        for i, rec in enumerate(inferred_receptors[:15], 1):  # top 15
+            name = rec.get("name", "Unknown")
+            rec_class = rec.get("receptor_class", "")
+            ptm_count = rec.get("downstream_ptm_count", 0)
+            downstream = rec.get("downstream_ptms", [])[:5]
+            via_kinases = rec.get("via_kinases", [])[:5]
+            pathway = rec.get("signaling_pathway") or rec.get("pathway", "")
+            source = rec.get("source", "")
+            source_label = {
+                "treatment_context": "Treatment context (curated)",
+                "treatment_context_uniprot": "Treatment context (UniProt)",
+                "reactome": "Reactome pathway mapping",
+                "literature": "Literature (upstream regulators)",
+            }.get(source, source)
+            line = f"{i}. {name} [{rec_class}] — {ptm_count} downstream PTMs"
+            if via_kinases:
+                line += f" | via kinases: {', '.join(via_kinases)}"
+            if pathway:
+                line += f" | pathway: {pathway}"
+            if downstream:
+                line += f" | key PTMs: {', '.join(downstream[:3])}"
+            line += f" | source: {source_label}"
+            lines.append(line)
+        lines.append("")
+        lines.append("=== END INFERRED UPSTREAM RECEPTORS ===")
+        receptor_llm_context = "\n".join(lines)
+        logger.info(f"[v9.20] Built receptor context: {len(inferred_receptors)} receptors, {len(receptor_llm_context)} chars")
     figure_gen = FigureInformationGenerator(
         network_analysis, parsed_ptms,
         comovement_analysis=comovement_analysis,
@@ -189,6 +228,11 @@ def run_section_writing(state: dict) -> dict:
         if temporal_kinase_cascade_llm_context and section_type in ("results", "discussion"):
             prompt += "\n\n" + temporal_kinase_cascade_llm_context
             logger.info(f"[v9.11] Injected temporal kinase cascade context into {section_type} prompt ({len(temporal_kinase_cascade_llm_context)} chars)")
+
+        # v9.20: Inject inferred receptor context for Introduction, Results, Discussion
+        if receptor_llm_context and section_type in ("introduction", "results", "discussion"):
+            prompt += "\n\n" + receptor_llm_context
+            logger.info(f"[v9.20] Injected receptor context into {section_type} prompt ({len(receptor_llm_context)} chars)")
 
         # Inject figure context for Results/Discussion so LLM can reference figures
         if figure_gen.has_figures() and section_type in ("results", "discussion"):
