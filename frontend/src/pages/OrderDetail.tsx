@@ -1716,10 +1716,18 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
                         {rec.name}
                       </span>
                       {/* Bar */}
-                      <div className="flex-1 h-2 rounded-full bg-muted/40 overflow-hidden">
+                      <div className="flex-1 h-2 rounded-full bg-muted/30 overflow-hidden">
                         <div
-                          className={`h-full rounded-full transition-all duration-500 ${style.text.replace("text-", "bg-")}`}
-                          style={{ width: `${barPct}%`, opacity: 1 }}
+                          className="h-full rounded-full transition-all duration-500"
+                          style={{
+                            width: `${barPct}%`,
+                            backgroundColor:
+                              source === "treatment_context" || source === "treatment_context_uniprot"
+                                ? "#38bdf8"   /* sky-400 — bright & unmistakable */
+                                : source === "reactome"
+                                  ? "#fb7185" /* rose-400 */
+                                  : "#a78bfa", /* violet-400 */
+                          }}
                         />
                       </div>
                       {/* Count */}
