@@ -176,6 +176,41 @@ export default function OrderCreate() {
   });
   const [researchQuestions, setResearchQuestions] = useState<string[]>([]);
   const [newQuestion, setNewQuestion] = useState("");
+
+  // Treatment typo detection
+  const [treatmentSuggestions, setTreatmentSuggestions] = useState<Array<{
+    original_token: string; suggested: string; canonical: string;
+    confidence: string; distance: number;
+  }>>([]);
+  const [treatmentSuggestionsVisible, setTreatmentSuggestionsVisible] = useState(false);
+  const treatmentDebounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleTreatmentChange = (value: string) => {
+    setForm({ ...form, treatment: value });
+    if (treatmentDebounceRef.current) clearTimeout(treatmentDebounceRef.current);
+    if (!value.trim()) { setTreatmentSuggestions([]); setTreatmentSuggestionsVisible(false); return; }
+    treatmentDebounceRef.current = setTimeout(async () => {
+      try {
+        const res = await api.post<{ suggestions: typeof treatmentSuggestions }>(
+          "/orders/validate-treatment", { treatment: value }
+        );
+        if (res.suggestions && res.suggestions.length > 0) {
+          setTreatmentSuggestions(res.suggestions);
+          setTreatmentSuggestionsVisible(true);
+        } else {
+          setTreatmentSuggestions([]);
+          setTreatmentSuggestionsVisible(false);
+        }
+      } catch { /* ignore */ }
+    }, 800);
+  };
+
+  const applyTreatmentSuggestion = (original: string, suggested: string) => {
+    const updated = form.treatment.replace(new RegExp(original, 'gi'), suggested);
+    setForm({ ...form, treatment: updated });
+    setTreatmentSuggestions([]);
+    setTreatmentSuggestionsVisible(false);
+  };
   const [llmModels, setLlmModels] = useState<{ provider: string; model_id: string; name: string }[]>([]);
   const [defaultLlmModel, setDefaultLlmModel] = useState("");
   const [llmCloudModelVariant, setLlmCloudModelVariant] = useState("");
@@ -1061,10 +1096,47 @@ export default function OrderCreate() {
                 </div>
                 <div className="space-y-2">
                   <Label>Treatment</Label>
-                  <Input value={form.treatment}
-                    onChange={(e) => setForm({ ...form, treatment: e.target.value })}
-                    placeholder="e.g., Irisin stimulation"
-                  />
+                  <div className="relative">
+                    <Input value={form.treatment}
+                      onChange={(e) => handleTreatmentChange(e.target.value)}
+                      placeholder="e.g., Irisin stimulation"
+                    />
+                    {treatmentSuggestionsVisible && treatmentSuggestions.length > 0 && (
+                      <div className="absolute z-50 top-full left-0 right-0 mt-1 rounded-lg border border-amber-500/40 bg-gray-900/95 backdrop-blur-sm shadow-xl p-3 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <p className="text-xs font-semibold text-amber-400 flex items-center gap-1">
+                            <span>⚠</span> Did you mean?
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => setTreatmentSuggestionsVisible(false)}
+                            className="text-gray-500 hover:text-gray-300 text-xs"
+                          >✕</button>
+                        </div>
+                        {treatmentSuggestions.map((s, i) => (
+                          <div key={i} className="flex items-center justify-between gap-2 text-sm">
+                            <span className="text-gray-400">
+                              <span className="line-through text-red-400/70">{s.original_token}</span>
+                              {" → "}
+                              <span className="text-green-400 font-medium">{s.suggested}</span>
+                            </span>
+                            <div className="flex items-center gap-1">
+                              <span className={`text-xs px-1.5 py-0.5 rounded ${
+                                s.confidence === 'high' ? 'bg-green-500/20 text-green-400' :
+                                s.confidence === 'medium' ? 'bg-yellow-500/20 text-yellow-400' :
+                                'bg-gray-500/20 text-gray-400'
+                              }`}>{s.confidence}</span>
+                              <button
+                                type="button"
+                                onClick={() => applyTreatmentSuggestion(s.original_token, s.suggested)}
+                                className="text-xs px-2 py-0.5 rounded bg-blue-600/30 hover:bg-blue-600/50 text-blue-300 border border-blue-500/30 transition-colors"
+                              >Apply</button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
                 <div className="space-y-2">
                   <Label>Time Points</Label>

@@ -332,7 +332,7 @@ LIGAND_RECEPTOR_DB: list[dict] = [
     # 4. CYTOKINES
     # ═══════════════════════════════════════════════════════════════════════
     {
-        "ligand_aliases": ["tnf", "tnf-alpha", "tnfα", "tnf-α", "tumor necrosis factor"],
+        "ligand_aliases": ["tnf", "tnf-alpha", "tnfα", "tnf-α", "tnfa", "tumor necrosis factor"],
         "receptors": [
             {"name": "TNFR1 (TNFRSF1A)", "class": "Cytokine/Immune",
              "pathway": "TNFR1 → TRADD/TRAF2 → NF-κB, MAPK/JNK, apoptosis",
@@ -451,7 +451,7 @@ LIGAND_RECEPTOR_DB: list[dict] = [
     # 5. WNT / HEDGEHOG / NOTCH (DEVELOPMENTAL)
     # ═══════════════════════════════════════════════════════════════════════
     {
-        "ligand_aliases": ["wnt3a", "wnt-3a"],
+        "ligand_aliases": ["wnt3a", "wnt-3a", "wnt3"],
         "receptors": [
             {"name": "FZD/LRP5/6 (Frizzled/LRP5/LRP6)", "class": "Developmental",
              "pathway": "Wnt → Dvl → β-catenin stabilization → TCF/LEF",
@@ -1335,3 +1335,162 @@ def lookup_receptors_for_treatment(treatment_text: str) -> list[dict]:
                 results.append(r)
 
     return results
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TYPO DETECTION & SUGGESTION
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _levenshtein(a: str, b: str) -> int:
+    """Compute Levenshtein edit distance between two strings."""
+    if len(a) < len(b):
+        return _levenshtein(b, a)
+    if len(b) == 0:
+        return len(a)
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a):
+        curr = [i + 1]
+        for j, cb in enumerate(b):
+            ins = prev[j + 1] + 1
+            dlt = curr[j] + 1
+            sub = prev[j] + (0 if ca == cb else 1)
+            curr.append(min(ins, dlt, sub))
+        prev = curr
+    return prev[-1]
+
+
+def _build_canonical_index() -> list[dict]:
+    """Build a flat list of {canonical, display, aliases} for all ligands."""
+    index = []
+    for entry in LIGAND_RECEPTOR_DB:
+        aliases = entry.get("ligand_aliases", [])
+        if not aliases:
+            continue
+        canonical = aliases[0]
+        # Use the most human-readable alias as display name
+        display = max(aliases, key=lambda x: (len(x), x[0].isupper()))
+        index.append({
+            "canonical": canonical,
+            "display": display,
+            "aliases": [a.lower() for a in aliases],
+        })
+    return index
+
+
+_CANONICAL_INDEX: list[dict] = _build_canonical_index()
+
+
+def suggest_corrections_for_treatment(treatment_text: str, max_suggestions: int = 3) -> list[dict]:
+    """
+    Given a treatment text, tokenise it and check each token against the
+    canonical ligand index.  Returns a list of suggestion objects:
+
+        {
+            "original_token": "Irsin",
+            "suggested": "Irisin",
+            "canonical": "irisin",
+            "confidence": "high" | "medium" | "low",
+            "distance": 1,
+        }
+
+    Only tokens that (a) are NOT already an exact alias match and
+    (b) have a close-enough fuzzy match are returned.
+    """
+    if not treatment_text or not treatment_text.strip():
+        return []
+
+    # For typo detection we need individual word tokens, not phrase tokens.
+    # Split on whitespace and common delimiters, then strip numeric/unit tokens.
+    import re as _re
+    _UNIT_PATTERN = _re.compile(
+        r"^\d[\d.]*\s*(?:ng|ug|μg|mg|nm|μm|mm|um|nM|μM|mM|ng/ml|ug/ml|μg/ml|mg/ml|IU|U/ml|%|of|nM|pM|fM)?$",
+        _re.IGNORECASE,
+    )
+    _SKIP_WORDS = {
+        "of", "and", "with", "the", "a", "an", "in", "at", "to", "for",
+        "buffer", "control", "media", "serum", "free", "vehicle",
+        "plus", "or", "vs", "versus",
+    }
+    raw_parts = _re.split(r"[+,;&()\[\]/]|\band\b|\bwith\b|\bor\b", treatment_text, flags=_re.IGNORECASE)
+    word_tokens: list[str] = []
+    for part in raw_parts:
+        for word in part.split():
+            w = word.strip(".,;:!?-_\'\"")
+            if len(w) < 3:
+                continue
+            if _UNIT_PATTERN.match(w):
+                continue
+            if w.lower() in _SKIP_WORDS:
+                continue
+            word_tokens.append(w)
+    # Deduplicate preserving order
+    seen: set[str] = set()
+    tokens: list[str] = []
+    for w in word_tokens:
+        if w.lower() not in seen:
+            seen.add(w.lower())
+            tokens.append(w)
+    suggestions: list[dict] = []
+
+    for token in tokens:
+        token_lower = token.lower()
+        token_len = len(token_lower)
+
+        # Skip very short tokens (≤ 2 chars) — too ambiguous
+        if token_len <= 2:
+            continue
+
+        # Check exact match first — no suggestion needed
+        exact_match = False
+        for entry in _CANONICAL_INDEX:
+            if token_lower in entry["aliases"]:
+                exact_match = True
+                break
+        if exact_match:
+            continue
+
+        # Fuzzy match: find the closest canonical alias
+        best_dist = 999
+        best_entry = None
+        for entry in _CANONICAL_INDEX:
+            for alias in entry["aliases"]:
+                # Only compare aliases of similar length (±40% or ±3 chars)
+                if abs(len(alias) - token_len) > max(3, int(token_len * 0.4)):
+                    continue
+                d = _levenshtein(token_lower, alias)
+                if d < best_dist:
+                    best_dist = d
+                    best_entry = entry
+
+        if best_entry is None:
+            continue
+
+        # Thresholds: distance ≤ 2 for short tokens, ≤ 3 for longer ones
+        max_dist = 2 if token_len <= 6 else 3
+        if best_dist > max_dist:
+            continue
+
+        # Avoid suggesting when the token is a common English word
+        _COMMON_WORDS = {
+            "buffer", "control", "media", "serum", "free", "with", "without",
+            "plus", "and", "the", "for", "from", "into", "onto", "over",
+            "high", "low", "dose", "time", "point", "hour", "min", "sec",
+            "day", "week", "month", "year", "cell", "line", "type", "human",
+            "mouse", "rat", "murine", "bovine", "rabbit", "porcine",
+        }
+        if token_lower in _COMMON_WORDS:
+            continue
+
+        confidence = "high" if best_dist == 1 else ("medium" if best_dist == 2 else "low")
+        suggestions.append({
+            "original_token": token,
+            "suggested": best_entry["display"],
+            "canonical": best_entry["canonical"],
+            "confidence": confidence,
+            "distance": best_dist,
+        })
+
+        if len(suggestions) >= max_suggestions:
+            break
+
+    return suggestions

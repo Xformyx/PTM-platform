@@ -4353,3 +4353,32 @@ async def global_kinase_modules(
         "cowave_cross_analysis": cowave_cross,
         "temporal_cascade": temporal_cascade,
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Treatment text typo-detection endpoint
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.post("/validate-treatment")
+async def validate_treatment(
+    body: dict = Body(...),
+):
+    """
+    Given a treatment text, return spelling suggestions for any tokens that
+    closely resemble known ligand names but are not exact matches.
+
+    Request body: { "treatment": "1 nM of Irsin" }
+    Response:     { "suggestions": [ { "original_token": "Irsin",
+                                        "suggested": "Irisin",
+                                        "canonical": "irisin",
+                                        "confidence": "high",
+                                        "distance": 1 } ] }
+    """
+    from app.services.ligand_receptor_db import suggest_corrections_for_treatment
+
+    treatment_text = (body.get("treatment") or "").strip()
+    if not treatment_text:
+        return {"suggestions": []}
+
+    suggestions = suggest_corrections_for_treatment(treatment_text, max_suggestions=5)
+    return {"suggestions": suggestions}
