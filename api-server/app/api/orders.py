@@ -1860,16 +1860,70 @@ async def get_vector_plot_data(
                     # Curated internal DB: always include, score = PTM count
                     relevance_score = len(top_n_ptms)
 
+                # v9.22: Map canonical downstream kinases for Source T receptors
+                # using the full kinase_names_set (not limited to top_n PTMs)
+                _CANONICAL_DOWNSTREAM: dict = {
+                    # Integrin family
+                    "Integrin": ["PTK2", "FAK", "SRC", "ILK", "ROCK1", "ROCK2", "PAK1", "PAK2", "PAK4",
+                                  "ITGB1BP1", "PXN", "VCL", "TLN1", "PARVA", "FERMT2",
+                                  "CDC42", "RAC1", "RHOA", "LIMK1", "LIMK2", "CFL1",
+                                  "PI3K", "PIK3CA", "PIK3R1", "AKT1", "AKT2",
+                                  "MAPK1", "MAPK3", "ERK1", "ERK2", "MAP2K1", "MAP2K2",
+                                  "BCAR1", "CRK", "CRKL", "DOCK1"],
+                    # RTK family
+                    "RTK": ["GRB2", "SOS1", "RAS", "RAF1", "BRAF", "MAP2K1", "MAP2K2",
+                             "MAPK1", "MAPK3", "ERK1", "ERK2",
+                             "PI3K", "PIK3CA", "AKT1", "AKT2", "MTOR",
+                             "SRC", "JAK1", "JAK2", "STAT3", "STAT5A",
+                             "PLCγ", "PLCG1", "PKC", "PRKCA", "PRKCB"],
+                    # GPCR family
+                    "GPCR": ["ADCY", "PKA", "PRKACA", "PRKACB", "PRKAR1A",
+                              "PLCB1", "PLCB3", "PKC", "PRKCA", "PRKCB",
+                              "GRK2", "GRK3", "GRK5", "GRK6",
+                              "ROCK1", "ROCK2", "RHOA",
+                              "PI3K", "PIK3CA", "AKT1", "MAPK1", "MAPK3",
+                              "ARRB1", "ARRB2"],
+                    # Receptor (generic)
+                    "Receptor": ["SRC", "MAPK1", "MAPK3", "AKT1", "PI3K", "JAK1", "JAK2"],
+                }
+                rec_class = m["receptor_class"]
+                canonical_list = _CANONICAL_DOWNSTREAM.get(rec_class, _CANONICAL_DOWNSTREAM["Receptor"])
+                # Intersect with kinases actually detected in this experiment
+                detected_via_kinases = [k for k in canonical_list if k in kinase_names_set]
+                # Also include kinases from kinase_ptm_map that overlap with downstream_ptms
+                downstream_ptm_set = set(p["label"] for p in top_n_ptms)
+                for kname, kptms in kinase_ptm_map.items():
+                    if kname not in detected_via_kinases and kptms & downstream_ptm_set:
+                        detected_via_kinases.append(kname)
+                # Deduplicate and limit
+                seen_k: set = set()
+                unique_via_kinases = []
+                for k in detected_via_kinases:
+                    if k not in seen_k:
+                        seen_k.add(k)
+                        unique_via_kinases.append(k)
+                unique_via_kinases = unique_via_kinases[:8]  # limit to 8
+
+                # Recalculate downstream_ptm_count using full kinase_ptm_map (not just top_n)
+                all_downstream_ptms: set = set()
+                for k in unique_via_kinases:
+                    all_downstream_ptms |= kinase_ptm_map.get(k, set())
+                # Fallback: use top_n_ptms if no kinase PTM map available
+                if not all_downstream_ptms:
+                    all_downstream_ptms = downstream_ptm_set
+                actual_downstream_count = len(all_downstream_ptms) if all_downstream_ptms else relevance_score
+
                 treatment_receptors[rec_name] = {
                     "name": rec_name,
-                    "receptor_class": m["receptor_class"],
-                    "downstream_ptm_count": relevance_score,
-                    "downstream_ptms": [p["label"] for p in top_n_ptms[:10]],
+                    "receptor_class": rec_class,
+                    "downstream_ptm_count": actual_downstream_count,
+                    "downstream_ptms": sorted(all_downstream_ptms)[:10] if all_downstream_ptms else [p["label"] for p in top_n_ptms[:10]],
+                    "via_kinases": unique_via_kinases,
                     "pathway": m.get("pathway", ""),
                     "evidence": m.get("evidence", ""),
                     "matched_ligand": m.get("ligand", ""),
                     "source": m.get("source", "treatment_context"),
-                    "relevance_score": relevance_score,
+                    "relevance_score": actual_downstream_count,
                 }
 
             if treatment_receptors:
