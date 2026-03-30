@@ -1658,7 +1658,7 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
         const classColor: Record<string, { bg: string; text: string; border: string }> = {
           RTK:             { bg: "bg-rose-500/15",    text: "text-rose-400",    border: "border-rose-500/30" },
           GPCR:            { bg: "bg-violet-500/15",  text: "text-violet-400",  border: "border-violet-500/30" },
-          Integrin:        { bg: "bg-cyan-500/15",    text: "text-cyan-400",    border: "border-cyan-500/30" },
+          Integrin:        { bg: "bg-cyan-500/15",    text: "text-cyan-300",    border: "border-cyan-500/30" },
           Developmental:   { bg: "bg-emerald-500/15", text: "text-emerald-400", border: "border-emerald-500/30" },
           "Cytokine/Immune": { bg: "bg-amber-500/15", text: "text-amber-400",   border: "border-amber-500/30" },
           Immune:          { bg: "bg-amber-500/15",   text: "text-amber-400",   border: "border-amber-500/30" },
@@ -1716,10 +1716,10 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
                         {rec.name}
                       </span>
                       {/* Bar */}
-                      <div className="flex-1 h-2 rounded-full bg-muted overflow-hidden">
+                      <div className="flex-1 h-2 rounded-full bg-muted/40 overflow-hidden">
                         <div
                           className={`h-full rounded-full transition-all duration-500 ${style.text.replace("text-", "bg-")}`}
-                          style={{ width: `${barPct}%`, opacity: 0.7 }}
+                          style={{ width: `${barPct}%`, opacity: 1 }}
                         />
                       </div>
                       {/* Count */}
