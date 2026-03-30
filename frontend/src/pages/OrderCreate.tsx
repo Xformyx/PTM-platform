@@ -183,7 +183,7 @@ export default function OrderCreate() {
     confidence: string; distance: number;
   }>>([]);
   const [treatmentSuggestionsVisible, setTreatmentSuggestionsVisible] = useState(false);
-  const treatmentDebounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const treatmentDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleTreatmentChange = (value: string) => {
     setForm({ ...form, treatment: value });
