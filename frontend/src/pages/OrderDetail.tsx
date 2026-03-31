@@ -1229,6 +1229,8 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
   const [yManualMax, setYManualMax] = useState<string>("");
   // v9.21: receptor → kinase highlight linkage
   const [selectedHighlightKinase, setSelectedHighlightKinase] = useState<string | null>(null);
+  // v9.23: Bimodal activity filter (de_novo / regulated / minor)
+  const [activityFilter, setActivityFilter] = useState<"all" | "de_novo" | "regulated" | "minor">("all");
 
   useEffect(() => {
     api
@@ -1315,10 +1317,32 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
     ptmTrends.set(key, classifyTrend(sorted));
   });
 
-  // Filter PTMs by trend category
-  const filteredPtms = trendFilter === "all"
-    ? uniquePtms
-    : uniquePtms.filter((p) => ptmTrends.get(`${p.gene}_${p.position}`) === trendFilter);
+  // v9.23: Bimodal activity classification per PTM
+  const ptmActivityClass = new Map<string, "de_novo" | "regulated" | "minor">();
+  uniquePtms.forEach((p) => {
+    const key = `${p.gene}_${p.position}`;
+    const arr = vectorByPtm.get(key);
+    if (!arr || !conditions.length) { ptmActivityClass.set(key, "minor"); return; }
+    const baselineVal = arr.find((r) => r.condition === conditions[0])?.value ?? 0;
+    const maxVal = Math.max(...arr.map((r) => r.value));
+    const minVal = Math.min(...arr.map((r) => r.value));
+    const maxAbsChange = Math.max(Math.abs(maxVal - baselineVal), Math.abs(minVal - baselineVal));
+    if (Math.abs(baselineVal) < 0.3 && maxAbsChange > 1.5) {
+      ptmActivityClass.set(key, "de_novo");
+    } else if (Math.abs(baselineVal) >= 0.3 && maxAbsChange > 0.8) {
+      ptmActivityClass.set(key, "regulated");
+    } else {
+      ptmActivityClass.set(key, "minor");
+    }
+  });
+
+  // Filter PTMs by trend category AND activity filter
+  const filteredPtms = uniquePtms.filter((p) => {
+    const key = `${p.gene}_${p.position}`;
+    const trendOk = trendFilter === "all" || ptmTrends.get(key) === trendFilter;
+    const actOk = activityFilter === "all" || ptmActivityClass.get(key) === activityFilter;
+    return trendOk && actOk;
+  });
 
   const chartData = conditions.map((cond) => {
     const point: Record<string, string | number> = { condition: cond };
@@ -1382,6 +1406,13 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
   uniquePtms.forEach((p) => {
     const t = ptmTrends.get(`${p.gene}_${p.position}`) || "other";
     trendCounts[t] = (trendCounts[t] || 0) + 1;
+  });
+
+  // v9.23: Count per activity class
+  const activityCounts: Record<string, number> = { all: uniquePtms.length, de_novo: 0, regulated: 0, minor: 0 };
+  uniquePtms.forEach((p) => {
+    const a = ptmActivityClass.get(`${p.gene}_${p.position}`) || "minor";
+    activityCounts[a] = (activityCounts[a] || 0) + 1;
   });
 
   // Chart height scales with visible lines for better separation (30% taller than before)
@@ -1448,6 +1479,49 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
               {TREND_META[cat].label} ({trendCounts[cat] || 0})
             </Button>
           ))}
+        </div>
+        <Separator orientation="vertical" className="h-6" />
+        {/* v9.23: Activity filter (De novo / Regulated / Minor) */}
+        <div className="flex flex-wrap gap-1.5 items-center">
+          <span className="text-[10px] text-muted-foreground font-medium mr-0.5">Activity:</span>
+          <Button
+            variant={activityFilter === "all" ? "default" : "outline"}
+            size="sm"
+            className="text-xs h-7 px-2"
+            onClick={() => setActivityFilter("all")}
+          >
+            All ({activityCounts.all})
+          </Button>
+          <Button
+            variant={activityFilter === "de_novo" ? "default" : "outline"}
+            size="sm"
+            className="text-xs h-7 px-2"
+            style={activityFilter === "de_novo" ? { backgroundColor: "#ef4444", borderColor: "#ef4444" } : {}}
+            onClick={() => setActivityFilter("de_novo")}
+            title="Baseline ≈ 0, sudden activation — may inflate Log2FC due to near-zero control"
+          >
+            ★ De novo ({activityCounts.de_novo})
+          </Button>
+          <Button
+            variant={activityFilter === "regulated" ? "default" : "outline"}
+            size="sm"
+            className="text-xs h-7 px-2"
+            style={activityFilter === "regulated" ? { backgroundColor: "#10b981", borderColor: "#10b981" } : {}}
+            onClick={() => setActivityFilter("regulated")}
+            title="Baseline present, meaningful change — likely true signaling regulation"
+          >
+            ● Regulated ({activityCounts.regulated})
+          </Button>
+          <Button
+            variant={activityFilter === "minor" ? "default" : "outline"}
+            size="sm"
+            className="text-xs h-7 px-2"
+            style={activityFilter === "minor" ? { backgroundColor: "#6b7280", borderColor: "#6b7280" } : {}}
+            onClick={() => setActivityFilter("minor")}
+            title="Small change — low significance"
+          >
+            Minor ({activityCounts.minor})
+          </Button>
         </div>
       </div>
 
@@ -1618,6 +1692,7 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
             {filteredPtms.map((p) => {
               const key = `${p.gene}_${p.position}`;
               const trend = ptmTrends.get(key) || "other";
+              const actCls = ptmActivityClass.get(key) || "minor";
               const pc = p.protein_class;
               return (
                 <label
@@ -1635,7 +1710,10 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
                     style={{ backgroundColor: colorMap.get(p.label) || "#6b7280", borderColor: TREND_META[trend].color }}
                     title={`${TREND_META[trend].label}: ${TREND_META[trend].description}`}
                   />
-                  <span className="truncate flex-1 min-w-0" title={pc ? `${p.label} \u2014 ${pc.role}${pc.ubi_context ? ` (${pc.ubi_context})` : ''} [${pc.confidence}]` : `${p.label} (${TREND_META[trend].label})`}>
+                  {/* v9.23: activity class indicator */}
+                  {actCls === "de_novo" && <span className="text-[8px] text-red-400 flex-shrink-0" title="De novo (baseline≈0)">★</span>}
+                  {actCls === "regulated" && <span className="text-[8px] text-emerald-400 flex-shrink-0" title="Regulated (baseline present)">●</span>}
+                  <span className="truncate flex-1 min-w-0" title={pc ? `${p.label} \u2014 ${pc.role}${pc.ubi_context ? ` (${pc.ubi_context})` : ''} [${pc.confidence}] | ${actCls}` : `${p.label} (${TREND_META[trend].label}) | ${actCls}`}>
                     {p.label}
                   </span>
                   {pc && pc.role !== "Other" && (
@@ -1646,7 +1724,7 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
             })}
             {filteredPtms.length === 0 && (
               <p className="text-xs text-muted-foreground text-center py-4">
-                {isUbi ? "No Ubi sites match this trend filter." : "No PTMs match this trend filter."}
+                {isUbi ? "No Ubi sites match the current filters." : "No PTMs match the current filters."}
               </p>
             )}
           </div>
