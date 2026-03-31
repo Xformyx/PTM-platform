@@ -552,6 +552,10 @@ def _analyze_timepoint(
             "trend": "up" if fc > 0 else ("down" if fc < 0 else "neutral"),
             "protein_log2fc": ptm.get("protein_log2fc", 0),
             "label": node_id,
+            # v9.27: activity classification
+            "activity_class": ptm.get("activity_class", "minor"),
+            "q_value": ptm.get("q_value"),
+            "control_pseudocount_used": ptm.get("control_pseudocount_used", False),
         }
 
         all_ptm_nodes.append(node)

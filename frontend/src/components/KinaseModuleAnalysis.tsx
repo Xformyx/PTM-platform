@@ -73,6 +73,7 @@ interface PtmInfo {
   gene: string;
   position: string;
   label: string;
+  activity_class?: "de_novo" | "regulated" | "minor";
 }
 
 interface CoWaveModule {
@@ -83,6 +84,9 @@ interface CoWaveModule {
   avgAmplitude: number;
   amplitudeRanking: number[];
   spearmanScore: number | null;
+  // v9.27: activity class breakdown
+  activity_class_counts: { de_novo: number; regulated: number; minor: number };
+  dominant_activity_class: "de_novo" | "regulated" | "minor";
 }
 
 // ── Motif Annotation Types ──────────────────────────────────────────────────
@@ -347,6 +351,8 @@ function detectCoWaveModules(
   if (conditions.length < 2 || ptms.length < 2) return [];
 
   const ptmSeries = new Map<string, number[]>();
+  // v9.27: compute activity_class per PTM from vectorData
+  const ptmActivityClassMap = new Map<string, "de_novo" | "regulated" | "minor">();
   ptms.forEach((p) => {
     const key = `${p.gene}_${p.position}`;
     const series = conditions.map((cond) => {
@@ -356,6 +362,24 @@ function detectCoWaveModules(
       return row?.value ?? 0;
     });
     ptmSeries.set(key, series);
+
+    // Determine activity_class: check all rows for this PTM across conditions
+    const rows = vectorData.filter((r) => r.gene === p.gene && r.position === p.position);
+    const isDenovo = rows.some((r) => r.control_pseudocount_used === true);
+    const maxAbsFC = Math.max(...series.map(Math.abs));
+    const minQValue = rows.reduce((min, r) => {
+      if (r.q_value != null && !isNaN(r.q_value)) return Math.min(min, r.q_value);
+      return min;
+    }, Infinity);
+    let actClass: "de_novo" | "regulated" | "minor";
+    if (isDenovo) {
+      actClass = "de_novo";
+    } else if (minQValue < 0.05 && maxAbsFC >= 1.0) {
+      actClass = "regulated";
+    } else {
+      actClass = "minor";
+    }
+    ptmActivityClassMap.set(key, actClass);
   });
 
   const peakGroups = new Map<string, PtmInfo[]>();
@@ -368,7 +392,8 @@ function detectCoWaveModules(
     );
     const peakCond = conditions[maxIdx] || "unknown";
     if (!peakGroups.has(peakCond)) peakGroups.set(peakCond, []);
-    peakGroups.get(peakCond)!.push(p);
+    // Attach activity_class to PtmInfo
+    peakGroups.get(peakCond)!.push({ ...p, activity_class: ptmActivityClassMap.get(key) ?? "minor" });
   });
 
   const modules: CoWaveModule[] = [];
@@ -416,6 +441,16 @@ function detectCoWaveModules(
       }
     }
 
+    // v9.27: activity class statistics
+    const class_counts = { de_novo: 0, regulated: 0, minor: 0 };
+    groupPtms.forEach((p) => {
+      const ac = p.activity_class ?? "minor";
+      class_counts[ac] = (class_counts[ac] ?? 0) + 1;
+    });
+    const dominant_activity_class: "de_novo" | "regulated" | "minor" =
+      class_counts.de_novo > 0 ? "de_novo" :
+      class_counts.regulated > 0 ? "regulated" : "minor";
+
     modules.push({
       id: moduleId,
       label: `Module ${moduleId} (peak: ${peakCond})`,
@@ -424,6 +459,8 @@ function detectCoWaveModules(
       avgAmplitude,
       amplitudeRanking,
       spearmanScore,
+      activity_class_counts: class_counts,
+      dominant_activity_class,
     });
   }
 
@@ -795,6 +832,17 @@ export default function KinaseModuleAnalysis({
                           ρ = {mod.spearmanScore.toFixed(2)}
                         </Badge>
                       )}
+                      {/* v9.27: Activity class badges */}
+                      {mod.activity_class_counts.de_novo > 0 && (
+                        <Badge variant="outline" className="text-[9px] border-orange-500 text-orange-600 dark:text-orange-400">
+                          ★ {mod.activity_class_counts.de_novo} De novo
+                        </Badge>
+                      )}
+                      {mod.activity_class_counts.regulated > 0 && (
+                        <Badge variant="outline" className="text-[9px] border-blue-500 text-blue-600 dark:text-blue-400">
+                          ● {mod.activity_class_counts.regulated} Regulated
+                        </Badge>
+                      )}
                       {/* Annotation summary badges */}
                       {annotation && (
                         <div className="flex gap-1">
@@ -879,6 +927,14 @@ export default function KinaseModuleAnalysis({
                           const statusCfg = ann ? STATUS_CONFIG[ann.status] : null;
                           const StatusIcon = statusCfg?.icon;
 
+                          // v9.27: activity class indicator
+                          const actClass = p.activity_class ?? "minor";
+                          const actClassConfig = {
+                            de_novo: { symbol: "★", color: "text-orange-500", title: "De novo (no control signal)" },
+                            regulated: { symbol: "●", color: "text-blue-500", title: "Regulated (q<0.05, |FC|≥1)" },
+                            minor: { symbol: "", color: "", title: "Minor" },
+                          }[actClass];
+
                           return (
                             <span
                               key={ptmKey}
@@ -889,7 +945,7 @@ export default function KinaseModuleAnalysis({
                               }`}
                               title={
                                 ann
-                                  ? `${statusCfg?.label}${
+                                  ? `[${actClassConfig.title}] ${statusCfg?.label}${
                                       ann.known_kinases.length > 0
                                         ? ` | Known: ${ann.known_kinases.map((k) => k.display_name || k.kinase).join(", ")}`
                                         : ""
@@ -902,9 +958,12 @@ export default function KinaseModuleAnalysis({
                                         ? ` | ${ann.concordance}`
                                         : ""
                                     }`
-                                  : p.label
+                                  : `[${actClassConfig.title}] ${p.label}`
                               }
                             >
+                              {actClassConfig.symbol && (
+                                <span className={`${actClassConfig.color} text-[10px]`}>{actClassConfig.symbol}</span>
+                              )}
                               {StatusIcon && <StatusIcon className="h-3 w-3" />}
                               {p.label}
                             </span>

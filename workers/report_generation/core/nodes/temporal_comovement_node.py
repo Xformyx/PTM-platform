@@ -229,7 +229,25 @@ def _build_temporal_matrix(
 
                 if key not in ptm_data:
                     ptm_data[key] = {}
-                    ptm_meta_map[key] = {"gene": gene, "site": site, "key": key}
+                    # v9.27: carry activity_class from node
+                    ptm_meta_map[key] = {
+                        "gene": gene,
+                        "site": site,
+                        "key": key,
+                        "activity_class": node.get("activity_class", "minor"),
+                        "q_value": node.get("q_value"),
+                        "control_pseudocount_used": node.get("control_pseudocount_used", False),
+                    }
+                else:
+                    # Update activity_class if a more significant class is found across timepoints
+                    # Priority: de_novo > regulated > minor
+                    existing = ptm_meta_map[key].get("activity_class", "minor")
+                    incoming = node.get("activity_class", "minor")
+                    _priority = {"de_novo": 2, "regulated": 1, "minor": 0}
+                    if _priority.get(incoming, 0) > _priority.get(existing, 0):
+                        ptm_meta_map[key]["activity_class"] = incoming
+                        ptm_meta_map[key]["q_value"] = node.get("q_value")
+                        ptm_meta_map[key]["control_pseudocount_used"] = node.get("control_pseudocount_used", False)
                 ptm_data[key][tp] = fc
 
     if not ptm_data:
@@ -346,6 +364,10 @@ def _cluster_comoving_ptms(
                                     for j, tp in enumerate(timepoints)},
                 "max_fc": round(float(np.max(np.abs(values))), 2),
                 "peak_tp": timepoints[peak_idx],
+                # v9.27: activity classification
+                "activity_class": meta[idx].get("activity_class", "minor"),
+                "q_value": meta[idx].get("q_value"),
+                "control_pseudocount_used": meta[idx].get("control_pseudocount_used", False),
             })
             temporal_profiles.append(values)
 
@@ -366,6 +388,19 @@ def _cluster_comoving_ptms(
         else:
             mean_corr = 1.0
 
+        # v9.27: activity class statistics for this cluster
+        class_counts = {"de_novo": 0, "regulated": 0, "minor": 0}
+        for md in member_details:
+            ac = md.get("activity_class", "minor")
+            class_counts[ac] = class_counts.get(ac, 0) + 1
+        # Dominant class: de_novo > regulated > minor
+        if class_counts["de_novo"] > 0:
+            dominant_class = "de_novo"
+        elif class_counts["regulated"] > 0:
+            dominant_class = "regulated"
+        else:
+            dominant_class = "minor"
+
         cluster = {
             "cluster_id": len(clusters) + 1,
             "members": members,
@@ -376,6 +411,9 @@ def _cluster_comoving_ptms(
             "mean_profile": {tp: round(float(mean_profile[j]), 2)
                              for j, tp in enumerate(timepoints)},
             "member_details": member_details,
+            # v9.27: activity class breakdown
+            "activity_class_counts": class_counts,
+            "dominant_activity_class": dominant_class,
         }
         clusters.append(cluster)
 
@@ -467,6 +505,10 @@ def _build_singleton(meta: dict, values: np.ndarray, timepoints: list) -> dict:
                             for j, tp in enumerate(timepoints)},
         "max_fc": round(float(np.max(np.abs(values))), 2),
         "peak_tp": timepoints[peak_idx],
+        # v9.27: activity classification
+        "activity_class": meta.get("activity_class", "minor"),
+        "q_value": meta.get("q_value"),
+        "control_pseudocount_used": meta.get("control_pseudocount_used", False),
     }
 
 
@@ -2090,11 +2132,31 @@ def _append_cluster_detail(
     ann = cluster.get("annotations", {})
     bio_summary = ann.get("biological_summary", "No shared annotations found")
 
+    # v9.27: activity class breakdown
+    class_counts = cluster.get("activity_class_counts", {})
+    dominant = cluster.get("dominant_activity_class", "minor")
+    class_label_map = {"de_novo": "De novo", "regulated": "Regulated", "minor": "Minor"}
+    class_summary = ", ".join(
+        f"{class_label_map.get(k, k)}: {v}"
+        for k, v in class_counts.items() if v > 0
+    ) if class_counts else "unknown"
+    dominant_label = class_label_map.get(dominant, dominant)
+
     parts.append(f"\n#### Cluster {cid}: {pattern} ({len(members)} members) [Figure {figure_num}]")
     parts.append(
         f"Members: {', '.join(members[:20])}"
         + (f" ... (+{len(members)-20} more)" if len(members) > 20 else "")
     )
+    # v9.27: show activity class composition
+    parts.append(f"Activity Class Composition: {class_summary} | Dominant: {dominant_label}")
+    # List De novo and Regulated members explicitly
+    if class_counts.get("de_novo", 0) > 0 or class_counts.get("regulated", 0) > 0:
+        denovo_members = [md["key"] for md in cluster.get("member_details", []) if md.get("activity_class") == "de_novo"]
+        regulated_members = [md["key"] for md in cluster.get("member_details", []) if md.get("activity_class") == "regulated"]
+        if denovo_members:
+            parts.append(f"  De novo PTMs (newly induced, no control signal): {', '.join(denovo_members)}")
+        if regulated_members:
+            parts.append(f"  Regulated PTMs (q<0.05, |Log2FC|≥1): {', '.join(regulated_members)}")
     parts.append(f"Mean intra-cluster correlation: {cluster['correlation_mean']:.2f}")
     parts.append(f"Peak timepoint: {cluster['peak_timepoint']}")
 

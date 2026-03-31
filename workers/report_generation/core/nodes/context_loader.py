@@ -112,12 +112,31 @@ def _parse_enriched_ptms(enriched_data: list) -> list:
         # Parse classification (8-category cell-signaling system)
         classification = enr.get("classification", {})
 
+        # v9.27: activity_class for De novo / Regulated / Minor classification
+        control_pseudocount_used = ptm.get("control_pseudocount_used") or ptm.get("Control_Pseudocount_Used", False)
+        q_value = ptm.get("q_value") or ptm.get("Q_Value")
+        ptm_relative_log2fc_val = _safe_float(ptm.get("ptm_relative_log2fc") or ptm.get("PTM_Relative_Log2FC"))
+        try:
+            control_pseudocount_used = bool(control_pseudocount_used) if control_pseudocount_used not in (None, "", "nan", "None") else False
+        except Exception:
+            control_pseudocount_used = False
+        try:
+            q_value_float = float(q_value) if q_value not in (None, "", "nan", "None") else None
+        except (TypeError, ValueError):
+            q_value_float = None
+        if control_pseudocount_used:
+            activity_class = "de_novo"
+        elif q_value_float is not None and q_value_float < 0.05 and abs(ptm_relative_log2fc_val or 0) >= 1.0:
+            activity_class = "regulated"
+        else:
+            activity_class = "minor"
+
         parsed.append({
             "gene": ptm.get("gene") or ptm.get("Gene.Name", "Unknown"),
             "position": ptm.get("position") or ptm.get("PTM_Position", "Unknown"),
             "ptm_type": ptm.get("ptm_type") or ptm.get("PTM_Type", "Phosphorylation"),
             "protein_log2fc": _safe_float(ptm.get("protein_log2fc") or ptm.get("Protein_Log2FC")),
-            "ptm_relative_log2fc": _safe_float(ptm.get("ptm_relative_log2fc") or ptm.get("PTM_Relative_Log2FC")),
+            "ptm_relative_log2fc": ptm_relative_log2fc_val,
             "protein_id": ptm.get("protein_id") or ptm.get("Protein.Group", ""),
             "modified_sequence": ptm.get("Modified.Sequence", ""),
             "condition": ptm.get("Condition", ""),
@@ -126,6 +145,10 @@ def _parse_enriched_ptms(enriched_data: list) -> list:
             "trajectory": trajectory,
             "condition_data": condition_data,
             "classification": classification,
+            # v9.27: activity classification
+            "control_pseudocount_used": control_pseudocount_used,
+            "q_value": q_value_float,
+            "activity_class": activity_class,
         })
     return parsed
 
