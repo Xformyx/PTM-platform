@@ -1245,6 +1245,8 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
   const [selectedHighlightKinase, setSelectedHighlightKinase] = useState<string | null>(null);
   // v9.23: Bimodal activity filter (de_novo / regulated / minor)
   const [activityFilter, setActivityFilter] = useState<"all" | "de_novo" | "regulated" | "minor">("all");
+  // Module highlight: PTM labels of the highlighted module (empty = none)
+  const [highlightedModulePtmLabels, setHighlightedModulePtmLabels] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     api
@@ -1375,6 +1377,18 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
       }
     }
   });
+
+  // Convert highlighted label set → gene_position key set (for KinaseModuleAnalysis button state)
+  const highlightedPtmKeySet = (() => {
+    if (highlightedModulePtmLabels.size === 0) return new Set<string>();
+    const labelToKey = new Map(uniquePtms.map((p) => [p.label, `${p.gene}_${p.position}`]));
+    const keys = new Set<string>();
+    highlightedModulePtmLabels.forEach((lbl) => {
+      const k = labelToKey.get(lbl);
+      if (k) keys.add(k);
+    });
+    return keys;
+  })();
 
   // Filter PTMs by trend category AND activity filter
   const filteredPtms = uniquePtms.filter((p) => {
@@ -1646,14 +1660,23 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
               {/* No <Legend /> — labels shown only on hover */}
               {visibleLabels.map((label) => {
                 const lineColor = colorMap.get(label) || "#1f77b4";
+                const isModuleHighlighted = highlightedModulePtmLabels.size > 0;
+                const inModule = highlightedModulePtmLabels.has(label);
+                // Priority: hover > module highlight > normal
+                const opacity = hoveredPtm
+                  ? hoveredPtm === label ? 1 : 0.15
+                  : isModuleHighlighted
+                    ? inModule ? 1 : 0.12
+                    : 1;
+                const strokeWidth = hoveredPtm === label ? 4 : inModule && isModuleHighlighted ? 3.5 : 1.8;
                 return (
                   <Line
                     key={label}
                     type="monotone"
                     dataKey={label}
                     stroke={lineColor}
-                    strokeWidth={hoveredPtm === label ? 4 : 2}
-                    dot={{ r: 3, fill: lineColor }}
+                    strokeWidth={strokeWidth}
+                    dot={{ r: inModule && isModuleHighlighted ? 4 : 2.5, fill: lineColor }}
                     activeDot={{
                       r: 7,
                       fill: lineColor,
@@ -1661,7 +1684,7 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
                       onMouseLeave: () => setHoveredPtm(null),
                     }}
                     name={label}
-                    opacity={hoveredPtm && hoveredPtm !== label ? 0.25 : 1}
+                    opacity={opacity}
                     onMouseEnter={() => setHoveredPtm(label)}
                     onMouseLeave={() => setHoveredPtm(null)}
                   />
@@ -1939,12 +1962,17 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
           topNPtms={uniquePtms}
           checkedPtms={checked}
           conditions={conditions}
+          highlightedPtmKeys={highlightedPtmKeySet}
           onSelectPtms={(keys) => {
-            setChecked((c) => {
-              const next: Record<string, boolean> = {};
-              Object.keys(c).forEach((k) => { next[k] = false; });
-              keys.forEach((k) => { next[k] = true; });
-              return next;
+            // Convert PTM keys (gene_position) → labels for chart highlight
+            const keySet = new Set(keys);
+            const labels = uniquePtms
+              .filter((p) => keySet.has(`${p.gene}_${p.position}`))
+              .map((p) => p.label);
+            setHighlightedModulePtmLabels((prev) => {
+              // Toggle: if same set already highlighted, clear
+              const same = prev.size === labels.length && labels.every((l) => prev.has(l));
+              return same ? new Set() : new Set(labels);
             });
           }}
         />
