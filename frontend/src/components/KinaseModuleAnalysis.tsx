@@ -65,6 +65,7 @@ interface PtmTimeSeriesRow {
   position: string;
   condition: string;
   value: number;
+  control_pseudocount_used?: boolean;
 }
 
 interface PtmInfo {
@@ -2579,23 +2580,24 @@ function SignalFlowView({
   const [selectedReceptor, setSelectedReceptor] = useState<string | null>(null);
 
   // Build PTM activity classification: de_novo | regulated | minor
+  // Primary: use Control_Pseudocount_Used flag from preprocessing (imputation-based)
+  // Fallback: threshold-based for backward compatibility
   const ptmActivityClass = useMemo(() => {
     const map: Record<string, "de_novo" | "regulated" | "minor"> = {};
     if (!vectorData.length || !conditions.length) return map;
-    const baseline = conditions[0]; // earliest timepoint ≈ control
-    // Compute per-PTM: baseline value and max value across all timepoints
+    const baseline = conditions[0];
     const ptmKeys = new Set(vectorData.map(r => `${r.gene}_${r.position}`));
     for (const key of ptmKeys) {
       const rows = vectorData.filter(r => `${r.gene}_${r.position}` === key);
+      const hasPseudocount = rows.some(r => r.control_pseudocount_used === true);
       const baselineVal = rows.find(r => r.condition === baseline)?.value ?? 0;
       const maxVal = Math.max(...rows.map(r => r.value));
       const minVal = Math.min(...rows.map(r => r.value));
       const maxAbsChange = Math.max(Math.abs(maxVal - baselineVal), Math.abs(minVal - baselineVal));
-      // De novo: baseline near zero AND large absolute change
-      if (Math.abs(baselineVal) < 0.3 && maxAbsChange > 1.5) {
+      if (hasPseudocount) {
+        // Preprocessing confirmed: control had no real value, imputed with pseudocount
         map[key] = "de_novo";
-      } else if (Math.abs(baselineVal) >= 0.3 && maxAbsChange > 0.8) {
-        // Regulated: has baseline expression AND meaningful change
+      } else if (maxAbsChange > 0.8) {
         map[key] = "regulated";
       } else {
         map[key] = "minor";
@@ -2748,8 +2750,8 @@ function SignalFlowView({
                                       ? "bg-emerald-900/30 text-emerald-300 border border-emerald-500 font-semibold"
                                       : "bg-muted text-muted-foreground border border-border opacity-60";
                                   const actLabel =
-                                    actClass === "de_novo" ? "De novo (baseline≈0)" :
-                                    actClass === "regulated" ? "Regulated (baseline present)" :
+                                    actClass === "de_novo" ? "De novo (control imputed — not detected in control)" :
+                                    actClass === "regulated" ? "Regulated (detected in control, meaningful change)" :
                                     "Minor change";
                                   return (
                                     <span
@@ -2808,11 +2810,11 @@ function SignalFlowView({
           <span className="font-medium text-muted-foreground/70">Substrate activity:</span>
           <span className="flex items-center gap-1">
             <span className="px-1.5 py-0.5 rounded bg-red-900/30 text-red-300 border border-red-500 text-[9px]">★ De novo</span>
-            <span className="text-[9px]">baseline≈0, sudden activation</span>
+            <span className="text-[9px]">not detected in control (imputed)</span>
           </span>
           <span className="flex items-center gap-1">
             <span className="px-1.5 py-0.5 rounded bg-emerald-900/30 text-emerald-300 border border-emerald-500 text-[9px]">● Regulated</span>
-            <span className="text-[9px]">baseline present, meaningful change</span>
+            <span className="text-[9px]">detected in control, meaningful change</span>
           </span>
           <span className="flex items-center gap-1">
             <span className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground border border-border opacity-60 text-[9px]">Minor</span>

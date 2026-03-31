@@ -608,6 +608,7 @@ class PTMQuantificationAnalyzer:
                     "Residual": ptm_row["Log2FC"],
                     "Has_PTM": True,
                     "Data_Type": "PTM",
+                    "Control_Pseudocount_Used": ptm_row.get("Control_Pseudocount_Used", False),
                     **cmeans,
                 })
 

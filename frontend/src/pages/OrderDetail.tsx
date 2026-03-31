@@ -868,6 +868,7 @@ type VectorRow = {
   protein_log2fc: number;
   ptm_relative_log2fc: number;
   ptm_absolute_log2fc: number;
+  control_pseudocount_used?: boolean;
 };
 
 function ScatterPlotsInteractive({ orderId }: { orderId: number }) {
@@ -1295,12 +1296,16 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
 
   const topNSet = new Set(uniquePtms.map((p) => `${p.gene}_${p.position}`));
   const vectorByPtm = new Map<string, Array<{ condition: string; value: number }>>();
+  // Track which PTMs had control pseudocount imputation (de novo flag from preprocessing)
+  const ptmPseudocountUsed = new Map<string, boolean>();
 
   data.vector_data.forEach((row) => {
     const key = `${row.gene}_${row.position}`;
     if (!topNSet.has(key)) return;
     if (!vectorByPtm.has(key)) vectorByPtm.set(key, []);
     vectorByPtm.get(key)!.push({ condition: row.condition, value: row[valueKey as keyof typeof row] as number });
+    // If any condition row for this PTM has control_pseudocount_used=true, mark it
+    if (row.control_pseudocount_used) ptmPseudocountUsed.set(key, true);
   });
 
   const conditions = Array.from(
@@ -1323,13 +1328,15 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
     const key = `${p.gene}_${p.position}`;
     const arr = vectorByPtm.get(key);
     if (!arr || !conditions.length) { ptmActivityClass.set(key, "minor"); return; }
-    const baselineVal = arr.find((r) => r.condition === conditions[0])?.value ?? 0;
     const maxVal = Math.max(...arr.map((r) => r.value));
     const minVal = Math.min(...arr.map((r) => r.value));
+    const baselineVal = arr.find((r) => r.condition === conditions[0])?.value ?? 0;
     const maxAbsChange = Math.max(Math.abs(maxVal - baselineVal), Math.abs(minVal - baselineVal));
-    if (Math.abs(baselineVal) < 0.3 && maxAbsChange > 1.5) {
+    // Primary: use preprocessing imputation flag (most accurate)
+    if (ptmPseudocountUsed.get(key)) {
       ptmActivityClass.set(key, "de_novo");
-    } else if (Math.abs(baselineVal) >= 0.3 && maxAbsChange > 0.8) {
+    } else if (maxAbsChange > 0.8) {
+      // Has real control baseline + meaningful change = regulated
       ptmActivityClass.set(key, "regulated");
     } else {
       ptmActivityClass.set(key, "minor");
@@ -1498,7 +1505,7 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
             className="text-xs h-7 px-2"
             style={activityFilter === "de_novo" ? { backgroundColor: "#ef4444", borderColor: "#ef4444" } : {}}
             onClick={() => setActivityFilter("de_novo")}
-            title="Baseline ≈ 0, sudden activation — may inflate Log2FC due to near-zero control"
+            title="Not detected in control (imputed with pseudocount) — may inflate Log2FC"
           >
             ★ De novo ({activityCounts.de_novo})
           </Button>
@@ -1508,7 +1515,7 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
             className="text-xs h-7 px-2"
             style={activityFilter === "regulated" ? { backgroundColor: "#10b981", borderColor: "#10b981" } : {}}
             onClick={() => setActivityFilter("regulated")}
-            title="Baseline present, meaningful change — likely true signaling regulation"
+            title="Detected in control with meaningful change — likely true signaling regulation"
           >
             ● Regulated ({activityCounts.regulated})
           </Button>
@@ -1711,8 +1718,8 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
                     title={`${TREND_META[trend].label}: ${TREND_META[trend].description}`}
                   />
                   {/* v9.23: activity class indicator */}
-                  {actCls === "de_novo" && <span className="text-[8px] text-red-400 flex-shrink-0" title="De novo (baseline≈0)">★</span>}
-                  {actCls === "regulated" && <span className="text-[8px] text-emerald-400 flex-shrink-0" title="Regulated (baseline present)">●</span>}
+                  {actCls === "de_novo" && <span className="text-[8px] text-red-400 flex-shrink-0" title="De novo (not detected in control, imputed)">★</span>}
+                  {actCls === "regulated" && <span className="text-[8px] text-emerald-400 flex-shrink-0" title="Regulated (detected in control, meaningful change)">●</span>}
                   <span className="truncate flex-1 min-w-0" title={pc ? `${p.label} \u2014 ${pc.role}${pc.ubi_context ? ` (${pc.ubi_context})` : ''} [${pc.confidence}] | ${actCls}` : `${p.label} (${TREND_META[trend].label}) | ${actCls}`}>
                     {p.label}
                   </span>
@@ -1893,6 +1900,7 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
             position: row.position,
             condition: row.condition,
             value: row[valueKey as keyof typeof row] as number,
+            control_pseudocount_used: row.control_pseudocount_used,
           }))}
           topNPtms={uniquePtms}
           checkedPtms={checked}

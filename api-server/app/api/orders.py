@@ -1551,6 +1551,8 @@ async def get_vector_plot_data(
                         prot_fc = float(prot_fc) if prot_fc else 0
                     except ValueError:
                         prot_fc = 0
+                    pc_used_raw = row.get("Control_Pseudocount_Used", "")
+                    pc_used = pc_used_raw.strip().lower() in ("true", "1", "yes") if pc_used_raw else False
                     vector_data.append({
                         "gene": gene,
                         "position": str(pos),
@@ -1558,6 +1560,7 @@ async def get_vector_plot_data(
                         "protein_log2fc": prot_fc,
                         "ptm_relative_log2fc": rel_fc,
                         "ptm_absolute_log2fc": abs_fc,
+                        "control_pseudocount_used": pc_used,
                     })
             break
 
