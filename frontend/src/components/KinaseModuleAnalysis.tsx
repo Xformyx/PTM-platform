@@ -66,6 +66,7 @@ interface PtmTimeSeriesRow {
   condition: string;
   value: number;
   control_pseudocount_used?: boolean;
+  q_value?: number | null;
 }
 
 interface PtmInfo {
@@ -2579,9 +2580,8 @@ function SignalFlowView({
 }) {
   const [selectedReceptor, setSelectedReceptor] = useState<string | null>(null);
 
-  // Build PTM activity classification: de_novo | regulated | minor
-  // Primary: use Control_Pseudocount_Used flag from preprocessing (imputation-based)
-  // Fallback: threshold-based for backward compatibility
+  // v9.25: Build PTM activity classification: de_novo | regulated | minor
+  // Uses q_value (Welch's t-test + BH correction) when available
   const ptmActivityClass = useMemo(() => {
     const map: Record<string, "de_novo" | "regulated" | "minor"> = {};
     if (!vectorData.length || !conditions.length) return map;
@@ -2590,17 +2590,24 @@ function SignalFlowView({
     for (const key of ptmKeys) {
       const rows = vectorData.filter(r => `${r.gene}_${r.position}` === key);
       const hasPseudocount = rows.some(r => r.control_pseudocount_used === true);
-      const baselineVal = rows.find(r => r.condition === baseline)?.value ?? 0;
       const maxVal = Math.max(...rows.map(r => r.value));
       const minVal = Math.min(...rows.map(r => r.value));
-      const maxAbsChange = Math.max(Math.abs(maxVal - baselineVal), Math.abs(minVal - baselineVal));
+      const maxAbsLog2FC = Math.max(Math.abs(maxVal), Math.abs(minVal));
+      // Find minimum q_value across conditions
+      const qValues = rows.map(r => r.q_value).filter((v): v is number => v != null && !isNaN(v));
+      const minQVal = qValues.length > 0 ? Math.min(...qValues) : null;
+      const hasQValue = minQVal != null;
+
       if (hasPseudocount) {
-        // Preprocessing confirmed: control had no real value, imputed with pseudocount
         map[key] = "de_novo";
-      } else if (maxAbsChange > 0.8) {
-        map[key] = "regulated";
+      } else if (hasQValue) {
+        // q_value available: Regulated = |Log2FC| >= 1.0 AND q_value < 0.05
+        map[key] = (maxAbsLog2FC >= 1.0 && minQVal < 0.05) ? "regulated" : "minor";
       } else {
-        map[key] = "minor";
+        // Fallback (old data without q_value): use maxAbsChange > 0.8
+        const baselineVal = rows.find(r => r.condition === baseline)?.value ?? 0;
+        const maxAbsChange = Math.max(Math.abs(maxVal - baselineVal), Math.abs(minVal - baselineVal));
+        map[key] = maxAbsChange > 0.8 ? "regulated" : "minor";
       }
     }
     return map;
@@ -2751,7 +2758,7 @@ function SignalFlowView({
                                       : "bg-muted text-muted-foreground border border-border opacity-60";
                                   const actLabel =
                                     actClass === "de_novo" ? "De novo (control imputed — not detected in control)" :
-                                    actClass === "regulated" ? "Regulated (detected in control, meaningful change)" :
+                                    actClass === "regulated" ? "Regulated (|Log2FC| ≥ 1.0 AND q-value < 0.05)" :
                                     "Minor change";
                                   return (
                                     <span

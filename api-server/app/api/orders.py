@@ -1553,6 +1553,17 @@ async def get_vector_plot_data(
                         prot_fc = 0
                     pc_used_raw = row.get("Control_Pseudocount_Used", "")
                     pc_used = pc_used_raw.strip().lower() in ("true", "1", "yes") if pc_used_raw else False
+                    # p_value / q_value (v9.25: Welch's t-test + BH correction)
+                    p_val_raw = row.get("p_value", "")
+                    q_val_raw = row.get("q_value", "")
+                    try:
+                        p_val = float(p_val_raw) if p_val_raw and p_val_raw.strip().lower() not in ("", "nan") else None
+                    except (ValueError, TypeError):
+                        p_val = None
+                    try:
+                        q_val = float(q_val_raw) if q_val_raw and q_val_raw.strip().lower() not in ("", "nan") else None
+                    except (ValueError, TypeError):
+                        q_val = None
                     vector_data.append({
                         "gene": gene,
                         "position": str(pos),
@@ -1561,6 +1572,8 @@ async def get_vector_plot_data(
                         "ptm_relative_log2fc": rel_fc,
                         "ptm_absolute_log2fc": abs_fc,
                         "control_pseudocount_used": pc_used,
+                        "p_value": p_val,
+                        "q_value": q_val,
                     })
             break
 

@@ -18,6 +18,8 @@ from typing import Callable, Dict, List, Optional, Set, Tuple
 import numpy as np
 import pandas as pd
 from Bio import SeqIO
+from scipy import stats
+from statsmodels.stats.multitest import multipletests
 
 from .config import FIXED_MODIFICATIONS, PTM_MODES, VARIABLE_MODIFICATIONS
 from .enhanced_motif_analyzer_v2 import EnhancedMotifAnalyzerV2
@@ -438,12 +440,24 @@ class PTMQuantificationAnalyzer:
     # ------------------------------------------------------------------
 
     def calculate_condition_comparisons(self, relative_quant_df: pd.DataFrame) -> pd.DataFrame:
+        """Calculate condition comparisons with Welch's t-test and BH correction.
+
+        For each PTM site × treatment condition:
+        1. Compute mean Log2FC from replicate-level data
+        2. Perform Welch's t-test (Control replicates vs Treatment replicates)
+        3. Apply Benjamini-Hochberg correction for multiple testing
+        4. Output p_value and q_value columns
+        """
+        # --- Build replicate-level grouped data (keep individual replicates) ---
+        id_cols = ["Protein.Group", "Precursor.Id", "Modified.Sequence", "PTM_Type", "PTM_Position"]
+
+        # Condition means (for Log2FC calculation, same as before)
         condition_means = relative_quant_df.groupby(
-            ["Protein.Group", "Precursor.Id", "Modified.Sequence", "PTM_Type", "PTM_Position", "Condition"]
+            id_cols + ["Condition"]
         )["PTM_Relative_Abundance"].mean().reset_index()
 
         pivot_df = condition_means.pivot_table(
-            index=["Protein.Group", "Precursor.Id", "Modified.Sequence", "PTM_Type", "PTM_Position"],
+            index=id_cols,
             columns="Condition",
             values="PTM_Relative_Abundance",
             fill_value=np.nan,
@@ -457,8 +471,21 @@ class PTMQuantificationAnalyzer:
 
         treatments = self.treatment_conditions if self.treatment_conditions else [
             c for c in pivot_df.columns
-            if c not in ["Protein.Group", "Precursor.Id", "Modified.Sequence", "PTM_Type", "PTM_Position", "Control"]
+            if c not in id_cols + ["Control"]
         ]
+
+        # --- Build replicate-level lookup for t-test ---
+        # Group replicate values by (PTM site, Condition)
+        replicate_groups = relative_quant_df.groupby(
+            id_cols + ["Condition"]
+        )["PTM_Relative_Abundance"].apply(list).reset_index()
+        replicate_groups.rename(columns={"PTM_Relative_Abundance": "replicate_values"}, inplace=True)
+
+        # Create a lookup dict: (Protein.Group, Precursor.Id, Condition) -> list of replicate values
+        replicate_lookup = {}
+        for _, rrow in replicate_groups.iterrows():
+            key = (rrow["Protein.Group"], rrow["Precursor.Id"], rrow["Condition"])
+            replicate_lookup[key] = rrow["replicate_values"]
 
         results = []
         for treatment in treatments:
@@ -473,6 +500,24 @@ class PTMQuantificationAnalyzer:
 
                 log2_fc = np.log2(treatment_value / control_adj)
                 used_pc = not (pd.notna(control_value) and control_value > 0)
+
+                # --- Welch's t-test ---
+                p_value = np.nan
+                ctrl_reps = replicate_lookup.get((row["Protein.Group"], row["Precursor.Id"], "Control"), [])
+                treat_reps = replicate_lookup.get((row["Protein.Group"], row["Precursor.Id"], treatment), [])
+
+                if len(ctrl_reps) >= 2 and len(treat_reps) >= 2:
+                    try:
+                        _, p_value = stats.ttest_ind(
+                            ctrl_reps, treat_reps, equal_var=False, nan_policy="omit"
+                        )
+                    except Exception:
+                        p_value = np.nan
+                elif used_pc:
+                    # De novo PTMs: no control replicates → p_value stays NaN
+                    pass
+                # If only 1 replicate per group, p_value stays NaN
+
                 results.append({
                     "Protein.Group": row["Protein.Group"],
                     "Precursor.Id": row["Precursor.Id"],
@@ -486,11 +531,37 @@ class PTMQuantificationAnalyzer:
                     "Log2FC": log2_fc,
                     "Fold_Change": 2 ** log2_fc,
                     "Control_Pseudocount_Used": used_pc,
+                    "p_value": p_value,
+                    "Control_N": len(ctrl_reps),
+                    "Treatment_N": len(treat_reps),
                 })
 
         if results:
             df = pd.DataFrame(results)
-            logger.info(f"Condition comparisons: {len(df)} records")
+
+            # --- Benjamini-Hochberg correction ---
+            valid_mask = df["p_value"].notna()
+            if valid_mask.sum() > 0:
+                _, q_values, _, _ = multipletests(
+                    df.loc[valid_mask, "p_value"].values,
+                    alpha=0.05,
+                    method="fdr_bh",
+                )
+                df.loc[valid_mask, "q_value"] = q_values
+            else:
+                df["q_value"] = np.nan
+
+            # Fill NaN q_value for entries without valid p_value
+            if "q_value" not in df.columns:
+                df["q_value"] = np.nan
+
+            n_tested = valid_mask.sum()
+            n_sig = (df["q_value"] < 0.05).sum() if "q_value" in df.columns else 0
+            logger.info(
+                f"Condition comparisons: {len(df)} records, "
+                f"t-test performed: {n_tested}, "
+                f"significant (q<0.05): {n_sig}"
+            )
             return df
         return pd.DataFrame()
 
@@ -609,6 +680,8 @@ class PTMQuantificationAnalyzer:
                     "Has_PTM": True,
                     "Data_Type": "PTM",
                     "Control_Pseudocount_Used": ptm_row.get("Control_Pseudocount_Used", False),
+                    "p_value": ptm_row.get("p_value", np.nan),
+                    "q_value": ptm_row.get("q_value", np.nan),
                     **cmeans,
                 })
 

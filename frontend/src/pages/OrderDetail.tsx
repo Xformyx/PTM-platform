@@ -869,6 +869,8 @@ type VectorRow = {
   ptm_relative_log2fc: number;
   ptm_absolute_log2fc: number;
   control_pseudocount_used?: boolean;
+  p_value?: number | null;
+  q_value?: number | null;
 };
 
 function ScatterPlotsInteractive({ orderId }: { orderId: number }) {
@@ -1298,6 +1300,8 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
   const vectorByPtm = new Map<string, Array<{ condition: string; value: number }>>();
   // Track which PTMs had control pseudocount imputation (de novo flag from preprocessing)
   const ptmPseudocountUsed = new Map<string, boolean>();
+  // v9.25: Track minimum q_value per PTM across conditions
+  const ptmMinQValue = new Map<string, number | null>();
 
   data.vector_data.forEach((row) => {
     const key = `${row.gene}_${row.position}`;
@@ -1306,6 +1310,11 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
     vectorByPtm.get(key)!.push({ condition: row.condition, value: row[valueKey as keyof typeof row] as number });
     // If any condition row for this PTM has control_pseudocount_used=true, mark it
     if (row.control_pseudocount_used) ptmPseudocountUsed.set(key, true);
+    // Track minimum q_value across conditions for this PTM
+    if (row.q_value != null && !isNaN(row.q_value)) {
+      const prev = ptmMinQValue.get(key);
+      if (prev == null || row.q_value < prev) ptmMinQValue.set(key, row.q_value);
+    }
   });
 
   const conditions = Array.from(
@@ -1322,7 +1331,7 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
     ptmTrends.set(key, classifyTrend(sorted));
   });
 
-  // v9.23: Bimodal activity classification per PTM
+  // v9.25: Bimodal activity classification per PTM (updated with q_value support)
   const ptmActivityClass = new Map<string, "de_novo" | "regulated" | "minor">();
   uniquePtms.forEach((p) => {
     const key = `${p.gene}_${p.position}`;
@@ -1331,15 +1340,28 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
     const maxVal = Math.max(...arr.map((r) => r.value));
     const minVal = Math.min(...arr.map((r) => r.value));
     const baselineVal = arr.find((r) => r.condition === conditions[0])?.value ?? 0;
-    const maxAbsChange = Math.max(Math.abs(maxVal - baselineVal), Math.abs(minVal - baselineVal));
-    // Primary: use preprocessing imputation flag (most accurate)
+    const maxAbsLog2FC = Math.max(Math.abs(maxVal), Math.abs(minVal));
+    const minQVal = ptmMinQValue.get(key);
+    const hasQValue = minQVal != null;
+
+    // Primary: use preprocessing imputation flag (most accurate for de novo)
     if (ptmPseudocountUsed.get(key)) {
       ptmActivityClass.set(key, "de_novo");
-    } else if (maxAbsChange > 0.8) {
-      // Has real control baseline + meaningful change = regulated
-      ptmActivityClass.set(key, "regulated");
+    } else if (hasQValue) {
+      // q_value available: Regulated = |Log2FC| >= 1.0 AND q_value < 0.05
+      if (maxAbsLog2FC >= 1.0 && minQVal < 0.05) {
+        ptmActivityClass.set(key, "regulated");
+      } else {
+        ptmActivityClass.set(key, "minor");
+      }
     } else {
-      ptmActivityClass.set(key, "minor");
+      // Fallback (old data without q_value): use maxAbsChange > 0.8
+      const maxAbsChange = Math.max(Math.abs(maxVal - baselineVal), Math.abs(minVal - baselineVal));
+      if (maxAbsChange > 0.8) {
+        ptmActivityClass.set(key, "regulated");
+      } else {
+        ptmActivityClass.set(key, "minor");
+      }
     }
   });
 
@@ -1515,7 +1537,7 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
             className="text-xs h-7 px-2"
             style={activityFilter === "regulated" ? { backgroundColor: "#10b981", borderColor: "#10b981" } : {}}
             onClick={() => setActivityFilter("regulated")}
-            title="Detected in control with meaningful change — likely true signaling regulation"
+            title="Detected in control, |Log2FC| ≥ 1.0 AND q-value < 0.05 (Welch's t-test + BH correction)"
           >
             ● Regulated ({activityCounts.regulated})
           </Button>
@@ -1901,6 +1923,7 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
             condition: row.condition,
             value: row[valueKey as keyof typeof row] as number,
             control_pseudocount_used: row.control_pseudocount_used,
+            q_value: row.q_value,
           }))}
           topNPtms={uniquePtms}
           checkedPtms={checked}
