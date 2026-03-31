@@ -1032,7 +1032,9 @@ export default function KinaseModuleAnalysis({
               </div>
             )}
           </div>
-         {/* ── Tab: Cascade View / Ubi Cascade ────────────────────────────────────── */}
+        )}
+
+        {/* ── Tab: Cascade View / Ubi Cascade ────────────────────────────────────── */}
         {activeTab === "cascade" && (
           <CascadeView
             modules={coWaveModules}
