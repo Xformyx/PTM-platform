@@ -1,7 +1,8 @@
 import { useEffect, useState, useRef } from "react";
 import {
   Brain, Cloud, RefreshCw, Plus, Loader2, CheckCircle2,
-  Thermometer, Hash, Download, Trash2, AlertCircle, HardDrive, X,
+  Thermometer, Hash, Download, Trash2, AlertCircle, HardDrive,
+  Pencil, FlaskConical, X, ShieldCheck, ShieldOff,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
@@ -29,6 +30,12 @@ interface OllamaModel {
   quantization: string;
 }
 
+interface TestResult {
+  status: "ok" | "error" | "skipped" | "testing";
+  detail?: string;
+  response?: string;
+}
+
 function formatSize(bytes: number): string {
   if (bytes === 0) return "";
   const gb = bytes / (1024 ** 3);
@@ -54,6 +61,15 @@ export default function LlmConfig() {
   const [addCloudForm, setAddCloudForm] = useState({
     name: "Gemini", provider: "gemini" as "gemini" | "openai" | "anthropic", api_key: "",
   });
+
+  // Edit state
+  const [editModel, setEditModel] = useState<LlmModel | null>(null);
+  const [editApiKey, setEditApiKey] = useState("");
+  const [editSubmitting, setEditSubmitting] = useState(false);
+
+  // Test state: modelId → result
+  const [testResults, setTestResults] = useState<Record<number, TestResult>>({});
+
   const abortRef = useRef<AbortController | null>(null);
 
   const loadAll = async () => {
@@ -172,6 +188,78 @@ export default function LlmConfig() {
       alert(e.response?.data?.detail || e.message || "Failed to add model");
     } finally {
       setAddCloudSubmitting(false);
+    }
+  };
+
+  const handleEditSave = async () => {
+    if (!editModel) return;
+    setEditSubmitting(true);
+    try {
+      await api.put(`/llm/models/${editModel.id}`, {
+        api_key: editApiKey.trim() || undefined,
+      });
+      await loadAll();
+      setEditModel(null);
+      setEditApiKey("");
+      // Clear test result for this model so it re-tests fresh
+      setTestResults((prev) => {
+        const next = { ...prev };
+        delete next[editModel.id];
+        return next;
+      });
+    } catch (e: any) {
+      alert(e.response?.data?.detail || e.message || "Failed to update API key");
+    } finally {
+      setEditSubmitting(false);
+    }
+  };
+
+  /** Test a cloud model's API key via /health/cloud-llm (uses .env key)
+   *  or directly against the provider using the DB key via /llm/models/:id/test */
+  const handleTestModel = async (m: LlmModel) => {
+    setTestResults((prev) => ({ ...prev, [m.id]: { status: "testing" } }));
+    try {
+      // Use the existing model test endpoint
+      const res = await api.post<{ status: string; response_preview?: string; detail?: string }>(
+        `/llm/models/${m.id}/test`
+      );
+      if (res.status === "ok") {
+        setTestResults((prev) => ({
+          ...prev,
+          [m.id]: { status: "ok", response: res.response_preview || "OK" },
+        }));
+      } else if (res.status === "skipped") {
+        // Fallback: call /health/cloud-llm for gemini/openai
+        const health = await api.get<Record<string, { status: string; detail?: string; response_preview?: string }>>(
+          "/health/cloud-llm"
+        );
+        const providerResult = health[m.provider];
+        if (!providerResult) {
+          setTestResults((prev) => ({
+            ...prev,
+            [m.id]: { status: "error", detail: "Provider not supported in health check" },
+          }));
+          return;
+        }
+        setTestResults((prev) => ({
+          ...prev,
+          [m.id]: {
+            status: providerResult.status === "ok" ? "ok" : "error",
+            detail: providerResult.detail,
+            response: providerResult.response_preview,
+          },
+        }));
+      } else {
+        setTestResults((prev) => ({
+          ...prev,
+          [m.id]: { status: "error", detail: res.detail || "Unknown error" },
+        }));
+      }
+    } catch (e: any) {
+      setTestResults((prev) => ({
+        ...prev,
+        [m.id]: { status: "error", detail: e.message || "Request failed" },
+      }));
     }
   };
 
@@ -315,27 +403,76 @@ export default function LlmConfig() {
         </div>
         {grouped.cloud.length > 0 ? (
           <StaggerContainer className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {grouped.cloud.map((m) => (
-              <StaggerItem key={m.id}>
-                <Card>
-                  <CardContent className="p-5">
-                    <div className="flex items-center justify-between mb-3">
-                      <h3 className="text-sm font-semibold">{m.name}</h3>
-                      <Badge variant="info">{m.provider}</Badge>
-                    </div>
-                    <Separator className="mb-3" />
-                    <div className="space-y-1.5 text-xs text-muted-foreground">
-                      <div>Model: <span className="font-mono">{m.model_id === CLOUD_PROVIDER_SENTINEL ? "(Order 시 선택)" : m.model_id}</span></div>
-                      <div>API Key: {m.has_api_key ? (
-                        <Badge variant="success" className="text-[10px] ml-1">Configured</Badge>
-                      ) : (
-                        <Badge variant="warning" className="text-[10px] ml-1">Not set</Badge>
-                      )}</div>
-                    </div>
-                  </CardContent>
-                </Card>
-              </StaggerItem>
-            ))}
+            {grouped.cloud.map((m) => {
+              const testResult = testResults[m.id];
+              return (
+                <StaggerItem key={m.id}>
+                  <Card>
+                    <CardContent className="p-5">
+                      <div className="flex items-center justify-between mb-3">
+                        <h3 className="text-sm font-semibold">{m.name}</h3>
+                        <Badge variant="info">{m.provider}</Badge>
+                      </div>
+                      <Separator className="mb-3" />
+                      <div className="space-y-1.5 text-xs text-muted-foreground mb-3">
+                        <div>Model: <span className="font-mono">{m.model_id === CLOUD_PROVIDER_SENTINEL ? "(Order 시 선택)" : m.model_id}</span></div>
+                        <div className="flex items-center gap-1">
+                          API Key:
+                          {m.has_api_key ? (
+                            <Badge variant="success" className="text-[10px] ml-1">Configured</Badge>
+                          ) : (
+                            <Badge variant="warning" className="text-[10px] ml-1">Not set</Badge>
+                          )}
+                        </div>
+                        {/* Test Result */}
+                        {testResult && testResult.status !== "testing" && (
+                          <div className={`flex items-start gap-1.5 mt-1 p-1.5 rounded text-[10px] ${
+                            testResult.status === "ok"
+                              ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                              : "bg-destructive/10 text-destructive"
+                          }`}>
+                            {testResult.status === "ok"
+                              ? <ShieldCheck className="h-3 w-3 mt-0.5 shrink-0" />
+                              : <ShieldOff className="h-3 w-3 mt-0.5 shrink-0" />}
+                            <span className="break-all">
+                              {testResult.status === "ok"
+                                ? `OK${testResult.response ? ` — "${testResult.response}"` : ""}`
+                                : testResult.detail || "Error"}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                      {/* Action buttons */}
+                      <div className="flex gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-7 text-xs gap-1 flex-1"
+                          onClick={() => handleTestModel(m)}
+                          disabled={testResult?.status === "testing"}
+                        >
+                          {testResult?.status === "testing"
+                            ? <Loader2 className="h-3 w-3 animate-spin" />
+                            : <FlaskConical className="h-3 w-3" />}
+                          {testResult?.status === "testing" ? "Testing..." : "Test"}
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-7 text-xs gap-1 flex-1"
+                          onClick={() => {
+                            setEditModel(m);
+                            setEditApiKey("");
+                          }}
+                        >
+                          <Pencil className="h-3 w-3" /> Edit Key
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </StaggerItem>
+              );
+            })}
           </StaggerContainer>
         ) : (
           <Card>
@@ -457,6 +594,56 @@ export default function LlmConfig() {
               <Button onClick={handleAddCloudModel} disabled={addCloudSubmitting || !addCloudForm.name.trim()}>
                 {addCloudSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
                 Add
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit API Key Modal */}
+      <Dialog open={!!editModel} onOpenChange={(open) => { if (!open) { setEditModel(null); setEditApiKey(""); } }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Pencil className="h-5 w-5" /> Edit API Key — {editModel?.name}
+            </DialogTitle>
+            <DialogDescription>
+              새 API 키를 입력하면 기존 키를 교체합니다. 비워두면 변경되지 않습니다.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 pt-2">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">
+                New API Key
+                <span className="ml-1 text-xs text-muted-foreground">
+                  ({editModel?.has_api_key ? "현재 설정됨 — 교체" : "현재 없음 — 새로 등록"})
+                </span>
+              </label>
+              <Input
+                type="password"
+                placeholder="새 API 키 입력..."
+                value={editApiKey}
+                onChange={(e) => setEditApiKey(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && !editSubmitting && editApiKey.trim() && handleEditSave()}
+                autoFocus
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button
+                variant="outline"
+                onClick={() => { setEditModel(null); setEditApiKey(""); }}
+                disabled={editSubmitting}
+              >
+                <X className="h-4 w-4 mr-1" /> Cancel
+              </Button>
+              <Button
+                onClick={handleEditSave}
+                disabled={editSubmitting || !editApiKey.trim()}
+              >
+                {editSubmitting
+                  ? <Loader2 className="h-4 w-4 animate-spin mr-1" />
+                  : <CheckCircle2 className="h-4 w-4 mr-1" />}
+                Save Key
               </Button>
             </div>
           </div>

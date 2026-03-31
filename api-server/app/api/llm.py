@@ -189,7 +189,57 @@ async def test_model(
         except Exception as e:
             return {"status": "error", "detail": str(e)}
 
-    return {"status": "skipped", "detail": "Cloud LLM test not yet implemented"}
+    # Cloud LLM test: use DB-stored API key first, fallback to .env
+    if model.provider in ("gemini", "openai"):
+        import os
+        api_key = model.api_key_encrypted or (
+            settings.GEMINI_API_KEY if model.provider == "gemini"
+            else (settings.OPENAI_API_KEY or os.getenv("OPENAI_API_KEY", ""))
+        )
+        if not api_key:
+            return {"status": "error", "detail": "No API key configured (DB or .env)"}
+
+        try:
+            if model.provider == "gemini":
+                gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+                async with httpx.AsyncClient(timeout=20) as client:
+                    resp = await client.post(
+                        "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+                        headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"},
+                        json={
+                            "model": gemini_model,
+                            "messages": [{"role": "user", "content": "Reply with exactly: OK"}],
+                            "max_tokens": 10,
+                        },
+                    )
+                    if resp.status_code == 200:
+                        preview = (resp.json().get("choices", [{}])[0].get("message", {}).get("content", "") or "")[:50]
+                        return {"status": "ok", "response_preview": preview.strip()}
+                    else:
+                        err = resp.json()
+                        msg = err[0].get("error", {}).get("message", resp.text[:200]) if isinstance(err, list) else resp.text[:200]
+                        return {"status": "error", "detail": msg}
+            elif model.provider == "openai":
+                openai_model = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
+                async with httpx.AsyncClient(timeout=20) as client:
+                    resp = await client.post(
+                        "https://api.openai.com/v1/chat/completions",
+                        headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"},
+                        json={
+                            "model": openai_model,
+                            "messages": [{"role": "user", "content": "Reply with exactly: OK"}],
+                            "max_tokens": 10,
+                        },
+                    )
+                    if resp.status_code == 200:
+                        preview = (resp.json().get("choices", [{}])[0].get("message", {}).get("content", "") or "")[:50]
+                        return {"status": "ok", "response_preview": preview.strip()}
+                    else:
+                        return {"status": "error", "detail": resp.text[:200]}
+        except Exception as e:
+            return {"status": "error", "detail": str(e)}
+
+    return {"status": "skipped", "detail": f"Provider '{model.provider}' test not implemented"}
 
 
 class OllamaPullRequest(BaseModel):
