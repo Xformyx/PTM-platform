@@ -130,13 +130,56 @@ def run_rag_enrichment(self, order_id: int, config: dict):
         elif fc_col in df.columns and cond_col in df.columns:
             df["_abs_fc"] = df[fc_col].abs()
             conditions = df[cond_col].dropna().unique()
-
-            # For each unique (gene, position), compute max |FC| across all conditions
             df["_key"] = list(zip(df[gene_col].astype(str), df[pos_col].astype(str)))
-            key_max_fc = df.groupby("_key")["_abs_fc"].max().sort_values(ascending=False)
 
-            # Select top_n unique PTMs by max |FC|
-            selected_keys = set(key_max_fc.head(top_n).index.tolist())
+            # ── v9.25: Priority-based Top N selection ─────────────────────────
+            # Priority 1 (De novo): Control_Pseudocount_Used == True
+            # Priority 2 (Regulated): q_value < 0.05 AND |Log2FC| >= 1.0
+            # Priority 3 (Remaining): sorted by max |FC| to fill up to top_n
+            # -----------------------------------------------------------------
+            pc_col = "Control_Pseudocount_Used" if "Control_Pseudocount_Used" in df.columns else None
+            q_col  = "q_value" if "q_value" in df.columns else None
+
+            # Per-PTM aggregates: max |FC|, any pseudocount, min q_value
+            key_max_fc = df.groupby("_key")["_abs_fc"].max()
+
+            if pc_col:
+                key_denovo = df.groupby("_key")[pc_col].any()
+            else:
+                key_denovo = None
+
+            if q_col:
+                import numpy as _np
+                key_min_q = df.groupby("_key")[q_col].min()
+            else:
+                key_min_q = None
+
+            # Build priority sets
+            denovo_keys: set = set()
+            regulated_keys: set = set()
+
+            for k in key_max_fc.index:
+                # De novo: any row for this PTM had pseudocount imputation
+                if key_denovo is not None and key_denovo.get(k, False):
+                    denovo_keys.add(k)
+                    continue
+                # Regulated: min q_value < 0.05 AND max |FC| >= 1.0
+                if key_min_q is not None:
+                    q_val = key_min_q.get(k)
+                    fc_val = key_max_fc.get(k, 0.0)
+                    if q_val is not None and not _np.isnan(q_val) and q_val < 0.05 and fc_val >= 1.0:
+                        regulated_keys.add(k)
+
+            # Priority 1 + 2: guaranteed inclusion
+            priority_keys = denovo_keys | regulated_keys
+
+            # Priority 3: fill remaining slots with highest |FC| PTMs not yet included
+            remaining_slots = max(0, top_n - len(priority_keys))
+            remaining_sorted = key_max_fc.drop(index=list(priority_keys), errors="ignore") \
+                                         .sort_values(ascending=False)
+            fill_keys = set(remaining_sorted.head(remaining_slots).index.tolist())
+
+            selected_keys = priority_keys | fill_keys
 
             # Keep all rows (all conditions) for the selected gene+position pairs
             df = df[df["_key"].isin(selected_keys)]
@@ -144,9 +187,10 @@ def run_rag_enrichment(self, order_id: int, config: dict):
 
             n_unique = len(selected_keys)
             logger.info(
-                f"[Order {order_id}] Top N selection: top {top_n} unique PTMs "
-                f"(by max |FC| across {len(conditions)} conditions) → {n_unique} unique PTMs, "
-                f"{len(df)} total rows"
+                f"[Order {order_id}] Top N selection (v9.25 priority): "
+                f"De novo={len(denovo_keys)}, Regulated={len(regulated_keys)}, "
+                f"Fill={len(fill_keys)} → {n_unique} unique PTMs, {len(df)} total rows "
+                f"(across {len(conditions)} conditions)"
             )
         elif fc_col in df.columns:
             # Fallback: no Condition column — simple top-N by abs FC
