@@ -2575,7 +2575,7 @@ function SignalFlowView({
   inferredReceptors: InferredReceptor[];
   globalKinaseResult: GlobalKinaseModuleResponse | null;
   topNPtms: { gene: string; position: string; label: string }[];
-  vectorData?: { gene: string; position: string; condition: string; value: number }[];
+  vectorData?: PtmTimeSeriesRow[];
   conditions?: string[];
 }) {
   const [selectedReceptor, setSelectedReceptor] = useState<string | null>(null);
