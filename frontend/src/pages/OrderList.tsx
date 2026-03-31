@@ -66,7 +66,8 @@ function SortIcon({ field, sort }: { field: SortField; sort: { field: SortField;
 
 const ORDER_LIST_COL_WIDTHS_KEY = "ptm-order-list-col-pct-v1";
 /** Percent widths — must sum to 100 */
-const DEFAULT_COL_PCT = [12, 16, 9, 9, 9, 12, 8, 11, 11, 5] as const;
+/** Last column (Action) kept ≥6% so Run/Delete aren’t flush to the table edge */
+const DEFAULT_COL_PCT = [12, 14, 9, 9, 9, 12, 8, 11, 10, 6] as const;
 const N_COLS = DEFAULT_COL_PCT.length;
 const MIN_COL_PCT = 4;
 
@@ -427,7 +428,7 @@ export default function OrderList() {
                     </div>
                     <ColResizeHandle colIndex={8} onStart={startColResize} />
                   </TableHead>
-                  <TableHead>Action</TableHead>
+                  <TableHead className="pr-5">Action</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -481,8 +482,8 @@ export default function OrderList() {
                     >
                       {order.status === "completed" ? fmtDate(order.completed_at) : "—"}
                     </TableCell>
-                    <TableCell onClick={(e) => e.stopPropagation()}>
-                      <div className="flex items-center gap-1">
+                    <TableCell className="pr-5" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex items-center justify-end gap-1.5">
                         {isRunning(order.status) ? (
                           <Button
                             size="sm"
