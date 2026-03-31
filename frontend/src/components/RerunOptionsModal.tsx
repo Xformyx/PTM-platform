@@ -77,7 +77,7 @@ export default function RerunOptionsModal({
   const [analysisOptions, setAnalysisOptions] = useState<AnalysisOptions>({ ...DEFAULT_ANALYSIS_OPTIONS });
   const [analysisModalOpen, setAnalysisModalOpen] = useState(false);
   const [reportType, setReportType] = useState("comprehensive");
-  const [topNptms, setTopNptms] = useState(20);
+  const [ptmSelectionMode, setPtmSelectionMode] = useState<"top_n" | "de_novo" | "regulated" | "de_novo_regulated" | "minor" | "all">("de_novo_regulated");
   const [llmModel, setLlmModel] = useState("");
   const [ragLlmModel, setRagLlmModel] = useState("");
   const [llmCloudModelVariant, setLlmCloudModelVariant] = useState("");
@@ -152,8 +152,9 @@ export default function RerunOptionsModal({
         modeVal === "ptm_nonptm_network" ? "ptm_nonptm_network" : "ptm_only"
       );
       setReportType(typeof ro.report_type === "string" ? ro.report_type : "comprehensive");
-      const topN = ro.top_n_ptms;
-      setTopNptms(typeof topN === "number" && !isNaN(topN) ? topN : 20);
+      const savedMode = ro.ptm_selection_mode as string;
+      const validModes = ["top_n", "de_novo", "regulated", "de_novo_regulated", "minor", "all"];
+      setPtmSelectionMode(validModes.includes(savedMode) ? savedMode as typeof ptmSelectionMode : "de_novo_regulated");
       const lm = ro.llm_model as string; const rp = ro.llm_provider as string;
       const rm = ro.rag_llm_model as string; const rrp = ro.rag_llm_provider as string;
       const hasProviderConfig = (p: string) => llmModels.some((m) => m.provider === p && m.model_id === CLOUD_PROVIDER_SENTINEL);
@@ -237,7 +238,7 @@ export default function RerunOptionsModal({
         report_options: {
           ...baseReportOpts,
           report_type: reportType,
-          top_n_ptms: topNptms,
+          ptm_selection_mode: ptmSelectionMode,
           output_format: baseReportOpts.output_format ?? "md",
           analysis_mode: analysisMode,
           research_questions: researchQuestions,
@@ -392,15 +393,26 @@ export default function RerunOptionsModal({
                   </Select>
                 </div>
                 <div className="space-y-1.5">
-                  <Label className="text-xs">Top N PTMs</Label>
-                  <Input
-                    type="number"
-                    value={topNptms}
-                    onChange={(e) => setTopNptms(parseInt(e.target.value) || 20)}
-                    min={5}
-                    max={100}
-                    className="h-8"
-                  />
+                  <Label className="text-xs">PTM Selection Mode</Label>
+                  <Select value={ptmSelectionMode} onValueChange={(v) => setPtmSelectionMode(v as typeof ptmSelectionMode)}>
+                    <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="de_novo_regulated">De novo + Regulated</SelectItem>
+                      <SelectItem value="de_novo">De novo only</SelectItem>
+                      <SelectItem value="regulated">Regulated only</SelectItem>
+                      <SelectItem value="minor">Minor only</SelectItem>
+                      <SelectItem value="all">All PTMs</SelectItem>
+                      <SelectItem value="top_n">Top N by |FC| (legacy)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-[10px] text-muted-foreground">
+                    {ptmSelectionMode === "de_novo_regulated" && "De novo ∪ Regulated (q < 0.05, |FC| ≥ 1.0)"}
+                    {ptmSelectionMode === "de_novo" && "No-control PTMs only"}
+                    {ptmSelectionMode === "regulated" && "Statistically significant PTMs only"}
+                    {ptmSelectionMode === "minor" && "Neither de novo nor regulated"}
+                    {ptmSelectionMode === "all" && "All PTMs — may increase analysis time"}
+                    {ptmSelectionMode === "top_n" && "Legacy: top 50 by max |Log2FC|"}
+                  </p>
                 </div>
               </div>
               <div className="space-y-1.5">
