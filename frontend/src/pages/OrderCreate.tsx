@@ -170,7 +170,7 @@ export default function OrderCreate() {
   const [form, setForm] = useState({
     project_name: "", ptm_type: "phosphorylation", species: "mouse",
     cell_type: "", treatment: "", time_points: "", biological_question: "", special_conditions: "",
-    report_type: "comprehensive", top_n_ptms: 20, llm_model: "", rag_llm_model: "",
+    report_type: "comprehensive", ptm_selection_mode: "de_novo_regulated" as "top_n" | "de_novo" | "regulated" | "de_novo_regulated" | "minor" | "all", llm_model: "", rag_llm_model: "",
     analysis_mode: "ptm_only" as "ptm_only" | "ptm_nonptm_network" | "cross_talk",
     secondary_ptm_type: "ubiquitylation",
   });
@@ -497,7 +497,7 @@ export default function OrderCreate() {
       ptm_detail_count: reportConfig.ptm_detail_count,
     };
     formData.append("report_options", JSON.stringify({
-      report_type: form.report_type, top_n_ptms: form.top_n_ptms, output_format: "md",
+      report_type: form.report_type, ptm_selection_mode: form.ptm_selection_mode, output_format: "md",
       analysis_mode: form.analysis_mode,
       research_questions: researchQuestions.length > 0 ? researchQuestions : [],
       ...(form.llm_model ? (() => {
@@ -1195,11 +1195,31 @@ export default function OrderCreate() {
                     </p>
                   </div>
                   <div className="space-y-2">
-                    <Label>Top N PTMs to Analyze</Label>
-                    <Input type="number" value={form.top_n_ptms}
-                      onChange={(e) => setForm({ ...form, top_n_ptms: parseInt(e.target.value) || 20 })}
-                      min={5} max={100}
-                    />
+                    <Label>PTM Selection Mode</Label>
+                    <Select
+                      value={form.ptm_selection_mode}
+                      onValueChange={(v) => setForm({ ...form, ptm_selection_mode: v as typeof form.ptm_selection_mode })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="de_novo_regulated">De novo + Regulated (recommended)</SelectItem>
+                        <SelectItem value="de_novo">De novo only</SelectItem>
+                        <SelectItem value="regulated">Regulated only</SelectItem>
+                        <SelectItem value="minor">Minor only</SelectItem>
+                        <SelectItem value="all">All PTMs</SelectItem>
+                        <SelectItem value="top_n">Top N by |FC| (legacy)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <p className="text-[10px] text-muted-foreground">
+                      {form.ptm_selection_mode === "de_novo_regulated" && "De novo (no control) + Statistically regulated (q < 0.05, |FC| ≥ 1.0) PTMs"}
+                      {form.ptm_selection_mode === "de_novo" && "Only PTMs with no control condition (pseudocount imputed)"}
+                      {form.ptm_selection_mode === "regulated" && "Only statistically significant PTMs (q < 0.05, |Log2FC| ≥ 1.0)"}
+                      {form.ptm_selection_mode === "minor" && "PTMs that are neither de novo nor statistically regulated"}
+                      {form.ptm_selection_mode === "all" && "All detected PTMs — may increase analysis time significantly"}
+                      {form.ptm_selection_mode === "top_n" && "Legacy: top 50 PTMs ranked by max |Log2FC|"}
+                    </p>
                   </div>
                 </div>
 

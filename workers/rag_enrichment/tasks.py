@@ -45,7 +45,14 @@ def run_rag_enrichment(self, order_id: int, config: dict):
       - ptm_mode: 'phospho' | 'ubi'
       - experimental_context: dict      (optional: tissue, treatment, keywords, etc.)
       - max_articles_per_ptm: int       (default 15)
-      - top_n_ptms: int                 (default 50 — limit to most significant PTMs)
+      - ptm_selection_mode: str         (default 'top_n' — PTM selection strategy)
+          'top_n'            : legacy behaviour — rank by max |FC|, take top_n
+          'de_novo'          : only Control_Pseudocount_Used == True PTMs
+          'regulated'        : only q_value < 0.05 AND |Log2FC| >= 1.0 PTMs
+          'de_novo_regulated': de_novo UNION regulated
+          'minor'            : PTMs that are neither de_novo nor regulated
+          'all'              : all PTMs (no limit)
+      - top_n_ptms: int                 (default 50 — used only when mode is 'top_n')
     """
     start_time = time.time()
     order_code = config.get("order_code") or str(order_id)
@@ -63,6 +70,7 @@ def run_rag_enrichment(self, order_id: int, config: dict):
         experimental_context = dict(config.get("experimental_context") or {})
         experimental_context["single_time_point"] = single_time_point
         top_n = config.get("top_n_ptms", 50)
+        ptm_selection_mode = config.get("ptm_selection_mode", "top_n")
         file_suffix = "_phospho" if ptm_mode == "phospho" else "_ubi"
 
         # ================================================================
@@ -79,11 +87,9 @@ def run_rag_enrichment(self, order_id: int, config: dict):
         df = pd.read_csv(vector_file, sep="\t", low_memory=False)
         logger.info(f"[Order {order_id}] Loaded {len(df)} PTM entries from {vector_file.name}")
 
-        # Select top-N most significant unique PTMs across all conditions.
-        # Strategy: Two modes available:
-        #   1. (Default) Rank by max |PTM_Relative_Log2FC| across conditions
-        #   2. (Classification) Use 8-category cell-signaling classification
-        #      to select High/Moderate significance PTMs first
+        # Select PTMs based on ptm_selection_mode.
+        # Modes: top_n | de_novo | regulated | de_novo_regulated | minor | all
+        # Legacy classification mode also supported via use_classification_selection flag.
         use_classification = config.get("use_classification_selection", False)
 
         gene_col = "Gene.Name" if "Gene.Name" in df.columns else "gene"
@@ -128,58 +134,78 @@ def run_rag_enrichment(self, order_id: int, config: dict):
             )
 
         elif fc_col in df.columns and cond_col in df.columns:
+            import numpy as _np
             df["_abs_fc"] = df[fc_col].abs()
             conditions = df[cond_col].dropna().unique()
             df["_key"] = list(zip(df[gene_col].astype(str), df[pos_col].astype(str)))
 
-            # ── v9.25: Priority-based Top N selection ─────────────────────────
-            # Priority 1 (De novo): Control_Pseudocount_Used == True
-            # Priority 2 (Regulated): q_value < 0.05 AND |Log2FC| >= 1.0
-            # Priority 3 (Remaining): sorted by max |FC| to fill up to top_n
+            # ── v9.26: PTM Selection Mode ──────────────────────────────────────
+            # Modes: top_n | de_novo | regulated | de_novo_regulated | minor | all
             # -----------------------------------------------------------------
             pc_col = "Control_Pseudocount_Used" if "Control_Pseudocount_Used" in df.columns else None
             q_col  = "q_value" if "q_value" in df.columns else None
 
-            # Per-PTM aggregates: max |FC|, any pseudocount, min q_value
+            # Per-PTM aggregates
             key_max_fc = df.groupby("_key")["_abs_fc"].max()
+            key_denovo = df.groupby("_key")[pc_col].any() if pc_col else None
+            key_min_q  = df.groupby("_key")[q_col].min() if q_col else None
 
-            if pc_col:
-                key_denovo = df.groupby("_key")[pc_col].any()
-            else:
-                key_denovo = None
-
-            if q_col:
-                import numpy as _np
-                key_min_q = df.groupby("_key")[q_col].min()
-            else:
-                key_min_q = None
-
-            # Build priority sets
+            # Classify every unique PTM key
             denovo_keys: set = set()
             regulated_keys: set = set()
+            minor_keys: set = set()
 
             for k in key_max_fc.index:
-                # De novo: any row for this PTM had pseudocount imputation
-                if key_denovo is not None and key_denovo.get(k, False):
+                is_denovo = bool(key_denovo is not None and key_denovo.get(k, False))
+                if is_denovo:
                     denovo_keys.add(k)
-                    continue
-                # Regulated: min q_value < 0.05 AND max |FC| >= 1.0
+                    continue  # De novo PTMs are never also Regulated
+                is_regulated = False
                 if key_min_q is not None:
                     q_val = key_min_q.get(k)
                     fc_val = key_max_fc.get(k, 0.0)
-                    if q_val is not None and not _np.isnan(q_val) and q_val < 0.05 and fc_val >= 1.0:
-                        regulated_keys.add(k)
+                    if q_val is not None and not _np.isnan(float(q_val)) and float(q_val) < 0.05 and fc_val >= 1.0:
+                        is_regulated = True
+                if is_regulated:
+                    regulated_keys.add(k)
+                else:
+                    minor_keys.add(k)
 
-            # Priority 1 + 2: guaranteed inclusion
-            priority_keys = denovo_keys | regulated_keys
+            # Apply selection based on mode
+            mode = ptm_selection_mode
+            if mode == "all":
+                selected_keys = set(key_max_fc.index.tolist())
+                fill_keys: set = set()
+            elif mode == "de_novo":
+                selected_keys = denovo_keys
+                fill_keys = set()
+            elif mode == "regulated":
+                selected_keys = regulated_keys
+                fill_keys = set()
+            elif mode == "de_novo_regulated":
+                selected_keys = denovo_keys | regulated_keys
+                fill_keys = set()
+            elif mode == "minor":
+                selected_keys = minor_keys
+                fill_keys = set()
+            else:
+                # Default: 'top_n' — De novo + Regulated guaranteed, fill remainder
+                priority_keys = denovo_keys | regulated_keys
+                remaining_slots = max(0, top_n - len(priority_keys))
+                remaining_sorted = key_max_fc.drop(index=list(priority_keys), errors="ignore") \
+                                             .sort_values(ascending=False)
+                fill_keys = set(remaining_sorted.head(remaining_slots).index.tolist())
+                selected_keys = priority_keys | fill_keys
 
-            # Priority 3: fill remaining slots with highest |FC| PTMs not yet included
-            remaining_slots = max(0, top_n - len(priority_keys))
-            remaining_sorted = key_max_fc.drop(index=list(priority_keys), errors="ignore") \
-                                         .sort_values(ascending=False)
-            fill_keys = set(remaining_sorted.head(remaining_slots).index.tolist())
-
-            selected_keys = priority_keys | fill_keys
+            # Fallback: if mode-based selection yields nothing, fall back to top_n
+            if not selected_keys:
+                logger.warning(
+                    f"[Order {order_id}] ptm_selection_mode='{mode}' yielded 0 PTMs "
+                    f"(q_value data available: {q_col is not None}). "
+                    f"Falling back to top_{top_n} by |FC|."
+                )
+                fill_keys = set(key_max_fc.sort_values(ascending=False).head(top_n).index.tolist())
+                selected_keys = fill_keys
 
             # Keep all rows (all conditions) for the selected gene+position pairs
             df = df[df["_key"].isin(selected_keys)]
@@ -187,10 +213,10 @@ def run_rag_enrichment(self, order_id: int, config: dict):
 
             n_unique = len(selected_keys)
             logger.info(
-                f"[Order {order_id}] Top N selection (v9.25 priority): "
+                f"[Order {order_id}] PTM selection mode='{mode}': "
                 f"De novo={len(denovo_keys)}, Regulated={len(regulated_keys)}, "
-                f"Fill={len(fill_keys)} → {n_unique} unique PTMs, {len(df)} total rows "
-                f"(across {len(conditions)} conditions)"
+                f"Minor={len(minor_keys)}, Selected={n_unique} unique PTMs, "
+                f"{len(df)} total rows (across {len(conditions)} conditions)"
             )
         elif fc_col in df.columns:
             # Fallback: no Condition column — simple top-N by abs FC

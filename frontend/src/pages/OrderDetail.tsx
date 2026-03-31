@@ -2886,8 +2886,19 @@ export default function OrderDetail() {
               </CardHeader>
               <CardContent className="space-y-4">
                 <OverviewField
-                  label="Top N PTMs"
-                  value={`${(order.report_options as any)?.top_n_ptms ?? 20}개`}
+                  label="PTM Selection Mode"
+                  value={(() => {
+                    const mode = (order.report_options as any)?.ptm_selection_mode;
+                    const labels: Record<string, string> = {
+                      de_novo_regulated: "De novo + Regulated",
+                      de_novo: "De novo only",
+                      regulated: "Regulated only",
+                      minor: "Minor only",
+                      all: "All PTMs",
+                      top_n: `Top ${(order.report_options as any)?.top_n_ptms ?? 50} by |FC|`,
+                    };
+                    return labels[mode] ?? (mode ? mode : "De novo + Regulated");
+                  })()}
                 />
                 <OverviewField
                   label="LLM Model (Report)"
