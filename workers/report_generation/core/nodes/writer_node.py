@@ -42,6 +42,23 @@ SECTION_MAX_TOKENS = {
     "title": 512,
 }
 
+# v9.30: Maximum prompt size (characters) to prevent context window overflow.
+# Gemini 2.5 Flash supports ~1M tokens (~4M chars), but we cap at 200K chars
+# (~50K tokens) to leave room for output and avoid timeouts.
+MAX_PROMPT_CHARS = 200_000
+
+# Minimum word counts for generate_with_retry per section
+SECTION_MIN_WORDS = {
+    "abstract": 200,
+    "introduction": 800,
+    "results": 1200,
+    "discussion": 1000,
+    "conclusion": 300,
+    "methods": 400,
+    "suggestion": 400,
+    "title": 3,
+}
+
 # Legacy SYSTEM_PROMPT kept as fallback; prefer get_system_prompt_for_ptm(ptm_type)
 SYSTEM_PROMPT = (
     "You are a scientific writer specializing in post-translational modification (PTM) analysis. "
@@ -240,11 +257,44 @@ def run_section_writing(state: dict) -> dict:
             prompt += "\n\n" + figure_ctx
 
         max_tok = section_max_tokens.get(section_type, 8192)
+
+        # v9.30: Prompt size management — truncate if too large
+        prompt_len = len(prompt)
+        if prompt_len > MAX_PROMPT_CHARS:
+            logger.warning(
+                f"[v9.30] {section_type} prompt too large ({prompt_len:,} chars > {MAX_PROMPT_CHARS:,}). "
+                f"Truncating to {MAX_PROMPT_CHARS:,} chars."
+            )
+            prompt = prompt[:MAX_PROMPT_CHARS] + "\n\n[... prompt truncated for context window limit ...]"
+        logger.info(
+            f"[v9.30] {section_type}: prompt={len(prompt):,} chars, "
+            f"max_tokens={max_tok}, provider={llm.provider}, model={llm.model}"
+        )
+
         # v9.1: Use PTM-aware system prompt from vocabulary dictionary
         ptm_system_prompt = get_system_prompt_for_ptm(ptm_type)
-        content = llm.generate(prompt, system_prompt=ptm_system_prompt, temperature=llm_temperature, max_tokens=max_tok)
 
-        if content.startswith("[LLM Error"):
+        # v9.30: Use generate_with_retry for robust LLM calls
+        min_words = SECTION_MIN_WORDS.get(section_type, 100)
+        content = llm.generate_with_retry(
+            prompt,
+            system_prompt=ptm_system_prompt,
+            temperature=llm_temperature,
+            max_tokens=max_tok,
+            min_words=min_words,
+            section_name=section_type.capitalize(),
+            max_retries=2,
+        )
+
+        if content is None or content.startswith("[LLM Error"):
+            error_detail = content if content else "generate_with_retry returned None"
+            logger.error(
+                f"[v9.30] LLM FAILED for section '{section_type}': {error_detail}. "
+                f"Using fallback text. Provider={llm.provider}, Model={llm.model}, "
+                f"Prompt size={prompt_len:,} chars, max_tokens={max_tok}"
+            )
+            if cb:
+                cb(pct, f"WARNING: LLM failed for {section_type} — using fallback text")
             content = _fallback_section(section_type, research_results, validated_hypotheses, parsed_ptms)
 
         # Strip self-generated section headings from LLM output

@@ -437,6 +437,13 @@ class LLMClient:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
 
+        # v9.30: Log prompt size for debugging
+        total_prompt_chars = len(prompt) + (len(system_prompt) if system_prompt else 0)
+        logger.info(
+            f"[LLM] {model}@{base_url}: prompt={total_prompt_chars:,} chars, "
+            f"max_tokens={max_tokens}, temp={temp}"
+        )
+
         payload = {
             "model": model,
             "messages": messages,
@@ -449,20 +456,32 @@ class LLMClient:
             "Authorization": f"Bearer {api_key}",
         }
 
+        # v9.30: Increase timeout for large prompts (600s for cloud APIs)
+        timeout = 600
+
         try:
             r = requests.post(
                 f"{base_url}/chat/completions",
-                json=payload, headers=headers, timeout=300,
+                json=payload, headers=headers, timeout=timeout,
             )
             r.raise_for_status()
-            return r.json()["choices"][0]["message"]["content"].strip()
+            result = r.json()["choices"][0]["message"]["content"].strip()
+            logger.info(
+                f"[LLM] {model}: success, response={len(result):,} chars, "
+                f"{len(result.split()):,} words"
+            )
+            return result
         except requests.HTTPError as e:
+            status = getattr(r, 'status_code', 'unknown')
+            body = getattr(r, 'text', '')[:500]
             error_msg = (
-                f"{model}@{base_url} returned HTTP {r.status_code}. "
-                f"Response: {r.text[:300]}. "
+                f"{model}@{base_url} returned HTTP {status}. "
+                f"Prompt size: {total_prompt_chars:,} chars. "
+                f"Response: {body}. "
                 f"Please check: (1) model name is a valid API model ID "
                 f"(e.g. 'gemini-2.5-flash', not 'Gemini'), "
-                f"(2) API key is valid."
+                f"(2) API key is valid, "
+                f"(3) prompt is within context window limits."
             )
             logger.error(f"OpenAI-compatible generation failed: {error_msg}")
             return f"[LLM Error: {error_msg}]"
@@ -475,12 +494,16 @@ class LLMClient:
             return f"[LLM Error: {error_msg}]"
         except requests.Timeout:
             error_msg = (
-                f"Request to {model}@{base_url} timed out (300s). "
+                f"Request to {model}@{base_url} timed out ({timeout}s). "
+                f"Prompt size: {total_prompt_chars:,} chars. "
                 f"The prompt may be too large or the API may be overloaded."
             )
             logger.error(error_msg)
             return f"[LLM Error: {error_msg}]"
         except Exception as e:
-            error_msg = f"OpenAI-compatible generation failed ({model}@{base_url}): {e}"
+            error_msg = (
+                f"OpenAI-compatible generation failed ({model}@{base_url}): {e}. "
+                f"Prompt size: {total_prompt_chars:,} chars."
+            )
             logger.error(error_msg)
             return f"[LLM Error: {error_msg}]"

@@ -43,7 +43,8 @@ def run_editor(state: dict) -> dict:
         questions = state.get("research_questions", [])
         dr_results = state.get("drug_repositioning_results", {})
         collected_references = state.get("collected_references", [])
-        report = _compile_report(title, sections, hypotheses, network_analysis, context, questions, dr_results, collected_references)
+        ptm_type = state.get("ptm_type", "phosphorylation")
+        report = _compile_report(title, sections, hypotheses, network_analysis, context, questions, dr_results, collected_references, ptm_type=ptm_type)
 
     # Save report: [Order_name]_report_[YYMMDD_HHMM].md
     output_path = Path(output_dir)
@@ -81,6 +82,7 @@ def _compile_report(
     network: dict, context: dict, questions: list,
     dr_results: dict = None,
     collected_references: list = None,
+    ptm_type: str = "phosphorylation",
 ) -> str:
     """Assemble all sections into a single Markdown report."""
     collected_references = collected_references or []
@@ -114,7 +116,8 @@ def _compile_report(
         lines.append("")
 
     # Network Analysis Figures — Base64 embedded or file-referenced
-    network_figure_section = generate_network_figure_section(network, ptm_type=state.get('ptm_type', 'phosphorylation'))
+    # v9.30: Fixed state reference bug — ptm_type is now passed as function argument
+    network_figure_section = generate_network_figure_section(network, ptm_type=ptm_type)
     if network_figure_section:
         lines.append(network_figure_section)
     else:
