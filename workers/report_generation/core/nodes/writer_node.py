@@ -43,14 +43,14 @@ SECTION_MAX_TOKENS = {
 }
 
 # v9.31: Per-section prompt budget (characters).
-# Gemini 2.5 Flash supports ~1M tokens but quality degrades sharply above ~80K chars.
-# Keep prompts well within this range for reliable, detailed output.
+# v9.32: Increased budgets — co-wave + temporal kinase + receptor are now ESSENTIAL.
+# Gemini 2.5 Flash supports ~1M tokens; quality is acceptable up to ~120K chars.
 SECTION_PROMPT_BUDGET = {
-    "abstract": 30_000,
+    "abstract": 40_000,
     "introduction": 60_000,
-    "results": 80_000,
-    "discussion": 60_000,
-    "conclusion": 40_000,
+    "results": 120_000,
+    "discussion": 100_000,
+    "conclusion": 50_000,
     "methods": 30_000,
     "suggestion": 40_000,
     "title": 10_000,
@@ -244,39 +244,48 @@ def run_section_writing(state: dict) -> dict:
         budget = SECTION_PROMPT_BUDGET.get(section_type, 60_000)
         base_len = len(prompt)
 
-        # Priority-ordered supplementary blocks for each section type
+        # v9.32: Priority-ordered supplementary blocks — co-wave, temporal kinase,
+        # receptor, and non-PTM are now ESSENTIAL (Priority 1-2) for PTM Vector interpretation.
         supplement_blocks = []
         if section_type == "results":
-            # Priority 1 (essential): v98 directive + structured data
-            supplement_blocks.append(("v98_directive", v98_directive))
-            supplement_blocks.append(("v98_structured_data", v98_structured_data))
-            # Priority 2 (important): aux data blocks
-            supplement_blocks.append(("ptm_data_summary", aux_ptm_data_summary))
-            supplement_blocks.append(("pathway_ctx", aux_pathway_ctx))
-            supplement_blocks.append(("signal_prop", aux_signal_prop))
-            # Priority 3 (nice-to-have): temporal analysis, kinase cascade
-            supplement_blocks.append(("nonptm_temporal", aux_nonptm_temporal))
-            supplement_blocks.append(("timelag", aux_timelag))
+            # Priority 1 (ESSENTIAL — PTM Vector core): co-wave + temporal kinase + receptor
+            supplement_blocks.append(("comovement", comovement_llm_context))
             supplement_blocks.append(("temporal_kinase", temporal_kinase_cascade_llm_context))
             supplement_blocks.append(("receptor_ctx", receptor_llm_context))
+            # Priority 2 (important): v98 + structured data + non-PTM temporal
+            supplement_blocks.append(("v98_directive", v98_directive))
+            supplement_blocks.append(("v98_structured_data", v98_structured_data))
+            supplement_blocks.append(("nonptm_temporal", aux_nonptm_temporal))
+            # Priority 3 (supporting): pathway, signal propagation, timelag
+            supplement_blocks.append(("pathway_ctx", aux_pathway_ctx))
+            supplement_blocks.append(("signal_prop", aux_signal_prop))
+            supplement_blocks.append(("timelag", aux_timelag))
+            supplement_blocks.append(("ptm_data_summary", aux_ptm_data_summary))
             # Priority 4 (lowest): figure context, writing example
             if figure_gen.has_figures():
                 supplement_blocks.append(("figure_ctx", figure_gen.generate_figure_context_for_llm(section_type)))
             supplement_blocks.append(("v98_writing_example", v98_writing_example))
 
         elif section_type == "discussion":
-            # Priority 1: v98 directive + structured data
-            supplement_blocks.append(("v98_directive", v98_directive))
-            supplement_blocks.append(("v98_structured_data", v98_structured_data))
-            # Priority 2: temporal kinase, receptor
+            # Priority 1 (ESSENTIAL): co-wave + temporal kinase + receptor + non-PTM
+            supplement_blocks.append(("comovement", comovement_llm_context))
             supplement_blocks.append(("temporal_kinase", temporal_kinase_cascade_llm_context))
             supplement_blocks.append(("receptor_ctx", receptor_llm_context))
+            supplement_blocks.append(("nonptm_temporal", aux_nonptm_temporal))
+            # Priority 2: v98 directive + structured data
+            supplement_blocks.append(("v98_directive", v98_directive))
+            supplement_blocks.append(("v98_structured_data", v98_structured_data))
             # Priority 3: figure context
             if figure_gen.has_figures():
                 supplement_blocks.append(("figure_ctx", figure_gen.generate_figure_context_for_llm(section_type)))
 
         elif section_type == "introduction":
             supplement_blocks.append(("receptor_ctx", receptor_llm_context))
+
+        elif section_type in ("conclusion", "abstract"):
+            # v9.32: Conclusion/Abstract also need co-wave summary for comprehensive coverage
+            supplement_blocks.append(("comovement", comovement_llm_context))
+            supplement_blocks.append(("temporal_kinase", temporal_kinase_cascade_llm_context))
 
         # v9.31: Add blocks respecting budget
         current_len = base_len
@@ -608,6 +617,9 @@ INSTRUCTIONS:
 - You MUST mention the treatment/stimulus ({treatment}) by name in the abstract. Never use generic terms like 'the treatment'.
 - For each Research Question, identify the most significant PTM findings and their biological implications.
 - If high-confidence literature matches are provided above, explicitly mention how the experimental results align with or diverge from published literature.
+- **PTM Vector Framework**: Frame the abstract through the PTM Vector approach — describe how PTM activation states reveal the signaling logic of the cellular response.
+- **Temporal signaling**: Briefly describe the receptor → kinase → substrate → effector cascade and its temporal evolution.
+- **Co-wave groups**: Mention the major co-movement groups and their biological significance.
 - Highlight the cell signaling commonalities among activated proteins based on PTM Vector values.
 - Write a comprehensive abstract that captures ALL major findings. Be specific about PTM sites using the correct terminology: '{get_vocabulary(ptm_type_label)["modification_at_site"].format(site=get_vocabulary(ptm_type_label)["site_prefixes"][0] + "48", gene="GENE_NAME")}'. NEVER use terminology from a different PTM type.
 {combined_lit}"""
@@ -654,14 +666,16 @@ Key PTM sites identified:
 {ptm_summary}
 {comp_intro}
 
-Structure (6-8 paragraphs):
+Structure (7-9 paragraphs):
 1. Background on post-translational modifications and their critical role in cellular signaling
 2. Specific background on {ptm_type_label} and its regulatory importance
-3. Relevance of the experimental system ({tissue}, {treatment}) — use the ChromaDB literature references below extensively
-4. Current understanding and knowledge gaps in this area — cite the provided references heavily
-5. PTM analysis methodology including mass spectrometry-based proteomics
-6. Overview of the key PTM sites identified and their known biological roles — cross-reference with ChromaDB literature
-7. Research questions and specific objectives of this study
+3. The PTM Vector approach: Introduce the concept of using PTM modification states as activation vectors to interpret proteomics data. Explain how PTM Log2FC values serve as indicators of signaling pathway activation direction and magnitude.
+4. Relevance of the experimental system ({tissue}, {treatment}) — use the ChromaDB literature references below extensively
+5. Current understanding and knowledge gaps in this area — cite the provided references heavily
+6. PTM analysis methodology including mass spectrometry-based proteomics
+7. Overview of the key PTM sites identified and their known biological roles — cross-reference with ChromaDB literature
+8. The importance of temporal analysis: receptor → kinase → substrate → effector cascade and co-movement (co-wave) analysis for understanding signal propagation dynamics
+9. Research questions and specific objectives of this study
 
 IMPORTANT: Write a thorough, detailed introduction. The ChromaDB collection references below are your PRIMARY source for background information. Cite as many of them as possible to establish context. Discuss the biological significance of each research question. Use the comprehensive analysis context provided above to enrich your writing with specific PTM data and findings.
 {intro_chromadb_emphasis}
@@ -746,6 +760,31 @@ IMPORTANT: Write a thorough, detailed introduction. The ChromaDB collection refe
 {single_tp_directive}
 {treatment_emphasis}
 {fig1_pw_results}
+
+=== PTM VECTOR INTERPRETATION FRAMEWORK (CORE METHODOLOGY) ===
+This report uses the **PTM Vector** approach: interpreting proteomics data through the lens of
+PTM-modified protein activation states. The key principle is that PTM changes (e.g., phosphorylation
+Log2FC) serve as VECTORS indicating the direction and magnitude of signaling pathway activation.
+
+You MUST interpret ALL findings through this framework:
+1. **Activation-centric interpretation**: PTM Log2FC values indicate activation (+) or inhibition (-)
+   of the modified protein. Use these as primary evidence for signaling pathway activity.
+2. **Receptor → Kinase → Substrate → Non-PTM cascade**: Trace the signal flow from upstream
+   receptors through kinases to their substrates, and finally to non-PTM effector proteins.
+   Describe HOW the signal propagates through each layer at each timepoint.
+3. **Temporal signal propagation**: At each timepoint, describe which layer of the cascade
+   is most active. Early timepoints often show receptor/kinase activation; later timepoints
+   show substrate modification and non-PTM effector changes.
+4. **Co-wave (co-movement) group analysis**: PTMs that change together across timepoints
+   form co-wave groups. For each group, explain:
+   - What biological process or pathway unites the group members
+   - How the group's temporal pattern (early transient, sustained, delayed) relates to its function
+   - What distinguishes this group from other co-wave groups
+   - How co-wave patterns change across timepoints (which groups activate first, which follow)
+5. **Quantitative evidence**: Always cite specific Log2FC values when making claims about
+   activation or inhibition. Use the PTM Vector magnitude to rank the importance of findings.
+=== END PTM VECTOR FRAMEWORK ===
+
 Research Findings:
 {research_str}
 
@@ -759,16 +798,26 @@ PTM Data:
 
 Structure:
 - Present results for each research question as subsections with ### headings
-- For EACH research question, provide: (1) Direct Answer, (2) Time Course Table, (3) Functional Interpretation, (4) Alternative Explanations, (5) Testable Prediction
-- For each PTM site, describe: the specific modification, fold-change values, known biological function, pathway involvement, and disease relevance
-- Include specific PTM sites with Log2FC values and their biological functions
-- Reference enriched pathways and protein interactions
-- Describe network relationships and regulatory mechanisms
-- Discuss disease relevance where applicable
-- Compare your findings with the published literature provided below
+- For EACH research question, provide: (1) Direct Answer framed through PTM Vector activation,
+  (2) Time Course Table showing receptor→kinase→substrate→non-PTM signal flow,
+  (3) Functional Interpretation using the PTM Vector framework,
+  (4) Co-wave group analysis relevant to this question,
+  (5) Testable Prediction based on the observed signaling cascade
+- For each PTM site, describe: the specific modification, fold-change values (PTM Vector magnitude),
+  its position in the signaling cascade (receptor/kinase/substrate/effector), and pathway involvement
+- MUST include a dedicated subsection on **Co-movement (Co-wave) Analysis**:
+  * Describe each co-wave group and its members
+  * Explain the biological commonality within each group
+  * Compare groups: what pathways/functions distinguish Group A from Group B?
+  * Describe how co-wave patterns evolve over time (which groups peak early vs late)
+- MUST include a dedicated subsection on **Temporal Signal Propagation**:
+  * Trace the signal from receptor activation → kinase cascade → substrate modification → effector response
+  * At each timepoint, describe which signaling layer is most active
+  * Identify signal relay points and amplification nodes
 
 IMPORTANT: Be thorough and detailed. Discuss each significant PTM site individually. Include quantitative data (Log2FC values). Cite the provided references to support your findings. This is the most important section of the report.
 - You MUST explicitly name the treatment/stimulus ({treatment}) when describing PTM responses. Never use generic terms like 'the treatment'.
+- ALL answers to research questions MUST be framed through the PTM Vector / activation-centric perspective.
 {combined_lit}"""
 
     elif section_type == "discussion":
@@ -840,6 +889,18 @@ IMPORTANT: Be thorough and detailed. Discuss each significant PTM site individua
 {analysis_context_block}
 {single_tp_directive}
 {treatment_emphasis_disc}
+
+=== PTM VECTOR DISCUSSION FRAMEWORK ===
+This report uses the **PTM Vector** approach. In the Discussion, you MUST:
+- Interpret all findings through the lens of PTM activation states as signaling vectors
+- Discuss the receptor → kinase → substrate → non-PTM effector cascade and how it evolves over time
+- Analyze co-wave (co-movement) groups: what unites members of each group, how groups differ,
+  and how co-wave patterns shift across timepoints
+- Compare the observed signaling cascade with known canonical pathways from the literature
+- Discuss whether the temporal signal propagation pattern suggests signal amplification,
+  relay, feedback, or termination at each stage
+=== END PTM VECTOR DISCUSSION FRAMEWORK ===
+
 Results Summary:
 {results_text}
 
@@ -851,16 +912,21 @@ PTM Biological Context:
 {comp_disc}
 {cell_signaling_block}
 
-Structure (7 core topics):
-1. Primary Finding: The main PTM signaling mechanism identified — discuss in detail how the observed modifications form a coherent signaling response
-2. Mechanistic Insight: How specific PTM sites contribute to the observed response — relate each key site to known {('E3 ligase-substrate' if ptm_type_str.lower().strip() in ('ubiquitylation', 'ubiquitination') else 'kinase-substrate')} relationships and signaling cascades
-3. Non-PTM Effector Signaling: Discuss the signaling roles of Non-PTM effector proteins (upstream regulators, scaffold/adaptors, transducers, downstream effectors). For each key Non-PTM protein, explain: (a) its relationship directionality with PTM proteins (upstream/downstream/feedback), (b) the canonical signaling pathway it belongs to, (c) how its temporal dynamics relate to PTM changes
-4. Cell Signaling Commonality: Discuss shared pathway memberships and cross-pathway interactions among the identified PTMs (use the Cell Signaling Commonality Analysis above). Explain whether signaling cascades represent signal amplification, relay, or termination
-5. Comparison with Literature: Compare and contrast your findings with published studies (use the provided references extensively)
-6. Broader Implications: Relevance to disease pathology or therapeutic targeting — discuss potential clinical significance
-7. Limitations and Future Directions: Acknowledge limitations and propose follow-up experiments
+Structure (8 core topics):
+1. **Primary Signaling Mechanism (PTM Vector Perspective)**: Interpret the main PTM signaling mechanism through the PTM Vector framework. How do the observed PTM activation vectors form a coherent signaling response? Trace the signal from receptor to effector.
+2. **Temporal Signal Propagation**: Discuss how the signaling cascade evolves over time. Which signaling layers (receptor/kinase/substrate/effector) are active at each timepoint? Where are the signal relay and amplification points? How does the signal terminate or sustain?
+3. **Co-wave (Co-movement) Group Interpretation**: For each co-wave group identified in the Results:
+   - What is the biological commonality (shared pathway, function, or subcellular localization)?
+   - How does this group's temporal pattern (early transient, sustained, delayed) relate to its function?
+   - What distinguishes this group from other co-wave groups?
+   - How do co-wave patterns change across timepoints (which groups lead, which follow)?
+4. **Mechanistic Insight**: How specific PTM sites contribute to the observed response — relate each key site to known {('E3 ligase-substrate' if ptm_type_str.lower().strip() in ('ubiquitylation', 'ubiquitination') else 'kinase-substrate')} relationships and signaling cascades
+5. **Non-PTM Effector Signaling**: Discuss the signaling roles of Non-PTM effector proteins. For each key Non-PTM protein, explain: (a) its position in the signaling cascade relative to PTM proteins, (b) its temporal dynamics compared to PTM changes, (c) whether it acts as upstream regulator, scaffold, transducer, or downstream effector
+6. **Cell Signaling Commonality**: Discuss shared pathway memberships and cross-pathway interactions. Explain whether signaling cascades represent signal amplification, relay, or termination
+7. **Comparison with Literature**: Compare and contrast your findings with published studies. Specifically compare the observed PTM Vector patterns with known signaling models from the literature.
+8. **Limitations and Future Directions**: Acknowledge limitations and propose follow-up experiments
 
-IMPORTANT: For each discussion point, provide evidence from your data AND from the literature. Cite the provided references extensively. Discuss alternative interpretations where appropriate. When discussing Non-PTM proteins, always classify their signaling role and explain their relationship directionality with PTM-modified proteins.
+IMPORTANT: For each discussion point, provide evidence from your data AND from the literature. Cite the provided references extensively. ALL interpretations must be grounded in the PTM Vector framework — activation states as signaling vectors.
 - You MUST explicitly name the treatment/stimulus ({treatment}) throughout the Discussion. Never use generic terms.
 {combined_lit}"""
 
@@ -886,15 +952,17 @@ Results Summary:
 Discussion Summary:
 {discussion_text}
 
-Summarize:
-1. Key findings and how they answer each research question
-2. Novel insights revealed by this analysis — what is new compared to existing literature
-3. Biological and clinical significance of the identified PTM changes
-4. Potential therapeutic implications
-5. Limitations of the current study
-6. Specific future research directions with concrete experimental suggestions
+Summarize through the PTM Vector framework:
+1. Key findings and how they answer each research question — framed through PTM activation vectors
+2. **Temporal signaling narrative**: Summarize the receptor → kinase → substrate → effector cascade and how it evolves over time
+3. **Co-wave group summary**: Briefly describe the major co-movement groups, their biological significance, and how they relate to each other temporally
+4. Novel insights revealed by this analysis — what is new compared to existing literature
+5. Biological and clinical significance of the identified PTM changes
+6. Potential therapeutic implications based on the identified signaling cascade
+7. Limitations of the current study
+8. Specific future research directions with concrete experimental suggestions
 
-IMPORTANT: Be specific about findings — mention key PTM sites and their implications. Reference the results and discussion sections. Cite relevant references.
+IMPORTANT: Be specific about findings — mention key PTM sites and their implications. The conclusion must capture the PTM Vector interpretation: how PTM activation states reveal the signaling logic of the cellular response to {treatment}. Reference the results and discussion sections. Cite relevant references.
 {combined_lit}"""
 
     # GAP B: Methods section
@@ -998,7 +1066,7 @@ INSTRUCTIONS:
 - Do NOT make the title too narrow (e.g., focusing only on one pathway or one PTM site).
 - Follow academic paper title conventions. Use the correct omics term for this PTM type: '{get_vocabulary(ptm_type_label)["omics_name"]}'. Example: 'Comprehensive {get_vocabulary(ptm_type_label)["omics_name"]} Analysis Reveals ...'. NEVER use an omics term from a different PTM type.
 - Include the PTM type ({ptm_type_label}), the experimental system ({tissue}), and the treatment ({treatment}).
-- The title should reflect the overall narrative: temporal {ptm_type_label} dynamics in {tissue} in response to {treatment}.
+- The title should reflect the PTM Vector approach: temporal {ptm_type_label} activation dynamics and signaling cascade analysis in {tissue} in response to {treatment}.
 - Keep it under 25 words."""
 
     return f"Write the {section_type} section for a PTM analysis report.\n{single_tp_directive}{ptm_summary}"
