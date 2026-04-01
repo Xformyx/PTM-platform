@@ -1139,9 +1139,10 @@ def _generate_comovement_figures(
                         f"{n_sites} PTM sites exhibited rapid activation followed by "
                         f"return to baseline. Peak responses observed at "
                         f"{', '.join(sorted(peak_tps))}. "
-                        f"(a) Individual PTM time-series profiles colored by cluster membership "
-                        f"with cluster mean (bold). "
-                        f"(b) Peak amplitude profiles showing Log2FC magnitude ranked by intensity. "
+                        f"(a) Individual PTM time-series profiles colored by activity class: "
+                        f"orange/\u2605=De novo (newly induced), blue/\u25cf=Regulated (q<0.05, |FC|\u22651), "
+                        f"gray dashed/\u25c6=Minor. Cluster mean shown as bold line. "
+                        f"(b) Peak amplitude profiles ranked by intensity, colored by activity class. "
                         f"(c) Cluster mean temporal envelope showing activation-recovery kinetics."
                     ),
                     "type": "transient_burst_composite",
@@ -1161,7 +1162,8 @@ def _generate_comovement_figures(
                 "caption": "Temporal Co-movement Heatmap: PTM sites grouped by "
                            "correlated temporal dynamics. Color intensity represents "
                            "Log2FC magnitude (red=activated, blue=inhibited). "
-                           "Cluster assignments shown on left sidebar.",
+                           "Left sidebar: cluster assignments. "
+                           "Activity class sidebar: orange=De novo, blue=Regulated, gray=Minor.",
                 "type": "supplementary_heatmap",
             })
     except Exception as e:
@@ -1248,6 +1250,55 @@ _NATURE_COLORS = [
     "#B09C85",  # Taupe
 ]
 
+# ── v9.28: Activity Class visual encoding ──
+# De novo: orange palette (newly induced, no control signal)
+# Regulated: blue palette (statistically significant, q<0.05 & |FC|≥1)
+# Minor: gray palette (sub-threshold changes)
+_ACTIVITY_CLASS_COLORS = {
+    "de_novo": [
+        "#E65100", "#F57C00", "#FB8C00", "#FFA726", "#FFB74D",
+        "#FFCC80", "#D84315", "#BF360C", "#FF6D00", "#FF9100",
+    ],
+    "regulated": [
+        "#1565C0", "#1976D2", "#1E88E5", "#2196F3", "#42A5F5",
+        "#64B5F6", "#0D47A1", "#1A237E", "#2962FF", "#448AFF",
+    ],
+    "minor": [
+        "#9E9E9E", "#BDBDBD", "#B0B0B0", "#A0A0A0", "#C0C0C0",
+        "#888888", "#AAAAAA", "#999999", "#B8B8B8", "#A8A8A8",
+    ],
+}
+_ACTIVITY_CLASS_MARKERS = {
+    "de_novo": "*",      # star
+    "regulated": "o",    # circle
+    "minor": "D",        # thin diamond
+}
+_ACTIVITY_CLASS_LINEWIDTH = {
+    "de_novo": 1.4,
+    "regulated": 1.4,
+    "minor": 0.8,
+}
+_ACTIVITY_CLASS_ALPHA = {
+    "de_novo": 0.85,
+    "regulated": 0.80,
+    "minor": 0.35,
+}
+_ACTIVITY_CLASS_LINESTYLE = {
+    "de_novo": "-",
+    "regulated": "-",
+    "minor": "--",
+}
+_ACTIVITY_CLASS_MARKER_SIZE = {
+    "de_novo": 40,   # star needs bigger size
+    "regulated": 18,
+    "minor": 10,
+}
+_ACTIVITY_CLASS_LABEL = {
+    "de_novo": "De novo",
+    "regulated": "Regulated",
+    "minor": "Minor",
+}
+
 
 def _generate_transient_burst_figure(
     burst_clusters: list, timepoints: list, output_dir: str
@@ -1323,46 +1374,65 @@ def _generate_transient_burst_figure(
         ax_c = None
 
     # ══════════════════════════════════════════════════════════════════════
-    # Panel (a): Time-series profiles — smooth spline, distinct colors per PTM
+    # Panel (a): Time-series profiles — v9.28 activity_class color encoding
+    # De novo = orange solid ★, Regulated = blue solid ●, Minor = gray dashed ◆
     # ══════════════════════════════════════════════════════════════════════
-    # Build a per-member color palette so each PTM is visually distinct
-    _MEMBER_COLORS = [
-        "#E64B35", "#4DBBD5", "#00A087", "#3C5488", "#F39B7F",
-        "#8491B4", "#91D1C2", "#DC9A6C", "#7E6148", "#B09C85",
-        "#E377C2", "#17BECF", "#BCBD22", "#9467BD", "#D62728",
-        "#FF7F0E", "#2CA02C", "#1F77B4", "#AEC7E8", "#FFBB78",
-    ]
+    # Track per-class color index for distinct shades within each class
+    _class_color_idx = {"de_novo": 0, "regulated": 0, "minor": 0}
     x_arr = np.array(x, dtype=float)
     # Smooth interpolation x-axis (200 points)
     x_smooth = np.linspace(x_arr[0], x_arr[-1], 200) if len(x_arr) >= 4 else x_arr
 
-    global_member_idx = 0
+    # v9.28: Draw Minor first (background), then Regulated, then De novo (foreground)
+    draw_order = ["minor", "regulated", "de_novo"]
+    zorder_base = {"minor": 2, "regulated": 4, "de_novo": 6}
+
+    for draw_class in draw_order:
+        for ci, cluster in enumerate(burst_clusters):
+            members = cluster["member_details"]
+            for mi, md in enumerate(members):
+                ac = md.get("activity_class", "minor")
+                if ac != draw_class:
+                    continue
+                vals = np.array([md["temporal_values"].get(tp, 0) for tp in timepoints], dtype=float)
+                # Pick color from activity class palette
+                palette = _ACTIVITY_CLASS_COLORS.get(ac, _ACTIVITY_CLASS_COLORS["minor"])
+                color_idx = _class_color_idx[ac] % len(palette)
+                member_color = palette[color_idx]
+                _class_color_idx[ac] += 1
+                lw = _ACTIVITY_CLASS_LINEWIDTH.get(ac, 1.0)
+                alpha = _ACTIVITY_CLASS_ALPHA.get(ac, 0.6)
+                ls = _ACTIVITY_CLASS_LINESTYLE.get(ac, "-")
+                marker = _ACTIVITY_CLASS_MARKERS.get(ac, "o")
+                ms = _ACTIVITY_CLASS_MARKER_SIZE.get(ac, 14)
+                zo = zorder_base.get(ac, 3)
+                label = md["key"] if len(all_members) <= 15 else (md["key"] if _class_color_idx[ac] <= 5 else None)
+
+                # Smooth spline interpolation
+                if len(x_arr) >= 4:
+                    try:
+                        spl = make_interp_spline(x_arr, vals, k=3)
+                        vals_smooth = spl(x_smooth)
+                        ax_a.plot(
+                            x_smooth, vals_smooth, linewidth=lw,
+                            alpha=alpha, color=member_color, label=label,
+                            linestyle=ls, zorder=zo,
+                        )
+                    except Exception:
+                        ax_a.plot(x, vals, linewidth=lw, alpha=alpha, color=member_color,
+                                  label=label, linestyle=ls, zorder=zo)
+                else:
+                    ax_a.plot(x, vals, linewidth=lw, alpha=alpha, color=member_color,
+                              label=label, linestyle=ls, zorder=zo)
+                # Markers at actual data points
+                ax_a.scatter(x, vals, s=ms, color=member_color, alpha=alpha,
+                             zorder=zo + 1, edgecolors="white", linewidths=0.3,
+                             marker=marker)
+
+    # v9.28: Cluster mean and envelope drawn AFTER all members (outside draw_order loop)
     for ci, cluster in enumerate(burst_clusters):
         cluster_base_color = _NATURE_COLORS[ci % len(_NATURE_COLORS)]
         members = cluster["member_details"]
-
-        # Individual member lines (thin, semi-transparent, distinct colors)
-        for mi, md in enumerate(members):
-            vals = np.array([md["temporal_values"].get(tp, 0) for tp in timepoints], dtype=float)
-            member_color = _MEMBER_COLORS[global_member_idx % len(_MEMBER_COLORS)]
-            global_member_idx += 1
-            label = md["key"] if len(all_members) <= 15 else (md["key"] if mi < 5 else None)
-
-            # Smooth spline interpolation
-            if len(x_arr) >= 4:
-                try:
-                    spl = make_interp_spline(x_arr, vals, k=3)
-                    vals_smooth = spl(x_smooth)
-                    ax_a.plot(
-                        x_smooth, vals_smooth, linewidth=1.0,
-                        alpha=0.55, color=member_color, label=label,
-                    )
-                except Exception:
-                    ax_a.plot(x, vals, linewidth=1.0, alpha=0.55, color=member_color, label=label)
-            else:
-                ax_a.plot(x, vals, linewidth=1.0, alpha=0.55, color=member_color, label=label)
-            # Small markers at actual data points
-            ax_a.scatter(x, vals, s=12, color=member_color, alpha=0.6, zorder=5, edgecolors="white", linewidths=0.3)
 
         # Cluster mean (bold smooth line)
         mean_vals = np.array([cluster["mean_profile"].get(tp, 0) for tp in timepoints], dtype=float)
@@ -1384,13 +1454,13 @@ def _generate_transient_burst_figure(
         ax_a.scatter(x, mean_vals, s=25, color=cluster_base_color, alpha=0.95, zorder=11, edgecolors="white", linewidths=0.5)
 
         # Shaded envelope (min-max range) — smooth
-        all_vals = np.array([
+        all_vals_arr = np.array([
             [md["temporal_values"].get(tp, 0) for tp in timepoints]
             for md in members
         ], dtype=float)
-        if all_vals.shape[0] > 1:
-            min_vals = np.min(all_vals, axis=0)
-            max_vals = np.max(all_vals, axis=0)
+        if all_vals_arr.shape[0] > 1:
+            min_vals = np.min(all_vals_arr, axis=0)
+            max_vals = np.max(all_vals_arr, axis=0)
             if len(x_arr) >= 4:
                 try:
                     spl_min = make_interp_spline(x_arr, min_vals, k=3)
@@ -1410,14 +1480,39 @@ def _generate_transient_burst_figure(
     ax_a.spines["right"].set_visible(False)
     ax_a.grid(axis="y", alpha=0.15, linewidth=0.3)
 
-    # Legend: show up to 15 entries, then add "..."
+    # v9.28: Build legend with activity class section headers
+    # First: class legend icons (De novo ★, Regulated ●, Minor ◆)
+    class_handles = []
+    for cls_key, cls_label in [("de_novo", "De novo"), ("regulated", "Regulated"), ("minor", "Minor")]:
+        cls_palette = _ACTIVITY_CLASS_COLORS[cls_key]
+        cls_marker = _ACTIVITY_CLASS_MARKERS[cls_key]
+        cls_ls = _ACTIVITY_CLASS_LINESTYLE[cls_key]
+        cls_lw = _ACTIVITY_CLASS_LINEWIDTH[cls_key]
+        class_handles.append(Line2D(
+            [0], [0], marker=cls_marker, markersize=7 if cls_key == "de_novo" else 5,
+            color=cls_palette[0], linewidth=cls_lw, linestyle=cls_ls,
+            label=cls_label, markerfacecolor=cls_palette[0],
+        ))
+    # Then: cluster mean handles
+    for ci, cluster in enumerate(burst_clusters):
+        cluster_base_color = _NATURE_COLORS[ci % len(_NATURE_COLORS)]
+        class_handles.append(Line2D(
+            [0], [0], linewidth=2.5, color=cluster_base_color,
+            label=f"Cluster {cluster['cluster_id']} Mean",
+        ))
+    # Separator
+    class_handles.append(Line2D([0], [0], linewidth=0, label="────────────"))
+    # Individual PTM handles (up to 12)
     handles, labels = ax_a.get_legend_handles_labels()
-    if len(handles) > 15:
-        handles = handles[:15]
-        labels = labels[:15]
-        labels[-1] = f"... +{len(all_members) - 14} more"
+    # Filter out cluster mean handles (already added above)
+    ptm_handles = [(h, l) for h, l in zip(handles, labels) if "Mean" not in l]
+    for h, l in ptm_handles[:12]:
+        class_handles.append(h)
+    if len(ptm_handles) > 12:
+        class_handles.append(Line2D([0], [0], linewidth=0,
+                                    label=f"... +{len(ptm_handles) - 12} more"))
     ax_a.legend(
-        handles, labels, loc="upper left", bbox_to_anchor=(1.01, 1.0),
+        handles=class_handles, loc="upper left", bbox_to_anchor=(1.01, 1.0),
         ncol=1, framealpha=0.95, borderaxespad=0,
         handlelength=1.5, columnspacing=0.8, fontsize=6.5,
     )
@@ -1448,10 +1543,15 @@ def _generate_transient_burst_figure(
         height = md["max_fc"]
         # Gaussian peak curve
         peak = height * np.exp(-0.5 * ((x_chrom - center) / sigma) ** 2)
-        color = _NATURE_COLORS[ci % len(_NATURE_COLORS)]
+        # v9.28: Use activity_class color instead of cluster color
+        ac = md.get("activity_class", "minor")
+        ac_palette = _ACTIVITY_CLASS_COLORS.get(ac, _ACTIVITY_CLASS_COLORS["minor"])
+        color = ac_palette[pi % len(ac_palette)]
 
         # Smooth curve outline only — no fill
-        ax_b.plot(x_chrom, peak, color=color, linewidth=1.2, alpha=0.85)
+        lw = 1.4 if ac != "minor" else 0.8
+        alpha_val = 0.85 if ac != "minor" else 0.45
+        ax_b.plot(x_chrom, peak, color=color, linewidth=lw, alpha=alpha_val)
         peak_positions.append((center, height, md["key"], color))
 
     # Annotate peak labels
@@ -1591,14 +1691,14 @@ def _generate_summary_heatmap(
     ordered_matrix = matrix[ordered_indices]
     ordered_meta = [meta[i] for i in ordered_indices]
 
-    # Create figure
+    # Create figure — v9.28: added activity_class sidebar
     n_rows = len(ordered_indices)
     fig_height = max(6, min(20, n_rows * 0.35 + 2))
-    fig_width = max(8, len(timepoints) * 0.8 + 4)
+    fig_width = max(8, len(timepoints) * 0.8 + 5)
 
-    fig, (ax_sidebar, ax_heatmap, ax_cbar) = plt.subplots(
-        1, 3, figsize=(fig_width, fig_height),
-        gridspec_kw={"width_ratios": [0.3, 6, 0.3], "wspace": 0.02}
+    fig, (ax_sidebar, ax_ac_sidebar, ax_heatmap, ax_cbar) = plt.subplots(
+        1, 4, figsize=(fig_width, fig_height),
+        gridspec_kw={"width_ratios": [0.3, 0.15, 6, 0.3], "wspace": 0.02}
     )
 
     # Heatmap
@@ -1645,6 +1745,25 @@ def _generate_summary_heatmap(
     # Colorbar
     plt.colorbar(im, cax=ax_cbar, label="Log2FC")
 
+    # v9.28: Activity class sidebar (De novo=orange, Regulated=blue, Minor=gray)
+    _AC_SIDEBAR_COLORS = {
+        "de_novo": "#E65100",
+        "regulated": "#1565C0",
+        "minor": "#CCCCCC",
+    }
+    ax_ac_sidebar.set_xlim(0, 1)
+    ax_ac_sidebar.set_ylim(n_rows - 0.5, -0.5)
+    ax_ac_sidebar.axis("off")
+    for row_i, m in enumerate(ordered_meta):
+        ac = m.get("activity_class", "minor")
+        ac_color = _AC_SIDEBAR_COLORS.get(ac, "#CCCCCC")
+        ax_ac_sidebar.fill_between(
+            [0, 1], row_i - 0.5, row_i + 0.5,
+            color=ac_color, alpha=0.8
+        )
+    # Activity class sidebar title
+    ax_ac_sidebar.set_title("Class", fontsize=7, pad=2)
+
     # Draw cluster boundaries on heatmap
     for start, end in cluster_boundaries:
         ax_heatmap.axhline(y=start - 0.5, color="white", linewidth=1.5)
@@ -1679,32 +1798,47 @@ def _generate_cluster_lineplot(
     # Smooth interpolation x-axis
     x_smooth = np.linspace(x_arr[0], x_arr[-1], 200) if len(x_arr) >= 4 else x_arr
 
-    # Distinct color palette for individual PTM members
-    _MEMBER_COLORS = [
-        "#E64B35", "#4DBBD5", "#00A087", "#3C5488", "#F39B7F",
-        "#8491B4", "#91D1C2", "#DC9A6C", "#7E6148", "#B09C85",
-        "#E377C2", "#17BECF", "#BCBD22", "#9467BD", "#D62728",
-        "#FF7F0E", "#2CA02C", "#1F77B4", "#AEC7E8", "#FFBB78",
-    ]
+    # v9.28: Activity class-based color/marker/style for individual PTM members
+    _class_color_idx = {"de_novo": 0, "regulated": 0, "minor": 0}
+    draw_order = ["minor", "regulated", "de_novo"]
+    zorder_base = {"minor": 2, "regulated": 4, "de_novo": 6}
 
-    # ── PTM member lines (smooth spline, distinct colors) ──
-    for i, md in enumerate(members):
-        vals = np.array([md["temporal_values"].get(tp, 0) for tp in timepoints], dtype=float)
-        color = _MEMBER_COLORS[i % len(_MEMBER_COLORS)]
+    # ── PTM member lines (v9.28: activity_class encoding) ──
+    for draw_class in draw_order:
+        for md in members:
+            ac = md.get("activity_class", "minor")
+            if ac != draw_class:
+                continue
+            vals = np.array([md["temporal_values"].get(tp, 0) for tp in timepoints], dtype=float)
+            palette = _ACTIVITY_CLASS_COLORS.get(ac, _ACTIVITY_CLASS_COLORS["minor"])
+            color_idx = _class_color_idx[ac] % len(palette)
+            color = palette[color_idx]
+            _class_color_idx[ac] += 1
+            lw = _ACTIVITY_CLASS_LINEWIDTH.get(ac, 1.0)
+            alpha = _ACTIVITY_CLASS_ALPHA.get(ac, 0.6)
+            ls = _ACTIVITY_CLASS_LINESTYLE.get(ac, "-")
+            marker = _ACTIVITY_CLASS_MARKERS.get(ac, "o")
+            ms = _ACTIVITY_CLASS_MARKER_SIZE.get(ac, 14)
+            zo = zorder_base.get(ac, 3)
 
-        # Smooth spline interpolation
-        if len(x_arr) >= 4:
-            try:
-                spl = make_interp_spline(x_arr, vals, k=3)
-                vals_smooth = spl(x_smooth)
-                ax_ptm.plot(x_smooth, vals_smooth, linewidth=1.2,
-                            alpha=0.7, color=color, label=md["key"])
-            except Exception:
-                ax_ptm.plot(x, vals, linewidth=1.2, alpha=0.7, color=color, label=md["key"])
-        else:
-            ax_ptm.plot(x, vals, linewidth=1.2, alpha=0.7, color=color, label=md["key"])
-        # Small markers at actual data points
-        ax_ptm.scatter(x, vals, s=16, color=color, alpha=0.7, zorder=5, edgecolors="white", linewidths=0.3)
+            # Smooth spline interpolation
+            if len(x_arr) >= 4:
+                try:
+                    spl = make_interp_spline(x_arr, vals, k=3)
+                    vals_smooth = spl(x_smooth)
+                    ax_ptm.plot(x_smooth, vals_smooth, linewidth=lw,
+                                alpha=alpha, color=color, label=md["key"],
+                                linestyle=ls, zorder=zo)
+                except Exception:
+                    ax_ptm.plot(x, vals, linewidth=lw, alpha=alpha, color=color,
+                                label=md["key"], linestyle=ls, zorder=zo)
+            else:
+                ax_ptm.plot(x, vals, linewidth=lw, alpha=alpha, color=color,
+                            label=md["key"], linestyle=ls, zorder=zo)
+            # Markers at actual data points
+            ax_ptm.scatter(x, vals, s=ms, color=color, alpha=alpha,
+                           zorder=zo + 1, edgecolors="white", linewidths=0.3,
+                           marker=marker)
 
     # Cluster mean (thick dashed, smooth)
     mean_vals = np.array([cluster["mean_profile"].get(tp, 0) for tp in timepoints], dtype=float)
@@ -1712,44 +1846,69 @@ def _generate_cluster_lineplot(
         try:
             spl_mean = make_interp_spline(x_arr, mean_vals, k=3)
             ax_ptm.plot(x_smooth, spl_mean(x_smooth), "--", linewidth=2.5, color="#333333",
-                        alpha=0.8, label="Cluster Mean")
+                        alpha=0.8, label="Cluster Mean", zorder=10)
         except Exception:
-            ax_ptm.plot(x, mean_vals, "--", linewidth=2.5, color="#333333", alpha=0.8, label="Cluster Mean")
+            ax_ptm.plot(x, mean_vals, "--", linewidth=2.5, color="#333333", alpha=0.8,
+                        label="Cluster Mean", zorder=10)
     else:
-        ax_ptm.plot(x, mean_vals, "--", linewidth=2.5, color="#333333", alpha=0.8, label="Cluster Mean")
-    ax_ptm.scatter(x, mean_vals, s=20, color="#333333", alpha=0.8, zorder=6, edgecolors="white", linewidths=0.3)
+        ax_ptm.plot(x, mean_vals, "--", linewidth=2.5, color="#333333", alpha=0.8,
+                    label="Cluster Mean", zorder=10)
+    ax_ptm.scatter(x, mean_vals, s=20, color="#333333", alpha=0.8, zorder=11,
+                   edgecolors="white", linewidths=0.3)
 
     ax_ptm.axhline(y=0, color="gray", linewidth=0.5, linestyle=":")
     ax_ptm.set_ylabel("PTM Log2FC", fontsize=11)
     ax_ptm.grid(True, alpha=0.2)
 
-    # Legend
-    if len(members) <= 12:
-        ax_ptm.legend(fontsize=6.5, loc="upper left", bbox_to_anchor=(1.01, 1.0),
-                      ncol=1, framealpha=0.95, borderaxespad=0)
-    else:
-        # Too many members — show only top 5 by max_fc + mean
-        top_members = sorted(members, key=lambda m: m["max_fc"], reverse=True)[:5]
-        handles = []
-        for md in top_members:
-            handles.append(Line2D([0], [0], marker="o", markersize=4,
-                                  label=md["key"], linewidth=1.2))
-        handles.append(Line2D([0], [0], linestyle="--", linewidth=2.5,
-                              color="#333333", label="Cluster Mean"))
-        ax_ptm.legend(handles=handles, fontsize=6.5, loc="upper left",
-                      bbox_to_anchor=(1.01, 1.0), ncol=1, framealpha=0.95,
-                      borderaxespad=0)
+    # v9.28: Legend with activity class section headers
+    legend_handles = []
+    for cls_key, cls_label in [("de_novo", "De novo"), ("regulated", "Regulated"), ("minor", "Minor")]:
+        cls_palette = _ACTIVITY_CLASS_COLORS[cls_key]
+        cls_marker = _ACTIVITY_CLASS_MARKERS[cls_key]
+        cls_ls = _ACTIVITY_CLASS_LINESTYLE[cls_key]
+        cls_lw = _ACTIVITY_CLASS_LINEWIDTH[cls_key]
+        legend_handles.append(Line2D(
+            [0], [0], marker=cls_marker, markersize=7 if cls_key == "de_novo" else 5,
+            color=cls_palette[0], linewidth=cls_lw, linestyle=cls_ls,
+            label=cls_label, markerfacecolor=cls_palette[0],
+        ))
+    legend_handles.append(Line2D([0], [0], linestyle="--", linewidth=2.5,
+                                  color="#333333", label="Cluster Mean"))
+    legend_handles.append(Line2D([0], [0], linewidth=0, label="────────────"))
+    # Individual PTM handles (up to 12)
+    handles, labels = ax_ptm.get_legend_handles_labels()
+    ptm_handles = [(h, l) for h, l in zip(handles, labels) if l not in ("Cluster Mean",)]
+    for h, l in ptm_handles[:12]:
+        legend_handles.append(h)
+    if len(ptm_handles) > 12:
+        legend_handles.append(Line2D([0], [0], linewidth=0,
+                                     label=f"... +{len(ptm_handles) - 12} more"))
+    ax_ptm.legend(handles=legend_handles, fontsize=6.5, loc="upper left",
+                  bbox_to_anchor=(1.01, 1.0), ncol=1, framealpha=0.95,
+                  borderaxespad=0)
 
     # Title with biological annotation
     ann = cluster.get("annotations", {})
     bio_summary = ann.get("biological_summary", "")
     pattern_label = _pattern_display_name(cluster["pattern"])
+    # v9.28: Include activity class composition in title
+    ac_counts = cluster.get("activity_class_counts", {})
+    ac_parts = []
+    if ac_counts.get("de_novo", 0) > 0:
+        ac_parts.append(f"★{ac_counts['de_novo']} De novo")
+    if ac_counts.get("regulated", 0) > 0:
+        ac_parts.append(f"●{ac_counts['regulated']} Regulated")
+    if ac_counts.get("minor", 0) > 0:
+        ac_parts.append(f"◆{ac_counts['minor']} Minor")
+    ac_str = " | ".join(ac_parts) if ac_parts else ""
     title = (
         f"Cluster {cluster['cluster_id']}: {pattern_label}\n"
         f"{cluster['member_count']} PTM sites | "
         f"Mean correlation: {cluster['correlation_mean']:.2f} | "
         f"Peak: {cluster['peak_timepoint']}"
     )
+    if ac_str:
+        title += f"\n{ac_str}"
     if bio_summary:
         title += f"\n{bio_summary}"
     ax_ptm.set_title(title, fontsize=10, fontweight="normal", loc="left", pad=8)

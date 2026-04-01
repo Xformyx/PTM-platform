@@ -1398,17 +1398,35 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
 
   const visibleLabels = filteredPtms.filter((p) => checked[`${p.gene}_${p.position}`]).map((p) => p.label);
 
-  // Extended color palette for better distinction
-  const COLORS = [
-    "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
-    "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf",
-    "#aec7e8", "#ffbb78", "#98df8a", "#ff9896", "#c5b0d5",
-    "#c49c94", "#f7b6d2", "#c7c7c7", "#dbdb8d", "#9edae5",
-  ];
+  // v9.28: Activity class-based color palettes
+  const AC_PALETTES: Record<string, string[]> = {
+    de_novo: ["#E65100", "#F57C00", "#FF9800", "#FFB74D", "#D84315", "#BF360C", "#EF6C00", "#FFA726", "#FB8C00", "#E55100"],
+    regulated: ["#1565C0", "#1E88E5", "#42A5F5", "#64B5F6", "#0D47A1", "#1976D2", "#2196F3", "#90CAF9", "#0277BD", "#039BE5"],
+    minor: ["#9E9E9E", "#BDBDBD", "#B0BEC5", "#90A4AE", "#78909C", "#A0A0A0", "#C0C0C0", "#8E8E8E", "#ABABAB", "#B5B5B5"],
+  };
+  const AC_LINE_STYLE: Record<string, { strokeWidth: number; strokeDasharray?: string; opacity: number }> = {
+    de_novo: { strokeWidth: 2.5, opacity: 1 },
+    regulated: { strokeWidth: 2.2, opacity: 0.95 },
+    minor: { strokeWidth: 1.2, strokeDasharray: "6 3", opacity: 0.5 },
+  };
 
-  // Fixed color map: each PTM always gets the same color based on its position in uniquePtms
+  // Fixed color map: each PTM gets color based on its activity class
   const colorMap = new Map<string, string>();
-  uniquePtms.forEach((p, i) => { colorMap.set(p.label, COLORS[i % COLORS.length]); });
+  const _acIdx: Record<string, number> = { de_novo: 0, regulated: 0, minor: 0 };
+  uniquePtms.forEach((p) => {
+    const key = `${p.gene}_${p.position}`;
+    const ac = ptmActivityClass.get(key) || "minor";
+    const palette = AC_PALETTES[ac] || AC_PALETTES.minor;
+    colorMap.set(p.label, palette[_acIdx[ac] % palette.length]);
+    _acIdx[ac]++;
+  });
+
+  // Map label to activity class for line style lookup
+  const labelToAC = new Map<string, string>();
+  uniquePtms.forEach((p) => {
+    const key = `${p.gene}_${p.position}`;
+    labelToAC.set(p.label, ptmActivityClass.get(key) || "minor");
+  });
 
   const toggle = (key: string) => setChecked((c) => ({ ...c, [key]: !c[key] }));
 
@@ -1536,7 +1554,7 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
             variant={activityFilter === "de_novo" ? "default" : "outline"}
             size="sm"
             className="text-xs h-7 px-2"
-            style={activityFilter === "de_novo" ? { backgroundColor: "#ef4444", borderColor: "#ef4444" } : {}}
+            style={activityFilter === "de_novo" ? { backgroundColor: "#E65100", borderColor: "#E65100" } : {}}
             onClick={() => setActivityFilter("de_novo")}
             title="Not detected in control (imputed with pseudocount) — may inflate Log2FC"
           >
@@ -1546,9 +1564,9 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
             variant={activityFilter === "regulated" ? "default" : "outline"}
             size="sm"
             className="text-xs h-7 px-2"
-            style={activityFilter === "regulated" ? { backgroundColor: "#10b981", borderColor: "#10b981" } : {}}
+            style={activityFilter === "regulated" ? { backgroundColor: "#1565C0", borderColor: "#1565C0" } : {}}
             onClick={() => setActivityFilter("regulated")}
-            title="Detected in control, |Log2FC| ≥ 1.0 AND q-value < 0.05 (Welch's t-test + BH correction)"
+            title="Detected in control, |Log2FC| \u2265 1.0 AND q-value < 0.05 (Welch's t-test + BH correction)"
           >
             ● Regulated ({activityCounts.regulated})
           </Button>
@@ -1644,29 +1662,40 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
                 }}
               />
               {/* No <Legend /> — labels shown only on hover */}
-              {visibleLabels.map((label) => {
-                const lineColor = colorMap.get(label) || "#1f77b4";
-                return (
-                  <Line
-                    key={label}
-                    type="monotone"
-                    dataKey={label}
-                    stroke={lineColor}
-                    strokeWidth={hoveredPtm === label ? 4 : 2}
-                    dot={{ r: 3, fill: lineColor }}
-                    activeDot={{
-                      r: 7,
-                      fill: lineColor,
-                      onMouseEnter: () => setHoveredPtm(label),
-                      onMouseLeave: () => setHoveredPtm(null),
-                    }}
-                    name={label}
-                    opacity={hoveredPtm && hoveredPtm !== label ? 0.25 : 1}
-                    onMouseEnter={() => setHoveredPtm(label)}
-                    onMouseLeave={() => setHoveredPtm(null)}
-                  />
-                );
-              })}
+              {/* v9.28: Render lines in draw order: minor first (background), then regulated, then de_novo (foreground) */}
+              {["minor", "regulated", "de_novo"].flatMap((drawClass) =>
+                visibleLabels
+                  .filter((label) => (labelToAC.get(label) || "minor") === drawClass)
+                  .map((label) => {
+                    const lineColor = colorMap.get(label) || "#9E9E9E";
+                    const ac = labelToAC.get(label) || "minor";
+                    const style = AC_LINE_STYLE[ac] || AC_LINE_STYLE.minor;
+                    const isHovered = hoveredPtm === label;
+                    const baseWidth = isHovered ? style.strokeWidth + 2 : style.strokeWidth;
+                    const baseOpacity = hoveredPtm && !isHovered ? 0.15 : style.opacity;
+                    return (
+                      <Line
+                        key={label}
+                        type="monotone"
+                        dataKey={label}
+                        stroke={lineColor}
+                        strokeWidth={baseWidth}
+                        strokeDasharray={style.strokeDasharray}
+                        dot={{ r: ac === "minor" ? 2 : 3, fill: lineColor }}
+                        activeDot={{
+                          r: 7,
+                          fill: lineColor,
+                          onMouseEnter: () => setHoveredPtm(label),
+                          onMouseLeave: () => setHoveredPtm(null),
+                        }}
+                        name={label}
+                        opacity={baseOpacity}
+                        onMouseEnter={() => setHoveredPtm(label)}
+                        onMouseLeave={() => setHoveredPtm(null)}
+                      />
+                    );
+                  })
+              )}
             </LineChart>
           </ResponsiveContainer>
         </div>
@@ -1751,8 +1780,8 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
                     title={`${TREND_META[trend].label}: ${TREND_META[trend].description}`}
                   />
                   {/* v9.23: activity class indicator */}
-                  {actCls === "de_novo" && <span className="text-[8px] text-red-400 flex-shrink-0" title="De novo (not detected in control, imputed)">★</span>}
-                  {actCls === "regulated" && <span className="text-[8px] text-emerald-400 flex-shrink-0" title="Regulated (detected in control, meaningful change)">●</span>}
+                  {actCls === "de_novo" && <span className="text-[8px] flex-shrink-0" style={{ color: "#E65100" }} title="De novo (not detected in control, imputed)">★</span>}
+                  {actCls === "regulated" && <span className="text-[8px] flex-shrink-0" style={{ color: "#1565C0" }} title="Regulated (q<0.05, |Log2FC|≥1.0)">●</span>}
                   <span className="truncate flex-1 min-w-0" title={pc ? `${p.label} \u2014 ${pc.role}${pc.ubi_context ? ` (${pc.ubi_context})` : ''} [${pc.confidence}] | ${actCls}` : `${p.label} (${TREND_META[trend].label}) | ${actCls}`}>
                     {p.label}
                   </span>

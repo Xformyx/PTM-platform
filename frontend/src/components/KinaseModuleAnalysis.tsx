@@ -930,8 +930,8 @@ export default function KinaseModuleAnalysis({
                           // v9.27: activity class indicator
                           const actClass = p.activity_class ?? "minor";
                           const actClassConfig = {
-                            de_novo: { symbol: "★", color: "text-orange-500", title: "De novo (no control signal)" },
-                            regulated: { symbol: "●", color: "text-blue-500", title: "Regulated (q<0.05, |FC|≥1)" },
+                            de_novo: { symbol: "★", color: "text-[#E65100]", title: "De novo (no control signal)" },
+                            regulated: { symbol: "●", color: "text-[#1565C0]", title: "Regulated (q<0.05, |FC|≥1)" },
                             minor: { symbol: "", color: "", title: "Minor" },
                           }[actClass];
 
@@ -2811,9 +2811,9 @@ function SignalFlowView({
                                   // Bimodal classification styling
                                   const chipStyle =
                                     actClass === "de_novo"
-                                      ? "bg-red-900/30 text-red-300 border border-red-500 font-semibold"
+                                      ? "bg-orange-900/30 text-orange-300 border border-orange-500 font-semibold"
                                       : actClass === "regulated"
-                                      ? "bg-emerald-900/30 text-emerald-300 border border-emerald-500 font-semibold"
+                                      ? "bg-blue-900/30 text-blue-300 border border-blue-500 font-semibold"
                                       : "bg-muted text-muted-foreground border border-border opacity-60";
                                   const actLabel =
                                     actClass === "de_novo" ? "De novo (control imputed — not detected in control)" :
