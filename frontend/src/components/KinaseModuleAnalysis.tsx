@@ -314,6 +314,7 @@ interface KinaseModuleAnalysisProps {
   checkedPtms: Record<string, boolean>;
   conditions: string[];
   onSelectPtms?: (keys: string[]) => void;
+  highlightedPtmKeys?: Set<string>; // keys currently highlighted in chart (gene_position)
   ptmType?: string; // v9.14: 'phosphorylation' | 'ubiquitylation'
   highlightedKinase?: string | null; // v9.21: from receptor panel click
   inferredReceptors?: InferredReceptor[]; // v9.21: for Signal Flow tab + receptor badges
@@ -505,6 +506,7 @@ export default function KinaseModuleAnalysis({
   checkedPtms,
   conditions,
   onSelectPtms,
+  highlightedPtmKeys,
   ptmType = "phosphorylation",
   highlightedKinase,
   inferredReceptors = [],
@@ -868,18 +870,22 @@ export default function KinaseModuleAnalysis({
                       )}
                     </div>
                     <div className="flex items-center gap-2">
-                      {onSelectPtms && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="text-[10px] h-6 px-2"
-                          onClick={() =>
-                            onSelectPtms(mod.ptms.map((p) => `${p.gene}_${p.position}`))
-                          }
-                        >
-                          Highlight in Chart
-                        </Button>
-                      )}
+                      {onSelectPtms && (() => {
+                        const modKeys = mod.ptms.map((p) => `${p.gene}_${p.position}`);
+                        const isActive = highlightedPtmKeys && highlightedPtmKeys.size > 0 &&
+                          modKeys.every((k) => highlightedPtmKeys.has(k)) &&
+                          modKeys.length === highlightedPtmKeys.size;
+                        return (
+                          <Button
+                            variant={isActive ? "default" : "outline"}
+                            size="sm"
+                            className={`text-[10px] h-6 px-2 transition-colors ${isActive ? "bg-amber-500 hover:bg-amber-600 border-amber-500 text-white" : ""}`}
+                            onClick={() => onSelectPtms(modKeys)}
+                          >
+                            {isActive ? "★ Highlighted" : "Highlight in Chart"}
+                          </Button>
+                        );
+                      })()}
                       <Button
                         variant="default"
                         size="sm"
@@ -1134,6 +1140,7 @@ export default function KinaseModuleAnalysis({
             vectorData={vectorData}
             conditions={conditions}
             onSelectPtms={onSelectPtms}
+            highlightedPtmKeys={highlightedPtmKeys}
             isUbi={isUbi}
           />
         )}
@@ -2113,6 +2120,7 @@ function GlobalKinaseModulesPanel({
   vectorData,
   conditions,
   onSelectPtms,
+  highlightedPtmKeys,
   isUbi = false,
 }: {
   result: GlobalKinaseModuleResponse | null;
@@ -2122,6 +2130,7 @@ function GlobalKinaseModulesPanel({
   vectorData: PtmTimeSeriesRow[];
   conditions: string[];
   onSelectPtms?: (keys: string[]) => void;
+  highlightedPtmKeys?: Set<string>;
   isUbi?: boolean;
 }) {
   const [expandedKinase, setExpandedKinase] = useState<string | null>(null);
@@ -2309,16 +2318,21 @@ function GlobalKinaseModulesPanel({
                   </Badge>
                 </div>
                 <div className="flex items-center gap-1">
-                  {onSelectPtms && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="text-[10px] h-6 px-2"
-                      onClick={() => onSelectPtms(memberKeys)}
-                    >
-                      Highlight in Chart
-                    </Button>
-                  )}
+                  {onSelectPtms && (() => {
+                    const isActive = highlightedPtmKeys && highlightedPtmKeys.size > 0 &&
+                      memberKeys.every((k) => highlightedPtmKeys.has(k)) &&
+                      memberKeys.length === highlightedPtmKeys.size;
+                    return (
+                      <Button
+                        variant={isActive ? "default" : "outline"}
+                        size="sm"
+                        className={`text-[10px] h-6 px-2 transition-colors ${isActive ? "bg-amber-500 hover:bg-amber-600 border-amber-500 text-white" : ""}`}
+                        onClick={() => onSelectPtms(memberKeys)}
+                      >
+                        {isActive ? "★ Highlighted" : "Highlight in Chart"}
+                      </Button>
+                    );
+                  })()}
                 </div>
               </div>
 

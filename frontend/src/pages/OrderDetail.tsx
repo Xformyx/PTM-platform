@@ -1245,6 +1245,8 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
   const [selectedHighlightKinase, setSelectedHighlightKinase] = useState<string | null>(null);
   // v9.23: Bimodal activity filter (de_novo / regulated / minor)
   const [activityFilter, setActivityFilter] = useState<"all" | "de_novo" | "regulated" | "minor">("all");
+  // Module highlight: PTM labels of the highlighted module (empty = none)
+  const [highlightedModulePtmLabels, setHighlightedModulePtmLabels] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     api
@@ -1375,6 +1377,18 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
       }
     }
   });
+
+  // Convert highlighted label set → gene_position key set (for KinaseModuleAnalysis button state)
+  const highlightedPtmKeySet = (() => {
+    if (highlightedModulePtmLabels.size === 0) return new Set<string>();
+    const labelToKey = new Map(uniquePtms.map((p) => [p.label, `${p.gene}_${p.position}`]));
+    const keys = new Set<string>();
+    highlightedModulePtmLabels.forEach((lbl) => {
+      const k = labelToKey.get(lbl);
+      if (k) keys.add(k);
+    });
+    return keys;
+  })();
 
   // Filter PTMs by trend category AND activity filter
   const filteredPtms = uniquePtms.filter((p) => {
@@ -1663,6 +1677,7 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
               />
               {/* No <Legend /> — labels shown only on hover */}
               {/* v9.28: Render lines in draw order: minor first (background), then regulated, then de_novo (foreground) */}
+              {/* Also supports module highlight from Co-wave */}
               {["minor", "regulated", "de_novo"].flatMap((drawClass) =>
                 visibleLabels
                   .filter((label) => (labelToAC.get(label) || "minor") === drawClass)
@@ -1671,8 +1686,20 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
                     const ac = labelToAC.get(label) || "minor";
                     const style = AC_LINE_STYLE[ac] || AC_LINE_STYLE.minor;
                     const isHovered = hoveredPtm === label;
-                    const baseWidth = isHovered ? style.strokeWidth + 2 : style.strokeWidth;
-                    const baseOpacity = hoveredPtm && !isHovered ? 0.15 : style.opacity;
+                    const isModuleHighlighted = highlightedModulePtmLabels.size > 0;
+                    const inModule = highlightedModulePtmLabels.has(label);
+                    // Priority: hover > module highlight > activity class default
+                    const baseWidth = isHovered
+                      ? style.strokeWidth + 2
+                      : inModule && isModuleHighlighted
+                        ? 3.5
+                        : style.strokeWidth;
+                    const baseOpacity = hoveredPtm
+                      ? isHovered ? 1 : 0.15
+                      : isModuleHighlighted
+                        ? inModule ? 1 : 0.12
+                        : style.opacity;
+                    const dotR = inModule && isModuleHighlighted ? 4 : ac === "minor" ? 2 : 3;
                     return (
                       <Line
                         key={label}
@@ -1681,7 +1708,7 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
                         stroke={lineColor}
                         strokeWidth={baseWidth}
                         strokeDasharray={style.strokeDasharray}
-                        dot={{ r: ac === "minor" ? 2 : 3, fill: lineColor }}
+                        dot={{ r: dotR, fill: lineColor }}
                         activeDot={{
                           r: 7,
                           fill: lineColor,
@@ -1968,12 +1995,17 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
           topNPtms={uniquePtms}
           checkedPtms={checked}
           conditions={conditions}
+          highlightedPtmKeys={highlightedPtmKeySet}
           onSelectPtms={(keys) => {
-            setChecked((c) => {
-              const next: Record<string, boolean> = {};
-              Object.keys(c).forEach((k) => { next[k] = false; });
-              keys.forEach((k) => { next[k] = true; });
-              return next;
+            // Convert PTM keys (gene_position) → labels for chart highlight
+            const keySet = new Set(keys);
+            const labels = uniquePtms
+              .filter((p) => keySet.has(`${p.gene}_${p.position}`))
+              .map((p) => p.label);
+            setHighlightedModulePtmLabels((prev) => {
+              // Toggle: if same set already highlighted, clear
+              const same = prev.size === labels.length && labels.every((l) => prev.has(l));
+              return same ? new Set() : new Set(labels);
             });
           }}
         />
