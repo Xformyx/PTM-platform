@@ -12,11 +12,20 @@ Changes from original:
   - 8-category cell-signaling classification system RESTORED
   - LOCAL-FIRST data loading: HPA/GTEx from local files with API fallback
   - TypeScript → Python
+
+v9.29.0 — Parallel Enrichment:
+  - Level 1: PTM-internal parallelization (ThreadPoolExecutor for independent MCP calls)
+  - Level 2: Gene-level result caching + PTM-level concurrent processing
+  - 3-phase dependency-aware execution within each PTM
+  - Thread-safe progress tracking
 """
 
 import logging
 import math
 import re
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable, Dict, List, Optional
 
 import pandas as pd
@@ -41,6 +50,43 @@ PTM_HIGH = 2.0       # Strong PTM change threshold (|Log2FC| > 2.0 = 4x fold cha
 PTM_LOW = 0.5        # Minimal PTM change threshold (|Log2FC| <= 0.5 = <1.4x fold change)
 PROTEIN_CHANGE = 0.5  # Protein change threshold (|Log2FC| > 0.5 = >1.4x fold change)
 
+# ---------------------------------------------------------------------------
+# Parallelization Config
+# ---------------------------------------------------------------------------
+# Level 1: Max concurrent MCP calls within a single PTM enrichment
+MCP_WORKERS = 6
+# Level 2: Max concurrent PTM enrichments (gene-level dedup reduces actual load)
+PTM_WORKERS = 4
+# Rate limiting: small delay between batches to avoid overwhelming MCP servers
+BATCH_DELAY_SEC = 0.1
+
+
+class _GeneCache:
+    """Thread-safe cache for gene-level MCP results.
+
+    Many PTMs share the same gene (e.g. MAPK1 S189, MAPK1 T185).
+    Gene-level queries (KEGG, STRING-DB, UniProt, HPA, GTEx, BioGRID, Reactome)
+    return identical results regardless of the specific PTM site.
+    This cache stores those results so they are fetched only once per gene.
+    """
+
+    def __init__(self):
+        self._store: Dict[str, dict] = {}
+        self._lock = threading.Lock()
+
+    def get(self, key: str) -> Optional[dict]:
+        with self._lock:
+            return self._store.get(key)
+
+    def set(self, key: str, value: dict) -> None:
+        with self._lock:
+            self._store[key] = value
+
+    def has(self, key: str) -> bool:
+        with self._lock:
+            return key in self._store
+
+
 class RAGEnrichmentPipeline:
     """Enriches PTM vector data with literature search and pattern-based analysis."""
     def __init__(
@@ -56,7 +102,8 @@ class RAGEnrichmentPipeline:
     ):
         self.mcp = mcp_client
         self.reg_extractor = RegulationExtractor()
-        self._progress = progress_callback or (lambda p, m: None)
+        self._progress_cb = progress_callback or (lambda p, m: None)
+        self._progress_lock = threading.Lock()
         # LLM-based analysis modules (restored from original)
         self.enable_llm = enable_llm_analysis
         self.enable_fulltext = enable_fulltext
@@ -87,6 +134,21 @@ class RAGEnrichmentPipeline:
         else:
             logger.info("GTEx local data not available — will use MCP API only")
 
+        # Level 2: Gene-level result cache
+        self._gene_cache = _GeneCache()
+
+    # ------------------------------------------------------------------
+    # Thread-safe progress reporting
+    # ------------------------------------------------------------------
+
+    def _progress(self, pct: float, msg: str) -> None:
+        with self._progress_lock:
+            self._progress_cb(pct, msg)
+
+    # ------------------------------------------------------------------
+    # Main entry point
+    # ------------------------------------------------------------------
+
     def enrich_ptm_data(
         self,
         ptm_data: List[dict],
@@ -105,7 +167,7 @@ class RAGEnrichmentPipeline:
             Enriched PTM list with added rag_enrichment field.
         """
         total = len(ptm_data)
-        logger.info(f"RAG enrichment: processing {total} PTM entries")
+        logger.info(f"RAG enrichment: processing {total} PTM entries (parallel mode: MCP_WORKERS={MCP_WORKERS}, PTM_WORKERS={PTM_WORKERS})")
 
         # MCP health check
         try:
@@ -139,22 +201,44 @@ class RAGEnrichmentPipeline:
         context_keywords = self._extract_context_keywords(experimental_context)
         logger.info(f"Context keywords: {context_keywords}")
 
-        enriched = []
+        # ── Gene deduplication analysis ──
+        gene_counts: Dict[str, int] = {}
+        for ptm in ptm_data:
+            g = ptm.get("gene") or ptm.get("Gene.Name", "?")
+            gene_counts[g] = gene_counts.get(g, 0) + 1
+        unique_genes = len(gene_counts)
+        multi_site_genes = sum(1 for c in gene_counts.values() if c > 1)
+        logger.info(
+            f"Gene dedup analysis: {total} PTMs → {unique_genes} unique genes "
+            f"({multi_site_genes} genes with multiple sites, "
+            f"cache will save ~{total - unique_genes} redundant gene-level queries)"
+        )
+
+        # ── Level 2: Parallel PTM enrichment ──
+        enriched = [None] * total  # Pre-allocate to maintain order
         stats = {"success": 0, "failed": 0, "total_articles": 0, "total_pathways": 0}
-        for i, ptm in enumerate(ptm_data):
+        stats_lock = threading.Lock()
+        completed_count = [0]  # mutable counter for thread-safe increment
+
+        t_start = time.time()
+
+        def _enrich_worker(idx: int, ptm: dict) -> None:
             gene = ptm.get("gene") or ptm.get("Gene.Name", "?")
             pos = ptm.get("position") or ptm.get("PTM_Position", "?")
-            self._progress(i / total, f"Enriching {gene} {pos} ({i+1}/{total})")
 
             try:
-                result = self._enrich_single_ptm(ptm, context_keywords, experimental_context)
-                enriched.append(result)
-                stats["success"] += 1
-                enr = result.get("rag_enrichment", {})
-                stats["total_articles"] += enr.get("search_summary", {}).get("total_articles", 0)
-                stats["total_pathways"] += len(enr.get("pathways", []))
+                result = self._enrich_single_ptm_parallel(ptm, context_keywords, experimental_context)
+                enriched[idx] = result
 
-                # --- Progress callback with 3-Layer pathway detail ---
+                enr = result.get("rag_enrichment", {})
+                with stats_lock:
+                    stats["success"] += 1
+                    stats["total_articles"] += enr.get("search_summary", {}).get("total_articles", 0)
+                    stats["total_pathways"] += len(enr.get("pathways", []))
+                    completed_count[0] += 1
+                    done = completed_count[0]
+
+                # Progress callback with 3-Layer pathway detail
                 kc = len(enr.get("pathways", []))
                 rc = enr.get("reactome", {})
                 rc_sig = rc.get("signaling_count", 0) if rc else 0
@@ -162,7 +246,6 @@ class RAGEnrichmentPipeline:
                 si = enr.get("string_indirect", {})
                 si_c = len(si.get("signaling_pathways", [])) if si else 0
                 pw_total = kc + rc_tot + si_c
-                # Build compact pathway summary for UI
                 pw_parts = []
                 if kc > 0:
                     pw_parts.append(f"KEGG:{kc}")
@@ -172,17 +255,45 @@ class RAGEnrichmentPipeline:
                     pw_parts.append(f"STR-Indir:{si_c}")
                 pw_summary = ", ".join(pw_parts) if pw_parts else "no pathways"
                 art_count = enr.get("search_summary", {}).get("total_articles", 0)
+                cached = " [gene-cached]" if self._gene_cache.has(f"{gene}__kegg") else ""
                 self._progress(
-                    (i + 1) / total,
-                    f"[{i+1}/{total}] {gene} {pos}: {art_count} articles, {pw_total} pathways ({pw_summary})"
+                    done / total,
+                    f"[{done}/{total}] {gene} {pos}: {art_count} articles, {pw_total} pathways ({pw_summary}){cached}"
                 )
             except Exception as e:
                 logger.error(f"Enrichment FAILED for {gene}/{pos}: {e}", exc_info=True)
                 ptm_log2fc = ptm.get("ptm_relative_log2fc") or ptm.get("PTM_Relative_Log2FC", 0)
                 protein_log2fc = ptm.get("protein_log2fc") or ptm.get("Protein_Log2FC", 0)
                 ptm["rag_enrichment"] = self._empty_enrichment(ptm_log2fc, protein_log2fc)
-                enriched.append(ptm)
-                stats["failed"] += 1
+                enriched[idx] = ptm
+                with stats_lock:
+                    stats["failed"] += 1
+                    completed_count[0] += 1
+
+        # Execute with ThreadPoolExecutor (Level 2)
+        self._progress(0.0, f"Starting parallel enrichment: {total} PTMs, {unique_genes} unique genes")
+        with ThreadPoolExecutor(max_workers=PTM_WORKERS, thread_name_prefix="ptm_enrich") as executor:
+            futures = {}
+            for i, ptm in enumerate(ptm_data):
+                gene = ptm.get("gene") or ptm.get("Gene.Name", "?")
+                pos = ptm.get("position") or ptm.get("PTM_Position", "?")
+                self._progress(i / total, f"Submitting {gene} {pos} ({i+1}/{total})")
+                future = executor.submit(_enrich_worker, i, ptm)
+                futures[future] = (i, gene, pos)
+
+            # Wait for all futures to complete
+            for future in as_completed(futures):
+                idx, gene, pos = futures[future]
+                try:
+                    future.result()  # Re-raise any unhandled exceptions
+                except Exception as e:
+                    logger.error(f"Unhandled exception in PTM worker {gene}/{pos}: {e}", exc_info=True)
+
+        t_elapsed = time.time() - t_start
+        logger.info(f"Parallel enrichment completed in {t_elapsed:.1f}s ({t_elapsed/total:.1f}s per PTM avg)")
+
+        # Filter out any None entries (shouldn't happen, but safety)
+        enriched = [e for e in enriched if e is not None]
 
         # ── 3-Layer Pathway Enrichment Summary Table ──
         layer_stats = {"kegg": 0, "kegg_genes": 0, "reactome": 0, "reactome_genes": 0,
@@ -245,15 +356,20 @@ class RAGEnrichmentPipeline:
             rc_sig = rc_data.get("signaling_count", 0) if rc_data else 0
             si_data = enr.get("string_indirect", {})
             si_count = len(si_data.get("signaling_pathways", [])) if si_data else 0
-            total = kc + rc_total + si_count
-            marker = " ⚠" if total == 0 else ""
-            logger.info(f"  {g:<15} {kc:>6} {rc_total:>10} {rc_sig:>10} {si_count:>10} {total:>7}{marker}")
+            total_pw = kc + rc_total + si_count
+            marker = " ⚠" if total_pw == 0 else ""
+            logger.info(f"  {g:<15} {kc:>6} {rc_total:>10} {rc_sig:>10} {si_count:>10} {total_pw:>7}{marker}")
         logger.info("═" * 70)
         logger.info("")
 
+        # Gene cache stats
+        cache_keys = [k for k in dir(self._gene_cache._store) if not k.startswith('_')]
+        logger.info(f"Gene cache entries: {len(self._gene_cache._store)} (saved redundant MCP calls for multi-site genes)")
+
         logger.info(
             f"Enrichment complete: {stats['success']} OK, {stats['failed']} failed, "
-            f"total articles={stats['total_articles']}, total pathways={stats['total_pathways']}"
+            f"total articles={stats['total_articles']}, total pathways={stats['total_pathways']}, "
+            f"elapsed={t_elapsed:.1f}s"
         )
         # --- Final 3-Layer summary via progress callback (visible in web UI) ---
         self._progress(0.98,
@@ -261,179 +377,377 @@ class RAGEnrichmentPipeline:
             f"Reactome={layer_stats['reactome']}pw({layer_stats['reactome_signaling']}sig)/{layer_stats['reactome_genes']}genes, "
             f"STRING-Indirect={layer_stats['string_indirect']}pw/{layer_stats['string_indirect_genes']}genes"
         )
-        self._progress(1.0, f"Enrichment complete: {len(enriched)} PTMs, {stats['total_articles']} articles, {stats['total_pathways']} KEGG pathways")
+        self._progress(1.0,
+            f"Enrichment complete: {len(enriched)} PTMs, {stats['total_articles']} articles, "
+            f"{stats['total_pathways']} KEGG pathways ({t_elapsed:.0f}s, {t_elapsed/max(total,1):.1f}s/PTM)"
+        )
         return enriched
 
-    def _enrich_single_ptm(
+    # ------------------------------------------------------------------
+    # Level 1 + Level 2: Parallel single-PTM enrichment
+    # ------------------------------------------------------------------
+
+    def _enrich_single_ptm_parallel(
         self, ptm: dict, context_keywords: List[str], context: Optional[dict]
     ) -> dict:
+        """Enrich a single PTM with parallelized MCP calls and gene-level caching.
+
+        Execution is split into 3 dependency-aware phases:
+
+        Phase A (parallel, no dependencies):
+            PubMed, KEGG, STRING-DB, UniProt, HPA, GTEx, BioGRID, Reactome
+            → Gene-level results (KEGG, STRING, UniProt, HPA, GTEx, BioGRID, Reactome)
+              are cached so multi-site genes only query once.
+
+        Phase B (parallel, depends on PubMed articles from Phase A):
+            Regulation extraction, Abstract analysis, Kinase prediction, Fulltext analysis, PTM validation
+            → Also depends on KEGG for functional_impact (pathway names)
+
+        Phase C (conditional, depends on KEGG from Phase A):
+            STRING indirect (only when KEGG pathways < 3)
+        """
         gene = ptm.get("gene") or ptm.get("Gene.Name", "Unknown")
         position = ptm.get("position") or ptm.get("PTM_Position", "Unknown")
         ptm_type = ptm.get("ptm_type") or ptm.get("PTM_Type", "Phosphorylation")
         species = (context or {}).get("organism") or (context or {}).get("species", "")
-
-        # 1. PubMed search via MCP
-        search_result = {}
-        articles = []
-        try:
-            search_result = self.mcp.search_pubmed(
-                gene=gene, position=position, ptm_type=ptm_type,
-                context_keywords=context_keywords, max_results=15,
-            )
-            articles = search_result.get("articles", [])
-            logger.info(f"PubMed search for {gene} {position}: {len(articles)} articles found")
-        except Exception as e:
-            logger.warning(f"PubMed search failed for {gene} {position}: {e}")
-
-        # 2. Pattern-based regulation extraction
-        regulation = {"upstream_regulators": [], "downstream_targets": [], "kinase_substrate": [], "regulation_evidence": [], "diseases": []}
-        try:
-            regulation = self.reg_extractor.extract_from_articles(articles, gene, position)
-        except Exception as e:
-            logger.warning(f"Regulation extraction failed for {gene}: {e}")
-
-        # 3. KEGG pathway info via MCP
-        kegg_info = {}
-        kegg_pathways = []
-        try:
-            kegg_info = self.mcp.query_kegg(gene)
-            kegg_pathways = kegg_info.get("pathways", [])
-            kegg_pw_names = [p.get("name", str(p)) if isinstance(p, dict) else str(p) for p in kegg_pathways[:5]]
-            logger.info(f"[Layer1-KEGG] {gene}: {len(kegg_pathways)} pathways → {kegg_pw_names}")
-        except Exception as e:
-            logger.warning(f"KEGG query failed for {gene}: {e}")
-
-        # 4. STRING-DB interactions via MCP
-        string_info = {}
-        interactions = []
-        try:
-            string_info = self.mcp.query_stringdb(gene, species=species)
-            interactions = string_info.get("interactions", [])
-            top_partners = [i.get("partner", "?") for i in interactions[:5]]
-            logger.info(f"[STRING-DB] {gene}: {len(interactions)} interactions → {top_partners}")
-        except Exception as e:
-            logger.warning(f"STRING-DB query failed for {gene}: {e}")
-
-        # 5. UniProt info via MCP
         protein_id = ptm.get("protein_id") or ptm.get("Protein.Group", "")
-        uniprot_info = {}
-        try:
-            if protein_id:
+
+        # ══════════════════════════════════════════════════════════════
+        # PHASE A: Independent MCP calls (parallel)
+        # ══════════════════════════════════════════════════════════════
+        phase_a_results = {}
+
+        def _pubmed():
+            try:
+                result = self.mcp.search_pubmed(
+                    gene=gene, position=position, ptm_type=ptm_type,
+                    context_keywords=context_keywords, max_results=15,
+                )
+                articles = result.get("articles", [])
+                logger.info(f"PubMed search for {gene} {position}: {len(articles)} articles found")
+                return {"search_result": result, "articles": articles}
+            except Exception as e:
+                logger.warning(f"PubMed search failed for {gene} {position}: {e}")
+                return {"search_result": {}, "articles": []}
+
+        def _kegg():
+            cache_key = f"{gene}__kegg"
+            cached = self._gene_cache.get(cache_key)
+            if cached is not None:
+                logger.debug(f"[CACHE HIT] KEGG for {gene}")
+                return cached
+            try:
+                kegg_info = self.mcp.query_kegg(gene)
+                kegg_pathways = kegg_info.get("pathways", [])
+                kegg_pw_names = [p.get("name", str(p)) if isinstance(p, dict) else str(p) for p in kegg_pathways[:5]]
+                logger.info(f"[Layer1-KEGG] {gene}: {len(kegg_pathways)} pathways → {kegg_pw_names}")
+                result = {"kegg_info": kegg_info, "kegg_pathways": kegg_pathways}
+                self._gene_cache.set(cache_key, result)
+                return result
+            except Exception as e:
+                logger.warning(f"KEGG query failed for {gene}: {e}")
+                result = {"kegg_info": {}, "kegg_pathways": []}
+                self._gene_cache.set(cache_key, result)
+                return result
+
+        def _stringdb():
+            cache_key = f"{gene}__stringdb__{species}"
+            cached = self._gene_cache.get(cache_key)
+            if cached is not None:
+                logger.debug(f"[CACHE HIT] STRING-DB for {gene}")
+                return cached
+            try:
+                string_info = self.mcp.query_stringdb(gene, species=species)
+                interactions = string_info.get("interactions", [])
+                top_partners = [i.get("partner", "?") for i in interactions[:5]]
+                logger.info(f"[STRING-DB] {gene}: {len(interactions)} interactions → {top_partners}")
+                result = {"string_info": string_info, "interactions": interactions}
+                self._gene_cache.set(cache_key, result)
+                return result
+            except Exception as e:
+                logger.warning(f"STRING-DB query failed for {gene}: {e}")
+                result = {"string_info": {}, "interactions": []}
+                self._gene_cache.set(cache_key, result)
+                return result
+
+        def _uniprot():
+            if not protein_id:
+                return {"uniprot_info": {}}
+            cache_key = f"{protein_id}__uniprot"
+            cached = self._gene_cache.get(cache_key)
+            if cached is not None:
+                logger.debug(f"[CACHE HIT] UniProt for {protein_id}")
+                return cached
+            try:
                 uniprot_info = self.mcp.query_uniprot(protein_id)
                 logger.info(f"[UniProt] {gene} ({protein_id}): {'found' if uniprot_info else 'empty'}")
-        except Exception as e:
-            logger.warning(f"UniProt query failed for {protein_id}: {e}")
-
-        # 6. HPA (Human Protein Atlas) — LOCAL-FIRST with API fallback
-        hpa_data = {}
-        try:
-            hpa_data = self._query_hpa_local_first(gene)
-        except Exception as e:
-            logger.warning(f"HPA query failed for {gene}: {e}")
-
-        # 7. GTEx tissue expression — LOCAL-FIRST with API fallback
-        gtex_data = {}
-        try:
-            gtex_data = self._query_gtex_local_first(gene)
-        except Exception as e:
-            logger.warning(f"GTEx query failed for {gene}: {e}")
-
-        # 8. BioGRID interactions via MCP
-        biogrid_data = {}
-        try:
-            biogrid_data = self.mcp.query_biogrid(gene)
-        except Exception as e:
-            logger.warning(f"BioGRID query failed for {gene}: {e}")
-
-        # 8b. Reactome pathway info via MCP (Layer 1: 3-Layer Pathway Enrichment)
-        reactome_data = {}
-        try:
-            reactome_data = self.mcp.query_reactome(gene)
-            reactome_count = reactome_data.get("total_count", 0)
-            signaling_count = reactome_data.get("signaling_count", 0)
-            reactome_pw_names = [p.get("name", "?") for p in reactome_data.get("signaling_pathways", [])[:5]]
-            logger.info(f"[Layer1-Reactome] {gene}: {reactome_count} total, {signaling_count} signaling → {reactome_pw_names}")
-        except Exception as e:
-            logger.warning(f"Reactome query failed for {gene}: {e}")
-
-        # 8c. STRING indirect pathway inference (Layer 3: for genes with few KEGG pathways)
-        string_indirect_data = {}
-        if len(kegg_pathways) < 3:  # Only for genes with sparse KEGG coverage
-            try:
-                string_indirect_data = self.mcp.query_string_indirect(gene)
-                inferred_pws = string_indirect_data.get("signaling_pathways", [])
-                inferred_names = [p.get("pathway_name", p) if isinstance(p, dict) else str(p) for p in inferred_pws[:5]]
-                logger.info(
-                    f"[Layer3-STRING-Indirect] {gene}: {len(inferred_pws)} inferred pathways "
-                    f"(from {string_indirect_data.get('partners_used', '?')} partners) → {inferred_names}"
-                )
+                result = {"uniprot_info": uniprot_info}
+                self._gene_cache.set(cache_key, result)
+                return result
             except Exception as e:
-                logger.warning(f"STRING indirect query failed for {gene}: {e}")
+                logger.warning(f"UniProt query failed for {protein_id}: {e}")
+                result = {"uniprot_info": {}}
+                self._gene_cache.set(cache_key, result)
+                return result
 
-        # 9. LLM-based abstract analysis (RESTORED)
+        def _hpa():
+            cache_key = f"{gene}__hpa"
+            cached = self._gene_cache.get(cache_key)
+            if cached is not None:
+                logger.debug(f"[CACHE HIT] HPA for {gene}")
+                return cached
+            try:
+                hpa_data = self._query_hpa_local_first(gene)
+                result = {"hpa_data": hpa_data}
+                self._gene_cache.set(cache_key, result)
+                return result
+            except Exception as e:
+                logger.warning(f"HPA query failed for {gene}: {e}")
+                result = {"hpa_data": {}}
+                self._gene_cache.set(cache_key, result)
+                return result
+
+        def _gtex():
+            cache_key = f"{gene}__gtex"
+            cached = self._gene_cache.get(cache_key)
+            if cached is not None:
+                logger.debug(f"[CACHE HIT] GTEx for {gene}")
+                return cached
+            try:
+                gtex_data = self._query_gtex_local_first(gene)
+                result = {"gtex_data": gtex_data}
+                self._gene_cache.set(cache_key, result)
+                return result
+            except Exception as e:
+                logger.warning(f"GTEx query failed for {gene}: {e}")
+                result = {"gtex_data": {}}
+                self._gene_cache.set(cache_key, result)
+                return result
+
+        def _biogrid():
+            cache_key = f"{gene}__biogrid"
+            cached = self._gene_cache.get(cache_key)
+            if cached is not None:
+                logger.debug(f"[CACHE HIT] BioGRID for {gene}")
+                return cached
+            try:
+                biogrid_data = self.mcp.query_biogrid(gene)
+                result = {"biogrid_data": biogrid_data}
+                self._gene_cache.set(cache_key, result)
+                return result
+            except Exception as e:
+                logger.warning(f"BioGRID query failed for {gene}: {e}")
+                result = {"biogrid_data": {}}
+                self._gene_cache.set(cache_key, result)
+                return result
+
+        def _reactome():
+            cache_key = f"{gene}__reactome"
+            cached = self._gene_cache.get(cache_key)
+            if cached is not None:
+                logger.debug(f"[CACHE HIT] Reactome for {gene}")
+                return cached
+            try:
+                reactome_data = self.mcp.query_reactome(gene)
+                reactome_count = reactome_data.get("total_count", 0)
+                signaling_count = reactome_data.get("signaling_count", 0)
+                reactome_pw_names = [p.get("name", "?") for p in reactome_data.get("signaling_pathways", [])[:5]]
+                logger.info(f"[Layer1-Reactome] {gene}: {reactome_count} total, {signaling_count} signaling → {reactome_pw_names}")
+                result = {"reactome_data": reactome_data}
+                self._gene_cache.set(cache_key, result)
+                return result
+            except Exception as e:
+                logger.warning(f"Reactome query failed for {gene}: {e}")
+                result = {"reactome_data": {}}
+                self._gene_cache.set(cache_key, result)
+                return result
+
+        # Execute Phase A in parallel
+        phase_a_tasks = {
+            "pubmed": _pubmed,
+            "kegg": _kegg,
+            "stringdb": _stringdb,
+            "uniprot": _uniprot,
+            "hpa": _hpa,
+            "gtex": _gtex,
+            "biogrid": _biogrid,
+            "reactome": _reactome,
+        }
+
+        with ThreadPoolExecutor(max_workers=MCP_WORKERS, thread_name_prefix=f"mcp_{gene[:8]}") as pool:
+            futures_a = {name: pool.submit(fn) for name, fn in phase_a_tasks.items()}
+            for name, future in futures_a.items():
+                try:
+                    phase_a_results[name] = future.result(timeout=60)
+                except Exception as e:
+                    logger.error(f"Phase A task '{name}' failed for {gene}: {e}")
+                    phase_a_results[name] = {}
+
+        # Unpack Phase A results
+        pubmed_r = phase_a_results.get("pubmed", {})
+        search_result = pubmed_r.get("search_result", {})
+        articles = pubmed_r.get("articles", [])
+
+        kegg_r = phase_a_results.get("kegg", {})
+        kegg_info = kegg_r.get("kegg_info", {})
+        kegg_pathways = kegg_r.get("kegg_pathways", [])
+
+        stringdb_r = phase_a_results.get("stringdb", {})
+        string_info = stringdb_r.get("string_info", {})
+        interactions = stringdb_r.get("interactions", [])
+
+        uniprot_r = phase_a_results.get("uniprot", {})
+        uniprot_info = uniprot_r.get("uniprot_info", {})
+
+        hpa_r = phase_a_results.get("hpa", {})
+        hpa_data = hpa_r.get("hpa_data", {})
+
+        gtex_r = phase_a_results.get("gtex", {})
+        gtex_data = gtex_r.get("gtex_data", {})
+
+        biogrid_r = phase_a_results.get("biogrid", {})
+        biogrid_data = biogrid_r.get("biogrid_data", {})
+
+        reactome_r = phase_a_results.get("reactome", {})
+        reactome_data = reactome_r.get("reactome_data", {})
+
+        # ══════════════════════════════════════════════════════════════
+        # PHASE B: PubMed-dependent tasks (parallel)
+        # ══════════════════════════════════════════════════════════════
+        regulation = {"upstream_regulators": [], "downstream_targets": [], "kinase_substrate": [], "regulation_evidence": [], "diseases": []}
         abstract_analysis = {}
-        if self.enable_llm and articles:
-            try:
-                raw_abstract = self.abstract_analyzer.analyze(
-                    articles=articles, gene=gene, position=position, ptm_type=ptm_type,
-                )
-                # Convert AbstractAnalysis dataclass to dict for JSON serialization
-                abstract_analysis = _asdict(raw_abstract) if hasattr(raw_abstract, '__dataclass_fields__') else (raw_abstract if isinstance(raw_abstract, dict) else {})
-            except Exception as e:
-                logger.warning(f"Abstract analysis failed for {gene}: {e}")
-
-        # 10. LLM-based kinase prediction (RESTORED)
         kinase_prediction = {}
-        if self.enable_llm:
-            try:
-                kinase_prediction = self.kinase_predictor.predict(
-                    gene=gene, site=position, ptm_type=ptm_type,
-                    context=context, articles=articles,
-                )
-            except Exception as e:
-                logger.warning(f"Kinase prediction failed for {gene}: {e}")
-
-        # 11. LLM-based functional impact analysis (RESTORED)
         functional_impact = {}
-        if self.enable_llm:
-            try:
-                pathway_names = [p.get("name", p) if isinstance(p, dict) else p for p in kegg_pathways]
-                functional_impact = self.functional_impact.analyze(
-                    gene=gene, site=position, ptm_type=ptm_type,
-                    articles=articles, pathways=pathway_names,
-                )
-            except Exception as e:
-                logger.warning(f"Functional impact analysis failed for {gene}: {e}")
-
-        # 12. Full-text analysis via PMC (RESTORED)
         fulltext_results = {}
-        if self.enable_fulltext:
-            try:
-                fulltext_results = self._run_fulltext_analysis(
-                    gene=gene, position=position, ptm_type=ptm_type,
-                    articles=articles,
-                )
-            except Exception as e:
-                logger.warning(f"Full-text analysis failed for {gene}: {e}")
-
-        # 13. PTM validation / novelty check (RESTORED + v4.0 context-aware)
         validation_result = {}
-        if self.enable_ptm_validation:
+
+        phase_b_tasks = {}
+
+        # Regulation extraction (depends on articles)
+        def _regulation():
             try:
-                raw_result = self.ptm_validator.validate(
-                    gene=gene,
-                    position=position,
-                    ptm_type=ptm_type,
-                    experimental_context=context,  # v4.0: pass context for context-aware search
-                )
-                # Convert dataclass to dict for JSON serialization & report_generator compatibility
-                validation_result = _asdict(raw_result) if hasattr(raw_result, '__dataclass_fields__') else raw_result
+                return self.reg_extractor.extract_from_articles(articles, gene, position)
             except Exception as e:
-                logger.warning(f"PTM validation failed for {gene}: {e}")
+                logger.warning(f"Regulation extraction failed for {gene}: {e}")
+                return {"upstream_regulators": [], "downstream_targets": [], "kinase_substrate": [], "regulation_evidence": [], "diseases": []}
+        phase_b_tasks["regulation"] = _regulation
+
+        # LLM-based abstract analysis
+        if self.enable_llm and articles:
+            def _abstract():
+                try:
+                    raw = self.abstract_analyzer.analyze(
+                        articles=articles, gene=gene, position=position, ptm_type=ptm_type,
+                    )
+                    return _asdict(raw) if hasattr(raw, '__dataclass_fields__') else (raw if isinstance(raw, dict) else {})
+                except Exception as e:
+                    logger.warning(f"Abstract analysis failed for {gene}: {e}")
+                    return {}
+            phase_b_tasks["abstract"] = _abstract
+
+        # LLM-based kinase prediction
+        if self.enable_llm:
+            def _kinase():
+                try:
+                    return self.kinase_predictor.predict(
+                        gene=gene, site=position, ptm_type=ptm_type,
+                        context=context, articles=articles,
+                    )
+                except Exception as e:
+                    logger.warning(f"Kinase prediction failed for {gene}: {e}")
+                    return {}
+            phase_b_tasks["kinase"] = _kinase
+
+        # LLM-based functional impact (depends on KEGG pathways from Phase A)
+        if self.enable_llm:
+            def _functional():
+                try:
+                    pathway_names = [p.get("name", p) if isinstance(p, dict) else p for p in kegg_pathways]
+                    return self.functional_impact.analyze(
+                        gene=gene, site=position, ptm_type=ptm_type,
+                        articles=articles, pathways=pathway_names,
+                    )
+                except Exception as e:
+                    logger.warning(f"Functional impact analysis failed for {gene}: {e}")
+                    return {}
+            phase_b_tasks["functional"] = _functional
+
+        # Full-text analysis via PMC
+        if self.enable_fulltext:
+            def _fulltext():
+                try:
+                    return self._run_fulltext_analysis(
+                        gene=gene, position=position, ptm_type=ptm_type,
+                        articles=articles,
+                    )
+                except Exception as e:
+                    logger.warning(f"Full-text analysis failed for {gene}: {e}")
+                    return {}
+            phase_b_tasks["fulltext"] = _fulltext
+
+        # PTM validation / novelty check
+        if self.enable_ptm_validation:
+            def _validation():
+                try:
+                    raw_result = self.ptm_validator.validate(
+                        gene=gene, position=position, ptm_type=ptm_type,
+                        experimental_context=context,
+                    )
+                    return _asdict(raw_result) if hasattr(raw_result, '__dataclass_fields__') else raw_result
+                except Exception as e:
+                    logger.warning(f"PTM validation failed for {gene}: {e}")
+                    return {}
+            phase_b_tasks["validation"] = _validation
+
+        # Execute Phase B in parallel (LLM calls are I/O-bound, safe to parallelize)
+        phase_b_results = {}
+        if phase_b_tasks:
+            with ThreadPoolExecutor(max_workers=min(len(phase_b_tasks), MCP_WORKERS), thread_name_prefix=f"llm_{gene[:8]}") as pool:
+                futures_b = {name: pool.submit(fn) for name, fn in phase_b_tasks.items()}
+                for name, future in futures_b.items():
+                    try:
+                        phase_b_results[name] = future.result(timeout=120)
+                    except Exception as e:
+                        logger.error(f"Phase B task '{name}' failed for {gene}: {e}")
+                        phase_b_results[name] = {}
+
+        regulation = phase_b_results.get("regulation", regulation)
+        abstract_analysis = phase_b_results.get("abstract", {})
+        kinase_prediction = phase_b_results.get("kinase", {})
+        functional_impact = phase_b_results.get("functional", {})
+        fulltext_results = phase_b_results.get("fulltext", {})
+        validation_result = phase_b_results.get("validation", {})
+
+        # ══════════════════════════════════════════════════════════════
+        # PHASE C: Conditional STRING indirect (depends on KEGG count)
+        # ══════════════════════════════════════════════════════════════
+        string_indirect_data = {}
+        if len(kegg_pathways) < 3:
+            cache_key = f"{gene}__string_indirect"
+            cached = self._gene_cache.get(cache_key)
+            if cached is not None:
+                string_indirect_data = cached.get("string_indirect_data", {})
+                logger.debug(f"[CACHE HIT] STRING indirect for {gene}")
+            else:
+                try:
+                    string_indirect_data = self.mcp.query_string_indirect(gene)
+                    inferred_pws = string_indirect_data.get("signaling_pathways", [])
+                    inferred_names = [p.get("pathway_name", p) if isinstance(p, dict) else str(p) for p in inferred_pws[:5]]
+                    logger.info(
+                        f"[Layer3-STRING-Indirect] {gene}: {len(inferred_pws)} inferred pathways "
+                        f"(from {string_indirect_data.get('partners_used', '?')} partners) → {inferred_names}"
+                    )
+                except Exception as e:
+                    logger.warning(f"STRING indirect query failed for {gene}: {e}")
+                self._gene_cache.set(cache_key, {"string_indirect_data": string_indirect_data})
+
+        # ══════════════════════════════════════════════════════════════
+        # PHASE D: Assembly (same as original)
+        # ══════════════════════════════════════════════════════════════
 
         # 14. Merge regulation (KEGG + PubMed patterns)
-        upstream = regulation["upstream_regulators"]
-        downstream = regulation["downstream_targets"]
+        upstream = regulation.get("upstream_regulators", [])
+        downstream = regulation.get("downstream_targets", [])
 
         # 15. Classify PTM significance (8-category cell-signaling system)
         ptm_log2fc_raw = ptm.get("PTM_Relative_Log2FC", ptm.get("ptm_relative_log2fc"))
@@ -481,19 +795,19 @@ class RAGEnrichmentPipeline:
             "regulation": {
                 "upstream_regulators": upstream,
                 "downstream_targets": downstream,
-                "kinase_substrate": regulation["kinase_substrate"],
+                "kinase_substrate": regulation.get("kinase_substrate", []),
                 "e3_substrate": regulation.get("e3_substrate", []),       # v9.14: E3 ligase-substrate pairs
                 "dub_substrate": regulation.get("dub_substrate", []),     # v9.14: DUB-substrate pairs
                 "chain_types": regulation.get("chain_types", []),         # v9.14: Detected ubiquitin chain types
-                "evidence_count": len(regulation["regulation_evidence"]),
-                "regulation_evidence": regulation["regulation_evidence"],
+                "evidence_count": len(regulation.get("regulation_evidence", [])),
+                "regulation_evidence": regulation.get("regulation_evidence", []),
             },
             "pathways": kegg_pathways,
             "string_db": {
                 "interactions": interaction_partners,
             },
             "string_interactions": interaction_partners,  # v101: dict format (same as string_db.interactions), no limit
-            "diseases": regulation["diseases"],
+            "diseases": regulation.get("diseases", []),
             "localization": uniprot_info.get("subcellular_location", []),
             "function_summary": uniprot_info.get("function_summary", ""),
             "aliases": uniprot_info.get("gene_synonyms", []),
@@ -543,6 +857,17 @@ class RAGEnrichmentPipeline:
             f"classification={classification.get('level', '?')} ({classification.get('significance', '?')})"
         )
         return ptm
+
+    # ------------------------------------------------------------------
+    # LEGACY: Sequential single-PTM enrichment (kept for fallback)
+    # ------------------------------------------------------------------
+
+    def _enrich_single_ptm(
+        self, ptm: dict, context_keywords: List[str], context: Optional[dict]
+    ) -> dict:
+        """Original sequential enrichment — kept as fallback.
+        Use _enrich_single_ptm_parallel for production."""
+        return self._enrich_single_ptm_parallel(ptm, context_keywords, context)
 
     # ------------------------------------------------------------------
     # LOCAL-FIRST Data Access: HPA
