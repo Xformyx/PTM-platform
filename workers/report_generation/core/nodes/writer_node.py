@@ -42,10 +42,20 @@ SECTION_MAX_TOKENS = {
     "title": 512,
 }
 
-# v9.30: Maximum prompt size (characters) to prevent context window overflow.
-# Gemini 2.5 Flash supports ~1M tokens (~4M chars), but we cap at 200K chars
-# (~50K tokens) to leave room for output and avoid timeouts.
-MAX_PROMPT_CHARS = 200_000
+# v9.31: Per-section prompt budget (characters).
+# Gemini 2.5 Flash supports ~1M tokens but quality degrades sharply above ~80K chars.
+# Keep prompts well within this range for reliable, detailed output.
+SECTION_PROMPT_BUDGET = {
+    "abstract": 30_000,
+    "introduction": 60_000,
+    "results": 80_000,
+    "discussion": 60_000,
+    "conclusion": 40_000,
+    "methods": 30_000,
+    "suggestion": 40_000,
+    "title": 10_000,
+}
+MAX_PROMPT_CHARS = 200_000  # absolute safety cap
 
 # Minimum word counts for generate_with_retry per section
 SECTION_MIN_WORDS = {
@@ -200,6 +210,22 @@ def run_section_writing(state: dict) -> dict:
     sections: Dict[str, str] = {}
     prev_sections: Dict[str, str] = {}
 
+    # v9.31: Pre-build auxiliary blocks once (reuse across sections)
+    aux_ptm_data_summary = build_ptm_data_summary(parsed_ptms, ptm_type=ptm_type)
+    aux_nonptm_temporal = build_nonptm_temporal_analysis(network_results, timepoints, ptm_type=ptm_type)
+    aux_timelag = build_ptm_protein_timelag_analysis(network_results, timepoints, ptm_type=ptm_type)
+    aux_pathway_ctx = build_pathway_context_for_llm(parsed_ptms)
+    aux_signal_prop = build_signal_propagation_json(network_results, timepoints, ptm_type=ptm_type)
+    logger.info(
+        f"[v9.31] Aux block sizes: ptm_data={len(aux_ptm_data_summary):,}, "
+        f"nonptm_temporal={len(aux_nonptm_temporal):,}, timelag={len(aux_timelag):,}, "
+        f"pathway_ctx={len(aux_pathway_ctx):,}, signal_prop={len(aux_signal_prop):,}, "
+        f"v98_directive={len(v98_directive):,}, v98_structured={len(v98_structured_data):,}, "
+        f"v98_example={len(v98_writing_example):,}, "
+        f"temporal_kinase={len(temporal_kinase_cascade_llm_context):,}, "
+        f"receptor={len(receptor_llm_context):,}"
+    )
+
     for i, section_type in enumerate(SECTION_ORDER):
         if cb:
             pct = 70 + (i / len(SECTION_ORDER)) * 20
@@ -213,61 +239,96 @@ def run_section_writing(state: dict) -> dict:
             chromadb_results=chromadb_results,
         )
 
-        # v98: Enhance prompt with anti-hallucination directives
-        if v98_directive and section_type in ("results", "discussion"):
-            prompt = v98_directive + "\n\n" + v98_structured_data + "\n\n" + prompt
-            if v98_writing_example and section_type == "results":
-                prompt += "\n\n" + v98_writing_example
+        # v9.31: Budget-aware prompt enhancement
+        # Build supplementary blocks with priority, respecting per-section budget
+        budget = SECTION_PROMPT_BUDGET.get(section_type, 60_000)
+        base_len = len(prompt)
 
-        # GAP A: Inject 5 auxiliary data blocks for Results section
+        # Priority-ordered supplementary blocks for each section type
+        supplement_blocks = []
         if section_type == "results":
-            aux_blocks = []
-            ptm_data_summary = build_ptm_data_summary(parsed_ptms, ptm_type=ptm_type)
-            if ptm_data_summary:
-                aux_blocks.append(ptm_data_summary)
-            nonptm_temporal = build_nonptm_temporal_analysis(network_results, timepoints, ptm_type=ptm_type)
-            if nonptm_temporal:
-                aux_blocks.append(nonptm_temporal)
-            timelag_analysis = build_ptm_protein_timelag_analysis(network_results, timepoints, ptm_type=ptm_type)
-            if timelag_analysis:
-                aux_blocks.append(timelag_analysis)
-            pathway_ctx = build_pathway_context_for_llm(parsed_ptms)
-            if pathway_ctx:
-                aux_blocks.append(pathway_ctx)
-            signal_prop = build_signal_propagation_json(network_results, timepoints, ptm_type=ptm_type)
-            if signal_prop:
-                aux_blocks.append(signal_prop)
-            if aux_blocks:
-                prompt += "\n\n" + "\n\n".join(aux_blocks)
-                logger.info(f"[GAP-A] Injected {len(aux_blocks)} auxiliary data blocks into Results prompt")
+            # Priority 1 (essential): v98 directive + structured data
+            supplement_blocks.append(("v98_directive", v98_directive))
+            supplement_blocks.append(("v98_structured_data", v98_structured_data))
+            # Priority 2 (important): aux data blocks
+            supplement_blocks.append(("ptm_data_summary", aux_ptm_data_summary))
+            supplement_blocks.append(("pathway_ctx", aux_pathway_ctx))
+            supplement_blocks.append(("signal_prop", aux_signal_prop))
+            # Priority 3 (nice-to-have): temporal analysis, kinase cascade
+            supplement_blocks.append(("nonptm_temporal", aux_nonptm_temporal))
+            supplement_blocks.append(("timelag", aux_timelag))
+            supplement_blocks.append(("temporal_kinase", temporal_kinase_cascade_llm_context))
+            supplement_blocks.append(("receptor_ctx", receptor_llm_context))
+            # Priority 4 (lowest): figure context, writing example
+            if figure_gen.has_figures():
+                supplement_blocks.append(("figure_ctx", figure_gen.generate_figure_context_for_llm(section_type)))
+            supplement_blocks.append(("v98_writing_example", v98_writing_example))
 
-        # v9.11: Inject temporal kinase cascade context for Results/Discussion
-        if temporal_kinase_cascade_llm_context and section_type in ("results", "discussion"):
-            prompt += "\n\n" + temporal_kinase_cascade_llm_context
-            logger.info(f"[v9.11] Injected temporal kinase cascade context into {section_type} prompt ({len(temporal_kinase_cascade_llm_context)} chars)")
+        elif section_type == "discussion":
+            # Priority 1: v98 directive + structured data
+            supplement_blocks.append(("v98_directive", v98_directive))
+            supplement_blocks.append(("v98_structured_data", v98_structured_data))
+            # Priority 2: temporal kinase, receptor
+            supplement_blocks.append(("temporal_kinase", temporal_kinase_cascade_llm_context))
+            supplement_blocks.append(("receptor_ctx", receptor_llm_context))
+            # Priority 3: figure context
+            if figure_gen.has_figures():
+                supplement_blocks.append(("figure_ctx", figure_gen.generate_figure_context_for_llm(section_type)))
 
-        # v9.20: Inject inferred receptor context for Introduction, Results, Discussion
-        if receptor_llm_context and section_type in ("introduction", "results", "discussion"):
-            prompt += "\n\n" + receptor_llm_context
-            logger.info(f"[v9.20] Injected receptor context into {section_type} prompt ({len(receptor_llm_context)} chars)")
+        elif section_type == "introduction":
+            supplement_blocks.append(("receptor_ctx", receptor_llm_context))
 
-        # Inject figure context for Results/Discussion so LLM can reference figures
-        if figure_gen.has_figures() and section_type in ("results", "discussion"):
-            figure_ctx = figure_gen.generate_figure_context_for_llm(section_type)
-            prompt += "\n\n" + figure_ctx
+        # v9.31: Add blocks respecting budget
+        current_len = base_len
+        added_blocks = []
+        skipped_blocks = []
+        for block_name, block_text in supplement_blocks:
+            if not block_text:
+                continue
+            block_len = len(block_text)
+            if current_len + block_len + 4 <= budget:  # +4 for "\n\n"
+                prompt += "\n\n" + block_text
+                current_len += block_len + 2
+                added_blocks.append(f"{block_name}({block_len:,})")
+            else:
+                skipped_blocks.append(f"{block_name}({block_len:,})")
+
+        if added_blocks:
+            logger.info(f"[v9.31] {section_type}: added {len(added_blocks)} blocks: {', '.join(added_blocks)}")
+        if skipped_blocks:
+            logger.warning(f"[v9.31] {section_type}: SKIPPED {len(skipped_blocks)} blocks (budget {budget:,}): {', '.join(skipped_blocks)}")
+
+        # v9.31: Cascading failure prevention — if Results used fallback,
+        # inject direct data context for Discussion/Conclusion/Abstract
+        results_is_fallback = (
+            prev_sections.get("results", "").startswith("The PTM analysis")
+            and len(prev_sections.get("results", "").split()) < 200
+        )
+        if results_is_fallback and section_type in ("discussion", "conclusion", "abstract"):
+            # Provide direct PTM data instead of relying on prev_sections["results"]
+            ptm_summary_for_cascade = _ptm_summary_text(parsed_ptms[:30], detail_count=20)
+            cascade_supplement = (
+                f"\n\n=== DIRECT PTM DATA (Results section was incomplete) ===\n"
+                f"{ptm_summary_for_cascade}\n"
+                f"=== END DIRECT PTM DATA ===\n"
+            )
+            remaining = budget - len(prompt)
+            if remaining > len(cascade_supplement):
+                prompt += cascade_supplement
+                logger.info(f"[v9.31] Injected direct PTM data into {section_type} (cascade failure prevention)")
 
         max_tok = section_max_tokens.get(section_type, 8192)
 
-        # v9.30: Prompt size management — truncate if too large
+        # v9.31: Final safety truncation (should rarely trigger with budget system)
         prompt_len = len(prompt)
         if prompt_len > MAX_PROMPT_CHARS:
             logger.warning(
-                f"[v9.30] {section_type} prompt too large ({prompt_len:,} chars > {MAX_PROMPT_CHARS:,}). "
-                f"Truncating to {MAX_PROMPT_CHARS:,} chars."
+                f"[v9.31] {section_type} prompt exceeds absolute limit ({prompt_len:,} > {MAX_PROMPT_CHARS:,}). "
+                f"Truncating."
             )
             prompt = prompt[:MAX_PROMPT_CHARS] + "\n\n[... prompt truncated for context window limit ...]"
         logger.info(
-            f"[v9.30] {section_type}: prompt={len(prompt):,} chars, "
+            f"[v9.31] {section_type}: final_prompt={len(prompt):,} chars (budget={budget:,}), "
             f"max_tokens={max_tok}, provider={llm.provider}, model={llm.model}"
         )
 
