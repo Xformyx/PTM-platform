@@ -1782,16 +1782,31 @@ async def get_vector_plot_data(
                             if kname and kname.strip():
                                 kinase_names_set.add(kname.strip())
                                 kinase_ptm_map[kname.strip()].add(label)
-                # string_interactions
-                for si in (rag.get("string_interactions", []) or []):
-                    if isinstance(si, dict):
-                        partner = si.get("preferredName_B") or si.get("partner") or ""
-                        score = si.get("score", 0)
-                        if partner and score >= 700:
-                            pl = partner.lower()
-                            if any(kw in pl for kw in _kinase_kw):
-                                kinase_names_set.add(partner.strip())
-                                kinase_ptm_map[partner.strip()].add(label)
+                # string_interactions — prefer string_db.interactions (dict list), fallback to string_interactions (may be str list)
+                _sdb = rag.get("string_db", {})
+                _sdb_ints = _sdb.get("interactions", []) if isinstance(_sdb, dict) else []
+                if _sdb_ints:
+                    _si_list = _sdb_ints
+                else:
+                    import re as _re_si
+                    _si_list = []
+                    for _s in (rag.get("string_interactions", []) or []):
+                        if isinstance(_s, dict):
+                            _si_list.append(_s)
+                        elif isinstance(_s, str):
+                            _m = _re_si.match(r"^(.+)\(([0-9.]+)\)$", _s.strip())
+                            if _m:
+                                _si_list.append({"partner": _m.group(1), "score": float(_m.group(2))})
+                for si in _si_list:
+                    partner = si.get("preferredName_B") or si.get("partner") or ""
+                    score = si.get("score", 0)
+                    if isinstance(score, float) and score <= 1.0:
+                        score = score * 1000
+                    if partner and score >= 700:
+                        pl = partner.lower()
+                        if any(kw in pl for kw in _kinase_kw):
+                            kinase_names_set.add(partner.strip())
+                            kinase_ptm_map[partner.strip()].add(label)
 
         if kinase_names_set:
             from app.services.reactome_client import get_receptors_for_kinases
@@ -3600,8 +3615,22 @@ async def motif_kinase_annotation(
 
             # ── Source 6: string_interactions (protein-protein interactions) ──
             # STRING DB interactions may include kinases/E3 ligases
-            string_ints = rag.get("string_interactions", [])
-            if isinstance(string_ints, list):
+            # Prefer string_db.interactions (dict list); fallback: parse string_interactions str list
+            _s6_sdb = rag.get("string_db", {})
+            _s6_sdb_ints = _s6_sdb.get("interactions", []) if isinstance(_s6_sdb, dict) else []
+            if _s6_sdb_ints:
+                string_ints = _s6_sdb_ints
+            else:
+                import re as _re_s6
+                string_ints = []
+                for _s in (rag.get("string_interactions", []) or []):
+                    if isinstance(_s, dict):
+                        string_ints.append(_s)
+                    elif isinstance(_s, str):
+                        _m = _re_s6.match(r"^(.+)\(([0-9.]+)\)$", _s.strip())
+                        if _m:
+                            string_ints.append({"partner": _m.group(1), "score": float(_m.group(2))})
+            if string_ints:
                 if order.ptm_type == "ubiquitylation":
                     kinase_keywords = {
                         "ligase", "ubiquitin", "RING", "HECT", "RBR",
@@ -3617,18 +3646,19 @@ async def motif_kinase_annotation(
                                        "PKA", "PKC", "GSK", "AKT", "mTOR", "ATM", "ATR", "PLK",
                                        "AURK", "NEK", "DYRK", "CLK", "SRPK", "CAMK", "AMPK"}
                 for si in string_ints:
-                    if isinstance(si, dict):
-                        partner = si.get("preferredName_B") or si.get("partner") or si.get("name", "")
-                        score = si.get("score", 0)
-                        if partner and score >= 700:  # High confidence STRING interaction
-                            partner_upper = partner.upper()
-                            if any(kw.upper() in partner_upper for kw in kinase_keywords):
-                                known_kinases.append({
-                                    "kinase": partner,
-                                    "confidence": f"STRING (score={score})",
-                                    "mechanism": "protein-protein interaction",
-                                    "source": "string_db",
-                                })
+                    partner = si.get("preferredName_B") or si.get("partner") or si.get("name", "")
+                    score = si.get("score", 0)
+                    if isinstance(score, float) and score <= 1.0:
+                        score = score * 1000
+                    if partner and score >= 700:  # High confidence STRING interaction
+                        partner_upper = partner.upper()
+                        if any(kw.upper() in partner_upper for kw in kinase_keywords):
+                            known_kinases.append({
+                                "kinase": partner,
+                                "confidence": f"STRING (score={score:.0f})",
+                                "mechanism": "protein-protein interaction",
+                                "source": "string_db",
+                            })
 
         # ── Source 7: iPTMnet direct API (site-specific enzyme/kinase) ──
         # This provides PSP + Signor + phospho.ELM + RLIMS-P + UniProt data
