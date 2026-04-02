@@ -24,10 +24,13 @@ import {
   EIGHT_CATEGORIES,
   LANGGRAPH_NODES,
   REPORT_SECTIONS,
+  REPORT_FIGURES_V934,
+  SIGNAL_FLOW_LAYERS,
+  EFFECTOR_EXTRACTION_STEPS,
   DOCKER_SERVICES,
   SHARED_INFRA,
 } from "@/lib/pipeline-data";
-import { Beaker, BookOpen, FileText, ArrowRight, Database, Server, Globe } from "lucide-react";
+import { Beaker, BookOpen, FileText, ArrowRight, Database, Server, Globe, Layers, Zap } from "lucide-react";
 
 const workerIcons = {
   beaker: Beaker,
@@ -59,7 +62,7 @@ export default function Home() {
             </span>
           </div>
           <span className="text-xs text-muted-foreground font-mono hidden sm:block">
-            Pipeline Manual v1.4
+            Pipeline Manual v1.5
           </span>
           <div className="ml-auto flex items-center gap-3">
             <span className="text-xs text-muted-foreground">2026-03-21</span>
@@ -595,6 +598,107 @@ export default function Home() {
             fallback 분류 로직을 추가하여 "Other"로 빠지는 PTM 수를 최소화합니다.
           </Callout>
 
+          {/* 5.10 Non-PTM Effector Integration (v9.34) */}
+          <SectionHeading id="report-effector" level={2}>5.10. Non-PTM Effector 통합 (v9.34)</SectionHeading>
+          <p className="text-base leading-relaxed text-foreground/85 mb-4">
+            v9.34에서는 PTM Substrate에 연결된 <strong>Non-PTM Effector 단백질</strong>을 4번째 레이어로 통합했습니다.
+            Non-PTM Effector는 PTM 수식은 받지 않았지만, STRING-DB, BioGRID, KEA3 네트워크 엣지를 통해
+            PTM Substrate와 물리적으로 상호작용하는 단백질로, Protein 수준의 발현량 변화(|Log2FC| &gt; 0.3)가
+            확인된 단백질들입니다.
+          </p>
+
+          <DataTable
+            caption="Table 5g. Non-PTM Effector 추출 파이프라인"
+            headers={["단계", "처리", "상세"]}
+            rows={EFFECTOR_EXTRACTION_STEPS.map((s) => [
+              <span className="font-mono text-xs">{s.step}</span>,
+              <strong>{s.action}</strong>,
+              s.detail,
+            ])}
+          />
+
+          <Callout type="info">
+            <strong>Effector 데이터 구조.</strong> 각 Non-PTM Effector는 다음 정보를 포함합니다:
+            <code className="text-xs font-mono">gene</code> (HGNC 심볼),
+            <code className="text-xs font-mono">peak_fc</code> (|Log2FC| 최대값),
+            <code className="text-xs font-mono">peak_condition</code> (peak 시점),
+            <code className="text-xs font-mono">sources</code> (STRING/BioGRID/KEA3),
+            <code className="text-xs font-mono">temporal_profile</code> (condition별 Protein_Log2FC),
+            <code className="text-xs font-mono">connected_substrates</code> (연결된 PTM substrate 목록).
+            이 데이터는 <code className="text-xs font-mono">global-kinase-modules</code> API의
+            <code className="text-xs font-mono">effector_proteins</code> 필드로 프론트엔드에 전달됩니다.
+          </Callout>
+
+          {/* 5.11 4-Layer Signal Flow (v9.34) */}
+          <SectionHeading id="report-signalflow" level={2}>5.11. 4-Layer Signal Flow 다이어그램 (v9.34)</SectionHeading>
+          <p className="text-base leading-relaxed text-foreground/85 mb-4">
+            v9.34에서 Signal Flow 다이어그램이 기존 3-layer(Receptor → Kinase → Substrate)에서
+            <strong> 4-layer(Receptor → Kinase → Substrate → Non-PTM Effector)</strong>로 확장되었습니다.
+            이 다이어그램은 <code className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono">signal_flow_figure.py</code>에서
+            matplotlib로 렌더링되며, 프론트엔드의 Signal Flow 탭에서도 동일한 구조를 인터랙티브하게 시각화합니다.
+          </p>
+
+          <DataTable
+            caption="Table 5h. Signal Flow 4-Layer 구조"
+            headers={["Layer", "이름", "색상", "노드 형태", "데이터 소스"]}
+            rows={SIGNAL_FLOW_LAYERS.map((l) => [
+              <span className="font-mono font-bold">{l.layer}</span>,
+              <strong>{l.name}</strong>,
+              <span className="inline-flex items-center gap-1">
+                <span className="w-3 h-3 rounded" style={{ backgroundColor: l.color.split(" / ")[0] }} />
+                <code className="text-xs font-mono">{l.color}</code>
+              </span>,
+              l.shape,
+              <span className="text-xs">{l.source}</span>,
+            ])}
+          />
+
+          {/* 4-layer visual diagram */}
+          <div className="my-6 p-5 bg-gradient-to-b from-slate-50 to-white rounded-lg border border-border">
+            <div className="flex flex-col items-center gap-3">
+              {SIGNAL_FLOW_LAYERS.map((l, i) => (
+                <div key={l.layer} className="flex flex-col items-center gap-2 w-full">
+                  <div
+                    className="flex items-center gap-3 px-5 py-3 rounded-lg border-2 w-full max-w-lg"
+                    style={{ borderColor: l.color.split(" / ")[0], backgroundColor: l.color.split(" / ")[0] + "15" }}
+                  >
+                    <span className="font-mono font-bold text-sm" style={{ color: l.color.split(" / ")[0] }}>L{l.layer}</span>
+                    <div>
+                      <p className="text-sm font-semibold text-foreground">{l.name}</p>
+                      <p className="text-xs text-muted-foreground">{l.desc}</p>
+                    </div>
+                  </div>
+                  {i < SIGNAL_FLOW_LAYERS.length - 1 && (
+                    <ArrowRight className="w-4 h-4 text-muted-foreground rotate-90" />
+                  )}
+                </div>
+              ))}
+            </div>
+            <p className="text-center text-xs text-muted-foreground mt-4 italic">
+              Figure. Signal Flow 4-Layer 구조 개념도 — 각 레이어는 신호 전달 방향을 따라 위에서 아래로 배치됩니다
+            </p>
+          </div>
+
+          <Callout type="info">
+            <strong>Time-lag 시각화.</strong> Non-PTM Effector 레이어에서는 각 effector 단백질의 peak response 시점을
+            연결된 substrate의 peak 시점과 비교하여 time-lag를 계산합니다.
+            이를 통해 PTM 신호가 하류 단백질 발현에 영향을 미치는 시간적 지연을 시각적으로 확인할 수 있습니다.
+            프론트엔드의 Signal Flow 탭에서는 이 정보가 툴팁으로 표시되며,
+            Cascade View 탭에서는 temporal swimlane에 effector 데이터가 오버레이됩니다.
+          </Callout>
+
+          {/* Updated Figure table */}
+          <DataTable
+            caption="Table 5i. 리포트 Figure 구성 (v9.34 업데이트)"
+            headers={["Figure", "유형", "생성 노드", "설명"]}
+            rows={REPORT_FIGURES_V934.map((f) => [
+              <strong>{f.figure}</strong>,
+              f.type,
+              <code className="text-xs font-mono">{f.node}</code>,
+              f.desc,
+            ])}
+          />
+
           {/* 6. Data Flow */}
           <SectionHeading id="dataflow" level={1}>6. Worker 간 데이터 흐름 요약</SectionHeading>
 
@@ -750,7 +854,7 @@ docker compose up -d celery-worker-report`}
           {/* Footer */}
           <div className="mt-20 pt-8 border-t border-border">
             <div className="flex items-center justify-between text-xs text-muted-foreground">
-              <span>PTM Platform Pipeline Manual v1.4</span>
+              <span>PTM Platform Pipeline Manual v1.5</span>
               <span>Generated by Manus AI &middot; 2026-03-21</span>
             </div>
           </div>

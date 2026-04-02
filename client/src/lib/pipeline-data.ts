@@ -34,6 +34,8 @@ export const TOC_ITEMS: TocItem[] = [
   { id: "report-figures", label: "5.7 Figure 구성 (v8.0)", level: 2 },
   { id: "report-quality", label: "5.8 리포트 품질 개선 (v8.1)", level: 2 },
   { id: "report-classification", label: "5.9 PTM 분류 시스템 (v8.2)", level: 2 },
+  { id: "report-effector", label: "5.10 Non-PTM Effector (v9.34)", level: 2 },
+  { id: "report-signalflow", label: "5.11 4-Layer Signal Flow (v9.34)", level: 2 },
   { id: "dataflow", label: "6. 데이터 흐름 요약", level: 1 },
   { id: "infra", label: "7. 인프라 구성", level: 1 },
   { id: "operations", label: "8. 운영 가이드", level: 1 },
@@ -121,7 +123,7 @@ export const LANGGRAPH_NODES = [
   { id: 3, name: "research", range: "10% - 30%", file: "nodes/research_node.py", desc: "각 연구 질문에 대해 관련 PTM 데이터를 필터링하고, 활성화/억제된 PTM 패턴, 경로 농축, 조절 패턴을 분석합니다.", state: "research_results" },
   { id: 4, name: "hypothesize", range: "30% - 40%", file: "nodes/hypothesis_node.py", desc: "연구 분석 결과를 바탕으로 IF-THEN-BECAUSE 형식의 구조화된 가설을 생성합니다.", state: "hypotheses" },
   { id: 5, name: "validate_hypotheses", range: "40% - 55%", file: "nodes/validation_node.py", desc: "생성된 각 가설을 ChromaDB 벡터 데이터베이스의 문헌 데이터를 통해 검증하고 신뢰도 점수를 부여합니다.", state: "validated_hypotheses" },
-  { id: 6, name: "network_analysis", range: "55% - 65%", file: "nodes/network_node.py", desc: "v8.1: PTM 데이터를 기반으로 단백질 상호작용 네트워크를 구축하고, Cytoscape Desktop의 CyREST API를 통해 시각화합니다. Figure 1 = Canonical Pathway Distribution Bar Graph (Activated + Inhibited PTM 모두 포함, 3-bar 구조로 편향 보정). Cascade diagram은 cascade_mediator가 생성. Kinase 소스 확장: KEA3 + kinase_prediction + kinase_substrate. Fallback kinase prediction 추가 (enrichment 데이터에 kinase가 없을 때 LLM 기반 예측). PTM 노드는 Red/Blue 그라디언트, Non-PTM 노드는 Green/Purple 그라디언트(Protein_Log2FC 기반), Kinase 노드는 Amber 다이아몬드.", state: "network_analysis, network_results, pathway_candidates" },
+  { id: 6, name: "network_analysis", range: "55% - 65%", file: "nodes/network_node.py", desc: "v9.34: PTM 데이터를 기반으로 단백질 상호작용 네트워크를 구축하고, Cytoscape Desktop의 CyREST API를 통해 시각화합니다. Figure 1 = Canonical Pathway Distribution Bar Graph (Activated + Inhibited PTM 모두 포함, 3-bar 구조로 편향 보정). Cascade diagram은 cascade_mediator가 생성. Kinase 소스 확장: KEA3 + kinase_prediction + kinase_substrate. Fallback kinase prediction 추가. PTM 노드는 Red/Blue 그라디언트, Non-PTM 노드는 Green/Purple 그라디언트(Protein_Log2FC 기반), Kinase 노드는 Amber 다이아몬드. v9.34: Non-PTM effector 노드를 timepoint별로 추출하여 state에 저장. 이 데이터는 global-kinase-modules API와 Signal Flow 다이어그램에서 4th layer로 활용됩니다.", state: "network_analysis, network_results, pathway_candidates, non_ptm_nodes" },
   { id: 7, name: "temporal_comovement", range: "65% - 70%", file: "nodes/temporal_comovement_node.py", desc: "v8.0 신규: Temporal PTM Co-movement Analysis. 전체 PTM의 시계열 Log2FC 데이터를 행렬화하고, Pearson 상관계수 기반 계층적 클러스터링(scipy.cluster.hierarchy)으로 동시 움직이는 PTM 그룹을 탐지합니다. 클러스터 패턴 분류(transient_burst, sustained_activation, biphasic_switch, sequential_wave 등), 생물학적 주석(pathway/kinase/GO term), Non-PTM interactor 연결, 그리고 Heatmap + Cluster Line Plot 시각화를 생성합니다. figure_context.py에 co-movement 컨텍스트를 주입하여 LLM이 시계열 클러스터링 결과를 해석할 수 있게 합니다.", state: "comovement_analysis, comovement_figures, comovement_llm_context" },
   { id: 8, name: "write_sections", range: "70% - 78%", file: "nodes/writer_node.py", desc: "v7.0: 검증된 가설, 네트워크 분석 결과, ChromaDB 문헌 컨텍스트를 종합하여 LLM이 리포트의 주요 섹션을 작성합니다. figure_context.py는 pathway_candidates를 informational context로만 제공하며, LLM이 자유롭게 맥락에 맞는 pathway를 선택하여 논의합니다. 더 이상 특정 pathway를 강제로 언급하도록 지시하지 않습니다.", state: "sections, collected_references" },
   { id: 9, name: "cascade_mediator", range: "78% - 82%", file: "nodes/cascade_mediator_node.py", desc: "v7.0 신규: Content-Driven Cascade Diagram 생성 에이전트. LLM이 작성한 Results/Discussion 텍스트에서 실제로 논의된 signaling pathway를 deterministic하게 추출합니다. 3단계 매칭: (1) 직접 pathway 이름 매칭, (2) Gene cluster 감지 (GENE_TO_PATHWAYS 매핑), (3) Alias 매칭 (ERK→MAPK, NF-κB→NF-kappa B 등). 추출된 pathway만으로 signaling_cascade.py의 렌더링 엔진을 호출하여 cascade diagram을 생성합니다. 이를 통해 본문 내용과 다이어그램이 자연스럽게 일치합니다.", state: "cascade_diagrams, cascade_pathway_names" },
@@ -131,12 +133,37 @@ export const LANGGRAPH_NODES = [
   { id: 13, name: "edit_report", range: "97% - 100%", file: "nodes/editor_node.py", desc: "최종 리포트를 저장하고, PTM 용어 교정, 인용 삽입, 가짜 참고문헌 제거 등의 후처리를 수행합니다.", state: "final output files" },
 ];
 
+export const REPORT_FIGURES_V934 = [
+  { figure: "Figure 1", type: "Bar Graph", node: "network_analysis", desc: "Canonical Pathway Distribution (Activated + Inhibited PTM, 3-bar 구조)" },
+  { figure: "Figure 2+", type: "Cascade Diagram", node: "cascade_mediator", desc: "Content-Driven Signaling Cascade — LLM 본문에서 추출된 pathway 기반" },
+  { figure: "Figure N", type: "Heatmap", node: "temporal_comovement", desc: "PTM Co-movement Heatmap — 클러스터별 시계열 Log2FC" },
+  { figure: "Figure N+1", type: "Line Plot", node: "temporal_comovement", desc: "Cluster Line Plot — 클러스터 평균 시계열 프로파일" },
+  { figure: "Figure N+2", type: "4-Layer Signal Flow", node: "kinase_annotation (signal_flow_figure)", desc: "v9.34: Receptor → Kinase → Substrate → Non-PTM Effector 4-layer 다이어그램 (time-lag 시각화 포함)" },
+  { figure: "Figure N+3...", type: "Network Image", node: "network_analysis", desc: "Cytoscape 네트워크 시각화 (Timepoint별)" },
+];
+
 export const REPORT_SECTIONS = [
   { section: "Abstract", tokens: "6,144", content: "연구 요약, 주요 발견, 결론" },
   { section: "Introduction", tokens: "12,288", content: "실험 배경, 연구 목적, 관련 문헌" },
   { section: "Results", tokens: "16,384", content: "PTM 분석 결과, 통계, 경로 분석" },
   { section: "Discussion", tokens: "12,288", content: "결과 해석, 기존 연구와의 비교" },
   { section: "Conclusion", tokens: "8,192", content: "핵심 발견 요약, 향후 연구 방향" },
+];
+
+export const SIGNAL_FLOW_LAYERS = [
+  { layer: 1, name: "Receptor", color: "#06b6d4", shape: "Hexagon", source: "Inferred from kinase-receptor mapping (KEGG, literature)", desc: "Upstream receptor tyrosine kinases or GPCRs that initiate signaling" },
+  { layer: 2, name: "Kinase / E3 Ligase", color: "#f59e0b", shape: "Diamond", source: "iPTMnet, UniProt, KEA3, motif prediction, RAG", desc: "Regulatory enzymes annotated from 8 sources" },
+  { layer: 3, name: "PTM Substrate", color: "#ef4444 / #3b82f6", shape: "Circle", source: "Experimental PTM data (Log2FC)", desc: "Phosphorylation/Ubiquitylation sites with temporal profiles" },
+  { layer: 4, name: "Non-PTM Effector", color: "#10b981 / #a855f6", shape: "Circle", source: "STRING-DB, BioGRID, KEA3 network edges", desc: "Downstream proteins with significant abundance changes (|Log2FC| > 0.3) connected via PPI" },
+];
+
+export const EFFECTOR_EXTRACTION_STEPS = [
+  { step: 1, action: "Network edge 추출", detail: "network_analysis state에서 timepoint별 non_ptm_nodes 추출" },
+  { step: 2, action: "Substrate 연결 매핑", detail: "Non-PTM 노드의 PPI edge를 추적하여 연결된 PTM substrate 식별" },
+  { step: 3, action: "Temporal profile 구성", detail: "unified_protein_data에서 각 condition별 Protein_Log2FC 추출" },
+  { step: 4, action: "Peak FC 계산", detail: "|Protein_Log2FC|가 최대인 condition을 peak으로 설정" },
+  { step: 5, action: "Time-lag 분석", detail: "Substrate peak 시점 대비 Effector peak 시점의 시간차 계산" },
+  { step: 6, action: "Signal Flow 다이어그램", detail: "4-layer 다이어그램 생성 (signal_flow_figure.py)" },
 ];
 
 export const DOCKER_SERVICES = [
