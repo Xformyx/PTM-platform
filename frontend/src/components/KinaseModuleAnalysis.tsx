@@ -274,6 +274,9 @@ interface EffectorConnectedSubstrate {
   gene: string;
   kinases: string[];
   source: string;
+  substrate_peak_fc?: number;
+  substrate_peak_cond?: string;
+  concordant?: boolean;
 }
 interface EffectorProtein {
   gene: string;
@@ -283,7 +286,15 @@ interface EffectorProtein {
   max_abs_fc: number;
   peak_condition: string;
   peak_fc: number;
+  peak_minutes?: number;
   sources: string[];
+  // Evidence scoring (v9.34.2)
+  concordant_count?: number;
+  discordant_count?: number;
+  directionality?: "concordant" | "discordant" | "mixed" | "unknown";
+  time_lag_minutes?: number | null;
+  evidence_strength?: "strong" | "moderate" | "weak";
+  evidence_score?: number;
 }
 
 interface GlobalKinaseModuleResponse {
@@ -2124,6 +2135,9 @@ function CascadeView({
                           </th>
                         ))}
                         <th className="text-center py-1.5 px-2 min-w-[80px] font-medium text-muted-foreground">Peak</th>
+                        <th className="text-center py-1.5 px-2 min-w-[60px] font-medium text-muted-foreground">Evidence</th>
+                        <th className="text-center py-1.5 px-2 min-w-[60px] font-medium text-muted-foreground">Direction</th>
+                        <th className="text-center py-1.5 px-2 min-w-[60px] font-medium text-muted-foreground">Time-lag</th>
                         <th className="text-center py-1.5 px-2 min-w-[80px] font-medium text-muted-foreground">Sources</th>
                       </tr>
                     </thead>
@@ -2168,6 +2182,36 @@ function CascadeView({
                                 eff.peak_fc > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"
                               }`}>
                                 {eff.peak_fc > 0 ? "+" : ""}{eff.peak_fc.toFixed(2)} @ {eff.peak_condition}
+                              </span>
+                            </td>
+                            <td className="py-1 px-2 text-center">
+                              <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded ${
+                                (eff.evidence_strength || "weak") === "strong" ? "bg-emerald-900/30 text-emerald-300" :
+                                (eff.evidence_strength || "weak") === "moderate" ? "bg-amber-900/30 text-amber-300" :
+                                "bg-muted text-muted-foreground"
+                              }`}>
+                                {eff.evidence_strength || "weak"}
+                              </span>
+                            </td>
+                            <td className="py-1 px-2 text-center">
+                              <span className={`text-[9px] ${
+                                eff.directionality === "concordant" ? "text-emerald-400" :
+                                eff.directionality === "discordant" ? "text-rose-400" :
+                                "text-yellow-400"
+                              }`}>
+                                {eff.directionality === "concordant" ? `\u2713 ${eff.concordant_count || 0}/${(eff.concordant_count || 0) + (eff.discordant_count || 0)}` :
+                                 eff.directionality === "discordant" ? `\u2717 ${eff.discordant_count || 0}/${(eff.concordant_count || 0) + (eff.discordant_count || 0)}` :
+                                 eff.directionality === "mixed" ? `~ ${eff.concordant_count || 0}\u2713/${eff.discordant_count || 0}\u2717` :
+                                 "—"}
+                              </span>
+                            </td>
+                            <td className="py-1 px-2 text-center">
+                              <span className={`text-[9px] ${
+                                eff.time_lag_minutes != null && eff.time_lag_minutes > 0 ? "text-emerald-400" :
+                                eff.time_lag_minutes != null && eff.time_lag_minutes < 0 ? "text-rose-400" :
+                                "text-muted-foreground"
+                              }`}>
+                                {eff.time_lag_minutes != null ? `${eff.time_lag_minutes > 0 ? "+" : ""}${eff.time_lag_minutes}m` : "—"}
                               </span>
                             </td>
                             <td className="py-1 px-2 text-center">
@@ -2320,17 +2364,24 @@ function GlobalKinaseModulesPanel({
           <div className="flex flex-wrap gap-1.5">
             {result.effector_proteins.slice(0, 20).map(eff => {
               const isUp = eff.peak_fc > 0;
+              const strength = eff.evidence_strength || "weak";
+              const strengthBorder = strength === "strong" ? "border-2" : strength === "moderate" ? "border" : "border border-dashed";
+              const dirIcon = eff.directionality === "concordant" ? "✓" : eff.directionality === "discordant" ? "✗" : eff.directionality === "mixed" ? "~" : "";
+              const lagStr = eff.time_lag_minutes != null ? `lag:${eff.time_lag_minutes > 0 ? "+" : ""}${eff.time_lag_minutes}m` : "";
               return (
                 <span
                   key={eff.gene}
-                  className={`text-[10px] px-1.5 py-0.5 rounded border font-medium ${
+                  className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
                     isUp
-                      ? "bg-emerald-900/20 text-emerald-400 border-emerald-500/50"
-                      : "bg-rose-900/20 text-rose-400 border-rose-500/50"
+                      ? `bg-emerald-900/20 text-emerald-400 ${strengthBorder} border-emerald-500/50`
+                      : `bg-rose-900/20 text-rose-400 ${strengthBorder} border-rose-500/50`
                   }`}
-                  title={`${eff.gene} | Peak FC: ${eff.peak_fc > 0 ? "+" : ""}${eff.peak_fc.toFixed(2)} @ ${eff.peak_condition} | Sources: ${eff.sources.join(", ")} | Connected to: ${eff.connected_substrates.map(s => s.gene).join(", ")}`}
+                  title={`${eff.gene} | FC: ${eff.peak_fc > 0 ? "+" : ""}${eff.peak_fc.toFixed(2)} @ ${eff.peak_condition}\nEvidence: ${strength} (score ${eff.evidence_score || 0})\nDirection: ${eff.directionality || "unknown"} (${eff.concordant_count || 0}✓ / ${eff.discordant_count || 0}✗)\nTime-lag: ${lagStr || "N/A"}\nSubstrates: ${eff.connected_substrates.map(s => s.gene).join(", ")}\nSources: ${eff.sources.join(", ")}`}
                 >
-                  {isUp ? "▲" : "▼"} {eff.gene} ({eff.peak_fc > 0 ? "+" : ""}{eff.peak_fc.toFixed(1)})
+                  {isUp ? "▲" : "▼"}
+                  {dirIcon && <span className={`mx-0.5 ${eff.directionality === "concordant" ? "text-emerald-300" : eff.directionality === "discordant" ? "text-rose-300" : "text-yellow-300"}`}>{dirIcon}</span>}
+                  {eff.gene} ({eff.peak_fc > 0 ? "+" : ""}{eff.peak_fc.toFixed(1)})
+                  {lagStr && <span className="ml-0.5 opacity-50 text-[8px]">{lagStr}</span>}
                 </span>
               );
             })}
@@ -2338,8 +2389,17 @@ function GlobalKinaseModulesPanel({
               <span className="text-[10px] text-muted-foreground">+{result.effector_proteins.length - 20} more</span>
             )}
           </div>
+          {/* Evidence strength legend */}
+          <div className="flex items-center gap-3 text-[9px] text-muted-foreground">
+            <span>Evidence: <span className="border-2 border-muted-foreground/30 px-1 rounded">strong</span></span>
+            <span><span className="border border-muted-foreground/30 px-1 rounded">moderate</span></span>
+            <span><span className="border border-dashed border-muted-foreground/30 px-1 rounded">weak</span></span>
+            <span className="ml-2">✓ concordant</span>
+            <span>✗ discordant</span>
+            <span>~ mixed</span>
+          </div>
           <div className="text-[10px] text-muted-foreground">
-            Non-PTM proteins with significant protein abundance changes (|Log2FC| &gt; 0.3) that interact with PTM substrates via PPI networks
+            Non-PTM proteins with significant protein abundance changes (|Log2FC| &gt; 0.3) that interact with PTM substrates via PPI networks. Evidence scored by temporal concordance, directionality, and multi-substrate support.
           </div>
         </div>
       )}
@@ -3059,19 +3119,25 @@ function SignalFlowView({
                                 <div className="flex flex-wrap gap-1 ml-3">
                                   {kinaseEffectors.slice(0, 8).map(eff => {
                                     const isUp = eff.peak_fc > 0;
+                                    const strength = eff.evidence_strength || "weak";
+                                    const strengthBorder = strength === "strong" ? "border-2" : strength === "moderate" ? "border" : "border border-dashed";
                                     const chipStyle = isUp
-                                      ? "bg-emerald-900/30 text-emerald-300 border border-emerald-500"
-                                      : "bg-rose-900/30 text-rose-300 border border-rose-500";
+                                      ? `bg-emerald-900/30 text-emerald-300 ${strengthBorder} border-emerald-500`
+                                      : `bg-rose-900/30 text-rose-300 ${strengthBorder} border-rose-500`;
                                     const arrow = isUp ? "▲" : "▼";
+                                    const dirIcon = eff.directionality === "concordant" ? "✓" : eff.directionality === "discordant" ? "✗" : eff.directionality === "mixed" ? "~" : "";
+                                    const lagStr = eff.time_lag_minutes != null ? `${eff.time_lag_minutes > 0 ? "+" : ""}${eff.time_lag_minutes}min` : "";
                                     return (
                                       <span
                                         key={eff.gene}
                                         className={`text-[9px] px-1.5 py-0.5 rounded ${chipStyle}`}
-                                        title={`${eff.gene} | Protein FC: ${eff.peak_fc > 0 ? "+" : ""}${eff.peak_fc.toFixed(2)} @ ${eff.peak_condition} | Sources: ${eff.sources.join(", ")} | Connected substrates: ${eff.connected_substrates.map(s => s.gene).join(", ")}`}
+                                        title={`${eff.gene} | FC: ${eff.peak_fc > 0 ? "+" : ""}${eff.peak_fc.toFixed(2)} @ ${eff.peak_condition}\nEvidence: ${strength} (score ${eff.evidence_score || 0})\nDirection: ${eff.directionality || "unknown"} (${eff.concordant_count || 0} concordant / ${eff.discordant_count || 0} discordant)\nTime-lag: ${lagStr || "N/A"}\nSubstrates: ${eff.connected_substrates.map(s => `${s.gene}${s.concordant ? "✓" : "✗"}`).join(", ")}\nSources: ${eff.sources.join(", ")}`}
                                       >
                                         <span className="mr-0.5">{arrow}</span>
+                                        {dirIcon && <span className={`mr-0.5 ${eff.directionality === "concordant" ? "text-emerald-400" : eff.directionality === "discordant" ? "text-rose-400" : "text-yellow-400"}`}>{dirIcon}</span>}
                                         {eff.gene}
                                         <span className="ml-0.5 opacity-70">{eff.peak_fc > 0 ? "+" : ""}{eff.peak_fc.toFixed(1)}</span>
+                                        {lagStr && <span className="ml-0.5 opacity-50 text-[8px]">{lagStr}</span>}
                                       </span>
                                     );
                                   })}

@@ -4451,6 +4451,7 @@ async def global_kinase_modules(
 
         # 9a. Load unified TSV for ALL protein temporal profiles
         _protein_temporal: dict = {}  # gene_upper -> {condition -> protein_log2fc}
+        _ptm_temporal: dict = {}      # "GENE_SITE" -> {condition -> ptm_log2fc}  (for substrate PTM peaks)
         _protein_data_type: dict = {}  # gene_upper -> Data_Type
         if output_dir.exists():
             tsv_candidates = (
@@ -4479,11 +4480,24 @@ async def global_kinase_modules(
                         if cond:
                             _protein_temporal[gene_upper][cond] = pfc
                         _protein_data_type[gene_upper] = dt
+                        # Also load PTM_Log2FC for substrate PTM peak calculation
+                        ptm_fc_raw = row.get("PTM_Log2FC") or row.get("ptm_log2fc") or ""
+                        ptm_pos = (row.get("PTM_Position") or row.get("Position") or "").strip()
+                        if ptm_fc_raw and ptm_fc_raw.lower() not in ("na", "nan", "") and ptm_pos and cond:
+                            try:
+                                ptm_fc = float(ptm_fc_raw)
+                                ptm_key = f"{gene_upper}_{ptm_pos.upper()}"
+                                if ptm_key not in _ptm_temporal:
+                                    _ptm_temporal[ptm_key] = {}
+                                _ptm_temporal[ptm_key][cond] = ptm_fc
+                            except (TypeError, ValueError):
+                                pass
                 _log.info(f"[GLOBAL-KINASE] Loaded temporal profiles for {len(_protein_temporal)} genes")
 
         # 9b. Identify PTM substrate genes (from kinase modules)
         _substrate_genes: set = set()
         _substrate_kinase_map: dict = {}  # gene_upper -> set of kinase names
+        _substrate_ptm_sites: dict = {}   # gene_upper -> list of "GENE_SITE" keys
         for km in kinase_module_list:
             for m in km["members"]:
                 g_upper = m["gene"].upper()
@@ -4491,10 +4505,25 @@ async def global_kinase_modules(
                 if g_upper not in _substrate_kinase_map:
                     _substrate_kinase_map[g_upper] = set()
                 _substrate_kinase_map[g_upper].add(km["kinase"])
+                # Track PTM sites for temporal concordance
+                pos = (m.get("position") or "").strip().upper()
+                if pos:
+                    ptm_key = f"{g_upper}_{pos}"
+                    if g_upper not in _substrate_ptm_sites:
+                        _substrate_ptm_sites[g_upper] = []
+                    if ptm_key not in _substrate_ptm_sites[g_upper]:
+                        _substrate_ptm_sites[g_upper].append(ptm_key)
         # Also include unassigned PTM genes as substrates
         for ua in unassigned:
             g_upper = ua["gene"].upper()
             _substrate_genes.add(g_upper)
+            pos = (ua.get("position") or "").strip().upper()
+            if pos:
+                ptm_key = f"{g_upper}_{pos}"
+                if g_upper not in _substrate_ptm_sites:
+                    _substrate_ptm_sites[g_upper] = []
+                if ptm_key not in _substrate_ptm_sites[g_upper]:
+                    _substrate_ptm_sites[g_upper].append(ptm_key)
 
         # 9c. Load enriched_ptm_data JSON for STRING/BioGRID interactions
         file_suffix = "_phospho" if order.ptm_type == "phosphorylation" else "_ubi"
@@ -4567,23 +4596,42 @@ async def global_kinase_modules(
                         "score": 0,
                     })
 
-        # 9d. Build effector protein list
+        # 9d. Build effector protein list with evidence scoring
         _effector_fc_threshold = 0.3  # |log2FC| threshold for significance
         _seen_effectors: dict = {}  # partner_upper -> effector dict
+
+        # Helper: get substrate PTM peak condition and direction
+        def _get_substrate_ptm_peak(sub_gene_upper: str):
+            """Return (peak_condition, peak_fc, peak_minutes) for a substrate's PTM."""
+            sites = _substrate_ptm_sites.get(sub_gene_upper, [])
+            best_peak = None
+            for site_key in sites:
+                site_temporal = _ptm_temporal.get(site_key, {})
+                if not site_temporal:
+                    continue
+                pk = max(site_temporal.items(), key=lambda x: abs(x[1]))
+                if best_peak is None or abs(pk[1]) > abs(best_peak[1]):
+                    best_peak = pk
+            if best_peak is None:
+                # Fallback: use protein-level temporal for this substrate
+                prot_temporal = _protein_temporal.get(sub_gene_upper, {})
+                if prot_temporal:
+                    best_peak = max(prot_temporal.items(), key=lambda x: abs(x[1]))
+            if best_peak:
+                return best_peak[0], best_peak[1], _parse_time_minutes(best_peak[0])
+            return None, 0.0, 0.0
+
         for sub_gene, partners in _substrate_to_partners.items():
             for p in partners:
                 pu = p["partner_upper"]
                 temporal = _protein_temporal.get(pu, {})
                 if not temporal:
-                    continue  # No temporal data available
-                # Check if this protein has significant change at any timepoint
+                    continue
                 max_abs_fc = max((abs(v) for v in temporal.values()), default=0)
                 if max_abs_fc < _effector_fc_threshold:
-                    continue  # Below significance threshold
+                    continue
                 if pu not in _seen_effectors:
-                    # Determine peak condition
                     peak_cond = max(temporal.items(), key=lambda x: abs(x[1]))
-                    # Build temporal profile list
                     tp_list = [
                         {"condition": c, "protein_log2fc": round(v, 4)}
                         for c, v in sorted(temporal.items(), key=lambda x: _parse_time_minutes(x[0]))
@@ -4597,20 +4645,35 @@ async def global_kinase_modules(
                         "max_abs_fc": round(max_abs_fc, 4),
                         "peak_condition": peak_cond[0],
                         "peak_fc": round(peak_cond[1], 4),
+                        "peak_minutes": _parse_time_minutes(peak_cond[0]),
                         "sources": set(),
+                        # Evidence scoring fields (computed in 9e)
+                        "concordant_count": 0,
+                        "discordant_count": 0,
+                        "directionality": "unknown",
+                        "time_lag_minutes": None,
+                        "evidence_strength": "weak",
                     }
                 _seen_effectors[pu]["sources"].add(p["source"])
-                # Find connected substrate details
+                # Compute per-substrate concordance
+                sub_peak_cond, sub_peak_fc, sub_peak_min = _get_substrate_ptm_peak(sub_gene)
+                eff_peak_fc = _seen_effectors[pu]["peak_fc"]
+                # Directionality: same sign = concordant
+                is_concordant = (sub_peak_fc > 0 and eff_peak_fc > 0) or (sub_peak_fc < 0 and eff_peak_fc < 0)
                 kinases_for_sub = list(_substrate_kinase_map.get(sub_gene, set()))
                 _seen_effectors[pu]["connected_substrates"].append({
                     "gene": sub_gene,
                     "kinases": kinases_for_sub[:3],
                     "source": p["source"],
+                    "substrate_peak_fc": round(sub_peak_fc, 4) if sub_peak_fc else 0,
+                    "substrate_peak_cond": sub_peak_cond or "",
+                    "concordant": is_concordant,
                 })
 
-        # 9e. Deduplicate connected_substrates and convert sets
+        # 9e. Deduplicate, compute evidence scoring, and convert sets
         for pu, eff in _seen_effectors.items():
             eff["sources"] = sorted(eff["sources"])
+            # Deduplicate connected_substrates
             seen_subs = set()
             unique_subs = []
             for s in eff["connected_substrates"]:
@@ -4619,10 +4682,71 @@ async def global_kinase_modules(
                     unique_subs.append(s)
             eff["connected_substrates"] = unique_subs
 
-        # Sort by max_abs_fc descending
+            # Concordance scoring
+            concordant = sum(1 for s in unique_subs if s.get("concordant"))
+            discordant = len(unique_subs) - concordant
+            eff["concordant_count"] = concordant
+            eff["discordant_count"] = discordant
+            total_subs = len(unique_subs)
+            if total_subs == 0:
+                eff["directionality"] = "unknown"
+            elif concordant == total_subs:
+                eff["directionality"] = "concordant"
+            elif discordant == total_subs:
+                eff["directionality"] = "discordant"
+            else:
+                eff["directionality"] = "mixed"
+
+            # Time-lag: average (effector peak - substrate peak) across connected substrates
+            eff_peak_min = eff.get("peak_minutes", 0)
+            lag_values = []
+            for s in unique_subs:
+                sub_cond = s.get("substrate_peak_cond", "")
+                if sub_cond:
+                    sub_min = _parse_time_minutes(sub_cond)
+                    lag_values.append(eff_peak_min - sub_min)
+            if lag_values:
+                avg_lag = sum(lag_values) / len(lag_values)
+                eff["time_lag_minutes"] = round(avg_lag, 1)
+            else:
+                eff["time_lag_minutes"] = None
+
+            # Evidence strength scoring
+            score = 0
+            # Multi-substrate support: more substrates = stronger
+            if total_subs >= 3:
+                score += 3
+            elif total_subs >= 2:
+                score += 2
+            else:
+                score += 1
+            # Concordance bonus
+            if eff["directionality"] == "concordant":
+                score += 2
+            elif eff["directionality"] == "mixed" and concordant > discordant:
+                score += 1
+            # Temporal lag bonus: effector peaks AFTER substrate (lag > 0) = causal direction
+            if eff["time_lag_minutes"] is not None and eff["time_lag_minutes"] > 0:
+                score += 2
+            # Fold-change magnitude bonus
+            if eff["max_abs_fc"] >= 1.0:
+                score += 1
+            # Multiple PPI sources bonus
+            if len(eff["sources"]) >= 2:
+                score += 1
+
+            if score >= 6:
+                eff["evidence_strength"] = "strong"
+            elif score >= 4:
+                eff["evidence_strength"] = "moderate"
+            else:
+                eff["evidence_strength"] = "weak"
+            eff["evidence_score"] = score
+
+        # Sort by evidence_score descending, then max_abs_fc descending
         effector_proteins = sorted(
             _seen_effectors.values(),
-            key=lambda x: x["max_abs_fc"],
+            key=lambda x: (x.get("evidence_score", 0), x["max_abs_fc"]),
             reverse=True,
         )
         _log.info(
