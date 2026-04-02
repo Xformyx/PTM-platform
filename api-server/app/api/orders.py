@@ -4483,13 +4483,31 @@ async def global_kinase_modules(
                 if not isinstance(rag, dict):
                     continue
                 # STRING interactions
-                string_ints = rag.get("string_interactions", []) or rag.get("string_db", {}).get("interactions", [])
+                # Prefer string_db.interactions (dict list) over string_interactions (str list)
+                _sdb_ints = rag.get("string_db", {}).get("interactions", []) if isinstance(rag.get("string_db"), dict) else []
+                if _sdb_ints:
+                    string_ints = _sdb_ints
+                else:
+                    # Fallback: parse 'GENE(score)' string format from string_interactions
+                    _raw = rag.get("string_interactions", []) or []
+                    string_ints = []
+                    import re as _re
+                    for _s in _raw:
+                        if isinstance(_s, dict):
+                            string_ints.append(_s)
+                        elif isinstance(_s, str):
+                            _m = _re.match(r"^(.+)\(([0-9.]+)\)$", _s.strip())
+                            if _m:
+                                string_ints.append({"partner": _m.group(1), "score": float(_m.group(2))})
                 for si in (string_ints or []):
                     partner = (si.get("partner") or "").strip()
                     partner_upper = partner.upper()
                     if not partner or partner_upper in _substrate_genes:
                         continue  # Skip PTM substrates (only want Non-PTM partners)
                     score = si.get("score", 0)
+                    # string_db scores are 0-1 float; normalize to 0-1000 scale if needed
+                    if isinstance(score, float) and score <= 1.0:
+                        score = score * 1000
                     if score < 400:  # STRING confidence threshold
                         continue
                     if gene_upper not in _substrate_to_partners:
