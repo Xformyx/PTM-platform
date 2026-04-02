@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # PTM Platform - Dev Deploy (커밋 없이 수정된 것만 빌드 & 재시작)
 # - 작업 중인 변경(uncommitted + staged)을 감지
+# - 감지 범위: api-server, mcp-server, frontend, workers, gateway, docker-compose.yml,
+#   docker-compose.override.yml(있을 때), .env
 # - 버전은 올리지 않음
 # Usage: ./scripts/dev-deploy.sh [--all]
 
@@ -11,6 +13,17 @@ cd "$REPO_ROOT"
 
 VERSION_FILE="$REPO_ROOT/VERSION"
 LAST_DEV_BUILD="$REPO_ROOT/.last-dev-build"
+
+# compose / .env 변경 시 컨테이너를 다시 만들어줄 앱 스택 (이미지 빌드는 별도 플래그)
+APP_STACK_SERVICES=(
+  api-server
+  mcp-server
+  frontend
+  celery-worker-preprocessing
+  celery-worker-rag
+  celery-worker-report
+  gateway
+)
 
 # 제외할 경로 (node_modules, __pycache__ 등은 소스 변경 아님)
 FIND_EXCLUDE=(
@@ -31,7 +44,7 @@ get_changed_components() {
   local result=()
   local marker="$LAST_DEV_BUILD"
 
-  for dir in api-server mcp-server frontend workers; do
+  for dir in api-server mcp-server frontend workers gateway; do
     [[ ! -d "$REPO_ROOT/$dir" ]] && continue
     if [[ ! -f "$marker" ]]; then
       result+=("$dir")
@@ -41,6 +54,22 @@ get_changed_components() {
       fi
     fi
   done
+
+  # 루트 compose / env (마커가 있을 때만 — 최초 실행은 위 디렉터리들로 전체 빌드가 이미 잡힘)
+  if [[ -f "$marker" ]]; then
+    local root_files=(docker-compose.yml .env)
+    [[ -f "$REPO_ROOT/docker-compose.override.yml" ]] && root_files+=(docker-compose.override.yml)
+    for f in "${root_files[@]}"; do
+      [[ -f "$REPO_ROOT/$f" ]] || continue
+      if [[ "$REPO_ROOT/$f" -nt "$marker" ]]; then
+        if [[ "$f" == ".env" ]]; then
+          result+=("dotenv")
+        else
+          result+=("compose-file")
+        fi
+      fi
+    done
+  fi
 
   printf '%s\n' "${result[@]}" | sort -u
 }
@@ -55,7 +84,8 @@ echo "=== PTM Platform Dev Deploy (버전 변경 없음) ==="
 
 # 변경된 컴포넌트
 if $FORCE_ALL; then
-  CHANGED=("api-server" "mcp-server" "frontend" "workers")
+  # 이미지 4종 전체 빌드 + 게이트웨이까지 스택 재기동
+  CHANGED=("api-server" "mcp-server" "frontend" "workers" "gateway")
   echo "Building all (--all)"
 else
   CHANGED=($(get_changed_components))
@@ -82,31 +112,45 @@ export VERSION_WORKERS="$_d"
 BUILD_SERVICES=()
 for c in "${CHANGED[@]}"; do
   case "$c" in
-    api-server) BUILD_SERVICES+=(api-server) ;;
-    mcp-server) BUILD_SERVICES+=(mcp-server) ;;
-    frontend)   BUILD_SERVICES+=(frontend) ;;
-    workers)    BUILD_SERVICES+=(celery-worker-preprocessing) ;;
+    api-server)    BUILD_SERVICES+=(api-server) ;;
+    mcp-server)    BUILD_SERVICES+=(mcp-server) ;;
+    frontend)      BUILD_SERVICES+=(frontend) ;;
+    workers)       BUILD_SERVICES+=(celery-worker-preprocessing) ;;
+    gateway)       ;;
+    dotenv)        ;;
+    compose-file)  BUILD_SERVICES+=(api-server mcp-server frontend celery-worker-preprocessing) ;;
   esac
 done
 BUILD_SERVICES=($(printf '%s\n' "${BUILD_SERVICES[@]}" | sort -u))
 
-echo "Building: ${BUILD_SERVICES[*]}"
-docker compose build "${BUILD_SERVICES[@]}"
+if [[ ${#BUILD_SERVICES[@]} -eq 0 ]]; then
+  echo "Build: (skip — no image rebuild needed)"
+else
+  echo "Building: ${BUILD_SERVICES[*]}"
+  docker compose build "${BUILD_SERVICES[@]}"
+fi
 
 # Restart
 RESTART_SERVICES=()
 for c in "${CHANGED[@]}"; do
   case "$c" in
-    api-server) RESTART_SERVICES+=(api-server) ;;
-    mcp-server) RESTART_SERVICES+=(mcp-server) ;;
-    frontend)   RESTART_SERVICES+=(frontend) ;;
-    workers)    RESTART_SERVICES+=(celery-worker-preprocessing celery-worker-rag celery-worker-report) ;;
+    api-server)   RESTART_SERVICES+=(api-server) ;;
+    mcp-server)   RESTART_SERVICES+=(mcp-server) ;;
+    frontend)     RESTART_SERVICES+=(frontend) ;;
+    workers)      RESTART_SERVICES+=(celery-worker-preprocessing celery-worker-rag celery-worker-report) ;;
+    gateway)      RESTART_SERVICES+=(gateway) ;;
+    dotenv)       RESTART_SERVICES+=("${APP_STACK_SERVICES[@]}") ;;
+    compose-file) RESTART_SERVICES+=("${APP_STACK_SERVICES[@]}") ;;
   esac
 done
 RESTART_SERVICES=($(printf '%s\n' "${RESTART_SERVICES[@]}" | sort -u))
 
-echo "Restarting: ${RESTART_SERVICES[*]}"
-docker compose up -d "${RESTART_SERVICES[@]}"
+if [[ ${#RESTART_SERVICES[@]} -eq 0 ]]; then
+  echo "Warning: nothing to restart."
+else
+  echo "Restarting: ${RESTART_SERVICES[*]}"
+  docker compose up -d "${RESTART_SERVICES[@]}"
+fi
 
 touch "$LAST_DEV_BUILD"
 # Update git hash for display
