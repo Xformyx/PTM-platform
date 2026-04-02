@@ -190,17 +190,21 @@ def run_kinase_annotation(state: dict) -> dict:
                         generate_kinase_temporal_heatmap,
                     )
                     if inferred_receptors:
+                        # v9.34: Include Non-PTM effector proteins in Signal Flow
+                        _effector_data = (global_km or {}).get("effector_proteins", [])
                         sf_path = generate_signal_flow_figure(
                             inferred_receptors=inferred_receptors,
                             global_kinase_modules=global_km,
                             enriched_ptm_data=enriched_data,
                             output_dir=output_dir,
                             ptm_type=ptm_type,
+                            effector_proteins=_effector_data,
                         )
+                        _has_eff = " + Non-PTM Effectors" if _effector_data else ""
                         if sf_path:
                             signal_flow_figures.append({
                                 "path": sf_path,
-                                "caption": "Signal Flow Diagram: Upstream Receptor → Kinase → PTM Substrate signaling cascade",
+                                "caption": f"Signal Flow Diagram: Upstream Receptor → Kinase → PTM Substrate{_has_eff} signaling cascade",
                                 "type": "signal_flow",
                             })
                     ht_path = generate_kinase_temporal_heatmap(
@@ -358,22 +362,26 @@ def run_kinase_annotation(state: dict) -> dict:
                     generate_kinase_temporal_heatmap,
                 )
 
-                # Figure A: Signal Flow Diagram (Receptor → Kinase → Substrate)
+                # Figure A: Signal Flow Diagram (Receptor → Kinase → Substrate → Non-PTM Effector)
                 if inferred_receptors:
+                    # v9.34: Include Non-PTM effector proteins in Signal Flow
+                    _effector_data = (global_km or {}).get("effector_proteins", [])
                     sf_path = generate_signal_flow_figure(
                         inferred_receptors=inferred_receptors,
                         global_kinase_modules=global_km,
                         enriched_ptm_data=enriched_data,
                         output_dir=output_dir,
                         ptm_type=ptm_type,
+                        effector_proteins=_effector_data,
                     )
+                    _has_eff = " → Non-PTM Effector" if _effector_data else ""
                     if sf_path:
                         signal_flow_figures.append({
                             "path": sf_path,
-                            "caption": "Signal Flow Diagram: Upstream Receptor → Kinase → PTM Substrate signaling cascade",
+                            "caption": f"Signal Flow Diagram: Upstream Receptor → Kinase → PTM Substrate{_has_eff} signaling cascade",
                             "type": "signal_flow",
                         })
-                        logger.info(f"[KINASE-ANNOTATION] Generated Signal Flow figure: {sf_path}")
+                        logger.info(f"[KINASE-ANNOTATION] Generated Signal Flow figure: {sf_path} (effectors={len(_effector_data)})")
                 else:
                     logger.info("[KINASE-ANNOTATION] No inferred receptors — skipping Signal Flow figure")
 

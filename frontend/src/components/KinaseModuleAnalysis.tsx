@@ -265,6 +265,27 @@ interface TemporalCascade {
   cascade_flow: CascadeFlowEntry[];
 }
 
+// ── Non-PTM Effector Types ──────────────────────────────────────────────────
+interface EffectorTemporalEntry {
+  condition: string;
+  protein_log2fc: number;
+}
+interface EffectorConnectedSubstrate {
+  gene: string;
+  kinases: string[];
+  source: string;
+}
+interface EffectorProtein {
+  gene: string;
+  data_type: string;
+  connected_substrates: EffectorConnectedSubstrate[];
+  temporal_profile: EffectorTemporalEntry[];
+  max_abs_fc: number;
+  peak_condition: string;
+  peak_fc: number;
+  sources: string[];
+}
+
 interface GlobalKinaseModuleResponse {
   order_id: number;
   kinase_modules: GlobalKinaseModule[];
@@ -281,6 +302,7 @@ interface GlobalKinaseModuleResponse {
   };
   cowave_cross_analysis: Record<string, CowaveCrossEntry>;
   temporal_cascade?: TemporalCascade;
+  effector_proteins?: EffectorProtein[];
 }
 
 // ── Kinase Module Colors ───────────────────────────────────────────────────
@@ -2080,6 +2102,91 @@ function CascadeView({
               </div>
             )}
           </div>
+
+          {/* v9.34: Non-PTM Effector Temporal Overlay */}
+          {globalKinaseResult?.effector_proteins && globalKinaseResult.effector_proteins.length > 0 && (
+            <>
+              <Separator />
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 text-xs font-medium">
+                  <ArrowRight className="h-3.5 w-3.5 text-teal-500" />
+                  Non-PTM Effector Temporal Response
+                  <span className="text-muted-foreground font-normal">— protein abundance changes of downstream effectors</span>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-[10px]">
+                    <thead>
+                      <tr className="border-b">
+                        <th className="text-left py-1.5 px-2 min-w-[100px] font-medium text-muted-foreground">Effector</th>
+                        {tc.timepoints.map(tp => (
+                          <th key={tp.condition} className="text-center py-1.5 px-2 min-w-[80px] font-medium text-muted-foreground">
+                            {tp.condition}
+                          </th>
+                        ))}
+                        <th className="text-center py-1.5 px-2 min-w-[80px] font-medium text-muted-foreground">Peak</th>
+                        <th className="text-center py-1.5 px-2 min-w-[80px] font-medium text-muted-foreground">Sources</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {globalKinaseResult.effector_proteins.slice(0, 15).map(eff => {
+                        const tpMap: Record<string, number> = {};
+                        for (const tp of eff.temporal_profile) {
+                          tpMap[tp.condition] = tp.protein_log2fc;
+                        }
+                        return (
+                          <tr key={eff.gene} className="border-b border-border/50">
+                            <td className="py-1 px-2 font-medium">
+                              <span className={eff.peak_fc > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}>
+                                {eff.peak_fc > 0 ? "▲" : "▼"} {eff.gene}
+                              </span>
+                            </td>
+                            {tc.timepoints.map(tp => {
+                              const fc = tpMap[tp.condition];
+                              if (fc === undefined || fc === null) {
+                                return (
+                                  <td key={tp.condition} className="py-1 px-2 text-center">
+                                    <span className="text-muted-foreground/30">—</span>
+                                  </td>
+                                );
+                              }
+                              const isUp = fc > 0.3;
+                              const isDown = fc < -0.3;
+                              return (
+                                <td key={tp.condition} className="py-1 px-2 text-center">
+                                  <span className={`inline-block px-1.5 py-0.5 rounded text-[9px] font-medium ${
+                                    isUp ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300" :
+                                    isDown ? "bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-300" :
+                                    "bg-muted text-muted-foreground"
+                                  }`}>
+                                    {fc > 0 ? "+" : ""}{fc.toFixed(2)}
+                                  </span>
+                                </td>
+                              );
+                            })}
+                            <td className="py-1 px-2 text-center">
+                              <span className={`text-[9px] font-medium ${
+                                eff.peak_fc > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"
+                              }`}>
+                                {eff.peak_fc > 0 ? "+" : ""}{eff.peak_fc.toFixed(2)} @ {eff.peak_condition}
+                              </span>
+                            </td>
+                            <td className="py-1 px-2 text-center">
+                              <span className="text-[9px] text-muted-foreground">{eff.sources.join(", ")}</span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                  {globalKinaseResult.effector_proteins.length > 15 && (
+                    <div className="text-[10px] text-muted-foreground text-center py-1">
+                      Showing top 15 of {globalKinaseResult.effector_proteins.length} effector proteins
+                    </div>
+                  )}
+                </div>
+              </div>
+            </>
+          )}
         </>
       )}
     </div>
@@ -2198,6 +2305,44 @@ function GlobalKinaseModulesPanel({
           <div className="text-[10px] text-muted-foreground">Unassigned</div>
         </div>
       </div>
+
+      {/* v9.34: Non-PTM Effector Summary */}
+      {result.effector_proteins && result.effector_proteins.length > 0 && (
+        <div className="rounded-lg border border-teal-500/30 bg-teal-50/5 dark:bg-teal-900/10 p-3 space-y-2">
+          <div className="flex items-center justify-between">
+            <div className="text-xs font-semibold text-teal-600 dark:text-teal-400 flex items-center gap-1">
+              <ArrowRight className="h-3 w-3" /> Non-PTM Effector Layer
+            </div>
+            <span className="text-[10px] text-muted-foreground">
+              {result.effector_proteins.length} proteins connected via STRING/BioGRID
+            </span>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {result.effector_proteins.slice(0, 20).map(eff => {
+              const isUp = eff.peak_fc > 0;
+              return (
+                <span
+                  key={eff.gene}
+                  className={`text-[10px] px-1.5 py-0.5 rounded border font-medium ${
+                    isUp
+                      ? "bg-emerald-900/20 text-emerald-400 border-emerald-500/50"
+                      : "bg-rose-900/20 text-rose-400 border-rose-500/50"
+                  }`}
+                  title={`${eff.gene} | Peak FC: ${eff.peak_fc > 0 ? "+" : ""}${eff.peak_fc.toFixed(2)} @ ${eff.peak_condition} | Sources: ${eff.sources.join(", ")} | Connected to: ${eff.connected_substrates.map(s => s.gene).join(", ")}`}
+                >
+                  {isUp ? "▲" : "▼"} {eff.gene} ({eff.peak_fc > 0 ? "+" : ""}{eff.peak_fc.toFixed(1)})
+                </span>
+              );
+            })}
+            {result.effector_proteins.length > 20 && (
+              <span className="text-[10px] text-muted-foreground">+{result.effector_proteins.length - 20} more</span>
+            )}
+          </div>
+          <div className="text-[10px] text-muted-foreground">
+            Non-PTM proteins with significant protein abundance changes (|Log2FC| &gt; 0.3) that interact with PTM substrates via PPI networks
+          </div>
+        </div>
+      )}
 
       {/* Ubiquitylation: Chain Type Distribution */}
       {isUbi && (() => {
@@ -2652,6 +2797,27 @@ function SignalFlowView({
   conditions?: string[];
 }) {
   const [selectedReceptor, setSelectedReceptor] = useState<string | null>(null);
+  const [showEffectors, setShowEffectors] = useState(true);
+
+  // v9.34: Non-PTM effector proteins from API
+  const effectorProteins = globalKinaseResult?.effector_proteins || [];
+  const hasEffectors = effectorProteins.length > 0;
+
+  // Build substrate → effector mapping
+  const substrateToEffectors = useMemo(() => {
+    const map: Record<string, EffectorProtein[]> = {};
+    for (const eff of effectorProteins) {
+      for (const sub of eff.connected_substrates) {
+        const key = sub.gene.toUpperCase();
+        if (!map[key]) map[key] = [];
+        // Avoid duplicates
+        if (!map[key].some(e => e.gene === eff.gene)) {
+          map[key].push(eff);
+        }
+      }
+    }
+    return map;
+  }, [effectorProteins]);
 
   // v9.25: Build PTM activity classification: de_novo | regulated | minor
   // Uses q_value (Welch's t-test + BH correction) when available
@@ -2732,13 +2898,27 @@ function SignalFlowView({
       <div className="flex items-center justify-between">
         <p className="text-xs text-muted-foreground flex items-center gap-1">
           <GitBranch className="h-3.5 w-3.5 text-sky-400" />
-          Signal chain: Upstream Receptor → Kinase → PTM substrate
+          Signal chain: Upstream Receptor → Kinase → PTM substrate{hasEffectors ? " → Non-PTM Effector" : ""}
         </p>
-        {!globalKinaseResult && (
-          <span className="text-[10px] text-amber-500 bg-amber-50 dark:bg-amber-900/20 px-2 py-0.5 rounded border border-amber-300">
-            Run Global Annotate to see Kinase→PTM links
-          </span>
-        )}
+        <div className="flex items-center gap-2">
+          {hasEffectors && (
+            <button
+              className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${
+                showEffectors
+                  ? "bg-teal-50 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300 border-teal-400"
+                  : "border-border text-muted-foreground hover:border-foreground/50"
+              }`}
+              onClick={() => setShowEffectors(!showEffectors)}
+            >
+              {showEffectors ? "◉" : "○"} Effectors ({effectorProteins.length})
+            </button>
+          )}
+          {!globalKinaseResult && (
+            <span className="text-[10px] text-amber-500 bg-amber-50 dark:bg-amber-900/20 px-2 py-0.5 rounded border border-amber-300">
+              Run Global Annotate to see Kinase→PTM links
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Receptor selector */}
@@ -2853,6 +3033,55 @@ function SignalFlowView({
                               no annotated substrates in current PTM set
                             </div>
                           )}
+
+                          {/* 4th Layer: Non-PTM Effectors connected to this kinase's substrates */}
+                          {showEffectors && ptms.length > 0 && (() => {
+                            // Collect effectors connected to this kinase's substrates
+                            const kinaseEffectors: EffectorProtein[] = [];
+                            const seen = new Set<string>();
+                            for (const ptm of ptms) {
+                              const geneKey = ptm.gene.toUpperCase();
+                              const effs = substrateToEffectors[geneKey] || [];
+                              for (const e of effs) {
+                                if (!seen.has(e.gene)) {
+                                  seen.add(e.gene);
+                                  kinaseEffectors.push(e);
+                                }
+                              }
+                            }
+                            if (kinaseEffectors.length === 0) return null;
+                            return (
+                              <div className="ml-2 mt-1 space-y-0.5">
+                                <div className="flex items-center gap-0.5 text-[9px] text-muted-foreground">
+                                  <ArrowRight className="h-2.5 w-2.5 text-teal-400" />
+                                  <span className="text-teal-400">{kinaseEffectors.length} Non-PTM effectors:</span>
+                                </div>
+                                <div className="flex flex-wrap gap-1 ml-3">
+                                  {kinaseEffectors.slice(0, 8).map(eff => {
+                                    const isUp = eff.peak_fc > 0;
+                                    const chipStyle = isUp
+                                      ? "bg-emerald-900/30 text-emerald-300 border border-emerald-500"
+                                      : "bg-rose-900/30 text-rose-300 border border-rose-500";
+                                    const arrow = isUp ? "▲" : "▼";
+                                    return (
+                                      <span
+                                        key={eff.gene}
+                                        className={`text-[9px] px-1.5 py-0.5 rounded ${chipStyle}`}
+                                        title={`${eff.gene} | Protein FC: ${eff.peak_fc > 0 ? "+" : ""}${eff.peak_fc.toFixed(2)} @ ${eff.peak_condition} | Sources: ${eff.sources.join(", ")} | Connected substrates: ${eff.connected_substrates.map(s => s.gene).join(", ")}`}
+                                      >
+                                        <span className="mr-0.5">{arrow}</span>
+                                        {eff.gene}
+                                        <span className="ml-0.5 opacity-70">{eff.peak_fc > 0 ? "+" : ""}{eff.peak_fc.toFixed(1)}</span>
+                                      </span>
+                                    );
+                                  })}
+                                  {kinaseEffectors.length > 8 && (
+                                    <span className="text-[9px] text-muted-foreground/50">+{kinaseEffectors.length - 8} more</span>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })()}
                         </div>
                       );
                     })}
@@ -2901,6 +3130,22 @@ function SignalFlowView({
             <span className="text-[9px]">small change</span>
           </span>
         </div>
+        {hasEffectors && (
+          <div className="flex flex-wrap items-center gap-3 text-[10px] text-muted-foreground">
+            <span className="font-medium text-muted-foreground/70">Non-PTM Effector:</span>
+            <span className="flex items-center gap-1">
+              <span className="px-1.5 py-0.5 rounded bg-emerald-900/30 text-emerald-300 border border-emerald-500 text-[9px]">▲ Up</span>
+              <span className="text-[9px]">Protein abundance increased</span>
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="px-1.5 py-0.5 rounded bg-rose-900/30 text-rose-300 border border-rose-500 text-[9px]">▼ Down</span>
+              <span className="text-[9px]">Protein abundance decreased</span>
+            </span>
+            <span className="text-[9px] text-muted-foreground/50 ml-1">
+              ({effectorProteins.length} proteins via STRING/BioGRID, |Log2FC| &gt; 0.3)
+            </span>
+          </div>
+        )}
       </div>
     </div>
   );

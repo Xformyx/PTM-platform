@@ -4411,11 +4411,187 @@ async def global_kinase_modules(
 
         temporal_cascade["cascade_flow"] = cascade_flow
 
+    # ── 9. Non-PTM Effector Proteins (4th layer for Signal Flow) ─────────
+    # Extract Non-PTM proteins connected to PTM substrates via STRING/BioGRID
+    # with significant abundance changes across timepoints
+    effector_proteins = []
+    try:
+        import csv as _csv
+        output_dir = Path(settings.OUTPUT_DIR) / order.order_code
+
+        # 9a. Load unified TSV for ALL protein temporal profiles
+        _protein_temporal: dict = {}  # gene_upper -> {condition -> protein_log2fc}
+        _protein_data_type: dict = {}  # gene_upper -> Data_Type
+        if output_dir.exists():
+            tsv_candidates = (
+                list(output_dir.glob("unified_protein_data_enriched_bio_enriched*.tsv"))
+                + list(output_dir.glob("unified_protein_data_enriched*.tsv"))
+            )
+            if tsv_candidates:
+                tsv_path = tsv_candidates[0]
+                _log.info(f"[GLOBAL-KINASE] Loading Non-PTM temporal profiles from {tsv_path.name}")
+                with open(tsv_path, "r", encoding="utf-8") as _f:
+                    reader = _csv.DictReader(_f, delimiter="\t")
+                    for row in reader:
+                        gene = (row.get("Gene.Name") or row.get("Gene_Name") or "").strip()
+                        gene_upper = gene.upper()
+                        if not gene_upper:
+                            continue
+                        dt = row.get("Data_Type", "")
+                        cond = (row.get("Condition") or "").strip()
+                        pfc_raw = row.get("Protein_Log2FC") or row.get("Log2FC") or "0"
+                        try:
+                            pfc = float(pfc_raw) if pfc_raw and pfc_raw.lower() not in ("na", "nan", "") else 0.0
+                        except (TypeError, ValueError):
+                            pfc = 0.0
+                        if gene_upper not in _protein_temporal:
+                            _protein_temporal[gene_upper] = {}
+                        if cond:
+                            _protein_temporal[gene_upper][cond] = pfc
+                        _protein_data_type[gene_upper] = dt
+                _log.info(f"[GLOBAL-KINASE] Loaded temporal profiles for {len(_protein_temporal)} genes")
+
+        # 9b. Identify PTM substrate genes (from kinase modules)
+        _substrate_genes: set = set()
+        _substrate_kinase_map: dict = {}  # gene_upper -> set of kinase names
+        for km in kinase_module_list:
+            for m in km["members"]:
+                g_upper = m["gene"].upper()
+                _substrate_genes.add(g_upper)
+                if g_upper not in _substrate_kinase_map:
+                    _substrate_kinase_map[g_upper] = set()
+                _substrate_kinase_map[g_upper].add(km["kinase"])
+        # Also include unassigned PTM genes as substrates
+        for ua in unassigned:
+            g_upper = ua["gene"].upper()
+            _substrate_genes.add(g_upper)
+
+        # 9c. Load enriched_ptm_data JSON for STRING/BioGRID interactions
+        file_suffix = "_phospho" if order.ptm_type == "phosphorylation" else "_ubi"
+        enriched_path = output_dir / f"enriched_ptm_data{file_suffix}.json"
+        _substrate_to_partners: dict = {}  # substrate_gene_upper -> [{partner, source, score}]
+        if enriched_path.exists():
+            import json as _json2
+            with open(enriched_path, "r", encoding="utf-8") as _ef:
+                enriched_list = _json2.load(_ef)
+            for ptm_item in enriched_list:
+                gene = (ptm_item.get("gene") or ptm_item.get("Gene.Name", "")).strip()
+                gene_upper = gene.upper()
+                if gene_upper not in _substrate_genes:
+                    continue
+                rag = ptm_item.get("rag_enrichment", {})
+                if not isinstance(rag, dict):
+                    continue
+                # STRING interactions
+                string_ints = rag.get("string_interactions", []) or rag.get("string_db", {}).get("interactions", [])
+                for si in (string_ints or []):
+                    partner = (si.get("partner") or "").strip()
+                    partner_upper = partner.upper()
+                    if not partner or partner_upper in _substrate_genes:
+                        continue  # Skip PTM substrates (only want Non-PTM partners)
+                    score = si.get("score", 0)
+                    if score < 400:  # STRING confidence threshold
+                        continue
+                    if gene_upper not in _substrate_to_partners:
+                        _substrate_to_partners[gene_upper] = []
+                    _substrate_to_partners[gene_upper].append({
+                        "partner": partner,
+                        "partner_upper": partner_upper,
+                        "source": "STRING",
+                        "score": score,
+                    })
+                # BioGRID interactions
+                biogrid = rag.get("biogrid", {})
+                biogrid_ints = biogrid.get("interactions", []) if isinstance(biogrid, dict) else []
+                for bi in biogrid_ints:
+                    int_a = (bi.get("interactor_a", "") or "").strip().upper()
+                    int_b = (bi.get("interactor_b", "") or "").strip().upper()
+                    partner_upper = int_b if int_a == gene_upper else int_a if int_b == gene_upper else ""
+                    if not partner_upper or partner_upper in _substrate_genes:
+                        continue
+                    partner_name = int_b if int_a == gene_upper else int_a
+                    if gene_upper not in _substrate_to_partners:
+                        _substrate_to_partners[gene_upper] = []
+                    _substrate_to_partners[gene_upper].append({
+                        "partner": partner_name,
+                        "partner_upper": partner_upper,
+                        "source": "BioGRID",
+                        "score": 0,
+                    })
+
+        # 9d. Build effector protein list
+        _effector_fc_threshold = 0.3  # |log2FC| threshold for significance
+        _seen_effectors: dict = {}  # partner_upper -> effector dict
+        for sub_gene, partners in _substrate_to_partners.items():
+            for p in partners:
+                pu = p["partner_upper"]
+                temporal = _protein_temporal.get(pu, {})
+                if not temporal:
+                    continue  # No temporal data available
+                # Check if this protein has significant change at any timepoint
+                max_abs_fc = max((abs(v) for v in temporal.values()), default=0)
+                if max_abs_fc < _effector_fc_threshold:
+                    continue  # Below significance threshold
+                if pu not in _seen_effectors:
+                    # Determine peak condition
+                    peak_cond = max(temporal.items(), key=lambda x: abs(x[1]))
+                    # Build temporal profile list
+                    tp_list = [
+                        {"condition": c, "protein_log2fc": round(v, 4)}
+                        for c, v in sorted(temporal.items(), key=lambda x: _parse_time_minutes(x[0]))
+                    ]
+                    data_type = _protein_data_type.get(pu, "")
+                    _seen_effectors[pu] = {
+                        "gene": p["partner"],
+                        "data_type": data_type,
+                        "connected_substrates": [],
+                        "temporal_profile": tp_list,
+                        "max_abs_fc": round(max_abs_fc, 4),
+                        "peak_condition": peak_cond[0],
+                        "peak_fc": round(peak_cond[1], 4),
+                        "sources": set(),
+                    }
+                _seen_effectors[pu]["sources"].add(p["source"])
+                # Find connected substrate details
+                kinases_for_sub = list(_substrate_kinase_map.get(sub_gene, set()))
+                _seen_effectors[pu]["connected_substrates"].append({
+                    "gene": sub_gene,
+                    "kinases": kinases_for_sub[:3],
+                    "source": p["source"],
+                })
+
+        # 9e. Deduplicate connected_substrates and convert sets
+        for pu, eff in _seen_effectors.items():
+            eff["sources"] = sorted(eff["sources"])
+            seen_subs = set()
+            unique_subs = []
+            for s in eff["connected_substrates"]:
+                if s["gene"] not in seen_subs:
+                    seen_subs.add(s["gene"])
+                    unique_subs.append(s)
+            eff["connected_substrates"] = unique_subs
+
+        # Sort by max_abs_fc descending
+        effector_proteins = sorted(
+            _seen_effectors.values(),
+            key=lambda x: x["max_abs_fc"],
+            reverse=True,
+        )
+        _log.info(
+            f"[GLOBAL-KINASE] Non-PTM effectors: {len(effector_proteins)} proteins "
+            f"(from {len(_substrate_to_partners)} substrate-partner connections, "
+            f"threshold |log2FC| > {_effector_fc_threshold})"
+        )
+    except Exception as _eff_err:
+        _log.warning(f"[GLOBAL-KINASE] Non-PTM effector extraction failed: {_eff_err}", exc_info=True)
+        effector_proteins = []
+
     _log.info(
         f"[GLOBAL-KINASE] Complete: {len(kinase_module_list)} kinase modules, "
         f"{summary['total_confirmed']} confirmed, {summary['total_inferred']} inferred, "
         f"{len(unassigned)} unassigned, "
-        f"{len(temporal_cascade.get('timepoints', []))} cascade timepoints"
+        f"{len(temporal_cascade.get('timepoints', []))} cascade timepoints, "
+        f"{len(effector_proteins)} Non-PTM effectors"
     )
 
     # ── Persist kinase analysis data to DB for use in report generation ──
@@ -4429,6 +4605,7 @@ async def global_kinase_modules(
                 "temporal_cascade": temporal_cascade,
                 "cowave_cross_analysis": cowave_cross,
                 "summary": summary,
+                "effector_proteins": effector_proteins,
                 "saved_at": _dt.utcnow().isoformat(),
             }
             await db.commit()
@@ -4444,6 +4621,7 @@ async def global_kinase_modules(
         "summary": summary,
         "cowave_cross_analysis": cowave_cross,
         "temporal_cascade": temporal_cascade,
+        "effector_proteins": effector_proteins,
     }
 
 

@@ -1,12 +1,13 @@
 """
-Signal Flow Figure — Publication-quality Receptor → Kinase → Substrate diagram.
+Signal Flow Figure — Publication-quality Receptor → Kinase → Substrate → Non-PTM Effector diagram.
 
-v1.0 — Server-side matplotlib figure generation for report insertion.
+v2.0 — 4-layer Signal Flow with Non-PTM Effector integration.
   - Mirrors the frontend SignalFlowView (KinaseModuleAnalysis.tsx)
-  - Receptor → Kinase → Substrate hierarchy with activity classification
+  - Receptor → Kinase → Substrate → Non-PTM Effector hierarchy
   - Color-coded: de_novo (orange), regulated (blue), minor (gray)
   - Receptor source: Treatment (sky), Reactome (rose), Literature (violet)
   - Kinase nodes in amber
+  - Non-PTM Effector nodes in teal/emerald
   - Outputs PNG file for DOCX/Markdown report insertion
 
 Called from kinase_annotation_node → output saved as signal_flow_diagram.png
@@ -29,6 +30,7 @@ def generate_signal_flow_figure(
     ptm_type: str = "phosphorylation",
     max_receptors: int = 8,
     max_substrates_per_kinase: int = 15,
+    effector_proteins: Optional[List[dict]] = None,
 ) -> Optional[str]:
     """Generate a publication-quality Signal Flow diagram.
 
@@ -42,6 +44,8 @@ def generate_signal_flow_figure(
         ptm_type: 'phosphorylation' or 'ubiquitylation'
         max_receptors: Maximum number of receptors to show
         max_substrates_per_kinase: Maximum substrates per kinase node
+        effector_proteins: Optional list of Non-PTM effector proteins
+            [{gene, connected_substrates, temporal_profile, max_abs_fc, peak_condition, sources}]
 
     Returns:
         Path to the generated PNG file, or None if generation fails.
@@ -66,6 +70,10 @@ def generate_signal_flow_figure(
     # ── Build kinase → PTM substrate mapping ──
     kinase_to_ptms = _build_kinase_to_ptms(global_kinase_modules)
 
+    # ── Build substrate → effector mapping ──
+    substrate_to_effectors = _build_substrate_to_effectors(effector_proteins or [])
+    has_effectors = len(substrate_to_effectors) > 0
+
     # ── Select top receptors ──
     receptors = sorted(
         inferred_receptors,
@@ -81,7 +89,9 @@ def generate_signal_flow_figure(
     total_kinases = sum(len(r.get("via_kinases", [])) for r in receptors)
     total_kinases = max(total_kinases, 1)
 
-    fig_width = max(16, min(28, 4 + total_kinases * 2.5))
+    # Wider figure if we have effectors (4th layer)
+    base_width = max(16, min(28, 4 + total_kinases * 2.5))
+    fig_width = base_width + (4 if has_effectors else 0)
     fig_height = max(10, min(24, 3 + len(receptors) * 2.8))
 
     fig, ax = plt.subplots(1, 1, figsize=(fig_width, fig_height))
@@ -105,25 +115,64 @@ def generate_signal_flow_figure(
         "regulated": {"border": "#3b82f6", "bg": "#1e1b4b", "text": "#93c5fd"},
         "minor": {"border": "#6b7280", "bg": "#1f2937", "text": "#9ca3af"},
     }
+    EFFECTOR_COLORS = {
+        "up": {"border": "#10b981", "bg": "#064e3b", "text": "#6ee7b7"},
+        "down": {"border": "#f43e5e", "bg": "#4c0519", "text": "#fda4af"},
+        "neutral": {"border": "#6b7280", "bg": "#1f2937", "text": "#9ca3af"},
+    }
 
     # ── Title ──
     entity_label = "E3 Ligases" if ptm_type.lower().strip() in ("ubiquitylation", "ubiquitination") else "Kinases"
+    layers_label = "Non-PTM Effectors" if has_effectors else "PTM Substrates"
     ax.text(
         fig_width / 2, fig_height - 0.5,
-        f"Signal Flow: Upstream Receptor → {entity_label} → PTM Substrates",
+        f"Signal Flow: Upstream Receptor → {entity_label} → PTM Substrates" + (" → Non-PTM Effectors" if has_effectors else ""),
         fontsize=14, fontweight="bold", color="white",
         ha="center", va="top",
     )
     ax.text(
         fig_width / 2, fig_height - 1.0,
-        f"Top {len(receptors)} inferred receptors with downstream {ptm_type} signaling cascade",
+        f"Top {len(receptors)} inferred receptors with downstream {ptm_type} signaling cascade"
+        + (f" + {len(substrate_to_effectors)} effector connections" if has_effectors else ""),
         fontsize=9, color="#9ca3af",
         ha="center", va="top",
     )
 
+    # ── Layer column headers ──
+    header_y = fig_height - 1.5
+    layer_positions = {
+        "receptor": 2.0,
+        "kinase": 6.5,
+        "substrate": 11.0 if has_effectors else 10.0,
+    }
+    if has_effectors:
+        layer_positions["effector"] = fig_width - 4.0
+
+    for layer_name, lx in layer_positions.items():
+        label = {
+            "receptor": "Receptors",
+            "kinase": entity_label,
+            "substrate": "PTM Substrates",
+            "effector": "Non-PTM Effectors",
+        }[layer_name]
+        color = {
+            "receptor": "#38bdf8",
+            "kinase": "#f59e0b",
+            "substrate": "#93c5fd",
+            "effector": "#6ee7b7",
+        }[layer_name]
+        ax.text(
+            lx, header_y, f"▎{label}",
+            fontsize=8, fontweight="bold", color=color,
+            ha="left", va="center", alpha=0.7,
+        )
+
     # ── Draw each receptor chain ──
-    y_cursor = fig_height - 1.8
-    row_height = max(2.0, (fig_height - 3.0) / len(receptors))
+    y_cursor = fig_height - 2.2
+    row_height = max(2.0, (fig_height - 3.5) / len(receptors))
+
+    # Track substrate positions for effector connections
+    _substrate_positions: Dict[str, Tuple[float, float]] = {}  # gene_upper -> (x, y)
 
     for rec_idx, rec in enumerate(receptors):
         rec_name = rec.get("name", "Unknown")
@@ -175,6 +224,8 @@ def generate_signal_flow_figure(
         if via_kinases:
             kinase_start_x = 5.5
             kinase_spacing = max(2.0, min(4.0, (fig_width - kinase_start_x - 1) / max(len(via_kinases), 1)))
+            if has_effectors:
+                kinase_spacing = max(1.8, min(3.0, (fig_width - kinase_start_x - 6) / max(len(via_kinases), 1)))
 
             # Arrow from receptor to kinase area
             ax.annotate(
@@ -269,7 +320,94 @@ def generate_signal_flow_figure(
                             ),
                         )
 
+                        # Track substrate position for effector connections
+                        gene_upper = ptm["gene"].upper()
+                        if gene_upper not in _substrate_positions:
+                            _substrate_positions[gene_upper] = (cx + 0.4, cy)
+
         y_cursor -= row_height
+
+    # ── 4th Layer: Non-PTM Effector nodes ──
+    if has_effectors and effector_proteins:
+        effector_x = layer_positions.get("effector", fig_width - 4.0)
+        # Select top effectors by max_abs_fc
+        top_effectors = sorted(
+            effector_proteins,
+            key=lambda e: e.get("max_abs_fc", 0),
+            reverse=True,
+        )[:12]  # max 12 effectors
+
+        if top_effectors:
+            eff_y_start = fig_height - 2.5
+            eff_spacing = min(1.2, (fig_height - 3.5) / max(len(top_effectors), 1))
+
+            for eff_idx, eff in enumerate(top_effectors):
+                eff_gene = eff.get("gene", "Unknown")
+                eff_fc = eff.get("peak_fc", 0)
+                eff_cond = eff.get("peak_condition", "")
+                eff_sources = eff.get("sources", [])
+                eff_subs = eff.get("connected_substrates", [])
+
+                ey = eff_y_start - eff_idx * eff_spacing
+
+                # Determine color by direction
+                if eff_fc > 0.3:
+                    eff_clr = EFFECTOR_COLORS["up"]
+                elif eff_fc < -0.3:
+                    eff_clr = EFFECTOR_COLORS["down"]
+                else:
+                    eff_clr = EFFECTOR_COLORS["neutral"]
+
+                # Effector node box
+                eff_box = FancyBboxPatch(
+                    (effector_x, ey - 0.2), 3.5, 0.4,
+                    boxstyle="round,pad=0.08",
+                    facecolor=eff_clr["bg"],
+                    edgecolor=eff_clr["border"],
+                    linewidth=1.2,
+                )
+                ax.add_patch(eff_box)
+
+                # Effector gene name
+                direction_icon = "▲" if eff_fc > 0 else "▼" if eff_fc < 0 else "●"
+                ax.text(
+                    effector_x + 0.1, ey,
+                    direction_icon,
+                    fontsize=6, color=eff_clr["text"],
+                    ha="left", va="center",
+                )
+                ax.text(
+                    effector_x + 0.35, ey,
+                    eff_gene if len(eff_gene) <= 10 else eff_gene[:8] + "…",
+                    fontsize=7, fontweight="bold", color=eff_clr["text"],
+                    ha="left", va="center",
+                )
+
+                # FC and peak info
+                fc_str = f"{eff_fc:+.2f}" if eff_fc != 0 else "0.00"
+                source_str = "/".join(eff_sources[:2])
+                ax.text(
+                    effector_x + 1.8, ey,
+                    f"FC:{fc_str} @{eff_cond}",
+                    fontsize=5, color="#9ca3af",
+                    ha="left", va="center",
+                )
+
+                # Draw connection lines from substrates to effector
+                for sub in eff_subs[:3]:  # max 3 connections per effector
+                    sub_gene_upper = sub.get("gene", "").upper()
+                    if sub_gene_upper in _substrate_positions:
+                        sx, sy = _substrate_positions[sub_gene_upper]
+                        ax.annotate(
+                            "", xy=(effector_x, ey),
+                            xytext=(sx + 0.3, sy),
+                            arrowprops=dict(
+                                arrowstyle="->",
+                                color=eff_clr["border"] + "60",
+                                lw=0.8,
+                                connectionstyle="arc3,rad=0.15",
+                            ),
+                        )
 
     # ── Legend ──
     legend_y = 0.8
@@ -309,6 +447,28 @@ def generate_signal_flow_figure(
             ),
         )
 
+    # Effector legend (if applicable)
+    if has_effectors:
+        ax.text(legend_x, legend_y - 0.7, "Non-PTM Effector:", fontsize=7, color="#6b7280",
+                fontweight="bold", ha="left", va="center")
+        for i, (label, eff_type) in enumerate([
+            ("▲ Upregulated (Protein FC>0)", "up"),
+            ("▼ Downregulated (Protein FC<0)", "down"),
+        ]):
+            clrs = EFFECTOR_COLORS[eff_type]
+            ax.text(
+                legend_x + 2.5 + i * 4.5, legend_y - 0.7,
+                label,
+                fontsize=6, color=clrs["text"],
+                ha="left", va="center",
+                bbox=dict(
+                    boxstyle="round,pad=0.06",
+                    facecolor=clrs["bg"],
+                    edgecolor=clrs["border"],
+                    linewidth=0.5,
+                ),
+            )
+
     # ── Save ──
     output_path = Path(output_dir) / "signal_flow_diagram.png"
     fig.tight_layout(pad=0.5)
@@ -320,9 +480,10 @@ def generate_signal_flow_figure(
     )
     plt.close(fig)
 
+    effector_count = len(substrate_to_effectors) if has_effectors else 0
     logger.info(
         f"[SIGNAL-FLOW-FIG] Generated signal flow diagram: {output_path} "
-        f"({len(receptors)} receptors, {total_kinases} kinases)"
+        f"({len(receptors)} receptors, {total_kinases} kinases, {effector_count} effector connections)"
     )
     return str(output_path)
 
@@ -538,3 +699,29 @@ def _build_kinase_to_ptms(global_kinase_modules: dict) -> Dict[str, List[dict]]:
         kinase_to_ptms[key] = members
 
     return kinase_to_ptms
+
+
+def _build_substrate_to_effectors(effector_proteins: List[dict]) -> Dict[str, List[dict]]:
+    """Build substrate → effector mapping from effector proteins list.
+
+    Returns: {SUBSTRATE_GENE_UPPER: [{gene, peak_fc, peak_condition, sources}]}
+    """
+    substrate_to_effectors: Dict[str, List[dict]] = {}
+    if not effector_proteins:
+        return substrate_to_effectors
+
+    for eff in effector_proteins:
+        for sub in eff.get("connected_substrates", []):
+            sub_gene = sub.get("gene", "").upper()
+            if not sub_gene:
+                continue
+            if sub_gene not in substrate_to_effectors:
+                substrate_to_effectors[sub_gene] = []
+            substrate_to_effectors[sub_gene].append({
+                "gene": eff.get("gene", ""),
+                "peak_fc": eff.get("peak_fc", 0),
+                "peak_condition": eff.get("peak_condition", ""),
+                "sources": eff.get("sources", []),
+            })
+
+    return substrate_to_effectors
