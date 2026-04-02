@@ -618,7 +618,7 @@ INSTRUCTIONS:
 - For each Research Question, identify the most significant PTM findings and their biological implications.
 - If high-confidence literature matches are provided above, explicitly mention how the experimental results align with or diverge from published literature.
 - **PTM Vector Framework**: Frame the abstract through the PTM Vector approach — describe how PTM activation states reveal the signaling logic of the cellular response.
-- **Temporal signaling**: Briefly describe the receptor → kinase → substrate → effector cascade and its temporal evolution.
+- **Temporal signaling**: Briefly describe the receptor → kinase → substrate → effector cascade and its temporal evolution. Mention that Non-PTM downstream interactors provided concordant validation evidence for the identified signaling axes.
 - **Co-wave groups**: Mention the major co-movement groups and their biological significance.
 - Highlight the cell signaling commonalities among activated proteins based on PTM Vector values.
 - Write a comprehensive abstract that captures ALL major findings. Be specific about PTM sites using the correct terminology: '{get_vocabulary(ptm_type_label)["modification_at_site"].format(site=get_vocabulary(ptm_type_label)["site_prefixes"][0] + "48", gene="GENE_NAME")}'. NEVER use terminology from a different PTM type.
@@ -772,6 +772,10 @@ You MUST interpret ALL findings through this framework:
 2. **Receptor → Kinase → Substrate → Non-PTM cascade**: Trace the signal flow from upstream
    receptors through kinases to their substrates, and finally to non-PTM effector proteins.
    Describe HOW the signal propagates through each layer at each timepoint.
+   **Non-PTM proteins as VALIDATION EVIDENCE**: When describing each kinase-substrate relationship,
+   INLINE mention the Non-PTM effector proteins that support it as concordant downstream evidence.
+   The NUMBER of concordant Non-PTM proteins strengthens confidence in the kinase-substrate axis.
+   Do NOT list Non-PTM proteins separately — weave them into kinase-substrate discussions.
 3. **Temporal signal propagation**: At each timepoint, describe which layer of the cascade
    is most active. Early timepoints often show receptor/kinase activation; later timepoints
    show substrate modification and non-PTM effector changes.
@@ -814,6 +818,8 @@ Structure:
   * Trace the signal from receptor activation → kinase cascade → substrate modification → effector response
   * At each timepoint, describe which signaling layer is most active
   * Identify signal relay points and amplification nodes
+  * For each kinase-substrate axis, mention the number of concordant Non-PTM downstream
+    interactors as validation evidence (e.g., 'supported by N concordant downstream effectors')
 
 IMPORTANT: Be thorough and detailed. Discuss each significant PTM site individually. Include quantitative data (Log2FC values). Cite the provided references to support your findings. This is the most important section of the report.
 - You MUST explicitly name the treatment/stimulus ({treatment}) when describing PTM responses. Never use generic terms like 'the treatment'.
@@ -899,6 +905,11 @@ This report uses the **PTM Vector** approach. In the Discussion, you MUST:
 - Compare the observed signaling cascade with known canonical pathways from the literature
 - Discuss whether the temporal signal propagation pattern suggests signal amplification,
   relay, feedback, or termination at each stage
+- **Non-PTM proteins as VALIDATION EVIDENCE**: When discussing each kinase-substrate relationship,
+  INLINE mention the Non-PTM effector proteins that support it. The number of concordant
+  Non-PTM proteins strengthens confidence in the kinase-substrate axis. Use temporal concordance
+  (time-lag between substrate PTM peak and Non-PTM protein change) as directional evidence.
+  Do NOT create a separate section for Non-PTM proteins — weave them into kinase-substrate discussions.
 === END PTM VECTOR DISCUSSION FRAMEWORK ===
 
 Results Summary:
@@ -921,7 +932,7 @@ Structure (8 core topics):
    - What distinguishes this group from other co-wave groups?
    - How do co-wave patterns change across timepoints (which groups lead, which follow)?
 4. **Mechanistic Insight**: How specific PTM sites contribute to the observed response — relate each key site to known {('E3 ligase-substrate' if ptm_type_str.lower().strip() in ('ubiquitylation', 'ubiquitination') else 'kinase-substrate')} relationships and signaling cascades
-5. **Non-PTM Effector Signaling**: Discuss the signaling roles of Non-PTM effector proteins. For each key Non-PTM protein, explain: (a) its position in the signaling cascade relative to PTM proteins, (b) its temporal dynamics compared to PTM changes, (c) whether it acts as upstream regulator, scaffold, transducer, or downstream effector
+5. **Non-PTM Validation Evidence** (IMPORTANT — NOT a standalone section): When discussing each kinase-substrate relationship in topics 1-4 above, INLINE mention the Non-PTM effector proteins that support it. For example: 'The MAPK1→STAT3(S727) axis is further validated by concordant changes in N downstream interactors (e.g., HSP90, CDC37).' The NUMBER of concordant Non-PTM proteins strengthens the confidence in each kinase-substrate relationship. Use temporal concordance (time-lag) as evidence of signal directionality. Do NOT create a separate subsection for Non-PTM proteins — weave them into the kinase-substrate discussions above
 6. **Cell Signaling Commonality**: Discuss shared pathway memberships and cross-pathway interactions. Explain whether signaling cascades represent signal amplification, relay, or termination
 7. **Comparison with Literature**: Compare and contrast your findings with published studies. Specifically compare the observed PTM Vector patterns with known signaling models from the literature.
 8. **Limitations and Future Directions**: Acknowledge limitations and propose follow-up experiments
@@ -954,7 +965,7 @@ Discussion Summary:
 
 Summarize through the PTM Vector framework:
 1. Key findings and how they answer each research question — framed through PTM activation vectors
-2. **Temporal signaling narrative**: Summarize the receptor → kinase → substrate → effector cascade and how it evolves over time
+2. **Temporal signaling narrative**: Summarize the receptor → kinase → substrate → effector cascade and how it evolves over time. Mention how Non-PTM downstream interactors provided validation evidence for key kinase-substrate relationships
 3. **Co-wave group summary**: Briefly describe the major co-movement groups, their biological significance, and how they relate to each other temporally
 4. Novel insights revealed by this analysis — what is new compared to existing literature
 5. Biological and clinical significance of the identified PTM changes

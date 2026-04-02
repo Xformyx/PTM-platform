@@ -988,11 +988,12 @@ def build_nonptm_temporal_analysis(
     )
 
     lines = [
-        "## NON-PTM EFFECTOR TEMPORAL ANALYSIS (with Signaling Role & Directionality)",
-        f"Non-PTM proteins are interaction partners that do not carry {ptm_type} "
-        "modifications but show significant protein abundance changes. "
-        "Each protein is classified by its signaling role and its relationship "
-        "directionality relative to the PTM-modified proteins.",
+        "## NON-PTM EFFECTOR PROTEINS — SUPPORTIVE EVIDENCE FOR KINASE-SUBSTRATE RELATIONSHIPS",
+        f"The following Non-PTM proteins are interaction partners of identified {ptm_type}-modified "
+        "substrates. They do NOT carry the target PTM modification but show significant protein "
+        "abundance changes that VALIDATE the identified kinase-substrate signaling axes. "
+        "Use these proteins as INLINE supporting evidence when discussing each kinase-substrate "
+        "relationship — do NOT discuss them as a separate topic.",
         "",
     ]
 
@@ -1054,13 +1055,24 @@ def build_nonptm_temporal_analysis(
         lines.append(f"- **{direction}**: {cnt} proteins")
 
     lines.append("")
-    lines.append("### Interpretation Instructions")
+    lines.append("### Interpretation Instructions (CRITICAL — Supportive Evidence Approach)")
     lines.append(
-        "When writing about Non-PTM proteins, you MUST:\n"
-        "1. Describe each protein's signaling role (upstream regulator, scaffold/adaptor, transducer, or downstream effector)\n"
-        "2. Explain the directionality of its relationship with PTM-modified proteins (upstream, downstream, feedback, or co-regulated)\n"
-        "3. Place the protein within its canonical signaling pathway context\n"
-        "4. Discuss how the temporal pattern (immediate/delayed/sustained) relates to its signaling role\n"
+        "IMPORTANT: Non-PTM proteins are NOT the main subject of this report. They serve as \n"
+        "**supportive evidence** that validates the identified kinase-substrate relationships.\n\n"
+        "When writing about Non-PTM proteins, you MUST follow these rules:\n"
+        "1. DO NOT create a separate dedicated section for Non-PTM proteins.\n"
+        "2. Instead, mention Non-PTM proteins INLINE when discussing each kinase-substrate relationship \n"
+        "   as validation evidence. For example: 'The activation of MAPK1-mediated phosphorylation of \n"
+        "   STAT3 (S727) is further supported by concordant upregulation of 12 downstream interactors \n"
+        "   (including HSP90, CDC37), with peak expression changes occurring 30 min after substrate \n"
+        "   PTM peak, confirming the temporal causality of this signaling axis.'\n"
+        "3. The NUMBER of concordant Non-PTM proteins strengthens the confidence — more supporting \n"
+        "   Non-PTM proteins = stronger evidence that the kinase-substrate relationship is real.\n"
+        "4. Use temporal concordance (time-lag) between substrate PTM change and Non-PTM protein \n"
+        "   abundance change as evidence of signal propagation directionality.\n"
+        "5. Group Non-PTM proteins by their connected PTM substrate, not as an independent list.\n"
+        "6. Briefly note the signaling role (scaffold, transducer, effector) only when it adds \n"
+        "   mechanistic insight to the kinase-substrate relationship being discussed.\n"
     )
 
     lines.append("")
