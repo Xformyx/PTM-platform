@@ -159,6 +159,9 @@ def run_report_generation(self, order_id: int, config: dict):
             "frontend_kinase_analysis": config.get("kinase_analysis_data", {}),
             # v9.20: Inferred upstream receptors from vector-plot-data analysis
             "inferred_receptors": inferred_receptors_from_db,
+            # v9.33: PTM selection settings (synced with frontend kinase module analysis)
+            "top_n_ptms": config.get("top_n_ptms", 50),
+            "ptm_selection_mode": config.get("ptm_selection_mode", "top_n"),
         }
 
         # ── Cross-Talk mode: load secondary PTM data into initial_state ──

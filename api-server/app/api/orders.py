@@ -895,6 +895,9 @@ async def run_stage(
             "secondary_condition_map": _build_condition_map(order.secondary_sample_config) if order.secondary_sample_config else None,
             # v9.12: Pass frontend kinase analysis results to report pipeline
             "kinase_analysis_data": order.kinase_analysis_data or {},
+            # v9.33: Pass PTM selection settings so kinase module analysis matches frontend
+            "top_n_ptms": (order.report_options or {}).get("top_n_ptms", 50),
+            "ptm_selection_mode": (order.report_options or {}).get("ptm_selection_mode", "top_n"),
         }
         task = celery_app.send_task(
             "report_generation.tasks.run_report_generation",

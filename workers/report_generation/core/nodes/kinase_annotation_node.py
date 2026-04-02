@@ -178,10 +178,51 @@ def run_kinase_annotation(state: dict) -> dict:
                 )
 
             llm_context = _build_frontend_kinase_llm_context(global_km, ptm_type)
+
+            # v9.33: Generate figures even without clusters
+            signal_flow_figures = []
+            output_dir = state.get("output_dir", "")
+            inferred_receptors = state.get("inferred_receptors", []) or []
+            if output_dir:
+                try:
+                    from report_generation.core.nodes.signal_flow_figure import (
+                        generate_signal_flow_figure,
+                        generate_kinase_temporal_heatmap,
+                    )
+                    if inferred_receptors:
+                        sf_path = generate_signal_flow_figure(
+                            inferred_receptors=inferred_receptors,
+                            global_kinase_modules=global_km,
+                            enriched_ptm_data=enriched_data,
+                            output_dir=output_dir,
+                            ptm_type=ptm_type,
+                        )
+                        if sf_path:
+                            signal_flow_figures.append({
+                                "path": sf_path,
+                                "caption": "Signal Flow Diagram: Upstream Receptor → Kinase → PTM Substrate signaling cascade",
+                                "type": "signal_flow",
+                            })
+                    ht_path = generate_kinase_temporal_heatmap(
+                        global_kinase_modules=global_km,
+                        output_dir=output_dir,
+                        ptm_type=ptm_type,
+                    )
+                    if ht_path:
+                        entity_label = "E3 Ligase" if ptm_type.lower().strip() in ("ubiquitylation", "ubiquitination") else "Kinase"
+                        signal_flow_figures.append({
+                            "path": ht_path,
+                            "caption": f"Temporal {entity_label} Activity Heatmap: substrate count per timepoint",
+                            "type": "kinase_heatmap",
+                        })
+                except Exception as fig_err:
+                    logger.warning(f"[KINASE-ANNOTATION] Figure generation failed (no clusters): {fig_err}")
+
             return {
                 "temporal_kinase_cascade": {},
                 "temporal_kinase_cascade_llm_context": llm_context,
                 "global_kinase_modules": global_km,
+                "signal_flow_figures": signal_flow_figures,
             }
 
         # Build gene → enriched_ptm_data lookup
@@ -305,10 +346,60 @@ def run_kinase_annotation(state: dict) -> dict:
             f"LLM context: {len(llm_context)} chars"
         )
 
+        # ── Step 7 (v9.33): Generate Signal Flow & Kinase Heatmap figures ──
+        signal_flow_figures = []
+        output_dir = state.get("output_dir", "")
+        inferred_receptors = state.get("inferred_receptors", []) or []
+
+        if output_dir:
+            try:
+                from report_generation.core.nodes.signal_flow_figure import (
+                    generate_signal_flow_figure,
+                    generate_kinase_temporal_heatmap,
+                )
+
+                # Figure A: Signal Flow Diagram (Receptor → Kinase → Substrate)
+                if inferred_receptors:
+                    sf_path = generate_signal_flow_figure(
+                        inferred_receptors=inferred_receptors,
+                        global_kinase_modules=global_km,
+                        enriched_ptm_data=enriched_data,
+                        output_dir=output_dir,
+                        ptm_type=ptm_type,
+                    )
+                    if sf_path:
+                        signal_flow_figures.append({
+                            "path": sf_path,
+                            "caption": "Signal Flow Diagram: Upstream Receptor → Kinase → PTM Substrate signaling cascade",
+                            "type": "signal_flow",
+                        })
+                        logger.info(f"[KINASE-ANNOTATION] Generated Signal Flow figure: {sf_path}")
+                else:
+                    logger.info("[KINASE-ANNOTATION] No inferred receptors — skipping Signal Flow figure")
+
+                # Figure B: Kinase Temporal Activity Heatmap
+                ht_path = generate_kinase_temporal_heatmap(
+                    global_kinase_modules=global_km,
+                    output_dir=output_dir,
+                    ptm_type=ptm_type,
+                )
+                if ht_path:
+                    entity_label = "E3 Ligase" if ptm_type.lower().strip() in ("ubiquitylation", "ubiquitination") else "Kinase"
+                    signal_flow_figures.append({
+                        "path": ht_path,
+                        "caption": f"Temporal {entity_label} Activity Heatmap: substrate count per timepoint across active {entity_label.lower()}s",
+                        "type": "kinase_heatmap",
+                    })
+                    logger.info(f"[KINASE-ANNOTATION] Generated Kinase Temporal Heatmap: {ht_path}")
+
+            except Exception as fig_err:
+                logger.warning(f"[KINASE-ANNOTATION] Signal Flow figure generation failed: {fig_err}", exc_info=True)
+
         return {
             "temporal_kinase_cascade": temporal_cascade,
             "temporal_kinase_cascade_llm_context": llm_context,
             "global_kinase_modules": global_km,
+            "signal_flow_figures": signal_flow_figures,
             "ubi_chain_classifications": ubi_chain_classifications,
             "ubi_e3_modules": ubi_e3_modules_result,
             "ubi_temporal_cascade": ubi_temporal_cascade_result,
