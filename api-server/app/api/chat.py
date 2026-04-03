@@ -93,6 +93,7 @@ class ChatRequest(BaseModel):
     conversation_history: List[ChatMessage] = []
     view_context: Optional[Dict[str, Any]] = None
     rag_collection_ids: Optional[List[int]] = None
+    response_language: str = "auto"  # "ko", "en", or "auto" (match user's language)
 
 
 # ── Context Assembly ─────────────────────────────────────────────────────────
@@ -375,7 +376,7 @@ IMPORTANT RULES:
 3. When explaining methodology, reference the Pipeline Methodology section.
 4. For literature-based answers, cite the RAG collection sources when available.
 5. Be honest about limitations — if data is insufficient to answer, say so clearly.
-6. Respond in the same language as the user's question (Korean or English).
+6. {language_instruction}
 7. Keep answers focused and concise but thorough. Use markdown formatting for readability.
 8. When the user asks about specific PTMs, proteins, or kinases, look them up in the provided data sections.
 
@@ -429,7 +430,16 @@ async def chat_with_analysis(
     )
 
     # Build messages for Ollama
-    system_prompt = SYSTEM_PROMPT_TEMPLATE.format(context=context)
+    # Determine language instruction
+    lang = body.response_language
+    if lang == "ko":
+        language_instruction = "You MUST respond entirely in Korean (한국어). All explanations, headings, and conclusions must be in Korean."
+    elif lang == "en":
+        language_instruction = "You MUST respond entirely in English. All explanations, headings, and conclusions must be in English."
+    else:
+        language_instruction = "Respond in the same language as the user's question (Korean or English)."
+
+    system_prompt = SYSTEM_PROMPT_TEMPLATE.format(context=context, language_instruction=language_instruction)
     messages = [{"role": "system", "content": system_prompt}]
 
     # Add conversation history (keep recent turns)

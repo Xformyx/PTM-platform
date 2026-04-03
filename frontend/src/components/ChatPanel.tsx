@@ -82,6 +82,7 @@ export default function ChatPanel({ orderId, viewContext, isOpen, onClose }: Cha
   const [selectedCollections, setSelectedCollections] = useState<number[]>([]);
   const [showCollections, setShowCollections] = useState(false);
   const [showContextInfo, setShowContextInfo] = useState(false);
+  const [responseLang, setResponseLang] = useState<"auto" | "ko" | "en">("auto");
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -134,11 +135,12 @@ export default function ChatPanel({ orderId, viewContext, isOpen, onClose }: Cha
           "Content-Type": "application/json",
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-        body: JSON.stringify({
+          body: JSON.stringify({
           message: text,
           conversation_history: history,
           view_context: viewContext || {},
           rag_collection_ids: selectedCollections.length > 0 ? selectedCollections : null,
+          response_language: responseLang,
         }),
         signal: controller.signal,
       });
@@ -245,7 +247,7 @@ export default function ChatPanel({ orderId, viewContext, isOpen, onClose }: Cha
       setIsStreaming(false);
       abortRef.current = null;
     }
-  }, [input, isStreaming, messages, orderId, viewContext, selectedCollections]);
+  }, [input, isStreaming, messages, orderId, viewContext, selectedCollections, responseLang]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -290,11 +292,6 @@ export default function ChatPanel({ orderId, viewContext, isOpen, onClose }: Cha
         <div className="flex items-center gap-2">
           <Sparkles className="h-4 w-4 text-primary" />
           <span className="font-semibold text-sm">PTM Analysis AI</span>
-          {contextInfo && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-mono">
-              {contextInfo.model}
-            </span>
-          )}
         </div>
         <div className="flex items-center gap-1">
           <Button
@@ -523,9 +520,26 @@ export default function ChatPanel({ orderId, viewContext, isOpen, onClose }: Cha
             <Send className="h-4 w-4" />
           </Button>
         </div>
-        <p className="text-[10px] text-muted-foreground mt-1.5 text-center">
-          AI 답변은 분석 데이터 기반이며, 항상 원본 데이터를 확인하세요.
-        </p>
+        <div className="flex items-center justify-between mt-1.5">
+          <div className="flex items-center gap-1">
+            {(["auto", "ko", "en"] as const).map((lang) => (
+              <button
+                key={lang}
+                onClick={() => setResponseLang(lang)}
+                className={`text-[10px] px-2 py-0.5 rounded-full transition-colors ${
+                  responseLang === lang
+                    ? "bg-primary text-primary-foreground font-medium"
+                    : "bg-muted text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {lang === "auto" ? "Auto" : lang === "ko" ? "한국어" : "English"}
+              </button>
+            ))}
+          </div>
+          <p className="text-[10px] text-muted-foreground">
+            AI 답변은 분석 데이터 기반입니다.
+          </p>
+        </div>
       </div>
     </div>
   );
