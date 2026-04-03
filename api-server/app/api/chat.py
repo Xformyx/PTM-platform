@@ -605,9 +605,12 @@ async def chat_with_analysis(
     # Determine language instruction
     lang = body.response_language
     if lang == "ko":
-        language_instruction = """절대적으로 한국어로만 답변하세요. 영어 단어를 사용하지 마세요.
-단, 단백질명(MAPK1 등), PTM 위치(S473 등), 유전자명 같은 과학 고유명사는 예외입니다.
-제목, 설명, 결론 모두 한국어로 작성하세요. 영어 문장을 사용하면 안 됩니다."""
+        language_instruction = """한국어로 답변하되, 과학 전문 용어는 반드시 영어 원문 그대로 사용하세요.
+번역하면 안 되는 용어 예시: kinase, substrate, receptor, phosphorylation, ubiquitination,
+upstream regulator, downstream target, effector, signal flow, fold-change, pathway,
+crosstalk, co-movement, evidence scoring, PTM-Vector, enrichment 등.
+단백질명(MAPK1, CDK5 등), 유전자명, PTM 위치(S473 등)도 영어 그대로 사용하세요.
+일반적인 설명과 문장 구조만 한국어로 작성하세요. 과학 용어를 한글로 음역하지 마세요(예: kinase를 '키나제'나 '킨기'로 쓰지 마세요)."""
     elif lang == "en":
         language_instruction = "You MUST respond entirely in English. All explanations, headings, and conclusions must be in English. Do not use Korean."
     else:
