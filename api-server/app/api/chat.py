@@ -457,10 +457,18 @@ async def chat_with_analysis(
     ollama_url = settings.OLLAMA_URL
 
     async def _stream_response():
+        import re as _re
         try:
             async with httpx.AsyncClient(
                 timeout=httpx.Timeout(10.0, read=300.0)
             ) as client:
+                # ── Track <thought> filtering state ──
+                # exaone-deep outputs <thought>...</thought> before the real answer.
+                # We buffer everything until </thought> is seen, then discard it.
+                _in_thought = False
+                _thought_buffer = ""
+                _thought_done = False  # True once </thought> has been fully consumed
+
                 async with client.stream(
                     "POST",
                     f"{ollama_url}/api/chat",
@@ -490,7 +498,31 @@ async def chat_with_analysis(
                             content = data.get("message", {}).get("content", "")
                             done = data.get("done", False)
 
-                            if content:
+                            if content and not _thought_done:
+                                # Still looking for / inside <thought> block
+                                _thought_buffer += content
+                                if not _in_thought and "<thought>" in _thought_buffer:
+                                    _in_thought = True
+                                if _in_thought and "</thought>" in _thought_buffer:
+                                    # Discard everything up to and including </thought>
+                                    idx = _thought_buffer.index("</thought>") + len("</thought>")
+                                    remainder = _thought_buffer[idx:].lstrip("\n")
+                                    _thought_done = True
+                                    _thought_buffer = ""
+                                    if remainder:
+                                        yield f"data: {json.dumps({'content': remainder, 'done': False})}\n\n"
+                                    # Send a thinking indicator so user knows AI is working
+                                elif not _in_thought:
+                                    # No <thought> tag at all — model didn't use thinking
+                                    # Check if we've accumulated enough to be sure
+                                    if len(_thought_buffer) > 20:
+                                        _thought_done = True
+                                        yield f"data: {json.dumps({'content': _thought_buffer, 'done': False})}\n\n"
+                                        _thought_buffer = ""
+                                # While in thought, send periodic "thinking" status
+                                # (no content, just to keep connection alive)
+                            elif content and _thought_done:
+                                # Normal content after thought block — pass through
                                 yield f"data: {json.dumps({'content': content, 'done': False})}\n\n"
 
                             if done:
