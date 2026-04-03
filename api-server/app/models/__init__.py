@@ -1,3 +1,4 @@
+from app.models.chat_message import ChatMessage
 from app.models.llm_model import LlmModel
 from app.models.notification import Notification
 from app.models.order import Order, OrderLog, OrderShare
@@ -15,4 +16,5 @@ __all__ = [
     "RagDocument",
     "LlmModel",
     "Report",
+    "ChatMessage",
 ]

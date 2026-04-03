@@ -28,8 +28,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
-from app.core.database import get_db
+from app.core.database import AsyncSessionLocal, get_db
 from app.dependencies import get_current_user
+from app.models.chat_message import ChatMessage
 from app.models.order import Order
 from app.models.rag_collection import RagCollection
 
@@ -395,6 +396,21 @@ async def chat_with_analysis(
     user=Depends(get_current_user),
 ):
     """Stream AI chat responses based on order analysis context."""
+    # Save user message to DB
+    user_msg = ChatMessage(
+        order_id=order_id,
+        user_id=user.id,
+        role="user",
+        content=body.message,
+        metadata_json={
+            "view_context": body.view_context,
+            "rag_collection_ids": body.rag_collection_ids,
+            "response_language": body.response_language,
+        } if body.view_context else None,
+    )
+    db.add(user_msg)
+    await db.commit()
+
     # Load order
     result = await db.execute(select(Order).where(Order.id == order_id))
     order = result.scalar_one_or_none()
@@ -456,6 +472,26 @@ async def chat_with_analysis(
 
     ollama_url = settings.OLLAMA_URL
 
+    # We'll collect the full assistant response to save to DB after streaming
+    _full_response_parts: list[str] = []
+
+    async def _save_assistant_response():
+        """Save the complete assistant response to DB."""
+        full_text = "".join(_full_response_parts).strip()
+        if full_text:
+            try:
+                async with AsyncSessionLocal() as save_db:
+                    assistant_msg = ChatMessage(
+                        order_id=order_id,
+                        user_id=user.id,
+                        role="assistant",
+                        content=full_text,
+                    )
+                    save_db.add(assistant_msg)
+                    await save_db.commit()
+            except Exception as e:
+                logger.warning(f"Failed to save assistant message: {e}")
+
     async def _stream_response():
         import re as _re
         try:
@@ -510,6 +546,7 @@ async def chat_with_analysis(
                                     _thought_done = True
                                     _thought_buffer = ""
                                     if remainder:
+                                        _full_response_parts.append(remainder)
                                         yield f"data: {json.dumps({'content': remainder, 'done': False})}\n\n"
                                     # Send a thinking indicator so user knows AI is working
                                 elif not _in_thought:
@@ -517,15 +554,19 @@ async def chat_with_analysis(
                                     # Check if we've accumulated enough to be sure
                                     if len(_thought_buffer) > 20:
                                         _thought_done = True
+                                        _full_response_parts.append(_thought_buffer)
                                         yield f"data: {json.dumps({'content': _thought_buffer, 'done': False})}\n\n"
                                         _thought_buffer = ""
                                 # While in thought, send periodic "thinking" status
                                 # (no content, just to keep connection alive)
                             elif content and _thought_done:
                                 # Normal content after thought block — pass through
+                                _full_response_parts.append(content)
                                 yield f"data: {json.dumps({'content': content, 'done': False})}\n\n"
 
                             if done:
+                                # Save assistant response to DB
+                                await _save_assistant_response()
                                 # Include token stats
                                 eval_count = data.get("eval_count", 0)
                                 eval_duration = data.get("eval_duration", 0)
@@ -620,3 +661,51 @@ async def get_chat_context_info(
             }
         ],
     }
+
+
+# ── Chat History Endpoints ────────────────────────────────────────────────────
+
+
+@router.get("/{order_id}/chat-history")
+async def get_chat_history(
+    order_id: int,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Load persisted chat history for this order (current user only)."""
+    result = await db.execute(
+        select(ChatMessage)
+        .where(ChatMessage.order_id == order_id, ChatMessage.user_id == user.id)
+        .order_by(ChatMessage.created_at.asc())
+    )
+    messages = result.scalars().all()
+    return {
+        "messages": [
+            {
+                "id": m.id,
+                "role": m.role,
+                "content": m.content,
+                "created_at": m.created_at.isoformat() if m.created_at else None,
+            }
+            for m in messages
+        ]
+    }
+
+
+@router.delete("/{order_id}/chat-history")
+async def clear_chat_history(
+    order_id: int,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Clear all chat history for this order (current user only)."""
+    from sqlalchemy import delete
+
+    await db.execute(
+        delete(ChatMessage).where(
+            ChatMessage.order_id == order_id,
+            ChatMessage.user_id == user.id,
+        )
+    )
+    await db.commit()
+    return {"status": "ok", "message": "Chat history cleared"}

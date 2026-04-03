@@ -3,6 +3,7 @@
  *
  * Streams responses from the backend via SSE, renders markdown,
  * and automatically passes current view state as context.
+ * Chat history is persisted to DB and loaded on mount.
  *
  * Model: exaone-deep:7.8b (fixed, Ollama)
  */
@@ -23,6 +24,7 @@ import {
   Info,
   Sparkles,
   AlertCircle,
+  History,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -83,6 +85,7 @@ export default function ChatPanel({ orderId, viewContext, isOpen, onClose }: Cha
   const [showCollections, setShowCollections] = useState(false);
   const [showContextInfo, setShowContextInfo] = useState(false);
   const [responseLang, setResponseLang] = useState<"auto" | "ko" | "en">("auto");
+  const [historyLoaded, setHistoryLoaded] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -99,6 +102,30 @@ export default function ChatPanel({ orderId, viewContext, isOpen, onClose }: Cha
       .then((data) => setContextInfo(data))
       .catch(() => {});
   }, [orderId]);
+
+  // Load chat history from DB on mount
+  useEffect(() => {
+    if (!orderId || historyLoaded) return;
+    const token = localStorage.getItem("ptm-token");
+    fetch(`/api/orders/${orderId}/chat-history`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.messages && data.messages.length > 0) {
+          const loaded: ChatMessage[] = data.messages.map((m: any) => ({
+            role: m.role,
+            content: m.content,
+            timestamp: m.created_at ? new Date(m.created_at).getTime() : Date.now(),
+          }));
+          setMessages(loaded);
+        }
+        setHistoryLoaded(true);
+      })
+      .catch(() => {
+        setHistoryLoaded(true);
+      });
+  }, [orderId, historyLoaded]);
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -256,9 +283,19 @@ export default function ChatPanel({ orderId, viewContext, isOpen, onClose }: Cha
     }
   };
 
-  const clearChat = () => {
+  const clearChat = useCallback(async () => {
+    // Clear from DB
+    const token = localStorage.getItem("ptm-token");
+    try {
+      await fetch(`/api/orders/${orderId}/chat-history`, {
+        method: "DELETE",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+    } catch {
+      // Continue clearing UI even if DB delete fails
+    }
     setMessages([]);
-  };
+  }, [orderId]);
 
   const stopStreaming = () => {
     abortRef.current?.abort();
@@ -291,7 +328,13 @@ export default function ChatPanel({ orderId, viewContext, isOpen, onClose }: Cha
       <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-muted/30">
         <div className="flex items-center gap-2">
           <Sparkles className="h-4 w-4 text-primary" />
-          <span className="font-semibold text-sm">PTM Analysis AI</span>
+          <span className="font-semibold text-sm">POTATO AI</span>
+          {historyLoaded && messages.length > 0 && (
+            <span className="text-[10px] text-muted-foreground flex items-center gap-1">
+              <History className="h-3 w-3" />
+              {messages.length} msgs
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-1">
           <Button
@@ -308,7 +351,7 @@ export default function ChatPanel({ orderId, viewContext, isOpen, onClose }: Cha
             size="icon"
             className="h-7 w-7"
             onClick={clearChat}
-            title="Clear chat"
+            title="Clear chat history"
             disabled={isStreaming}
           >
             <Trash2 className="h-3.5 w-3.5" />
@@ -385,7 +428,7 @@ export default function ChatPanel({ orderId, viewContext, isOpen, onClose }: Cha
               <MessageSquare className="h-6 w-6 text-primary" />
             </div>
             <div>
-              <p className="text-sm font-medium">PTM Analysis Assistant</p>
+              <p className="text-sm font-medium">POTATO AI</p>
               <p className="text-xs text-muted-foreground mt-1 max-w-[260px]">
                 분석 결과에 대해 질문하세요. Report, Kinase Module, Signal Flow, Evidence Scoring 데이터를 참조하여 답변합니다.
               </p>
@@ -537,7 +580,7 @@ export default function ChatPanel({ orderId, viewContext, isOpen, onClose }: Cha
             ))}
           </div>
           <p className="text-[10px] text-muted-foreground">
-            AI 답변은 분석 데이터 기반입니다.
+            대화 내용은 자동 저장됩니다.
           </p>
         </div>
       </div>
