@@ -39,6 +39,10 @@ export const TOC_ITEMS: TocItem[] = [
   { id: "dataflow", label: "6. 데이터 흐름 요약", level: 1 },
   { id: "infra", label: "7. 인프라 구성", level: 1 },
   { id: "operations", label: "8. 운영 가이드", level: 1 },
+  { id: "ai-chat", label: "9. AI Analysis Chat", level: 1 },
+  { id: "ai-chat-arch", label: "9.1 아키텍처", level: 2 },
+  { id: "ai-chat-context", label: "9.2 컨텍스트 조립", level: 2 },
+  { id: "ai-chat-usage", label: "9.3 사용 가이드", level: 2 },
 ];
 
 export interface WorkerOverview {
