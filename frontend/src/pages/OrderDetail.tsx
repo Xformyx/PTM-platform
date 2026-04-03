@@ -35,6 +35,7 @@ import CrossTalkSequentialGating from "@/components/CrossTalkSequentialGating";
 import SignalPropagationTimeline from "@/components/SignalPropagationTimeline";
 import { OrderArticlesTab } from "@/components/OrderArticlesTab";
 import KinaseModuleAnalysis from "@/components/KinaseModuleAnalysis";
+import ChatPanel from "@/components/ChatPanel";
 import {
   LineChart,
   Line,
@@ -2384,6 +2385,8 @@ export default function OrderDetail() {
   const [ragCollections, setRagCollections] = useState<{ id: number; name: string }[]>([]);
   const [rerunModalOpen, setRerunModalOpen] = useState(false);
   const [shareModalOpen, setShareModalOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState("overview");
   const [pendingAction, setPendingAction] = useState<{ type: "start" } | { type: "run-stage"; stage: string } | null>(null);
   const runHandledRef = useRef(false);
 
@@ -2755,7 +2758,7 @@ export default function OrderDetail() {
       )}
 
       {/* Tabs: Overview / Analysis Statistics / Vector Plot / Results */}
-      <Tabs defaultValue="overview">
+      <Tabs defaultValue="overview" onValueChange={(v) => setActiveTab(v)}>
         <TabsList className="flex-wrap h-auto gap-1">
           <TabsTrigger value="overview">
             <LayoutDashboard className="h-3.5 w-3.5 mr-1.5" />
@@ -3082,7 +3085,41 @@ export default function OrderDetail() {
         </TabsContent>
 
         <TabsContent value="vector-plot" className="mt-4">
-          <VectorPlotTab orderId={order.id} singleTimePoint={(order.sample_config as any)?.single_time_point} ptmType={order.ptm_type} />
+          <div className="relative">
+            {/* AI Chat toggle button */}
+            <div className="flex justify-end mb-3">
+              <Button
+                variant={chatOpen ? "default" : "outline"}
+                size="sm"
+                onClick={() => setChatOpen(!chatOpen)}
+                className="gap-2"
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+                {chatOpen ? "Close AI Chat" : "AI Chat"}
+              </Button>
+            </div>
+
+            <div className={`flex gap-4 ${chatOpen ? "" : ""}`}>
+              {/* Main content */}
+              <div className={chatOpen ? "flex-1 min-w-0" : "w-full"}>
+                <VectorPlotTab orderId={order.id} singleTimePoint={(order.sample_config as any)?.single_time_point} ptmType={order.ptm_type} />
+              </div>
+
+              {/* Chat Panel (slide-in from right) */}
+              {chatOpen && (
+                <div className="w-[420px] flex-shrink-0 h-[calc(100vh-200px)] sticky top-4 rounded-xl border border-border shadow-lg overflow-hidden">
+                  <ChatPanel
+                    orderId={order.id}
+                    viewContext={{
+                      active_tab: activeTab,
+                    }}
+                    isOpen={chatOpen}
+                    onClose={() => setChatOpen(false)}
+                  />
+                </div>
+              )}
+            </div>
+          </div>
         </TabsContent>
 
         {(order.report_options as any)?.analysis_mode === "cross_talk" && (

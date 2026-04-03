@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api import articles, auth, events, health, llm, notifications, orders, rag, settings as settings_api, system
+from app.api import articles, auth, chat, events, health, llm, notifications, orders, rag, settings as settings_api, system
 from app.config import get_settings
 from app.core.database import engine, Base
 from app.core.logging import setup_logging
@@ -122,3 +122,4 @@ app.include_router(rag.router, prefix="/api")
 app.include_router(llm.router, prefix="/api")
 app.include_router(system.router, prefix="/api")
 app.include_router(articles.router, prefix="/api")
+app.include_router(chat.router, prefix="/api")
