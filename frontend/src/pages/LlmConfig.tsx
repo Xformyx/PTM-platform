@@ -108,12 +108,26 @@ export default function LlmConfig() {
     abortRef.current = controller;
 
     try {
+      const token = localStorage.getItem("ptm-token");
       const resp = await fetch("/api/llm/ollama/pull", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({ model_name: pullModelName.trim() }),
         signal: controller.signal,
       });
+
+      if (resp.status === 401) {
+        setPullError("인증 오류: 다시 로그인해주세요.");
+        return;
+      }
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+        setPullError(err.detail || `요청 실패: ${resp.status}`);
+        return;
+      }
 
       const reader = resp.body?.getReader();
       if (!reader) throw new Error("No stream");
