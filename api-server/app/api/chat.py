@@ -4,12 +4,13 @@ PTM Analysis AI Chat — Context-aware conversational assistant.
 Provides an SSE-streaming chat endpoint that assembles rich context from:
   1. Generated report (comprehensive_report_*.md)
   2. Enriched PTM data (enriched_ptm_data_*.json)
-  3. Kinase module analysis results (global_kinase_modules_*.json)
-  4. Signal flow / evidence scoring data
-  5. Temporal co-movement clusters
-  6. ChromaDB RAG collections (user-selected)
-  7. Pipeline methodology documentation (fixed)
-  8. Current view state (checked PTMs, active tab, etc.)
+  3. Kinase module analysis (DB: order.kinase_analysis_data)
+  4. Signal flow / receptor inference (DB: order.receptor_inference_data)
+  5. Signal propagation timeline (DB: order.signal_propagation_data)
+  6. Temporal co-movement clusters (file)
+  7. ChromaDB RAG collections (user-selected)
+  8. Pipeline methodology documentation (fixed)
+  9. Current view state (checked PTMs, active tab, etc.)
 
 Model: exaone-deep:7.8b (Ollama, fixed)
 """
@@ -30,7 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import Settings, get_settings
 from app.core.database import AsyncSessionLocal, get_db
 from app.dependencies import get_current_user
-from app.models.chat_message import ChatMessage
+from app.models.chat_message import ChatMessage as ChatMessageDB  # DB model (renamed to avoid clash)
 from app.models.order import Order
 from app.models.rag_collection import RagCollection
 
@@ -84,14 +85,17 @@ delayed_response, biphasic, oscillatory, sustained_down, late_onset, gradual_dec
 """
 
 
-class ChatMessage(BaseModel):
+# ── Pydantic models for request ──────────────────────────────────────────────
+
+class ChatMessageSchema(BaseModel):
+    """Pydantic schema for conversation history messages."""
     role: str  # "user" or "assistant"
     content: str
 
 
 class ChatRequest(BaseModel):
     message: str
-    conversation_history: List[ChatMessage] = []
+    conversation_history: List[ChatMessageSchema] = []
     view_context: Optional[Dict[str, Any]] = None
     rag_collection_ids: Optional[List[int]] = None
     response_language: str = "auto"  # "ko", "en", or "auto" (match user's language)
@@ -144,8 +148,8 @@ def _load_enriched_ptm_summary(output_dir: Path, file_suffix: str) -> str:
             return ""
 
         lines = [f"Total enriched PTMs: {len(data)}"]
-        # Summarize top PTMs with key info
-        for ptm in data[:30]:  # Top 30 for context
+        # Summarize top PTMs with key info — include more for better coverage
+        for ptm in data[:60]:  # Top 60 for context (was 30)
             gene = ptm.get("gene") or ptm.get("Gene.Name", "?")
             pos = ptm.get("position") or ptm.get("PTM_Position", "?")
             rag = ptm.get("rag_enrichment", {})
@@ -155,9 +159,14 @@ def _load_enriched_ptm_summary(output_dir: Path, file_suffix: str) -> str:
                     upstream = reg.get("upstream_regulators", [])
                     downstream = reg.get("downstream_targets", [])
                     function = reg.get("function_summary", "")
+                    ks = reg.get("kinase_substrate", [])
+                    ks_text = ""
+                    if isinstance(ks, list) and ks:
+                        ks_names = [k.get("kinase", "") for k in ks if isinstance(k, dict)]
+                        ks_text = f", kinases={ks_names[:3]}" if ks_names else ""
                     lines.append(
                         f"- {gene} {pos}: upstream={upstream[:3]}, "
-                        f"downstream={downstream[:3]}, function={function[:100]}"
+                        f"downstream={downstream[:3]}{ks_text}, function={function[:100]}"
                     )
                 else:
                     lines.append(f"- {gene} {pos}")
@@ -170,8 +179,8 @@ def _load_enriched_ptm_summary(output_dir: Path, file_suffix: str) -> str:
         return ""
 
 
-def _load_kinase_modules(output_dir: Path, file_suffix: str) -> str:
-    """Load kinase module analysis results."""
+def _load_kinase_modules_from_file(output_dir: Path, file_suffix: str) -> str:
+    """Load kinase module analysis results from file (fallback)."""
     path = output_dir / f"global_kinase_modules{file_suffix}.json"
     if not path.exists():
         return ""
@@ -187,6 +196,106 @@ def _load_kinase_modules(output_dir: Path, file_suffix: str) -> str:
         return text
     except Exception as e:
         logger.warning(f"Failed to load kinase modules: {e}")
+        return ""
+
+
+def _build_kinase_analysis_context(order: Order) -> str:
+    """Build kinase module analysis context from DB (order.kinase_analysis_data).
+    This is the PRIMARY source — contains kinase → substrate mappings with evidence."""
+    kad = order.kinase_analysis_data
+    if not kad:
+        return ""
+
+    lines = []
+    kinase_modules = kad.get("kinase_modules", [])
+    if kinase_modules:
+        lines.append(f"Total kinase modules: {len(kinase_modules)}")
+        for km in kinase_modules:
+            kinase = km.get("kinase", "") or km.get("canonical", "")
+            members = km.get("members", [])
+            sources = km.get("sources", [])
+            confirmed = km.get("confirmed", 0)
+            inferred = km.get("inferred", 0)
+            member_labels = [
+                f"{m.get('gene', '')}_{m.get('position', '')}" for m in members[:15]
+            ]
+            lines.append(
+                f"- {kinase}: {len(members)} substrates "
+                f"(confirmed={confirmed}, inferred={inferred}), "
+                f"sources={sources}, "
+                f"substrates=[{', '.join(member_labels)}]"
+            )
+            if len(members) > 15:
+                lines.append(f"  ... and {len(members) - 15} more substrates")
+
+    # Effector proteins
+    effectors = kad.get("effector_proteins", [])
+    if effectors:
+        lines.append(f"\nNon-PTM Effector Proteins: {len(effectors)}")
+        for eff in effectors[:20]:
+            gene = eff.get("gene", "")
+            role = eff.get("role", "")
+            evidence = eff.get("evidence_strength", "")
+            score = eff.get("evidence_score", 0)
+            connected = eff.get("connected_substrates", [])
+            conn_names = [s.get("gene", "") for s in connected[:5]] if isinstance(connected, list) else []
+            lines.append(
+                f"- {gene}: role={role}, evidence={evidence}(score={score}), "
+                f"connected_substrates={conn_names}"
+            )
+
+    text = "\n".join(lines)
+    if len(text) > MAX_KINASE_CHARS:
+        text = text[:MAX_KINASE_CHARS] + "\n... [truncated]"
+    return text
+
+
+def _build_signal_flow_context(order: Order) -> str:
+    """Build Signal Flow context from DB (order.receptor_inference_data).
+    Contains receptor → kinase → substrate cascade information."""
+    rid = order.receptor_inference_data
+    if not rid:
+        return ""
+
+    receptors = rid.get("receptors", [])
+    if not receptors:
+        return ""
+
+    lines = [f"Total inferred receptors: {len(receptors)}"]
+    for rec in receptors:
+        name = rec.get("name", "")
+        rec_class = rec.get("receptor_class", "")
+        ptm_count = rec.get("downstream_ptm_count", 0)
+        downstream_ptms = rec.get("downstream_ptms", [])
+        via_kinases = rec.get("via_kinases", [])
+        pathway = rec.get("pathway", "") or rec.get("signaling_pathway", "")
+        source = rec.get("source", "")
+
+        kinase_text = f", via_kinases={via_kinases}" if via_kinases else ""
+        pathway_text = f", pathway={pathway}" if pathway else ""
+
+        lines.append(
+            f"- {name} ({rec_class}): {ptm_count} downstream PTMs, "
+            f"substrates={downstream_ptms[:8]}{kinase_text}{pathway_text}, source={source}"
+        )
+
+    text = "\n".join(lines)
+    if len(text) > 4000:
+        text = text[:4000] + "\n... [truncated]"
+    return text
+
+
+def _build_signal_propagation_context(order: Order) -> str:
+    """Build Signal Propagation Timeline context from DB."""
+    spd = order.signal_propagation_data
+    if not spd:
+        return ""
+    try:
+        text = json.dumps(spd, indent=1, default=str)
+        if len(text) > 3000:
+            text = text[:3000] + "\n... [truncated]"
+        return text
+    except Exception:
         return ""
 
 
@@ -340,20 +449,34 @@ async def _assemble_context(
     if ptm_summary:
         sections.append("[ENRICHED PTM DATA]\n" + ptm_summary)
 
-    # 5. Kinase module results
-    kinase = _load_kinase_modules(output_dir, file_suffix)
-    if kinase:
-        sections.append("[KINASE MODULE ANALYSIS]\n" + kinase)
+    # 5. Kinase module results — PRIMARY from DB, fallback to file
+    kinase_db = _build_kinase_analysis_context(order)
+    if kinase_db:
+        sections.append("[KINASE MODULE ANALYSIS (from DB)]\n" + kinase_db)
+    else:
+        kinase_file = _load_kinase_modules_from_file(output_dir, file_suffix)
+        if kinase_file:
+            sections.append("[KINASE MODULE ANALYSIS]\n" + kinase_file)
 
-    # 6. Co-movement clusters
+    # 6. Signal Flow — receptor → kinase → substrate cascade (from DB)
+    signal_flow = _build_signal_flow_context(order)
+    if signal_flow:
+        sections.append("[SIGNAL FLOW: RECEPTOR → KINASE → SUBSTRATE]\n" + signal_flow)
+
+    # 7. Signal Propagation Timeline (from DB)
+    signal_prop = _build_signal_propagation_context(order)
+    if signal_prop:
+        sections.append("[SIGNAL PROPAGATION TIMELINE]\n" + signal_prop)
+
+    # 8. Co-movement clusters
     comovement = _load_comovement_clusters(output_dir, file_suffix)
     if comovement:
         sections.append("[TEMPORAL CO-MOVEMENT CLUSTERS]\n" + comovement)
 
-    # 7. Pipeline methodology
+    # 9. Pipeline methodology
     sections.append("[PIPELINE METHODOLOGY]\n" + METHODOLOGY_CONTEXT.strip())
 
-    # 8. RAG collection context (dynamic, based on user question)
+    # 10. RAG collection context (dynamic, based on user question)
     if rag_collection_names:
         chromadb_url = settings.CHROMADB_URL
         rag_text = await _query_chromadb_collections(
@@ -377,11 +500,12 @@ SYSTEM_PROMPT_TEMPLATE = """당신은 POTATO AI입니다. PTM-Vector 분석 플�
 3. 사용자가 "자세히", "구체적으로", "더 설명해줘" 등을 요청하면 그때 상세하게 데이터를 인용하며 설명하세요.
 4. 딸딸한 학술체가 아니라, 동료 연구자에게 말하듯 자연스러운 구어체로 대화하세요. ("이건 ~해요", "아마 ~일 거예요", "~로 보이네요" 등)
 5. 데이터가 답변을 뒷받침할 때는 구체적인 값(fold-change, p-value, score)을 인용하세요.
-6. 신뢰도/신뚰성 질문에는 Evidence Scoring(0-5점)을 참조하세요.
+6. 신뢰도/신뢰성 질문에는 Evidence Scoring(0-5점)을 참조하세요.
 7. 방법론 질문에는 Pipeline Methodology 섹션을 참조하세요.
 8. 문헌 기반 답변 시 RAG collection 출처를 인용하세요.
 9. 데이터가 부족하면 솔직하게 "이 부분은 데이터가 부족해서 확실하게 말씀드리기 어렵네요" 라고 말하세요.
-10. {language_instruction}
+10. 반드시 아래 제공된 [SIGNAL FLOW], [KINASE MODULE ANALYSIS], [ENRICHED PTM DATA] 섹션의 실제 데이터를 참조하여 답변하세요. 데이터에 있는 정보를 "없다"고 말하지 마세요.
+11. {language_instruction}
 
 {context}
 """
@@ -397,7 +521,7 @@ async def chat_with_analysis(
 ):
     """Stream AI chat responses based on order analysis context."""
     # Save user message to DB
-    user_msg = ChatMessage(
+    user_msg = ChatMessageDB(
         order_id=order_id,
         user_id=user.id,
         role="user",
@@ -447,6 +571,11 @@ async def chat_with_analysis(
         order, settings, body.view_context, rag_collection_names, body.message
     )
 
+    # Log context sections for debugging
+    context_sections = [line for line in context.split("\n") if line.startswith("[")]
+    logger.info(f"Chat context sections for order {order_id}: {context_sections}")
+    logger.info(f"Chat context total length: {len(context)} chars")
+
     # Build messages for Ollama
     # Determine language instruction
     lang = body.response_language
@@ -481,7 +610,7 @@ async def chat_with_analysis(
         if full_text:
             try:
                 async with AsyncSessionLocal() as save_db:
-                    assistant_msg = ChatMessage(
+                    assistant_msg = ChatMessageDB(
                         order_id=order_id,
                         user_id=user.id,
                         role="assistant",
@@ -548,7 +677,6 @@ async def chat_with_analysis(
                                     if remainder:
                                         _full_response_parts.append(remainder)
                                         yield f"data: {json.dumps({'content': remainder, 'done': False})}\n\n"
-                                    # Send a thinking indicator so user knows AI is working
                                 elif not _in_thought:
                                     # No <thought> tag at all — model didn't use thinking
                                     # Check if we've accumulated enough to be sure
@@ -557,8 +685,6 @@ async def chat_with_analysis(
                                         _full_response_parts.append(_thought_buffer)
                                         yield f"data: {json.dumps({'content': _thought_buffer, 'done': False})}\n\n"
                                         _thought_buffer = ""
-                                # While in thought, send periodic "thinking" status
-                                # (no content, just to keep connection alive)
                             elif content and _thought_done:
                                 # Normal content after thought block — pass through
                                 _full_response_parts.append(content)
@@ -619,11 +745,18 @@ async def get_chat_context_info(
     output_dir = Path(settings.OUTPUT_DIR) / (order.order_code or str(order.id))
     file_suffix = "_phospho" if (order.ptm_type or "phosphorylation") == "phosphorylation" else "_ubi"
 
+    # Check DB data availability
+    has_kinase_db = bool(order.kinase_analysis_data and order.kinase_analysis_data.get("kinase_modules"))
+    has_signal_flow = bool(order.receptor_inference_data and order.receptor_inference_data.get("receptors"))
+    has_signal_prop = bool(order.signal_propagation_data)
+
     available = {
         "report": (output_dir / f"comprehensive_report{file_suffix}.md").exists()
                   or (output_dir / "final_report.md").exists(),
         "enriched_ptms": (output_dir / f"enriched_ptm_data{file_suffix}.json").exists(),
-        "kinase_modules": (output_dir / f"global_kinase_modules{file_suffix}.json").exists(),
+        "kinase_modules": has_kinase_db or (output_dir / f"global_kinase_modules{file_suffix}.json").exists(),
+        "signal_flow": has_signal_flow,
+        "signal_propagation": has_signal_prop,
         "comovement": (output_dir / f"temporal_comovement{file_suffix}.json").exists(),
         "methodology": True,  # Always available (fixed text)
     }
@@ -674,9 +807,9 @@ async def get_chat_history(
 ):
     """Load persisted chat history for this order (current user only)."""
     result = await db.execute(
-        select(ChatMessage)
-        .where(ChatMessage.order_id == order_id, ChatMessage.user_id == user.id)
-        .order_by(ChatMessage.created_at.asc())
+        select(ChatMessageDB)
+        .where(ChatMessageDB.order_id == order_id, ChatMessageDB.user_id == user.id)
+        .order_by(ChatMessageDB.created_at.asc())
     )
     messages = result.scalars().all()
     return {
@@ -702,9 +835,9 @@ async def clear_chat_history(
     from sqlalchemy import delete
 
     await db.execute(
-        delete(ChatMessage).where(
-            ChatMessage.order_id == order_id,
-            ChatMessage.user_id == user.id,
+        delete(ChatMessageDB).where(
+            ChatMessageDB.order_id == order_id,
+            ChatMessageDB.user_id == user.id,
         )
     )
     await db.commit()
