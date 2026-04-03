@@ -105,19 +105,44 @@ class ChatRequest(BaseModel):
 
 
 def _load_report_summary(output_dir: Path, file_suffix: str) -> str:
-    """Load report MD and truncate to fit context budget."""
-    report_path = output_dir / f"comprehensive_report{file_suffix}.md"
-    if not report_path.exists():
-        # Try LangGraph report
-        for name in ("final_report.md", "report.md"):
+    """Load report MD and truncate to fit context budget.
+    
+    Search order:
+    1. Glob pattern: {order_code}_report_*.md (actual report naming convention)
+    2. Legacy names: comprehensive_report{suffix}.md, final_report.md, report.md
+    """
+    report_path = None
+    
+    # 1. Try glob pattern matching (actual naming: {order_code}_report_{YYMMDD_HHMM}.md)
+    report_candidates = sorted(
+        output_dir.glob("*_report_*.md"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,  # Most recent first
+    )
+    if report_candidates:
+        report_path = report_candidates[0]
+        logger.info(f"Found report via glob: {report_path.name}")
+    
+    # 2. Fallback to legacy names
+    if not report_path or not report_path.exists():
+        for name in (
+            f"comprehensive_report{file_suffix}.md",
+            "final_report.md",
+            "report.md",
+        ):
             alt = output_dir / name
             if alt.exists():
                 report_path = alt
+                logger.info(f"Found report via legacy name: {name}")
                 break
-    if not report_path.exists():
+    
+    if not report_path or not report_path.exists():
+        logger.warning(f"No report file found in {output_dir}")
         return ""
+    
     try:
         text = report_path.read_text(encoding="utf-8")
+        logger.info(f"Loaded report: {report_path.name} ({len(text)} chars)")
         if len(text) > MAX_REPORT_CHARS:
             # Keep abstract + first sections, truncate middle
             lines = text.split("\n")
