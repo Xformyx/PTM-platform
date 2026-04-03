@@ -15,7 +15,7 @@ from app.config import get_settings
 from app.core.database import get_db
 from app.core.webhook import send_order_webhook
 from app.dependencies import get_current_user
-from app.models.order import Order, OrderLog
+from app.models.order import Order, OrderLog, OrderShare
 from app.models.rag_collection import RagCollection
 from app.models.user import User
 
@@ -102,34 +102,56 @@ async def list_orders(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    # Alias for creator and runner
+    from sqlalchemy import or_
+
     CreatorUser = User.__table__.alias("creator")
     RunnerUser = User.__table__.alias("runner")
+    is_admin = getattr(user, "role", "admin") == "admin"
 
+    # LEFT JOIN order_shares on the current user, so we get share_access for shared orders
     base_query = (
         select(
             Order,
             CreatorUser.c.name.label("created_by_name"),
             RunnerUser.c.name.label("run_by_name"),
+            OrderShare.access_level.label("share_access"),
         )
         .outerjoin(CreatorUser, Order.user_id == CreatorUser.c.id)
         .outerjoin(RunnerUser, Order.run_by_user_id == RunnerUser.c.id)
+        .outerjoin(
+            OrderShare,
+            (OrderShare.order_id == Order.id) & (OrderShare.shared_with_user_id == (user.id if not is_admin else -1)),
+        )
         .order_by(Order.created_at.desc())
     )
+
+    if not is_admin:
+        # Non-admin: own orders OR orders shared with this user
+        base_query = base_query.where(
+            or_(Order.user_id == user.id, OrderShare.shared_with_user_id == user.id)
+        )
+
     if status_filter:
         base_query = base_query.where(Order.status == status_filter)
-    if getattr(user, "role", "admin") != "admin":
-        base_query = base_query.where(Order.user_id == user.id)
+
+    count_query = (
+        select(sqlfunc.count(Order.id))
+        .outerjoin(
+            OrderShare,
+            (OrderShare.order_id == Order.id) & (OrderShare.shared_with_user_id == (user.id if not is_admin else -1)),
+        )
+    )
+    if not is_admin:
+        count_query = count_query.where(
+            or_(Order.user_id == user.id, OrderShare.shared_with_user_id == user.id)
+        )
+    if status_filter:
+        count_query = count_query.where(Order.status == status_filter)
 
     query = base_query.offset((page - 1) * page_size).limit(page_size)
     result = await db.execute(query)
     rows = result.all()
 
-    count_query = select(sqlfunc.count(Order.id))
-    if status_filter:
-        count_query = count_query.where(Order.status == status_filter)
-    if getattr(user, "role", "admin") != "admin":
-        count_query = count_query.where(Order.user_id == user.id)
     count_result = await db.execute(count_query)
     total = count_result.scalar()
 
@@ -151,8 +173,10 @@ async def list_orders(
                 "completed_at": o.completed_at.isoformat() + "Z" if o.completed_at else None,
                 "created_by": created_by_name,
                 "run_by": run_by_name,
+                "is_shared": share_access is not None,
+                "share_access": share_access,
             }
-            for o, created_by_name, run_by_name in rows
+            for o, created_by_name, run_by_name, share_access in rows
         ],
         "total": total,
         "page": page,
@@ -160,10 +184,171 @@ async def list_orders(
     }
 
 
+async def _get_share_access(order_id: int, user_id: int, db: AsyncSession) -> Optional[str]:
+    """Return the share access level for a user on an order, or None if not shared."""
+    result = await db.execute(
+        select(OrderShare.access_level).where(
+            OrderShare.order_id == order_id,
+            OrderShare.shared_with_user_id == user_id,
+        )
+    )
+    row = result.scalar_one_or_none()
+    return row
+
+
+async def _check_order_access_async(order, user, db: AsyncSession) -> Optional[str]:
+    """Raise 403 if user has no access. Returns share_access level or None for own/admin."""
+    if getattr(user, "role", "admin") == "admin":
+        return None
+    if order.user_id == user.id:
+        return None
+    share_access = await _get_share_access(order.id, user.id, db)
+    if share_access is None:
+        raise HTTPException(status_code=403, detail="Not authorized to access this order")
+    return share_access
+
+
+async def _require_write_access(order, user, db: AsyncSession) -> None:
+    """Allow only owner/admin/full_access shared users to perform write operations."""
+    share_access = await _check_order_access_async(order, user, db)
+    if share_access == "read_only":
+        raise HTTPException(status_code=403, detail="This order is shared as read-only. Write operations are not permitted.")
+
+
 def _check_order_access(order, user):
-    """Raise 403 if non-admin user tries to access another user's order."""
+    """Raise 403 if non-admin user tries to access another user's order (sync, no share check).
+    NOTE: Use _check_order_access_async for endpoints that shared users should access."""
     if getattr(user, "role", "admin") != "admin" and order.user_id != user.id:
         raise HTTPException(status_code=403, detail="Not authorized to access this order")
+
+
+# ── Order Share endpoints ─────────────────────────────────────────────────────
+
+class ShareOrderRequest(BaseModel):
+    user_id: int
+    access_level: str  # "full_access" | "read_only"
+
+
+@router.get("/shareable-users")
+async def get_shareable_users(
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Return list of non-admin users that an order can be shared with."""
+    result = await db.execute(
+        select(User.id, User.name, User.email)
+        .where(User.role != "admin", User.is_active == True, User.id != user.id)
+        .order_by(User.name)
+    )
+    users = result.all()
+    return [{"id": u.id, "name": u.name, "email": u.email} for u in users]
+
+
+@router.get("/{order_id}/shares")
+async def get_order_shares(
+    order_id: int,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """List users this order is shared with (only owner or admin can view)."""
+    result = await db.execute(select(Order).where(Order.id == order_id))
+    order = result.scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    _check_order_access(order, user)
+
+    shares_result = await db.execute(
+        select(OrderShare, User.name, User.email)
+        .join(User, User.id == OrderShare.shared_with_user_id)
+        .where(OrderShare.order_id == order_id)
+        .order_by(User.name)
+    )
+    shares = shares_result.all()
+    return [
+        {
+            "user_id": s.OrderShare.shared_with_user_id,
+            "name": s.name,
+            "email": s.email,
+            "access_level": s.OrderShare.access_level,
+        }
+        for s in shares
+    ]
+
+
+@router.post("/{order_id}/share")
+async def share_order(
+    order_id: int,
+    body: ShareOrderRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Share an order with another user (only owner or admin)."""
+    if body.access_level not in ("full_access", "read_only"):
+        raise HTTPException(status_code=400, detail="access_level must be 'full_access' or 'read_only'")
+
+    result = await db.execute(select(Order).where(Order.id == order_id))
+    order = result.scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    _check_order_access(order, user)
+
+    # Verify target user exists and is non-admin
+    target = await db.execute(select(User).where(User.id == body.user_id))
+    target_user = target.scalar_one_or_none()
+    if not target_user:
+        raise HTTPException(status_code=404, detail="Target user not found")
+    if target_user.role == "admin":
+        raise HTTPException(status_code=400, detail="Cannot share with admin users")
+    if target_user.id == order.user_id:
+        raise HTTPException(status_code=400, detail="Cannot share with the order owner")
+
+    # Upsert share
+    existing = await db.execute(
+        select(OrderShare).where(
+            OrderShare.order_id == order_id,
+            OrderShare.shared_with_user_id == body.user_id,
+        )
+    )
+    share = existing.scalar_one_or_none()
+    if share:
+        share.access_level = body.access_level
+    else:
+        share = OrderShare(
+            order_id=order_id,
+            shared_with_user_id=body.user_id,
+            access_level=body.access_level,
+        )
+        db.add(share)
+    await db.commit()
+    return {"status": "ok", "user_id": body.user_id, "access_level": body.access_level}
+
+
+@router.delete("/{order_id}/share/{target_user_id}")
+async def revoke_order_share(
+    order_id: int,
+    target_user_id: int,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Revoke a share (only owner or admin)."""
+    result = await db.execute(select(Order).where(Order.id == order_id))
+    order = result.scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    _check_order_access(order, user)
+
+    existing = await db.execute(
+        select(OrderShare).where(
+            OrderShare.order_id == order_id,
+            OrderShare.shared_with_user_id == target_user_id,
+        )
+    )
+    share = existing.scalar_one_or_none()
+    if not share:
+        raise HTTPException(status_code=404, detail="Share not found")
+    await db.delete(share)
+    await db.commit()
+    return {"status": "ok"}
 
 
 @router.get("/{order_id}")
@@ -176,7 +361,7 @@ async def get_order(
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    _check_order_access(order, user)
+    share_access = await _check_order_access_async(order, user, db)
 
     return {
         "id": order.id,
@@ -199,6 +384,8 @@ async def get_order(
         "cross_talk_data": order.cross_talk_data,
         "signal_propagation_data": order.signal_propagation_data,
         "receptor_inference_data": order.receptor_inference_data,
+        "is_shared": share_access is not None,
+        "share_access": share_access,
         "started_at": order.started_at.isoformat() + "Z" if order.started_at else None,
         "completed_at": order.completed_at.isoformat() + "Z" if order.completed_at else None,
         "created_at": order.created_at.isoformat() + "Z",
@@ -225,7 +412,7 @@ async def update_order_options(
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    _check_order_access(order, user)
+    await _require_write_access(order, user, db)
     if order.status not in ("pending", "completed", "failed", "cancelled"):
         raise HTTPException(
             status_code=400,
@@ -484,7 +671,7 @@ async def start_order(
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    _check_order_access(order, user)
+    await _require_write_access(order, user, db)
     if order.status not in ("pending", "failed", "completed", "cancelled"):
         raise HTTPException(
             status_code=400, detail=f"Cannot start order in '{order.status}' status"
@@ -569,6 +756,8 @@ async def start_order(
         "report_type": report_opts.get("report_type", "comprehensive"),
         "report_config": report_opts.get("report_config", {}),
         "analysis_mode": report_opts.get("analysis_mode", "ptm_only"),
+        "top_n_ptms": report_opts.get("top_n_ptms", 50),
+        "ptm_selection_mode": report_opts.get("ptm_selection_mode", "top_n"),
         "secondary_ptm_type": order.secondary_ptm_type,
         "secondary_sample_config": order.secondary_sample_config,
         "secondary_condition_map": _build_condition_map(order.secondary_sample_config) if order.secondary_sample_config else None,
@@ -623,7 +812,7 @@ async def generate_questions(
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    _check_order_access(order, user)
+    await _check_order_access_async(order, user, db)
 
     output_dir = Path(os.getenv("OUTPUT_DIR", "/app/data/outputs")) / order.order_code
 
@@ -676,7 +865,7 @@ async def get_order_questions(
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    _check_order_access(order, user)
+    await _check_order_access_async(order, user, db)
 
     report_opts = order.report_options or {}
     return {
@@ -702,7 +891,7 @@ async def save_order_questions(
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    _check_order_access(order, user)
+    await _require_write_access(order, user, db)
 
     report_opts = dict(order.report_options or {})
     report_opts["research_questions"] = body.research_questions
@@ -756,7 +945,7 @@ async def run_stage(
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    _check_order_access(order, user)
+    await _require_write_access(order, user, db)
 
     if order.status not in ("completed", "failed"):
         raise HTTPException(
@@ -939,7 +1128,7 @@ async def cancel_order(
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    _check_order_access(order, user)
+    await _require_write_access(order, user, db)
 
     running_statuses = ("queued", "running", "preprocessing", "rag_enrichment", "report_generation")
     if order.status not in running_statuses:
@@ -982,7 +1171,7 @@ async def delete_order(
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    _check_order_access(order, user)
+    await _require_write_access(order, user, db)
 
     if order.status not in ("pending", "completed", "failed", "cancelled"):
         raise HTTPException(
@@ -1024,7 +1213,7 @@ async def get_order_logs(
     order = order_result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    _check_order_access(order, user)
+    await _check_order_access_async(order, user, db)
 
     query = select(OrderLog).where(OrderLog.order_id == order_id)
     if stage:
@@ -1068,7 +1257,7 @@ async def get_vector_plots(
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    _check_order_access(order, user)
+    await _check_order_access_async(order, user, db)
 
     output_dir = Path(settings.OUTPUT_DIR) / order.order_code
     if not output_dir.exists():
@@ -1522,7 +1711,7 @@ async def get_vector_plot_data(
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    _check_order_access(order, user)
+    await _check_order_access_async(order, user, db)
 
     output_dir = Path(settings.OUTPUT_DIR) / order.order_code
     if not output_dir.exists():
@@ -2060,7 +2249,7 @@ async def get_file_details(
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    _check_order_access(order, user)
+    await _check_order_access_async(order, user, db)
 
     output_dir = Path(settings.OUTPUT_DIR) / order.order_code
     if not output_dir.exists():
@@ -2111,7 +2300,7 @@ async def download_order_file(
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    _check_order_access(order, user)
+    await _check_order_access_async(order, user, db)
 
     output_dir = Path(settings.OUTPUT_DIR) / order.order_code
     file_path = output_dir / filename
@@ -2154,7 +2343,7 @@ async def preview_order_file(
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    _check_order_access(order, user)
+    await _check_order_access_async(order, user, db)
 
     output_dir = Path(settings.OUTPUT_DIR) / order.order_code
     file_path = output_dir / filename
@@ -2208,7 +2397,7 @@ async def delete_order_file(
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    _check_order_access(order, user)
+    await _require_write_access(order, user, db)
 
     ext = Path(filename).suffix.lower()
     if ext not in {".md", ".docx", ".html"}:
@@ -2403,7 +2592,7 @@ async def get_order_statistics(
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    _check_order_access(order, user)
+    await _check_order_access_async(order, user, db)
 
     output_dir = Path(settings.OUTPUT_DIR) / order.order_code
     if not output_dir.exists():
@@ -2479,7 +2668,7 @@ async def get_order_articles(
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    _check_order_access(order, user)
+    await _check_order_access_async(order, user, db)
 
     output_dir = Path(_settings.OUTPUT_DIR) / order.order_code
 
@@ -2580,7 +2769,7 @@ async def kinase_enrichment(
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    _check_order_access(order, user)
+    await _require_write_access(order, user, db)
 
     genes = body.get("genes", [])
     if not genes or not isinstance(genes, list):
@@ -2959,7 +3148,7 @@ async def motif_kinase_annotation(
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    _check_order_access(order, user)
+    await _require_write_access(order, user, db)
 
     ptms = body.get("ptms", [])
     kea3_top_kinases = [k.upper() for k in body.get("kea3_top_kinases", [])]
@@ -4081,7 +4270,7 @@ async def global_kinase_modules(
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    _check_order_access(order, user)
+    await _require_write_access(order, user, db)
 
     ptms = body.get("ptms", [])
     cowave_modules_input = body.get("cowave_modules", [])

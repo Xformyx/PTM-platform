@@ -661,6 +661,8 @@ def run_preprocessing(self, order_id: int, config: dict):
             "ptm_mode": ptm_mode,
             "experimental_context": config.get("experimental_context"),
             "top_n_ptms": config.get("top_n_ptms", 50),
+            "ptm_selection_mode": config.get("ptm_selection_mode", "top_n"),
+            "single_time_point": config.get("single_time_point", False),
             "chromadb_collections": config.get("chromadb_collections", []),
             "llm_provider": config.get("llm_provider", "ollama"),
             "llm_model": config.get("llm_model"),

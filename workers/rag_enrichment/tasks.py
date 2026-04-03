@@ -212,11 +212,14 @@ def run_rag_enrichment(self, order_id: int, config: dict):
             df = df.drop(columns=["_abs_fc", "_key"])
 
             n_unique = len(selected_keys)
+            _total_unique = len(key_max_fc.index)
             logger.info(
-                f"[Order {order_id}] PTM selection mode='{mode}': "
-                f"De novo={len(denovo_keys)}, Regulated={len(regulated_keys)}, "
-                f"Minor={len(minor_keys)}, Selected={n_unique} unique PTMs, "
-                f"{len(df)} total rows (across {len(conditions)} conditions)"
+                f"[Order {order_id}] [RAG-SELECT] "
+                f"mode='{mode}' | "
+                f"전체 unique PTM={_total_unique} | "
+                f"De novo={len(denovo_keys)}, Regulated={len(regulated_keys)}, Minor={len(minor_keys)} | "
+                f"선택됨={n_unique} unique PTMs ({len(df)} rows, {len(conditions)} conditions) | "
+                f"top_n_setting={top_n} (mode!=top_n 이면 무시됨)"
             )
         elif fc_col in df.columns:
             # Fallback: no Condition column — simple top-N by abs FC
@@ -229,7 +232,7 @@ def run_rag_enrichment(self, order_id: int, config: dict):
 
         ptm_data = df.to_dict("records")
         publish_progress(order_id, "rag_enrichment", "load_data", "completed", 10,
-                        f"Loaded {len(ptm_data)} PTM entries ({n_unique} unique PTMs from top {top_n}/condition)")
+                        f"[{n_unique} PTMs selected, {len(ptm_data)} rows] mode='{ptm_selection_mode}' → enrichment 시작")
 
         # ================================================================
         # Step 2: RAG Enrichment — PubMed + pattern matching (10% – 70%)
@@ -260,7 +263,19 @@ def run_rag_enrichment(self, order_id: int, config: dict):
         enriched_json_path = order_output / f"enriched_ptm_data{file_suffix}.json"
         with open(enriched_json_path, "w", encoding="utf-8") as f:
             json.dump(enriched_ptms, f, indent=2, default=str)
-        logger.info(f"[Order {order_id}] Saved enriched data: {enriched_json_path.name}")
+
+        # ── Logging: JSON 저장 결과 ──────────────────────────────────────────
+        _json_unique_keys = set()
+        for _item in enriched_ptms:
+            _g = _item.get("Gene.Name", "") or _item.get("gene", "")
+            _s = _item.get("PTM_Position", "") or _item.get("position", "")
+            if _g and _s:
+                _json_unique_keys.add(f"{_g}_{_s}")
+        logger.info(
+            f"[Order {order_id}] [RAG-SAVE] "
+            f"JSON: {enriched_json_path.name} | "
+            f"total rows={len(enriched_ptms)}, unique PTMs={len(_json_unique_keys)}"
+        )
 
         publish_progress(order_id, "rag_enrichment", "enrichment", "completed", 70, "Literature enrichment complete")
 

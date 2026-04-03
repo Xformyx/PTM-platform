@@ -24,6 +24,22 @@ export interface Order {
   created_at: string;
   created_by?: string | null;
   run_by?: string | null;
+  /** Populated when this order was shared with the current user */
+  is_shared?: boolean;
+  share_access?: 'full_access' | 'read_only' | null;
+}
+
+export interface OrderShareEntry {
+  user_id: number;
+  name: string;
+  email: string;
+  access_level: 'full_access' | 'read_only';
+}
+
+export interface ShareableUser {
+  id: number;
+  name: string;
+  email: string;
 }
 
 export type OrderStatus =

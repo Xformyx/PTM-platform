@@ -9,6 +9,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.dialects.mysql import DATETIME as DateTime, JSON
@@ -132,3 +133,27 @@ class OrderLog(Base):
     )
 
     order: Mapped["Order"] = relationship(back_populates="logs")
+
+
+class OrderShare(Base):
+    """Tracks which orders have been shared with which users and at what access level."""
+    __tablename__ = "order_shares"
+    __table_args__ = (
+        UniqueConstraint("order_id", "shared_with_user_id", name="uq_order_share"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    order_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("orders.id", ondelete="CASCADE"), nullable=False
+    )
+    shared_with_user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    access_level: Mapped[str] = mapped_column(
+        Enum("full_access", "read_only", name="share_access_level"),
+        nullable=False,
+        default="read_only",
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now()
+    )

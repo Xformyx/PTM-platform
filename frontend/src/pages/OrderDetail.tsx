@@ -8,8 +8,9 @@ import {
   Copy, Check, Eye, ArrowRightCircle, Sparkles, Plus, X, Trash2,
   MessageSquare, Loader2, ToggleLeft, ToggleRight, Square,
   ChartScatter, TrendingUp, ZoomIn, ZoomOut, GitMerge, BarChart3,
-  LayoutDashboard, FileOutput,
+  LayoutDashboard, FileOutput, Share2,
 } from "lucide-react";
+import { ShareOrderModal } from "@/components/ShareOrderModal";
 import { Input } from "@/components/ui/input";
 import { AutoResizeTextarea } from "@/components/ui/auto-resize-textarea";
 import { api } from "@/lib/api";
@@ -2373,12 +2374,16 @@ export default function OrderDetail() {
   const [searchParams, setSearchParams] = useSearchParams();
   const orderId = parseInt(id || "0");
   const [order, setOrder] = useState<Order | null>(null);
+
+  // read-only shared: hide all write actions
+  const isReadOnlyShared = !!(order?.is_shared && order?.share_access === "read_only");
   const [logs, setLogs] = useState<OrderLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [llmConfig, setLlmConfig] = useState<LlmConfig | null>(null);
   const [llmModels, setLlmModels] = useState<{ provider: string; model_id: string; name: string }[]>([]);
   const [ragCollections, setRagCollections] = useState<{ id: number; name: string }[]>([]);
   const [rerunModalOpen, setRerunModalOpen] = useState(false);
+  const [shareModalOpen, setShareModalOpen] = useState(false);
   const [pendingAction, setPendingAction] = useState<{ type: "start" } | { type: "run-stage"; stage: string } | null>(null);
   const runHandledRef = useRef(false);
 
@@ -2618,22 +2623,34 @@ export default function OrderDetail() {
           <Button variant="outline" size="icon" onClick={handleRefresh} title="Refresh">
             <RefreshCw className="h-4 w-4" />
           </Button>
-          {isRunning && (
+          {/* Share button — only for own orders */}
+          {!order.is_shared && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={() => setShareModalOpen(true)}
+              title="Share order"
+            >
+              <Share2 className="h-4 w-4" /> Share
+            </Button>
+          )}
+          {isRunning && !isReadOnlyShared && (
             <Button variant="destructive" onClick={handleStop} className="gap-2">
               <Square className="h-4 w-4" /> Stop
             </Button>
           )}
-          {order.status === "pending" && (
+          {order.status === "pending" && !isReadOnlyShared && (
             <Button onClick={handleStart} className="gap-2">
               <Play className="h-4 w-4" /> Start Analysis
             </Button>
           )}
-          {order.status === "failed" && (
+          {order.status === "failed" && !isReadOnlyShared && (
             <Button variant="outline" onClick={handleStart} className="gap-2">
               <RotateCcw className="h-4 w-4" /> Retry Analysis
             </Button>
           )}
-          {["completed", "cancelled"].includes(order.status) && (
+          {["completed", "cancelled"].includes(order.status) && !isReadOnlyShared && (
             <Button variant="outline" onClick={handleStart} className="gap-2">
               <RotateCcw className="h-4 w-4" /> Re-run from Beginning
             </Button>
@@ -2652,7 +2669,8 @@ export default function OrderDetail() {
               const isFailed = isActive && order.status === "failed";
               const canRerun =
                 !isRunning &&
-                order.status !== "pending";
+                order.status !== "pending" &&
+                !isReadOnlyShared;
 
               return (
                 <div key={stage.key} className="flex flex-1 items-center">
@@ -3019,7 +3037,7 @@ export default function OrderDetail() {
         <TabsContent value="results" className="mt-4">
           {order.result_files && (order.result_files as any)?.all_files?.length > 0 ? (
             <div className="space-y-4">
-              {!isRunning && order.status !== "pending" && (
+              {!isRunning && order.status !== "pending" && !isReadOnlyShared && (
                 <div className="flex justify-end">
                   <Button
                     variant="outline"
@@ -3043,7 +3061,7 @@ export default function OrderDetail() {
                     ? "Report files available for download"
                     : "Results will appear here after analysis completes"}
                 </p>
-                {!isRunning && order.status !== "pending" && (
+                {!isRunning && order.status !== "pending" && !isReadOnlyShared && (
                   <Button
                     variant="outline"
                     size="sm"
@@ -3153,6 +3171,12 @@ export default function OrderDetail() {
         defaultLlmModel={llmConfig?.default_model || ""}
         onConfirm={handleRerunConfirm}
         confirmLabel="Confirm & Re-run from Beginning"
+      />
+      <ShareOrderModal
+        open={shareModalOpen}
+        onOpenChange={setShareModalOpen}
+        orderId={order.id}
+        orderCode={order.order_code}
       />
     </div>
   );

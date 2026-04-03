@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
-import { PlusCircle, ClipboardList, Play, ChevronDown, ChevronUp, ChevronsUpDown, AlertCircle, Trash2, Square } from "lucide-react";
+import { PlusCircle, ClipboardList, Play, ChevronDown, ChevronUp, ChevronsUpDown, AlertCircle, Trash2, Square, Share2 } from "lucide-react";
 import { api } from "@/lib/api";
 import type { Order } from "@/lib/types";
 import { Card, CardContent } from "@/components/ui/card";
@@ -18,6 +18,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { ShareOrderModal } from "@/components/ShareOrderModal";
+import { useAuth } from "@/contexts/AuthContext";
 
 function fmtDate(iso: string | null | undefined): string {
   if (!iso) return "—";
@@ -134,6 +136,7 @@ function ColResizeHandle({
 
 export default function OrderList() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [orders, setOrders] = useState<Order[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -142,6 +145,7 @@ export default function OrderList() {
   const [expandedError, setExpandedError] = useState<number | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ id: number; order_code: string } | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [shareTarget, setShareTarget] = useState<{ id: number; order_code: string } | null>(null);
 
   const [colWidths, setColWidths] = useState<number[]>(() => loadOrderListColWidths());
   const colWidthsRef = useRef<number[]>(colWidths);
@@ -447,7 +451,19 @@ export default function OrderList() {
                         {order.order_code}
                       </Link>
                     </TableCell>
-                    <TableCell className="truncate" title={order.project_name}>{order.project_name}</TableCell>
+                    <TableCell className="truncate" title={order.project_name}>
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span className="truncate">{order.project_name}</span>
+                        {order.is_shared && (
+                          <Badge
+                            variant="outline"
+                            className="shrink-0 text-[10px] h-4 px-1.5 border-amber-400 text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30"
+                          >
+                            Shared
+                          </Badge>
+                        )}
+                      </div>
+                    </TableCell>
                     <TableCell className="capitalize truncate">{order.ptm_type}</TableCell>
                     <TableCell className="capitalize truncate">{order.species}</TableCell>
                     <TableCell>
@@ -483,51 +499,79 @@ export default function OrderList() {
                       {order.status === "completed" ? fmtDate(order.completed_at) : "—"}
                     </TableCell>
                     <TableCell className="pr-5" onClick={(e) => e.stopPropagation()}>
-                      <div className="flex items-center justify-end gap-1.5">
-                        {isRunning(order.status) ? (
-                          <Button
-                            size="sm"
-                            variant="destructive"
-                            className="h-7 gap-1 min-w-[60px]"
-                            onClick={(e) => handleStop(e, order.id)}
-                          >
-                            <Square className="h-3 w-3" /> Stop
-                          </Button>
-                        ) : (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-7 gap-1 min-w-[60px]"
-                            onClick={(e) => handleRun(e, order.id)}
-                          >
-                            <Play className="h-3 w-3" /> {order.status === "completed" ? "Re-Run" : "Run"}
-                          </Button>
-                        )}
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-7 w-7 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
-                          onClick={(e) => handleDeleteClick(e, order)}
-                          disabled={isRunning(order.status)}
-                          title="Delete order"
-                        >
-                          <Trash2 className="h-3 w-3" />
-                        </Button>
-                        {order.status === "failed" && order.error_message && (
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="h-7 w-7 p-0"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setExpandedError(expandedError === order.id ? null : order.id);
-                            }}
-                            title="Show error"
-                          >
-                            <ChevronDown className={`h-3 w-3 transition-transform ${expandedError === order.id ? "rotate-180" : ""}`} />
-                          </Button>
-                        )}
-                      </div>
+                      {(() => {
+                        const isReadOnly = order.is_shared && order.share_access === "read_only";
+                        const isOwn = !order.is_shared;
+                        return (
+                          <div className="flex items-center justify-end gap-1.5">
+                            {/* Run/Stop — hidden for read-only shared */}
+                            {!isReadOnly && (
+                              isRunning(order.status) ? (
+                                <Button
+                                  size="sm"
+                                  variant="destructive"
+                                  className="h-7 gap-1 min-w-[60px]"
+                                  onClick={(e) => handleStop(e, order.id)}
+                                >
+                                  <Square className="h-3 w-3" /> Stop
+                                </Button>
+                              ) : (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-7 gap-1 min-w-[60px]"
+                                  onClick={(e) => handleRun(e, order.id)}
+                                >
+                                  <Play className="h-3 w-3" /> {order.status === "completed" ? "Re-Run" : "Run"}
+                                </Button>
+                              )
+                            )}
+                            {/* Share button — only for own orders */}
+                            {isOwn && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-7 w-7 p-0 text-muted-foreground hover:text-primary"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setShareTarget({ id: order.id, order_code: order.order_code });
+                                }}
+                                title="Share order"
+                              >
+                                <Share2 className="h-3.5 w-3.5" />
+                              </Button>
+                            )}
+                            {/* Delete — hidden for read-only shared */}
+                            {!isReadOnly && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-7 w-7 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
+                                onClick={(e) => handleDeleteClick(e, order)}
+                                disabled={isRunning(order.status)}
+                                title="Delete order"
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </Button>
+                            )}
+                            {/* Error expand */}
+                            {order.status === "failed" && order.error_message && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-7 w-7 p-0"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setExpandedError(expandedError === order.id ? null : order.id);
+                                }}
+                                title="Show error"
+                              >
+                                <ChevronDown className={`h-3 w-3 transition-transform ${expandedError === order.id ? "rotate-180" : ""}`} />
+                              </Button>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </TableCell>
                   </TableRow>
                 ))}
@@ -544,6 +588,16 @@ export default function OrderList() {
           )}
         </CardContent>
       </Card>
+
+      {/* Share modal */}
+      {shareTarget && (
+        <ShareOrderModal
+          open={!!shareTarget}
+          onOpenChange={(open) => !open && setShareTarget(null)}
+          orderId={shareTarget.id}
+          orderCode={shareTarget.order_code}
+        />
+      )}
 
       {/* Delete confirmation dialog */}
       <Dialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
