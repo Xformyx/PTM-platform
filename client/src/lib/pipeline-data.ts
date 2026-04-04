@@ -34,8 +34,8 @@ export const TOC_ITEMS: TocItem[] = [
   { id: "report-figures", label: "5.7 Figure 구성 (v8.0)", level: 2 },
   { id: "report-quality", label: "5.8 리포트 품질 개선 (v8.1)", level: 2 },
   { id: "report-classification", label: "5.9 PTM 분류 시스템 (v8.2)", level: 2 },
-  { id: "report-effector", label: "5.10 Non-PTM Effector (v9.34)", level: 2 },
-  { id: "report-signalflow", label: "5.11 4-Layer Signal Flow (v9.34)", level: 2 },
+  { id: "report-effector", label: "5.10 Non-PTM Effector (v9.34+)", level: 2 },
+  { id: "report-signalflow", label: "5.11 4-Layer Signal Flow (v9.34+)", level: 2 },
   { id: "dataflow", label: "6. 데이터 흐름 요약", level: 1 },
   { id: "infra", label: "7. 인프라 구성", level: 1 },
   { id: "operations", label: "8. 운영 가이드", level: 1 },
@@ -157,17 +157,19 @@ export const REPORT_SECTIONS = [
 export const SIGNAL_FLOW_LAYERS = [
   { layer: 1, name: "Receptor", color: "#06b6d4", shape: "Hexagon", source: "Inferred from kinase-receptor mapping (KEGG, literature)", desc: "Upstream receptor tyrosine kinases or GPCRs that initiate signaling" },
   { layer: 2, name: "Kinase / E3 Ligase", color: "#f59e0b", shape: "Diamond", source: "iPTMnet, UniProt, KEA3, motif prediction, RAG", desc: "Regulatory enzymes annotated from 8 sources" },
-  { layer: 3, name: "PTM Substrate", color: "#ef4444 / #3b82f6", shape: "Circle", source: "Experimental PTM data (Log2FC)", desc: "Phosphorylation/Ubiquitylation sites with temporal profiles" },
-  { layer: 4, name: "Non-PTM Effector", color: "#10b981 / #a855f6", shape: "Circle", source: "STRING-DB, BioGRID, KEA3 network edges", desc: "Downstream proteins with significant abundance changes (|Log2FC| > 0.3) connected via PPI" },
+  { layer: 3, name: "PTM Substrate", color: "#ef4444 / #3b82f6", shape: "Circle", source: "Experimental PTM data (PTM_Relative_Log2FC)", desc: "Phosphorylation/Ubiquitylation sites with temporal profiles" },
+  { layer: 4, name: "Non-PTM Effector", color: "#10b981 / #0ea5e9", shape: "Circle", source: "PPI (STRING/BioGRID) + Expression-only (TSV Protein_Only)", desc: "Two types: PPI-based (green/red border) connected via network edges, and expression_only (sky-blue dotted border) with |Protein_Log2FC| > 0.3 from TSV" },
 ];
 
 export const EFFECTOR_EXTRACTION_STEPS = [
-  { step: 1, action: "Network edge 추출", detail: "network_analysis state에서 timepoint별 non_ptm_nodes 추출" },
-  { step: 2, action: "Substrate 연결 매핑", detail: "Non-PTM 노드의 PPI edge를 추적하여 연결된 PTM substrate 식별" },
+  { step: "1a", action: "PPI-based: Network edge 추출", detail: "network_analysis state에서 timepoint별 non_ptm_nodes 추출 (STRING/BioGRID confidence score 기반)" },
+  { step: "1b", action: "Expression-only: TSV Protein_Only 추출", detail: "unified_protein_data TSV에서 Data_Type='Protein_Only'이고 |Protein_Log2FC| > 0.3인 단백질 전체 추출" },
+  { step: 2, action: "Substrate 연결 매핑", detail: "PPI-based 노드의 edge를 추적하여 연결된 PTM substrate 식별 (expression_only는 substrate 연결 없음)" },
   { step: 3, action: "Temporal profile 구성", detail: "unified_protein_data에서 각 condition별 Protein_Log2FC 추출" },
   { step: 4, action: "Peak FC 계산", detail: "|Protein_Log2FC|가 최대인 condition을 peak으로 설정" },
-  { step: 5, action: "Time-lag 분석", detail: "Substrate peak 시점 대비 Effector peak 시점의 시간차 계산" },
-  { step: 6, action: "Signal Flow 다이어그램", detail: "4-layer 다이어그램 생성 (signal_flow_figure.py)" },
+  { step: 5, action: "Evidence strength 분류", detail: "PPI-based: strong (≥700) / moderate (400-699) / weak (<400). Expression-only: expression_only" },
+  { step: 6, action: "Time-lag 분석", detail: "Substrate PTM_Relative_Log2FC peak 시점 대비 Effector Protein_Log2FC peak 시점의 시간차 계산" },
+  { step: 7, action: "Signal Flow 다이어그램", detail: "4-layer 다이어그램 생성 — PPI-based(실선 border) vs expression_only(점선 sky-blue border) 시각 구분" },
 ];
 
 export const DOCKER_SERVICES = [

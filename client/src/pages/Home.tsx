@@ -62,10 +62,10 @@ export default function Home() {
             </span>
           </div>
           <span className="text-xs text-muted-foreground font-mono hidden sm:block">
-            Pipeline Manual v1.5
+            Pipeline Manual v1.7
           </span>
           <div className="ml-auto flex items-center gap-3">
-            <span className="text-xs text-muted-foreground">2026-03-21</span>
+            <span className="text-xs text-muted-foreground">2026-04-05</span>
           </div>
         </div>
       </header>
@@ -599,12 +599,21 @@ export default function Home() {
           </Callout>
 
           {/* 5.10 Non-PTM Effector Integration (v9.34) */}
-          <SectionHeading id="report-effector" level={2}>5.10. Non-PTM Effector 통합 (v9.34)</SectionHeading>
+          <SectionHeading id="report-effector" level={2}>5.10. Non-PTM Effector 통합 (v9.34+)</SectionHeading>
           <p className="text-base leading-relaxed text-foreground/85 mb-4">
-            v9.34에서는 PTM Substrate에 연결된 <strong>Non-PTM Effector 단백질</strong>을 4번째 레이어로 통합했습니다.
-            Non-PTM Effector는 PTM 수식은 받지 않았지만, STRING-DB, BioGRID, KEA3 네트워크 엣지를 통해
-            PTM Substrate와 물리적으로 상호작용하는 단백질로, Protein 수준의 발현량 변화(|Log2FC| &gt; 0.3)가
-            확인된 단백질들입니다.
+            v9.34+에서는 <strong>Non-PTM Effector 단백질</strong>을 두 가지 유형으로 4번째 레이어에 통합했습니다.
+          </p>
+          <p className="text-base leading-relaxed text-foreground/85 mb-2">
+            <strong>(1) PPI-based Effector</strong> — STRING-DB, BioGRID, KEA3 네트워크 엣지를 통해
+            PTM Substrate와 물리적으로 상호작용하는 단백질입니다. Evidence strength는 PPI confidence score에 따라
+            strong (≥700), moderate (400-699), weak (&lt;400)으로 분류됩니다.
+            프론트엔드에서 <strong>green/red 실선 border</strong>로 표시됩니다.
+          </p>
+          <p className="text-base leading-relaxed text-foreground/85 mb-4">
+            <strong>(2) Expression-only Effector</strong> — TSV의 <code className="text-xs font-mono">Data_Type = "Protein_Only"</code> 행 중
+            |Protein_Log2FC| &gt; 0.3인 모든 단백질을 포함합니다. PPI 관계 없이 유의미한 발현 변화만으로 추출되며,
+            프론트엔드에서 <strong>sky-blue 점선 border</strong>로 시각적으로 구분됩니다.
+            이를 통해 PPI 데이터베이스에 등록되지 않았지만 실험적으로 유의미한 변화를 보이는 단백질도 분석에 포함됩니다.
           </p>
 
           <DataTable
@@ -622,9 +631,10 @@ export default function Home() {
             <code className="text-xs font-mono">gene</code> (HGNC 심볼),
             <code className="text-xs font-mono">peak_fc</code> (|Log2FC| 최대값),
             <code className="text-xs font-mono">peak_condition</code> (peak 시점),
-            <code className="text-xs font-mono">sources</code> (STRING/BioGRID/KEA3),
+            <code className="text-xs font-mono">evidence_strength</code> (strong/moderate/weak/expression_only),
+            <code className="text-xs font-mono">sources</code> (STRING/BioGRID/KEA3 또는 "expression_only"),
             <code className="text-xs font-mono">temporal_profile</code> (condition별 Protein_Log2FC),
-            <code className="text-xs font-mono">connected_substrates</code> (연결된 PTM substrate 목록).
+            <code className="text-xs font-mono">connected_substrates</code> (PPI-based만 해당, expression_only는 빈 배열).
             이 데이터는 <code className="text-xs font-mono">global-kinase-modules</code> API의
             <code className="text-xs font-mono">effector_proteins</code> 필드로 프론트엔드에 전달됩니다.
           </Callout>
@@ -632,10 +642,11 @@ export default function Home() {
           {/* 5.11 4-Layer Signal Flow (v9.34) */}
           <SectionHeading id="report-signalflow" level={2}>5.11. 4-Layer Signal Flow 다이어그램 (v9.34)</SectionHeading>
           <p className="text-base leading-relaxed text-foreground/85 mb-4">
-            v9.34에서 Signal Flow 다이어그램이 기존 3-layer(Receptor → Kinase → Substrate)에서
+            v9.34+에서 Signal Flow 다이어그램이 기존 3-layer(Receptor → Kinase → Substrate)에서
             <strong> 4-layer(Receptor → Kinase → Substrate → Non-PTM Effector)</strong>로 확장되었습니다.
             이 다이어그램은 <code className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono">signal_flow_figure.py</code>에서
             matplotlib로 렌더링되며, 프론트엔드의 Signal Flow 탭에서도 동일한 구조를 인터랙티브하게 시각화합니다.
+            Non-PTM Effector 레이어에서는 PPI-based와 expression_only 두 유형이 시각적으로 구분됩니다.
           </p>
 
           <DataTable
@@ -680,9 +691,9 @@ export default function Home() {
           </div>
 
           <Callout type="info">
-            <strong>Time-lag 시각화.</strong> Non-PTM Effector 레이어에서는 각 effector 단백질의 peak response 시점을
-            연결된 substrate의 peak 시점과 비교하여 time-lag를 계산합니다.
-            이를 통해 PTM 신호가 하류 단백질 발현에 영향을 미치는 시간적 지연을 시각적으로 확인할 수 있습니다.
+            <strong>Time-lag 시각화.</strong> PPI-based Effector의 peak Protein_Log2FC 시점을
+            연결된 substrate의 peak PTM_Relative_Log2FC 시점과 비교하여 time-lag를 계산합니다.
+            Expression-only Effector는 substrate 연결이 없으므로 time-lag 대신 peak condition만 표시됩니다.
             프론트엔드의 Signal Flow 탭에서는 이 정보가 툴팁으로 표시되며,
             Cascade View 탭에서는 temporal swimlane에 effector 데이터가 오버레이됩니다.
           </Callout>
@@ -935,8 +946,8 @@ Request Body:
           {/* Footer */}
           <div className="mt-20 pt-8 border-t border-border">
             <div className="flex items-center justify-between text-xs text-muted-foreground">
-              <span>PTM Platform Pipeline Manual v1.6</span>
-              <span>Generated by Manus AI &middot; 2026-04-03</span>
+              <span>PTM Platform Pipeline Manual v1.7</span>
+              <span>Generated by Manus AI &middot; 2026-04-05</span>
             </div>
           </div>
         </main>
