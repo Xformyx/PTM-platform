@@ -2006,7 +2006,7 @@ def _generate_pathway_distribution_graph(
         if log2fc == 0.0:
             for cd in ptm.get("condition_data", []):
                 try:
-                    cd_fc = float(cd.get("PTM_Log2FC") or cd.get("ptm_log2fc") or cd.get("Log2FC", 0))
+                    cd_fc = float(cd.get("ptm_relative_log2fc") or cd.get("PTM_Relative_Log2FC") or cd.get("PTM_Log2FC") or cd.get("Log2FC", 0))
                     if abs(cd_fc) > abs(log2fc):
                         log2fc = cd_fc
                 except (ValueError, TypeError):

@@ -4669,8 +4669,8 @@ async def global_kinase_modules(
                         if cond:
                             _protein_temporal[gene_upper][cond] = pfc
                         _protein_data_type[gene_upper] = dt
-                        # Also load PTM_Log2FC for substrate PTM peak calculation
-                        ptm_fc_raw = row.get("PTM_Log2FC") or row.get("ptm_log2fc") or ""
+                        # Also load PTM_Relative_Log2FC for substrate PTM peak calculation
+                        ptm_fc_raw = row.get("PTM_Relative_Log2FC") or row.get("PTM_Log2FC") or row.get("ptm_log2fc") or ""
                         ptm_pos = (row.get("PTM_Position") or row.get("Position") or "").strip()
                         if ptm_fc_raw and ptm_fc_raw.lower() not in ("na", "nan", "") and ptm_pos and cond:
                             try:

@@ -284,10 +284,10 @@ def run_preprocessing(self, order_id: int, config: dict):
                 }
 
                 # Comparison stats per condition
-                if "Condition" in ptm_vec_df.columns and "PTM_Log2FC" in ptm_vec_df.columns:
+                if "Condition" in ptm_vec_df.columns and "PTM_Relative_Log2FC" in ptm_vec_df.columns:
                     per_condition = {}
                     for cond, grp in ptm_vec_df.groupby("Condition"):
-                        log2fc = grp["PTM_Log2FC"].dropna()
+                        log2fc = grp["PTM_Relative_Log2FC"].dropna()
                         per_condition[str(cond)] = {
                             "total_entries": len(grp),
                             "unique_proteins": int(grp["Protein.Group"].nunique()) if "Protein.Group" in grp.columns else 0,
@@ -313,18 +313,18 @@ def run_preprocessing(self, order_id: int, config: dict):
                     }
 
                 # PTM vector / quadrant analysis
-                if "Protein_Log2FC" in ptm_vec_df.columns and "PTM_Log2FC" in ptm_vec_df.columns:
+                if "Protein_Log2FC" in ptm_vec_df.columns and "PTM_Relative_Log2FC" in ptm_vec_df.columns:
                     prot_fc = ptm_vec_df["Protein_Log2FC"].dropna()
-                    ptm_fc = ptm_vec_df["PTM_Log2FC"].dropna()
-                    valid = ptm_vec_df.dropna(subset=["Protein_Log2FC", "PTM_Log2FC"])
+                    ptm_fc = ptm_vec_df["PTM_Relative_Log2FC"].dropna()
+                    valid = ptm_vec_df.dropna(subset=["Protein_Log2FC", "PTM_Relative_Log2FC"])
                     ps.stats["step2_quantification"]["ptm_vector"] = {
                         "total_vectors": len(valid),
                         "unique_proteins": int(valid["Protein.Group"].nunique()) if "Protein.Group" in valid.columns else 0,
                         "quadrant_analysis": {
-                            "Q1_up_up": int(((valid["Protein_Log2FC"] > 0) & (valid["PTM_Log2FC"] > 0)).sum()),
-                            "Q2_down_up": int(((valid["Protein_Log2FC"] < 0) & (valid["PTM_Log2FC"] > 0)).sum()),
-                            "Q3_down_down": int(((valid["Protein_Log2FC"] < 0) & (valid["PTM_Log2FC"] < 0)).sum()),
-                            "Q4_up_down": int(((valid["Protein_Log2FC"] > 0) & (valid["PTM_Log2FC"] < 0)).sum()),
+                            "Q1_up_up": int(((valid["Protein_Log2FC"] > 0) & (valid["PTM_Relative_Log2FC"] > 0)).sum()),
+                            "Q2_down_up": int(((valid["Protein_Log2FC"] < 0) & (valid["PTM_Relative_Log2FC"] > 0)).sum()),
+                            "Q3_down_down": int(((valid["Protein_Log2FC"] < 0) & (valid["PTM_Relative_Log2FC"] < 0)).sum()),
+                            "Q4_up_down": int(((valid["Protein_Log2FC"] > 0) & (valid["PTM_Relative_Log2FC"] < 0)).sum()),
                         },
                     }
 
