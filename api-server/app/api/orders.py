@@ -4859,6 +4859,49 @@ async def global_kinase_modules(
                     "concordant": is_concordant,
                 })
 
+        # 9d-2. Add ALL non-PTM proteins from TSV (Data_Type == "Protein_Only")
+        #       that have significant expression changes, regardless of PPI relationship
+        _non_ptm_added = 0
+        for _gene_up, _dt in _protein_data_type.items():
+            if _dt != "Protein_Only":
+                continue
+            if _gene_up in _substrate_genes:
+                continue  # Skip PTM substrates
+            if _gene_up in _seen_effectors:
+                continue  # Already added via PPI
+            _temporal = _protein_temporal.get(_gene_up, {})
+            if not _temporal:
+                continue
+            _max_fc = max((abs(v) for v in _temporal.values()), default=0)
+            if _max_fc < _effector_fc_threshold:
+                continue
+            _pk = max(_temporal.items(), key=lambda x: abs(x[1]))
+            _tp = [
+                {"condition": c, "protein_log2fc": round(v, 4)}
+                for c, v in sorted(_temporal.items(), key=lambda x: _parse_time_minutes(x[0]))
+            ]
+            _seen_effectors[_gene_up] = {
+                "gene": _gene_up,
+                "data_type": _dt,
+                "connected_substrates": [],
+                "temporal_profile": _tp,
+                "max_abs_fc": round(_max_fc, 4),
+                "peak_condition": _pk[0],
+                "peak_fc": round(_pk[1], 4),
+                "peak_minutes": _parse_time_minutes(_pk[0]),
+                "sources": [],
+                "concordant_count": 0,
+                "discordant_count": 0,
+                "directionality": "expression_only",
+                "time_lag_minutes": None,
+                "evidence_strength": "expression_only",
+            }
+            _non_ptm_added += 1
+        _log.info(
+            f"[GLOBAL-KINASE] Added {_non_ptm_added} additional non-PTM proteins "
+            f"from TSV (Data_Type=Protein_Only, |log2FC| > {_effector_fc_threshold})"
+        )
+
         # 9e. Deduplicate, compute evidence scoring, and convert sets
         for pu, eff in _seen_effectors.items():
             eff["sources"] = sorted(eff["sources"])

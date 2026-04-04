@@ -293,7 +293,7 @@ interface EffectorProtein {
   discordant_count?: number;
   directionality?: "concordant" | "discordant" | "mixed" | "unknown";
   time_lag_minutes?: number | null;
-  evidence_strength?: "strong" | "moderate" | "weak";
+  evidence_strength?: "strong" | "moderate" | "weak" | "expression_only";
   evidence_score?: number;
 }
 
@@ -2142,7 +2142,7 @@ function CascadeView({
                       </tr>
                     </thead>
                     <tbody>
-                      {globalKinaseResult.effector_proteins.slice(0, 15).map(eff => {
+                      {globalKinaseResult.effector_proteins.map(eff => {
                         const tpMap: Record<string, number> = {};
                         for (const tp of eff.temporal_profile) {
                           tpMap[tp.condition] = tp.protein_log2fc;
@@ -2188,6 +2188,7 @@ function CascadeView({
                               <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded ${
                                 (eff.evidence_strength || "weak") === "strong" ? "bg-emerald-900/30 text-emerald-300" :
                                 (eff.evidence_strength || "weak") === "moderate" ? "bg-amber-900/30 text-amber-300" :
+                                (eff.evidence_strength || "weak") === "expression_only" ? "bg-sky-900/30 text-sky-300" :
                                 "bg-muted text-muted-foreground"
                               }`}>
                                 {eff.evidence_strength || "weak"}
@@ -2222,11 +2223,7 @@ function CascadeView({
                       })}
                     </tbody>
                   </table>
-                  {globalKinaseResult.effector_proteins.length > 15 && (
-                    <div className="text-[10px] text-muted-foreground text-center py-1">
-                      Showing top 15 of {globalKinaseResult.effector_proteins.length} effector proteins
-                    </div>
-                  )}
+
                 </div>
               </div>
             </>
@@ -2358,23 +2355,27 @@ function GlobalKinaseModulesPanel({
               <ArrowRight className="h-3 w-3" /> Non-PTM Effector Layer
             </div>
             <span className="text-[10px] text-muted-foreground">
-              {result.effector_proteins.length} proteins connected via STRING/BioGRID
+              {result.effector_proteins.length} non-PTM proteins
             </span>
           </div>
           <div className="flex flex-wrap gap-1.5">
-            {result.effector_proteins.slice(0, 20).map(eff => {
+            {result.effector_proteins.map(eff => {
               const isUp = eff.peak_fc > 0;
               const strength = eff.evidence_strength || "weak";
-              const strengthBorder = strength === "strong" ? "border-2" : strength === "moderate" ? "border" : "border border-dashed";
+              const strengthBorder = strength === "strong" ? "border-2" : strength === "moderate" ? "border" : strength === "expression_only" ? "border border-dotted" : "border border-dashed";
               const dirIcon = eff.directionality === "concordant" ? "✓" : eff.directionality === "discordant" ? "✗" : eff.directionality === "mixed" ? "~" : "";
               const lagStr = eff.time_lag_minutes != null ? `lag:${eff.time_lag_minutes > 0 ? "+" : ""}${eff.time_lag_minutes}m` : "";
               return (
                 <span
                   key={eff.gene}
                   className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
-                    isUp
-                      ? `bg-emerald-900/20 text-emerald-400 ${strengthBorder} border-emerald-500/50`
-                      : `bg-rose-900/20 text-rose-400 ${strengthBorder} border-rose-500/50`
+                    strength === "expression_only"
+                      ? (isUp
+                          ? `bg-sky-900/20 text-sky-400 ${strengthBorder} border-sky-500/50`
+                          : `bg-sky-900/20 text-sky-300 ${strengthBorder} border-sky-500/50`)
+                      : (isUp
+                          ? `bg-emerald-900/20 text-emerald-400 ${strengthBorder} border-emerald-500/50`
+                          : `bg-rose-900/20 text-rose-400 ${strengthBorder} border-rose-500/50`)
                   }`}
                   title={`${eff.gene} | FC: ${eff.peak_fc > 0 ? "+" : ""}${eff.peak_fc.toFixed(2)} @ ${eff.peak_condition}\nEvidence: ${strength} (score ${eff.evidence_score || 0})\nDirection: ${eff.directionality || "unknown"} (${eff.concordant_count || 0}✓ / ${eff.discordant_count || 0}✗)\nTime-lag: ${lagStr || "N/A"}\nSubstrates: ${eff.connected_substrates.map(s => s.gene).join(", ")}\nSources: ${eff.sources.join(", ")}`}
                 >
@@ -2385,21 +2386,20 @@ function GlobalKinaseModulesPanel({
                 </span>
               );
             })}
-            {result.effector_proteins.length > 20 && (
-              <span className="text-[10px] text-muted-foreground">+{result.effector_proteins.length - 20} more</span>
-            )}
+
           </div>
           {/* Evidence strength legend */}
           <div className="flex items-center gap-3 text-[9px] text-muted-foreground">
             <span>Evidence: <span className="border-2 border-muted-foreground/30 px-1 rounded">strong</span></span>
             <span><span className="border border-muted-foreground/30 px-1 rounded">moderate</span></span>
             <span><span className="border border-dashed border-muted-foreground/30 px-1 rounded">weak</span></span>
+            <span><span className="border border-dotted border-sky-500/50 px-1 rounded text-sky-400">expr. only</span></span>
             <span className="ml-2">✓ concordant</span>
             <span>✗ discordant</span>
             <span>~ mixed</span>
           </div>
           <div className="text-[10px] text-muted-foreground">
-            Non-PTM proteins with significant protein abundance changes (|Log2FC| &gt; 0.3) that interact with PTM substrates via PPI networks. Evidence scored by temporal concordance, directionality, and multi-substrate support.
+            Non-PTM proteins with significant protein abundance changes (|Log2FC| &gt; 0.3). PPI-connected proteins are scored by temporal concordance, directionality, and multi-substrate support. Expression-only proteins show abundance changes without known PPI links.
           </div>
         </div>
       )}
@@ -3120,7 +3120,7 @@ function SignalFlowView({
                                   {kinaseEffectors.slice(0, 8).map(eff => {
                                     const isUp = eff.peak_fc > 0;
                                     const strength = eff.evidence_strength || "weak";
-                                    const strengthBorder = strength === "strong" ? "border-2" : strength === "moderate" ? "border" : "border border-dashed";
+                                    const strengthBorder = strength === "strong" ? "border-2" : strength === "moderate" ? "border" : strength === "expression_only" ? "border border-dotted" : "border border-dashed";
                                     const chipStyle = isUp
                                       ? `bg-emerald-900/30 text-emerald-300 ${strengthBorder} border-emerald-500`
                                       : `bg-rose-900/30 text-rose-300 ${strengthBorder} border-rose-500`;
