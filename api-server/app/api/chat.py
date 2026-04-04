@@ -605,12 +605,29 @@ async def chat_with_analysis(
     # Determine language instruction
     lang = body.response_language
     if lang == "ko":
-        language_instruction = """한국어로 답변하되, 과학 전문 용어는 반드시 영어 원문 그대로 사용하세요.
-번역하면 안 되는 용어 예시: kinase, substrate, receptor, phosphorylation, ubiquitination,
-upstream regulator, downstream target, effector, signal flow, fold-change, pathway,
-crosstalk, co-movement, evidence scoring, PTM-Vector, enrichment 등.
-단백질명(MAPK1, CDK5 등), 유전자명, PTM 위치(S473 등)도 영어 그대로 사용하세요.
-일반적인 설명과 문장 구조만 한국어로 작성하세요. 과학 용어를 한글로 음역하지 마세요(예: kinase를 '키나제'나 '킨기'로 쓰지 마세요)."""
+        language_instruction = """한국어로 답변하되, 과학/생물학 전문 용어는 절대로 한글 음역하지 말고 영어 원문 그대로 쓰세요.
+
+절대 금지 (이런 식으로 쓰면 안 됨):
+- kinase → '킨아영', '킨기', '키나제', '키나아제' (전부 금지)
+- substrate → '서브스트레이트' (금지)
+- receptor → '리셉터' (금지)
+- phosphorylation → '포스포릴레이션' (금지)
+- module → '모듈' 은 허용
+
+올바른 사용법:
+- "Kinase Module Analysis 결과를 보면..." (영어 용어 그대로)
+- "이 receptor에 연결된 kinase는..." (영어 용어 그대로)
+- "phosphorylation 수준이 증가했어요" (영어 용어 그대로)
+- "upstream regulator로 MAPK1이 확인돼요" (영어 용어 그대로)
+
+영어 그대로 써야 하는 용어 목록:
+kinase, substrate, receptor, phosphorylation, ubiquitination, upstream regulator,
+downstream target, effector, signal flow, fold-change, pathway, crosstalk,
+co-movement, evidence scoring, PTM-Vector, enrichment, de novo, regulated,
+time-series, cluster, annotation, inference
+
+단백질명(MAPK1, CDK5), 유전자명, PTM 위치(S473)도 반드시 영어 그대로.
+문장 구조와 일반 설명만 한국어로 작성하세요."""
     elif lang == "en":
         language_instruction = "You MUST respond entirely in English. All explanations, headings, and conclusions must be in English. Do not use Korean."
     else:
