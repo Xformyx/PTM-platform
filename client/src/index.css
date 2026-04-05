@@ -157,3 +157,32 @@ html {
   scroll-behavior: smooth;
   scroll-padding-top: 5rem;
 }
+
+/* Mobile-specific utilities */
+@media (max-width: 639px) {
+  /* Prevent code blocks from being too wide */
+  pre {
+    font-size: 11px;
+  }
+  /* Ensure inline code doesn't overflow */
+  code {
+    word-break: break-all;
+  }
+  /* Safe area padding for bottom nav */
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom, 1rem);
+  }
+}
+
+/* Touch-friendly tap targets */
+@media (pointer: coarse) {
+  button, a {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  /* Except for inline links and small UI elements */
+  p a, li a, .text-xs a, nav a {
+    min-height: auto;
+    min-width: auto;
+  }
+}

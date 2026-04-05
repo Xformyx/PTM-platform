@@ -80,17 +80,17 @@ export default function Home() {
             backgroundPosition: "center",
           }}
         />
-        <div className="relative container py-16 sm:py-24">
+        <div className="relative container py-10 sm:py-16 lg:py-24">
           <p className="text-sm font-mono text-primary mb-3 tracking-wider uppercase">
             Technical Documentation
           </p>
-          <h1 className="font-serif text-4xl sm:text-5xl lg:text-6xl font-bold text-foreground leading-tight max-w-3xl">
+          <h1 className="font-serif text-2xl sm:text-4xl lg:text-6xl font-bold text-foreground leading-tight max-w-3xl">
             Worker Pipeline Manual
           </h1>
-          <p className="mt-5 text-lg text-muted-foreground max-w-2xl leading-relaxed">
+          <p className="mt-3 sm:mt-5 text-sm sm:text-lg text-muted-foreground max-w-2xl leading-relaxed">
             Preprocessing, RAG Enrichment, Report Generation 세 Worker의 구조, 기능, 데이터 흐름을 상세히 설명합니다.
           </p>
-          <div className="mt-8 flex flex-wrap gap-3">
+          <div className="mt-5 sm:mt-8 flex flex-wrap gap-2 sm:gap-3">
             {WORKERS.map((w) => {
               const c = workerColors[w.color as keyof typeof workerColors];
               return (
@@ -108,7 +108,7 @@ export default function Home() {
       </section>
 
       {/* Main layout: sidebar + content */}
-      <div className="container flex gap-8 py-8">
+      <div className="container flex gap-4 sm:gap-6 lg:gap-8 py-4 sm:py-6 lg:py-8">
         {/* Sidebar TOC (desktop) */}
         <aside className="hidden lg:block w-56 shrink-0">
           <TableOfContents />
@@ -119,7 +119,7 @@ export default function Home() {
 
           {/* 1. Overview */}
           <SectionHeading id="overview" level={1}>1. 개요</SectionHeading>
-          <p className="text-base leading-relaxed text-foreground/85 mb-4">
+          <p className="text-sm sm:text-base leading-relaxed text-foreground/85 mb-4">
             PTM Platform은 대규모 Proteomics 실험 데이터로부터 번역 후 변형(Post-Translational Modification, PTM) 패턴을 분석하고,
             최신 연구 문헌과 결합하여 종합적인 과학 리포트를 자동 생성하는 시스템입니다. 전체 분석 파이프라인은 세 개의 독립적인
             <strong> Celery Worker</strong>로 구성되어 있으며, 각 Worker는 고유한 역할을 수행하면서 순차적으로 연결됩니다.
@@ -141,7 +141,7 @@ export default function Home() {
             })}
           />
 
-          <p className="text-base leading-relaxed text-foreground/85">
+          <p className="text-sm sm:text-base leading-relaxed text-foreground/85">
             세 Worker는 <strong>Celery Task Queue</strong>와 <strong>Redis</strong> 메시지 브로커를 통해 비동기적으로 연결됩니다.
             한 단계가 완료되면 <code className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono">app.send_task()</code>를 호출하여
             다음 Worker의 Queue에 새로운 Task를 자동으로 생성하고, 이전 단계의 출력 파일 경로와 설정 정보를 <code className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono">config</code> 딕셔너리로 전달합니다.
@@ -149,7 +149,7 @@ export default function Home() {
 
           {/* 2. Flowchart */}
           <SectionHeading id="flowchart" level={1}>2. 파이프라인 흐름도</SectionHeading>
-          <p className="text-base leading-relaxed text-foreground/85 mb-4">
+          <p className="text-sm sm:text-base leading-relaxed text-foreground/85 mb-4">
             아래 다이어그램은 PTM Platform의 전체 데이터 처리 흐름을 시각적으로 보여줍니다.
             분홍색 노드는 각 단계의 진입점을, 녹색 노드는 최종 산출물을 나타냅니다.
           </p>
@@ -184,7 +184,7 @@ export default function Home() {
           </figure>
 
           <SectionHeading id="preprocessing-goal" level={2}>3.1. 목표</SectionHeading>
-          <p className="text-base leading-relaxed text-foreground/85 mb-4">
+          <p className="text-sm sm:text-base leading-relaxed text-foreground/85 mb-4">
             사용자가 업로드한 Raw Proteomics 데이터(PR Matrix, PG Matrix, FASTA)를 분석 가능한 <strong>정규화된 PTM 데이터셋</strong>으로 변환합니다.
             이 단계에서 PTM 사이트별 상대적 정량 값(Log2 Fold Change)을 계산하고, 단백질 도메인, 모티프, 생물학적 경로 등의 기본 주석을 추가합니다.
           </p>
@@ -261,7 +261,7 @@ export default function Home() {
           </div>
 
           <SectionHeading id="preprocessing-handoff" level={2}>3.5. 다음 단계로의 전달</SectionHeading>
-          <p className="text-base leading-relaxed text-foreground/85 mb-3">
+          <p className="text-sm sm:text-base leading-relaxed text-foreground/85 mb-3">
             Preprocessing이 완료되면 RAG Enrichment Worker에 다음 정보를 전달합니다:
           </p>
           <CodeBlock
@@ -297,17 +297,17 @@ export default function Home() {
           </figure>
 
           <SectionHeading id="rag-goal" level={2}>4.1. 목표</SectionHeading>
-          <p className="text-base leading-relaxed text-foreground/85 mb-6">
+          <p className="text-sm sm:text-base leading-relaxed text-foreground/85 mb-6">
             Preprocessing 단계에서 생성된 정량 데이터에 <strong>최신 연구 문헌 정보</strong>를 결합하여 각 PTM 사이트의 생물학적 컨텍스트를 극대화합니다.
             PubMed 문헌 검색, LLM 기반 초록 분석, 다중 데이터베이스 통합을 통해 풍부한 메타데이터를 생성하고,
             이를 바탕으로 1차 종합 리포트(Markdown)를 작성합니다.
           </p>
 
           <SectionHeading id="rag-process" level={2}>4.4. 내부 프로세스</SectionHeading>
-          <p className="text-base leading-relaxed text-foreground/85 mb-4">
+          <p className="text-sm sm:text-base leading-relaxed text-foreground/85 mb-4">
             <strong>Step 1 (0%-10%):</strong> Preprocessing의 출력물인 TSV 파일을 로드하고, |PTM_Relative_Log2FC| 기준으로 상위 N개의 고유 PTM 사이트를 선별합니다.
           </p>
-          <p className="text-base leading-relaxed text-foreground/85 mb-4">
+          <p className="text-sm sm:text-base leading-relaxed text-foreground/85 mb-4">
             <strong>Step 2 (10%-70%):</strong> <code className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono">RAGEnrichmentPipeline</code>이
             선별된 각 PTM 사이트에 대해 아래의 18단계 분석을 수행합니다.
           </p>
@@ -330,7 +330,7 @@ export default function Home() {
           />
 
           <SectionHeading id="rag-8cat" level={2}>8-Category Cell-Signaling 분류 시스템</SectionHeading>
-          <p className="text-base leading-relaxed text-foreground/85 mb-4">
+          <p className="text-sm sm:text-base leading-relaxed text-foreground/85 mb-4">
             PTM Log2FC와 Protein Log2FC의 조합을 기반으로 각 PTM 사이트의 생물학적 의미를 자동으로 분류합니다.
           </p>
           <DataTable
@@ -347,7 +347,7 @@ export default function Home() {
             ])}
           />
 
-          <p className="text-base leading-relaxed text-foreground/85 mt-4 mb-3">
+          <p className="text-sm sm:text-base leading-relaxed text-foreground/85 mt-4 mb-3">
             <strong>Step 3 (70%-95%):</strong> Enrich된 모든 PTM 데이터를 종합하여 포괄적인 Markdown 형식의 1차 종합 리포트를 생성합니다.
           </p>
           <Callout type="output">
@@ -390,14 +390,14 @@ export default function Home() {
           </figure>
 
           <SectionHeading id="report-goal" level={2}>5.1. 목표</SectionHeading>
-          <p className="text-base leading-relaxed text-foreground/85 mb-6">
+          <p className="text-sm sm:text-base leading-relaxed text-foreground/85 mb-6">
             RAG로 보강된 데이터와 사용자의 연구 질문을 바탕으로, <strong>LangGraph StateGraph</strong> 기반의 자율 에이전트 시스템을 통해
             학술 논문 수준의 최종 종합 분석 리포트를 생성합니다. 가설 생성 및 검증, 네트워크 시각화, LLM 기반 섹션 작성,
             인용 포맷팅까지 전 과정을 자동화합니다.
           </p>
 
           <SectionHeading id="report-graph" level={2}>5.4. LangGraph StateGraph 구조</SectionHeading>
-          <p className="text-base leading-relaxed text-foreground/85 mb-4">
+          <p className="text-sm sm:text-base leading-relaxed text-foreground/85 mb-4">
             <code className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono">ReportState</code>라는 TypedDict 상태 객체를 통해
             모든 노드가 데이터를 공유하며, 아래의 13개 노드가 순차적으로 실행됩니다.
           </p>
@@ -427,7 +427,7 @@ export default function Home() {
             ))}
           </div>
 
-          <p className="text-base leading-relaxed text-foreground/85 mb-3">
+          <p className="text-sm sm:text-base leading-relaxed text-foreground/85 mb-3">
             <strong>write_sections</strong> 노드에서 생성되는 리포트 섹션 구성:
           </p>
           <DataTable
@@ -448,7 +448,7 @@ export default function Home() {
 
           {/* 5.6 Temporal Co-movement Analysis (v8.0) */}
           <SectionHeading id="report-temporal" level={2}>5.6. Temporal PTM Co-movement Analysis (v8.0)</SectionHeading>
-          <p className="text-base leading-relaxed text-foreground/85 mb-4">
+          <p className="text-sm sm:text-base leading-relaxed text-foreground/85 mb-4">
             v8.0에서 추가된 <code className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono">temporal_comovement</code> 노드는
             전체 PTM의 시계열 Log2FC 데이터를 분석하여 동시에 움직이는 PTM 그룹을 탐지합니다.
             이 분석은 <code className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono">network_analysis</code> 이후,
@@ -496,7 +496,7 @@ export default function Home() {
 
           {/* 5.7 Figure Composition (v8.0) */}
           <SectionHeading id="report-figures" level={2}>5.7. 리포트 Figure 구성 (v8.0)</SectionHeading>
-          <p className="text-base leading-relaxed text-foreground/85 mb-4">
+          <p className="text-sm sm:text-base leading-relaxed text-foreground/85 mb-4">
             v8.0에서 Figure 구성이 확장되었습니다. 기존 Pathway Distribution, Cascade Diagram, Cytoscape 네트워크에
             Temporal Co-movement Heatmap과 Cluster Line Plot이 추가되었습니다.
           </p>
@@ -551,7 +551,7 @@ export default function Home() {
 
           {/* 5.8 Report Quality Improvements (v8.1) */}
           <SectionHeading id="report-quality" level={2}>5.8. 리포트 품질 개선 (v8.1)</SectionHeading>
-          <p className="text-base leading-relaxed text-foreground/85 mb-4">
+          <p className="text-sm sm:text-base leading-relaxed text-foreground/85 mb-4">
             v8.1에서는 생성된 리포트의 과학적 품질을 전반적으로 개선하는 여러 수정이 적용되었습니다.
           </p>
 
@@ -570,7 +570,7 @@ export default function Home() {
 
           {/* 5.9 PTM Classification System (v8.2) */}
           <SectionHeading id="report-classification" level={2}>5.9. PTM 분류 시스템 (v8.2)</SectionHeading>
-          <p className="text-base leading-relaxed text-foreground/85 mb-4">
+          <p className="text-sm sm:text-base leading-relaxed text-foreground/85 mb-4">
             v8.2에서는 프론트엔드의 PTM 시계열 분류 로직을 백엔드의 temporal_comovement 패턴 분류와 일치시켰습니다.
             기존 5개 카테고리에서 8개 카테고리로 확장하고, 분류 기준을 데이터 적응형으로 개선했습니다.
           </p>
@@ -600,16 +600,16 @@ export default function Home() {
 
           {/* 5.10 Non-PTM Effector Integration (v9.34) */}
           <SectionHeading id="report-effector" level={2}>5.10. Non-PTM Effector 통합 (v9.34+)</SectionHeading>
-          <p className="text-base leading-relaxed text-foreground/85 mb-4">
+          <p className="text-sm sm:text-base leading-relaxed text-foreground/85 mb-4">
             v9.34+에서는 <strong>Non-PTM Effector 단백질</strong>을 두 가지 유형으로 4번째 레이어에 통합했습니다.
           </p>
-          <p className="text-base leading-relaxed text-foreground/85 mb-2">
+          <p className="text-sm sm:text-base leading-relaxed text-foreground/85 mb-2">
             <strong>(1) PPI-based Effector</strong> — STRING-DB, BioGRID, KEA3 네트워크 엣지를 통해
             PTM Substrate와 물리적으로 상호작용하는 단백질입니다. Evidence strength는 PPI confidence score에 따라
             strong (≥700), moderate (400-699), weak (&lt;400)으로 분류됩니다.
             프론트엔드에서 <strong>green/red 실선 border</strong>로 표시됩니다.
           </p>
-          <p className="text-base leading-relaxed text-foreground/85 mb-4">
+          <p className="text-sm sm:text-base leading-relaxed text-foreground/85 mb-4">
             <strong>(2) Expression-only Effector</strong> — TSV의 <code className="text-xs font-mono">Data_Type = "Protein_Only"</code> 행 중
             |Protein_Log2FC| &gt; 0.3인 모든 단백질을 포함합니다. PPI 관계 없이 유의미한 발현 변화만으로 추출되며,
             프론트엔드에서 <strong>sky-blue 점선 border</strong>로 시각적으로 구분됩니다.
@@ -641,7 +641,7 @@ export default function Home() {
 
           {/* 5.11 4-Layer Signal Flow (v9.34) */}
           <SectionHeading id="report-signalflow" level={2}>5.11. 4-Layer Signal Flow 다이어그램 (v9.34)</SectionHeading>
-          <p className="text-base leading-relaxed text-foreground/85 mb-4">
+          <p className="text-sm sm:text-base leading-relaxed text-foreground/85 mb-4">
             v9.34+에서 Signal Flow 다이어그램이 기존 3-layer(Receptor → Kinase → Substrate)에서
             <strong> 4-layer(Receptor → Kinase → Substrate → Non-PTM Effector)</strong>로 확장되었습니다.
             이 다이어그램은 <code className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono">signal_flow_figure.py</code>에서
@@ -665,27 +665,27 @@ export default function Home() {
           />
 
           {/* 4-layer visual diagram */}
-          <div className="my-6 p-5 bg-gradient-to-b from-slate-50 to-white rounded-lg border border-border">
-            <div className="flex flex-col items-center gap-3">
+          <div className="my-6 p-3 sm:p-5 bg-gradient-to-b from-slate-50 to-white rounded-lg border border-border">
+            <div className="flex flex-col items-center gap-2 sm:gap-3">
               {SIGNAL_FLOW_LAYERS.map((l, i) => (
-                <div key={l.layer} className="flex flex-col items-center gap-2 w-full">
+                <div key={l.layer} className="flex flex-col items-center gap-1.5 sm:gap-2 w-full">
                   <div
-                    className="flex items-center gap-3 px-5 py-3 rounded-lg border-2 w-full max-w-lg"
+                    className="flex items-center gap-2 sm:gap-3 px-3 py-2 sm:px-5 sm:py-3 rounded-lg border-2 w-full max-w-lg"
                     style={{ borderColor: l.color.split(" / ")[0], backgroundColor: l.color.split(" / ")[0] + "15" }}
                   >
-                    <span className="font-mono font-bold text-sm" style={{ color: l.color.split(" / ")[0] }}>L{l.layer}</span>
-                    <div>
-                      <p className="text-sm font-semibold text-foreground">{l.name}</p>
-                      <p className="text-xs text-muted-foreground">{l.desc}</p>
+                    <span className="font-mono font-bold text-xs sm:text-sm shrink-0" style={{ color: l.color.split(" / ")[0] }}>L{l.layer}</span>
+                    <div className="min-w-0">
+                      <p className="text-xs sm:text-sm font-semibold text-foreground">{l.name}</p>
+                      <p className="text-[10px] sm:text-xs text-muted-foreground leading-snug">{l.desc}</p>
                     </div>
                   </div>
                   {i < SIGNAL_FLOW_LAYERS.length - 1 && (
-                    <ArrowRight className="w-4 h-4 text-muted-foreground rotate-90" />
+                    <ArrowRight className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-muted-foreground rotate-90" />
                   )}
                 </div>
               ))}
             </div>
-            <p className="text-center text-xs text-muted-foreground mt-4 italic">
+            <p className="text-center text-[10px] sm:text-xs text-muted-foreground mt-3 sm:mt-4 italic">
               Figure. Signal Flow 4-Layer 구조 개념도 — 각 레이어는 신호 전달 방향을 따라 위에서 아래로 배치됩니다
             </p>
           </div>
@@ -714,7 +714,7 @@ export default function Home() {
           <SectionHeading id="dataflow" level={1}>6. Worker 간 데이터 흐름 요약</SectionHeading>
 
           {/* Visual data flow */}
-          <div className="my-8 flex flex-col sm:flex-row items-stretch gap-4">
+          <div className="my-6 sm:my-8 flex flex-col sm:flex-row items-stretch gap-3 sm:gap-4">
             {[
               { name: "Preprocessing", color: "teal", outputs: ["ptm_vector_data.tsv"] },
               { name: "RAG Enrichment", color: "amber", outputs: ["enriched_ptm_data.json", "comprehensive_report.md"] },
@@ -722,13 +722,16 @@ export default function Home() {
             ].map((w, i) => {
               const c = workerColors[w.color as keyof typeof workerColors];
               return (
-                <div key={w.name} className="flex items-center gap-4 flex-1">
-                  <div className={`flex-1 rounded-lg border ${c.border} ${c.bg} p-4`}>
-                    <p className={`text-xs font-semibold ${c.text} mb-2`}>{w.name}</p>
+                <div key={w.name} className="flex sm:flex-col items-center gap-2 sm:gap-4 flex-1">
+                  <div className={`flex-1 w-full rounded-lg border ${c.border} ${c.bg} p-3 sm:p-4`}>
+                    <p className={`text-[11px] sm:text-xs font-semibold ${c.text} mb-1 sm:mb-2`}>{w.name}</p>
                     {w.outputs.map((o) => (
-                      <p key={o} className="text-xs font-mono text-foreground/70">{o}</p>
+                      <p key={o} className="text-[10px] sm:text-xs font-mono text-foreground/70">{o}</p>
                     ))}
                   </div>
+                  {i < 2 && (
+                    <ArrowRight className="w-4 h-4 text-muted-foreground shrink-0 sm:hidden" />
+                  )}
                   {i < 2 && (
                     <ArrowRight className="w-5 h-5 text-muted-foreground shrink-0 hidden sm:block" />
                   )}
@@ -754,7 +757,7 @@ export default function Home() {
             ]}
           />
 
-          <p className="text-base leading-relaxed text-foreground/85 mb-4">
+          <p className="text-sm sm:text-base leading-relaxed text-foreground/85 mb-4">
             모든 Worker는 공유 볼륨(<code className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono">./data:/app/data</code>)을 통해
             동일한 파일 시스템에 접근하므로, 파일 경로만 전달하면 다음 Worker가 해당 파일을 직접 읽을 수 있습니다.
           </p>
@@ -769,23 +772,23 @@ export default function Home() {
             ])}
           />
 
-          <h3 className="font-serif text-xl font-semibold mt-8 mb-3">6.2. 진행률 보고 체계</h3>
-          <p className="text-base leading-relaxed text-foreground/85 mb-4">
+          <h3 className="font-serif text-base sm:text-xl font-semibold mt-6 sm:mt-8 mb-2 sm:mb-3">6.2. 진행률 보고 체계</h3>
+          <p className="text-sm sm:text-base leading-relaxed text-foreground/85 mb-4">
             모든 Worker는 <code className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono">common/progress.py</code>의{" "}
             <code className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono">publish_progress()</code> 함수를 통해
             실시간 진행률을 세 가지 채널로 동시에 보고합니다:
           </p>
-          <div className="space-y-3 mb-6">
+          <div className="space-y-2 sm:space-y-3 mb-4 sm:mb-6">
             {[
               { icon: Database, label: "MySQL orders 테이블", desc: "progress_pct, stage_detail, current_stage 컬럼 업데이트" },
               { icon: Database, label: "MySQL order_logs 테이블", desc: "모든 진행 이벤트를 시계열로 기록 (감사 추적용)" },
               { icon: Globe, label: "Redis Pub/Sub", desc: "order:progress:{order_id} 채널로 JSON 메시지 발행 (프론트엔드 SSE 실시간 스트리밍용)" },
             ].map((ch) => (
-              <div key={ch.label} className="flex items-start gap-3 p-3 rounded-lg bg-muted/30 border border-border/50">
-                <ch.icon className="w-4 h-4 text-primary mt-0.5 shrink-0" />
-                <div>
-                  <p className="text-sm font-medium text-foreground">{ch.label}</p>
-                  <p className="text-xs text-muted-foreground">{ch.desc}</p>
+              <div key={ch.label} className="flex items-start gap-2.5 sm:gap-3 p-2.5 sm:p-3 rounded-lg bg-muted/30 border border-border/50">
+                <ch.icon className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-primary mt-0.5 shrink-0" />
+                <div className="min-w-0">
+                  <p className="text-xs sm:text-sm font-medium text-foreground">{ch.label}</p>
+                  <p className="text-[10px] sm:text-xs text-muted-foreground break-words">{ch.desc}</p>
                 </div>
               </div>
             ))}
@@ -793,7 +796,7 @@ export default function Home() {
 
           {/* 7. Infrastructure */}
           <SectionHeading id="infra" level={1}>7. 인프라 구성</SectionHeading>
-          <p className="text-base leading-relaxed text-foreground/85 mb-4">
+          <p className="text-sm sm:text-base leading-relaxed text-foreground/85 mb-4">
             PTM Platform은 <code className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono">docker-compose.yml</code>에 정의된
             <strong> 10개의 서비스 컨테이너</strong>로 구성됩니다.
           </p>
@@ -809,7 +812,7 @@ export default function Home() {
             ])}
           />
 
-          <h3 className="font-serif text-xl font-semibold mt-8 mb-3">7.2. 네트워크 및 외부 연결</h3>
+          <h3 className="font-serif text-base sm:text-xl font-semibold mt-6 sm:mt-8 mb-2 sm:mb-3">7.2. 네트워크 및 외부 연결</h3>
           <CodeBlock
             title="Docker Network 구조"
             language="text"
@@ -833,14 +836,14 @@ Host Machine
           {/* 8. Operations */}
           <SectionHeading id="operations" level={1}>8. 운영 가이드</SectionHeading>
 
-          <h3 className="font-serif text-xl font-semibold mt-6 mb-3">8.1. 특정 단계만 재실행</h3>
-          <p className="text-base leading-relaxed text-foreground/85 mb-4">
+          <h3 className="font-serif text-base sm:text-xl font-semibold mt-5 sm:mt-6 mb-2 sm:mb-3">8.1. 특정 단계만 재실행</h3>
+          <p className="text-sm sm:text-base leading-relaxed text-foreground/85 mb-4">
             각 Worker는 <code className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono">chain_to_next</code> 설정을 통해 독립적으로 실행할 수 있습니다.
             특정 단계에서 오류가 발생한 경우, 해당 단계만 재실행하면 이전 단계의 출력물을 재사용합니다.
           </p>
 
-          <h3 className="font-serif text-xl font-semibold mt-6 mb-3">8.2. 코드 변경 후 적용</h3>
-          <p className="text-base leading-relaxed text-foreground/85 mb-3">
+          <h3 className="font-serif text-base sm:text-xl font-semibold mt-5 sm:mt-6 mb-2 sm:mb-3">8.2. 코드 변경 후 적용</h3>
+          <p className="text-sm sm:text-base leading-relaxed text-foreground/85 mb-3">
             Worker 코드를 수정한 경우, Docker 이미지를 재빌드해야 합니다.
           </p>
           <CodeBlock
@@ -851,8 +854,8 @@ docker compose build --no-cache celery-worker-report
 docker compose up -d celery-worker-report`}
           />
 
-          <h3 className="font-serif text-xl font-semibold mt-6 mb-3">8.3. Idempotent 설계</h3>
-          <p className="text-base leading-relaxed text-foreground/85 mb-4">
+          <h3 className="font-serif text-base sm:text-xl font-semibold mt-5 sm:mt-6 mb-2 sm:mb-3">8.3. Idempotent 설계</h3>
+          <p className="text-sm sm:text-base leading-relaxed text-foreground/85 mb-4">
             Preprocessing Worker는 각 Step의 출력 파일 존재 여부를 확인하여, 이미 완료된 Step을 건너뜁니다.
             따라서 중간에 실패한 경우 동일한 Order를 다시 실행하면 완료된 부분은 건너뛰고 실패한 지점부터 재개됩니다.
             강제로 처음부터 재실행하려면 해당 Order의 출력 디렉토리를 삭제해야 합니다.
@@ -866,7 +869,7 @@ docker compose up -d celery-worker-report`}
           {/* 9. AI Analysis Chat */}
           {/* ═══════════════════════════════════════════════════════════════ */}
           <SectionHeading id="ai-chat" level={1}>9. AI Analysis Chat</SectionHeading>
-          <p className="text-base leading-relaxed text-foreground/85 mb-4">
+          <p className="text-sm sm:text-base leading-relaxed text-foreground/85 mb-4">
             Vector Plot &gt; Top N PTM Time-series 페이지에 내장된 <strong>컨텍스트 기반 AI 채팅</strong> 기능입니다.
             분석이 완료된 주문의 모든 결과 데이터를 참조하여 연구자의 질문에 답변합니다.
           </p>
@@ -875,7 +878,7 @@ docker compose up -d celery-worker-report`}
           </Callout>
 
           <SectionHeading id="ai-chat-arch" level={2}>9.1. 아키텍처</SectionHeading>
-          <p className="text-base leading-relaxed text-foreground/85 mb-4">
+          <p className="text-sm sm:text-base leading-relaxed text-foreground/85 mb-4">
             채팅은 SSE(Server-Sent Events) 스트리밍 방식으로 동작합니다.
             프론트엔드에서 현재 뷰 상태(체크된 PTM, 활성 탭, 필터 등)를 자동으로 백엔드에 전달하고,
             백엔드는 주문의 분석 결과 파일들을 읽어 컨텍스트를 조립한 뒤 Ollama에 스트리밍 요청합니다.
@@ -900,7 +903,7 @@ Request Body:
           />
 
           <SectionHeading id="ai-chat-context" level={2}>9.2. 컨텍스트 조립</SectionHeading>
-          <p className="text-base leading-relaxed text-foreground/85 mb-4">
+          <p className="text-sm sm:text-base leading-relaxed text-foreground/85 mb-4">
             32K 토큰 제약 내에서 최대한 풍부한 컨텍스트를 제공하기 위해, 각 데이터 소스별 토큰 예산을 배분합니다.
           </p>
           <DataTable
@@ -923,7 +926,7 @@ Request Body:
           </Callout>
 
           <SectionHeading id="ai-chat-usage" level={2}>9.3. 사용 가이드</SectionHeading>
-          <p className="text-base leading-relaxed text-foreground/85 mb-3">
+          <p className="text-sm sm:text-base leading-relaxed text-foreground/85 mb-3">
             Vector Plot 탭에서 <strong>"AI Chat"</strong> 버튼을 클릭하면 우측에 채팅 패널이 열립니다.
             다음과 같은 질문 유형을 지원합니다:
           </p>
@@ -944,8 +947,8 @@ Request Body:
           </Callout>
 
           {/* Footer */}
-          <div className="mt-20 pt-8 border-t border-border">
-            <div className="flex items-center justify-between text-xs text-muted-foreground">
+          <div className="mt-12 sm:mt-20 pt-6 sm:pt-8 border-t border-border">
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-1 text-[10px] sm:text-xs text-muted-foreground">
               <span>PTM Platform Pipeline Manual v1.7</span>
               <span>Generated by Manus AI &middot; 2026-04-05</span>
             </div>

@@ -18,29 +18,29 @@ export default function NodeCard({ id, name, range, file, desc, state }: NodeCar
     <div className="border border-border rounded-lg overflow-hidden bg-card hover:shadow-sm transition-shadow">
       <button
         onClick={() => setOpen(!open)}
-        className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-muted/30 transition-colors"
+        className="w-full flex items-center gap-2 sm:gap-3 px-3 py-2.5 sm:px-4 sm:py-3 text-left hover:bg-muted/30 transition-colors"
       >
-        <span className="flex items-center justify-center w-7 h-7 rounded-full bg-violet-100 text-violet-700 text-xs font-bold shrink-0">
+        <span className="flex items-center justify-center w-6 h-6 sm:w-7 sm:h-7 rounded-full bg-violet-100 text-violet-700 text-[10px] sm:text-xs font-bold shrink-0">
           {id}
         </span>
         <div className="flex-1 min-w-0">
-          <span className="font-mono text-sm font-medium text-foreground">{name}</span>
-          <span className="text-xs text-muted-foreground ml-2">{range}</span>
+          <span className="font-mono text-xs sm:text-sm font-medium text-foreground block truncate">{name}</span>
+          <span className="text-[10px] sm:text-xs text-muted-foreground">{range}</span>
         </div>
         <ChevronDown
           className={cn(
-            "w-4 h-4 text-muted-foreground transition-transform",
+            "w-3.5 h-3.5 sm:w-4 sm:h-4 text-muted-foreground transition-transform shrink-0",
             open && "rotate-180"
           )}
         />
       </button>
       {open && (
-        <div className="px-4 pb-4 border-t border-border/50 pt-3 space-y-2">
-          <p className="text-xs font-mono text-muted-foreground">{file}</p>
-          <p className="text-sm leading-relaxed text-foreground/80">{desc}</p>
+        <div className="px-3 pb-3 sm:px-4 sm:pb-4 border-t border-border/50 pt-2.5 sm:pt-3 space-y-2">
+          <p className="text-[10px] sm:text-xs font-mono text-muted-foreground break-all">{file}</p>
+          <p className="text-xs sm:text-sm leading-relaxed text-foreground/80">{desc}</p>
           <div className="flex items-start gap-2 mt-2">
-            <span className="text-xs font-semibold text-violet-600 shrink-0 mt-0.5">State:</span>
-            <span className="text-xs font-mono text-muted-foreground">{state}</span>
+            <span className="text-[10px] sm:text-xs font-semibold text-violet-600 shrink-0 mt-0.5">State:</span>
+            <span className="text-[10px] sm:text-xs font-mono text-muted-foreground break-all">{state}</span>
           </div>
         </div>
       )}

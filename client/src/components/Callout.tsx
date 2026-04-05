@@ -38,14 +38,14 @@ export default function Callout({ type = "info", children, className }: CalloutP
   return (
     <div
       className={cn(
-        "my-4 flex gap-3 rounded-lg border p-4",
+        "my-4 flex gap-2.5 sm:gap-3 rounded-lg border p-3 sm:p-4",
         v.bg,
         v.border,
         className
       )}
     >
-      <Icon className={cn("w-5 h-5 mt-0.5 shrink-0", v.iconColor)} />
-      <div className="text-sm leading-relaxed text-foreground/85">
+      <Icon className={cn("w-4 h-4 sm:w-5 sm:h-5 mt-0.5 shrink-0", v.iconColor)} />
+      <div className="text-xs sm:text-sm leading-relaxed text-foreground/85 min-w-0">
         <span className={cn("font-semibold mr-1", v.iconColor)}>{v.label}:</span>
         {children}
       </div>
