@@ -102,82 +102,92 @@ async def list_orders(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    from sqlalchemy import or_
+    from sqlalchemy import or_, text as sa_text
 
+    is_admin = getattr(user, "role", "admin") == "admin"
+    uid = user.id if not is_admin else None
+
+    # ── Step 1: lightweight query to get sorted/paginated IDs + share info
+    # Select only small columns (no JSON) for sorting, to avoid sort buffer overflow.
+    id_query = (
+        select(
+            Order.id,
+            Order.created_at,
+            OrderShare.access_level.label("share_access"),
+        )
+        .outerjoin(
+            OrderShare,
+            (OrderShare.order_id == Order.id) & (OrderShare.shared_with_user_id == (uid or -1)),
+        )
+        .order_by(Order.created_at.desc())
+    )
+    if not is_admin:
+        id_query = id_query.where(
+            or_(Order.user_id == uid, OrderShare.shared_with_user_id == uid)
+        )
+    if status_filter:
+        id_query = id_query.where(Order.status == status_filter)
+
+    count_result = await db.execute(
+        select(sqlfunc.count()).select_from(id_query.subquery())
+    )
+    total = count_result.scalar()
+
+    id_result = await db.execute(
+        id_query.offset((page - 1) * page_size).limit(page_size)
+    )
+    id_rows = id_result.all()
+    if not id_rows:
+        return {"orders": [], "total": total, "page": page, "page_size": page_size}
+
+    order_ids = [r.id for r in id_rows]
+    share_map = {r.id: r.share_access for r in id_rows}
+
+    # ── Step 2: fetch full order data + creator/runner names for those IDs only
     CreatorUser = User.__table__.alias("creator")
     RunnerUser = User.__table__.alias("runner")
-    is_admin = getattr(user, "role", "admin") == "admin"
-
-    # LEFT JOIN order_shares on the current user, so we get share_access for shared orders
-    base_query = (
+    full_query = (
         select(
             Order,
             CreatorUser.c.name.label("created_by_name"),
             RunnerUser.c.name.label("run_by_name"),
-            OrderShare.access_level.label("share_access"),
         )
         .outerjoin(CreatorUser, Order.user_id == CreatorUser.c.id)
         .outerjoin(RunnerUser, Order.run_by_user_id == RunnerUser.c.id)
-        .outerjoin(
-            OrderShare,
-            (OrderShare.order_id == Order.id) & (OrderShare.shared_with_user_id == (user.id if not is_admin else -1)),
-        )
-        .order_by(Order.created_at.desc())
+        .where(Order.id.in_(order_ids))
     )
+    full_result = await db.execute(full_query)
+    full_rows = {row.Order.id: row for row in full_result.all()}
 
-    if not is_admin:
-        # Non-admin: own orders OR orders shared with this user
-        base_query = base_query.where(
-            or_(Order.user_id == user.id, OrderShare.shared_with_user_id == user.id)
-        )
-
-    if status_filter:
-        base_query = base_query.where(Order.status == status_filter)
-
-    count_query = (
-        select(sqlfunc.count(Order.id))
-        .outerjoin(
-            OrderShare,
-            (OrderShare.order_id == Order.id) & (OrderShare.shared_with_user_id == (user.id if not is_admin else -1)),
-        )
-    )
-    if not is_admin:
-        count_query = count_query.where(
-            or_(Order.user_id == user.id, OrderShare.shared_with_user_id == user.id)
-        )
-    if status_filter:
-        count_query = count_query.where(Order.status == status_filter)
-
-    query = base_query.offset((page - 1) * page_size).limit(page_size)
-    result = await db.execute(query)
-    rows = result.all()
-
-    count_result = await db.execute(count_query)
-    total = count_result.scalar()
+    # Reconstruct in original sorted order
+    orders_out = []
+    for oid in order_ids:
+        row = full_rows.get(oid)
+        if not row:
+            continue
+        o = row.Order
+        orders_out.append({
+            "id": o.id,
+            "order_code": o.order_code,
+            "project_name": o.project_name,
+            "status": o.status,
+            "ptm_type": o.ptm_type,
+            "species": o.species,
+            "progress_pct": float(o.progress_pct),
+            "current_stage": o.current_stage,
+            "stage_detail": o.stage_detail,
+            "error_message": o.error_message,
+            "started_at": o.started_at.isoformat() + "Z" if o.started_at else None,
+            "created_at": o.created_at.isoformat() + "Z",
+            "completed_at": o.completed_at.isoformat() + "Z" if o.completed_at else None,
+            "created_by": row.created_by_name,
+            "run_by": row.run_by_name,
+            "is_shared": share_map[oid] is not None,
+            "share_access": share_map[oid],
+        })
 
     return {
-        "orders": [
-            {
-                "id": o.id,
-                "order_code": o.order_code,
-                "project_name": o.project_name,
-                "status": o.status,
-                "ptm_type": o.ptm_type,
-                "species": o.species,
-                "progress_pct": float(o.progress_pct),
-                "current_stage": o.current_stage,
-                "stage_detail": o.stage_detail,
-                "error_message": o.error_message,
-                "started_at": o.started_at.isoformat() + "Z" if o.started_at else None,
-                "created_at": o.created_at.isoformat() + "Z",
-                "completed_at": o.completed_at.isoformat() + "Z" if o.completed_at else None,
-                "created_by": created_by_name,
-                "run_by": run_by_name,
-                "is_shared": share_access is not None,
-                "share_access": share_access,
-            }
-            for o, created_by_name, run_by_name, share_access in rows
-        ],
+        "orders": orders_out,
         "total": total,
         "page": page,
         "page_size": page_size,
