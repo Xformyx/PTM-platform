@@ -998,6 +998,141 @@ def _cross_timepoint_inference(cascade: dict) -> dict:
 # STEP 4: BUILD LLM CONTEXT
 # ═══════════════════════════════════════════════════════════════════════════
 
+# ═══════════════════════════════════════════════════════════════════════════
+# v9.35: EVIDENCE STRENGTH GRADING
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Source tiers for evidence grading
+_HIGH_CONFIDENCE_SOURCES = {
+    "kinase_substrate_pair",   # Literature-confirmed kinase-substrate
+    "e3_substrate_pair",       # Literature-confirmed E3-substrate
+    "iPTMnet",                 # Database-confirmed
+    "dub_substrate_pair",      # Literature-confirmed DUB-substrate
+}
+_MEDIUM_CONFIDENCE_SOURCES = {
+    "upstream_regulator",      # Literature upstream regulator
+    "fulltext_analysis",       # Text-mined from full-text articles
+    "fulltext_e3_extraction",  # Text-mined E3 from full-text
+    "abstract_analysis",       # NER from abstracts
+    "abstract_e3_analysis",    # NER E3 from abstracts
+}
+_LOW_CONFIDENCE_SOURCES = {
+    "rag_kinase_prediction",   # LLM-based prediction
+    "string_db",               # STRING PPI interaction
+    "string_db_e3",            # STRING PPI E3
+}
+
+
+def _grade_evidence_strength(
+    sources: set,
+    has_concordant_motif: bool = False,
+    has_pmid: bool = False,
+    n_effectors: int = 0,
+) -> str:
+    """Grade the evidence strength for a kinase-substrate relationship.
+
+    Returns:
+        'Strong', 'Moderate', or 'Inferred'
+
+    Grading criteria:
+        Strong:   2+ independent sources (at least 1 high-confidence)
+                  OR 1 high-confidence source + concordant motif + PMID
+                  OR 1 high-confidence source + 3+ concordant effectors
+        Moderate: 1 high/medium source + concordant motif
+                  OR 2+ medium sources
+                  OR 1 high source alone
+        Inferred: motif prediction only, or only low-confidence sources
+    """
+    high = sources & _HIGH_CONFIDENCE_SOURCES
+    medium = sources & _MEDIUM_CONFIDENCE_SOURCES
+    low = sources & _LOW_CONFIDENCE_SOURCES
+    total_confirmed = len(high) + len(medium)
+
+    # Strong evidence
+    if len(high) >= 1 and (total_confirmed >= 2 or (has_concordant_motif and has_pmid)):
+        return "Strong"
+    if len(high) >= 1 and n_effectors >= 3:
+        return "Strong"
+    if total_confirmed >= 3:
+        return "Strong"
+
+    # Moderate evidence
+    if len(high) >= 1:
+        return "Moderate"
+    if len(medium) >= 2:
+        return "Moderate"
+    if len(medium) >= 1 and has_concordant_motif:
+        return "Moderate"
+
+    # Inferred
+    return "Inferred"
+
+
+def _compute_cascade_evidence_grades(
+    cluster_annotations: list,
+) -> Dict[str, dict]:
+    """Compute evidence grades for each kinase across all clusters.
+
+    Returns:
+        Dict[canonical_kinase] → {
+            'grade': 'Strong'|'Moderate'|'Inferred',
+            'sources': set,
+            'n_confirmed': int,
+            'n_inferred': int,
+            'has_pmid': bool,
+            'concordance_ratio': float,
+        }
+    """
+    kinase_evidence: Dict[str, dict] = {}
+
+    for ca in cluster_annotations:
+        # Anchor kinases
+        for canon, info in ca.get("anchor_kinases", {}).items():
+            if canon not in kinase_evidence:
+                kinase_evidence[canon] = {
+                    "kinase": info["kinase"],
+                    "sources": set(),
+                    "n_confirmed": 0,
+                    "n_inferred": 0,
+                    "has_pmid": False,
+                    "concordant_count": 0,
+                    "total_ptms": 0,
+                }
+            ke = kinase_evidence[canon]
+            ke["sources"].update(info.get("sources", set()))
+            ke["n_confirmed"] += len(info.get("confirmed_ptms", []))
+
+        # Check PTM annotations for concordance and PMID
+        for pa in ca.get("ptm_annotations", []):
+            for kk in pa.get("known_kinases", []):
+                canon = kk.get("canonical_name", "")
+                if canon and canon in kinase_evidence:
+                    if kk.get("pmid"):
+                        kinase_evidence[canon]["has_pmid"] = True
+                    kinase_evidence[canon]["total_ptms"] += 1
+                    if pa.get("concordance") == "concordant":
+                        kinase_evidence[canon]["concordant_count"] += 1
+
+        # Inferred assignments
+        for inf in ca.get("inferred_assignments", []):
+            canon = inf.get("inferred_canonical", "")
+            if canon and canon in kinase_evidence:
+                kinase_evidence[canon]["n_inferred"] += 1
+
+    # Compute grades
+    for canon, ke in kinase_evidence.items():
+        total = ke["total_ptms"] or 1
+        concordance_ratio = ke["concordant_count"] / total
+        ke["concordance_ratio"] = concordance_ratio
+        ke["grade"] = _grade_evidence_strength(
+            sources=ke["sources"],
+            has_concordant_motif=concordance_ratio > 0.3,
+            has_pmid=ke["has_pmid"],
+        )
+
+    return kinase_evidence
+
+
 def _build_temporal_kinase_llm_context(
     cascade: dict,
     cluster_annotations: list,
@@ -1028,6 +1163,9 @@ def _build_temporal_kinase_llm_context(
     parts.append(f"### A. Temporal {regulator_label} Landscape (timepoint-by-timepoint)")
     parts.append("")
 
+    # v9.35: Compute evidence grades for all kinases
+    evidence_grades = _compute_cascade_evidence_grades(cluster_annotations)
+
     for tp in tp_order:
         tp_data = tp_map[tp]
         minutes = tp_data["minutes"]
@@ -1047,10 +1185,15 @@ def _build_temporal_kinase_llm_context(
                 ptms_str = ", ".join(info["confirmed_ptms"][:8])
                 if len(info["confirmed_ptms"]) > 8:
                     ptms_str += f" (+{len(info['confirmed_ptms']) - 8} more)"
+                # v9.35: Add evidence grade
+                eg = evidence_grades.get(canon, {})
+                grade = eg.get("grade", "Inferred")
+                grade_emoji = {"Strong": "★★★", "Moderate": "★★☆", "Inferred": "★☆☆"}.get(grade, "★☆☆")
                 parts.append(
                     f"    - {info['kinase']} (canonical: {canon}): "
                     f"{len(info['confirmed_ptms'])} confirmed substrates ({ptms_str}), "
-                    f"sources: [{sources_str}]"
+                    f"sources: [{sources_str}], "
+                    f"Evidence: {grade} {grade_emoji}"
                 )
         else:
             parts.append(f"  No known {regulator_label.lower()}s at this timepoint.")
@@ -1145,10 +1288,15 @@ def _build_temporal_kinase_llm_context(
         minutes = tp_data["minutes"]
 
         if kinases:
+            kinase_entries = []
+            for canon, info in sorted(kinases.items(), key=lambda x: len(x[1]["confirmed_ptms"]), reverse=True):
+                eg = evidence_grades.get(canon, {})
+                grade = eg.get("grade", "Inferred")
+                kinase_entries.append(f"{info['kinase']}({grade[0]})")
+            kinase_str = ", ".join(kinase_entries[:5])
+            if len(kinase_entries) > 5:
+                kinase_str += f" (+{len(kinase_entries) - 5})"
             kinase_names = [info["kinase"] for _, info in sorted(kinases.items(), key=lambda x: len(x[1]["confirmed_ptms"]), reverse=True)]
-            kinase_str = ", ".join(kinase_names[:5])
-            if len(kinase_names) > 5:
-                kinase_str += f" (+{len(kinase_names) - 5})"
         else:
             # Use cross-timepoint inferences for this timepoint
             inferred_at_tp = set()
@@ -1188,10 +1336,12 @@ def _build_temporal_kinase_llm_context(
             parts.append(f"  Anchor {regulator_label}s:")
             for canon, info in ca["anchor_kinases"].items():
                 sources = ", ".join(info["sources"])
+                eg = evidence_grades.get(canon, {})
+                grade = eg.get("grade", "Inferred")
                 parts.append(
                     f"    - {info['kinase']} ({canon}): "
                     f"{len(info['confirmed_ptms'])} confirmed substrates, "
-                    f"sources: [{sources}]"
+                    f"sources: [{sources}], Evidence: {grade}"
                 )
 
         if ca["inferred_assignments"]:
@@ -1243,6 +1393,38 @@ def _build_temporal_kinase_llm_context(
         f"   - The {regulator_label.lower()} cascade data complements the co-movement cluster analysis.\n"
         f"   - Use both to build a coherent narrative of the signaling response.\n"
     )
+    parts.append(
+        f"6. EVIDENCE STRENGTH GRADING (v9.35):\n"
+        f"   Each {regulator_label.lower()}-substrate relationship has an evidence grade:\n"
+        f"   - **Strong** (★★★): Confirmed by 2+ independent sources (database + literature + motif),\n"
+        f"     or 1 high-confidence source with PMID + concordant motif prediction.\n"
+        f"     These relationships should be presented as HIGH-CONFIDENCE findings.\n"
+        f"   - **Moderate** (★★☆): Supported by 1 high-confidence source or 2+ medium sources.\n"
+        f"     Present as SUPPORTED findings with appropriate caveats.\n"
+        f"   - **Inferred** (★☆☆): Based on motif prediction or low-confidence sources only.\n"
+        f"     Present as PREDICTED relationships requiring further validation.\n"
+        f"   IMPORTANT: When describing each {regulator_label.lower()}-substrate cascade in the report,\n"
+        f"   you MUST explicitly state the evidence grade (e.g., 'MAPK1 phosphorylation of ELK1\n"
+        f"   (Evidence: Strong) was confirmed by...').\n"
+    )
+
+    # v9.35: Evidence Summary Table
+    if evidence_grades:
+        parts.append(f"\n### F. Evidence Strength Summary Table")
+        parts.append("")
+        parts.append(f"| {regulator_label} | Grade | Sources | Confirmed | Inferred | Concordance |")
+        parts.append("|---|---|---|---|---|---|")
+        for canon, eg in sorted(
+            evidence_grades.items(),
+            key=lambda x: ({"Strong": 0, "Moderate": 1, "Inferred": 2}.get(x[1]["grade"], 3), -x[1]["n_confirmed"]),
+        ):
+            sources_str = ", ".join(sorted(eg["sources"]))[:50]
+            conc = f"{eg['concordance_ratio']:.0%}" if eg.get("concordance_ratio") else "N/A"
+            parts.append(
+                f"| {eg['kinase']} ({canon}) | {eg['grade']} | {sources_str} | "
+                f"{eg['n_confirmed']} | {eg['n_inferred']} | {conc} |"
+            )
+        parts.append("")
 
     return "\n".join(parts)
 

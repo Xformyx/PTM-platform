@@ -259,6 +259,100 @@ class RAGRetriever:
         query_text = f"{section_type}: {' '.join(keywords[:5])}"
         return self.query_with_reranking(query_text, n_results=n_results)
 
+    def search_for_cascade_pathways(
+        self,
+        temporal_kinase_cascade: dict,
+        inferred_receptors: list = None,
+        ptm_type: str = "phosphorylation",
+        n_results_per_query: int = 3,
+        max_queries: int = 5,
+    ) -> List[dict]:
+        """v9.35: Pathway-specific ChromaDB search using kinase cascade data.
+        Extracts top kinase→substrate relationships from temporal_kinase_cascade
+        and searches for literature evidence supporting each specific cascade.
+        Returns deduplicated results tagged with the cascade they support.
+        """
+        if not temporal_kinase_cascade:
+            return []
+
+        # Build cascade-specific search queries
+        cascade_queries = []
+
+        # Source 1: Top kinases from kinase_activity (most timepoints = most important)
+        kinase_activity = temporal_kinase_cascade.get("kinase_activity", [])
+        for ka in kinase_activity[:max_queries]:
+            kinase_name = ka.get("canonical", ka.get("kinase", ""))
+            if kinase_name:
+                cascade_queries.append({
+                    "query": f"{kinase_name} {ptm_type} substrate signaling pathway",
+                    "context": f"kinase:{kinase_name}",
+                })
+
+        # Source 2: Receptor → Kinase connections (if receptors available)
+        if inferred_receptors:
+            for rec in inferred_receptors[:3]:
+                rec_name = rec.get("name", "")
+                # Find kinases connected to this receptor
+                connected_kinases = rec.get("connected_kinases", [])
+                if connected_kinases:
+                    kinase_str = " ".join(str(k) for k in connected_kinases[:3])
+                    cascade_queries.append({
+                        "query": f"{rec_name} receptor {kinase_str} {ptm_type} signaling",
+                        "context": f"receptor:{rec_name}→kinase:{kinase_str}",
+                    })
+                elif rec_name:
+                    cascade_queries.append({
+                        "query": f"{rec_name} receptor {ptm_type} downstream signaling",
+                        "context": f"receptor:{rec_name}",
+                    })
+
+        # Source 3: Cascade flow transitions (new kinases at each timepoint)
+        cascade_flow = temporal_kinase_cascade.get("cascade_flow", [])
+        for flow in cascade_flow[:3]:
+            new_kinases = flow.get("new_kinases", [])
+            if new_kinases:
+                kinase_str = " ".join(new_kinases[:3])
+                from_tp = flow.get("from_timepoint", "")
+                to_tp = flow.get("to_timepoint", "")
+                cascade_queries.append({
+                    "query": f"{kinase_str} {ptm_type} activation signaling cascade",
+                    "context": f"cascade_transition:{from_tp}→{to_tp}",
+                })
+
+        # Deduplicate and limit queries
+        seen_queries = set()
+        unique_queries = []
+        for cq in cascade_queries:
+            q_key = cq["query"].lower().strip()
+            if q_key not in seen_queries:
+                seen_queries.add(q_key)
+                unique_queries.append(cq)
+        unique_queries = unique_queries[:max_queries]
+
+        # Execute searches
+        all_results = []
+        seen_docs = set()
+        for cq in unique_queries:
+            try:
+                results = self.query_with_reranking(
+                    cq["query"], n_results=n_results_per_query
+                )
+                for r in results:
+                    doc_key = r.get("document", "")[:100]
+                    if doc_key not in seen_docs:
+                        seen_docs.add(doc_key)
+                        r["cascade_context"] = cq["context"]
+                        r["cascade_query"] = cq["query"]
+                        all_results.append(r)
+            except Exception as e:
+                logger.warning(f"[v9.35] Cascade search failed for '{cq['query'][:50]}': {e}")
+
+        logger.info(
+            f"[v9.35] Cascade pathway search: {len(unique_queries)} queries → "
+            f"{len(all_results)} unique results"
+        )
+        return all_results
+
     def _get_collection(self, name: str):
         if name not in self._collections:
             try:

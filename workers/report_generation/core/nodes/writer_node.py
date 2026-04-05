@@ -237,6 +237,8 @@ def run_section_writing(state: dict) -> dict:
             prev_sections, retriever, comprehensive_summary,
             all_references, ptm_detail_count=ptm_detail_count,
             chromadb_results=chromadb_results,
+            temporal_kinase_cascade=state.get("temporal_kinase_cascade"),
+            inferred_receptors=state.get("inferred_receptors"),
         )
 
         # v9.31: Budget-aware prompt enhancement
@@ -248,14 +250,16 @@ def run_section_writing(state: dict) -> dict:
         # receptor, and non-PTM are now ESSENTIAL (Priority 1-2) for PTM Vector interpretation.
         supplement_blocks = []
         if section_type == "results":
-            # Priority 1 (ESSENTIAL — PTM Vector core): co-wave + temporal kinase + receptor
+            # Priority 1 (ESSENTIAL — PTM Vector core): co-wave + temporal kinase + receptor + non-PTM effector
+            # v9.35: nonptm_temporal promoted to Priority 1 — effector proteins are integral
+            # to the receptor→kinase→substrate→effector signal flow narrative.
             supplement_blocks.append(("comovement", comovement_llm_context))
             supplement_blocks.append(("temporal_kinase", temporal_kinase_cascade_llm_context))
             supplement_blocks.append(("receptor_ctx", receptor_llm_context))
-            # Priority 2 (important): v98 + structured data + non-PTM temporal
+            supplement_blocks.append(("nonptm_temporal", aux_nonptm_temporal))
+            # Priority 2 (important): v98 + structured data
             supplement_blocks.append(("v98_directive", v98_directive))
             supplement_blocks.append(("v98_structured_data", v98_structured_data))
-            supplement_blocks.append(("nonptm_temporal", aux_nonptm_temporal))
             # Priority 3 (supporting): pathway, signal propagation, timelag
             supplement_blocks.append(("pathway_ctx", aux_pathway_ctx))
             supplement_blocks.append(("signal_prop", aux_signal_prop))
@@ -429,6 +433,8 @@ def _build_section_prompt(
     all_references: list = None,
     ptm_detail_count: int = 30,
     chromadb_results: int = 10,
+    temporal_kinase_cascade: dict = None,
+    inferred_receptors: list = None,
 ) -> str:
     """Build LLM prompt for a specific report section."""
     all_references = all_references or []
@@ -467,6 +473,36 @@ def _build_section_prompt(
             "(e.g., 'as previously reported [1]'). NEVER mention 'ChromaDB' or 'knowledge base'.\n\n"
             + "\n\n".join(ref_lines)
         )
+
+    # v9.35: Cascade-specific ChromaDB search — pathway-level evidence
+    cascade_lit_context = ""
+    if section_type in ("results", "discussion") and temporal_kinase_cascade:
+        cascade_results = retriever.search_for_cascade_pathways(
+            temporal_kinase_cascade=temporal_kinase_cascade,
+            inferred_receptors=inferred_receptors,
+            ptm_type=ptm_type_label,
+            n_results_per_query=3,
+            max_queries=5,
+        )
+        if cascade_results:
+            # Number cascade refs starting after general refs
+            start_idx = len(rag_results) + 1 if rag_results else 1
+            cascade_lines = []
+            for idx, r in enumerate(cascade_results[:8], start_idx):
+                title = r.get("title", "Unknown")
+                cascade_ctx = r.get("cascade_context", "")
+                cascade_lines.append(
+                    f"--- Reference [{idx}] (Cascade: {cascade_ctx}) ---\n"
+                    f"Source: {title}\n{r['document'][:400]}"
+                )
+            cascade_lit_context = (
+                "\n\n**Pathway-Specific Literature Evidence (Cascade Search):**\n"
+                "The following references were retrieved specifically for the kinase\u2192substrate "
+                "signaling cascades identified in this experiment. Use these to provide "
+                "pathway-level evidence when describing each signaling cascade.\n\n"
+                + "\n\n".join(cascade_lines)
+            )
+            logger.info(f"[v9.35] Added {len(cascade_results)} cascade-specific references for {section_type}")
 
     # --- PubMed references from enriched PTM data ---
     pubmed_context = _format_pubmed_references(all_references, section_type, ptms)
@@ -564,7 +600,7 @@ def _build_section_prompt(
     vocab_block = build_vocabulary_prompt_block(ptm_type_label)
     analysis_context_block += vocab_block
 
-    combined_lit = lit_context + pubmed_context
+    combined_lit = lit_context + cascade_lit_context + pubmed_context
 
     if section_type == "abstract":
         intro = prev_sections.get("introduction", "")[:1500]
@@ -795,35 +831,63 @@ Research Findings:
 PTM Data:
 {ptm_summary}
 
-{hyp_summary}
 {network_info}
 {comp_ctx}
 {rq_answer_structure}
 
-Structure:
-- Present results for each research question as subsections with ### headings
-- For EACH research question, provide: (1) Direct Answer framed through PTM Vector activation,
-  (2) Time Course Table showing receptor→kinase→substrate→non-PTM signal flow,
-  (3) Functional Interpretation using the PTM Vector framework,
-  (4) Co-wave group analysis relevant to this question,
-  (5) Testable Prediction based on the observed signaling cascade
-- For each PTM site, describe: the specific modification, fold-change values (PTM Vector magnitude),
-  its position in the signaling cascade (receptor/kinase/substrate/effector), and pathway involvement
-- MUST include a dedicated subsection on **Co-movement (Co-wave) Analysis**:
-  * Describe each co-wave group and its members
-  * Explain the biological commonality within each group
-  * Compare groups: what pathways/functions distinguish Group A from Group B?
-  * Describe how co-wave patterns evolve over time (which groups peak early vs late)
-- MUST include a dedicated subsection on **Temporal Signal Propagation**:
-  * Trace the signal from receptor activation → kinase cascade → substrate modification → effector response
-  * At each timepoint, describe which signaling layer is most active
-  * Identify signal relay points and amplification nodes
-  * For each kinase-substrate axis, mention the number of concordant Non-PTM downstream
-    interactors as validation evidence (e.g., 'supported by N concordant downstream effectors')
+{hyp_summary}
+(NOTE: The above hypotheses are AUXILIARY context only — do NOT structure Results around them.
+Results must be driven by the experimental data and the receptor→kinase→substrate→effector
+signal flow evidence. Hypotheses may be referenced in Discussion for interpretive context.)
 
-IMPORTANT: Be thorough and detailed. Discuss each significant PTM site individually. Include quantitative data (Log2FC values). Cite the provided references to support your findings. This is the most important section of the report.
-- You MUST explicitly name the treatment/stimulus ({treatment}) when describing PTM responses. Never use generic terms like 'the treatment'.
+Structure (Figure-Centric, Nature Style):
+Organize the Results section around the analytical figures and data, NOT around hypotheses.
+Each major subsection should correspond to a key analytical output (figure or data table).
+
+### Part 1: Pathway Enrichment Landscape (Figure 1)
+- Present the top enriched signaling pathways from Figure 1 (3-Layer Pathway Enrichment)
+- For each top pathway, identify which PTM proteins contribute and their Log2FC values
+- Highlight pathway convergence: where do multiple PTMs converge on the same signaling axis?
+
+### Part 2: Co-movement (Co-wave) Group Analysis (Figure 2)
+- Describe each co-wave group and its members
+- Explain the biological commonality within each group (shared pathway, function, localization)
+- Compare groups: what pathways/functions distinguish Group A from Group B?
+- Describe temporal patterns: which groups peak early (transient) vs late (sustained)?
+- How do co-wave patterns reveal coordinated signaling responses?
+
+### Part 3: Signal Flow — Receptor → Kinase → Substrate → Effector Cascade (Figure 3)
+- Trace the complete signal flow from upstream receptor activation through kinase cascade
+  to substrate modification and finally to non-PTM effector protein changes
+- At each timepoint, describe which signaling layer is most active
+- Identify signal relay points and amplification nodes
+- For each kinase-substrate axis, INLINE mention the number of concordant Non-PTM downstream
+  interactors as validation evidence (e.g., 'supported by N concordant downstream effectors')
+- Describe the evidence strength for each cascade connection:
+  * Strong: confirmed kinase-substrate + concordant effectors + literature support
+  * Moderate: predicted kinase-substrate + some effector concordance
+  * Inferred: motif-based prediction only
+
+### Part 4: Cascade Detail — Key Signaling Axes (Figure 4)
+- For each major kinase identified, detail its substrate targets and temporal activation
+- Present cascade diagrams showing the specific signaling axes
+- Quantify: Log2FC values, number of substrates, timepoint of peak activity
+
+### Part 5: Research Question Integration
+- For EACH research question, provide a dedicated subsection (### heading) that integrates
+  findings from Parts 1-4 above:
+  (1) Direct Answer framed through PTM Vector activation
+  (2) Evidence Summary: which figures/data support this answer
+  (3) Testable Prediction based on the observed signaling cascade
+
+IMPORTANT: Be thorough and detailed. Discuss each significant PTM site individually.
+Include quantitative data (Log2FC values). Cite the provided references to support your findings.
+This is the most important section of the report.
+- You MUST explicitly name the treatment/stimulus ({treatment}) when describing PTM responses.
+  Never use generic terms like 'the treatment'.
 - ALL answers to research questions MUST be framed through the PTM Vector / activation-centric perspective.
+- When referencing figures, use 'Figure N' format (e.g., 'As shown in Figure 1, ...').
+- Each Part should flow naturally into the next, building a coherent signaling narrative.
 {combined_lit}"""
 
     elif section_type == "discussion":
@@ -915,7 +979,7 @@ This report uses the **PTM Vector** approach. In the Discussion, you MUST:
 Results Summary:
 {results_text}
 
-Validated Hypotheses:
+Interpretive Hypotheses (for contextualizing findings — not for structuring discussion):
 {hyp_summary}
 
 PTM Biological Context:
@@ -951,7 +1015,7 @@ IMPORTANT: For each discussion point, provide evidence from your data AND from t
 Research Questions:
 {questions_str}
 
-Key Hypotheses:
+Interpretive Hypotheses (reference only):
 {hyp_summary}
 
 PTM Summary:
@@ -1282,12 +1346,38 @@ def _ptm_summary_text(ptms: list, detail_count: int = 30) -> str:
 
 
 def _hypothesis_summary_text(hypotheses: list) -> str:
+    """v9.35: Enhanced hypothesis summary — includes signaling pathway context,
+    mechanism, supporting PTMs, and evidence strength instead of bare IF-THEN.
+    Format: H1: <Pathway> (<cascade>) — confidence=0.xx
+    """
     if not hypotheses:
         return ""
-    lines = ["\nHypotheses:"]
+    lines = ["\nHypotheses (Signaling Pathway Context):"]
     for h in hypotheses:
         conf = h.get("confidence", 0)
-        lines.append(f"  H{h.get('id', '?')}: IF {h.get('condition', '')[:100]} THEN {h.get('prediction', '')[:100]} (confidence={conf:.2f})")
+        hid = h.get("id", "?")
+        # Extract pathway/mechanism for concise signaling context
+        mechanism = h.get("mechanism", "").strip()
+        prediction = h.get("prediction", "").strip()
+        condition = h.get("condition", "").strip()
+        supporting = h.get("supporting_ptms", [])
+        # Build pathway-centric summary
+        ptm_str = ", ".join(str(p) for p in supporting[:4]) if supporting else ""
+        # Validation evidence summary
+        validation = h.get("validation", {})
+        ev_count = validation.get("evidence_count", 0)
+        sup_count = len(validation.get("supporting_evidence", []))
+        validity = validation.get("validity_score", 0)
+        ev_tag = ""
+        if ev_count > 0:
+            ev_tag = f" [literature: {sup_count}/{ev_count} supporting, validity={validity:.2f}]"
+        # Compose: pathway-focused one-liner + mechanism
+        line = f"  H{hid}: {prediction[:120]} (confidence={conf:.2f}){ev_tag}"
+        if mechanism:
+            line += f"\n        Mechanism: {mechanism[:200]}"
+        if ptm_str:
+            line += f"\n        Key PTMs: {ptm_str}"
+        lines.append(line)
     return "\n".join(lines)
 
 
