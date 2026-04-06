@@ -401,17 +401,20 @@ function detectCoWaveModules(
     const rows = vectorData.filter((r) => r.gene === p.gene && r.position === p.position);
     const isDenovo = rows.some((r) => r.control_pseudocount_used === true);
     const maxAbsFC = Math.max(...series.map(Math.abs));
-    const minQValue = rows.reduce((min, r) => {
-      if (r.q_value != null && !isNaN(r.q_value)) return Math.min(min, r.q_value);
-      return min;
-    }, Infinity);
+    const qValues = rows.map((r) => r.q_value).filter((v): v is number => v != null && !isNaN(v));
+    const minQValue = qValues.length > 0 ? Math.min(...qValues) : null;
+    const hasQValue = minQValue != null;
     let actClass: "de_novo" | "regulated" | "minor";
     if (isDenovo) {
       actClass = "de_novo";
-    } else if (minQValue < 0.05 && maxAbsFC >= 1.0) {
-      actClass = "regulated";
+    } else if (hasQValue) {
+      // q_value available: Regulated = |Log2FC| >= 1.0 AND q_value < 0.05
+      actClass = (minQValue < 0.05 && maxAbsFC >= 1.0) ? "regulated" : "minor";
     } else {
-      actClass = "minor";
+      // Fallback (old data without q_value): use maxAbsChange > 0.8
+      const baselineVal = series[0] ?? 0;
+      const maxAbsChange = Math.max(...series.map((v) => Math.abs(v - baselineVal)));
+      actClass = maxAbsChange > 0.8 ? "regulated" : "minor";
     }
     ptmActivityClassMap.set(key, actClass);
   });
