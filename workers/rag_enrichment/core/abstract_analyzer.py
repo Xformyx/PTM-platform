@@ -10,6 +10,9 @@ Uses LLM to extract:
   - Biological context (pathways, processes, disease relevance)
   - Experimental evidence and quantitative data
   - Relevance assessment with context alignment
+
+v2.1 — Batch mode: analyze multiple abstracts in a single LLM call to reduce
+Ollama queue pressure. Falls back to per-article mode on parse failure.
 """
 
 import json
@@ -63,7 +66,7 @@ class AbstractAnalysis:
 
 
 # ---------------------------------------------------------------------------
-# Prompt builder
+# Prompt builders
 # ---------------------------------------------------------------------------
 
 def _build_analysis_prompt(
@@ -74,7 +77,7 @@ def _build_analysis_prompt(
     experimental_context: Optional[dict] = None,
     ptm_type: str = "phosphorylation",
 ) -> str:
-    """Build the LLM prompt for abstract analysis."""
+    """Build the LLM prompt for single-abstract analysis."""
 
     # Context info
     context_info = "No experimental context provided."
@@ -194,6 +197,132 @@ Output JSON only, no markdown code blocks."""
     return prompt
 
 
+def _build_batch_prompt(
+    articles: List[dict],
+    gene: str,
+    position: str,
+    experimental_context: Optional[dict] = None,
+    ptm_type: str = "phosphorylation",
+) -> str:
+    """Build a single LLM prompt that analyzes multiple abstracts at once.
+
+    Instead of calling the LLM N times (once per article), this prompt asks
+    the LLM to read all abstracts and return a **single merged** JSON result.
+    This reduces PTM-level LLM calls from N to 1.
+    """
+
+    # Context info
+    context_info = "No experimental context provided."
+    if experimental_context:
+        parts = []
+        for key in ("cell_type", "treatment", "time_points", "biological_question"):
+            val = experimental_context.get(key)
+            if val:
+                parts.append(f"- {key.replace('_', ' ').title()}: {val}")
+        if parts:
+            context_info = "Experimental Context:\n" + "\n".join(parts)
+
+    # Build numbered abstract list
+    abstract_blocks = []
+    for idx, art in enumerate(articles, 1):
+        pmid = art.get("pmid", f"unknown_{idx}")
+        text = (art.get("abstract", "") or art.get("text", "")).strip()
+        abstract_blocks.append(
+            f"--- ABSTRACT #{idx} (PMID: {pmid}) ---\n{text}"
+        )
+    abstracts_section = "\n\n".join(abstract_blocks)
+
+    # Ubiquitylation-specific instructions
+    ub_extra = ""
+    ptm_lower = (ptm_type or "").lower()
+    if "ubiquityl" in ptm_lower or "ubiquitin" in ptm_lower:
+        ub_extra = """
+IMPORTANT for ubiquitylation analysis:
+- In signalingNetwork.e3Ligases: list ALL E3 ubiquitin ligases mentioned across all abstracts
+- In signalingNetwork.dubs: list ALL deubiquitylases mentioned
+- In signalingNetwork.upstreamRegulators: include E3 ligases and DUBs with type='e3_ligase' or type='dub'
+- Identify ubiquitin chain types (K48=degradation, K63=signaling, K11=cell cycle, mono=signaling)
+- Note if ubiquitylation leads to proteasomal degradation or non-degradative signaling
+"""
+
+    prompt = f"""You are an expert in cellular signaling and post-translational modifications (PTMs).
+
+You will read {len(articles)} PubMed abstracts about {gene} {position} ({ptm_type}).
+Analyze ALL abstracts together and return a SINGLE MERGED JSON result that synthesizes findings from every abstract.
+
+EXPERIMENTAL CONTEXT:
+{context_info}
+
+{abstracts_section}
+
+TASK:
+Read all {len(articles)} abstracts above. Extract and MERGE PTM signaling information across all papers.
+- Combine upstream regulators, downstream effects, key findings from ALL abstracts.
+- For relevanceScore: use the HIGHEST score among all abstracts.
+- For signaling pathways and cellular processes: merge from the most relevant abstract.
+- Deduplicate entries with the same name/target.
+- Be precise: extract ONLY information explicitly stated in the abstracts.
+{ub_extra}
+Return a SINGLE JSON object (not an array) with these keys:
+{{
+  "signalingNetwork": {{
+    "upstreamRegulators": [
+      {{"name": "...", "type": "kinase|phosphatase|e3_ligase|dub|...", "evidence": "direct|indirect|predicted",
+        "mechanism": "...", "conditions": "...", "quantitativeData": "...", "sourcePmid": "..."}}
+    ],
+    "e3Ligases": [
+      {{"name": "...", "family": "RING|HECT|RBR", "evidence": "direct|indirect|predicted",
+        "chainType": "K48|K63|K11|K27|mono|...", "function": "degradation|signaling|DNA_repair|..."}}
+    ],
+    "dubs": [
+      {{"name": "...", "family": "USP|OTU|UCH|JAMM|...", "evidence": "direct|indirect|predicted",
+        "function": "stabilization|deubiquitylation|..."}}
+    ],
+    "downstreamEffects": [
+      {{"target": "...", "effect": "activation|inhibition|...", "mechanism": "...",
+        "magnitude": "...", "biologicalOutcome": "...", "sourcePmid": "..."}}
+    ],
+    "coRegulators": [
+      {{"name": "...", "relationship": "cooperative|antagonistic|sequential", "site": "..."}}
+    ]
+  }},
+  "functionalConsequences": {{
+    "enzymaticActivity": {{"affected": true/false, "direction": "...", "magnitude": "...", "mechanism": "..."}},
+    "proteinInteractions": [{{"partner": "...", "effect": "...", "functionalImpact": "..."}}],
+    "subcellularLocalization": {{"changed": true/false, "from": "...", "to": "...", "mechanism": "..."}},
+    "proteinStability": {{"affected": true/false, "direction": "...", "mechanism": "..."}}
+  }},
+  "biologicalContext": {{
+    "signalingPathways": [{{"pathway": "...", "role": "...", "regulation": "..."}}],
+    "cellularProcesses": [{{"process": "...", "role": "...", "impact": "..."}}],
+    "diseaseRelevance": [{{"disease": "...", "role": "...", "therapeuticImplication": "..."}}]
+  }},
+  "experimentalEvidence": {{
+    "methods": [{{"technique": "...", "purpose": "...", "finding": "..."}}],
+    "mutations": [{{"mutation": "...", "effect": "...", "phenotype": "..."}}],
+    "quantitativeData": {{
+      "foldChanges": ["..."], "pValues": ["..."], "kinetics": ["..."]
+    }}
+  }},
+  "relevanceAssessment": {{
+    "relevanceScore": 0-100,
+    "relevanceReasons": ["..."],
+    "contextAlignment": {{
+      "cellTypeMatch": true/false,
+      "treatmentMatch": true/false,
+      "biologicalQuestionMatch": true/false
+    }},
+    "evidenceQuality": "direct experimental evidence|indirect evidence|...",
+    "novelty": "novel finding|confirmation of known|..."
+  }},
+  "keyFindings": ["5-8 most important findings synthesized from all abstracts"]
+}}
+
+Output JSON only, no markdown code blocks."""
+
+    return prompt
+
+
 # ---------------------------------------------------------------------------
 # Core analyzer
 # ---------------------------------------------------------------------------
@@ -203,6 +332,8 @@ class AbstractAnalyzer:
 
     def __init__(self, llm_client: LLMClient):
         self.llm = llm_client
+
+    # ── public entry point ──────────────────────────────────────────────
 
     def analyze(
         self,
@@ -215,49 +346,152 @@ class AbstractAnalyzer:
         ptm_type: str = "phosphorylation",
         articles: Optional[list] = None,
         on_article_done: Optional[callable] = None,
+        batch_mode: bool = True,
     ) -> AbstractAnalysis:
-        """Analyze PTM signaling from abstract(s). Accepts either pmid+abstract or articles list.
+        """Analyze PTM signaling from abstract(s).
 
-        on_article_done: optional callable(done: int, total: int) called after each article.
+        When *articles* is provided:
+          - batch_mode=True  → single LLM call for all articles (fast)
+          - batch_mode=False → one LLM call per article (legacy)
+        Falls back to per-article mode if batch parsing fails.
+
+        on_article_done: optional callable(done: int, total: int) called
+            after each article (per-article mode) or once at completion (batch).
         """
-        # If articles list is provided, analyze each and return merged result
         if articles:
-            # Count only articles with usable abstracts
             eligible = [
                 a for a in articles
                 if isinstance(a, dict) and len((a.get("abstract", "") or a.get("text", "")).strip()) >= 50
             ]
-            total = len(eligible)
-            merged = AbstractAnalysis(pmid="merged", gene=gene, position=position)
-            done = 0
-            for art in eligible:
-                art_pmid = art.get("pmid", "")
-                art_abstract = art.get("abstract", "") or art.get("text", "")
-                result = self._analyze_single(
-                    pmid=art_pmid, abstract=art_abstract, gene=gene,
-                    position=position, ptm_type=ptm_type,
+            if not eligible:
+                return AbstractAnalysis(pmid="merged", gene=gene, position=position)
+
+            if batch_mode:
+                result = self._analyze_batch(
+                    eligible, gene, position, ptm_type, experimental_context,
                 )
-                # Merge results
-                merged.upstream_regulators.extend(result.upstream_regulators)
-                merged.downstream_effects.extend(result.downstream_effects)
-                merged.key_findings.extend(result.key_findings)
-                if result.relevance_score > merged.relevance_score:
-                    merged.relevance_score = result.relevance_score
-                    merged.signaling_pathways = result.signaling_pathways
-                    merged.cellular_processes = result.cellular_processes
-                done += 1
-                if on_article_done:
-                    try:
-                        on_article_done(done, total)
-                    except Exception:
-                        pass
-            return merged
+                if result is not None:
+                    # Report all articles as done at once
+                    if on_article_done:
+                        try:
+                            on_article_done(len(eligible), len(eligible))
+                        except Exception:
+                            pass
+                    return result
+                # Batch failed → fall through to per-article mode
+                logger.warning(
+                    f"[AbstractAnalyzer] Batch mode failed for {gene} {position}, "
+                    f"falling back to per-article mode"
+                )
+
+            # Per-article mode (legacy or fallback)
+            return self._analyze_per_article(
+                eligible, gene, position, ptm_type, on_article_done,
+            )
+
         # Single abstract mode
         return self._analyze_single(
             pmid=pmid, abstract=abstract, gene=gene, position=position,
             pattern_analysis=pattern_analysis, experimental_context=experimental_context,
             ptm_type=ptm_type,
         )
+
+    # ── batch mode: single LLM call for all articles ────────────────────
+
+    def _analyze_batch(
+        self,
+        articles: List[dict],
+        gene: str,
+        position: str,
+        ptm_type: str,
+        experimental_context: Optional[dict] = None,
+    ) -> Optional[AbstractAnalysis]:
+        """Analyze all articles in a single LLM call.
+
+        Returns AbstractAnalysis on success, None on failure (caller should
+        fall back to per-article mode).
+        """
+        prompt = _build_batch_prompt(
+            articles, gene, position, experimental_context, ptm_type,
+        )
+
+        # Scale max_tokens with article count (base 3000 + 800 per extra article)
+        n = len(articles)
+        max_tokens = min(3000 + 800 * (n - 1), 8192)
+
+        max_retries = 2
+        for attempt in range(1, max_retries + 1):
+            try:
+                response = self.llm.generate(
+                    prompt=prompt,
+                    system_prompt=(
+                        "You are an expert in cellular signaling and PTM biology. "
+                        "Read ALL abstracts and return a single merged JSON result. "
+                        "Output valid JSON only."
+                    ),
+                    temperature=0.3,
+                    max_tokens=max_tokens,
+                )
+                parsed = self._parse_response(response)
+                if parsed:
+                    result = self._build_result("merged", gene, position, parsed)
+                    logger.info(
+                        f"[AbstractAnalyzer·batch] {gene} {position}: "
+                        f"{n} articles → score={result.relevance_score}, "
+                        f"findings={len(result.key_findings)}, "
+                        f"upstream={len(result.upstream_regulators)}"
+                    )
+                    return result
+                logger.warning(
+                    f"[AbstractAnalyzer·batch] Attempt {attempt}: "
+                    f"parse returned None for {gene} {position}"
+                )
+            except Exception as e:
+                logger.warning(
+                    f"[AbstractAnalyzer·batch] Attempt {attempt} failed "
+                    f"for {gene} {position}: {e}"
+                )
+
+        return None  # signal caller to fall back
+
+    # ── per-article mode (legacy) ────────────────────────────────────────
+
+    def _analyze_per_article(
+        self,
+        articles: List[dict],
+        gene: str,
+        position: str,
+        ptm_type: str,
+        on_article_done: Optional[callable] = None,
+    ) -> AbstractAnalysis:
+        """Analyze each article individually and merge results."""
+        total = len(articles)
+        merged = AbstractAnalysis(pmid="merged", gene=gene, position=position)
+        done = 0
+        for art in articles:
+            art_pmid = art.get("pmid", "")
+            art_abstract = art.get("abstract", "") or art.get("text", "")
+            result = self._analyze_single(
+                pmid=art_pmid, abstract=art_abstract, gene=gene,
+                position=position, ptm_type=ptm_type,
+            )
+            # Merge results
+            merged.upstream_regulators.extend(result.upstream_regulators)
+            merged.downstream_effects.extend(result.downstream_effects)
+            merged.key_findings.extend(result.key_findings)
+            if result.relevance_score > merged.relevance_score:
+                merged.relevance_score = result.relevance_score
+                merged.signaling_pathways = result.signaling_pathways
+                merged.cellular_processes = result.cellular_processes
+            done += 1
+            if on_article_done:
+                try:
+                    on_article_done(done, total)
+                except Exception:
+                    pass
+        return merged
+
+    # ── single-abstract analysis ─────────────────────────────────────────
 
     def _analyze_single(
         self,
@@ -281,7 +515,7 @@ class AbstractAnalyzer:
             experimental_context: Optional experimental context dict
 
         Returns:
-            AbstractAnalysis with extracted signaling information.
+            AbstractAnalysis with extracted information
         """
         result = AbstractAnalysis(pmid=pmid, gene=gene, position=position)
 
@@ -317,6 +551,8 @@ class AbstractAnalyzer:
 
         return result
 
+    # ── response parsing ─────────────────────────────────────────────────
+
     def _parse_response(self, response: str) -> Optional[dict]:
         """Parse JSON from LLM response."""
         text = response.strip()
@@ -335,6 +571,8 @@ class AbstractAnalyzer:
         except json.JSONDecodeError as e:
             logger.error(f"[AbstractAnalyzer] JSON parse error: {e}")
             return None
+
+    # ── result builder ───────────────────────────────────────────────────
 
     def _build_result(self, pmid: str, gene: str, position: str, data: dict) -> AbstractAnalysis:
         """Build AbstractAnalysis from parsed LLM response."""

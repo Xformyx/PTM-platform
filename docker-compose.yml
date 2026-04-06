@@ -226,9 +226,13 @@ services:
       # Increase only if Ollama can handle more simultaneous requests without queue buildup
       RAG_PTM_WORKERS: ${RAG_PTM_WORKERS:-2}
       RAG_MCP_WORKERS: ${RAG_MCP_WORKERS:-6}
-      # Max PubMed articles per PTM fed to LLM (each article = 1 LLM call)
-      # 5 = fast (~17 calls/PTM), 15 = thorough (~17→45 calls/PTM)
+      # Max PubMed articles per PTM fed to LLM abstract analysis
+      # With batch mode (default): all articles in 1 LLM call → 3 calls/PTM
+      # Without batch mode: each article = 1 LLM call → N+2 calls/PTM
       RAG_MAX_ARTICLES: ${RAG_MAX_ARTICLES:-5}
+      # Abstract batch mode: analyze all articles in a single LLM call (default: true)
+      # Reduces abstract analysis from N LLM calls to 1. Falls back to per-article on failure.
+      RAG_ABSTRACT_BATCH_MODE: ${RAG_ABSTRACT_BATCH_MODE:-true}
       # LLM task toggles — set to "false" to disable individual Phase B tasks
       # RAG_ENABLE_LLM=false → skip ALL LLM (abstract + kinase + functional)
       # RAG_ENABLE_KINASE=false / RAG_ENABLE_FUNCTIONAL=false → skip individually

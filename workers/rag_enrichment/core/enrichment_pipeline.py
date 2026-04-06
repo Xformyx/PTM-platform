@@ -64,7 +64,8 @@ MCP_WORKERS = int(_os.getenv("RAG_MCP_WORKERS", "6"))
 # Set RAG_PTM_WORKERS env var in docker-compose to tune for your hardware.
 PTM_WORKERS = int(_os.getenv("RAG_PTM_WORKERS", "2"))
 # Max PubMed articles per PTM for LLM abstract analysis.
-# Each article = 1 LLM call, so 15 articles = 15 calls → major bottleneck.
+# With batch_mode=True (default), all articles are analyzed in a single LLM call.
+# With batch_mode=False, each article = 1 LLM call → major bottleneck.
 # 5 = good balance of speed vs coverage; increase if hardware allows.
 MAX_ARTICLES_PER_PTM = int(_os.getenv("RAG_MAX_ARTICLES", "5"))
 # LLM task toggles — set to "false" to skip individual Phase B LLM calls.
@@ -76,6 +77,10 @@ def _env_bool(name: str, default: bool = True) -> bool:
 ENABLE_LLM       = _env_bool("RAG_ENABLE_LLM",       default=True)
 ENABLE_KINASE    = _env_bool("RAG_ENABLE_KINASE",    default=True)
 ENABLE_FUNCTIONAL= _env_bool("RAG_ENABLE_FUNCTIONAL", default=True)
+# Abstract batch mode: analyze all articles in a single LLM call instead of one-by-one.
+# Reduces PTM-level LLM calls from N to 1 for abstract analysis.
+# Falls back to per-article mode automatically if batch parsing fails.
+ABSTRACT_BATCH_MODE = _env_bool("RAG_ABSTRACT_BATCH_MODE", default=True)
 # Rate limiting: small delay between batches to avoid overwhelming MCP servers
 BATCH_DELAY_SEC = 0.1
 
@@ -779,6 +784,7 @@ class RAGEnrichmentPipeline:
                     raw = self.abstract_analyzer.analyze(
                         articles=articles, gene=gene, position=position, ptm_type=ptm_type,
                         on_article_done=_on_article,
+                        batch_mode=ABSTRACT_BATCH_MODE,
                     )
                     out = _asdict(raw) if hasattr(raw, '__dataclass_fields__') else (raw if isinstance(raw, dict) else {})
                     if self._analysis_log and gene not in self._abstract_warned_genes and articles:
