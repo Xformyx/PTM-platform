@@ -1418,12 +1418,12 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
   const AC_PALETTES: Record<string, string[]> = {
     de_novo: ["#E65100", "#F57C00", "#FF9800", "#FFB74D", "#D84315", "#BF360C", "#EF6C00", "#FFA726", "#FB8C00", "#E55100"],
     regulated: ["#1565C0", "#1E88E5", "#42A5F5", "#64B5F6", "#0D47A1", "#1976D2", "#2196F3", "#90CAF9", "#0277BD", "#039BE5"],
-    minor: ["#9E9E9E", "#BDBDBD", "#B0BEC5", "#90A4AE", "#78909C", "#A0A0A0", "#C0C0C0", "#8E8E8E", "#ABABAB", "#B5B5B5"],
+    minor: ["#4CAF50", "#66BB6A", "#81C784", "#A5D6A7", "#2E7D32", "#388E3C", "#43A047", "#56985A", "#6DAF71", "#7BC67F"],
   };
   const AC_LINE_STYLE: Record<string, { strokeWidth: number; strokeDasharray?: string; opacity: number }> = {
     de_novo: { strokeWidth: 2.5, opacity: 1 },
     regulated: { strokeWidth: 2.2, opacity: 0.95 },
-    minor: { strokeWidth: 1.2, strokeDasharray: "6 3", opacity: 0.5 },
+    minor: { strokeWidth: 1.8, opacity: 0.75 },
   };
 
   // Fixed color map: each PTM gets color based on its activity class
@@ -1590,7 +1590,7 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
             variant={activityFilter === "minor" ? "default" : "outline"}
             size="sm"
             className="text-xs h-7 px-2"
-            style={activityFilter === "minor" ? { backgroundColor: "#6b7280", borderColor: "#6b7280" } : {}}
+            style={activityFilter === "minor" ? { backgroundColor: "#2E7D32", borderColor: "#2E7D32" } : {}}
             onClick={() => setActivityFilter("minor")}
             title="Small change — low significance"
           >
@@ -1684,7 +1684,7 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
                 visibleLabels
                   .filter((label) => (labelToAC.get(label) || "minor") === drawClass)
                   .map((label) => {
-                    const lineColor = colorMap.get(label) || "#9E9E9E";
+                    const lineColor = colorMap.get(label) || "#4CAF50";
                     const ac = labelToAC.get(label) || "minor";
                     const style = AC_LINE_STYLE[ac] || AC_LINE_STYLE.minor;
                     const isHovered = hoveredPtm === label;
@@ -1701,7 +1701,7 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
                       : isModuleHighlighted
                         ? inModule ? 1 : 0.12
                         : style.opacity;
-                    const dotR = inModule && isModuleHighlighted ? 4 : ac === "minor" ? 2 : 3;
+                    const dotR = inModule && isModuleHighlighted ? 4 : 3;
                     return (
                       <Line
                         key={label}

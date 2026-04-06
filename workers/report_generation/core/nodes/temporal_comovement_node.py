@@ -47,8 +47,8 @@ logger = logging.getLogger(__name__)
 
 # ── Constants ──────────────────────────────────────────────────────────────
 MIN_TIMEPOINTS = 3          # Need at least 3 timepoints for meaningful clustering
-MIN_VARIANCE = 0.5          # Minimum variance across timepoints to be "significant"
-MIN_AMPLITUDE = 1.5         # Minimum max |Log2FC| to be "significant"
+MIN_VARIANCE = 0.3          # Minimum variance across timepoints (relaxed to include patterned minor PTMs)
+MIN_AMPLITUDE = 0.8         # Minimum max |Log2FC| (relaxed to include patterned minor PTMs)
 CORRELATION_THRESHOLD = 0.70  # Minimum |correlation| to be in same cluster
 MIN_CLUSTER_SIZE = 2        # Minimum members for a valid cluster
 MAX_CLUSTERS = 8            # Maximum clusters to report
@@ -1141,7 +1141,7 @@ def _generate_comovement_figures(
                         f"{', '.join(sorted(peak_tps))}. "
                         f"(a) Individual PTM time-series profiles colored by activity class: "
                         f"orange/\u2605=De novo (newly induced), blue/\u25cf=Regulated (q<0.05, |FC|\u22651), "
-                        f"gray dashed/\u25c6=Minor. Cluster mean shown as bold line. "
+                        f"green solid/\u25c6=Minor (patterned). Cluster mean shown as bold line. "
                         f"(b) Peak amplitude profiles ranked by intensity, colored by activity class. "
                         f"(c) Cluster mean temporal envelope showing activation-recovery kinetics."
                     ),
@@ -1163,7 +1163,7 @@ def _generate_comovement_figures(
                            "correlated temporal dynamics. Color intensity represents "
                            "Log2FC magnitude (red=activated, blue=inhibited). "
                            "Left sidebar: cluster assignments. "
-                           "Activity class sidebar: orange=De novo, blue=Regulated, gray=Minor.",
+                           "Activity class sidebar: orange=De novo, blue=Regulated, green=Minor.",
                 "type": "supplementary_heatmap",
             })
     except Exception as e:
@@ -1253,7 +1253,7 @@ _NATURE_COLORS = [
 # ── v9.28: Activity Class visual encoding ──
 # De novo: orange palette (newly induced, no control signal)
 # Regulated: blue palette (statistically significant, q<0.05 & |FC|≥1)
-# Minor: gray palette (sub-threshold changes)
+# Minor: green palette (sub-threshold but patterned changes)
 _ACTIVITY_CLASS_COLORS = {
     "de_novo": [
         "#E65100", "#F57C00", "#FB8C00", "#FFA726", "#FFB74D",
@@ -1264,8 +1264,8 @@ _ACTIVITY_CLASS_COLORS = {
         "#64B5F6", "#0D47A1", "#1A237E", "#2962FF", "#448AFF",
     ],
     "minor": [
-        "#9E9E9E", "#BDBDBD", "#B0B0B0", "#A0A0A0", "#C0C0C0",
-        "#888888", "#AAAAAA", "#999999", "#B8B8B8", "#A8A8A8",
+        "#4CAF50", "#66BB6A", "#81C784", "#A5D6A7", "#2E7D32",
+        "#388E3C", "#43A047", "#56985A", "#6DAF71", "#7BC67F",
     ],
 }
 _ACTIVITY_CLASS_MARKERS = {
@@ -1276,22 +1276,22 @@ _ACTIVITY_CLASS_MARKERS = {
 _ACTIVITY_CLASS_LINEWIDTH = {
     "de_novo": 1.4,
     "regulated": 1.4,
-    "minor": 0.8,
+    "minor": 1.2,
 }
 _ACTIVITY_CLASS_ALPHA = {
     "de_novo": 0.85,
     "regulated": 0.80,
-    "minor": 0.35,
+    "minor": 0.65,
 }
 _ACTIVITY_CLASS_LINESTYLE = {
     "de_novo": "-",
     "regulated": "-",
-    "minor": "--",
+    "minor": "-",
 }
 _ACTIVITY_CLASS_MARKER_SIZE = {
     "de_novo": 40,   # star needs bigger size
     "regulated": 18,
-    "minor": 10,
+    "minor": 14,
 }
 _ACTIVITY_CLASS_LABEL = {
     "de_novo": "De novo",
@@ -1375,7 +1375,7 @@ def _generate_transient_burst_figure(
 
     # ══════════════════════════════════════════════════════════════════════
     # Panel (a): Time-series profiles — v9.28 activity_class color encoding
-    # De novo = orange solid ★, Regulated = blue solid ●, Minor = gray dashed ◆
+    # De novo = orange solid ★, Regulated = blue solid ●, Minor = green solid ◆
     # ══════════════════════════════════════════════════════════════════════
     # Track per-class color index for distinct shades within each class
     _class_color_idx = {"de_novo": 0, "regulated": 0, "minor": 0}
@@ -1745,11 +1745,11 @@ def _generate_summary_heatmap(
     # Colorbar
     plt.colorbar(im, cax=ax_cbar, label="Log2FC")
 
-    # v9.28: Activity class sidebar (De novo=orange, Regulated=blue, Minor=gray)
+    # v9.28: Activity class sidebar (De novo=orange, Regulated=blue, Minor=green)
     _AC_SIDEBAR_COLORS = {
         "de_novo": "#E65100",
         "regulated": "#1565C0",
-        "minor": "#CCCCCC",
+        "minor": "#4CAF50",
     }
     ax_ac_sidebar.set_xlim(0, 1)
     ax_ac_sidebar.set_ylim(n_rows - 0.5, -0.5)

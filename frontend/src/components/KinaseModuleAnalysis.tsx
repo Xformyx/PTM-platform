@@ -878,6 +878,11 @@ export default function KinaseModuleAnalysis({
                           ● {mod.activity_class_counts.regulated} Regulated
                         </Badge>
                       )}
+                      {mod.activity_class_counts.minor > 0 && (
+                        <Badge variant="outline" className="text-[9px] border-green-500 text-green-600 dark:text-green-400">
+                          ◇ {mod.activity_class_counts.minor} Minor
+                        </Badge>
+                      )}
                       {/* Annotation summary badges */}
                       {annotation && (
                         <div className="flex gap-1">
@@ -971,7 +976,7 @@ export default function KinaseModuleAnalysis({
                           const actClassConfig = {
                             de_novo: { symbol: "★", color: "text-[#E65100]", title: "De novo (no control signal)" },
                             regulated: { symbol: "●", color: "text-[#1565C0]", title: "Regulated (q<0.05, |FC|≥1)" },
-                            minor: { symbol: "", color: "", title: "Minor" },
+                            minor: { symbol: "◇", color: "text-[#4CAF50]", title: "Minor (sub-threshold but patterned)" },
                           }[actClass];
 
                           return (
@@ -3068,11 +3073,11 @@ function SignalFlowView({
                                       ? "bg-orange-900/30 text-orange-300 border border-orange-500 font-semibold"
                                       : actClass === "regulated"
                                       ? "bg-blue-900/30 text-blue-300 border border-blue-500 font-semibold"
-                                      : "bg-muted text-muted-foreground border border-border opacity-60";
+                                      : "bg-green-900/30 text-green-300 border border-green-500";
                                   const actLabel =
                                     actClass === "de_novo" ? "De novo (control imputed — not detected in control)" :
                                     actClass === "regulated" ? "Regulated (|Log2FC| ≥ 1.0 AND q-value < 0.05)" :
-                                    "Minor change";
+                                    "Minor (sub-threshold but patterned)";
                                   return (
                                     <span
                                       key={ptmKey}
@@ -3081,6 +3086,7 @@ function SignalFlowView({
                                     >
                                       {actClass === "de_novo" && <span className="mr-0.5">★</span>}
                                       {actClass === "regulated" && <span className="mr-0.5">●</span>}
+                                      {actClass === "minor" && <span className="mr-0.5">◇</span>}
                                       {ptm.label || ptmKey}
                                     </span>
                                   );
@@ -3192,8 +3198,8 @@ function SignalFlowView({
             <span className="text-[9px]">detected in control, meaningful change</span>
           </span>
           <span className="flex items-center gap-1">
-            <span className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground border border-border opacity-60 text-[9px]">Minor</span>
-            <span className="text-[9px]">small change</span>
+            <span className="px-1.5 py-0.5 rounded bg-green-900/30 text-green-300 border border-green-500 text-[9px]">◇ Minor</span>
+            <span className="text-[9px]">sub-threshold but patterned</span>
           </span>
         </div>
         {hasEffectors && (
