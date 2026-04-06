@@ -119,7 +119,8 @@ export interface ProgressEvent {
   stage: string;
   step: string;
   status: string;
-  progress_pct: number;
+  /** Omitted on detail-only log lines that do not update overall progress */
+  progress_pct?: number | null;
   message: string;
   metadata: Record<string, unknown>;
   _ts?: number;

@@ -28,6 +28,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable, Dict, List, Optional
 
+from common.phase_b_cache import get_cached, set_cached
+
 import pandas as pd
 
 from common.llm_client import LLMClient
@@ -53,12 +55,43 @@ PROTEIN_CHANGE = 0.5  # Protein change threshold (|Log2FC| > 0.5 = >1.4x fold ch
 # ---------------------------------------------------------------------------
 # Parallelization Config
 # ---------------------------------------------------------------------------
+import os as _os
 # Level 1: Max concurrent MCP calls within a single PTM enrichment
-MCP_WORKERS = 6
-# Level 2: Max concurrent PTM enrichments (gene-level dedup reduces actual load)
-PTM_WORKERS = 4
+MCP_WORKERS = int(_os.getenv("RAG_MCP_WORKERS", "6"))
+# Level 2: Max concurrent PTM enrichments.
+# Default 2: each PTM runs abstract+kinase+functional in parallel inside Phase B,
+# so 4 workers → up to 12 simultaneous Ollama requests which causes queue buildup.
+# Set RAG_PTM_WORKERS env var in docker-compose to tune for your hardware.
+PTM_WORKERS = int(_os.getenv("RAG_PTM_WORKERS", "2"))
+# Max PubMed articles per PTM for LLM abstract analysis.
+# Each article = 1 LLM call, so 15 articles = 15 calls → major bottleneck.
+# 5 = good balance of speed vs coverage; increase if hardware allows.
+MAX_ARTICLES_PER_PTM = int(_os.getenv("RAG_MAX_ARTICLES", "5"))
+# LLM task toggles — set to "false" to skip individual Phase B LLM calls.
+# RAG_ENABLE_LLM=false  → disable ALL LLM tasks (abstract + kinase + functional)
+# RAG_ENABLE_KINASE=false → skip only kinase prediction
+# RAG_ENABLE_FUNCTIONAL=false → skip only functional impact analysis
+def _env_bool(name: str, default: bool = True) -> bool:
+    return _os.getenv(name, "true" if default else "false").lower() not in ("false", "0", "no")
+ENABLE_LLM       = _env_bool("RAG_ENABLE_LLM",       default=True)
+ENABLE_KINASE    = _env_bool("RAG_ENABLE_KINASE",    default=True)
+ENABLE_FUNCTIONAL= _env_bool("RAG_ENABLE_FUNCTIONAL", default=True)
 # Rate limiting: small delay between batches to avoid overwhelming MCP servers
 BATCH_DELAY_SEC = 0.1
+
+
+def _format_phase_b_exc(e: BaseException, max_len: int = 220) -> str:
+    """Phase B pool uses future.result(timeout=120); TimeoutError often has empty str(e)."""
+    msg = (str(e) or "").strip()
+    if msg:
+        return msg[:max_len]
+    name = type(e).__name__
+    if "Timeout" in name:
+        return (
+            f"{name}: 120s per sub-task — Ollama slow or prompt too large "
+            f"(lighter model, or increase timeout in enrichment_pipeline)"
+        )[:max_len]
+    return name[:max_len]
 
 
 class _GeneCache:
@@ -93,25 +126,49 @@ class RAGEnrichmentPipeline:
         self,
         mcp_client: MCPClient,
         progress_callback: Optional[Callable[[float, str], None]] = None,
-        enable_llm_analysis: bool = True,
+        analysis_log: Optional[Callable[[str], None]] = None,
+        enable_llm_analysis: bool = ENABLE_LLM,
         enable_fulltext: bool = True,
         enable_ptm_validation: bool = True,
+        rag_enrichment_llm_model: Optional[str] = None,
+        rag_enrichment_llm_provider: Optional[str] = None,
         rag_llm_model: Optional[str] = None,
+        rag_llm_provider: Optional[str] = None,
         llm_provider: str = "ollama",
         llm_model: Optional[str] = None,
     ):
         self.mcp = mcp_client
         self.reg_extractor = RegulationExtractor()
         self._progress_cb = progress_callback or (lambda p, m: None)
+        self._analysis_log = analysis_log
+        self._phase_b_genes_seen: set = set()
+        self._abstract_warned_genes: set = set()
         self._progress_lock = threading.Lock()
         # LLM-based analysis modules (restored from original)
         self.enable_llm = enable_llm_analysis
         self.enable_fulltext = enable_fulltext
         self.enable_ptm_validation = enable_ptm_validation
         if enable_llm_analysis:
-            # Use rag_llm_model if specified, otherwise fall back to llm_model
-            effective_model = rag_llm_model or llm_model
-            llm = LLMClient(provider=llm_provider, model=effective_model) if effective_model else LLMClient(provider=llm_provider)
+            # Model: RAG Enrichment → Paper Read → Report. Provider follows the tier that supplied the model.
+            effective_model = (
+                rag_enrichment_llm_model or rag_llm_model or llm_model
+            )
+            if rag_enrichment_llm_model:
+                eff_provider = (
+                    rag_enrichment_llm_provider
+                    or rag_llm_provider
+                    or llm_provider
+                )
+            elif rag_llm_model:
+                eff_provider = rag_llm_provider or llm_provider
+            else:
+                eff_provider = llm_provider
+            eff_provider = eff_provider or "ollama"
+            llm = (
+                LLMClient(provider=eff_provider, model=effective_model)
+                if effective_model
+                else LLMClient(provider=eff_provider)
+            )
             if not llm.is_available():
                 logger.warning("No LLM provider available — disabling LLM analysis")
                 self.enable_llm = False
@@ -141,6 +198,28 @@ class RAGEnrichmentPipeline:
     # Thread-safe progress reporting
     # ------------------------------------------------------------------
 
+    def _alog(self, msg: str, metadata: dict | None = None) -> None:
+        if not self._analysis_log:
+            return
+        try:
+            self._analysis_log(msg, metadata)
+        except Exception:
+            pass
+
+    def _phase_event(self, gene: str, position: str, phase: str, status: str, detail: str = "") -> None:
+        """Emit a structured PTM-phase progress event consumed by the frontend phase-status modal."""
+        self._alog(
+            f"[phase:{phase}] {gene} {position} → {status}",
+            metadata={
+                "type": "ptm_phase",
+                "gene": gene,
+                "position": position,
+                "phase": phase,
+                "status": status,  # running | done | skip | error
+                "detail": detail,
+            },
+        )
+
     def _progress(self, pct: float, msg: str) -> None:
         with self._progress_lock:
             self._progress_cb(pct, msg)
@@ -153,6 +232,7 @@ class RAGEnrichmentPipeline:
         self,
         ptm_data: List[dict],
         experimental_context: Optional[dict] = None,
+        cancel_event: Optional[threading.Event] = None,
     ) -> List[dict]:
         """
         Enrich a list of PTM entries with PubMed literature and biological context.
@@ -213,6 +293,11 @@ class RAGEnrichmentPipeline:
             f"({multi_site_genes} genes with multiple sites, "
             f"cache will save ~{total - unique_genes} redundant gene-level queries)"
         )
+        self._alog(
+            f"RAG: {total} PTM rows, {unique_genes} unique genes — "
+            f"Phase A(MCP) + Phase B(LLM: abstract/kinase/functional/…) per row in parallel; "
+            f"first Phase B per gene is logged below."
+        )
 
         # ── Level 2: Parallel PTM enrichment ──
         enriched = [None] * total  # Pre-allocate to maintain order
@@ -226,8 +311,20 @@ class RAGEnrichmentPipeline:
             gene = ptm.get("gene") or ptm.get("Gene.Name", "?")
             pos = ptm.get("position") or ptm.get("PTM_Position", "?")
 
+            # Skip this PTM if the order was cancelled while we were waiting in the queue.
+            if cancel_event and cancel_event.is_set():
+                logger.info(f"[cancel] Skipping {gene} {pos} — order cancelled")
+                ptm_log2fc = ptm.get("ptm_relative_log2fc") or ptm.get("PTM_Relative_Log2FC", 0)
+                protein_log2fc = ptm.get("protein_log2fc") or ptm.get("Protein_Log2FC", 0)
+                ptm["rag_enrichment"] = self._empty_enrichment(ptm_log2fc, protein_log2fc)
+                enriched[idx] = ptm
+                with stats_lock:
+                    stats["failed"] += 1
+                    completed_count[0] += 1
+                return
+
             try:
-                result = self._enrich_single_ptm_parallel(ptm, context_keywords, experimental_context)
+                result = self._enrich_single_ptm_parallel(ptm, context_keywords, experimental_context, cancel_event=cancel_event)
                 enriched[idx] = result
 
                 enr = result.get("rag_enrichment", {})
@@ -272,6 +369,21 @@ class RAGEnrichmentPipeline:
 
         # Execute with ThreadPoolExecutor (Level 2)
         self._progress(0.0, f"Starting parallel enrichment: {total} PTMs, {unique_genes} unique genes")
+
+        # Emit pending events for ALL PTMs upfront so the frontend table shows the full list immediately
+        self._alog(
+            f"[ptm_list] total={total}",
+            metadata={"type": "ptm_list", "total": total},
+        )
+        for ptm in ptm_data:
+            _g = ptm.get("gene") or ptm.get("Gene.Name", "?")
+            _p = ptm.get("position") or ptm.get("PTM_Position", "?")
+            self._alog(
+                f"[phase:queued] {_g} {_p}",
+                metadata={"type": "ptm_phase", "gene": _g, "position": _p,
+                          "phase": "A", "status": "pending", "detail": ""},
+            )
+
         with ThreadPoolExecutor(max_workers=PTM_WORKERS, thread_name_prefix="ptm_enrich") as executor:
             futures = {}
             for i, ptm in enumerate(ptm_data):
@@ -280,6 +392,18 @@ class RAGEnrichmentPipeline:
                 self._progress(i / total, f"Submitting {gene} {pos} ({i+1}/{total})")
                 future = executor.submit(_enrich_worker, i, ptm)
                 futures[future] = (i, gene, pos)
+
+            # Same progress bucket as last "Submitting" line — clarifies the often-long gap until first completion
+            _qfrac = (total - 1) / total if total > 1 else 1.0
+            self._progress(
+                _qfrac,
+                f"Submitted {total}/{total} — {PTM_WORKERS} parallel workers; Phase B (LLM) per row. "
+                f"Next lines appear when rows finish (first batch often 1–3+ min).",
+            )
+            self._alog(
+                f"All {total} jobs queued (max {PTM_WORKERS} concurrent). "
+                f"Phase A→D per PTM; LLM calls can delay the first '[1/{total}] …' line."
+            )
 
             # Wait for all futures to complete
             for future in as_completed(futures):
@@ -388,7 +512,8 @@ class RAGEnrichmentPipeline:
     # ------------------------------------------------------------------
 
     def _enrich_single_ptm_parallel(
-        self, ptm: dict, context_keywords: List[str], context: Optional[dict]
+        self, ptm: dict, context_keywords: List[str], context: Optional[dict],
+        cancel_event: Optional[threading.Event] = None,
     ) -> dict:
         """Enrich a single PTM with parallelized MCP calls and gene-level caching.
 
@@ -421,7 +546,7 @@ class RAGEnrichmentPipeline:
             try:
                 result = self.mcp.search_pubmed(
                     gene=gene, position=position, ptm_type=ptm_type,
-                    context_keywords=context_keywords, max_results=15,
+                    context_keywords=context_keywords, max_results=MAX_ARTICLES_PER_PTM,
                 )
                 articles = result.get("articles", [])
                 logger.info(f"PubMed search for {gene} {position}: {len(articles)} articles found")
@@ -574,6 +699,8 @@ class RAGEnrichmentPipeline:
             "reactome": _reactome,
         }
 
+        self._phase_event(gene, position, "A", "running", "PubMed/KEGG/STRING/UniProt/HPA/GTEx/BioGRID/Reactome")
+        _phase_a_errors = []
         with ThreadPoolExecutor(max_workers=MCP_WORKERS, thread_name_prefix=f"mcp_{gene[:8]}") as pool:
             futures_a = {name: pool.submit(fn) for name, fn in phase_a_tasks.items()}
             for name, future in futures_a.items():
@@ -582,6 +709,12 @@ class RAGEnrichmentPipeline:
                 except Exception as e:
                     logger.error(f"Phase A task '{name}' failed for {gene}: {e}")
                     phase_a_results[name] = {}
+                    _phase_a_errors.append(name)
+        self._phase_event(
+            gene, position, "A",
+            "error" if _phase_a_errors else "done",
+            f"failed: {','.join(_phase_a_errors)}" if _phase_a_errors else "",
+        )
 
         # Unpack Phase A results
         pubmed_r = phase_a_results.get("pubmed", {})
@@ -636,22 +769,47 @@ class RAGEnrichmentPipeline:
         if self.enable_llm and articles:
             def _abstract():
                 try:
+                    def _on_article(done: int, total: int):
+                        self._alog(
+                            f"[phase:B:art] {gene} {position} {done}/{total}",
+                            metadata={"type": "ptm_phase", "gene": gene, "position": position,
+                                      "phase": "B", "status": "running",
+                                      "detail": f"{done}/{total} articles"},
+                        )
                     raw = self.abstract_analyzer.analyze(
                         articles=articles, gene=gene, position=position, ptm_type=ptm_type,
+                        on_article_done=_on_article,
                     )
-                    return _asdict(raw) if hasattr(raw, '__dataclass_fields__') else (raw if isinstance(raw, dict) else {})
+                    out = _asdict(raw) if hasattr(raw, '__dataclass_fields__') else (raw if isinstance(raw, dict) else {})
+                    if self._analysis_log and gene not in self._abstract_warned_genes and articles:
+                        score = out.get("relevance_score", 0) if isinstance(out, dict) else 0
+                        kf = out.get("key_findings") if isinstance(out, dict) else None
+                        n_kf = len(kf) if isinstance(kf, list) else 0
+                        if score == 0 and n_kf == 0:
+                            self._abstract_warned_genes.add(gene)
+                            self._alog(
+                                f"[LLM·abstract] {gene}: no scored findings "
+                                f"(JSON parse fail, Ollama timeout, or short abstracts — see worker logs)"
+                            )
+                    return out
                 except Exception as e:
                     logger.warning(f"Abstract analysis failed for {gene}: {e}")
+                    if self._analysis_log and gene not in self._abstract_warned_genes:
+                        self._abstract_warned_genes.add(gene)
+                        self._alog(f"[LLM·abstract] {gene}: exception — {str(e)[:160]}")
                     return {}
             phase_b_tasks["abstract"] = _abstract
 
         # LLM-based kinase prediction
-        if self.enable_llm:
+        if self.enable_llm and ENABLE_KINASE:
             def _kinase():
                 try:
                     return self.kinase_predictor.predict(
-                        gene=gene, site=position, ptm_type=ptm_type,
-                        context=context, articles=articles,
+                        gene=gene,
+                        position=position,
+                        ptm_type=ptm_type,
+                        experimental_context=context,
+                        pubmed_articles=articles,
                     )
                 except Exception as e:
                     logger.warning(f"Kinase prediction failed for {gene}: {e}")
@@ -659,13 +817,21 @@ class RAGEnrichmentPipeline:
             phase_b_tasks["kinase"] = _kinase
 
         # LLM-based functional impact (depends on KEGG pathways from Phase A)
-        if self.enable_llm:
+        if self.enable_llm and ENABLE_FUNCTIONAL:
             def _functional():
                 try:
                     pathway_names = [p.get("name", p) if isinstance(p, dict) else p for p in kegg_pathways]
+                    ptm_l = float(ptm.get("PTM_Relative_Log2FC") or ptm.get("ptm_relative_log2fc") or 0)
+                    prot_l = float(ptm.get("Protein_Log2FC") or ptm.get("protein_log2fc") or 0)
                     return self.functional_impact.analyze(
-                        gene=gene, site=position, ptm_type=ptm_type,
-                        articles=articles, pathways=pathway_names,
+                        gene=gene,
+                        position=position,
+                        ptm_type=ptm_type,
+                        ptm_log2fc=ptm_l,
+                        protein_log2fc=prot_l,
+                        pubmed_articles=articles,
+                        kegg_pathways=pathway_names,
+                        experimental_context=context,
                     )
                 except Exception as e:
                     logger.warning(f"Functional impact analysis failed for {gene}: {e}")
@@ -700,16 +866,77 @@ class RAGEnrichmentPipeline:
             phase_b_tasks["validation"] = _validation
 
         # Execute Phase B in parallel (LLM calls are I/O-bound, safe to parallelize)
+        # Early-exit if the order was cancelled while Phase A was running.
+        if cancel_event and cancel_event.is_set():
+            logger.info(f"[cancel] {gene} {position} — skipping Phase B/C/D (order cancelled)")
+            self._phase_event(gene, position, "B", "skip", "cancelled")
+            self._phase_event(gene, position, "C", "skip", "cancelled")
+            self._phase_event(gene, position, "D", "skip", "cancelled")
+            ptm_log2fc_raw = ptm.get("PTM_Relative_Log2FC", ptm.get("ptm_relative_log2fc", 0))
+            protein_log2fc_raw = ptm.get("Protein_Log2FC", ptm.get("protein_log2fc", 0))
+            ptm["rag_enrichment"] = self._empty_enrichment(ptm_log2fc_raw or 0, protein_log2fc_raw or 0)
+            return ptm
+
+        # ① 영구 캐시 확인: 캐시에 있으면 LLM 호출 건너뜀
+        self._phase_event(gene, position, "B", "running", f"{len(articles)} articles")
         phase_b_results = {}
-        if phase_b_tasks:
-            with ThreadPoolExecutor(max_workers=min(len(phase_b_tasks), MCP_WORKERS), thread_name_prefix=f"llm_{gene[:8]}") as pool:
-                futures_b = {name: pool.submit(fn) for name, fn in phase_b_tasks.items()}
+        pmids = [a.get("pmid", "") for a in articles]
+        tasks_to_run: dict = {}
+        for name, fn in phase_b_tasks.items():
+            cached = get_cached(gene, position, ptm_type, name, pmids)
+            if cached is not None:
+                phase_b_results[name] = cached
+                logger.debug(f"Phase B '{name}' for {gene} served from persistent cache")
+            else:
+                tasks_to_run[name] = fn
+
+        _phase_b_errors: list = []
+        if tasks_to_run:
+            if gene not in self._phase_b_genes_seen:
+                self._phase_b_genes_seen.add(gene)
+                keys = ",".join(sorted(tasks_to_run.keys()))
+                self._alog(
+                    f"[LLM·Phase B] {gene}: articles={len(articles)}, parallel=[{keys}]"
+                )
+            # ② 병렬 실행 (timeout=120)
+            failed_tasks: dict = {}
+            with ThreadPoolExecutor(max_workers=min(len(tasks_to_run), MCP_WORKERS), thread_name_prefix=f"llm_{gene[:8]}") as pool:
+                futures_b = {name: pool.submit(fn) for name, fn in tasks_to_run.items()}
                 for name, future in futures_b.items():
                     try:
-                        phase_b_results[name] = future.result(timeout=120)
+                        result = future.result(timeout=120)
+                        phase_b_results[name] = result
+                        set_cached(gene, position, ptm_type, name, pmids, result)
                     except Exception as e:
                         logger.error(f"Phase B task '{name}' failed for {gene}: {e}")
-                        phase_b_results[name] = {}
+                        failed_tasks[name] = tasks_to_run[name]
+
+            # ③ 실패한 태스크 직렬 재시도 (timeout=300, LLM 부하 감소 후 재시도)
+            if failed_tasks:
+                retry_names = ", ".join(sorted(failed_tasks.keys()))
+                self._alog(
+                    f"[LLM·Phase B] {gene} {position} — retrying [{retry_names}] (serial, timeout=300)"
+                )
+            for name, fn in failed_tasks.items():
+                try:
+                    with ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"retry_{gene[:8]}") as retry_pool:
+                        result = retry_pool.submit(fn).result(timeout=300)
+                    phase_b_results[name] = result
+                    set_cached(gene, position, ptm_type, name, pmids, result)
+                    self._alog(f"[LLM·Phase B] {gene} {position} — {name}: retry OK")
+                except Exception as e:
+                    logger.error(f"Phase B task '{name}' retry failed for {gene}: {e}")
+                    self._alog(
+                        f"[LLM·Phase B] ⚠ {gene} {position} — {name}: {_format_phase_b_exc(e)}"
+                    )
+                    phase_b_results[name] = {}
+                    _phase_b_errors.append(name)
+
+        self._phase_event(
+            gene, position, "B",
+            "error" if _phase_b_errors else "done",
+            f"timeout: {','.join(_phase_b_errors)}" if _phase_b_errors else "",
+        )
 
         regulation = phase_b_results.get("regulation", regulation)
         abstract_analysis = phase_b_results.get("abstract", {})
@@ -723,8 +950,10 @@ class RAGEnrichmentPipeline:
         # ══════════════════════════════════════════════════════════════
         string_indirect_data = {}
         if len(kegg_pathways) < 3:
+            self._phase_event(gene, position, "C", "running", "STRING indirect (KEGG < 3)")
             cache_key = f"{gene}__string_indirect"
             cached = self._gene_cache.get(cache_key)
+            _phase_c_err = False
             if cached is not None:
                 string_indirect_data = cached.get("string_indirect_data", {})
                 logger.debug(f"[CACHE HIT] STRING indirect for {gene}")
@@ -739,11 +968,16 @@ class RAGEnrichmentPipeline:
                     )
                 except Exception as e:
                     logger.warning(f"STRING indirect query failed for {gene}: {e}")
+                    _phase_c_err = True
                 self._gene_cache.set(cache_key, {"string_indirect_data": string_indirect_data})
+            self._phase_event(gene, position, "C", "error" if _phase_c_err else "done")
+        else:
+            self._phase_event(gene, position, "C", "skip", f"KEGG={len(kegg_pathways)} ≥ 3")
 
         # ══════════════════════════════════════════════════════════════
         # PHASE D: Assembly (same as original)
         # ══════════════════════════════════════════════════════════════
+        self._phase_event(gene, position, "D", "running", "assembling result")
 
         # 14. Merge regulation (KEGG + PubMed patterns)
         upstream = regulation.get("upstream_regulators", [])
@@ -838,6 +1072,7 @@ class RAGEnrichmentPipeline:
         }
 
         ptm["rag_enrichment"] = enrichment
+        self._phase_event(gene, position, "D", "done")
 
         # Log enrichment summary for debugging
         hpa_ok = bool(hpa_data and (hpa_data.get("tissue_expression") or hpa_data.get("locations")))

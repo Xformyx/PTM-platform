@@ -222,6 +222,22 @@ services:
       OLLAMA_URL: http://host.docker.internal:11434
       LLM_MODEL: ${LLM_MODEL:-gemma3:27b}
       LLM_PROVIDER: ${LLM_PROVIDER:-auto}
+      # RAG Enrichment parallelism (2 PTMs × up to 6 LLM sub-tasks = ~12 max Ollama requests)
+      # Increase only if Ollama can handle more simultaneous requests without queue buildup
+      RAG_PTM_WORKERS: ${RAG_PTM_WORKERS:-2}
+      RAG_MCP_WORKERS: ${RAG_MCP_WORKERS:-6}
+      # Max PubMed articles per PTM fed to LLM (each article = 1 LLM call)
+      # 5 = fast (~17 calls/PTM), 15 = thorough (~17→45 calls/PTM)
+      RAG_MAX_ARTICLES: ${RAG_MAX_ARTICLES:-5}
+      # LLM task toggles — set to "false" to disable individual Phase B tasks
+      # RAG_ENABLE_LLM=false → skip ALL LLM (abstract + kinase + functional)
+      # RAG_ENABLE_KINASE=false / RAG_ENABLE_FUNCTIONAL=false → skip individually
+      RAG_ENABLE_LLM: ${RAG_ENABLE_LLM:-true}
+      RAG_ENABLE_KINASE: ${RAG_ENABLE_KINASE:-true}
+      RAG_ENABLE_FUNCTIONAL: ${RAG_ENABLE_FUNCTIONAL:-true}
+      # Note: OLLAMA_NUM_PARALLEL is set on the HOST via:
+      #   launchctl setenv OLLAMA_NUM_PARALLEL 6  (macOS)
+      # It cannot be set here because Ollama runs on the host, not in Docker.
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1-mini}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}

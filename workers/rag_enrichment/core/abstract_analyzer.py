@@ -214,18 +214,25 @@ class AbstractAnalyzer:
         experimental_context: Optional[dict] = None,
         ptm_type: str = "phosphorylation",
         articles: Optional[list] = None,
+        on_article_done: Optional[callable] = None,
     ) -> AbstractAnalysis:
-        """Analyze PTM signaling from abstract(s). Accepts either pmid+abstract or articles list."""
+        """Analyze PTM signaling from abstract(s). Accepts either pmid+abstract or articles list.
+
+        on_article_done: optional callable(done: int, total: int) called after each article.
+        """
         # If articles list is provided, analyze each and return merged result
         if articles:
+            # Count only articles with usable abstracts
+            eligible = [
+                a for a in articles
+                if isinstance(a, dict) and len((a.get("abstract", "") or a.get("text", "")).strip()) >= 50
+            ]
+            total = len(eligible)
             merged = AbstractAnalysis(pmid="merged", gene=gene, position=position)
-            for art in articles:
-                if not isinstance(art, dict):
-                    continue
+            done = 0
+            for art in eligible:
                 art_pmid = art.get("pmid", "")
                 art_abstract = art.get("abstract", "") or art.get("text", "")
-                if not art_abstract or len(art_abstract.strip()) < 50:
-                    continue
                 result = self._analyze_single(
                     pmid=art_pmid, abstract=art_abstract, gene=gene,
                     position=position, ptm_type=ptm_type,
@@ -238,6 +245,12 @@ class AbstractAnalyzer:
                     merged.relevance_score = result.relevance_score
                     merged.signaling_pathways = result.signaling_pathways
                     merged.cellular_processes = result.cellular_processes
+                done += 1
+                if on_article_done:
+                    try:
+                        on_article_done(done, total)
+                    except Exception:
+                        pass
             return merged
         # Single abstract mode
         return self._analyze_single(

@@ -54,7 +54,15 @@ async def search_ptm_pubmed(
         cached = await redis.get(cache_key)
         if cached:
             logger.debug(f"PubMed search cache hit: {cache_key}")
-            return json.loads(cached)
+            data = json.loads(cached)
+            # Honour the caller's max_results even if the cache holds more articles
+            # (cache key doesn't include max_results so old entries may have more).
+            cached_articles = data.get("articles", [])
+            if len(cached_articles) > max_results:
+                data = dict(data)
+                data["articles"] = cached_articles[:max_results]
+                data["total_found"] = len(data["articles"])
+            return data
 
     result = await _multi_tier_search(gene, position, ptm_type, context_keywords or [], max_results)
 

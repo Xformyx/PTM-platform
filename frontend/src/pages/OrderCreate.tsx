@@ -170,7 +170,7 @@ export default function OrderCreate() {
   const [form, setForm] = useState({
     project_name: "", ptm_type: "phosphorylation", species: "mouse",
     cell_type: "", treatment: "", time_points: "", biological_question: "", special_conditions: "",
-    report_type: "comprehensive", ptm_selection_mode: "de_novo_regulated" as "top_n" | "de_novo" | "regulated" | "de_novo_regulated" | "minor" | "all", llm_model: "", rag_llm_model: "",
+    report_type: "comprehensive", ptm_selection_mode: "de_novo_regulated" as "top_n" | "de_novo" | "regulated" | "de_novo_regulated" | "minor" | "all", llm_model: "", rag_enrichment_llm_model: "", rag_llm_model: "",
     analysis_mode: "ptm_only" as "ptm_only" | "ptm_nonptm_network" | "cross_talk",
     secondary_ptm_type: "ubiquitylation",
   });
@@ -214,6 +214,7 @@ export default function OrderCreate() {
   const [llmModels, setLlmModels] = useState<{ provider: string; model_id: string; name: string }[]>([]);
   const [defaultLlmModel, setDefaultLlmModel] = useState("");
   const [llmCloudModelVariant, setLlmCloudModelVariant] = useState("");
+  const [ragEnrichmentLlmCloudModelVariant, setRagEnrichmentLlmCloudModelVariant] = useState("");
   const [ragLlmCloudModelVariant, setRagLlmCloudModelVariant] = useState("");
   const [files, setFiles] = useState<{
     pr_matrix: File | null; pg_matrix: File | null; config_file: File | null;
@@ -508,6 +509,15 @@ export default function OrderCreate() {
           ? (llmCloudModelVariant || (presets?.some((x) => x.id === m) ? m : presets?.[0]?.id))
           : m;
         return model ? { llm_model: model, llm_provider: p } : {};
+      })() : {}),
+      ...(form.rag_enrichment_llm_model ? (() => {
+        const colonIdx = form.rag_enrichment_llm_model.indexOf(":");
+        const [p, m] = colonIdx >= 0 ? [form.rag_enrichment_llm_model.slice(0, colonIdx), form.rag_enrichment_llm_model.slice(colonIdx + 1)] : ["ollama", form.rag_enrichment_llm_model];
+        const presets = CLOUD_MODEL_PRESETS[p as CloudProvider];
+        const model = isCloudProviderSelection(form.rag_enrichment_llm_model)
+          ? (ragEnrichmentLlmCloudModelVariant || (presets?.some((x) => x.id === m) ? m : presets?.[0]?.id))
+          : m;
+        return model ? { rag_enrichment_llm_model: model, rag_enrichment_llm_provider: p } : {};
       })() : {}),
       ...(form.rag_llm_model ? (() => {
         const colonIdx = form.rag_llm_model.indexOf(":");
@@ -1225,30 +1235,30 @@ export default function OrderCreate() {
                   </div>
                 </div>
 
-                {/* LLM Model for Paper Read (RAG Enrichment) */}
+                {/* LLM Model for RAG Enrichment */}
                 <div className="space-y-2">
                   <Label className="flex items-center gap-2">
-                    <BookOpen className="h-4 w-4" /> LLM Model for Paper Read
+                    <Database className="h-4 w-4" /> LLM Model (RAG Enrichment)
                   </Label>
                   <Select
-                    value={form.rag_llm_model || ""}
+                    value={form.rag_enrichment_llm_model || ""}
                     onValueChange={(v) => {
-                      setForm({ ...form, rag_llm_model: v === "__default__" ? "" : v });
+                      setForm({ ...form, rag_enrichment_llm_model: v === "__default__" ? "" : v });
                       if (v === "__default__" || !isCloudProviderSelection(v)) {
-                        setRagLlmCloudModelVariant("");
+                        setRagEnrichmentLlmCloudModelVariant("");
                       } else {
                         const [, m] = v.split(":", 2);
                         const p = v.split(":")[0] as CloudProvider;
                         const presets = CLOUD_MODEL_PRESETS[p];
                         const validId = presets?.some((x) => x.id === m) ? m : presets?.[0]?.id || "";
-                        setRagLlmCloudModelVariant(validId);
+                        setRagEnrichmentLlmCloudModelVariant(validId);
                       }
                     }}
                   >
-                    <SelectTrigger><SelectValue placeholder={`Default (${defaultLlmModel || "auto"})`} /></SelectTrigger>
+                    <SelectTrigger><SelectValue placeholder={`Default (Paper Read → Report)`} /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="__default__">
-                        Default ({defaultLlmModel || "auto"})
+                        Default ({defaultLlmModel || "Paper Read → Report"})
                       </SelectItem>
                       {llmModels.map((m) => {
                         const val = `${m.provider}:${m.model_id}`;
@@ -1260,16 +1270,16 @@ export default function OrderCreate() {
                       })}
                     </SelectContent>
                   </Select>
-                  {isCloudProviderSelection(form.rag_llm_model || "") && (
+                  {isCloudProviderSelection(form.rag_enrichment_llm_model || "") && (
                     <div className="flex items-center gap-2 pl-2 border-l-2 border-muted">
                       <Label className="text-xs shrink-0">세부 모델</Label>
                       <Select
-                        value={ragLlmCloudModelVariant || CLOUD_MODEL_PRESETS[form.rag_llm_model.split(":")[0] as CloudProvider]?.[0]?.id}
-                        onValueChange={setRagLlmCloudModelVariant}
+                        value={ragEnrichmentLlmCloudModelVariant || CLOUD_MODEL_PRESETS[form.rag_enrichment_llm_model.split(":")[0] as CloudProvider]?.[0]?.id}
+                        onValueChange={setRagEnrichmentLlmCloudModelVariant}
                       >
                         <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
                         <SelectContent>
-                          {CLOUD_MODEL_PRESETS[form.rag_llm_model.split(":")[0] as CloudProvider]?.map((x) => (
+                          {CLOUD_MODEL_PRESETS[form.rag_enrichment_llm_model.split(":")[0] as CloudProvider]?.map((x) => (
                             <SelectItem key={x.id} value={x.id}>{x.name}</SelectItem>
                           ))}
                         </SelectContent>
@@ -1277,7 +1287,7 @@ export default function OrderCreate() {
                     </div>
                   )}
                   <p className="text-xs text-muted-foreground">
-                    논문 읽기 및 요약(RAG Enrichment)에서 사용할 LLM 모델. Abstract 분석, 키나제 예측, 기능적 영향 분석에 사용됩니다.
+                    RAG Enrichment 단계(Abstract 분석, 키나제 예측 등) 전용. 미선택 시 Paper Read → Report 모델 순으로 사용합니다.
                   </p>
                 </div>
 
@@ -1334,6 +1344,62 @@ export default function OrderCreate() {
                   )}
                   <p className="text-xs text-muted-foreground">
                     Report Generation에서 사용할 LLM 모델. Cloud 선택 시 세부 모델을 선택하세요.
+                  </p>
+                </div>
+
+                {/* LLM Model for Paper Read */}
+                <div className="space-y-2">
+                  <Label className="flex items-center gap-2">
+                    <BookOpen className="h-4 w-4" /> LLM Model (Paper Read)
+                  </Label>
+                  <Select
+                    value={form.rag_llm_model || ""}
+                    onValueChange={(v) => {
+                      setForm({ ...form, rag_llm_model: v === "__default__" ? "" : v });
+                      if (v === "__default__" || !isCloudProviderSelection(v)) {
+                        setRagLlmCloudModelVariant("");
+                      } else {
+                        const [, m] = v.split(":", 2);
+                        const p = v.split(":")[0] as CloudProvider;
+                        const presets = CLOUD_MODEL_PRESETS[p];
+                        const validId = presets?.some((x) => x.id === m) ? m : presets?.[0]?.id || "";
+                        setRagLlmCloudModelVariant(validId);
+                      }
+                    }}
+                  >
+                    <SelectTrigger><SelectValue placeholder={`Default (${defaultLlmModel || "auto"})`} /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__default__">
+                        Default ({defaultLlmModel || "auto"})
+                      </SelectItem>
+                      {llmModels.map((m) => {
+                        const val = `${m.provider}:${m.model_id}`;
+                        return (
+                          <SelectItem key={val} value={val}>
+                            {m.name} ({m.provider})
+                          </SelectItem>
+                        );
+                      })}
+                    </SelectContent>
+                  </Select>
+                  {isCloudProviderSelection(form.rag_llm_model || "") && (
+                    <div className="flex items-center gap-2 pl-2 border-l-2 border-muted">
+                      <Label className="text-xs shrink-0">세부 모델</Label>
+                      <Select
+                        value={ragLlmCloudModelVariant || CLOUD_MODEL_PRESETS[form.rag_llm_model.split(":")[0] as CloudProvider]?.[0]?.id}
+                        onValueChange={setRagLlmCloudModelVariant}
+                      >
+                        <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {CLOUD_MODEL_PRESETS[form.rag_llm_model.split(":")[0] as CloudProvider]?.map((x) => (
+                            <SelectItem key={x.id} value={x.id}>{x.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                  <p className="text-xs text-muted-foreground">
+                    RAG Enrichment 전용 모델이 비어 있을 때 enrichment에 사용하는 보조 설정입니다.
                   </p>
                 </div>
 
@@ -1659,12 +1725,28 @@ export default function OrderCreate() {
                     <span className="font-medium">
                       {analysisOptions.mode === "full" ? "None (Full)" : analysisOptions.mode.replace("_", " ").replace(/\b\w/g, c => c.toUpperCase())}
                     </span>
+                    <span className="text-muted-foreground">LLM (RAG Enrichment)</span>
+                    <span className="font-medium font-mono text-xs">
+                      {form.rag_enrichment_llm_model
+                        ? (isCloudProviderSelection(form.rag_enrichment_llm_model)
+                          ? `${llmModels.find((m) => `${m.provider}:${m.model_id}` === form.rag_enrichment_llm_model)?.name || form.rag_enrichment_llm_model.split(":")[0]} - ${CLOUD_MODEL_PRESETS[form.rag_enrichment_llm_model.split(":")[0] as CloudProvider]?.find((x) => x.id === (ragEnrichmentLlmCloudModelVariant || CLOUD_MODEL_PRESETS[form.rag_enrichment_llm_model.split(":")[0] as CloudProvider]?.[0]?.id))?.name || ragEnrichmentLlmCloudModelVariant || "?"}`
+                          : (llmModels.find((m) => `${m.provider}:${m.model_id}` === form.rag_enrichment_llm_model)?.name || form.rag_enrichment_llm_model))
+                        : `Default → Paper Read`}
+                    </span>
                     <span className="text-muted-foreground">LLM Model (Report)</span>
                     <span className="font-medium font-mono text-xs">
                       {form.llm_model
                         ? (isCloudProviderSelection(form.llm_model)
                           ? `${llmModels.find((m) => `${m.provider}:${m.model_id}` === form.llm_model)?.name || form.llm_model.split(":")[0]} - ${CLOUD_MODEL_PRESETS[form.llm_model.split(":")[0] as CloudProvider]?.find((x) => x.id === (llmCloudModelVariant || CLOUD_MODEL_PRESETS[form.llm_model.split(":")[0] as CloudProvider]?.[0]?.id))?.name || llmCloudModelVariant || "?"}`
                           : (llmModels.find((m) => `${m.provider}:${m.model_id}` === form.llm_model)?.name || form.llm_model))
+                        : `Default (${defaultLlmModel})`}
+                    </span>
+                    <span className="text-muted-foreground">LLM (Paper Read)</span>
+                    <span className="font-medium font-mono text-xs">
+                      {form.rag_llm_model
+                        ? (isCloudProviderSelection(form.rag_llm_model)
+                          ? `${llmModels.find((m) => `${m.provider}:${m.model_id}` === form.rag_llm_model)?.name || form.rag_llm_model.split(":")[0]} - ${CLOUD_MODEL_PRESETS[form.rag_llm_model.split(":")[0] as CloudProvider]?.find((x) => x.id === (ragLlmCloudModelVariant || CLOUD_MODEL_PRESETS[form.rag_llm_model.split(":")[0] as CloudProvider]?.[0]?.id))?.name || ragLlmCloudModelVariant || "?"}`
+                          : (llmModels.find((m) => `${m.provider}:${m.model_id}` === form.rag_llm_model)?.name || form.rag_llm_model))
                         : `Default (${defaultLlmModel})`}
                     </span>
                     <span className="text-muted-foreground">RAG Collections</span>
@@ -1674,14 +1756,6 @@ export default function OrderCreate() {
                         : selectedCollectionIds.length > 0
                           ? `${selectedCollectionIds.length}개 선택`
                           : "전체 (미선택 시 기본)"}
-                    </span>
-                    <span className="text-muted-foreground">LLM Model (Paper Read)</span>
-                    <span className="font-medium font-mono text-xs">
-                      {form.rag_llm_model
-                        ? (isCloudProviderSelection(form.rag_llm_model)
-                          ? `${llmModels.find((m) => `${m.provider}:${m.model_id}` === form.rag_llm_model)?.name || form.rag_llm_model.split(":")[0]} - ${CLOUD_MODEL_PRESETS[form.rag_llm_model.split(":")[0] as CloudProvider]?.find((x) => x.id === (ragLlmCloudModelVariant || CLOUD_MODEL_PRESETS[form.rag_llm_model.split(":")[0] as CloudProvider]?.[0]?.id))?.name || ragLlmCloudModelVariant || "?"}`
-                          : (llmModels.find((m) => `${m.provider}:${m.model_id}` === form.rag_llm_model)?.name || form.rag_llm_model))
-                        : `Default (${defaultLlmModel})`}
                     </span>
                   </div>
                 </div>

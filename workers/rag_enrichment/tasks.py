@@ -11,6 +11,7 @@ Takes preprocessing TSV output and enriches each PTM site with:
 import json
 import logging
 import os
+import threading
 import time
 import traceback
 from pathlib import Path
@@ -21,7 +22,7 @@ from celery_app import app
 from common.db_update import get_order_status, update_order_status
 from common.notifications import notify_order_status
 from common.mcp_client import MCPClient
-from common.progress import publish_progress
+from common.progress import publish_analysis_log, publish_progress
 
 logger = logging.getLogger("ptm-workers.rag-enrichment")
 
@@ -244,20 +245,54 @@ def run_rag_enrichment(self, order_id: int, config: dict):
         mcp = MCPClient()
         enrich_cb = _make_progress_cb(order_id, "rag_enrichment", "enrichment", 10, 60)
 
+        def _analysis_log(msg: str, metadata: dict | None = None) -> None:
+            publish_analysis_log(order_id, msg, metadata=metadata)
+
         rag_llm_model = config.get("rag_llm_model")
-        rag_llm_provider = config.get("rag_llm_provider") or config.get("llm_provider", "ollama")
+        rag_llm_provider = config.get("rag_llm_provider")
+        report_llm_provider = config.get("llm_provider", "ollama")
+
+        def _env_bool(name: str, default: bool = True) -> bool:
+            return os.getenv(name, "true" if default else "false").lower() not in ("false", "0", "no")
+
         pipeline = RAGEnrichmentPipeline(
             mcp_client=mcp,
             progress_callback=enrich_cb,
+            analysis_log=_analysis_log,
+            enable_llm_analysis=_env_bool("RAG_ENABLE_LLM", default=True),
+            rag_enrichment_llm_model=config.get("rag_enrichment_llm_model"),
+            rag_enrichment_llm_provider=config.get("rag_enrichment_llm_provider"),
             rag_llm_model=rag_llm_model,
-            llm_provider=rag_llm_provider,
+            rag_llm_provider=rag_llm_provider,
+            llm_provider=report_llm_provider,
             llm_model=config.get("llm_model"),
         )
+
+        # Cancellation: poll DB every 5 s; set event when order becomes cancelled.
+        cancel_event = threading.Event()
+
+        def _cancellation_poller():
+            while not cancel_event.is_set():
+                try:
+                    if get_order_status(order_id) == "cancelled":
+                        cancel_event.set()
+                        logger.info(f"[Order {order_id}] cancellation detected — signalling pipeline to stop")
+                        break
+                except Exception:
+                    pass
+                time.sleep(5)
+
+        _poll_thread = threading.Thread(target=_cancellation_poller, daemon=True, name=f"cancel_poll_{order_id}")
+        _poll_thread.start()
 
         enriched_ptms = pipeline.enrich_ptm_data(
             ptm_data=ptm_data,
             experimental_context=experimental_context,
+            cancel_event=cancel_event,
         )
+
+        # Stop the poller once the pipeline finishes (normal or early exit).
+        cancel_event.set()
 
         # Save enriched data as JSON
         enriched_json_path = order_output / f"enriched_ptm_data{file_suffix}.json"
@@ -357,8 +392,12 @@ def run_rag_enrichment(self, order_id: int, config: dict):
                 sec_pipeline = RAGEnrichmentPipeline(
                     mcp_client=mcp,
                     progress_callback=sec_enrich_cb,
+                    analysis_log=_analysis_log,
+                    rag_enrichment_llm_model=config.get("rag_enrichment_llm_model"),
+                    rag_enrichment_llm_provider=config.get("rag_enrichment_llm_provider"),
                     rag_llm_model=rag_llm_model,
-                    llm_provider=rag_llm_provider,
+                    rag_llm_provider=rag_llm_provider,
+                    llm_provider=report_llm_provider,
                     llm_model=config.get("llm_model"),
                 )
                 sec_enriched = sec_pipeline.enrich_ptm_data(

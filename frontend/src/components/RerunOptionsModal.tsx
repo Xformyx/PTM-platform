@@ -79,8 +79,10 @@ export default function RerunOptionsModal({
   const [reportType, setReportType] = useState("comprehensive");
   const [ptmSelectionMode, setPtmSelectionMode] = useState<"top_n" | "de_novo" | "regulated" | "de_novo_regulated" | "minor" | "all">("de_novo_regulated");
   const [llmModel, setLlmModel] = useState("");
+  const [ragEnrichmentLlmModel, setRagEnrichmentLlmModel] = useState("");
   const [ragLlmModel, setRagLlmModel] = useState("");
   const [llmCloudModelVariant, setLlmCloudModelVariant] = useState("");
+  const [ragEnrichmentLlmCloudModelVariant, setRagEnrichmentLlmCloudModelVariant] = useState("");
   const [ragLlmCloudModelVariant, setRagLlmCloudModelVariant] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -156,6 +158,8 @@ export default function RerunOptionsModal({
       const validModes = ["top_n", "de_novo", "regulated", "de_novo_regulated", "minor", "all"];
       setPtmSelectionMode(validModes.includes(savedMode) ? savedMode as typeof ptmSelectionMode : "de_novo_regulated");
       const lm = ro.llm_model as string; const rp = ro.llm_provider as string;
+      const rem = ro.rag_enrichment_llm_model as string;
+      const rerp = ro.rag_enrichment_llm_provider as string;
       const rm = ro.rag_llm_model as string; const rrp = ro.rag_llm_provider as string;
       const hasProviderConfig = (p: string) => llmModels.some((m) => m.provider === p && m.model_id === CLOUD_PROVIDER_SENTINEL);
       if (rp && lm) {
@@ -163,6 +167,13 @@ export default function RerunOptionsModal({
         setLlmCloudModelVariant(CLOUD_PROVIDERS.includes(rp as any) ? lm : "");
       } else {
         setLlmModel(lm || "");
+      }
+      if (rerp && rem) {
+        setRagEnrichmentLlmModel(hasProviderConfig(rerp) ? `${rerp}:${CLOUD_PROVIDER_SENTINEL}` : `${rerp}:${rem}`);
+        setRagEnrichmentLlmCloudModelVariant(CLOUD_PROVIDERS.includes(rerp as any) ? rem : "");
+      } else {
+        setRagEnrichmentLlmModel(rem || "");
+        setRagEnrichmentLlmCloudModelVariant("");
       }
       if (rrp && rm) {
         setRagLlmModel(hasProviderConfig(rrp) ? `${rrp}:${CLOUD_PROVIDER_SENTINEL}` : `${rrp}:${rm}`);
@@ -250,6 +261,15 @@ export default function RerunOptionsModal({
               ? (llmCloudModelVariant || (presets?.some((x) => x.id === m) ? m : presets?.[0]?.id))
               : m;
             return model ? { llm_model: model, llm_provider: p } : {};
+          })() : {}),
+          ...(ragEnrichmentLlmModel ? (() => {
+            const colonIdx = ragEnrichmentLlmModel.indexOf(":");
+            const [p, m] = colonIdx >= 0 ? [ragEnrichmentLlmModel.slice(0, colonIdx), ragEnrichmentLlmModel.slice(colonIdx + 1)] : ["ollama", ragEnrichmentLlmModel];
+            const presets = CLOUD_MODEL_PRESETS[p as CloudProvider];
+            const model = isCloudProviderSelection(ragEnrichmentLlmModel)
+              ? (ragEnrichmentLlmCloudModelVariant || (presets?.some((x) => x.id === m) ? m : presets?.[0]?.id))
+              : m;
+            return model ? { rag_enrichment_llm_model: model, rag_enrichment_llm_provider: p } : {};
           })() : {}),
           ...(ragLlmModel ? (() => {
             const colonIdx = ragLlmModel.indexOf(":");
@@ -418,6 +438,54 @@ export default function RerunOptionsModal({
                 </div>
               </div>
               <div className="space-y-1.5">
+                <Label className="text-xs flex items-center gap-1">
+                  <Database className="h-3.5 w-3.5" /> LLM Model (RAG Enrichment)
+                </Label>
+                <Select
+                  value={ragEnrichmentLlmModel || "__default__"}
+                  onValueChange={(v) => {
+                    setRagEnrichmentLlmModel(v === "__default__" ? "" : v);
+                    if (v !== "__default__" && isCloudProviderSelection(v)) {
+                      const [, m] = v.split(":", 2);
+                      const p = v.split(":")[0] as CloudProvider;
+                      const presets = CLOUD_MODEL_PRESETS[p];
+                      const validId = presets?.some((x) => x.id === m) ? m : presets?.[0]?.id || "";
+                      setRagEnrichmentLlmCloudModelVariant(validId);
+                    } else {
+                      setRagEnrichmentLlmCloudModelVariant("");
+                    }
+                  }}
+                >
+                  <SelectTrigger className="h-8"><SelectValue placeholder={`Default → Paper Read → Report`} /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__default__">Default (Paper Read → Report fallback)</SelectItem>
+                    {llmModels.map((m) => {
+                      const val = `${m.provider}:${m.model_id}`;
+                      return <SelectItem key={val} value={val}>{m.name} ({m.provider})</SelectItem>;
+                    })}
+                  </SelectContent>
+                </Select>
+                {isCloudProviderSelection(ragEnrichmentLlmModel || "") && (
+                  <div className="flex items-center gap-2 pl-2 border-l-2 border-muted">
+                    <Label className="text-xs shrink-0">세부 모델</Label>
+                    <Select
+                      value={ragEnrichmentLlmCloudModelVariant || CLOUD_MODEL_PRESETS[ragEnrichmentLlmModel.split(":")[0] as CloudProvider]?.[0]?.id}
+                      onValueChange={setRagEnrichmentLlmCloudModelVariant}
+                    >
+                      <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {CLOUD_MODEL_PRESETS[ragEnrichmentLlmModel.split(":")[0] as CloudProvider]?.map((x) => (
+                          <SelectItem key={x.id} value={x.id}>{x.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+                <p className="text-[10px] text-muted-foreground">
+                  RAG Enrichment 단계(Abstract/키나제 예측 등). 미선택 시 Paper Read → Report 순으로 대체.
+                </p>
+              </div>
+              <div className="space-y-1.5">
                 <Label className="text-xs">LLM Model (Report Generation)</Label>
                 <Select
                   value={llmModel || "__default__"}
@@ -502,6 +570,9 @@ export default function RerunOptionsModal({
                     </Select>
                   </div>
                 )}
+                <p className="text-[10px] text-muted-foreground">
+                  RAG Enrichment 전용 모델 미설정일 때 enrichment에 사용. 향후 논문 읽기 기능 확장용으로도 보관.
+                </p>
               </div>
               {/* RAG Collection Selection */}
               <div className="space-y-1.5">

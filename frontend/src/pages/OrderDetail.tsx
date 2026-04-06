@@ -6,7 +6,7 @@ import {
   Play, RotateCcw, ArrowLeft, Terminal, Circle, RefreshCw,
   ChevronDown, ChevronUp, Download, FileSpreadsheet, FileJson, File, FolderOpen,
   Copy, Check, Eye, ArrowRightCircle, Sparkles, Plus, X, Trash2,
-  MessageSquare, Loader2, ToggleLeft, ToggleRight, Square,
+  MessageSquare, Loader2, ToggleLeft, ToggleRight, Square, StopCircle,
   ChartScatter, TrendingUp, ZoomIn, ZoomOut, GitMerge, BarChart3,
   LayoutDashboard, FileOutput, Share2,
 } from "lucide-react";
@@ -107,6 +107,7 @@ function statusIcon(status: string): string {
     case "failed": return "✗";
     case "started": return "▶";
     case "running": return "●";
+    case "progress": return "›";
     default: return "·";
   }
 }
@@ -117,6 +118,7 @@ function statusColor(status: string): string {
     case "failed": return "text-red-400";
     case "started": return "text-cyan-400";
     case "running": return "text-blue-400";
+    case "progress": return "text-amber-400/90";
     default: return "text-zinc-500";
   }
 }
@@ -271,13 +273,14 @@ function toLogEntry(log: OrderLog): LogEntry {
 }
 
 function sseToLogEntry(e: ProgressEvent, idx: number): LogEntry {
+  const pct = e.progress_pct;
   return {
     key: `sse-${idx}`,
     ts: e._ts || Date.now(),
     stage: e.stage,
     step: e.step,
     status: e.status,
-    pct: e.progress_pct,
+    pct: pct != null && !Number.isNaN(Number(pct)) ? Number(pct) : undefined,
     message: e.message || "",
   };
 }
@@ -2389,10 +2392,70 @@ export default function OrderDetail() {
   const [activeTab, setActiveTab] = useState("overview");
   const [pendingAction, setPendingAction] = useState<{ type: "start" } | { type: "run-stage"; stage: string } | null>(null);
   const runHandledRef = useRef(false);
+  const [phaseModalOpen, setPhaseModalOpen] = useState(false);
 
   const isRunning = !!order && !["completed", "failed", "pending", "cancelled"].includes(order.status);
 
   const { progress, events } = useOrderProgress(isRunning ? orderId : null);
+
+  // Build per-PTM phase status from SSE events + DB logs (for stopped/completed orders)
+  type PhaseStatus = "pending" | "running" | "done" | "skip" | "error";
+  type PtmPhaseRow = {
+    gene: string; position: string;
+    A: PhaseStatus; B: PhaseStatus; C: PhaseStatus; D: PhaseStatus;
+    articleProgress: string; // "done/total" e.g. "5/15", or "" if unknown
+    errorDetail: string;
+  };
+  const { ptmPhaseMap, ptmTotal } = useMemo(() => {
+    const map = new Map<string, PtmPhaseRow>();
+    let total: number | null = null;
+
+    const blank = (gene: string, position: string): PtmPhaseRow =>
+      ({ gene, position, A: "pending", B: "pending", C: "pending", D: "pending", articleProgress: "", errorDetail: "" });
+
+    const applyMeta = (meta: Record<string, unknown>) => {
+      if (meta?.type === "ptm_list") {
+        total = Number(meta.total ?? 0) || null;
+        return;
+      }
+      if (meta?.type !== "ptm_phase") return;
+      const gene = String(meta.gene ?? "");
+      const position = String(meta.position ?? "");
+      const phase = String(meta.phase ?? "") as "A" | "B" | "C" | "D";
+      const status = String(meta.status ?? "pending") as PhaseStatus;
+      const detail = String(meta.detail ?? "");
+      const key = `${gene}__${position}`;
+
+      // Phase A pending = 새 run 시작 신호 → 이전 run 데이터 완전 리셋
+      if (phase === "A" && status === "pending") {
+        map.set(key, blank(gene, position));
+        return;
+      }
+
+      const existing = map.get(key) ?? blank(gene, position);
+
+      // article progress: detail like "5/15 articles" from B running events
+      const artMatch = detail.match(/^(\d+)\/(\d+)\s*articles?$/);
+      const newArticleProgress = artMatch
+        ? `${artMatch[1]}/${artMatch[2]}`
+        : existing.articleProgress;
+
+      map.set(key, {
+        ...existing,
+        [phase]: status,
+        articleProgress: newArticleProgress,
+        errorDetail: phase === "B" && status === "error" && detail ? detail : existing.errorDetail,
+      });
+    };
+    // DB logs first (historical), then SSE events override (real-time)
+    for (const log of logs) {
+      if ((log as any).metadata?.type) applyMeta((log as any).metadata);
+    }
+    for (const ev of events) {
+      if (ev.metadata?.type) applyMeta(ev.metadata as Record<string, unknown>);
+    }
+    return { ptmPhaseMap: map, ptmTotal: total };
+  }, [logs, events]);
 
   useEffect(() => {
     Promise.all([
@@ -2491,7 +2554,11 @@ export default function OrderDetail() {
         prev
           ? {
               ...prev,
-              progress_pct: progress.progress_pct,
+              progress_pct:
+                progress.progress_pct != null &&
+                !Number.isNaN(Number(progress.progress_pct))
+                  ? Number(progress.progress_pct)
+                  : prev.progress_pct,
               current_stage: progress.stage,
               stage_detail: progress.message,
               status: progress.status === "failed" ? "failed" : prev.status,
@@ -2678,33 +2745,77 @@ export default function OrderDetail() {
               return (
                 <div key={stage.key} className="flex flex-1 items-center">
                   <div className="flex flex-col items-center gap-2">
-                    <div
-                      className={cn(
-                        "relative flex h-11 w-11 items-center justify-center rounded-full border-2 transition-colors",
-                        isCompleted ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-950"
-                          : isFailed ? "border-destructive bg-destructive/10"
-                          : isActive ? "border-primary bg-primary/10"
-                          : "border-muted bg-muted",
-                      )}
-                    >
-                      {isCompleted ? (
-                        <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: "spring", stiffness: 300 }}>
-                          <CheckCircle2 className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
-                        </motion.div>
-                      ) : (
-                        <Icon className={cn("h-5 w-5", isActive ? (isFailed ? "text-destructive" : "text-primary") : "text-muted-foreground")} />
-                      )}
-                      {isActive && !isCompleted && !isFailed && (
-                        <motion.div
-                          className="absolute inset-0 rounded-full border-2 border-primary"
-                          animate={{ scale: [1, 1.15, 1], opacity: [1, 0.4, 1] }}
-                          transition={{ duration: 2, repeat: Infinity }}
-                        />
-                      )}
-                    </div>
+                    {stage.key === "rag_enrichment" ? (
+                      <button
+                        type="button"
+                        onClick={() => setPhaseModalOpen(true)}
+                        title="Phase 진행 상태 보기"
+                        className={cn(
+                          "relative flex h-11 w-11 items-center justify-center rounded-full border-2 transition-all",
+                          isCompleted ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-950"
+                            : isFailed ? "border-destructive bg-destructive/10"
+                            : isActive ? "border-primary bg-primary/10"
+                            : "border-muted bg-muted",
+                          "cursor-pointer hover:ring-2 hover:ring-primary/50 hover:scale-105",
+                        )}
+                      >
+                        {isCompleted ? (
+                          <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: "spring", stiffness: 300 }}>
+                            <CheckCircle2 className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+                          </motion.div>
+                        ) : (
+                          <Icon className={cn("h-5 w-5", isActive ? (isFailed ? "text-destructive" : "text-primary") : "text-muted-foreground")} />
+                        )}
+                        {isActive && !isCompleted && !isFailed && (
+                          <motion.div
+                            className="absolute inset-0 rounded-full border-2 border-primary pointer-events-none"
+                            animate={{ scale: [1, 1.15, 1], opacity: [1, 0.4, 1] }}
+                            transition={{ duration: 2, repeat: Infinity }}
+                          />
+                        )}
+                      </button>
+                    ) : (
+                      <div
+                        className={cn(
+                          "relative flex h-11 w-11 items-center justify-center rounded-full border-2 transition-colors",
+                          isCompleted ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-950"
+                            : isFailed ? "border-destructive bg-destructive/10"
+                            : isActive ? "border-primary bg-primary/10"
+                            : "border-muted bg-muted",
+                        )}
+                      >
+                        {isCompleted ? (
+                          <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: "spring", stiffness: 300 }}>
+                            <CheckCircle2 className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+                          </motion.div>
+                        ) : (
+                          <Icon className={cn("h-5 w-5", isActive ? (isFailed ? "text-destructive" : "text-primary") : "text-muted-foreground")} />
+                        )}
+                        {isActive && !isCompleted && !isFailed && (
+                          <motion.div
+                            className="absolute inset-0 rounded-full border-2 border-primary pointer-events-none"
+                            animate={{ scale: [1, 1.15, 1], opacity: [1, 0.4, 1] }}
+                            transition={{ duration: 2, repeat: Infinity }}
+                          />
+                        )}
+                      </div>
+                    )}
                     <span className={cn("text-xs font-medium", isActive ? "text-foreground" : "text-muted-foreground")}>
                       {stage.label}
                     </span>
+                    {stage.key === "rag_enrichment" && llmConfig && (
+                      <button
+                        type="button"
+                        onClick={() => setPhaseModalOpen(true)}
+                        className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-muted text-[10px] text-muted-foreground font-mono hover:bg-muted/70 hover:text-foreground transition-colors cursor-pointer"
+                        title="Phase 진행 상태 보기"
+                      >
+                        <Brain className="h-3 w-3" />
+                        {(order.report_options as any)?.rag_enrichment_llm_model ||
+                          (order.report_options as any)?.rag_llm_model ||
+                          llmConfig.default_model}
+                      </button>
+                    )}
                     {stage.key === "report_generation" && llmConfig && (
                       <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-muted text-[10px] text-muted-foreground font-mono">
                         <Brain className="h-3 w-3" />
@@ -2731,6 +2842,106 @@ export default function OrderDetail() {
           </div>
         </CardContent>
       </Card>
+
+      {/* ── RAG Enrichment Phase Status Modal ── */}
+      {phaseModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setPhaseModalOpen(false)}>
+          <div className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-4xl max-h-[80vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-3 border-b border-border">
+              <div className="flex items-center gap-2">
+                <BookOpen className="h-4 w-4 text-primary" />
+                <span className="font-semibold text-sm">RAG Enrichment — Phase 진행 상태</span>
+                <Badge variant="outline" className="text-[10px] font-mono">
+                  {(() => {
+                    const done = Array.from(ptmPhaseMap.values()).filter(r => r.D === "done").length;
+                    const unique = ptmPhaseMap.size;
+                    return `${done} / ${unique}${ptmTotal ? ` / ${ptmTotal}` : ""} PTMs`;
+                  })()}
+                </Badge>
+              </div>
+              <button type="button" onClick={() => setPhaseModalOpen(false)} className="text-muted-foreground hover:text-foreground">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="overflow-auto flex-1">
+              {ptmPhaseMap.size === 0 ? (
+                <div className="flex flex-col items-center justify-center h-40 gap-2 text-muted-foreground text-sm">
+                  <Loader2 className="h-6 w-6 animate-spin" />
+                  <span>아직 Phase 이벤트가 없습니다. 분석이 시작되면 실시간으로 업데이트됩니다.</span>
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-28">Gene</TableHead>
+                      <TableHead className="w-20">Position</TableHead>
+                      {(["A", "B", "C", "D"] as const).map(ph => (
+                        <TableHead key={ph} className="text-center w-20">
+                          Phase {ph}
+                          <div className="text-[9px] font-normal text-muted-foreground">
+                            {ph === "A" ? "MCP" : ph === "B" ? "LLM" : ph === "C" ? "STRING" : "Assembly"}
+                          </div>
+                        </TableHead>
+                      ))}
+                      <TableHead>Detail</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {Array.from(ptmPhaseMap.values()).map(row => {
+                      const isCancelledOrder = order?.status === "cancelled" || order?.status === "failed";
+                      const phaseIcon = (s: string) => {
+                        if (s === "done") return <CheckCircle2 className="h-4 w-4 text-emerald-500 mx-auto" />;
+                        if (s === "running") {
+                          if (isCancelledOrder)
+                            return <StopCircle className="h-4 w-4 text-amber-500 mx-auto" aria-label="중단됨" />;
+                          return <Loader2 className="h-4 w-4 text-primary animate-spin mx-auto" />;
+                        }
+                        if (s === "error") return <AlertCircle className="h-4 w-4 text-destructive mx-auto" />;
+                        if (s === "skip") return <span className="text-[10px] text-muted-foreground block text-center">skip</span>;
+                        return <Circle className="h-3 w-3 text-muted-foreground/40 mx-auto" />;
+                      };
+                      const hasError = [row.A, row.B, row.C, row.D].some(s => s === "error");
+                      return (
+                        <TableRow key={`${row.gene}__${row.position}`} className={hasError ? "bg-destructive/5" : undefined}>
+                          <TableCell className="font-mono text-xs font-medium">{row.gene}</TableCell>
+                          <TableCell className="font-mono text-xs text-muted-foreground">{row.position}</TableCell>
+                          {(["A", "B", "C", "D"] as const).map(ph => (
+                            <TableCell key={ph} className="text-center">{phaseIcon(row[ph])}</TableCell>
+                          ))}
+                          <TableCell className="text-[10px] text-muted-foreground max-w-[200px]">
+                            {row.errorDetail
+                              ? <span className="text-destructive" title={row.errorDetail}>⚠ {row.errorDetail}</span>
+                              : row.articleProgress
+                              ? (() => {
+                                  const [d, t] = row.articleProgress.split("/").map(Number);
+                                  const isDone = row.B === "done";
+                                  return (
+                                    <span className={isDone ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"}>
+                                      {isDone ? "✓ " : ""}{d}/{t} articles
+                                    </span>
+                                  );
+                                })()
+                              : <span className="text-muted-foreground/40">—</span>
+                            }
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              )}
+            </div>
+            <div className="px-5 py-2 border-t border-border text-[10px] text-muted-foreground flex gap-4">
+              <span className="flex items-center gap-1"><CheckCircle2 className="h-3 w-3 text-emerald-500" /> done</span>
+              <span className="flex items-center gap-1"><Loader2 className="h-3 w-3 text-primary" /> running</span>
+              <span className="flex items-center gap-1"><StopCircle className="h-3 w-3 text-amber-500" /> stopped</span>
+              <span className="flex items-center gap-1"><AlertCircle className="h-3 w-3 text-destructive" /> error</span>
+              <span className="flex items-center gap-1"><Circle className="h-3 w-3 text-muted-foreground/40" /> pending</span>
+              <span className="text-muted-foreground/60">skip = 조건 미충족(정상)</span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Activity Progress Bar */}
       {showProgress && (
@@ -2981,6 +3192,10 @@ export default function OrderDetail() {
                     };
                     return labels[mode] ?? (mode ? mode : "De novo + Regulated");
                   })()}
+                />
+                <OverviewField
+                  label="LLM Model (RAG Enrichment)"
+                  value={(order.report_options as any)?.rag_enrichment_llm_model || "Default (Paper Read → Report)"}
                 />
                 <OverviewField
                   label="LLM Model (Report)"
