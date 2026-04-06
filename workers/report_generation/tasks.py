@@ -256,6 +256,61 @@ def run_report_generation(self, order_id: int, config: dict):
             })
             logger.info(f"[Order {order_id}] Cross-Talk state prepared: secondary_ptm_type={secondary_ptm_type}")
 
+        # ── v9.35: LLM Pre-flight Check ──────────────────────────────
+        # Verify LLM availability BEFORE starting the expensive pipeline.
+        # If LLM is not reachable, fail early with a clear error message
+        # instead of running the full pipeline and producing a fallback report.
+        llm_provider = config.get("llm_provider", "ollama")
+        llm_model = config.get("llm_model")
+        try:
+            from common.llm_client import LLMClient
+            preflight_llm = LLMClient(provider=llm_provider, model=llm_model)
+            llm_available = preflight_llm.is_available()
+            llm_info = preflight_llm.get_provider_info()
+            logger.info(f"[Order {order_id}] LLM pre-flight check: provider={preflight_llm.provider}, model={preflight_llm.model}, available={llm_available}")
+
+            if not llm_available:
+                error_msg = (
+                    f"LLM pre-flight check FAILED: {llm_info} is not available. "
+                    f"Report generation cannot proceed without a working LLM. "
+                    f"Please verify: (1) Ollama is running and the model '{preflight_llm.model}' is pulled, "
+                    f"or (2) Cloud API key (OPENAI_API_KEY / GEMINI_API_KEY) is configured."
+                )
+                logger.error(f"[Order {order_id}] {error_msg}")
+                update_order_status(order_id, "failed", error_message=error_msg)
+                notify_order_status(order_id, "failed", error_msg)
+                publish_progress(
+                    order_id, "report_generation", "llm_preflight", "failed", -1, error_msg,
+                    metadata={"llm_provider": preflight_llm.provider, "llm_model": preflight_llm.model},
+                )
+                raise RuntimeError(error_msg)
+
+            # Quick generation test — send a trivial prompt to confirm the model responds
+            test_response = preflight_llm.generate("Respond with OK.", max_tokens=10)
+            if test_response is None or test_response.startswith("[LLM Error"):
+                error_msg = (
+                    f"LLM pre-flight generation test FAILED: {llm_info} returned error. "
+                    f"Response: {test_response[:200] if test_response else 'None'}. "
+                    f"The model may be loading or misconfigured."
+                )
+                logger.error(f"[Order {order_id}] {error_msg}")
+                update_order_status(order_id, "failed", error_message=error_msg)
+                notify_order_status(order_id, "failed", error_msg)
+                publish_progress(
+                    order_id, "report_generation", "llm_preflight", "failed", -1, error_msg,
+                    metadata={"llm_provider": preflight_llm.provider, "llm_model": preflight_llm.model},
+                )
+                raise RuntimeError(error_msg)
+
+            logger.info(f"[Order {order_id}] LLM pre-flight check PASSED: {llm_info} responded successfully")
+            publish_progress(order_id, "report_generation", "llm_preflight", "running", 1, f"LLM verified: {llm_info}")
+        except RuntimeError:
+            raise  # Re-raise our own pre-flight errors
+        except Exception as preflight_err:
+            # Non-critical: if the pre-flight check itself fails (e.g., import error),
+            # log a warning but allow the pipeline to proceed
+            logger.warning(f"[Order {order_id}] LLM pre-flight check could not be performed: {preflight_err}")
+
         # Execute LangGraph pipeline
         publish_progress(order_id, "report_generation", "graph", "started", 2, "Executing LangGraph pipeline")
 
@@ -345,16 +400,43 @@ def run_report_generation(self, order_id: int, config: dict):
 
         elapsed = round(time.time() - start_time, 1)
 
+        # v9.35: Detect LLM fallback usage and warn user
+        fallback_sections = final_state.get("llm_fallback_sections", [])
+        core_sections = {"abstract", "introduction", "results", "discussion", "conclusion"}
+        core_fallbacks = [s for s in fallback_sections if s in core_sections]
+        llm_failed = len(core_fallbacks) >= 3  # 3+ core sections in fallback = LLM effectively failed
+
+        if llm_failed:
+            fallback_warning = (
+                f"WARNING: LLM failed for {len(core_fallbacks)}/{len(core_sections)} core sections "
+                f"({', '.join(core_fallbacks)}). The report contains placeholder text instead of "
+                f"AI-generated analysis. Please check LLM availability and re-run report generation."
+            )
+            logger.warning(f"[Order {order_id}] {fallback_warning}")
+        elif fallback_sections:
+            fallback_warning = (
+                f"Partial LLM fallback: {len(fallback_sections)} section(s) used placeholder text "
+                f"({', '.join(fallback_sections)}). Other sections were generated successfully."
+            )
+            logger.warning(f"[Order {order_id}] {fallback_warning}")
+        else:
+            fallback_warning = None
+
+        progress_metadata = {
+            "output_files": output_file_names,
+            "elapsed_seconds": elapsed,
+            "sections_generated": len(final_state.get("sections", {})),
+            "hypotheses_count": len(final_state.get("validated_hypotheses", [])),
+            "cytoscape_connected": final_state.get("network_analysis", {}).get("cytoscape_connected", False),
+        }
+        if fallback_sections:
+            progress_metadata["llm_fallback_sections"] = fallback_sections
+            progress_metadata["llm_fallback_warning"] = fallback_warning
+
         publish_progress(
             order_id, "report_generation", "finalization", "completed", 100,
             f"Report generation complete ({elapsed}s)",
-            metadata={
-                "output_files": output_file_names,
-                "elapsed_seconds": elapsed,
-                "sections_generated": len(final_state.get("sections", {})),
-                "hypotheses_count": len(final_state.get("validated_hypotheses", [])),
-                "cytoscape_connected": final_state.get("network_analysis", {}).get("cytoscape_connected", False),
-            },
+            metadata=progress_metadata,
         )
 
         all_output_files = [f.name for f in order_output.iterdir() if f.is_file() and f.suffix in (".md", ".docx", ".html", ".json", ".tsv", ".txt", ".png")]
@@ -363,9 +445,25 @@ def run_report_generation(self, order_id: int, config: dict):
             "all_files": all_output_files,
             "output_dir": str(order_output),
         }
-        update_order_status(order_id, "completed", progress_pct=100, result_files=result_data)
-        notify_order_status(order_id, "completed")
-        logger.info(f"[Order {order_id}] Report generation completed in {elapsed}s — {len(output_file_names)} files")
+        if fallback_sections:
+            result_data["llm_fallback_sections"] = fallback_sections
+            result_data["llm_fallback_warning"] = fallback_warning
+
+        # v9.35: If LLM effectively failed, mark as completed_with_warnings instead of completed
+        if llm_failed:
+            update_order_status(
+                order_id, "completed", progress_pct=100, result_files=result_data,
+                error_message=fallback_warning,
+            )
+            notify_order_status(order_id, "completed", fallback_warning)
+            logger.warning(
+                f"[Order {order_id}] Report completed WITH WARNINGS in {elapsed}s — "
+                f"LLM fallback used for {len(core_fallbacks)} core sections"
+            )
+        else:
+            update_order_status(order_id, "completed", progress_pct=100, result_files=result_data)
+            notify_order_status(order_id, "completed")
+            logger.info(f"[Order {order_id}] Report generation completed in {elapsed}s — {len(output_file_names)} files")
 
         return {
             "order_id": order_id,

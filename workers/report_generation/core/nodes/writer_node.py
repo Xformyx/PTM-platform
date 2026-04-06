@@ -418,7 +418,20 @@ def run_section_writing(state: dict) -> dict:
     if cb:
         cb(90, "All sections written")
 
-    return {"sections": sections, "collected_references": all_references}
+    # v9.35: Track which sections used fallback (LLM failure detection)
+    fallback_sections = [s for s in sections if sections[s] == _fallback_section(s, research_results, validated_hypotheses, parsed_ptms)]
+    if fallback_sections:
+        logger.warning(
+            f"[v9.35] LLM FALLBACK DETECTED: {len(fallback_sections)}/{len(sections)} sections "
+            f"used fallback text: {fallback_sections}. "
+            f"Provider={llm.provider}, Model={llm.model}"
+        )
+
+    return {
+        "sections": sections,
+        "collected_references": all_references,
+        "llm_fallback_sections": fallback_sections,
+    }
 
 
 # ---------------------------------------------------------------------------
