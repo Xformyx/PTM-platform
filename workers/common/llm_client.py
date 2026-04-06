@@ -124,6 +124,39 @@ def _normalize_model_name(provider: str, model: str) -> str:
     return model
 
 
+def _resolve_ollama_model_name(base_url: str, model: str) -> str:
+    """Resolve a possibly tag-less model name to the full installed name.
+
+    e.g. "gemma3" → "gemma3:27b" if that's the only gemma3 variant installed.
+    Returns the original name unchanged when the model is already exact or unresolvable.
+    """
+    if not model:
+        return model
+    try:
+        r = requests.get(f"{base_url}/api/tags", timeout=5)
+        if r.status_code != 200:
+            return model
+        installed = [m.get("name", "") for m in r.json().get("models", [])]
+        if model in installed:
+            return model  # exact match — no change needed
+        # Try base-name resolution (e.g. "gemma3" → "gemma3:27b")
+        base = model.split(":")[0]
+        matches = [m for m in installed if m == base or m.startswith(base + ":")]
+        if len(matches) == 1:
+            logger.info(f"Resolved Ollama model '{model}' → '{matches[0]}'")
+            return matches[0]
+        if len(matches) > 1:
+            # Multiple variants installed — pick the first one and warn
+            logger.warning(
+                f"Ambiguous Ollama model '{model}': multiple installed ({matches}). "
+                f"Using '{matches[0]}'. Set explicit tag to avoid this."
+            )
+            return matches[0]
+    except Exception:
+        pass
+    return model
+
+
 def _check_ollama_available(base_url: str, model: str) -> bool:
     """Check if Ollama is reachable and has the requested model."""
     try:
@@ -131,13 +164,11 @@ def _check_ollama_available(base_url: str, model: str) -> bool:
         if r.status_code != 200:
             return False
         models = [m.get("name", "") for m in r.json().get("models", [])]
-        # Check exact match
         if model in models:
             return True
-        # Also check base name match (e.g., "gemma3" matches "gemma3:27b")
         base_name = model.split(":")[0]
         for m in models:
-            if m.startswith(base_name):
+            if m == base_name or m.startswith(base_name + ":"):
                 return True
         return False
     except Exception:
@@ -173,9 +204,10 @@ class LLMClient:
             self._init_auto(model, base_url, api_key)
         elif requested_provider == "ollama":
             self.provider = "ollama"
-            self.model = model or DEFAULT_MODEL
             self.base_url = base_url or OLLAMA_URL
             self.api_key = ""
+            raw_model = model or DEFAULT_MODEL
+            self.model = _resolve_ollama_model_name(self.base_url, raw_model)
         elif requested_provider == "openai":
             self.provider = "openai"
             self.model = _normalize_model_name("openai", model or OPENAI_MODEL)

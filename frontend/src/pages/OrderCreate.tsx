@@ -501,7 +501,8 @@ export default function OrderCreate() {
       analysis_mode: form.analysis_mode,
       research_questions: researchQuestions.length > 0 ? researchQuestions : [],
       ...(form.llm_model ? (() => {
-        const [p, m] = form.llm_model.includes(":") ? form.llm_model.split(":", 2) : ["ollama", form.llm_model];
+        const colonIdx = form.llm_model.indexOf(":");
+        const [p, m] = colonIdx >= 0 ? [form.llm_model.slice(0, colonIdx), form.llm_model.slice(colonIdx + 1)] : ["ollama", form.llm_model];
         const presets = CLOUD_MODEL_PRESETS[p as CloudProvider];
         const model = isCloudProviderSelection(form.llm_model)
           ? (llmCloudModelVariant || (presets?.some((x) => x.id === m) ? m : presets?.[0]?.id))
@@ -509,7 +510,8 @@ export default function OrderCreate() {
         return model ? { llm_model: model, llm_provider: p } : {};
       })() : {}),
       ...(form.rag_llm_model ? (() => {
-        const [p, m] = form.rag_llm_model.includes(":") ? form.rag_llm_model.split(":", 2) : ["ollama", form.rag_llm_model];
+        const colonIdx = form.rag_llm_model.indexOf(":");
+        const [p, m] = colonIdx >= 0 ? [form.rag_llm_model.slice(0, colonIdx), form.rag_llm_model.slice(colonIdx + 1)] : ["ollama", form.rag_llm_model];
         const presets = CLOUD_MODEL_PRESETS[p as CloudProvider];
         const model = isCloudProviderSelection(form.rag_llm_model)
           ? (ragLlmCloudModelVariant || (presets?.some((x) => x.id === m) ? m : presets?.[0]?.id))

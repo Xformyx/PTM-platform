@@ -243,7 +243,8 @@ export default function RerunOptionsModal({
           analysis_mode: analysisMode,
           research_questions: researchQuestions,
           ...(llmModel ? (() => {
-            const [p, m] = llmModel.includes(":") ? llmModel.split(":", 2) : ["ollama", llmModel];
+            const colonIdx = llmModel.indexOf(":");
+            const [p, m] = colonIdx >= 0 ? [llmModel.slice(0, colonIdx), llmModel.slice(colonIdx + 1)] : ["ollama", llmModel];
             const presets = CLOUD_MODEL_PRESETS[p as CloudProvider];
             const model = isCloudProviderSelection(llmModel)
               ? (llmCloudModelVariant || (presets?.some((x) => x.id === m) ? m : presets?.[0]?.id))
@@ -251,7 +252,8 @@ export default function RerunOptionsModal({
             return model ? { llm_model: model, llm_provider: p } : {};
           })() : {}),
           ...(ragLlmModel ? (() => {
-            const [p, m] = ragLlmModel.includes(":") ? ragLlmModel.split(":", 2) : ["ollama", ragLlmModel];
+            const colonIdx = ragLlmModel.indexOf(":");
+            const [p, m] = colonIdx >= 0 ? [ragLlmModel.slice(0, colonIdx), ragLlmModel.slice(colonIdx + 1)] : ["ollama", ragLlmModel];
             const presets = CLOUD_MODEL_PRESETS[p as CloudProvider];
             const model = isCloudProviderSelection(ragLlmModel)
               ? (ragLlmCloudModelVariant || (presets?.some((x) => x.id === m) ? m : presets?.[0]?.id))
