@@ -3197,19 +3197,64 @@ function SignalFlowView({
           </span>
         </div>
         {hasEffectors && (
-          <div className="flex flex-wrap items-center gap-3 text-[10px] text-muted-foreground">
-            <span className="font-medium text-muted-foreground/70">Non-PTM Effector:</span>
-            <span className="flex items-center gap-1">
-              <span className="px-1.5 py-0.5 rounded bg-emerald-900/30 text-emerald-300 border border-emerald-500 text-[9px]">▲ Up</span>
-              <span className="text-[9px]">Protein abundance increased</span>
-            </span>
-            <span className="flex items-center gap-1">
-              <span className="px-1.5 py-0.5 rounded bg-rose-900/30 text-rose-300 border border-rose-500 text-[9px]">▼ Down</span>
-              <span className="text-[9px]">Protein abundance decreased</span>
-            </span>
-            <span className="text-[9px] text-muted-foreground/50 ml-1">
-              ({effectorProteins.length} proteins via STRING/BioGRID, |Log2FC| &gt; 0.3)
-            </span>
+          <div className="space-y-1.5">
+            {/* Row 1: Direction (Up/Down) */}
+            <div className="flex flex-wrap items-center gap-3 text-[10px] text-muted-foreground">
+              <span className="font-medium text-muted-foreground/70 w-[110px] shrink-0">Non-PTM Effector:</span>
+              <span className="flex items-center gap-1">
+                <span className="px-1.5 py-0.5 rounded bg-emerald-900/30 text-emerald-300 border border-emerald-500 text-[9px]">▲ Up</span>
+                <span className="text-[9px]">Protein abundance increased</span>
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="px-1.5 py-0.5 rounded bg-rose-900/30 text-rose-300 border border-rose-500 text-[9px]">▼ Down</span>
+                <span className="text-[9px]">Protein abundance decreased</span>
+              </span>
+              <span className="text-[9px] text-muted-foreground/50 ml-1">
+                ({effectorProteins.length} proteins via STRING/BioGRID, |Log2FC| &gt; 0.3)
+              </span>
+            </div>
+            {/* Row 2: Directionality (concordant/discordant/mixed) */}
+            <div className="flex flex-wrap items-center gap-3 text-[10px] text-muted-foreground">
+              <span className="font-medium text-muted-foreground/70 w-[110px] shrink-0">Directionality:</span>
+              <span className="flex items-center gap-1">
+                <span className="text-emerald-400 font-bold text-[10px]">✓</span>
+                <span className="text-[9px]">Concordant — effector changes in same direction as substrate PTM</span>
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="text-rose-400 font-bold text-[10px]">✗</span>
+                <span className="text-[9px]">Discordant — effector changes in opposite direction</span>
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="text-yellow-400 font-bold text-[10px]">~</span>
+                <span className="text-[9px]">Mixed — inconsistent across substrates</span>
+              </span>
+            </div>
+            {/* Row 3: Evidence strength (border style) */}
+            <div className="flex flex-wrap items-center gap-3 text-[10px] text-muted-foreground">
+              <span className="font-medium text-muted-foreground/70 w-[110px] shrink-0">Evidence strength:</span>
+              <span className="flex items-center gap-1">
+                <span className="px-1.5 py-0.5 rounded bg-muted/30 text-muted-foreground border-2 border-muted-foreground/50 text-[9px]">Strong</span>
+                <span className="text-[9px]">thick solid border (score ≥ 6)</span>
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="px-1.5 py-0.5 rounded bg-muted/30 text-muted-foreground border border-muted-foreground/50 text-[9px]">Moderate</span>
+                <span className="text-[9px]">thin solid border (score 4–5)</span>
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="px-1.5 py-0.5 rounded bg-muted/30 text-muted-foreground border border-dashed border-muted-foreground/50 text-[9px]">Weak</span>
+                <span className="text-[9px]">dashed border (score &lt; 4)</span>
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="px-1.5 py-0.5 rounded bg-muted/30 text-muted-foreground border border-dotted border-muted-foreground/50 text-[9px]">Expr.</span>
+                <span className="text-[9px]">dotted border (expression-only, no PPI)</span>
+              </span>
+            </div>
+            {/* Row 4: Chip format explanation */}
+            <div className="flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
+              <span className="font-medium text-muted-foreground/70 w-[110px] shrink-0">Chip format:</span>
+              <span className="px-1.5 py-0.5 rounded bg-emerald-900/30 text-emerald-300 border border-emerald-500 text-[9px]">▲ ✓ GENE +1.7 +3min</span>
+              <span className="text-[9px] text-muted-foreground/60">= direction · directionality · gene name · peak Log2FC · time-lag vs substrate PTM</span>
+            </div>
           </div>
         )}
       </div>
