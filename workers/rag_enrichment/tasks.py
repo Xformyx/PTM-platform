@@ -240,14 +240,15 @@ def run_rag_enrichment(self, order_id: int, config: dict):
         # Step 2: RAG Enrichment — PubMed + pattern matching (10% – 70%)
         # ================================================================
         publish_progress(order_id, "rag_enrichment", "enrichment", "started", 10, "Starting literature enrichment")
+        send_step_webhook(order_id, "rag_enrichment", "started")
 
         from rag_enrichment.core.enrichment_pipeline import RAGEnrichmentPipeline
 
         mcp = MCPClient()
         enrich_cb = _make_progress_cb(order_id, "rag_enrichment", "enrichment", 10, 60)
 
-        def _analysis_log(msg: str, metadata: dict | None = None) -> None:
-            publish_analysis_log(order_id, msg, metadata=metadata)
+        def _analysis_log(msg: str, metadata: dict | None = None, *, persist: bool = False) -> None:
+            publish_analysis_log(order_id, msg, metadata=metadata, persist=persist)
 
         rag_llm_model = config.get("rag_llm_model")
         rag_llm_provider = config.get("rag_llm_provider")

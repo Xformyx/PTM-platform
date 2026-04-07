@@ -2394,6 +2394,8 @@ export default function OrderDetail() {
   const [pendingAction, setPendingAction] = useState<{ type: "start" } | { type: "run-stage"; stage: string } | null>(null);
   const runHandledRef = useRef(false);
   const [phaseModalOpen, setPhaseModalOpen] = useState(false);
+  const [reportModalOpen, setReportModalOpen] = useState(false);
+  const [prepModalOpen, setPrepModalOpen] = useState(false);
   const [stopInProgress, setStopInProgress] = useState(false);
   const stopRequestRef = useRef(false);
   const lastLogIdRef = useRef(0);
@@ -2408,6 +2410,7 @@ export default function OrderDetail() {
     gene: string; position: string;
     A: PhaseStatus; B: PhaseStatus; C: PhaseStatus; D: PhaseStatus;
     articleProgress: string; // "done/total" e.g. "5/15", or "" if unknown
+    cachedCount: number;
     errorDetail: string;
   };
   const { ptmPhaseMap, ptmTotal } = useMemo(() => {
@@ -2415,7 +2418,7 @@ export default function OrderDetail() {
     let total: number | null = null;
 
     const blank = (gene: string, position: string): PtmPhaseRow =>
-      ({ gene, position, A: "pending", B: "pending", C: "pending", D: "pending", articleProgress: "", errorDetail: "" });
+      ({ gene, position, A: "pending", B: "pending", C: "pending", D: "pending", articleProgress: "", cachedCount: 0, errorDetail: "" });
 
     const applyMeta = (meta: Record<string, unknown>) => {
       if (meta?.type === "ptm_list") {
@@ -2441,21 +2444,22 @@ export default function OrderDetail() {
       // Article progress:
       // - "3/15 articles" from per-article LLM callbacks
       // - "15 articles" from Phase B start (backend) — parse as total only
-      const artMatch = detail.match(/^(\d+)\/(\d+)\s*articles?$/i);
+      // - "5/5 articles, 5 cached" from Phase B done with cache hits
+      const artMatch = detail.match(/^(\d+)\/(\d+)\s*articles?(?:,\s*(\d+)\s*cached)?$/i);
       const totalOnlyMatch = detail.match(/^(\d+)\s*articles?$/i);
       let newArticleProgress = existing.articleProgress;
+      let newCachedCount = existing.cachedCount;
       if (artMatch) {
         newArticleProgress = `${artMatch[1]}/${artMatch[2]}`;
+        if (artMatch[3]) newCachedCount = Number(artMatch[3]);
       } else if (phase === "B" && totalOnlyMatch) {
         const t = totalOnlyMatch[1];
         if (status === "running") {
           newArticleProgress = `0/${t}`;
         } else if (status === "done" || status === "skip") {
-          // Logs had no "k/n articles" lines — treat full batch as done
           newArticleProgress = `${t}/${t}`;
         }
       } else if (phase === "B" && status === "done" && detail === "") {
-        // B done clears detail; if we only had "0/N" from a lone "N articles" ping, show N/N
         const partial = existing.articleProgress.match(/^0\/(\d+)$/);
         if (partial) newArticleProgress = `${partial[1]}/${partial[1]}`;
       }
@@ -2464,6 +2468,7 @@ export default function OrderDetail() {
         ...existing,
         [phase]: status,
         articleProgress: newArticleProgress,
+        cachedCount: newCachedCount,
         errorDetail: phase === "B" && status === "error" && detail ? detail : existing.errorDetail,
       });
     };
@@ -2475,6 +2480,72 @@ export default function OrderDetail() {
       if (ev.metadata?.type) applyMeta(ev.metadata as Record<string, unknown>);
     }
     return { ptmPhaseMap: map, ptmTotal: total };
+  }, [logs, events]);
+
+  type StepRow = { step: string; label: string; status: PhaseStatus; detail: string };
+
+  const PREP_STEPS: { key: string; label: string }[] = [
+    { key: "ptm_quantification", label: "PTM Quantification" },
+    { key: "vector_report", label: "Vector Report" },
+    { key: "unified_enrichment", label: "Domain/Motif Enrichment" },
+    { key: "biological_enrichment", label: "Biological Enrichment" },
+    { key: "finalization", label: "Finalization" },
+  ];
+
+  const REPORT_STEPS: { key: string; label: string }[] = [
+    { key: "context_loading", label: "Context Loading" },
+    { key: "question_generation", label: "Question Generation" },
+    { key: "research", label: "Research Analysis" },
+    { key: "hypothesis", label: "Hypothesis Generation" },
+    { key: "validation", label: "Hypothesis Validation" },
+    { key: "network", label: "Network Analysis" },
+    { key: "writing", label: "Report Writing" },
+    { key: "qa_report", label: "Q&A Report" },
+    { key: "compilation", label: "Final Compilation" },
+  ];
+
+  const prepStepRows = useMemo((): StepRow[] => {
+    const map = new Map<string, StepRow>();
+    for (const s of PREP_STEPS) map.set(s.key, { step: s.key, label: s.label, status: "pending", detail: "" });
+
+    const apply = (meta: Record<string, unknown>) => {
+      if (meta?.type !== "preprocessing_phase") return;
+      const step = String(meta.step ?? "");
+      const status = String(meta.status ?? "");
+      const detail = String(meta.detail ?? "");
+      const row = map.get(step);
+      if (!row) return;
+      if (status === "done") row.status = "done";
+      else if (status === "running") row.status = "running";
+      else if (status === "error") row.status = "error";
+      row.detail = detail;
+    };
+
+    for (const log of logs) { if ((log as any).metadata?.type) apply((log as any).metadata); }
+    for (const ev of events) { if (ev.metadata?.type) apply(ev.metadata as Record<string, unknown>); }
+    return Array.from(map.values());
+  }, [logs, events]);
+
+  const reportStepRows = useMemo((): StepRow[] => {
+    const map = new Map<string, StepRow>();
+    for (const s of REPORT_STEPS) map.set(s.key, { step: s.key, label: s.label, status: "pending", detail: "" });
+
+    const apply = (meta: Record<string, unknown>) => {
+      if (meta?.type !== "report_phase") return;
+      const step = String(meta.step ?? "");
+      const status = String(meta.status ?? "");
+      const detail = String(meta.detail ?? "");
+      const row = map.get(step);
+      if (!row) return;
+      if (status === "done") row.status = "done";
+      else if (status === "running") row.status = "running";
+      else if (status === "error") row.status = "error";
+      row.detail = detail;
+    };
+
+    for (const log of logs) { if ((log as any).metadata?.type) apply((log as any).metadata); }
+    for (const ev of events) { if (ev.metadata?.type) apply(ev.metadata as Record<string, unknown>); }
+    return Array.from(map.values());
   }, [logs, events]);
 
   useEffect(() => {
@@ -2794,61 +2865,38 @@ export default function OrderDetail() {
               return (
                 <div key={stage.key} className="flex flex-1 items-center">
                   <div className="flex flex-col items-center gap-2">
-                    {stage.key === "rag_enrichment" ? (
-                      <button
-                        type="button"
-                        onClick={() => setPhaseModalOpen(true)}
-                        title="Phase 진행 상태 보기"
-                        className={cn(
-                          "relative flex h-11 w-11 items-center justify-center rounded-full border-2 transition-all",
-                          isCompleted ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-950"
-                            : isFailed ? "border-destructive bg-destructive/10"
-                            : isActive ? "border-primary bg-primary/10"
-                            : "border-muted bg-muted",
-                          "cursor-pointer hover:ring-2 hover:ring-primary/50 hover:scale-105",
-                        )}
-                      >
-                        {isCompleted ? (
-                          <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: "spring", stiffness: 300 }}>
-                            <CheckCircle2 className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
-                          </motion.div>
-                        ) : (
-                          <Icon className={cn("h-5 w-5", isActive ? (isFailed ? "text-destructive" : "text-primary") : "text-muted-foreground")} />
-                        )}
-                        {isActive && !isCompleted && !isFailed && (
-                          <motion.div
-                            className="absolute inset-0 rounded-full border-2 border-primary pointer-events-none"
-                            animate={{ scale: [1, 1.15, 1], opacity: [1, 0.4, 1] }}
-                            transition={{ duration: 2, repeat: Infinity }}
-                          />
-                        )}
-                      </button>
-                    ) : (
-                      <div
-                        className={cn(
-                          "relative flex h-11 w-11 items-center justify-center rounded-full border-2 transition-colors",
-                          isCompleted ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-950"
-                            : isFailed ? "border-destructive bg-destructive/10"
-                            : isActive ? "border-primary bg-primary/10"
-                            : "border-muted bg-muted",
-                        )}
-                      >
-                        {isCompleted ? (
-                          <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: "spring", stiffness: 300 }}>
-                            <CheckCircle2 className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
-                          </motion.div>
-                        ) : (
-                          <Icon className={cn("h-5 w-5", isActive ? (isFailed ? "text-destructive" : "text-primary") : "text-muted-foreground")} />
-                        )}
-                        {isActive && !isCompleted && !isFailed && (
-                          <motion.div
-                            className="absolute inset-0 rounded-full border-2 border-primary pointer-events-none"
-                            animate={{ scale: [1, 1.15, 1], opacity: [1, 0.4, 1] }}
-                            transition={{ duration: 2, repeat: Infinity }}
-                          />
-                        )}
-                      </div>
-                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (stage.key === "preprocessing") setPrepModalOpen(true);
+                        else if (stage.key === "rag_enrichment") setPhaseModalOpen(true);
+                        else if (stage.key === "report_generation") setReportModalOpen(true);
+                      }}
+                      title="진행 상태 보기"
+                      className={cn(
+                        "relative flex h-11 w-11 items-center justify-center rounded-full border-2 transition-all",
+                        isCompleted ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-950"
+                          : isFailed ? "border-destructive bg-destructive/10"
+                          : isActive ? "border-primary bg-primary/10"
+                          : "border-muted bg-muted",
+                        "cursor-pointer hover:ring-2 hover:ring-primary/50 hover:scale-105",
+                      )}
+                    >
+                      {isCompleted ? (
+                        <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: "spring", stiffness: 300 }}>
+                          <CheckCircle2 className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+                        </motion.div>
+                      ) : (
+                        <Icon className={cn("h-5 w-5", isActive ? (isFailed ? "text-destructive" : "text-primary") : "text-muted-foreground")} />
+                      )}
+                      {isActive && !isCompleted && !isFailed && (
+                        <motion.div
+                          className="absolute inset-0 rounded-full border-2 border-primary pointer-events-none"
+                          animate={{ scale: [1, 1.15, 1], opacity: [1, 0.4, 1] }}
+                          transition={{ duration: 2, repeat: Infinity }}
+                        />
+                      )}
+                    </button>
                     <span className={cn("text-xs font-medium", isActive ? "text-foreground" : "text-muted-foreground")}>
                       {stage.label}
                     </span>
@@ -2866,10 +2914,15 @@ export default function OrderDetail() {
                       </button>
                     )}
                     {stage.key === "report_generation" && llmConfig && (
-                      <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-muted text-[10px] text-muted-foreground font-mono">
+                      <button
+                        type="button"
+                        onClick={() => setReportModalOpen(true)}
+                        className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-muted text-[10px] text-muted-foreground font-mono hover:bg-muted/70 hover:text-foreground transition-colors cursor-pointer"
+                        title="진행 상태 보기"
+                      >
                         <Brain className="h-3 w-3" />
                         {(order.report_options as any)?.llm_model || llmConfig.default_model}
-                      </div>
+                      </button>
                     )}
                     {canRerun && (
                       <Button
@@ -2964,9 +3017,10 @@ export default function OrderDetail() {
                               ? (() => {
                                   const [d, t] = row.articleProgress.split("/").map(Number);
                                   const isDone = row.B === "done";
+                                  const cached = row.cachedCount > 0 ? `, ${row.cachedCount} cached` : "";
                                   return (
                                     <span className={isDone ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"}>
-                                      {isDone ? "✓ " : ""}{d}/{t} articles
+                                      {isDone ? "✓ " : ""}{d}/{t} articles{cached}
                                     </span>
                                   );
                                 })()
@@ -2987,6 +3041,140 @@ export default function OrderDetail() {
               <span className="flex items-center gap-1"><AlertCircle className="h-3 w-3 text-destructive" /> error</span>
               <span className="flex items-center gap-1"><Circle className="h-3 w-3 text-muted-foreground/40" /> pending</span>
               <span className="text-muted-foreground/60">skip = 조건 미충족(정상)</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Preprocessing Phase Status Modal ── */}
+      {prepModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setPrepModalOpen(false)}>
+          <div className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-3 border-b border-border">
+              <div className="flex items-center gap-2">
+                <Cog className="h-4 w-4 text-primary" />
+                <span className="font-semibold text-sm">Preprocessing — 단계별 진행 상태</span>
+                <Badge variant="outline" className="text-[10px] font-mono">
+                  {prepStepRows.filter(r => r.status === "done").length} / {prepStepRows.length} steps
+                </Badge>
+              </div>
+              <button type="button" onClick={() => setPrepModalOpen(false)} className="text-muted-foreground hover:text-foreground">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="overflow-auto flex-1">
+              {prepStepRows.every(r => r.status === "pending") ? (
+                <div className="flex flex-col items-center justify-center h-40 gap-2 text-muted-foreground text-sm">
+                  <Loader2 className="h-6 w-6 animate-spin" />
+                  <span>아직 이벤트가 없습니다. 분석이 시작되면 실시간으로 업데이트됩니다.</span>
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-12 text-center">#</TableHead>
+                      <TableHead>Step</TableHead>
+                      <TableHead className="text-center w-20">Status</TableHead>
+                      <TableHead>Detail</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {prepStepRows.map((row, i) => {
+                      const isCancelledOrder = order?.status === "cancelled" || order?.status === "failed";
+                      const icon = row.status === "done" ? <CheckCircle2 className="h-4 w-4 text-emerald-500 mx-auto" />
+                        : row.status === "running" ? (isCancelledOrder ? <StopCircle className="h-4 w-4 text-amber-500 mx-auto" /> : <Loader2 className="h-4 w-4 text-primary animate-spin mx-auto" />)
+                        : row.status === "error" ? <AlertCircle className="h-4 w-4 text-destructive mx-auto" />
+                        : <Circle className="h-3 w-3 text-muted-foreground/40 mx-auto" />;
+                      return (
+                        <TableRow key={row.step}>
+                          <TableCell className="text-center text-xs text-muted-foreground">{i + 1}</TableCell>
+                          <TableCell className="text-xs font-medium">{row.label}</TableCell>
+                          <TableCell className="text-center">{icon}</TableCell>
+                          <TableCell className="text-[10px] text-muted-foreground max-w-[250px] truncate">
+                            {row.detail ? (
+                              <span className={row.status === "done" ? "text-emerald-600 dark:text-emerald-400" : ""}>{row.detail}</span>
+                            ) : (
+                              <span className="text-muted-foreground/40">—</span>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              )}
+            </div>
+            <div className="px-5 py-2 border-t border-border text-[10px] text-muted-foreground flex gap-4">
+              <span className="flex items-center gap-1"><CheckCircle2 className="h-3 w-3 text-emerald-500" /> done</span>
+              <span className="flex items-center gap-1"><Loader2 className="h-3 w-3 text-primary" /> running</span>
+              <span className="flex items-center gap-1"><Circle className="h-3 w-3 text-muted-foreground/40" /> pending</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Report Generation Phase Status Modal ── */}
+      {reportModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setReportModalOpen(false)}>
+          <div className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-3 border-b border-border">
+              <div className="flex items-center gap-2">
+                <FileText className="h-4 w-4 text-primary" />
+                <span className="font-semibold text-sm">Report Generation — 단계별 진행 상태</span>
+                <Badge variant="outline" className="text-[10px] font-mono">
+                  {reportStepRows.filter(r => r.status === "done").length} / {reportStepRows.length} steps
+                </Badge>
+              </div>
+              <button type="button" onClick={() => setReportModalOpen(false)} className="text-muted-foreground hover:text-foreground">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="overflow-auto flex-1">
+              {reportStepRows.every(r => r.status === "pending") ? (
+                <div className="flex flex-col items-center justify-center h-40 gap-2 text-muted-foreground text-sm">
+                  <Loader2 className="h-6 w-6 animate-spin" />
+                  <span>아직 이벤트가 없습니다. 분석이 시작되면 실시간으로 업데이트됩니다.</span>
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-12 text-center">#</TableHead>
+                      <TableHead>Step</TableHead>
+                      <TableHead className="text-center w-20">Status</TableHead>
+                      <TableHead>Detail</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {reportStepRows.map((row, i) => {
+                      const isCancelledOrder = order?.status === "cancelled" || order?.status === "failed";
+                      const icon = row.status === "done" ? <CheckCircle2 className="h-4 w-4 text-emerald-500 mx-auto" />
+                        : row.status === "running" ? (isCancelledOrder ? <StopCircle className="h-4 w-4 text-amber-500 mx-auto" /> : <Loader2 className="h-4 w-4 text-primary animate-spin mx-auto" />)
+                        : row.status === "error" ? <AlertCircle className="h-4 w-4 text-destructive mx-auto" />
+                        : <Circle className="h-3 w-3 text-muted-foreground/40 mx-auto" />;
+                      return (
+                        <TableRow key={row.step}>
+                          <TableCell className="text-center text-xs text-muted-foreground">{i + 1}</TableCell>
+                          <TableCell className="text-xs font-medium">{row.label}</TableCell>
+                          <TableCell className="text-center">{icon}</TableCell>
+                          <TableCell className="text-[10px] text-muted-foreground max-w-[250px] truncate">
+                            {row.detail ? (
+                              <span className={row.status === "done" ? "text-emerald-600 dark:text-emerald-400" : ""}>{row.detail}</span>
+                            ) : (
+                              <span className="text-muted-foreground/40">—</span>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              )}
+            </div>
+            <div className="px-5 py-2 border-t border-border text-[10px] text-muted-foreground flex gap-4">
+              <span className="flex items-center gap-1"><CheckCircle2 className="h-3 w-3 text-emerald-500" /> done</span>
+              <span className="flex items-center gap-1"><Loader2 className="h-3 w-3 text-primary" /> running</span>
+              <span className="flex items-center gap-1"><Circle className="h-3 w-3 text-muted-foreground/40" /> pending</span>
             </div>
           </div>
         </div>

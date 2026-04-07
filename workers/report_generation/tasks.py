@@ -21,7 +21,7 @@ from pathlib import Path
 from celery_app import app
 from common.db_update import update_order_status
 from common.notifications import notify_order_status
-from common.progress import publish_progress
+from common.progress import publish_analysis_log, publish_progress
 from common.webhook import send_step_webhook
 
 logger = logging.getLogger("ptm-workers.report-generation")
@@ -67,8 +67,65 @@ def _resolve_enriched_json_path(order_id: int, rag_dir: Path, explicit: str | No
 
 
 def _make_progress_cb(order_id):
+    _q_total = [0]
+
+    def _emit(step, status, detail="", pct=0):
+        publish_analysis_log(
+            order_id, f"[report:{step}] {status}: {detail}",
+            stage="report_generation", step="report_phase", status="progress",
+            metadata={"type": "report_phase", "step": step, "status": status,
+                      "detail": detail, "pct": round(pct, 1)},
+            persist=True,
+        )
+
     def cb(pct, msg):
         publish_progress(order_id, "report_generation", "graph", "running", round(pct, 1), msg)
+
+        if "Loading enriched PTM data" in msg:
+            _emit("context_loading", "running", msg, pct)
+        elif msg.startswith("Context loaded:"):
+            _emit("context_loading", "done", msg, pct)
+        elif "Generating AI research questions" in msg:
+            _emit("question_generation", "running", msg, pct)
+        elif msg.startswith("Generated ") and "question" in msg:
+            _emit("question_generation", "done", msg, pct)
+        elif msg.startswith("Using ") and "question" in msg:
+            _emit("question_generation", "done", msg, pct)
+        elif msg == "Analyzing PTM data":
+            _emit("research", "running", msg, pct)
+        elif msg.startswith("Researching:"):
+            _emit("research", "running", msg, pct)
+        elif msg.startswith("Research complete:"):
+            _emit("research", "done", msg, pct)
+        elif msg == "Generating hypotheses":
+            _emit("hypothesis", "running", msg, pct)
+        elif msg.startswith("Hypothesis for Q"):
+            _emit("hypothesis", "running", msg, pct)
+        elif msg.startswith("Generated ") and "hypothes" in msg:
+            _emit("hypothesis", "done", msg, pct)
+        elif msg == "Validating hypotheses":
+            _emit("validation", "running", msg, pct)
+        elif msg.startswith("Validation complete:"):
+            _emit("validation", "done", msg, pct)
+        elif "Analyzing signaling networks" in msg:
+            _emit("network", "running", msg, pct)
+        elif "Network analysis complete" in msg or "Network analysis failed" in msg:
+            _emit("network", "done", msg, pct)
+        elif msg == "Writing report sections":
+            _emit("writing", "running", msg, pct)
+        elif msg.startswith("Writing "):
+            _emit("writing", "running", msg, pct)
+        elif msg == "All sections written":
+            _emit("writing", "done", msg, pct)
+        elif "Generating Q&A report" in msg:
+            _emit("qa_report", "running", msg, pct)
+        elif "Q&A report generated" in msg:
+            _emit("qa_report", "done", msg, pct)
+        elif msg == "Compiling final report":
+            _emit("compilation", "running", msg, pct)
+        elif "Report generation complete" in msg:
+            _emit("compilation", "done", msg, pct)
+
     return cb
 
 
@@ -134,6 +191,7 @@ def run_report_generation(self, order_id: int, config: dict):
     update_order_status(order_id, "report_generation", current_stage="report_generation", progress_pct=0)
     logger.info(f"[Order {order_id}] Report generation started")
     publish_progress(order_id, "report_generation", "start", "started", 0, "Report generation pipeline started")
+    send_step_webhook(order_id, "report_generation", "started")
 
     try:
         # Resolve enriched data path (handles missing explicit path after RAG stop / volume issues)

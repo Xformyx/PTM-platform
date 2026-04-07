@@ -8,7 +8,7 @@ from typing import Optional
 from fastapi import APIRouter, Body, Depends, HTTPException, UploadFile, File, Form, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from sqlalchemy import select, func as sqlfunc
+from sqlalchemy import select, text, func as sqlfunc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -699,10 +699,14 @@ async def start_order(
             except OSError as e:
                 logger.warning(f"Failed to clear output dir: {e}")
 
-    # Truncate previous run logs
+    # Truncate previous run logs + webhook idempotency records
     await db.execute(
         OrderLog.__table__.delete().where(OrderLog.order_id == order.id)
     )
+    try:
+        await db.execute(text("DELETE FROM webhook_sent_log WHERE order_id = :oid"), {"oid": order.id})
+    except Exception:
+        pass
 
     order.status = "queued"
     order.current_stage = "preprocessing"
@@ -988,8 +992,9 @@ async def run_stage(
     )
     active_collections = [r[0] for r in coll_result.fetchall()]
 
-    # Truncate logs for stages that will be re-run
+    # Truncate logs + webhook records for stages that will be re-run
     stage_order = ["preprocessing", "rag_enrichment", "report_generation"]
+    step_map = {"preprocessing": "preprocessing", "rag_enrichment": "rag_enrichment", "report_generation": "report_generation"}
     idx = stage_order.index(body.stage)
     stages_to_clear = stage_order[idx:]
     await db.execute(
@@ -998,6 +1003,14 @@ async def run_stage(
             OrderLog.stage.in_(stages_to_clear),
         )
     )
+    try:
+        steps_to_clear = [step_map[s] for s in stages_to_clear] + ["order"]
+        await db.execute(
+            text("DELETE FROM webhook_sent_log WHERE order_id = :oid AND step IN :steps"),
+            {"oid": order.id, "steps": tuple(steps_to_clear)},
+        )
+    except Exception:
+        pass
 
     order.status = "queued"
     order.current_stage = body.stage
@@ -1247,7 +1260,7 @@ async def get_order_logs(
     order_id: int,
     stage: Optional[str] = None,
     since_id: Optional[int] = None,
-    limit: int = 2000,
+    limit: int = 50000,
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
@@ -1262,7 +1275,7 @@ async def get_order_logs(
         query = query.where(OrderLog.stage == stage)
     if since_id:
         query = query.where(OrderLog.id > since_id)
-    query = query.order_by(OrderLog.created_at.asc()).limit(min(limit, 5000))
+    query = query.order_by(OrderLog.created_at.asc()).limit(min(limit, 50000))
 
     result = await db.execute(query)
     logs = result.scalars().all()

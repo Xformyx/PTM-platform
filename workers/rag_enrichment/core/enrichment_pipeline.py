@@ -203,11 +203,11 @@ class RAGEnrichmentPipeline:
     # Thread-safe progress reporting
     # ------------------------------------------------------------------
 
-    def _alog(self, msg: str, metadata: dict | None = None) -> None:
+    def _alog(self, msg: str, metadata: dict | None = None, *, persist: bool = False) -> None:
         if not self._analysis_log:
             return
         try:
-            self._analysis_log(msg, metadata)
+            self._analysis_log(msg, metadata, persist=persist)
         except Exception:
             pass
 
@@ -223,6 +223,7 @@ class RAGEnrichmentPipeline:
                 "status": status,  # running | done | skip | error
                 "detail": detail,
             },
+            persist=True,
         )
 
     def _progress(self, pct: float, msg: str) -> None:
@@ -888,10 +889,12 @@ class RAGEnrichmentPipeline:
         phase_b_results = {}
         pmids = [a.get("pmid", "") for a in articles]
         tasks_to_run: dict = {}
+        cache_hit_count = 0
         for name, fn in phase_b_tasks.items():
             cached = get_cached(gene, position, ptm_type, name, pmids)
             if cached is not None and isinstance(cached, dict):
                 phase_b_results[name] = cached
+                cache_hit_count += 1
                 logger.debug(f"Phase B '{name}' for {gene} served from persistent cache")
             else:
                 if cached is not None:
@@ -950,9 +953,10 @@ class RAGEnrichmentPipeline:
             f"timeout: {','.join(_phase_b_errors)}" if _phase_b_errors else ""
         )
         if not _phase_b_errors:
-            # So UIs / DB logs can show "N/N articles" even without per-step callbacks
             n_art = len(articles)
-            _b_detail = f"{n_art}/{n_art} articles"
+            all_cached = cache_hit_count > 0 and not tasks_to_run
+            cache_suffix = f", {n_art} cached" if all_cached else ""
+            _b_detail = f"{n_art}/{n_art} articles{cache_suffix}"
 
         self._phase_event(
             gene, position, "B",

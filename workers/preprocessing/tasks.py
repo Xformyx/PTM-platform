@@ -22,7 +22,7 @@ from celery_app import app
 from common.db_update import get_order_status, update_order_status
 from common.notifications import notify_order_status
 from common.mcp_client import MCPClient
-from common.progress import publish_progress
+from common.progress import publish_analysis_log, publish_progress
 from common.webhook import send_step_webhook
 
 logger = logging.getLogger("ptm-workers.preprocessing")
@@ -132,6 +132,16 @@ def _apply_downsampling(df, analysis_options: dict | None, order_id: int) -> "pd
     return df
 
 
+def _emit_prep_phase(order_id, step, status, detail="", pct=0):
+    publish_analysis_log(
+        order_id, f"[prep:{step}] {status}: {detail}",
+        stage="preprocessing", step="preprocessing_phase", status="progress",
+        metadata={"type": "preprocessing_phase", "step": step, "status": status,
+                  "detail": detail, "pct": round(pct, 1)},
+        persist=True,
+    )
+
+
 @app.task(bind=True, name="preprocessing.tasks.run_preprocessing", max_retries=1)
 def run_preprocessing(self, order_id: int, config: dict):
     """
@@ -195,8 +205,10 @@ def run_preprocessing(self, order_id: int, config: dict):
         if _has_output(order_output, quant_output, all_protein_output):
             logger.info(f"[Order {order_id}] Step 1 skipped — quantification outputs already exist")
             publish_progress(order_id, "preprocessing", "ptm_quantification", "completed", 50, "PTM quantification skipped (cached)")
+            _emit_prep_phase(order_id, "ptm_quantification", "done", "cached", 50)
         else:
             publish_progress(order_id, "preprocessing", "ptm_quantification", "started", 2, "Loading input files")
+            _emit_prep_phase(order_id, "ptm_quantification", "running", "Loading input files", 2)
 
             from preprocessing.core.ptm_quantification import PTMQuantificationAnalyzer
 
@@ -215,6 +227,7 @@ def run_preprocessing(self, order_id: int, config: dict):
                 raise RuntimeError("PTM quantification failed")
 
             publish_progress(order_id, "preprocessing", "ptm_quantification", "completed", 50, "PTM quantification complete")
+            _emit_prep_phase(order_id, "ptm_quantification", "done", "PTM quantification complete", 50)
 
         # --- Pipeline Statistics: collect Step 1 & 2 stats ---
         try:
@@ -350,10 +363,12 @@ def run_preprocessing(self, order_id: int, config: dict):
             if vector_file.exists() and vector_file.stat().st_size > 0:
                 try:
                     publish_progress(order_id, "preprocessing", "vector_report", "started", 52, "Generating PTM vector plots")
+                    _emit_prep_phase(order_id, "vector_report", "running", "Generating PTM vector plots", 52)
                     from preprocessing.core.ptm_vector_report_generator import PTMVectorReportGenerator
                     gen = PTMVectorReportGenerator(str(order_output))
                     gen.generate_all(str(vector_file), file_suffix)
                     publish_progress(order_id, "preprocessing", "vector_report", "completed", 55, "PTM vector plots generated")
+                    _emit_prep_phase(order_id, "vector_report", "done", "PTM vector plots generated", 55)
                 except Exception as vec_err:
                     logger.warning(f"[Order {order_id}] PTM vector report failed (non-fatal): {vec_err}")
 
@@ -365,8 +380,10 @@ def run_preprocessing(self, order_id: int, config: dict):
         if _has_output(order_output, enriched_output):
             logger.info(f"[Order {order_id}] Step 2 skipped — unified enrichment output already exists")
             publish_progress(order_id, "preprocessing", "unified_enrichment", "completed", 70, "Domain/motif enrichment skipped (cached)")
+            _emit_prep_phase(order_id, "unified_enrichment", "done", "cached", 70)
         else:
             publish_progress(order_id, "preprocessing", "unified_enrichment", "started", 50, "Starting domain/motif enrichment")
+            _emit_prep_phase(order_id, "unified_enrichment", "running", "Starting domain/motif enrichment", 50)
 
             from preprocessing.core.unified_enricher import UnifiedProteinEnricher
 
@@ -391,6 +408,7 @@ def run_preprocessing(self, order_id: int, config: dict):
                 logger.warning(f"[Order {order_id}] Skipping unified enrichment — missing input files")
 
             publish_progress(order_id, "preprocessing", "unified_enrichment", "completed", 70, "Domain/motif enrichment complete")
+            _emit_prep_phase(order_id, "unified_enrichment", "done", "Domain/motif enrichment complete", 70)
 
 
         # ================================================================
@@ -401,8 +419,10 @@ def run_preprocessing(self, order_id: int, config: dict):
         if _has_output(order_output, bio_output):
             logger.info(f"[Order {order_id}] Step 3 skipped — biological enrichment output already exists")
             publish_progress(order_id, "preprocessing", "biological_enrichment", "completed", 90, "Biological enrichment skipped (cached)")
+            _emit_prep_phase(order_id, "biological_enrichment", "done", "cached", 90)
         else:
             publish_progress(order_id, "preprocessing", "biological_enrichment", "started", 70, "Starting biological enrichment")
+            _emit_prep_phase(order_id, "biological_enrichment", "running", "Starting biological enrichment", 70)
 
             from preprocessing.core.biological_enricher import BiologicalEnricher
 
@@ -441,6 +461,7 @@ def run_preprocessing(self, order_id: int, config: dict):
                 logger.warning(f"[Order {order_id}] Skipping biological enrichment — {enriched_file.name} not found")
 
             publish_progress(order_id, "preprocessing", "biological_enrichment", "completed", 90, "Biological enrichment complete")
+            _emit_prep_phase(order_id, "biological_enrichment", "done", "Biological enrichment complete", 90)
 
         # --- Pipeline Statistics: collect Step 3, Step 4 & Final Output stats ---
         try:
@@ -500,6 +521,7 @@ def run_preprocessing(self, order_id: int, config: dict):
         # Step 4: Finalization (90% – 100%)
         # ================================================================
         publish_progress(order_id, "preprocessing", "finalization", "started", 90, "Finalizing results")
+        _emit_prep_phase(order_id, "finalization", "running", "Finalizing results", 90)
 
         output_files = [f.name for f in order_output.iterdir() if f.is_file() and f.suffix in (".tsv", ".txt", ".png", ".json")]
         elapsed = round(time.time() - start_time, 1)
@@ -509,6 +531,7 @@ def run_preprocessing(self, order_id: int, config: dict):
             f"Preprocessing complete ({elapsed}s, {len(output_files)} files)",
             metadata={"output_files": output_files, "elapsed_seconds": elapsed},
         )
+        _emit_prep_phase(order_id, "finalization", "done", f"Complete ({elapsed}s, {len(output_files)} files)", 100)
 
         logger.info(f"[Order {order_id}] Preprocessing completed in {elapsed}s — {len(output_files)} output files")
 
