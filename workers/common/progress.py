@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import threading
 
 import redis
 
@@ -11,9 +12,20 @@ logger = logging.getLogger("ptm-workers.progress")
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 CHANNEL_PREFIX = "order:progress:"
 
+_redis_client = None
+_redis_lock = threading.Lock()
+
 
 def get_redis_client():
-    return redis.from_url(REDIS_URL, decode_responses=True)
+    global _redis_client
+    if _redis_client is None:
+        with _redis_lock:
+            if _redis_client is None:
+                _redis_client = redis.from_url(
+                    REDIS_URL, decode_responses=True,
+                    socket_connect_timeout=5, socket_timeout=5,
+                )
+    return _redis_client
 
 
 def publish_progress(

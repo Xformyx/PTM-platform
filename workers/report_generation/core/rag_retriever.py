@@ -7,6 +7,7 @@ Provides literature evidence retrieval for hypothesis validation and section wri
 
 import logging
 import os
+import threading
 from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,7 @@ class RAGRetriever:
         self._client = None
         self._collections: Dict[str, object] = {}
         self._cache: Dict[str, list] = {}
+        self._cache_lock = threading.Lock()
         self._resolved_names: Optional[List[str]] = None  # Filtered to existing only
 
     @property
@@ -87,9 +89,10 @@ class RAGRetriever:
         self, query_text: str, n_results: int = 5, relevance_threshold: float = 0.5
     ) -> List[dict]:
         """Query all collections and return merged, scored results."""
-        cache_key = f"{query_text}:{n_results}"
-        if cache_key in self._cache:
-            return self._cache[cache_key]
+        cache_key = f"{query_text}:{n_results}:{relevance_threshold}"
+        with self._cache_lock:
+            if cache_key in self._cache:
+                return self._cache[cache_key]
 
         if not self.is_available():
             logger.warning("ChromaDB not available — returning empty results")
@@ -214,7 +217,8 @@ class RAGRetriever:
                 i, r["relevance"], source, st, boosted, r.get("collection", "?"),
             )
 
-        self._cache[cache_key] = result
+        with self._cache_lock:
+            self._cache[cache_key] = result
         return result
 
     def query_with_reranking(

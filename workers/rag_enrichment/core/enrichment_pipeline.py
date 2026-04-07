@@ -30,7 +30,6 @@ from typing import Callable, Dict, List, Optional
 
 from common.phase_b_cache import get_cached, set_cached
 
-import pandas as pd
 
 from common.llm_client import LLMClient
 from common.mcp_client import MCPClient
@@ -148,6 +147,7 @@ class RAGEnrichmentPipeline:
         self._analysis_log = analysis_log
         self._phase_b_genes_seen: set = set()
         self._abstract_warned_genes: set = set()
+        self._sets_lock = threading.Lock()
         self._progress_lock = threading.Lock()
         # LLM-based analysis modules (restored from original)
         self.enable_llm = enable_llm_analysis
@@ -493,7 +493,6 @@ class RAGEnrichmentPipeline:
         logger.info("")
 
         # Gene cache stats
-        cache_keys = [k for k in dir(self._gene_cache._store) if not k.startswith('_')]
         logger.info(f"Gene cache entries: {len(self._gene_cache._store)} (saved redundant MCP calls for multi-site genes)")
 
         logger.info(
@@ -788,12 +787,15 @@ class RAGEnrichmentPipeline:
                         batch_mode=ABSTRACT_BATCH_MODE,
                     )
                     out = _asdict(raw) if hasattr(raw, '__dataclass_fields__') else (raw if isinstance(raw, dict) else {})
-                    if self._analysis_log and gene not in self._abstract_warned_genes and articles:
+                    with self._sets_lock:
+                        already_warned = gene in self._abstract_warned_genes
+                    if self._analysis_log and not already_warned and articles:
                         score = out.get("relevance_score", 0) if isinstance(out, dict) else 0
                         kf = out.get("key_findings") if isinstance(out, dict) else None
                         n_kf = len(kf) if isinstance(kf, list) else 0
                         if score == 0 and n_kf == 0:
-                            self._abstract_warned_genes.add(gene)
+                            with self._sets_lock:
+                                self._abstract_warned_genes.add(gene)
                             self._alog(
                                 f"[LLM·abstract] {gene}: no scored findings "
                                 f"(JSON parse fail, Ollama timeout, or short abstracts — see worker logs)"
@@ -801,8 +803,11 @@ class RAGEnrichmentPipeline:
                     return out
                 except Exception as e:
                     logger.warning(f"Abstract analysis failed for {gene}: {e}")
-                    if self._analysis_log and gene not in self._abstract_warned_genes:
-                        self._abstract_warned_genes.add(gene)
+                    with self._sets_lock:
+                        already_warned = gene in self._abstract_warned_genes
+                    if self._analysis_log and not already_warned:
+                        with self._sets_lock:
+                            self._abstract_warned_genes.add(gene)
                         self._alog(f"[LLM·abstract] {gene}: exception — {str(e)[:160]}")
                     return {}
             phase_b_tasks["abstract"] = _abstract
@@ -903,8 +908,10 @@ class RAGEnrichmentPipeline:
 
         _phase_b_errors: list = []
         if tasks_to_run:
-            if gene not in self._phase_b_genes_seen:
+            with self._sets_lock:
+                first_seen = gene not in self._phase_b_genes_seen
                 self._phase_b_genes_seen.add(gene)
+            if first_seen:
                 keys = ",".join(sorted(tasks_to_run.keys()))
                 self._alog(
                     f"[LLM·Phase B] {gene}: articles={len(articles)}, parallel=[{keys}]"

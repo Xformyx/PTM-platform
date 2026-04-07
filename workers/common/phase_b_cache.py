@@ -5,7 +5,7 @@ Persistent cache for Phase B LLM sub-task results.
  - pmid_hash : MD5(sorted PMID 목록을 쉼표로 이은 문자열)
  - task_name : abstract | kinase | functional | fulltext | validation | regulation
 
-데이터베이스는 workers/common/db_update.py 와 동일한 MySQL 연결을 사용한다 (raw pymysql).
+Uses the shared SQLAlchemy engine from common.db_engine.
 캐시 실패는 항상 silently ignore — 캐시가 없어도 파이프라인은 정상 동작한다.
 """
 
@@ -14,37 +14,13 @@ import json
 import logging
 import os
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
+
+from common.db_engine import get_engine as _engine
 
 logger = logging.getLogger(__name__)
 
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "mysql+asyncmy://ptm_user:ptm_password@localhost:3306/ptm_platform",
-)
-SYNC_DATABASE_URL = DATABASE_URL.replace("+asyncmy", "+pymysql").replace("+aiomysql", "+pymysql")
-
-# 캐시 유효 기간 (일). 0 이면 만료 체크 없음.
 CACHE_TTL_DAYS: int = int(os.getenv("PHASE_B_CACHE_TTL_DAYS", "30"))
-
-
-_ENGINE = None
-_ENGINE_LOCK = __import__("threading").Lock()
-
-
-def _engine():
-    global _ENGINE
-    if _ENGINE is None:
-        with _ENGINE_LOCK:
-            if _ENGINE is None:
-                _ENGINE = create_engine(
-                    SYNC_DATABASE_URL,
-                    pool_pre_ping=True,
-                    pool_size=2,
-                    max_overflow=3,
-                    pool_recycle=600,
-                )
-    return _ENGINE
 
 
 # ──────────────────────────────────────────────────────────────────────────────

@@ -2615,11 +2615,11 @@ export default function OrderDetail() {
     const interval = setInterval(async () => {
       try {
         const sinceId = lastLogIdRef.current;
-        const [o, l] = await Promise.all([
-          api.get<Order>(`/orders/${orderId}`),
+        const [s, l] = await Promise.all([
+          api.get<Pick<Order, "id" | "status" | "current_stage" | "progress_pct" | "stage_detail" | "error_message">>(`/orders/${orderId}/status`),
           api.get<{ logs: OrderLog[] }>(`/orders/${orderId}/logs?since_id=${sinceId}`),
         ]);
-        setOrder(o);
+        setOrder((prev) => prev ? { ...prev, ...s } : prev);
         if (l.logs.length > 0) {
           setLogs((prev) => {
             const merged = [...prev, ...l.logs];

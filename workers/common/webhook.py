@@ -22,37 +22,16 @@ import time
 import urllib.request
 from datetime import datetime, timezone
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
+
+from common.db_engine import get_engine as _get_engine
 
 logger = logging.getLogger("ptm-workers.webhook")
-
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "mysql+asyncmy://ptm_user:ptm_password@localhost:3306/ptm_platform",
-)
-SYNC_DATABASE_URL = DATABASE_URL.replace("+asyncmy", "+pymysql").replace("+aiomysql", "+pymysql")
 
 ALLOWED_STEPS = ("preprocessing", "rag_enrichment", "report_generation", "order")
 ALLOWED_STATUSES = ("started", "completed")
 
-_ENGINE = None
-_ENGINE_LOCK = __import__("threading").Lock()
 _TABLE_READY = False
-
-
-def _get_engine():
-    global _ENGINE
-    if _ENGINE is None:
-        with _ENGINE_LOCK:
-            if _ENGINE is None:
-                _ENGINE = create_engine(
-                    SYNC_DATABASE_URL,
-                    pool_pre_ping=True,
-                    pool_size=1,
-                    max_overflow=2,
-                    pool_recycle=600,
-                )
-    return _ENGINE
 
 
 def _ensure_table():
@@ -76,8 +55,7 @@ def _ensure_table():
             conn.commit()
         _TABLE_READY = True
     except Exception as e:
-        logger.debug(f"webhook_sent_log table check: {e}")
-        _TABLE_READY = True
+        logger.warning(f"webhook_sent_log table creation failed (will retry next call): {e}")
 
 
 def _already_sent(order_id: int, step: str, status: str) -> bool:
@@ -207,12 +185,3 @@ def send_step_webhook(
         logger.warning(f"[Order {order_id}] Webhook delivery FAILED for step={step} status={status}")
 
 
-# ── Legacy wrapper (kept for db_update.py backward compat) ────────────────────
-
-def send_order_webhook(
-    order_id: int,
-    event: str,
-    error_message: str | None = None,
-):
-    """Legacy: map old event names to new step-based webhooks where applicable."""
-    pass

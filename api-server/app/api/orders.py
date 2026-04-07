@@ -1255,6 +1255,32 @@ async def delete_order(
     return {"order_code": order_code, "status": "deleted"}
 
 
+@router.get("/{order_id}/status")
+async def get_order_status(
+    order_id: int,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Lightweight polling endpoint — returns only status-relevant fields."""
+    result = await db.execute(
+        select(
+            Order.id, Order.status, Order.current_stage, Order.progress_pct,
+            Order.stage_detail, Order.error_message,
+        ).where(Order.id == order_id)
+    )
+    row = result.one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="Order not found")
+    return {
+        "id": row[0],
+        "status": row[1],
+        "current_stage": row[2],
+        "progress_pct": float(row[3]) if row[3] is not None else 0,
+        "stage_detail": row[4],
+        "error_message": row[5],
+    }
+
+
 @router.get("/{order_id}/logs")
 async def get_order_logs(
     order_id: int,

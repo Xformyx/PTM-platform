@@ -368,7 +368,7 @@ def run_section_writing(state: dict) -> dict:
                 f"Prompt size={prompt_len:,} chars, max_tokens={max_tok}"
             )
             if cb:
-                cb(pct, f"WARNING: LLM failed for {section_type} — using fallback text")
+                cb(70, f"WARNING: LLM failed for {section_type} — using fallback text")
             content = _fallback_section(section_type, research_results, validated_hypotheses, parsed_ptms)
 
         # Strip self-generated section headings from LLM output
@@ -502,7 +502,11 @@ def _build_section_prompt(
         "signaling",
     ]
     keywords = [k for k in keywords if k and isinstance(k, str)]
-    rag_results = retriever.search_for_section(section_type, keywords, n_results=chromadb_results)
+    # Introduction has its own dedicated (larger) Chroma search — skip the generic one
+    rag_results = (
+        retriever.search_for_section(section_type, keywords, n_results=chromadb_results)
+        if section_type != "introduction" else []
+    )
     if rag_results:
         ref_lines = []
         for idx, r in enumerate(rag_results[:chromadb_results], 1):

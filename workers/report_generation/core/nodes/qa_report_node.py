@@ -368,12 +368,12 @@ class QAReportGenerator:
         q_prompt = _build_ptm_question_prompt(section, context)
 
         if self.use_two_model:
-            questions_text = self.llm.generate(
+            q_llm = LLMClient(provider=self.llm.provider, model=self.question_model)
+            questions_text = q_llm.generate(
                 prompt=q_prompt,
                 system_prompt=QA_SYSTEM_PROMPT,
                 temperature=0.7,
                 max_tokens=2000,
-                model_override=self.question_model,
             )
         else:
             questions_text = self.llm.generate(
@@ -408,12 +408,12 @@ class QAReportGenerator:
             a_prompt = _build_ptm_answer_prompt(section, context, q)
 
             if self.use_two_model:
-                answer = self.llm.generate(
+                a_llm = LLMClient(provider=self.llm.provider, model=self.answer_model)
+                answer = a_llm.generate(
                     prompt=a_prompt,
                     system_prompt=QA_SYSTEM_PROMPT,
                     temperature=0.5,
                     max_tokens=1500,
-                    model_override=self.answer_model,
                 )
             else:
                 answer = self.llm.generate(

@@ -17,31 +17,9 @@ from common.document_indexer import DocumentIndexer
 
 logger = logging.getLogger("ptm-workers.document-indexing")
 
-SYNC_DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "mysql+asyncmy://ptm_user:ptm_password@localhost:3306/ptm_platform",
-).replace("+asyncmy", "+pymysql").replace("+aiomysql", "+pymysql")
+from sqlalchemy import text
 
-import threading as _threading
-from sqlalchemy import create_engine, text
-
-_ENGINE = None
-_ENGINE_LOCK = _threading.Lock()
-
-
-def _get_engine():
-    global _ENGINE
-    if _ENGINE is None:
-        with _ENGINE_LOCK:
-            if _ENGINE is None:
-                _ENGINE = create_engine(
-                    SYNC_DATABASE_URL,
-                    pool_pre_ping=True,
-                    pool_size=1,
-                    max_overflow=2,
-                    pool_recycle=600,
-                )
-    return _ENGINE
+from common.db_engine import get_engine as _get_engine
 
 
 def _update_document_status(doc_id: int, status: str, chunk_count: int = 0, error_message: str = None):

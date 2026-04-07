@@ -22,7 +22,10 @@ export function useOrderProgress(orderId: number | null) {
           _ts: Date.now(),
         };
         setProgress(data);
-        setEvents((prev) => [...prev, data]);
+        setEvents((prev) => {
+          const next = [...prev, data];
+          return next.length > 500 ? next.slice(-500) : next;
+        });
       } catch {
         // ignore parse errors
       }

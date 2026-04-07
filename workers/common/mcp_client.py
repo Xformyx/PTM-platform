@@ -7,6 +7,7 @@ caching (Redis), rate limiting, and response normalization.
 
 import logging
 import os
+import threading
 from typing import Callable, Dict, List, Optional
 
 import requests
@@ -19,13 +20,22 @@ ProgressCallback = Optional[Callable[[int, int, str], None]]
 
 
 class MCPClient:
-    """Synchronous MCP Client for Celery workers."""
+    """Synchronous MCP Client for Celery workers. Thread-safe via per-thread sessions."""
 
     def __init__(self, base_url: str = None, timeout: float = 120.0):
         self.base_url = (base_url or MCP_BASE_URL).rstrip("/")
         self.timeout = timeout
-        self.session = requests.Session()
-        self.session.headers.update({"Content-Type": "application/json"})
+        self._local = threading.local()
+
+    @property
+    def session(self) -> requests.Session:
+        """Return a per-thread requests.Session (lazy-created)."""
+        s = getattr(self._local, "session", None)
+        if s is None:
+            s = requests.Session()
+            s.headers.update({"Content-Type": "application/json"})
+            self._local.session = s
+        return s
 
     def health_check(self) -> bool:
         try:
@@ -597,4 +607,7 @@ class MCPClient:
             return []
 
     def close(self):
-        self.session.close()
+        s = getattr(self._local, "session", None)
+        if s is not None:
+            s.close()
+            self._local.session = None

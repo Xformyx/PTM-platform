@@ -5,6 +5,7 @@ from typing import Optional
 from sqlalchemy import (
     Enum,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
@@ -133,6 +134,10 @@ class OrderLog(Base):
     )
 
     order: Mapped["Order"] = relationship(back_populates="logs")
+
+    __table_args__ = (
+        Index("ix_order_logs_order_id_id", "order_id", "id"),
+    )
 
 
 class OrderShare(Base):

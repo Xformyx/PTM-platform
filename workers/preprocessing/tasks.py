@@ -732,3 +732,9 @@ def run_preprocessing(self, order_id: int, config: dict):
             metadata={"traceback": traceback.format_exc(), "elapsed_seconds": elapsed},
         )
         raise
+    finally:
+        try:
+            if "mcp" in dir():
+                mcp.close()
+        except Exception:
+            pass

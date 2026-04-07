@@ -67,8 +67,6 @@ def _resolve_enriched_json_path(order_id: int, rag_dir: Path, explicit: str | No
 
 
 def _make_progress_cb(order_id):
-    _q_total = [0]
-
     def _emit(step, status, detail="", pct=0):
         publish_analysis_log(
             order_id, f"[report:{step}] {status}: {detail}",
@@ -213,9 +211,9 @@ def run_report_generation(self, order_id: int, config: dict):
         # v9.20: Load receptor_inference_data from DB
         inferred_receptors_from_db = []
         try:
-            from common.db_update import _get_engine
+            from common.db_engine import get_engine as _get_shared_engine
             from sqlalchemy import text as _text
-            _engine = _get_engine()
+            _engine = _get_shared_engine()
             with _engine.connect() as _conn:
                 _row = _conn.execute(
                     _text("SELECT receptor_inference_data FROM orders WHERE id = :oid"),

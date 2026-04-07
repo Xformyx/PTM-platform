@@ -26,6 +26,18 @@ NCBI_BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 EUROPEPMC_BASE = "https://www.ebi.ac.uk/europepmc/webservices/rest"
 MYGENE_BASE = "https://mygene.info/v3"
 
+_http_client: httpx.AsyncClient | None = None
+
+
+def _get_http_client() -> httpx.AsyncClient:
+    global _http_client
+    if _http_client is None or _http_client.is_closed:
+        _http_client = httpx.AsyncClient(
+            timeout=httpx.Timeout(connect=10, read=120, write=30, pool=10),
+            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+        )
+    return _http_client
+
 NCBI_EMAIL = os.getenv("NCBI_EMAIL", "user@example.com")
 NCBI_API_KEY = os.getenv("NCBI_API_KEY", "")
 NCBI_TOOL = os.getenv("NCBI_TOOL", "PTM-Platform")
@@ -77,8 +89,7 @@ async def search_ptm_pubmed(
 
     if redis and result.get("articles"):
         import json
-        # Permanent cache — articles don't change once published
-        await redis.set(cache_key, json.dumps(result))
+        await redis.set(cache_key, json.dumps(result), ex=604800)
         # Also cache each article individually with metadata
         for article in result["articles"]:
             pmid = article.get("pmid")
@@ -87,7 +98,7 @@ async def search_ptm_pubmed(
                 # Only set if not already cached (preserve original cached_at)
                 existing = await redis.get(article_key)
                 if not existing:
-                    await redis.set(article_key, json.dumps(article))
+                    await redis.set(article_key, json.dumps(article), ex=604800)
         logger.info(f"PubMed search cached permanently: {cache_key} ({result.get('total_found', 0)} articles)")
 
     return result
@@ -132,8 +143,8 @@ async def fetch_articles_by_pmids(pmids: list[str], redis=None) -> dict:
                 pmid = article.get("pmid")
                 if pmid:
                     article_key = f"pubmed:article:{pmid}"
-                    await redis.set(article_key, json.dumps(article))
-            logger.info(f"Cached {len(new_articles)} new articles permanently")
+                    await redis.set(article_key, json.dumps(article), ex=604800)
+            logger.info(f"Cached {len(new_articles)} new articles (7-day TTL)")
 
     all_articles = cached_articles + new_articles
     return {"articles": all_articles}
@@ -156,7 +167,7 @@ async def get_gene_aliases(gene: str, redis=None) -> dict:
 
     if redis and aliases:
         import json
-        await redis.set(cache_key, json.dumps(result))
+        await redis.set(cache_key, json.dumps(result), ex=604800)
 
     return result
 
@@ -351,11 +362,11 @@ async def _esearch(query: str, max_results: int = 15) -> list[str]:
         params["api_key"] = NCBI_API_KEY
 
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.get(f"{NCBI_BASE}/esearch.fcgi", params=params)
-            resp.raise_for_status()
-            root = ET.fromstring(resp.text)
-            return [el.text for el in root.findall(".//Id") if el.text]
+        client = _get_http_client()
+        resp = await client.get(f"{NCBI_BASE}/esearch.fcgi", params=params, timeout=30)
+        resp.raise_for_status()
+        root = ET.fromstring(resp.text)
+        return [el.text for el in root.findall(".//Id") if el.text]
     except Exception as e:
         logger.warning(f"PubMed esearch failed: {e}")
         return []
@@ -376,10 +387,10 @@ async def _fetch_article_details(pmids: list[str]) -> list[dict]:
         params["api_key"] = NCBI_API_KEY
 
     try:
-        async with httpx.AsyncClient(timeout=120) as client:
-            resp = await client.get(f"{NCBI_BASE}/efetch.fcgi", params=params)
-            resp.raise_for_status()
-            return _parse_pubmed_xml(resp.text)
+        client = _get_http_client()
+        resp = await client.get(f"{NCBI_BASE}/efetch.fcgi", params=params, timeout=120)
+        resp.raise_for_status()
+        return _parse_pubmed_xml(resp.text)
     except Exception as e:
         logger.warning(f"PubMed efetch failed: {e}")
         return []
@@ -480,19 +491,20 @@ async def _search_europe_pmc(gene: str, position: str, ptm_type: str, max_result
     query = f'"{gene}" AND "{ptm}" AND ("{position}")'
 
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.get(
-                f"{EUROPEPMC_BASE}/search",
-                params={"query": query, "format": "json", "resultType": "lite", "pageSize": str(max_results)},
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            pmids = []
-            for r in data.get("resultList", {}).get("result", []):
-                pmid = r.get("pmid")
-                if pmid:
-                    pmids.append(str(pmid))
-            return pmids
+        client = _get_http_client()
+        resp = await client.get(
+            f"{EUROPEPMC_BASE}/search",
+            params={"query": query, "format": "json", "resultType": "lite", "pageSize": str(max_results)},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        pmids = []
+        for r in data.get("resultList", {}).get("result", []):
+            pmid = r.get("pmid")
+            if pmid:
+                pmids.append(str(pmid))
+        return pmids
     except Exception as e:
         logger.warning(f"Europe PMC search failed: {e}")
         return []
@@ -551,25 +563,26 @@ def _calculate_relevance(
 
 async def _fetch_gene_aliases(gene: str) -> list[str]:
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.get(
-                f"{MYGENE_BASE}/query",
-                params={"q": gene, "fields": "alias,symbol", "size": "1"},
-            )
-            if resp.status_code != 200:
-                return []
-            data = resp.json()
-            hits = data.get("hits", [])
-            if not hits:
-                return []
-            hit = hits[0]
-            aliases = hit.get("alias", [])
-            if isinstance(aliases, str):
-                aliases = [aliases]
-            symbol = hit.get("symbol", "")
-            if symbol and symbol != gene:
-                aliases.append(symbol)
-            return [a for a in aliases if a and a != gene][:5]
+        client = _get_http_client()
+        resp = await client.get(
+            f"{MYGENE_BASE}/query",
+            params={"q": gene, "fields": "alias,symbol", "size": "1"},
+            timeout=10,
+        )
+        if resp.status_code != 200:
+            return []
+        data = resp.json()
+        hits = data.get("hits", [])
+        if not hits:
+            return []
+        hit = hits[0]
+        aliases = hit.get("alias", [])
+        if isinstance(aliases, str):
+            aliases = [aliases]
+        symbol = hit.get("symbol", "")
+        if symbol and symbol != gene:
+            aliases.append(symbol)
+        return [a for a in aliases if a and a != gene][:5]
     except Exception:
         return []
 

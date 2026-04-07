@@ -513,3 +513,8 @@ def run_rag_enrichment(self, order_id: int, config: dict):
             metadata={"traceback": traceback.format_exc(), "elapsed_seconds": elapsed},
         )
         raise
+    finally:
+        try:
+            mcp.close()
+        except Exception:
+            pass

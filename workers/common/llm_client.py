@@ -413,7 +413,9 @@ class LLMClient:
                     "[v95] %s: LLM returned error on attempt %d: %s",
                     section_name, attempt, result[:200] if result else "None",
                 )
-                continue
+                if result and ("timed out" in result or "timeout" in result.lower()):
+                    continue
+                break
 
             word_count = len(result.strip().split())
             logger.info(

@@ -7,34 +7,11 @@ import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
+
+from common.db_engine import get_engine as _get_engine
 
 logger = logging.getLogger("ptm-workers.notifications")
-
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "mysql+asyncmy://ptm_user:ptm_password@localhost:3306/ptm_platform",
-)
-SYNC_DATABASE_URL = DATABASE_URL.replace("+asyncmy", "+pymysql").replace("+aiomysql", "+pymysql")
-
-
-_ENGINE = None
-_ENGINE_LOCK = __import__("threading").Lock()
-
-
-def _get_engine():
-    global _ENGINE
-    if _ENGINE is None:
-        with _ENGINE_LOCK:
-            if _ENGINE is None:
-                _ENGINE = create_engine(
-                    SYNC_DATABASE_URL,
-                    pool_pre_ping=True,
-                    pool_size=1,
-                    max_overflow=2,
-                    pool_recycle=600,
-                )
-    return _ENGINE
 
 
 def _get_user_for_order(order_id: int) -> tuple[int | None, str | None, bool]:
