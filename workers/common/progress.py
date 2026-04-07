@@ -68,17 +68,23 @@ def publish_analysis_log(
     step: str = "enrichment_detail",
     status: str = "progress",
     metadata: dict = None,
+    persist: bool = False,
 ):
-    """Append a line to Analysis Log (order_logs + Redis) without changing orders.progress_pct."""
-    insert_order_log(
-        order_id=order_id,
-        stage=stage,
-        step=step,
-        status=status,
-        progress_pct=None,
-        message=message,
-        metadata=metadata,
-    )
+    """Publish a real-time event to Redis SSE.
+
+    By default does NOT write to order_logs (DB) to avoid log bloat.
+    Set persist=True for milestone events that should survive a page reload.
+    """
+    if persist:
+        insert_order_log(
+            order_id=order_id,
+            stage=stage,
+            step=step,
+            status=status,
+            progress_pct=None,
+            message=message,
+            metadata=metadata,
+        )
     try:
         r = get_redis_client()
         channel = f"{CHANNEL_PREFIX}{order_id}"

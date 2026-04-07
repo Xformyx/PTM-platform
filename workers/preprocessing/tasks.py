@@ -23,6 +23,7 @@ from common.db_update import get_order_status, update_order_status
 from common.notifications import notify_order_status
 from common.mcp_client import MCPClient
 from common.progress import publish_progress
+from common.webhook import send_step_webhook
 
 logger = logging.getLogger("ptm-workers.preprocessing")
 
@@ -154,6 +155,7 @@ def run_preprocessing(self, order_id: int, config: dict):
     update_order_status(order_id, "preprocessing", current_stage="preprocessing", progress_pct=0)
     logger.info(f"[Order {order_id}] Preprocessing started — mode={config.get('ptm_mode', 'phospho')}")
     publish_progress(order_id, "preprocessing", "start", "started", 0, "Preprocessing pipeline started")
+    send_step_webhook(order_id, "preprocessing", "started")
 
     try:
         pr_path = config["pr_matrix_path"]

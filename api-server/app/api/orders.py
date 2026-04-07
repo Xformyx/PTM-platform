@@ -699,6 +699,11 @@ async def start_order(
             except OSError as e:
                 logger.warning(f"Failed to clear output dir: {e}")
 
+    # Truncate previous run logs
+    await db.execute(
+        OrderLog.__table__.delete().where(OrderLog.order_id == order.id)
+    )
+
     order.status = "queued"
     order.current_stage = "preprocessing"
     order.progress_pct = 0
@@ -983,7 +988,17 @@ async def run_stage(
     )
     active_collections = [r[0] for r in coll_result.fetchall()]
 
-    # Update order status
+    # Truncate logs for stages that will be re-run
+    stage_order = ["preprocessing", "rag_enrichment", "report_generation"]
+    idx = stage_order.index(body.stage)
+    stages_to_clear = stage_order[idx:]
+    await db.execute(
+        OrderLog.__table__.delete().where(
+            OrderLog.order_id == order.id,
+            OrderLog.stage.in_(stages_to_clear),
+        )
+    )
+
     order.status = "queued"
     order.current_stage = body.stage
     order.progress_pct = 0
@@ -1003,7 +1018,6 @@ async def run_stage(
     single_time_point = sample_cfg.get("single_time_point", False)
 
     if body.stage == "preprocessing":
-        # Clear preprocessing outputs so they are regenerated
         _clear_preprocessing_outputs(order_output, ptm_mode)
 
         condition_map = _build_condition_map(order.sample_config)
@@ -1232,6 +1246,8 @@ async def delete_order(
 async def get_order_logs(
     order_id: int,
     stage: Optional[str] = None,
+    since_id: Optional[int] = None,
+    limit: int = 2000,
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
@@ -1244,7 +1260,9 @@ async def get_order_logs(
     query = select(OrderLog).where(OrderLog.order_id == order_id)
     if stage:
         query = query.where(OrderLog.stage == stage)
-    query = query.order_by(OrderLog.created_at.asc())
+    if since_id:
+        query = query.where(OrderLog.id > since_id)
+    query = query.order_by(OrderLog.created_at.asc()).limit(min(limit, 5000))
 
     result = await db.execute(query)
     logs = result.scalars().all()

@@ -22,6 +22,7 @@ from celery_app import app
 from common.db_update import update_order_status
 from common.notifications import notify_order_status
 from common.progress import publish_progress
+from common.webhook import send_step_webhook
 
 logger = logging.getLogger("ptm-workers.report-generation")
 
@@ -504,6 +505,9 @@ def run_report_generation(self, order_id: int, config: dict):
             update_order_status(order_id, "completed", progress_pct=100, result_files=result_data)
             notify_order_status(order_id, "completed")
             logger.info(f"[Order {order_id}] Report generation completed in {elapsed}s — {len(output_file_names)} files")
+
+        send_step_webhook(order_id, "report_generation", "completed")
+        send_step_webhook(order_id, "order", "completed")
 
         return {
             "order_id": order_id,

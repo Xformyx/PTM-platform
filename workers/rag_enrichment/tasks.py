@@ -23,6 +23,7 @@ from common.db_update import get_order_status, update_order_status
 from common.notifications import notify_order_status
 from common.mcp_client import MCPClient
 from common.progress import publish_analysis_log, publish_progress
+from common.webhook import send_step_webhook
 
 logger = logging.getLogger("ptm-workers.rag-enrichment")
 
@@ -452,6 +453,7 @@ def run_rag_enrichment(self, order_id: int, config: dict):
         )
 
         logger.info(f"[Order {order_id}] RAG enrichment completed in {elapsed}s")
+        send_step_webhook(order_id, "rag_enrichment", "completed")
         mcp.close()
 
         # Chain to Stage 3: Report Generation

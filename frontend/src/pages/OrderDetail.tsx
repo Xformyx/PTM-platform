@@ -26,7 +26,6 @@ import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Progress } from "@/components/ui/progress";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import FilePreviewModal from "@/components/FilePreviewModal";
@@ -2397,6 +2396,7 @@ export default function OrderDetail() {
   const [phaseModalOpen, setPhaseModalOpen] = useState(false);
   const [stopInProgress, setStopInProgress] = useState(false);
   const stopRequestRef = useRef(false);
+  const lastLogIdRef = useRef(0);
 
   const isRunning = !!order && !["completed", "failed", "pending", "cancelled"].includes(order.status);
 
@@ -2485,6 +2485,9 @@ export default function OrderDetail() {
     ]).then(([o, l, lc]) => {
       setOrder(o);
       setLogs(l.logs);
+      if (l.logs.length > 0) {
+        lastLogIdRef.current = Math.max(...l.logs.map((x) => x.id));
+      }
       setLlmConfig(lc);
       setLoading(false);
     });
@@ -2540,14 +2543,21 @@ export default function OrderDetail() {
     if (!isRunning) return;
     const interval = setInterval(async () => {
       try {
+        const sinceId = lastLogIdRef.current;
         const [o, l] = await Promise.all([
           api.get<Order>(`/orders/${orderId}`),
-          api.get<{ logs: OrderLog[] }>(`/orders/${orderId}/logs`),
+          api.get<{ logs: OrderLog[] }>(`/orders/${orderId}/logs?since_id=${sinceId}`),
         ]);
         setOrder(o);
-        setLogs(l.logs);
+        if (l.logs.length > 0) {
+          setLogs((prev) => {
+            const merged = [...prev, ...l.logs];
+            lastLogIdRef.current = Math.max(lastLogIdRef.current, ...l.logs.map((x) => x.id));
+            return merged;
+          });
+        }
       } catch { /* ignore */ }
-    }, 3000);
+    }, 5000);
     return () => clearInterval(interval);
   }, [isRunning, orderId]);
 
@@ -2735,7 +2745,12 @@ export default function OrderDetail() {
             </Button>
           )}
           {isRunning && !isReadOnlyShared && (
-            <Button variant="destructive" onClick={handleStop} aria-busy={stopInProgress} className="gap-2 min-w-[7.5rem]">
+            <Button
+              variant="destructive"
+              onClick={handleStop}
+              disabled={stopInProgress}
+              className={cn("gap-2 min-w-[7.5rem]", stopInProgress && "opacity-80 cursor-wait")}
+            >
               {stopInProgress ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
@@ -3446,31 +3461,20 @@ export default function OrderDetail() {
         </TabsContent>
       </Tabs>
 
-      <Dialog
-        open={stopInProgress}
-        onOpenChange={(next) => {
-          if (!next) {
-            /* Dismiss only via finally {} after cancel API completes */
-            return;
-          }
-        }}
-      >
-        <DialogContent
-          className="sm:max-w-md [&>button]:hidden"
-          onPointerDownOutside={(e) => e.preventDefault()}
-          onEscapeKeyDown={(e) => e.preventDefault()}
-        >
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-3">
+      {/* Stop-in-progress overlay — renders immediately (no portal/animation delay) */}
+      {stopInProgress && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+          <div className="bg-background rounded-lg shadow-lg p-6 max-w-md w-full mx-4 flex flex-col gap-3">
+            <div className="flex items-center gap-3 text-lg font-semibold">
               <Loader2 className="h-6 w-6 shrink-0 animate-spin text-primary" />
               분석을 멈추는 중
-            </DialogTitle>
-            <DialogDescription className="text-left pt-1">
+            </div>
+            <p className="text-sm text-muted-foreground">
               서버에 중단 요청을 보내고 있습니다. 백그라운드 워커와 LLM이 처리 중일 수 있어 잠시 걸릴 수 있습니다.
-            </DialogDescription>
-          </DialogHeader>
-        </DialogContent>
-      </Dialog>
+            </p>
+          </div>
+        </div>
+      )}
 
       <RerunOptionsModal
         open={rerunModalOpen}
