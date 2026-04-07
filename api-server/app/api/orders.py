@@ -1071,6 +1071,16 @@ async def run_stage(
         md_report = order_output / f"comprehensive_report{file_suffix}.md"
 
         if not enriched_json.exists():
+            # Fallback: any enriched_ptm_data*.json (newest first), e.g. suffix mismatch or manual copy
+            _cand = sorted(
+                order_output.glob("enriched_ptm_data*.json"),
+                key=lambda p: p.stat().st_mtime,
+                reverse=True,
+            )
+            if _cand:
+                enriched_json = _cand[0]
+
+        if not enriched_json.exists():
             order.status = "failed"
             order.error_message = "Enriched JSON not found. Run RAG Enrichment first."
             await db.commit()

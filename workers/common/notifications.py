@@ -18,10 +18,29 @@ DATABASE_URL = os.getenv(
 SYNC_DATABASE_URL = DATABASE_URL.replace("+asyncmy", "+pymysql").replace("+aiomysql", "+pymysql")
 
 
+_ENGINE = None
+_ENGINE_LOCK = __import__("threading").Lock()
+
+
+def _get_engine():
+    global _ENGINE
+    if _ENGINE is None:
+        with _ENGINE_LOCK:
+            if _ENGINE is None:
+                _ENGINE = create_engine(
+                    SYNC_DATABASE_URL,
+                    pool_pre_ping=True,
+                    pool_size=1,
+                    max_overflow=2,
+                    pool_recycle=600,
+                )
+    return _ENGINE
+
+
 def _get_user_for_order(order_id: int) -> tuple[int | None, str | None, bool]:
     """Return (user_id, email, email_notifications_enabled) for the order's run_by_user. None if no user."""
     try:
-        engine = create_engine(SYNC_DATABASE_URL, pool_pre_ping=True, pool_size=1)
+        engine = _get_engine()
         with engine.connect() as conn:
             row = conn.execute(
                 text("""
@@ -42,7 +61,7 @@ def _get_user_for_order(order_id: int) -> tuple[int | None, str | None, bool]:
 def _get_order_info(order_id: int) -> tuple[str, str]:
     """Return (order_code, project_name) for the order."""
     try:
-        engine = create_engine(SYNC_DATABASE_URL, pool_pre_ping=True, pool_size=1)
+        engine = _get_engine()
         with engine.connect() as conn:
             row = conn.execute(
                 text("SELECT order_code, project_name FROM orders WHERE id = :order_id"),
@@ -57,7 +76,7 @@ def _get_order_info(order_id: int) -> tuple[str, str]:
 
 def _insert_notification(user_id: int, order_id: int, ntype: str, title: str, message: str | None = None):
     try:
-        engine = create_engine(SYNC_DATABASE_URL, pool_pre_ping=True, pool_size=1)
+        engine = _get_engine()
         with engine.connect() as conn:
             conn.execute(
                 text("""

@@ -28,6 +28,43 @@ logger = logging.getLogger("ptm-workers.report-generation")
 OUTPUT_DIR = os.getenv("OUTPUT_DIR", "/data/outputs")
 
 
+def _resolve_enriched_json_path(order_id: int, rag_dir: Path, explicit: str | None) -> str:
+    """
+    Prefer config path if the file exists; otherwise pick newest enriched_ptm_data*.json
+    under rag_dir. Avoids FileNotFoundError when RAG chained path is stale or volume reset.
+    """
+    if explicit:
+        p = Path(explicit)
+        if p.is_file():
+            return str(p.resolve())
+        logger.warning(
+            "[Order %s] enriched_json_path not found (%s), searching %s",
+            order_id,
+            explicit,
+            rag_dir,
+        )
+    rag_dir = Path(rag_dir)
+    if not rag_dir.is_dir():
+        raise FileNotFoundError(
+            f"[Order {order_id}] RAG output directory missing: {rag_dir}. "
+            "Run preprocessing and RAG Enrichment so the order output folder exists."
+        )
+    candidates = sorted(
+        rag_dir.glob("enriched_ptm_data*.json"),
+        key=lambda f: f.stat().st_mtime,
+        reverse=True,
+    )
+    if not candidates:
+        raise FileNotFoundError(
+            f"[Order {order_id}] No enriched_ptm_data*.json under {rag_dir}. "
+            "Run RAG Enrichment to completion (order must reach the JSON save step). "
+            f"Expected file was: {explicit or f'enriched_ptm_data_*.json in {rag_dir}'}"
+        )
+    chosen = candidates[0]
+    logger.info("[Order %s] Using enriched JSON: %s", order_id, chosen)
+    return str(chosen.resolve())
+
+
 def _make_progress_cb(order_id):
     def cb(pct, msg):
         publish_progress(order_id, "report_generation", "graph", "running", round(pct, 1), msg)
@@ -98,18 +135,14 @@ def run_report_generation(self, order_id: int, config: dict):
     publish_progress(order_id, "report_generation", "start", "started", 0, "Report generation pipeline started")
 
     try:
-        # Resolve enriched data path
+        # Resolve enriched data path (handles missing explicit path after RAG stop / volume issues)
         rag_dir = Path(config.get("rag_output_dir", str(order_output)))
-        enriched_path = config.get("enriched_json_path")
-        if not enriched_path:
-            candidates = list(rag_dir.glob("enriched_ptm_data_*.json"))
-            if candidates:
-                enriched_path = str(candidates[0])
-            else:
-                raise FileNotFoundError(f"No enriched PTM JSON found in {rag_dir}")
+        enriched_path = _resolve_enriched_json_path(
+            order_id, rag_dir, config.get("enriched_json_path")
+        )
 
         # Load enriched data
-        with open(enriched_path, "r") as f:
+        with open(enriched_path, "r", encoding="utf-8") as f:
             enriched_data = json.load(f)
         logger.info(f"[Order {order_id}] Loaded {len(enriched_data)} enriched PTMs from {enriched_path}")
 

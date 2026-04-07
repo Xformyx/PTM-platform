@@ -22,10 +22,29 @@ SYNC_DATABASE_URL = DATABASE_URL.replace("+asyncmy", "+pymysql").replace("+aiomy
 EVENTS = ("started", "completed", "failed", "cancelled")
 
 
+_ENGINE = None
+_ENGINE_LOCK = __import__("threading").Lock()
+
+
+def _get_engine():
+    global _ENGINE
+    if _ENGINE is None:
+        with _ENGINE_LOCK:
+            if _ENGINE is None:
+                _ENGINE = create_engine(
+                    SYNC_DATABASE_URL,
+                    pool_pre_ping=True,
+                    pool_size=1,
+                    max_overflow=2,
+                    pool_recycle=600,
+                )
+    return _ENGINE
+
+
 def _get_order_info(order_id: int) -> dict:
     """Fetch order_code, project_name for webhook payload."""
     try:
-        engine = create_engine(SYNC_DATABASE_URL, pool_pre_ping=True, pool_size=1)
+        engine = _get_engine()
         with engine.connect() as conn:
             row = conn.execute(
                 text("SELECT order_code, project_name, status, current_stage, error_message FROM orders WHERE id = :order_id"),

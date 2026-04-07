@@ -946,10 +946,18 @@ class RAGEnrichmentPipeline:
                     phase_b_results[name] = {}
                     _phase_b_errors.append(name)
 
+        _b_detail = (
+            f"timeout: {','.join(_phase_b_errors)}" if _phase_b_errors else ""
+        )
+        if not _phase_b_errors:
+            # So UIs / DB logs can show "N/N articles" even without per-step callbacks
+            n_art = len(articles)
+            _b_detail = f"{n_art}/{n_art} articles"
+
         self._phase_event(
             gene, position, "B",
             "error" if _phase_b_errors else "done",
-            f"timeout: {','.join(_phase_b_errors)}" if _phase_b_errors else "",
+            _b_detail,
         )
 
         regulation = phase_b_results.get("regulation", regulation)

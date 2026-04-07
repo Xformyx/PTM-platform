@@ -22,13 +22,32 @@ SYNC_DATABASE_URL = os.getenv(
     "mysql+asyncmy://ptm_user:ptm_password@localhost:3306/ptm_platform",
 ).replace("+asyncmy", "+pymysql").replace("+aiomysql", "+pymysql")
 
+import threading as _threading
+from sqlalchemy import create_engine, text
+
+_ENGINE = None
+_ENGINE_LOCK = _threading.Lock()
+
+
+def _get_engine():
+    global _ENGINE
+    if _ENGINE is None:
+        with _ENGINE_LOCK:
+            if _ENGINE is None:
+                _ENGINE = create_engine(
+                    SYNC_DATABASE_URL,
+                    pool_pre_ping=True,
+                    pool_size=1,
+                    max_overflow=2,
+                    pool_recycle=600,
+                )
+    return _ENGINE
+
 
 def _update_document_status(doc_id: int, status: str, chunk_count: int = 0, error_message: str = None):
     """Update rag_documents row with indexing result."""
-    from sqlalchemy import create_engine, text
-
     try:
-        engine = create_engine(SYNC_DATABASE_URL, pool_pre_ping=True, pool_size=1)
+        engine = _get_engine()
         with engine.connect() as conn:
             conn.execute(
                 text(
@@ -43,17 +62,14 @@ def _update_document_status(doc_id: int, status: str, chunk_count: int = 0, erro
                 },
             )
             conn.commit()
-        engine.dispose()
     except Exception as e:
         logger.error(f"Failed to update document {doc_id} status: {e}")
 
 
 def _update_collection_counts(collection_id: int):
     """Recalculate and update document_count and chunk_count for a collection."""
-    from sqlalchemy import create_engine, text
-
     try:
-        engine = create_engine(SYNC_DATABASE_URL, pool_pre_ping=True, pool_size=1)
+        engine = _get_engine()
         with engine.connect() as conn:
             row = conn.execute(
                 text(
@@ -71,16 +87,13 @@ def _update_collection_counts(collection_id: int):
                     {"doc_count": row[0], "total_chunks": row[1], "cid": collection_id},
                 )
             conn.commit()
-        engine.dispose()
     except Exception as e:
         logger.error(f"Failed to update collection {collection_id} counts: {e}")
 
 
 def _get_collection_info(collection_id: int) -> dict:
     """Fetch collection metadata from DB."""
-    from sqlalchemy import create_engine, text
-
-    engine = create_engine(SYNC_DATABASE_URL, pool_pre_ping=True, pool_size=1)
+    engine = _get_engine()
     with engine.connect() as conn:
         row = conn.execute(
             text(
@@ -89,7 +102,6 @@ def _get_collection_info(collection_id: int) -> dict:
             ),
             {"cid": collection_id},
         ).fetchone()
-    engine.dispose()
     if not row:
         raise ValueError(f"Collection {collection_id} not found")
     return {

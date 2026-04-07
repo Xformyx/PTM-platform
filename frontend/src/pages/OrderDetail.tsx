@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useMemo } from "react";
+import { flushSync } from "react-dom";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -2395,6 +2396,7 @@ export default function OrderDetail() {
   const runHandledRef = useRef(false);
   const [phaseModalOpen, setPhaseModalOpen] = useState(false);
   const [stopInProgress, setStopInProgress] = useState(false);
+  const stopRequestRef = useRef(false);
 
   const isRunning = !!order && !["completed", "failed", "pending", "cancelled"].includes(order.status);
 
@@ -2436,11 +2438,27 @@ export default function OrderDetail() {
 
       const existing = map.get(key) ?? blank(gene, position);
 
-      // article progress: detail like "5/15 articles" from B running events
-      const artMatch = detail.match(/^(\d+)\/(\d+)\s*articles?$/);
-      const newArticleProgress = artMatch
-        ? `${artMatch[1]}/${artMatch[2]}`
-        : existing.articleProgress;
+      // Article progress:
+      // - "3/15 articles" from per-article LLM callbacks
+      // - "15 articles" from Phase B start (backend) — parse as total only
+      const artMatch = detail.match(/^(\d+)\/(\d+)\s*articles?$/i);
+      const totalOnlyMatch = detail.match(/^(\d+)\s*articles?$/i);
+      let newArticleProgress = existing.articleProgress;
+      if (artMatch) {
+        newArticleProgress = `${artMatch[1]}/${artMatch[2]}`;
+      } else if (phase === "B" && totalOnlyMatch) {
+        const t = totalOnlyMatch[1];
+        if (status === "running") {
+          newArticleProgress = `0/${t}`;
+        } else if (status === "done" || status === "skip") {
+          // Logs had no "k/n articles" lines — treat full batch as done
+          newArticleProgress = `${t}/${t}`;
+        }
+      } else if (phase === "B" && status === "done" && detail === "") {
+        // B done clears detail; if we only had "0/N" from a lone "N articles" ping, show N/N
+        const partial = existing.articleProgress.match(/^0\/(\d+)$/);
+        if (partial) newArticleProgress = `${partial[1]}/${partial[1]}`;
+      }
 
       map.set(key, {
         ...existing,
@@ -2637,7 +2655,12 @@ export default function OrderDetail() {
   const handleRunStage = (_stage: string) => openRerunModal({ type: "start" });
 
   const handleStop = async () => {
-    setStopInProgress(true);
+    if (stopRequestRef.current) return;
+    stopRequestRef.current = true;
+    // Force one paint before network so spinner + dialog show (React 18 batches across await otherwise).
+    flushSync(() => {
+      setStopInProgress(true);
+    });
     try {
       await api.post(`/orders/${orderId}/cancel`);
       const [o, l] = await Promise.all([
@@ -2649,6 +2672,7 @@ export default function OrderDetail() {
     } catch (err: any) {
       alert(err.message || "Failed to stop");
     } finally {
+      stopRequestRef.current = false;
       setStopInProgress(false);
     }
   };
@@ -2711,7 +2735,7 @@ export default function OrderDetail() {
             </Button>
           )}
           {isRunning && !isReadOnlyShared && (
-            <Button variant="destructive" onClick={handleStop} disabled={stopInProgress} className="gap-2 min-w-[7.5rem]">
+            <Button variant="destructive" onClick={handleStop} aria-busy={stopInProgress} className="gap-2 min-w-[7.5rem]">
               {stopInProgress ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (

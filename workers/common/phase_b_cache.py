@@ -28,8 +28,23 @@ SYNC_DATABASE_URL = DATABASE_URL.replace("+asyncmy", "+pymysql").replace("+aiomy
 CACHE_TTL_DAYS: int = int(os.getenv("PHASE_B_CACHE_TTL_DAYS", "30"))
 
 
+_ENGINE = None
+_ENGINE_LOCK = __import__("threading").Lock()
+
+
 def _engine():
-    return create_engine(SYNC_DATABASE_URL, pool_pre_ping=True, pool_size=1, max_overflow=2)
+    global _ENGINE
+    if _ENGINE is None:
+        with _ENGINE_LOCK:
+            if _ENGINE is None:
+                _ENGINE = create_engine(
+                    SYNC_DATABASE_URL,
+                    pool_pre_ping=True,
+                    pool_size=2,
+                    max_overflow=3,
+                    pool_recycle=600,
+                )
+    return _ENGINE
 
 
 # ──────────────────────────────────────────────────────────────────────────────

@@ -15,8 +15,23 @@ DATABASE_URL = os.getenv(
 SYNC_DATABASE_URL = DATABASE_URL.replace("+asyncmy", "+pymysql").replace("+aiomysql", "+pymysql")
 
 
+_ENGINE = None
+_ENGINE_LOCK = __import__("threading").Lock()
+
+
 def _get_engine():
-    return create_engine(SYNC_DATABASE_URL, pool_pre_ping=True, pool_size=2)
+    global _ENGINE
+    if _ENGINE is None:
+        with _ENGINE_LOCK:
+            if _ENGINE is None:
+                _ENGINE = create_engine(
+                    SYNC_DATABASE_URL,
+                    pool_pre_ping=True,
+                    pool_size=2,
+                    max_overflow=3,
+                    pool_recycle=600,
+                )
+    return _ENGINE
 
 
 def get_order_status(order_id: int) -> str | None:
