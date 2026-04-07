@@ -285,8 +285,15 @@ def run_report_generation(self, order_id: int, config: dict):
                 )
                 raise RuntimeError(error_msg)
 
-            # Quick generation test — send a trivial prompt to confirm the model responds
-            test_response = preflight_llm.generate("Respond with OK.", max_tokens=10)
+            # Quick generation test — send a trivial prompt to confirm the model responds.
+            # Retry up to 3 times: Ollama may be busy with other requests (RAG Phase B).
+            test_response = None
+            for _attempt in range(3):
+                test_response = preflight_llm.generate("Respond with OK.", max_tokens=10)
+                if test_response and not test_response.startswith("[LLM Error"):
+                    break
+                logger.warning(f"[Order {order_id}] LLM pre-flight attempt {_attempt + 1}/3 failed, retrying in 10s…")
+                time.sleep(10)
             if test_response is None or test_response.startswith("[LLM Error"):
                 error_msg = (
                     f"LLM pre-flight generation test FAILED: {llm_info} returned error. "

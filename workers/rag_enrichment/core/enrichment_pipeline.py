@@ -890,10 +890,12 @@ class RAGEnrichmentPipeline:
         tasks_to_run: dict = {}
         for name, fn in phase_b_tasks.items():
             cached = get_cached(gene, position, ptm_type, name, pmids)
-            if cached is not None:
+            if cached is not None and isinstance(cached, dict):
                 phase_b_results[name] = cached
                 logger.debug(f"Phase B '{name}' for {gene} served from persistent cache")
             else:
+                if cached is not None:
+                    logger.warning(f"Phase B cache for {gene}/{name} has non-dict type ({type(cached).__name__}), discarding")
                 tasks_to_run[name] = fn
 
         _phase_b_errors: list = []
@@ -905,12 +907,18 @@ class RAGEnrichmentPipeline:
                     f"[LLM·Phase B] {gene}: articles={len(articles)}, parallel=[{keys}]"
                 )
             # ② 병렬 실행 (timeout=120)
+            def _to_dict(obj):
+                """Ensure Phase B results are plain dicts before caching/storing."""
+                if hasattr(obj, '__dataclass_fields__'):
+                    return _asdict(obj)
+                return obj
+
             failed_tasks: dict = {}
             with ThreadPoolExecutor(max_workers=min(len(tasks_to_run), MCP_WORKERS), thread_name_prefix=f"llm_{gene[:8]}") as pool:
                 futures_b = {name: pool.submit(fn) for name, fn in tasks_to_run.items()}
                 for name, future in futures_b.items():
                     try:
-                        result = future.result(timeout=120)
+                        result = _to_dict(future.result(timeout=120))
                         phase_b_results[name] = result
                         set_cached(gene, position, ptm_type, name, pmids, result)
                     except Exception as e:
@@ -926,7 +934,7 @@ class RAGEnrichmentPipeline:
             for name, fn in failed_tasks.items():
                 try:
                     with ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"retry_{gene[:8]}") as retry_pool:
-                        result = retry_pool.submit(fn).result(timeout=300)
+                        result = _to_dict(retry_pool.submit(fn).result(timeout=300))
                     phase_b_results[name] = result
                     set_cached(gene, position, ptm_type, name, pmids, result)
                     self._alog(f"[LLM·Phase B] {gene} {position} — {name}: retry OK")
