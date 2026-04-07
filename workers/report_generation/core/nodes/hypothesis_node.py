@@ -9,15 +9,18 @@ Uses LLM when available, falls back to rule-based generation.
 import logging
 import os
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List
 
 from common.llm_client import LLMClient
 
 logger = logging.getLogger(__name__)
 
+_LLM_WORKERS = int(os.getenv("REPORT_LLM_WORKERS", "4"))
+
 
 def run_hypothesis_generation(state: dict) -> dict:
-    """Generate hypotheses from research results."""
+    """Generate hypotheses from research results (parallel LLM calls)."""
     cb = state.get("progress_callback")
     if cb:
         cb(30, "Generating hypotheses")
@@ -31,14 +34,30 @@ def run_hypothesis_generation(state: dict) -> dict:
         model=state.get("llm_model"),
     )
 
-    hypotheses = []
-    for i, result in enumerate(research_results):
-        if cb:
-            pct = 30 + (i / max(len(research_results), 1)) * 10
-            cb(pct, f"Hypothesis for Q{i+1}")
+    n = len(research_results)
+    if n == 0:
+        return {"hypotheses": []}
 
-        new_hyps = _generate_hypotheses(result, context, llm, ptm_type=ptm_type)
-        hypotheses.extend(new_hyps)
+    def _do(idx_result):
+        idx, result = idx_result
+        return idx, _generate_hypotheses(result, context, llm, ptm_type=ptm_type)
+
+    ordered: dict = {}
+    workers = min(_LLM_WORKERS, n)
+    logger.info(f"[hypothesis] Generating hypotheses for {n} questions with {workers} workers")
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futs = {pool.submit(_do, (i, r)): i for i, r in enumerate(research_results)}
+        for fut in as_completed(futs):
+            idx, hyps = fut.result()
+            ordered[idx] = hyps
+            if cb:
+                done = len(ordered)
+                pct = 30 + (done / n) * 10
+                cb(pct, f"Hypothesis for Q{idx+1} done ({done}/{n})")
+
+    hypotheses = []
+    for i in range(n):
+        hypotheses.extend(ordered.get(i, []))
 
     if cb:
         cb(40, f"Generated {len(hypotheses)} hypotheses")

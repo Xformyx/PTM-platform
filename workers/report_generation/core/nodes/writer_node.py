@@ -7,7 +7,9 @@ Each section uses LLM with published literature context for integration.
 """
 
 import logging
+import os
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, List
 
 from common.llm_client import LLMClient
@@ -207,6 +209,8 @@ def run_section_writing(state: dict) -> dict:
     )
     logger.info(f"[v98] Built structured data: {len(v98_protein_names)} proteins, {len(v98_log2fc_values)} values")
 
+    _LLM_WORKERS = int(os.getenv("REPORT_LLM_WORKERS", "4"))
+
     sections: Dict[str, str] = {}
     prev_sections: Dict[str, str] = {}
 
@@ -226,15 +230,12 @@ def run_section_writing(state: dict) -> dict:
         f"receptor={len(receptor_llm_context):,}"
     )
 
-    for i, section_type in enumerate(SECTION_ORDER):
-        if cb:
-            pct = 70 + (i / len(SECTION_ORDER)) * 20
-            cb(pct, f"Writing {section_type}")
-
+    # ── Per-section writer (extracted for parallel execution) ──
+    def _write_one(section_type, snap_prev):
         prompt = _build_section_prompt(
             section_type, research_results, validated_hypotheses,
             network_analysis, parsed_ptms, context, questions,
-            prev_sections, retriever, comprehensive_summary,
+            snap_prev, retriever, comprehensive_summary,
             all_references, ptm_detail_count=ptm_detail_count,
             chromadb_results=chromadb_results,
             temporal_kinase_cascade=state.get("temporal_kinase_cascade"),
@@ -314,11 +315,10 @@ def run_section_writing(state: dict) -> dict:
         # v9.31: Cascading failure prevention — if Results used fallback,
         # inject direct data context for Discussion/Conclusion/Abstract
         results_is_fallback = (
-            prev_sections.get("results", "").startswith("The PTM analysis")
-            and len(prev_sections.get("results", "").split()) < 200
+            snap_prev.get("results", "").startswith("The PTM analysis")
+            and len(snap_prev.get("results", "").split()) < 200
         )
         if results_is_fallback and section_type in ("discussion", "conclusion", "abstract"):
-            # Provide direct PTM data instead of relying on prev_sections["results"]
             ptm_summary_for_cascade = _ptm_summary_text(parsed_ptms[:30], detail_count=20)
             cascade_supplement = (
                 f"\n\n=== DIRECT PTM DATA (Results section was incomplete) ===\n"
@@ -412,8 +412,37 @@ def run_section_writing(state: dict) -> dict:
                 logger.warning(f"[v98] {section_type} validation failed (non-fatal): {e}")
 
 
-        sections[section_type] = content
-        prev_sections[section_type] = content
+        return section_type, content
+
+    # ── Phase 1: independent sections (parallel) ──
+    phase1_set = {"introduction", "results", "methods"}
+    phase1_sections = [s for s in SECTION_ORDER if s in phase1_set]
+    phase2_sections = [s for s in SECTION_ORDER if s not in phase1_set]
+
+    workers = min(_LLM_WORKERS, len(phase1_sections))
+    logger.info(f"[writer] Phase 1: writing {phase1_sections} in parallel ({workers} workers)")
+    if cb:
+        cb(70, f"Writing {len(phase1_sections)} sections in parallel")
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futs = {pool.submit(_write_one, st, {}): st for st in phase1_sections}
+        for fut in as_completed(futs):
+            st, content = fut.result()
+            sections[st] = content
+            prev_sections[st] = content
+            if cb:
+                cb(74, f"Section {st} done")
+            logger.info(f"[writer] Phase 1 done: {st} ({len(content):,} chars)")
+
+    # ── Phase 2: dependent sections (sequential) ──
+    logger.info(f"[writer] Phase 2: writing {phase2_sections} sequentially")
+    for i, section_type in enumerate(phase2_sections):
+        if cb:
+            pct = 76 + (i / max(len(phase2_sections), 1)) * 14
+            cb(pct, f"Writing {section_type}")
+        st, content = _write_one(section_type, dict(prev_sections))
+        sections[st] = content
+        prev_sections[st] = content
 
     if cb:
         cb(90, "All sections written")

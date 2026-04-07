@@ -6,6 +6,8 @@ Uses RAG retrieval to find supporting/contradicting evidence, then scores each h
 """
 
 import logging
+import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List
 
 from common.llm_client import LLMClient
@@ -14,10 +16,11 @@ from report_generation.core.rag_retriever import RAGRetriever
 logger = logging.getLogger(__name__)
 
 MIN_CONFIDENCE = 0.4
+_LLM_WORKERS = int(os.getenv("REPORT_LLM_WORKERS", "4"))
 
 
 def run_validation(state: dict) -> dict:
-    """Validate hypotheses against ChromaDB literature evidence."""
+    """Validate hypotheses against ChromaDB literature evidence (parallel)."""
     cb = state.get("progress_callback")
     if cb:
         cb(40, "Validating hypotheses")
@@ -34,21 +37,18 @@ def run_validation(state: dict) -> dict:
         model=state.get("llm_model"),
     )
 
-    validated = []
-    for i, hyp in enumerate(hypotheses):
-        if cb:
-            pct = 40 + (i / max(len(hypotheses), 1)) * 15
-            cb(pct, f"Validating hypothesis {i+1}/{len(hypotheses)}")
+    n = len(hypotheses)
+    if n == 0:
+        return {"validated_hypotheses": []}
 
+    def _validate_one(idx_hyp):
+        idx, hyp = idx_hyp
         evidence = []
         if rag_available:
             evidence = retriever.search_for_hypothesis(hyp)
-
         classified = _classify_evidence(evidence, hyp, llm)
-
         supporting = [e for e in classified if e.get("classification") == "supporting"]
         contradicting = [e for e in classified if e.get("classification") == "contradicting"]
-
         total = len(supporting) + len(contradicting) + 1
         validity = (len(supporting) + 0.5) / total
         hyp["validation"] = {
@@ -60,13 +60,22 @@ def run_validation(state: dict) -> dict:
         }
         hyp["confidence"] = round(hyp.get("confidence", 0.5) * validity, 2)
         hyp["status"] = "validated"
+        return idx, hyp
 
-        if hyp["confidence"] >= MIN_CONFIDENCE:
-            validated.append(hyp)
-        else:
-            logger.info(f"Hypothesis {hyp['id']} below threshold ({hyp['confidence']:.2f})")
-            validated.append(hyp)
+    workers = min(_LLM_WORKERS, n)
+    logger.info(f"[validation] Validating {n} hypotheses with {workers} workers")
+    results_map: dict = {}
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futs = {pool.submit(_validate_one, (i, h)): i for i, h in enumerate(hypotheses)}
+        for fut in as_completed(futs):
+            idx, hyp = fut.result()
+            results_map[idx] = hyp
+            if cb:
+                done = len(results_map)
+                pct = 40 + (done / n) * 15
+                cb(pct, f"Validated {done}/{n} hypotheses")
 
+    validated = [results_map[i] for i in range(n)]
     validated.sort(key=lambda h: h.get("confidence", 0), reverse=True)
 
     if cb:

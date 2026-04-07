@@ -15,13 +15,17 @@ Features:
 """
 
 import logging
+import os
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
 from common.llm_client import LLMClient
 
 logger = logging.getLogger(__name__)
+
+_LLM_WORKERS = int(os.getenv("REPORT_LLM_WORKERS", "4"))
 
 QA_SYSTEM_PROMPT = (
     "You are an expert in post-translational modification (PTM) biology and cell signaling. "
@@ -318,18 +322,28 @@ class QAReportGenerator:
         if not ptm_sections:
             return "# Q&A Report\n\nNo PTM sections found in the comprehensive report."
 
-        # 2. Pass 1: Per-PTM Q&A
+        # 2. Pass 1: Per-PTM Q&A (parallel)
+        n_ptms = len(ptm_sections)
         if progress_callback:
-            progress_callback(10, f"Generating Q&A for {len(ptm_sections)} PTMs (Pass 1)")
+            progress_callback(10, f"Generating Q&A for {n_ptms} PTMs (Pass 1, {min(_LLM_WORKERS, n_ptms)} workers)")
 
-        ptm_qa_blocks: List[str] = []
-        for i, section in enumerate(ptm_sections):
-            if progress_callback:
-                pct = 10 + (i / len(ptm_sections)) * 60
-                progress_callback(pct, f"Q&A for {section.gene} {section.position}")
+        def _do_ptm_qa(idx_section):
+            idx, section = idx_section
+            return idx, self._generate_ptm_qa(section, context)
 
-            qa_block = self._generate_ptm_qa(section, context)
-            ptm_qa_blocks.append(qa_block)
+        workers = min(_LLM_WORKERS, n_ptms)
+        ordered: dict = {}
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futs = {pool.submit(_do_ptm_qa, (i, s)): i for i, s in enumerate(ptm_sections)}
+            for fut in as_completed(futs):
+                idx, block = fut.result()
+                ordered[idx] = block
+                if progress_callback:
+                    done = len(ordered)
+                    pct = 10 + (done / n_ptms) * 60
+                    progress_callback(pct, f"Q&A done {done}/{n_ptms}")
+
+        ptm_qa_blocks: List[str] = [ordered[i] for i in range(n_ptms)]
 
         # 3. Pass 2: Global Trends
         if progress_callback:
