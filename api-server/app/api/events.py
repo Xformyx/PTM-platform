@@ -28,18 +28,19 @@ async def order_progress_stream(
         try:
             idle_cycles = 0
             while True:
-                latest = None
+                batch: list[str] = []
                 for _ in range(50):
                     message = await pubsub.get_message(
                         ignore_subscribe_messages=True, timeout=0.05
                     )
                     if message and message["type"] == "message":
-                        latest = message["data"]
+                        batch.append(message["data"])
                     else:
                         break
 
-                if latest is not None:
-                    yield {"event": "progress", "data": latest}
+                if batch:
+                    for data in batch:
+                        yield {"event": "progress", "data": data}
                     idle_cycles = 0
                 else:
                     idle_cycles += 1

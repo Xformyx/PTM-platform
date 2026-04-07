@@ -59,6 +59,7 @@ export interface OrderLog {
   status: string;
   progress_pct?: number;
   message?: string;
+  metadata?: Record<string, unknown>;
   duration_ms?: number;
   created_at: string;
 }

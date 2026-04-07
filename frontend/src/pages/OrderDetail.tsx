@@ -2474,7 +2474,7 @@ export default function OrderDetail() {
     };
     // DB logs first (historical), then SSE events override (real-time)
     for (const log of logs) {
-      if ((log as any).metadata?.type) applyMeta((log as any).metadata);
+      if (log.metadata?.type) applyMeta(log.metadata);
     }
     for (const ev of events) {
       if (ev.metadata?.type) applyMeta(ev.metadata as Record<string, unknown>);
@@ -2521,7 +2521,7 @@ export default function OrderDetail() {
       row.detail = detail;
     };
 
-    for (const log of logs) { if ((log as any).metadata?.type) apply((log as any).metadata); }
+    for (const log of logs) { if (log.metadata?.type) apply(log.metadata); }
     for (const ev of events) { if (ev.metadata?.type) apply(ev.metadata as Record<string, unknown>); }
     return Array.from(map.values());
   }, [logs, events]);
@@ -2543,7 +2543,7 @@ export default function OrderDetail() {
       row.detail = detail;
     };
 
-    for (const log of logs) { if ((log as any).metadata?.type) apply((log as any).metadata); }
+    for (const log of logs) { if (log.metadata?.type) apply(log.metadata); }
     for (const ev of events) { if (ev.metadata?.type) apply(ev.metadata as Record<string, unknown>); }
     return Array.from(map.values());
   }, [logs, events]);
