@@ -25,6 +25,7 @@ import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Progress } from "@/components/ui/progress";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import FilePreviewModal from "@/components/FilePreviewModal";
@@ -2393,6 +2394,7 @@ export default function OrderDetail() {
   const [pendingAction, setPendingAction] = useState<{ type: "start" } | { type: "run-stage"; stage: string } | null>(null);
   const runHandledRef = useRef(false);
   const [phaseModalOpen, setPhaseModalOpen] = useState(false);
+  const [stopInProgress, setStopInProgress] = useState(false);
 
   const isRunning = !!order && !["completed", "failed", "pending", "cancelled"].includes(order.status);
 
@@ -2635,6 +2637,7 @@ export default function OrderDetail() {
   const handleRunStage = (_stage: string) => openRerunModal({ type: "start" });
 
   const handleStop = async () => {
+    setStopInProgress(true);
     try {
       await api.post(`/orders/${orderId}/cancel`);
       const [o, l] = await Promise.all([
@@ -2645,6 +2648,8 @@ export default function OrderDetail() {
       setLogs(l.logs);
     } catch (err: any) {
       alert(err.message || "Failed to stop");
+    } finally {
+      setStopInProgress(false);
     }
   };
 
@@ -2706,8 +2711,13 @@ export default function OrderDetail() {
             </Button>
           )}
           {isRunning && !isReadOnlyShared && (
-            <Button variant="destructive" onClick={handleStop} className="gap-2">
-              <Square className="h-4 w-4" /> Stop
+            <Button variant="destructive" onClick={handleStop} disabled={stopInProgress} className="gap-2 min-w-[7.5rem]">
+              {stopInProgress ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Square className="h-4 w-4" />
+              )}
+              {stopInProgress ? "Stopping…" : "Stop"}
             </Button>
           )}
           {order.status === "pending" && !isReadOnlyShared && (
@@ -3411,6 +3421,32 @@ export default function OrderDetail() {
           <OrderArticlesTab orderCode={order.order_code} orderStatus={order.status} />
         </TabsContent>
       </Tabs>
+
+      <Dialog
+        open={stopInProgress}
+        onOpenChange={(next) => {
+          if (!next) {
+            /* Dismiss only via finally {} after cancel API completes */
+            return;
+          }
+        }}
+      >
+        <DialogContent
+          className="sm:max-w-md [&>button]:hidden"
+          onPointerDownOutside={(e) => e.preventDefault()}
+          onEscapeKeyDown={(e) => e.preventDefault()}
+        >
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-3">
+              <Loader2 className="h-6 w-6 shrink-0 animate-spin text-primary" />
+              분석을 멈추는 중
+            </DialogTitle>
+            <DialogDescription className="text-left pt-1">
+              서버에 중단 요청을 보내고 있습니다. 백그라운드 워커와 LLM이 처리 중일 수 있어 잠시 걸릴 수 있습니다.
+            </DialogDescription>
+          </DialogHeader>
+        </DialogContent>
+      </Dialog>
 
       <RerunOptionsModal
         open={rerunModalOpen}

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { Bell, CheckCheck, Loader2 } from "lucide-react";
+import { Bell, CheckCheck, Loader2, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -93,6 +93,24 @@ export default function NotificationBell({ compact }: NotificationBellProps) {
     }
   };
 
+  const handleDeleteAll = async () => {
+    if (notifications.length === 0) return;
+    if (
+      !window.confirm(
+        "모든 알림을 삭제할까요? 이 작업은 되돌릴 수 없습니다."
+      )
+    ) {
+      return;
+    }
+    try {
+      await api.delete<{ ok: boolean }>("/notifications");
+      setNotifications([]);
+      setUnreadCount(0);
+    } catch {
+      // ignore
+    }
+  };
+
   const formatTime = (iso: string) => {
     const d = new Date(iso);
     const now = new Date();
@@ -119,19 +137,40 @@ export default function NotificationBell({ compact }: NotificationBellProps) {
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-80 p-0">
-        <div className="flex items-center justify-between border-b px-3 py-2">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b px-3 py-2">
           <span className="text-sm font-medium">알림</span>
-          {notifications.some((n) => !n.read_at) && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 text-xs"
-              onClick={handleMarkAllRead}
-            >
-              <CheckCheck className="mr-1 h-3 w-3" />
-              모두 읽음
-            </Button>
-          )}
+          <div className="flex shrink-0 items-center gap-1">
+            {notifications.some((n) => !n.read_at) && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 text-xs"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  handleMarkAllRead();
+                }}
+              >
+                <CheckCheck className="mr-1 h-3 w-3" />
+                모두 읽음
+              </Button>
+            )}
+            {!loading && notifications.length > 0 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  handleDeleteAll();
+                }}
+              >
+                <Trash2 className="mr-1 h-3 w-3" />
+                모두 삭제
+              </Button>
+            )}
+          </div>
         </div>
         <ScrollArea className="h-[320px]">
           {loading ? (

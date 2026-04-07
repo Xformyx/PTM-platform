@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -95,5 +95,16 @@ async def mark_all_read(
         )
         .values(read_at=datetime.utcnow())
     )
+    await db.commit()
+    return {"ok": True}
+
+
+@router.delete("")
+async def delete_all_notifications(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Permanently delete all notifications for the current user."""
+    await db.execute(delete(Notification).where(Notification.user_id == user.id))
     await db.commit()
     return {"ok": True}
