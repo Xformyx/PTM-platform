@@ -375,7 +375,10 @@ def run_preprocessing(self, order_id: int, config: dict):
             f.name.startswith("ptm_vector_report_") or f.name.startswith("ptm_vector_summary_report")
             for f in order_output.glob("*.png")
         )
-        if not has_vector_reports:
+        if has_vector_reports:
+            publish_progress(order_id, "preprocessing", "vector_report", "completed", 55, "PTM vector plots skipped (cached)")
+            _emit_prep_phase(order_id, "vector_report", "done", "cached", 55)
+        else:
             vector_file = order_output / quant_output
             if vector_file.exists() and vector_file.stat().st_size > 0:
                 try:
