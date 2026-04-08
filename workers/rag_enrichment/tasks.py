@@ -61,7 +61,27 @@ def run_rag_enrichment(self, order_id: int, config: dict):
     order_output = Path(OUTPUT_DIR) / order_code
     order_output.mkdir(parents=True, exist_ok=True)
 
-    update_order_status(order_id, "rag_enrichment", current_stage="rag_enrichment", progress_pct=0)
+    update_order_status(order_id, "rag_enrichment", current_stage="rag_enrichment", progress_pct=0,
+                        stage_detail="RAG enrichment started")
+
+    # Clear stale ptm_phase/ptm_list logs from previous runs so the UI starts clean
+    try:
+        from common.db_engine import get_engine as _get_engine
+        from sqlalchemy import text as _text
+        _eng = _get_engine()
+        with _eng.connect() as _conn:
+            _conn.execute(
+                _text(
+                    "DELETE FROM order_logs WHERE order_id = :oid "
+                    "AND stage = 'rag_enrichment' AND step = 'ptm_phase'"
+                ),
+                {"oid": order_id},
+            )
+            _conn.commit()
+        logger.info(f"[Order {order_id}] Cleared previous ptm_phase logs")
+    except Exception as _del_err:
+        logger.warning(f"[Order {order_id}] Could not clear old ptm_phase logs: {_del_err}")
+
     logger.info(f"[Order {order_id}] RAG enrichment started")
     publish_progress(order_id, "rag_enrichment", "start", "started", 0, "RAG enrichment pipeline started")
 

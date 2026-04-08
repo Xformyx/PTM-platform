@@ -105,6 +105,27 @@ def _send_email(to_email: str, subject: str, body_text: str) -> bool:
         return False
 
 
+def _get_order_elapsed(order_id: int) -> str | None:
+    """Return human-readable elapsed time for the order, or None."""
+    try:
+        engine = _get_engine()
+        with engine.connect() as conn:
+            row = conn.execute(
+                text("SELECT TIMESTAMPDIFF(SECOND, started_at, completed_at) FROM orders WHERE id = :oid"),
+                {"oid": order_id},
+            ).fetchone()
+        if row and row[0] is not None:
+            secs = int(row[0])
+            if secs < 60:
+                return f"{secs}초"
+            if secs < 3600:
+                return f"{secs // 60}분 {secs % 60}초"
+            return f"{secs // 3600}시간 {(secs % 3600) // 60}분"
+    except Exception:
+        pass
+    return None
+
+
 def notify_order_status(order_id: int, status: str, error_message: str | None = None):
     """
     Create in-app notification and optionally send email when order completes or fails.
@@ -116,25 +137,39 @@ def notify_order_status(order_id: int, status: str, error_message: str | None = 
         return
 
     order_code, project_name = _get_order_info(order_id)
-    display_name = project_name or order_code or f"Order #{order_id}"
+    display_name = order_code or f"Order #{order_id}"
 
     if status == "completed":
         ntype = "order_completed"
-        title = f"분석 완료: {display_name}"
-        message = f"주문 '{display_name}'의 분석이 완료되었습니다."
-        email_subject = f"[PTM Platform] 분석 완료: {display_name}"
-        email_body = f"PTM Platform 알림\n\n주문 '{display_name}'의 분석이 완료되었습니다.\n\n주문 코드: {order_code}"
+        elapsed = _get_order_elapsed(order_id)
+        elapsed_str = f" ({elapsed})" if elapsed else ""
+        title = f"✅ 분석 완료 — {display_name}"
+        if error_message:
+            message = f"일부 경고가 있지만 분석이 완료되었습니다{elapsed_str}.\n⚠ {error_message[:300]}"
+        else:
+            message = f"분석이 성공적으로 완료되었습니다{elapsed_str}."
+        email_subject = f"[PTM] 분석 완료: {display_name}"
+        email_body = (
+            f"PTM Platform\n\n"
+            f"주문: {display_name}\n"
+            f"상태: 분석 완료{elapsed_str}\n\n"
+            f"플랫폼에서 결과를 확인하세요."
+        )
     else:
         ntype = "order_failed"
-        err = (error_message or "Unknown error")[:500]
-        title = f"분석 실패: {display_name}"
-        message = f"주문 '{display_name}'의 분석이 실패했습니다.\n{err}"
-        email_subject = f"[PTM Platform] 분석 실패: {display_name}"
-        email_body = f"PTM Platform 알림\n\n주문 '{display_name}'의 분석이 실패했습니다.\n\n오류: {err}"
+        err_raw = error_message or "알 수 없는 오류"
+        err_short = err_raw.split("\n")[0][:200]
+        title = f"❌ 분석 실패 — {display_name}"
+        message = err_short
+        email_subject = f"[PTM] 분석 실패: {display_name}"
+        email_body = (
+            f"PTM Platform\n\n"
+            f"주문: {display_name}\n"
+            f"상태: 분석 실패\n\n"
+            f"오류: {err_raw[:500]}"
+        )
 
-    # In-app notification: always create
     _insert_notification(user_id, order_id, ntype, title, message)
 
-    # Email: only if user has it enabled
     if email_enabled and email:
         _send_email(email, email_subject, email_body)

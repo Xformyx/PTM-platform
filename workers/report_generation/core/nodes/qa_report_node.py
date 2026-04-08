@@ -541,7 +541,12 @@ def run_qa_report_generation(state: dict) -> dict:
         use_two_model=bool(state.get("qa_question_model") and state.get("qa_answer_model")),
     )
 
-    qa_report = generator.generate(report_content, progress_callback=cb)
+    # Remap internal 0-100% progress to the 92-95% overall range
+    def _qa_inner_cb(pct, msg):
+        mapped = 92 + (pct / 100) * 3
+        cb(mapped, msg)
+
+    qa_report = generator.generate(report_content, progress_callback=_qa_inner_cb if cb else None)
 
     if cb:
         cb(95, "Q&A report generated")

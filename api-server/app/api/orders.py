@@ -173,7 +173,7 @@ async def list_orders(
             "status": o.status,
             "ptm_type": o.ptm_type,
             "species": o.species,
-            "progress_pct": float(o.progress_pct),
+            "progress_pct": 100.0 if o.status == "completed" else float(o.progress_pct),
             "current_stage": o.current_stage,
             "stage_detail": o.stage_detail,
             "error_message": o.error_message,
@@ -387,7 +387,7 @@ async def get_order(
         "report_options": order.report_options,
         "rag_collections": order.rag_collections,
         "current_stage": order.current_stage,
-        "progress_pct": float(order.progress_pct),
+        "progress_pct": 100.0 if order.status == "completed" else float(order.progress_pct),
         "stage_detail": order.stage_detail,
         "result_files": order.result_files,
         "error_message": order.error_message,
@@ -1271,11 +1271,12 @@ async def get_order_status(
     row = result.one_or_none()
     if not row:
         raise HTTPException(status_code=404, detail="Order not found")
+    status = row[1]
     return {
         "id": row[0],
-        "status": row[1],
+        "status": status,
         "current_stage": row[2],
-        "progress_pct": float(row[3]) if row[3] is not None else 0,
+        "progress_pct": 100.0 if status == "completed" else (float(row[3]) if row[3] is not None else 0),
         "stage_detail": row[4],
         "error_message": row[5],
     }

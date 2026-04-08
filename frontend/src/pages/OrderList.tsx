@@ -473,14 +473,26 @@ export default function OrderList() {
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2 min-w-[120px]">
-                        <Progress
-                          value={order.progress_pct}
-                          className="w-20"
-                          indicatorClassName={order.status === "failed" ? "bg-destructive" : undefined}
-                        />
-                        <span className="text-xs text-muted-foreground whitespace-nowrap">
-                          {Math.round(order.progress_pct)}%
-                        </span>
+                        {(() => {
+                          const stageWeights: Record<string, [number, number]> = { preprocessing: [0, 15], rag_enrichment: [15, 50], report_generation: [50, 100] };
+                          const raw = order.status === "completed" ? 100 : order.progress_pct;
+                          const range = stageWeights[order.status];
+                          const displayPct = order.status === "completed" ? 100
+                            : range ? Math.round(range[0] + (Math.min(Math.max(raw, 0), 100) / 100) * (range[1] - range[0]))
+                            : raw;
+                          return (
+                            <>
+                              <Progress
+                                value={displayPct}
+                                className="w-20"
+                                indicatorClassName={order.status === "failed" ? "bg-destructive" : undefined}
+                              />
+                              <span className="text-xs text-muted-foreground whitespace-nowrap">
+                                {Math.round(displayPct)}%
+                              </span>
+                            </>
+                          );
+                        })()}
                       </div>
                     </TableCell>
                     <TableCell className="font-mono text-muted-foreground whitespace-nowrap">

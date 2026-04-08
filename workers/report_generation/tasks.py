@@ -18,6 +18,8 @@ import time
 import traceback
 from pathlib import Path
 
+import redis as _redis
+
 from celery_app import app
 from common.db_update import update_order_status
 from common.notifications import notify_order_status
@@ -27,6 +29,7 @@ from common.webhook import send_step_webhook
 logger = logging.getLogger("ptm-workers.report-generation")
 
 OUTPUT_DIR = os.getenv("OUTPUT_DIR", "/data/outputs")
+_REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
 
 
 def _resolve_enriched_json_path(order_id: int, rag_dir: Path, explicit: str | None) -> str:
@@ -181,12 +184,39 @@ def run_report_generation(self, order_id: int, config: dict):
       - llm_model: str                (default from env)
       - report_title: str
     """
+    lock_key = f"report_gen_lock:{order_id}"
+    lock_client = _redis.from_url(_REDIS_URL, decode_responses=True)
+    acquired = lock_client.set(lock_key, "1", nx=True, ex=14400)  # 4-hour TTL
+    if not acquired:
+        logger.warning(
+            f"[Order {order_id}] Report generation already running (lock exists). "
+            f"Skipping duplicate execution."
+        )
+        return {"order_id": order_id, "status": "skipped", "reason": "duplicate"}
+
     start_time = time.time()
     order_code = config.get("order_code") or str(order_id)
     order_output = Path(OUTPUT_DIR) / order_code
     order_output.mkdir(parents=True, exist_ok=True)
 
-    update_order_status(order_id, "report_generation", current_stage="report_generation", progress_pct=0)
+    update_order_status(order_id, "report_generation", current_stage="report_generation", progress_pct=0,
+                        stage_detail="Report generation started")
+
+    # Clear stale report_phase logs from previous runs so the UI starts clean
+    try:
+        from common.db_engine import get_engine as _get_engine
+        from sqlalchemy import text as _text
+        _eng = _get_engine()
+        with _eng.connect() as _conn:
+            _conn.execute(
+                _text("DELETE FROM order_logs WHERE order_id = :oid AND step = 'report_phase'"),
+                {"oid": order_id},
+            )
+            _conn.commit()
+        logger.info(f"[Order {order_id}] Cleared previous report_phase logs")
+    except Exception as _del_err:
+        logger.warning(f"[Order {order_id}] Could not clear old report_phase logs: {_del_err}")
+
     logger.info(f"[Order {order_id}] Report generation started")
     publish_progress(order_id, "report_generation", "start", "started", 0, "Report generation pipeline started")
     send_step_webhook(order_id, "report_generation", "started")
@@ -547,10 +577,13 @@ def run_report_generation(self, order_id: int, config: dict):
             result_data["llm_fallback_warning"] = fallback_warning
 
         # v9.35: If LLM effectively failed, mark as completed_with_warnings instead of completed
+        completion_detail = f"Report generation complete ({elapsed}s)"
         if llm_failed:
             update_order_status(
                 order_id, "completed", progress_pct=100, result_files=result_data,
                 error_message=fallback_warning,
+                current_stage="completed",
+                stage_detail=completion_detail,
             )
             notify_order_status(order_id, "completed", fallback_warning)
             logger.warning(
@@ -558,7 +591,11 @@ def run_report_generation(self, order_id: int, config: dict):
                 f"LLM fallback used for {len(core_fallbacks)} core sections"
             )
         else:
-            update_order_status(order_id, "completed", progress_pct=100, result_files=result_data)
+            update_order_status(
+                order_id, "completed", progress_pct=100, result_files=result_data,
+                current_stage="completed",
+                stage_detail=completion_detail,
+            )
             notify_order_status(order_id, "completed")
             logger.info(f"[Order {order_id}] Report generation completed in {elapsed}s — {len(output_file_names)} files")
 
@@ -584,3 +621,8 @@ def run_report_generation(self, order_id: int, config: dict):
             metadata={"traceback": traceback.format_exc(), "elapsed_seconds": elapsed},
         )
         raise
+    finally:
+        try:
+            lock_client.delete(lock_key)
+        except Exception:
+            pass

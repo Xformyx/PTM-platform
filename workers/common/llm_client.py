@@ -28,6 +28,7 @@ import requests
 logger = logging.getLogger(__name__)
 
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://host.docker.internal:11434")
+OLLAMA_TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT", "1800"))  # seconds per request
 DEFAULT_MODEL = os.getenv("LLM_MODEL", "gemma3:27b")
 
 # Cloud settings
@@ -318,7 +319,7 @@ class LLMClient:
             payload["system"] = system_prompt
 
         try:
-            r = requests.post(f"{self.base_url}/api/generate", json=payload, timeout=600)
+            r = requests.post(f"{self.base_url}/api/generate", json=payload, timeout=OLLAMA_TIMEOUT)
             if r.status_code != 200:
                 body = r.text[:500]
                 error_msg = (
@@ -330,7 +331,7 @@ class LLMClient:
             return r.json().get("response", "").strip()
         except requests.Timeout:
             error_msg = (
-                f"Ollama request timed out (600s) for model '{self.model}' "
+                f"Ollama request timed out ({OLLAMA_TIMEOUT}s) for model '{self.model}' "
                 f"at {self.base_url}. The model may be too slow for this prompt size."
             )
             logger.error(error_msg)

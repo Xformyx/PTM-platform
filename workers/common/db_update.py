@@ -34,6 +34,7 @@ def update_order_status(
     error_message: str | None = None,
     result_files: dict | None = None,
     report_options_merge: dict | None = None,
+    stage_detail: str | None = None,
 ):
     try:
         engine = _get_engine()
@@ -56,6 +57,9 @@ def update_order_status(
         if result_files is not None:
             sets.append("result_files = :result_files")
             params["result_files"] = json.dumps(result_files)
+        if stage_detail is not None:
+            sets.append("stage_detail = :stage_detail")
+            params["stage_detail"] = stage_detail[:255]
 
         if report_options_merge is not None:
             with engine.connect() as conn:
@@ -70,8 +74,17 @@ def update_order_status(
 
         if status == "completed":
             sets.append("completed_at = NOW()")
+            if progress_pct is None:
+                sets.append("progress_pct = 100")
+            if current_stage is None:
+                sets.append("current_stage = 'completed'")
+            if stage_detail is None:
+                sets.append("stage_detail = 'Completed'")
         if status == "failed":
             sets.append("completed_at = NOW()")
+            if stage_detail is None and error_message is not None:
+                sets.append("stage_detail = :_fail_detail")
+                params["_fail_detail"] = f"Failed: {error_message[:200]}"
 
         if not sets:
             return

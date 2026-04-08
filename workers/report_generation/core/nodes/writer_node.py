@@ -209,7 +209,7 @@ def run_section_writing(state: dict) -> dict:
     )
     logger.info(f"[v98] Built structured data: {len(v98_protein_names)} proteins, {len(v98_log2fc_values)} values")
 
-    _LLM_WORKERS = int(os.getenv("REPORT_LLM_WORKERS", "4"))
+    _LLM_WORKERS = int(os.getenv("REPORT_LLM_WORKERS", "2"))
 
     sections: Dict[str, str] = {}
     prev_sections: Dict[str, str] = {}

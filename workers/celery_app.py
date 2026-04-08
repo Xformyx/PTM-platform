@@ -21,6 +21,9 @@ app.conf.update(
     task_acks_late=True,
     worker_prefetch_multiplier=1,
     result_expires=86400,
+    broker_transport_options={
+        "visibility_timeout": 43200,  # 12 hours — prevents Redis redelivery for long-running tasks
+    },
     task_routes={
         "preprocessing.tasks.*": {"queue": "preprocessing"},
         "rag_enrichment.tasks.*": {"queue": "rag_enrichment"},

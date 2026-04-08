@@ -162,7 +162,24 @@ def run_preprocessing(self, order_id: int, config: dict):
     order_output = Path(OUTPUT_DIR) / order_code
     order_output.mkdir(parents=True, exist_ok=True)
 
-    update_order_status(order_id, "preprocessing", current_stage="preprocessing", progress_pct=0)
+    update_order_status(order_id, "preprocessing", current_stage="preprocessing", progress_pct=0,
+                        stage_detail="Preprocessing started")
+
+    # Clear stale phase logs from previous runs so the UI starts clean
+    try:
+        from common.db_engine import get_engine as _get_engine
+        from sqlalchemy import text as _text
+        _eng = _get_engine()
+        with _eng.connect() as _conn:
+            _conn.execute(
+                _text("DELETE FROM order_logs WHERE order_id = :oid AND step = 'preprocessing_phase'"),
+                {"oid": order_id},
+            )
+            _conn.commit()
+        logger.info(f"[Order {order_id}] Cleared previous preprocessing_phase logs")
+    except Exception as _del_err:
+        logger.warning(f"[Order {order_id}] Could not clear old preprocessing_phase logs: {_del_err}")
+
     logger.info(f"[Order {order_id}] Preprocessing started — mode={config.get('ptm_mode', 'phospho')}")
     publish_progress(order_id, "preprocessing", "start", "started", 0, "Preprocessing pipeline started")
     send_step_webhook(order_id, "preprocessing", "started")

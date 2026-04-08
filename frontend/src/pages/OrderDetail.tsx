@@ -89,7 +89,28 @@ function stageLabel(stage: string): string {
     case "preprocessing": return "Preprocessing";
     case "rag_enrichment": return "RAG Enrichment";
     case "report_generation": return "Report Generation";
+    case "completed": return "Completed";
     default: return stage;
+  }
+}
+
+const STAGE_WEIGHTS = { preprocessing: [0, 15], rag_enrichment: [15, 50], report_generation: [50, 100] } as const;
+type StageKey = keyof typeof STAGE_WEIGHTS;
+
+function computeOverallPct(stage: string | undefined, stagePct: number): number {
+  if (stage === "completed") return 100;
+  const range = STAGE_WEIGHTS[stage as StageKey];
+  if (!range) return stagePct;
+  const [lo, hi] = range;
+  return Math.round(lo + (Math.min(Math.max(stagePct, 0), 100) / 100) * (hi - lo));
+}
+
+function stageStepLabel(stage: string | undefined): string {
+  switch (stage) {
+    case "preprocessing": return "1/3";
+    case "rag_enrichment": return "2/3";
+    case "report_generation": return "3/3";
+    default: return "";
   }
 }
 
@@ -195,7 +216,9 @@ function ActivityProgress({
 }) {
   const latestMessage = progress?.message || message || "";
   const latestStage = progress?.stage || stage || "";
-  const overallPct = progress?.progress_pct ?? pct;
+  const stagePct = progress?.progress_pct ?? pct;
+  const overallPct = computeOverallPct(latestStage, stagePct);
+  const stepInfo = stageStepLabel(latestStage);
   const sub = parseSubProgress(latestMessage);
 
   if (!isRunning && !sub) return null;
@@ -203,25 +226,44 @@ function ActivityProgress({
   return (
     <Card>
       <CardContent className="py-4 space-y-3">
-        {/* Overall progress */}
+        {/* Overall pipeline progress */}
         <div className="space-y-1.5">
           <div className="flex items-center justify-between text-sm">
             <div className="flex items-center gap-2">
               {isRunning && (
                 <Circle className="h-2 w-2 fill-primary text-primary animate-pulse" />
               )}
-              <span className="font-medium">{stageLabel(latestStage)}</span>
+              <span className="font-medium">Overall Progress</span>
             </div>
             <span className="text-muted-foreground tabular-nums">
-              {overallPct >= 0 ? `${Math.round(overallPct)}%` : ""}
+              {overallPct >= 0 ? `${overallPct}%` : ""}
             </span>
           </div>
           <Progress value={Math.max(0, overallPct)} className="h-2" />
         </div>
 
+        {/* Current stage progress */}
+        <div className="space-y-1.5 pl-4 border-l-2 border-primary/20">
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-muted-foreground">
+              {stepInfo && <span className="font-mono mr-1.5">[{stepInfo}]</span>}
+              {stageLabel(latestStage)}
+            </span>
+            <span className="font-mono tabular-nums text-muted-foreground">
+              {stagePct >= 0 ? `${Math.round(stagePct)}%` : ""}
+            </span>
+          </div>
+          <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+            <div
+              className="h-full rounded-full bg-primary/60 transition-all duration-500 ease-out"
+              style={{ width: `${Math.max(0, stagePct)}%` }}
+            />
+          </div>
+        </div>
+
         {/* Sub-task progress (e.g., InterPro 3,200/6,071) */}
         {sub && (
-          <div className="space-y-1.5 pl-4 border-l-2 border-primary/20">
+          <div className="space-y-1.5 pl-8 border-l-2 border-primary/10">
             <div className="flex items-center justify-between text-xs">
               <span className="text-muted-foreground">{sub.label}</span>
               <span className="font-mono tabular-nums text-muted-foreground">
@@ -229,18 +271,18 @@ function ActivityProgress({
                 <span className="ml-1.5 text-foreground font-medium">{sub.pct}%</span>
               </span>
             </div>
-            <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+            <div className="h-1 w-full rounded-full bg-muted overflow-hidden">
               <div
-                className="h-full rounded-full bg-primary/60 transition-all duration-500 ease-out"
+                className="h-full rounded-full bg-primary/40 transition-all duration-500 ease-out"
                 style={{ width: `${sub.pct}%` }}
               />
             </div>
           </div>
         )}
 
-        {/* Current activity text (non-progress messages) */}
+        {/* Current activity text */}
         {!sub && latestMessage && (
-          <p className="text-xs text-muted-foreground pl-4 border-l-2 border-primary/20">
+          <p className="text-xs text-muted-foreground pl-4 border-l-2 border-primary/20 truncate" title={latestMessage}>
             {latestMessage}
           </p>
         )}
@@ -2505,14 +2547,22 @@ export default function OrderDetail() {
   ];
 
   const prepStepRows = useMemo((): StepRow[] => {
+    const resetAll = () => {
+      for (const s of PREP_STEPS) map.set(s.key, { step: s.key, label: s.label, status: "pending", detail: "" });
+    };
     const map = new Map<string, StepRow>();
-    for (const s of PREP_STEPS) map.set(s.key, { step: s.key, label: s.label, status: "pending", detail: "" });
+    resetAll();
 
     const apply = (meta: Record<string, unknown>) => {
       if (meta?.type !== "preprocessing_phase") return;
       const step = String(meta.step ?? "");
       const status = String(meta.status ?? "");
       const detail = String(meta.detail ?? "");
+
+      if (step === PREP_STEPS[0].key && status === "running") {
+        resetAll();
+      }
+
       const row = map.get(step);
       if (!row) return;
       if (status === "done") row.status = "done";
@@ -2523,18 +2573,35 @@ export default function OrderDetail() {
 
     for (const log of logs) { if (log.metadata?.type) apply(log.metadata); }
     for (const ev of events) { if (ev.metadata?.type) apply(ev.metadata as Record<string, unknown>); }
+
+    // Completed order past preprocessing: force all prep steps to "done"
+    if (order && ["completed", "rag_enrichment", "report_generation"].includes(order.status)) {
+      for (const row of map.values()) {
+        if (row.status !== "done") row.status = "done";
+      }
+    }
+
     return Array.from(map.values());
-  }, [logs, events]);
+  }, [logs, events, order?.status]);
 
   const reportStepRows = useMemo((): StepRow[] => {
+    const resetAll = () => {
+      for (const s of REPORT_STEPS) map.set(s.key, { step: s.key, label: s.label, status: "pending", detail: "" });
+    };
     const map = new Map<string, StepRow>();
-    for (const s of REPORT_STEPS) map.set(s.key, { step: s.key, label: s.label, status: "pending", detail: "" });
+    resetAll();
 
     const apply = (meta: Record<string, unknown>) => {
       if (meta?.type !== "report_phase") return;
       const step = String(meta.step ?? "");
       const status = String(meta.status ?? "");
       const detail = String(meta.detail ?? "");
+
+      // New run detected: first step starts running → reset all steps
+      if (step === "context_loading" && status === "running") {
+        resetAll();
+      }
+
       const row = map.get(step);
       if (!row) return;
       if (status === "done") row.status = "done";
@@ -2545,8 +2612,16 @@ export default function OrderDetail() {
 
     for (const log of logs) { if (log.metadata?.type) apply(log.metadata); }
     for (const ev of events) { if (ev.metadata?.type) apply(ev.metadata as Record<string, unknown>); }
+
+    // Completed order: force all steps to "done" (logs may be from an interrupted duplicate run)
+    if (order?.status === "completed") {
+      for (const row of map.values()) {
+        if (row.status !== "done") row.status = "done";
+      }
+    }
+
     return Array.from(map.values());
-  }, [logs, events]);
+  }, [logs, events, order?.status]);
 
   useEffect(() => {
     Promise.all([

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { Bell, CheckCheck, Loader2, Trash2 } from "lucide-react";
+import { Bell, CheckCheck, Loader2, Trash2, CheckCircle2, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -121,6 +121,8 @@ export default function NotificationBell({ compact }: NotificationBellProps) {
     return d.toLocaleDateString("ko-KR", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
   };
 
+  const isCompleted = (n: Notification) => n.notification_type === "order_completed";
+
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
@@ -136,7 +138,7 @@ export default function NotificationBell({ compact }: NotificationBellProps) {
           )}
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-80 p-0">
+      <DropdownMenuContent align="end" className="w-96 p-0">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b px-3 py-2">
           <span className="text-sm font-medium">알림</span>
           <div className="flex shrink-0 items-center gap-1">
@@ -172,7 +174,7 @@ export default function NotificationBell({ compact }: NotificationBellProps) {
             )}
           </div>
         </div>
-        <ScrollArea className="h-[320px]">
+        <ScrollArea className="max-h-[420px]">
           {loading ? (
             <div className="flex items-center justify-center py-12">
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -187,24 +189,40 @@ export default function NotificationBell({ compact }: NotificationBellProps) {
                 <button
                   key={n.id}
                   type="button"
-                  className="w-full px-3 py-2.5 text-left hover:bg-accent transition-colors"
+                  className={cn(
+                    "w-full px-3 py-2.5 text-left hover:bg-accent transition-colors",
+                    !n.read_at && "bg-accent/30",
+                  )}
                   onClick={() => handleMarkRead(n)}
                 >
-                  <div className="flex items-start justify-between gap-2">
-                    <span
-                      className={`text-sm ${!n.read_at ? "font-medium" : "text-muted-foreground"}`}
-                    >
-                      {n.title}
-                    </span>
-                    <span className="shrink-0 text-[11px] text-muted-foreground">
-                      {formatTime(n.created_at)}
-                    </span>
+                  <div className="flex items-start gap-2.5">
+                    <div className="mt-0.5 shrink-0">
+                      {isCompleted(n)
+                        ? <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                        : <XCircle className="h-4 w-4 text-destructive" />
+                      }
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-baseline justify-between gap-2">
+                        <span
+                          className={cn(
+                            "text-sm leading-snug break-words",
+                            !n.read_at ? "font-medium" : "text-muted-foreground",
+                          )}
+                        >
+                          {n.title}
+                        </span>
+                        <span className="shrink-0 text-[11px] text-muted-foreground whitespace-nowrap">
+                          {formatTime(n.created_at)}
+                        </span>
+                      </div>
+                      {n.message && (
+                        <p className="mt-1 text-xs text-muted-foreground leading-relaxed break-words whitespace-pre-wrap">
+                          {n.message}
+                        </p>
+                      )}
+                    </div>
                   </div>
-                  {n.message && (
-                    <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
-                      {n.message}
-                    </p>
-                  )}
                 </button>
               ))}
             </div>
