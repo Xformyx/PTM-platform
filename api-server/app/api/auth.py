@@ -1,9 +1,10 @@
 import logging
 import re
 
-from fastapi import APIRouter, Depends, HTTPException, status
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -11,12 +12,52 @@ _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 from app.core.database import get_db
 from app.core.security import create_access_token, hash_password, verify_password
 from app.dependencies import get_current_user, require_role
+from app.models.login_attempt import LoginAttempt
 from app.models.user import User
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 logger = logging.getLogger("ptm-platform.auth")
 
 DEFAULT_PASSWORD = "ptm1234"
+
+
+def _extract_ip(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+async def _resolve_location(ip: str) -> str | None:
+    """Best-effort IP geolocation via ip-api.com (free, no key)."""
+    if ip in ("127.0.0.1", "::1", "unknown") or ip.startswith(("10.", "172.", "192.168.")):
+        return "Local network"
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            resp = await client.get(f"http://ip-api.com/json/{ip}?fields=status,country,regionName,city")
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("status") == "success":
+                    parts = [data.get("city"), data.get("regionName"), data.get("country")]
+                    return ", ".join(p for p in parts if p)
+    except Exception:
+        pass
+    return None
+
+
+async def _record_login(
+    db: AsyncSession, *, email: str, user_id: int | None, user_name: str | None,
+    reason: str, login_status: str, request: Request,
+) -> None:
+    ip = _extract_ip(request)
+    ua = request.headers.get("user-agent", "")[:512]
+    location = await _resolve_location(ip)
+    db.add(LoginAttempt(
+        email=email, user_id=user_id, user_name=user_name,
+        reason=reason, status=login_status,
+        ip_address=ip, location=location, user_agent=ua,
+    ))
+    await db.commit()
 
 
 def _user_dict(u: User) -> dict:
@@ -54,16 +95,32 @@ class UpdateUserRequest(BaseModel):
 
 
 @router.post("/login")
-async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
-    # Allow "Admin" shorthand to resolve to the default admin account
+async def login(body: LoginRequest, request: Request, db: AsyncSession = Depends(get_db)):
     email = "admin@ptm.local" if body.email.strip().lower() == "admin" else body.email.strip()
     result = await db.execute(select(User).where(User.email == email))
     user = result.scalar_one_or_none()
-    if not user or not user.is_active or not verify_password(body.password, user.password_hash):
+
+    if not user or not verify_password(body.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
         )
+
+    if not user.is_active:
+        await _record_login(
+            db, email=email, user_id=user.id, user_name=user.name,
+            reason="disabled_account", login_status="blocked", request=request,
+        )
+        logger.warning(f"Disabled user login attempt: {email} from {_extract_ip(request)}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="로그인 오류가 발생합니다",
+        )
+
+    await _record_login(
+        db, email=email, user_id=user.id, user_name=user.name,
+        reason="login", login_status="success", request=request,
+    )
 
     token = create_access_token({"sub": str(user.id)})
     logger.info(f"User logged in: {user.email} (role={user.role})")
@@ -221,3 +278,37 @@ async def delete_user(
         raise HTTPException(status_code=404, detail="User not found")
     await db.delete(target)
     await db.commit()
+
+
+def _attempt_dict(r: LoginAttempt) -> dict:
+    return {
+        "id": r.id,
+        "email": r.email,
+        "user_id": r.user_id,
+        "user_name": r.user_name,
+        "status": r.status,
+        "reason": r.reason,
+        "ip_address": r.ip_address,
+        "location": r.location,
+        "user_agent": r.user_agent,
+        "created_at": r.created_at.isoformat() + "Z" if r.created_at else None,
+    }
+
+
+@router.get("/login-attempts")
+async def list_login_attempts(
+    user=Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
+    user_id: int | None = Query(None),
+    status_filter: str | None = Query(None, alias="status"),
+    limit: int = 50,
+):
+    """Return recent login attempts. Optionally filter by user_id or status."""
+    q = select(LoginAttempt)
+    if user_id is not None:
+        q = q.where(LoginAttempt.user_id == user_id)
+    if status_filter:
+        q = q.where(LoginAttempt.status == status_filter)
+    q = q.order_by(desc(LoginAttempt.created_at)).limit(min(limit, 200))
+    result = await db.execute(q)
+    return [_attempt_dict(r) for r in result.scalars().all()]

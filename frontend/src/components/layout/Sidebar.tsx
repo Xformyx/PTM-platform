@@ -359,11 +359,29 @@ interface ManagedUser {
   must_change_password: boolean;
 }
 
+interface LoginAttemptRow {
+  id: number;
+  email: string;
+  user_name: string | null;
+  user_id: number | null;
+  status: string;
+  reason: string;
+  ip_address: string | null;
+  location: string | null;
+  user_agent: string | null;
+  created_at: string | null;
+}
+
 function ManageUsersModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const { user: currentUser } = useAuth();
   const [users, setUsers] = useState<ManagedUser[]>([]);
   const [loading, setLoading] = useState(false);
   const [resetting, setResetting] = useState<number | null>(null);
+  const [toggling, setToggling] = useState<number | null>(null);
   const [message, setMessage] = useState<{ id: number; text: string; ok: boolean } | null>(null);
+  const [expandedUserId, setExpandedUserId] = useState<number | null>(null);
+  const [userAttempts, setUserAttempts] = useState<Record<number, LoginAttemptRow[]>>({});
+  const [attemptsLoading, setAttemptsLoading] = useState<number | null>(null);
 
   const loadUsers = async () => {
     setLoading(true);
@@ -390,9 +408,31 @@ function ManageUsersModal({ open, onClose }: { open: boolean; onClose: () => voi
     }
   };
 
+  const loadUserAttempts = async (uid: number) => {
+    setAttemptsLoading(uid);
+    try {
+      const data = await api.get<LoginAttemptRow[]>(`/auth/login-attempts?user_id=${uid}&limit=20`);
+      setUserAttempts((prev) => ({ ...prev, [uid]: data }));
+    } catch { /* ignore */ }
+    finally { setAttemptsLoading(null); }
+  };
+
+  const handleToggleActive = async (u: ManagedUser) => {
+    setToggling(u.id);
+    setMessage(null);
+    try {
+      const res = await api.patch<ManagedUser>(`/auth/users/${u.id}`, { is_active: !u.is_active });
+      setUsers((prev) => prev.map((p) => (p.id === u.id ? { ...p, is_active: res.is_active } : p)));
+    } catch (err: unknown) {
+      setMessage({ id: u.id, text: err instanceof Error ? err.message : "Failed", ok: false });
+    } finally {
+      setToggling(null);
+    }
+  };
+
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
-      <DialogContent className="max-w-lg" onOpenAutoFocus={() => loadUsers()}>
+      <DialogContent className="max-w-lg" onOpenAutoFocus={() => { loadUsers(); setUserAttempts({}); setExpandedUserId(null); }}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Users className="h-4 w-4" />
@@ -410,49 +450,122 @@ function ManageUsersModal({ open, onClose }: { open: boolean; onClose: () => voi
             <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
           </div>
         ) : (
-          <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
-            {users.map((u) => (
-              <div
-                key={u.id}
-                className="flex items-center gap-3 rounded-lg border px-3 py-2.5"
-              >
-                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
-                  {u.name.charAt(0).toUpperCase()}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5">
-                    <p className="text-sm font-medium truncate">{u.name}</p>
-                    <Badge variant={u.role === "admin" ? "default" : "secondary"} className="text-[10px] h-4 px-1">
-                      {u.role === "admin" ? "Admin" : "User"}
-                    </Badge>
-                    {u.must_change_password && (
-                      <Badge variant="outline" className="text-[10px] h-4 px-1 text-amber-600 border-amber-400">
-                        pw change required
-                      </Badge>
-                    )}
+          <div className="space-y-2 max-h-[26rem] overflow-y-auto pr-1">
+            {users.map((u) => {
+              const isExpanded = expandedUserId === u.id;
+              const logs = userAttempts[u.id] || [];
+
+              return (
+                <div key={u.id} className={`rounded-lg border ${!u.is_active ? "opacity-60" : ""}`}>
+                  <div className="flex items-center gap-3 px-3 py-2.5">
+                    <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${u.is_active ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"}`}>
+                      {u.name.charAt(0).toUpperCase()}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <p className="text-sm font-medium truncate">{u.name}</p>
+                        <Badge variant={u.role === "admin" ? "default" : "secondary"} className="text-[10px] h-4 px-1">
+                          {u.role === "admin" ? "Admin" : "User"}
+                        </Badge>
+                        {!u.is_active && (
+                          <Badge variant="outline" className="text-[10px] h-4 px-1 text-red-500 border-red-300">
+                            Disabled
+                          </Badge>
+                        )}
+                        {u.must_change_password && (
+                          <Badge variant="outline" className="text-[10px] h-4 px-1 text-amber-600 border-amber-400">
+                            pw change required
+                          </Badge>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-muted-foreground truncate">{u.email}</p>
+                      {message?.id === u.id && (
+                        <p className={`text-[11px] mt-0.5 ${message.ok ? "text-green-600 dark:text-green-400" : "text-destructive"}`}>
+                          {message.text}
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 text-xs px-2"
+                        title="Login history"
+                        onClick={() => {
+                          if (isExpanded) { setExpandedUserId(null); }
+                          else { setExpandedUserId(u.id); loadUserAttempts(u.id); }
+                        }}
+                      >
+                        <Shield className="h-3 w-3" />
+                      </Button>
+                      {u.id !== currentUser?.id && (
+                        <Button
+                          variant={u.is_active ? "outline" : "default"}
+                          size="sm"
+                          className={`h-7 text-xs ${!u.is_active ? "bg-emerald-600 hover:bg-emerald-700" : ""}`}
+                          onClick={() => handleToggleActive(u)}
+                          disabled={toggling === u.id}
+                        >
+                          {toggling === u.id ? (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          ) : u.is_active ? (
+                            "Disable"
+                          ) : (
+                            "Enable"
+                          )}
+                        </Button>
+                      )}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 text-xs"
+                        onClick={() => handleReset(u)}
+                        disabled={resetting === u.id}
+                      >
+                        {resetting === u.id ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                          <><RotateCcw className="h-3 w-3 mr-1" />Reset PW</>
+                        )}
+                      </Button>
+                    </div>
                   </div>
-                  <p className="text-[11px] text-muted-foreground truncate">{u.email}</p>
-                  {message?.id === u.id && (
-                    <p className={`text-[11px] mt-0.5 ${message.ok ? "text-green-600 dark:text-green-400" : "text-destructive"}`}>
-                      {message.text}
-                    </p>
+
+                  {isExpanded && (
+                    <div className="border-t bg-muted/30 px-3 py-2 space-y-1.5">
+                      <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Login History</p>
+                      {attemptsLoading === u.id ? (
+                        <div className="flex justify-center py-3">
+                          <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+                        </div>
+                      ) : logs.length === 0 ? (
+                        <p className="text-[11px] text-muted-foreground py-1">No login records</p>
+                      ) : (
+                        <div className="space-y-1 max-h-40 overflow-y-auto">
+                          {logs.map((a) => (
+                            <div key={a.id} className="flex items-center gap-2 text-[11px] rounded bg-background px-2 py-1.5 border">
+                              <span className={`shrink-0 h-1.5 w-1.5 rounded-full ${a.status === "success" ? "bg-emerald-500" : "bg-red-500"}`} />
+                              <span className="text-muted-foreground whitespace-nowrap">
+                                {a.created_at ? new Date(a.created_at).toLocaleString("ko-KR") : ""}
+                              </span>
+                              <span className="font-medium">
+                                {a.status === "success" ? "Login" : "Blocked"}
+                              </span>
+                              {a.location && (
+                                <span className="text-muted-foreground truncate">{a.location}</span>
+                              )}
+                              {a.ip_address && (
+                                <span className="text-muted-foreground/60 font-mono text-[10px] ml-auto shrink-0">{a.ip_address}</span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   )}
                 </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-7 text-xs shrink-0"
-                  onClick={() => handleReset(u)}
-                  disabled={resetting === u.id}
-                >
-                  {resetting === u.id ? (
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                  ) : (
-                    <><RotateCcw className="h-3 w-3 mr-1" />Reset PW</>
-                  )}
-                </Button>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
 
