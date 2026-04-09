@@ -11,6 +11,8 @@ app = Celery(
     backend=result_backend,
 )
 
+WATCHDOG_INTERVAL = int(os.getenv("WATCHDOG_CHECK_INTERVAL_SECONDS", "300"))
+
 app.conf.update(
     task_serializer="json",
     accept_content=["json"],
@@ -29,14 +31,22 @@ app.conf.update(
         "rag_enrichment.tasks.*": {"queue": "rag_enrichment"},
         "rag_enrichment.document_tasks.*": {"queue": "rag_enrichment"},
         "report_generation.tasks.*": {"queue": "report_generation"},
+        "watchdog.tasks.*": {"queue": "default"},
     },
     task_default_queue="default",
+    beat_schedule={
+        "watchdog-check-stalled": {
+            "task": "watchdog.tasks.check_stalled_orders",
+            "schedule": WATCHDOG_INTERVAL,
+        },
+    },
 )
 
 app.autodiscover_tasks([
     "preprocessing",
     "rag_enrichment",
     "report_generation",
+    "watchdog",
 ])
 
 # document_tasks.py is not named 'tasks.py', so autodiscover won't find it.

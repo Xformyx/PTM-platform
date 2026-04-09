@@ -43,7 +43,7 @@ export interface ShareableUser {
 }
 
 export type OrderStatus =
-  | 'pending'
+  | 'registered'
   | 'queued'
   | 'preprocessing'
   | 'rag_enrichment'

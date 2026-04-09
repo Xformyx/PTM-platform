@@ -25,6 +25,8 @@ import {
   Sparkles,
   AlertCircle,
   History,
+  PanelRightClose,
+  PanelRightOpen,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -71,12 +73,12 @@ interface ChatPanelProps {
   orderId: number;
   viewContext?: ViewContext;
   isOpen: boolean;
-  onClose: () => void;
+  onToggle: () => void;
 }
 
 // ── Component ───────────────────────────────────────────────────────────────
 
-export default function ChatPanel({ orderId, viewContext, isOpen, onClose }: ChatPanelProps) {
+export default function ChatPanel({ orderId, viewContext, isOpen, onToggle }: ChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
@@ -320,13 +322,35 @@ export default function ChatPanel({ orderId, viewContext, isOpen, onClose }: Cha
     ];
   }, [contextInfo]);
 
-  if (!isOpen) return null;
+  if (!isOpen) {
+    return (
+      <div
+        className="flex flex-col items-center py-3 gap-2 border-l border-border bg-muted/30 cursor-pointer hover:bg-muted/50 transition-colors w-10"
+        onClick={onToggle}
+        title="Open AI Chat"
+      >
+        <PanelRightOpen className="h-4 w-4 text-primary shrink-0" />
+        <span className="text-[11px] font-semibold text-primary [writing-mode:vertical-lr]">
+          POTATO AI
+        </span>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-full border-l border-border bg-background">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-muted/30">
         <div className="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 -ml-1"
+            onClick={onToggle}
+            title="Collapse panel"
+          >
+            <PanelRightClose className="h-4 w-4 text-muted-foreground" />
+          </Button>
           <Sparkles className="h-4 w-4 text-primary" />
           <span className="font-semibold text-sm">POTATO AI</span>
           {historyLoaded && messages.length > 0 && (
@@ -355,9 +379,6 @@ export default function ChatPanel({ orderId, viewContext, isOpen, onClose }: Cha
             disabled={isStreaming}
           >
             <Trash2 className="h-3.5 w-3.5" />
-          </Button>
-          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onClose}>
-            <X className="h-4 w-4" />
           </Button>
         </div>
       </div>

@@ -4,6 +4,7 @@ from app.models.notification import Notification
 from app.models.order import Order, OrderLog, OrderShare
 from app.models.rag_collection import RagCollection, RagDocument
 from app.models.report import Report
+from app.models.system_setting import SystemSetting
 from app.models.user import User
 
 __all__ = [
@@ -17,4 +18,5 @@ __all__ = [
     "LlmModel",
     "Report",
     "ChatMessage",
+    "SystemSetting",
 ]

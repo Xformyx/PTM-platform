@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { Bell, CheckCheck, Loader2, Trash2, CheckCircle2, XCircle } from "lucide-react";
+import { Bell, CheckCheck, Loader2, Trash2, CheckCircle2, XCircle, AlertTriangle, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -121,7 +121,20 @@ export default function NotificationBell({ compact }: NotificationBellProps) {
     return d.toLocaleDateString("ko-KR", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
   };
 
-  const isCompleted = (n: Notification) => n.notification_type === "order_completed";
+  const getNotifIcon = (n: Notification) => {
+    switch (n.notification_type) {
+      case "order_completed":
+        return <CheckCircle2 className="h-4 w-4 text-emerald-500" />;
+      case "watchdog_restart":
+        return <RefreshCw className="h-4 w-4 text-amber-500" />;
+      case "watchdog_halted":
+        return <AlertTriangle className="h-4 w-4 text-red-500" />;
+      case "watchdog_warning":
+        return <AlertTriangle className="h-4 w-4 text-amber-500" />;
+      default:
+        return <XCircle className="h-4 w-4 text-destructive" />;
+    }
+  };
 
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
@@ -197,10 +210,7 @@ export default function NotificationBell({ compact }: NotificationBellProps) {
                 >
                   <div className="flex items-start gap-2.5">
                     <div className="mt-0.5 shrink-0">
-                      {isCompleted(n)
-                        ? <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-                        : <XCircle className="h-4 w-4 text-destructive" />
-                      }
+                      {getNotifIcon(n)}
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-baseline justify-between gap-2">

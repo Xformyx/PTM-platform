@@ -69,8 +69,17 @@ def _resolve_enriched_json_path(order_id: int, rag_dir: Path, explicit: str | No
     return str(chosen.resolve())
 
 
+_REPORT_STEP_ORDER = [
+    "context_loading", "question_generation", "research", "hypothesis",
+    "validation", "network", "writing", "qa_report", "compilation",
+]
+
+
 def _make_progress_cb(order_id):
+    seen_steps: set[str] = set()
+
     def _emit(step, status, detail="", pct=0):
+        seen_steps.add(step)
         publish_analysis_log(
             order_id, f"[report:{step}] {status}: {detail}",
             stage="report_generation", step="report_phase", status="progress",
@@ -78,6 +87,15 @@ def _make_progress_cb(order_id):
                       "detail": detail, "pct": round(pct, 1)},
             persist=True,
         )
+
+    def _backfill_prior(current_step):
+        """Mark all steps before current_step as 'done' if not yet seen."""
+        idx = _REPORT_STEP_ORDER.index(current_step) if current_step in _REPORT_STEP_ORDER else -1
+        if idx <= 0:
+            return
+        for prev in _REPORT_STEP_ORDER[:idx]:
+            if prev not in seen_steps:
+                _emit(prev, "done", "Completed (cached)", 0)
 
     def cb(pct, msg):
         publish_progress(order_id, "report_generation", "graph", "running", round(pct, 1), msg)
@@ -87,44 +105,61 @@ def _make_progress_cb(order_id):
         elif msg.startswith("Context loaded:"):
             _emit("context_loading", "done", msg, pct)
         elif "Generating AI research questions" in msg:
+            _backfill_prior("question_generation")
             _emit("question_generation", "running", msg, pct)
         elif msg.startswith("Generated ") and "question" in msg:
+            _backfill_prior("question_generation")
             _emit("question_generation", "done", msg, pct)
         elif msg.startswith("Using ") and "question" in msg:
+            _backfill_prior("question_generation")
             _emit("question_generation", "done", msg, pct)
         elif msg == "Analyzing PTM data":
+            _backfill_prior("research")
             _emit("research", "running", msg, pct)
         elif msg.startswith("Researching:"):
             _emit("research", "running", msg, pct)
         elif msg.startswith("Research complete:"):
+            _backfill_prior("research")
             _emit("research", "done", msg, pct)
         elif msg == "Generating hypotheses":
+            _backfill_prior("hypothesis")
             _emit("hypothesis", "running", msg, pct)
         elif msg.startswith("Hypothesis for Q"):
             _emit("hypothesis", "running", msg, pct)
         elif msg.startswith("Generated ") and "hypothes" in msg:
+            _backfill_prior("hypothesis")
             _emit("hypothesis", "done", msg, pct)
         elif msg == "Validating hypotheses":
+            _backfill_prior("validation")
             _emit("validation", "running", msg, pct)
         elif msg.startswith("Validation complete:"):
+            _backfill_prior("validation")
             _emit("validation", "done", msg, pct)
         elif "Analyzing signaling networks" in msg:
+            _backfill_prior("network")
             _emit("network", "running", msg, pct)
         elif "Network analysis complete" in msg or "Network analysis failed" in msg:
+            _backfill_prior("network")
             _emit("network", "done", msg, pct)
         elif msg == "Writing report sections":
+            _backfill_prior("writing")
             _emit("writing", "running", msg, pct)
         elif msg.startswith("Writing "):
             _emit("writing", "running", msg, pct)
         elif msg == "All sections written":
+            _backfill_prior("writing")
             _emit("writing", "done", msg, pct)
         elif "Generating Q&A report" in msg:
+            _backfill_prior("qa_report")
             _emit("qa_report", "running", msg, pct)
         elif "Q&A report generated" in msg:
+            _backfill_prior("qa_report")
             _emit("qa_report", "done", msg, pct)
         elif msg == "Compiling final report":
+            _backfill_prior("compilation")
             _emit("compilation", "running", msg, pct)
         elif "Report generation complete" in msg:
+            _backfill_prior("compilation")
             _emit("compilation", "done", msg, pct)
 
     return cb

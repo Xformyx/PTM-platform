@@ -173,3 +173,59 @@ def notify_order_status(order_id: int, status: str, error_message: str | None = 
 
     if email_enabled and email:
         _send_email(email, email_subject, email_body)
+
+
+def notify_watchdog_alert(
+    order_id: int,
+    reason: str,
+    stalled_stage: str,
+    action_taken: str = "none",
+):
+    """
+    Create in-app notification (+ optional email) when the watchdog detects a stalled order.
+    action_taken: 'none', 'auto_restart', 'halted'
+    """
+    user_id, email, email_enabled = _get_user_for_order(order_id)
+    if user_id is None:
+        return
+
+    order_code, project_name = _get_order_info(order_id)
+    display_name = order_code or f"Order #{order_id}"
+    stage_label = stalled_stage.replace("_", " ").title()
+
+    if action_taken == "auto_restart":
+        ntype = "watchdog_restart"
+        title = f"🔄 분석 자동 재시작 — {display_name}"
+        message = (
+            f"'{stage_label}' 단계가 멈춤 감지되어 자동 재시작되었습니다.\n"
+            f"원인: {reason}"
+        )
+    elif action_taken == "halted":
+        ntype = "watchdog_halted"
+        title = f"⚠️ 분석 중단 — {display_name}"
+        message = (
+            f"'{stage_label}' 단계가 멈춤 감지되어 분석이 중단되었습니다.\n"
+            f"원인: {reason}\n"
+            f"수동 확인이 필요합니다."
+        )
+    else:
+        ntype = "watchdog_warning"
+        title = f"⚠️ 분석 멈춤 감지 — {display_name}"
+        message = (
+            f"'{stage_label}' 단계에서 진행이 멈춤이 감지되었습니다.\n"
+            f"원인: {reason}"
+        )
+
+    _insert_notification(user_id, order_id, ntype, title, message)
+
+    if email_enabled and email:
+        email_subject = f"[PTM] Watchdog Alert: {display_name}"
+        email_body = (
+            f"PTM Platform — Watchdog Alert\n\n"
+            f"주문: {display_name}\n"
+            f"단계: {stage_label}\n"
+            f"상태: {action_taken}\n"
+            f"원인: {reason}\n\n"
+            f"플랫폼에서 확인하세요."
+        )
+        _send_email(email, email_subject, email_body)

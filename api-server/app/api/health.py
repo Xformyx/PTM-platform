@@ -444,6 +444,7 @@ CONTAINER_OPTIONS = [
     {"id": "ptm-worker-preprocessing", "label": "Preprocessing Worker", "category": "pipeline"},
     {"id": "ptm-worker-rag", "label": "RAG Enrichment Worker", "category": "pipeline"},
     {"id": "ptm-worker-report", "label": "Report Generation Worker", "category": "pipeline"},
+    {"id": "ptm-celery-beat", "label": "Celery Beat (Watchdog)", "category": "pipeline"},
     {"id": "ptm-api-server", "label": "API Server", "category": "app"},
     {"id": "ptm-mcp-server", "label": "MCP Server", "category": "app"},
     {"id": "ptm-gateway", "label": "Gateway (nginx)", "category": "app"},
@@ -532,6 +533,28 @@ async def container_status() -> dict:
     return {"containers": result}
 
 
+
+
+@router.post("/health/container-restart/{container_id}")
+async def container_restart(container_id: str) -> dict:
+    """Restart a Docker container. Requires Docker socket."""
+    allowed = {c["id"] for c in CONTAINER_OPTIONS}
+    if container_id not in allowed:
+        return {"error": f"Unknown container: {container_id}", "success": False}
+
+    try:
+        import docker
+        client = docker.from_env()
+        container = _find_container(client, container_id)
+        if container is None:
+            return {"error": f"Container {container_id} not found", "success": False}
+        container.restart(timeout=30)
+        label = next((c["label"] for c in CONTAINER_OPTIONS if c["id"] == container_id), container_id)
+        logger.info(f"Container restarted: {container_id} ({label})")
+        return {"success": True, "container": container_id, "label": label, "message": f"{label} restarted successfully"}
+    except Exception as e:
+        logger.warning(f"Container restart failed for {container_id}: {e}")
+        return {"error": str(e), "success": False}
 
 
 @router.get("/health/container-logs/{container_id}")

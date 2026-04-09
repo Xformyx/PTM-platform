@@ -80,7 +80,7 @@ export function OrderArticlesTab({ orderCode, orderStatus }: OrderArticlesTabPro
       }
     };
 
-    if (orderCode && orderStatus !== "pending") {
+    if (orderCode && orderStatus !== "registered") {
       fetchArticles();
     } else {
       setLoading(false);
@@ -138,7 +138,7 @@ export function OrderArticlesTab({ orderCode, orderStatus }: OrderArticlesTabPro
     URL.revokeObjectURL(url);
   };
 
-  if (orderStatus === "pending") {
+  if (orderStatus === "registered") {
     return (
       <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
         <BookOpen className="h-12 w-12 mb-4 opacity-50" />

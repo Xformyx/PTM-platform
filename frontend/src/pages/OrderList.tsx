@@ -46,16 +46,21 @@ function fmtElapsed(order: Order): string {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 }
 
-const statusBadgeVariant = (s: string) => {
+const statusBadgeVariant = (s: string): { variant: "success" | "destructive" | "info" | "warning" | "secondary" | "outline"; className?: string } => {
   switch (s) {
-    case "completed": return "success" as const;
-    case "failed": return "destructive" as const;
-    case "running": case "preprocessing": case "rag_enrichment": case "report_generation": return "info" as const;
-    default: return "secondary" as const;
+    case "completed": return { variant: "success" };
+    case "failed": return { variant: "destructive" };
+    case "cancelled": return { variant: "outline" };
+    case "registered": return { variant: "secondary", className: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300" };
+    case "queued": return { variant: "warning" };
+    case "preprocessing": return { variant: "info", className: "bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-400" };
+    case "rag_enrichment": return { variant: "info", className: "bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400" };
+    case "report_generation": return { variant: "info", className: "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400" };
+    default: return { variant: "secondary" };
   }
 };
 
-type StatusFilter = "all" | "pending" | "running" | "completed" | "failed";
+type StatusFilter = "all" | "registered" | "running" | "completed" | "failed";
 type SortField = "created_at" | "completed_at";
 type SortDir = "asc" | "desc";
 
@@ -66,10 +71,10 @@ function SortIcon({ field, sort }: { field: SortField; sort: { field: SortField;
     : <ChevronDown className="h-3 w-3 ml-1 text-primary" />;
 }
 
-const ORDER_LIST_COL_WIDTHS_KEY = "ptm-order-list-col-pct-v1";
+const ORDER_LIST_COL_WIDTHS_KEY = "ptm-order-list-col-pct-v2";
 /** Percent widths — must sum to 100 */
 /** Last column (Action) kept ≥6% so Run/Delete aren’t flush to the table edge */
-const DEFAULT_COL_PCT = [12, 14, 9, 9, 9, 12, 8, 11, 10, 6] as const;
+const DEFAULT_COL_PCT = [11, 13, 8, 8, 8, 11, 7, 10, 11, 13] as const;
 const N_COLS = DEFAULT_COL_PCT.length;
 const MIN_COL_PCT = 4;
 
@@ -333,7 +338,7 @@ export default function OrderList() {
     return list;
   })();
 
-  const filters: StatusFilter[] = ["all", "pending", "running", "completed", "failed"];
+  const filters: StatusFilter[] = ["all", "registered", "running", "completed", "failed"];
 
   if (loading) {
     return (
@@ -442,7 +447,7 @@ export default function OrderList() {
                     className="cursor-pointer"
                     onClick={() => navigate(`/orders/${order.id}`)}
                   >
-                    <TableCell className="truncate">
+                    <TableCell className="truncate" title={order.order_code}>
                       <Link
                         to={`/orders/${order.id}`}
                         className="font-mono text-primary hover:underline font-medium"
@@ -467,9 +472,25 @@ export default function OrderList() {
                     <TableCell className="capitalize truncate">{order.ptm_type}</TableCell>
                     <TableCell className="capitalize truncate">{order.species}</TableCell>
                     <TableCell>
-                      <Badge variant={statusBadgeVariant(order.status)} className="capitalize">
-                        {order.status}
-                      </Badge>
+                      {(() => {
+                        const isHalted = order.stage_detail?.startsWith("Halted:");
+                        if (isHalted) {
+                          return (
+                            <Badge variant="destructive" className="bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400">
+                              Halted
+                            </Badge>
+                          );
+                        }
+                        const badge = statusBadgeVariant(order.status);
+                        const label = order.status === "rag_enrichment" ? "RAG Enrichment"
+                          : order.status === "report_generation" ? "Report Gen."
+                          : order.status;
+                        return (
+                          <Badge variant={badge.variant} className={`capitalize ${badge.className ?? ""}`}>
+                            {label}
+                          </Badge>
+                        );
+                      })()}
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2 min-w-[120px]">
@@ -485,7 +506,11 @@ export default function OrderList() {
                               <Progress
                                 value={displayPct}
                                 className="w-20"
-                                indicatorClassName={order.status === "failed" ? "bg-destructive" : undefined}
+                                indicatorClassName={
+                                  order.status === "failed" ? "bg-destructive"
+                                    : order.stage_detail?.startsWith("Halted:") ? "bg-red-400"
+                                    : undefined
+                                }
                               />
                               <span className="text-xs text-muted-foreground whitespace-nowrap">
                                 {Math.round(displayPct)}%

@@ -306,6 +306,31 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  celery-beat:
+    image: ptm-workers:${VERSION_WORKERS:-001}
+    container_name: ptm-celery-beat
+    command: celery -A celery_app beat -l info --pidfile=/tmp/celerybeat.pid
+    env_file:
+      - .env
+    volumes:
+      - ./workers:/app
+    environment:
+      TZ: Asia/Seoul
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONPATH: /app
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: mysql+asyncmy://${MYSQL_USER:-ptm_user}:${MYSQL_PASSWORD:-ptm_password_change_me}@mysql:3306/${MYSQL_DATABASE:-ptm_platform}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - ptm-network
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
   # ─── Gateway & Frontend ────────────────────────────────────────────────────
 
   frontend:

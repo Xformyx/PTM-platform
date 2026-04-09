@@ -1,12 +1,12 @@
 import { useEffect, useState, useCallback, useRef } from "react";
-import { RefreshCw, AlertCircle, CheckCircle2, HelpCircle, Server, Database, Cpu, Network, Terminal, ChevronDown, ChevronUp, Circle } from "lucide-react";
+import { RefreshCw, AlertCircle, CheckCircle2, HelpCircle, Server, Database, Cpu, Network, Terminal, ChevronDown, ChevronUp, Circle, RotateCcw, Loader2, Eye } from "lucide-react";
 import { api } from "@/lib/api";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 
-interface Node {
+interface ArchNode {
   id: string;
   label: string;
   host: string;
@@ -23,7 +23,7 @@ interface Edge {
 }
 
 interface SystemArchitecture {
-  nodes: Record<string, Node>;
+  nodes: Record<string, ArchNode>;
   edges: Edge[];
 }
 
@@ -31,6 +31,7 @@ const statusConfig = {
   ok: { color: "text-blue-600", bg: "bg-blue-500/20", icon: CheckCircle2 },
   error: { color: "text-red-600", bg: "bg-red-500/20", icon: AlertCircle },
   unavailable: { color: "text-amber-600", bg: "bg-amber-500/20", icon: HelpCircle },
+  restarting: { color: "text-amber-600", bg: "bg-amber-500/20", icon: RefreshCw },
   unknown: { color: "text-muted-foreground", bg: "bg-muted/50", icon: HelpCircle },
 };
 
@@ -65,6 +66,11 @@ export default function SystemMonitor() {
   const logsEndRef = useRef<HTMLDivElement>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
   const autoScrollRef = useRef(true);
+
+  // Context menu
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; containerId: string; label: string } | null>(null);
+  const [restarting, setRestarting] = useState<string | null>(null);
+  const ctxRef = useRef<HTMLDivElement>(null);
 
   // ── Architecture & Container Status ──────────────────────────
   const fetchArchitecture = useCallback(async () => {
@@ -217,8 +223,58 @@ export default function SystemMonitor() {
     }
   }, [selectedContainer, closeStream]);
 
+  // ── Context menu handlers ──────────────────────────────────────
+  const handleContextMenu = useCallback((e: React.MouseEvent, containerId: string, label: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setCtxMenu({ x: e.clientX, y: e.clientY, containerId, label });
+  }, []);
+
+  useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      if (ctxRef.current && !ctxRef.current.contains(e.target as Node)) {
+        setCtxMenu(null);
+      }
+    };
+    if (ctxMenu) {
+      document.addEventListener("mousedown", handleClick);
+      return () => document.removeEventListener("mousedown", handleClick);
+    }
+  }, [ctxMenu]);
+
+  const handleRestart = useCallback(async (containerId: string) => {
+    setCtxMenu(null);
+    setRestarting(containerId);
+    try {
+      const res = await api.post<{ success: boolean; message?: string; error?: string }>(
+        `/health/container-restart/${containerId}`
+      );
+      if (res.success) {
+        setTimeout(() => {
+          fetchContainerStatus();
+          setRestarting(null);
+        }, 3000);
+      } else {
+        alert(res.error || "Restart failed");
+        setRestarting(null);
+      }
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Restart failed");
+      setRestarting(null);
+    }
+  }, [fetchContainerStatus]);
+
   const leftCol = ["client", "gateway", "api_server"];
   const rightCol = ["mysql", "redis", "chromadb", "mcp_server", "ollama", "cytoscape"];
+
+  const archNodeToContainer: Record<string, { id: string; label: string }> = {
+    api_server: { id: "ptm-api-server", label: "API Server" },
+    gateway: { id: "ptm-gateway", label: "Gateway (nginx)" },
+    mysql: { id: "ptm-mysql", label: "MySQL" },
+    redis: { id: "ptm-redis", label: "Redis" },
+    chromadb: { id: "ptm-chromadb", label: "ChromaDB" },
+    mcp_server: { id: "ptm-mcp-server", label: "MCP Server" },
+  };
 
   const containerLogs = logLines.join("\n");
 
@@ -290,13 +346,18 @@ export default function SystemMonitor() {
                   if (!node) return null;
                   const config = statusConfig[node.status as keyof typeof statusConfig] ?? statusConfig.unknown;
                   const Icon = id === "client" ? Cpu : id === "gateway" ? Server : Database;
+                  const ctr = archNodeToContainer[id];
+                  const isNodeRestarting = ctr && restarting === ctr.id;
                   return (
                     <div
                       key={id}
+                      onContextMenu={ctr ? (e) => handleContextMenu(e, ctr.id, ctr.label) : undefined}
                       className={cn(
                         "rounded-lg border p-4 transition-colors",
                         config.bg,
-                        "border-current/20"
+                        "border-current/20",
+                        ctr && "cursor-context-menu",
+                        isNodeRestarting && "opacity-60 animate-pulse",
                       )}
                     >
                       <div className="flex items-center justify-between">
@@ -304,7 +365,10 @@ export default function SystemMonitor() {
                           <Icon className="h-4 w-4" />
                           <span className="font-medium">{node.label}</span>
                         </div>
-                        <StatusBadge status={node.status} />
+                        {isNodeRestarting
+                          ? <StatusBadge status="restarting" />
+                          : <StatusBadge status={node.status} />
+                        }
                       </div>
                       <div className="mt-2 text-xs text-muted-foreground">
                         {node.port > 0 ? `${node.host}:${node.port}` : node.detail}
@@ -329,13 +393,18 @@ export default function SystemMonitor() {
                     const node = data.nodes[id];
                     if (!node) return null;
                     const config = statusConfig[node.status as keyof typeof statusConfig] ?? statusConfig.unknown;
+                    const ctr = archNodeToContainer[id];
+                    const isNodeRestarting = ctr && restarting === ctr.id;
                     return (
                       <div
                         key={id}
+                        onContextMenu={ctr ? (e) => handleContextMenu(e, ctr.id, ctr.label) : undefined}
                         className={cn(
                           "rounded-lg border p-4 transition-colors",
                           config.bg,
-                          "border-current/20"
+                          "border-current/20",
+                          ctr && "cursor-context-menu",
+                          isNodeRestarting && "opacity-60 animate-pulse",
                         )}
                       >
                         <div className="flex items-center justify-between">
@@ -347,13 +416,16 @@ export default function SystemMonitor() {
                             )}
                             <span className="font-medium">{node.label}</span>
                           </div>
-                          <StatusBadge status={node.status} />
+                          {isNodeRestarting
+                            ? <StatusBadge status="restarting" />
+                            : <StatusBadge status={node.status} />
+                          }
                         </div>
                         <div className="mt-2 text-xs text-muted-foreground">
                           {node.port > 0 ? `${node.host}:${node.port}` : node.host}
                         </div>
                         <div className="mt-1 text-xs text-muted-foreground truncate" title={node.detail}>
-                          {node.detail}
+                          {isNodeRestarting ? "Restarting..." : node.detail}
                         </div>
                       </div>
                     );
@@ -446,25 +518,31 @@ export default function SystemMonitor() {
               {containerStatus.map((c) => {
                 const config = statusConfig[c.status as keyof typeof statusConfig] ?? statusConfig.unknown;
                 const isSelected = selectedContainer === c.id;
+                const isRestarting = restarting === c.id;
                 return (
                   <button
                     key={c.id}
                     type="button"
                     onClick={() => setSelectedContainer(c.id)}
+                    onContextMenu={(e) => handleContextMenu(e, c.id, c.label)}
                     className={cn(
                       "rounded-lg border p-3 transition-colors text-left w-full cursor-pointer",
                       "hover:opacity-90 hover:ring-2 hover:ring-blue-400/50",
                       config.bg,
                       "border-current/20",
-                      isSelected && "ring-2 ring-blue-500 ring-offset-2"
+                      isSelected && "ring-2 ring-blue-500 ring-offset-2",
+                      isRestarting && "opacity-60 animate-pulse"
                     )}
                   >
                     <div className="flex items-center justify-between">
                       <span className="font-medium text-sm">{c.label}</span>
-                      <StatusBadge status={c.status} />
+                      <div className="flex items-center gap-1.5">
+                        {isRestarting && <Loader2 className="h-3 w-3 animate-spin text-amber-500" />}
+                        <StatusBadge status={isRestarting ? "restarting" : c.status} />
+                      </div>
                     </div>
                     <div className="mt-1 text-xs text-muted-foreground font-mono truncate" title={c.detail}>
-                      {c.detail}
+                      {isRestarting ? "Restarting..." : c.detail}
                     </div>
                     {c.image && (
                       <div className="mt-1.5 text-xs text-muted-foreground truncate" title={c.image}>
@@ -476,7 +554,10 @@ export default function SystemMonitor() {
                         Started: {new Date(c.started_at).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", dateStyle: "short", timeStyle: "short" })}
                       </div>
                     )}
-                    <div className="mt-1 text-xs text-muted-foreground">{isSelected ? "✓ Viewing logs" : "Click to view logs"}</div>
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      {isSelected ? "✓ Viewing logs" : "Click to view logs"}
+                      <span className="text-muted-foreground/40 ml-1">• Right-click for options</span>
+                    </div>
                   </button>
                 );
               })}
@@ -592,6 +673,44 @@ export default function SystemMonitor() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Context Menu */}
+      {ctxMenu && (
+        <div
+          ref={ctxRef}
+          className="fixed z-50 min-w-[180px] rounded-lg border bg-popover p-1 shadow-lg animate-in fade-in-0 zoom-in-95"
+          style={{ left: ctxMenu.x, top: ctxMenu.y }}
+        >
+          <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground border-b mb-1">
+            {ctxMenu.label}
+          </div>
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent transition-colors"
+            onClick={() => {
+              setSelectedContainer(ctxMenu.containerId);
+              setCtxMenu(null);
+            }}
+          >
+            <Eye className="h-4 w-4" />
+            View Logs
+          </button>
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent transition-colors text-amber-600 dark:text-amber-400"
+            onClick={() => {
+              if (confirm(`'${ctxMenu.label}' 컨테이너를 재시작하시겠습니까?`)) {
+                handleRestart(ctxMenu.containerId);
+              } else {
+                setCtxMenu(null);
+              }
+            }}
+          >
+            <RotateCcw className="h-4 w-4" />
+            Restart Container
+          </button>
+        </div>
+      )}
     </div>
   );
 }

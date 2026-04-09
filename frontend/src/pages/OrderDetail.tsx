@@ -9,7 +9,7 @@ import {
   Copy, Check, Eye, ArrowRightCircle, Sparkles, Plus, X, Trash2,
   MessageSquare, Loader2, ToggleLeft, ToggleRight, Square, StopCircle,
   ChartScatter, TrendingUp, ZoomIn, ZoomOut, GitMerge, BarChart3,
-  LayoutDashboard, FileOutput, Share2,
+  LayoutDashboard, FileOutput, Share2, CopyPlus, ChevronLeft, ChevronRight,
 } from "lucide-react";
 import { ShareOrderModal } from "@/components/ShareOrderModal";
 import { Input } from "@/components/ui/input";
@@ -23,6 +23,9 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Progress } from "@/components/ui/progress";
@@ -57,12 +60,17 @@ const STAGES = [
   { key: "report_generation", label: "Report Generation", icon: FileText, range: [66, 100] },
 ];
 
-const statusBadgeVariant = (s: string) => {
+const statusBadgeVariant = (s: string): { variant: "success" | "destructive" | "info" | "warning" | "secondary" | "outline"; className?: string } => {
   switch (s) {
-    case "completed": return "success" as const;
-    case "failed": return "destructive" as const;
-    case "running": case "preprocessing": case "rag_enrichment": case "report_generation": return "info" as const;
-    default: return "secondary" as const;
+    case "completed": return { variant: "success" };
+    case "failed": return { variant: "destructive" };
+    case "cancelled": return { variant: "outline" };
+    case "registered": return { variant: "secondary", className: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300" };
+    case "queued": return { variant: "warning" };
+    case "preprocessing": return { variant: "info", className: "bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-400" };
+    case "rag_enrichment": return { variant: "info", className: "bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400" };
+    case "report_generation": return { variant: "info", className: "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400" };
+    default: return { variant: "secondary" };
   }
 };
 
@@ -105,13 +113,8 @@ function computeOverallPct(stage: string | undefined, stagePct: number): number 
   return Math.round(lo + (Math.min(Math.max(stagePct, 0), 100) / 100) * (hi - lo));
 }
 
-function stageStepLabel(stage: string | undefined): string {
-  switch (stage) {
-    case "preprocessing": return "1/3";
-    case "rag_enrichment": return "2/3";
-    case "report_generation": return "3/3";
-    default: return "";
-  }
+function stageStepLabel(_stage: string | undefined): string {
+  return "";
 }
 
 function stageColor(stage: string): string {
@@ -190,13 +193,23 @@ interface SubProgress {
 }
 
 function parseSubProgress(message: string): SubProgress | null {
-  // Matches patterns like "InterPro domains: 1,200/6,071" or "UniProt: 500/6,095"
-  const m = message.match(/^(.+?):\s*([\d,]+)\s*\/\s*([\d,]+)$/);
-  if (!m) return null;
-  const done = parseInt(m[2].replace(/,/g, ""));
-  const total = parseInt(m[3].replace(/,/g, ""));
-  if (isNaN(done) || isNaN(total) || total === 0) return null;
-  return { label: m[1].trim(), done, total, pct: Math.round((done / total) * 100) };
+  // Pattern 1: "InterPro domains: 1,200/6,071"
+  const m1 = message.match(/^(.+?):\s*([\d,]+)\s*\/\s*([\d,]+)$/);
+  if (m1) {
+    const done = parseInt(m1[2].replace(/,/g, ""));
+    const total = parseInt(m1[3].replace(/,/g, ""));
+    if (!isNaN(done) && !isNaN(total) && total > 0)
+      return { label: m1[1].trim(), done, total, pct: Math.round((done / total) * 100) };
+  }
+  // Pattern 2: "Hypothesis for Q4 done (3/10)"
+  const m2 = message.match(/^(.+?)\s*\((\d+)\s*\/\s*(\d+)\)\s*$/);
+  if (m2) {
+    const done = parseInt(m2[2]);
+    const total = parseInt(m2[3]);
+    if (!isNaN(done) && !isNaN(total) && total > 0)
+      return { label: `[${done}/${total}] ${m2[1].trim()}`, done, total, pct: Math.round((done / total) * 100) };
+  }
+  return null;
 }
 
 // ── Activity Progress Card ──────────────────────────────────────────────────
@@ -218,7 +231,6 @@ function ActivityProgress({
   const latestStage = progress?.stage || stage || "";
   const stagePct = progress?.progress_pct ?? pct;
   const overallPct = computeOverallPct(latestStage, stagePct);
-  const stepInfo = stageStepLabel(latestStage);
   const sub = parseSubProgress(latestMessage);
 
   if (!isRunning && !sub) return null;
@@ -246,7 +258,6 @@ function ActivityProgress({
         <div className="space-y-1.5 pl-4 border-l-2 border-primary/20">
           <div className="flex items-center justify-between text-xs">
             <span className="text-muted-foreground">
-              {stepInfo && <span className="font-mono mr-1.5">[{stepInfo}]</span>}
               {stageLabel(latestStage)}
             </span>
             <span className="font-mono tabular-nums text-muted-foreground">
@@ -1295,6 +1306,7 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
   const [activityFilter, setActivityFilter] = useState<"all" | "de_novo" | "regulated" | "minor">("all");
   // Module highlight: PTM labels of the highlighted module (empty = none)
   const [highlightedModulePtmLabels, setHighlightedModulePtmLabels] = useState<Set<string>>(new Set());
+  const [sidebarOpen, setSidebarOpen] = useState(true);
 
   useEffect(() => {
     api
@@ -1643,9 +1655,19 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
             Minor ({activityCounts.minor})
           </Button>
         </div>
+        <div className="ml-auto">
+          <Button
+            variant="outline"
+            size="sm"
+            className="text-xs h-7 px-2 gap-1.5"
+            onClick={() => setSidebarOpen((v) => !v)}
+          >
+            {sidebarOpen ? <><ChevronRight className="h-3 w-3" /> Hide PTM List</> : <><ChevronLeft className="h-3 w-3" /> Show PTM List</>}
+          </Button>
+        </div>
       </div>
 
-      <div className="grid lg:grid-cols-[1fr_240px] gap-4">
+      <div className={`grid gap-4 ${sidebarOpen ? "lg:grid-cols-[1fr_240px]" : ""}`}>
         {/* Chart area — taller Y axis with zoom controls */}
         <div className="rounded-lg border bg-background p-4 relative" style={{ minHeight: `${chartHeight + 40}px` }}>
           {/* Y-axis zoom controls + manual min/max */}
@@ -1776,7 +1798,7 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
         </div>
 
         {/* Right sidebar — PTM checklist with Select All / Deselect All */}
-        <div className="space-y-2">
+        {sidebarOpen && <div className="space-y-2">
           <p className="text-xs font-medium text-muted-foreground">
             {isUbi ? "Top N Ubi Sites" : "Top N PTMs"} ({filteredPtms.length})
           </p>
@@ -1872,7 +1894,7 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
               </p>
             )}
           </div>
-        </div>
+        </div>}
       </div>
 
       {/* ── v9.18: Inferred Upstream Receptors Panel ── */}
@@ -2433,6 +2455,7 @@ export default function OrderDetail() {
   const [shareModalOpen, setShareModalOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("overview");
+  const [duplicateModalOpen, setDuplicateModalOpen] = useState(false);
   const [pendingAction, setPendingAction] = useState<{ type: "start" } | { type: "run-stage"; stage: string } | null>(null);
   const runHandledRef = useRef(false);
   const [phaseModalOpen, setPhaseModalOpen] = useState(false);
@@ -2442,7 +2465,7 @@ export default function OrderDetail() {
   const stopRequestRef = useRef(false);
   const lastLogIdRef = useRef(0);
 
-  const isRunning = !!order && !["completed", "failed", "pending", "cancelled"].includes(order.status);
+  const isRunning = !!order && !["completed", "failed", "registered", "cancelled"].includes(order.status);
 
   const { progress, events } = useOrderProgress(isRunning ? orderId : null);
 
@@ -2661,7 +2684,7 @@ export default function OrderDetail() {
   }, []);
   useEffect(() => {
     if (runHandledRef.current) return;
-    if (searchParams.get("run") !== "1" || !order || !["pending", "failed", "completed"].includes(order.status)) return;
+    if (searchParams.get("run") !== "1" || !order || !["registered", "failed", "completed"].includes(order.status)) return;
 
     runHandledRef.current = true;
 
@@ -2669,7 +2692,7 @@ export default function OrderDetail() {
     url.searchParams.delete("run");
     window.history.replaceState({}, "", url.pathname + url.search);
 
-    if (order.status === "pending") {
+    if (order.status === "registered") {
       api.post(`/orders/${orderId}/start`)
         .then(() => Promise.all([api.get<Order>(`/orders/${orderId}`), api.get<{ logs: OrderLog[] }>(`/orders/${orderId}/logs`)]))
         .then(([o, l]) => {
@@ -2791,7 +2814,7 @@ export default function OrderDetail() {
   };
 
   const handleStart = async () => {
-    if (order?.status === "pending") {
+    if (order?.status === "registered") {
       try {
         await api.post(`/orders/${orderId}/start`);
         const [o, l] = await Promise.all([
@@ -2833,6 +2856,230 @@ export default function OrderDetail() {
     }
   };
 
+  // ── Duplicate Order Modal ──────────────────────────────────────────
+  const DuplicateModal = () => {
+    const [dupName, setDupName] = useState(order ? `${order.order_code}_copy` : "");
+    const [dupSubmitting, setDupSubmitting] = useState(false);
+    const [dupError, setDupError] = useState("");
+
+    const ro = (order?.report_options ?? {}) as Record<string, any>;
+    const ao = (order?.analysis_options ?? {}) as Record<string, any>;
+    const ac = (order?.analysis_context ?? {}) as Record<string, any>;
+
+    const [dupLlmModel, setDupLlmModel] = useState(() => {
+      const p = ro.llm_provider || "ollama";
+      const m = ro.llm_model || "";
+      return m ? `${p}:${m}` : "";
+    });
+    const [dupRagEnrichmentLlm, setDupRagEnrichmentLlm] = useState(() => {
+      const p = ro.rag_enrichment_llm_provider || "ollama";
+      const m = ro.rag_enrichment_llm_model || "";
+      return m ? `${p}:${m}` : "";
+    });
+    const [dupPtmSelection, setDupPtmSelection] = useState<string>(ro.ptm_selection_mode || "de_novo_regulated");
+    const [dupTopN, setDupTopN] = useState<string>(String(ao.topN ?? 50));
+    const [dupReportType, setDupReportType] = useState<string>(ro.report_type || "comprehensive");
+    const [dupQuestions, setDupQuestions] = useState<string[]>(ro.research_questions || []);
+    const [dupNewQ, setDupNewQ] = useState("");
+    const [dupBioQuestion, setDupBioQuestion] = useState<string>(ac.biological_question || "");
+    const [dupTreatment, setDupTreatment] = useState<string>(ac.treatment || "");
+    const [dupTimePoints, setDupTimePoints] = useState<string>(ac.time_points || "");
+
+    const handleDuplicate = async () => {
+      if (!dupName.trim()) { setDupError("Order name is required"); return; }
+      setDupSubmitting(true);
+      setDupError("");
+      try {
+        const parseLlm = (v: string) => {
+          const i = v.indexOf(":");
+          return i >= 0 ? [v.slice(0, i), v.slice(i + 1)] : ["ollama", v];
+        };
+        const [llmProv, llmMod] = parseLlm(dupLlmModel);
+        const [ragEnrProv, ragEnrMod] = parseLlm(dupRagEnrichmentLlm);
+
+        const newReportOpts = {
+          ...ro,
+          ...(llmMod ? { llm_model: llmMod, llm_provider: llmProv } : {}),
+          ...(ragEnrMod ? { rag_enrichment_llm_model: ragEnrMod, rag_enrichment_llm_provider: ragEnrProv } : {}),
+          ptm_selection_mode: dupPtmSelection,
+          report_type: dupReportType,
+          research_questions: dupQuestions,
+        };
+        const newAnalysisOpts = { ...ao, topN: parseInt(dupTopN) || 50 };
+        const newAnalysisCtx = { ...ac, biological_question: dupBioQuestion, treatment: dupTreatment, time_points: dupTimePoints };
+
+        const result = await api.post<{ id: number; order_code: string }>(`/orders/${order!.id}/duplicate`, {
+          new_order_name: dupName.trim(),
+          report_options: newReportOpts,
+          analysis_options: newAnalysisOpts,
+          analysis_context: newAnalysisCtx,
+        });
+        setDuplicateModalOpen(false);
+        navigate(`/orders/${result.id}`);
+      } catch (err: any) {
+        setDupError(err?.message || "Duplication failed");
+      } finally {
+        setDupSubmitting(false);
+      }
+    };
+
+    return (
+      <Dialog open={duplicateModalOpen} onOpenChange={setDuplicateModalOpen}>
+        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Duplicate Order</DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            {dupError && (
+              <Alert variant="destructive"><AlertDescription>{dupError}</AlertDescription></Alert>
+            )}
+
+            <div className="space-y-1.5">
+              <Label>New Order Name *</Label>
+              <Input value={dupName} onChange={(e) => setDupName(e.target.value)} placeholder="e.g., MyAnalysis_v2" autoFocus />
+            </div>
+
+            <Separator />
+            <p className="text-xs font-medium text-muted-foreground">Source: {order?.order_code}</p>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label className="text-xs">PTM Type</Label>
+                <Input value={order?.ptm_type || ""} disabled className="bg-muted text-xs" />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Species</Label>
+                <Input value={order?.species || ""} disabled className="bg-muted text-xs" />
+              </div>
+            </div>
+
+            <Separator />
+            <p className="text-xs font-medium text-muted-foreground">LLM Models</p>
+
+            <div className="space-y-1.5">
+              <Label className="text-xs">LLM Model (RAG Enrichment)</Label>
+              <Select value={dupRagEnrichmentLlm} onValueChange={setDupRagEnrichmentLlm}>
+                <SelectTrigger className="text-xs">
+                  <SelectValue placeholder="Default (from .env)" />
+                </SelectTrigger>
+                <SelectContent>
+                  {llmModels.map((m) => (
+                    <SelectItem key={`rag-enr-${m.provider}:${m.model_id}`} value={`${m.provider}:${m.model_id}`} className="text-xs">
+                      {m.name} ({m.provider})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-xs">LLM Model (Report Generation)</Label>
+              <Select value={dupLlmModel} onValueChange={setDupLlmModel}>
+                <SelectTrigger className="text-xs">
+                  <SelectValue placeholder="Default (from .env)" />
+                </SelectTrigger>
+                <SelectContent>
+                  {llmModels.map((m) => (
+                    <SelectItem key={`report-${m.provider}:${m.model_id}`} value={`${m.provider}:${m.model_id}`} className="text-xs">
+                      {m.name} ({m.provider})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <Separator />
+            <p className="text-xs font-medium text-muted-foreground">Analysis Settings</p>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label className="text-xs">PTM Selection Mode</Label>
+                <Select value={dupPtmSelection} onValueChange={setDupPtmSelection}>
+                  <SelectTrigger className="text-xs"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="de_novo_regulated">De novo + Regulated</SelectItem>
+                    <SelectItem value="de_novo">De novo only</SelectItem>
+                    <SelectItem value="regulated">Regulated only</SelectItem>
+                    <SelectItem value="minor">Minor only</SelectItem>
+                    <SelectItem value="all">All PTMs</SelectItem>
+                    <SelectItem value="top_n">Top N</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Top N (proteins)</Label>
+                <Input type="number" value={dupTopN} onChange={(e) => setDupTopN(e.target.value)} className="text-xs" />
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-xs">Report Type</Label>
+              <Select value={dupReportType} onValueChange={setDupReportType}>
+                <SelectTrigger className="text-xs"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="comprehensive">Comprehensive</SelectItem>
+                  <SelectItem value="summary">Summary</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <Separator />
+            <p className="text-xs font-medium text-muted-foreground">Analysis Context</p>
+
+            <div className="space-y-1.5">
+              <Label className="text-xs">Biological Question</Label>
+              <AutoResizeTextarea value={dupBioQuestion} onChange={(e) => setDupBioQuestion(e.target.value)} className="text-xs min-h-[60px]" />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label className="text-xs">Treatment</Label>
+                <Input value={dupTreatment} onChange={(e) => setDupTreatment(e.target.value)} className="text-xs" />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Time Points</Label>
+                <Input value={dupTimePoints} onChange={(e) => setDupTimePoints(e.target.value)} className="text-xs" />
+              </div>
+            </div>
+
+            <Separator />
+            <p className="text-xs font-medium text-muted-foreground">Research Questions</p>
+
+            <div className="space-y-2">
+              {dupQuestions.map((q, i) => (
+                <div key={i} className="flex items-start gap-2">
+                  <span className="text-xs text-muted-foreground mt-1.5 shrink-0">{i + 1}.</span>
+                  <Input value={q} onChange={(e) => { const arr = [...dupQuestions]; arr[i] = e.target.value; setDupQuestions(arr); }} className="text-xs" />
+                  <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => setDupQuestions(dupQuestions.filter((_, j) => j !== i))}>
+                    <X className="h-3 w-3" />
+                  </Button>
+                </div>
+              ))}
+              <div className="flex gap-2">
+                <Input value={dupNewQ} onChange={(e) => setDupNewQ(e.target.value)} placeholder="Add question..." className="text-xs"
+                  onKeyDown={(e) => { if (e.key === "Enter" && dupNewQ.trim()) { setDupQuestions([...dupQuestions, dupNewQ.trim()]); setDupNewQ(""); } }}
+                />
+                <Button variant="outline" size="sm" className="shrink-0" disabled={!dupNewQ.trim()}
+                  onClick={() => { if (dupNewQ.trim()) { setDupQuestions([...dupQuestions, dupNewQ.trim()]); setDupNewQ(""); } }}>
+                  <Plus className="h-3 w-3" />
+                </Button>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDuplicateModalOpen(false)}>Cancel</Button>
+            <Button onClick={handleDuplicate} disabled={dupSubmitting || !dupName.trim()}>
+              {dupSubmitting ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : <CopyPlus className="h-4 w-4 mr-1.5" />}
+              Create Duplicate
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    );
+  };
+
   if (loading) {
     return (
       <div className="space-y-6">
@@ -2867,9 +3114,29 @@ export default function OrderDetail() {
           <div>
             <div className="flex items-center gap-3">
               <h1 className="text-2xl font-bold tracking-tight">{order.order_code}</h1>
-              <Badge variant={statusBadgeVariant(order.status)} className="capitalize">
-                {order.status}
-              </Badge>
+              {(() => {
+                const isHalted = order.stage_detail?.startsWith("Halted:");
+                if (isHalted) {
+                  return (
+                    <>
+                      <Badge variant="destructive" className="bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400">
+                        Halted
+                      </Badge>
+                      <span className="text-xs text-red-500 ml-1" title={order.stage_detail ?? ""}>
+                        {(order.stage_detail ?? "").replace("Halted: ", "")}
+                      </span>
+                    </>
+                  );
+                }
+                const badge = statusBadgeVariant(order.status);
+                return (
+                  <Badge variant={badge.variant} className={`capitalize ${badge.className ?? ""}`}>
+                    {order.status === "rag_enrichment" ? "RAG Enrichment"
+                      : order.status === "report_generation" ? "Report Generation"
+                      : order.status}
+                  </Badge>
+                );
+              })()}
             </div>
             <p className="text-sm text-muted-foreground mt-0.5">{order.project_name}</p>
           </div>
@@ -2905,7 +3172,7 @@ export default function OrderDetail() {
               {stopInProgress ? "Stopping…" : "Stop"}
             </Button>
           )}
-          {order.status === "pending" && !isReadOnlyShared && (
+          {order.status === "registered" && !isReadOnlyShared && (
             <Button onClick={handleStart} className="gap-2">
               <Play className="h-4 w-4" /> Start Analysis
             </Button>
@@ -2934,7 +3201,7 @@ export default function OrderDetail() {
               const isFailed = isActive && order.status === "failed";
               const canRerun =
                 !isRunning &&
-                order.status !== "pending" &&
+                order.status !== "registered" &&
                 !isReadOnlyShared;
 
               return (
@@ -3282,34 +3549,40 @@ export default function OrderDetail() {
 
       {/* Tabs: Overview / Analysis Statistics / Vector Plot / Results */}
       <Tabs defaultValue="overview" onValueChange={(v) => setActiveTab(v)}>
-        <TabsList className="flex-wrap h-auto gap-1">
-          <TabsTrigger value="overview">
-            <LayoutDashboard className="h-3.5 w-3.5 mr-1.5" />
-            Overview
-          </TabsTrigger>
-          <TabsTrigger value="analysis-statistics">
-            <BarChart3 className="h-3.5 w-3.5 mr-1.5" />
-            Analysis Statistics
-          </TabsTrigger>
-          <TabsTrigger value="vector-plot">
-            <ChartScatter className="h-3.5 w-3.5 mr-1.5" />
-            Vector Plot
-          </TabsTrigger>
-          {(order.report_options as any)?.analysis_mode === "cross_talk" && (
-            <TabsTrigger value="cross-talk">
-              <GitMerge className="h-3.5 w-3.5 mr-1.5" />
-              Cross-Talk
+        <div className="flex items-center justify-between gap-2">
+          <TabsList className="flex-wrap h-auto gap-1">
+            <TabsTrigger value="overview">
+              <LayoutDashboard className="h-3.5 w-3.5 mr-1.5" />
+              Overview
             </TabsTrigger>
-          )}
-          <TabsTrigger value="articles">
-            <BookOpen className="h-3.5 w-3.5 mr-1.5" />
-            Articles
-          </TabsTrigger>
-          <TabsTrigger value="results">
-            <FileOutput className="h-3.5 w-3.5 mr-1.5" />
-            Results
-          </TabsTrigger>
-        </TabsList>
+            <TabsTrigger value="analysis-statistics">
+              <BarChart3 className="h-3.5 w-3.5 mr-1.5" />
+              Analysis Statistics
+            </TabsTrigger>
+            <TabsTrigger value="vector-plot">
+              <ChartScatter className="h-3.5 w-3.5 mr-1.5" />
+              Vector Plot
+            </TabsTrigger>
+            {(order.report_options as any)?.analysis_mode === "cross_talk" && (
+              <TabsTrigger value="cross-talk">
+                <GitMerge className="h-3.5 w-3.5 mr-1.5" />
+                Cross-Talk
+              </TabsTrigger>
+            )}
+            <TabsTrigger value="articles">
+              <BookOpen className="h-3.5 w-3.5 mr-1.5" />
+              Articles
+            </TabsTrigger>
+            <TabsTrigger value="results">
+              <FileOutput className="h-3.5 w-3.5 mr-1.5" />
+              Results
+            </TabsTrigger>
+          </TabsList>
+          <Button variant="outline" size="sm" className="shrink-0" onClick={() => setDuplicateModalOpen(true)}>
+            <CopyPlus className="h-3.5 w-3.5 mr-1.5" />
+            Order Duplicate
+          </Button>
+        </div>
 
         <TabsContent value="overview" className="space-y-4 mt-4">
           {/* Project & Sample Info */}
@@ -3507,15 +3780,11 @@ export default function OrderDetail() {
                 />
                 <OverviewField
                   label="LLM Model (RAG Enrichment)"
-                  value={(order.report_options as any)?.rag_enrichment_llm_model || "Default (Paper Read → Report)"}
+                  value={(order.report_options as any)?.rag_enrichment_llm_model || "Default (Report model)"}
                 />
                 <OverviewField
                   label="LLM Model (Report)"
                   value={(order.report_options as any)?.llm_model || "Default"}
-                />
-                <OverviewField
-                  label="LLM Model (Paper Read)"
-                  value={(order.report_options as any)?.rag_llm_model || "Default"}
                 />
                 <OverviewField
                   label="RAG Literature Collections"
@@ -3567,7 +3836,7 @@ export default function OrderDetail() {
         <TabsContent value="results" className="mt-4">
           {order.result_files && (order.result_files as any)?.all_files?.length > 0 ? (
             <div className="space-y-4">
-              {!isRunning && order.status !== "pending" && !isReadOnlyShared && (
+              {!isRunning && order.status !== "registered" && !isReadOnlyShared && (
                 <div className="flex justify-end">
                   <Button
                     variant="outline"
@@ -3591,7 +3860,7 @@ export default function OrderDetail() {
                     ? "Report files available for download"
                     : "Results will appear here after analysis completes"}
                 </p>
-                {!isRunning && order.status !== "pending" && !isReadOnlyShared && (
+                {!isRunning && order.status !== "registered" && !isReadOnlyShared && (
                   <Button
                     variant="outline"
                     size="sm"
@@ -3612,39 +3881,20 @@ export default function OrderDetail() {
         </TabsContent>
 
         <TabsContent value="vector-plot" className="mt-4">
-          <div className="relative">
-            {/* AI Chat toggle button */}
-            <div className="flex justify-end mb-3">
-              <Button
-                variant={chatOpen ? "default" : "outline"}
-                size="sm"
-                onClick={() => setChatOpen(!chatOpen)}
-                className="gap-2"
-              >
-                <Sparkles className="h-3.5 w-3.5" />
-                {chatOpen ? "Close AI Chat" : "AI Chat"}
-              </Button>
+          <div className="flex gap-4">
+            <div className={chatOpen ? "flex-1 min-w-0" : "w-full"}>
+              <VectorPlotTab orderId={order.id} singleTimePoint={(order.sample_config as any)?.single_time_point} ptmType={order.ptm_type} />
             </div>
 
-            <div className={`flex gap-4 ${chatOpen ? "" : ""}`}>
-              {/* Main content */}
-              <div className={chatOpen ? "flex-1 min-w-0" : "w-full"}>
-                <VectorPlotTab orderId={order.id} singleTimePoint={(order.sample_config as any)?.single_time_point} ptmType={order.ptm_type} />
-              </div>
-
-              {/* Chat Panel (slide-in from right) */}
-              {chatOpen && (
-                <div className="w-[420px] flex-shrink-0 h-[calc(100vh-200px)] sticky top-4 rounded-xl border border-border shadow-lg overflow-hidden">
-                  <ChatPanel
-                    orderId={order.id}
-                    viewContext={{
-                      active_tab: activeTab,
-                    }}
-                    isOpen={chatOpen}
-                    onClose={() => setChatOpen(false)}
-                  />
-                </div>
-              )}
+            <div className={`${chatOpen ? "w-[420px]" : "w-10"} flex-shrink-0 h-[calc(100vh-200px)] sticky top-4 rounded-xl border border-border shadow-lg overflow-hidden`}>
+              <ChatPanel
+                orderId={order.id}
+                viewContext={{
+                  active_tab: activeTab,
+                }}
+                isOpen={chatOpen}
+                onToggle={() => setChatOpen((v) => !v)}
+              />
             </div>
           </div>
         </TabsContent>
@@ -3757,6 +4007,7 @@ export default function OrderDetail() {
         orderId={order.id}
         orderCode={order.order_code}
       />
+      <DuplicateModal />
     </div>
   );
 }

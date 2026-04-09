@@ -26,6 +26,9 @@ def get_order_status(order_id: int) -> str | None:
         return None
 
 
+_PIPELINE_STAGES = {"preprocessing", "rag_enrichment", "report_generation"}
+
+
 def update_order_status(
     order_id: int,
     status: str | None,
@@ -48,6 +51,11 @@ def update_order_status(
         if current_stage is not None:
             sets.append("current_stage = :current_stage")
             params["current_stage"] = current_stage
+            # Sync status to match current_stage for pipeline stages
+            if current_stage in _PIPELINE_STAGES and status is None:
+                sets.append("status = :status")
+                params["status"] = current_stage
+
         if progress_pct is not None:
             sets.append("progress_pct = :progress_pct")
             params["progress_pct"] = progress_pct
@@ -117,12 +125,72 @@ def update_order_progress(
         if current_stage is not None:
             sets.append("current_stage = :current_stage")
             params["current_stage"] = current_stage
+            if current_stage in _PIPELINE_STAGES:
+                sets.append("status = :status")
+                params["status"] = current_stage
         sql = text(f"UPDATE orders SET {', '.join(sets)} WHERE id = :order_id")
         with engine.connect() as conn:
             conn.execute(sql, params)
             conn.commit()
     except Exception as e:
         logger.warning(f"[Order {order_id}] Failed to update progress: {e}")
+
+
+def update_watchdog_alert(order_id: int, stage_detail: str):
+    """Set watchdog_alerted_at to NOW() and update stage_detail."""
+    try:
+        engine = _get_engine()
+        with engine.connect() as conn:
+            conn.execute(
+                text(
+                    "UPDATE orders SET watchdog_alerted_at = NOW(), "
+                    "stage_detail = :detail WHERE id = :order_id"
+                ),
+                {"order_id": order_id, "detail": stage_detail[:255]},
+            )
+            conn.commit()
+    except Exception as e:
+        logger.warning(f"[Order {order_id}] Failed to update watchdog alert: {e}")
+
+
+def increment_watchdog_restart(order_id: int) -> int:
+    """Increment watchdog_restart_count and return new value."""
+    try:
+        engine = _get_engine()
+        with engine.connect() as conn:
+            conn.execute(
+                text(
+                    "UPDATE orders SET watchdog_restart_count = watchdog_restart_count + 1, "
+                    "watchdog_alerted_at = NOW() WHERE id = :order_id"
+                ),
+                {"order_id": order_id},
+            )
+            conn.commit()
+            row = conn.execute(
+                text("SELECT watchdog_restart_count FROM orders WHERE id = :order_id"),
+                {"order_id": order_id},
+            ).fetchone()
+        return int(row[0]) if row else 0
+    except Exception as e:
+        logger.warning(f"[Order {order_id}] Failed to increment restart count: {e}")
+        return 99
+
+
+def reset_watchdog(order_id: int):
+    """Clear watchdog state when an order starts a new stage normally."""
+    try:
+        engine = _get_engine()
+        with engine.connect() as conn:
+            conn.execute(
+                text(
+                    "UPDATE orders SET watchdog_alerted_at = NULL, "
+                    "watchdog_restart_count = 0 WHERE id = :order_id"
+                ),
+                {"order_id": order_id},
+            )
+            conn.commit()
+    except Exception as e:
+        logger.warning(f"[Order {order_id}] Failed to reset watchdog: {e}")
 
 
 def insert_order_log(

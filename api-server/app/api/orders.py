@@ -423,7 +423,7 @@ async def update_order_options(
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
     await _require_write_access(order, user, db)
-    if order.status not in ("pending", "completed", "failed", "cancelled"):
+    if order.status not in ("registered", "completed", "failed", "cancelled"):
         raise HTTPException(
             status_code=400,
             detail=f"Cannot update order while running (status: '{order.status}'). Stop first.",
@@ -671,6 +671,107 @@ async def create_order(
         )
 
 
+class DuplicateOrderRequest(BaseModel):
+    new_order_name: str
+    report_options: Optional[dict] = None
+    analysis_options: Optional[dict] = None
+    analysis_context: Optional[dict] = None
+    rag_collections: Optional[list] = None
+
+
+@router.post("/{order_id}/duplicate", status_code=status.HTTP_201_CREATED)
+async def duplicate_order(
+    order_id: int,
+    body: DuplicateOrderRequest = Body(...),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Duplicate an existing order: copy input files and settings under a new name."""
+    from app.config import get_settings
+    import shutil
+
+    settings = get_settings()
+
+    result = await db.execute(select(Order).where(Order.id == order_id))
+    source = result.scalar_one_or_none()
+    if not source:
+        raise HTTPException(status_code=404, detail="Source order not found")
+
+    new_code = body.new_order_name.strip()
+    _validate_order_code(new_code)
+
+    existing = await db.execute(select(Order).where(Order.order_code == new_code))
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail=f"Order '{new_code}' already exists.")
+
+    new_input_dir = Path(settings.INPUT_DIR) / new_code
+    if new_input_dir.exists():
+        raise HTTPException(status_code=400, detail=f"Input directory for '{new_code}' already exists.")
+
+    try:
+        src_input_dir = Path(settings.INPUT_DIR) / source.order_code
+        if src_input_dir.is_dir():
+            shutil.copytree(str(src_input_dir), str(new_input_dir))
+        else:
+            new_input_dir.mkdir(parents=True, exist_ok=True)
+
+        def _remap_path(original: str | None) -> str | None:
+            if not original:
+                return None
+            p = Path(original)
+            if source.order_code in p.parts:
+                idx = p.parts.index(source.order_code)
+                return str(Path(*p.parts[:idx], new_code, *p.parts[idx + 1 :]))
+            return original
+
+        report_opts = body.report_options if body.report_options is not None else (source.report_options or {})
+        analysis_opts = body.analysis_options if body.analysis_options is not None else source.analysis_options
+        analysis_ctx = body.analysis_context if body.analysis_context is not None else source.analysis_context
+        rag_cols = body.rag_collections if body.rag_collections is not None else source.rag_collections
+
+        new_order = Order(
+            order_code=new_code,
+            user_id=user.id if user.id != 0 else None,
+            project_name=new_code,
+            ptm_type=source.ptm_type,
+            species=source.species,
+            organism_code=source.organism_code,
+            sample_config=source.sample_config,
+            analysis_context=analysis_ctx,
+            analysis_options=analysis_opts,
+            report_options=report_opts,
+            rag_collections=rag_cols,
+            pr_matrix_path=_remap_path(source.pr_matrix_path),
+            pg_matrix_path=_remap_path(source.pg_matrix_path),
+            fasta_path=source.fasta_path,
+            config_xlsx_path=_remap_path(source.config_xlsx_path),
+            secondary_pr_matrix_path=_remap_path(source.secondary_pr_matrix_path),
+            secondary_pg_matrix_path=_remap_path(source.secondary_pg_matrix_path),
+            secondary_ptm_type=source.secondary_ptm_type,
+            secondary_sample_config=source.secondary_sample_config,
+        )
+
+        db.add(new_order)
+        await db.commit()
+        await db.refresh(new_order)
+
+        logger.info(f"Order duplicated: {source.order_code} → {new_code} (id={new_order.id})")
+
+        return {
+            "id": new_order.id,
+            "order_code": new_order.order_code,
+            "status": new_order.status,
+            "message": f"Order duplicated from '{source.order_code}'",
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        if new_input_dir.exists():
+            shutil.rmtree(str(new_input_dir), ignore_errors=True)
+        logger.exception("Order duplicate failed")
+        raise HTTPException(status_code=500, detail=f"Order duplication failed: {str(e)}")
+
+
 @router.post("/{order_id}/start")
 async def start_order(
     order_id: int,
@@ -682,7 +783,7 @@ async def start_order(
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
     await _require_write_access(order, user, db)
-    if order.status not in ("pending", "failed", "completed", "cancelled"):
+    if order.status not in ("registered", "failed", "completed", "cancelled"):
         raise HTTPException(
             status_code=400, detail=f"Cannot start order in '{order.status}' status"
         )
@@ -1226,7 +1327,7 @@ async def delete_order(
         raise HTTPException(status_code=404, detail="Order not found")
     await _require_write_access(order, user, db)
 
-    if order.status not in ("pending", "completed", "failed", "cancelled"):
+    if order.status not in ("registered", "completed", "failed", "cancelled"):
         raise HTTPException(
             status_code=400,
             detail=f"Cannot delete order while running (status: '{order.status}'). Cancel first.",
@@ -1272,10 +1373,22 @@ async def get_order_status(
     if not row:
         raise HTTPException(status_code=404, detail="Order not found")
     status = row[1]
+    current_stage = row[2]
+
+    # Defensive: auto-correct status if current_stage is ahead
+    pipeline_stages = {"preprocessing", "rag_enrichment", "report_generation"}
+    if current_stage in pipeline_stages and status in pipeline_stages and status != current_stage:
+        status = current_stage
+        await db.execute(
+            text("UPDATE orders SET status = :s WHERE id = :oid"),
+            {"s": current_stage, "oid": order_id},
+        )
+        await db.commit()
+
     return {
         "id": row[0],
         "status": status,
-        "current_stage": row[2],
+        "current_stage": current_stage,
         "progress_pct": 100.0 if status == "completed" else (float(row[3]) if row[3] is not None else 0),
         "stage_detail": row[4],
         "error_message": row[5],

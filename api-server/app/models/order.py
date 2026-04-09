@@ -19,7 +19,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base
 
 ORDER_STATUS = (
-    "pending",
+    "registered",
     "queued",
     "preprocessing",
     "rag_enrichment",
@@ -43,7 +43,7 @@ class Order(Base):
     )
     project_name: Mapped[str] = mapped_column(String(255), nullable=False)
     status: Mapped[str] = mapped_column(
-        Enum(*ORDER_STATUS, name="order_status"), default="pending"
+        Enum(*ORDER_STATUS, name="order_status"), default="registered"
     )
     priority: Mapped[int] = mapped_column(Integer, default=5)
 
@@ -96,6 +96,10 @@ class Order(Base):
     # Receptor Inference data (JSON) — saved from vector-plot-data endpoint
     # [{name, receptor_class, downstream_ptm_count, downstream_ptms, via_kinases, source, ...}]
     receptor_inference_data: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+
+    # Watchdog
+    watchdog_alerted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    watchdog_restart_count: Mapped[int] = mapped_column(Integer, default=0)
 
     # Timestamps
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
