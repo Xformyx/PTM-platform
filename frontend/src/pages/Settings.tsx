@@ -83,6 +83,21 @@ const SETTING_LABELS: Record<string, string> = {
   REPORT_GENERATION_CONCURRENCY: "Report Generation 워커",
 };
 
+const SETTING_DESCRIPTIONS: Record<string, string> = {
+  WATCHDOG_CHECK_INTERVAL_SECONDS: "분석 상태를 자동 점검하는 주기 (초)",
+  WATCHDOG_NO_TASK_STALL_MINUTES: "Celery 작업이 없을 때 멈춤으로 판단하는 시간 (분)",
+  WATCHDOG_NO_PROGRESS_STALL_MINUTES: "진행 없음 감지 임계값 (분, LLM 호출 시간 고려)",
+  WATCHDOG_ALERT_COOLDOWN_MINUTES: "동일 오더에 대한 반복 알림 쿨다운 (분)",
+  WATCHDOG_MAX_RESTARTS: "멈춤 감지 시 자동 재시작의 최대 횟수",
+  WATCHDOG_AUTO_RESTART: "멈춤 감지 시 자동으로 재시작할지 여부",
+  REPORT_LLM_WORKERS: "Report 생성 시 동시에 수행하는 LLM 호출 수",
+  OLLAMA_TIMEOUT: "Ollama LLM 요청 타임아웃 (초)",
+  WEBHOOK_URL: "분석 이벤트를 전송할 Webhook URL",
+  PREPROCESSING_CONCURRENCY: "Preprocessing 워커의 동시 처리 수 (재시작 필요)",
+  RAG_ENRICHMENT_CONCURRENCY: "RAG Enrichment 워커의 동시 처리 수 (재시작 필요)",
+  REPORT_GENERATION_CONCURRENCY: "Report Generation 워커의 동시 처리 수 (재시작 필요)",
+};
+
 function Toggle({ checked, onChange, disabled }: { checked: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
   return (
     <button
@@ -361,7 +376,7 @@ export default function Settings() {
                             )}
                           </div>
                           <p className="text-xs text-muted-foreground mt-0.5">
-                            {s.description}
+                            {SETTING_DESCRIPTIONS[s.key] || s.description || ""}
                           </p>
                           <p className="text-[10px] text-muted-foreground/60 font-mono mt-0.5">
                             {s.key}

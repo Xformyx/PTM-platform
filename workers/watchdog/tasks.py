@@ -42,6 +42,10 @@ TASK_NAME_MAP = {
     "report_generation": "report_generation.tasks.run_report_generation",
 }
 
+STAGE_LOCK_KEYS = {
+    "report_generation": "report_gen_lock:{order_id}",
+}
+
 
 def _get_active_orders() -> list[dict]:
     """Fetch orders currently in an active analysis stage."""
@@ -119,6 +123,22 @@ def _is_in_cooldown(alerted_at: datetime | None) -> bool:
     return (now_utc - alerted_utc) < timedelta(minutes=cooldown_min)
 
 
+def _clear_stale_locks(order_id: int) -> int:
+    """Remove Redis stage-execution locks for the given order."""
+    import redis as _redis
+    import os
+    redis_url = os.getenv("CELERY_BROKER_URL", "redis://redis:6379/1")
+    r = _redis.from_url(redis_url, decode_responses=True)
+    cleared = 0
+    for pattern in STAGE_LOCK_KEYS.values():
+        key = pattern.format(order_id=order_id)
+        if r.delete(key):
+            cleared += 1
+    if cleared:
+        logger.info(f"[Watchdog] Cleared {cleared} stale lock(s) for order {order_id}")
+    return cleared
+
+
 def _handle_stalled_order(order: dict, reason: str):
     """Take action on a stalled order: notify, optionally restart or halt."""
     order_id = order["id"]
@@ -126,6 +146,8 @@ def _handle_stalled_order(order: dict, reason: str):
     restart_count = order["watchdog_restart_count"]
     auto_restart = get_bool("WATCHDOG_AUTO_RESTART", False)
     max_restarts = get_int("WATCHDOG_MAX_RESTARTS", 2)
+
+    _clear_stale_locks(order_id)
 
     logger.warning(
         f"[Watchdog] Order {order_id} ({order['order_code']}) stalled at "

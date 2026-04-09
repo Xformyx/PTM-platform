@@ -3298,8 +3298,8 @@ export default function OrderDetail() {
                 <Badge variant="outline" className="text-[10px] font-mono">
                   {(() => {
                     const done = Array.from(ptmPhaseMap.values()).filter(r => r.D === "done").length;
-                    const unique = ptmPhaseMap.size;
-                    return `${done} / ${unique}${ptmTotal ? ` / ${ptmTotal}` : ""} PTMs`;
+                    const total = ptmTotal || ptmPhaseMap.size;
+                    return `${done} / ${total} PTMs`;
                   })()}
                 </Badge>
               </div>

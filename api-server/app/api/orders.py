@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.core.database import get_db
+from app.core.redis import get_redis
 from app.core.webhook import send_order_webhook
 from app.dependencies import get_current_user
 from app.models.order import Order, OrderLog, OrderShare
@@ -21,6 +22,23 @@ from app.models.user import User
 
 router = APIRouter(prefix="/orders", tags=["orders"])
 logger = logging.getLogger("ptm-platform.orders")
+
+_STAGE_LOCK_KEYS = [
+    "report_gen_lock:{order_id}",
+]
+
+
+async def _clear_order_locks(order_id: int) -> int:
+    """Remove all Redis stage-execution locks for the given order."""
+    r = await get_redis()
+    cleared = 0
+    for pattern in _STAGE_LOCK_KEYS:
+        key = pattern.format(order_id=order_id)
+        if await r.delete(key):
+            cleared += 1
+    if cleared:
+        logger.info(f"Cleared {cleared} Redis lock(s) for order {order_id}")
+    return cleared
 
 
 def _resolve_fasta(reference_dir: str, species: str) -> str | None:
@@ -788,6 +806,8 @@ async def start_order(
             status_code=400, detail=f"Cannot start order in '{order.status}' status"
         )
 
+    await _clear_order_locks(order_id)
+
     # For completed or cancelled orders, clear output dir so full pipeline runs from scratch
     if order.status in ("completed", "cancelled"):
         output_dir = os.getenv("OUTPUT_DIR", "/app/data/outputs")
@@ -1075,6 +1095,8 @@ async def run_stage(
             detail=f"Can only re-run stages for completed or failed orders (current: '{order.status}')",
         )
 
+    await _clear_order_locks(order_id)
+
     output_dir = os.getenv("OUTPUT_DIR", "/app/data/outputs")
     order_output = Path(output_dir) / order.order_code
 
@@ -1293,6 +1315,8 @@ async def cancel_order(
 
     order.status = "cancelled"
     await db.commit()
+
+    await _clear_order_locks(order_id)
 
     logger.info(f"Order {order.order_code} cancelled (stopped)")
 

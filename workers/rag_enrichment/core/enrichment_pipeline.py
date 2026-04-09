@@ -361,7 +361,7 @@ class RAGEnrichmentPipeline:
                 cached = " [gene-cached]" if self._gene_cache.has(f"{gene}__kegg") else ""
                 self._progress(
                     done / total,
-                    f"[{done}/{total}] {gene} {pos}: {art_count} articles, {pw_total} pathways ({pw_summary}){cached}"
+                    f"{gene} {pos}: {art_count} articles, {pw_total} pathways ({done}/{total})"
                 )
             except Exception as e:
                 logger.error(f"Enrichment FAILED for {gene}/{pos}: {e}", exc_info=True)
@@ -380,6 +380,7 @@ class RAGEnrichmentPipeline:
         self._alog(
             f"[ptm_list] total={total}",
             metadata={"type": "ptm_list", "total": total},
+            persist=True,
         )
         for ptm in ptm_data:
             _g = ptm.get("gene") or ptm.get("Gene.Name", "?")
@@ -388,6 +389,7 @@ class RAGEnrichmentPipeline:
                 f"[phase:queued] {_g} {_p}",
                 metadata={"type": "ptm_phase", "gene": _g, "position": _p,
                           "phase": "A", "status": "pending", "detail": ""},
+                persist=True,
             )
 
         with ThreadPoolExecutor(max_workers=PTM_WORKERS, thread_name_prefix="ptm_enrich") as executor:
@@ -395,20 +397,13 @@ class RAGEnrichmentPipeline:
             for i, ptm in enumerate(ptm_data):
                 gene = ptm.get("gene") or ptm.get("Gene.Name", "?")
                 pos = ptm.get("position") or ptm.get("PTM_Position", "?")
-                self._progress(i / total, f"Submitting {gene} {pos} ({i+1}/{total})")
                 future = executor.submit(_enrich_worker, i, ptm)
                 futures[future] = (i, gene, pos)
 
-            # Same progress bucket as last "Submitting" line — clarifies the often-long gap until first completion
-            _qfrac = (total - 1) / total if total > 1 else 1.0
-            self._progress(
-                _qfrac,
-                f"Submitted {total}/{total} — {PTM_WORKERS} parallel workers; Phase B (LLM) per row. "
-                f"Next lines appear when rows finish (first batch often 1–3+ min).",
-            )
+            self._progress(0.0, f"All {total} PTMs queued — processing (0/{total})")
             self._alog(
-                f"All {total} jobs queued (max {PTM_WORKERS} concurrent). "
-                f"Phase A→D per PTM; LLM calls can delay the first '[1/{total}] …' line."
+                f"All {total} jobs submitted (max {PTM_WORKERS} concurrent). "
+                f"Waiting for completions..."
             )
 
             # Wait for all futures to complete
