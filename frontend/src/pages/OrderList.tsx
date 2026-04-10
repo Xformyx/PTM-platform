@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { Link, useNavigate } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
-import { PlusCircle, ClipboardList, Play, ChevronDown, ChevronUp, ChevronsUpDown, AlertCircle, Trash2, Square, Share2 } from "lucide-react";
+import { PlusCircle, ClipboardList, Play, ChevronDown, ChevronUp, ChevronsUpDown, AlertCircle, Trash2, Square, Share2, Loader2 } from "lucide-react";
 import { api } from "@/lib/api";
 import type { Order } from "@/lib/types";
 import { Card, CardContent } from "@/components/ui/card";
@@ -20,6 +21,7 @@ import {
 } from "@/components/ui/dialog";
 import { ShareOrderModal } from "@/components/ShareOrderModal";
 import { useAuth } from "@/contexts/AuthContext";
+import { cn } from "@/lib/utils";
 
 function fmtDate(iso: string | null | undefined): string {
   if (!iso) return "—";
@@ -151,6 +153,9 @@ export default function OrderList() {
   const [deleteTarget, setDeleteTarget] = useState<{ id: number; order_code: string } | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [shareTarget, setShareTarget] = useState<{ id: number; order_code: string } | null>(null);
+  const [stoppingOrderId, setStoppingOrderId] = useState<number | null>(null);
+  const stopRequestRef = useRef(false);
+  const [startingOrderId, setStartingOrderId] = useState<number | null>(null);
 
   const [colWidths, setColWidths] = useState<number[]>(() => loadOrderListColWidths());
   const colWidthsRef = useRef<number[]>(colWidths);
@@ -272,9 +277,18 @@ export default function OrderList() {
 
   useEffect(() => { fetchOrders(); }, []);
 
-  const handleRun = (e: React.MouseEvent, orderId: number) => {
+  const handleRun = async (e: React.MouseEvent, order: Order) => {
     e.stopPropagation();
-    navigate(`/orders/${orderId}?run=1`);
+    if (startingOrderId !== null || stoppingOrderId !== null) return;
+    setStartingOrderId(order.id);
+    try {
+      await api.post(`/orders/${order.id}/start`);
+      fetchOrders();
+    } catch (err: unknown) {
+      alert((err as { message?: string })?.message || "Failed to start");
+    } finally {
+      setStartingOrderId(null);
+    }
   };
 
   const handleDeleteClick = (e: React.MouseEvent, order: Order) => {
@@ -298,11 +312,19 @@ export default function OrderList() {
 
   const handleStop = async (e: React.MouseEvent, orderId: number) => {
     e.stopPropagation();
+    if (stopRequestRef.current) return;
+    stopRequestRef.current = true;
+    flushSync(() => {
+      setStoppingOrderId(orderId);
+    });
     try {
       await api.post(`/orders/${orderId}/cancel`);
       fetchOrders();
     } catch (err: any) {
       alert(err.message || "Failed to stop");
+    } finally {
+      stopRequestRef.current = false;
+      setStoppingOrderId(null);
     }
   };
 
@@ -547,19 +569,41 @@ export default function OrderList() {
                                 <Button
                                   size="sm"
                                   variant="destructive"
-                                  className="h-7 gap-1 min-w-[60px]"
+                                  className={cn(
+                                    "h-7 gap-1 min-w-[60px]",
+                                    stoppingOrderId !== null && "opacity-80 cursor-wait",
+                                  )}
+                                  disabled={stoppingOrderId !== null}
                                   onClick={(e) => handleStop(e, order.id)}
                                 >
-                                  <Square className="h-3 w-3" /> Stop
+                                  {stoppingOrderId === order.id ? (
+                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                  ) : (
+                                    <Square className="h-3 w-3" />
+                                  )}
+                                  {stoppingOrderId === order.id ? "Stopping…" : "Stop"}
                                 </Button>
                               ) : (
                                 <Button
                                   size="sm"
                                   variant="outline"
-                                  className="h-7 gap-1 min-w-[60px]"
-                                  onClick={(e) => handleRun(e, order.id)}
+                                  className={cn(
+                                    "h-7 gap-1 min-w-[60px]",
+                                    startingOrderId !== null && "opacity-80 cursor-wait",
+                                  )}
+                                  disabled={startingOrderId !== null || stoppingOrderId !== null}
+                                  onClick={(e) => void handleRun(e, order)}
                                 >
-                                  <Play className="h-3 w-3" /> {order.status === "completed" ? "Re-Run" : "Run"}
+                                  {startingOrderId === order.id ? (
+                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                  ) : (
+                                    <Play className="h-3 w-3" />
+                                  )}
+                                  {startingOrderId === order.id
+                                    ? "Starting…"
+                                    : order.status === "completed"
+                                      ? "Re-Run"
+                                      : "Run"}
                                 </Button>
                               )
                             )}
@@ -625,6 +669,26 @@ export default function OrderList() {
           )}
         </CardContent>
       </Card>
+
+      {/* Stop-in-progress overlay (Order detail과 동일 — 즉시 피드백, 중복 클릭 방지) */}
+      {stoppingOrderId !== null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+          <div className="bg-background rounded-lg shadow-lg p-6 max-w-md w-full mx-4 flex flex-col gap-3">
+            <div className="flex items-center gap-3 text-lg font-semibold">
+              <Loader2 className="h-6 w-6 shrink-0 animate-spin text-primary" />
+              분석을 멈추는 중
+            </div>
+            <p className="text-sm text-muted-foreground">
+              서버에 중단 요청을 보내고 있습니다. 백그라운드 워커와 LLM이 처리 중일 수 있어 잠시 걸릴 수 있습니다.
+            </p>
+            {orders.find((o) => o.id === stoppingOrderId)?.order_code && (
+              <p className="text-xs font-mono text-muted-foreground">
+                Order: {orders.find((o) => o.id === stoppingOrderId)?.order_code}
+              </p>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Share modal */}
       {shareTarget && (

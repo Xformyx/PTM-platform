@@ -10,6 +10,7 @@ import {
   MessageSquare, Loader2, ToggleLeft, ToggleRight, Square, StopCircle,
   ChartScatter, TrendingUp, ZoomIn, ZoomOut, GitMerge, BarChart3,
   LayoutDashboard, FileOutput, Share2, CopyPlus, ChevronLeft, ChevronRight,
+  Presentation,
 } from "lucide-react";
 import { ShareOrderModal } from "@/components/ShareOrderModal";
 import { Input } from "@/components/ui/input";
@@ -2462,6 +2463,14 @@ export default function OrderDetail() {
   const [reportModalOpen, setReportModalOpen] = useState(false);
   const [prepModalOpen, setPrepModalOpen] = useState(false);
   const [stopInProgress, setStopInProgress] = useState(false);
+  const [pptxGenerating, setPptxGenerating] = useState(false);
+  /** PPTX Celery 진행 (폴링 + sessionStorage로 탭 이동 후에도 복원) */
+  const [pptxProgressMeta, setPptxProgressMeta] = useState<{
+    message: string;
+    progress: number | null;
+    stage?: string;
+  } | null>(null);
+  const [pptxLlm, setPptxLlm] = useState("");
   const stopRequestRef = useRef(false);
   const lastLogIdRef = useRef(0);
 
@@ -2680,6 +2689,20 @@ export default function OrderDetail() {
     }).catch(() => {});
   }, []);
   useEffect(() => {
+    if (llmModels.length === 0 || pptxLlm) return;
+    const ro = order?.report_options as { llm_provider?: string; llm_model?: string } | undefined;
+    const fromOrder =
+      ro?.llm_provider && ro?.llm_model
+        ? `${ro.llm_provider}:${ro.llm_model}`
+        : "";
+    if (fromOrder && llmModels.some((m) => `${m.provider}:${m.model_id}` === fromOrder)) {
+      setPptxLlm(fromOrder);
+      return;
+    }
+    const m0 = llmModels[0];
+    setPptxLlm(`${m0.provider}:${m0.model_id}`);
+  }, [llmModels, order?.report_options, pptxLlm]);
+  useEffect(() => {
     api.get<{ collections: { id: number; name: string }[] }>("/rag/collections").then((d) => {
       setRagCollections(d.collections.map((c) => ({ id: c.id, name: c.name })));
     }).catch(() => setRagCollections([]));
@@ -2777,6 +2800,130 @@ export default function OrderDetail() {
     setOrder(o);
     setLogs(l.logs);
   };
+
+  /** PPTX: poll Celery job (524 방지 — 작업은 워커에서 실행; 복귀 시 sessionStorage로 폴링 재개) */
+  const pptxPollAbortRef = useRef<AbortController | null>(null);
+  const runPptxPollRef = useRef<((taskId: string, signal?: AbortSignal) => Promise<void>) | null>(null);
+  runPptxPollRef.current = async (taskId: string, signal?: AbortSignal) => {
+    const key = `pptx-task-${orderId}`;
+    const metaKey = `pptx-meta-${orderId}`;
+    const deadline = Date.now() + 45 * 60 * 1000;
+    const sleepAbortable = (ms: number) =>
+      new Promise<void>((resolve) => {
+        const id = window.setTimeout(resolve, ms);
+        signal?.addEventListener(
+          "abort",
+          () => {
+            window.clearTimeout(id);
+            resolve();
+          },
+          { once: true },
+        );
+      });
+    while (Date.now() < deadline) {
+      if (signal?.aborted) return;
+      const s = await api.get<{
+        job_status: string;
+        ready: boolean;
+        filename?: string | null;
+        error?: string;
+        raw?: unknown;
+        message?: string | null;
+        progress?: number | null;
+        stage?: string | null;
+        celery_state?: string;
+      }>(`/orders/${orderId}/generate-pptx/status/${taskId}`);
+      if (s.job_status === "success" && s.ready) {
+        sessionStorage.removeItem(key);
+        sessionStorage.removeItem(metaKey);
+        setPptxProgressMeta(null);
+        if (s.filename) {
+          await api.downloadFile(
+            `/orders/${orderId}/files/${encodeURIComponent(s.filename)}`,
+            s.filename,
+          );
+          await handleRefresh();
+        } else {
+          alert(
+            s.raw != null
+              ? `PPTX 결과가 비정상입니다: ${JSON.stringify(s.raw)}`
+              : "PPTX 파일을 찾을 수 없습니다.",
+          );
+        }
+        return;
+      }
+      if (s.job_status === "failure" && s.ready) {
+        sessionStorage.removeItem(key);
+        sessionStorage.removeItem(metaKey);
+        setPptxProgressMeta(null);
+        alert(s.error || "PPTX 생성에 실패했습니다.");
+        return;
+      }
+      const msg =
+        (typeof s.message === "string" && s.message.trim()
+          ? s.message
+          : s.celery_state === "PENDING"
+            ? "Waiting for worker…"
+            : "Generating PPTX…") ?? "Generating PPTX…";
+      const pct = typeof s.progress === "number" ? s.progress : null;
+      const next = {
+        message: msg,
+        progress: pct,
+        stage: s.stage ?? undefined,
+      };
+      setPptxProgressMeta(next);
+      try {
+        sessionStorage.setItem(metaKey, JSON.stringify(next));
+      } catch {
+        /* ignore quota */
+      }
+      await sleepAbortable(2000);
+    }
+    if (signal?.aborted) return;
+    sessionStorage.removeItem(key);
+    sessionStorage.removeItem(metaKey);
+    setPptxProgressMeta(null);
+    alert("PPTX 생성 대기 시간이 초과되었습니다.");
+  };
+
+  useEffect(() => {
+    const tid = sessionStorage.getItem(`pptx-task-${orderId}`);
+    if (!tid || !runPptxPollRef.current) return;
+    pptxPollAbortRef.current?.abort();
+    const ac = new AbortController();
+    pptxPollAbortRef.current = ac;
+    setPptxGenerating(true);
+    void runPptxPollRef.current(tid, ac.signal).finally(() => {
+      if (!ac.signal.aborted) setPptxGenerating(false);
+    });
+    return () => {
+      ac.abort();
+    };
+  }, [orderId]);
+
+  /** 주문 진입 시 진행 중 PPTX 메타 복원 (다른 탭 갔다 와도 배너 즉시 표시) */
+  useEffect(() => {
+    const tid = sessionStorage.getItem(`pptx-task-${orderId}`);
+    const raw = sessionStorage.getItem(`pptx-meta-${orderId}`);
+    if (!tid) {
+      setPptxProgressMeta(null);
+      return;
+    }
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw) as { message?: string; progress?: number | null; stage?: string };
+        setPptxProgressMeta({
+          message: parsed.message || "Generating PPTX…",
+          progress: typeof parsed.progress === "number" ? parsed.progress : null,
+          stage: parsed.stage,
+        });
+      } catch {
+        setPptxProgressMeta({ message: "Generating PPTX…", progress: null });
+      }
+    } else {
+      setPptxProgressMeta({ message: "Generating PPTX…", progress: null });
+    }
+  }, [orderId]);
 
   const openRerunModal = async (action: { type: "start" } | { type: "run-stage"; stage: string }) => {
     setPendingAction(action);
@@ -3549,6 +3696,33 @@ export default function OrderDetail() {
         </Alert>
       )}
 
+      {/* PPTX generation (Celery) — 모든 탭에서 보임; 진행률은 워커 PROGRESS 메타 + sessionStorage 복원 */}
+      {pptxGenerating && (
+        <div className="rounded-lg border border-primary/35 bg-primary/5 px-4 py-3 space-y-2 shadow-sm">
+          <div className="flex items-center gap-2">
+            <Loader2 className="h-4 w-4 shrink-0 animate-spin text-primary" />
+            <span className="text-sm font-medium">Generating PPTX…</span>
+          </div>
+          <p className="text-xs text-muted-foreground pl-6">
+            {pptxProgressMeta?.message ?? "Preparing presentation. You can switch tabs; progress is saved for this order."}
+          </p>
+          <div className="pl-6 pr-1 pt-1">
+            {typeof pptxProgressMeta?.progress === "number" ? (
+              <Progress value={Math.min(100, Math.max(0, pptxProgressMeta.progress))} className="h-2" />
+            ) : (
+              <div className="relative h-2 w-full overflow-hidden rounded-full bg-primary/20">
+                <motion.div
+                  className="absolute top-0 bottom-0 w-[38%] rounded-full bg-primary"
+                  initial={false}
+                  animate={{ left: ["-38%", "100%"] }}
+                  transition={{ repeat: Infinity, duration: 1.55, ease: "linear" }}
+                />
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Tabs: Overview / Analysis Statistics / Vector Plot / Results */}
       <Tabs defaultValue="overview" onValueChange={(v) => setActiveTab(v)}>
         <div className="flex items-center justify-between gap-2">
@@ -3920,7 +4094,60 @@ export default function OrderDetail() {
           {order.result_files && (order.result_files as any)?.all_files?.length > 0 ? (
             <div className="space-y-4">
               {!isRunning && order.status !== "registered" && !isReadOnlyShared && (
-                <div className="flex justify-end">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <Select value={pptxLlm} onValueChange={setPptxLlm}>
+                      <SelectTrigger className="h-8 text-xs w-[200px]">
+                        <SelectValue placeholder="LLM for PPTX" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {llmModels.map((m) => (
+                          <SelectItem key={`pptx-${m.provider}:${m.model_id}`} value={`${m.provider}:${m.model_id}`} className="text-xs">
+                            {m.name} ({m.provider})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-2"
+                      disabled={pptxGenerating || !pptxLlm}
+                      onClick={async () => {
+                        setPptxGenerating(true);
+                        setPptxProgressMeta({ message: "Queueing PPTX job…", progress: null });
+                        try {
+                          const [provider, ...modelParts] = pptxLlm.split(":");
+                          const model = modelParts.join(":");
+                          const res = await api.post<{ task_id: string }>(`/orders/${order.id}/generate-pptx`, {
+                            llm_provider: provider,
+                            llm_model: model === "__provider__" ? "" : model,
+                          });
+                          const tid = res.task_id;
+                          sessionStorage.setItem(`pptx-task-${order.id}`, tid);
+                          pptxPollAbortRef.current?.abort();
+                          const ac = new AbortController();
+                          pptxPollAbortRef.current = ac;
+                          await runPptxPollRef.current?.(tid, ac.signal);
+                        } catch (e: unknown) {
+                          setPptxProgressMeta(null);
+                          sessionStorage.removeItem(`pptx-meta-${order.id}`);
+                          const msg =
+                            e instanceof Error && e.message
+                              ? e.message
+                              : typeof e === "string"
+                                ? e
+                                : "PPTX 생성에 실패했습니다.";
+                          alert(msg);
+                        } finally {
+                          setPptxGenerating(false);
+                        }
+                      }}
+                    >
+                      {pptxGenerating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Presentation className="h-3.5 w-3.5" />}
+                      {pptxGenerating ? "Generating PPTX…" : "Generate PPTX"}
+                    </Button>
+                  </div>
                   <Button
                     variant="outline"
                     size="sm"

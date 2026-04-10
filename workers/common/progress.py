@@ -5,7 +5,7 @@ import threading
 
 import redis
 
-from common.db_update import insert_order_log, update_order_progress
+from common.db_update import get_order_status, insert_order_log, update_order_progress
 
 logger = logging.getLogger("ptm-workers.progress")
 
@@ -37,6 +37,9 @@ def publish_progress(
     message: str = "",
     metadata: dict = None,
 ):
+    if get_order_status(order_id) == "cancelled":
+        return
+
     payload = {
         "order_id": order_id,
         "stage": stage,
@@ -87,6 +90,9 @@ def publish_analysis_log(
     By default does NOT write to order_logs (DB) to avoid log bloat.
     Set persist=True for milestone events that should survive a page reload.
     """
+    if get_order_status(order_id) == "cancelled":
+        return
+
     if persist:
         insert_order_log(
             order_id=order_id,

@@ -302,7 +302,7 @@ def run_rag_enrichment(self, order_id: int, config: dict):
                         break
                 except Exception:
                     pass
-                time.sleep(5)
+                time.sleep(1)
 
         _poll_thread = threading.Thread(target=_cancellation_poller, daemon=True, name=f"cancel_poll_{order_id}")
         _poll_thread.start()
@@ -315,6 +315,22 @@ def run_rag_enrichment(self, order_id: int, config: dict):
 
         # Stop the poller once the pipeline finishes (normal or early exit).
         cancel_event.set()
+
+        # Do not continue to MD report / webhooks / chain if the user cancelled (cancel_event is always set here).
+        if get_order_status(order_id) == "cancelled":
+            logger.info(
+                f"[Order {order_id}] RAG enrichment stopped by user — skipping MD report, finalization, and chain"
+            )
+            try:
+                mcp.close()
+            except Exception:
+                pass
+            return {
+                "order_id": order_id,
+                "status": "cancelled",
+                "elapsed_seconds": round(time.time() - start_time, 1),
+                "message": "Stopped by user",
+            }
 
         # Save enriched data as JSON
         enriched_json_path = order_output / f"enriched_ptm_data{file_suffix}.json"

@@ -40,6 +40,17 @@ def update_order_status(
     stage_detail: str | None = None,
 ):
     try:
+        existing = get_order_status(order_id)
+        if existing == "cancelled":
+            # User stopped the job — do not let pipeline workers overwrite status/stage.
+            if status is None:
+                return
+            if status in _PIPELINE_STAGES:
+                return
+            # Keep cancelled; do not mark failed/completed from a late worker exception.
+            if status in ("failed", "completed"):
+                return
+
         engine = _get_engine()
         sets = []
         params: dict = {"order_id": order_id}
@@ -115,6 +126,9 @@ def update_order_progress(
 ):
     """Update progress_pct, stage_detail, and optionally current_stage in orders table."""
     try:
+        if get_order_status(order_id) == "cancelled":
+            return
+
         engine = _get_engine()
         sets = ["progress_pct = :pct", "stage_detail = :detail"]
         params: dict = {

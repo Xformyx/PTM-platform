@@ -31,6 +31,7 @@ app.conf.update(
         "rag_enrichment.tasks.*": {"queue": "rag_enrichment"},
         "rag_enrichment.document_tasks.*": {"queue": "rag_enrichment"},
         "report_generation.tasks.*": {"queue": "report_generation"},
+        "pptx_generation.tasks.*": {"queue": "report_generation"},
         "watchdog.tasks.*": {"queue": "default"},
     },
     task_default_queue="default",
@@ -46,9 +47,11 @@ app.autodiscover_tasks([
     "preprocessing",
     "rag_enrichment",
     "report_generation",
+    "pptx_generation",
     "watchdog",
 ])
 
 # document_tasks.py is not named 'tasks.py', so autodiscover won't find it.
 # Explicit import ensures the @app.task decorators are registered.
 import rag_enrichment.document_tasks  # noqa: F401, E402
+import pptx_generation.tasks  # noqa: F401, E402

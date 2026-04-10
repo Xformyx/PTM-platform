@@ -700,6 +700,16 @@ def run_preprocessing(self, order_id: int, config: dict):
                 )
 
         # Chain to Stage 2: RAG Enrichment
+        if get_order_status(order_id) == "cancelled":
+            logger.info(f"[Order {order_id}] Skipping RAG chain — order cancelled")
+            return {
+                "order_id": order_id,
+                "status": "cancelled",
+                "elapsed_seconds": elapsed,
+                "output_dir": str(order_output),
+                "output_files": output_files,
+            }
+
         rag_config = {
             "order_code": order_code,
             "preprocessing_output_dir": str(order_output),

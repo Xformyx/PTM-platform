@@ -24,11 +24,37 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   }
 
   if (!res.ok) {
-    const error = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(error.detail || `Request failed: ${res.status}`);
+    const raw = await res.json().catch(() => null);
+    const msg = formatApiDetail(raw, res.status, res.statusText);
+    throw new Error(msg);
   }
 
   return res.json();
+}
+
+/** Normalize FastAPI / gateway error bodies for user-visible messages */
+function formatApiDetail(
+  raw: unknown,
+  status: number,
+  statusText: string,
+): string {
+  if (!raw || typeof raw !== 'object') return `Request failed: ${status} ${statusText}`;
+  const r = raw as Record<string, unknown>;
+  const d = r.detail ?? r.message ?? r.error;
+  if (typeof d === 'string' && d.trim()) return d;
+  if (Array.isArray(d)) {
+    const parts = d.map((item: unknown) => {
+      if (item && typeof item === 'object' && 'msg' in item) {
+        const o = item as { msg?: string; loc?: unknown };
+        const loc = Array.isArray(o.loc) ? o.loc.join('.') : '';
+        return loc ? `${loc}: ${o.msg ?? ''}` : (o.msg ?? JSON.stringify(item));
+      }
+      return String(item);
+    });
+    return parts.filter(Boolean).join('; ') || `Request failed: ${status}`;
+  }
+  if (d && typeof d === 'object') return JSON.stringify(d);
+  return `Request failed: ${status} ${statusText}`;
 }
 
 export const api = {
@@ -61,8 +87,8 @@ export const api = {
       body: formData,
     });
     if (!res.ok) {
-      const error = await res.json().catch(() => ({ detail: res.statusText }));
-      throw new Error(error.detail || `Upload failed: ${res.status}`);
+      const raw = await res.json().catch(() => null);
+      throw new Error(formatApiDetail(raw, res.status, res.statusText));
     }
     return res.json();
   },
@@ -77,7 +103,10 @@ export const api = {
       window.location.href = '/login';
       throw new Error('Unauthorized');
     }
-    if (!res.ok) throw new Error(`Failed to load: ${res.status}`);
+    if (!res.ok) {
+      const raw = await res.json().catch(() => null);
+      throw new Error(formatApiDetail(raw, res.status, res.statusText));
+    }
     const blob = await res.blob();
     return URL.createObjectURL(blob);
   },
@@ -93,8 +122,8 @@ export const api = {
       throw new Error('Unauthorized');
     }
     if (!res.ok) {
-      const error = await res.json().catch(() => ({ detail: res.statusText }));
-      throw new Error(error.detail || `Download failed: ${res.status}`);
+      const raw = await res.json().catch(() => null);
+      throw new Error(formatApiDetail(raw, res.status, res.statusText));
     }
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);

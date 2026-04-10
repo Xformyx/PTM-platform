@@ -21,7 +21,7 @@ from pathlib import Path
 import redis as _redis
 
 from celery_app import app
-from common.db_update import update_order_status
+from common.db_update import get_order_status, update_order_status
 from common.notifications import notify_order_status
 from common.progress import publish_analysis_log, publish_progress
 from common.webhook import send_step_webhook
@@ -244,6 +244,14 @@ def run_report_generation(self, order_id: int, config: dict):
             f"Skipping duplicate execution."
         )
         return {"order_id": order_id, "status": "skipped", "reason": "duplicate"}
+
+    if get_order_status(order_id) == "cancelled":
+        try:
+            lock_client.delete(lock_key)
+        except Exception:
+            pass
+        logger.info(f"[Order {order_id}] Report generation skipped — order cancelled")
+        return {"order_id": order_id, "status": "skipped", "reason": "cancelled"}
 
     start_time = time.time()
     order_code = config.get("order_code") or str(order_id)
