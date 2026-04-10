@@ -16,6 +16,7 @@ import {
   Moon,
   Monitor,
   Shield,
+  Trash2,
   UserPlus,
   Users,
   RotateCcw,
@@ -533,7 +534,24 @@ function ManageUsersModal({ open, onClose }: { open: boolean; onClose: () => voi
 
                   {isExpanded && (
                     <div className="border-t bg-muted/30 px-3 py-2 space-y-1.5">
-                      <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Login History</p>
+                      <div className="flex items-center justify-between">
+                        <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Login History</p>
+                        {logs.length > 0 && (
+                          <Button
+                            variant="ghost" size="sm"
+                            className="h-5 text-[10px] px-1.5 text-muted-foreground hover:text-destructive"
+                            title="Delete all login history"
+                            onClick={async () => {
+                              try {
+                                await api.delete(`/auth/login-attempts/${u.id}`);
+                                setUserAttempts((prev) => ({ ...prev, [u.id]: [] }));
+                              } catch { /* ignore */ }
+                            }}
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        )}
+                      </div>
                       {attemptsLoading === u.id ? (
                         <div className="flex justify-center py-3">
                           <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
@@ -541,9 +559,9 @@ function ManageUsersModal({ open, onClose }: { open: boolean; onClose: () => voi
                       ) : logs.length === 0 ? (
                         <p className="text-[11px] text-muted-foreground py-1">No login records</p>
                       ) : (
-                        <div className="space-y-1 max-h-40 overflow-y-auto">
+                        <div className="space-y-1 overflow-y-auto" style={{ maxHeight: "calc(5 * 34px)" }}>
                           {logs.map((a) => (
-                            <div key={a.id} className="flex items-center gap-2 text-[11px] rounded bg-background px-2 py-1.5 border">
+                            <div key={a.id} className="flex items-center gap-2 text-[11px] rounded bg-background px-2 py-1.5 border" title={a.ip_address || ""}>
                               <span className={`shrink-0 h-1.5 w-1.5 rounded-full ${a.status === "success" ? "bg-emerald-500" : "bg-red-500"}`} />
                               <span className="text-muted-foreground whitespace-nowrap">
                                 {a.created_at ? new Date(a.created_at).toLocaleString("ko-KR") : ""}
@@ -551,12 +569,11 @@ function ManageUsersModal({ open, onClose }: { open: boolean; onClose: () => voi
                               <span className="font-medium">
                                 {a.status === "success" ? "Login" : "Blocked"}
                               </span>
-                              {a.location && (
-                                <span className="text-muted-foreground truncate">{a.location}</span>
-                              )}
-                              {a.ip_address && (
-                                <span className="text-muted-foreground/60 font-mono text-[10px] ml-auto shrink-0">{a.ip_address}</span>
-                              )}
+                              {a.location ? (
+                                <span className="text-muted-foreground truncate ml-auto">{a.location}</span>
+                              ) : a.ip_address ? (
+                                <span className="text-muted-foreground/60 font-mono text-[10px] ml-auto truncate max-w-[120px]">{a.ip_address}</span>
+                              ) : null}
                             </div>
                           ))}
                         </div>

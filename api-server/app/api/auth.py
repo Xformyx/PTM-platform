@@ -4,7 +4,7 @@ import re
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
-from sqlalchemy import select, desc
+from sqlalchemy import select, desc, delete as sa_delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -312,3 +312,16 @@ async def list_login_attempts(
     q = q.order_by(desc(LoginAttempt.created_at)).limit(min(limit, 200))
     result = await db.execute(q)
     return [_attempt_dict(r) for r in result.scalars().all()]
+
+
+@router.delete("/login-attempts/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_login_attempts(
+    user_id: int,
+    user=Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete all login attempt records for a specific user."""
+    await db.execute(
+        sa_delete(LoginAttempt).where(LoginAttempt.user_id == user_id)
+    )
+    await db.commit()
