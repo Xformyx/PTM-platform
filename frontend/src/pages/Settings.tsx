@@ -96,6 +96,8 @@ const SETTING_DESCRIPTIONS: Record<string, string> = {
   PREPROCESSING_CONCURRENCY: "Preprocessing 워커의 동시 처리 수 (재시작 필요)",
   RAG_ENRICHMENT_CONCURRENCY: "RAG Enrichment 워커의 동시 처리 수 (재시작 필요)",
   REPORT_GENERATION_CONCURRENCY: "Report Generation 워커의 동시 처리 수 (재시작 필요)",
+  ENABLE_RQ_REFINEMENT: "리포트 생성 시 분석 결과를 기반으로 Research Question을 자동 구체화",
+  ENABLE_REPORT_COPILOT: "리포트 초안을 AI가 검토하여 누락/보완점을 자동 식별",
 };
 
 function Toggle({ checked, onChange, disabled }: { checked: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {

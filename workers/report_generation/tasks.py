@@ -71,7 +71,8 @@ def _resolve_enriched_json_path(order_id: int, rag_dir: Path, explicit: str | No
 
 _REPORT_STEP_ORDER = [
     "context_loading", "question_generation", "research", "hypothesis",
-    "validation", "network", "writing", "qa_report", "compilation",
+    "validation", "network", "rq_refinement", "writing", "report_copilot",
+    "qa_report", "compilation",
 ]
 
 
@@ -141,6 +142,15 @@ def _make_progress_cb(order_id):
         elif "Network analysis complete" in msg or "Network analysis failed" in msg:
             _backfill_prior("network")
             _emit("network", "done", msg, pct)
+        elif "Refining research questions" in msg:
+            _backfill_prior("rq_refinement")
+            _emit("rq_refinement", "running", msg, pct)
+        elif "refined" in msg and "question" in msg.lower():
+            _backfill_prior("rq_refinement")
+            _emit("rq_refinement", "done", msg, pct)
+        elif "RQ refinement skipped" in msg:
+            _backfill_prior("rq_refinement")
+            _emit("rq_refinement", "done", msg, pct)
         elif msg == "Writing report sections":
             _backfill_prior("writing")
             _emit("writing", "running", msg, pct)
@@ -149,6 +159,12 @@ def _make_progress_cb(order_id):
         elif msg == "All sections written":
             _backfill_prior("writing")
             _emit("writing", "done", msg, pct)
+        elif "Report co-pilot" in msg and "reviewing" in msg:
+            _backfill_prior("report_copilot")
+            _emit("report_copilot", "running", msg, pct)
+        elif "Report reviewed" in msg or "Report co-pilot skipped" in msg:
+            _backfill_prior("report_copilot")
+            _emit("report_copilot", "done", msg, pct)
         elif "Generating Q&A report" in msg:
             _backfill_prior("qa_report")
             _emit("qa_report", "running", msg, pct)
@@ -583,6 +599,39 @@ def run_report_generation(self, order_id: int, config: dict):
             logger.warning(f"[Order {order_id}] {fallback_warning}")
         else:
             fallback_warning = None
+
+        # v10.0: Persist RQ refinement metadata + copilot review as log events
+        rq_meta = final_state.get("rq_refinement_metadata") or {}
+        if rq_meta and not rq_meta.get("skipped"):
+            publish_analysis_log(
+                order_id,
+                f"[rq_refinement] Refined {rq_meta.get('original_count', 0)} → {rq_meta.get('refined_count', 0)} questions",
+                stage="report_generation", step="rq_refinement", status="done",
+                metadata={
+                    "type": "rq_refinement",
+                    "original_questions": final_state.get("original_research_questions", []),
+                    "refined_questions": final_state.get("research_questions", []),
+                    "refined_items": rq_meta.get("refined_items", []),
+                    "key_discovery": rq_meta.get("key_discovery", ""),
+                    "suggested_experiments": rq_meta.get("suggested_experiments", []),
+                },
+                persist=True,
+            )
+        copilot_review = final_state.get("copilot_review") or {}
+        if copilot_review and not copilot_review.get("skipped"):
+            publish_analysis_log(
+                order_id,
+                f"[report_copilot] Review: {copilot_review.get('overall_quality', 'N/A')}",
+                stage="report_generation", step="report_copilot", status="done",
+                metadata={
+                    "type": "report_copilot",
+                    "overall_quality": copilot_review.get("overall_quality"),
+                    "section_reviews": copilot_review.get("section_reviews", []),
+                    "missing_connections": copilot_review.get("missing_connections", []),
+                    "literature_suggestions": copilot_review.get("literature_suggestions", []),
+                },
+                persist=True,
+            )
 
         progress_metadata = {
             "output_files": output_file_names,

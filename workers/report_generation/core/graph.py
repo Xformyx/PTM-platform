@@ -114,6 +114,11 @@ class ReportState(TypedDict, total=False):
     # v9.35: LLM fallback tracking
     llm_fallback_sections: List[str]  # sections that used fallback text due to LLM failure
 
+    # v10.0: RQ Refinement + Report Co-pilot
+    original_research_questions: List[str]  # preserved user RQ0 before refinement
+    rq_refinement_metadata: dict            # LLM refinement diagnostics
+    copilot_review: dict                    # report co-pilot review output
+
     # Progress tracking
     progress_callback: Any
     error: Optional[str]
@@ -175,6 +180,18 @@ def kinase_annotation(state: ReportState) -> dict:
     """v9.11: Multi-source kinase annotation + temporal cascade for co-wave clusters."""
     from .nodes.kinase_annotation_node import run_kinase_annotation
     return run_kinase_annotation(state)
+
+
+def rq_refinement(state: ReportState) -> dict:
+    """v10.0: Refine research questions using discovered signaling architecture."""
+    from .nodes.rq_refinement_node import run_rq_refinement
+    return run_rq_refinement(state)
+
+
+def report_copilot(state: ReportState) -> dict:
+    """v10.0: Review draft report and suggest enhancements."""
+    from .nodes.report_copilot_node import run_report_copilot
+    return run_report_copilot(state)
 
 
 def cascade_mediator(state: ReportState) -> dict:
@@ -596,24 +613,21 @@ def _route_after_cascade(state: ReportState) -> str:
 def build_report_graph() -> StateGraph:
     """Build the LangGraph StateGraph for report generation.
 
-    Flow (v9.11):
+    Flow (v10.0):
       Standard (ptm_only / ptm_nonptm_network):
         load_context → generate_questions → research → hypothesize
           → validate_hypotheses → network_analysis → temporal_comovement
-          → kinase_annotation → write_sections → cascade_mediator
-          → generate_qa_report → drug_repositioning → format_citations
-          → edit_report
+          → kinase_annotation → rq_refinement → write_sections
+          → report_copilot → cascade_mediator → generate_qa_report
+          → drug_repositioning → format_citations → edit_report
 
       Cross-Talk (cross_talk):
-        load_context → generate_questions → research → hypothesize
-          → validate_hypotheses → network_analysis → temporal_comovement
-          → kinase_annotation → write_sections → cascade_mediator
-          → crosstalk_analysis → generate_qa_report → drug_repositioning
-          → format_citations → edit_report
+        Same as standard but crosstalk_analysis inserted after cascade_mediator.
 
+    v10.0: rq_refinement between kinase_annotation and write_sections.
+           report_copilot between write_sections and cascade_mediator.
     v9.11: kinase_annotation between temporal_comovement and write_sections.
-    v9.0: crosstalk_analysis conditionally inserted after cascade_mediator
-    when analysis_mode == "cross_talk".
+    v9.0: crosstalk_analysis conditionally inserted after cascade_mediator.
     v8.0: temporal_comovement between network_analysis and write_sections.
     v7.0: cascade_mediator after write_sections for content-driven diagrams.
     """
@@ -627,7 +641,9 @@ def build_report_graph() -> StateGraph:
     graph.add_node("network_analysis", network_analysis)
     graph.add_node("temporal_comovement", temporal_comovement)
     graph.add_node("kinase_annotation", kinase_annotation)
+    graph.add_node("rq_refinement", rq_refinement)
     graph.add_node("write_sections", write_sections)
+    graph.add_node("report_copilot", report_copilot)
     graph.add_node("cascade_mediator", cascade_mediator)
     graph.add_node("crosstalk_analysis", crosstalk_analysis)
     graph.add_node("generate_qa_report", generate_qa_report)
@@ -643,8 +659,10 @@ def build_report_graph() -> StateGraph:
     graph.add_edge("validate_hypotheses", "network_analysis")
     graph.add_edge("network_analysis", "temporal_comovement")
     graph.add_edge("temporal_comovement", "kinase_annotation")
-    graph.add_edge("kinase_annotation", "write_sections")
-    graph.add_edge("write_sections", "cascade_mediator")
+    graph.add_edge("kinase_annotation", "rq_refinement")
+    graph.add_edge("rq_refinement", "write_sections")
+    graph.add_edge("write_sections", "report_copilot")
+    graph.add_edge("report_copilot", "cascade_mediator")
 
     # Conditional: cross_talk mode inserts crosstalk_analysis before qa_report
     graph.add_conditional_edges(

@@ -295,6 +295,8 @@ services:
       CYTOSCAPE_PORT: ${CYTOSCAPE_PORT:-1234}
       WEBHOOK_URL: ${WEBHOOK_URL:-}
       REPORT_LLM_WORKERS: ${REPORT_LLM_WORKERS:-4}
+      ENABLE_RQ_REFINEMENT: ${ENABLE_RQ_REFINEMENT:-true}
+      ENABLE_REPORT_COPILOT: ${ENABLE_REPORT_COPILOT:-true}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:

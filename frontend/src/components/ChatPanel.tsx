@@ -27,6 +27,7 @@ import {
   History,
   PanelRightClose,
   PanelRightOpen,
+  FileOutput,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -88,6 +89,7 @@ export default function ChatPanel({ orderId, viewContext, isOpen, onToggle }: Ch
   const [showContextInfo, setShowContextInfo] = useState(false);
   const [responseLang, setResponseLang] = useState<"auto" | "ko" | "en">("auto");
   const [historyLoaded, setHistoryLoaded] = useState(false);
+  const [applyingInsights, setApplyingInsights] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -303,6 +305,52 @@ export default function ChatPanel({ orderId, viewContext, isOpen, onToggle }: Ch
     abortRef.current?.abort();
   };
 
+  const applyToReport = useCallback(async () => {
+    if (messages.length === 0) return;
+    setApplyingInsights(true);
+    const token = localStorage.getItem("ptm-token");
+    try {
+      const resp = await fetch(`/api/orders/${orderId}/chat/apply-to-report`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: "{}",
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        setMessages((prev) => [
+          ...prev,
+          { role: "assistant", content: `⚠️ ${data.detail || "Failed to extract insights"}`, timestamp: Date.now(), error: true },
+        ]);
+        return;
+      }
+      const insightCount = data.extracted?.insights?.length || 0;
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: `📋 **Report Insight Extraction Complete**\n\n${data.message}\n\n` +
+            (data.extracted?.insights?.map((i: { type: string; content: string; target_section: string; priority: string }, idx: number) =>
+              `${idx + 1}. **[${i.type}]** ${i.content} → _${i.target_section}_ (${i.priority})`
+            ).join("\n") || "") +
+            (data.extracted?.additional_questions?.length
+              ? `\n\n**New Questions:**\n${data.extracted.additional_questions.map((q: string) => `- ${q}`).join("\n")}`
+              : ""),
+          timestamp: Date.now(),
+        },
+      ]);
+    } catch (e) {
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: "⚠️ Failed to apply insights to report.", timestamp: Date.now(), error: true },
+      ]);
+    } finally {
+      setApplyingInsights(false);
+    }
+  }, [orderId, messages]);
+
   const toggleCollection = (id: number) => {
     setSelectedCollections((prev) =>
       prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
@@ -369,6 +417,18 @@ export default function ChatPanel({ orderId, viewContext, isOpen, onToggle }: Ch
             title="Context info"
           >
             <Info className="h-3.5 w-3.5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7"
+            onClick={applyToReport}
+            title="Apply insights to report"
+            disabled={isStreaming || applyingInsights || messages.length === 0}
+          >
+            {applyingInsights
+              ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              : <FileOutput className="h-3.5 w-3.5" />}
           </Button>
           <Button
             variant="ghost"

@@ -887,3 +887,193 @@ async def clear_chat_history(
     )
     await db.commit()
     return {"status": "ok", "message": "Chat history cleared"}
+
+
+# ── Chat Insight Extractor — chatbot → report feedback ────────────────────
+
+_INSIGHT_SYSTEM_PROMPT = """\
+You are analyzing a conversation between a researcher and POTATO AI
+(a PTM analysis assistant). Extract actionable insights that should be
+incorporated into the analysis report.
+
+## EXTRACTION RULES
+
+1. **New hypotheses**: If the conversation generated a new hypothesis
+   not in the current report, extract it with supporting evidence
+
+2. **Data corrections**: If the researcher pointed out errors in the
+   analysis or provided additional context, flag these
+
+3. **Interpretation refinements**: If the conversation led to a more
+   nuanced interpretation of the data, capture the refined view
+
+4. **Literature connections**: If new papers or biological mechanisms
+   were discussed, note them for citation
+
+5. **Experimental suggestions**: If follow-up experiments were discussed,
+   include them in the Discussion section
+
+## OUTPUT FORMAT
+Return ONLY a valid JSON object (no markdown fences):
+{
+  "insights": [
+    {
+      "type": "hypothesis | correction | interpretation | literature | experiment",
+      "content": "The conversation revealed that...",
+      "target_section": "Results | Discussion | Conclusion",
+      "priority": "must_include | nice_to_have",
+      "source_messages": [3, 5, 7]
+    }
+  ],
+  "revised_conclusions": "If the conversation changed the overall conclusion, state it here or null",
+  "additional_questions": ["New research questions that emerged from the conversation"]
+}
+"""
+
+_INSIGHT_USER_TEMPLATE = """\
+## Conversation History
+{conversation}
+
+## Current Report Sections (summary)
+{report_summary}
+
+## Research Questions
+{research_questions}
+
+## Task
+Extract insights from the conversation that should be reflected in the
+report. Focus on new understanding, corrections, and refinements that
+emerged through the dialogue.
+"""
+
+
+class ApplyToReportRequest(BaseModel):
+    """Request body for chat-to-report feedback."""
+    pass
+
+
+@router.post("/{order_id}/chat/apply-to-report")
+async def apply_chat_to_report(
+    order_id: int,
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+    user=Depends(get_current_user),
+):
+    """Extract insights from chat conversation and trigger report re-generation."""
+    result = await db.execute(select(Order).where(Order.id == order_id))
+    order = result.scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    # Load chat history
+    msg_result = await db.execute(
+        select(ChatMessageDB)
+        .where(
+            ChatMessageDB.order_id == order_id,
+            ChatMessageDB.user_id == user.id,
+        )
+        .order_by(ChatMessageDB.created_at.asc())
+    )
+    messages = msg_result.scalars().all()
+    if not messages:
+        raise HTTPException(status_code=400, detail="No chat history to extract insights from")
+
+    conversation_lines = []
+    for i, m in enumerate(messages):
+        role = "Researcher" if m.role == "user" else "POTATO AI"
+        conversation_lines.append(f"[{i+1}] {role}: {m.content}")
+    conversation_text = "\n\n".join(conversation_lines)
+
+    # Load report summary
+    output_dir = Path(settings.OUTPUT_DIR) / (order.order_code or str(order.id))
+    file_suffix = "_phospho" if (order.ptm_type or "phosphorylation") == "phosphorylation" else "_ubi"
+    report_summary = _load_report_summary(output_dir, file_suffix)
+
+    rqs = (order.report_options or {}).get("research_questions", [])
+
+    user_prompt = _INSIGHT_USER_TEMPLATE.format(
+        conversation=conversation_text[:12000],
+        report_summary=report_summary[:6000] if report_summary else "(No report available)",
+        research_questions="\n".join(f"- {q}" for q in rqs) if rqs else "(None)",
+    )
+
+    # Call LLM for insight extraction
+    ollama_url = os.getenv("OLLAMA_URL", "http://host.docker.internal:11434")
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            resp = await client.post(
+                f"{ollama_url}/api/chat",
+                json={
+                    "model": CHAT_MODEL,
+                    "messages": [
+                        {"role": "system", "content": _INSIGHT_SYSTEM_PROMPT},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    "stream": False,
+                    "options": {"temperature": 0.3, "num_predict": 4096},
+                },
+            )
+            resp.raise_for_status()
+            raw_content = resp.json().get("message", {}).get("content", "")
+    except Exception as e:
+        logger.error(f"[chat-insight] LLM call failed: {e}")
+        raise HTTPException(status_code=502, detail=f"LLM insight extraction failed: {e}")
+
+    # Parse JSON from LLM response
+    parsed = None
+    text = raw_content.strip()
+    if text.startswith("```"):
+        lines = text.split("\n")
+        lines = [l for l in lines if not l.strip().startswith("```")]
+        text = "\n".join(lines)
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start != -1 and end != -1:
+            try:
+                parsed = json.loads(text[start : end + 1])
+            except json.JSONDecodeError:
+                pass
+
+    if not parsed:
+        raise HTTPException(
+            status_code=422,
+            detail="Failed to parse insights from conversation. Please try again.",
+        )
+
+    insights = parsed.get("insights", [])
+    if not insights:
+        return {
+            "status": "no_insights",
+            "message": "No actionable insights found in the conversation.",
+            "extracted": parsed,
+        }
+
+    # Store insights in report_options for the next report generation run
+    report_options = dict(order.report_options or {})
+    report_options["chat_insights"] = insights
+    if parsed.get("additional_questions"):
+        existing_rqs = report_options.get("research_questions", [])
+        for q in parsed["additional_questions"]:
+            if q not in existing_rqs:
+                existing_rqs.append(q)
+        report_options["research_questions"] = existing_rqs
+
+    order.report_options = report_options
+    await db.commit()
+
+    must_count = sum(1 for i in insights if i.get("priority") == "must_include")
+    nice_count = len(insights) - must_count
+
+    return {
+        "status": "ok",
+        "message": f"Extracted {len(insights)} insights ({must_count} must-include, {nice_count} nice-to-have). "
+                   "Re-run Report Generation to apply them.",
+        "extracted": {
+            "insights": insights,
+            "revised_conclusions": parsed.get("revised_conclusions"),
+            "additional_questions": parsed.get("additional_questions", []),
+        },
+    }

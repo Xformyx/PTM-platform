@@ -2564,7 +2564,9 @@ export default function OrderDetail() {
     { key: "hypothesis", label: "Hypothesis Generation" },
     { key: "validation", label: "Hypothesis Validation" },
     { key: "network", label: "Network Analysis" },
+    { key: "rq_refinement", label: "RQ Refinement" },
     { key: "writing", label: "Report Writing" },
+    { key: "report_copilot", label: "Report Co-pilot" },
     { key: "qa_report", label: "Q&A Report" },
     { key: "compilation", label: "Final Compilation" },
   ];
@@ -3831,6 +3833,87 @@ export default function OrderDetail() {
               })()}
             </CardContent>
           </Card>
+
+          {/* Research Question Evolution (from rq_refinement pipeline node) */}
+          {(() => {
+            const rqLog = logs.find(l => l.metadata?.type === "rq_refinement");
+            if (!rqLog?.metadata) return null;
+            const meta = rqLog.metadata as Record<string, unknown>;
+            const origQs = (meta.original_questions as string[]) || [];
+            const refinedQs = (meta.refined_questions as string[]) || [];
+            const refinedItems = (meta.refined_items as Array<{question: string; category?: string; signaling_chain?: string; priority?: string}>) || [];
+            const keyDiscovery = meta.key_discovery as string || "";
+            if (origQs.length === 0 && refinedQs.length === 0) return null;
+            return (
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm flex items-center gap-2">
+                    <GitMerge className="h-4 w-4" /> Research Question Evolution
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {origQs.length > 0 && (
+                    <div>
+                      <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-2">
+                        RQ₀ — Original (User)
+                      </p>
+                      <div className="space-y-1.5">
+                        {origQs.map((q: string, i: number) => (
+                          <div key={i} className="rounded border px-3 py-1.5 text-xs bg-muted/20 text-muted-foreground break-words">
+                            {q}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {refinedItems.length > 0 && (
+                    <>
+                      <div className="flex items-center gap-2 text-muted-foreground">
+                        <ArrowRightCircle className="h-3.5 w-3.5 rotate-90" />
+                        <span className="text-[10px] uppercase tracking-wider">Refined by Signaling Analysis</span>
+                      </div>
+                      <div>
+                        <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-2">
+                          RQ₂ — Data-grounded
+                        </p>
+                        <div className="space-y-2">
+                          {refinedItems.map((item, i: number) => (
+                            <div key={i} className="rounded-lg border px-3 py-2 text-sm bg-background break-words">
+                              <div className="flex items-start gap-2">
+                                <span className="text-xs text-primary font-mono mt-0.5 shrink-0">Q{i + 1}</span>
+                                <div className="flex-1">
+                                  <p>{item.question}</p>
+                                  <div className="flex flex-wrap gap-1.5 mt-1.5">
+                                    {item.category && (
+                                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary">{item.category}</span>
+                                    )}
+                                    {item.priority && (
+                                      <span className={`text-[10px] px-1.5 py-0.5 rounded ${item.priority === "high" ? "bg-orange-500/10 text-orange-600" : "bg-muted text-muted-foreground"}`}>
+                                        {item.priority}
+                                      </span>
+                                    )}
+                                    {item.signaling_chain && (
+                                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-600 font-mono">{item.signaling_chain}</span>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </>
+                  )}
+                  {keyDiscovery && (
+                    <div className="rounded border-l-2 border-primary/40 bg-primary/5 px-3 py-2">
+                      <p className="text-[10px] font-medium text-primary uppercase tracking-wider mb-1">Key Discovery</p>
+                      <p className="text-xs">{keyDiscovery}</p>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            );
+          })()}
         </TabsContent>
 
         <TabsContent value="results" className="mt-4">
