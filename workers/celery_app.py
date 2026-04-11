@@ -32,7 +32,8 @@ app.conf.update(
         "rag_enrichment.document_tasks.*": {"queue": "rag_enrichment"},
         "report_generation.tasks.*": {"queue": "report_generation"},
         "pptx_generation.tasks.*": {"queue": "report_generation"},
-        "watchdog.tasks.*": {"queue": "default"},
+        # Must match a queue consumed by docker-compose workers (none listen on "default").
+        "watchdog.tasks.*": {"queue": "report_generation"},
     },
     task_default_queue="default",
     beat_schedule={
