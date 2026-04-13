@@ -40,19 +40,24 @@ interface LlmModelOption {
   name: string;
 }
 
+export interface RerunConfirmPayload {
+  analysis_context: Record<string, unknown>;
+  analysis_options: Record<string, unknown>;
+  report_options: Record<string, unknown>;
+  rag_collections?: number[] | null;
+}
+
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   order: Order | null;
   llmModels: LlmModelOption[];
   defaultLlmModel: string;
-  onConfirm: (opts: {
-    analysis_context: Record<string, unknown>;
-    analysis_options: Record<string, unknown>;
-    report_options: Record<string, unknown>;
-    rag_collections?: number[] | null;
-  }) => void | Promise<void>;
+  onConfirm: (opts: RerunConfirmPayload) => void | Promise<void>;
   confirmLabel?: string;
+  duplicateMode?: boolean;
+  duplicateName?: string;
+  onDuplicateNameChange?: (name: string) => void;
 }
 
 const DEFAULT_CONTEXT = {
@@ -71,6 +76,9 @@ export default function RerunOptionsModal({
   defaultLlmModel,
   onConfirm,
   confirmLabel = "Confirm & Run",
+  duplicateMode = false,
+  duplicateName = "",
+  onDuplicateNameChange,
 }: Props) {
   const [analysisContext, setAnalysisContext] = useState<Record<string, string>>(DEFAULT_CONTEXT);
   const [analysisMode, setAnalysisMode] = useState<"ptm_only" | "ptm_nonptm_network">("ptm_only");
@@ -280,14 +288,26 @@ export default function RerunOptionsModal({
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent className="sm:max-w-[900px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Analysis Focus & Report Options</DialogTitle>
+            <DialogTitle>{duplicateMode ? "Duplicate Order — Options" : "Analysis Focus & Report Options"}</DialogTitle>
             <DialogDescription>
-              전체 또는 단계별 Re-run 시 반드시 이 화면에서 설정을 확인·수정한 뒤 Confirm 해주세요.
-              기존 Order 설정값이 표시됩니다.
+              {duplicateMode
+                ? "Duplicate 시 분석 설정을 변경할 수 있습니다. 기존 Order 설정값이 표시됩니다."
+                : "전체 또는 단계별 Re-run 시 반드시 이 화면에서 설정을 확인·수정한 뒤 Confirm 해주세요. 기존 Order 설정값이 표시됩니다."}
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-6">
+            {duplicateMode && (
+              <div className="space-y-2">
+                <Label className="text-sm font-semibold">New Order Name</Label>
+                <Input
+                  value={duplicateName}
+                  onChange={(e) => onDuplicateNameChange?.(e.target.value)}
+                  placeholder="Enter new order name"
+                  className="text-sm"
+                />
+              </div>
+            )}
             {/* Analysis Focus */}
             <div className="space-y-4">
               <h4 className="text-sm font-semibold flex items-center gap-2">

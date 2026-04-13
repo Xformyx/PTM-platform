@@ -338,6 +338,15 @@ interface InferredReceptor {
   pathway?: string;
   signaling_pathway?: string;
   source?: string;
+  has_receptor_specific_db?: boolean;
+  uniqueness_score?: number;
+  unique_kinases?: string[];
+  shared_kinases?: string[];
+  kinase_group_id?: string | null;
+  kinase_group_members?: string[];
+  unique_ptms?: string[];
+  shared_ptms?: string[];
+  unique_ptm_ratio?: number;
 }
 
 interface KinaseModuleAnalysisProps {
@@ -2947,9 +2956,44 @@ function SignalFlowView({
     return "#a78bfa";
   };
 
-  const receptorsToShow = selectedReceptor
-    ? inferredReceptors.filter(r => r.name === selectedReceptor)
-    : inferredReceptors.slice(0, 6); // show top 6 by default
+  // v9.37: Group receptors with identical kinase sets
+  const groupedReceptors = useMemo(() => {
+    const groups: Map<string, InferredReceptor[]> = new Map();
+    const ungrouped: InferredReceptor[] = [];
+
+    for (const rec of inferredReceptors) {
+      const groupId = rec.kinase_group_id;
+      if (groupId) {
+        if (!groups.has(groupId)) groups.set(groupId, []);
+        groups.get(groupId)!.push(rec);
+      } else {
+        ungrouped.push(rec);
+      }
+    }
+
+    const result: { primary: InferredReceptor; members: InferredReceptor[] }[] = [];
+
+    for (const [, members] of groups) {
+      const sorted = [...members].sort(
+        (a, b) => (b.downstream_ptm_count || 0) - (a.downstream_ptm_count || 0)
+      );
+      result.push({ primary: sorted[0], members: sorted });
+    }
+
+    for (const rec of ungrouped) {
+      result.push({ primary: rec, members: [rec] });
+    }
+
+    return result.sort(
+      (a, b) => (b.primary.downstream_ptm_count || 0) - (a.primary.downstream_ptm_count || 0)
+    );
+  }, [inferredReceptors]);
+
+  const groupsToShow = selectedReceptor
+    ? groupedReceptors.filter(g =>
+        g.members.some(m => m.name === selectedReceptor)
+      )
+    : groupedReceptors.slice(0, 6);
 
   if (inferredReceptors.length === 0) {
     return (
@@ -2989,7 +3033,7 @@ function SignalFlowView({
         </div>
       </div>
 
-      {/* Receptor selector */}
+      {/* Receptor selector — group-aware */}
       <div className="flex flex-wrap gap-1.5">
         <button
           className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${
@@ -2999,46 +3043,95 @@ function SignalFlowView({
           }`}
           onClick={() => setSelectedReceptor(null)}
         >
-          All (top 6)
+          All ({groupedReceptors.length} groups)
         </button>
-        {inferredReceptors.map(r => (
+        {groupedReceptors.map(({ primary, members }) => (
           <button
-            key={r.name}
+            key={primary.name}
             className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${
-              selectedReceptor === r.name
+              members.some(m => m.name === selectedReceptor)
                 ? "bg-foreground text-background border-foreground"
                 : "border-border text-muted-foreground hover:border-foreground/50"
             }`}
-            onClick={() => setSelectedReceptor(r.name === selectedReceptor ? null : r.name)}
+            onClick={() => setSelectedReceptor(
+              primary.name === selectedReceptor ? null : primary.name
+            )}
           >
-            {r.name.length > 20 ? r.name.slice(0, 18) + "…" : r.name}
+            {members.length > 1
+              ? `${primary.name.length > 12 ? primary.name.slice(0, 10) + "…" : primary.name} +${members.length - 1}`
+              : primary.name.length > 20 ? primary.name.slice(0, 18) + "…" : primary.name
+            }
+            {primary.uniqueness_score != null && (
+              <span className={`ml-1 text-[8px] ${
+                (primary.uniqueness_score || 0) > 0.6 ? "text-green-400" :
+                (primary.uniqueness_score || 0) > 0.3 ? "text-yellow-400" : "text-red-400"
+              }`}>
+                {((primary.uniqueness_score || 0) * 100).toFixed(0)}%
+              </span>
+            )}
           </button>
         ))}
       </div>
 
-      {/* Flow chains */}
+      {/* Flow chains — grouped */}
       <div className="space-y-3">
-        {receptorsToShow.map(rec => {
-          const viaKinases = rec.via_kinases || [];
-          const color = sourceColor(rec.source);
+        {groupsToShow.map(({ primary, members }) => {
+          const viaKinases = primary.via_kinases || [];
+          const isGrouped = members.length > 1;
 
           return (
-            <div key={rec.name} className="rounded-lg border bg-card/50 p-3 space-y-2">
-              {/* Receptor node */}
-              <div className="flex items-center gap-2">
-                <div
-                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border-2 text-xs font-semibold"
-                  style={{ borderColor: color, color, backgroundColor: `${color}18` }}
-                >
-                  <Activity className="h-3 w-3" />
-                  {rec.name}
-                </div>
+            <div key={primary.name} className="rounded-lg border bg-card/50 p-3 space-y-2">
+              {/* Receptor node(s) */}
+              <div className="flex items-center gap-2 flex-wrap">
+                {members.map((rec, i) => (
+                  <div
+                    key={rec.name}
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border-2 text-xs font-semibold"
+                    style={{
+                      borderColor: sourceColor(rec.source),
+                      color: sourceColor(rec.source),
+                      backgroundColor: `${sourceColor(rec.source)}18`,
+                      opacity: i === 0 ? 1 : 0.75,
+                    }}
+                  >
+                    <Activity className="h-3 w-3" />
+                    {rec.name}
+                  </div>
+                ))}
                 <span className="text-[10px] text-muted-foreground">
-                  {rec.receptor_class} · {rec.downstream_ptm_count} PTMs ·{" "}
-                  <span style={{ color }}>
-                    {rec.source === "treatment_context" ? "T" : rec.source === "reactome" ? "R" : "L"}
+                  {primary.receptor_class} · {primary.downstream_ptm_count} PTMs ·{" "}
+                  <span style={{ color: sourceColor(primary.source) }}>
+                    {primary.source === "treatment_context" ? "T" : primary.source === "reactome" ? "R" : "L"}
                   </span>
                 </span>
+                {isGrouped && (
+                  <span className="text-[9px] text-amber-500 bg-amber-50 dark:bg-amber-900/20 px-1.5 py-0.5 rounded border border-amber-300/50">
+                    {members.length} receptors share identical kinase pathway
+                  </span>
+                )}
+                {primary.has_receptor_specific_db === false && (
+                  <span className="text-[9px] text-muted-foreground/50 bg-muted/50 px-1.5 py-0.5 rounded">
+                    Limited kinase mapping
+                  </span>
+                )}
+                {primary.uniqueness_score != null && (
+                  <div className="flex items-center gap-1 text-[9px] text-muted-foreground ml-auto">
+                    <div className="w-10 h-1.5 bg-muted rounded-full overflow-hidden">
+                      <div
+                        className="h-full rounded-full transition-all"
+                        style={{
+                          width: `${(primary.uniqueness_score || 0) * 100}%`,
+                          backgroundColor: (primary.uniqueness_score || 0) > 0.6
+                            ? "#22c55e"
+                            : (primary.uniqueness_score || 0) > 0.3
+                            ? "#eab308"
+                            : "#ef4444",
+                        }}
+                      />
+                    </div>
+                    <span>{((primary.uniqueness_score || 0) * 100).toFixed(0)}%</span>
+                  </div>
+                )}
               </div>
 
               {/* Kinase layer */}
@@ -3052,12 +3145,18 @@ function SignalFlowView({
                     {viaKinases.map(kinase => {
                       const kinaseKey = kinase.toUpperCase();
                       const ptms = kinaseToPtms[kinaseKey] || [];
+                      const isUnique = primary.unique_kinases?.includes(kinase);
+
                       return (
                         <div key={kinase} className="space-y-1">
-                          {/* Kinase node */}
-                          <div className="flex items-center gap-1 px-2 py-0.5 rounded border border-amber-400 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 text-[10px] font-medium">
+                          <div className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium ${
+                            isUnique
+                              ? "border-2 border-amber-400 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300"
+                              : "border border-dashed border-amber-400/50 bg-amber-50/50 dark:bg-amber-900/10 text-amber-700/60 dark:text-amber-300/60"
+                          }`}>
                             <Zap className="h-2.5 w-2.5" />
                             {kinase}
+                            {isUnique && <span className="ml-0.5 text-[8px] text-amber-500">★</span>}
                           </div>
                           {/* PTM substrates */}
                           {ptms.length > 0 && (
@@ -3070,7 +3169,6 @@ function SignalFlowView({
                                 {ptms.map(ptm => {
                                   const ptmKey = `${ptm.gene}_${ptm.position}`;
                                   const actClass = ptmActivityClass[ptmKey] || "minor";
-                                  // Bimodal classification styling
                                   const chipStyle =
                                     actClass === "de_novo"
                                       ? "bg-orange-900/30 text-orange-300 border border-orange-500 font-semibold"
@@ -3078,9 +3176,9 @@ function SignalFlowView({
                                       ? "bg-blue-900/30 text-blue-300 border border-blue-500 font-semibold"
                                       : "bg-green-900/30 text-green-300 border border-green-500";
                                   const actLabel =
-                                    actClass === "de_novo" ? "De novo (control imputed — not detected in control)" :
-                                    actClass === "regulated" ? "Regulated (|Log2FC| ≥ 1.0 AND q-value < 0.05)" :
-                                    "Minor (sub-threshold but patterned)";
+                                    actClass === "de_novo" ? "De novo (control imputed)" :
+                                    actClass === "regulated" ? "Regulated (|Log2FC| ≥ 1.0 AND q < 0.05)" :
+                                    "Minor (sub-threshold)";
                                   return (
                                     <span
                                       key={ptmKey}
@@ -3103,9 +3201,8 @@ function SignalFlowView({
                             </div>
                           )}
 
-                          {/* 4th Layer: Non-PTM Effectors connected to this kinase's substrates */}
+                          {/* 4th Layer: Non-PTM Effectors */}
                           {showEffectors && ptms.length > 0 && (() => {
-                            // Collect effectors connected to this kinase's substrates
                             const kinaseEffectors: EffectorProtein[] = [];
                             const seen = new Set<string>();
                             for (const ptm of ptms) {
@@ -3166,8 +3263,8 @@ function SignalFlowView({
                 <div className="ml-4 text-[10px] text-muted-foreground/50 flex items-center gap-1">
                   <ArrowRight className="h-3 w-3" />
                   Direct receptor (no intermediate kinase mapping)
-                  {rec.downstream_ptms?.length > 0 && (
-                    <span className="ml-1">→ {rec.downstream_ptms.slice(0, 3).join(", ")}{rec.downstream_ptms.length > 3 ? ` +${rec.downstream_ptms.length - 3}` : ""}</span>
+                  {primary.downstream_ptms?.length > 0 && (
+                    <span className="ml-1">→ {primary.downstream_ptms.slice(0, 3).join(", ")}{primary.downstream_ptms.length > 3 ? ` +${primary.downstream_ptms.length - 3}` : ""}</span>
                   )}
                 </div>
               )}
@@ -3188,6 +3285,40 @@ function SignalFlowView({
           </span>
           <span className="flex items-center gap-1">
             <span className="w-2 h-2 rounded-full bg-violet-400 inline-block" /> Literature (L)
+          </span>
+        </div>
+        {/* v9.37: Kinase specificity legend */}
+        <div className="flex flex-wrap items-center gap-3 text-[10px] text-muted-foreground">
+          <span className="font-medium text-muted-foreground/70">Kinase specificity:</span>
+          <span className="flex items-center gap-1">
+            <span className="px-1.5 py-0.5 rounded bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 border-2 border-amber-400 text-[9px]">★ Unique</span>
+            <span className="text-[9px]">receptor-specific kinase (from curated DB)</span>
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="px-1.5 py-0.5 rounded bg-amber-50/50 dark:bg-amber-900/10 text-amber-700/60 dark:text-amber-300/60 border border-dashed border-amber-400/50 text-[9px]">Shared</span>
+            <span className="text-[9px]">kinase shared across multiple receptors</span>
+          </span>
+        </div>
+        <div className="flex flex-wrap items-center gap-3 text-[10px] text-muted-foreground">
+          <span className="font-medium text-muted-foreground/70">Uniqueness score:</span>
+          <span className="flex items-center gap-1">
+            <span className="w-6 h-1.5 rounded-full bg-green-500 inline-block" />
+            <span className="text-[9px]">&gt;60% — highly unique kinase set</span>
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="w-6 h-1.5 rounded-full bg-yellow-500 inline-block" />
+            <span className="text-[9px]">30–60% — moderate overlap</span>
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="w-6 h-1.5 rounded-full bg-red-500 inline-block" />
+            <span className="text-[9px]">&lt;30% — mostly shared (consider grouping)</span>
+          </span>
+        </div>
+        <div className="flex flex-wrap items-center gap-3 text-[10px] text-muted-foreground">
+          <span className="font-medium text-muted-foreground/70">DB coverage:</span>
+          <span className="flex items-center gap-1">
+            <span className="text-[9px] bg-muted/50 px-1.5 py-0.5 rounded">Limited kinase mapping</span>
+            <span className="text-[9px]">receptor not in curated DB (82 receptors) — class-level fallback used</span>
           </span>
         </div>
         <div className="flex flex-wrap items-center gap-3 text-[10px] text-muted-foreground">

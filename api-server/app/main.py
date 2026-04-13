@@ -1,9 +1,11 @@
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api import articles, auth, chat, events, health, llm, notifications, orders, presentation, rag, settings as settings_api, system
@@ -74,22 +76,69 @@ async def _seed_admin(session: AsyncSession) -> None:
     logger.info("Created default admin user: admin@ptm.local / admin1234")
 
 
+_MYSQL_NON_RETRY_CODES = frozenset({1044, 1045, 1049, 1146})
+_MYSQL_TRANSIENT_CODES = frozenset({2002, 2003, 2013})
+
+
+def _is_transient_mysql_error(exc: OperationalError) -> bool:
+    orig = exc.orig
+    if orig is not None and getattr(orig, "args", None):
+        code = orig.args[0]
+        if isinstance(code, int):
+            if code in _MYSQL_NON_RETRY_CODES:
+                return False
+            if code in _MYSQL_TRANSIENT_CODES:
+                return True
+    lowered = str(exc).lower()
+    if "access denied" in lowered or "unknown database" in lowered:
+        return False
+    if "connection refused" in lowered or "can't connect" in lowered:
+        return True
+    return False
+
+
+async def _run_database_startup() -> None:
+    max_attempts = max(1, settings.DB_CONNECT_MAX_ATTEMPTS)
+    delay = settings.DB_CONNECT_RETRY_INITIAL_SEC
+    delay_max = settings.DB_CONNECT_RETRY_MAX_SEC
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+                try:
+                    await _run_migrations(conn)
+                except Exception as e:
+                    logger.warning(f"Migration note: {e}")
+            logger.info("Database tables ensured")
+
+            async with AsyncSession(engine) as session:
+                await _seed_admin(session)
+            return
+        except OperationalError as e:
+            if not _is_transient_mysql_error(e):
+                raise
+            if attempt >= max_attempts:
+                logger.error("Database unavailable after %s attempts", max_attempts)
+                raise
+            logger.warning(
+                "Database not ready (%s/%s): %s; retrying in %.1fs",
+                attempt,
+                max_attempts,
+                e,
+                delay,
+            )
+            await asyncio.sleep(delay)
+            delay = min(delay * 1.5, delay_max)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("PTM Analysis Platform API Server starting...")
     logger.info(f"Environment: {settings.APP_ENV}")
     logger.info(f"Auth enabled: {settings.AUTH_ENABLED}")
 
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-        try:
-            await _run_migrations(conn)
-        except Exception as e:
-            logger.warning(f"Migration note: {e}")
-    logger.info("Database tables ensured")
-
-    async with AsyncSession(engine) as session:
-        await _seed_admin(session)
+    await _run_database_startup()
 
     yield
 

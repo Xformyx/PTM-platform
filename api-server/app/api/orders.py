@@ -2044,12 +2044,14 @@ async def get_vector_plot_data(
     #   (A) upstream_regulators from enriched data (text-based, biased)
     #   (B) Reactome pathway mapping: kinase → receptor (unbiased, cached)
     #   (C) Treatment-context: order.analysis_context.treatment → known ligand-receptor DB
+    from app.services.ligand_receptor_db import _RECEPTOR_DOWNSTREAM_KINASES
     inferred_receptors = []
 
     # --- Source A: upstream_regulators (existing, kept for backward compat) ---
     literature_receptors: dict = {}  # receptor_name -> {ptm_labels, class}
     if enriched_path.exists():
         from collections import defaultdict
+        from app.services.ligand_receptor_db import _RECEPTOR_DOWNSTREAM_KINASES
         receptor_ptm_map: dict = defaultdict(list)
         for ptm in enriched:
             gene = ptm.get("gene") or ptm.get("Gene.Name", "")
@@ -2102,7 +2104,9 @@ async def get_vector_plot_data(
                 "receptor_class": rec_class,
                 "downstream_ptm_count": len(ptm_labels),
                 "downstream_ptms": ptm_labels[:10],
+                "via_kinases": [],
                 "source": "literature",
+                "has_receptor_specific_db": False,
             }
 
     # --- Source B: Reactome pathway mapping (kinase → receptor) ---
@@ -2110,10 +2114,10 @@ async def get_vector_plot_data(
     # as the PRIMARY source of kinase names. This includes iPTMnet + UniProt API results
     # that are not stored in enriched JSON. Falls back to enriched JSON parsing.
     reactome_receptors: dict = {}  # receptor_name -> {info}
+    from collections import defaultdict
+    kinase_names_set: set = set()
+    kinase_ptm_map: dict = defaultdict(set)  # kinase_name -> {ptm_labels}
     try:
-        from collections import defaultdict
-        kinase_names_set: set = set()
-        kinase_ptm_map: dict = defaultdict(set)  # kinase_name -> {ptm_labels}
 
         # ── Primary source: order.kinase_analysis_data (from Kinase Module Analysis) ──
         # This contains kinases from ALL 8 sources including iPTMnet/UniProt API
@@ -2248,6 +2252,33 @@ async def get_vector_plot_data(
                 for kin in info["kinases"]:
                     downstream_ptms.update(kinase_ptm_map.get(kin, set()))
                 unique_kinases = sorted(set(info["kinases"]))
+
+                # v9.37: Supplement with receptor-specific kinases from curated DB
+                _b_aliases: list[str] = [rec_name.split("(")[0].strip().upper()]
+                if "(" in rec_name:
+                    _b_alias = rec_name.split("(")[1].replace(")", "").strip().upper()
+                    if _b_alias:
+                        _b_aliases.append(_b_alias)
+                for _ba in list(_b_aliases):
+                    _bc = _ba.replace("-", "").replace(" ", "")
+                    if _bc != _ba:
+                        _b_aliases.append(_bc)
+
+                _b_rec_specific: set = set()
+                for _ba in _b_aliases:
+                    if _ba in _RECEPTOR_DOWNSTREAM_KINASES:
+                        _b_rec_specific.update(_RECEPTOR_DOWNSTREAM_KINASES[_ba])
+
+                _b_has_specific = len(_b_rec_specific) > 0
+                if _b_has_specific:
+                    _existing_set = set(unique_kinases)
+                    _priority = [k for k in _b_rec_specific
+                                 if k in kinase_names_set and k not in _existing_set]
+                    unique_kinases = _priority + unique_kinases
+                    unique_kinases = unique_kinases[:8]
+                    for _pk in _priority:
+                        downstream_ptms.update(kinase_ptm_map.get(_pk, set()))
+
                 reactome_receptors[rec_name] = {
                     "name": rec_name,
                     "receptor_class": info["receptor_class"],
@@ -2257,6 +2288,7 @@ async def get_vector_plot_data(
                     "pathway": info["pathway"],
                     "signaling_pathway": info["signaling_pathway"],
                     "source": "reactome",
+                    "has_receptor_specific_db": _b_has_specific,
                 }
         else:
             logging.getLogger("vector_plot").warning(
@@ -2308,55 +2340,90 @@ async def get_vector_plot_data(
                     # Curated internal DB: always include, score = PTM count
                     relevance_score = len(top_n_ptms)
 
-                # v9.22: Map canonical downstream kinases for Source T receptors
-                # using the full kinase_names_set (not limited to top_n PTMs)
+                # v9.37: General receptor-specific kinase mapping
+                from app.services.ligand_receptor_db import (
+                    _RECEPTOR_DOWNSTREAM_KINASES,
+                )
+
                 _CANONICAL_DOWNSTREAM: dict = {
-                    # Integrin family
                     "Integrin": ["PTK2", "FAK", "SRC", "ILK", "ROCK1", "ROCK2", "PAK1", "PAK2", "PAK4",
                                   "ITGB1BP1", "PXN", "VCL", "TLN1", "PARVA", "FERMT2",
                                   "CDC42", "RAC1", "RHOA", "LIMK1", "LIMK2", "CFL1",
                                   "PI3K", "PIK3CA", "PIK3R1", "AKT1", "AKT2",
                                   "MAPK1", "MAPK3", "ERK1", "ERK2", "MAP2K1", "MAP2K2",
                                   "BCAR1", "CRK", "CRKL", "DOCK1"],
-                    # RTK family
                     "RTK": ["GRB2", "SOS1", "RAS", "RAF1", "BRAF", "MAP2K1", "MAP2K2",
                              "MAPK1", "MAPK3", "ERK1", "ERK2",
                              "PI3K", "PIK3CA", "AKT1", "AKT2", "MTOR",
                              "SRC", "JAK1", "JAK2", "STAT3", "STAT5A",
                              "PLCγ", "PLCG1", "PKC", "PRKCA", "PRKCB"],
-                    # GPCR family
                     "GPCR": ["ADCY", "PKA", "PRKACA", "PRKACB", "PRKAR1A",
                               "PLCB1", "PLCB3", "PKC", "PRKCA", "PRKCB",
                               "GRK2", "GRK3", "GRK5", "GRK6",
                               "ROCK1", "ROCK2", "RHOA",
                               "PI3K", "PIK3CA", "AKT1", "MAPK1", "MAPK3",
                               "ARRB1", "ARRB2"],
-                    # Receptor (generic)
                     "Receptor": ["SRC", "MAPK1", "MAPK3", "AKT1", "PI3K", "JAK1", "JAK2"],
                 }
                 rec_class = m["receptor_class"]
                 canonical_list = _CANONICAL_DOWNSTREAM.get(rec_class, _CANONICAL_DOWNSTREAM["Receptor"])
-                # Intersect with kinases actually detected in this experiment
-                detected_via_kinases = [k for k in canonical_list if k in kinase_names_set]
-                # Also include kinases from kinase_ptm_map that overlap with downstream_ptms
-                downstream_ptm_set = set(p["label"] for p in top_n_ptms)
-                for kname, kptms in kinase_ptm_map.items():
-                    if kname not in detected_via_kinases and kptms & downstream_ptm_set:
-                        detected_via_kinases.append(kname)
-                # Deduplicate and limit
-                seen_k: set = set()
-                unique_via_kinases = []
-                for k in detected_via_kinases:
-                    if k not in seen_k:
-                        seen_k.add(k)
-                        unique_via_kinases.append(k)
-                unique_via_kinases = unique_via_kinases[:8]  # limit to 8
 
-                # Recalculate downstream_ptm_count using full kinase_ptm_map (not just top_n)
+                # Step 0: Receptor name normalization
+                _rec_aliases: list[str] = []
+                _base_name = rec_name.split("(")[0].strip()
+                _rec_aliases.append(_base_name.upper())
+                if "(" in rec_name:
+                    _alias = rec_name.split("(")[1].replace(")", "").strip()
+                    if _alias:
+                        _rec_aliases.append(_alias.upper())
+                for _a in list(_rec_aliases):
+                    _clean = _a.replace("-", "").replace(" ", "")
+                    if _clean != _a:
+                        _rec_aliases.append(_clean)
+
+                # Step 1: Receptor-specific kinases from curated DB
+                receptor_specific_kinases: set = set()
+                for _alias in _rec_aliases:
+                    if _alias in _RECEPTOR_DOWNSTREAM_KINASES:
+                        receptor_specific_kinases.update(
+                            _RECEPTOR_DOWNSTREAM_KINASES[_alias]
+                        )
+                has_receptor_specific = len(receptor_specific_kinases) > 0
+
+                # Step 2: Build via_kinases with 3-tier priority
+                detected_via_kinases: list[str] = []
+                _seen_via: set = set()
+
+                def _add_kinase(k: str):
+                    if k not in _seen_via:
+                        _seen_via.add(k)
+                        detected_via_kinases.append(k)
+
+                # Priority 1: Receptor-specific kinases
+                if has_receptor_specific:
+                    for k in receptor_specific_kinases:
+                        if k in kinase_names_set:
+                            _add_kinase(k)
+
+                # Priority 2: Canonical class-level kinases
+                for k in canonical_list:
+                    if k in kinase_names_set:
+                        _add_kinase(k)
+
+                # Priority 3: Supplementary kinases (only if receptor-specific DB exists)
+                downstream_ptm_set = set(p["label"] for p in top_n_ptms)
+                if has_receptor_specific:
+                    for kname, kptms in kinase_ptm_map.items():
+                        if kname not in _seen_via and kptms & downstream_ptm_set:
+                            if kname in receptor_specific_kinases:
+                                _add_kinase(kname)
+
+                unique_via_kinases = detected_via_kinases[:8]
+
+                # Step 3: Recalculate downstream_ptm_count
                 all_downstream_ptms: set = set()
                 for k in unique_via_kinases:
                     all_downstream_ptms |= kinase_ptm_map.get(k, set())
-                # Fallback: use top_n_ptms if no kinase PTM map available
                 if not all_downstream_ptms:
                     all_downstream_ptms = downstream_ptm_set
                 actual_downstream_count = len(all_downstream_ptms) if all_downstream_ptms else relevance_score
@@ -2372,6 +2439,7 @@ async def get_vector_plot_data(
                     "matched_ligand": m.get("ligand", ""),
                     "source": m.get("source", "treatment_context"),
                     "relevance_score": actual_downstream_count,
+                    "has_receptor_specific_db": has_receptor_specific,
                 }
 
             if treatment_receptors:
@@ -2381,6 +2449,30 @@ async def get_vector_plot_data(
                 )
     except Exception as e:
         logging.getLogger("vector_plot").warning(f"Treatment-context receptor lookup failed: {e}")
+
+    # v9.37: Reverse-infer via_kinases for Source A literature receptors
+    # (must run after Source B where kinase_names_set is populated)
+    if literature_receptors and kinase_names_set:
+        for _lit_rec_name, _lit_info in literature_receptors.items():
+            _a_aliases: list[str] = [_lit_rec_name.split("(")[0].strip().upper()]
+            if "(" in _lit_rec_name:
+                _a_alias = _lit_rec_name.split("(")[1].replace(")", "").strip().upper()
+                if _a_alias:
+                    _a_aliases.append(_a_alias)
+            for _aa in list(_a_aliases):
+                _ac = _aa.replace("-", "").replace(" ", "")
+                if _ac != _aa:
+                    _a_aliases.append(_ac)
+
+            _a_rec_specific: set = set()
+            for _aa in _a_aliases:
+                if _aa in _RECEPTOR_DOWNSTREAM_KINASES:
+                    _a_rec_specific.update(_RECEPTOR_DOWNSTREAM_KINASES[_aa])
+
+            _a_has_specific = len(_a_rec_specific) > 0
+            _lit_info["has_receptor_specific_db"] = _a_has_specific
+            if _a_has_specific:
+                _lit_info["via_kinases"] = [k for k in _a_rec_specific if k in kinase_names_set][:8]
 
     # --- Merge all three sources (C > B > A priority) ---
     merged: dict = {}
@@ -2410,6 +2502,78 @@ async def get_vector_plot_data(
             combined = existing_ptms | lit_ptms
             existing["downstream_ptm_count"] = max(existing["downstream_ptm_count"], len(combined))
             existing["downstream_ptms"] = sorted(combined)[:10]
+
+    # ── v9.37: General Uniqueness Score, Grouping, and Unique PTM Metadata ──
+    from collections import defaultdict
+    _all_kinase_freq: dict = defaultdict(int)
+    for _ri in merged.values():
+        for _k in _ri.get("via_kinases", []):
+            _all_kinase_freq[_k] += 1
+
+    for _ri in merged.values():
+        _vk = _ri.get("via_kinases", [])
+        if not _vk:
+            _ri["uniqueness_score"] = 0.0
+            _ri["unique_kinases"] = []
+            _ri["shared_kinases"] = []
+            continue
+        _unique_k = []
+        _shared_k = []
+        _u_sum = 0.0
+        for _k in _vk:
+            _freq = _all_kinase_freq.get(_k, 1)
+            _u_sum += 1.0 / _freq
+            if _freq == 1:
+                _unique_k.append(_k)
+            else:
+                _shared_k.append(_k)
+        _ri["uniqueness_score"] = round(_u_sum / len(_vk), 3)
+        _ri["unique_kinases"] = _unique_k
+        _ri["shared_kinases"] = _shared_k
+
+    # --- Grouping: receptors with identical via_kinases sets ---
+    _sig_to_members: dict = defaultdict(list)
+    for _ri in merged.values():
+        _sig = frozenset(_ri.get("via_kinases", []))
+        _sig_to_members[_sig].append(_ri["name"])
+
+    _group_counter = 0
+    _sig_to_gid: dict = {}
+    for _sig, _members in _sig_to_members.items():
+        if len(_members) > 1:
+            _group_counter += 1
+            _sig_to_gid[_sig] = f"kinase_group_{_group_counter}"
+
+    for _ri in merged.values():
+        _sig = frozenset(_ri.get("via_kinases", []))
+        if _sig in _sig_to_gid:
+            _ri["kinase_group_id"] = _sig_to_gid[_sig]
+            _ri["kinase_group_members"] = _sig_to_members[_sig]
+        else:
+            _ri["kinase_group_id"] = None
+            _ri["kinase_group_members"] = [_ri["name"]]
+
+    # --- Unique PTM Subset ---
+    _all_ptm_freq: dict = defaultdict(int)
+    for _ri in merged.values():
+        for _p in _ri.get("downstream_ptms", []):
+            _all_ptm_freq[_p] += 1
+
+    for _ri in merged.values():
+        _ptms = _ri.get("downstream_ptms", [])
+        _ri["unique_ptms"] = [p for p in _ptms if _all_ptm_freq[p] == 1]
+        _ri["shared_ptms"] = [p for p in _ptms if _all_ptm_freq[p] > 1]
+        _ri["unique_ptm_ratio"] = round(
+            len(_ri["unique_ptms"]) / max(len(_ptms), 1), 3
+        )
+
+    _uq_summary = ", ".join(
+        f"{r['name']}={r.get('uniqueness_score', 0):.2f}" for r in merged.values()
+    )
+    logging.getLogger("vector_plot").info(
+        f"Receptor grouping: {_group_counter} groups from {len(merged)} receptors. "
+        f"Uniqueness scores: {_uq_summary}"
+    )
 
     inferred_receptors = sorted(
         merged.values(),

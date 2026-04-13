@@ -16,6 +16,9 @@ class Settings(BaseSettings):
 
     # Database
     DATABASE_URL: str = "mysql+asyncmy://ptm_user:ptm_password@localhost:3306/ptm_platform"
+    DB_CONNECT_MAX_ATTEMPTS: int = 60
+    DB_CONNECT_RETRY_INITIAL_SEC: float = 1.0
+    DB_CONNECT_RETRY_MAX_SEC: float = 5.0
 
     # Redis
     REDIS_URL: str = "redis://localhost:6379/0"

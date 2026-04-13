@@ -2567,6 +2567,7 @@ export default function OrderDetail() {
   ];
 
   const REPORT_STEPS: { key: string; label: string }[] = [
+    { key: "kinase_annotation", label: "Kinase Annotation" },
     { key: "context_loading", label: "Context Loading" },
     { key: "question_generation", label: "Question Generation" },
     { key: "research", label: "Research Analysis" },
@@ -2632,13 +2633,13 @@ export default function OrderDetail() {
       const detail = String(meta.detail ?? "");
 
       // New run detected: first step starts running → reset all steps
-      if (step === "context_loading" && status === "running") {
+      if ((step === "kinase_annotation" || step === "context_loading") && status === "running") {
         resetAll();
       }
 
       const row = map.get(step);
       if (!row) return;
-      if (status === "done") row.status = "done";
+      if (status === "done" || status === "skipped") row.status = "done";
       else if (status === "running") row.status = "running";
       else if (status === "error") row.status = "error";
       row.detail = detail;
@@ -3005,228 +3006,35 @@ export default function OrderDetail() {
     }
   };
 
-  // ── Duplicate Order Modal ──────────────────────────────────────────
-  const DuplicateModal = () => {
-    const [dupName, setDupName] = useState(order ? `${order.order_code}_copy` : "");
-    const [dupSubmitting, setDupSubmitting] = useState(false);
-    const [dupError, setDupError] = useState("");
+  // ── Duplicate Order (via RerunOptionsModal in duplicate mode) ──────
+  const [dupName, setDupName] = useState("");
 
-    const ro = (order?.report_options ?? {}) as Record<string, any>;
-    const ao = (order?.analysis_options ?? {}) as Record<string, any>;
-    const ac = (order?.analysis_context ?? {}) as Record<string, any>;
+  useEffect(() => {
+    if (duplicateModalOpen && order) {
+      setDupName(`${order.order_code}_copy`);
+    }
+  }, [duplicateModalOpen, order]);
 
-    const [dupLlmModel, setDupLlmModel] = useState(() => {
-      const p = ro.llm_provider || "ollama";
-      const m = ro.llm_model || "";
-      return m ? `${p}:${m}` : "";
-    });
-    const [dupRagEnrichmentLlm, setDupRagEnrichmentLlm] = useState(() => {
-      const p = ro.rag_enrichment_llm_provider || "ollama";
-      const m = ro.rag_enrichment_llm_model || "";
-      return m ? `${p}:${m}` : "";
-    });
-    const [dupPtmSelection, setDupPtmSelection] = useState<string>(ro.ptm_selection_mode || "de_novo_regulated");
-    const [dupTopN, setDupTopN] = useState<string>(String(ao.topN ?? 50));
-    const [dupReportType, setDupReportType] = useState<string>(ro.report_type || "comprehensive");
-    const [dupQuestions, setDupQuestions] = useState<string[]>(ro.research_questions || []);
-    const [dupNewQ, setDupNewQ] = useState("");
-    const [dupBioQuestion, setDupBioQuestion] = useState<string>(ac.biological_question || "");
-    const [dupTreatment, setDupTreatment] = useState<string>(ac.treatment || "");
-    const [dupTimePoints, setDupTimePoints] = useState<string>(ac.time_points || "");
-
-    const handleDuplicate = async () => {
-      if (!dupName.trim()) { setDupError("Order name is required"); return; }
-      setDupSubmitting(true);
-      setDupError("");
-      try {
-        const parseLlm = (v: string) => {
-          const i = v.indexOf(":");
-          return i >= 0 ? [v.slice(0, i), v.slice(i + 1)] : ["ollama", v];
-        };
-        const [llmProv, llmMod] = parseLlm(dupLlmModel);
-        const [ragEnrProv, ragEnrMod] = parseLlm(dupRagEnrichmentLlm);
-
-        const newReportOpts = {
-          ...ro,
-          ...(llmMod ? { llm_model: llmMod, llm_provider: llmProv } : {}),
-          ...(ragEnrMod ? { rag_enrichment_llm_model: ragEnrMod, rag_enrichment_llm_provider: ragEnrProv } : {}),
-          ptm_selection_mode: dupPtmSelection,
-          report_type: dupReportType,
-          research_questions: dupQuestions,
-        };
-        const newAnalysisOpts = { ...ao, topN: parseInt(dupTopN) || 50 };
-        const newAnalysisCtx = { ...ac, biological_question: dupBioQuestion, treatment: dupTreatment, time_points: dupTimePoints };
-
-        const result = await api.post<{ id: number; order_code: string }>(`/orders/${order!.id}/duplicate`, {
-          new_order_name: dupName.trim(),
-          report_options: newReportOpts,
-          analysis_options: newAnalysisOpts,
-          analysis_context: newAnalysisCtx,
-        });
-        setDuplicateModalOpen(false);
-        navigate(`/orders/${result.id}`);
-      } catch (err: any) {
-        setDupError(err?.message || "Duplication failed");
-      } finally {
-        setDupSubmitting(false);
-      }
-    };
-
-    return (
-      <Dialog open={duplicateModalOpen} onOpenChange={setDuplicateModalOpen}>
-        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Duplicate Order</DialogTitle>
-          </DialogHeader>
-
-          <div className="space-y-4 py-2">
-            {dupError && (
-              <Alert variant="destructive"><AlertDescription>{dupError}</AlertDescription></Alert>
-            )}
-
-            <div className="space-y-1.5">
-              <Label>New Order Name *</Label>
-              <Input value={dupName} onChange={(e) => setDupName(e.target.value)} placeholder="e.g., MyAnalysis_v2" autoFocus />
-            </div>
-
-            <Separator />
-            <p className="text-xs font-medium text-muted-foreground">Source: {order?.order_code}</p>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label className="text-xs">PTM Type</Label>
-                <Input value={order?.ptm_type || ""} disabled className="bg-muted text-xs" />
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs">Species</Label>
-                <Input value={order?.species || ""} disabled className="bg-muted text-xs" />
-              </div>
-            </div>
-
-            <Separator />
-            <p className="text-xs font-medium text-muted-foreground">LLM Models</p>
-
-            <div className="space-y-1.5">
-              <Label className="text-xs">LLM Model (RAG Enrichment)</Label>
-              <Select value={dupRagEnrichmentLlm} onValueChange={setDupRagEnrichmentLlm}>
-                <SelectTrigger className="text-xs">
-                  <SelectValue placeholder="Default (from .env)" />
-                </SelectTrigger>
-                <SelectContent>
-                  {llmModels.map((m) => (
-                    <SelectItem key={`rag-enr-${m.provider}:${m.model_id}`} value={`${m.provider}:${m.model_id}`} className="text-xs">
-                      {m.name} ({m.provider})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-1.5">
-              <Label className="text-xs">LLM Model (Report Generation)</Label>
-              <Select value={dupLlmModel} onValueChange={setDupLlmModel}>
-                <SelectTrigger className="text-xs">
-                  <SelectValue placeholder="Default (from .env)" />
-                </SelectTrigger>
-                <SelectContent>
-                  {llmModels.map((m) => (
-                    <SelectItem key={`report-${m.provider}:${m.model_id}`} value={`${m.provider}:${m.model_id}`} className="text-xs">
-                      {m.name} ({m.provider})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <Separator />
-            <p className="text-xs font-medium text-muted-foreground">Analysis Settings</p>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label className="text-xs">PTM Selection Mode</Label>
-                <Select value={dupPtmSelection} onValueChange={setDupPtmSelection}>
-                  <SelectTrigger className="text-xs"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="de_novo_regulated">De novo + Regulated</SelectItem>
-                    <SelectItem value="de_novo">De novo only</SelectItem>
-                    <SelectItem value="regulated">Regulated only</SelectItem>
-                    <SelectItem value="minor">Minor only</SelectItem>
-                    <SelectItem value="all">All PTMs</SelectItem>
-                    <SelectItem value="top_n">Top N</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs">Top N (proteins)</Label>
-                <Input type="number" value={dupTopN} onChange={(e) => setDupTopN(e.target.value)} className="text-xs" />
-              </div>
-            </div>
-
-            <div className="space-y-1.5">
-              <Label className="text-xs">Report Type</Label>
-              <Select value={dupReportType} onValueChange={setDupReportType}>
-                <SelectTrigger className="text-xs"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="comprehensive">Comprehensive</SelectItem>
-                  <SelectItem value="summary">Summary</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <Separator />
-            <p className="text-xs font-medium text-muted-foreground">Analysis Context</p>
-
-            <div className="space-y-1.5">
-              <Label className="text-xs">Biological Question</Label>
-              <AutoResizeTextarea value={dupBioQuestion} onChange={(e) => setDupBioQuestion(e.target.value)} className="text-xs min-h-[60px]" />
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label className="text-xs">Treatment</Label>
-                <Input value={dupTreatment} onChange={(e) => setDupTreatment(e.target.value)} className="text-xs" />
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs">Time Points</Label>
-                <Input value={dupTimePoints} onChange={(e) => setDupTimePoints(e.target.value)} className="text-xs" />
-              </div>
-            </div>
-
-            <Separator />
-            <p className="text-xs font-medium text-muted-foreground">Research Questions</p>
-
-            <div className="space-y-2">
-              {dupQuestions.map((q, i) => (
-                <div key={i} className="flex items-start gap-2">
-                  <span className="text-xs text-muted-foreground mt-1.5 shrink-0">{i + 1}.</span>
-                  <Input value={q} onChange={(e) => { const arr = [...dupQuestions]; arr[i] = e.target.value; setDupQuestions(arr); }} className="text-xs" />
-                  <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => setDupQuestions(dupQuestions.filter((_, j) => j !== i))}>
-                    <X className="h-3 w-3" />
-                  </Button>
-                </div>
-              ))}
-              <div className="flex gap-2">
-                <Input value={dupNewQ} onChange={(e) => setDupNewQ(e.target.value)} placeholder="Add question..." className="text-xs"
-                  onKeyDown={(e) => { if (e.key === "Enter" && dupNewQ.trim()) { setDupQuestions([...dupQuestions, dupNewQ.trim()]); setDupNewQ(""); } }}
-                />
-                <Button variant="outline" size="sm" className="shrink-0" disabled={!dupNewQ.trim()}
-                  onClick={() => { if (dupNewQ.trim()) { setDupQuestions([...dupQuestions, dupNewQ.trim()]); setDupNewQ(""); } }}>
-                  <Plus className="h-3 w-3" />
-                </Button>
-              </div>
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDuplicateModalOpen(false)}>Cancel</Button>
-            <Button onClick={handleDuplicate} disabled={dupSubmitting || !dupName.trim()}>
-              {dupSubmitting ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : <CopyPlus className="h-4 w-4 mr-1.5" />}
-              Create Duplicate
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    );
+  const handleDuplicateConfirm = async (opts: {
+    analysis_context: Record<string, unknown>;
+    analysis_options: Record<string, unknown>;
+    report_options: Record<string, unknown>;
+    rag_collections?: number[] | null;
+  }) => {
+    if (!order || !dupName.trim()) return;
+    try {
+      const result = await api.post<{ id: number; order_code: string }>(`/orders/${order.id}/duplicate`, {
+        new_order_name: dupName.trim(),
+        report_options: opts.report_options,
+        analysis_options: opts.analysis_options,
+        analysis_context: opts.analysis_context,
+      });
+      setDuplicateModalOpen(false);
+      navigate(`/orders/${result.id}`);
+    } catch (err: any) {
+      alert(err?.message || "Duplication failed");
+      throw err;
+    }
   };
 
   if (loading) {
@@ -4317,7 +4125,18 @@ export default function OrderDetail() {
         orderId={order.id}
         orderCode={order.order_code}
       />
-      <DuplicateModal />
+      <RerunOptionsModal
+        open={duplicateModalOpen}
+        onOpenChange={setDuplicateModalOpen}
+        order={order}
+        llmModels={llmModels}
+        defaultLlmModel={llmConfig?.default_model || ""}
+        onConfirm={handleDuplicateConfirm}
+        confirmLabel="Create Duplicate"
+        duplicateMode
+        duplicateName={dupName}
+        onDuplicateNameChange={setDupName}
+      />
     </div>
   );
 }

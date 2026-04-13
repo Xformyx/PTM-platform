@@ -69,10 +69,89 @@ def _resolve_enriched_json_path(order_id: int, rag_dir: Path, explicit: str | No
     return str(chosen.resolve())
 
 
+def _emit_kinase_phase(order_id: int, status: str, detail: str, pct: float = 0):
+    """Emit a report_phase log entry for the kinase_annotation step."""
+    publish_analysis_log(
+        order_id, f"[report:kinase_annotation] {status}: {detail}",
+        stage="report_generation", step="report_phase", status="progress",
+        metadata={"type": "report_phase", "step": "kinase_annotation",
+                  "status": status, "detail": detail, "pct": round(pct, 1)},
+        persist=True,
+    )
+
+
+def _auto_build_kinase_modules(order_id: int, enriched_data: list, config: dict) -> dict:
+    """Auto-build Global Kinase Modules when not pre-computed by the user.
+
+    Runs the same pipeline-internal logic as kinase_annotation_node but earlier,
+    so the result is available as frontend_kinase_analysis from the start and
+    also saved to orders.kinase_analysis_data for POTATIO AI chat.
+    """
+    t0 = time.time()
+    _emit_kinase_phase(order_id, "running", "Auto-building Global Kinase Modules")
+    publish_progress(
+        order_id, "report_generation", "kinase_modules", "running", 1,
+        "Auto-building Global Kinase Modules",
+    )
+    try:
+        from report_generation.core.nodes.kinase_annotation_node import (
+            _build_global_kinase_modules,
+            PHOSPHO_MOTIF_DB,
+            UBI_MOTIF_DB,
+        )
+
+        ptm_type = (config.get("experimental_context") or {}).get("ptm_type", "phosphorylation")
+        motif_db = PHOSPHO_MOTIF_DB if ptm_type == "phosphorylation" else UBI_MOTIF_DB
+
+        result = _build_global_kinase_modules(
+            enriched_data=enriched_data,
+            cluster_annotations=[],
+            clusters=[],
+            motif_db=motif_db,
+            ptm_type=ptm_type,
+        )
+        n_modules = result.get("summary", {}).get("total_kinase_modules", 0)
+        n_confirmed = result.get("summary", {}).get("total_confirmed", 0)
+        elapsed = round(time.time() - t0, 1)
+        logger.info(
+            f"[Order {order_id}] Auto-built Global Kinase Modules: "
+            f"{n_modules} modules in {elapsed}s"
+        )
+        detail = f"Built {n_modules} kinase modules ({n_confirmed} confirmed, {elapsed}s)"
+        _emit_kinase_phase(order_id, "done", detail)
+        publish_progress(
+            order_id, "report_generation", "kinase_modules", "running", 2,
+            detail,
+        )
+
+        # Persist to DB so POTATIO AI chat can use it without Global Annotate
+        try:
+            from common.db_engine import get_engine as _get_engine
+            from sqlalchemy import text as _text
+            _engine = _get_engine()
+            with _engine.connect() as _conn:
+                _conn.execute(
+                    _text(
+                        "UPDATE orders SET kinase_analysis_data = :kad WHERE id = :oid"
+                    ),
+                    {"oid": order_id, "kad": json.dumps(result)},
+                )
+                _conn.commit()
+            logger.info(f"[Order {order_id}] Saved auto-built kinase_analysis_data to DB")
+        except Exception as _db_err:
+            logger.warning(f"[Order {order_id}] Could not save kinase_analysis_data to DB: {_db_err}")
+
+        return result
+    except Exception as e:
+        logger.warning(f"[Order {order_id}] Auto-build kinase modules failed (non-fatal): {e}")
+        _emit_kinase_phase(order_id, "error", f"Failed (non-fatal): {e}")
+        return {}
+
+
 _REPORT_STEP_ORDER = [
-    "context_loading", "question_generation", "research", "hypothesis",
-    "validation", "network", "rq_refinement", "writing", "report_copilot",
-    "qa_report", "compilation",
+    "kinase_annotation", "context_loading", "question_generation", "research",
+    "hypothesis", "validation", "network", "rq_refinement", "writing",
+    "report_copilot", "qa_report", "compilation",
 ]
 
 
@@ -292,6 +371,15 @@ def run_report_generation(self, order_id: int, config: dict):
             enriched_data = json.load(f)
         logger.info(f"[Order {order_id}] Loaded {len(enriched_data)} enriched PTMs from {enriched_path}")
 
+        # v9.35: Auto-build Global Kinase Modules if not pre-computed
+        kinase_analysis_data = config.get("kinase_analysis_data") or {}
+        if kinase_analysis_data.get("kinase_modules"):
+            n_km = len(kinase_analysis_data["kinase_modules"])
+            _emit_kinase_phase(order_id, "skipped", f"Using pre-computed data ({n_km} kinase modules)")
+            logger.info(f"[Order {order_id}] Kinase modules already in DB ({n_km} modules) — skipped")
+        else:
+            kinase_analysis_data = _auto_build_kinase_modules(order_id, enriched_data, config)
+
         # Build initial state (merge single_time_point into experimental_context)
         experimental_context = dict(config.get("experimental_context") or {})
         experimental_context["single_time_point"] = config.get("single_time_point", False)
@@ -334,8 +422,8 @@ def run_report_generation(self, order_id: int, config: dict):
             "report_config": config.get("report_config", {}),
             "analysis_mode": analysis_mode,
             "progress_callback": _make_progress_cb(order_id),
-            # v9.12: Frontend kinase analysis results (Global Kinase Modules)
-            "frontend_kinase_analysis": config.get("kinase_analysis_data", {}),
+            # v9.12/v9.35: Frontend kinase analysis results (auto-built if absent)
+            "frontend_kinase_analysis": kinase_analysis_data,
             # v9.20: Inferred upstream receptors from vector-plot-data analysis
             "inferred_receptors": inferred_receptors_from_db,
             # v9.33: PTM selection settings (synced with frontend kinase module analysis)
