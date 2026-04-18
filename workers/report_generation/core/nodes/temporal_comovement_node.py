@@ -49,7 +49,7 @@ logger = logging.getLogger(__name__)
 MIN_TIMEPOINTS = 3          # Need at least 3 timepoints for meaningful clustering
 MIN_VARIANCE = 0.3          # Minimum variance across timepoints (relaxed to include patterned minor PTMs)
 MIN_AMPLITUDE = 0.8         # Minimum max |Log2FC| (relaxed to include patterned minor PTMs)
-CORRELATION_THRESHOLD = 0.70  # Minimum |correlation| to be in same cluster
+CORRELATION_THRESHOLD = 0.70  # Minimum |correlation| to be in same cluster (default; may be overridden by AI Singularity)
 MIN_CLUSTER_SIZE = 2        # Minimum members for a valid cluster
 MAX_CLUSTERS = 8            # Maximum clusters to report
 PROTEIN_THRESHOLD = 0.3     # Minimum |protein_log2fc| for Non-PTM significance
@@ -141,7 +141,7 @@ def run_temporal_comovement(state: dict) -> dict:
             }
 
         # Step 3-4: Cluster co-moving PTMs
-        clusters, singletons = _cluster_comoving_ptms(sig_matrix, sig_meta, timepoints)
+        clusters, singletons = _cluster_comoving_ptms(sig_matrix, sig_meta, timepoints, state=state)
 
         # Step 5: Annotate clusters with biological context
         # pathway_candidates is a dict {"candidates": [...], "gene_data": {...}}
@@ -292,7 +292,7 @@ def _filter_significant_ptms(
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _cluster_comoving_ptms(
-    matrix: np.ndarray, meta: list, timepoints: list
+    matrix: np.ndarray, meta: list, timepoints: list, state: Optional[dict] = None
 ) -> Tuple[List[dict], List[dict]]:
     """Cluster PTMs by temporal correlation using hierarchical clustering.
 
@@ -332,7 +332,19 @@ def _cluster_comoving_ptms(
     Z = linkage(condensed, method="average")
 
     # Cut at threshold
-    threshold = 1.0 - CORRELATION_THRESHOLD  # distance threshold
+    # ── AI Singularity: 적응형 임계값 ──────────────────────────────────────
+    try:
+        from common.singularity_orchestrator import get_adaptive_threshold, is_enabled
+        if is_enabled() and state:
+            _adaptive = get_adaptive_threshold(state, default_threshold=CORRELATION_THRESHOLD)
+            logger.info(f"[COMOVEMENT][Singularity] Adaptive threshold: {_adaptive:.4f}")
+            effective_threshold = _adaptive
+        else:
+            effective_threshold = CORRELATION_THRESHOLD
+    except Exception:
+        effective_threshold = CORRELATION_THRESHOLD
+    # ─────────────────────────────────────────────────────────────────────────
+    threshold = 1.0 - effective_threshold  # distance threshold
     labels = fcluster(Z, t=threshold, criterion="distance")
 
     # Group by cluster label

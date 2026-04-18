@@ -63,6 +63,20 @@ def run_drug_repositioning(state: dict) -> dict:
             if cb:
                 cb(95, f"Drug repositioning: {dr_results.get('error', 'no results')}")
 
+        # ── AI Singularity: 분석 결과 저장 ──────────────────────────────────
+        try:
+            from common.singularity_orchestrator import save_analysis_results, is_enabled
+            if is_enabled() and dr_results.get("success"):
+                order_id = state.get("order_id", 0)
+                save_analysis_results(
+                    state=state,
+                    order_id=order_id,
+                    drug_results=dr_results.get("candidates", []),
+                )
+        except Exception as sing_e:
+            logger.debug(f"[Singularity] save_analysis_results skipped: {sing_e}")
+        # ─────────────────────────────────────────────────────────────────────────
+
         return {"drug_repositioning_results": dr_results}
 
     except Exception as e:

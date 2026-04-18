@@ -82,13 +82,29 @@ def run_context_loader(state: dict) -> dict:
         dominant_ptm_type = ptm_type_from_context
     logger.info(f"Detected ptm_type: {dominant_ptm_type}")
 
-    return {
+    # ── AI Singularity: 컨텍스트 초기화 ────────────────────────────────────
+    singularity_data = {}
+    try:
+        from common.singularity_orchestrator import initialize_singularity_context, is_enabled
+        if is_enabled():
+            singularity_data = initialize_singularity_context(state)
+            if singularity_data:
+                logger.info(
+                    f"[Singularity] Context initialized: Level={singularity_data.get('singularity_level', 0)}"
+                )
+    except Exception as e:
+        logger.debug(f"[Singularity] Init skipped (non-fatal): {e}")
+    # ─────────────────────────────────────────────────────────────────────────
+
+    result = {
         "parsed_ptms": parsed_ptms,
         "enriched_ptm_data": enriched_data,
         "research_questions": questions,
         "comprehensive_summary": comprehensive_summary,
         "ptm_type": dominant_ptm_type,
     }
+    result.update(singularity_data)
+    return result
 
 
 def _parse_enriched_ptms(enriched_data: list) -> list:
