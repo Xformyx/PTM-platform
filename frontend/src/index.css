@@ -65,3 +65,9 @@
     -webkit-font-smoothing: antialiased;
   }
 }
+
+@keyframes slide {
+  0%   { left: -40%; }
+  50%  { left: 60%; }
+  100% { left: -40%; }
+}

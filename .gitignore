@@ -27,11 +27,7 @@ frontend/node_modules/
 .yarn-integrity
 
 # Storage (Docker volumes mapped here)
-storage/mysql/
-storage/redis/
-storage/chromadb/
-storage/reports/
-storage/logs/
+storage/
 
 # Data: user uploads & generated outputs
 data/inputs/
@@ -50,10 +46,14 @@ data/config/*
 *.gtex_gene_index.json
 
 # Reference data (large FASTA etc. - add back if needed)
-# data/reference/
+data/reference/
+
+# Copyright registration materials (local only)
+copyright_registration/
 
 # Worker & app logs
 workers/logs/
+workers/celerybeat-schedule
 *.log
 
 # IDE & OS

@@ -46,6 +46,7 @@ class Settings(BaseSettings):
     REPORTS_DIR: str = "/app/storage/reports"
     REFERENCE_DIR: str = "/app/data/reference"
     LOG_DIR: str = "/app/storage/logs"
+    FILE_SHARE_DIR: str = "/app/storage/file_share"
 
     # Cloud LLM keys (optional)
     GEMINI_API_KEY: Optional[str] = None
