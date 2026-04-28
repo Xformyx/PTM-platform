@@ -26,6 +26,13 @@ class PTMQuantJob(Base):
     passes: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
     output_subdir: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 
+    # Search parameters (added in v0.5.2 — enzyme & Orbitrap instrument preset)
+    enzyme: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    instrument: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    # AlphaPeptDeep options (added in v0.5.2). Stored as TINYINT(1) in MySQL.
+    predicted_library: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    transfer_learning: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
     progress: Mapped[float] = mapped_column(Float, default=0.0)
     log: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

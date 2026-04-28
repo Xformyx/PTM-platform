@@ -105,6 +105,23 @@ async def _run_migrations(conn) -> None:
         conn, "ptmquant_jobs", "user_id",
         "user_id INT NULL, ADD CONSTRAINT fk_ptmquant_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL"
     )
+    # ptmquant_jobs: enzyme / instrument / AlphaPeptDeep flags (v0.5.2)
+    await _add_column_if_missing(
+        conn, "ptmquant_jobs", "enzyme",
+        "enzyme VARCHAR(32) NULL COMMENT 'Proteolytic enzyme (trypsin, lys-c, ...)'"
+    )
+    await _add_column_if_missing(
+        conn, "ptmquant_jobs", "instrument",
+        "instrument VARCHAR(32) NULL COMMENT 'Orbitrap preset (exploris_240, orbitrap_astral, ...)'"
+    )
+    await _add_column_if_missing(
+        conn, "ptmquant_jobs", "predicted_library",
+        "predicted_library TINYINT(1) NULL DEFAULT 0 COMMENT 'Enable AlphaPeptDeep predicted spectral library'"
+    )
+    await _add_column_if_missing(
+        conn, "ptmquant_jobs", "transfer_learning",
+        "transfer_learning TINYINT(1) NULL DEFAULT 0 COMMENT 'Fine-tune AlphaPeptDeep on pass-1 high-confidence PSMs'"
+    )
     # phase_b_cache: PMID 목록 저장 컬럼 (subset matching v2)
     await _add_column_if_missing(
         conn, "phase_b_cache", "pmid_list",

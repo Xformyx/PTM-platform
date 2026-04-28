@@ -40,6 +40,10 @@ interface Job {
   name: string;
   status: "pending" | "running" | "done" | "failed" | "cancelled";
   reference_file: string | null;
+  enzyme?: string | null;
+  instrument?: string | null;
+  predicted_library?: boolean | null;
+  transfer_learning?: boolean | null;
   input_files: string[] | null;
   passes: string[] | null;
   output_subdir: string | null;
@@ -297,6 +301,12 @@ function CreateJobDialog({ open, onClose, onCreated, passes: passDefs, fastaFile
   const [threads,        setThreads]        = useState(defaultThreads);
   const [maxMemoryGb,    setMaxMemoryGb]    = useState(defaultMemory);
   const [resume,         setResume]         = useState(false);
+  const [enzyme,         setEnzyme]         = useState("trypsin");
+  const [instrument,     setInstrument]     = useState("exploris_240");
+  const [predictedLib,   setPredictedLib]   = useState(false);
+  const [transferLearn,  setTransferLearn]  = useState(false);
+  const [enzymeOpts,     setEnzymeOpts]     = useState<{id:string;label:string;description:string}[]>([]);
+  const [instrumentOpts, setInstrumentOpts] = useState<{id:string;label:string;description:string}[]>([]);
   const [error,          setError]          = useState("");
   const [submitting,     setSubmitting]     = useState(false);
   // Track last auto-filled values to detect user edits
@@ -313,10 +323,33 @@ function CreateJobDialog({ open, onClose, onCreated, passes: passDefs, fastaFile
       setThreads(defaultThreads);
       setMaxMemoryGb(defaultMemory);
       setResume(false);
+      setEnzyme("trypsin");
+      setInstrument("exploris_240");
+      setPredictedLib(false);
+      setTransferLearn(false);
       setError("");
       autoFilledRef.current = { name: "", subdir: "" };
     }
   }, [open, defaultMemory, defaultThreads]);
+
+  // Load enzyme / instrument catalogs on first open (v0.5.2 API)
+  useEffect(() => {
+    if (!open) return;
+    (async () => {
+      try {
+        const [ez, ins] = await Promise.all([
+          api.get<{id:string;label:string;description:string}[]>("/ptmquant/enzymes"),
+          api.get<{id:string;label:string;description:string}[]>("/ptmquant/instruments"),
+        ]);
+        setEnzymeOpts(ez);
+        setInstrumentOpts(ins);
+      } catch {
+        // Backend may be older (v<=0.5.1) — fall back to hard-coded defaults
+        setEnzymeOpts([{id:"trypsin",label:"Trypsin/P",description:"default"}]);
+        setInstrumentOpts([{id:"exploris_240",label:"Exploris 240",description:"default"}]);
+      }
+    })();
+  }, [open]);
 
   const togglePass = (id: string) => {
     setSelectedPasses(prev => {
@@ -343,6 +376,10 @@ function CreateJobDialog({ open, onClose, onCreated, passes: passDefs, fastaFile
         passes: Array.from(selectedPasses),
         output_subdir: outputSubdir.trim(),
         threads, max_memory_gb: maxMemoryGb, resume,
+        enzyme,
+        instrument,
+        predicted_library: predictedLib,
+        transfer_learning: transferLearn,
       });
       onCreated(job);
       onClose();
@@ -451,6 +488,64 @@ function CreateJobDialog({ open, onClose, onCreated, passes: passDefs, fastaFile
 
           <Separator />
 
+          {/* v0.5.2: Search parameters — enzyme + Orbitrap instrument preset */}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium">효소 (Enzyme)</Label>
+              <select value={enzyme} onChange={e => setEnzyme(e.target.value)}
+                className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-sm">
+                {enzymeOpts.length === 0 && <option value="trypsin">Trypsin/P (default)</option>}
+                {enzymeOpts.map(o => (
+                  <option key={o.id} value={o.id}>{o.label}</option>
+                ))}
+              </select>
+              {enzymeOpts.find(o => o.id === enzyme)?.description && (
+                <p className="text-[10px] text-muted-foreground">{enzymeOpts.find(o => o.id === enzyme)?.description}</p>
+              )}
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium">Orbitrap 기종 (Instrument)</Label>
+              <select value={instrument} onChange={e => setInstrument(e.target.value)}
+                className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-sm">
+                {instrumentOpts.length === 0 && <option value="exploris_240">Exploris 240 (default)</option>}
+                {instrumentOpts.map(o => (
+                  <option key={o.id} value={o.id}>{o.label}</option>
+                ))}
+              </select>
+              {instrumentOpts.find(o => o.id === instrument)?.description && (
+                <p className="text-[10px] text-muted-foreground">{instrumentOpts.find(o => o.id === instrument)?.description}</p>
+              )}
+            </div>
+          </div>
+
+          {/* v0.5.2: AlphaPeptDeep toggles */}
+          <div className="space-y-2">
+            <label className={cn(
+              "flex items-center gap-3 rounded-lg border px-3 py-2 cursor-pointer transition-colors",
+              predictedLib ? "border-primary bg-primary/5" : "hover:bg-muted/40"
+            )}>
+              <input type="checkbox" checked={predictedLib}
+                onChange={e => { setPredictedLib(e.target.checked); if (!e.target.checked) setTransferLearn(false); }}
+                className="rounded shrink-0" />
+              <div>
+                <p className="text-sm font-medium">예측 스펙트럼 라이브러리 사용 (AlphaPeptDeep)</p>
+                <p className="text-xs text-muted-foreground">예측된 RT/MS2로 PSM을 후처리 rescoring하여 저신뢰 PTM의 false positive를 줄입니다</p>
+              </div>
+            </label>
+            <label className={cn(
+              "flex items-center gap-3 rounded-lg border px-3 py-2 transition-colors",
+              !predictedLib ? "opacity-50 cursor-not-allowed" : transferLearn ? "border-primary bg-primary/5 cursor-pointer" : "cursor-pointer hover:bg-muted/40"
+            )}>
+              <input type="checkbox" checked={transferLearn} disabled={!predictedLib}
+                onChange={e => setTransferLearn(e.target.checked)}
+                className="rounded shrink-0" />
+              <div>
+                <p className="text-sm font-medium">Transfer Learning 활성화</p>
+                <p className="text-xs text-muted-foreground">첫 pass의 고신뢰 PSM으로 RT/MS2 모델을 미세조정 후 다음 pass에 재적용 (실험 1회당 ~5분 추가)</p>
+              </div>
+            </label>
+          </div>
+
           {/* Advanced */}
           <div className="grid grid-cols-2 gap-4">
             {/* CPU Threads */}
@@ -557,6 +652,10 @@ function JobDetail({ job, onRefresh }: { job: Job; onRefresh: (id: string) => vo
         <span><span className="font-medium text-foreground">파일 수:</span> {job.input_files?.length ?? 0}개</span>
         <span><span className="font-medium text-foreground">패스:</span> {job.passes?.join(", ") ?? "—"}</span>
         <span><span className="font-medium text-foreground">Reference:</span> {job.reference_file ?? "—"}</span>
+        <span><span className="font-medium text-foreground">효소:</span> {job.enzyme ?? "trypsin"}</span>
+        <span><span className="font-medium text-foreground">기종:</span> {job.instrument ?? "exploris_240"}</span>
+        {job.predicted_library ? <span className="px-1.5 rounded bg-primary/10 text-primary text-[10px]">AlphaPeptDeep</span> : null}
+        {job.transfer_learning ? <span className="px-1.5 rounded bg-primary/10 text-primary text-[10px]">TL</span> : null}
       </div>
 
       {/* Progress bar (active) */}

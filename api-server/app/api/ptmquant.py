@@ -39,9 +39,33 @@ settings = get_settings()
 # ──────────────────────────────────────────────────────────────────────────────
 
 AVAILABLE_PASSES = [
-    {"id": "phospho",       "label": "Phosphorylation",      "description": "Ser/Thr/Tyr phosphorylation"},
-    {"id": "ubiquitin",     "label": "Ubiquitination",       "description": "Lys ubiquitination (GlyGly)"},
-    {"id": "acetyl_methyl", "label": "Acetylation/Methylation", "description": "Lys acetylation & methylation"},
+    {"id": "phospho",         "label": "Phosphorylation",         "description": "Ser/Thr/Tyr phosphorylation"},
+    {"id": "ubiquitin",       "label": "Ubiquitination",          "description": "Lys ubiquitination (GlyGly)"},
+    {"id": "acetyl_methyl",   "label": "Acetylation/Methylation", "description": "Lys acetylation & methylation"},
+    {"id": "oglcnac",         "label": "O-GlcNAc",                "description": "Ser/Thr O-linked N-acetylglucosamine"},
+    {"id": "citrullination",  "label": "Citrullination",          "description": "Arg deimination (R → Cit, Δmass 0.984)"},
+    {"id": "lactyl_acyl",     "label": "Lactylation",             "description": "Lys lactylation (K-acyl, mc=3)"},
+]
+
+# Enzyme catalog exposed to the UI (mirrors diaquant.enzymes.ENZYME_CATALOG).
+AVAILABLE_ENZYMES = [
+    {"id": "trypsin",         "label": "Trypsin/P",     "description": "KR | restrict=P (default)"},
+    {"id": "trypsin-strict",  "label": "Trypsin",       "description": "KR | strict (no P rule)"},
+    {"id": "lys-c",           "label": "Lys-C/P",       "description": "K | restrict=P"},
+    {"id": "lys-c-strict",    "label": "Lys-C",         "description": "K | strict"},
+    {"id": "arg-c",           "label": "Arg-C",         "description": "R"},
+    {"id": "asp-n",           "label": "Asp-N",         "description": "D (N-terminal)"},
+    {"id": "glu-c",           "label": "Glu-C",         "description": "E (mc=3 default)"},
+    {"id": "chymotrypsin",    "label": "Chymotrypsin/P","description": "FWY | restrict=P"},
+    {"id": "no-cleavage",     "label": "No cleavage",   "description": "Unspecific / top-down"},
+]
+
+# Orbitrap instrument presets (mirrors diaquant.instruments.INSTRUMENT_PRESETS).
+AVAILABLE_INSTRUMENTS = [
+    {"id": "exploris_240",     "label": "Exploris 240 (default)", "description": "MS1 6 / MS2 12 ppm, 400–1000 m/z, NCE 28"},
+    {"id": "orbitrap_astral",  "label": "Orbitrap Astral",        "description": "MS1 3 / MS2 8 ppm, 380–980 m/z, NCE 27"},
+    {"id": "orbitrap_eclipse", "label": "Orbitrap Eclipse",       "description": "MS1 5 / MS2 10 ppm, 350–1500 m/z, NCE 30"},
+    {"id": "fusion_lumos",     "label": "Fusion Lumos",           "description": "MS1 5 / MS2 12 ppm, 350–1500 m/z, NCE 30"},
 ]
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -378,6 +402,11 @@ class CreateJobRequest(BaseModel):
     threads: int = 4             # CPU threads (1-16)
     max_memory_gb: int = 32      # Docker memory limit in GB (8-96)
     resume: bool = False         # Reuse existing pass results (skip completed Sage runs)
+    # --- v0.5.2 knobs (all optional, safe fallbacks applied in diaquant 0.5.1) ---
+    enzyme: str = "trypsin"              # See AVAILABLE_ENZYMES
+    instrument: str = "exploris_240"     # See AVAILABLE_INSTRUMENTS
+    predicted_library: bool = False      # Enable AlphaPeptDeep predicted spectral library
+    transfer_learning: bool = False      # Fine-tune AlphaPeptDeep on pass-1 high-confidence PSMs
 
 
 class JobResponse(BaseModel):
@@ -388,6 +417,10 @@ class JobResponse(BaseModel):
     input_files: Optional[list]
     passes: Optional[list]
     output_subdir: Optional[str]
+    enzyme: Optional[str] = None
+    instrument: Optional[str] = None
+    predicted_library: Optional[bool] = None
+    transfer_learning: Optional[bool] = None
     progress: float
     error_message: Optional[str]
     created_at: str
@@ -403,6 +436,10 @@ class JobResponse(BaseModel):
             input_files=job.input_files,
             passes=job.passes,
             output_subdir=job.output_subdir,
+            enzyme=job.enzyme,
+            instrument=job.instrument,
+            predicted_library=bool(job.predicted_library) if job.predicted_library is not None else None,
+            transfer_learning=bool(job.transfer_learning) if job.transfer_learning is not None else None,
             progress=job.progress,
             error_message=job.error_message,
             created_at=job.created_at.isoformat() if job.created_at else "",
@@ -443,6 +480,18 @@ async def get_memory_info(_=Depends(get_current_user)):
 async def list_passes(_=Depends(get_current_user)):
     """Return available PTM analysis pass types."""
     return AVAILABLE_PASSES
+
+
+@router.get("/enzymes")
+async def list_enzymes(_=Depends(get_current_user)):
+    """Return supported proteolytic enzymes (v0.5.2)."""
+    return AVAILABLE_ENZYMES
+
+
+@router.get("/instruments")
+async def list_instruments(_=Depends(get_current_user)):
+    """Return supported Orbitrap instrument presets (v0.5.2)."""
+    return AVAILABLE_INSTRUMENTS
 
 
 @router.get("/files")
@@ -548,6 +597,13 @@ async def create_job(
     for p in req.passes:
         if p not in valid_pass_ids:
             raise HTTPException(400, detail=f"Unknown pass: {p}")
+    # v0.5.2: validate enzyme + instrument ids (falls back to defaults if empty string)
+    req.enzyme = (req.enzyme or "trypsin").strip()
+    req.instrument = (req.instrument or "exploris_240").strip()
+    if req.enzyme not in {e["id"] for e in AVAILABLE_ENZYMES}:
+        raise HTTPException(400, detail=f"Unknown enzyme: {req.enzyme}")
+    if req.instrument not in {i["id"] for i in AVAILABLE_INSTRUMENTS}:
+        raise HTTPException(400, detail=f"Unknown instrument preset: {req.instrument}")
 
     # Create job record
     job_id = str(uuid.uuid4())
@@ -559,6 +615,10 @@ async def create_job(
         input_files=req.input_files,
         passes=req.passes,
         output_subdir=req.output_subdir,
+        enzyme=req.enzyme,
+        instrument=req.instrument,
+        predicted_library=1 if req.predicted_library else 0,
+        transfer_learning=1 if req.transfer_learning else 0,
         progress=0.0,
         user_id=user.id if hasattr(user, "id") and user.id else None,
     )
@@ -619,6 +679,12 @@ async def create_job(
         "passes": req.passes,
         "threads": threads,
         "batch_size": batch_size,
+        # v0.5.2: forward UI knobs to diaquant
+        "enzyme": req.enzyme,
+        "instrument": req.instrument,
+        "predicted_library": bool(req.predicted_library),
+        "rescore_with_prediction": bool(req.predicted_library),
+        "pred_lib_transfer_learning": bool(req.transfer_learning),
     }
     with open(job_dir / "config.yaml", "w") as f:
         yaml.dump(config, f, default_flow_style=False, allow_unicode=True)
