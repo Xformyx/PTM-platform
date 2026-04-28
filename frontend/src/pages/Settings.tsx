@@ -3,6 +3,7 @@ import {
   Settings as SettingsIcon, Monitor, Save, Mail, Shield, Zap,
   Webhook, Server, Loader2, CheckCircle2, AlertTriangle,
   FolderOpen, Upload, Download, Trash2, FileIcon, X, CheckSquare, Square, CheckCircle2 as CheckCircleIcon,
+  FlaskConical, MemoryStick,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -67,6 +68,16 @@ const CATEGORY_CONFIG: Record<string, { label: string; icon: typeof Shield; desc
     icon: Server,
     description: "각 파이프라인 워커의 동시 처리 수입니다. 변경 후 서비스 재시작이 필요합니다.",
   },
+  rag_enrichment: {
+    label: "RAG Enrichment (LLM 농화 설정)",
+    icon: Zap,
+    description: "RAG Enrichment Stage의 LLM 호출 방식을 조정합니다. 변경 즉시 다음 분석부터 적용됩니다.",
+  },
+  ptmquant: {
+    label: "PTMQuant (변환 작업 기본값)",
+    icon: FlaskConical,
+    description: "PTMQuant 작업 생성 시 자동으로 적용되는 기본 설정입니다. 작업별로 개별 조정도 가능합니다.",
+  },
 };
 
 const SETTING_LABELS: Record<string, string> = {
@@ -82,6 +93,17 @@ const SETTING_LABELS: Record<string, string> = {
   PREPROCESSING_CONCURRENCY: "Preprocessing 워커",
   RAG_ENRICHMENT_CONCURRENCY: "RAG Enrichment 워커",
   REPORT_GENERATION_CONCURRENCY: "Report Generation 워커",
+  RAG_MAX_ARTICLES: "논문 수 제한 (PTM당)",
+  RAG_ENABLE_KINASE: "키나제 예측 LLM 활성화",
+  RAG_ENABLE_FUNCTIONAL: "기능적 영향 분석 LLM 활성화",
+  RAG_ABSTRACT_BATCH_MODE: "Abstract 배치 분석 모드",
+  RAG_ABSTRACT_MAX_TOKENS: "Abstract 분석 Max Tokens",
+  RAG_KINASE_MAX_TOKENS: "키나제 예측 Max Tokens",
+  RAG_FUNCTIONAL_MAX_TOKENS: "기능 분석 Max Tokens",
+  RAG_PHASE_A_TIMEOUT: "Phase A 타임아웃 (초)",
+  RAG_PHASE_B_TIMEOUT: "Phase B 타임아웃 (초)",
+  PTMQUANT_DEFAULT_MEMORY_GB: "기본 메모리 (GB)",
+  PTMQUANT_DEFAULT_THREADS: "기본 CPU 스레드 수",
 };
 
 const SETTING_DESCRIPTIONS: Record<string, string> = {
@@ -97,6 +119,17 @@ const SETTING_DESCRIPTIONS: Record<string, string> = {
   PREPROCESSING_CONCURRENCY: "Preprocessing 워커의 동시 처리 수 (재시작 필요)",
   RAG_ENRICHMENT_CONCURRENCY: "RAG Enrichment 워커의 동시 처리 수 (재시작 필요)",
   REPORT_GENERATION_CONCURRENCY: "Report Generation 워커의 동시 처리 수 (재시작 필요)",
+  RAG_MAX_ARTICLES: "PTM 1개당 LLM에 전달할 최대 PubMed 논문 수. 줄이면 JSON 잘림이 감소하고 속도가 향상됩니다 (권장: 3)",
+  RAG_ENABLE_KINASE: "키나제 예측 LLM 호출(Phase B) 활성화. 비활성화 시 PTM당 최대 7분 절약, 키나제 주석은 공백으로 처리됩니다",
+  RAG_ENABLE_FUNCTIONAL: "기능적 영향 분석 LLM 호출(Phase B) 활성화. 비활성화 시 PTM당 최대 7분 절약, 기능 분석은 공백으로 처리됩니다",
+  RAG_ABSTRACT_BATCH_MODE: "true: 여러 논문을 1회 LLM 호출로 분석 (빠름). false: 논문당 1회 호출 (느림, JSON 잘림 발생 시 자동 폴백)",
+  RAG_ABSTRACT_MAX_TOKENS: "Abstract 배치 분석 시 LLM이 생성할 최대 토큰 수. 줄이면 JSON 잘림 방지 (권장: 3000-4096, gemma3:27b 기준)",
+  RAG_KINASE_MAX_TOKENS: "키나제 예측 LLM이 생성할 최대 토큰 수 (기본: 2000, 응답이 잘리면 늘려주세요)",
+  RAG_FUNCTIONAL_MAX_TOKENS: "기능적 영향 분석 LLM이 생성할 최대 토큰 수 (기본: 3000, 응답이 잘리면 늘려주세요)",
+  RAG_PHASE_A_TIMEOUT: "Phase A 외부 API 호출(UniProt/KEGG/PubMed/STRING 등) 작업당 타임아웃 (초, 기본: 60)",
+  RAG_PHASE_B_TIMEOUT: "Phase B LLM 호출(abstract/kinase/functional) 병렬 실행 및 재시도 타임아웃 (초, 기본: 120). LLM이 느리면 늘려주세요",
+  PTMQUANT_DEFAULT_MEMORY_GB: "PTMQuant Docker 컨테이너의 기본 메모리 제한 (GB). Phospho 패스는 fragment 인덱스만 ~15 GB 이상 필요합니다. 32 GB 이상 권장.",
+  PTMQUANT_DEFAULT_THREADS: "PTMQuant 기본 CPU 스레드 수 (0 = 전체 코어). 과도하게 설정하면 시스템이 느려질 수 있습니다.",
   ENABLE_RQ_REFINEMENT: "리포트 생성 시 분석 결과를 기반으로 Research Question을 자동 구체화",
   ENABLE_REPORT_COPILOT: "리포트 초안을 AI가 검토하여 누락/보완점을 자동 식별",
 };
@@ -192,11 +225,16 @@ export default function Settings() {
 
   // File share
   const [sharedFiles, setSharedFiles] = useState<SharedFile[]>([]);
+  const [sharedDirs,  setSharedDirs]  = useState<{ name: string; path: string }[]>([]);
+  const [currentSharePath, setCurrentSharePath] = useState("");
   const [fileShareLoading, setFileShareLoading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<Record<string, UploadEntry>>({});
   const [pendingResumes, setPendingResumes] = useState<SavedUpload[]>([]);
   const [fileShareError, setFileShareError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [newFolderName, setNewFolderName] = useState("");
+  const [showNewFolder, setShowNewFolder] = useState(false);
+  const [newFolderLoading, setNewFolderLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const resumeFileInputRef = useRef<HTMLInputElement>(null);
   const resumeTargetRef = useRef<string | null>(null);
@@ -299,26 +337,53 @@ export default function Settings() {
     return acc;
   }, {});
 
-  const categoryOrder = ["watchdog", "performance", "integration", "worker"];
+  const categoryOrder = ["ptmquant", "watchdog", "performance", "rag_enrichment", "integration", "worker"];
+
+  // PTMQuant: Docker memory info
+  const [dockerMemInfo, setDockerMemInfo] = useState<{ docker_limit_gb: number | null; host_total_gb: number | null } | null>(null);
+  useEffect(() => {
+    api.get<{ docker_limit_gb: number | null; host_total_gb: number | null }>("/ptmquant/memory-info")
+      .then(setDockerMemInfo).catch(() => {});
+  }, []);
 
   const isAdmin = user?.role === "admin";
 
   // ── File Share handlers ──────────────────────────────────────────────
-  const fetchSharedFiles = useCallback(async () => {
+  const fetchSharedFiles = useCallback(async (path = currentSharePath) => {
     if (!isAdmin) return;
     setFileShareLoading(true);
     setFileShareError(null);
     try {
-      const res = await api.get<{ files: SharedFile[] }>("/settings/files");
-      setSharedFiles(res.files);
+      const res = await api.get<{ current_path: string; dirs: { name: string; path: string }[]; files: SharedFile[] }>(
+        `/settings/files?path=${encodeURIComponent(path)}`
+      );
+      setCurrentSharePath(res.current_path ?? "");
+      setSharedDirs(res.dirs ?? []);
+      setSharedFiles(res.files ?? []);
     } catch {
       setFileShareError("파일 목록을 불러올 수 없습니다.");
     } finally {
       setFileShareLoading(false);
     }
-  }, [isAdmin]);
+  }, [isAdmin, currentSharePath]);
 
-  useEffect(() => { fetchSharedFiles(); }, [fetchSharedFiles]);
+  useEffect(() => { fetchSharedFiles(""); }, [isAdmin]); // eslint-disable-line
+
+  const createFolder = async () => {
+    if (!newFolderName.trim()) return;
+    const targetPath = currentSharePath ? `${currentSharePath}/${newFolderName.trim()}` : newFolderName.trim();
+    setNewFolderLoading(true);
+    try {
+      await api.post("/settings/directories", { path: targetPath });
+      setNewFolderName("");
+      setShowNewFolder(false);
+      fetchSharedFiles(currentSharePath);
+    } catch (e: unknown) {
+      setFileShareError(e instanceof Error ? e.message : "폴더 생성 실패");
+    } finally {
+      setNewFolderLoading(false);
+    }
+  };
 
   // On mount: restore pending upload sessions from localStorage
   useEffect(() => {
@@ -897,11 +962,38 @@ export default function Settings() {
                 <CardDescription>{config.description}</CardDescription>
               </CardHeader>
               <CardContent>
+                {/* PTMQuant: Docker memory info banner */}
+                {cat === "ptmquant" && dockerMemInfo && (
+                  <div className={cn(
+                    "mb-4 flex items-start gap-3 rounded-lg border px-4 py-3",
+                    dockerMemInfo.docker_limit_gb && dockerMemInfo.docker_limit_gb < 24
+                      ? "border-red-300 bg-red-50 dark:bg-red-950/20"
+                      : "border-blue-300 bg-blue-50 dark:bg-blue-950/20"
+                  )}>
+                    <MemoryStick className={cn("h-4 w-4 mt-0.5 shrink-0",
+                      dockerMemInfo.docker_limit_gb && dockerMemInfo.docker_limit_gb < 24
+                        ? "text-red-500" : "text-blue-500"
+                    )} />
+                    <div className="text-sm space-y-0.5">
+                      <p className="font-medium">
+                        Docker 메모리: <span className="font-mono">{dockerMemInfo.docker_limit_gb ?? "??"} GB</span>
+                        {dockerMemInfo.docker_limit_gb && dockerMemInfo.docker_limit_gb < 24 && (
+                          <span className="ml-2 text-red-600 text-xs">(Phospho 패스에 부족 — Docker Desktop에서 늘려주세요)</span>
+                        )}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        Docker Desktop → Settings → Resources → Memory 에서 조정하세요.
+                        PTMQuant 기본 메모리는 이 값을 초과할 수 없습니다.
+                      </p>
+                    </div>
+                  </div>
+                )}
                 <div className="space-y-4">
                   {items.map((s) => {
                     const label = SETTING_LABELS[s.key] || s.key;
                     const isBoolean = s.value_type === "boolean";
                     const isChanged = sysEdits[s.key] !== s.value;
+                    const currentVal = Number(sysEdits[s.key] ?? s.value);
 
                     return (
                       <div key={s.key} className="flex items-center justify-between gap-4 rounded-lg border px-4 py-3">
@@ -922,7 +1014,38 @@ export default function Settings() {
                           </p>
                         </div>
                         <div className="shrink-0">
-                          {isBoolean ? (
+                          {/* PTMQuant memory: show slider instead of plain input */}
+                          {s.key === "PTMQUANT_DEFAULT_MEMORY_GB" ? (
+                            <div className="w-56 space-y-1.5">
+                              <div className="flex items-center justify-between">
+                                <span className={cn(
+                                  "text-xs font-mono font-semibold px-1.5 py-0.5 rounded",
+                                  currentVal < 24 ? "bg-red-500/15 text-red-600"
+                                    : currentVal < 32 ? "bg-yellow-500/15 text-yellow-600"
+                                    : "bg-green-500/15 text-green-600"
+                                )}>
+                                  {currentVal} GB
+                                </span>
+                                {dockerMemInfo?.docker_limit_gb && currentVal > dockerMemInfo.docker_limit_gb && (
+                                  <span className="text-[10px] text-red-500">Docker 한계 초과</span>
+                                )}
+                              </div>
+                              <input
+                                type="range"
+                                min={8}
+                                max={Math.max(96, dockerMemInfo?.docker_limit_gb ?? 96)}
+                                step={4}
+                                value={currentVal}
+                                onChange={(e) => handleSysEdit(s.key, e.target.value)}
+                                className="w-full h-1.5 accent-primary cursor-pointer"
+                              />
+                              <div className="flex justify-between text-[10px] text-muted-foreground">
+                                <span>8 GB</span>
+                                <span className="text-green-600 font-medium">32 GB 권장</span>
+                                <span>{Math.max(96, dockerMemInfo?.docker_limit_gb ?? 96)} GB</span>
+                              </div>
+                            </div>
+                          ) : isBoolean ? (
                             <Toggle
                               checked={sysEdits[s.key]?.toLowerCase() === "true"}
                               onChange={(v) => handleSysEdit(s.key, v ? "true" : "false")}
@@ -972,18 +1095,24 @@ export default function Settings() {
                     관리자 전용 파일 공유 공간입니다. Drag &amp; Drop 또는 파일 선택으로 업로드하고, 클릭으로 다운로드합니다.
                   </CardDescription>
                 </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={fetchSharedFiles}
-                  disabled={fileShareLoading}
-                  className="gap-1.5 shrink-0"
-                >
-                  {fileShareLoading
-                    ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    : <FolderOpen className="h-3.5 w-3.5" />}
-                  새로고침
-                </Button>
+                <div className="flex items-center gap-2 shrink-0">
+                  <Button
+                    variant="outline" size="sm"
+                    onClick={() => setShowNewFolder(v => !v)}
+                    className="gap-1.5"
+                  >
+                    <FolderOpen className="h-3.5 w-3.5" /> 새 폴더
+                  </Button>
+                  <Button
+                    variant="outline" size="sm"
+                    onClick={() => fetchSharedFiles(currentSharePath)}
+                    disabled={fileShareLoading}
+                    className="gap-1.5"
+                  >
+                    {fileShareLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FolderOpen className="h-3.5 w-3.5" />}
+                    새로고침
+                  </Button>
+                </div>
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -997,6 +1126,43 @@ export default function Settings() {
                   <button onClick={() => setFileShareError(null)}>
                     <X className="h-3.5 w-3.5" />
                   </button>
+                </div>
+              )}
+
+              {/* New folder input */}
+              {showNewFolder && (
+                <div className="flex items-center gap-2 rounded-lg border border-dashed px-3 py-2 bg-muted/20">
+                  <FolderOpen className="h-4 w-4 text-amber-500 shrink-0" />
+                  <Input
+                    value={newFolderName}
+                    onChange={e => setNewFolderName(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter") createFolder(); if (e.key === "Escape") setShowNewFolder(false); }}
+                    placeholder="폴더 이름 입력 후 Enter"
+                    className="h-7 text-sm flex-1"
+                    autoFocus
+                  />
+                  <Button size="sm" variant="default" className="h-7 text-xs" onClick={createFolder} disabled={newFolderLoading}>
+                    {newFolderLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : "만들기"}
+                  </Button>
+                  <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setShowNewFolder(false)}>취소</Button>
+                </div>
+              )}
+
+              {/* Breadcrumb navigation */}
+              {currentSharePath && (
+                <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                  <button onClick={() => fetchSharedFiles("")} className="hover:text-primary transition-colors flex items-center gap-1">
+                    <FolderOpen className="h-3 w-3" /> file_share
+                  </button>
+                  {currentSharePath.split("/").map((part, i, arr) => {
+                    const partPath = arr.slice(0, i + 1).join("/");
+                    return (
+                      <span key={i} className="flex items-center gap-1">
+                        <span>/</span>
+                        <button onClick={() => fetchSharedFiles(partPath)} className="hover:text-primary transition-colors">{part}</button>
+                      </span>
+                    );
+                  })}
                 </div>
               )}
 
@@ -1114,14 +1280,14 @@ export default function Settings() {
               )}
 
               {/* File list */}
-              {fileShareLoading && sharedFiles.length === 0 ? (
+              {fileShareLoading && sharedFiles.length === 0 && sharedDirs.length === 0 ? (
                 <div className="flex items-center justify-center py-8">
                   <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
                 </div>
-              ) : sharedFiles.length === 0 ? (
+              ) : sharedFiles.length === 0 && sharedDirs.length === 0 ? (
                 <div className="flex flex-col items-center justify-center gap-1 py-8 text-muted-foreground">
                   <FolderOpen className="h-8 w-8 opacity-30" />
-                  <p className="text-sm">업로드된 파일이 없습니다</p>
+                  <p className="text-sm">이 폴더에 파일이 없습니다</p>
                 </div>
               ) : (
                 <>
@@ -1161,6 +1327,26 @@ export default function Settings() {
                       <div className="text-right">동작</div>
                     </div>
                     <div className="divide-y">
+                      {/* Subdirectory rows */}
+                      {sharedDirs.map((dir) => (
+                        <div
+                          key={dir.path}
+                          className="grid grid-cols-[32px_1fr_110px_180px_88px] items-center gap-3 px-3 py-2.5 hover:bg-amber-50/40 dark:hover:bg-amber-950/10 cursor-pointer transition-colors"
+                          onClick={() => fetchSharedFiles(dir.path)}
+                        >
+                          <div className="flex items-center justify-center">
+                            <FolderOpen className="h-4 w-4 text-amber-500" />
+                          </div>
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="font-medium text-sm">{dir.name}/</span>
+                          </div>
+                          <div className="text-right text-xs text-muted-foreground">—</div>
+                          <div className="text-xs text-muted-foreground">폴더</div>
+                          <div className="flex items-center justify-end">
+                            <span className="text-xs text-muted-foreground">열기 →</span>
+                          </div>
+                        </div>
+                      ))}
                       {sharedFiles.map((file) => {
                         const uploadedAt = new Date(file.modified_at * 1000);
                         const isSelected = selectedFiles.has(file.name);

@@ -47,6 +47,8 @@ class Settings(BaseSettings):
     REFERENCE_DIR: str = "/app/data/reference"
     LOG_DIR: str = "/app/storage/logs"
     FILE_SHARE_DIR: str = "/app/storage/file_share"
+    PTMQUANT_DIR: str = "/app/storage/ptmquant"
+    HOST_DATA_DIR: str = ""
 
     # Cloud LLM keys (optional)
     GEMINI_API_KEY: Optional[str] = None

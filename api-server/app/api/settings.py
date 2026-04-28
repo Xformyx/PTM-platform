@@ -225,23 +225,76 @@ def _write_session(upload_id: str, data: dict) -> None:
     (d / "meta.json").write_text(json.dumps(data))
 
 
-@router.get("/files")
-async def list_files(user=Depends(get_current_user)):
-    """List all files in the admin file share directory."""
+class CreateDirectoryRequest(BaseModel):
+    path: str   # relative path within file_share, e.g. "mouse_samples" or "2025/run1"
+
+
+@router.post("/directories", status_code=201)
+async def create_directory(body: CreateDirectoryRequest, user=Depends(get_current_user)):
+    """Create a directory inside the file share."""
     _require_admin(user)
     share_dir = _ensure_share_dir()
+    # Sanitize: allow only safe path components
+    parts = [re.sub(r"[^\w.\-]", "_", p) for p in Path(body.path).parts if p not in ("", ".", "..")]
+    if not parts:
+        raise HTTPException(400, detail="Invalid directory path")
+    target = share_dir.joinpath(*parts)
+    if target.exists():
+        return {"path": str(target.relative_to(share_dir)), "already_existed": True}
+    target.mkdir(parents=True, exist_ok=True)
+    return {"path": str(target.relative_to(share_dir)), "already_existed": False}
+
+
+@router.get("/files")
+async def list_files(path: str = "", user=Depends(get_current_user)):
+    """List files and subdirectories in the file share at the given relative path."""
+    _require_admin(user)
+    share_dir = _ensure_share_dir()
+
+    # Resolve and validate path stays within share_dir
+    if path:
+        parts = [p for p in Path(path).parts if p not in ("", ".", "..")]
+        current = share_dir.joinpath(*parts) if parts else share_dir
+    else:
+        current = share_dir
+
+    try:
+        current = current.resolve()
+        share_dir = share_dir.resolve()
+        if not str(current).startswith(str(share_dir)):
+            raise HTTPException(400, detail="Path outside file share")
+    except Exception:
+        raise HTTPException(400, detail="Invalid path")
+
+    if not current.is_dir():
+        raise HTTPException(404, detail="Directory not found")
+
+    rel_base = current.relative_to(share_dir)
     files = []
-    for p in sorted(share_dir.iterdir()):
-        if p.is_file():
+    dirs = []
+    for p in sorted(current.iterdir()):
+        if p.name.startswith("."):
+            continue
+        if p.is_dir():
+            dirs.append({
+                "name": p.name,
+                "path": str(rel_base / p.name) if str(rel_base) != "." else p.name,
+            })
+        elif p.is_file():
             stat = p.stat()
             mime, _ = mimetypes.guess_type(p.name)
             files.append({
                 "name": p.name,
+                "path": str(rel_base / p.name) if str(rel_base) != "." else p.name,
                 "size": stat.st_size,
                 "modified_at": stat.st_mtime,
                 "mime_type": mime or "application/octet-stream",
             })
-    return {"files": files}
+    return {
+        "current_path": str(rel_base) if str(rel_base) != "." else "",
+        "dirs": dirs,
+        "files": files,
+    }
 
 
 @router.post("/files")

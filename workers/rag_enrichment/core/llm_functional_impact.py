@@ -178,6 +178,7 @@ class LLMFunctionalImpact:
         kegg_pathways: Optional[List[str]] = None,
         string_interactions: Optional[List[str]] = None,
         experimental_context: Optional[dict] = None,
+        max_tokens: int = 3000,
     ) -> FunctionalImpactResult:
         """
         Predict functional impact of a PTM event.
@@ -200,7 +201,7 @@ class LLMFunctionalImpact:
                 prompt=prompt,
                 system_prompt="You are an expert in PTM functional biology and cell signaling. Output valid JSON only.",
                 temperature=0.4,
-                max_tokens=3000,
+                max_tokens=max_tokens,
             )
             parsed = self._parse_response(response)
             if parsed:

@@ -8,7 +8,7 @@ from sqlalchemy import select, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api import articles, auth, chat, events, health, llm, notifications, orders, presentation, rag, settings as settings_api, system
+from app.api import articles, auth, chat, events, health, llm, notifications, orders, presentation, ptmquant, rag, settings as settings_api, system
 from app.config import get_settings
 from app.core.database import engine, Base
 from app.core.logging import setup_logging
@@ -31,8 +31,51 @@ async def _add_column_if_missing(conn, table: str, column: str, definition: str)
         logger.info(f"Migration: added {table}.{column}")
 
 
+async def _add_index_if_missing(conn, table: str, index_name: str, columns: str) -> None:
+    result = await conn.execute(text(
+        "SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS "
+        "WHERE TABLE_SCHEMA = DATABASE() "
+        f"AND TABLE_NAME = '{table}' AND INDEX_NAME = '{index_name}'"
+    ))
+    row = result.fetchone()
+    if row and row[0] == 0:
+        await conn.execute(text(f"ALTER TABLE `{table}` ADD INDEX `{index_name}` ({columns})"))
+        logger.info(f"Migration: added index {table}.{index_name}")
+
+
+async def _seed_system_settings(conn) -> None:
+    """Insert default system settings if they don't exist yet (INSERT IGNORE)."""
+    defaults = [
+        # PTMQuant defaults
+        ("PTMQUANT_DEFAULT_MEMORY_GB", "32",
+         "PTMQuant 작업의 기본 Docker 메모리 제한 (GB). "
+         "Phospho 패스는 fragment 인덱스만 ~15 GB 이상 필요하므로 32 GB 이상 권장.",
+         "ptmquant", "integer"),
+        ("PTMQUANT_DEFAULT_THREADS",   "4",
+         "PTMQuant 작업의 기본 CPU 스레드 수 (0 = 전체 코어).",
+         "ptmquant", "integer"),
+        # RAG Enrichment tuning
+        ("RAG_MAX_ARTICLES",         "3",    "PTM당 LLM에 전달할 최대 PubMed 논문 수 (배치 모드 기준)", "rag_enrichment", "integer"),
+        ("RAG_ENABLE_KINASE",        "true", "키나제 예측 LLM 태스크 활성화 여부 (false로 설정 시 Phase B 속도 향상)", "rag_enrichment", "boolean"),
+        ("RAG_ENABLE_FUNCTIONAL",    "true", "기능적 영향 분석 LLM 태스크 활성화 여부 (false로 설정 시 Phase B 속도 향상)", "rag_enrichment", "boolean"),
+        ("RAG_ABSTRACT_BATCH_MODE",  "true", "여러 논문을 하나의 LLM 호출로 분석 (false: 논문당 1회 호출, 느림)", "rag_enrichment", "boolean"),
+        ("RAG_ABSTRACT_MAX_TOKENS",  "4096", "Abstract 배치 분석 LLM 최대 출력 토큰 수 (줄이면 JSON 잘림 방지, 권장: 3000-4096)", "rag_enrichment", "integer"),
+        ("RAG_KINASE_MAX_TOKENS",    "2000", "키나제 예측 LLM 최대 출력 토큰 수", "rag_enrichment", "integer"),
+        ("RAG_FUNCTIONAL_MAX_TOKENS","3000", "기능적 영향 분석 LLM 최대 출력 토큰 수", "rag_enrichment", "integer"),
+        ("RAG_PHASE_A_TIMEOUT",      "60",   "Phase A (외부 API: UniProt/KEGG/PubMed 등) 작업당 타임아웃 (초)", "rag_enrichment", "integer"),
+        ("RAG_PHASE_B_TIMEOUT",      "120",  "Phase B (LLM: abstract/kinase/functional) 작업당 타임아웃 + 재시도 타임아웃 (초)", "rag_enrichment", "integer"),
+    ]
+    for key, value, desc, category, vtype in defaults:
+        await conn.execute(text(
+            "INSERT IGNORE INTO system_settings "
+            "(setting_key, setting_value, description, category, value_type) "
+            "VALUES (:k, :v, :d, :c, :t)"
+        ), {"k": key, "v": value, "d": desc, "c": category, "t": vtype})
+
+
 async def _run_migrations(conn) -> None:
     """Apply incremental schema changes that create_all won't handle."""
+    await _seed_system_settings(conn)
     await _add_column_if_missing(
         conn, "users", "must_change_password",
         "must_change_password TINYINT(1) NOT NULL DEFAULT 0"
@@ -56,6 +99,21 @@ async def _run_migrations(conn) -> None:
     await _add_column_if_missing(
         conn, "orders", "kinase_analysis_data",
         "kinase_analysis_data JSON NULL"
+    )
+    # ptmquant_jobs: user_id FK (table created by create_all, this adds FK if missed)
+    await _add_column_if_missing(
+        conn, "ptmquant_jobs", "user_id",
+        "user_id INT NULL, ADD CONSTRAINT fk_ptmquant_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL"
+    )
+    # phase_b_cache: PMID 목록 저장 컬럼 (subset matching v2)
+    await _add_column_if_missing(
+        conn, "phase_b_cache", "pmid_list",
+        "pmid_list TEXT NULL COMMENT 'JSON array of sorted PMIDs for subset cache matching'"
+    )
+    # phase_b_cache: subset matching 쿼리 성능을 위한 복합 인덱스
+    await _add_index_if_missing(
+        conn, "phase_b_cache", "idx_phase_b_lookup",
+        "gene, position, ptm_type, task_name"
     )
 
 
@@ -173,3 +231,4 @@ app.include_router(system.router, prefix="/api")
 app.include_router(articles.router, prefix="/api")
 app.include_router(chat.router, prefix="/api")
 app.include_router(presentation.router, prefix="/api")
+app.include_router(ptmquant.router, prefix="/api")

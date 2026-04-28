@@ -150,6 +150,7 @@ class LLMKinasePredictor:
         pubmed_articles: Optional[List[dict]] = None,
         kea3_results: Optional[dict] = None,
         experimental_context: Optional[dict] = None,
+        max_tokens: int = 2000,
     ) -> KinasePredictionResult:
         """
         Predict upstream kinases/regulators for a PTM site.
@@ -177,7 +178,7 @@ class LLMKinasePredictor:
                 prompt=prompt,
                 system_prompt="You are an expert in kinase-substrate relationships and PTM biology. Output valid JSON only.",
                 temperature=0.3,
-                max_tokens=2000,
+                max_tokens=max_tokens,
             )
             parsed = self._parse_response(response)
             if parsed:

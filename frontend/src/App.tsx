@@ -15,6 +15,7 @@ import Reports from '@/pages/Reports';
 import Logs from '@/pages/Logs';
 import Settings from '@/pages/Settings';
 import SystemMonitor from '@/pages/SystemMonitor';
+import PTMQuant from '@/pages/PTMQuant';
 import { Loader2 } from 'lucide-react';
 
 function ProtectedRoutes() {
@@ -56,6 +57,7 @@ export default function App() {
         <Route path="reports" element={<Reports />} />
         <Route path="logs" element={<Logs />} />
         <Route path="settings" element={<Settings />} />
+        <Route path="ptmquant" element={<PTMQuant />} />
       </Route>
     </Routes>
   );

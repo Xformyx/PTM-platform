@@ -347,6 +347,7 @@ class AbstractAnalyzer:
         articles: Optional[list] = None,
         on_article_done: Optional[callable] = None,
         batch_mode: bool = True,
+        batch_max_tokens: Optional[int] = None,
     ) -> AbstractAnalysis:
         """Analyze PTM signaling from abstract(s).
 
@@ -369,6 +370,7 @@ class AbstractAnalyzer:
             if batch_mode:
                 result = self._analyze_batch(
                     eligible, gene, position, ptm_type, experimental_context,
+                    max_tokens_override=batch_max_tokens,
                 )
                 if result is not None:
                     # Report all articles as done at once
@@ -405,6 +407,7 @@ class AbstractAnalyzer:
         position: str,
         ptm_type: str,
         experimental_context: Optional[dict] = None,
+        max_tokens_override: Optional[int] = None,
     ) -> Optional[AbstractAnalysis]:
         """Analyze all articles in a single LLM call.
 
@@ -415,9 +418,11 @@ class AbstractAnalyzer:
             articles, gene, position, experimental_context, ptm_type,
         )
 
-        # Scale max_tokens with article count (base 3000 + 800 per extra article)
+        # Scale max_tokens with article count (base 2000 + 500 per extra article)
+        # Cap from Settings (RAG_ABSTRACT_MAX_TOKENS) or default 4096
         n = len(articles)
-        max_tokens = min(3000 + 800 * (n - 1), 8192)
+        cap = max_tokens_override if max_tokens_override and max_tokens_override > 0 else 4096
+        max_tokens = min(2000 + 500 * (n - 1), cap)
 
         max_retries = 2
         for attempt in range(1, max_retries + 1):

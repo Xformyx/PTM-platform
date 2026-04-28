@@ -3,6 +3,7 @@ from app.models.llm_model import LlmModel
 from app.models.login_attempt import LoginAttempt
 from app.models.notification import Notification
 from app.models.order import Order, OrderLog, OrderShare
+from app.models.ptmquant_job import PTMQuantJob
 from app.models.rag_collection import RagCollection, RagDocument
 from app.models.report import Report
 from app.models.system_setting import SystemSetting
@@ -21,4 +22,5 @@ __all__ = [
     "Report",
     "ChatMessage",
     "SystemSetting",
+    "PTMQuantJob",
 ]

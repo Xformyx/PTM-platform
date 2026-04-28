@@ -95,6 +95,7 @@ services:
       - ./storage/reports:/app/storage/reports
       - ./storage/logs:/app/storage/logs
       - ./storage/file_share:/app/storage/file_share
+      - ./storage/ptmquant:/app/storage/ptmquant
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
       APP_ENV: ${APP_ENV:-development}
@@ -120,6 +121,7 @@ services:
       REFERENCE_DIR: /app/data/reference
       LOG_DIR: /app/storage/logs
       FILE_SHARE_DIR: /app/storage/file_share
+      PTMQUANT_DIR: /app/storage/ptmquant
       HOST_DATA_DIR: ${HOST_DATA_DIR:-}
       LLM_MODEL: ${LLM_MODEL:-gemma3:27b}
       # Cloud API keys come from env_file (.env) only — avoids shell env overriding
@@ -233,7 +235,8 @@ services:
       # Max PubMed articles per PTM fed to LLM abstract analysis
       # With batch mode (default): all articles in 1 LLM call → 3 calls/PTM
       # Without batch mode: each article = 1 LLM call → N+2 calls/PTM
-      RAG_MAX_ARTICLES: ${RAG_MAX_ARTICLES:-5}
+      # Reduced to 3 (from 5) to prevent JSON truncation with large Human proteome contexts
+      RAG_MAX_ARTICLES: ${RAG_MAX_ARTICLES:-3}
       # Abstract batch mode: analyze all articles in a single LLM call (default: true)
       # Reduces abstract analysis from N LLM calls to 1. Falls back to per-article on failure.
       RAG_ABSTRACT_BATCH_MODE: ${RAG_ABSTRACT_BATCH_MODE:-true}

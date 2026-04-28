@@ -28,7 +28,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable, Dict, List, Optional
 
-from common.phase_b_cache import get_cached, set_cached
+from common.phase_b_cache import get_cached, get_cached_best_match, set_cached
 
 
 from common.llm_client import LLMClient
@@ -62,23 +62,46 @@ MCP_WORKERS = int(_os.getenv("RAG_MCP_WORKERS", "6"))
 # so 4 workers → up to 12 simultaneous Ollama requests which causes queue buildup.
 # Set RAG_PTM_WORKERS env var in docker-compose to tune for your hardware.
 PTM_WORKERS = int(_os.getenv("RAG_PTM_WORKERS", "2"))
-# Max PubMed articles per PTM for LLM abstract analysis.
-# With batch_mode=True (default), all articles are analyzed in a single LLM call.
-# With batch_mode=False, each article = 1 LLM call → major bottleneck.
-# 5 = good balance of speed vs coverage; increase if hardware allows.
-MAX_ARTICLES_PER_PTM = int(_os.getenv("RAG_MAX_ARTICLES", "5"))
-# LLM task toggles — set to "false" to skip individual Phase B LLM calls.
-# RAG_ENABLE_LLM=false  → disable ALL LLM tasks (abstract + kinase + functional)
-# RAG_ENABLE_KINASE=false → skip only kinase prediction
-# RAG_ENABLE_FUNCTIONAL=false → skip only functional impact analysis
-def _env_bool(name: str, default: bool = True) -> bool:
-    return _os.getenv(name, "true" if default else "false").lower() not in ("false", "0", "no")
-ENABLE_LLM       = _env_bool("RAG_ENABLE_LLM",       default=True)
-ENABLE_KINASE    = _env_bool("RAG_ENABLE_KINASE",    default=True)
-ENABLE_FUNCTIONAL= _env_bool("RAG_ENABLE_FUNCTIONAL", default=True)
 # Abstract batch mode: analyze all articles in a single LLM call instead of one-by-one.
 # Reduces PTM-level LLM calls from N to 1 for abstract analysis.
 # Falls back to per-article mode automatically if batch parsing fails.
+def _env_bool(name: str, default: bool = True) -> bool:
+    return _os.getenv(name, "true" if default else "false").lower() not in ("false", "0", "no")
+def _get_rag_settings() -> dict:
+    """Read RAG tuning settings from DB (with env var + hardcoded fallback).
+
+    Called at task start so Settings page changes take effect without restart.
+    Uses common.system_settings which caches DB values for 60s.
+    """
+    try:
+        from common.system_settings import get_int, get_bool, get_setting
+        return {
+            "max_articles":          get_int("RAG_MAX_ARTICLES", 3),
+            "enable_llm":            get_bool("RAG_ENABLE_LLM",            default=True),
+            "enable_kinase":         get_bool("RAG_ENABLE_KINASE",          default=True),
+            "enable_functional":     get_bool("RAG_ENABLE_FUNCTIONAL",      default=True),
+            "abstract_batch_mode":   get_bool("RAG_ABSTRACT_BATCH_MODE",    default=True),
+            "abstract_max_tokens":   get_int("RAG_ABSTRACT_MAX_TOKENS",    4096),
+            "kinase_max_tokens":     get_int("RAG_KINASE_MAX_TOKENS",      2000),
+            "functional_max_tokens": get_int("RAG_FUNCTIONAL_MAX_TOKENS",  3000),
+            "phase_a_timeout":       get_int("RAG_PHASE_A_TIMEOUT",        60),
+            "phase_b_timeout":       get_int("RAG_PHASE_B_TIMEOUT",        120),
+        }
+    except Exception:
+        return {
+            "max_articles":          int(_os.getenv("RAG_MAX_ARTICLES", "3")),
+            "enable_llm":            _env_bool("RAG_ENABLE_LLM",         True),
+            "enable_kinase":         _env_bool("RAG_ENABLE_KINASE",       True),
+            "enable_functional":     _env_bool("RAG_ENABLE_FUNCTIONAL",   True),
+            "abstract_batch_mode":   _env_bool("RAG_ABSTRACT_BATCH_MODE", True),
+            "abstract_max_tokens":   int(_os.getenv("RAG_ABSTRACT_MAX_TOKENS",    "4096")),
+            "kinase_max_tokens":     int(_os.getenv("RAG_KINASE_MAX_TOKENS",      "2000")),
+            "functional_max_tokens": int(_os.getenv("RAG_FUNCTIONAL_MAX_TOKENS",  "3000")),
+            "phase_a_timeout":       int(_os.getenv("RAG_PHASE_A_TIMEOUT",        "60")),
+            "phase_b_timeout":       int(_os.getenv("RAG_PHASE_B_TIMEOUT",        "120")),
+        }
+
+
 ABSTRACT_BATCH_MODE = _env_bool("RAG_ABSTRACT_BATCH_MODE", default=True)
 # Rate limiting: small delay between batches to avoid overwhelming MCP servers
 BATCH_DELAY_SEC = 0.1
@@ -131,7 +154,7 @@ class RAGEnrichmentPipeline:
         mcp_client: MCPClient,
         progress_callback: Optional[Callable[[float, str], None]] = None,
         analysis_log: Optional[Callable[[str], None]] = None,
-        enable_llm_analysis: bool = ENABLE_LLM,
+        enable_llm_analysis: bool = True,
         enable_fulltext: bool = True,
         enable_ptm_validation: bool = True,
         rag_enrichment_llm_model: Optional[str] = None,
@@ -149,8 +172,19 @@ class RAGEnrichmentPipeline:
         self._abstract_warned_genes: set = set()
         self._sets_lock = threading.Lock()
         self._progress_lock = threading.Lock()
+        # Read RAG tuning settings from DB at pipeline init (Settings page changes apply immediately)
+        _rag_cfg = _get_rag_settings()
+        self.max_articles: int        = _rag_cfg["max_articles"]
+        self.enable_kinase: bool      = _rag_cfg["enable_kinase"]
+        self.enable_functional: bool  = _rag_cfg["enable_functional"]
+        self.abstract_batch_mode: bool   = _rag_cfg["abstract_batch_mode"]
+        self.abstract_max_tokens: int    = _rag_cfg["abstract_max_tokens"]
+        self.kinase_max_tokens: int      = _rag_cfg["kinase_max_tokens"]
+        self.functional_max_tokens: int  = _rag_cfg["functional_max_tokens"]
+        self.phase_a_timeout: int        = _rag_cfg["phase_a_timeout"]
+        self.phase_b_timeout: int        = _rag_cfg["phase_b_timeout"]
         # LLM-based analysis modules (restored from original)
-        self.enable_llm = enable_llm_analysis
+        self.enable_llm = enable_llm_analysis and _rag_cfg["enable_llm"]
         self.enable_fulltext = enable_fulltext
         self.enable_ptm_validation = enable_ptm_validation
         if enable_llm_analysis:
@@ -546,7 +580,7 @@ class RAGEnrichmentPipeline:
             try:
                 result = self.mcp.search_pubmed(
                     gene=gene, position=position, ptm_type=ptm_type,
-                    context_keywords=context_keywords, max_results=MAX_ARTICLES_PER_PTM,
+                    context_keywords=context_keywords, max_results=self.max_articles,
                 )
                 articles = result.get("articles", [])
                 logger.info(f"PubMed search for {gene} {position}: {len(articles)} articles found")
@@ -705,7 +739,7 @@ class RAGEnrichmentPipeline:
             futures_a = {name: pool.submit(fn) for name, fn in phase_a_tasks.items()}
             for name, future in futures_a.items():
                 try:
-                    phase_a_results[name] = future.result(timeout=60)
+                    phase_a_results[name] = future.result(timeout=self.phase_a_timeout)
                 except Exception as e:
                     logger.error(f"Phase A task '{name}' failed for {gene}: {e}")
                     phase_a_results[name] = {}
@@ -779,7 +813,8 @@ class RAGEnrichmentPipeline:
                     raw = self.abstract_analyzer.analyze(
                         articles=articles, gene=gene, position=position, ptm_type=ptm_type,
                         on_article_done=_on_article,
-                        batch_mode=ABSTRACT_BATCH_MODE,
+                        batch_mode=self.abstract_batch_mode,
+                        batch_max_tokens=self.abstract_max_tokens,
                     )
                     out = _asdict(raw) if hasattr(raw, '__dataclass_fields__') else (raw if isinstance(raw, dict) else {})
                     with self._sets_lock:
@@ -808,7 +843,7 @@ class RAGEnrichmentPipeline:
             phase_b_tasks["abstract"] = _abstract
 
         # LLM-based kinase prediction
-        if self.enable_llm and ENABLE_KINASE:
+        if self.enable_llm and self.enable_kinase:
             def _kinase():
                 try:
                     return self.kinase_predictor.predict(
@@ -817,6 +852,7 @@ class RAGEnrichmentPipeline:
                         ptm_type=ptm_type,
                         experimental_context=context,
                         pubmed_articles=articles,
+                        max_tokens=self.kinase_max_tokens,
                     )
                 except Exception as e:
                     logger.warning(f"Kinase prediction failed for {gene}: {e}")
@@ -824,7 +860,7 @@ class RAGEnrichmentPipeline:
             phase_b_tasks["kinase"] = _kinase
 
         # LLM-based functional impact (depends on KEGG pathways from Phase A)
-        if self.enable_llm and ENABLE_FUNCTIONAL:
+        if self.enable_llm and self.enable_functional:
             def _functional():
                 try:
                     pathway_names = [p.get("name", p) if isinstance(p, dict) else p for p in kegg_pathways]
@@ -839,6 +875,7 @@ class RAGEnrichmentPipeline:
                         pubmed_articles=articles,
                         kegg_pathways=pathway_names,
                         experimental_context=context,
+                        max_tokens=self.functional_max_tokens,
                     )
                 except Exception as e:
                     logger.warning(f"Functional impact analysis failed for {gene}: {e}")
@@ -884,7 +921,7 @@ class RAGEnrichmentPipeline:
             ptm["rag_enrichment"] = self._empty_enrichment(ptm_log2fc_raw or 0, protein_log2fc_raw or 0)
             return ptm
 
-        # ① 영구 캐시 확인: 캐시에 있으면 LLM 호출 건너뜀
+        # ① 영구 캐시 확인: 정확한 PMID 조합 → 없으면 subset 폴백 (논문 수 변경 시 재활용)
         self._phase_event(gene, position, "B", "running", f"{len(articles)} articles")
         phase_b_results = {}
         pmids = [a.get("pmid", "") for a in articles]
@@ -892,6 +929,9 @@ class RAGEnrichmentPipeline:
         cache_hit_count = 0
         for name, fn in phase_b_tasks.items():
             cached = get_cached(gene, position, ptm_type, name, pmids)
+            if cached is None:
+                # 정확한 매치 없음 → subset 매칭 시도 (논문 수가 바뀐 경우 재활용)
+                cached = get_cached_best_match(gene, position, ptm_type, name, pmids)
             if cached is not None and isinstance(cached, dict):
                 phase_b_results[name] = cached
                 cache_hit_count += 1
@@ -911,7 +951,7 @@ class RAGEnrichmentPipeline:
                 self._alog(
                     f"[LLM·Phase B] {gene}: articles={len(articles)}, parallel=[{keys}]"
                 )
-            # ② 병렬 실행 (timeout=120)
+            # ② 병렬 실행
             def _to_dict(obj):
                 """Ensure Phase B results are plain dicts before caching/storing."""
                 if hasattr(obj, '__dataclass_fields__'):
@@ -923,23 +963,23 @@ class RAGEnrichmentPipeline:
                 futures_b = {name: pool.submit(fn) for name, fn in tasks_to_run.items()}
                 for name, future in futures_b.items():
                     try:
-                        result = _to_dict(future.result(timeout=120))
+                        result = _to_dict(future.result(timeout=self.phase_b_timeout))
                         phase_b_results[name] = result
                         set_cached(gene, position, ptm_type, name, pmids, result)
                     except Exception as e:
                         logger.error(f"Phase B task '{name}' failed for {gene}: {e}")
                         failed_tasks[name] = tasks_to_run[name]
 
-            # ③ 실패한 태스크 직렬 재시도 (timeout=300, LLM 부하 감소 후 재시도)
+            # ③ 실패한 태스크 직렬 재시도 (LLM 부하 감소 후 재시도)
             if failed_tasks:
                 retry_names = ", ".join(sorted(failed_tasks.keys()))
                 self._alog(
-                    f"[LLM·Phase B] {gene} {position} — retrying [{retry_names}] (serial, timeout=300)"
+                    f"[LLM·Phase B] {gene} {position} — retrying [{retry_names}] (serial, timeout={self.phase_b_timeout})"
                 )
             for name, fn in failed_tasks.items():
                 try:
                     with ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"retry_{gene[:8]}") as retry_pool:
-                        result = _to_dict(retry_pool.submit(fn).result(timeout=300))
+                        result = _to_dict(retry_pool.submit(fn).result(timeout=self.phase_b_timeout))
                     phase_b_results[name] = result
                     set_cached(gene, position, ptm_type, name, pmids, result)
                     self._alog(f"[LLM·Phase B] {gene} {position} — {name}: retry OK")

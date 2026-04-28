@@ -60,6 +60,7 @@ interface NavItem {
 const mainNav: NavItem[] = [
   { path: "/", label: "Dashboard", icon: LayoutDashboard, end: true },
   { path: "/orders", label: "Orders", icon: ClipboardList, end: true },
+  { path: "/ptmquant", label: "PTMQuant", icon: FlaskConical },
   { path: "/rag", label: "RAG Collections", icon: Library },
   { path: "/llm", label: "LLM Models", icon: Brain },
   { path: "/articles", label: "Article Cache", icon: BookOpen },
