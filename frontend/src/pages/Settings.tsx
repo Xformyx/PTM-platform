@@ -161,6 +161,7 @@ function Toggle({ checked, onChange, disabled }: { checked: boolean; onChange: (
 
 interface SharedFile {
   name: string;
+  path: string;
   size: number;
   modified_at: number;
   mime_type: string;
@@ -581,6 +582,9 @@ export default function Settings() {
     if (e.dataTransfer.files.length > 0) uploadFiles(e.dataTransfer.files);
   }, [uploadFiles]);
 
+  // Encode each path segment individually so slashes are preserved in the URL
+  const encodeFilePath = (p: string) => p.split("/").map(encodeURIComponent).join("/");
+
   const downloadFile = useCallback(async (filename: string) => {
     const authToken = localStorage.getItem("ptm-token");
     const controller = new AbortController();
@@ -610,7 +614,7 @@ export default function Settings() {
 
         let resp: Response;
         try {
-          resp = await fetch(`/api/settings/files/${encodeURIComponent(filename)}`, {
+          resp = await fetch(`/api/settings/files/${encodeFilePath(filename)}`, {
             headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
             signal: controller.signal,
           });
@@ -648,13 +652,13 @@ export default function Settings() {
         );
 
         const tokenResp = await fetch(
-          `/api/settings/files/${encodeURIComponent(filename)}/dl-token`,
+          `/api/settings/files/${encodeFilePath(filename)}/dl-token`,
           { headers: authToken ? { Authorization: `Bearer ${authToken}` } : {} }
         );
         if (!tokenResp.ok) throw new Error(`토큰 발급 실패 (${tokenResp.status})`);
         const { token: dlToken } = await tokenResp.json();
 
-        const dlUrl = `/api/settings/files/${encodeURIComponent(filename)}/dl?token=${encodeURIComponent(dlToken)}`;
+        const dlUrl = `/api/settings/files/${encodeFilePath(filename)}/dl?token=${encodeURIComponent(dlToken)}`;
         const a = document.createElement("a");
         a.href = dlUrl;
         a.download = filename;
@@ -714,17 +718,18 @@ export default function Settings() {
     setSelectedFiles((prev) =>
       prev.size === sharedFiles.length
         ? new Set()
-        : new Set(sharedFiles.map((f) => f.name))
+        : new Set(sharedFiles.map((f) => f.path ?? f.name))
     );
   }, [sharedFiles]);
 
-  const handleDeleteFile = async (filename: string) => {
-    if (!confirm(`'${filename}' 파일을 삭제할까요?`)) return;
+  const handleDeleteFile = async (filepath: string) => {
+    const displayName = filepath.split("/").pop() ?? filepath;
+    if (!confirm(`'${displayName}' 파일을 삭제할까요?`)) return;
     try {
-      await api.delete(`/settings/files/${encodeURIComponent(filename)}`);
-      setSharedFiles((prev) => prev.filter((f) => f.name !== filename));
+      await api.delete(`/settings/files/${encodeFilePath(filepath)}`);
+      setSharedFiles((prev) => prev.filter((f) => f.path !== filepath));
     } catch {
-      setFileShareError(`'${filename}' 삭제 실패`);
+      setFileShareError(`'${displayName}' 삭제 실패`);
     }
   };
 
@@ -1349,17 +1354,18 @@ export default function Settings() {
                       ))}
                       {sharedFiles.map((file) => {
                         const uploadedAt = new Date(file.modified_at * 1000);
-                        const isSelected = selectedFiles.has(file.name);
+                        const filePath = file.path ?? file.name;
+                        const isSelected = selectedFiles.has(filePath);
                         return (
                           <div
-                            key={file.name}
+                            key={filePath}
                             className={cn(
                               "grid grid-cols-[32px_1fr_110px_180px_88px] items-center gap-3 px-3 py-2.5 transition-colors",
                               isSelected ? "bg-primary/5" : "hover:bg-muted/30",
                             )}
                           >
                             <button
-                              onClick={() => toggleSelectFile(file.name)}
+                              onClick={() => toggleSelectFile(filePath)}
                               className="flex items-center justify-center text-muted-foreground hover:text-foreground"
                             >
                               {isSelected
@@ -1384,7 +1390,7 @@ export default function Settings() {
                                 variant="ghost"
                                 size="icon"
                                 className="h-7 w-7 text-muted-foreground hover:text-foreground"
-                                onClick={() => downloadFile(file.name)}
+                                onClick={() => downloadFile(file.path ?? file.name)}
                                 title="다운로드"
                               >
                                 <Download className="h-3.5 w-3.5" />
@@ -1393,7 +1399,7 @@ export default function Settings() {
                                 variant="ghost"
                                 size="icon"
                                 className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                                onClick={() => handleDeleteFile(file.name)}
+                                onClick={() => handleDeleteFile(file.path ?? file.name)}
                                 title="삭제"
                               >
                                 <Trash2 className="h-3.5 w-3.5" />

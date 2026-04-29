@@ -21,6 +21,33 @@ import {
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
 
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
+/** Encode each path segment individually so slashes are preserved in the URL */
+const encodeFilePath = (p: string) => p.split("/").map(encodeURIComponent).join("/");
+
+/** Fetch-based download that sends the Authorization header */
+async function downloadJobFile(jobId: string, filePath: string, fileName: string) {
+  const token = localStorage.getItem("ptm-token");
+  try {
+    const resp = await fetch(`/api/ptmquant/jobs/${jobId}/files/${encodeFilePath(filePath)}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    alert(`다운로드 실패: ${e instanceof Error ? e.message : e}`);
+  }
+}
+
 // ── Types ──────────────────────────────────────────────────────────────────
 
 interface MzmlFile  { name: string; path: string; size: number; }
@@ -73,15 +100,23 @@ function fmtDate(iso: string) {
     return new Intl.DateTimeFormat("ko-KR", {
       timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit",
       hour: "2-digit", minute: "2-digit", hour12: false,
-    }).format(new Date(iso)).replace(/\.\s*/g, ".").replace(/\.$/, "");
+    }).format(toUtcDate(iso)).replace(/\.\s*/g, ".").replace(/\.$/, "");
   } catch { return iso; }
+}
+
+function toUtcDate(iso: string): Date {
+  // DB returns "2026-04-28 13:59:09" without timezone → treat as UTC
+  if (iso && !iso.endsWith("Z") && !iso.includes("+")) {
+    return new Date(iso.replace(" ", "T") + "Z");
+  }
+  return new Date(iso);
 }
 
 function fmtElapsed(start: string, end: string | null, status: Job["status"]) {
   try {
-    const s = new Date(start).getTime();
+    const s = toUtcDate(start).getTime();
     const e = (status === "done" || status === "failed" || status === "cancelled") && end
-      ? new Date(end).getTime() : Date.now();
+      ? toUtcDate(end).getTime() : Date.now();
     const ms = Math.max(0, e - s);
     const sec = Math.floor(ms / 1000);
     const min = Math.floor(sec / 60);
@@ -154,10 +189,10 @@ function PreviewModal({ jobId, file, open, onClose }: {
             ) : <pre className="text-xs font-mono bg-muted/40 rounded p-3 overflow-auto whitespace-pre-wrap">{content}</pre>}
         </div>
         <div className="flex justify-end gap-2 pt-2 border-t">
-          <a href={`/api/ptmquant/jobs/${jobId}/files/${encodeURIComponent(file?.path ?? "")}`} download={file?.name}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90">
-            <Download className="h-3.5 w-3.5" /> 다운로드
-          </a>
+          <Button size="sm"
+            onClick={() => file && downloadJobFile(jobId, file.path, file.name)}>
+            <Download className="h-3.5 w-3.5 mr-1" /> 다운로드
+          </Button>
           <Button variant="outline" size="sm" onClick={onClose}>닫기</Button>
         </div>
       </DialogContent>
@@ -684,7 +719,6 @@ function JobDetail({ job, onRefresh }: { job: Job; onRefresh: (id: string) => vo
       {/* Job meta summary */}
       <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-muted-foreground">
         <span><span className="font-medium text-foreground">출력 폴더:</span> {job.output_subdir ?? "—"}</span>
-        <span><span className="font-medium text-foreground">파일 수:</span> {job.input_files?.length ?? 0}개</span>
         <span><span className="font-medium text-foreground">패스:</span> {job.passes?.join(", ") ?? "—"}</span>
         <span><span className="font-medium text-foreground">Reference:</span> {job.reference_file ?? "—"}</span>
         <span><span className="font-medium text-foreground">효소:</span> {job.enzyme ?? "trypsin"}</span>
@@ -698,6 +732,33 @@ function JobDetail({ job, onRefresh }: { job: Job; onRefresh: (id: string) => vo
           </span>
         ) : null}
       </div>
+
+      {/* Input file list */}
+      {job.input_files && job.input_files.length > 0 && (
+        <div>
+          <p className="text-xs font-medium text-muted-foreground mb-1">
+            입력 파일 ({job.input_files.length}개)
+          </p>
+          <div className="rounded border overflow-hidden">
+            {job.input_files.map((f, i) => {
+              const parts = f.split("/");
+              const dir = parts.length > 1 ? parts.slice(0, -1).join("/") : "";
+              const fname = parts[parts.length - 1];
+              return (
+                <div key={i} className="flex items-center gap-2 px-3 py-1.5 border-b last:border-0 bg-muted/20 text-xs">
+                  <span className="text-muted-foreground tabular-nums w-5 shrink-0 text-right">{i + 1}</span>
+                  {dir && (
+                    <span className="flex items-center gap-1 text-amber-600 dark:text-amber-400 shrink-0">
+                      <Folder className="h-3 w-3" />{dir}/
+                    </span>
+                  )}
+                  <span className="font-mono truncate">{fname}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Progress bar (active) */}
       {isActive && (
@@ -762,7 +823,7 @@ function JobDetail({ job, onRefresh }: { job: Job; onRefresh: (id: string) => vo
                     {new Intl.DateTimeFormat("ko-KR", {
                       timeZone: "Asia/Seoul", month: "2-digit", day: "2-digit",
                       hour: "2-digit", minute: "2-digit", hour12: false,
-                    }).format(new Date(f.modified_at * 1000))}
+                    }).format(new Date(f.modified_at * 1000))}  {/* unix timestamp — already UTC */}
                   </span>
                 )}
                 <div className="flex gap-1 shrink-0">
@@ -772,10 +833,10 @@ function JobDetail({ job, onRefresh }: { job: Job; onRefresh: (id: string) => vo
                       <Eye className="h-3 w-3" />
                     </Button>
                   )}
-                  <a href={`/api/ptmquant/jobs/${job.job_id}/files/${encodeURIComponent(f.path)}`} download={f.name}
-                    className="inline-flex items-center justify-center h-6 w-6 rounded hover:bg-accent" title="다운로드">
+                  <Button variant="ghost" size="icon" className="h-6 w-6" title="다운로드"
+                    onClick={() => downloadJobFile(job.job_id, f.path, f.name)}>
                     <Download className="h-3 w-3" />
-                  </a>
+                  </Button>
                 </div>
               </div>
             ))}

@@ -176,8 +176,10 @@ def _parse_progress(line: str, total_files: int = 0, current_progress: float = 0
 # Background Docker runner
 # ──────────────────────────────────────────────────────────────────────────────
 
-async def _run_ptmquant(job_id: str, db_url: str) -> None:
-    """Execute ptmquant:latest in a sibling Docker container, stream progress."""
+async def _run_ptmquant(job_id: str, db_url: str, attach_container_id: str | None = None) -> None:
+    """Execute ptmquant:latest in a sibling Docker container, stream progress.
+    If attach_container_id is given, skip container creation and attach to that existing container.
+    """
     import docker as docker_sdk  # type: ignore
 
     redis = await get_redis()
@@ -258,21 +260,27 @@ async def _run_ptmquant(job_id: str, db_url: str) -> None:
         if batch_size_info > 0 and n_files_info > batch_size_info
         else ""
     )
-    await _publish({"type": "log", "message": f"Starting ptmquant container (mem={mem_limit}{', resume' if resume_flag else ''}{batch_msg})...", "progress": 5})
-
     try:
         client = docker_sdk.from_env()
-        container = await asyncio.to_thread(
-            client.containers.run,
-            "ptmquant:latest",
-            command=docker_command,
-            volumes=volumes,
-            mem_limit=mem_limit,
-            detach=True,
-            remove=False,
-        )
-        # Persist container ID so cancel endpoint can kill it
-        (job_path / "container_id.txt").write_text(container.id)
+
+        if attach_container_id:
+            # Re-attach to an already-running container (e.g. after server restart)
+            container = await asyncio.to_thread(client.containers.get, attach_container_id)
+            logger.info(f"[ptmquant] Re-attached to container {attach_container_id[:12]} for job {job_id}")
+            await _publish({"type": "log", "message": f"[복구] 실행 중인 컨테이너에 재연결됨 ({attach_container_id[:12]})", "progress": 47})
+        else:
+            await _publish({"type": "log", "message": f"Starting ptmquant container (mem={mem_limit}{', resume' if resume_flag else ''}{batch_msg})...", "progress": 5})
+            container = await asyncio.to_thread(
+                client.containers.run,
+                "ptmquant:latest",
+                command=docker_command,
+                volumes=volumes,
+                mem_limit=mem_limit,
+                detach=True,
+                remove=False,
+            )
+            # Persist container ID so cancel endpoint can kill it
+            (job_path / "container_id.txt").write_text(container.id)
 
         log_lines: list[str] = []
         current_progress = 5.0

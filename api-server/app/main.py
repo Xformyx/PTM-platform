@@ -9,6 +9,7 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api import articles, auth, chat, events, health, llm, notifications, orders, presentation, ptmquant, rag, settings as settings_api, system
+from app.middleware.security import SecurityMiddleware
 from app.config import get_settings
 from app.core.database import engine, Base
 from app.core.logging import setup_logging
@@ -226,10 +227,68 @@ async def lifespan(app: FastAPI):
 
     await _run_database_startup()
 
+    # Resume monitoring of any ptmquant jobs that were 'running' when the server restarted
+    asyncio.create_task(_resume_orphaned_ptmquant_jobs())
+
     yield
 
     await engine.dispose()
     logger.info("API Server shutting down")
+
+
+async def _resume_orphaned_ptmquant_jobs() -> None:
+    """On startup, re-attach progress tracking for ptmquant containers still running.
+    Only re-attaches if the Docker container is actually alive; does NOT start new ones.
+    """
+    import docker as docker_sdk  # type: ignore
+    from pathlib import Path
+    from app.core.database import get_db
+    from app.models.ptmquant_job import PTMQuantJob
+    from app.api.ptmquant import _run_ptmquant
+    from app.config import get_settings as _get_settings
+
+    await asyncio.sleep(3)
+    _settings = _get_settings()
+    try:
+        client = docker_sdk.from_env()
+    except Exception as e:
+        logger.warning(f"Docker unavailable at startup, skipping orphan recovery: {e}")
+        return
+
+    try:
+        async for db in get_db():
+            result = await db.execute(
+                select(PTMQuantJob).where(PTMQuantJob.status == "running")
+            )
+            orphans = result.scalars().all()
+            for job in orphans:
+                # Check if the Docker container is actually still running
+                cid_file = Path(_settings.PTMQUANT_DIR) / job.job_id / "container_id.txt"
+                if not cid_file.exists():
+                    logger.warning(f"Orphan job {job.job_id} has no container_id.txt — marking failed")
+                    job.status = "failed"
+                    job.error_message = "서버 재시작으로 작업이 중단됨"
+                    await db.commit()
+                    continue
+                cid = cid_file.read_text().strip()
+                try:
+                    container = client.containers.get(cid)
+                    if container.status == "running":
+                        logger.info(f"Re-attaching to running ptmquant container {cid[:12]} for job {job.job_id}")
+                        asyncio.create_task(_run_ptmquant(job.job_id, str(_settings.DATABASE_URL), attach_container_id=cid))
+                    else:
+                        logger.warning(f"Container {cid[:12]} for job {job.job_id} is {container.status} — marking failed")
+                        job.status = "failed"
+                        job.error_message = f"컨테이너가 {container.status} 상태로 종료됨"
+                        await db.commit()
+                except Exception:
+                    logger.warning(f"Container {cid[:12]} not found for job {job.job_id} — marking failed")
+                    job.status = "failed"
+                    job.error_message = "서버 재시작 중 컨테이너 소실"
+                    await db.commit()
+            break
+    except Exception as e:
+        logger.warning(f"Could not resume orphaned ptmquant jobs: {e}")
 
 
 app = FastAPI(
@@ -238,6 +297,8 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+app.add_middleware(SecurityMiddleware)
 
 app.add_middleware(
     CORSMiddleware,

@@ -33,10 +33,20 @@ _FILE_SHARE_DIR = Path(_settings.FILE_SHARE_DIR)
 
 
 def _safe_filename(name: str) -> str:
-    """Sanitize filename to prevent path traversal."""
+    """Sanitize filename to prevent path traversal (basename only)."""
     name = os.path.basename(name)
     name = re.sub(r"[^\w.\-]", "_", name)
     return name or "file"
+
+
+def _safe_relpath(path: str, share_dir: Path) -> Path:
+    """Resolve a relative path within share_dir, blocking path traversal (../)."""
+    parts = [p for p in Path(path).parts if p not in ("", "..", ".")]
+    resolved = share_dir.joinpath(*parts).resolve()
+    share_resolved = share_dir.resolve()
+    if not str(resolved).startswith(str(share_resolved)):
+        raise HTTPException(status_code=400, detail="Invalid path")
+    return resolved
 
 
 def _ensure_share_dir() -> Path:
@@ -327,32 +337,31 @@ async def upload_file(
     return {"name": dest.name, "size": stat.st_size}
 
 
-@router.get("/files/{filename}/dl-token")
-async def get_download_token(filename: str, user=Depends(get_current_user)):
+@router.get("/files/{filepath:path}/dl-token")
+async def get_download_token(filepath: str, user=Depends(get_current_user)):
     """Issue a short-lived signed download token for the given file (admin only)."""
     _require_admin(user)
     share_dir = _ensure_share_dir()
-    safe_name = _safe_filename(filename)
-    if not (share_dir / safe_name).is_file():
+    file_path = _safe_relpath(filepath, share_dir)
+    if not file_path.is_file():
         raise HTTPException(status_code=404, detail="File not found")
-    token = _make_dl_token(safe_name, getattr(user, "id", 0))
+    token = _make_dl_token(filepath, getattr(user, "id", 0))
     return {"token": token, "expires_in": _DL_TOKEN_TTL}
 
 
-@router.get("/files/{filename}/dl")
+@router.get("/files/{filepath:path}/dl")
 async def download_file_by_token(
-    filename: str,
+    filepath: str,
     token: str = Query(...),
 ):
     """Token-based download — no Authorization header needed (browser native download)."""
     verified = _verify_dl_token(token)
     if not verified:
         raise HTTPException(status_code=401, detail="Invalid or expired download token")
-    safe_name = _safe_filename(filename)
-    if verified != safe_name:
+    if verified != filepath:
         raise HTTPException(status_code=403, detail="Token filename mismatch")
     share_dir = _ensure_share_dir()
-    file_path = share_dir / safe_name
+    file_path = _safe_relpath(filepath, share_dir)
     if not file_path.is_file():
         raise HTTPException(status_code=404, detail="File not found")
     mime, _ = mimetypes.guess_type(file_path.name)
@@ -363,14 +372,13 @@ async def download_file_by_token(
     )
 
 
-@router.get("/files/{filename}")
-async def download_file(filename: str, user=Depends(get_current_user)):
-    """Download a file from the admin file share directory."""
+@router.get("/files/{filepath:path}")
+async def download_file(filepath: str, user=Depends(get_current_user)):
+    """Download a file from the admin file share directory (supports subdirectories)."""
     _require_admin(user)
     share_dir = _ensure_share_dir()
 
-    safe_name = _safe_filename(filename)
-    file_path = share_dir / safe_name
+    file_path = _safe_relpath(filepath, share_dir)
 
     if not file_path.exists() or not file_path.is_file():
         raise HTTPException(status_code=404, detail="File not found")
@@ -383,21 +391,20 @@ async def download_file(filename: str, user=Depends(get_current_user)):
     )
 
 
-@router.delete("/files/{filename}")
-async def delete_file(filename: str, user=Depends(get_current_user)):
-    """Delete a file from the admin file share directory."""
+@router.delete("/files/{filepath:path}")
+async def delete_file(filepath: str, user=Depends(get_current_user)):
+    """Delete a file from the admin file share directory (supports subdirectories)."""
     _require_admin(user)
     share_dir = _ensure_share_dir()
 
-    safe_name = _safe_filename(filename)
-    file_path = share_dir / safe_name
+    file_path = _safe_relpath(filepath, share_dir)
 
     if not file_path.exists() or not file_path.is_file():
         raise HTTPException(status_code=404, detail="File not found")
 
     file_path.unlink()
-    logger.info(f"File share delete: {safe_name} by user {getattr(user, 'id', 0)}")
-    return {"deleted": safe_name}
+    logger.info(f"File share delete: {filepath} by user {getattr(user, 'id', 0)}")
+    return {"deleted": filepath}
 
 
 # ── Chunked Upload Endpoints ──────────────────────────────────────────────
