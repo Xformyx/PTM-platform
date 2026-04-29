@@ -96,6 +96,10 @@ services:
       - ./storage/logs:/app/storage/logs
       - ./storage/file_share:/app/storage/file_share
       - ./storage/ptmquant:/app/storage/ptmquant
+      # v0.5.3: shared AlphaPeptDeep predicted-library cache.  Every PTMQuant
+      # job mounts this into the ptmquant container so AlphaPeptDeep
+      # prediction runs at most once per (species, FASTA, PTM set) tuple.
+      - ./storage/predicted_lib_cache:/app/storage/predicted_lib_cache
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
       APP_ENV: ${APP_ENV:-development}
@@ -122,6 +126,7 @@ services:
       LOG_DIR: /app/storage/logs
       FILE_SHARE_DIR: /app/storage/file_share
       PTMQUANT_DIR: /app/storage/ptmquant
+      PTMQUANT_LIB_CACHE_DIR: ${PTMQUANT_LIB_CACHE_DIR:-/app/storage/predicted_lib_cache}
       HOST_DATA_DIR: ${HOST_DATA_DIR:-}
       LLM_MODEL: ${LLM_MODEL:-gemma3:27b}
       # Cloud API keys come from env_file (.env) only — avoids shell env overriding

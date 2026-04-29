@@ -44,6 +44,8 @@ interface Job {
   instrument?: string | null;
   predicted_library?: boolean | null;
   transfer_learning?: boolean | null;
+  site_probability_cutoff?: number | null;
+  include_low_loc_sites?: boolean | null;
   input_files: string[] | null;
   passes: string[] | null;
   output_subdir: string | null;
@@ -303,8 +305,16 @@ function CreateJobDialog({ open, onClose, onCreated, passes: passDefs, fastaFile
   const [resume,         setResume]         = useState(false);
   const [enzyme,         setEnzyme]         = useState("trypsin");
   const [instrument,     setInstrument]     = useState("exploris_240");
-  const [predictedLib,   setPredictedLib]   = useState(false);
+  // v0.5.3: AlphaPeptDeep predicted-library is enabled by default — cached
+  // libraries are shared across jobs keyed by FASTA + PTM set so turning it
+  // on costs almost nothing on subsequent identical runs.
+  const [predictedLib,   setPredictedLib]   = useState(true);
   const [transferLearn,  setTransferLearn]  = useState(false);
+  // v0.5.3: phospho localization filter (PhosphoRS / SpectroMine-style).  0.75
+  // is the recommended cutoff; users can drop it to 0 via the slider to keep
+  // every site and filter downstream on the per-row Best.Site.Probability.
+  const [siteCutoff,     setSiteCutoff]     = useState(0.75);
+  const [includeLowLoc,  setIncludeLowLoc]  = useState(false);
   const [enzymeOpts,     setEnzymeOpts]     = useState<{id:string;label:string;description:string}[]>([]);
   const [instrumentOpts, setInstrumentOpts] = useState<{id:string;label:string;description:string}[]>([]);
   const [error,          setError]          = useState("");
@@ -325,8 +335,10 @@ function CreateJobDialog({ open, onClose, onCreated, passes: passDefs, fastaFile
       setResume(false);
       setEnzyme("trypsin");
       setInstrument("exploris_240");
-      setPredictedLib(false);
+      setPredictedLib(true);
       setTransferLearn(false);
+      setSiteCutoff(0.75);
+      setIncludeLowLoc(false);
       setError("");
       autoFilledRef.current = { name: "", subdir: "" };
     }
@@ -380,6 +392,8 @@ function CreateJobDialog({ open, onClose, onCreated, passes: passDefs, fastaFile
         instrument,
         predicted_library: predictedLib,
         transfer_learning: transferLearn,
+        site_probability_cutoff: siteCutoff,
+        include_low_loc_sites: includeLowLoc,
       });
       onCreated(job);
       onClose();
@@ -545,7 +559,28 @@ function CreateJobDialog({ open, onClose, onCreated, passes: passDefs, fastaFile
               </div>
             </label>
           </div>
-
+          {/* v0.5.3: Phospho localization probability filter */}
+          <div className="space-y-2 rounded-lg border px-3 py-3">
+            <div className="flex items-center justify-between">
+              <Label className="text-xs font-medium">Phospho 위치 확신도 필터 (Localization)</Label>
+              <span className="text-xs font-mono font-semibold px-1.5 py-0.5 rounded bg-primary/10 text-primary">
+                {siteCutoff.toFixed(2)}
+              </span>
+            </div>
+            <input type="range" min={0} max={1} step={0.05} value={siteCutoff}
+              onChange={e => setSiteCutoff(Number(e.target.value))}
+              className="w-full h-1.5 accent-primary cursor-pointer" />
+            <p className="text-[10px] text-muted-foreground">
+              ptm_site_matrix.tsv에 포함될 사이트의 최소 Best.Site.Probability.
+              0.75가 PhosphoRS / SpectroMine 권장치입니다. 0 값은 필터를 전면 해제합니다.
+            </p>
+            <label className="flex items-center gap-2 text-xs">
+              <input type="checkbox" checked={includeLowLoc}
+                onChange={e => setIncludeLowLoc(e.target.checked)}
+                className="rounded shrink-0" />
+              <span>저신뢰 사이트도 매트릭스에 포함 (include_low_loc_sites)</span>
+            </label>
+          </div>
           {/* Advanced */}
           <div className="grid grid-cols-2 gap-4">
             {/* CPU Threads */}
@@ -656,6 +691,12 @@ function JobDetail({ job, onRefresh }: { job: Job; onRefresh: (id: string) => vo
         <span><span className="font-medium text-foreground">기종:</span> {job.instrument ?? "exploris_240"}</span>
         {job.predicted_library ? <span className="px-1.5 rounded bg-primary/10 text-primary text-[10px]">AlphaPeptDeep</span> : null}
         {job.transfer_learning ? <span className="px-1.5 rounded bg-primary/10 text-primary text-[10px]">TL</span> : null}
+        {typeof job.site_probability_cutoff === "number" ? (
+          <span className="px-1.5 rounded bg-muted text-[10px]">
+            loc≥{job.site_probability_cutoff.toFixed(2)}
+            {job.include_low_loc_sites ? " (keep-low)" : ""}
+          </span>
+        ) : null}
       </div>
 
       {/* Progress bar (active) */}

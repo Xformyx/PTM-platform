@@ -122,6 +122,17 @@ async def _run_migrations(conn) -> None:
         conn, "ptmquant_jobs", "transfer_learning",
         "transfer_learning TINYINT(1) NULL DEFAULT 0 COMMENT 'Fine-tune AlphaPeptDeep on pass-1 high-confidence PSMs'"
     )
+    # ptmquant_jobs: phospho localization filter (v0.5.3)
+    await _add_column_if_missing(
+        conn, "ptmquant_jobs", "site_probability_cutoff",
+        "site_probability_cutoff FLOAT NULL DEFAULT 0.75 "
+        "COMMENT 'Minimum Best.Site.Probability kept in ptm_site_matrix.tsv (diaquant v0.5.3)'"
+    )
+    await _add_column_if_missing(
+        conn, "ptmquant_jobs", "include_low_loc_sites",
+        "include_low_loc_sites TINYINT(1) NULL DEFAULT 0 "
+        "COMMENT 'Keep sites below site_probability_cutoff (diaquant v0.5.3)'"
+    )
     # phase_b_cache: PMID 목록 저장 컬럼 (subset matching v2)
     await _add_column_if_missing(
         conn, "phase_b_cache", "pmid_list",

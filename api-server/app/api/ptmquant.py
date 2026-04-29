@@ -225,11 +225,18 @@ async def _run_ptmquant(job_id: str, db_url: str) -> None:
     Path(settings.FILE_SHARE_DIR) / output_subdir  # ensure created by POST handler
 
     host_reference = str(_host_reference())
+    # v0.5.3: shared AlphaPeptDeep predicted-library cache, bind-mounted into
+    # the ptmquant container at /cache/predicted_libs so diaquant can reuse
+    # cached libraries across jobs (keyed by FASTA + PTM set + enzyme +
+    # instrument + mz range).  Falls back gracefully when unset.
+    host_lib_cache = _host_storage_dir() / "predicted_lib_cache"
+    host_lib_cache.mkdir(parents=True, exist_ok=True)
     volumes = {
-        host_file_share: {"bind": "/input",     "mode": "ro"},
-        host_reference:  {"bind": "/reference", "mode": "ro"},
-        host_output_dir: {"bind": "/output",    "mode": "rw"},
-        host_job_dir:    {"bind": "/work",      "mode": "ro"},
+        host_file_share: {"bind": "/input",               "mode": "ro"},
+        host_reference:  {"bind": "/reference",           "mode": "ro"},
+        host_output_dir: {"bind": "/output",              "mode": "rw"},
+        host_job_dir:    {"bind": "/work",                "mode": "ro"},
+        str(host_lib_cache): {"bind": "/cache/predicted_libs", "mode": "rw"},
     }
 
     # Read memory limit from job dir (written by POST handler)
@@ -405,8 +412,17 @@ class CreateJobRequest(BaseModel):
     # --- v0.5.2 knobs (all optional, safe fallbacks applied in diaquant 0.5.1) ---
     enzyme: str = "trypsin"              # See AVAILABLE_ENZYMES
     instrument: str = "exploris_240"     # See AVAILABLE_INSTRUMENTS
-    predicted_library: bool = False      # Enable AlphaPeptDeep predicted spectral library
+    # v0.5.3: AlphaPeptDeep predicted library is on by default.  Cached
+    # libraries under /cache/predicted_libs are shared across jobs keyed by
+    # FASTA + PTM set + instrument + enzyme so repeated runs on the same
+    # species / FASTA / PTM tuple are effectively free.
+    predicted_library: bool = True       # Enable AlphaPeptDeep predicted spectral library
     transfer_learning: bool = False      # Fine-tune AlphaPeptDeep on pass-1 high-confidence PSMs
+    # v0.5.3: phospho localization filter applied to report.ptm_site_matrix.tsv.
+    # 0.75 matches the recommended PhosphoRS / SpectroMine threshold; set
+    # include_low_loc_sites=True to keep all sites and filter downstream.
+    site_probability_cutoff: float = 0.75
+    include_low_loc_sites: bool = False
 
 
 class JobResponse(BaseModel):
@@ -421,6 +437,8 @@ class JobResponse(BaseModel):
     instrument: Optional[str] = None
     predicted_library: Optional[bool] = None
     transfer_learning: Optional[bool] = None
+    site_probability_cutoff: Optional[float] = None
+    include_low_loc_sites: Optional[bool] = None
     progress: float
     error_message: Optional[str]
     created_at: str
@@ -440,6 +458,10 @@ class JobResponse(BaseModel):
             instrument=job.instrument,
             predicted_library=bool(job.predicted_library) if job.predicted_library is not None else None,
             transfer_learning=bool(job.transfer_learning) if job.transfer_learning is not None else None,
+            site_probability_cutoff=float(job.site_probability_cutoff)
+                if getattr(job, "site_probability_cutoff", None) is not None else None,
+            include_low_loc_sites=bool(job.include_low_loc_sites)
+                if getattr(job, "include_low_loc_sites", None) is not None else None,
             progress=job.progress,
             error_message=job.error_message,
             created_at=job.created_at.isoformat() if job.created_at else "",
@@ -619,6 +641,8 @@ async def create_job(
         instrument=req.instrument,
         predicted_library=1 if req.predicted_library else 0,
         transfer_learning=1 if req.transfer_learning else 0,
+        site_probability_cutoff=float(req.site_probability_cutoff),
+        include_low_loc_sites=1 if req.include_low_loc_sites else 0,
         progress=0.0,
         user_id=user.id if hasattr(user, "id") and user.id else None,
     )
@@ -682,9 +706,20 @@ async def create_job(
         # v0.5.2: forward UI knobs to diaquant
         "enzyme": req.enzyme,
         "instrument": req.instrument,
+        # v0.5.3: AlphaPeptDeep predicted-library is always on by default.
+        # Users can still opt out per job by unchecking the UI toggle; in
+        # that case ``req.predicted_library`` is False and diaquant falls
+        # back to Sage's built-in theoretical library.
         "predicted_library": bool(req.predicted_library),
         "rescore_with_prediction": bool(req.predicted_library),
         "pred_lib_transfer_learning": bool(req.transfer_learning),
+        # v0.5.3: shared cross-job predicted-library cache.  Path is inside
+        # the ptmquant container; the api-server mounts the host directory
+        # at /cache/predicted_libs (see volumes dict above).
+        "pred_lib_cache_dir": "/cache/predicted_libs",
+        # v0.5.3: phospho localization-probability filter for the site matrix.
+        "site_probability_cutoff": float(req.site_probability_cutoff),
+        "include_low_loc_sites": bool(req.include_low_loc_sites),
     }
     with open(job_dir / "config.yaml", "w") as f:
         yaml.dump(config, f, default_flow_style=False, allow_unicode=True)

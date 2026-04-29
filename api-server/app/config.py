@@ -48,6 +48,12 @@ class Settings(BaseSettings):
     LOG_DIR: str = "/app/storage/logs"
     FILE_SHARE_DIR: str = "/app/storage/file_share"
     PTMQUANT_DIR: str = "/app/storage/ptmquant"
+    # v0.5.3: shared AlphaPeptDeep predicted-library cache (container path).
+    # Every PTMQuant job mounts this directory into the ptmquant container
+    # and diaquant reuses cached libraries keyed by FASTA + PTM set +
+    # instrument + enzyme + m/z range so the expensive AlphaPeptDeep
+    # prediction runs at most once per (species, FASTA, PTMs) tuple.
+    PTMQUANT_LIB_CACHE_DIR: str = "/app/storage/ptmquant/predicted_lib_cache"
     HOST_DATA_DIR: str = ""
 
     # Cloud LLM keys (optional)

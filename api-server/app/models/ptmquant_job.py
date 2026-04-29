@@ -32,6 +32,12 @@ class PTMQuantJob(Base):
     # AlphaPeptDeep options (added in v0.5.2). Stored as TINYINT(1) in MySQL.
     predicted_library: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     transfer_learning: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # Phospho localization filter (v0.5.3).  site_probability_cutoff is the
+    # minimum Best.Site.Probability kept in report.ptm_site_matrix.tsv; when
+    # include_low_loc_sites is True every site is reported and downstream
+    # consumers filter on the per-row probability column.
+    site_probability_cutoff: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    include_low_loc_sites: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
     progress: Mapped[float] = mapped_column(Float, default=0.0)
     log: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
