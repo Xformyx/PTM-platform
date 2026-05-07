@@ -270,12 +270,18 @@ async def _run_ptmquant(job_id: str, db_url: str, attach_container_id: str | Non
             await _publish({"type": "log", "message": f"[복구] 실행 중인 컨테이너에 재연결됨 ({attach_container_id[:12]})", "progress": 47})
         else:
             await _publish({"type": "log", "message": f"Starting ptmquant container (mem={mem_limit}{', resume' if resume_flag else ''}{batch_msg})...", "progress": 5})
+            # Use job name as container name (sanitized, with job_id suffix for uniqueness)
+            _name_file = job_path / "job_name.txt"
+            _job_name = _name_file.read_text().strip() if _name_file.exists() else job_id[:8]
+            safe_name = re.sub(r"[^a-zA-Z0-9_.-]", "_", _job_name)[:40]
+            container_name = f"ptmquant_{safe_name}_{job_id[:8]}"
             container = await asyncio.to_thread(
                 client.containers.run,
                 "ptmquant:latest",
                 command=docker_command,
                 volumes=volumes,
                 mem_limit=mem_limit,
+                name=container_name,
                 detach=True,
                 remove=False,
             )
@@ -666,6 +672,7 @@ async def create_job(
     (job_dir / "output_subdir.txt").write_text(req.output_subdir)
     (job_dir / "max_memory_gb.txt").write_text(str(max(8, min(req.max_memory_gb, 128))))
     (job_dir / "resume.txt").write_text("1" if req.resume else "0")
+    (job_dir / "job_name.txt").write_text(req.name)
 
     # Create output directory in file_share
     out_dir = share / req.output_subdir
@@ -820,6 +827,38 @@ async def cancel_job(
     await db.commit()
 
     return {"ok": True, "killed": killed}
+
+
+@router.post("/jobs/{job_id}/retry")
+async def retry_job(
+    job_id: str,
+    db: AsyncSession = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Reset a failed/cancelled job and re-run it."""
+    result = await db.execute(select(PTMQuantJob).where(PTMQuantJob.job_id == job_id))
+    job = result.scalar_one_or_none()
+    if not job:
+        raise HTTPException(404, detail="Job not found")
+    if job.status not in ("failed", "cancelled"):
+        raise HTTPException(400, detail=f"Only failed or cancelled jobs can be retried (status: {job.status})")
+
+    # Reset job state (including timestamps so elapsed time restarts from zero)
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+    job.status = "pending"
+    job.progress = 0
+    job.error_message = None
+    job.log = ""
+    job.created_at = now
+    job.updated_at = now
+    await db.commit()
+    await db.refresh(job)
+
+    db_url = str(settings.DATABASE_URL)
+    asyncio.create_task(_run_ptmquant(job_id, db_url))
+    logger.info(f"[PTMQuant] Retrying job {job_id} ({job.name})")
+    return {"ok": True, "job_id": job_id}
 
 
 @router.delete("/jobs/{job_id}", status_code=204)

@@ -3,7 +3,7 @@ import {
   FlaskConical, PlusCircle, RefreshCw, Trash2, Download, Eye,
   ChevronDown, ChevronRight, Loader2, FileText, CheckCircle2,
   Clock, XCircle, StopCircle, Folder, FolderOpen, ChevronRight as BreadcrumbSep,
-  Home,
+  Home, RotateCcw,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -921,6 +921,13 @@ export default function PTMQuant() {
     } catch (e: unknown) { alert(e instanceof Error ? e.message : "삭제 실패"); }
   }, [expandedId]);
 
+  const retryJob = useCallback(async (jobId: string) => {
+    try {
+      await api.post(`/ptmquant/jobs/${jobId}/retry`, {});
+      await refreshJob(jobId);
+    } catch (e: unknown) { alert(e instanceof Error ? e.message : "재실행 실패"); }
+  }, []);  // eslint-disable-line
+
   const cancelJob = useCallback(async (jobId: string) => {
     if (!confirm("실행 중인 작업을 중단하시겠습니까?")) return;
     try {
@@ -1042,6 +1049,12 @@ export default function PTMQuant() {
                             <Button variant="ghost" size="icon" className="h-7 w-7 text-orange-500 hover:text-orange-600"
                               onClick={() => cancelJob(job.job_id)} title="중단">
                               <StopCircle className="h-3.5 w-3.5" />
+                            </Button>
+                          )}
+                          {(job.status === "failed" || job.status === "cancelled") && (
+                            <Button variant="ghost" size="icon" className="h-7 w-7 text-blue-500 hover:text-blue-600"
+                              onClick={() => retryJob(job.job_id)} title="재실행">
+                              <RotateCcw className="h-3.5 w-3.5" />
                             </Button>
                           )}
                           <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive"
