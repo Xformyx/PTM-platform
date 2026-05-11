@@ -240,17 +240,16 @@ async def _resume_orphaned_ptmquant_jobs() -> None:
     """On startup, re-attach progress tracking for ptmquant containers still running.
     Only re-attaches if the Docker container is actually alive; does NOT start new ones.
     """
-    import docker as docker_sdk  # type: ignore
     from pathlib import Path
     from app.core.database import get_db
     from app.models.ptmquant_job import PTMQuantJob
-    from app.api.ptmquant import _run_ptmquant
+    from app.api.ptmquant import _ptmquant_docker_client, _run_ptmquant
     from app.config import get_settings as _get_settings
 
     await asyncio.sleep(3)
     _settings = _get_settings()
     try:
-        client = docker_sdk.from_env()
+        client = _ptmquant_docker_client()
     except Exception as e:
         logger.warning(f"Docker unavailable at startup, skipping orphan recovery: {e}")
         return

@@ -34,6 +34,35 @@ logger = logging.getLogger("ptm-platform.ptmquant")
 
 settings = get_settings()
 
+
+def _ptmquant_docker_client():
+    """Docker SDK client with a long API read timeout for PTMQuant jobs.
+
+    docker-py defaults to ~60 seconds.  Streaming ``container.logs(follow=True)``
+    fails with ``UnixHTTPConnectionPool … Read timed out (read timeout=60)`` when
+    diaquant spends many minutes between log lines; ``container.wait()`` can hit the
+    same limit on some Docker/API combinations.
+
+    Set ``DOCKER_CLIENT_TIMEOUT_SECONDS`` (integer seconds, e.g. ``604800``) to override.
+    Use ``<= 0`` or ``0`` for the library default (~60 s) when debugging.
+    """
+    import docker as docker_sdk  # type: ignore
+
+    raw = os.environ.get("DOCKER_CLIENT_TIMEOUT_SECONDS", "").strip()
+    if not raw:
+        return docker_sdk.from_env(timeout=7 * 24 * 3600)
+    try:
+        timeout_sec = int(raw, 10)
+    except ValueError:
+        logger.warning(
+            "Invalid DOCKER_CLIENT_TIMEOUT_SECONDS=%r; using 7-day timeout", raw,
+        )
+        return docker_sdk.from_env(timeout=7 * 24 * 3600)
+    if timeout_sec <= 0:
+        return docker_sdk.from_env()
+    return docker_sdk.from_env(timeout=timeout_sec)
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Pass definitions (multi-select in UI)
 # ──────────────────────────────────────────────────────────────────────────────
@@ -180,8 +209,6 @@ async def _run_ptmquant(job_id: str, db_url: str, attach_container_id: str | Non
     """Execute ptmquant:latest in a sibling Docker container, stream progress.
     If attach_container_id is given, skip container creation and attach to that existing container.
     """
-    import docker as docker_sdk  # type: ignore
-
     redis = await get_redis()
     channel = f"ptmquant:progress:{job_id}"
 
@@ -261,7 +288,7 @@ async def _run_ptmquant(job_id: str, db_url: str, attach_container_id: str | Non
         else ""
     )
     try:
-        client = docker_sdk.from_env()
+        client = _ptmquant_docker_client()
 
         if attach_container_id:
             # Re-attach to an already-running container (e.g. after server restart)
@@ -490,13 +517,11 @@ class JobResponse(BaseModel):
 @router.get("/memory-info")
 async def get_memory_info(_=Depends(get_current_user)):
     """Return host system total RAM and Docker daemon memory limit (in GB)."""
-    import docker as docker_sdk  # type: ignore
-
     host_total_gb: Optional[int] = None
     docker_limit_gb: Optional[int] = None
 
     try:
-        client = docker_sdk.from_env()
+        client = _ptmquant_docker_client()
         info = client.info()
         # Docker reports MemTotal in bytes (the memory available to Docker VM)
         mem_bytes = info.get("MemTotal", 0)
@@ -790,8 +815,6 @@ async def cancel_job(
     _=Depends(get_current_user),
 ):
     """Kill the running Docker container and mark job as cancelled."""
-    import docker as docker_sdk  # type: ignore
-
     result = await db.execute(select(PTMQuantJob).where(PTMQuantJob.job_id == job_id))
     job = result.scalar_one_or_none()
     if not job:
@@ -806,7 +829,7 @@ async def cancel_job(
     if container_id_file.exists():
         container_id = container_id_file.read_text().strip()
         try:
-            client = await asyncio.to_thread(docker_sdk.from_env)
+            client = await asyncio.to_thread(_ptmquant_docker_client)
             container = await asyncio.to_thread(client.containers.get, container_id)
             await asyncio.to_thread(container.kill)
             await asyncio.to_thread(container.remove, **{"force": True})
@@ -843,15 +866,11 @@ async def retry_job(
     if job.status not in ("failed", "cancelled"):
         raise HTTPException(400, detail=f"Only failed or cancelled jobs can be retried (status: {job.status})")
 
-    # Reset job state (including timestamps so elapsed time restarts from zero)
-    from datetime import datetime, timezone
-    now = datetime.now(timezone.utc)
+    # Reset job state
     job.status = "pending"
     job.progress = 0
     job.error_message = None
     job.log = ""
-    job.created_at = now
-    job.updated_at = now
     await db.commit()
     await db.refresh(job)
 
