@@ -63,6 +63,57 @@ def _ptmquant_docker_client():
     return docker_sdk.from_env(timeout=timeout_sec)
 
 
+def _discard_stale_named_ptmquant_container(
+    client,
+    container_name: str,
+    job_dir: Path,
+) -> None:
+    """Remove a leftover Docker container before ``containers.run(.., name=…)``.
+
+    Re-run/retry reuse ``ptmquant_{job}_{uuid8}``.  If a previous run ended with a
+    client timeout, killed daemon, or ``remove`` never ran, the old container
+    still holds the name and Docker returns HTTP 409 Conflict.
+    """
+    import docker.errors as docker_errors  # type: ignore
+
+    cid_file = job_dir / "container_id.txt"
+    cid = cid_file.read_text().strip() if cid_file.exists() else ""
+    if cid:
+        try:
+            client.containers.get(cid).remove(force=True)
+            logger.info(
+                "[ptmquant] removed stale container %.12s (from container_id.txt) before create",
+                cid,
+            )
+        except docker_errors.NotFound:  # noqa: BLE001 — expected
+            pass
+        except Exception as exc:  # pragma: no cover — log and retry by name below
+            logger.warning(
+                "[ptmquant] could not remove container %.12s: %s",
+                cid,
+                exc,
+            )
+        try:
+            cid_file.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    try:
+        client.containers.get(container_name).remove(force=True)
+        logger.info(
+            "[ptmquant] removed stale named container %r before create",
+            container_name,
+        )
+    except docker_errors.NotFound:  # noqa: BLE001
+        pass
+    except Exception as exc:
+        logger.warning(
+            "[ptmquant] could not remove container by name %r: %s",
+            container_name,
+            exc,
+        )
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Pass definitions (multi-select in UI)
 # ──────────────────────────────────────────────────────────────────────────────
@@ -302,6 +353,12 @@ async def _run_ptmquant(job_id: str, db_url: str, attach_container_id: str | Non
             _job_name = _name_file.read_text().strip() if _name_file.exists() else job_id[:8]
             safe_name = re.sub(r"[^a-zA-Z0-9_.-]", "_", _job_name)[:40]
             container_name = f"ptmquant_{safe_name}_{job_id[:8]}"
+            await asyncio.to_thread(
+                _discard_stale_named_ptmquant_container,
+                client,
+                container_name,
+                job_path,
+            )
             container = await asyncio.to_thread(
                 client.containers.run,
                 "ptmquant:latest",
