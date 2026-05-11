@@ -326,7 +326,18 @@ async def _run_ptmquant(job_id: str, db_url: str, attach_container_id: str | Non
 
     resume_file = job_path / "resume.txt"
     resume_flag = resume_file.exists() and resume_file.read_text().strip() == "1"
-    docker_command = "run --config /work/config.yaml" + (" --resume" if resume_flag else "")
+    # v0.6.0+: diaquant `run` defaults to --engine alphadia.  Platform jobs still
+    # use the Sage + multipass + predicted-library path unless explicitly opted
+    # into AlphaDIA via PTMQUANT_DIAQUANT_ENGINE=alphadia.
+    _diaqu_engine = os.environ.get("PTMQUANT_DIAQUANT_ENGINE", "sage").strip().lower()
+    if _diaqu_engine == "alphadia":
+        _engine_arg = ""
+    else:
+        _engine_arg = " --engine sage"
+    docker_command = (
+        f"run --config /work/config.yaml{_engine_arg}"
+        + (" --resume" if resume_flag else "")
+    )
 
     # Read batch_size for informational log message
     batch_size_info = cfg.get("batch_size", 0)
