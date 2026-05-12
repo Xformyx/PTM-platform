@@ -14,7 +14,7 @@ import shutil
 import threading
 import uuid
 from pathlib import Path
-from typing import AsyncGenerator, Optional
+from typing import AsyncGenerator, Literal, Optional
 
 import yaml
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -326,17 +326,30 @@ async def _run_ptmquant(job_id: str, db_url: str, attach_container_id: str | Non
 
     resume_file = job_path / "resume.txt"
     resume_flag = resume_file.exists() and resume_file.read_text().strip() == "1"
-    # v0.6.0+: diaquant `run` defaults to --engine alphadia.  Platform jobs still
-    # use the Sage + multipass + predicted-library path unless explicitly opted
-    # into AlphaDIA via PTMQUANT_DIAQUANT_ENGINE=alphadia.
-    _diaqu_engine = os.environ.get("PTMQUANT_DIAQUANT_ENGINE", "sage").strip().lower()
-    if _diaqu_engine == "alphadia":
-        _engine_arg = ""
+    # Resolve diaquant search engine:
+    #   1) job config.yaml ``search_engine`` / ``engine`` (written by POST /jobs)
+    #   2) else PTMQUANT_DIAQUANT_ENGINE (default sage — legacy jobs without yaml key)
+    _yaml_eng = str(cfg.get("search_engine") or cfg.get("engine") or "").strip().lower()
+    if _yaml_eng in ("alphadia", "sage"):
+        _diaqu_engine = _yaml_eng
     else:
-        _engine_arg = " --engine sage"
+        _diaqu_engine = os.environ.get(
+            "PTMQUANT_DIAQUANT_ENGINE", "sage"
+        ).strip().lower()
+    if _diaqu_engine not in ("alphadia", "sage"):
+        _diaqu_engine = "sage"
+    _engine_arg = "" if _diaqu_engine == "alphadia" else " --engine sage"
     docker_command = (
         f"run --config /work/config.yaml{_engine_arg}"
         + (" --resume" if resume_flag else "")
+    )
+    logger.info(
+        "[ptmquant] job %s diaquant argv: %s (resolved_engine=%s, yaml=%r, env=%r)",
+        job_id,
+        docker_command,
+        _diaqu_engine,
+        cfg.get("search_engine"),
+        os.environ.get("PTMQUANT_DIAQUANT_ENGINE"),
     )
 
     # Read batch_size for informational log message
@@ -532,6 +545,8 @@ class CreateJobRequest(BaseModel):
     # include_low_loc_sites=True to keep all sites and filter downstream.
     site_probability_cutoff: float = 0.75
     include_low_loc_sites: bool = False
+    # diaquant CLI --engine (stored in job config.yaml; overrides loose env defaults).
+    search_engine: Literal["alphadia", "sage"] = "alphadia"
 
 
 class JobResponse(BaseModel):
@@ -828,6 +843,8 @@ async def create_job(
         # v0.5.3: phospho localization-probability filter for the site matrix.
         "site_probability_cutoff": float(req.site_probability_cutoff),
         "include_low_loc_sites": bool(req.include_low_loc_sites),
+        # Propagates to Docker argv via _run_ptmquant (diaquant ignores unknown YAML keys).
+        "search_engine": req.search_engine,
     }
     with open(job_dir / "config.yaml", "w") as f:
         yaml.dump(config, f, default_flow_style=False, allow_unicode=True)

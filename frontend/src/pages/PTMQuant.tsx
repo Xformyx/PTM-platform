@@ -340,6 +340,8 @@ function CreateJobDialog({ open, onClose, onCreated, passes: passDefs, fastaFile
   const [resume,         setResume]         = useState(false);
   const [enzyme,         setEnzyme]         = useState("trypsin");
   const [instrument,     setInstrument]     = useState("exploris_240");
+  /** diaquant `--engine`; stored in job config.yaml */
+  const [searchEngine,   setSearchEngine]   = useState<"alphadia" | "sage">("alphadia");
   // v0.5.3: AlphaPeptDeep predicted-library is enabled by default — cached
   // libraries are shared across jobs keyed by FASTA + PTM set so turning it
   // on costs almost nothing on subsequent identical runs.
@@ -370,6 +372,7 @@ function CreateJobDialog({ open, onClose, onCreated, passes: passDefs, fastaFile
       setResume(false);
       setEnzyme("trypsin");
       setInstrument("exploris_240");
+      setSearchEngine("alphadia");
       setPredictedLib(true);
       setTransferLearn(false);
       setSiteCutoff(0.75);
@@ -429,6 +432,7 @@ function CreateJobDialog({ open, onClose, onCreated, passes: passDefs, fastaFile
         transfer_learning: transferLearn,
         site_probability_cutoff: siteCutoff,
         include_low_loc_sites: includeLowLoc,
+        search_engine: searchEngine,
       });
       onCreated(job);
       onClose();
@@ -565,6 +569,21 @@ function CreateJobDialog({ open, onClose, onCreated, passes: passDefs, fastaFile
                 <p className="text-[10px] text-muted-foreground">{instrumentOpts.find(o => o.id === instrument)?.description}</p>
               )}
             </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-xs font-medium">검색 엔진</Label>
+            <select
+              value={searchEngine}
+              onChange={e => setSearchEngine(e.target.value as "alphadia" | "sage")}
+              className="w-full max-w-md rounded-md border border-input bg-background px-2 py-1.5 text-sm"
+            >
+              <option value="alphadia">AlphaDIA (기본)</option>
+              <option value="sage">Sage (레거시 multipass)</option>
+            </select>
+            <p className="text-[10px] text-muted-foreground">
+              새 작업은 선택값이 config.yaml에 저장됩니다. 예전 작업 재실행 시에는 해당 파일의 값이 우선하고, 없으면 서버 환경변수 PTMQUANT_DIAQUANT_ENGINE을 사용합니다.
+            </p>
           </div>
 
           {/* v0.5.2: AlphaPeptDeep toggles */}

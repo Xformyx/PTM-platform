@@ -128,6 +128,8 @@ services:
       PTMQUANT_DIR: /app/storage/ptmquant
       PTMQUANT_LIB_CACHE_DIR: ${PTMQUANT_LIB_CACHE_DIR:-/app/storage/predicted_lib_cache}
       HOST_DATA_DIR: ${HOST_DATA_DIR:-}
+      # Fallback when job config.yaml has no search_engine (older jobs). New jobs store per-job choice.
+      PTMQUANT_DIAQUANT_ENGINE: ${PTMQUANT_DIAQUANT_ENGINE:-sage}
       LLM_MODEL: ${LLM_MODEL:-gemma3:27b}
       # Cloud API keys come from env_file (.env) only — avoids shell env overriding
     extra_hosts:
