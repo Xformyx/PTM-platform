@@ -1,10 +1,24 @@
 import logging
 import sys
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from app.config import get_settings
 
 settings = get_settings()
+
+_LOG_TZ = ZoneInfo("Asia/Seoul")
+
+
+class KSTFormatter(logging.Formatter):
+    """Log timestamps in Asia/Seoul (KST, UTC+9) for file and console."""
+
+    def formatTime(self, record: logging.LogRecord, datefmt: str | None = None) -> str:
+        dt = datetime.fromtimestamp(record.created, tz=_LOG_TZ)
+        if datefmt:
+            return dt.strftime(datefmt)
+        return dt.strftime("%Y-%m-%d %H:%M:%S") + f",{int(dt.microsecond / 1000):03d}"
 
 
 def setup_logging() -> logging.Logger:
@@ -13,7 +27,7 @@ def setup_logging() -> logging.Logger:
         if settings.APP_ENV == "development"
         else '{"time":"%(asctime)s","level":"%(levelname)s","logger":"%(name)s","msg":"%(message)s"}'
     )
-    formatter = logging.Formatter(log_format)
+    formatter = KSTFormatter(log_format)
     level = logging.DEBUG if settings.DEBUG else logging.INFO
 
     root = logging.getLogger()

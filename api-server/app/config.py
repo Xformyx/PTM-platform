@@ -56,6 +56,11 @@ class Settings(BaseSettings):
     PTMQUANT_LIB_CACHE_DIR: str = "/app/storage/ptmquant/predicted_lib_cache"
     HOST_DATA_DIR: str = ""
 
+    # PTMQuant Docker runner: if true, do not `docker rm` the job container when
+    # diaquant exits non-zero — keeps `docker logs <id>` available for debugging.
+    # Retrying the same job removes the stale container by name before recreate.
+    PTMQUANT_KEEP_CONTAINER_ON_FAILURE: bool = False
+
     # Cloud LLM keys (optional)
     GEMINI_API_KEY: Optional[str] = None
     OPENAI_API_KEY: Optional[str] = None

@@ -134,6 +134,30 @@ async def _run_migrations(conn) -> None:
         "include_low_loc_sites TINYINT(1) NULL DEFAULT 0 "
         "COMMENT 'Keep sites below site_probability_cutoff (diaquant v0.5.3)'"
     )
+    await _add_column_if_missing(
+        conn, "ptmquant_jobs", "search_engine",
+        "search_engine VARCHAR(16) NULL COMMENT 'alphadia vs sage (diaquant CLI --engine)'"
+    )
+    await _add_column_if_missing(
+        conn, "ptmquant_jobs", "max_var_mod_num",
+        "max_var_mod_num TINYINT NULL DEFAULT 2 "
+        "COMMENT 'AlphaDIA library_prediction.max_var_mod_num override (2=safe default, 3=diaquant phospho default causes OOM)'"
+    )
+    await _add_column_if_missing(
+        conn, "ptmquant_jobs", "missed_cleavages",
+        "missed_cleavages TINYINT NULL DEFAULT 1 "
+        "COMMENT 'Missed cleavages override (1=safe default; phospho pass default 2 doubles speclib → DecoyGenerator OOM)'"
+    )
+    await _add_column_if_missing(
+        conn, "ptmquant_jobs", "max_precursors",
+        "max_precursors INT NULL DEFAULT NULL "
+        "COMMENT 'pred_lib_max_precursors hard cap; NULL = no cap (diaquant default 50M)'"
+    )
+    await _add_column_if_missing(
+        conn, "ptmquant_jobs", "alphadia_threads",
+        "alphadia_threads TINYINT NULL DEFAULT NULL "
+        "COMMENT 'AlphaDIA general.thread_count; NULL=auto, 0=auto, 2-6=memory-safe cap (PTMQUANT_ALPHADIA_THREADS)'"
+    )
     # phase_b_cache: PMID 목록 저장 컬럼 (subset matching v2)
     await _add_column_if_missing(
         conn, "phase_b_cache", "pmid_list",

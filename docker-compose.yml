@@ -129,7 +129,12 @@ services:
       PTMQUANT_LIB_CACHE_DIR: ${PTMQUANT_LIB_CACHE_DIR:-/app/storage/predicted_lib_cache}
       HOST_DATA_DIR: ${HOST_DATA_DIR:-}
       # Fallback when job config.yaml has no search_engine (older jobs). New jobs store per-job choice.
-      PTMQUANT_DIAQUANT_ENGINE: ${PTMQUANT_DIAQUANT_ENGINE:-sage}
+      PTMQUANT_DIAQUANT_ENGINE: ${PTMQUANT_DIAQUANT_ENGINE:-alphadia}
+      # Keep failed ptmquant worker containers for docker logs / inspect (see .env.example).
+      PTMQUANT_KEEP_CONTAINER_ON_FAILURE: "${PTMQUANT_KEEP_CONTAINER_ON_FAILURE:-false}"
+      # AlphaDIA worker thread count override (see .env.example for memory-tier guidance).
+      # Omit (or set empty) to use the auto-calculated value from max_memory_gb.
+      PTMQUANT_ALPHADIA_THREADS: "${PTMQUANT_ALPHADIA_THREADS:-}"
       LLM_MODEL: ${LLM_MODEL:-gemma3:27b}
       # Cloud API keys come from env_file (.env) only — avoids shell env overriding
     extra_hosts:

@@ -73,6 +73,10 @@ interface Job {
   transfer_learning?: boolean | null;
   site_probability_cutoff?: number | null;
   include_low_loc_sites?: boolean | null;
+  search_engine?: string | null;
+  max_var_mod_num?: number | null;
+  missed_cleavages?: number | null;
+  max_precursors?: number | null;
   input_files: string[] | null;
   passes: string[] | null;
   output_subdir: string | null;
@@ -112,6 +116,12 @@ function toUtcDate(iso: string): Date {
   return new Date(iso);
 }
 
+/** Finished job that can be re-run (API: done | failed | cancelled). */
+function ptmquantRetryableStatus(status: string | undefined): boolean {
+  const s = (status ?? "").trim().toLowerCase();
+  return s === "done" || s === "failed" || s === "cancelled";
+}
+
 function fmtElapsed(start: string, end: string | null, status: Job["status"]) {
   try {
     const s = toUtcDate(start).getTime();
@@ -139,6 +149,29 @@ function StatusBadge({ status }: { status: Job["status"] }) {
   return (
     <span className={cn("inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border whitespace-nowrap", c.cls)}>
       {c.icon}{c.label}
+    </span>
+  );
+}
+
+function SearchEngineTag({ engine }: { engine: string | null | undefined }) {
+  const e = (engine ?? "").trim().toLowerCase();
+  if (e === "alphadia") {
+    return (
+      <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-semibold border bg-violet-500/12 text-violet-700 dark:text-violet-300 border-violet-400/40 whitespace-nowrap">
+        AlphaDIA
+      </span>
+    );
+  }
+  if (e === "sage") {
+    return (
+      <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-semibold border bg-amber-500/12 text-amber-800 dark:text-amber-200 border-amber-400/40 whitespace-nowrap">
+        Sage
+      </span>
+    );
+  }
+  return (
+    <span className="text-[10px] text-muted-foreground tabular-nums" title="실행이 시작되면 표시됩니다">
+      —
     </span>
   );
 }
@@ -352,6 +385,13 @@ function CreateJobDialog({ open, onClose, onCreated, passes: passDefs, fastaFile
   // every site and filter downstream on the per-row Best.Site.Probability.
   const [siteCutoff,     setSiteCutoff]     = useState(0.75);
   const [includeLowLoc,  setIncludeLowLoc]  = useState(false);
+  // max_var_mod_num: diaquant phospho pass internally sets 3 (→ ~47M precursors → PeptDeep OOM).
+  // Default 2 matches AlphaDIA's own default and is safe for typical proteomes.
+  const [maxVarModNum,   setMaxVarModNum]   = useState(2);
+  // missed_cleavages: phospho pass default 2 → ~15GB speclib → DecoyGenerator OOM. Default 1 is safe.
+  const [missedCleavages, setMissedCleavages] = useState(1);
+  // pred_lib_max_precursors hard cap. 0 = no cap (diaquant default 50M).
+  const [maxPrecursors,  setMaxPrecursors]  = useState(0);
   const [enzymeOpts,     setEnzymeOpts]     = useState<{id:string;label:string;description:string}[]>([]);
   const [instrumentOpts, setInstrumentOpts] = useState<{id:string;label:string;description:string}[]>([]);
   const [error,          setError]          = useState("");
@@ -377,6 +417,9 @@ function CreateJobDialog({ open, onClose, onCreated, passes: passDefs, fastaFile
       setTransferLearn(false);
       setSiteCutoff(0.75);
       setIncludeLowLoc(false);
+      setMaxVarModNum(2);
+      setMissedCleavages(1);
+      setMaxPrecursors(0);
       setError("");
       autoFilledRef.current = { name: "", subdir: "" };
     }
@@ -433,6 +476,9 @@ function CreateJobDialog({ open, onClose, onCreated, passes: passDefs, fastaFile
         site_probability_cutoff: siteCutoff,
         include_low_loc_sites: includeLowLoc,
         search_engine: searchEngine,
+        max_var_mod_num: maxVarModNum,
+        missed_cleavages: missedCleavages,
+        max_precursors: maxPrecursors > 0 ? maxPrecursors : null,
       });
       onCreated(job);
       onClose();
@@ -635,6 +681,108 @@ function CreateJobDialog({ open, onClose, onCreated, passes: passDefs, fastaFile
               <span>저신뢰 사이트도 매트릭스에 포함 (include_low_loc_sites)</span>
             </label>
           </div>
+          {/* Max Variable Modifications */}
+          <div className="space-y-2 rounded-lg border px-3 py-3">
+            <div className="flex items-center justify-between">
+              <Label className="text-xs font-medium">최대 가변 변형 수 (max_var_mod_num)</Label>
+              <span className={cn(
+                "text-xs font-mono font-semibold px-1.5 py-0.5 rounded",
+                maxVarModNum <= 2 ? "bg-green-500/15 text-green-700 dark:text-green-300" : "bg-red-500/15 text-red-700 dark:text-red-300"
+              )}>{maxVarModNum}</span>
+            </div>
+            <div className="flex gap-2">
+              {[1, 2, 3].map(v => (
+                <button
+                  key={v}
+                  type="button"
+                  onClick={() => setMaxVarModNum(v)}
+                  className={cn(
+                    "flex-1 rounded-md border py-1.5 text-sm font-medium transition-colors",
+                    maxVarModNum === v
+                      ? v <= 2
+                        ? "border-green-500 bg-green-500/10 text-green-700 dark:text-green-300"
+                        : "border-red-500 bg-red-500/10 text-red-700 dark:text-red-300"
+                      : "border-border hover:bg-muted/50 text-muted-foreground"
+                  )}
+                >
+                  {v}
+                </button>
+              ))}
+            </div>
+            <p className="text-[10px] text-muted-foreground">
+              AlphaDIA가 한 펩타이드에 허용하는 가변 변형 조합 수. 기본값 3은 Mouse proteome에서 ~4,700만 precursor를 생성해 PeptDeep 메모리 오류를 유발할 수 있습니다.
+              <span className="text-green-700 dark:text-green-400 font-medium"> 2 권장</span>
+            </p>
+          </div>
+
+          {/* Missed Cleavages */}
+          <div className="space-y-2 rounded-lg border px-3 py-3">
+            <div className="flex items-center justify-between">
+              <Label className="text-xs font-medium">Missed Cleavages</Label>
+              <span className={cn(
+                "text-xs font-mono font-semibold px-1.5 py-0.5 rounded",
+                missedCleavages <= 1
+                  ? "bg-green-500/15 text-green-700 dark:text-green-300"
+                  : "bg-amber-500/15 text-amber-700 dark:text-amber-300"
+              )}>{missedCleavages}</span>
+            </div>
+            <div className="flex gap-2">
+              {[0, 1, 2, 3].map(v => (
+                <button key={v} type="button" onClick={() => setMissedCleavages(v)}
+                  className={cn(
+                    "flex-1 rounded-md border py-1.5 text-sm font-medium transition-colors",
+                    missedCleavages === v
+                      ? v <= 1
+                        ? "border-green-500 bg-green-500/10 text-green-700 dark:text-green-300"
+                        : "border-amber-500 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                      : "border-border hover:bg-muted/50 text-muted-foreground"
+                  )}
+                >{v}</button>
+              ))}
+            </div>
+            <p className="text-[10px] text-muted-foreground">
+              tryptic 절단 미완성 펩타이드 허용 수. Phospho pass 기본값 2는 speclib를 ~2배로 키워 DecoyGenerator OOM을 유발할 수 있습니다.
+              <span className="text-green-700 dark:text-green-400 font-medium"> 1 권장</span>
+            </p>
+          </div>
+
+          {/* Max Precursors */}
+          <div className="space-y-2 rounded-lg border px-3 py-3">
+            <div className="flex items-center justify-between">
+              <Label className="text-xs font-medium">Precursor 상한 (max_precursors)</Label>
+              <span className={cn(
+                "text-xs font-mono font-semibold px-1.5 py-0.5 rounded",
+                maxPrecursors === 0
+                  ? "bg-muted text-muted-foreground"
+                  : maxPrecursors <= 20_000_000
+                    ? "bg-green-500/15 text-green-700 dark:text-green-300"
+                    : "bg-amber-500/15 text-amber-700 dark:text-amber-300"
+              )}>
+                {maxPrecursors === 0 ? "제한 없음" : `${(maxPrecursors / 1_000_000).toFixed(0)}M`}
+              </span>
+            </div>
+            <div className="flex gap-2">
+              {([0, 10_000_000, 15_000_000, 20_000_000, 30_000_000] as const).map(v => (
+                <button key={v} type="button" onClick={() => setMaxPrecursors(v)}
+                  className={cn(
+                    "flex-1 rounded-md border py-1 text-xs font-medium transition-colors",
+                    maxPrecursors === v
+                      ? v === 0
+                        ? "border-border bg-muted text-muted-foreground"
+                        : v <= 20_000_000
+                          ? "border-green-500 bg-green-500/10 text-green-700 dark:text-green-300"
+                          : "border-amber-500 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                      : "border-border hover:bg-muted/50 text-muted-foreground"
+                  )}
+                >{v === 0 ? "없음" : `${v / 1_000_000}M`}</button>
+              ))}
+            </div>
+            <p className="text-[10px] text-muted-foreground">
+              PeptDeep에 넘기는 precursor 수 상한. Mouse proteome + Phospho에서 30M 이상이면 메모리 급증 위험.
+              <span className="text-green-700 dark:text-green-400 font-medium"> 15M 권장</span>
+            </p>
+          </div>
+
           {/* Advanced */}
           <div className="grid grid-cols-2 gap-4">
             {/* CPU Threads */}
@@ -691,7 +839,15 @@ function CreateJobDialog({ open, onClose, onCreated, passes: passDefs, fastaFile
 
 // ── Expanded Job Detail Row ────────────────────────────────────────────────
 
-function JobDetail({ job, onRefresh }: { job: Job; onRefresh: (id: string) => void }) {
+function JobDetail({
+  job,
+  onRefresh,
+  onRetry,
+}: {
+  job: Job;
+  onRefresh: (id: string) => void;
+  onRetry: (job: Job) => void;
+}) {
   const [log, setLog] = useState<string[]>([]);
   const [fileStatus, setFileStatus] = useState("");
   const [outputFiles, setOutputFiles] = useState<OutputFile[]>([]);
@@ -733,12 +889,33 @@ function JobDetail({ job, onRefresh }: { job: Job; onRefresh: (id: string) => vo
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [log]);
 
+  const canRetry = ptmquantRetryableStatus(job.status);
+
   return (
     <div className="px-4 py-3 space-y-3 border-t border-border/40">
+      {canRetry && (
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant="secondary"
+            size="sm"
+            className="h-8 gap-1.5"
+            onClick={(e) => { e.stopPropagation(); onRetry(job); }}
+          >
+            <RotateCcw className="h-3.5 w-3.5" /> 재실행
+          </Button>
+          <span className="text-xs text-muted-foreground self-center">
+            실패·취소·완료된 작업을 같은 설정으로 다시 실행할 수 있습니다. (완료 후 재실행 시 출력 폴더 내용은 파이프라인에 따라 덮어쓰기 될 수 있습니다.)
+          </span>
+        </div>
+      )}
       {/* Job meta summary */}
       <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-muted-foreground">
         <span><span className="font-medium text-foreground">출력 폴더:</span> {job.output_subdir ?? "—"}</span>
         <span><span className="font-medium text-foreground">패스:</span> {job.passes?.join(", ") ?? "—"}</span>
+        <span className="inline-flex items-center gap-1.5 flex-wrap">
+          <span className="font-medium text-foreground">검색엔진:</span>
+          <SearchEngineTag engine={job.search_engine} />
+        </span>
         <span><span className="font-medium text-foreground">Reference:</span> {job.reference_file ?? "—"}</span>
         <span><span className="font-medium text-foreground">효소:</span> {job.enzyme ?? "trypsin"}</span>
         <span><span className="font-medium text-foreground">기종:</span> {job.instrument ?? "exploris_240"}</span>
@@ -750,6 +927,30 @@ function JobDetail({ job, onRefresh }: { job: Job; onRefresh: (id: string) => vo
             {job.include_low_loc_sites ? " (keep-low)" : ""}
           </span>
         ) : null}
+                {typeof job.max_var_mod_num === "number" ? (
+                  <span className={cn(
+                    "px-1.5 rounded text-[10px]",
+                    job.max_var_mod_num <= 2 ? "bg-green-500/10 text-green-700 dark:text-green-300" : "bg-red-500/10 text-red-700 dark:text-red-300"
+                  )}>
+                    varmod≤{job.max_var_mod_num}
+                  </span>
+                ) : null}
+                {typeof job.missed_cleavages === "number" ? (
+                  <span className={cn(
+                    "px-1.5 rounded text-[10px]",
+                    job.missed_cleavages <= 1 ? "bg-green-500/10 text-green-700 dark:text-green-300" : "bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                  )}>
+                    mc={job.missed_cleavages}
+                  </span>
+                ) : null}
+                {typeof job.max_precursors === "number" && job.max_precursors > 0 ? (
+                  <span className={cn(
+                    "px-1.5 rounded text-[10px]",
+                    job.max_precursors <= 20_000_000 ? "bg-green-500/10 text-green-700 dark:text-green-300" : "bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                  )}>
+                    cap={Math.round(job.max_precursors / 1_000_000)}M
+                  </span>
+                ) : null}
       </div>
 
       {/* Input file list */}
@@ -940,12 +1141,14 @@ export default function PTMQuant() {
     } catch (e: unknown) { alert(e instanceof Error ? e.message : "삭제 실패"); }
   }, [expandedId]);
 
-  const retryJob = useCallback(async (jobId: string) => {
+  const retryJob = useCallback(async (jobId: string, status?: Job["status"]) => {
+    if ((status ?? "").trim().toLowerCase() === "done"
+      && !confirm("완료된 작업을 같은 설정으로 처음부터 다시 실행합니다. 계속할까요?")) return;
     try {
       await api.post(`/ptmquant/jobs/${jobId}/retry`, {});
       await refreshJob(jobId);
     } catch (e: unknown) { alert(e instanceof Error ? e.message : "재실행 실패"); }
-  }, []);  // eslint-disable-line
+  }, [refreshJob]);
 
   const cancelJob = useCallback(async (jobId: string) => {
     if (!confirm("실행 중인 작업을 중단하시겠습니까?")) return;
@@ -998,7 +1201,7 @@ export default function PTMQuant() {
           </CardContent>
         </Card>
       ) : (
-        <Card className="overflow-hidden">
+        <Card>
           <Table>
             <TableHeader>
               <TableRow className="bg-muted/40 hover:bg-muted/40">
@@ -1006,12 +1209,15 @@ export default function PTMQuant() {
                 <TableHead>작업 이름</TableHead>
                 <TableHead>Reference</TableHead>
                 <TableHead>패스</TableHead>
+                <TableHead className="whitespace-nowrap">검색엔진</TableHead>
                 <TableHead className="text-center">파일</TableHead>
                 <TableHead className="w-36">진행률</TableHead>
                 <TableHead>상태</TableHead>
                 <TableHead className="text-right font-mono">소요시간</TableHead>
                 <TableHead>생성일</TableHead>
-                <TableHead className="w-20"></TableHead>
+                <TableHead className="w-24 text-right sticky right-0 z-30 bg-muted/40">
+                  작업
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -1022,7 +1228,11 @@ export default function PTMQuant() {
                 return (
                   <Fragment key={job.job_id}>
                     <TableRow
-                      className={cn("cursor-pointer", isExpanded && "bg-muted/20", isActive && "bg-blue-50/30 dark:bg-blue-950/10")}
+                      className={cn(
+                        "group cursor-pointer",
+                        isExpanded && "bg-muted/20",
+                        isActive && "bg-blue-50/30 dark:bg-blue-950/10",
+                      )}
                       onClick={() => setExpandedId(isExpanded ? null : job.job_id)}
                     >
                       <TableCell className="py-2">
@@ -1038,6 +1248,9 @@ export default function PTMQuant() {
                             <Badge key={p} variant="secondary" className="text-[10px] py-0 px-1.5">{p}</Badge>
                           ))}
                         </div>
+                      </TableCell>
+                      <TableCell className="py-2">
+                        <SearchEngineTag engine={job.search_engine} />
                       </TableCell>
                       <TableCell className="py-2 text-center text-sm">{job.input_files?.length ?? 0}</TableCell>
                       <TableCell className="py-2">
@@ -1062,21 +1275,31 @@ export default function PTMQuant() {
                         {tick >= 0 && fmtElapsed(job.created_at, job.updated_at, job.status)}
                       </TableCell>
                       <TableCell className="py-2 text-xs text-muted-foreground whitespace-nowrap">{fmtDate(job.created_at)}</TableCell>
-                      <TableCell className="py-2" onClick={e => e.stopPropagation()}>
-                        <div className="flex items-center gap-1 justify-end">
+                      <TableCell
+                        className={cn(
+                          "py-2 px-1 w-24 text-right sticky right-0 z-20",
+                          isActive
+                            ? "bg-blue-50/95 dark:bg-blue-950/40"
+                            : isExpanded
+                              ? "bg-muted/30"
+                              : "bg-background group-hover:bg-muted/50",
+                        )}
+                        onClick={e => e.stopPropagation()}
+                      >
+                        <div className="flex items-center justify-end gap-0.5">
                           {isActive && (
-                            <Button variant="ghost" size="icon" className="h-7 w-7 text-orange-500 hover:text-orange-600"
+                            <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0 text-orange-500 hover:text-orange-600"
                               onClick={() => cancelJob(job.job_id)} title="중단">
                               <StopCircle className="h-3.5 w-3.5" />
                             </Button>
                           )}
-                          {(job.status === "failed" || job.status === "cancelled") && (
-                            <Button variant="ghost" size="icon" className="h-7 w-7 text-blue-500 hover:text-blue-600"
-                              onClick={() => retryJob(job.job_id)} title="재실행">
+                          {ptmquantRetryableStatus(job.status) && (
+                            <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0 text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-950/30"
+                              onClick={() => retryJob(job.job_id, job.status)} title="재실행">
                               <RotateCcw className="h-3.5 w-3.5" />
                             </Button>
                           )}
-                          <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive"
+                          <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0 text-destructive hover:text-destructive"
                             onClick={() => deleteJob(job.job_id)} disabled={isActive} title="삭제">
                             <Trash2 className="h-3.5 w-3.5" />
                           </Button>
@@ -1087,8 +1310,8 @@ export default function PTMQuant() {
                     {/* Expanded Detail */}
                     {isExpanded && (
                       <TableRow className="bg-muted/5 hover:bg-muted/5">
-                        <TableCell colSpan={10} className="p-0">
-                          <JobDetail job={job} onRefresh={refreshJob} />
+                        <TableCell colSpan={11} className="p-0">
+                          <JobDetail job={job} onRefresh={refreshJob} onRetry={(j) => retryJob(j.job_id, j.status)} />
                         </TableCell>
                       </TableRow>
                     )}

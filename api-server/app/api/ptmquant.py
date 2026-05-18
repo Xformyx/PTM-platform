@@ -13,6 +13,7 @@ import re
 import shutil
 import threading
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import AsyncGenerator, Literal, Optional
 
@@ -114,6 +115,100 @@ def _discard_stale_named_ptmquant_container(
         )
 
 
+def _alphadia_threads_for_memory(max_memory_gb: int, explicit: Optional[int]) -> Optional[int]:
+    """Return AlphaDIA thread_count to use given a Docker container memory limit.
+
+    If the caller passes an explicit value (not None), that wins unconditionally.
+    When None is passed, a conservative default is derived from available RAM:
+
+      Docker RAM   →  thread_count  (rationale)
+      ─────────────────────────────────────────────────────────────────────────
+      ≤  64 GB  →  2   very tight; each worker risks OOM during DecoyGenerator
+      ≤  96 GB  →  4   current Mac Studio setup (80 GB container limit)
+      ≤ 128 GB  →  6   comfortable single-pass; headroom for 2nd pass spike
+      > 128 GB  →  0   let AlphaDIA pick (0 = auto in AlphaDIA 2.x)
+      ─────────────────────────────────────────────────────────────────────────
+
+    Returns 0 for "let AlphaDIA auto-detect", or a positive int for a hard cap.
+    Returning None means "omit the key from config.yaml" (same as 0 in practice
+    but keeps the YAML clean for servers where auto-detect is the right choice).
+    """
+    if explicit is not None:
+        return explicit
+    if max_memory_gb <= 64:
+        return 2
+    if max_memory_gb <= 96:
+        return 4
+    if max_memory_gb <= 128:
+        return 6
+    return 0  # auto — don't emit the key, let AlphaDIA decide
+
+
+def _collect_ptmquant_container_meta(
+    container,
+    *,
+    job_id: str,
+    exit_code: int,
+    mem_limit: str,
+    docker_command: str,
+    requested_container_name: str = "",
+) -> dict:
+    """Inspect an exited (or running) container for post-mortem debugging."""
+    meta: dict = {
+        "job_id": job_id,
+        "exit_code": exit_code,
+        "mem_limit": mem_limit,
+        "diaquant_argv": docker_command,
+        "requested_container_name": requested_container_name or None,
+        "ts_utc": datetime.now(timezone.utc).isoformat(),
+    }
+    try:
+        container.reload()
+        attrs = container.attrs or {}
+        st = attrs.get("State") or {}
+        meta["container_id"] = container.id
+        meta["container_short_id"] = container.short_id
+        nm = (attrs.get("Name") or "").lstrip("/")
+        if nm:
+            meta["container_name"] = nm
+        meta["oom_killed"] = bool(st.get("OOMKilled"))
+        if st.get("Error"):
+            meta["docker_state_error"] = st["Error"]
+        meta["docker_status"] = st.get("Status")
+        hc = attrs.get("HostConfig") or {}
+        mem_b = hc.get("Memory")
+        if mem_b:
+            meta["host_memory_limit_bytes"] = mem_b
+    except Exception as exc:
+        meta["inspect_error"] = str(exc)
+    return meta
+
+
+def _write_last_container_run(job_path: Path, meta: dict) -> None:
+    """Persist diagnostics beside config.yaml (bind-mounted to host storage/ptmquant/)."""
+    (job_path / "last_container_run.json").write_text(
+        json.dumps(meta, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _ptmquant_container_footer_lines(meta: dict) -> list[str]:
+    lines = [
+        "",
+        "--- ptm-platform: container finished ---",
+        (
+            f"exit_code={meta.get('exit_code')}  mem_limit={meta.get('mem_limit')}  "
+            f"OOMKilled={meta.get('oom_killed')}  "
+            f"id={meta.get('container_short_id') or str(meta.get('container_id', ''))[:12]}"
+        ),
+    ]
+    cid = meta.get("container_id") or ""
+    if cid:
+        lines.append(f"docker logs {cid}")
+        lines.append(f"docker inspect {cid}")
+    return lines
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Pass definitions (multi-select in UI)
 # ──────────────────────────────────────────────────────────────────────────────
@@ -126,6 +221,151 @@ AVAILABLE_PASSES = [
     {"id": "citrullination",  "label": "Citrullination",          "description": "Arg deimination (R → Cit, Δmass 0.984)"},
     {"id": "lactyl_acyl",     "label": "Lactylation",             "description": "Lys lactylation (K-acyl, mc=3)"},
 ]
+
+# Built-in diaquant pass profiles mirrored from diaquant.ptm_profiles.PASS_PROFILES
+# (ptmquant:latest image).  Used by _apply_max_var_mod_override() to convert
+# `passes: [phospho]` → `custom_passes: [{...max_variable_mods: N}]` when the user
+# overrides max_var_mod_num.  Keeps all per-pass specifics (missed_cleavages,
+# peptide_fdr, site_probability_cutoff, etc.) intact while only changing the mods limit.
+_BUILTIN_PASS_PROFILES: dict[str, dict] = {
+    "whole_proteome": {
+        "variable_modifications": ["Oxidation", "Acetyl_Nterm"],
+        "missed_cleavages": 2,
+        "max_variable_mods": 2,
+        "min_peptide_length": 7,
+        "max_peptide_length": 30,
+        "max_precursor_charge": 4,
+    },
+    "phospho": {
+        "variable_modifications": ["Oxidation", "Acetyl_Nterm", "Phospho"],
+        "missed_cleavages": 2,
+        "max_variable_mods": 3,
+        "min_peptide_length": 7,
+        "max_peptide_length": 30,
+        "max_precursor_charge": 4,
+        "site_probability_cutoff": 0.75,
+        "peptide_fdr": 0.05,
+    },
+    "ubiquitin": {
+        "variable_modifications": ["Oxidation", "Acetyl_Nterm", "GlyGly"],
+        "missed_cleavages": 3,
+        "max_variable_mods": 3,
+        "min_peptide_length": 7,
+        "max_peptide_length": 35,
+        "max_precursor_charge": 4,
+        "site_probability_cutoff": 0.75,
+        "peptide_fdr": 0.05,
+    },
+    "acetyl_methyl": {
+        "variable_modifications": ["Oxidation", "Acetyl_Nterm", "Acetyl", "Methyl", "Dimethyl", "Trimethyl"],
+        "missed_cleavages": 3,
+        "max_variable_mods": 3,
+        "min_peptide_length": 7,
+        "max_peptide_length": 35,
+        "max_precursor_charge": 4,
+        "site_probability_cutoff": 0.75,
+        "peptide_fdr": 0.05,
+    },
+    "succinyl_acyl": {
+        "variable_modifications": ["Oxidation", "Acetyl_Nterm", "Succinyl", "Malonyl", "Crotonyl"],
+        "missed_cleavages": 3,
+        "max_variable_mods": 2,
+        "min_peptide_length": 7,
+        "max_peptide_length": 35,
+        "max_precursor_charge": 4,
+        "site_probability_cutoff": 0.75,
+        "peptide_fdr": 0.05,
+    },
+    "oglcnac": {
+        "variable_modifications": ["Oxidation", "Acetyl_Nterm", "OGlcNAc"],
+        "missed_cleavages": 2,
+        "max_variable_mods": 2,
+        "min_peptide_length": 7,
+        "max_peptide_length": 30,
+        "max_precursor_charge": 4,
+        "site_probability_cutoff": 0.75,
+        "fragment_tol_ppm": 15.0,
+        "peptide_fdr": 0.05,
+    },
+    "citrullination": {
+        "variable_modifications": ["Oxidation", "Acetyl_Nterm", "Citrullination"],
+        "missed_cleavages": 2,
+        "max_variable_mods": 2,
+        "min_peptide_length": 7,
+        "max_peptide_length": 30,
+        "max_precursor_charge": 4,
+        "site_probability_cutoff": 0.75,
+        "peptide_fdr": 0.05,
+    },
+    "lactyl_acyl": {
+        "variable_modifications": ["Oxidation", "Acetyl_Nterm", "Lactyl", "Propionyl", "Butyryl"],
+        "missed_cleavages": 3,
+        "max_variable_mods": 2,
+        "min_peptide_length": 7,
+        "max_peptide_length": 35,
+        "max_precursor_charge": 4,
+        "site_probability_cutoff": 0.75,
+        "peptide_fdr": 0.05,
+    },
+}
+
+
+def _apply_pass_overrides(cfg: dict) -> dict:
+    """Rewrite config dict to use custom_passes when pass-level overrides are requested.
+
+    diaquant's `passes:` key uses built-in PassProfiles whose per-field values take
+    precedence over any top-level config key (via _pick()).  The only way to override
+    fields like max_variable_mods or missed_cleavages is via `custom_passes:`.
+
+    Handles:
+      - max_var_mod_num  → custom_passes[*].max_variable_mods
+      - missed_cleavages → custom_passes[*].missed_cleavages
+
+    Passes not found in _BUILTIN_PASS_PROFILES are left in the passes list unchanged.
+    """
+    max_var_mod = cfg.get("max_var_mod_num")
+    missed_clv   = cfg.get("missed_cleavages")
+    if max_var_mod is None and missed_clv is None:
+        return cfg
+    max_var_mod = int(max_var_mod) if max_var_mod is not None else None
+    missed_clv  = int(missed_clv)  if missed_clv  is not None else None
+
+    cfg = dict(cfg)
+    remaining_passes: list[str] = []
+    custom_passes: list[dict] = list(cfg.get("custom_passes") or [])
+    for pass_name in cfg.get("passes") or []:
+        builtin = _BUILTIN_PASS_PROFILES.get(pass_name)
+        if builtin is None:
+            remaining_passes.append(pass_name)
+            continue
+        needs_override = (
+            (max_var_mod is not None and builtin.get("max_variable_mods") != max_var_mod)
+            or
+            (missed_clv  is not None and builtin.get("missed_cleavages")  != missed_clv)
+        )
+        if not needs_override:
+            remaining_passes.append(pass_name)
+            continue
+        entry = dict(builtin)
+        entry["name"] = pass_name
+        if max_var_mod is not None:
+            entry["max_variable_mods"] = max_var_mod
+        if missed_clv is not None:
+            entry["missed_cleavages"] = missed_clv
+        custom_passes.append(entry)
+        logger.info(
+            "[ptmquant] pass '%s': custom_passes override → max_variable_mods=%s missed_cleavages=%s",
+            pass_name, entry.get("max_variable_mods"), entry.get("missed_cleavages"),
+        )
+    cfg["passes"] = remaining_passes
+    if custom_passes:
+        cfg["custom_passes"] = custom_passes
+    return cfg
+
+
+# Keep old name as alias for backward compat with any existing callers.
+_apply_max_var_mod_override = _apply_pass_overrides
+
 
 # Enzyme catalog exposed to the UI (mirrors diaquant.enzymes.ENZYME_CATALOG).
 AVAILABLE_ENZYMES = [
@@ -328,34 +568,70 @@ async def _run_ptmquant(job_id: str, db_url: str, attach_container_id: str | Non
     resume_flag = resume_file.exists() and resume_file.read_text().strip() == "1"
     # Resolve diaquant search engine:
     #   1) job config.yaml ``search_engine`` / ``engine`` (written by POST /jobs)
-    #   2) else PTMQUANT_DIAQUANT_ENGINE (default sage — legacy jobs without yaml key)
-    _yaml_eng = str(cfg.get("search_engine") or cfg.get("engine") or "").strip().lower()
-    if _yaml_eng in ("alphadia", "sage"):
-        _diaqu_engine = _yaml_eng
+    #   2) else PTMQUANT_DIAQUANT_ENGINE (default alphadia; matches UI / new-job default)
+    _explicit_eng = str(cfg.get("search_engine") or cfg.get("engine") or "").strip().lower()
+    if _explicit_eng in ("alphadia", "sage"):
+        _diaqu_engine = _explicit_eng
     else:
         _diaqu_engine = os.environ.get(
-            "PTMQUANT_DIAQUANT_ENGINE", "sage"
+            "PTMQUANT_DIAQUANT_ENGINE", "alphadia"
         ).strip().lower()
     if _diaqu_engine not in ("alphadia", "sage"):
-        _diaqu_engine = "sage"
+        _diaqu_engine = "alphadia"
+    # Persist engine + max_var_mod_num into yaml when missing so retries / humans see explicit choice.
+    # max_var_mod_num: diaquant phospho pass internally raises to 3 (→ ~47M precursors → OOM).
+    # Backfill 2 (AlphaDIA default) so legacy jobs that pre-date this field also get the safe value.
+    _cfg_dirty = False
+    if str(cfg.get("search_engine") or cfg.get("engine") or "").strip() == "":
+        cfg["search_engine"] = _diaqu_engine
+        _cfg_dirty = True
+        logger.info("[ptmquant] job %s: added search_engine=%s to config.yaml (was absent)", job_id, _diaqu_engine)
+    if cfg.get("max_var_mod_num") is None:
+        cfg["max_var_mod_num"] = 2
+        _cfg_dirty = True
+        logger.info("[ptmquant] job %s: added max_var_mod_num=2 to config.yaml (was absent)", job_id)
+    if cfg.get("missed_cleavages") is None:
+        cfg["missed_cleavages"] = 1
+        _cfg_dirty = True
+        logger.info("[ptmquant] job %s: added missed_cleavages=1 to config.yaml (was absent)", job_id)
+    # Apply custom_passes override so the passes actually receive the overridden values.
+    cfg_after = _apply_pass_overrides(cfg)
+    if cfg_after is not cfg or cfg_after.get("custom_passes") != cfg.get("custom_passes"):
+        cfg = cfg_after
+        _cfg_dirty = True
+    if _cfg_dirty:
+        try:
+            with open(config_path, "w", encoding="utf-8") as wf:
+                yaml.dump(cfg, wf, default_flow_style=False, allow_unicode=True)
+        except Exception as persist_exc:
+            logger.warning("[ptmquant] job %s: could not persist config.yaml updates: %s", job_id, persist_exc)
     _engine_arg = "" if _diaqu_engine == "alphadia" else " --engine sage"
     docker_command = (
         f"run --config /work/config.yaml{_engine_arg}"
         + (" --resume" if resume_flag else "")
     )
     logger.info(
-        "[ptmquant] job %s diaquant argv: %s (resolved_engine=%s, yaml=%r, env=%r)",
+        "[ptmquant] job %s diaquant argv: %s (resolved_engine=%s, yaml=%r, env=%r, "
+        "keep_container_on_failure=%s)",
         job_id,
         docker_command,
         _diaqu_engine,
         cfg.get("search_engine"),
         os.environ.get("PTMQUANT_DIAQUANT_ENGINE"),
+        settings.PTMQUANT_KEEP_CONTAINER_ON_FAILURE,
     )
 
     # Read batch_size for informational log message
     batch_size_info = cfg.get("batch_size", 0)
     n_files_info = len(cfg.get("mzml_files", []))
 
+    await _update_job_search_engine(job_id, _diaqu_engine)
+    # Sync overridden values from (possibly backfilled) config.yaml into DB so UI can display them.
+    await _update_job_max_var_mod_num(job_id, int(cfg.get("max_var_mod_num") or 2))
+    await _update_job_config_ints(job_id, {
+        "missed_cleavages": int(cfg.get("missed_cleavages") or 1),
+        "max_precursors": cfg.get("pred_lib_max_precursors") or None,
+    })
     await _update_job_status(job_id, "running")
     batch_msg = (
         f", auto-batch={batch_size_info}파일씩 ({-((-n_files_info) // batch_size_info)}배치)"
@@ -365,6 +641,7 @@ async def _run_ptmquant(job_id: str, db_url: str, attach_container_id: str | Non
     try:
         client = _ptmquant_docker_client()
 
+        requested_container_name = ""
         if attach_container_id:
             # Re-attach to an already-running container (e.g. after server restart)
             container = await asyncio.to_thread(client.containers.get, attach_container_id)
@@ -377,6 +654,7 @@ async def _run_ptmquant(job_id: str, db_url: str, attach_container_id: str | Non
             _job_name = _name_file.read_text().strip() if _name_file.exists() else job_id[:8]
             safe_name = re.sub(r"[^a-zA-Z0-9_.-]", "_", _job_name)[:40]
             container_name = f"ptmquant_{safe_name}_{job_id[:8]}"
+            requested_container_name = container_name
             await asyncio.to_thread(
                 _discard_stale_named_ptmquant_container,
                 client,
@@ -466,13 +744,76 @@ async def _run_ptmquant(job_id: str, db_url: str, attach_container_id: str | Non
             except Exception:
                 pass
 
-        await asyncio.to_thread(container.remove, force=True)
+        meta = await asyncio.to_thread(
+            _collect_ptmquant_container_meta,
+            container,
+            job_id=job_id,
+            exit_code=exit_code,
+            mem_limit=mem_limit,
+            docker_command=docker_command,
+            requested_container_name=requested_container_name,
+        )
+        remove_container = (
+            exit_code == 0 or not settings.PTMQUANT_KEEP_CONTAINER_ON_FAILURE
+        )
+        meta["runner_removed_container"] = remove_container
+
+        logger.info(
+            "[ptmquant] job %s finished exit=%s OOMKilled=%s remove_container=%s container=%s",
+            job_id,
+            exit_code,
+            meta.get("oom_killed"),
+            remove_container,
+            meta.get("container_short_id") or (meta.get("container_id") or "")[:12],
+        )
+
+        footer = _ptmquant_container_footer_lines(meta)
+        log_lines.extend(footer)
+
+        sse_diag_lines: list[str] = list(footer)
+        if remove_container:
+            hint_removed = "(Container removed by runner — job log above is complete.)"
+            log_lines.append(hint_removed)
+            sse_diag_lines.append(hint_removed)
+        else:
+            sse_diag_lines.extend(
+                [
+                    "(Container kept after failure — PTMQUANT_KEEP_CONTAINER_ON_FAILURE=true)",
+                    f"docker rm -f {meta.get('container_id') or '<container_id>'}  # when finished",
+                ]
+            )
+            log_lines.extend(sse_diag_lines[-2:])
+
+        try:
+            await asyncio.to_thread(_write_last_container_run, job_path, meta)
+        except Exception as persist_exc:
+            logger.warning(
+                "[ptmquant] job %s: could not write last_container_run.json: %s",
+                job_id,
+                persist_exc,
+            )
+
+        for ln in sse_diag_lines:
+            await _publish({"type": "log", "message": ln, "progress": current_progress})
+
+        if remove_container:
+            await asyncio.to_thread(container.remove, force=True)
+        else:
+            logger.warning(
+                "[ptmquant] job %s failed exit=%s; keeping container %s "
+                "(PTMQUANT_KEEP_CONTAINER_ON_FAILURE=true)",
+                job_id,
+                exit_code,
+                meta.get("container_short_id") or (meta.get("container_id") or "")[:12],
+            )
 
         if exit_code == 0:
             await _publish({"type": "done", "message": "Conversion complete!", "progress": 100})
             await _update_job_status(job_id, "done", log="\n".join(log_lines), progress=100)
         else:
             err = f"ptmquant exited with code {exit_code}"
+            if meta.get("oom_killed"):
+                err += " (Docker OOMKilled=true)"
             await _publish({"type": "error", "message": err, "progress": current_progress})
             await _update_job_status(job_id, "failed", log="\n".join(log_lines), error=err)
 
@@ -518,6 +859,51 @@ async def _update_job_progress(job_id: str, progress: float) -> None:
             await session.commit()
 
 
+async def _update_job_search_engine(job_id: str, engine: str) -> None:
+    """Persist resolved diaquant engine (alphadia|sage) for list UI."""
+    from app.core.database import AsyncSessionLocal
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(PTMQuantJob).where(PTMQuantJob.job_id == job_id)
+        )
+        job = result.scalar_one_or_none()
+        if job:
+            job.search_engine = engine
+            await session.commit()
+
+
+async def _update_job_max_var_mod_num(job_id: str, value: int) -> None:
+    """Persist effective max_var_mod_num into DB (backfill for legacy / retried jobs)."""
+    from app.core.database import AsyncSessionLocal
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(PTMQuantJob).where(PTMQuantJob.job_id == job_id)
+        )
+        job = result.scalar_one_or_none()
+        if job and getattr(job, "max_var_mod_num", None) != value:
+            job.max_var_mod_num = value
+            await session.commit()
+
+
+async def _update_job_config_ints(job_id: str, fields: dict) -> None:
+    """Persist arbitrary integer config fields into DB (backfill for legacy / retried jobs)."""
+    from app.core.database import AsyncSessionLocal
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(PTMQuantJob).where(PTMQuantJob.job_id == job_id)
+        )
+        job = result.scalar_one_or_none()
+        if not job:
+            return
+        changed = False
+        for attr, val in fields.items():
+            if getattr(job, attr, "MISSING") != val:
+                setattr(job, attr, val)
+                changed = True
+        if changed:
+            await session.commit()
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Schemas
 # ──────────────────────────────────────────────────────────────────────────────
@@ -547,6 +933,22 @@ class CreateJobRequest(BaseModel):
     include_low_loc_sites: bool = False
     # diaquant CLI --engine (stored in job config.yaml; overrides loose env defaults).
     search_engine: Literal["alphadia", "sage"] = "alphadia"
+    # AlphaDIA library_prediction.max_var_mod_num override.
+    # diaquant phospho pass internally raises this to 3, producing ~47M precursors which
+    # causes PeptDeep multiprocessing OOM (exit code 1).  Default 2 is AlphaDIA's own default.
+    max_var_mod_num: Optional[int] = 2
+    # missed_cleavages override.  diaquant phospho pass uses 2 (doubles speclib vs. 1)
+    # which creates a ~15 GB speclib → DecoyGenerator OOM on large proteomes.  Default 1.
+    missed_cleavages: Optional[int] = 1
+    # pred_lib_max_precursors: hard cap on digested precursors passed to AlphaPeptDeep.
+    # None = no cap (diaquant default 50 M).  Set e.g. 15_000_000 to avoid memory spikes.
+    max_precursors: Optional[int] = None
+    # alphadia_threads: AlphaDIA general.thread_count.
+    # Each worker thread holds a copy of the speclib → peak RAM ≈ N × per-thread size.
+    # None = auto-calculate from max_memory_gb (see _alphadia_threads_for_memory).
+    # 0    = let AlphaDIA pick (all logical CPUs; fine on servers with ≥ 128 GB RAM).
+    # 2–6  = recommended for 64–128 GB Docker setups to avoid DecoyGenerator OOM.
+    alphadia_threads: Optional[int] = None
 
 
 class JobResponse(BaseModel):
@@ -563,6 +965,11 @@ class JobResponse(BaseModel):
     transfer_learning: Optional[bool] = None
     site_probability_cutoff: Optional[float] = None
     include_low_loc_sites: Optional[bool] = None
+    search_engine: Optional[str] = None
+    max_var_mod_num: Optional[int] = None
+    missed_cleavages: Optional[int] = None
+    max_precursors: Optional[int] = None
+    alphadia_threads: Optional[int] = None
     progress: float
     error_message: Optional[str]
     created_at: str
@@ -586,6 +993,11 @@ class JobResponse(BaseModel):
                 if getattr(job, "site_probability_cutoff", None) is not None else None,
             include_low_loc_sites=bool(job.include_low_loc_sites)
                 if getattr(job, "include_low_loc_sites", None) is not None else None,
+            search_engine=getattr(job, "search_engine", None),
+            max_var_mod_num=getattr(job, "max_var_mod_num", None),
+            missed_cleavages=getattr(job, "missed_cleavages", None),
+            max_precursors=getattr(job, "max_precursors", None),
+            alphadia_threads=getattr(job, "alphadia_threads", None),
             progress=job.progress,
             error_message=job.error_message,
             created_at=job.created_at.isoformat() if job.created_at else "",
@@ -765,6 +1177,11 @@ async def create_job(
         transfer_learning=1 if req.transfer_learning else 0,
         site_probability_cutoff=float(req.site_probability_cutoff),
         include_low_loc_sites=1 if req.include_low_loc_sites else 0,
+        search_engine=req.search_engine,
+        max_var_mod_num=req.max_var_mod_num if req.max_var_mod_num is not None else 2,
+        missed_cleavages=req.missed_cleavages if req.missed_cleavages is not None else 1,
+        max_precursors=req.max_precursors,
+        alphadia_threads=_alphadia_threads_for_memory(req.max_memory_gb, req.alphadia_threads),
         progress=0.0,
         user_id=user.id if hasattr(user, "id") and user.id else None,
     )
@@ -845,7 +1262,25 @@ async def create_job(
         "include_low_loc_sites": bool(req.include_low_loc_sites),
         # Propagates to Docker argv via _run_ptmquant (diaquant ignores unknown YAML keys).
         "search_engine": req.search_engine,
+        # Override AlphaDIA library_prediction.max_var_mod_num.
+        # diaquant phospho pass internally sets 3, creating ~47M precursors which causes
+        # PeptDeep multiprocessing OOM (exit code 1). Default 2 matches AlphaDIA's own default.
+        "max_var_mod_num": req.max_var_mod_num if req.max_var_mod_num is not None else 2,
+        # missed_cleavages override: phospho pass default 2 → ~15 GB speclib → DecoyGenerator OOM.
+        "missed_cleavages": req.missed_cleavages if req.missed_cleavages is not None else 1,
+        # pred_lib_max_precursors hard cap (None = no cap).
+        # Controls AlphaPeptDeep precursor count when PTMQuant generates the library.
+        **({"pred_lib_max_precursors": req.max_precursors} if req.max_precursors else {}),
+        # alphadia_threads → AlphaDIA general.thread_count.
+        # Limits parallel workers during speclib build and DecoyGenerator.
+        # Peak RAM ≈ thread_count × per-thread-speclib-size.
+        # Auto-calculated from max_memory_gb when not set explicitly:
+        #   ≤ 64 GB → 2,  ≤ 96 GB → 4,  ≤ 128 GB → 6,  > 128 GB → 0 (auto)
+        # To disable the cap on a large-memory server: set alphadia_threads: 0
+        "alphadia_threads": _alphadia_threads_for_memory(req.max_memory_gb, req.alphadia_threads),
     }
+    # Convert built-in passes to custom_passes when pass-level overrides are requested.
+    config = _apply_pass_overrides(config)
     with open(job_dir / "config.yaml", "w") as f:
         yaml.dump(config, f, default_flow_style=False, allow_unicode=True)
 
@@ -943,19 +1378,25 @@ async def retry_job(
     db: AsyncSession = Depends(get_db),
     _=Depends(get_current_user),
 ):
-    """Reset a failed/cancelled job and re-run it."""
+    """Reset a finished job (failed, cancelled, or done) and re-run it with the same settings."""
     result = await db.execute(select(PTMQuantJob).where(PTMQuantJob.job_id == job_id))
     job = result.scalar_one_or_none()
     if not job:
         raise HTTPException(404, detail="Job not found")
-    if job.status not in ("failed", "cancelled"):
-        raise HTTPException(400, detail=f"Only failed or cancelled jobs can be retried (status: {job.status})")
+    if job.status not in ("failed", "cancelled", "done"):
+        raise HTTPException(
+            400,
+            detail=f"Only finished jobs can be re-run (status: {job.status}; use cancel for running jobs)",
+        )
 
-    # Reset job state
+    # Reset job state; reset timestamps so UI elapsed time starts from zero
+    now = datetime.now(timezone.utc)
     job.status = "pending"
     job.progress = 0
     job.error_message = None
     job.log = ""
+    job.created_at = now
+    job.updated_at = now
     await db.commit()
     await db.refresh(job)
 
