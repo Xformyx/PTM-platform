@@ -518,7 +518,8 @@ def run_rag_enrichment(self, order_id: int, config: dict):
             report_config["secondary_tsv_data_path"] = secondary_tsv_path
             report_config["secondary_output_dir"] = str(order_output / "secondary_ptm") if (order_output / "secondary_ptm").exists() else str(order_output)
             logger.info(f"[Order {order_id}] Cross-Talk report_config: secondary_enriched={secondary_enriched_json_path}, secondary_md={secondary_md_path_out}")
-        if config.get("chain_to_next", True) and get_order_status(order_id) != "cancelled":
+        _status_before_chain = get_order_status(order_id)
+        if config.get("chain_to_next", True) and _status_before_chain == "rag_enrichment":
             app.send_task(
                 "report_generation.tasks.run_report_generation",
                 args=[order_id, report_config],
@@ -526,7 +527,10 @@ def run_rag_enrichment(self, order_id: int, config: dict):
             )
             logger.info(f"[Order {order_id}] Chained to report generation")
         else:
-            logger.info(f"[Order {order_id}] RAG complete (no chain — re-run only)")
+            logger.info(
+                f"[Order {order_id}] RAG complete — skipping chain "
+                f"(chain_to_next={config.get('chain_to_next', True)}, status={_status_before_chain!r})"
+            )
 
         return {
             "order_id": order_id,

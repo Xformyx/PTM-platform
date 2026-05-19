@@ -324,13 +324,22 @@ def run_report_generation(self, order_id: int, config: dict):
         )
         return {"order_id": order_id, "status": "skipped", "reason": "duplicate"}
 
-    if get_order_status(order_id) == "cancelled":
+    _current_status = get_order_status(order_id)
+    # Allow report generation only from valid predecessor states.
+    # "rag_enrichment" = normal chain from RAG; "completed"/"failed" = explicit run-stage re-run.
+    # Any other status (cancelled, queued, preprocessing, None) means this task is stale from
+    # a previous run and must NOT overwrite the current pipeline state.
+    _allowed_start_statuses = {"rag_enrichment", "completed", "failed"}
+    if _current_status not in _allowed_start_statuses:
         try:
             lock_client.delete(lock_key)
         except Exception:
             pass
-        logger.info(f"[Order {order_id}] Report generation skipped — order cancelled")
-        return {"order_id": order_id, "status": "skipped", "reason": "cancelled"}
+        logger.info(
+            f"[Order {order_id}] Report generation skipped — "
+            f"unexpected status: {_current_status!r} (expected one of {_allowed_start_statuses})"
+        )
+        return {"order_id": order_id, "status": "skipped", "reason": f"unexpected_status:{_current_status}"}
 
     start_time = time.time()
     order_code = config.get("order_code") or str(order_id)
