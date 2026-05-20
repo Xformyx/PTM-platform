@@ -1,0 +1,30 @@
+# Force LF line endings for all shell scripts and text files
+* text=auto
+
+*.sh    text eol=lf
+*.py    text eol=lf
+*.ts    text eol=lf
+*.tsx   text eol=lf
+*.js    text eol=lf
+*.json  text eol=lf
+*.yaml  text eol=lf
+*.yml   text eol=lf
+*.md    text eol=lf
+*.sql   text eol=lf
+*.conf  text eol=lf
+*.env   text eol=lf
+*.txt   text eol=lf
+*.toml  text eol=lf
+
+# Binary files — no conversion
+*.tar.gz  binary
+*.gz      binary
+*.png     binary
+*.jpg     binary
+*.jpeg    binary
+*.gif     binary
+*.ico     binary
+*.woff    binary
+*.woff2   binary
+*.ttf     binary
+*.eot     binary
