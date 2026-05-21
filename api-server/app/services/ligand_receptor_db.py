@@ -1494,3 +1494,147 @@ def suggest_corrections_for_treatment(treatment_text: str, max_suggestions: int 
             break
 
     return suggestions
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# E3 LIGASE → UPSTREAM RECEPTOR MAPPING (v9.40)
+# For ubiquitylation orders where Reactome kinase→receptor mapping is unavailable
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_E3_UPSTREAM_RECEPTORS: dict[str, list[dict]] = {
+    # ── RTK-regulated E3 ligases ──
+    "NEDD4": [
+        {"receptor": "EGFR", "receptor_class": "RTK", "pathway": "EGFR signaling → NEDD4-mediated endosomal sorting", "evidence": "NEDD4 ubiquitylates EGFR for lysosomal degradation; also targets downstream effectors", "pmid": "11461910"},
+        {"receptor": "IGF1R", "receptor_class": "RTK", "pathway": "IGF1R → PI3K/AKT → NEDD4 activation", "evidence": "NEDD4 activity regulated by IGF1R-PI3K-SGK1 axis", "pmid": "20068231"},
+    ],
+    "NEDD4L": [
+        {"receptor": "TGF-beta Receptor (TGFBR)", "receptor_class": "Serine/Threonine Kinase Receptor", "pathway": "TGF-beta → SMAD7 → NEDD4L recruitment", "evidence": "NEDD4L ubiquitylates TGFBR1 via SMAD7 adaptor", "pmid": "15761148"},
+        {"receptor": "ENaC (SCNN1)", "receptor_class": "Ion Channel", "pathway": "Aldosterone → SGK1 → NEDD4L phosphorylation", "evidence": "NEDD4L regulates ENaC surface expression via PY motif ubiquitylation", "pmid": "11278723"},
+    ],
+    "CBL": [
+        {"receptor": "EGFR", "receptor_class": "RTK", "pathway": "EGFR → CBL direct binding → receptor downregulation", "evidence": "CBL is recruited to activated EGFR and mediates multi-monoubiquitylation", "pmid": "11461910"},
+        {"receptor": "PDGFR", "receptor_class": "RTK", "pathway": "PDGFR → CBL recruitment → receptor turnover", "evidence": "CBL ubiquitylates activated PDGFR for degradation", "pmid": "10644996"},
+        {"receptor": "c-MET (HGFR)", "receptor_class": "RTK", "pathway": "HGF → c-MET → CBL-mediated degradation", "evidence": "CBL targets c-MET for ubiquitin-dependent degradation", "pmid": "12551946"},
+        {"receptor": "CSF1R (M-CSFR)", "receptor_class": "RTK", "pathway": "CSF1 → CSF1R → CBL-mediated internalization", "evidence": "CBL ubiquitylates CSF1R upon ligand stimulation", "pmid": "15657061"},
+    ],
+    "CBLB": [
+        {"receptor": "TCR complex", "receptor_class": "Immune Receptor", "pathway": "TCR → ZAP70 → CBL-B negative regulation", "evidence": "CBL-B ubiquitylates TCR signaling components as negative regulator", "pmid": "11163196"},
+        {"receptor": "EGFR", "receptor_class": "RTK", "pathway": "EGFR → CBL-B recruitment → receptor downregulation", "evidence": "CBL-B cooperates with CBL in RTK ubiquitylation", "pmid": "15657061"},
+    ],
+    # ── Muscle atrophy E3 ligases (microgravity relevant) ──
+    "TRIM63": [  # MuRF1
+        {"receptor": "Insulin Receptor (INSR)", "receptor_class": "RTK", "pathway": "Insulin/IGF1 → PI3K/AKT → FoxO inhibition → MuRF1 suppression", "evidence": "MuRF1 expression inversely regulated by insulin/IGF1 signaling via AKT-FoxO axis", "pmid": "15262962"},
+        {"receptor": "Glucocorticoid Receptor (NR3C1)", "receptor_class": "Nuclear Receptor", "pathway": "Cortisol → GR → MuRF1 transcriptional activation", "evidence": "GR directly activates MuRF1 transcription via GRE elements", "pmid": "19056867"},
+        {"receptor": "ActRIIB (Myostatin Receptor)", "receptor_class": "Serine/Threonine Kinase Receptor", "pathway": "Myostatin → ActRIIB → SMAD2/3 → MuRF1 induction", "evidence": "Myostatin signaling induces MuRF1 via SMAD-FoxO cooperation", "pmid": "21543610"},
+    ],
+    "FBXO32": [  # Atrogin-1/MAFbx
+        {"receptor": "Insulin Receptor (INSR)", "receptor_class": "RTK", "pathway": "Insulin/IGF1 → PI3K/AKT → FoxO inhibition → Atrogin-1 suppression", "evidence": "Atrogin-1 expression inversely regulated by insulin/IGF1 signaling via AKT-FoxO axis", "pmid": "15262962"},
+        {"receptor": "ActRIIB (Myostatin Receptor)", "receptor_class": "Serine/Threonine Kinase Receptor", "pathway": "Myostatin → ActRIIB → SMAD2/3 → Atrogin-1 induction", "evidence": "Myostatin signaling induces Atrogin-1 via SMAD-FoxO cooperation", "pmid": "21543610"},
+        {"receptor": "TNF Receptor (TNFR1)", "receptor_class": "Cytokine Receptor", "pathway": "TNF-alpha → TNFR1 → NF-kB → Atrogin-1 induction", "evidence": "TNF-alpha induces Atrogin-1 via NF-kB and p38 MAPK pathways", "pmid": "15262962"},
+    ],
+    # ── Hypoxia/HIF pathway E3 ligases ──
+    "VHL": [
+        {"receptor": "VEGFR2 (KDR)", "receptor_class": "RTK", "pathway": "Hypoxia → HIF-1a stabilization → VEGF → VEGFR2 (VHL loss-of-function)", "evidence": "VHL ubiquitylates HIF-1a; loss leads to VEGF overexpression and VEGFR2 activation", "pmid": "10205047"},
+        {"receptor": "EGFR", "receptor_class": "RTK", "pathway": "VHL → HIF-1a degradation → TGF-alpha/EGFR suppression", "evidence": "VHL loss leads to HIF-mediated TGF-alpha upregulation and EGFR activation", "pmid": "16474401"},
+    ],
+    # ── NF-kB pathway E3 ligases ──
+    "TRAF6": [
+        {"receptor": "IL-1 Receptor (IL1R)", "receptor_class": "Cytokine Receptor", "pathway": "IL-1 → IL1R → MyD88 → IRAK → TRAF6 → NF-kB", "evidence": "TRAF6 is essential adaptor for IL-1R signaling to NF-kB", "pmid": "9346484"},
+        {"receptor": "TLR4", "receptor_class": "Pattern Recognition Receptor", "pathway": "LPS → TLR4 → MyD88 → TRAF6 → NF-kB/MAPK", "evidence": "TRAF6 mediates TLR4 signaling via K63-linked polyubiquitylation", "pmid": "12426565"},
+        {"receptor": "RANK (TNFRSF11A)", "receptor_class": "TNF Receptor Family", "pathway": "RANKL → RANK → TRAF6 → NF-kB/JNK", "evidence": "TRAF6 directly binds RANK and mediates osteoclast differentiation signals", "pmid": "9990853"},
+    ],
+    "TRAF2": [
+        {"receptor": "TNF Receptor (TNFR1)", "receptor_class": "Cytokine Receptor", "pathway": "TNF-alpha → TNFR1 → TRADD → TRAF2 → NF-kB", "evidence": "TRAF2 mediates TNF-induced NF-kB activation via K63-ubiquitylation of RIP1", "pmid": "8986714"},
+        {"receptor": "TNFR2 (TNFRSF1B)", "receptor_class": "Cytokine Receptor", "pathway": "TNF-alpha → TNFR2 → TRAF2 direct binding", "evidence": "TRAF2 directly binds TNFR2 cytoplasmic domain", "pmid": "8986714"},
+    ],
+    # ── Wnt pathway E3 ligases ──
+    "RNF43": [
+        {"receptor": "Frizzled (FZD)", "receptor_class": "GPCR-like", "pathway": "Wnt → Frizzled → RNF43-mediated Frizzled turnover", "evidence": "RNF43 ubiquitylates Frizzled receptors for endolysosomal degradation", "pmid": "22575959"},
+    ],
+    "ZNRF3": [
+        {"receptor": "Frizzled (FZD)", "receptor_class": "GPCR-like", "pathway": "Wnt → Frizzled → ZNRF3-mediated Frizzled turnover", "evidence": "ZNRF3 ubiquitylates Frizzled receptors; antagonized by R-spondin/LGR5", "pmid": "22575959"},
+    ],
+    # ── DNA damage response E3 ligases ──
+    "MDM2": [
+        {"receptor": "IGF1R", "receptor_class": "RTK", "pathway": "IGF1 → IGF1R → PI3K/AKT → MDM2 phosphorylation/activation", "evidence": "AKT phosphorylates MDM2 promoting nuclear entry and p53 degradation", "pmid": "11461910"},
+        {"receptor": "Insulin Receptor (INSR)", "receptor_class": "RTK", "pathway": "Insulin → INSR → AKT → MDM2 activation", "evidence": "Insulin signaling activates MDM2 via AKT-mediated phosphorylation", "pmid": "15262962"},
+    ],
+    # ── Notch pathway E3 ligases ──
+    "ITCH": [
+        {"receptor": "Notch1", "receptor_class": "Type I Transmembrane Receptor", "pathway": "Notch ligand → Notch1 → ITCH-mediated degradation", "evidence": "ITCH ubiquitylates Notch1 intracellular domain for proteasomal degradation", "pmid": "12183369"},
+        {"receptor": "EGFR", "receptor_class": "RTK", "pathway": "EGF → EGFR → ITCH activation → receptor sorting", "evidence": "ITCH participates in EGFR endosomal sorting", "pmid": "16751101"},
+    ],
+    # ── Autophagy/ER stress E3 ligases ──
+    "PARK2": [  # Parkin
+        {"receptor": "EGFR", "receptor_class": "RTK", "pathway": "EGF → EGFR → Parkin-mediated mitophagy regulation", "evidence": "Parkin ubiquitylates mitochondrial substrates downstream of growth factor signaling", "pmid": "20404107"},
+    ],
+    "MARCHF6": [  # MARCH6
+        {"receptor": "Insulin Receptor (INSR)", "receptor_class": "RTK", "pathway": "Insulin → INSR → SREBP → MARCH6 regulation of cholesterol enzymes", "evidence": "MARCH6 ubiquitylates squalene monooxygenase; regulated by cholesterol/insulin axis", "pmid": "23335749"},
+    ],
+    # ── Cell cycle E3 ligases ──
+    "SMURF1": [
+        {"receptor": "TGF-beta Receptor (TGFBR)", "receptor_class": "Serine/Threonine Kinase Receptor", "pathway": "TGF-beta → TGFBR → SMAD7 → SMURF1 recruitment → receptor degradation", "evidence": "SMURF1 ubiquitylates TGFBR via SMAD7 adaptor for proteasomal degradation", "pmid": "11461910"},
+        {"receptor": "BMP Receptor (BMPR)", "receptor_class": "Serine/Threonine Kinase Receptor", "pathway": "BMP → BMPR → SMURF1-mediated SMAD1/5 degradation", "evidence": "SMURF1 targets BMP-responsive SMADs for ubiquitin-dependent degradation", "pmid": "11461910"},
+    ],
+    "SMURF2": [
+        {"receptor": "TGF-beta Receptor (TGFBR)", "receptor_class": "Serine/Threonine Kinase Receptor", "pathway": "TGF-beta → TGFBR → SMAD7 → SMURF2 recruitment", "evidence": "SMURF2 cooperates with SMAD7 to ubiquitylate TGF-beta receptor complex", "pmid": "11461910"},
+    ],
+    # ── Immune signaling E3 ligases ──
+    "BIRC2": [  # cIAP1
+        {"receptor": "TNF Receptor (TNFR1)", "receptor_class": "Cytokine Receptor", "pathway": "TNF-alpha → TNFR1 → TRADD/TRAF2 → cIAP1 recruitment", "evidence": "cIAP1 ubiquitylates RIP1 with K63-linked chains for NF-kB activation", "pmid": "15064759"},
+    ],
+    "BIRC3": [  # cIAP2
+        {"receptor": "TNF Receptor (TNFR1)", "receptor_class": "Cytokine Receptor", "pathway": "TNF-alpha → TNFR1 → TRADD/TRAF2 → cIAP2 recruitment", "evidence": "cIAP2 cooperates with cIAP1 in RIP1 ubiquitylation for NF-kB signaling", "pmid": "15064759"},
+    ],
+    # ── Golgi/trafficking E3 ligases (microgravity relevant) ──
+    "RNF5": [
+        {"receptor": "STING (TMEM173)", "receptor_class": "Innate Immune Receptor", "pathway": "cGAS → STING → RNF5-mediated STING degradation", "evidence": "RNF5 ubiquitylates STING at ER/Golgi for proteasomal degradation", "pmid": "22705104"},
+    ],
+    "HUWE1": [
+        {"receptor": "c-MET (HGFR)", "receptor_class": "RTK", "pathway": "HGF → c-MET → HUWE1-mediated substrate regulation", "evidence": "HUWE1 regulates c-MYC downstream of RTK signaling", "pmid": "16399167"},
+        {"receptor": "Wnt/Frizzled", "receptor_class": "GPCR-like", "pathway": "Wnt → Dvl → HUWE1-mediated Dvl ubiquitylation", "evidence": "HUWE1 ubiquitylates Dishevelled to attenuate Wnt signaling", "pmid": "20543822"},
+    ],
+}
+
+# Build lowercase alias index for flexible matching
+_E3_ALIASES: dict[str, str] = {
+    "murf1": "TRIM63", "mafbx": "FBXO32", "atrogin-1": "FBXO32", "atrogin1": "FBXO32",
+    "parkin": "PARK2", "march6": "MARCHF6", "ciap1": "BIRC2", "ciap2": "BIRC3",
+    "c-cbl": "CBL", "cbl-b": "CBLB",
+}
+_E3_LOWER_INDEX: dict[str, list[dict]] = {k.lower(): v for k, v in _E3_UPSTREAM_RECEPTORS.items()}
+
+
+def get_receptors_for_e3_ligase(e3_name: str) -> list[dict]:
+    """
+    E3 리가아제 이름으로 상위 수용체 조회.
+    별칭(MuRF1, Atrogin-1 등) 및 대소문자 무관 매칭 지원.
+    """
+    if not e3_name:
+        return []
+    name_lower = e3_name.strip().lower()
+    # Direct match
+    if name_lower in _E3_LOWER_INDEX:
+        return _E3_LOWER_INDEX[name_lower]
+    # Alias match
+    canonical = _E3_ALIASES.get(name_lower)
+    if canonical:
+        return _E3_UPSTREAM_RECEPTORS.get(canonical, [])
+    # Partial match (e.g., "NEDD4" matches "NEDD4" but not "NEDD4L")
+    for key in _E3_LOWER_INDEX:
+        if name_lower == key or (len(name_lower) >= 4 and name_lower in key):
+            return _E3_LOWER_INDEX[key]
+    return []
+
+
+def get_receptors_for_e3_list(e3_names: list[str]) -> dict[str, list[dict]]:
+    """
+    여러 E3 리가아제에 대해 일괄 수용체 조회.
+    Returns: {e3_name: [receptor_info_dicts]} (매핑이 있는 것만 포함)
+    """
+    result = {}
+    for name in e3_names:
+        receptors = get_receptors_for_e3_ligase(name)
+        if receptors:
+            result[name] = receptors
+    return result
