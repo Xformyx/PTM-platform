@@ -170,7 +170,7 @@ export default function OrderCreate() {
   const [form, setForm] = useState({
     project_name: "", ptm_type: "phosphorylation", species: "mouse",
     cell_type: "", treatment: "", time_points: "", biological_question: "", special_conditions: "",
-    report_type: "comprehensive", ptm_selection_mode: "de_novo_regulated" as "top_n" | "de_novo" | "regulated" | "de_novo_regulated" | "minor" | "all", llm_model: "", rag_enrichment_llm_model: "",
+    report_type: "comprehensive", ptm_selection_mode: "de_novo_regulated" as "top_n" | "de_novo" | "regulated" | "de_novo_regulated" | "minor" | "all", top_n_ptms: 50, llm_model: "", rag_enrichment_llm_model: "",
     analysis_mode: "ptm_only" as "ptm_only" | "ptm_nonptm_network" | "cross_talk",
     secondary_ptm_type: "ubiquitylation",
   });
@@ -497,7 +497,7 @@ export default function OrderCreate() {
       ptm_detail_count: reportConfig.ptm_detail_count,
     };
     formData.append("report_options", JSON.stringify({
-      report_type: form.report_type, ptm_selection_mode: form.ptm_selection_mode, output_format: "md",
+      report_type: form.report_type, ptm_selection_mode: form.ptm_selection_mode, top_n_ptms: form.top_n_ptms, output_format: "md",
       analysis_mode: form.analysis_mode,
       research_questions: researchQuestions.length > 0 ? researchQuestions : [],
       ...(form.llm_model ? (() => {
@@ -1220,8 +1220,22 @@ export default function OrderCreate() {
                       {form.ptm_selection_mode === "regulated" && "Only statistically significant PTMs (q < 0.05, |Log2FC| ≥ 1.0)"}
                       {form.ptm_selection_mode === "minor" && "PTMs that are neither de novo nor statistically regulated"}
                       {form.ptm_selection_mode === "all" && "All detected PTMs — may increase analysis time significantly"}
-                      {form.ptm_selection_mode === "top_n" && "Legacy: top 50 PTMs ranked by max |Log2FC|"}
+                      {form.ptm_selection_mode === "top_n" && `Top ${form.top_n_ptms} PTMs ranked by max |Log2FC|`}
                     </p>
+                    {form.ptm_selection_mode === "top_n" && (
+                      <div className="flex items-center gap-2 mt-2">
+                        <Label className="text-xs whitespace-nowrap">Top N:</Label>
+                        <Input
+                          type="number"
+                          min={10}
+                          max={500}
+                          value={form.top_n_ptms}
+                          onChange={(e) => setForm({ ...form, top_n_ptms: Math.max(10, Math.min(500, parseInt(e.target.value) || 50)) })}
+                          className="w-24 h-8 text-sm"
+                        />
+                        <span className="text-[10px] text-muted-foreground">10–500</span>
+                      </div>
+                    )}
                   </div>
                 </div>
 

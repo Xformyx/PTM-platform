@@ -86,6 +86,7 @@ export default function RerunOptionsModal({
   const [analysisModalOpen, setAnalysisModalOpen] = useState(false);
   const [reportType, setReportType] = useState("comprehensive");
   const [ptmSelectionMode, setPtmSelectionMode] = useState<"top_n" | "de_novo" | "regulated" | "de_novo_regulated" | "minor" | "all">("de_novo_regulated");
+  const [topNPtms, setTopNPtms] = useState(50);
   const [llmModel, setLlmModel] = useState("");
   const [ragEnrichmentLlmModel, setRagEnrichmentLlmModel] = useState("");
   const [llmCloudModelVariant, setLlmCloudModelVariant] = useState("");
@@ -163,6 +164,8 @@ export default function RerunOptionsModal({
       const savedMode = ro.ptm_selection_mode as string;
       const validModes = ["top_n", "de_novo", "regulated", "de_novo_regulated", "minor", "all"];
       setPtmSelectionMode(validModes.includes(savedMode) ? savedMode as typeof ptmSelectionMode : "de_novo_regulated");
+      const savedTopN = typeof ro.top_n_ptms === "number" ? ro.top_n_ptms : 50;
+      setTopNPtms(savedTopN);
       const lm = ro.llm_model as string; const rp = ro.llm_provider as string;
       const rem = ro.rag_enrichment_llm_model as string;
       const rerp = ro.rag_enrichment_llm_provider as string;
@@ -249,6 +252,7 @@ export default function RerunOptionsModal({
           ...baseReportOpts,
           report_type: reportType,
           ptm_selection_mode: ptmSelectionMode,
+          top_n_ptms: topNPtms,
           output_format: baseReportOpts.output_format ?? "md",
           analysis_mode: analysisMode,
           research_questions: researchQuestions,
@@ -435,8 +439,22 @@ export default function RerunOptionsModal({
                     {ptmSelectionMode === "regulated" && "Statistically significant PTMs only"}
                     {ptmSelectionMode === "minor" && "Neither de novo nor regulated"}
                     {ptmSelectionMode === "all" && "All PTMs — may increase analysis time"}
-                    {ptmSelectionMode === "top_n" && "Legacy: top 50 by max |Log2FC|"}
+                    {ptmSelectionMode === "top_n" && `Top ${topNPtms} by max |Log2FC|`}
                   </p>
+                  {ptmSelectionMode === "top_n" && (
+                    <div className="flex items-center gap-2 mt-1.5">
+                      <Label className="text-[10px] whitespace-nowrap">Top N:</Label>
+                      <Input
+                        type="number"
+                        min={10}
+                        max={500}
+                        value={topNPtms}
+                        onChange={(e) => setTopNPtms(Math.max(10, Math.min(500, parseInt(e.target.value) || 50)))}
+                        className="w-20 h-7 text-xs"
+                      />
+                      <span className="text-[10px] text-muted-foreground">10–500</span>
+                    </div>
+                  )}
                 </div>
               </div>
               <div className="space-y-1.5">
