@@ -36,6 +36,29 @@ logger = logging.getLogger("ptm-platform.ptmquant")
 settings = get_settings()
 
 
+def _gpu_available() -> bool:
+    """Return True if NVIDIA GPU passthrough to containers is enabled and available.
+
+    Controlled by PTMQUANT_USE_GPU env var (default: auto-detect via pynvml).
+    Set PTMQUANT_USE_GPU=false to disable even when GPU is present.
+    Set PTMQUANT_USE_GPU=true to force (will fail if toolkit not installed).
+    """
+    override = os.environ.get("PTMQUANT_USE_GPU", "").strip().lower()
+    if override == "false":
+        return False
+    if override == "true":
+        return True
+    # Auto-detect: check if pynvml can find at least one GPU
+    try:
+        import pynvml
+        pynvml.nvmlInit()
+        count = pynvml.nvmlDeviceGetCount()
+        pynvml.nvmlShutdown()
+        return count > 0
+    except Exception:
+        return False
+
+
 def _ptmquant_docker_client():
     """Docker SDK client with a long API read timeout for PTMQuant jobs.
 
@@ -661,6 +684,17 @@ async def _run_ptmquant(job_id: str, db_url: str, attach_container_id: str | Non
                 container_name,
                 job_path,
             )
+            use_gpu = _gpu_available()
+            gpu_kwargs: dict = {}
+            if use_gpu:
+                import docker as _docker_sdk
+                gpu_kwargs["device_requests"] = [
+                    _docker_sdk.types.DeviceRequest(count=-1, capabilities=[["gpu"]])
+                ]
+                logger.info(f"[PTMQuant {job_id[:8]}] GPU passthrough enabled")
+            else:
+                logger.info(f"[PTMQuant {job_id[:8]}] GPU not available — CPU mode")
+
             container = await asyncio.to_thread(
                 client.containers.run,
                 "ptmquant:latest",
@@ -670,6 +704,7 @@ async def _run_ptmquant(job_id: str, db_url: str, attach_container_id: str | Non
                 name=container_name,
                 detach=True,
                 remove=False,
+                **gpu_kwargs,
             )
             # Persist container ID so cancel endpoint can kill it
             (job_path / "container_id.txt").write_text(container.id)

@@ -24,6 +24,28 @@ from typing import Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 
+def _get_embedding_device() -> str:
+    """Auto-detect the best available device for sentence-transformers.
+
+    Returns 'cuda' when an NVIDIA GPU is accessible, 'cpu' otherwise.
+    Respects EMBEDDING_DEVICE env var for manual override.
+    """
+    override = os.environ.get("EMBEDDING_DEVICE", "").strip().lower()
+    if override in ("cuda", "cpu", "mps"):
+        return override
+    try:
+        import torch
+        if torch.cuda.is_available():
+            logger.info(
+                "CUDA detected — embedding model will run on GPU "
+                f"({torch.cuda.get_device_name(0)})"
+            )
+            return "cuda"
+    except Exception:
+        pass
+    return "cpu"
+
+
 # ---------------------------------------------------------------------------
 # Collection Name Sanitizer (v84)
 # ---------------------------------------------------------------------------
@@ -258,8 +280,14 @@ class DocumentIndexer:
             try:
                 from sentence_transformers import SentenceTransformer
 
-                self._embedding_model = SentenceTransformer(self.embedding_model_name)
-                logger.info(f"Loaded embedding model: {self.embedding_model_name}")
+                # Auto-detect CUDA; fall back to CPU gracefully
+                device = _get_embedding_device()
+                self._embedding_model = SentenceTransformer(
+                    self.embedding_model_name, device=device
+                )
+                logger.info(
+                    f"Loaded embedding model: {self.embedding_model_name} (device={device})"
+                )
             except ImportError:
                 logger.error("sentence-transformers not installed")
         return self._embedding_model

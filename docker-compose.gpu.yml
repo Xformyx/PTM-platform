@@ -1,0 +1,47 @@
+# =============================================================================
+# PTM Analysis Platform — GPU Override (NVIDIA)
+#
+# Windows/Linux 서버에서 NVIDIA GPU를 사용할 때 기본 compose에 오버레이합니다.
+# 사전 조건: NVIDIA Container Toolkit 설치
+#   https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html
+#
+# 실행:
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+#
+# 중단:
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml down
+# =============================================================================
+
+services:
+  api-server:
+    environment:
+      # PTMQuant 컨테이너에 자동으로 GPU passthrough (auto-detect via pynvml)
+      PTMQUANT_USE_GPU: "true"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  celery-worker-rag:
+    environment:
+      # sentence-transformers embedding을 GPU로 수행
+      EMBEDDING_DEVICE: "cuda"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  celery-worker-report:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
