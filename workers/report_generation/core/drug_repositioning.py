@@ -1917,7 +1917,7 @@ class RepositioningEvaluator:
                     prompt=prompt,
                     model=self.model,
                     max_tokens=1500,
-                    temperature=0.3,
+                    temperature=0.0,  # v9.41: deterministic for receptor stability
                 )
                 
                 if response:
@@ -2473,7 +2473,7 @@ Write a professional scientific summary suitable for inclusion in a research rep
                 prompt=prompt,
                 model=self.model,
                 max_tokens=3000,
-                temperature=0.3,
+                temperature=0.0,  # v9.41: deterministic for receptor stability
             )
             return response.strip() if response else ""
         except Exception as e:

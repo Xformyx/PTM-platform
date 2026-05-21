@@ -434,7 +434,7 @@ class AbstractAnalyzer:
                         "Read ALL abstracts and return a single merged JSON result. "
                         "Output valid JSON only."
                     ),
-                    temperature=0.3,
+                    temperature=0.0,  # v9.41: deterministic for receptor stability
                     max_tokens=max_tokens,
                 )
                 parsed = self._parse_response(response)
@@ -541,7 +541,7 @@ class AbstractAnalyzer:
                 response = self.llm.generate(
                     prompt=prompt,
                     system_prompt="You are an expert in cellular signaling and PTM biology. Output valid JSON only.",
-                    temperature=0.3,
+                    temperature=0.0,  # v9.41: deterministic for receptor stability
                     max_tokens=3000,
                 )
                 parsed = self._parse_response(response)

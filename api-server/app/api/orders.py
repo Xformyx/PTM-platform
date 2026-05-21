@@ -2175,6 +2175,28 @@ async def get_vector_plot_data(
                     f"Reactome: {len(kinase_names_set)} kinases from kinase_analysis_data"
                 )
 
+            # ── v9.41: E3 Module Integration for Ubiquitylation orders ──
+            # If ptm_type is ubiquitylation, also extract E3 ligase names from
+            # kinase_analysis_data (stored by Kinase Annotation Node's Ubi Suite)
+            if ptm_type_str in ("ubiquitylation", "ubiquitination"):
+                e3_modules_data = kad.get("ubi_e3_modules", {})
+                if isinstance(e3_modules_data, dict):
+                    for e3m in e3_modules_data.get("e3_modules", []):
+                        e3_name = e3m.get("e3_ligase", "") or e3m.get("canonical", "")
+                        if e3_name and e3_name.strip():
+                            kinase_names_set.add(e3_name.strip())
+                            # Also add E3 → PTM map for substrate tracking
+                            for sub in e3m.get("confirmed_substrates", []) + e3m.get("inferred_substrates", []):
+                                sub_label = sub.get("label", "") or sub.get("key", "")
+                                if sub_label:
+                                    kinase_ptm_map[e3_name.strip()].add(
+                                        sub_label.replace("_", " ") if "_" in sub_label and " " not in sub_label else sub_label
+                                    )
+                    if e3_modules_data.get("e3_modules"):
+                        logging.getLogger("vector_plot").info(
+                            f"E3 Module Integration: added {len(e3_modules_data['e3_modules'])} E3 ligases to kinase_names_set"
+                        )
+
             # ── Fallback: enriched JSON parsing (if kinase_analysis_data is empty) ──
             if not kinase_names_set and enriched_path.exists():
                 _kinase_kw = {
@@ -2185,6 +2207,14 @@ async def get_vector_plot_data(
                     "raf", "mek", "jnk", "p38", "pi3k", "pdk",
                     "cam", "rock", "pak", "rsk", "s6k", "sgk",
                 }
+                # v9.41: Add E3 ligase keywords for ubiquitylation orders
+                if ptm_type_str in ("ubiquitylation", "ubiquitination"):
+                    _kinase_kw.update({
+                        "e3", "ligase", "ubiquitin", "nedd4", "mdm2", "trim",
+                        "cbl", "vhl", "traf", "itch", "wwp", "huwe", "chip",
+                        "parkin", "smurf", "rnf", "march", "hectd", "ube3",
+                        "fbxw", "skp2", "btrc", "keap1", "spop", "cullin",
+                    })
                 for ptm in enriched:
                     rag = ptm.get("rag_enrichment", {})
                     if not isinstance(rag, dict):
@@ -2375,6 +2405,46 @@ async def get_vector_plot_data(
                 )
         except Exception as _e3_err:
             logging.getLogger("vector_plot").warning(f"E3 receptor lookup failed: {_e3_err}")
+
+        # --- Source B-3: UbiNet/E3Atlas enriched pathway context (v9.41) ---
+        # Uses ubiquitylation_db_client for deeper E3→Receptor inference
+        # with pathway context, biological process, and evidence levels.
+        if ptm_type_str in ("ubiquitylation", "ubiquitination"):
+            try:
+                from app.services.ubiquitylation_db_client import (
+                    get_ubiquitylation_db_client,
+                )
+                ubi_client = get_ubiquitylation_db_client()
+                for e3_name in list(kinase_names_set):
+                    ubi_receptors = ubi_client.infer_receptors_from_e3_local(e3_name)
+                    for rec_info in ubi_receptors:
+                        rec_name = rec_info["receptor"]
+                        if rec_name not in reactome_receptors:
+                            reactome_receptors[rec_name] = {
+                                "name": rec_name,
+                                "receptor_class": "ubiquitylation_pathway",
+                                "via_kinases": [e3_name],
+                                "pathway": rec_info.get("pathway", ""),
+                                "source": "ubiquitylation_db_client",
+                                "evidence": rec_info.get("evidence_level", "curated"),
+                                "biological_process": rec_info.get("biological_process", ""),
+                            }
+                        else:
+                            existing = reactome_receptors[rec_name]
+                            via = existing.get("via_kinases") or []
+                            if e3_name not in via:
+                                via.append(e3_name)
+                                existing["via_kinases"] = via[:8]
+                            # Enrich with biological process if not present
+                            if not existing.get("biological_process") and rec_info.get("biological_process"):
+                                existing["biological_process"] = rec_info["biological_process"]
+                logging.getLogger("vector_plot").info(
+                    f"UbiNet/E3Atlas (Source B-3): enriched receptor context for "
+                    f"{len(kinase_names_set)} E3 candidates"
+                )
+            except Exception as _ubi_err:
+                logging.getLogger("vector_plot").debug(f"UbiNet enrichment skipped: {_ubi_err}")
+
 
         # --- Source C: Treatment-context-based receptor inference ---
         # Uses order.analysis_context.treatment to look up known ligand→receptor pairs.

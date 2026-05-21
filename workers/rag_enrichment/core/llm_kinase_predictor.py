@@ -177,7 +177,7 @@ class LLMKinasePredictor:
             response = self.llm.generate(
                 prompt=prompt,
                 system_prompt="You are an expert in kinase-substrate relationships and PTM biology. Output valid JSON only.",
-                temperature=0.3,
+                temperature=0.0,  # v9.41: deterministic for receptor stability
                 max_tokens=max_tokens,
             )
             parsed = self._parse_response(response)

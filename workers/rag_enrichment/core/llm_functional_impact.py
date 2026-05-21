@@ -200,7 +200,7 @@ class LLMFunctionalImpact:
             response = self.llm.generate(
                 prompt=prompt,
                 system_prompt="You are an expert in PTM functional biology and cell signaling. Output valid JSON only.",
-                temperature=0.4,
+                temperature=0.0,  # v9.41: deterministic for receptor stability
                 max_tokens=max_tokens,
             )
             parsed = self._parse_response(response)
