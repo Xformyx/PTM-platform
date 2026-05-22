@@ -2289,7 +2289,26 @@ async def get_vector_plot_data(
 
             if kinase_names_set:
                 from app.services.reactome_client import get_receptors_for_kinases
-                kinase_list = sorted(kinase_names_set)[:20]  # limit to top 20 kinases
+                # ── Wave-aware kinase selection for Reactome query ──
+                # Instead of just taking top 20 alphabetically, ensure diversity
+                # by including kinases from different temporal waves
+                _wave_diverse_kinases: list[str] = []
+                try:
+                    kad_for_waves = order.kinase_analysis_data or {}
+                    _wkp = kad_for_waves.get("wave_kinase_profile", [])
+                    if _wkp:
+                        # Take top kinases from each wave (ensures temporal diversity)
+                        for _wave in _wkp:
+                            for _wk in _wave.get("kinases", [])[:4]:
+                                _wk_name = _wk.get("canonical", "") or _wk.get("kinase", "")
+                                if _wk_name and _wk_name in kinase_names_set:
+                                    if _wk_name not in _wave_diverse_kinases:
+                                        _wave_diverse_kinases.append(_wk_name)
+                except Exception:
+                    pass
+                # Fill remaining slots with other kinases
+                _remaining = [k for k in sorted(kinase_names_set) if k not in _wave_diverse_kinases]
+                kinase_list = (_wave_diverse_kinases + _remaining)[:30]  # expanded to 30 for better coverage
                 logging.getLogger("vector_plot").info(
                     f"Reactome: querying receptors for {len(kinase_list)} kinases: {kinase_list}"
                 )
@@ -5111,8 +5130,46 @@ async def global_kinase_modules(
                     break
 
         if matched_kinases:
-            # Assign to the kinase module with most confirmed members
-            best_canon = max(matched_kinases, key=lambda c: len(kinase_members[c]["confirmed"]))
+            # ── Temporal-aware best kinase selection ──
+            # Instead of just picking the kinase with most confirmed members,
+            # use temporal context to pick the best-fitting kinase for this PTM
+            ptm_peak_min = None
+            ptm_wave_info = {}
+            if cowave_modules_input:
+                for cw in cowave_modules_input:
+                    cw_ptm_set = set(cw.get("ptm_keys", []) or cw.get("ptms", []))
+                    if ptm_key in cw_ptm_set:
+                        cw_label = cw.get("label", "")
+                        peak_match = re.search(r'peak:\s*([\w.]+)', cw_label)
+                        if peak_match:
+                            _pk_str = peak_match.group(1)
+                            _pk_m = re.match(r'([\d.]+)\s*(h|hr|hour|min|m)?', _pk_str, re.IGNORECASE)
+                            if _pk_m:
+                                _pk_val = float(_pk_m.group(1))
+                                _pk_unit = (_pk_m.group(2) or 'h').lower()
+                                ptm_peak_min = _pk_val if _pk_unit.startswith('m') else _pk_val * 60
+                            else:
+                                ptm_peak_min = None
+                        break
+
+            if ptm_peak_min is not None and len(matched_kinases) > 1:
+                # Score each candidate kinase by temporal fit
+                try:
+                    from app.services.temporal_kinase_scoring import compute_temporal_fit_score
+                    scored_candidates = []
+                    for c in matched_kinases:
+                        t_score = compute_temporal_fit_score(ptm_peak_min, c)
+                        # Combine temporal score with confirmed count (weighted)
+                        conf_count = len(kinase_members[c]["confirmed"])
+                        combined = t_score * 0.6 + min(1.0, conf_count / 20.0) * 0.4
+                        scored_candidates.append((c, combined))
+                    scored_candidates.sort(key=lambda x: x[1], reverse=True)
+                    best_canon = scored_candidates[0][0]
+                except Exception:
+                    best_canon = max(matched_kinases, key=lambda c: len(kinase_members[c]["confirmed"]))
+            else:
+                best_canon = max(matched_kinases, key=lambda c: len(kinase_members[c]["confirmed"]))
+
             if ptm_key not in [m["key"] for m in kinase_members[best_canon]["inferred"]]:
                 kinase_members[best_canon]["inferred"].append({
                     "key": ptm_key,
@@ -5211,6 +5268,29 @@ async def global_kinase_modules(
 
     # Sort by total_count descending
     kinase_module_list.sort(key=lambda x: x["total_count"], reverse=True)
+
+    # ── 5b. Smart Signal Decomposition: Temporal Kinase Redistribution ─────
+    # Disambiguate over-concentrated kinase modules using temporal context
+    try:
+        from app.services.temporal_kinase_scoring import (
+            redistribute_kinase_assignments,
+            build_wave_kinase_profile,
+        )
+        treatment_ctx = order.treatment or ""
+        kinase_module_list = redistribute_kinase_assignments(
+            kinase_module_list,
+            cowave_modules_input or [],
+            treatment_context=treatment_ctx,
+        )
+        # Build wave-kinase profile for enhanced receptor inference
+        wave_kinase_profile = build_wave_kinase_profile(
+            kinase_module_list,
+            cowave_modules_input or [],
+        )
+    except Exception as e:
+        import traceback
+        _log.warning(f"[TEMPORAL-SCORING] Redistribution failed: {e}\n{traceback.format_exc()}")
+        wave_kinase_profile = []
 
     # ── 6. Cowave cross-analysis summary ────────────────────────────────────
     cowave_cross = {}
@@ -5765,6 +5845,7 @@ async def global_kinase_modules(
                 "cowave_cross_analysis": cowave_cross,
                 "summary": summary,
                 "effector_proteins": effector_proteins,
+                "wave_kinase_profile": wave_kinase_profile,
                 "saved_at": _dt.utcnow().isoformat(),
             }
             await db.commit()
@@ -5781,6 +5862,7 @@ async def global_kinase_modules(
         "cowave_cross_analysis": cowave_cross,
         "temporal_cascade": temporal_cascade,
         "effector_proteins": effector_proteins,
+        "wave_kinase_profile": wave_kinase_profile,
     }
 
 
@@ -5822,13 +5904,14 @@ async def save_kinase_analysis_data(
     cowave_cross_analysis = body.get("cowave_cross_analysis", {})
     summary = body.get("summary", {})
     effector_proteins = body.get("effector_proteins", [])
-
+    wave_kinase_profile = body.get("wave_kinase_profile", [])
     order.kinase_analysis_data = {
         "kinase_modules": kinase_modules,
         "temporal_cascade": temporal_cascade,
         "cowave_cross_analysis": cowave_cross_analysis,
         "summary": summary,
         "effector_proteins": effector_proteins,
+        "wave_kinase_profile": wave_kinase_profile,
         "saved_at": _dt.utcnow().isoformat(),
         "source": "batched_merge",
     }

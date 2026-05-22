@@ -314,6 +314,17 @@ interface GlobalKinaseModuleResponse {
   cowave_cross_analysis: Record<string, CowaveCrossEntry>;
   temporal_cascade?: TemporalCascade;
   effector_proteins?: EffectorProtein[];
+  wave_kinase_profile?: WaveKinaseProfile[];
+}
+
+interface WaveKinaseProfile {
+  wave_id: number;
+  wave_label: string;
+  peak_minutes: number;
+  tier: string;
+  kinases: { canonical: string; kinase: string; ptm_count: number; is_anchor: boolean }[];
+  cascade_context: string;
+  suggested_receptors: string[];
 }
 
 // ── Kinase Module Colors ───────────────────────────────────────────────────
@@ -850,6 +861,15 @@ export default function KinaseModuleAnalysis({
       mergedEffectors = Array.from(effectorMap.values())
         .sort((a, b) => (b.evidence_score || 0) - (a.evidence_score || 0));
 
+      // Merge wave_kinase_profile — use the first batch that has it (all batches get same cowave context)
+      let mergedWaveProfile: WaveKinaseProfile[] | undefined;
+      for (const br of batchResults) {
+        if (br.wave_kinase_profile && br.wave_kinase_profile.length > 0) {
+          mergedWaveProfile = br.wave_kinase_profile;
+          break;
+        }
+      }
+
       const mergedResult: GlobalKinaseModuleResponse = {
         order_id: orderId,
         kinase_modules: mergedModules,
@@ -859,6 +879,7 @@ export default function KinaseModuleAnalysis({
         cowave_cross_analysis: mergedCowaveCross,
         temporal_cascade: mergedTemporal,
         effector_proteins: mergedEffectors,
+        wave_kinase_profile: mergedWaveProfile,
       };
 
       setGlobalKinaseResult(mergedResult);
@@ -887,6 +908,7 @@ export default function KinaseModuleAnalysis({
             directionality: eff.directionality,
             connected_substrates: eff.connected_substrates,
           })),
+          wave_kinase_profile: mergedWaveProfile || [],
         });
         console.log("[Global Annotate] Merged kinase_analysis_data saved to DB");
       } catch (saveErr) {
