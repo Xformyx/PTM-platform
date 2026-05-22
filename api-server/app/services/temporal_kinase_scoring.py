@@ -134,6 +134,9 @@ BASOPHILIC_KINASES = {
     "PRKCA": {"cascade": "DAG-PKC", "typical_peak_min": (1, 15)},
     "AMPK": {"cascade": "AMPK-metabolic", "typical_peak_min": (5, 30)},
     "PRKAA1": {"cascade": "AMPK-metabolic", "typical_peak_min": (5, 30)},
+    "MTOR": {"cascade": "mTOR-S6K", "typical_peak_min": (10, 60)},
+    "RPS6KB1": {"cascade": "mTOR-S6K", "typical_peak_min": (15, 60)},
+    "RPS6KA1": {"cascade": "RAS-MAPK", "typical_peak_min": (5, 30)},
 }
 
 # Pro-directed kinases that also overlap
@@ -166,7 +169,8 @@ MOTIF_FAMILY_MEMBERS = {
     "CAMK2": ["CAMK2", "CAMK2A", "CAMK2B", "CAMK2D"],
     "CAMK": ["CAMK2", "CAMK1", "CAMK4", "DAPK"],
     "PIM1/PIM2": ["PIM1", "PIM2", "PIM3"],
-    "mTOR": ["MTOR"],
+    "mTOR": ["MTOR", "S6K", "S6K1", "RPS6KA1", "RPS6KB1"],
+    "mTOR/S6K": ["MTOR", "S6K", "S6K1", "RPS6KA1", "RPS6KB1"],
     "CK2": ["CK2", "CSNK2A1", "CSNK2A2"],
     "GSK3": ["GSK3", "GSK3A", "GSK3B"],
     "ATM/ATR": ["ATM", "ATR"],
@@ -502,7 +506,12 @@ def redistribute_kinase_assignments(
     
     # Find anchor kinases per wave (confirmed kinases in each wave)
     for km in kinase_modules:
-        for member in km.get("confirmed", []) if isinstance(km.get("confirmed"), list) else []:
+        # Members with membership == "confirmed" are the anchor kinases
+        confirmed_members = [
+            m for m in km.get("members", [])
+            if m.get("membership") == "confirmed"
+        ]
+        for member in confirmed_members:
             pk = member.get("key", "")
             if pk in ptm_peak_map:
                 # Find which wave this PTM belongs to
@@ -548,9 +557,98 @@ def redistribute_kinase_assignments(
         f"(threshold={concentration_threshold*100:.0f}% of {total_ptms} PTMs)"
     )
     
-    # Redistribute inferred PTMs from over-concentrated modules
+    # Initialize redistribution containers
     new_modules = {}  # canonical → module dict
     reassigned_keys = set()
+    
+    # ── Strategy: Tier-based forced redistribution ──
+    # For severely over-concentrated modules (>40%), force split by temporal tier
+    # This ensures PTMs in different time windows get assigned to different kinases
+    for km in kinase_modules:
+        if km["canonical"] not in over_concentrated:
+            continue
+        if km["total_count"] / total_ptms < 0.35:
+            continue  # Only force-split severely concentrated ones
+        
+        # Group inferred members by temporal tier
+        tier_groups: dict = {}  # tier → [members]
+        for member in km.get("members", []):
+            if member.get("membership") != "inferred":
+                continue
+            pk = member.get("key", "")
+            peak_min = ptm_peak_map.get(pk)
+            if peak_min is not None:
+                tier = classify_wave_tier(peak_min)
+            else:
+                tier = "unknown"
+            if tier not in tier_groups:
+                tier_groups[tier] = []
+            tier_groups[tier].append(member)
+        
+        if len(tier_groups) <= 1:
+            continue  # All in same tier, can't split
+        
+        _log.info(
+            f"[TEMPORAL-SCORING] Force-splitting {km['canonical']} by tier: "
+            + ", ".join(f"{t}={len(ms)}" for t, ms in tier_groups.items())
+        )
+        
+        # Determine which tier the original kinase belongs to
+        original_canonical = km["canonical"]
+        original_info = BASOPHILIC_KINASES.get(original_canonical.upper()) or PRO_DIRECTED_KINASES.get(original_canonical.upper())
+        if original_info:
+            orig_min_t, orig_max_t = original_info["typical_peak_min"]
+            orig_tier = classify_wave_tier((orig_min_t + orig_max_t) / 2)
+        else:
+            orig_tier = "early"  # Default assumption for unknown kinases
+        
+        # For each tier that doesn't match the original kinase's tier,
+        # pick the best alternative kinase and force-assign those PTMs
+        for tier, tier_members in tier_groups.items():
+            if tier == orig_tier or tier == "unknown":
+                continue  # Keep these with original kinase
+            
+            # Pick the best kinase for this tier
+            tier_kinase_candidates = WAVE_TIER_KINASES.get(tier, {}).get("primary", [])
+            best_tier_kinase = None
+            for tk in tier_kinase_candidates:
+                if tk.upper() != original_canonical.upper():
+                    best_tier_kinase = tk
+                    break
+            
+            if not best_tier_kinase:
+                continue
+            
+            # Force-assign all PTMs in this tier to the tier's kinase
+            new_canon = best_tier_kinase.upper()
+            if new_canon not in new_modules:
+                new_modules[new_canon] = {
+                    "kinase": best_tier_kinase,
+                    "canonical": new_canon,
+                    "sources": set(["temporal_decomposition"]),
+                    "confirmed": [],
+                    "inferred": [],
+                    "temporal_reasoning": f"tier-forced from {original_canonical} (tier={tier})",
+                    "is_temporal_decomposition": True,
+                }
+            for m in tier_members:
+                new_modules[new_canon]["sources"].add("temporal_decomposition")
+                new_modules[new_canon]["inferred"].append({
+                    **m,
+                    "evidence": f"tier-forced reassignment from {original_canonical} "
+                               f"(tier={tier}, target_kinase={best_tier_kinase})",
+                    "temporal_score": 0.8,
+                    "original_kinase": original_canonical,
+                })
+                reassigned_keys.add(m.get("key", ""))
+            
+            _log.info(
+                f"[TEMPORAL-SCORING] Tier-forced {len(tier_members)} PTMs "
+                f"from {original_canonical} to {best_tier_kinase} (tier={tier})"
+            )
+    
+    # Redistribute inferred PTMs from over-concentrated modules (score-based)
+    # Note: new_modules and reassigned_keys may already have tier-forced entries from above
     
     for km in kinase_modules:
         if km["canonical"] not in over_concentrated:
@@ -559,27 +657,53 @@ def redistribute_kinase_assignments(
         original_canonical = km["canonical"]
         inferred_members = [m for m in km["members"] if m.get("membership") == "inferred"]
         
+        # Calculate over-concentration penalty:
+        # The more PTMs concentrated, the more aggressively we redistribute
+        concentration_ratio = km["total_count"] / total_ptms
+        # penalty: 0.0 at threshold, up to 0.4 at 70%+ concentration
+        overconcentration_penalty = min(0.4, (concentration_ratio - concentration_threshold) * 1.5)
+        
         for member in inferred_members:
             pk = member.get("key", "")
+            
+            # Skip if already reassigned by tier-forced redistribution
+            if pk in reassigned_keys:
+                continue
+            
             peak_min = ptm_peak_map.get(pk)
             wave_info = ptm_wave_map.get(pk, {})
             
             if peak_min is None:
                 continue  # No temporal info, keep current assignment
             
-            # Score current kinase
-            current_score = score_kinase_for_ptm(
+            # Score current kinase WITH penalty for over-concentration
+            raw_score = score_kinase_for_ptm(
                 original_canonical, peak_min, wave_info, is_confirmed=False
             )
+            current_score = max(0.1, raw_score - overconcentration_penalty)
             
             # Get motif family for this PTM
             evidence = member.get("evidence", "")
             motif_families = []
-            if "motif match" in evidence:
-                # Extract families from evidence string
+            if "motif match" in evidence.lower() or "motif" in evidence.lower():
+                # Extract families from evidence string like "motif match (AKT/PKB, RSK)"
                 fam_match = re.search(r'\(([^)]+)\)', evidence)
                 if fam_match:
                     motif_families = [f.strip() for f in fam_match.group(1).split(",")]
+            
+            # If no motif families found, use the original kinase canonical to find its family
+            if not motif_families:
+                for family_key, members in MOTIF_FAMILY_MEMBERS.items():
+                    if original_canonical.upper() in [m.upper() for m in members]:
+                        motif_families.append(family_key)
+                        break
+                # Also try matching by canonical name prefix
+                if not motif_families:
+                    for family_key in MOTIF_FAMILY_MEMBERS:
+                        if (original_canonical.upper() in family_key.upper() or
+                            family_key.upper().split('/')[0] in original_canonical.upper()):
+                            motif_families.append(family_key)
+                            break
             
             # Try disambiguation
             best_alternative = None
@@ -594,18 +718,20 @@ def redistribute_kinase_assignments(
                 for cand in candidates:
                     if cand["kinase"].upper() == original_canonical.upper():
                         continue  # Skip current kinase
-                    if cand["score"] > best_alt_score + 0.15:  # Need significant improvement
+                    if cand["score"] > best_alt_score + 0.1:  # Lowered threshold for better redistribution
                         best_alternative = cand
                         best_alt_score = cand["score"]
                         break
             
-            # Also check wave-tier expected kinases
+            # Also check wave-tier expected kinases (more aggressive)
             if not best_alternative and wave_info:
                 tier = wave_info.get("tier", "")
                 tier_kinases = WAVE_TIER_KINASES.get(tier, {})
                 for primary_k in tier_kinases.get("primary", []):
+                    if primary_k.upper() == original_canonical.upper():
+                        continue
                     alt_score = score_kinase_for_ptm(primary_k, peak_min, wave_info)
-                    if alt_score > best_alt_score + 0.2:
+                    if alt_score > best_alt_score + 0.15:
                         best_alternative = {
                             "kinase": primary_k,
                             "score": alt_score,
