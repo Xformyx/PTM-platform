@@ -2380,6 +2380,75 @@ async def get_vector_plot_data(
         except Exception as e:
             logging.getLogger("vector_plot").warning(f"Reactome receptor lookup failed: {e}")
 
+        # --- Source B-1.5: Curated kinase→receptor DB fallback ---
+        # When Reactome API returns few receptors, supplement with curated reverse mapping.
+        # This ensures kinase modules that Reactome doesn't cover still get receptor annotations.
+        try:
+            from app.services.ligand_receptor_db import get_upstream_receptors_for_kinases
+            # Identify kinases not yet mapped to any receptor
+            _mapped_kinases = set()
+            for _ri in reactome_receptors.values():
+                _mapped_kinases.update(_ri.get("via_kinases", []))
+            _unmapped_kinases = [k for k in kinase_names_set if k not in _mapped_kinases]
+            
+            if _unmapped_kinases or len(reactome_receptors) < 5:
+                # Query curated DB for all kinases (not just unmapped) to maximize coverage
+                _curated_results = get_upstream_receptors_for_kinases(list(kinase_names_set))
+                _curated_receptor_kinases: dict = {}  # receptor_name -> set of kinases
+                for _kin, _recs in _curated_results.items():
+                    for _rec_info in _recs:
+                        _rn = _rec_info["receptor"]
+                        if _rn not in _curated_receptor_kinases:
+                            _curated_receptor_kinases[_rn] = {
+                                "kinases": set(),
+                                "receptor_class": _rec_info["receptor_class"],
+                            }
+                        _curated_receptor_kinases[_rn]["kinases"].add(_kin)
+                
+                # Add curated receptors that aren't already in reactome_receptors
+                _curated_added = 0
+                for _rn, _info in _curated_receptor_kinases.items():
+                    _via_kins = sorted(_info["kinases"])[:8]
+                    # Calculate downstream PTMs for this receptor
+                    _ds_ptms = set()
+                    for _vk in _via_kins:
+                        _ds_ptms.update(kinase_ptm_map.get(_vk, set()))
+                    
+                    if _rn not in reactome_receptors:
+                        if len(_via_kins) >= 2 or len(_ds_ptms) >= 5:  # Only add if meaningful
+                            reactome_receptors[_rn] = {
+                                "name": _rn,
+                                "receptor_class": _info["receptor_class"],
+                                "downstream_ptm_count": max(len(_ds_ptms), 1),
+                                "downstream_ptms": sorted(_ds_ptms)[:10],
+                                "via_kinases": _via_kins,
+                                "pathway": f"Curated: {_rn} → {', '.join(_via_kins[:3])}",
+                                "signaling_pathway": f"Signaling by {_rn}",
+                                "source": "curated_kinase_receptor_db",
+                                "has_receptor_specific_db": True,
+                            }
+                            _curated_added += 1
+                    else:
+                        # Supplement existing receptor with additional kinases
+                        _existing = reactome_receptors[_rn]
+                        _existing_via = set(_existing.get("via_kinases", []))
+                        _new_via = [k for k in _via_kins if k not in _existing_via]
+                        if _new_via:
+                            _existing["via_kinases"] = (list(_existing_via) + _new_via)[:8]
+                            # Update PTM count
+                            _all_ptms = set()
+                            for _vk in _existing["via_kinases"]:
+                                _all_ptms.update(kinase_ptm_map.get(_vk, set()))
+                            _existing["downstream_ptm_count"] = max(len(_all_ptms), _existing["downstream_ptm_count"])
+                            _existing["downstream_ptms"] = sorted(_all_ptms)[:10]
+                
+                logging.getLogger("vector_plot").info(
+                    f"Curated DB (Source B-1.5): Added {_curated_added} receptors, "
+                    f"supplemented existing. Total receptors now: {len(reactome_receptors)}"
+                )
+        except Exception as _curated_err:
+            logging.getLogger("vector_plot").warning(f"Curated kinase→receptor fallback failed: {_curated_err}")
+
         # --- Source B-2: E3 Ligase → Receptor mapping (for ubiquitylation) ---
         # v9.40: For ubiquitylation orders, E3 ligases in kinase_names_set may not
         # map to receptors via Reactome. Use dedicated E3→Receptor DB as fallback.

@@ -1045,6 +1045,85 @@ _RECEPTOR_DOWNSTREAM_KINASES_LOWER: dict[str, list[str]] = {
     k.lower(): v for k, v in _RECEPTOR_DOWNSTREAM_KINASES.items()
 }
 
+# ── Reverse mapping: kinase → upstream receptors (auto-generated) ──────────────
+# Built by inverting _RECEPTOR_DOWNSTREAM_KINASES
+_KINASE_UPSTREAM_RECEPTORS: dict[str, list[str]] = {}
+for _rec_name, _downstream_kinases in _RECEPTOR_DOWNSTREAM_KINASES.items():
+    for _dk in _downstream_kinases:
+        _dk_upper = _dk.upper()
+        if _dk_upper not in _KINASE_UPSTREAM_RECEPTORS:
+            _KINASE_UPSTREAM_RECEPTORS[_dk_upper] = []
+        if _rec_name not in _KINASE_UPSTREAM_RECEPTORS[_dk_upper]:
+            _KINASE_UPSTREAM_RECEPTORS[_dk_upper].append(_rec_name)
+
+# Also add common aliases
+_KINASE_ALIAS_MAP: dict[str, str] = {
+    "ERK1": "MAPK3", "ERK2": "MAPK1", "ERK": "MAPK1",
+    "JNK": "MAPK8", "JNK1": "MAPK8", "JNK2": "MAPK9",
+    "P38": "MAPK14", "p38": "MAPK14",
+    "PKA": "PRKACA", "PKC": "PRKCA",
+    "FAK": "PTK2", "CAMKII": "CAMK2A", "CaMKII": "CAMK2A",
+    "AMPK": "PRKAA1", "PI3K": "PIK3CA",
+    "MTOR": "MTOR", "mTOR": "MTOR",
+    "IKK": "IKBKB", "LIMK": "LIMK1",
+    "S6K1": "RPS6KB1", "RSK": "RPS6KA1",
+    "TAK1": "MAP3K7", "ROCK1": "ROCK1", "ROCK2": "ROCK2",
+    "CK1": "CSNK1A1", "WNT": "WNT",
+    "JAK": "JAK1", "STAT3": "STAT3", "STAT1": "STAT1",
+}
+for _alias, _canonical in _KINASE_ALIAS_MAP.items():
+    _alias_upper = _alias.upper()
+    _canonical_upper = _canonical.upper()
+    if _canonical_upper in _KINASE_UPSTREAM_RECEPTORS:
+        if _alias_upper not in _KINASE_UPSTREAM_RECEPTORS:
+            _KINASE_UPSTREAM_RECEPTORS[_alias_upper] = _KINASE_UPSTREAM_RECEPTORS[_canonical_upper]
+        else:
+            for _r in _KINASE_UPSTREAM_RECEPTORS[_canonical_upper]:
+                if _r not in _KINASE_UPSTREAM_RECEPTORS[_alias_upper]:
+                    _KINASE_UPSTREAM_RECEPTORS[_alias_upper].append(_r)
+
+
+def get_upstream_receptors_for_kinases(kinase_names: list[str]) -> dict[str, list[dict]]:
+    """
+    Given a list of kinase names, return upstream receptors from curated DB.
+    Returns: {kinase_name: [{receptor, receptor_class, pathway}]}
+    """
+    result: dict[str, list[dict]] = {}
+    for kinase in kinase_names:
+        k_upper = kinase.upper().strip()
+        receptors = _KINASE_UPSTREAM_RECEPTORS.get(k_upper, [])
+        if receptors:
+            rec_list = []
+            for rec_name in receptors:
+                # Determine receptor class from _RECEPTOR_DOWNSTREAM_KINASES structure
+                rec_class = "Receptor"
+                rec_upper = rec_name.upper()
+                if any(x in rec_upper for x in ["EGFR", "ERBB", "FGFR", "PDGFR", "VEGFR",
+                       "KDR", "MET", "IGF1R", "INSR", "NTRK", "TRK", "RET", "KIT",
+                       "ALK", "ROS1", "AXL", "MERTK", "TYRO3", "ROR", "EPH"]):
+                    rec_class = "RTK"
+                elif any(x in rec_upper for x in ["TGFBR", "BMPR", "ACVR"]):
+                    rec_class = "TGFβ/BMP"
+                elif any(x in rec_upper for x in ["IL", "IFNAR", "IFNGR", "TNFRSF"]):
+                    rec_class = "Cytokine"
+                elif any(x in rec_upper for x in ["ADR", "CHR", "DRD", "HTR", "PTGER", "LPAR", "S1PR"]):
+                    rec_class = "GPCR"
+                elif any(x in rec_upper for x in ["ITG"]):
+                    rec_class = "Integrin"
+                elif any(x in rec_upper for x in ["FZD", "LRP5", "LRP6", "NOTCH"]):
+                    rec_class = "Developmental"
+                elif any(x in rec_upper for x in ["LEPR", "ADIPOR"]):
+                    rec_class = "Metabolic"
+                rec_list.append({
+                    "receptor": rec_name,
+                    "receptor_class": rec_class,
+                    "pathway": f"{rec_name} → {kinase}",
+                    "source": "curated_kinase_receptor_db",
+                })
+            result[kinase] = rec_list
+    return result
+
+
 
 def score_uniprot_receptor(
     receptor_name: str,
