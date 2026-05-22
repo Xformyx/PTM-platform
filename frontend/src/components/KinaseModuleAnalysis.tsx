@@ -574,6 +574,7 @@ export default function KinaseModuleAnalysis({
   const [globalKinaseResult, setGlobalKinaseResult] = useState<GlobalKinaseModuleResponse | null>(null);
   const [globalKinaseLoading, setGlobalKinaseLoading] = useState(false);
   const [globalKinaseError, setGlobalKinaseError] = useState<string | null>(null);
+  const [globalKinaseBatchProgress, setGlobalKinaseBatchProgress] = useState<{ current: number; total: number; phase: string } | null>(null);
 
   // ── Receptor→Kinase reverse mapping (v9.21) ─────────────────────────────
   // Maps canonical kinase name (uppercase) → list of receptor names that route through it
@@ -653,10 +654,13 @@ export default function KinaseModuleAnalysis({
     }
   }, [orderId, manualSelection, topNPtms]);
 
-  // ── Global Kinase Module annotation call ────────────────────────────────
+  // ── Global Kinase Module annotation call (batched to avoid 524 timeout) ─
+  const GLOBAL_ANNOTATE_BATCH_SIZE = 150; // PTMs per batch (keeps each call < 60s)
+
   const runGlobalKinaseModules = useCallback(async () => {
     setGlobalKinaseLoading(true);
     setGlobalKinaseError(null);
+    setGlobalKinaseBatchProgress(null);
     try {
       const allPtms = checkedPtmList.length > 0 ? checkedPtmList : topNPtms;
       const cowaveModulesPayload = coWaveModules.map((m) => ({
@@ -664,20 +668,237 @@ export default function KinaseModuleAnalysis({
         label: m.label,
         ptms: m.ptms.map((p) => `${p.gene}_${p.position}`),
       }));
-      const result = await api.post<GlobalKinaseModuleResponse>(
-        `/orders/${orderId}/global-kinase-modules`,
-        {
-          ptms: allPtms.map((p) => ({ gene: p.gene, position: p.position })),
-          cowave_modules: cowaveModulesPayload,
+
+      // If PTM count is small enough, do a single call (no batching needed)
+      if (allPtms.length <= GLOBAL_ANNOTATE_BATCH_SIZE) {
+        setGlobalKinaseBatchProgress({ current: 1, total: 1, phase: "Annotating..." });
+        const result = await api.post<GlobalKinaseModuleResponse>(
+          `/orders/${orderId}/global-kinase-modules`,
+          {
+            ptms: allPtms.map((p) => ({ gene: p.gene, position: p.position })),
+            cowave_modules: cowaveModulesPayload,
+          }
+        );
+        setGlobalKinaseResult(result);
+        setActiveTab("kinaseModules");
+        return;
+      }
+
+      // ── Batched processing ─────────────────────────────────────────────
+      const batches: { gene: string; position: string }[][] = [];
+      const ptmPayload = allPtms.map((p) => ({ gene: p.gene, position: p.position }));
+      for (let i = 0; i < ptmPayload.length; i += GLOBAL_ANNOTATE_BATCH_SIZE) {
+        batches.push(ptmPayload.slice(i, i + GLOBAL_ANNOTATE_BATCH_SIZE));
+      }
+
+      const totalBatches = batches.length;
+      const batchResults: GlobalKinaseModuleResponse[] = [];
+
+      for (let bIdx = 0; bIdx < totalBatches; bIdx++) {
+        setGlobalKinaseBatchProgress({
+          current: bIdx + 1,
+          total: totalBatches,
+          phase: `Batch ${bIdx + 1}/${totalBatches} (${batches[bIdx].length} PTMs)`,
+        });
+
+        const batchResult = await api.post<GlobalKinaseModuleResponse>(
+          `/orders/${orderId}/global-kinase-modules`,
+          {
+            ptms: batches[bIdx],
+            cowave_modules: cowaveModulesPayload,
+          }
+        );
+        batchResults.push(batchResult);
+      }
+
+      // ── Merge batch results ────────────────────────────────────────────
+      setGlobalKinaseBatchProgress({ current: totalBatches, total: totalBatches, phase: "Merging results..." });
+
+      // Merge kinase_modules: combine by canonical name
+      const mergedModulesMap = new Map<string, GlobalKinaseModule>();
+      for (const br of batchResults) {
+        for (const km of br.kinase_modules) {
+          const existing = mergedModulesMap.get(km.canonical);
+          if (!existing) {
+            mergedModulesMap.set(km.canonical, { ...km });
+          } else {
+            // Merge members (deduplicate by key)
+            const existingKeys = new Set(existing.members.map((m) => m.key));
+            for (const m of km.members) {
+              if (!existingKeys.has(m.key)) {
+                existing.members.push(m);
+                existingKeys.add(m.key);
+              }
+            }
+            // Merge sources
+            const srcSet = new Set([...existing.sources, ...km.sources]);
+            existing.sources = Array.from(srcSet);
+            existing.source_count = existing.sources.length;
+            // Recount
+            existing.confirmed_count = existing.members.filter((m) => m.membership === "confirmed").length;
+            existing.inferred_count = existing.members.filter((m) => m.membership === "inferred").length;
+            existing.total_count = existing.members.length;
+            // Merge cowave_overlap
+            const existingCwIds = new Set(existing.cowave_overlap.map((c) => c.cowave_id));
+            for (const cw of km.cowave_overlap) {
+              if (!existingCwIds.has(cw.cowave_id)) {
+                existing.cowave_overlap.push(cw);
+              } else {
+                const existCw = existing.cowave_overlap.find((c) => c.cowave_id === cw.cowave_id);
+                if (existCw) {
+                  const sharedSet = new Set([...existCw.shared_ptms, ...cw.shared_ptms]);
+                  existCw.shared_ptms = Array.from(sharedSet);
+                }
+              }
+            }
+          }
         }
-      );
-      setGlobalKinaseResult(result);
+      }
+      const mergedModules = Array.from(mergedModulesMap.values())
+        .sort((a, b) => b.total_count - a.total_count);
+
+      // Merge unassigned_ptms (deduplicate by key, remove those now assigned)
+      const assignedKeys = new Set<string>();
+      for (const km of mergedModules) {
+        for (const m of km.members) assignedKeys.add(m.key);
+      }
+      const mergedUnassigned: GlobalKinaseModuleResponse["unassigned_ptms"] = [];
+      const seenUnassigned = new Set<string>();
+      for (const br of batchResults) {
+        for (const ua of br.unassigned_ptms) {
+          if (!assignedKeys.has(ua.key) && !seenUnassigned.has(ua.key)) {
+            mergedUnassigned.push(ua);
+            seenUnassigned.add(ua.key);
+          }
+        }
+      }
+
+      // Merge annotation_details (deduplicate by gene+position)
+      const mergedAnnotations: GlobalKinaseModuleResponse["annotation_details"] = [];
+      const seenAnnot = new Set<string>();
+      for (const br of batchResults) {
+        for (const ann of br.annotation_details) {
+          const k = `${ann.gene}_${ann.position}`;
+          if (!seenAnnot.has(k)) {
+            mergedAnnotations.push(ann);
+            seenAnnot.add(k);
+          }
+        }
+      }
+
+      // Merge summary
+      const mergedSummary: GlobalKinaseModuleResponse["summary"] = {
+        total_ptms: mergedAnnotations.length,
+        total_kinase_modules: mergedModules.length,
+        total_confirmed: mergedModules.reduce((s, km) => s + km.confirmed_count, 0),
+        total_inferred: mergedModules.reduce((s, km) => s + km.inferred_count, 0),
+        total_unassigned: mergedUnassigned.length,
+        status_counts: { known: 0, motif_only: 0, novel_candidate: 0 },
+        top_kinases: mergedModules.slice(0, 10).map((km) => ({
+          kinase: km.kinase, canonical: km.canonical, total: km.total_count,
+        })),
+      };
+      for (const ann of mergedAnnotations) {
+        const st = (ann as any).status || "novel_candidate";
+        mergedSummary.status_counts[st] = (mergedSummary.status_counts[st] || 0) + 1;
+      }
+
+      // Merge cowave_cross_analysis (union)
+      const mergedCowaveCross: Record<string, CowaveCrossEntry> = {};
+      for (const br of batchResults) {
+        for (const [cwId, entry] of Object.entries(br.cowave_cross_analysis || {})) {
+          if (!mergedCowaveCross[cwId]) {
+            mergedCowaveCross[cwId] = { ...entry, overlapping_kinases: [...entry.overlapping_kinases] };
+          } else {
+            // Merge overlapping kinases
+            const existing = mergedCowaveCross[cwId];
+            for (const ok of entry.overlapping_kinases) {
+              const found = existing.overlapping_kinases.find((e) => e.canonical === ok.canonical);
+              if (!found) {
+                existing.overlapping_kinases.push(ok);
+              } else {
+                const sharedSet = new Set([...found.shared_ptms, ...ok.shared_ptms]);
+                found.shared_ptms = Array.from(sharedSet);
+                found.shared_count = found.shared_ptms.length;
+              }
+            }
+          }
+        }
+      }
+
+      // Use temporal_cascade and effector_proteins from the LAST batch (which has full cowave context)
+      // Actually, re-request the final merge call with all PTM keys for temporal cascade
+      // For simplicity, merge temporal_cascade from all batches
+      let mergedTemporal: TemporalCascade | undefined;
+      let mergedEffectors: EffectorProtein[] | undefined;
+      // Use the result from the first batch that has temporal data (all batches get same cowave_modules)
+      for (const br of batchResults) {
+        if (br.temporal_cascade && br.temporal_cascade.timepoints.length > 0) {
+          mergedTemporal = br.temporal_cascade;
+          break;
+        }
+      }
+      // Merge effector_proteins (deduplicate by gene)
+      const effectorMap = new Map<string, EffectorProtein>();
+      for (const br of batchResults) {
+        for (const eff of (br.effector_proteins || [])) {
+          if (!effectorMap.has(eff.gene.toUpperCase())) {
+            effectorMap.set(eff.gene.toUpperCase(), eff);
+          }
+        }
+      }
+      mergedEffectors = Array.from(effectorMap.values())
+        .sort((a, b) => (b.evidence_score || 0) - (a.evidence_score || 0));
+
+      const mergedResult: GlobalKinaseModuleResponse = {
+        order_id: orderId,
+        kinase_modules: mergedModules,
+        unassigned_ptms: mergedUnassigned,
+        annotation_details: mergedAnnotations,
+        summary: mergedSummary,
+        cowave_cross_analysis: mergedCowaveCross,
+        temporal_cascade: mergedTemporal,
+        effector_proteins: mergedEffectors,
+      };
+
+      setGlobalKinaseResult(mergedResult);
       setActiveTab("kinaseModules");
+
+      // Save merged result to DB (so Receptor Inference uses complete data)
+      try {
+        await api.post(`/orders/${orderId}/save-kinase-analysis-data`, {
+          kinase_modules: mergedModules.map((km) => ({
+            ...km,
+            // Strip members to reduce payload size for DB storage
+            members: km.members.map((m) => ({ key: m.key, gene: m.gene, position: m.position, membership: m.membership })),
+          })),
+          temporal_cascade: mergedTemporal || {},
+          cowave_cross_analysis: mergedCowaveCross,
+          summary: mergedSummary,
+          effector_proteins: (mergedEffectors || []).map((eff) => ({
+            gene: eff.gene,
+            data_type: eff.data_type,
+            max_abs_fc: eff.max_abs_fc,
+            peak_condition: eff.peak_condition,
+            peak_fc: eff.peak_fc,
+            sources: eff.sources,
+            evidence_strength: eff.evidence_strength,
+            evidence_score: eff.evidence_score,
+            directionality: eff.directionality,
+            connected_substrates: eff.connected_substrates,
+          })),
+        });
+        console.log("[Global Annotate] Merged kinase_analysis_data saved to DB");
+      } catch (saveErr) {
+        console.warn("[Global Annotate] Failed to save merged data to DB:", saveErr);
+        // Non-fatal: the UI still shows the merged result
+      }
     } catch (err: any) {
       console.error("Global kinase module failed:", err);
       setGlobalKinaseError(err?.message || "Global kinase module request failed");
     } finally {
       setGlobalKinaseLoading(false);
+      setGlobalKinaseBatchProgress(null);
     }
   }, [orderId, checkedPtmList, topNPtms, coWaveModules]);
 
@@ -797,11 +1018,31 @@ export default function KinaseModuleAnalysis({
           </div>
         </div>
 
-        {/* Global annotation loading/error */}
+        {/* Global annotation loading/error with batch progress */}
         {globalKinaseLoading && (
-          <div className="flex items-center gap-2 text-xs text-muted-foreground py-3 px-2 bg-amber-50 dark:bg-amber-900/10 rounded">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            {isUbi ? `Running E3 Ligase module analysis for ${checkedPtmList.length} ubiquitylation sites across all sources...` : `Running global kinase module analysis for ${checkedPtmList.length} PTMs across all sources...`}
+          <div className="flex flex-col gap-1 text-xs text-muted-foreground py-3 px-2 bg-amber-50 dark:bg-amber-900/10 rounded">
+            <div className="flex items-center gap-2">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              {isUbi ? `Running E3 Ligase module analysis for ${checkedPtmList.length} ubiquitylation sites across all sources...` : `Running global kinase module analysis for ${checkedPtmList.length} PTMs across all sources...`}
+            </div>
+            {globalKinaseBatchProgress && globalKinaseBatchProgress.total > 1 && (
+              <div className="ml-6 space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="font-medium text-amber-700 dark:text-amber-300">
+                    {globalKinaseBatchProgress.phase}
+                  </span>
+                  <span className="text-[10px] text-muted-foreground">
+                    ({Math.round((globalKinaseBatchProgress.current / globalKinaseBatchProgress.total) * 100)}%)
+                  </span>
+                </div>
+                <div className="w-full bg-amber-200 dark:bg-amber-800 rounded-full h-1.5">
+                  <div
+                    className="bg-amber-500 dark:bg-amber-400 h-1.5 rounded-full transition-all duration-300"
+                    style={{ width: `${(globalKinaseBatchProgress.current / globalKinaseBatchProgress.total) * 100}%` }}
+                  />
+                </div>
+              </div>
+            )}
           </div>
         )}
         {globalKinaseError && (

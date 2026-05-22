@@ -5785,6 +5785,64 @@ async def global_kinase_modules(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Save merged kinase analysis data (for batched Global Annotate)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.post("/{order_id}/save-kinase-analysis-data")
+async def save_kinase_analysis_data(
+    order_id: int,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Save merged kinase analysis data to DB.
+
+    When Global Annotate runs in batched mode (to avoid 524 timeout),
+    the frontend merges results from multiple batch calls and then
+    saves the final merged result via this endpoint.
+
+    This ensures kinase_analysis_data in the DB reflects the COMPLETE
+    analysis across all PTMs, not just the last batch.
+
+    Request body: same structure as GlobalKinaseModuleResponse
+    """
+    import logging
+    from datetime import datetime as _dt
+
+    _log = logging.getLogger("save_kinase_analysis")
+
+    result = await db.execute(select(Order).where(Order.id == order_id))
+    order = result.scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    await _require_write_access(order, user, db)
+
+    kinase_modules = body.get("kinase_modules", [])
+    temporal_cascade = body.get("temporal_cascade", {})
+    cowave_cross_analysis = body.get("cowave_cross_analysis", {})
+    summary = body.get("summary", {})
+    effector_proteins = body.get("effector_proteins", [])
+
+    order.kinase_analysis_data = {
+        "kinase_modules": kinase_modules,
+        "temporal_cascade": temporal_cascade,
+        "cowave_cross_analysis": cowave_cross_analysis,
+        "summary": summary,
+        "effector_proteins": effector_proteins,
+        "saved_at": _dt.utcnow().isoformat(),
+        "source": "batched_merge",
+    }
+    await db.commit()
+
+    _log.info(
+        f"[SAVE-KINASE] Saved merged kinase_analysis_data to order {order_id}: "
+        f"{len(kinase_modules)} modules, {len(effector_proteins)} effectors"
+    )
+
+    return {"status": "ok", "order_id": order_id, "modules_saved": len(kinase_modules)}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Treatment text typo-detection endpoint
 # ─────────────────────────────────────────────────────────────────────────────
 
