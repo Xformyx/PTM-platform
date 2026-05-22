@@ -2078,7 +2078,7 @@ async def get_vector_plot_data(
 
     if _use_cached:
         inferred_receptors = _cached_receptors
-        pass  # marker — actual Source A code follows below
+        _cowave_analysis = _cached_receptor_data.get("cowave_analysis")  # v9.42: restore from cache
 
     if not _use_cached:
         # --- Source A: upstream_regulators (existing, kept for backward compat) ---
@@ -2724,9 +2724,225 @@ async def get_vector_plot_data(
             f"Uniqueness scores: {_uq_summary}"
         )
 
+        # ══════════════════════════════════════════════════════════════════════
+        # v9.42: Co-Wave Divergence Receptor Inference
+        # ══════════════════════════════════════════════════════════════════════
+        # Hub kinases that appear in almost every RTK pathway — penalize them
+        _HUB_KINASES = {"AKT1", "AKT2", "MAPK1", "MAPK3", "PI3K", "SRC",
+                        "ERK1", "ERK2", "PIK3CA", "PIK3R1"}
+        _HUB_PENALTY = 0.2  # weight multiplier for hub kinases
+
+        # Determine if multi-time-point data is available
+        _sample_cfg = order.sample_config or {}
+        _is_single_tp = _sample_cfg.get("single_time_point", False)
+        _conditions_in_data = sorted(set(
+            r["condition"] for r in vector_data if r.get("condition")
+        ))
+        _is_multi_tp = (not _is_single_tp) and len(_conditions_in_data) >= 3
+
+        _cowave_analysis = None
+
+        if _is_multi_tp and top_n_ptms:
+            # ── Parse time order from condition labels ──
+            import re as _cw_re
+            def _parse_time_minutes(cond_str: str) -> float:
+                """Parse condition string to minutes for ordering."""
+                m = _cw_re.match(r'^([\d.]+)\s*(min|m|h|hr|hour|d|day)s?$', cond_str.strip(), _cw_re.IGNORECASE)
+                if m:
+                    val = float(m.group(1))
+                    unit = m.group(2).lower()
+                    if unit in ('h', 'hr', 'hour'):
+                        return val * 60
+                    elif unit in ('d', 'day'):
+                        return val * 1440
+                    return val  # minutes
+                # Try just numeric
+                m2 = _cw_re.match(r'^([\d.]+)$', cond_str.strip())
+                if m2:
+                    return float(m2.group(1))
+                return float('inf')  # unparseable → sort last
+
+            _cond_order = sorted(_conditions_in_data, key=_parse_time_minutes)
+            _parseable = [c for c in _cond_order if _parse_time_minutes(c) != float('inf')]
+            _is_multi_tp = len(_parseable) >= 3  # re-check after parsing
+
+        if _is_multi_tp and top_n_ptms:
+            # ── Build PTM × Time matrix ──
+            _ptm_labels_set = set(p["label"] for p in top_n_ptms)
+            _ptm_time_matrix: dict = {}  # ptm_label → {cond: fc}
+            for r in vector_data:
+                _lbl = f"{r['gene']} {r['position']}".strip()
+                if _lbl in _ptm_labels_set:
+                    if _lbl not in _ptm_time_matrix:
+                        _ptm_time_matrix[_lbl] = {}
+                    _ptm_time_matrix[_lbl][r["condition"]] = r["ptm_relative_log2fc"]
+
+            # Only proceed if enough PTMs have full time-series
+            _full_ts_ptms = [
+                lbl for lbl, conds in _ptm_time_matrix.items()
+                if len([c for c in _parseable if c in conds]) >= 3
+            ]
+
+            if len(_full_ts_ptms) >= 5:
+                # ── Compute pairwise Pearson correlation ──
+                import math as _cw_math
+                _vectors: dict = {}  # ptm_label → list of FC values (ordered by time)
+                for lbl in _full_ts_ptms:
+                    _vectors[lbl] = [_ptm_time_matrix[lbl].get(c, 0.0) for c in _parseable]
+
+                def _pearson(v1: list, v2: list) -> float:
+                    n = len(v1)
+                    if n < 3:
+                        return 0.0
+                    m1 = sum(v1) / n
+                    m2 = sum(v2) / n
+                    num = sum((a - m1) * (b - m2) for a, b in zip(v1, v2))
+                    d1 = _cw_math.sqrt(sum((a - m1) ** 2 for a in v1))
+                    d2 = _cw_math.sqrt(sum((b - m2) ** 2 for b in v2))
+                    if d1 == 0 or d2 == 0:
+                        return 0.0
+                    return num / (d1 * d2)
+
+                # ── Simple greedy clustering (correlation threshold) ──
+                _CW_THRESHOLD = 0.7
+                _labels_list = list(_vectors.keys())
+                _assigned = [False] * len(_labels_list)
+                _clusters: list[list[str]] = []
+
+                for i in range(len(_labels_list)):
+                    if _assigned[i]:
+                        continue
+                    cluster = [_labels_list[i]]
+                    _assigned[i] = True
+                    for j in range(i + 1, len(_labels_list)):
+                        if _assigned[j]:
+                            continue
+                        corr = _pearson(_vectors[_labels_list[i]], _vectors[_labels_list[j]])
+                        if corr >= _CW_THRESHOLD:
+                            cluster.append(_labels_list[j])
+                            _assigned[j] = True
+                    _clusters.append(cluster)
+
+                # ── Determine cluster-specific vs shared kinases ──
+                _cluster_kinases: list[set] = []  # per cluster
+                for cl in _clusters:
+                    _cl_kinases: set = set()
+                    for ptm_lbl in cl:
+                        for kin_name, kin_ptms in kinase_ptm_map.items():
+                            if ptm_lbl in kin_ptms:
+                                _cl_kinases.add(kin_name)
+                    _cluster_kinases.append(_cl_kinases)
+
+                # Count how many clusters each kinase appears in
+                _kinase_cluster_freq: dict = defaultdict(int)
+                for _cl_kins in _cluster_kinases:
+                    for k in _cl_kins:
+                        _kinase_cluster_freq[k] += 1
+
+                # ── Compute co-wave receptor score ──
+                # For each receptor: score = Σ (cluster_specificity × hub_weight × ptm_coverage)
+                for _ri in merged.values():
+                    _vk = _ri.get("via_kinases", [])
+                    if not _vk:
+                        _ri["cowave_score"] = 0.0
+                        continue
+                    _cw_score = 0.0
+                    for k in _vk:
+                        # Hub penalty
+                        _hub_w = _HUB_PENALTY if k in _HUB_KINASES else 1.0
+                        # Cluster specificity: 1/N where N = number of clusters this kinase appears in
+                        _cl_freq = _kinase_cluster_freq.get(k, 1)
+                        _spec_w = 1.0 / max(_cl_freq, 1)
+                        # PTM coverage: how many top_n PTMs this kinase covers
+                        _ptm_cov = len(kinase_ptm_map.get(k, set()) & _ptm_labels_set)
+                        _cw_score += _hub_w * _spec_w * max(_ptm_cov, 1)
+                    _ri["cowave_score"] = round(_cw_score, 3)
+
+                # ── Detect temporal patterns per cluster ──
+                _cluster_patterns: list[dict] = []
+                for idx, cl in enumerate(_clusters):
+                    # Average FC per time point for this cluster
+                    _avg_fc = []
+                    for c in _parseable:
+                        vals = [_ptm_time_matrix[lbl].get(c, 0.0) for lbl in cl if lbl in _ptm_time_matrix]
+                        _avg_fc.append(sum(vals) / max(len(vals), 1))
+                    # Classify pattern
+                    if len(_avg_fc) >= 3:
+                        _early = abs(_avg_fc[0])
+                        _late = abs(_avg_fc[-1])
+                        _mid = abs(_avg_fc[len(_avg_fc) // 2])
+                        if _early > _late and _early > _mid:
+                            _pattern = "early_transient"
+                        elif _late > _early and _late > _mid:
+                            _pattern = "late_onset"
+                        elif _mid > _early and _mid > _late:
+                            _pattern = "mid_peak"
+                        elif _early > 0 and _late > 0 and abs(_early - _late) / max(_early, _late) < 0.3:
+                            _pattern = "sustained"
+                        else:
+                            _pattern = "variable"
+                    else:
+                        _pattern = "unknown"
+
+                    # Specific kinases for this cluster
+                    _cl_specific = [
+                        k for k in _cluster_kinases[idx]
+                        if _kinase_cluster_freq[k] == 1 and k not in _HUB_KINASES
+                    ]
+                    _cl_hub = [k for k in _cluster_kinases[idx] if k in _HUB_KINASES]
+
+                    _cluster_patterns.append({
+                        "cluster_id": idx + 1,
+                        "ptm_labels": cl[:15],  # limit for storage
+                        "ptm_count": len(cl),
+                        "specific_kinases": _cl_specific[:8],
+                        "hub_kinases": _cl_hub[:5],
+                        "temporal_pattern": _pattern,
+                        "avg_fc_timeseries": [round(v, 3) for v in _avg_fc],
+                    })
+
+                _cowave_analysis = {
+                    "is_multi_timepoint": True,
+                    "conditions_ordered": _parseable,
+                    "num_clusters": len(_clusters),
+                    "clusters": _cluster_patterns,
+                    "scoring_method": "cowave_divergence",
+                }
+
+                logging.getLogger("vector_plot").info(
+                    f"Co-wave analysis: {len(_clusters)} clusters from {len(_full_ts_ptms)} PTMs, "
+                    f"conditions={_parseable}"
+                )
+            else:
+                # Not enough PTMs with full time-series → fallback
+                _is_multi_tp = False
+
+        # ── Fallback scoring for single-time-point or insufficient data ──
+        if not _is_multi_tp or _cowave_analysis is None:
+            # Method A+B: Hub-penalized uniqueness scoring
+            for _ri in merged.values():
+                _vk = _ri.get("via_kinases", [])
+                if not _vk:
+                    _ri["cowave_score"] = 0.0
+                    continue
+                _fb_score = 0.0
+                for k in _vk:
+                    _hub_w = _HUB_PENALTY if k in _HUB_KINASES else 1.0
+                    _freq = _all_kinase_freq.get(k, 1)
+                    _uniqueness_w = 1.0 / _freq
+                    _ptm_cov = len(kinase_ptm_map.get(k, set()))
+                    _fb_score += _hub_w * _uniqueness_w * max(_ptm_cov, 1)
+                _ri["cowave_score"] = round(_fb_score, 3)
+
+            _cowave_analysis = {
+                "is_multi_timepoint": False,
+                "scoring_method": "hub_penalized_uniqueness",
+            }
+
+        # ── Final sorting: cowave_score primary, downstream_ptm_count secondary ──
         inferred_receptors = sorted(
             merged.values(),
-            key=lambda x: x.get("downstream_ptm_count", 0),
+            key=lambda x: (x.get("cowave_score", 0), x.get("downstream_ptm_count", 0)),
             reverse=True,
         )
 
@@ -2736,6 +2952,7 @@ async def get_vector_plot_data(
                 "receptors": inferred_receptors,
                 "top_n_setting": top_n_setting,
                 "locked": lock_receptor,
+                "cowave_analysis": _cowave_analysis,
                 "saved_at": __import__('datetime').datetime.utcnow().isoformat(),
             }
             await db.commit()
@@ -2769,6 +2986,7 @@ async def get_vector_plot_data(
         "top_n_setting": top_n_setting,
         "source": "enriched" if enriched_path.exists() else "preprocessing",
         "inferred_receptors": inferred_receptors,  # v9.18
+        "cowave_analysis": _cowave_analysis if '_cowave_analysis' in locals() else None,  # v9.42
     }
 
 
