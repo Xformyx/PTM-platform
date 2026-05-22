@@ -177,26 +177,56 @@ def run_rag_enrichment(self, order_id: int, config: dict):
             regulated_keys: set = set()
             minor_keys: set = set()
 
+            # ── 2-pass regulated classification ──────────────────────────────
+            # Pass 1: Strict criteria (q_value < 0.05 AND |FC| >= 1.0)
+            # Pass 2: If Pass 1 yields 0 regulated, relax to |FC| >= 0.8 only
+            # This handles datasets where BH correction is too conservative
+            # (all q_values > 0.05) while preserving q_value when available.
+            # ─────────────────────────────────────────────────────────────────
+            non_denovo_keys: list = []
             for k in key_max_fc.index:
                 is_denovo = bool(key_denovo is not None and key_denovo.get(k, False))
                 if is_denovo:
                     denovo_keys.add(k)
                     continue  # De novo PTMs are never also Regulated
-                is_regulated = False
+                non_denovo_keys.append(k)
+
+            # Pass 1: strict q_value-based classification
+            for k in non_denovo_keys:
                 fc_val = key_max_fc.get(k, 0.0)
+                is_regulated = False
                 if key_min_q is not None:
                     q_val = key_min_q.get(k)
                     if q_val is not None and not _np.isnan(float(q_val)) and float(q_val) < 0.05 and fc_val >= 1.0:
                         is_regulated = True
                 else:
-                    # Fallback: no q_value column — use |FC| >= 0.8 as regulated threshold
-                    # (matches frontend ptmActivityClass fallback: maxAbsChange > 0.8)
+                    # No q_value column at all — use |FC| >= 0.8
                     if fc_val >= 0.8:
                         is_regulated = True
                 if is_regulated:
                     regulated_keys.add(k)
                 else:
                     minor_keys.add(k)
+
+            # Pass 2: if q_value column exists but yielded 0 regulated,
+            # re-classify using |FC| >= 0.8 as fallback threshold
+            if key_min_q is not None and len(regulated_keys) == 0 and len(non_denovo_keys) > 0:
+                logger.info(
+                    f"[Order {order_id}] Pass 1 (q<0.05 + |FC|>=1.0) yielded 0 regulated PTMs. "
+                    f"Applying Pass 2 fallback: |FC| >= 0.8 for {len(non_denovo_keys)} non-de_novo PTMs."
+                )
+                regulated_keys = set()
+                minor_keys = set()
+                for k in non_denovo_keys:
+                    fc_val = key_max_fc.get(k, 0.0)
+                    if fc_val >= 0.8:
+                        regulated_keys.add(k)
+                    else:
+                        minor_keys.add(k)
+                logger.info(
+                    f"[Order {order_id}] Pass 2 result: {len(regulated_keys)} regulated, "
+                    f"{len(minor_keys)} minor PTMs."
+                )
 
             # Apply selection based on mode
             mode = ptm_selection_mode

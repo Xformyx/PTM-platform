@@ -1424,7 +1424,13 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
   });
 
   // v9.25: Bimodal activity classification per PTM (updated with q_value support)
+  // ── 2-pass activity classification (matches RAG worker logic) ──────────────
+  // Pass 1: Strict (q_value < 0.05 AND |FC| >= 1.0)
+  // Pass 2: If Pass 1 yields 0 regulated, relax to |FC| >= 0.8
   const ptmActivityClass = new Map<string, "de_novo" | "regulated" | "minor">();
+  const _hasAnyQValue = Array.from(ptmMinQValue.values()).some((v) => v != null);
+
+  // Pass 1: classify all PTMs
   uniquePtms.forEach((p) => {
     const key = `${p.gene}_${p.position}`;
     const arr = vectorByPtm.get(key);
@@ -1456,6 +1462,23 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
       }
     }
   });
+
+  // Pass 2: if q_value data exists but yielded 0 regulated, re-classify with |FC| >= 0.8
+  const _regulatedCount = Array.from(ptmActivityClass.values()).filter((v) => v === "regulated").length;
+  if (_hasAnyQValue && _regulatedCount === 0) {
+    uniquePtms.forEach((p) => {
+      const key = `${p.gene}_${p.position}`;
+      if (ptmActivityClass.get(key) === "de_novo") return; // keep de_novo
+      const arr = vectorByPtm.get(key);
+      if (!arr || !conditions.length) return;
+      const maxAbsLog2FC = Math.max(...arr.map((r) => Math.abs(r.value)));
+      if (maxAbsLog2FC >= 0.8) {
+        ptmActivityClass.set(key, "regulated");
+      } else {
+        ptmActivityClass.set(key, "minor");
+      }
+    });
+  }
 
   // Convert highlighted label set → gene_position key set (for KinaseModuleAnalysis button state)
   const highlightedPtmKeySet = (() => {
