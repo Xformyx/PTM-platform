@@ -183,10 +183,15 @@ def run_rag_enrichment(self, order_id: int, config: dict):
                     denovo_keys.add(k)
                     continue  # De novo PTMs are never also Regulated
                 is_regulated = False
+                fc_val = key_max_fc.get(k, 0.0)
                 if key_min_q is not None:
                     q_val = key_min_q.get(k)
-                    fc_val = key_max_fc.get(k, 0.0)
                     if q_val is not None and not _np.isnan(float(q_val)) and float(q_val) < 0.05 and fc_val >= 1.0:
+                        is_regulated = True
+                else:
+                    # Fallback: no q_value column — use |FC| >= 0.8 as regulated threshold
+                    # (matches frontend ptmActivityClass fallback: maxAbsChange > 0.8)
+                    if fc_val >= 0.8:
                         is_regulated = True
                 if is_regulated:
                     regulated_keys.add(k)
