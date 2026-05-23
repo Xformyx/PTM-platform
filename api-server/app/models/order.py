@@ -96,6 +96,9 @@ class Order(Base):
     # Receptor Inference data (JSON) — saved from vector-plot-data endpoint
     # [{name, receptor_class, downstream_ptm_count, downstream_ptms, via_kinases, source, ...}]
     receptor_inference_data: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    # Kinase Activity Temporal Heatmap data (JSON) — computed from vector_data + kinase_modules
+    # {kinase_scores: [{kinase, conditions, scores, substrate_count, confidence}], conditions, _cache_hash}
+    kinase_activity_heatmap: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
     # Watchdog
     watchdog_alerted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)

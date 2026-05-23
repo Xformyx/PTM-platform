@@ -30,6 +30,175 @@ logger = logging.getLogger("ptm-workers.rag-enrichment")
 OUTPUT_DIR = os.getenv("OUTPUT_DIR", "/data/outputs")
 
 
+def _auto_run_global_analysis(order_id: int, enriched_data: list, config: dict) -> dict:
+    """v9.44: Auto-run Global Kinase Modules + Activity Heatmap after RAG enrichment.
+
+    Reuses the same _build_global_kinase_modules from report_generation and
+    computes kinase activity heatmap scores. Results are cached to DB.
+    """
+    import numpy as np
+    from hashlib import md5
+
+    t0 = time.time()
+    publish_progress(order_id, "rag_enrichment", "global_analysis", "running", 92,
+                     "Auto-running Global Kinase Analysis")
+    try:
+        from report_generation.core.nodes.kinase_annotation_node import (
+            _build_global_kinase_modules,
+            PHOSPHO_MOTIF_DB,
+            UBI_MOTIF_DB,
+        )
+
+        ptm_type = (config.get("experimental_context") or {}).get("ptm_type", "phosphorylation")
+        motif_db = PHOSPHO_MOTIF_DB if ptm_type == "phosphorylation" else UBI_MOTIF_DB
+
+        # Build kinase modules
+        kinase_result = _build_global_kinase_modules(
+            enriched_data=enriched_data,
+            cluster_annotations=[],
+            clusters=[],
+            motif_db=motif_db,
+            ptm_type=ptm_type,
+        )
+
+        # Build activity heatmap from enriched_data time-series
+        heatmap_data = _compute_kinase_activity_heatmap(enriched_data, kinase_result, ptm_type)
+
+        # Persist to DB
+        from common.db_engine import get_engine as _get_engine
+        from sqlalchemy import text as _text
+        _engine = _get_engine()
+        with _engine.connect() as _conn:
+            _conn.execute(
+                _text(
+                    "UPDATE orders SET kinase_analysis_data = :kad, "
+                    "kinase_activity_heatmap = :kah WHERE id = :oid"
+                ),
+                {
+                    "oid": order_id,
+                    "kad": json.dumps(kinase_result, default=str),
+                    "kah": json.dumps(heatmap_data, default=str),
+                },
+            )
+            _conn.commit()
+
+        elapsed = round(time.time() - t0, 1)
+        n_modules = kinase_result.get("summary", {}).get("total_kinase_modules", 0)
+        logger.info(
+            f"[Order {order_id}] Auto global analysis: {n_modules} kinase modules, "
+            f"heatmap with {len(heatmap_data.get('kinase_scores', []))} kinases in {elapsed}s"
+        )
+        publish_progress(order_id, "rag_enrichment", "global_analysis", "completed", 95,
+                         f"Global analysis done: {n_modules} modules ({elapsed}s)")
+
+        return {
+            "kinase_analysis_data": kinase_result,
+            "kinase_activity_heatmap": heatmap_data,
+        }
+    except Exception as e:
+        logger.warning(f"[Order {order_id}] Auto global analysis failed (non-fatal): {e}")
+        publish_progress(order_id, "rag_enrichment", "global_analysis", "completed", 95,
+                         f"Global analysis skipped: {e}")
+        return {}
+
+
+def _compute_kinase_activity_heatmap(enriched_data: list, kinase_result: dict, ptm_type: str) -> dict:
+    """Compute per-kinase per-condition weighted activity scores from enriched PTM data."""
+    import numpy as np
+
+    # Extract conditions from enriched data
+    conditions = set()
+    ptm_values = {}  # key: (gene, position, condition) -> log2fc
+    ptm_qvalues = {}  # key: (gene, position, condition) -> q_value
+    ptm_de_novo = set()  # (gene, position) that are de_novo
+
+    for item in enriched_data:
+        gene = item.get("Gene.Name") or item.get("gene", "")
+        pos = item.get("PTM_Position") or item.get("position", "")
+        cond = item.get("Condition") or item.get("condition", "")
+        log2fc = item.get("Log2FC") or item.get("log2fc")
+        q_val = item.get("q_value") or item.get("Q_Value")
+        is_pseudo = item.get("Control_Pseudocount_Used", False)
+
+        if not gene or not pos or not cond:
+            continue
+        conditions.add(cond)
+        try:
+            ptm_values[(gene, pos, cond)] = float(log2fc) if log2fc is not None else 0.0
+        except (ValueError, TypeError):
+            ptm_values[(gene, pos, cond)] = 0.0
+        try:
+            ptm_qvalues[(gene, pos, cond)] = float(q_val) if q_val is not None else 1.0
+        except (ValueError, TypeError):
+            ptm_qvalues[(gene, pos, cond)] = 1.0
+        if is_pseudo:
+            ptm_de_novo.add((gene, pos))
+
+    conditions = sorted(conditions)
+    if not conditions:
+        return {"kinase_scores": [], "conditions": [], "_cached": True}
+
+    # Activity class weights
+    def _get_weight(gene, pos, cond):
+        key = (gene, pos)
+        if key in ptm_de_novo:
+            return 1.5  # de_novo
+        q = ptm_qvalues.get((gene, pos, cond), 1.0)
+        fc = abs(ptm_values.get((gene, pos, cond), 0))
+        if q < 0.05 and fc >= 1.0:
+            return 1.2  # regulated
+        if fc >= 0.5:
+            return 1.0  # coordinated-eligible
+        return 0.5  # minor
+
+    # Build kinase -> PTM mapping from kinase_result
+    kinase_modules = kinase_result.get("kinase_module_list", [])
+    kinase_scores = []
+
+    for km in kinase_modules:
+        kinase_name = km.get("kinase", "")
+        members = km.get("members", [])
+        if not kinase_name or not members:
+            continue
+
+        scores = {}
+        for cond in conditions:
+            weighted_sum = 0.0
+            weight_total = 0.0
+            for m in members:
+                g = m.get("gene", "")
+                p = m.get("position", "")
+                val = ptm_values.get((g, p, cond), 0.0)
+                w = _get_weight(g, p, cond)
+                weighted_sum += val * w
+                weight_total += w
+            scores[cond] = round(weighted_sum / max(weight_total, 1e-9), 4)
+
+        # Find peak
+        peak_cond = max(conditions, key=lambda c: abs(scores.get(c, 0)))
+        peak_score = scores.get(peak_cond, 0)
+
+        confidence = km.get("confidence_score", 0.5)
+
+        kinase_scores.append({
+            "kinase": kinase_name,
+            "scores": scores,
+            "substrate_count": len(members),
+            "confidence": confidence,
+            "peak_condition": peak_cond,
+            "peak_score": peak_score,
+        })
+
+    # Sort by peak_score descending
+    kinase_scores.sort(key=lambda x: abs(x["peak_score"]), reverse=True)
+
+    return {
+        "kinase_scores": kinase_scores,
+        "conditions": conditions,
+        "_cached": True,
+    }
+
+
 def _make_progress_cb(order_id, stage, step, base, span):
     def cb(frac, msg):
         pct = base + frac * span
@@ -553,6 +722,13 @@ def run_rag_enrichment(self, order_id: int, config: dict):
             report_config["secondary_tsv_data_path"] = secondary_tsv_path
             report_config["secondary_output_dir"] = str(order_output / "secondary_ptm") if (order_output / "secondary_ptm").exists() else str(order_output)
             logger.info(f"[Order {order_id}] Cross-Talk report_config: secondary_enriched={secondary_enriched_json_path}, secondary_md={secondary_md_path_out}")
+        # ── v9.44: Auto-run Global Annotate + Upstream Inference before Report Gen ──
+        _auto_analysis_data = _auto_run_global_analysis(order_id, enriched_data, config)
+        if _auto_analysis_data:
+            report_config["kinase_analysis_data"] = _auto_analysis_data.get("kinase_analysis_data", {})
+            report_config["kinase_activity_heatmap"] = _auto_analysis_data.get("kinase_activity_heatmap", {})
+            logger.info(f"[Order {order_id}] Auto global analysis completed — kinase modules + heatmap cached")
+
         _status_before_chain = get_order_status(order_id)
         if config.get("chain_to_next", True) and _status_before_chain == "rag_enrichment":
             app.send_task(

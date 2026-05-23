@@ -396,22 +396,35 @@ def run_report_generation(self, order_id: int, config: dict):
 
         # v9.20: Load receptor_inference_data from DB
         inferred_receptors_from_db = []
+        # v9.44: Load kinase_activity_heatmap + signal_propagation_data from DB
+        kinase_activity_heatmap_from_db = {}
+        signal_propagation_from_db = {}
         try:
             from common.db_engine import get_engine as _get_shared_engine
             from sqlalchemy import text as _text
             _engine = _get_shared_engine()
             with _engine.connect() as _conn:
                 _row = _conn.execute(
-                    _text("SELECT receptor_inference_data FROM orders WHERE id = :oid"),
+                    _text(
+                        "SELECT receptor_inference_data, kinase_activity_heatmap, "
+                        "signal_propagation_data FROM orders WHERE id = :oid"
+                    ),
                     {"oid": order_id},
                 ).fetchone()
-            if _row and _row[0]:
+            if _row:
                 import json as _json
-                _rid = _row[0] if isinstance(_row[0], dict) else _json.loads(_row[0])
-                inferred_receptors_from_db = _rid.get("receptors", [])
-                logger.info(f"[Order {order_id}] Loaded {len(inferred_receptors_from_db)} inferred receptors from DB")
+                if _row[0]:
+                    _rid = _row[0] if isinstance(_row[0], dict) else _json.loads(_row[0])
+                    inferred_receptors_from_db = _rid.get("receptors", [])
+                    logger.info(f"[Order {order_id}] Loaded {len(inferred_receptors_from_db)} inferred receptors from DB")
+                if _row[1]:
+                    kinase_activity_heatmap_from_db = _row[1] if isinstance(_row[1], dict) else _json.loads(_row[1])
+                    logger.info(f"[Order {order_id}] Loaded kinase activity heatmap from DB ({len(kinase_activity_heatmap_from_db.get('kinase_scores', []))} kinases)")
+                if _row[2]:
+                    signal_propagation_from_db = _row[2] if isinstance(_row[2], dict) else _json.loads(_row[2])
+                    logger.info(f"[Order {order_id}] Loaded signal propagation data from DB")
         except Exception as _rec_err:
-            logger.warning(f"[Order {order_id}] Could not load receptor_inference_data from DB: {_rec_err}")
+            logger.warning(f"[Order {order_id}] Could not load analysis data from DB: {_rec_err}")
 
         initial_state = {
             "order_id": order_id,
@@ -438,6 +451,12 @@ def run_report_generation(self, order_id: int, config: dict):
             # v9.33: PTM selection settings (synced with frontend kinase module analysis)
             "top_n_ptms": config.get("top_n_ptms", 50),
             "ptm_selection_mode": config.get("ptm_selection_mode", "top_n"),
+            # v9.44: Kinase activity heatmap data (auto-computed in RAG stage)
+            "kinase_activity_heatmap": kinase_activity_heatmap_from_db or config.get("kinase_activity_heatmap", {}),
+            # v9.44: Signal propagation data for report generation
+            "signal_propagation_data": signal_propagation_from_db,
+            # v9.44: Vector plot data reference for report generation
+            "vector_plot_data_available": True,
         }
 
         # ── Cross-Talk mode: load secondary PTM data into initial_state ──

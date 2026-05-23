@@ -13,7 +13,7 @@
  * Receives time-series data + selected PTMs from the parent TopNTimeSeriesPlot.
  */
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import {
   Loader2,
   Search,
@@ -609,7 +609,7 @@ export default function KinaseModuleAnalysis({
   inferredReceptors = [],
 }: KinaseModuleAnalysisProps) {
   const isUbi = ptmType.toLowerCase().includes("ubiquityl") || ptmType.toLowerCase().includes("ubiquitin");
-  const [activeTab, setActiveTab] = useState<"cowave" | "lookup" | "cascade" | "kinaseModules" | "signalFlow">("cowave");
+  const [activeTab, setActiveTab] = useState<"cowave" | "lookup" | "cascade" | "kinaseModules" | "signalFlow" | "heatmap">("cowave");
   const [expandedModules, setExpandedModules] = useState<Set<string>>(new Set());
   const [manualSelection, setManualSelection] = useState<Set<string>>(new Set());
 
@@ -1065,6 +1065,16 @@ export default function KinaseModuleAnalysis({
               <GitBranch className="h-3 w-3 mr-1" /> Signal Flow
             </Button>
           )}
+          {globalKinaseResult && (
+            <Button
+              variant={activeTab === "heatmap" ? "default" : "ghost"}
+              size="sm"
+              className="text-xs h-7"
+              onClick={() => setActiveTab("heatmap")}
+            >
+              <Activity className="h-3 w-3 mr-1" /> Kinase Heatmap
+            </Button>
+          )}
           <div className="ml-auto">
             <Button
               variant="outline"
@@ -1516,6 +1526,16 @@ export default function KinaseModuleAnalysis({
             onSelectPtms={onSelectPtms}
             highlightedPtmKeys={highlightedPtmKeys}
             isUbi={isUbi}
+          />
+        )}
+
+        {/* ── Tab: Kinase Activity Heatmap ────────────────────────────────────────── */}
+        {activeTab === "heatmap" && globalKinaseResult && (
+          <KinaseActivityHeatmapView
+            orderId={orderId}
+            globalKinaseResult={globalKinaseResult}
+            vectorData={vectorData}
+            conditions={conditions}
           />
         )}
       </CardContent>
@@ -3870,6 +3890,400 @@ function SignalFlowView({
             </div>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+
+// ── Kinase Activity Heatmap + Line Chart View ────────────────────────────────
+
+interface KinaseActivityScore {
+  kinase: string;
+  scores: Record<string, number>;
+  substrate_count: number;
+  confidence: number;
+  peak_condition: string;
+  peak_score: number;
+}
+
+interface KinaseHeatmapData {
+  kinase_scores: KinaseActivityScore[];
+  conditions: string[];
+  _cached: boolean;
+  _cache_hash?: string;
+}
+
+type HeatmapSortMode = "peak_score" | "peak_time" | "confidence" | "substrate_count" | "alphabetical";
+type HeatmapViewMode = "heatmap" | "line";
+
+function KinaseActivityHeatmapView({
+  orderId,
+  globalKinaseResult,
+  vectorData,
+  conditions,
+}: {
+  orderId: number;
+  globalKinaseResult: GlobalKinaseModuleResponse;
+  vectorData: PtmTimeSeriesRow[];
+  conditions: string[];
+}) {
+  const [heatmapData, setHeatmapData] = useState<KinaseHeatmapData | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [sortMode, setSortMode] = useState<HeatmapSortMode>("peak_score");
+  const [viewMode, setViewMode] = useState<HeatmapViewMode>("heatmap");
+  const [topN, setTopN] = useState(20);
+  const [selectedKinases, setSelectedKinases] = useState<Set<string>>(new Set());
+
+  // Fetch heatmap data from backend
+  const fetchHeatmapData = useCallback(async (forceRefresh = false) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const kinase_modules = globalKinaseResult.kinase_modules.map((km) => ({
+        kinase: km.kinase,
+        ptms: km.members.map((m) => ({ gene: m.gene, position: m.position })),
+        confidence_score: km.confidence_score || 0.5,
+      }));
+      const result = await api.post<KinaseHeatmapData>(
+        `/orders/${orderId}/kinase-activity-heatmap`,
+        { kinase_modules, force_refresh: forceRefresh }
+      );
+      setHeatmapData(result);
+    } catch (err: any) {
+      setError(err?.message || "Failed to compute kinase activity heatmap");
+    } finally {
+      setLoading(false);
+    }
+  }, [orderId, globalKinaseResult]);
+
+  useEffect(() => {
+    if (globalKinaseResult?.kinase_modules?.length > 0) {
+      fetchHeatmapData(false);
+    }
+  }, [fetchHeatmapData]);
+
+  // Sort kinase scores
+  const sortedScores = useMemo(() => {
+    if (!heatmapData) return [];
+    let scores = [...heatmapData.kinase_scores];
+    switch (sortMode) {
+      case "peak_score":
+        scores.sort((a, b) => Math.abs(b.peak_score) - Math.abs(a.peak_score));
+        break;
+      case "peak_time": {
+        const condOrder = heatmapData.conditions;
+        scores.sort((a, b) => condOrder.indexOf(a.peak_condition) - condOrder.indexOf(b.peak_condition));
+        break;
+      }
+      case "confidence":
+        scores.sort((a, b) => b.confidence - a.confidence);
+        break;
+      case "substrate_count":
+        scores.sort((a, b) => b.substrate_count - a.substrate_count);
+        break;
+      case "alphabetical":
+        scores.sort((a, b) => a.kinase.localeCompare(b.kinase));
+        break;
+    }
+    return scores.slice(0, topN);
+  }, [heatmapData, sortMode, topN]);
+
+  // Color scale for heatmap: blue(-) → white(0) → red(+)
+  const getHeatmapColor = (value: number, maxAbs: number) => {
+    if (maxAbs === 0) return "rgb(30, 30, 40)";
+    const norm = Math.max(-1, Math.min(1, value / maxAbs));
+    if (norm > 0) {
+      const r = Math.round(30 + 225 * norm);
+      const g = Math.round(30 + 50 * (1 - norm));
+      const b = Math.round(40 * (1 - norm));
+      return `rgb(${r}, ${g}, ${b})`;
+    } else {
+      const intensity = Math.abs(norm);
+      const r = Math.round(30 * (1 - intensity));
+      const g = Math.round(30 + 100 * intensity);
+      const b = Math.round(40 + 215 * intensity);
+      return `rgb(${r}, ${g}, ${b})`;
+    }
+  };
+
+  // Max absolute value for normalization
+  const maxAbsScore = useMemo(() => {
+    if (!sortedScores.length) return 1;
+    return Math.max(...sortedScores.flatMap((s) => Object.values(s.scores).map(Math.abs)), 0.1);
+  }, [sortedScores]);
+
+  // Line chart colors
+  const LINE_COLORS = [
+    "#ef4444", "#f97316", "#eab308", "#22c55e", "#06b6d4",
+    "#3b82f6", "#8b5cf6", "#ec4899", "#14b8a6", "#f59e0b",
+    "#6366f1", "#10b981", "#f43f5e", "#0ea5e9", "#a855f7",
+    "#84cc16", "#e11d48", "#0891b2", "#7c3aed", "#d97706",
+  ];
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <Loader2 className="h-6 w-6 animate-spin text-cyan-400 mr-2" />
+        <span className="text-sm text-muted-foreground">Computing kinase activity scores...</span>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="text-center py-8">
+        <p className="text-sm text-red-400 mb-2">{error}</p>
+        <Button size="sm" variant="outline" onClick={() => fetchHeatmapData(true)}>
+          <RefreshCw className="h-3 w-3 mr-1" /> Retry
+        </Button>
+      </div>
+    );
+  }
+
+  if (!heatmapData || !sortedScores.length) {
+    return (
+      <div className="text-center py-8 text-muted-foreground text-sm">
+        No kinase activity data available. Run Global Annotate first.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {/* Controls */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-center gap-1">
+          <Button
+            size="sm"
+            variant={viewMode === "heatmap" ? "default" : "ghost"}
+            className="text-xs h-7"
+            onClick={() => setViewMode("heatmap")}
+          >
+            Heatmap
+          </Button>
+          <Button
+            size="sm"
+            variant={viewMode === "line" ? "default" : "ghost"}
+            className="text-xs h-7"
+            onClick={() => setViewMode("line")}
+          >
+            Line Chart
+          </Button>
+        </div>
+        <span className="text-xs text-muted-foreground">Sort:</span>
+        <select
+          className="text-xs h-7 bg-background border border-border rounded px-2"
+          value={sortMode}
+          onChange={(e) => setSortMode(e.target.value as HeatmapSortMode)}
+        >
+          <option value="peak_score">Peak Score</option>
+          <option value="peak_time">Peak Time</option>
+          <option value="confidence">Confidence</option>
+          <option value="substrate_count">Substrate Count</option>
+          <option value="alphabetical">Alphabetical</option>
+        </select>
+        <span className="text-xs text-muted-foreground">Top:</span>
+        <select
+          className="text-xs h-7 bg-background border border-border rounded px-2"
+          value={topN}
+          onChange={(e) => setTopN(Number(e.target.value))}
+        >
+          <option value={10}>10</option>
+          <option value={20}>20</option>
+          <option value={30}>30</option>
+          <option value={50}>50</option>
+          <option value={100}>All</option>
+        </select>
+        <div className="ml-auto flex items-center gap-1">
+          {heatmapData._cached && (
+            <Badge variant="outline" className="text-[10px] h-5 text-green-400 border-green-600">cached</Badge>
+          )}
+          <Button size="sm" variant="ghost" className="text-xs h-7" onClick={() => fetchHeatmapData(true)}>
+            <RefreshCw className="h-3 w-3 mr-1" /> Refresh
+          </Button>
+        </div>
+      </div>
+
+      {/* Heatmap View */}
+      {viewMode === "heatmap" && (
+        <div className="overflow-x-auto border border-border rounded-lg">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b border-border">
+                <th className="text-left px-2 py-1 sticky left-0 bg-background z-10 min-w-[100px]">Kinase</th>
+                <th className="text-center px-1 py-1 w-10">#Sub</th>
+                <th className="text-center px-1 py-1 w-10">Conf</th>
+                {heatmapData.conditions.map((c) => (
+                  <th key={c} className="text-center px-1 py-1 min-w-[40px] max-w-[60px] truncate" title={c}>
+                    {c.replace(/min$/i, "").replace(/hr$/i, "h")}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {sortedScores.map((ks) => (
+                <tr
+                  key={ks.kinase}
+                  className="border-b border-border/30 hover:bg-muted/20 cursor-pointer"
+                  onClick={() => {
+                    setSelectedKinases((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(ks.kinase)) next.delete(ks.kinase);
+                      else next.add(ks.kinase);
+                      return next;
+                    });
+                  }}
+                >
+                  <td className="px-2 py-1 sticky left-0 bg-background z-10 font-medium whitespace-nowrap">
+                    {selectedKinases.has(ks.kinase) && <span className="text-cyan-400 mr-1">●</span>}
+                    {ks.kinase}
+                  </td>
+                  <td className="text-center px-1 py-0.5 text-muted-foreground">{ks.substrate_count}</td>
+                  <td className="text-center px-1 py-0.5">
+                    <span className={`${ks.confidence >= 0.7 ? "text-green-400" : ks.confidence >= 0.4 ? "text-yellow-400" : "text-red-400"}`}>
+                      {(ks.confidence * 100).toFixed(0)}%
+                    </span>
+                  </td>
+                  {heatmapData.conditions.map((c) => {
+                    const val = ks.scores[c] || 0;
+                    return (
+                      <td
+                        key={c}
+                        className="px-0 py-0.5 text-center"
+                        title={`${ks.kinase} @ ${c}: ${val.toFixed(3)}`}
+                      >
+                        <div
+                          className="mx-auto w-full h-5 flex items-center justify-center text-[9px]"
+                          style={{ backgroundColor: getHeatmapColor(val, maxAbsScore) }}
+                        >
+                          {Math.abs(val) >= maxAbsScore * 0.3 ? val.toFixed(1) : ""}
+                        </div>
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {/* Color legend */}
+          <div className="flex items-center justify-center gap-2 py-2 text-[10px] text-muted-foreground">
+            <span className="px-2 py-0.5 rounded" style={{ backgroundColor: getHeatmapColor(-maxAbsScore, maxAbsScore) }}>
+              -{maxAbsScore.toFixed(1)}
+            </span>
+            <span>→</span>
+            <span className="px-2 py-0.5 rounded bg-background border border-border">0</span>
+            <span>→</span>
+            <span className="px-2 py-0.5 rounded text-white" style={{ backgroundColor: getHeatmapColor(maxAbsScore, maxAbsScore) }}>
+              +{maxAbsScore.toFixed(1)}
+            </span>
+            <span className="ml-4">(Weighted mean Log2FC per kinase per condition)</span>
+          </div>
+        </div>
+      )}
+
+      {/* Line Chart View */}
+      {viewMode === "line" && (
+        <div className="border border-border rounded-lg p-4">
+          <div className="relative" style={{ height: `${Math.max(300, Math.min(500, sortedScores.length * 15))}px` }}>
+            {/* Y-axis labels */}
+            <div className="absolute left-0 top-0 bottom-8 w-12 flex flex-col justify-between text-[9px] text-muted-foreground">
+              <span>{maxAbsScore.toFixed(1)}</span>
+              <span>0</span>
+              <span>-{maxAbsScore.toFixed(1)}</span>
+            </div>
+            {/* Chart area */}
+            <svg
+              className="absolute left-12 top-0 right-0 bottom-8"
+              viewBox={`0 0 ${heatmapData.conditions.length * 60} 400`}
+              preserveAspectRatio="none"
+              style={{ width: "calc(100% - 48px)", height: "calc(100% - 32px)" }}
+            >
+              {/* Grid lines */}
+              <line x1="0" y1="200" x2={heatmapData.conditions.length * 60} y2="200" stroke="#333" strokeWidth="0.5" strokeDasharray="4" />
+              <line x1="0" y1="100" x2={heatmapData.conditions.length * 60} y2="100" stroke="#222" strokeWidth="0.5" strokeDasharray="2" />
+              <line x1="0" y1="300" x2={heatmapData.conditions.length * 60} y2="300" stroke="#222" strokeWidth="0.5" strokeDasharray="2" />
+              {/* Lines for each kinase */}
+              {(selectedKinases.size > 0
+                ? sortedScores.filter((s) => selectedKinases.has(s.kinase))
+                : sortedScores.slice(0, 10)
+              ).map((ks, idx) => {
+                const points = heatmapData.conditions.map((c, i) => {
+                  const x = i * 60 + 30;
+                  const y = 200 - (ks.scores[c] || 0) / maxAbsScore * 180;
+                  return `${x},${y}`;
+                }).join(" ");
+                const color = LINE_COLORS[idx % LINE_COLORS.length];
+                return (
+                  <g key={ks.kinase}>
+                    <polyline
+                      points={points}
+                      fill="none"
+                      stroke={color}
+                      strokeWidth="2"
+                      opacity="0.85"
+                    />
+                    {heatmapData.conditions.map((c, i) => {
+                      const x = i * 60 + 30;
+                      const y = 200 - (ks.scores[c] || 0) / maxAbsScore * 180;
+                      return <circle key={c} cx={x} cy={y} r="3" fill={color} />;
+                    })}
+                  </g>
+                );
+              })}
+            </svg>
+            {/* X-axis labels */}
+            <div className="absolute left-12 bottom-0 right-0 flex justify-between text-[9px] text-muted-foreground">
+              {heatmapData.conditions.map((c) => (
+                <span key={c} className="text-center flex-1 truncate" title={c}>
+                  {c.replace(/min$/i, "'").replace(/hr$/i, "h")}
+                </span>
+              ))}
+            </div>
+          </div>
+          {/* Legend */}
+          <div className="flex flex-wrap gap-2 mt-3 text-[10px]">
+            {(selectedKinases.size > 0
+              ? sortedScores.filter((s) => selectedKinases.has(s.kinase))
+              : sortedScores.slice(0, 10)
+            ).map((ks, idx) => (
+              <span key={ks.kinase} className="flex items-center gap-1">
+                <span className="w-3 h-0.5 inline-block" style={{ backgroundColor: LINE_COLORS[idx % LINE_COLORS.length] }} />
+                {ks.kinase}
+              </span>
+            ))}
+          </div>
+          {selectedKinases.size === 0 && (
+            <p className="text-[10px] text-muted-foreground mt-1">
+              Showing top 10. Click kinase rows in heatmap to select specific kinases.
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Summary stats */}
+      <div className="grid grid-cols-4 gap-2 text-xs">
+        <div className="bg-muted/30 rounded p-2 text-center">
+          <div className="text-lg font-bold text-cyan-400">{heatmapData.kinase_scores.length}</div>
+          <div className="text-muted-foreground">Kinases</div>
+        </div>
+        <div className="bg-muted/30 rounded p-2 text-center">
+          <div className="text-lg font-bold text-amber-400">{heatmapData.conditions.length}</div>
+          <div className="text-muted-foreground">Conditions</div>
+        </div>
+        <div className="bg-muted/30 rounded p-2 text-center">
+          <div className="text-lg font-bold text-green-400">
+            {sortedScores.filter((s) => Math.abs(s.peak_score) >= 1.0).length}
+          </div>
+          <div className="text-muted-foreground">Active (|peak|≥1)</div>
+        </div>
+        <div className="bg-muted/30 rounded p-2 text-center">
+          <div className="text-lg font-bold text-purple-400">
+            {sortedScores.filter((s) => s.confidence >= 0.7).length}
+          </div>
+          <div className="text-muted-foreground">High Conf (≥70%)</div>
+        </div>
       </div>
     </div>
   );

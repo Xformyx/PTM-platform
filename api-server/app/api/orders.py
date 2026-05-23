@@ -6147,6 +6147,189 @@ async def save_kinase_analysis_data(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# v9.44: Kinase Activity Temporal Heatmap (compute + cache)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.post("/{order_id}/kinase-activity-heatmap")
+async def kinase_activity_heatmap(
+    order_id: int,
+    body: dict = Body(...),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Compute Kinase Activity Temporal Scores for heatmap/line chart.
+
+    For each kinase module, aggregate substrate Log2FC values per condition
+    using activity-class-weighted mean. Results are cached in DB.
+
+    Request body:
+      - kinase_modules: [{kinase, ptms: [{gene, position}], confidence_score}]
+      - force_refresh: bool (default false)
+
+    Response:
+      - kinase_scores: [{kinase, scores: {condition: float}, substrate_count, confidence, peak_condition, peak_score}]
+      - conditions: [str]  (ordered)
+      - _cached: bool
+    """
+    import hashlib
+    from datetime import datetime as _dt
+
+    result = await db.execute(select(Order).where(Order.id == order_id))
+    order = result.scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    await _check_order_access_async(order, user, db)
+
+    kinase_modules = body.get("kinase_modules", [])
+    force_refresh = body.get("force_refresh", False)
+
+    # Cache key
+    km_keys = sorted([m.get("kinase", "") for m in kinase_modules])
+    hash_input = f"{order_id}|{len(kinase_modules)}|{'|'.join(km_keys[:30])}"
+    cache_hash = hashlib.md5(hash_input.encode()).hexdigest()[:12]
+
+    # Check cache
+    if not force_refresh and order.kinase_activity_heatmap:
+        cached = order.kinase_activity_heatmap
+        if cached.get("_cache_hash") == cache_hash:
+            return {**cached, "_cached": True}
+
+    # Load vector data (time-series)
+    from app.config import get_settings
+    settings = get_settings()
+    output_dir = Path(settings.OUTPUT_DIR) / order.order_code
+    file_suffix = "_phospho" if order.ptm_type == "phosphorylation" else "_ubi"
+
+    vector_data = []
+    for name in (f"ptm_vector_data_normalized{file_suffix}.tsv", f"ptm_vector_data_with_motifs{file_suffix}.tsv"):
+        p = output_dir / name
+        if p.exists():
+            import csv
+            with open(p, "r", encoding="utf-8") as f:
+                reader = csv.DictReader(f, delimiter="\t")
+                for row in reader:
+                    gene = row.get("Gene.Name", row.get("gene", ""))
+                    pos = row.get("PTM_Position", row.get("position", ""))
+                    cond = row.get("Condition", "")
+                    rel_fc = row.get("PTM_Relative_Log2FC", "")
+                    q_val_raw = row.get("q_value", "")
+                    try:
+                        rel_fc = float(rel_fc) if rel_fc else 0.0
+                    except ValueError:
+                        rel_fc = 0.0
+                    try:
+                        q_val = float(q_val_raw) if q_val_raw and q_val_raw.strip().lower() not in ("", "nan") else None
+                    except (ValueError, TypeError):
+                        q_val = None
+                    vector_data.append({
+                        "gene": gene, "position": str(pos),
+                        "condition": cond, "log2fc": rel_fc, "q_value": q_val,
+                    })
+            break
+
+    if not vector_data:
+        raise HTTPException(status_code=400, detail="No vector data found. Run preprocessing first.")
+
+    # Build PTM key → condition → log2fc map
+    ptm_timeseries: dict[str, dict[str, float]] = {}
+    ptm_qvalues: dict[str, dict[str, float | None]] = {}
+    all_conditions: set[str] = set()
+    for row in vector_data:
+        key = f"{row['gene']}_{row['position']}"
+        cond = row["condition"]
+        all_conditions.add(cond)
+        if key not in ptm_timeseries:
+            ptm_timeseries[key] = {}
+            ptm_qvalues[key] = {}
+        ptm_timeseries[key][cond] = row["log2fc"]
+        ptm_qvalues[key][cond] = row["q_value"]
+
+    # Sort conditions (try numeric extraction for time-series)
+    import re
+    def _cond_sort_key(c: str):
+        nums = re.findall(r"[\d.]+", c)
+        return float(nums[0]) if nums else c
+    conditions_sorted = sorted(all_conditions, key=_cond_sort_key)
+
+    # Activity class weights
+    ACTIVITY_WEIGHTS = {"de_novo": 1.5, "regulated": 1.2, "coordinated": 1.0, "minor": 0.5}
+
+    # Compute per-kinase activity score
+    kinase_scores = []
+    for km in kinase_modules:
+        kinase_name = km.get("kinase", "")
+        ptms = km.get("ptms", [])
+        confidence = km.get("confidence_score", 0.5)
+
+        # Determine activity class for each PTM
+        weighted_sums: dict[str, float] = {c: 0.0 for c in conditions_sorted}
+        weight_totals: dict[str, float] = {c: 0.0 for c in conditions_sorted}
+
+        for ptm in ptms:
+            ptm_key = f"{ptm.get('gene', '')}_{ptm.get('position', '')}"
+            ts = ptm_timeseries.get(ptm_key, {})
+            if not ts:
+                continue
+
+            # Determine activity class based on max |Log2FC| and q-value
+            max_abs_fc = max(abs(ts.get(c, 0)) for c in conditions_sorted) if conditions_sorted else 0
+            min_q = min((ptm_qvalues.get(ptm_key, {}).get(c) or 1.0) for c in conditions_sorted)
+            if max_abs_fc >= 1.0 and min_q < 0.05:
+                # Check if detected in control (simplified: if any condition has low FC, it's regulated)
+                act_class = "de_novo"  # simplified — frontend has more nuanced logic
+            elif max_abs_fc >= 0.5:
+                act_class = "coordinated" if len(ptms) >= 3 else "regulated"
+            else:
+                act_class = "minor"
+
+            w = ACTIVITY_WEIGHTS.get(act_class, 0.5)
+            for c in conditions_sorted:
+                fc = ts.get(c, 0.0)
+                weighted_sums[c] += w * fc
+                weight_totals[c] += w
+
+        # Compute weighted mean per condition
+        scores = {}
+        for c in conditions_sorted:
+            if weight_totals[c] > 0:
+                scores[c] = round(weighted_sums[c] / weight_totals[c], 4)
+            else:
+                scores[c] = 0.0
+
+        # Peak detection
+        if scores:
+            peak_cond = max(scores, key=lambda c: abs(scores[c]))
+            peak_score = scores[peak_cond]
+        else:
+            peak_cond = ""
+            peak_score = 0.0
+
+        kinase_scores.append({
+            "kinase": kinase_name,
+            "scores": scores,
+            "substrate_count": len(ptms),
+            "confidence": confidence,
+            "peak_condition": peak_cond,
+            "peak_score": round(peak_score, 4),
+        })
+
+    # Sort by peak_score descending
+    kinase_scores.sort(key=lambda x: abs(x["peak_score"]), reverse=True)
+
+    # Save to DB
+    result_data = {
+        "kinase_scores": kinase_scores,
+        "conditions": conditions_sorted,
+        "_cache_hash": cache_hash,
+        "computed_at": _dt.utcnow().isoformat(),
+    }
+    order.kinase_activity_heatmap = result_data
+    await db.commit()
+
+    return {**result_data, "_cached": False}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Treatment text typo-detection endpoint
 # ─────────────────────────────────────────────────────────────────────────────
 
