@@ -709,6 +709,34 @@ export default function KinaseModuleAnalysis({
   // ── Global Kinase Module annotation call (batched to avoid 524 timeout) ─
   const GLOBAL_ANNOTATE_BATCH_SIZE = 150; // PTMs per batch (keeps each call < 60s)
 
+  // ── Auto-load cached Global Annotate result on mount ─────────────────────
+  useEffect(() => {
+    if (globalKinaseResult || globalKinaseLoading) return; // already loaded or loading
+    if (topNPtms.length === 0) return; // no PTMs yet
+    // Try to load from cache (force_refresh=false → instant if cached)
+    const loadCached = async () => {
+      try {
+        const allPtms = topNPtms;
+        const result = await api.post<GlobalKinaseModuleResponse>(
+          `/orders/${orderId}/global-kinase-modules`,
+          {
+            ptms: allPtms.slice(0, 5).map((p) => ({ gene: p.gene, position: p.position })),
+            cowave_modules: [],
+            force_refresh: false,
+            _cache_probe: true, // signal that this is a cache probe, not full computation
+          }
+        );
+        if (result._cached && result.kinase_modules?.length > 0) {
+          setGlobalKinaseResult(result);
+          console.log("[GLOBAL-KINASE] Auto-loaded from cache on mount");
+        }
+      } catch {
+        // Silently fail — user can click Global Annotate manually
+      }
+    };
+    loadCached();
+  }, [orderId, topNPtms.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const runGlobalKinaseModules = useCallback(async (forceRefresh = false) => {
     setGlobalKinaseLoading(true);
     setGlobalKinaseError(null);
@@ -955,6 +983,7 @@ export default function KinaseModuleAnalysis({
             connected_substrates: eff.connected_substrates,
           })),
           wave_kinase_profile: mergedWaveProfile || [],
+          _cache_hash: mergedResult._cache_hash || "",
         });
         console.log("[Global Annotate] Merged kinase_analysis_data saved to DB");
       } catch (saveErr) {

@@ -338,11 +338,18 @@ def _auto_run_global_analysis(order_id: int, enriched_data: list, config: dict) 
             ],
         }
 
+        # Compute cache hash compatible with global-kinase-modules API endpoint
+        import hashlib as _hashlib
+        _ptm_keys_sorted = sorted(f"{g.upper()}_{str(p).upper()}" for g, p, _ in all_ptm_entries)
+        _cache_input_str = f"{len(all_ptm_entries)}|{'|'.join(_ptm_keys_sorted[:50])}"
+        _cache_hash = _hashlib.md5(_cache_input_str.encode()).hexdigest()[:12]
+
         kinase_result = {
             "kinase_modules": kinase_module_list,
             "temporal_cascade": {"timepoints": [], "kinase_activity": [], "cascade_flow": []},
             "summary": summary,
             "source": "pipeline_auto",
+            "_cache_hash": _cache_hash,
         }
 
         # Build activity heatmap

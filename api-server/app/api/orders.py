@@ -5207,11 +5207,14 @@ async def global_kinase_modules(
     _cache_input_str = f"{len(ptms)}|{'|'.join(_ptm_keys_sorted[:50])}|{'|'.join(_cowave_keys_sorted[:20])}"
     _cache_hash = _hashlib.md5(_cache_input_str.encode()).hexdigest()[:12]
 
+    # _cache_probe: frontend mount-time check — return any existing cache regardless of hash
+    _cache_probe = body.get("_cache_probe", False)
+
     if not force_refresh and order.kinase_analysis_data:
         _cached = order.kinase_analysis_data
         _cached_hash = _cached.get("_cache_hash", "")
-        if _cached_hash == _cache_hash:
-            _log.info(f"[GLOBAL-KINASE] Cache HIT for order {order_id} (hash={_cache_hash})")
+        if _cache_probe or _cached_hash == _cache_hash:
+            _log.info(f"[GLOBAL-KINASE] Cache HIT for order {order_id} (probe={_cache_probe}, hash={_cache_hash})")
             return {
                 "order_id": order_id,
                 "kinase_modules": _cached.get("kinase_modules", []),
@@ -5223,12 +5226,28 @@ async def global_kinase_modules(
                 "effector_proteins": _cached.get("effector_proteins", []),
                 "wave_kinase_profile": _cached.get("wave_kinase_profile", []),
                 "_cached": True,
-                "_cache_hash": _cache_hash,
+                "_cache_hash": _cached_hash or _cache_hash,
             }
         else:
             _log.info(f"[GLOBAL-KINASE] Cache MISS for order {order_id} (stored={_cached_hash}, current={_cache_hash})")
     else:
         _log.info(f"[GLOBAL-KINASE] No cache or force_refresh for order {order_id}")
+
+    # If this is just a cache probe and no cache was found, return empty (don't compute)
+    if _cache_probe:
+        _log.info(f"[GLOBAL-KINASE] Cache probe with no cache found for order {order_id}, returning empty")
+        return {
+            "order_id": order_id,
+            "kinase_modules": [],
+            "unassigned_ptms": [],
+            "annotation_details": [],
+            "summary": {},
+            "cowave_cross_analysis": {},
+            "temporal_cascade": {},
+            "effector_proteins": [],
+            "wave_kinase_profile": [],
+            "_cached": False,
+        }
 
     _log.info(f"[GLOBAL-KINASE] Starting global kinase module analysis: {len(ptms)} PTMs")
 
@@ -6097,6 +6116,7 @@ async def global_kinase_modules(
         "temporal_cascade": temporal_cascade,
         "effector_proteins": effector_proteins,
         "wave_kinase_profile": wave_kinase_profile,
+        "_cache_hash": _cache_hash,
     }
 
 
@@ -6139,6 +6159,8 @@ async def save_kinase_analysis_data(
     summary = body.get("summary", {})
     effector_proteins = body.get("effector_proteins", [])
     wave_kinase_profile = body.get("wave_kinase_profile", [])
+    # Preserve _cache_hash from body (set by global-kinase-modules endpoint)
+    _cache_hash = body.get("_cache_hash", "")
     order.kinase_analysis_data = {
         "kinase_modules": kinase_modules,
         "temporal_cascade": temporal_cascade,
@@ -6148,6 +6170,7 @@ async def save_kinase_analysis_data(
         "wave_kinase_profile": wave_kinase_profile,
         "saved_at": _dt.utcnow().isoformat(),
         "source": "batched_merge",
+        "_cache_hash": _cache_hash,
     }
     await db.commit()
 
@@ -6255,7 +6278,11 @@ async def kinase_activity_heatmap(
             ptm_timeseries[key] = {}
             ptm_qvalues[key] = {}
         # Cap extreme Log2FC values (pseudocount artifacts)
-        _raw_fc = row["log2fc"]
+        _raw_fc_raw = row["log2fc"]
+        try:
+            _raw_fc = float(_raw_fc_raw) if _raw_fc_raw is not None else 0.0
+        except (ValueError, TypeError):
+            _raw_fc = 0.0
         _LOG2FC_CAP = 5.0
         ptm_timeseries[key][cond] = max(-_LOG2FC_CAP, min(_LOG2FC_CAP, _raw_fc))
         ptm_qvalues[key][cond] = row["q_value"]
