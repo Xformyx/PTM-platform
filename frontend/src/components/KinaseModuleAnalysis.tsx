@@ -609,9 +609,13 @@ export default function KinaseModuleAnalysis({
   inferredReceptors = [],
 }: KinaseModuleAnalysisProps) {
   const isUbi = ptmType.toLowerCase().includes("ubiquityl") || ptmType.toLowerCase().includes("ubiquitin");
-  const [activeTab, setActiveTab] = useState<"cowave" | "lookup" | "cascade" | "kinaseModules" | "signalFlow" | "heatmap">("cowave");
+  const [activeTab, setActiveTab] = useState<"cowave" | "lookup" | "cascade" | "kinaseModules" | "signalFlow" | "heatmap" | "cascadeTimeline">("cowave");
   const [expandedModules, setExpandedModules] = useState<Set<string>>(new Set());
   const [manualSelection, setManualSelection] = useState<Set<string>>(new Set());
+  const [internalHighlightedKinase, setInternalHighlightedKinase] = useState<string | null>(null);
+
+  // Merge external highlightedKinase (from receptor panel) with internal (from heatmap/timeline click)
+  const effectiveHighlightedKinase = internalHighlightedKinase || highlightedKinase || null;
 
   // ── Motif annotation state ──────────────────────────────────────────────
   const [motifAnnotations, setMotifAnnotations] = useState<Record<string, MotifAnnotationResponse>>({});
@@ -1050,7 +1054,7 @@ export default function KinaseModuleAnalysis({
             variant={activeTab === "cowave" ? "default" : "ghost"}
             size="sm"
             className="text-xs h-7"
-            onClick={() => setActiveTab("cowave")}
+            onClick={() => { setActiveTab("cowave"); setInternalHighlightedKinase(null); }}
           >
             <GitMerge className="h-3 w-3 mr-1" /> Co-wave Modules
           </Button>
@@ -1058,7 +1062,7 @@ export default function KinaseModuleAnalysis({
             variant={activeTab === "lookup" ? "default" : "ghost"}
             size="sm"
             className="text-xs h-7"
-            onClick={() => setActiveTab("lookup")}
+            onClick={() => { setActiveTab("lookup"); setInternalHighlightedKinase(null); }}
           >
             <Search className="h-3 w-3 mr-1" /> {isUbi ? "E3 Lookup" : "Kinase Lookup"}
           </Button>
@@ -1066,7 +1070,7 @@ export default function KinaseModuleAnalysis({
             variant={activeTab === "cascade" ? "default" : "ghost"}
             size="sm"
             className="text-xs h-7"
-            onClick={() => setActiveTab("cascade")}
+            onClick={() => { setActiveTab("cascade"); setInternalHighlightedKinase(null); }}
           >
             <BarChart3 className="h-3 w-3 mr-1" /> {isUbi ? "Ubi Cascade" : "Cascade View"}
           </Button>
@@ -1074,7 +1078,7 @@ export default function KinaseModuleAnalysis({
             variant={activeTab === "kinaseModules" ? "default" : "ghost"}
             size="sm"
             className="text-xs h-7"
-            onClick={() => setActiveTab("kinaseModules")}
+            onClick={() => { setActiveTab("kinaseModules"); setInternalHighlightedKinase(null); }}
           >
             {isUbi ? <Boxes className="h-3 w-3 mr-1" /> : <Sparkles className="h-3 w-3 mr-1" />}
             {isUbi ? "E3 Modules" : "Kinase Modules"}
@@ -1102,6 +1106,16 @@ export default function KinaseModuleAnalysis({
               onClick={() => setActiveTab("heatmap")}
             >
               <Activity className="h-3 w-3 mr-1" /> Kinase Heatmap
+            </Button>
+          )}
+          {globalKinaseResult && conditions.length > 1 && (
+            <Button
+              variant={activeTab === "cascadeTimeline" ? "default" : "ghost"}
+              size="sm"
+              className="text-xs h-7"
+              onClick={() => setActiveTab("cascadeTimeline")}
+            >
+              <Clock className="h-3 w-3 mr-1" /> Cascade Timeline
             </Button>
           )}
           <div className="ml-auto">
@@ -1526,7 +1540,7 @@ export default function KinaseModuleAnalysis({
             globalKinaseLoading={globalKinaseLoading}
             onRunGlobalKinase={runGlobalKinaseModules}
             isUbi={isUbi}
-            highlightedKinase={highlightedKinase}
+            highlightedKinase={effectiveHighlightedKinase}
             kinaseToReceptors={kinaseToReceptors}
           />
         )}
@@ -1565,6 +1579,24 @@ export default function KinaseModuleAnalysis({
             globalKinaseResult={globalKinaseResult}
             vectorData={vectorData}
             conditions={conditions}
+            onKinaseSelect={(kinase) => {
+              setInternalHighlightedKinase(kinase);
+              setActiveTab("signalFlow");
+            }}
+          />
+        )}
+
+        {/* ── Tab: Cascade Timeline ────────────────────────────────────────── */}
+        {activeTab === "cascadeTimeline" && globalKinaseResult && (
+          <CascadeTimelineView
+            globalKinaseResult={globalKinaseResult}
+            vectorData={vectorData}
+            conditions={conditions}
+            inferredReceptors={inferredReceptors}
+            onKinaseClick={(kinase) => {
+              setInternalHighlightedKinase(kinase);
+              setActiveTab("signalFlow");
+            }}
           />
         )}
       </CardContent>
@@ -3718,6 +3750,32 @@ function SignalFlowView({
                   <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
                     <ArrowRight className="h-3 w-3" />
                     <span>via kinases:</span>
+                    {/* v9.48: Edge temporal validation summary */}
+                    {showTemporalOverlay && (() => {
+                      const recClass = receptorTemporalClass[primary.name];
+                      if (!recClass || recClass.class === "unknown") return null;
+                      const recOrder = conditions.indexOf(recClass.earliestPeak);
+                      let valid = 0;
+                      let invalid = 0;
+                      let total = 0;
+                      for (const k of viaKinases) {
+                        const t = kinaseTemporalMap[k.toUpperCase()];
+                        if (!t) continue;
+                        total++;
+                        if (t.peakOrder >= recOrder) valid++;
+                        else invalid++;
+                      }
+                      if (total === 0) return null;
+                      return (
+                        <span className={`ml-1 text-[8px] px-1 py-px rounded border ${
+                          invalid === 0 ? "bg-green-900/30 text-green-300 border-green-500/40" :
+                          invalid <= valid ? "bg-yellow-900/30 text-yellow-300 border-yellow-500/40" :
+                          "bg-red-900/30 text-red-300 border-red-500/40"
+                        }`} title={`Temporal flow validation: ${valid} kinases peak after receptor activation (✓), ${invalid} peak before (⚠️ possible feedback)`}>
+                          {invalid === 0 ? "✓" : "⚠️"} {valid}/{total} forward
+                        </span>
+                      );
+                    })()}
                   </div>
                   <div className="flex flex-wrap gap-2 ml-4">
                     {viaKinases.map(kinase => {
@@ -3743,22 +3801,43 @@ function SignalFlowView({
                                 {((kinaseConfidence[kinaseKey]?.confidence_score ?? 0) * 100).toFixed(0)}%
                               </span>
                             )}
-                            {/* v9.47: Temporal peak badge */}
-                            {showTemporalOverlay && kinaseTemporalMap[kinaseKey] && (
-                              <span
-                                className={`ml-0.5 text-[7px] px-1 py-px rounded border ${
-                                  kinaseTemporalMap[kinaseKey].direction === "activation"
-                                    ? "bg-red-900/30 text-red-300 border-red-500/40"
-                                    : kinaseTemporalMap[kinaseKey].direction === "inactivation"
-                                    ? "bg-blue-900/30 text-blue-300 border-blue-500/40"
-                                    : "bg-gray-900/30 text-gray-400 border-gray-500/40"
-                                }`}
-                                title={`Peak: ${kinaseTemporalMap[kinaseKey].peakCondition} (${kinaseTemporalMap[kinaseKey].peakScore > 0 ? "+" : ""}${kinaseTemporalMap[kinaseKey].peakScore.toFixed(1)})\nDirection: ${kinaseTemporalMap[kinaseKey].direction}`}
-                              >
-                                {kinaseTemporalMap[kinaseKey].direction === "activation" ? "▲" : kinaseTemporalMap[kinaseKey].direction === "inactivation" ? "▼" : "—"}
-                                {kinaseTemporalMap[kinaseKey].peakCondition}
-                              </span>
-                            )}
+                            {/* v9.48: Temporal peak badge + edge validation */}
+                            {showTemporalOverlay && kinaseTemporalMap[kinaseKey] && (() => {
+                              const t = kinaseTemporalMap[kinaseKey];
+                              const recClass = receptorTemporalClass[primary.name];
+                              const recOrder = recClass ? conditions.indexOf(recClass.earliestPeak) : -1;
+                              const isForward = recOrder < 0 || t.peakOrder >= recOrder;
+                              return (
+                                <>
+                                  <span
+                                    className={`ml-0.5 text-[7px] px-1 py-px rounded border ${
+                                      t.direction === "activation"
+                                        ? "bg-red-900/30 text-red-300 border-red-500/40"
+                                        : t.direction === "inactivation"
+                                        ? "bg-blue-900/30 text-blue-300 border-blue-500/40"
+                                        : "bg-gray-900/30 text-gray-400 border-gray-500/40"
+                                    }`}
+                                    title={`Peak: ${t.peakCondition} (${t.peakScore > 0 ? "+" : ""}${t.peakScore.toFixed(1)})\nDirection: ${t.direction}`}
+                                  >
+                                    {t.direction === "activation" ? "▲" : t.direction === "inactivation" ? "▼" : "—"}
+                                    {t.peakCondition}
+                                  </span>
+                                  {recOrder >= 0 && (
+                                    <span
+                                      className={`ml-0.5 text-[7px] ${
+                                        isForward ? "text-green-400" : "text-amber-400"
+                                      }`}
+                                      title={isForward
+                                        ? `✓ Forward flow: kinase peaks at ${t.peakCondition} (after receptor activation at ${conditions[recOrder]})`
+                                        : `⚠️ Feedback: kinase peaks at ${t.peakCondition} (before receptor activation at ${conditions[recOrder]}) — possible negative feedback loop`
+                                      }
+                                    >
+                                      {isForward ? "✓" : "⚠️"}
+                                    </span>
+                                  )}
+                                </>
+                              );
+                            })()}
                           </div>
                           {/* PTM substrates */}
                           {ptms.length > 0 && (() => {
@@ -4141,6 +4220,282 @@ interface KinaseHeatmapData {
   _cache_hash?: string;
 }
 
+// ── Cascade Timeline View ──────────────────────────────────────────────────
+
+interface CascadeTimelineProps {
+  globalKinaseResult: GlobalKinaseModuleResponse;
+  vectorData: PtmTimeSeriesRow[];
+  conditions: string[];
+  inferredReceptors: InferredReceptor[];
+  onKinaseClick?: (kinase: string) => void;
+}
+
+function CascadeTimelineView({
+  globalKinaseResult,
+  vectorData,
+  conditions,
+  inferredReceptors,
+  onKinaseClick,
+}: CascadeTimelineProps) {
+  const LOG2FC_CAP = 5.0;
+
+  // Compute temporal data for each kinase
+  const kinaseTimeline = useMemo(() => {
+    const ptmLookup: Record<string, number> = {};
+    for (const row of vectorData) {
+      const key = `${row.gene.toUpperCase()}|${row.position.toUpperCase()}|${row.condition}`;
+      ptmLookup[key] = Math.max(-LOG2FC_CAP, Math.min(LOG2FC_CAP, row.value));
+    }
+
+    const timeline: Array<{
+      kinase: string;
+      canonical: string;
+      peakCondition: string;
+      peakOrder: number;
+      peakScore: number;
+      direction: "activation" | "inactivation" | "neutral";
+      scores: Record<string, number>;
+      substrateCount: number;
+      upstreamReceptors: string[];
+    }> = [];
+
+    for (const mod of globalKinaseResult.kinase_modules) {
+      if (mod.members.length < 1) continue;
+      const scores: Record<string, number> = {};
+      for (const cond of conditions) {
+        let sum = 0;
+        let count = 0;
+        for (const m of mod.members) {
+          const val = ptmLookup[`${m.gene.toUpperCase()}|${m.position.toUpperCase()}|${cond}`];
+          if (val !== undefined) { sum += val; count++; }
+        }
+        scores[cond] = count > 0 ? sum / count : 0;
+      }
+      let peakCond = conditions[0];
+      let peakVal = 0;
+      for (const cond of conditions) {
+        if (Math.abs(scores[cond]) > Math.abs(peakVal)) {
+          peakVal = scores[cond];
+          peakCond = cond;
+        }
+      }
+      const direction: "activation" | "inactivation" | "neutral" =
+        peakVal > 0.3 ? "activation" : peakVal < -0.3 ? "inactivation" : "neutral";
+
+      // Find upstream receptors
+      const kinaseUpper = (mod.canonical || mod.kinase).toUpperCase();
+      const receptors: string[] = [];
+      for (const rec of inferredReceptors) {
+        if (rec.via_kinases?.some(k => k.toUpperCase() === kinaseUpper)) {
+          receptors.push(rec.name);
+        }
+      }
+
+      timeline.push({
+        kinase: mod.kinase,
+        canonical: mod.canonical || mod.kinase,
+        peakCondition: peakCond,
+        peakOrder: conditions.indexOf(peakCond),
+        peakScore: peakVal,
+        direction,
+        scores,
+        substrateCount: mod.members.length,
+        upstreamReceptors: receptors,
+      });
+    }
+
+    // Sort by peak order, then by peak score descending
+    timeline.sort((a, b) => a.peakOrder - b.peakOrder || Math.abs(b.peakScore) - Math.abs(a.peakScore));
+    return timeline;
+  }, [globalKinaseResult, vectorData, conditions, inferredReceptors]);
+
+  // Group by peak condition (time phase)
+  const phaseGroups = useMemo(() => {
+    const groups: Record<string, typeof kinaseTimeline> = {};
+    for (const cond of conditions) groups[cond] = [];
+    for (const entry of kinaseTimeline) {
+      if (groups[entry.peakCondition]) groups[entry.peakCondition].push(entry);
+    }
+    return groups;
+  }, [kinaseTimeline, conditions]);
+
+  // Phase labels
+  const phaseLabels: Record<number, string> = {
+    0: "Immediate Early",
+    1: "Secondary Response",
+    2: "Late Response",
+    3: "Sustained/Adaptive",
+  };
+
+  const phaseColors: Record<number, { bg: string; border: string; text: string; bar: string }> = {
+    0: { bg: "bg-red-950/30", border: "border-red-500/30", text: "text-red-300", bar: "bg-red-500" },
+    1: { bg: "bg-orange-950/30", border: "border-orange-500/30", text: "text-orange-300", bar: "bg-orange-500" },
+    2: { bg: "bg-yellow-950/30", border: "border-yellow-500/30", text: "text-yellow-300", bar: "bg-yellow-500" },
+    3: { bg: "bg-blue-950/30", border: "border-blue-500/30", text: "text-blue-300", bar: "bg-blue-500" },
+  };
+
+  // Cascade connections: kinases that share receptors across time phases
+  const cascadeConnections = useMemo(() => {
+    const connections: Array<{ from: string; to: string; sharedReceptors: string[]; fromPhase: number; toPhase: number }> = [];
+    for (let i = 0; i < kinaseTimeline.length; i++) {
+      for (let j = i + 1; j < kinaseTimeline.length; j++) {
+        const a = kinaseTimeline[i];
+        const b = kinaseTimeline[j];
+        if (a.peakOrder >= b.peakOrder) continue; // only forward connections
+        const shared = a.upstreamReceptors.filter(r => b.upstreamReceptors.includes(r));
+        if (shared.length > 0) {
+          connections.push({
+            from: a.canonical,
+            to: b.canonical,
+            sharedReceptors: shared,
+            fromPhase: a.peakOrder,
+            toPhase: b.peakOrder,
+          });
+        }
+      }
+    }
+    // Limit to top 20 connections by shared receptor count
+    return connections.sort((a, b) => b.sharedReceptors.length - a.sharedReceptors.length).slice(0, 20);
+  }, [kinaseTimeline]);
+
+  if (kinaseTimeline.length === 0) {
+    return (
+      <div className="text-center py-8 text-sm text-muted-foreground">
+        <Clock className="h-8 w-8 mx-auto mb-2 opacity-40" />
+        No temporal kinase data available. Run Global Annotate first.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-muted-foreground flex items-center gap-1">
+          <Clock className="h-3.5 w-3.5 text-orange-400" />
+          Temporal cascade: kinase activation order across {conditions.length} time points
+        </p>
+        <div className="text-[10px] text-muted-foreground">
+          {kinaseTimeline.length} kinases · {cascadeConnections.length} cascade connections
+        </div>
+      </div>
+
+      {/* Summary stats */}
+      <div className="grid grid-cols-4 gap-2">
+        {conditions.map((cond, idx) => {
+          const group = phaseGroups[cond] || [];
+          const activations = group.filter(g => g.direction === "activation").length;
+          const inactivations = group.filter(g => g.direction === "inactivation").length;
+          const colors = phaseColors[idx] || phaseColors[3];
+          return (
+            <div key={cond} className={`rounded-lg p-2 border ${colors.bg} ${colors.border}`}>
+              <div className={`text-[10px] font-semibold ${colors.text}`}>
+                {cond} — {phaseLabels[idx] || `Phase ${idx + 1}`}
+              </div>
+              <div className="text-lg font-bold text-foreground">{group.length}</div>
+              <div className="text-[9px] text-muted-foreground">
+                ▲{activations} ▼{inactivations}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Timeline visualization */}
+      <div className="relative">
+        {/* Time axis */}
+        <div className="flex items-center mb-4">
+          {conditions.map((cond, idx) => {
+            const colors = phaseColors[idx] || phaseColors[3];
+            return (
+              <div key={cond} className="flex-1 flex items-center">
+                <div className={`h-1 flex-1 ${colors.bar} rounded-full opacity-60`} />
+                <div className={`mx-1 text-[10px] font-semibold ${colors.text} whitespace-nowrap`}>
+                  {cond}
+                </div>
+                {idx < conditions.length - 1 && (
+                  <ArrowRight className={`h-3 w-3 ${colors.text} opacity-60`} />
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Phase columns */}
+        <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${conditions.length}, 1fr)` }}>
+          {conditions.map((cond, idx) => {
+            const group = phaseGroups[cond] || [];
+            const colors = phaseColors[idx] || phaseColors[3];
+            const topKinases = group.slice(0, 12); // Show top 12 per phase
+            return (
+              <div key={cond} className={`rounded-lg border p-2 ${colors.bg} ${colors.border} min-h-[120px]`}>
+                <div className={`text-[9px] font-semibold mb-2 ${colors.text}`}>
+                  {phaseLabels[idx] || `Phase ${idx + 1}`} ({group.length})
+                </div>
+                <div className="space-y-1">
+                  {topKinases.map(entry => (
+                    <div
+                      key={entry.canonical}
+                      className="flex items-center gap-1 text-[9px] cursor-pointer hover:bg-foreground/5 rounded px-1 py-0.5 transition-colors"
+                      onClick={() => onKinaseClick?.(entry.canonical)}
+                      title={`${entry.kinase}\nPeak: ${entry.peakCondition} (${entry.peakScore > 0 ? "+" : ""}${entry.peakScore.toFixed(2)})\nSubstrates: ${entry.substrateCount}\nReceptors: ${entry.upstreamReceptors.join(", ") || "unknown"}`}
+                    >
+                      <span className={`text-[8px] ${entry.direction === "activation" ? "text-red-400" : entry.direction === "inactivation" ? "text-blue-400" : "text-gray-400"}`}>
+                        {entry.direction === "activation" ? "▲" : entry.direction === "inactivation" ? "▼" : "—"}
+                      </span>
+                      <span className="text-foreground font-medium truncate flex-1">{entry.kinase}</span>
+                      <span className="text-muted-foreground">{entry.peakScore > 0 ? "+" : ""}{entry.peakScore.toFixed(1)}</span>
+                    </div>
+                  ))}
+                  {group.length > 12 && (
+                    <div className="text-[8px] text-muted-foreground text-center">+{group.length - 12} more</div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Cascade connections */}
+      {cascadeConnections.length > 0 && (
+        <div className="space-y-2">
+          <div className="text-[10px] font-semibold text-muted-foreground flex items-center gap-1">
+            <ArrowRight className="h-3 w-3" />
+            Cross-phase cascade connections (shared upstream receptors)
+          </div>
+          <div className="grid grid-cols-2 gap-1">
+            {cascadeConnections.slice(0, 10).map((conn, i) => {
+              const fromColors = phaseColors[conn.fromPhase] || phaseColors[3];
+              const toColors = phaseColors[conn.toPhase] || phaseColors[3];
+              return (
+                <div key={i} className="flex items-center gap-1 text-[9px] px-2 py-1 rounded bg-muted/30 border border-border/50">
+                  <span className={`font-medium ${fromColors.text}`}>{conn.from}</span>
+                  <ArrowRight className="h-2.5 w-2.5 text-muted-foreground" />
+                  <span className={`font-medium ${toColors.text}`}>{conn.to}</span>
+                  <span className="text-muted-foreground ml-auto">
+                    via {conn.sharedReceptors.slice(0, 2).join(", ")}{conn.sharedReceptors.length > 2 ? ` +${conn.sharedReceptors.length - 2}` : ""}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Legend */}
+      <div className="flex flex-wrap gap-3 text-[9px] text-muted-foreground pt-2 border-t border-border/50">
+        <span>▲ <span className="text-red-400">Activation</span> (kinase active)</span>
+        <span>▼ <span className="text-blue-400">Inactivation</span> (phosphatase/suppressed)</span>
+        <span>Click kinase → jump to Signal Flow</span>
+        <span className="ml-auto">Cascade = shared upstream receptor across time phases</span>
+      </div>
+    </div>
+  );
+}
+
+// ── Kinase Activity Heatmap View ──────────────────────────────────────────────────
+
 type HeatmapSortMode = "peak_score" | "peak_time" | "confidence" | "substrate_count" | "alphabetical" | "cowave_group";
 type HeatmapViewMode = "heatmap" | "line";
 
@@ -4149,11 +4504,13 @@ function KinaseActivityHeatmapView({
   globalKinaseResult,
   vectorData,
   conditions,
+  onKinaseSelect,
 }: {
   orderId: number;
   globalKinaseResult: GlobalKinaseModuleResponse;
   vectorData: PtmTimeSeriesRow[];
   conditions: string[];
+  onKinaseSelect?: (kinase: string) => void;
 }) {
   const [heatmapData, setHeatmapData] = useState<KinaseHeatmapData | null>(null);
   const [loading, setLoading] = useState(false);
@@ -4422,6 +4779,7 @@ function KinaseActivityHeatmapView({
                         else next.add(ks.kinase);
                         return next;
                       });
+                      onKinaseSelect?.(ks.kinase);
                     }}
                   >
                     {/* Co-wave Group Color Bar */}
@@ -4545,6 +4903,7 @@ function KinaseActivityHeatmapView({
               <span className="text-blue-400 font-bold">▼</span>
               <span>Inactivation: substrates de-phosphorylated (phosphatase action / kinase suppressed)</span>
             </span>
+            <span className="ml-auto text-cyan-400">→ Click row to view in Signal Flow</span>
           </div>
         </div>
       )}
