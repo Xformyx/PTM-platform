@@ -358,6 +358,7 @@ interface InferredReceptor {
   unique_ptms?: string[];
   shared_ptms?: string[];
   unique_ptm_ratio?: number;
+  cowave_score?: number;
 }
 
 interface KinaseModuleAnalysisProps {
@@ -1440,6 +1441,7 @@ export default function KinaseModuleAnalysis({
             topNPtms={topNPtms}
             vectorData={vectorData}
             conditions={conditions}
+            coWaveModules={coWaveModules}
           />
         )}
 
@@ -3129,12 +3131,14 @@ function SignalFlowView({
   topNPtms,
   vectorData = [],
   conditions = [],
+  coWaveModules = [],
 }: {
   inferredReceptors: InferredReceptor[];
   globalKinaseResult: GlobalKinaseModuleResponse | null;
   topNPtms: { gene: string; position: string; label: string }[];
   vectorData?: PtmTimeSeriesRow[];
   conditions?: string[];
+  coWaveModules?: CoWaveModule[];
 }) {
   const [selectedReceptor, setSelectedReceptor] = useState<string | null>(null);
   const [showEffectors, setShowEffectors] = useState(true);
@@ -3191,6 +3195,38 @@ function SignalFlowView({
     }
     return map;
   }, [vectorData, conditions]);
+
+  // v9.43: Build PTM → co-wave group mapping for Signal Flow visualization
+  // Maps each PTM key to its co-wave module info (label, peak condition, group size)
+  const ptmCoWaveMap = useMemo(() => {
+    const map: Record<string, { moduleId: number; label: string; peakCondition: string; groupSize: number; dominantClass: string }[]> = {};
+    for (const mod of coWaveModules) {
+      for (const ptm of mod.ptms) {
+        const key = `${ptm.gene}_${ptm.position}`;
+        if (!map[key]) map[key] = [];
+        map[key].push({
+          moduleId: mod.id,
+          label: mod.label,
+          peakCondition: mod.peakCondition,
+          groupSize: mod.ptms.length,
+          dominantClass: mod.dominant_activity_class,
+        });
+      }
+    }
+    return map;
+  }, [coWaveModules]);
+
+  // Co-wave color palette for visual grouping (up to 8 distinct colors)
+  const cowaveColors = [
+    { bg: "bg-cyan-900/20", text: "text-cyan-300", border: "border-cyan-500/50", dot: "bg-cyan-400" },
+    { bg: "bg-fuchsia-900/20", text: "text-fuchsia-300", border: "border-fuchsia-500/50", dot: "bg-fuchsia-400" },
+    { bg: "bg-amber-900/20", text: "text-amber-300", border: "border-amber-500/50", dot: "bg-amber-400" },
+    { bg: "bg-indigo-900/20", text: "text-indigo-300", border: "border-indigo-500/50", dot: "bg-indigo-400" },
+    { bg: "bg-lime-900/20", text: "text-lime-300", border: "border-lime-500/50", dot: "bg-lime-400" },
+    { bg: "bg-pink-900/20", text: "text-pink-300", border: "border-pink-500/50", dot: "bg-pink-400" },
+    { bg: "bg-sky-900/20", text: "text-sky-300", border: "border-sky-500/50", dot: "bg-sky-400" },
+    { bg: "bg-orange-900/20", text: "text-orange-300", border: "border-orange-500/50", dot: "bg-orange-400" },
+  ];
 
   // Build kinase → PTM mapping from globalKinaseResult
   const kinaseToPtms = useMemo(() => {
@@ -3395,6 +3431,11 @@ function SignalFlowView({
                     <span>{((primary.uniqueness_score || 0) * 100).toFixed(0)}%</span>
                   </div>
                 )}
+                {primary.cowave_score != null && primary.cowave_score > 0 && (
+                  <span className="text-[8px] px-1 py-0.5 rounded bg-cyan-900/20 text-cyan-300 border border-cyan-500/40" title={`Co-wave divergence score: ${primary.cowave_score.toFixed(1)} — higher = more temporally specific signaling`}>
+                    CW:{primary.cowave_score.toFixed(1)}
+                  </span>
+                )}
               </div>
 
               {/* Kinase layer */}
@@ -3422,11 +3463,44 @@ function SignalFlowView({
                             {isUnique && <span className="ml-0.5 text-[8px] text-amber-500">★</span>}
                           </div>
                           {/* PTM substrates */}
-                          {ptms.length > 0 && (
+                          {ptms.length > 0 && (() => {
+                            // v9.43: Count co-wave groups among this kinase's substrates
+                            const kinaseCowaveGroups = new Map<number, { label: string; count: number; peakCondition: string }>();
+                            for (const ptm of ptms) {
+                              const key = `${ptm.gene}_${ptm.position}`;
+                              const cwInfos = ptmCoWaveMap[key] || [];
+                              for (const cw of cwInfos) {
+                                if (!kinaseCowaveGroups.has(cw.moduleId)) {
+                                  kinaseCowaveGroups.set(cw.moduleId, { label: cw.label, count: 0, peakCondition: cw.peakCondition });
+                                }
+                                kinaseCowaveGroups.get(cw.moduleId)!.count++;
+                              }
+                            }
+                            const cowaveGroupList = Array.from(kinaseCowaveGroups.entries())
+                              .filter(([, v]) => v.count >= 2) // Only show groups with 2+ substrates under this kinase
+                              .sort((a, b) => b[1].count - a[1].count);
+                            return (
                             <div className="ml-2 space-y-0.5">
                               <div className="flex items-center gap-0.5 text-[9px] text-muted-foreground">
                                 <ArrowRight className="h-2.5 w-2.5" />
                                 <span>{ptms.length} substrates:</span>
+                                {cowaveGroupList.length > 0 && (
+                                  <span className="ml-1 flex items-center gap-1">
+                                    {cowaveGroupList.slice(0, 3).map(([modId, info]) => {
+                                      const colorIdx = (modId - 1) % cowaveColors.length;
+                                      return (
+                                        <span
+                                          key={modId}
+                                          className={`inline-flex items-center gap-0.5 px-1 py-px rounded ${cowaveColors[colorIdx].bg} ${cowaveColors[colorIdx].text} border ${cowaveColors[colorIdx].border}`}
+                                          title={`${info.label}: ${info.count}/${ptms.length} substrates co-move (peak: ${info.peakCondition})`}
+                                        >
+                                          <span className={`w-1.5 h-1.5 rounded-full ${cowaveColors[colorIdx].dot}`} />
+                                          <span className="text-[8px]">{info.count}/{ptms.length}</span>
+                                        </span>
+                                      );
+                                    })}
+                                  </span>
+                                )}
                               </div>
                               <div className="flex flex-wrap gap-1 ml-3">
                                 {ptms.map(ptm => {
@@ -3442,22 +3516,41 @@ function SignalFlowView({
                                     actClass === "de_novo" ? "De novo (control imputed)" :
                                     actClass === "regulated" ? "Regulated (|Log2FC| ≥ 1.0 AND q < 0.05)" :
                                     "Minor (sub-threshold)";
+                                  const cowaveInfo = ptmCoWaveMap[ptmKey] || [];
+                                  const cowaveTooltip = cowaveInfo.length > 0
+                                    ? `\nCo-wave: ${cowaveInfo.map(c => `${c.label} (n=${c.groupSize}, peak=${c.peakCondition})`).join("; ")}`
+                                    : "";
                                   return (
                                     <span
                                       key={ptmKey}
-                                      className={`text-[9px] px-1.5 py-0.5 rounded ${chipStyle}`}
-                                      title={`${ptm.gene} ${ptm.position} | ${actLabel} | kinase evidence: ${ptm.membership}`}
+                                      className={`text-[9px] px-1.5 py-0.5 rounded ${chipStyle} relative`}
+                                      title={`${ptm.gene} ${ptm.position} | ${actLabel} | kinase evidence: ${ptm.membership}${cowaveTooltip}`}
                                     >
                                       {actClass === "de_novo" && <span className="mr-0.5">★</span>}
                                       {actClass === "regulated" && <span className="mr-0.5">●</span>}
                                       {actClass === "minor" && <span className="mr-0.5">◇</span>}
                                       {ptm.label || ptmKey}
+                                      {cowaveInfo.length > 0 && (
+                                        <span className={`ml-0.5 inline-flex items-center gap-px`}>
+                                          {cowaveInfo.slice(0, 2).map(cw => {
+                                            const colorIdx = (cw.moduleId - 1) % cowaveColors.length;
+                                            return (
+                                              <span
+                                                key={cw.moduleId}
+                                                className={`w-1.5 h-1.5 rounded-full inline-block ${cowaveColors[colorIdx].dot}`}
+                                                title={`${cw.label} (${cw.groupSize} PTMs, peak: ${cw.peakCondition})`}
+                                              />
+                                            );
+                                          })}
+                                        </span>
+                                      )}
                                     </span>
                                   );
                                 })}
                               </div>
                             </div>
-                          )}
+                            );
+                          })()}
                           {ptms.length === 0 && globalKinaseResult && (
                             <div className="ml-2 text-[9px] text-muted-foreground/50">
                               no annotated substrates in current PTM set
@@ -3599,6 +3692,22 @@ function SignalFlowView({
             <span className="text-[9px]">sub-threshold but patterned</span>
           </span>
         </div>
+        {coWaveModules.length > 0 && (
+          <div className="flex flex-wrap items-center gap-3 text-[10px] text-muted-foreground">
+            <span className="font-medium text-muted-foreground/70">Co-wave group:</span>
+            <span className="flex items-center gap-1">
+              <span className="flex gap-0.5">
+                {cowaveColors.slice(0, Math.min(coWaveModules.length, 4)).map((c, i) => (
+                  <span key={i} className={`w-2 h-2 rounded-full inline-block ${c.dot}`} />
+                ))}
+              </span>
+              <span className="text-[9px]">colored dots = co-movement group (substrates with same temporal peak)</span>
+            </span>
+            <span className="text-[9px] text-muted-foreground/50">
+              ({coWaveModules.length} groups detected)
+            </span>
+          </div>
+        )}
         {hasEffectors && (
           <div className="space-y-1.5">
             {/* Row 1: Direction (Up/Down) */}
