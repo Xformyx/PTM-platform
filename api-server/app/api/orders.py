@@ -2978,8 +2978,9 @@ async def get_vector_plot_data(
                     for k in _cl_kins:
                         _kinase_cluster_freq[k] += 1
 
-                # ── Compute co-wave receptor score ──
-                # For each receptor: score = Σ (cluster_specificity × hub_weight × ptm_coverage)
+                # ── v9.44: Compute co-wave receptor score with kinase module confidence ──
+                # For each receptor: score = Σ (cluster_specificity × hub_weight × ptm_coverage × module_confidence)
+                # Kinases whose modules have high co-wave coherence get priority
                 for _ri in merged.values():
                     _vk = _ri.get("via_kinases", [])
                     if not _vk:
@@ -2994,7 +2995,22 @@ async def get_vector_plot_data(
                         _spec_w = 1.0 / max(_cl_freq, 1)
                         # PTM coverage: how many top_n PTMs this kinase covers
                         _ptm_cov = len(kinase_ptm_map.get(k, set()) & _ptm_labels_set)
-                        _cw_score += _hub_w * _spec_w * max(_ptm_cov, 1)
+                        # v9.44: Co-wave coherence boost — kinases concentrated in few clusters
+                        # get amplified score (temporally specific = more reliable pathway)
+                        _module_boost = 1.0
+                        # Use kinase_ptm_map to find which co-wave clusters this kinase's PTMs belong to
+                        _kinase_ptm_set = kinase_ptm_map.get(k, set())
+                        _kinase_in_clusters = set()
+                        for _cl_idx, _cl_ptms in enumerate(_clusters):
+                            if _kinase_ptm_set & set(_cl_ptms):
+                                _kinase_in_clusters.add(_cl_idx)
+                        # Coherence: if kinase's PTMs are concentrated in 1-2 clusters (not spread)
+                        if len(_kinase_in_clusters) <= 2 and len(_kinase_ptm_set) >= 3:
+                            _module_boost = 1.5  # 50% boost for temporally coherent kinases
+                        elif len(_kinase_in_clusters) == 1 and len(_kinase_ptm_set) >= 2:
+                            _module_boost = 1.8  # 80% boost for single-cluster kinases
+
+                        _cw_score += _hub_w * _spec_w * max(_ptm_cov, 1) * _module_boost
                     _ri["cowave_score"] = round(_cw_score, 3)
 
                 # ── Detect temporal patterns per cluster ──
@@ -5386,8 +5402,48 @@ async def global_kinase_modules(
             "cowave_overlap": list(cowave_overlap.values()),
         })
 
-    # Sort by total_count descending
-    kinase_module_list.sort(key=lambda x: x["total_count"], reverse=True)
+    # ── 5a. v9.44: Co-wave Confidence Boost for Kinase Modules ─────────────
+    # A kinase module is more confident when its substrates co-move temporally.
+    # confidence_score = base_score + cowave_boost
+    #   base_score: confirmed_ratio * source_diversity
+    #   cowave_boost: proportion of members in co-wave groups * group_coherence
+    for km in kinase_module_list:
+        total = km["total_count"]
+        if total == 0:
+            km["confidence_score"] = 0.0
+            km["cowave_boost"] = 0.0
+            continue
+
+        # Base confidence: confirmed ratio + source diversity
+        confirmed_ratio = km["confirmed_count"] / total
+        source_diversity = min(1.0, km["source_count"] / 3.0)  # max 3 sources = 1.0
+        base_score = confirmed_ratio * 0.6 + source_diversity * 0.4
+
+        # Co-wave boost: how many members are in co-wave groups?
+        cowave_member_count = 0
+        max_shared_ratio = 0.0
+        for cw_ov in km.get("cowave_overlap", []):
+            shared_count = len(cw_ov.get("shared_ptms", []))
+            cowave_member_count += shared_count
+            # Find the co-wave group that has the highest overlap with this kinase
+            if shared_count > 0:
+                ratio = shared_count / total
+                if ratio > max_shared_ratio:
+                    max_shared_ratio = ratio
+
+        # cowave_boost: [0, 1] — higher when more substrates are in same co-wave
+        # Dedup: a PTM can be in multiple co-waves, cap at total
+        cowave_coverage = min(1.0, cowave_member_count / total)
+        # Coherence bonus: if a single co-wave contains most of this kinase's substrates
+        coherence_bonus = max_shared_ratio ** 0.5  # sqrt to soften
+        cowave_boost = cowave_coverage * 0.5 + coherence_bonus * 0.5
+
+        # Final confidence: base + boost (capped at 1.0)
+        km["confidence_score"] = round(min(1.0, base_score * 0.6 + cowave_boost * 0.4 + base_score * cowave_boost * 0.3), 3)
+        km["cowave_boost"] = round(cowave_boost, 3)
+
+    # Sort by confidence_score descending (replaces simple total_count sort)
+    kinase_module_list.sort(key=lambda x: (x.get("confidence_score", 0), x["total_count"]), reverse=True)
 
     # ── 5b. Smart Signal Decomposition: Temporal Kinase Redistribution ─────
     # Disambiguate over-concentrated kinase modules using temporal context

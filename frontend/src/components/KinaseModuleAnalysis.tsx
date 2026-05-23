@@ -73,7 +73,7 @@ interface PtmInfo {
   gene: string;
   position: string;
   label: string;
-  activity_class?: "de_novo" | "regulated" | "minor";
+  activity_class?: "de_novo" | "regulated" | "coordinated" | "minor";
 }
 
 interface CoWaveModule {
@@ -85,8 +85,8 @@ interface CoWaveModule {
   amplitudeRanking: number[];
   spearmanScore: number | null;
   // v9.27: activity class breakdown
-  activity_class_counts: { de_novo: number; regulated: number; minor: number };
-  dominant_activity_class: "de_novo" | "regulated" | "minor";
+  activity_class_counts: { de_novo: number; regulated: number; coordinated: number; minor: number };
+  dominant_activity_class: "de_novo" | "regulated" | "coordinated" | "minor";
 }
 
 // ── Motif Annotation Types ──────────────────────────────────────────────────
@@ -210,6 +210,9 @@ interface GlobalKinaseModule {
   inferred_count: number;
   total_count: number;
   cowave_overlap: CowaveOverlap[];
+  // v9.44: Co-wave confidence scoring
+  confidence_score?: number;
+  cowave_boost?: number;
 }
 
 interface CowaveCrossEntry {
@@ -406,8 +409,8 @@ function detectCoWaveModules(
   if (conditions.length < 2 || ptms.length < 2) return [];
 
   const ptmSeries = new Map<string, number[]>();
-  // v9.27: compute activity_class per PTM from vectorData
-  const ptmActivityClassMap = new Map<string, "de_novo" | "regulated" | "minor">();
+  // v9.44: compute activity_class per PTM from vectorData with co-wave confidence boost
+  const ptmActivityClassMap = new Map<string, "de_novo" | "regulated" | "coordinated" | "minor">();
   ptms.forEach((p) => {
     const key = `${p.gene}_${p.position}`;
     const series = conditions.map((cond) => {
@@ -418,21 +421,19 @@ function detectCoWaveModules(
     });
     ptmSeries.set(key, series);
 
-    // Determine activity_class: check all rows for this PTM across conditions
+    // Determine base activity_class: check all rows for this PTM across conditions
     const rows = vectorData.filter((r) => r.gene === p.gene && r.position === p.position);
     const isDenovo = rows.some((r) => r.control_pseudocount_used === true);
     const maxAbsFC = Math.max(...series.map(Math.abs));
     const qValues = rows.map((r) => r.q_value).filter((v): v is number => v != null && !isNaN(v));
     const minQValue = qValues.length > 0 ? Math.min(...qValues) : null;
     const hasQValue = minQValue != null;
-    let actClass: "de_novo" | "regulated" | "minor";
+    let actClass: "de_novo" | "regulated" | "coordinated" | "minor";
     if (isDenovo) {
       actClass = "de_novo";
     } else if (hasQValue) {
-      // q_value available: Regulated = |Log2FC| >= 1.0 AND q_value < 0.05
       actClass = (minQValue < 0.05 && maxAbsFC >= 1.0) ? "regulated" : "minor";
     } else {
-      // Fallback (old data without q_value): use maxAbsChange > 0.8
       const baselineVal = series[0] ?? 0;
       const maxAbsChange = Math.max(...series.map((v) => Math.abs(v - baselineVal)));
       actClass = maxAbsChange > 0.8 ? "regulated" : "minor";
@@ -499,15 +500,50 @@ function detectCoWaveModules(
       }
     }
 
-    // v9.27: activity class statistics
-    const class_counts = { de_novo: 0, regulated: 0, minor: 0 };
+    // v9.44: Co-wave Confidence Boost — upgrade "minor" PTMs to "coordinated"
+    // Rationale: If a PTM is sub-threshold individually but moves in concert with
+    // 2+ other PTMs at the same timepoint, it represents a coordinated signaling event.
+    // Boost criteria:
+    //   - Group has 3+ PTMs (coordinated movement is statistically meaningful)
+    //   - PTM has |Log2FC| >= 0.5 at peak (not just noise)
+    //   - At least 1 other PTM in the group is de_novo or regulated (anchor signal)
+    const hasAnchorSignal = groupPtms.some((p) => {
+      const ac = ptmActivityClassMap.get(`${p.gene}_${p.position}`) ?? "minor";
+      return ac === "de_novo" || ac === "regulated";
+    });
+    const groupSizeThreshold = 3;
+    const cowaveBoostFcThreshold = 0.5;
+
+    if (groupPtms.length >= groupSizeThreshold && hasAnchorSignal) {
+      groupPtms.forEach((p) => {
+        const key = `${p.gene}_${p.position}`;
+        const currentClass = ptmActivityClassMap.get(key) ?? "minor";
+        if (currentClass === "minor") {
+          // Check if this PTM has meaningful signal at peak
+          const series = ptmSeries.get(key) || [];
+          const peakIdx = conditions.indexOf(peakCond);
+          const peakFc = peakIdx >= 0 ? Math.abs(series[peakIdx]) : 0;
+          if (peakFc >= cowaveBoostFcThreshold) {
+            ptmActivityClassMap.set(key, "coordinated");
+            // Also update the PtmInfo's activity_class in-place
+            p.activity_class = "coordinated";
+          }
+        }
+      });
+    }
+
+    // v9.44: activity class statistics (includes coordinated)
+    const class_counts = { de_novo: 0, regulated: 0, coordinated: 0, minor: 0 };
     groupPtms.forEach((p) => {
-      const ac = p.activity_class ?? "minor";
+      const key = `${p.gene}_${p.position}`;
+      const ac = ptmActivityClassMap.get(key) ?? "minor";
+      p.activity_class = ac; // ensure PtmInfo reflects final class
       class_counts[ac] = (class_counts[ac] ?? 0) + 1;
     });
-    const dominant_activity_class: "de_novo" | "regulated" | "minor" =
+    const dominant_activity_class: "de_novo" | "regulated" | "coordinated" | "minor" =
       class_counts.de_novo > 0 ? "de_novo" :
-      class_counts.regulated > 0 ? "regulated" : "minor";
+      class_counts.regulated > 0 ? "regulated" :
+      class_counts.coordinated > 0 ? "coordinated" : "minor";
 
     modules.push({
       id: moduleId,
@@ -1249,11 +1285,12 @@ export default function KinaseModuleAnalysis({
 
                           // v9.27: activity class indicator
                           const actClass = p.activity_class ?? "minor";
-                          const actClassConfig = {
+                          const actClassConfig = ({
                             de_novo: { symbol: "★", color: "text-[#E65100]", title: "De novo (no control signal)" },
                             regulated: { symbol: "●", color: "text-[#1565C0]", title: "Regulated (q<0.05, |FC|≥1)" },
-                            minor: { symbol: "◇", color: "text-[#4CAF50]", title: "Minor (sub-threshold but patterned)" },
-                          }[actClass];
+                            coordinated: { symbol: "◆", color: "text-[#7B1FA2]", title: "Coordinated (co-wave boosted, |FC|≥0.5)" },
+                            minor: { symbol: "◇", color: "text-[#4CAF50]", title: "Minor (sub-threshold)" },
+                          } as Record<string, { symbol: string; color: string; title: string }>)[actClass];
 
                           return (
                             <span
@@ -3163,20 +3200,22 @@ function SignalFlowView({
     return map;
   }, [effectorProteins]);
 
-  // v9.25: Build PTM activity classification: de_novo | regulated | minor
-  // Uses q_value (Welch's t-test + BH correction) when available
+  // v9.44: Build PTM activity classification with co-wave confidence boost
+  // Priority: de_novo > regulated > coordinated > minor
+  // "coordinated" = sub-threshold PTM that co-moves with 2+ others in a co-wave group
   const ptmActivityClass = useMemo(() => {
-    const map: Record<string, "de_novo" | "regulated" | "minor"> = {};
+    const map: Record<string, "de_novo" | "regulated" | "coordinated" | "minor"> = {};
     if (!vectorData.length || !conditions.length) return map;
     const baseline = conditions[0];
     const ptmKeys = new Set(vectorData.map(r => `${r.gene}_${r.position}`));
+
+    // Step 1: Compute base class (same as before)
     for (const key of ptmKeys) {
       const rows = vectorData.filter(r => `${r.gene}_${r.position}` === key);
       const hasPseudocount = rows.some(r => r.control_pseudocount_used === true);
       const maxVal = Math.max(...rows.map(r => r.value));
       const minVal = Math.min(...rows.map(r => r.value));
       const maxAbsLog2FC = Math.max(Math.abs(maxVal), Math.abs(minVal));
-      // Find minimum q_value across conditions
       const qValues = rows.map(r => r.q_value).filter((v): v is number => v != null && !isNaN(v));
       const minQVal = qValues.length > 0 ? Math.min(...qValues) : null;
       const hasQValue = minQVal != null;
@@ -3184,17 +3223,27 @@ function SignalFlowView({
       if (hasPseudocount) {
         map[key] = "de_novo";
       } else if (hasQValue) {
-        // q_value available: Regulated = |Log2FC| >= 1.0 AND q_value < 0.05
         map[key] = (maxAbsLog2FC >= 1.0 && minQVal < 0.05) ? "regulated" : "minor";
       } else {
-        // Fallback (old data without q_value): use maxAbsChange > 0.8
         const baselineVal = rows.find(r => r.condition === baseline)?.value ?? 0;
         const maxAbsChange = Math.max(Math.abs(maxVal - baselineVal), Math.abs(minVal - baselineVal));
         map[key] = maxAbsChange > 0.8 ? "regulated" : "minor";
       }
     }
+
+    // Step 2: Co-wave Confidence Boost — use pre-computed classes from coWaveModules
+    // coWaveModules already applied the boost in detectCoWaveModules (v9.44)
+    for (const mod of coWaveModules) {
+      for (const ptm of mod.ptms) {
+        const key = `${ptm.gene}_${ptm.position}`;
+        if (ptm.activity_class === "coordinated" && map[key] === "minor") {
+          map[key] = "coordinated";
+        }
+      }
+    }
+
     return map;
-  }, [vectorData, conditions]);
+  }, [vectorData, conditions, coWaveModules]);
 
   // v9.43: Build PTM → co-wave group mapping for Signal Flow visualization
   // Maps each PTM key to its co-wave module info (label, peak condition, group size)
@@ -3247,6 +3296,20 @@ function SignalFlowView({
     }
     return map;
   }, [globalKinaseResult, topNPtms]);
+
+  // v9.44: kinase → module confidence mapping
+  const kinaseConfidence = useMemo(() => {
+    const map: Record<string, { confidence_score: number; cowave_boost: number }> = {};
+    if (!globalKinaseResult) return map;
+    for (const mod of globalKinaseResult.kinase_modules) {
+      const key = (mod.canonical || mod.kinase).toUpperCase();
+      map[key] = {
+        confidence_score: mod.confidence_score ?? 0,
+        cowave_boost: mod.cowave_boost ?? 0,
+      };
+    }
+    return map;
+  }, [globalKinaseResult]);
 
   // Source color
   const sourceColor = (src?: string) => {
@@ -3461,6 +3524,14 @@ function SignalFlowView({
                             <Zap className="h-2.5 w-2.5" />
                             {kinase}
                             {isUnique && <span className="ml-0.5 text-[8px] text-amber-500">★</span>}
+                            {kinaseConfidence[kinaseKey]?.cowave_boost > 0.3 && (
+                              <span
+                                className="ml-0.5 text-[7px] px-0.5 rounded bg-purple-900/30 text-purple-300"
+                                title={`Module confidence: ${((kinaseConfidence[kinaseKey]?.confidence_score ?? 0) * 100).toFixed(0)}% (co-wave boost: ${((kinaseConfidence[kinaseKey]?.cowave_boost ?? 0) * 100).toFixed(0)}%)`}
+                              >
+                                {((kinaseConfidence[kinaseKey]?.confidence_score ?? 0) * 100).toFixed(0)}%
+                              </span>
+                            )}
                           </div>
                           {/* PTM substrates */}
                           {ptms.length > 0 && (() => {
@@ -3511,10 +3582,13 @@ function SignalFlowView({
                                       ? "bg-red-900/30 text-red-300 border border-red-500 font-semibold"
                                       : actClass === "regulated"
                                       ? "bg-emerald-900/30 text-emerald-300 border border-emerald-500 font-semibold"
+                                      : actClass === "coordinated"
+                                      ? "bg-purple-900/30 text-purple-300 border border-purple-500 font-medium"
                                       : "bg-green-900/30 text-green-300 border border-green-500";
                                   const actLabel =
                                     actClass === "de_novo" ? "De novo (control imputed)" :
                                     actClass === "regulated" ? "Regulated (|Log2FC| ≥ 1.0 AND q < 0.05)" :
+                                    actClass === "coordinated" ? "Coordinated (co-wave boosted, |FC|≥0.5 + group≥3)" :
                                     "Minor (sub-threshold)";
                                   const cowaveInfo = ptmCoWaveMap[ptmKey] || [];
                                   const cowaveTooltip = cowaveInfo.length > 0
@@ -3528,6 +3602,7 @@ function SignalFlowView({
                                     >
                                       {actClass === "de_novo" && <span className="mr-0.5">★</span>}
                                       {actClass === "regulated" && <span className="mr-0.5">●</span>}
+                                      {actClass === "coordinated" && <span className="mr-0.5">◆</span>}
                                       {actClass === "minor" && <span className="mr-0.5">◇</span>}
                                       {ptm.label || ptmKey}
                                       {cowaveInfo.length > 0 && (
@@ -3688,8 +3763,12 @@ function SignalFlowView({
             <span className="text-[9px]">detected in control, meaningful change</span>
           </span>
           <span className="flex items-center gap-1">
+            <span className="px-1.5 py-0.5 rounded bg-purple-900/30 text-purple-300 border border-purple-500 text-[9px]">◆ Coordinated</span>
+            <span className="text-[9px]">co-wave boosted (|FC|≥0.5, group≥3, has anchor signal)</span>
+          </span>
+          <span className="flex items-center gap-1">
             <span className="px-1.5 py-0.5 rounded bg-green-900/30 text-green-300 border border-green-500 text-[9px]">◇ Minor</span>
-            <span className="text-[9px]">sub-threshold but patterned</span>
+            <span className="text-[9px]">sub-threshold, isolated</span>
           </span>
         </div>
         {coWaveModules.length > 0 && (
