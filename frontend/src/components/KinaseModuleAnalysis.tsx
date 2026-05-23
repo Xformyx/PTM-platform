@@ -3673,27 +3673,71 @@ function SignalFlowView({
         </div>
       </div>
 
-      {/* v9.48.2: CW Group highlight banner from Heatmap click */}
-      {highlightedCwGroup !== null && highlightedCwGroupKinases.length > 0 && (
-        <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-cyan-500/50 bg-cyan-900/20">
-          <span className="text-[11px] font-semibold text-cyan-300">CW Group G{highlightedCwGroup}</span>
-          <span className="text-[10px] text-cyan-400/80">({highlightedCwGroupKinases.length} kinases):</span>
-          <div className="flex flex-wrap gap-1">
-            {highlightedCwGroupKinases.map((k) => (
-              <span key={k} className="text-[9px] px-1.5 py-0.5 rounded bg-cyan-800/40 text-cyan-200 border border-cyan-500/30">
-                {k}
-              </span>
-            ))}
+      {/* v9.48.2: CW Group highlight banner from Heatmap click — with substrate PTM list */}
+      {highlightedCwGroup !== null && highlightedCwGroupKinases.length > 0 && (() => {
+        // Build kinase → substrate map from globalKinaseResult
+        const kinaseSubstrateMap: Record<string, { gene: string; position: string; membership: string }[]> = {};
+        let totalSubstrates = 0;
+        if (globalKinaseResult?.kinase_modules) {
+          for (const km of globalKinaseResult.kinase_modules) {
+            const kName = km.canonical || km.kinase;
+            if (highlightedCwGroupKinases.some(k => k.toLowerCase() === kName.toLowerCase() || k.toLowerCase() === km.kinase.toLowerCase())) {
+              kinaseSubstrateMap[kName] = km.members.map(m => ({ gene: m.gene, position: m.position, membership: m.membership }));
+              totalSubstrates += km.members.length;
+            }
+          }
+        }
+        return (
+          <div className="px-3 py-2 rounded-lg border border-cyan-500/50 bg-cyan-900/20 space-y-2">
+            {/* Header row */}
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-semibold text-cyan-300">CW Group G{highlightedCwGroup}</span>
+              <span className="text-[10px] text-cyan-400/80">({highlightedCwGroupKinases.length} kinases, {totalSubstrates} substrate PTMs):</span>
+              <div className="flex flex-wrap gap-1">
+                {highlightedCwGroupKinases.map((k) => (
+                  <span key={k} className="text-[9px] px-1.5 py-0.5 rounded bg-cyan-800/40 text-cyan-200 border border-cyan-500/30">
+                    {k}
+                  </span>
+                ))}
+              </div>
+              <button
+                className="ml-auto text-[9px] text-muted-foreground hover:text-foreground"
+                title="CW Group: kinases with correlated substrate activity (r≥0.7). Substrates listed below."
+              >
+                ?
+              </button>
+            </div>
+            {/* Substrate PTM list per kinase */}
+            {Object.keys(kinaseSubstrateMap).length > 0 && (
+              <div className="grid grid-cols-1 gap-1 max-h-[200px] overflow-y-auto">
+                {Object.entries(kinaseSubstrateMap).map(([kName, substrates]) => (
+                  <div key={kName} className="flex items-start gap-2">
+                    <span className="text-[9px] font-semibold text-cyan-200 min-w-[80px] shrink-0">{kName}:</span>
+                    <div className="flex flex-wrap gap-0.5">
+                      {substrates.slice(0, 12).map((s, i) => (
+                        <span
+                          key={i}
+                          className={`text-[8px] px-1 py-0.5 rounded ${
+                            s.membership === "confirmed"
+                              ? "bg-emerald-900/40 text-emerald-300 border border-emerald-500/30"
+                              : "bg-amber-900/30 text-amber-300 border border-amber-500/20"
+                          }`}
+                          title={`${s.gene} ${s.position} (${s.membership})`}
+                        >
+                          {s.gene} {s.position}
+                        </span>
+                      ))}
+                      {substrates.length > 12 && (
+                        <span className="text-[8px] text-muted-foreground">+{substrates.length - 12} more</span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
-          <button
-            className="ml-auto text-[9px] text-muted-foreground hover:text-foreground"
-            onClick={() => { /* clear is handled by parent */ }}
-            title="This banner shows the CW Group from Heatmap click. Kinases in this group are highlighted below."
-          >
-            ?
-          </button>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Receptor selector — group-aware */}
       <div className="flex flex-wrap gap-1.5">
