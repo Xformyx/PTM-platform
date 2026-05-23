@@ -33,35 +33,301 @@ OUTPUT_DIR = os.getenv("OUTPUT_DIR", "/data/outputs")
 def _auto_run_global_analysis(order_id: int, enriched_data: list, config: dict) -> dict:
     """v9.44: Auto-run Global Kinase Modules + Activity Heatmap after RAG enrichment.
 
-    Reuses the same _build_global_kinase_modules from report_generation and
-    computes kinase activity heatmap scores. Results are cached to DB.
+    Self-contained implementation — no cross-worker imports.
+    Builds kinase modules from enriched_ptms and computes activity heatmap.
+    Results are cached to DB.
     """
-    import numpy as np
+    import re
     from hashlib import md5
+    from common.kinase_utils import normalize_kinase_name, are_kinases_same_family
 
     t0 = time.time()
     publish_progress(order_id, "rag_enrichment", "global_analysis", "running", 92,
                      "Auto-running Global Kinase Analysis")
     try:
-        from report_generation.core.nodes.kinase_annotation_node import (
-            _build_global_kinase_modules,
-            PHOSPHO_MOTIF_DB,
-            UBI_MOTIF_DB,
-        )
-
         ptm_type = (config.get("experimental_context") or {}).get("ptm_type", "phosphorylation")
+
+        # ── Motif databases (inline) ──
+        PHOSPHO_MOTIF_DB = {
+            "CDK1/CDK2": r"[ST]P.[KR]", "CDK/MAPK": r"[ST]P", "ERK1/ERK2": r"P.[ST]P",
+            "JNK": r"[ST]P", "p38": r"[ST]P", "DYRK1A/DYRK1B": r"R..[ST]P",
+            "PKA": r"[RK][RK].[ST]", "PKC": r"[RK].[ST][RK]", "AKT/PKB": r"R.R..[ST]",
+            "RSK": r"[RK].[RK]..[ST]", "CAMK2": r"[RK]..[ST]..[RK]",
+            "AMPK": r"[LMVIF].[RK]..[ST]", "CK2": r"[ST].{1,2}[ED]",
+            "CK1": r"[ST]..[ST]", "GSK3": r"[ST]...[ST]P",
+            "PLK1": r"[DE].[ST][ILVM]", "Aurora_A/B": r"[RK].[ST][ILVM]",
+            "ATM/ATR": r"[ST]Q", "DNA-PK": r"[ST]Q..",
+            "Src/Fyn/Yes": r"[EDAY].[YF].{1,3}[PGAS]", "ABL": r"[IVLA]Y..[PG]",
+            "JAK1/JAK2": r"Y..[LIV]", "mTOR": r"[ST]F",
+            "CHK1/CHK2": r"[LM].[RK]..[ST]", "NEK2/NEK6": r"[LM].[ST]",
+        }
+        UBI_MOTIF_DB = {
+            "SCF_complex": r"[DE].{0,2}[ST].[DE]", "SCF-FBXW7": r"[LI].{0,1}[ST]P.{0,2}[ED]",
+            "SCF-BTRC": r"DS.{1,2}[AG][IL]D", "SCF-SKP2": r"[LI].[KR].{1,2}[ST]P",
+            "APC/C_D-box": r"R..L.{2,4}[ILVM]", "APC/C_KEN-box": r"KEN",
+            "NEDD4/HECT": r"[LP]P.Y", "VHL": r"LA.{1,2}[ILVM]P",
+            "MDM2": r"F..W..L", "CHIP/STUB1": r"[RK].{0,2}[ILVM].{0,2}[ED]",
+            "PARKIN": r"[RK].{1,3}[ST].{1,3}[DE]", "TRAF6": r"[ST].{0,2}[KR].{0,2}[ED]",
+            "TRIM25": r"[FY].{1,3}[KR]", "KEAP1": r"[DE].{1,3}[ST][GS][ED]",
+        }
+        RESIDUE_KINASE_FAMILIES = {
+            "S": ["CK2", "CK1", "CDK/MAPK", "PKA", "PKC", "AKT", "GSK3", "PLK1", "Aurora", "ATM/ATR", "AMPK", "mTOR"],
+            "T": ["CDK/MAPK", "CK2", "GSK3", "PKC", "AMPK", "PLK1", "Aurora", "NEK", "MST1/2", "CAMK"],
+            "Y": ["Src-family", "EGFR", "ABL", "JAK", "SYK", "FAK", "PDGFR", "VEGFR", "BTK", "FLT3"],
+            "K": ["SCF_complex", "APC/C", "MDM2", "NEDD4", "CHIP/STUB1", "TRAF6", "PARKIN", "TRIM25", "VHL"],
+        }
+
         motif_db = PHOSPHO_MOTIF_DB if ptm_type == "phosphorylation" else UBI_MOTIF_DB
 
-        # Build kinase modules
-        kinase_result = _build_global_kinase_modules(
-            enriched_data=enriched_data,
-            cluster_annotations=[],
-            clusters=[],
-            motif_db=motif_db,
-            ptm_type=ptm_type,
-        )
+        # ── Helper: collect known kinases from enriched entry ──
+        def _collect_known_kinases(gene, pos, entry):
+            known = []
+            rag = entry.get("rag_enrichment", {})
+            if not rag or not isinstance(rag, dict):
+                return known
+            # Source 1: kinase_prediction
+            kp = rag.get("kinase_prediction", {})
+            if isinstance(kp, str):
+                try:
+                    import ast
+                    kp = ast.literal_eval(kp) if kp.startswith("{") else {}
+                except Exception:
+                    kp = {}
+            if isinstance(kp, dict):
+                for k in kp.get("predicted_kinases", []):
+                    if isinstance(k, dict) and k.get("kinase"):
+                        known.append({"kinase": k["kinase"], "source": "rag_kinase_prediction"})
+                    elif isinstance(k, str) and k:
+                        known.append({"kinase": k, "source": "rag_kinase_prediction"})
+            # Source 2: regulation
+            reg = rag.get("regulation", {})
+            if isinstance(reg, dict):
+                for ks in reg.get("kinase_substrate", []):
+                    if isinstance(ks, dict) and ks.get("kinase"):
+                        known.append({"kinase": ks["kinase"], "source": "kinase_substrate_pair"})
+                for ur in reg.get("upstream_regulators", []):
+                    if isinstance(ur, dict) and ur.get("regulator"):
+                        known.append({"kinase": ur["regulator"], "source": "upstream_regulator"})
+                    elif isinstance(ur, str) and ur:
+                        known.append({"kinase": ur, "source": "upstream_regulator"})
+                for e3s in reg.get("e3_substrate", []):
+                    if isinstance(e3s, dict) and e3s.get("e3_ligase"):
+                        known.append({"kinase": e3s["e3_ligase"], "source": "e3_substrate_pair"})
+            # Source 3: ptm_validation
+            ptm_val = rag.get("ptm_validation", {})
+            if isinstance(ptm_val, dict):
+                for hit in ptm_val.get("iptmnet_hits", []):
+                    if isinstance(hit, dict):
+                        enz = hit.get("enzyme") or {}
+                        if isinstance(enz, dict) and enz.get("name"):
+                            known.append({"kinase": enz["name"], "source": "iPTMnet"})
+            # Source 4: fulltext_analysis
+            ft = rag.get("fulltext_analysis", {})
+            if isinstance(ft, dict):
+                kinase_pattern = re.compile(
+                    r'(?:substrate\s+of|phosphorylated\s+by|target\s+of|regulated\s+by)'
+                    r'\s+([A-Z][A-Za-z0-9]{1,10})', re.IGNORECASE)
+                all_findings = list(ft.get("key_findings", []))
+                for article in ft.get("per_article", []):
+                    if isinstance(article, dict):
+                        all_findings.extend(article.get("key_findings", []))
+                for finding in all_findings:
+                    if not isinstance(finding, str):
+                        if isinstance(finding, tuple) and len(finding) >= 1:
+                            finding = finding[0]
+                        else:
+                            continue
+                    for m in kinase_pattern.finditer(finding):
+                        kname = m.group(1).strip()
+                        if kname and len(kname) > 1:
+                            known.append({"kinase": kname, "source": "fulltext_analysis"})
+            # Source 5: abstract_analysis
+            aa = rag.get("abstract_analysis", {})
+            if isinstance(aa, dict):
+                for key_name in ("kinases", "upstream_kinases", "predicted_kinases", "regulators",
+                                 "e3_ligases", "ubiquitin_ligases"):
+                    for item in aa.get(key_name, []):
+                        if isinstance(item, dict):
+                            kn = item.get("kinase") or item.get("name") or item.get("e3_ligase")
+                            if kn:
+                                known.append({"kinase": kn, "source": "abstract_analysis"})
+                        elif isinstance(item, str) and item:
+                            known.append({"kinase": item, "source": "abstract_analysis"})
+            # Source 6: STRING DB
+            string_ints = rag.get("string_interactions", [])
+            if isinstance(string_ints, list):
+                kinase_kw = {"kinase", "CDK", "MAPK", "PKA", "PKC", "GSK", "AKT", "mTOR",
+                             "ATM", "ATR", "PLK", "AURK", "NEK", "DYRK", "CLK", "CAMK", "AMPK"}
+                e3_kw = {"ligase", "RING", "HECT", "SCF", "APC", "MDM2", "NEDD4", "CHIP",
+                         "TRAF", "TRIM", "RNF", "PARKIN", "VHL", "FBXW", "FBXL", "FBXO"}
+                for si in string_ints:
+                    if isinstance(si, dict):
+                        partner = si.get("preferredName_B") or si.get("partner", "")
+                        score = si.get("score", 0)
+                        if partner and score >= 700:
+                            pu = partner.upper()
+                            if any(kw.upper() in pu for kw in kinase_kw):
+                                known.append({"kinase": partner, "source": "string_db"})
+                            elif any(kw.upper() in pu for kw in e3_kw):
+                                known.append({"kinase": partner, "source": "string_db_e3"})
+            # Normalize & deduplicate
+            for kk in known:
+                canonical, display = normalize_kinase_name(kk["kinase"])
+                kk["canonical_name"] = canonical
+                kk["display_name"] = display
+            seen = set()
+            unique = []
+            for kk in known:
+                c = kk["canonical_name"]
+                if c and c not in seen:
+                    seen.add(c)
+                    unique.append(kk)
+            return unique
 
-        # Build activity heatmap from enriched_data time-series
+        # ── Helper: predict motif kinases ──
+        def _predict_motif(position, entry):
+            predicted = []
+            seq = ""
+            rag = entry.get("rag_enrichment", {})
+            for seq_key in ("modified_sequence", "Modified.Sequence", "sequence_window",
+                           "Sequence_Window", "flanking_sequence"):
+                val = entry.get(seq_key, "")
+                if val and isinstance(val, str) and len(val) > 3:
+                    seq = re.sub(r'\(UniMod:\d+\)', '', val).strip()
+                    break
+            if not seq and isinstance(rag, dict):
+                for seq_key in ("sequence_window", "flanking_sequence"):
+                    val = rag.get(seq_key, "")
+                    if val and isinstance(val, str) and len(val) > 3:
+                        seq = val
+                        break
+            if seq and len(seq) > 2:
+                for kinase_name, pattern in motif_db.items():
+                    try:
+                        if re.search(pattern, seq):
+                            canonical, display = normalize_kinase_name(kinase_name)
+                            predicted.append({"canonical_family": canonical})
+                    except re.error:
+                        continue
+            if not predicted and position:
+                residue = str(position)[0].upper()
+                if residue in RESIDUE_KINASE_FAMILIES:
+                    for family in RESIDUE_KINASE_FAMILIES[residue]:
+                        canonical, _ = normalize_kinase_name(family)
+                        predicted.append({"canonical_family": canonical})
+            return predicted
+
+        # ── Step A: Collect all PTM entries ──
+        all_ptm_entries = []
+        for ed in enriched_data:
+            gene = (ed.get("gene") or ed.get("Gene.Name", "")).strip()
+            pos = ed.get("position") or ed.get("PTM_Position", "")
+            if gene and pos:
+                all_ptm_entries.append((gene, str(pos), ed))
+
+        # ── Step B: Build kinase-centric modules (confirmed) ──
+        kinase_members = {}  # canonical → {kinase, sources, confirmed, inferred}
+        for gene, pos, entry in all_ptm_entries:
+            ptm_key = f"{gene.upper()}_{str(pos).upper()}"
+            known = _collect_known_kinases(gene, pos, entry)
+            for kk in known:
+                canon = kk.get("canonical_name", "")
+                display = kk.get("display_name", kk.get("kinase", ""))
+                source = kk.get("source", "unknown")
+                # Filter out invalid kinase names (stop words, too short, generic terms)
+                _KINASE_STOP_WORDS = {
+                    "OF", "THE", "AND", "FOR", "WITH", "THIS", "THAT", "FROM",
+                    "BY", "TO", "IN", "ON", "AT", "IS", "IT", "AS", "OR", "AN",
+                    "BE", "IF", "NO", "NOT", "BUT", "ALL", "CAN", "HAD", "HAS",
+                    "HER", "HIS", "HOW", "ITS", "MAY", "NEW", "NOW", "OLD", "OUR",
+                    "OUT", "OWN", "SAY", "SHE", "TOO", "USE", "WAY", "WHO", "BOY",
+                    "DID", "GET", "HIM", "LET", "PUT", "RUN", "SET", "TOP", "WHY",
+                    "CELL", "GENE", "PROTEIN", "DOMAIN", "SITE", "TYPE", "ROLE",
+                    "ACTIVITY", "FUNCTION", "PATHWAY", "SIGNAL", "TARGET", "EFFECT",
+                    "RESULT", "LEVEL", "FACTOR", "COMPLEX", "FAMILY", "GROUP",
+                    "REGION", "SEQUENCE", "RESIDUE", "MOTIF", "SUBSTRATE",
+                }
+                if not canon or len(canon) < 3 or canon in _KINASE_STOP_WORDS:
+                    continue
+                if canon not in kinase_members:
+                    kinase_members[canon] = {
+                        "kinase": display, "canonical": canon,
+                        "sources": set(), "confirmed": [], "inferred": [],
+                    }
+                kinase_members[canon]["sources"].add(source)
+                if ptm_key not in [m["key"] for m in kinase_members[canon]["confirmed"]]:
+                    kinase_members[canon]["confirmed"].append({
+                        "key": ptm_key, "gene": gene.upper(),
+                        "position": pos, "membership": "confirmed", "evidence": source,
+                    })
+
+        # ── Step C: Infer kinases for PTMs without known kinase ──
+        for gene, pos, entry in all_ptm_entries:
+            ptm_key = f"{gene.upper()}_{str(pos).upper()}"
+            already_confirmed = any(
+                ptm_key in [m["key"] for m in info["confirmed"]]
+                for info in kinase_members.values()
+            )
+            if already_confirmed:
+                continue
+            motif_pred = _predict_motif(pos, entry)
+            motif_families = set()
+            for mp in motif_pred:
+                for part in mp.get("canonical_family", "").split("/"):
+                    if part and len(part) >= 2:
+                        motif_families.add(part)
+            if not motif_families:
+                continue
+            matched_kinases = []
+            for canon in kinase_members:
+                for mf in motif_families:
+                    if are_kinases_same_family(canon, mf):
+                        matched_kinases.append(canon)
+                        break
+            if matched_kinases:
+                best_canon = max(matched_kinases, key=lambda c: len(kinase_members[c]["confirmed"]))
+                if ptm_key not in [m["key"] for m in kinase_members[best_canon]["inferred"]]:
+                    kinase_members[best_canon]["inferred"].append({
+                        "key": ptm_key, "gene": gene.upper(),
+                        "position": pos, "membership": "inferred",
+                        "evidence": f"motif match ({', '.join(sorted(motif_families))})",
+                    })
+
+        # ── Step D: Format kinase module list ──
+        kinase_module_list = []
+        for canon, info in kinase_members.items():
+            members = info["confirmed"] + info["inferred"]
+            kinase_module_list.append({
+                "kinase": info["kinase"], "canonical": canon,
+                "sources": sorted(info["sources"]),
+                "source_count": len(info["sources"]),
+                "members": members,
+                "confirmed_count": len(info["confirmed"]),
+                "inferred_count": len(info["inferred"]),
+                "total_count": len(members),
+            })
+        kinase_module_list.sort(key=lambda x: x["total_count"], reverse=True)
+
+        # ── Step E: Summary ──
+        summary = {
+            "total_ptms": len(all_ptm_entries),
+            "total_kinase_modules": len(kinase_module_list),
+            "total_confirmed": sum(km["confirmed_count"] for km in kinase_module_list),
+            "total_inferred": sum(km["inferred_count"] for km in kinase_module_list),
+            "top_kinases": [
+                {"kinase": km["kinase"], "canonical": km["canonical"], "total": km["total_count"]}
+                for km in kinase_module_list[:10]
+            ],
+        }
+
+        kinase_result = {
+            "kinase_modules": kinase_module_list,
+            "temporal_cascade": {"timepoints": [], "kinase_activity": [], "cascade_flow": []},
+            "summary": summary,
+            "source": "pipeline_auto",
+        }
+
+        # Build activity heatmap
         heatmap_data = _compute_kinase_activity_heatmap(enriched_data, kinase_result, ptm_type)
 
         # Persist to DB
@@ -97,6 +363,8 @@ def _auto_run_global_analysis(order_id: int, enriched_data: list, config: dict) 
         }
     except Exception as e:
         logger.warning(f"[Order {order_id}] Auto global analysis failed (non-fatal): {e}")
+        import traceback as _tb
+        logger.warning(f"[Order {order_id}] Traceback: {_tb.format_exc()}")
         publish_progress(order_id, "rag_enrichment", "global_analysis", "completed", 95,
                          f"Global analysis skipped: {e}")
         return {}
@@ -116,8 +384,8 @@ def _compute_kinase_activity_heatmap(enriched_data: list, kinase_result: dict, p
         gene = item.get("Gene.Name") or item.get("gene", "")
         pos = item.get("PTM_Position") or item.get("position", "")
         cond = item.get("Condition") or item.get("condition", "")
-        log2fc = item.get("Log2FC") or item.get("log2fc")
-        q_val = item.get("q_value") or item.get("Q_Value")
+        log2fc = item.get("PTM_Relative_Log2FC") or item.get("ptm_relative_log2fc") or item.get("Log2FC") or item.get("log2fc")
+        q_val = item.get("Q_Value") or item.get("q_value")
         is_pseudo = item.get("Control_Pseudocount_Used", False)
 
         if not gene or not pos or not cond:
@@ -152,7 +420,7 @@ def _compute_kinase_activity_heatmap(enriched_data: list, kinase_result: dict, p
         return 0.5  # minor
 
     # Build kinase -> PTM mapping from kinase_result
-    kinase_modules = kinase_result.get("kinase_module_list", [])
+    kinase_modules = kinase_result.get("kinase_modules", kinase_result.get("kinase_module_list", []))
     kinase_scores = []
 
     for km in kinase_modules:
@@ -189,12 +457,110 @@ def _compute_kinase_activity_heatmap(enriched_data: list, kinase_result: dict, p
             "peak_score": peak_score,
         })
 
+    # ── Co-wave metadata: intra-kinase coherence ──
+    # For each kinase, compute how synchronized its substrates move across conditions
+    for ks in kinase_scores:
+        kinase_name = ks["kinase"]
+        km_match = next((km for km in kinase_modules if km.get("kinase") == kinase_name), None)
+        if km_match and len(conditions) >= 2:
+            members = km_match.get("members", [])
+            # Build matrix: rows=substrates, cols=conditions
+            vectors = []
+            for m in members:
+                g, p = m.get("gene", ""), m.get("position", "")
+                row = [ptm_values.get((g, p, c), 0.0) for c in conditions]
+                if any(v != 0 for v in row):
+                    vectors.append(row)
+            if len(vectors) >= 2:
+                arr = np.array(vectors)
+                # Pairwise Pearson correlation mean = coherence
+                try:
+                    corr_matrix = np.corrcoef(arr)
+                    # Upper triangle (excluding diagonal)
+                    n = corr_matrix.shape[0]
+                    upper = [corr_matrix[i][j] for i in range(n) for j in range(i+1, n)
+                             if not np.isnan(corr_matrix[i][j])]
+                    ks["coherence"] = round(float(np.mean(upper)), 3) if upper else 0.0
+                except Exception:
+                    ks["coherence"] = 0.0
+            else:
+                ks["coherence"] = 0.0
+        else:
+            ks["coherence"] = 0.0
+
+    # ── Peak Synchronization: find kinases that peak at the same condition ──
+    peak_groups = {}  # condition -> list of kinase names
+    for ks in kinase_scores:
+        pc = ks.get("peak_condition", "")
+        if pc:
+            peak_groups.setdefault(pc, []).append(ks["kinase"])
+
+    # Mark sync groups (3+ kinases peaking at same condition)
+    peak_sync = {}
+    for cond, kinases in peak_groups.items():
+        if len(kinases) >= 3:
+            peak_sync[cond] = {
+                "kinases": kinases,
+                "count": len(kinases),
+            }
+
+    # ── Co-wave group assignment (kinase-level) ──
+    # Cluster kinases by temporal profile similarity
+    cowave_groups = []
+    if len(kinase_scores) >= 3 and len(conditions) >= 2:
+        # Build kinase score matrix
+        score_matrix = []
+        valid_kinases = []
+        for ks in kinase_scores:
+            row = [ks["scores"].get(c, 0.0) for c in conditions]
+            if any(abs(v) > 0.1 for v in row):  # skip flat kinases
+                score_matrix.append(row)
+                valid_kinases.append(ks["kinase"])
+        if len(valid_kinases) >= 3:
+            arr = np.array(score_matrix)
+            # Simple correlation-based clustering
+            try:
+                corr = np.corrcoef(arr)
+                visited = set()
+                group_id = 0
+                for i in range(len(valid_kinases)):
+                    if i in visited:
+                        continue
+                    group = [i]
+                    visited.add(i)
+                    for j in range(i+1, len(valid_kinases)):
+                        if j not in visited and not np.isnan(corr[i][j]) and corr[i][j] >= 0.7:
+                            group.append(j)
+                            visited.add(j)
+                    if len(group) >= 2:
+                        cowave_groups.append({
+                            "group_id": group_id,
+                            "kinases": [valid_kinases[idx] for idx in group],
+                            "size": len(group),
+                            "mean_correlation": round(float(np.mean(
+                                [corr[a][b] for a in group for b in group if a != b and not np.isnan(corr[a][b])]
+                            )), 3) if len(group) > 1 else 1.0,
+                        })
+                        group_id += 1
+            except Exception:
+                pass
+
+    # Annotate each kinase with its co-wave group
+    kinase_to_group = {}
+    for grp in cowave_groups:
+        for k in grp["kinases"]:
+            kinase_to_group[k] = grp["group_id"]
+    for ks in kinase_scores:
+        ks["cowave_group"] = kinase_to_group.get(ks["kinase"], -1)
+
     # Sort by peak_score descending
     kinase_scores.sort(key=lambda x: abs(x["peak_score"]), reverse=True)
 
     return {
         "kinase_scores": kinase_scores,
         "conditions": conditions,
+        "peak_sync": peak_sync,
+        "cowave_groups": cowave_groups,
         "_cached": True,
     }
 

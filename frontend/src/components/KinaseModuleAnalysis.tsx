@@ -3905,16 +3905,32 @@ interface KinaseActivityScore {
   confidence: number;
   peak_condition: string;
   peak_score: number;
+  coherence?: number;
+  cowave_group?: number;
+}
+
+interface PeakSyncEntry {
+  kinases: string[];
+  count: number;
+}
+
+interface CowaveGroupEntry {
+  group_id: number;
+  kinases: string[];
+  size: number;
+  mean_correlation: number;
 }
 
 interface KinaseHeatmapData {
   kinase_scores: KinaseActivityScore[];
   conditions: string[];
+  peak_sync?: Record<string, PeakSyncEntry>;
+  cowave_groups?: CowaveGroupEntry[];
   _cached: boolean;
   _cache_hash?: string;
 }
 
-type HeatmapSortMode = "peak_score" | "peak_time" | "confidence" | "substrate_count" | "alphabetical";
+type HeatmapSortMode = "peak_score" | "peak_time" | "confidence" | "substrate_count" | "alphabetical" | "cowave_group";
 type HeatmapViewMode = "heatmap" | "line";
 
 function KinaseActivityHeatmapView({
@@ -3986,6 +4002,14 @@ function KinaseActivityHeatmapView({
       case "alphabetical":
         scores.sort((a, b) => a.kinase.localeCompare(b.kinase));
         break;
+      case "cowave_group":
+        scores.sort((a, b) => {
+          const ga = a.cowave_group ?? 999;
+          const gb = b.cowave_group ?? 999;
+          if (ga !== gb) return ga - gb;
+          return Math.abs(b.peak_score) - Math.abs(a.peak_score);
+        });
+        break;
     }
     return scores.slice(0, topN);
   }, [heatmapData, sortMode, topN]);
@@ -4021,6 +4045,25 @@ function KinaseActivityHeatmapView({
     "#6366f1", "#10b981", "#f43f5e", "#0ea5e9", "#a855f7",
     "#84cc16", "#e11d48", "#0891b2", "#7c3aed", "#d97706",
   ];
+
+  // Co-wave group color palette (consistent with Signal Flow)
+  const COWAVE_GROUP_COLORS = [
+    { bar: "bg-cyan-400", text: "text-cyan-300", hex: "#22d3ee" },
+    { bar: "bg-fuchsia-400", text: "text-fuchsia-300", hex: "#e879f9" },
+    { bar: "bg-amber-400", text: "text-amber-300", hex: "#fbbf24" },
+    { bar: "bg-indigo-400", text: "text-indigo-300", hex: "#818cf8" },
+    { bar: "bg-lime-400", text: "text-lime-300", hex: "#a3e635" },
+    { bar: "bg-pink-400", text: "text-pink-300", hex: "#f472b6" },
+    { bar: "bg-sky-400", text: "text-sky-300", hex: "#38bdf8" },
+    { bar: "bg-orange-400", text: "text-orange-300", hex: "#fb923c" },
+  ];
+
+  // Coherence color helper (0→gray, 1→green)
+  const getCoherenceColor = (val: number) => {
+    if (val >= 0.7) return "text-green-400";
+    if (val >= 0.4) return "text-yellow-400";
+    return "text-muted-foreground";
+  };
 
   if (loading) {
     return (
@@ -4083,6 +4126,7 @@ function KinaseActivityHeatmapView({
           <option value="confidence">Confidence</option>
           <option value="substrate_count">Substrate Count</option>
           <option value="alphabetical">Alphabetical</option>
+          <option value="cowave_group">Co-wave Group</option>
         </select>
         <span className="text-xs text-muted-foreground">Top:</span>
         <select
@@ -4111,10 +4155,38 @@ function KinaseActivityHeatmapView({
         <div className="overflow-x-auto border border-border rounded-lg">
           <table className="w-full text-xs">
             <thead>
+              {/* Peak Sync Indicator Row */}
+              {heatmapData.peak_sync && Object.keys(heatmapData.peak_sync).length > 0 && (
+                <tr className="border-b border-border/20">
+                  <th className="sticky left-0 bg-background z-10" />{/* CW bar spacer */}
+                  <th />{/* Kinase spacer */}
+                  <th />{/* #Sub spacer */}
+                  <th />{/* Conf spacer */}
+                  <th />{/* Coh spacer */}
+                  {heatmapData.conditions.map((c) => {
+                    const sync = heatmapData.peak_sync?.[c];
+                    return (
+                      <th key={`sync-${c}`} className="text-center px-0 py-0.5">
+                        {sync ? (
+                          <span
+                            className="text-amber-400 text-[9px] cursor-help"
+                            title={`Peak Sync: ${sync.count} kinases peak at ${c}\n${sync.kinases.join(", ")}`}
+                          >
+                            ⚡{sync.count}
+                          </span>
+                        ) : null}
+                      </th>
+                    );
+                  })}
+                </tr>
+              )}
+              {/* Main header row */}
               <tr className="border-b border-border">
+                <th className="w-2 px-0 py-1" title="Co-wave Group">CW</th>
                 <th className="text-left px-2 py-1 sticky left-0 bg-background z-10 min-w-[100px]">Kinase</th>
                 <th className="text-center px-1 py-1 w-10">#Sub</th>
                 <th className="text-center px-1 py-1 w-10">Conf</th>
+                <th className="text-center px-1 py-1 w-10" title="Intra-kinase substrate coherence">Coh</th>
                 {heatmapData.conditions.map((c) => (
                   <th key={c} className="text-center px-1 py-1 min-w-[40px] max-w-[60px] truncate" title={c}>
                     {c.replace(/min$/i, "").replace(/hr$/i, "h")}
@@ -4123,63 +4195,123 @@ function KinaseActivityHeatmapView({
               </tr>
             </thead>
             <tbody>
-              {sortedScores.map((ks) => (
-                <tr
-                  key={ks.kinase}
-                  className="border-b border-border/30 hover:bg-muted/20 cursor-pointer"
-                  onClick={() => {
-                    setSelectedKinases((prev) => {
-                      const next = new Set(prev);
-                      if (next.has(ks.kinase)) next.delete(ks.kinase);
-                      else next.add(ks.kinase);
-                      return next;
-                    });
-                  }}
-                >
-                  <td className="px-2 py-1 sticky left-0 bg-background z-10 font-medium whitespace-nowrap">
-                    {selectedKinases.has(ks.kinase) && <span className="text-cyan-400 mr-1">●</span>}
-                    {ks.kinase}
-                  </td>
-                  <td className="text-center px-1 py-0.5 text-muted-foreground">{ks.substrate_count}</td>
-                  <td className="text-center px-1 py-0.5">
-                    <span className={`${ks.confidence >= 0.7 ? "text-green-400" : ks.confidence >= 0.4 ? "text-yellow-400" : "text-red-400"}`}>
-                      {(ks.confidence * 100).toFixed(0)}%
-                    </span>
-                  </td>
-                  {heatmapData.conditions.map((c) => {
-                    const val = ks.scores[c] || 0;
-                    return (
-                      <td
-                        key={c}
-                        className="px-0 py-0.5 text-center"
-                        title={`${ks.kinase} @ ${c}: ${val.toFixed(3)}`}
-                      >
+              {sortedScores.map((ks) => {
+                const cwGroup = ks.cowave_group ?? -1;
+                const cwColor = cwGroup >= 0 ? COWAVE_GROUP_COLORS[cwGroup % COWAVE_GROUP_COLORS.length] : null;
+                return (
+                  <tr
+                    key={ks.kinase}
+                    className="border-b border-border/30 hover:bg-muted/20 cursor-pointer"
+                    onClick={() => {
+                      setSelectedKinases((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(ks.kinase)) next.delete(ks.kinase);
+                        else next.add(ks.kinase);
+                        return next;
+                      });
+                    }}
+                  >
+                    {/* Co-wave Group Color Bar */}
+                    <td className="px-0 py-0 w-2">
+                      {cwColor ? (
                         <div
-                          className="mx-auto w-full h-5 flex items-center justify-center text-[9px]"
-                          style={{ backgroundColor: getHeatmapColor(val, maxAbsScore) }}
+                          className={`w-1.5 h-full min-h-[20px] rounded-sm ${cwColor.bar}`}
+                          title={`Co-wave Group ${cwGroup}`}
+                        />
+                      ) : (
+                        <div className="w-1.5 min-h-[20px]" />
+                      )}
+                    </td>
+                    {/* Kinase name */}
+                    <td className="px-2 py-1 sticky left-0 bg-background z-10 font-medium whitespace-nowrap">
+                      {selectedKinases.has(ks.kinase) && <span className="text-cyan-400 mr-1">●</span>}
+                      {ks.kinase}
+                      {cwColor && (
+                        <span className={`ml-1 text-[8px] ${cwColor.text} opacity-70`}>G{cwGroup}</span>
+                      )}
+                    </td>
+                    {/* Substrate count */}
+                    <td className="text-center px-1 py-0.5 text-muted-foreground">{ks.substrate_count}</td>
+                    {/* Confidence */}
+                    <td className="text-center px-1 py-0.5">
+                      <span className={`${ks.confidence >= 0.7 ? "text-green-400" : ks.confidence >= 0.4 ? "text-yellow-400" : "text-red-400"}`}>
+                        {(ks.confidence * 100).toFixed(0)}%
+                      </span>
+                    </td>
+                    {/* Coherence */}
+                    <td className="text-center px-1 py-0.5">
+                      <span
+                        className={`text-[10px] ${getCoherenceColor(ks.coherence ?? 0)}`}
+                        title={`Intra-kinase substrate coherence: ${(ks.coherence ?? 0).toFixed(3)}\n(mean pairwise Pearson r of substrate profiles)`}
+                      >
+                        {(ks.coherence ?? 0).toFixed(2)}
+                      </span>
+                    </td>
+                    {/* Heatmap cells */}
+                    {heatmapData.conditions.map((c) => {
+                      const val = ks.scores[c] || 0;
+                      return (
+                        <td
+                          key={c}
+                          className="px-0 py-0.5 text-center"
+                          title={`${ks.kinase} @ ${c}: ${val.toFixed(3)}`}
                         >
-                          {Math.abs(val) >= maxAbsScore * 0.3 ? val.toFixed(1) : ""}
-                        </div>
-                      </td>
-                    );
-                  })}
-                </tr>
-              ))}
+                          <div
+                            className="mx-auto w-full h-5 flex items-center justify-center text-[9px]"
+                            style={{ backgroundColor: getHeatmapColor(val, maxAbsScore) }}
+                          >
+                            {Math.abs(val) >= maxAbsScore * 0.3 ? val.toFixed(1) : ""}
+                          </div>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
           {/* Color legend */}
-          <div className="flex items-center justify-center gap-2 py-2 text-[10px] text-muted-foreground">
-            <span className="px-2 py-0.5 rounded" style={{ backgroundColor: getHeatmapColor(-maxAbsScore, maxAbsScore) }}>
-              -{maxAbsScore.toFixed(1)}
-            </span>
-            <span>→</span>
-            <span className="px-2 py-0.5 rounded bg-background border border-border">0</span>
-            <span>→</span>
-            <span className="px-2 py-0.5 rounded text-white" style={{ backgroundColor: getHeatmapColor(maxAbsScore, maxAbsScore) }}>
-              +{maxAbsScore.toFixed(1)}
-            </span>
-            <span className="ml-4">(Weighted mean Log2FC per kinase per condition)</span>
+          <div className="flex items-center justify-between gap-2 py-2 px-3 text-[10px] text-muted-foreground">
+            <div className="flex items-center gap-2">
+              <span className="px-2 py-0.5 rounded" style={{ backgroundColor: getHeatmapColor(-maxAbsScore, maxAbsScore) }}>
+                -{maxAbsScore.toFixed(1)}
+              </span>
+              <span>→</span>
+              <span className="px-2 py-0.5 rounded bg-background border border-border">0</span>
+              <span>→</span>
+              <span className="px-2 py-0.5 rounded text-white" style={{ backgroundColor: getHeatmapColor(maxAbsScore, maxAbsScore) }}>
+                +{maxAbsScore.toFixed(1)}
+              </span>
+              <span className="ml-2">(Weighted mean Log2FC)</span>
+            </div>
+            {/* Co-wave group legend */}
+            {heatmapData.cowave_groups && heatmapData.cowave_groups.length > 0 && (
+              <div className="flex items-center gap-2">
+                <span className="text-muted-foreground/70">CW Groups:</span>
+                {heatmapData.cowave_groups.slice(0, 6).map((grp) => {
+                  const color = COWAVE_GROUP_COLORS[grp.group_id % COWAVE_GROUP_COLORS.length];
+                  return (
+                    <span
+                      key={grp.group_id}
+                      className="flex items-center gap-0.5"
+                      title={`Group ${grp.group_id}: ${grp.kinases.join(", ")}\nMean r=${grp.mean_correlation.toFixed(2)}`}
+                    >
+                      <span className={`w-2 h-2 rounded-sm ${color.bar}`} />
+                      <span className={color.text}>G{grp.group_id}</span>
+                      <span className="opacity-50">({grp.size})</span>
+                    </span>
+                  );
+                })}
+              </div>
+            )}
           </div>
+          {/* Peak Sync legend */}
+          {heatmapData.peak_sync && Object.keys(heatmapData.peak_sync).length > 0 && (
+            <div className="flex items-center gap-2 px-3 pb-2 text-[10px] text-muted-foreground">
+              <span className="text-amber-400">⚡</span>
+              <span>Peak Sync: conditions where 3+ kinases reach peak activity simultaneously</span>
+            </div>
+          )}
         </div>
       )}
 
@@ -4263,7 +4395,7 @@ function KinaseActivityHeatmapView({
       )}
 
       {/* Summary stats */}
-      <div className="grid grid-cols-4 gap-2 text-xs">
+      <div className="grid grid-cols-5 gap-2 text-xs">
         <div className="bg-muted/30 rounded p-2 text-center">
           <div className="text-lg font-bold text-cyan-400">{heatmapData.kinase_scores.length}</div>
           <div className="text-muted-foreground">Kinases</div>
@@ -4283,6 +4415,12 @@ function KinaseActivityHeatmapView({
             {sortedScores.filter((s) => s.confidence >= 0.7).length}
           </div>
           <div className="text-muted-foreground">High Conf (≥70%)</div>
+        </div>
+        <div className="bg-muted/30 rounded p-2 text-center">
+          <div className="text-lg font-bold text-fuchsia-400">
+            {heatmapData.cowave_groups?.length ?? 0}
+          </div>
+          <div className="text-muted-foreground">CW Groups</div>
         </div>
       </div>
     </div>

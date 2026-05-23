@@ -1673,7 +1673,16 @@ def _build_global_kinase_modules(
             canon = kk.get("canonical_name", "")
             display = kk.get("display_name", kk.get("kinase", ""))
             source = kk.get("source", "unknown")
-            if not canon or len(canon) < 2:
+            _KINASE_STOP_WORDS = {
+                "OF", "THE", "AND", "FOR", "WITH", "THIS", "THAT", "FROM",
+                "BY", "TO", "IN", "ON", "AT", "IS", "IT", "AS", "OR", "AN",
+                "BE", "IF", "NO", "NOT", "BUT", "ALL", "CAN", "HAD", "HAS",
+                "CELL", "GENE", "PROTEIN", "DOMAIN", "SITE", "TYPE", "ROLE",
+                "ACTIVITY", "FUNCTION", "PATHWAY", "SIGNAL", "TARGET", "EFFECT",
+                "RESULT", "LEVEL", "FACTOR", "COMPLEX", "FAMILY", "GROUP",
+                "REGION", "SEQUENCE", "RESIDUE", "MOTIF", "SUBSTRATE",
+            }
+            if not canon or len(canon) < 3 or canon in _KINASE_STOP_WORDS:
                 continue
 
             if canon not in kinase_members:
