@@ -3250,6 +3250,7 @@ function SignalFlowView({
 }) {
   const [selectedReceptor, setSelectedReceptor] = useState<string | null>(null);
   const [showEffectors, setShowEffectors] = useState(true);
+  const [showTemporalOverlay, setShowTemporalOverlay] = useState(true);
 
   // v9.34: Non-PTM effector proteins from API
   const effectorProteins = globalKinaseResult?.effector_proteins || [];
@@ -3382,6 +3383,84 @@ function SignalFlowView({
     return map;
   }, [globalKinaseResult]);
 
+  // v9.47: Kinase temporal activity map — compute peak timepoint per kinase from vectorData
+  const kinaseTemporalMap = useMemo(() => {
+    const map: Record<string, {
+      peakCondition: string;
+      peakScore: number;
+      direction: "activation" | "inactivation" | "neutral";
+      scores: Record<string, number>;
+      peakOrder: number; // 0-based index in conditions array
+    }> = {};
+    if (!globalKinaseResult || !vectorData.length || !conditions.length) return map;
+
+    const LOG2FC_CAP = 5.0;
+    // Build PTM lookup: (gene_upper, pos_upper, condition) → value
+    const ptmLookup: Record<string, number> = {};
+    for (const row of vectorData) {
+      const key = `${row.gene.toUpperCase()}|${row.position.toUpperCase()}|${row.condition}`;
+      const capped = Math.max(-LOG2FC_CAP, Math.min(LOG2FC_CAP, row.value));
+      ptmLookup[key] = capped;
+    }
+
+    for (const mod of globalKinaseResult.kinase_modules) {
+      const kinaseKey = (mod.canonical || mod.kinase).toUpperCase();
+      if (mod.members.length < 1) continue;
+
+      const scores: Record<string, number> = {};
+      for (const cond of conditions) {
+        let sum = 0;
+        let count = 0;
+        for (const m of mod.members) {
+          const lookupKey = `${m.gene.toUpperCase()}|${m.position.toUpperCase()}|${cond}`;
+          const val = ptmLookup[lookupKey];
+          if (val !== undefined) {
+            sum += val;
+            count++;
+          }
+        }
+        scores[cond] = count > 0 ? sum / count : 0;
+      }
+
+      // Find peak
+      let peakCond = conditions[0];
+      let peakVal = 0;
+      for (const cond of conditions) {
+        if (Math.abs(scores[cond]) > Math.abs(peakVal)) {
+          peakVal = scores[cond];
+          peakCond = cond;
+        }
+      }
+
+      const direction: "activation" | "inactivation" | "neutral" =
+        peakVal > 0.3 ? "activation" : peakVal < -0.3 ? "inactivation" : "neutral";
+
+      map[kinaseKey] = {
+        peakCondition: peakCond,
+        peakScore: peakVal,
+        direction,
+        scores,
+        peakOrder: conditions.indexOf(peakCond),
+      };
+    }
+    return map;
+  }, [globalKinaseResult, vectorData, conditions]);
+
+  // v9.47: Temporal color for peak timepoint
+  const temporalColors: Record<string, { bg: string; text: string; label: string }> = useMemo(() => {
+    const colors: Record<string, { bg: string; text: string; label: string }> = {};
+    const palette = [
+      { bg: "bg-red-900/40", text: "text-red-300", label: "" },
+      { bg: "bg-orange-900/40", text: "text-orange-300", label: "" },
+      { bg: "bg-yellow-900/40", text: "text-yellow-300", label: "" },
+      { bg: "bg-blue-900/40", text: "text-blue-300", label: "" },
+    ];
+    conditions.forEach((cond, i) => {
+      colors[cond] = { ...palette[i % palette.length], label: cond };
+    });
+    return colors;
+  }, [conditions]);
+
   // Source color
   const sourceColor = (src?: string) => {
     if (src === "treatment_context" || src === "treatment_context_uniprot") return "#38bdf8";
@@ -3422,6 +3501,34 @@ function SignalFlowView({
     );
   }, [inferredReceptors]);
 
+  // v9.47: Receptor temporal classification based on earliest kinase peak
+  const receptorTemporalClass = useMemo(() => {
+    const map: Record<string, { class: "immediate-early" | "secondary" | "late" | "sustained" | "unknown"; earliestPeak: string; latestPeak: string }> = {};
+    for (const { primary } of groupedReceptors) {
+      const kinases = primary.via_kinases || [];
+      let earliest = conditions.length;
+      let latest = -1;
+      for (const k of kinases) {
+        const temporal = kinaseTemporalMap[k.toUpperCase()];
+        if (temporal) {
+          if (temporal.peakOrder < earliest) earliest = temporal.peakOrder;
+          if (temporal.peakOrder > latest) latest = temporal.peakOrder;
+        }
+      }
+      const classLabel =
+        earliest === 0 ? "immediate-early" :
+        earliest === 1 ? "secondary" :
+        earliest <= 2 ? "late" :
+        earliest < conditions.length ? "sustained" : "unknown";
+      map[primary.name] = {
+        class: classLabel,
+        earliestPeak: earliest < conditions.length ? conditions[earliest] : "?",
+        latestPeak: latest >= 0 ? conditions[latest] : "?",
+      };
+    }
+    return map;
+  }, [groupedReceptors, kinaseTemporalMap, conditions]);
+
   const groupsToShow = selectedReceptor
     ? groupedReceptors.filter(g =>
         g.members.some(m => m.name === selectedReceptor)
@@ -3446,6 +3553,19 @@ function SignalFlowView({
           Signal chain: Upstream Receptor → Kinase → PTM substrate{hasEffectors ? " → Non-PTM Effector" : ""}
         </p>
         <div className="flex items-center gap-2">
+          {/* v9.47: Temporal overlay toggle */}
+          {Object.keys(kinaseTemporalMap).length > 0 && (
+            <button
+              className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${
+                showTemporalOverlay
+                  ? "bg-orange-50 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300 border-orange-400"
+                  : "border-border text-muted-foreground hover:border-foreground/50"
+              }`}
+              onClick={() => setShowTemporalOverlay(!showTemporalOverlay)}
+            >
+              {showTemporalOverlay ? "◉" : "○"} Temporal
+            </button>
+          )}
           {hasEffectors && (
             <button
               className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${
@@ -3570,6 +3690,26 @@ function SignalFlowView({
                     CW:{primary.cowave_score.toFixed(1)}
                   </span>
                 )}
+                {/* v9.47: Receptor temporal classification */}
+                {showTemporalOverlay && receptorTemporalClass[primary.name] && receptorTemporalClass[primary.name].class !== "unknown" && (
+                  <span
+                    className={`text-[8px] px-1.5 py-0.5 rounded border ${
+                      receptorTemporalClass[primary.name].class === "immediate-early"
+                        ? "bg-red-900/30 text-red-300 border-red-500/50"
+                        : receptorTemporalClass[primary.name].class === "secondary"
+                        ? "bg-orange-900/30 text-orange-300 border-orange-500/50"
+                        : receptorTemporalClass[primary.name].class === "late"
+                        ? "bg-yellow-900/30 text-yellow-300 border-yellow-500/50"
+                        : "bg-blue-900/30 text-blue-300 border-blue-500/50"
+                    }`}
+                    title={`Receptor activation timing: ${receptorTemporalClass[primary.name].class}\nEarliest kinase peak: ${receptorTemporalClass[primary.name].earliestPeak}\nLatest kinase peak: ${receptorTemporalClass[primary.name].latestPeak}`}
+                  >
+                    {receptorTemporalClass[primary.name].class === "immediate-early" ? "⚡" :
+                     receptorTemporalClass[primary.name].class === "secondary" ? "⏱" :
+                     receptorTemporalClass[primary.name].class === "late" ? "⏳" : "♾"}
+                    {" "}{receptorTemporalClass[primary.name].earliestPeak}
+                  </span>
+                )}
               </div>
 
               {/* Kinase layer */}
@@ -3601,6 +3741,22 @@ function SignalFlowView({
                                 title={`Module confidence: ${((kinaseConfidence[kinaseKey]?.confidence_score ?? 0) * 100).toFixed(0)}% (co-wave boost: ${((kinaseConfidence[kinaseKey]?.cowave_boost ?? 0) * 100).toFixed(0)}%)`}
                               >
                                 {((kinaseConfidence[kinaseKey]?.confidence_score ?? 0) * 100).toFixed(0)}%
+                              </span>
+                            )}
+                            {/* v9.47: Temporal peak badge */}
+                            {showTemporalOverlay && kinaseTemporalMap[kinaseKey] && (
+                              <span
+                                className={`ml-0.5 text-[7px] px-1 py-px rounded border ${
+                                  kinaseTemporalMap[kinaseKey].direction === "activation"
+                                    ? "bg-red-900/30 text-red-300 border-red-500/40"
+                                    : kinaseTemporalMap[kinaseKey].direction === "inactivation"
+                                    ? "bg-blue-900/30 text-blue-300 border-blue-500/40"
+                                    : "bg-gray-900/30 text-gray-400 border-gray-500/40"
+                                }`}
+                                title={`Peak: ${kinaseTemporalMap[kinaseKey].peakCondition} (${kinaseTemporalMap[kinaseKey].peakScore > 0 ? "+" : ""}${kinaseTemporalMap[kinaseKey].peakScore.toFixed(1)})\nDirection: ${kinaseTemporalMap[kinaseKey].direction}`}
+                              >
+                                {kinaseTemporalMap[kinaseKey].direction === "activation" ? "▲" : kinaseTemporalMap[kinaseKey].direction === "inactivation" ? "▼" : "—"}
+                                {kinaseTemporalMap[kinaseKey].peakCondition}
                               </span>
                             )}
                           </div>
@@ -3919,13 +4075,38 @@ function SignalFlowView({
             </div>
           </div>
         )}
+        {/* v9.47: Temporal overlay legend */}
+        {showTemporalOverlay && Object.keys(kinaseTemporalMap).length > 0 && (
+          <div className="flex flex-wrap items-center gap-3 text-[10px] text-muted-foreground">
+            <span className="font-medium text-muted-foreground/70">Temporal overlay:</span>
+            <span className="flex items-center gap-1">
+              <span className="px-1 py-0.5 rounded bg-red-900/30 text-red-300 border border-red-500/50 text-[8px]">⚡ 6h</span>
+              <span className="text-[9px]">Immediate-early receptor</span>
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="px-1 py-0.5 rounded bg-orange-900/30 text-orange-300 border border-orange-500/50 text-[8px]">⏱ 12h</span>
+              <span className="text-[9px]">Secondary</span>
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="px-1 py-0.5 rounded bg-yellow-900/30 text-yellow-300 border border-yellow-500/50 text-[8px]">⏳ 24h</span>
+              <span className="text-[9px]">Late</span>
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="px-1 py-0.5 rounded bg-blue-900/30 text-blue-300 border border-blue-500/50 text-[8px]">♾ 48h</span>
+              <span className="text-[9px]">Sustained</span>
+            </span>
+            <span className="text-[9px] text-muted-foreground/50 ml-2">
+              Kinase: ▲ activation (red) ▼ inactivation/phosphatase (blue)
+            </span>
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
 
-// ── Kinase Activity Heatmap + Line Chart View ────────────────────────────────
+// ── Kinase Activity Heatmap + Line Chart View ────────────────────────────────────────
 
 interface KinaseActivityScore {
   kinase: string;
