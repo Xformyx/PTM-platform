@@ -3434,9 +3434,9 @@ function SignalFlowView({
                                   const actClass = ptmActivityClass[ptmKey] || "minor";
                                   const chipStyle =
                                     actClass === "de_novo"
-                                      ? "bg-orange-900/30 text-orange-300 border border-orange-500 font-semibold"
+                                      ? "bg-red-900/30 text-red-300 border border-red-500 font-semibold"
                                       : actClass === "regulated"
-                                      ? "bg-blue-900/30 text-blue-300 border border-blue-500 font-semibold"
+                                      ? "bg-emerald-900/30 text-emerald-300 border border-emerald-500 font-semibold"
                                       : "bg-green-900/30 text-green-300 border border-green-500";
                                   const actLabel =
                                     actClass === "de_novo" ? "De novo (control imputed)" :
