@@ -4901,8 +4901,8 @@ function KinaseActivityHeatmapView({
               )}
               {/* Main header row */}
               <tr className="border-b border-border">
-                <th className="w-2 px-0 py-1 cursor-help" title="Co-Wave Group (CW)&#10;&#10;Color bar = kinases with correlated temporal substrate activity (Pearson r≥0.7).&#10;Same color = same group.&#10;&#10;G-labels (e.g. G1 ≈ M4):&#10;  • G1 = CW Group number&#10;  • ≈ M4 = matches Co-Wave Module 4 in Vector Plot&#10;    (substrates that peak at the same timepoint)&#10;&#10;Click a group in the legend below to filter Vector Plot.">CW</th>
-                <th className="text-left px-2 py-1 sticky left-0 bg-background z-10 min-w-[100px] cursor-help" title="Kinase&#10;&#10;Name of the kinase (or kinase family).&#10;G-label shows its Co-Wave Group and linked Module.">Kinase</th>
+                <th className="w-2 px-0 py-1 cursor-help" title="Co-Wave Group (CW)&#10;&#10;Color bar = kinases with correlated temporal substrate activity (Pearson r≥0.7).&#10;Same color = same group.&#10;&#10;G-label (e.g. G2) = CW Group number.&#10;Kinases in the same group have substrates whose&#10;phosphorylation levels move together over time.&#10;&#10;Click a group in the legend below to filter Vector Plot.">CW</th>
+                <th className="text-left px-2 py-1 sticky left-0 bg-background z-10 min-w-[100px] cursor-help" title="Kinase&#10;&#10;Name of the kinase (or kinase family).&#10;G-label shows its Co-Wave Group number.">Kinase</th>
                 <th className="text-center px-1 py-1 w-8 cursor-help" title="Direction&#10;&#10;Overall activation direction of this kinase's substrates:&#10;  ▲ = activating (substrates phosphorylation increases)&#10;  ▼ = inhibitory (substrates phosphorylation decreases)&#10;  ↕ = mixed">Dir</th>
                 <th className="text-center px-1 py-1 w-10 cursor-help" title="Number of Substrates (#Sub)&#10;&#10;Total confirmed + inferred phosphorylation substrates&#10;for this kinase in the current dataset.">#Sub</th>
                 <th className="text-center px-1 py-1 w-10 cursor-help" title="Confidence (Conf)&#10;&#10;Weighted evidence score (0–100%) based on:&#10;  • Number of substrates&#10;  • Source quality (PhosphoSitePlus, KEA3, motif)&#10;  • Annotation depth&#10;Higher = more reliable kinase-substrate assignment.">Conf</th>
@@ -4939,20 +4939,14 @@ function KinaseActivityHeatmapView({
                     <td className="px-0 py-0 w-2">
                       {cwColor ? (() => {
                         const grpInfo = heatmapData.cowave_groups?.find(g => g.group_id === cwGroup);
-                        // v9.48.2: Link to Co-Wave Module
-                        const linkedModule = grpInfo?.dominant_peak
-                          ? coWaveModules.find((m) => m.peakCondition === grpInfo.dominant_peak)
-                          : undefined;
                         const tipLines = [
                           `Co-wave Group G${cwGroup}`,
                           grpInfo?.dominant_peak ? `Peak: ${grpInfo.dominant_peak}` : "",
                           grpInfo ? `Members (${grpInfo.size}): ${grpInfo.kinases.slice(0, 8).join(", ")}${grpInfo.kinases.length > 8 ? "..." : ""}` : "",
                           grpInfo ? `Correlation: r=${grpInfo.mean_correlation.toFixed(2)}` : "",
-                          linkedModule ? `\n↔ Vector Plot: ${linkedModule.label}` : "",
-                          linkedModule ? `  (${linkedModule.ptms.length} PTMs share this peak timing)` : "",
                           "",
                           "Kinases in this group have highly correlated",
-                          "temporal activity patterns (r≥0.7).",
+                          "temporal substrate activity patterns (r≥0.7).",
                         ].filter(Boolean).join("\n");
                         return (
                           <div
@@ -4970,24 +4964,18 @@ function KinaseActivityHeatmapView({
                       {ks.kinase}
                       {cwColor && (() => {
                         const grpInfo = heatmapData.cowave_groups?.find(g => g.group_id === cwGroup);
-                        const linkedModule = grpInfo?.dominant_peak
-                          ? coWaveModules.find((m) => m.peakCondition === grpInfo.dominant_peak)
-                          : undefined;
-                        const moduleTag = linkedModule ? ` ≈ M${linkedModule.id}` : "";
                         return (
                           <span
                             className={`ml-1 text-[8px] ${cwColor.text} opacity-70 cursor-help`}
                             title={grpInfo
-                              ? `G${cwGroup}${linkedModule ? ` ≈ M${linkedModule.id}` : ""}\n\n` +
-                                `Co-Wave Group ${cwGroup}\n` +
-                                (linkedModule ? `≈ M${linkedModule.id} means: this group's peak timing matches\nCo-Wave Module ${linkedModule.id} in the Vector Plot.\n(${linkedModule.ptms.length} substrate PTMs share this peak)\n\n` : "") +
+                              ? `Co-Wave Group G${cwGroup}\n\n` +
                                 `Members (${grpInfo.size}): ${grpInfo.kinases.slice(0, 6).join(", ")}${grpInfo.kinases.length > 6 ? "..." : ""}\n` +
                                 (grpInfo.dominant_peak ? `Peak: ${grpInfo.dominant_peak}\n` : "") +
                                 `Correlation: r=${grpInfo.mean_correlation.toFixed(2)}\n\n` +
-                                `Click group in legend to filter Vector Plot.`
+                                `Kinases whose substrates show correlated\ntemporal activation patterns (r≥0.7).\n\nClick group in legend to filter Vector Plot.`
                               : `Group ${cwGroup}`}
                           >
-                            G{cwGroup}{moduleTag}
+                            G{cwGroup}
                           </span>
                         );
                       })()}
@@ -5056,7 +5044,7 @@ function KinaseActivityHeatmapView({
               </span>
               <span className="ml-2">(Weighted mean Log2FC)</span>
             </div>
-             {/* Co-wave group legend — v9.48.2: linked to Vector Plot Co-Wave Modules */}
+             {/* Co-wave group legend */}
             {heatmapData.cowave_groups && heatmapData.cowave_groups.length > 0 && (
               <div className="flex flex-col gap-1">
                 <div className="flex items-center gap-1 flex-wrap">
@@ -5066,13 +5054,7 @@ function KinaseActivityHeatmapView({
                 <div className="flex items-center gap-3 flex-wrap">
                   {heatmapData.cowave_groups.map((grp) => {
                     const color = COWAVE_GROUP_COLORS[grp.group_id % COWAVE_GROUP_COLORS.length];
-                    // v9.48.2: Find matching Co-Wave Module by dominant_peak
-                    const matchingModule = grp.dominant_peak
-                      ? coWaveModules.find((m) => m.peakCondition === grp.dominant_peak)
-                      : undefined;
-                    const moduleColor = matchingModule
-                      ? KINASE_MODULE_COLORS[(matchingModule.id - 1) % KINASE_MODULE_COLORS.length]
-                      : undefined;
+
                     const isActive = selectedCwGroupFilter === grp.group_id;
                     return (
                       <span
@@ -5103,11 +5085,10 @@ function KinaseActivityHeatmapView({
                           `Members: ${grp.kinases.join(", ")}`,
                           `Mean correlation: r=${grp.mean_correlation.toFixed(2)}`,
                           grp.dominant_peak ? `Dominant peak: ${grp.dominant_peak}` : "",
-                          matchingModule ? `\n↔ Linked to ${matchingModule.label} in Vector Plot` : "",
-                          matchingModule ? `  (${matchingModule.ptms.length} PTMs with same peak timing)` : "",
                           "",
-                          "Kinases in this group show highly correlated",
-                          "temporal activity patterns.",
+                          "Kinases whose substrates show correlated",
+                          "temporal activation patterns (r≥0.7).",
+                          "Click to filter Vector Plot by this group's substrates.",
                         ].filter(Boolean).join("\n")}
                       >
                         <span className={`w-2.5 h-2.5 rounded-sm ${color.bar}`} />
@@ -5115,14 +5096,7 @@ function KinaseActivityHeatmapView({
                         {grp.dominant_peak && (
                           <span className="text-muted-foreground/70 text-[9px]">@{grp.dominant_peak.replace(/min$/i, "m").replace(/hr$/i, "h")}</span>
                         )}
-                        {matchingModule && (
-                          <span
-                            className={`text-[8px] px-1 rounded border ${moduleColor!.border} ${moduleColor!.text}`}
-                            title={`This CW Group's kinases peak at ${grp.dominant_peak}, matching ${matchingModule.label} in the Vector Plot chart above.`}
-                          >
-                            ≈M{matchingModule.id}
-                          </span>
-                        )}
+
                         <span className="opacity-40 text-[9px]">({grp.size})</span>
                       </span>
                     );
