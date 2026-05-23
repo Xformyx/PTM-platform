@@ -723,7 +723,7 @@ def run_rag_enrichment(self, order_id: int, config: dict):
             report_config["secondary_output_dir"] = str(order_output / "secondary_ptm") if (order_output / "secondary_ptm").exists() else str(order_output)
             logger.info(f"[Order {order_id}] Cross-Talk report_config: secondary_enriched={secondary_enriched_json_path}, secondary_md={secondary_md_path_out}")
         # ── v9.44: Auto-run Global Annotate + Upstream Inference before Report Gen ──
-        _auto_analysis_data = _auto_run_global_analysis(order_id, enriched_data, config)
+        _auto_analysis_data = _auto_run_global_analysis(order_id, enriched_ptms, config)
         if _auto_analysis_data:
             report_config["kinase_analysis_data"] = _auto_analysis_data.get("kinase_analysis_data", {})
             report_config["kinase_activity_heatmap"] = _auto_analysis_data.get("kinase_activity_heatmap", {})
