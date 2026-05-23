@@ -1627,6 +1627,7 @@ export default function KinaseModuleAnalysis({
             vectorData={vectorData}
             conditions={conditions}
             coWaveModules={coWaveModules}
+            onSelectPtms={onSelectPtms}
             onKinaseSelect={(kinase, cwGroup, cwKinases) => {
               setInternalHighlightedKinase(kinase);
               setHighlightedCwGroup(cwGroup ?? null);
@@ -4592,6 +4593,7 @@ function KinaseActivityHeatmapView({
   vectorData,
   conditions,
   onKinaseSelect,
+  onSelectPtms,
   coWaveModules = [],
 }: {
   orderId: number;
@@ -4599,6 +4601,7 @@ function KinaseActivityHeatmapView({
   vectorData: PtmTimeSeriesRow[];
   conditions: string[];
   onKinaseSelect?: (kinase: string, cwGroup?: number, cwGroupKinases?: string[]) => void;
+  onSelectPtms?: (keys: string[]) => void;
   coWaveModules?: CoWaveModule[];
 }) {
   const [heatmapData, setHeatmapData] = useState<KinaseHeatmapData | null>(null);
@@ -4607,8 +4610,8 @@ function KinaseActivityHeatmapView({
   const [sortMode, setSortMode] = useState<HeatmapSortMode>("peak_score");
   const [viewMode, setViewMode] = useState<HeatmapViewMode>("heatmap");
   const [topN, setTopN] = useState(20);
-  const [selectedKinases, setSelectedKinases] = useState<Set<string>>(new Set());
-
+   const [selectedKinases, setSelectedKinases] = useState<Set<string>>(new Set());
+  const [selectedCwGroupFilter, setSelectedCwGroupFilter] = useState<number | null>(null);
   // Fetch heatmap data from backend
   const fetchHeatmapData = useCallback(async (forceRefresh = false) => {
     setLoading(true);
@@ -5008,7 +5011,7 @@ function KinaseActivityHeatmapView({
               <div className="flex flex-col gap-1">
                 <div className="flex items-center gap-1 flex-wrap">
                   <span className="text-muted-foreground/70 font-medium">CW Groups</span>
-                  <span className="text-muted-foreground/50 text-[9px]">(kinases with correlated activity, r≥0.7 — linked to PTM Co-Wave Modules above):</span>
+                  <span className="text-muted-foreground/50 text-[9px]">(kinases with correlated activity, r≥0.7 — <span className="text-cyan-400">click group to filter Vector Plot</span>):</span>
                 </div>
                 <div className="flex items-center gap-3 flex-wrap">
                   {heatmapData.cowave_groups.map((grp) => {
@@ -5020,10 +5023,31 @@ function KinaseActivityHeatmapView({
                     const moduleColor = matchingModule
                       ? KINASE_MODULE_COLORS[(matchingModule.id - 1) % KINASE_MODULE_COLORS.length]
                       : undefined;
+                    const isActive = selectedCwGroupFilter === grp.group_id;
                     return (
                       <span
                         key={grp.group_id}
-                        className="flex items-center gap-1 cursor-help"
+                        className={`flex items-center gap-1 cursor-pointer rounded px-1 py-0.5 transition-colors ${isActive ? "ring-2 ring-cyan-400 bg-cyan-900/30" : "hover:bg-muted/40"}`}
+                        onClick={() => {
+                          if (isActive) {
+                            setSelectedCwGroupFilter(null);
+                            // Clear filter
+                            if (onSelectPtms) onSelectPtms([]);
+                          } else {
+                            setSelectedCwGroupFilter(grp.group_id);
+                            // Collect all substrate PTMs for kinases in this CW group
+                            const groupKinases = new Set(grp.kinases.map((k: string) => k.toUpperCase()));
+                            const substratePtmKeys: string[] = [];
+                            for (const mod of globalKinaseResult.kinase_modules) {
+                              if (groupKinases.has(mod.kinase.toUpperCase()) || groupKinases.has((mod.canonical || "").toUpperCase())) {
+                                for (const member of mod.members) {
+                                  substratePtmKeys.push(`${member.gene}_${member.position}`);
+                                }
+                              }
+                            }
+                            if (onSelectPtms) onSelectPtms([...new Set(substratePtmKeys)]);
+                          }
+                        }}
                         title={[
                           `Co-wave Group G${grp.group_id}`,
                           `Members: ${grp.kinases.join(", ")}`,
