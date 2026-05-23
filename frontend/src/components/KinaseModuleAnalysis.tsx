@@ -721,6 +721,7 @@ export default function KinaseModuleAnalysis({
     const loadCached = async () => {
       try {
         const allPtms = topNPtms;
+        console.log(`[GLOBAL-KINASE] Cache probe: sending ${Math.min(5, allPtms.length)} PTMs for order ${orderId}`);
         const result = await api.post<GlobalKinaseModuleResponse>(
           `/orders/${orderId}/global-kinase-modules`,
           {
@@ -730,11 +731,14 @@ export default function KinaseModuleAnalysis({
             _cache_probe: true, // signal that this is a cache probe, not full computation
           }
         );
-        if (result._cached && result.kinase_modules?.length > 0) {
+        console.log(`[GLOBAL-KINASE] Cache probe response: _cached=${result._cached}, modules=${result.kinase_modules?.length ?? 0}`);
+        if (result._cached && result.kinase_modules) {
+          // Accept cached result even if kinase_modules is empty (valid cached state)
           setGlobalKinaseResult(result);
-          console.log("[GLOBAL-KINASE] Auto-loaded from cache on mount");
+          console.log(`[GLOBAL-KINASE] Auto-loaded from cache on mount: ${result.kinase_modules.length} modules`);
         }
-      } catch {
+      } catch (err) {
+        console.error("[GLOBAL-KINASE] Cache probe failed:", err);
         // Silently fail — user can click Global Annotate manually
       }
     };
@@ -768,6 +772,31 @@ export default function KinaseModuleAnalysis({
         setActiveTab("kinaseModules");
         if (result._cached) {
           console.log("[GLOBAL-KINASE] Loaded from cache (instant). Use force_refresh to re-run.");
+        } else {
+          // Ensure result is persisted to DB (backup save in case API's internal save failed)
+          try {
+            await api.post(`/orders/${orderId}/save-kinase-analysis-data`, {
+              kinase_modules: (result.kinase_modules || []).map((km) => ({
+                ...km,
+                members: km.members.map((m) => ({ key: m.key, gene: m.gene, position: m.position, membership: m.membership })),
+              })),
+              temporal_cascade: result.temporal_cascade || {},
+              cowave_cross_analysis: result.cowave_cross_analysis || {},
+              summary: result.summary || {},
+              effector_proteins: (result.effector_proteins || []).map((eff) => ({
+                gene: eff.gene, data_type: eff.data_type, max_abs_fc: eff.max_abs_fc,
+                peak_condition: eff.peak_condition, peak_fc: eff.peak_fc,
+                sources: eff.sources, evidence_strength: eff.evidence_strength,
+                evidence_score: eff.evidence_score, directionality: eff.directionality,
+                connected_substrates: eff.connected_substrates,
+              })),
+              wave_kinase_profile: result.wave_kinase_profile || [],
+              _cache_hash: result._cache_hash || "",
+            });
+            console.log("[GLOBAL-KINASE] Single-batch result saved to DB (backup)");
+          } catch (saveErr) {
+            console.warn("[GLOBAL-KINASE] Backup save failed (non-fatal):", saveErr);
+          }
         }
         return;
       }

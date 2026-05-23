@@ -5212,6 +5212,17 @@ async def global_kinase_modules(
 
     if not force_refresh and order.kinase_analysis_data:
         _cached = order.kinase_analysis_data
+        # v9.48.1: Handle case where kinase_analysis_data is stored as string (double-serialized)
+        if isinstance(_cached, str):
+            try:
+                import json as _json_mod
+                _cached = _json_mod.loads(_cached)
+                _log.info(f"[GLOBAL-KINASE] Deserialized string kinase_analysis_data for order {order_id}")
+            except Exception:
+                _log.warning(f"[GLOBAL-KINASE] Failed to parse string kinase_analysis_data for order {order_id}")
+                _cached = {}
+        if not isinstance(_cached, dict):
+            _cached = {}
         _cached_hash = _cached.get("_cache_hash", "")
         if _cache_probe or _cached_hash == _cache_hash:
             _log.info(f"[GLOBAL-KINASE] Cache HIT for order {order_id} (probe={_cache_probe}, hash={_cache_hash})")
@@ -6089,22 +6100,29 @@ async def global_kinase_modules(
         result_obj = await db.execute(select(Order).where(Order.id == order_id))
         order_obj = result_obj.scalar_one_or_none()
         if order_obj:
+            # v9.48.1: Strip annotation_details (large) from DB cache to avoid MySQL packet limits.
+            # annotation_details can be re-derived from enriched JSON if needed.
+            # Also strip temporal_profile from effector_proteins to reduce size.
+            _effectors_slim = [
+                {k: v for k, v in eff.items() if k != "temporal_profile"}
+                for eff in (effector_proteins or [])[:200]
+            ]
             order_obj.kinase_analysis_data = {
                 "kinase_modules": kinase_module_list,
                 "temporal_cascade": temporal_cascade,
                 "cowave_cross_analysis": cowave_cross,
                 "summary": summary,
-                "effector_proteins": effector_proteins,
+                "effector_proteins": _effectors_slim,
                 "wave_kinase_profile": wave_kinase_profile,
                 "unassigned_ptms": unassigned,
-                "annotation_details": annotations,
                 "saved_at": _dt.utcnow().isoformat(),
                 "_cache_hash": _cache_hash,
             }
             await db.commit()
-            _log.info(f"[GLOBAL-KINASE] Saved kinase_analysis_data to order {order_id} DB")
+            _log.info(f"[GLOBAL-KINASE] Saved kinase_analysis_data to order {order_id} DB (slim, no annotation_details)")
     except Exception as _e:
-        _log.warning(f"[GLOBAL-KINASE] Failed to save kinase_analysis_data to DB: {_e}")
+        import traceback as _tb
+        _log.warning(f"[GLOBAL-KINASE] Failed to save kinase_analysis_data to DB: {_e}\n{_tb.format_exc()}")
 
     return {
         "order_id": order_id,
