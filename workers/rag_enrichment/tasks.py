@@ -381,8 +381,8 @@ def _compute_kinase_activity_heatmap(enriched_data: list, kinase_result: dict, p
     ptm_de_novo = set()  # (gene, position) that are de_novo
 
     for item in enriched_data:
-        gene = item.get("Gene.Name") or item.get("gene", "")
-        pos = item.get("PTM_Position") or item.get("position", "")
+        gene = (item.get("Gene.Name") or item.get("gene", "")).strip().upper()
+        pos = str(item.get("PTM_Position") or item.get("position", "")).strip().upper()
         cond = item.get("Condition") or item.get("condition", "")
         log2fc = item.get("PTM_Relative_Log2FC") or item.get("ptm_relative_log2fc") or item.get("Log2FC") or item.get("log2fc")
         q_val = item.get("Q_Value") or item.get("q_value")
@@ -434,8 +434,8 @@ def _compute_kinase_activity_heatmap(enriched_data: list, kinase_result: dict, p
             weighted_sum = 0.0
             weight_total = 0.0
             for m in members:
-                g = m.get("gene", "")
-                p = m.get("position", "")
+                g = m.get("gene", "").upper()
+                p = str(m.get("position", "")).upper()
                 val = ptm_values.get((g, p, cond), 0.0)
                 w = _get_weight(g, p, cond)
                 weighted_sum += val * w
@@ -467,7 +467,7 @@ def _compute_kinase_activity_heatmap(enriched_data: list, kinase_result: dict, p
             # Build matrix: rows=substrates, cols=conditions
             vectors = []
             for m in members:
-                g, p = m.get("gene", ""), m.get("position", "")
+                g, p = m.get("gene", "").upper(), str(m.get("position", "")).upper()
                 row = [ptm_values.get((g, p, c), 0.0) for c in conditions]
                 if any(v != 0 for v in row):
                     vectors.append(row)

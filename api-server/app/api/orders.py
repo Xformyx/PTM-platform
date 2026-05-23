@@ -6248,7 +6248,7 @@ async def kinase_activity_heatmap(
     ptm_qvalues: dict[str, dict[str, float | None]] = {}
     all_conditions: set[str] = set()
     for row in vector_data:
-        key = f"{row['gene']}_{row['position']}"
+        key = f"{row['gene'].upper()}_{row['position'].upper()}"
         cond = row["condition"]
         all_conditions.add(cond)
         if key not in ptm_timeseries:
@@ -6279,7 +6279,7 @@ async def kinase_activity_heatmap(
         weight_totals: dict[str, float] = {c: 0.0 for c in conditions_sorted}
 
         for ptm in ptms:
-            ptm_key = f"{ptm.get('gene', '')}_{ptm.get('position', '')}"
+            ptm_key = f"{ptm.get('gene', '').upper()}_{str(ptm.get('position', '')).upper()}"
             ts = ptm_timeseries.get(ptm_key, {})
             if not ts:
                 continue
@@ -6326,6 +6326,93 @@ async def kinase_activity_heatmap(
             "peak_score": round(peak_score, 4),
         })
 
+    # ── Co-wave metadata: intra-kinase coherence ──
+    import numpy as np
+    for ks_entry in kinase_scores:
+        kinase_name = ks_entry["kinase"]
+        km_match = next((km for km in kinase_modules if km.get("kinase") == kinase_name), None)
+        if km_match and len(conditions_sorted) >= 2:
+            ptms_list = km_match.get("ptms", [])
+            vectors = []
+            for ptm in ptms_list:
+                pk = f"{ptm.get('gene', '').upper()}_{str(ptm.get('position', '')).upper()}"
+                ts = ptm_timeseries.get(pk, {})
+                if ts:
+                    row = [ts.get(c, 0.0) for c in conditions_sorted]
+                    if any(v != 0 for v in row):
+                        vectors.append(row)
+            if len(vectors) >= 2:
+                arr = np.array(vectors)
+                try:
+                    corr_matrix = np.corrcoef(arr)
+                    n = corr_matrix.shape[0]
+                    upper = [corr_matrix[i][j] for i in range(n) for j in range(i+1, n)
+                             if not np.isnan(corr_matrix[i][j])]
+                    ks_entry["coherence"] = round(float(np.mean(upper)), 3) if upper else 0.0
+                except Exception:
+                    ks_entry["coherence"] = 0.0
+            else:
+                ks_entry["coherence"] = 0.0
+        else:
+            ks_entry["coherence"] = 0.0
+
+    # ── Peak Synchronization ──
+    peak_groups: dict[str, list[str]] = {}
+    for ks_entry in kinase_scores:
+        pc = ks_entry.get("peak_condition", "")
+        if pc:
+            peak_groups.setdefault(pc, []).append(ks_entry["kinase"])
+    peak_sync = {}
+    for cond_name, kinase_list in peak_groups.items():
+        if len(kinase_list) >= 3:
+            peak_sync[cond_name] = {"kinases": kinase_list, "count": len(kinase_list)}
+
+    # ── Co-wave group assignment ──
+    cowave_groups = []
+    if len(kinase_scores) >= 3 and len(conditions_sorted) >= 2:
+        score_matrix = []
+        valid_kinase_names = []
+        for ks_entry in kinase_scores:
+            row = [ks_entry["scores"].get(c, 0.0) for c in conditions_sorted]
+            if any(abs(v) > 0.1 for v in row):
+                score_matrix.append(row)
+                valid_kinase_names.append(ks_entry["kinase"])
+        if len(valid_kinase_names) >= 3:
+            arr = np.array(score_matrix)
+            try:
+                corr = np.corrcoef(arr)
+                visited: set[int] = set()
+                group_id = 0
+                for i in range(len(valid_kinase_names)):
+                    if i in visited:
+                        continue
+                    group = [i]
+                    visited.add(i)
+                    for j in range(i+1, len(valid_kinase_names)):
+                        if j not in visited and not np.isnan(corr[i][j]) and corr[i][j] >= 0.7:
+                            group.append(j)
+                            visited.add(j)
+                    if len(group) >= 2:
+                        cowave_groups.append({
+                            "group_id": group_id,
+                            "kinases": [valid_kinase_names[idx] for idx in group],
+                            "size": len(group),
+                            "mean_correlation": round(float(np.mean(
+                                [corr[a][b] for a in group for b in group if a != b and not np.isnan(corr[a][b])]
+                            )), 3) if len(group) > 1 else 1.0,
+                        })
+                        group_id += 1
+            except Exception:
+                pass
+
+    # Annotate each kinase with its co-wave group
+    kinase_to_group: dict[str, int] = {}
+    for grp in cowave_groups:
+        for k in grp["kinases"]:
+            kinase_to_group[k] = grp["group_id"]
+    for ks_entry in kinase_scores:
+        ks_entry["cowave_group"] = kinase_to_group.get(ks_entry["kinase"], -1)
+
     # Sort by peak_score descending
     kinase_scores.sort(key=lambda x: abs(x["peak_score"]), reverse=True)
 
@@ -6333,6 +6420,8 @@ async def kinase_activity_heatmap(
     result_data = {
         "kinase_scores": kinase_scores,
         "conditions": conditions_sorted,
+        "peak_sync": peak_sync,
+        "cowave_groups": cowave_groups,
         "_cache_hash": cache_hash,
         "computed_at": _dt.utcnow().isoformat(),
     }
