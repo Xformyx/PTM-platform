@@ -2406,23 +2406,74 @@ async def get_vector_plot_data(
                         _curated_receptor_kinases[_rn]["kinases"].add(_kin)
                 
                 # Add curated receptors that aren't already in reactome_receptors
+                # Build a reverse lookup: curated kinase name → actual kinase_names_set name
+                # This handles cases like curated "MAPK1" matching module "ERK1/2"
+                _curated_to_actual: dict = {}  # curated_name → actual_name_in_kinase_names_set
+                _kinase_names_upper = {k.upper(): k for k in kinase_names_set}
+                for _ck in set(k for info in _curated_receptor_kinases.values() for k in info["kinases"]):
+                    _ck_upper = _ck.upper()
+                    if _ck_upper in _kinase_names_upper:
+                        _curated_to_actual[_ck] = _kinase_names_upper[_ck_upper]
+                    else:
+                        # Try matching via alias: curated "MAPK1" → module "ERK1/2" or "ERK2"
+                        for _actual_name in kinase_names_set:
+                            _an_upper = _actual_name.upper()
+                            # Check if curated name is part of a composite ("ERK1/2" contains "ERK1")
+                            if _ck_upper in _an_upper or _an_upper in _ck_upper:
+                                _curated_to_actual[_ck] = _actual_name
+                                break
+                            # Check common aliases
+                            if _ck_upper == "ERK1" and "ERK" in _an_upper:
+                                _curated_to_actual[_ck] = _actual_name
+                                break
+                            if _ck_upper == "ERK2" and "ERK" in _an_upper:
+                                _curated_to_actual[_ck] = _actual_name
+                                break
+                            if _ck_upper == "MAPK1" and ("ERK" in _an_upper or "MAPK1" in _an_upper):
+                                _curated_to_actual[_ck] = _actual_name
+                                break
+                            if _ck_upper == "MAPK3" and ("ERK" in _an_upper or "MAPK3" in _an_upper):
+                                _curated_to_actual[_ck] = _actual_name
+                                break
+
                 _curated_added = 0
                 for _rn, _info in _curated_receptor_kinases.items():
-                    _via_kins = sorted(_info["kinases"])[:8]
-                    # Calculate downstream PTMs for this receptor
+                    _raw_kins = sorted(_info["kinases"])[:8]
+                    # Map curated kinase names to actual names in kinase_names_set
+                    _via_kins_mapped = []
+                    _via_kins_display = []
+                    for _rk in _raw_kins:
+                        if _rk in _curated_to_actual:
+                            _actual = _curated_to_actual[_rk]
+                            if _actual not in _via_kins_mapped:
+                                _via_kins_mapped.append(_actual)
+                                _via_kins_display.append(_actual)
+                        else:
+                            _via_kins_display.append(_rk)
+                    
+                    # Use mapped kinases for PTM lookup, display names for via_kinases
                     _ds_ptms = set()
-                    for _vk in _via_kins:
+                    for _vk in _via_kins_mapped:
                         _ds_ptms.update(kinase_ptm_map.get(_vk, set()))
+                    # Also try original curated names as fallback
+                    if not _ds_ptms:
+                        for _vk in _raw_kins:
+                            _ds_ptms.update(kinase_ptm_map.get(_vk, set()))
+                    
+                    # Use mapped kinases (that have PTM data) for display
+                    _final_via = _via_kins_mapped if _via_kins_mapped else _via_kins_display[:8]
                     
                     if _rn not in reactome_receptors:
-                        if len(_via_kins) >= 2 or len(_ds_ptms) >= 5:  # Only add if meaningful
+                        # Relaxed condition: add if we have at least 1 mapped kinase with PTMs,
+                        # OR if 2+ kinases from our data map to this receptor
+                        if len(_via_kins_mapped) >= 1 or len(_ds_ptms) >= 3:
                             reactome_receptors[_rn] = {
                                 "name": _rn,
                                 "receptor_class": _info["receptor_class"],
-                                "downstream_ptm_count": max(len(_ds_ptms), 1),
-                                "downstream_ptms": sorted(_ds_ptms)[:10],
-                                "via_kinases": _via_kins,
-                                "pathway": f"Curated: {_rn} → {', '.join(_via_kins[:3])}",
+                                "downstream_ptm_count": max(len(_ds_ptms), len(_via_kins_mapped)),
+                                "downstream_ptms": sorted(_ds_ptms)[:20],
+                                "via_kinases": _final_via[:8],
+                                "pathway": f"Curated: {_rn} → {', '.join(_final_via[:3])}",
                                 "signaling_pathway": f"Signaling by {_rn}",
                                 "source": "curated_kinase_receptor_db",
                                 "has_receptor_specific_db": True,
@@ -2432,7 +2483,7 @@ async def get_vector_plot_data(
                         # Supplement existing receptor with additional kinases
                         _existing = reactome_receptors[_rn]
                         _existing_via = set(_existing.get("via_kinases", []))
-                        _new_via = [k for k in _via_kins if k not in _existing_via]
+                        _new_via = [k for k in _final_via if k not in _existing_via]
                         if _new_via:
                             _existing["via_kinases"] = (list(_existing_via) + _new_via)[:8]
                             # Update PTM count
@@ -2440,7 +2491,7 @@ async def get_vector_plot_data(
                             for _vk in _existing["via_kinases"]:
                                 _all_ptms.update(kinase_ptm_map.get(_vk, set()))
                             _existing["downstream_ptm_count"] = max(len(_all_ptms), _existing["downstream_ptm_count"])
-                            _existing["downstream_ptms"] = sorted(_all_ptms)[:10]
+                            _existing["downstream_ptms"] = sorted(_all_ptms)[:20]
                 
                 logging.getLogger("vector_plot").info(
                     f"Curated DB (Source B-1.5): Added {_curated_added} receptors, "

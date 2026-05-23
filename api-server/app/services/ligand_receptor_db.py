@@ -1086,12 +1086,38 @@ for _alias, _canonical in _KINASE_ALIAS_MAP.items():
 def get_upstream_receptors_for_kinases(kinase_names: list[str]) -> dict[str, list[dict]]:
     """
     Given a list of kinase names, return upstream receptors from curated DB.
+    Handles composite names like 'ERK1/2', 'CDK1/CDK2', 'MAPK3/MAPK1' by splitting.
     Returns: {kinase_name: [{receptor, receptor_class, pathway}]}
     """
     result: dict[str, list[dict]] = {}
     for kinase in kinase_names:
         k_upper = kinase.upper().strip()
         receptors = _KINASE_UPSTREAM_RECEPTORS.get(k_upper, [])
+        
+        # If not found, try splitting composite names (e.g., "ERK1/2" -> ["ERK1", "ERK2"])
+        if not receptors and "/" in k_upper:
+            import re
+            parts = k_upper.split("/")
+            # Handle patterns like "ERK1/2" -> "ERK1", "ERK2"
+            if len(parts) == 2 and parts[1].isdigit():
+                prefix = re.sub(r'\d+$', '', parts[0])
+                expanded = [parts[0], prefix + parts[1]]
+            else:
+                expanded = parts
+            for part in expanded:
+                part = part.strip()
+                sub_recs = _KINASE_UPSTREAM_RECEPTORS.get(part, [])
+                if sub_recs:
+                    receptors = list(set(receptors + sub_recs))
+        
+        # If still not found, try alias resolution
+        if not receptors:
+            for alias, canonical in _KINASE_ALIAS_MAP.items():
+                if alias.upper() == k_upper or canonical.upper() == k_upper:
+                    canon_upper = canonical.upper()
+                    if canon_upper in _KINASE_UPSTREAM_RECEPTORS:
+                        receptors = _KINASE_UPSTREAM_RECEPTORS[canon_upper]
+                        break
         if receptors:
             rec_list = []
             for rec_name in receptors:
