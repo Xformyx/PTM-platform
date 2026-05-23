@@ -4662,7 +4662,7 @@ function KinaseActivityHeatmapView({
     "#84cc16", "#e11d48", "#0891b2", "#7c3aed", "#d97706",
   ];
 
-  // Co-wave group color palette (consistent with Signal Flow)
+  // Co-wave group color palette (expanded to 16 for large datasets)
   const COWAVE_GROUP_COLORS = [
     { bar: "bg-cyan-400", text: "text-cyan-300", hex: "#22d3ee" },
     { bar: "bg-fuchsia-400", text: "text-fuchsia-300", hex: "#e879f9" },
@@ -4672,6 +4672,14 @@ function KinaseActivityHeatmapView({
     { bar: "bg-pink-400", text: "text-pink-300", hex: "#f472b6" },
     { bar: "bg-sky-400", text: "text-sky-300", hex: "#38bdf8" },
     { bar: "bg-orange-400", text: "text-orange-300", hex: "#fb923c" },
+    { bar: "bg-emerald-400", text: "text-emerald-300", hex: "#34d399" },
+    { bar: "bg-rose-400", text: "text-rose-300", hex: "#fb7185" },
+    { bar: "bg-violet-400", text: "text-violet-300", hex: "#a78bfa" },
+    { bar: "bg-teal-400", text: "text-teal-300", hex: "#2dd4bf" },
+    { bar: "bg-red-400", text: "text-red-300", hex: "#f87171" },
+    { bar: "bg-blue-400", text: "text-blue-300", hex: "#60a5fa" },
+    { bar: "bg-yellow-400", text: "text-yellow-300", hex: "#facc15" },
+    { bar: "bg-purple-400", text: "text-purple-300", hex: "#c084fc" },
   ];
 
   // Coherence color helper (0→gray, 1→green)
@@ -4735,7 +4743,12 @@ function KinaseActivityHeatmapView({
         <select
           className="text-xs h-7 bg-background border border-border rounded px-2"
           value={sortMode}
-          onChange={(e) => setSortMode(e.target.value as HeatmapSortMode)}
+          onChange={(e) => {
+            const mode = e.target.value as HeatmapSortMode;
+            setSortMode(mode);
+            // Auto-expand to show all when sorting by co-wave group
+            if (mode === "cowave_group") setTopN(9999);
+          }}
         >
           <option value="peak_score">Peak Score</option>
           <option value="peak_time">Peak Time</option>
@@ -4754,7 +4767,8 @@ function KinaseActivityHeatmapView({
           <option value={20}>20</option>
           <option value={30}>30</option>
           <option value={50}>50</option>
-          <option value={100}>All</option>
+
+          <option value={9999}>All</option>
         </select>
         <div className="ml-auto flex items-center gap-1">
           {heatmapData._cached && (
@@ -4953,7 +4967,7 @@ function KinaseActivityHeatmapView({
                   <span className="text-muted-foreground/50 text-[9px]">(kinases with correlated activity, r≥0.7 — linked to PTM Co-Wave Modules above):</span>
                 </div>
                 <div className="flex items-center gap-3 flex-wrap">
-                  {heatmapData.cowave_groups.slice(0, 8).map((grp) => {
+                  {heatmapData.cowave_groups.map((grp) => {
                     const color = COWAVE_GROUP_COLORS[grp.group_id % COWAVE_GROUP_COLORS.length];
                     // v9.48.2: Find matching Co-Wave Module by dominant_peak
                     const matchingModule = grp.dominant_peak
