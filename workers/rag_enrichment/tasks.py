@@ -261,15 +261,11 @@ def _auto_run_global_analysis(order_id: int, enriched_data: list, config: dict) 
                         "position": pos, "membership": "confirmed", "evidence": source,
                     })
 
-        # ── Step C: Infer kinases for PTMs without known kinase ──
+        # ── Step C: Infer kinases via motif — assign PTMs to ALL matching kinase families ──
+        # Unlike Step B (confirmed 1:1), motif inference allows a PTM to be assigned
+        # to multiple kinase families, AND creates new kinase modules for unmatched motifs.
         for gene, pos, entry in all_ptm_entries:
             ptm_key = f"{gene.upper()}_{str(pos).upper()}"
-            already_confirmed = any(
-                ptm_key in [m["key"] for m in info["confirmed"]]
-                for info in kinase_members.values()
-            )
-            if already_confirmed:
-                continue
             motif_pred = _predict_motif(pos, entry)
             motif_families = set()
             for mp in motif_pred:
@@ -278,20 +274,42 @@ def _auto_run_global_analysis(order_id: int, enriched_data: list, config: dict) 
                         motif_families.add(part)
             if not motif_families:
                 continue
-            matched_kinases = []
-            for canon in kinase_members:
+            # Assign to ALL matching existing kinase modules
+            matched_any = False
+            for canon in list(kinase_members.keys()):
                 for mf in motif_families:
                     if are_kinases_same_family(canon, mf):
-                        matched_kinases.append(canon)
+                        # Add if not already confirmed or inferred in this module
+                        existing_keys = {m["key"] for m in kinase_members[canon]["confirmed"]} | \
+                                        {m["key"] for m in kinase_members[canon]["inferred"]}
+                        if ptm_key not in existing_keys:
+                            kinase_members[canon]["inferred"].append({
+                                "key": ptm_key, "gene": gene.upper(),
+                                "position": pos, "membership": "inferred",
+                                "evidence": f"motif match ({mf})",
+                            })
+                        matched_any = True
                         break
-            if matched_kinases:
-                best_canon = max(matched_kinases, key=lambda c: len(kinase_members[c]["confirmed"]))
-                if ptm_key not in [m["key"] for m in kinase_members[best_canon]["inferred"]]:
-                    kinase_members[best_canon]["inferred"].append({
-                        "key": ptm_key, "gene": gene.upper(),
-                        "position": pos, "membership": "inferred",
-                        "evidence": f"motif match ({', '.join(sorted(motif_families))})",
-                    })
+            # If no existing module matched, create new module from motif family
+            if not matched_any:
+                for mf in motif_families:
+                    canonical, display = normalize_kinase_name(mf)
+                    if not canonical or len(canonical) < 3 or canonical in _KINASE_STOP_WORDS:
+                        continue
+                    if canonical not in kinase_members:
+                        kinase_members[canonical] = {
+                            "kinase": display, "canonical": canonical,
+                            "sources": set(), "confirmed": [], "inferred": [],
+                        }
+                    kinase_members[canonical]["sources"].add("motif_prediction")
+                    existing_keys = {m["key"] for m in kinase_members[canonical]["confirmed"]} | \
+                                    {m["key"] for m in kinase_members[canonical]["inferred"]}
+                    if ptm_key not in existing_keys:
+                        kinase_members[canonical]["inferred"].append({
+                            "key": ptm_key, "gene": gene.upper(),
+                            "position": pos, "membership": "inferred",
+                            "evidence": f"motif match ({mf})",
+                        })
 
         # ── Step D: Format kinase module list ──
         kinase_module_list = []
@@ -392,9 +410,12 @@ def _compute_kinase_activity_heatmap(enriched_data: list, kinase_result: dict, p
             continue
         conditions.add(cond)
         try:
-            ptm_values[(gene, pos, cond)] = float(log2fc) if log2fc is not None else 0.0
+            raw_fc = float(log2fc) if log2fc is not None else 0.0
         except (ValueError, TypeError):
-            ptm_values[(gene, pos, cond)] = 0.0
+            raw_fc = 0.0
+        # Cap extreme Log2FC values (pseudocount artifacts)
+        LOG2FC_CAP = 5.0
+        ptm_values[(gene, pos, cond)] = max(-LOG2FC_CAP, min(LOG2FC_CAP, raw_fc))
         try:
             ptm_qvalues[(gene, pos, cond)] = float(q_val) if q_val is not None else 1.0
         except (ValueError, TypeError):
@@ -553,14 +574,31 @@ def _compute_kinase_activity_heatmap(enriched_data: list, kinase_result: dict, p
     for ks in kinase_scores:
         ks["cowave_group"] = kinase_to_group.get(ks["kinase"], -1)
 
+    # ── Activation / Inactivation classification ──
+    for ks in kinase_scores:
+        peak = ks.get("peak_score", 0)
+        if peak > 0.3:
+            ks["direction"] = "activation"  # kinase activation (substrates phosphorylated)
+        elif peak < -0.3:
+            ks["direction"] = "inactivation"  # phosphatase action / kinase suppression
+        else:
+            ks["direction"] = "neutral"
+
     # Sort by peak_score descending
     kinase_scores.sort(key=lambda x: abs(x["peak_score"]), reverse=True)
 
+    # Filter: only include kinases with ≥2 substrates for meaningful activity
+    kinase_scores_filtered = [ks for ks in kinase_scores if ks["substrate_count"] >= 2]
+    # If filtering removes too many, keep top kinases even with 1 substrate
+    if len(kinase_scores_filtered) < 5 and len(kinase_scores) >= 5:
+        kinase_scores_filtered = kinase_scores[:20]  # fallback: top 20 regardless
+
     return {
-        "kinase_scores": kinase_scores,
+        "kinase_scores": kinase_scores_filtered,
         "conditions": conditions,
         "peak_sync": peak_sync,
         "cowave_groups": cowave_groups,
+        "all_kinase_scores": kinase_scores,  # unfiltered for debug
         "_cached": True,
     }
 

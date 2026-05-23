@@ -3907,6 +3907,7 @@ interface KinaseActivityScore {
   peak_score: number;
   coherence?: number;
   cowave_group?: number;
+  direction?: "activation" | "inactivation" | "neutral";
 }
 
 interface PeakSyncEntry {
@@ -4160,6 +4161,7 @@ function KinaseActivityHeatmapView({
                 <tr className="border-b border-border/20">
                   <th className="sticky left-0 bg-background z-10" />{/* CW bar spacer */}
                   <th />{/* Kinase spacer */}
+                  <th />{/* Dir spacer */}
                   <th />{/* #Sub spacer */}
                   <th />{/* Conf spacer */}
                   <th />{/* Coh spacer */}
@@ -4184,6 +4186,7 @@ function KinaseActivityHeatmapView({
               <tr className="border-b border-border">
                 <th className="w-2 px-0 py-1" title="Co-wave Group">CW</th>
                 <th className="text-left px-2 py-1 sticky left-0 bg-background z-10 min-w-[100px]">Kinase</th>
+                <th className="text-center px-1 py-1 w-8" title="Direction: activation (▲) or inactivation (▼)">Dir</th>
                 <th className="text-center px-1 py-1 w-10">#Sub</th>
                 <th className="text-center px-1 py-1 w-10">Conf</th>
                 <th className="text-center px-1 py-1 w-10" title="Intra-kinase substrate coherence">Coh</th>
@@ -4228,6 +4231,16 @@ function KinaseActivityHeatmapView({
                       {ks.kinase}
                       {cwColor && (
                         <span className={`ml-1 text-[8px] ${cwColor.text} opacity-70`}>G{cwGroup}</span>
+                      )}
+                    </td>
+                    {/* Direction indicator */}
+                    <td className="text-center px-0.5 py-0.5">
+                      {ks.direction === "activation" ? (
+                        <span className="text-red-400 font-bold text-xs" title="Kinase Activation (substrates up-phosphorylated)">▲</span>
+                      ) : ks.direction === "inactivation" ? (
+                        <span className="text-blue-400 font-bold text-xs" title="Inactivation / Phosphatase action (substrates de-phosphorylated)">▼</span>
+                      ) : (
+                        <span className="text-muted-foreground/50 text-[9px]">—</span>
                       )}
                     </td>
                     {/* Substrate count */}
@@ -4312,6 +4325,17 @@ function KinaseActivityHeatmapView({
               <span>Peak Sync: conditions where 3+ kinases reach peak activity simultaneously</span>
             </div>
           )}
+          {/* Direction legend */}
+          <div className="flex items-center gap-4 px-3 pb-2 text-[10px] text-muted-foreground">
+            <span className="flex items-center gap-1">
+              <span className="text-red-400 font-bold">▲</span>
+              <span>Activation: kinase substrates up-phosphorylated (kinase active)</span>
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="text-blue-400 font-bold">▼</span>
+              <span>Inactivation: substrates de-phosphorylated (phosphatase action / kinase suppressed)</span>
+            </span>
+          </div>
         </div>
       )}
 
@@ -4395,7 +4419,7 @@ function KinaseActivityHeatmapView({
       )}
 
       {/* Summary stats */}
-      <div className="grid grid-cols-5 gap-2 text-xs">
+      <div className="grid grid-cols-6 gap-2 text-xs">
         <div className="bg-muted/30 rounded p-2 text-center">
           <div className="text-lg font-bold text-cyan-400">{heatmapData.kinase_scores.length}</div>
           <div className="text-muted-foreground">Kinases</div>
@@ -4405,10 +4429,16 @@ function KinaseActivityHeatmapView({
           <div className="text-muted-foreground">Conditions</div>
         </div>
         <div className="bg-muted/30 rounded p-2 text-center">
-          <div className="text-lg font-bold text-green-400">
-            {sortedScores.filter((s) => Math.abs(s.peak_score) >= 1.0).length}
+          <div className="text-lg font-bold text-red-400">
+            {sortedScores.filter((s) => s.direction === "activation").length}
           </div>
-          <div className="text-muted-foreground">Active (|peak|≥1)</div>
+          <div className="text-muted-foreground">▲ Activation</div>
+        </div>
+        <div className="bg-muted/30 rounded p-2 text-center">
+          <div className="text-lg font-bold text-blue-400">
+            {sortedScores.filter((s) => s.direction === "inactivation").length}
+          </div>
+          <div className="text-muted-foreground">▼ Inactivation</div>
         </div>
         <div className="bg-muted/30 rounded p-2 text-center">
           <div className="text-lg font-bold text-purple-400">

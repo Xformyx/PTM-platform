@@ -6254,7 +6254,10 @@ async def kinase_activity_heatmap(
         if key not in ptm_timeseries:
             ptm_timeseries[key] = {}
             ptm_qvalues[key] = {}
-        ptm_timeseries[key][cond] = row["log2fc"]
+        # Cap extreme Log2FC values (pseudocount artifacts)
+        _raw_fc = row["log2fc"]
+        _LOG2FC_CAP = 5.0
+        ptm_timeseries[key][cond] = max(-_LOG2FC_CAP, min(_LOG2FC_CAP, _raw_fc))
         ptm_qvalues[key][cond] = row["q_value"]
 
     # Sort conditions (try numeric extraction for time-series)
@@ -6413,12 +6416,27 @@ async def kinase_activity_heatmap(
     for ks_entry in kinase_scores:
         ks_entry["cowave_group"] = kinase_to_group.get(ks_entry["kinase"], -1)
 
+    # ── Activation / Inactivation classification ──
+    for ks_entry in kinase_scores:
+        peak = ks_entry.get("peak_score", 0)
+        if peak > 0.3:
+            ks_entry["direction"] = "activation"
+        elif peak < -0.3:
+            ks_entry["direction"] = "inactivation"
+        else:
+            ks_entry["direction"] = "neutral"
+
     # Sort by peak_score descending
     kinase_scores.sort(key=lambda x: abs(x["peak_score"]), reverse=True)
 
+    # Filter: only include kinases with ≥2 substrates
+    kinase_scores_filtered = [ks for ks in kinase_scores if ks["substrate_count"] >= 2]
+    if len(kinase_scores_filtered) < 5 and len(kinase_scores) >= 5:
+        kinase_scores_filtered = kinase_scores[:20]
+
     # Save to DB
     result_data = {
-        "kinase_scores": kinase_scores,
+        "kinase_scores": kinase_scores_filtered,
         "conditions": conditions_sorted,
         "peak_sync": peak_sync,
         "cowave_groups": cowave_groups,
