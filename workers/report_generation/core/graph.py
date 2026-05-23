@@ -114,6 +114,10 @@ class ReportState(TypedDict, total=False):
     # v9.35: LLM fallback tracking
     llm_fallback_sections: List[str]  # sections that used fallback text due to LLM failure
 
+    # v9.48: Kinase Activity Heatmap (CW Groups, per-condition scores, peak sync)
+    kinase_activity_heatmap: dict  # {kinase_scores, conditions, peak_sync, cowave_groups}
+    signal_propagation_data: dict  # signal propagation analysis from frontend
+
     # v10.0: RQ Refinement + Report Co-pilot
     original_research_questions: List[str]  # preserved user RQ0 before refinement
     rq_refinement_metadata: dict            # LLM refinement diagnostics

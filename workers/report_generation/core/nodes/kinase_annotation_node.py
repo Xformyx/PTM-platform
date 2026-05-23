@@ -156,6 +156,9 @@ def run_kinase_annotation(state: dict) -> dict:
             and len(frontend_kinase["kinase_modules"]) > 0
         )
 
+        # v9.48: Load kinase activity heatmap data (CW Groups, per-condition scores)
+        kinase_activity_heatmap = state.get("kinase_activity_heatmap", {})
+
         if not clusters:
             logger.info("[KINASE-ANNOTATION] No co-wave clusters — building Global Kinase Modules from all enriched PTMs")
             enriched_map = _build_enriched_map(enriched_data)
@@ -177,9 +180,8 @@ def run_kinase_annotation(state: dict) -> dict:
                     f"{global_km['summary']['total_kinase_modules']} modules"
                 )
 
-            llm_context = _build_frontend_kinase_llm_context(global_km, ptm_type)
-
-            # v9.33: Generate figures even without clusters
+            llm_context = _build_frontend_kinase_llm_context(global_km, ptm_type, kinase_activity_heatmap)
+            # v9.33: Generate figures even without clusterss
             signal_flow_figures = []
             output_dir = state.get("output_dir", "")
             inferred_receptors = state.get("inferred_receptors", []) or []
@@ -287,7 +289,7 @@ def run_kinase_annotation(state: dict) -> dict:
             )
 
         # Append Global Kinase Modules context to LLM context
-        global_km_ctx = _build_frontend_kinase_llm_context(global_km, ptm_type)
+        global_km_ctx = _build_frontend_kinase_llm_context(global_km, ptm_type, kinase_activity_heatmap)
         if global_km_ctx:
             llm_context = llm_context + "\n\n" + global_km_ctx
 
@@ -1433,7 +1435,7 @@ def _build_temporal_kinase_llm_context(
 # v9.12: FRONTEND GLOBAL KINASE MODULES → LLM CONTEXT
 # ═══════════════════════════════════════════════════════════════════════════
 
-def _build_frontend_kinase_llm_context(frontend_kinase: dict, ptm_type: str) -> str:
+def _build_frontend_kinase_llm_context(frontend_kinase: dict, ptm_type: str, kinase_activity_heatmap: dict = None) -> str:
     """Build structured LLM context from the frontend Global Kinase Modules analysis.
 
     This supplements the pipeline-internal kinase annotation with the more
@@ -1443,6 +1445,8 @@ def _build_frontend_kinase_llm_context(frontend_kinase: dict, ptm_type: str) -> 
         frontend_kinase: Result from global_kinase_modules API
             {kinase_modules, temporal_cascade, cowave_cross_analysis, summary, saved_at}
         ptm_type: 'phosphorylation' or 'ubiquitylation'
+        kinase_activity_heatmap: Optional heatmap data from DB
+            {kinase_scores, conditions, peak_sync, cowave_groups}
 
     Returns:
         Structured markdown string for LLM injection
@@ -1590,6 +1594,173 @@ def _build_frontend_kinase_llm_context(frontend_kinase: dict, ptm_type: str) -> 
                 parts.append(f"  Deactivated: {', '.join(lost_kinases[:5])}")
             parts.append("")
 
+    # ── Section D2: Co-Wave Module × Kinase Module Cross-Analysis ──
+    cowave_cross = frontend_kinase.get("cowave_cross_analysis", {})
+    if cowave_cross:
+        parts.append(f"### D2. Co-Wave PTM Module × {regulator_label} Module Cross-Analysis")
+        parts.append("")
+        parts.append(
+            f"This section maps which {regulator_label.lower()}s are responsible for phosphorylating "
+            f"PTMs within each temporal Co-Wave module. Overlaps indicate that a {regulator_label.lower()} "
+            f"is driving the coordinated temporal pattern of an entire PTM cluster."
+        )
+        parts.append("")
+
+        for cw_id, cw_data in sorted(cowave_cross.items(), key=lambda x: int(x[0]) if x[0].isdigit() else 0):
+            cw_label = cw_data.get("cowave_label", f"Module {cw_id}")
+            total_ptms = cw_data.get("total_ptms", 0)
+            overlapping = cw_data.get("overlapping_kinases", [])
+            if not overlapping:
+                continue
+
+            parts.append(f"**{cw_label}** ({total_ptms} PTMs):")
+            for ok in sorted(overlapping, key=lambda x: x.get("shared_count", 0), reverse=True)[:5]:
+                k_name = ok.get("kinase", ok.get("canonical", ""))
+                shared = ok.get("shared_count", 0)
+                parts.append(f"  - {k_name}: {shared} shared substrates")
+            parts.append("")
+
+        parts.append(
+            f"*Interpretation: {regulator_label}s with high substrate overlap in a Co-Wave module "
+            f"are likely the primary drivers of that module's temporal pattern. Multiple "
+            f"{regulator_label.lower()}s sharing substrates in the same module suggest convergent "
+            f"signaling or sequential phosphorylation events.*"
+        )
+        parts.append("")
+
+    # ── Section E: Co-Wave Kinase Groups (CW Groups) ──
+    if kinase_activity_heatmap and kinase_activity_heatmap.get("cowave_groups"):
+        cowave_groups = kinase_activity_heatmap["cowave_groups"]
+        parts.append(f"### E. Co-Wave {regulator_label} Groups (Temporal Correlation Clusters)")
+        parts.append("")
+        parts.append(
+            f"{regulator_label}s were grouped by temporal substrate activity correlation (Pearson r ≥ 0.7). "
+            f"{regulator_label}s within the same Co-Wave Group exhibit highly correlated substrate "
+            f"phosphorylation dynamics across all measured timepoints, suggesting they participate "
+            f"in the same signaling cascade or are co-activated by a common upstream signal."
+        )
+        parts.append("")
+        parts.append(f"**Total CW Groups: {len(cowave_groups)}**")
+        parts.append("")
+
+        for grp in cowave_groups:
+            gid = grp.get("group_id", "?")
+            kinases = grp.get("kinases", [])
+            size = grp.get("size", len(kinases))
+            mean_corr = grp.get("mean_correlation", 0)
+            dominant_peak = grp.get("dominant_peak", "unknown")
+            k_str = ", ".join(kinases[:8])
+            if len(kinases) > 8:
+                k_str += f" (+{len(kinases) - 8} more)"
+            parts.append(
+                f"**CW Group G{gid}** — {size} {regulator_label.lower()}s, "
+                f"mean r={mean_corr:.2f}, dominant peak: {dominant_peak}"
+            )
+            parts.append(f"  Members: {k_str}")
+            parts.append("")
+
+        parts.append(
+            f"*Biological interpretation: {regulator_label}s in the same CW Group are likely "
+            f"co-regulated — either by a shared upstream activator, or as sequential members "
+            f"of a tightly coupled signaling relay. Groups peaking at the same timepoint "
+            f"represent parallel signaling branches activated simultaneously.*"
+        )
+        parts.append("")
+
+    # ── Section F: Per-Condition Kinase Activity Scores ──
+    if kinase_activity_heatmap and kinase_activity_heatmap.get("kinase_scores"):
+        ks_list = kinase_activity_heatmap["kinase_scores"]
+        conditions = kinase_activity_heatmap.get("conditions", [])
+        parts.append(f"### F. {regulator_label} Activity Scores (Weighted Mean Log2FC per Condition)")
+        parts.append("")
+        parts.append(
+            f"Each {regulator_label.lower()}'s activity score represents the weighted mean Log2FC "
+            f"of its substrate PTMs at each timepoint. Weights are based on annotation confidence "
+            f"(confirmed substrates weighted higher than inferred). Direction indicates whether "
+            f"the {regulator_label.lower()} is predominantly activating (substrates up-phosphorylated) "
+            f"or being inactivated (substrates de-phosphorylated)."
+        )
+        parts.append("")
+
+        # Top 25 kinases by absolute peak score
+        sorted_ks = sorted(ks_list, key=lambda x: abs(x.get("peak_score", 0)), reverse=True)
+        for ks in sorted_ks[:25]:
+            kinase_name = ks.get("kinase", "")
+            sub_count = ks.get("substrate_count", 0)
+            confidence = ks.get("confidence", 0)
+            peak_cond = ks.get("peak_condition", "")
+            peak_score = ks.get("peak_score", 0)
+            direction = ks.get("direction", "neutral")
+            coherence = ks.get("coherence", 0)
+            cw_group = ks.get("cowave_group", -1)
+            cw_str = f"CW-G{cw_group}" if cw_group >= 0 else "ungrouped"
+
+            # Per-condition scores (compact)
+            scores = ks.get("scores", {})
+            score_parts = []
+            for c in conditions[:6]:  # Max 6 conditions
+                v = scores.get(c, 0)
+                if abs(v) >= 0.01:
+                    score_parts.append(f"{c}:{v:+.2f}")
+            score_str = ", ".join(score_parts) if score_parts else "flat"
+
+            parts.append(
+                f"**{kinase_name}** [{cw_str}] — {sub_count} substrates, "
+                f"conf={confidence:.0%}, peak={peak_cond} ({peak_score:+.2f}), "
+                f"direction={direction}, coherence={coherence:.2f}"
+            )
+            parts.append(f"  Temporal profile: [{score_str}]")
+            parts.append("")
+
+    # ── Section G: Peak Synchronization Events ──
+    if kinase_activity_heatmap and kinase_activity_heatmap.get("peak_sync"):
+        peak_sync = kinase_activity_heatmap["peak_sync"]
+        parts.append(f"### G. Peak Synchronization Events (≥3 {regulator_label}s Peaking Simultaneously)")
+        parts.append("")
+        parts.append(
+            f"Timepoints where multiple {regulator_label.lower()}s reach peak substrate activity "
+            f"simultaneously indicate major signaling activation events — potential therapeutic "
+            f"intervention windows or critical decision points in the cellular response."
+        )
+        parts.append("")
+
+        for cond, data in sorted(peak_sync.items(), key=lambda x: x[1].get("count", 0), reverse=True):
+            count = data.get("count", 0)
+            kinases = data.get("kinases", [])
+            k_str = ", ".join(kinases[:10])
+            if len(kinases) > 10:
+                k_str += f" (+{len(kinases) - 10} more)"
+            parts.append(f"**{cond}** — {count} {regulator_label.lower()}s peak simultaneously:")
+            parts.append(f"  {k_str}")
+            parts.append("")
+
+    # ── Section H: Non-PTM Effector Proteins (Downstream Functional Outputs) ──
+    effector_proteins = frontend_kinase.get("effector_proteins", [])
+    if effector_proteins:
+        parts.append(f"### H. Non-PTM Effector Proteins (Downstream Functional Outputs)")
+        parts.append("")
+        parts.append(
+            f"These are proteins identified as downstream functional effectors of the "
+            f"active {regulator_label.lower()}s. They represent the biological output of the "
+            f"signaling cascade — transcription factors, metabolic enzymes, structural proteins, "
+            f"or other functional mediators that translate kinase activity into cellular responses."
+        )
+        parts.append("")
+
+        for eff in effector_proteins[:20]:  # Top 20 effectors
+            eff_name = eff.get("name", eff.get("gene", ""))
+            eff_function = eff.get("function", eff.get("category", ""))
+            upstream_kinases = eff.get("upstream_kinases", [])
+            confidence = eff.get("confidence", 0)
+            uk_str = ", ".join(upstream_kinases[:4]) if upstream_kinases else "unknown"
+            if len(upstream_kinases) > 4:
+                uk_str += f" (+{len(upstream_kinases) - 4})"
+            parts.append(
+                f"**{eff_name}** — {eff_function}, "
+                f"upstream: [{uk_str}], conf={confidence:.0%}"
+            )
+        parts.append("")
+
     # ── LLM Instructions ──
     parts.append(f"### INSTRUCTIONS FOR USING GLOBAL {regulator_label.upper()} MODULE DATA")
     parts.append("")
@@ -1616,6 +1787,34 @@ def _build_frontend_kinase_llm_context(frontend_kinase: dict, ptm_type: str) -> 
         f"   - The pipeline-internal cascade (above) was computed from co-wave clusters only.\n"
         f"   - Where both analyses agree, this represents high-confidence signaling events.\n"
         f"   - Discrepancies may indicate context-specific or cluster-specific regulation.\n"
+    )
+    parts.append(
+        f"5. CO-WAVE GROUP INTERPRETATION:\n"
+        f"   - {regulator_label}s in the same CW Group have highly correlated substrate activity (r≥0.7).\n"
+        f"   - Interpret CW Groups as functional signaling units — co-activated kinase cassettes.\n"
+        f"   - Explain WHY these {regulator_label.lower()}s are co-regulated (shared upstream receptor, \n"
+        f"     common scaffold protein, or sequential cascade members).\n"
+        f"   - Use Peak Synchronization events (Section G) to identify major signaling activation waves.\n"
+    )
+    parts.append(
+        f"6. ACTIVITY SCORE INTERPRETATION:\n"
+        f"   - Use per-condition scores (Section F) to describe the temporal dynamics of each {regulator_label.lower()}.\n"
+        f"   - 'Activation' direction = substrates are up-phosphorylated = kinase is active.\n"
+        f"   - 'Inactivation' direction = substrates are de-phosphorylated = phosphatase action or kinase suppression.\n"
+        f"   - High coherence (>0.5) = substrates move together = high-confidence activity measurement.\n"
+        f"   - Low coherence (<0.3) = substrates are heterogeneous = possible multi-functional kinase.\n"
+    )
+    parts.append(
+        f"7. EFFECTOR PROTEIN NARRATIVE:\n"
+        f"   - Use Non-PTM Effector Proteins (Section H) to explain the FUNCTIONAL OUTPUT of the signaling.\n"
+        f"   - Connect upstream {regulator_label.lower()} activity to downstream cellular responses.\n"
+        f"   - Explain how the kinase cascade ultimately affects cell fate, metabolism, or gene expression.\n"
+    )
+    parts.append(
+        f"8. CROSS-ANALYSIS (PTM Module × {regulator_label} Module):\n"
+        f"   - Use Section D2 to explain which {regulator_label.lower()}s drive each Co-Wave PTM module.\n"
+        f"   - High substrate overlap = that {regulator_label.lower()} is the primary driver of the module's temporal pattern.\n"
+        f"   - Multiple {regulator_label.lower()}s sharing substrates in one module = convergent signaling.\n"
     )
 
     return "\n".join(parts)
