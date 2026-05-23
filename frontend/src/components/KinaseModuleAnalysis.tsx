@@ -1299,6 +1299,21 @@ export default function KinaseModuleAnalysis({
                           ◇ {mod.activity_class_counts.minor} Minor
                         </Badge>
                       )}
+                      {/* v9.48.2: Linked Heatmap CW Groups — use cowave_cross_analysis */}
+                      {globalKinaseResult?.cowave_cross_analysis && (() => {
+                        const crossEntry = globalKinaseResult.cowave_cross_analysis[`module_${mod.id}`];
+                        if (!crossEntry || !crossEntry.overlapping_kinases?.length) return null;
+                        const kinaseNames = crossEntry.overlapping_kinases.map((k) => k.canonical);
+                        return (
+                          <Badge
+                            variant="outline"
+                            className="text-[9px] border-cyan-500 text-cyan-600 dark:text-cyan-400 cursor-help"
+                            title={`Linked kinases (Heatmap): ${kinaseNames.slice(0, 6).join(", ")}${kinaseNames.length > 6 ? "..." : ""}\nThese kinases have substrates in this Co-Wave module.\nSwitch to Heatmap tab to see their activity patterns.`}
+                          >
+                            ↔ {kinaseNames.length} kinases
+                          </Badge>
+                        );
+                      })()}
                       {/* Annotation summary badges */}
                       {annotation && (
                         <div className="flex gap-1">
@@ -1608,6 +1623,7 @@ export default function KinaseModuleAnalysis({
             globalKinaseResult={globalKinaseResult}
             vectorData={vectorData}
             conditions={conditions}
+            coWaveModules={coWaveModules}
             onKinaseSelect={(kinase) => {
               setInternalHighlightedKinase(kinase);
               setActiveTab("signalFlow");
@@ -4535,12 +4551,14 @@ function KinaseActivityHeatmapView({
   vectorData,
   conditions,
   onKinaseSelect,
+  coWaveModules = [],
 }: {
   orderId: number;
   globalKinaseResult: GlobalKinaseModuleResponse;
   vectorData: PtmTimeSeriesRow[];
   conditions: string[];
   onKinaseSelect?: (kinase: string) => void;
+  coWaveModules?: CoWaveModule[];
 }) {
   const [heatmapData, setHeatmapData] = useState<KinaseHeatmapData | null>(null);
   const [loading, setLoading] = useState(false);
@@ -4781,7 +4799,7 @@ function KinaseActivityHeatmapView({
               )}
               {/* Main header row */}
               <tr className="border-b border-border">
-                <th className="w-2 px-0 py-1" title="Co-wave Group: Color bar indicates kinases with correlated temporal activity patterns (r≥0.7). Same color = same group. Hover over the bar or G-label for details.">CW</th>
+                <th className="w-2 px-0 py-1" title="Co-wave Group: Color bar indicates kinases with correlated temporal activity patterns (r≥0.7). Same color = same group.\n\nG-labels (e.g. G2 ≈ M3) show the linked Co-Wave Module from the Vector Plot chart.\nKinases in the same CW Group phosphorylate substrates that peak at the same time.\n\nHover over the bar or G-label for details.">CW</th>
                 <th className="text-left px-2 py-1 sticky left-0 bg-background z-10 min-w-[100px]">Kinase</th>
                 <th className="text-center px-1 py-1 w-8" title="Direction: activation (▲) or inactivation (▼)">Dir</th>
                 <th className="text-center px-1 py-1 w-10">#Sub</th>
@@ -4816,11 +4834,17 @@ function KinaseActivityHeatmapView({
                     <td className="px-0 py-0 w-2">
                       {cwColor ? (() => {
                         const grpInfo = heatmapData.cowave_groups?.find(g => g.group_id === cwGroup);
+                        // v9.48.2: Link to Co-Wave Module
+                        const linkedModule = grpInfo?.dominant_peak
+                          ? coWaveModules.find((m) => m.peakCondition === grpInfo.dominant_peak)
+                          : undefined;
                         const tipLines = [
                           `Co-wave Group G${cwGroup}`,
                           grpInfo?.dominant_peak ? `Peak: ${grpInfo.dominant_peak}` : "",
                           grpInfo ? `Members (${grpInfo.size}): ${grpInfo.kinases.slice(0, 8).join(", ")}${grpInfo.kinases.length > 8 ? "..." : ""}` : "",
                           grpInfo ? `Correlation: r=${grpInfo.mean_correlation.toFixed(2)}` : "",
+                          linkedModule ? `\n↔ Vector Plot: ${linkedModule.label}` : "",
+                          linkedModule ? `  (${linkedModule.ptms.length} PTMs share this peak timing)` : "",
                           "",
                           "Kinases in this group have highly correlated",
                           "temporal activity patterns (r≥0.7).",
@@ -4841,12 +4865,18 @@ function KinaseActivityHeatmapView({
                       {ks.kinase}
                       {cwColor && (() => {
                         const grpInfo = heatmapData.cowave_groups?.find(g => g.group_id === cwGroup);
+                        const linkedModule = grpInfo?.dominant_peak
+                          ? coWaveModules.find((m) => m.peakCondition === grpInfo.dominant_peak)
+                          : undefined;
+                        const moduleTag = linkedModule ? ` ≈ M${linkedModule.id}` : "";
                         return (
                           <span
                             className={`ml-1 text-[8px] ${cwColor.text} opacity-70 cursor-help`}
-                            title={grpInfo ? `G${cwGroup}: ${grpInfo.kinases.slice(0, 5).join(", ")}${grpInfo.kinases.length > 5 ? "..." : ""}${grpInfo.dominant_peak ? " | peak@" + grpInfo.dominant_peak : ""}` : `Group ${cwGroup}`}
+                            title={grpInfo
+                              ? `G${cwGroup}: ${grpInfo.kinases.slice(0, 5).join(", ")}${grpInfo.kinases.length > 5 ? "..." : ""}${grpInfo.dominant_peak ? " | peak@" + grpInfo.dominant_peak : ""}${linkedModule ? "\n↔ " + linkedModule.label + " in Vector Plot" : ""}`
+                              : `Group ${cwGroup}`}
                           >
-                            G{cwGroup}
+                            G{cwGroup}{moduleTag}
                           </span>
                         );
                       })()}
@@ -4915,26 +4945,51 @@ function KinaseActivityHeatmapView({
               </span>
               <span className="ml-2">(Weighted mean Log2FC)</span>
             </div>
-             {/* Co-wave group legend — v9.48.1: enhanced with dominant_peak and explanation */}
+             {/* Co-wave group legend — v9.48.2: linked to Vector Plot Co-Wave Modules */}
             {heatmapData.cowave_groups && heatmapData.cowave_groups.length > 0 && (
               <div className="flex flex-col gap-1">
                 <div className="flex items-center gap-1 flex-wrap">
                   <span className="text-muted-foreground/70 font-medium">CW Groups</span>
-                  <span className="text-muted-foreground/50 text-[9px]">(kinases with correlated activity patterns, r≥0.7):</span>
+                  <span className="text-muted-foreground/50 text-[9px]">(kinases with correlated activity, r≥0.7 — linked to PTM Co-Wave Modules above):</span>
                 </div>
                 <div className="flex items-center gap-3 flex-wrap">
                   {heatmapData.cowave_groups.slice(0, 8).map((grp) => {
                     const color = COWAVE_GROUP_COLORS[grp.group_id % COWAVE_GROUP_COLORS.length];
+                    // v9.48.2: Find matching Co-Wave Module by dominant_peak
+                    const matchingModule = grp.dominant_peak
+                      ? coWaveModules.find((m) => m.peakCondition === grp.dominant_peak)
+                      : undefined;
+                    const moduleColor = matchingModule
+                      ? KINASE_MODULE_COLORS[(matchingModule.id - 1) % KINASE_MODULE_COLORS.length]
+                      : undefined;
                     return (
                       <span
                         key={grp.group_id}
                         className="flex items-center gap-1 cursor-help"
-                        title={`Co-wave Group ${grp.group_id}\n${grp.kinases.join(", ")}\nMean correlation: r=${grp.mean_correlation.toFixed(2)}\n${grp.dominant_peak ? `Dominant peak: ${grp.dominant_peak}` : ""}\n\nKinases in this group show highly correlated temporal activity patterns.`}
+                        title={[
+                          `Co-wave Group G${grp.group_id}`,
+                          `Members: ${grp.kinases.join(", ")}`,
+                          `Mean correlation: r=${grp.mean_correlation.toFixed(2)}`,
+                          grp.dominant_peak ? `Dominant peak: ${grp.dominant_peak}` : "",
+                          matchingModule ? `\n↔ Linked to ${matchingModule.label} in Vector Plot` : "",
+                          matchingModule ? `  (${matchingModule.ptms.length} PTMs with same peak timing)` : "",
+                          "",
+                          "Kinases in this group show highly correlated",
+                          "temporal activity patterns.",
+                        ].filter(Boolean).join("\n")}
                       >
                         <span className={`w-2.5 h-2.5 rounded-sm ${color.bar}`} />
                         <span className={`${color.text} font-medium`}>G{grp.group_id}</span>
                         {grp.dominant_peak && (
                           <span className="text-muted-foreground/70 text-[9px]">@{grp.dominant_peak.replace(/min$/i, "m").replace(/hr$/i, "h")}</span>
+                        )}
+                        {matchingModule && (
+                          <span
+                            className={`text-[8px] px-1 rounded border ${moduleColor!.border} ${moduleColor!.text}`}
+                            title={`This CW Group's kinases peak at ${grp.dominant_peak}, matching ${matchingModule.label} in the Vector Plot chart above.`}
+                          >
+                            ≈M{matchingModule.id}
+                          </span>
                         )}
                         <span className="opacity-40 text-[9px]">({grp.size})</span>
                       </span>
