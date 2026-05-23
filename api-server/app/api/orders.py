@@ -6441,13 +6441,23 @@ async def kinase_activity_heatmap(
                             group.append(j)
                             visited.add(j)
                     if len(group) >= 2:
+                        # v9.48.1: Compute dominant peak condition for this group
+                        _grp_kinases = [valid_kinase_names[idx] for idx in group]
+                        _peak_counts: dict[str, int] = {}
+                        for _gk in _grp_kinases:
+                            _ks_match = next((ks for ks in kinase_scores if ks["kinase"] == _gk), None)
+                            if _ks_match and _ks_match.get("peak_condition"):
+                                _pc = _ks_match["peak_condition"]
+                                _peak_counts[_pc] = _peak_counts.get(_pc, 0) + 1
+                        _dominant_peak = max(_peak_counts, key=_peak_counts.get) if _peak_counts else ""
                         cowave_groups.append({
                             "group_id": group_id,
-                            "kinases": [valid_kinase_names[idx] for idx in group],
+                            "kinases": _grp_kinases,
                             "size": len(group),
                             "mean_correlation": round(float(np.mean(
                                 [corr[a][b] for a in group for b in group if a != b and not np.isnan(corr[a][b])]
                             )), 3) if len(group) > 1 else 1.0,
+                            "dominant_peak": _dominant_peak,
                         })
                         group_id += 1
             except Exception:

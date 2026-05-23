@@ -4238,6 +4238,7 @@ interface CowaveGroupEntry {
   kinases: string[];
   size: number;
   mean_correlation: number;
+  dominant_peak?: string;
 }
 
 interface KinaseHeatmapData {
@@ -4780,7 +4781,7 @@ function KinaseActivityHeatmapView({
               )}
               {/* Main header row */}
               <tr className="border-b border-border">
-                <th className="w-2 px-0 py-1" title="Co-wave Group">CW</th>
+                <th className="w-2 px-0 py-1" title="Co-wave Group: Color bar indicates kinases with correlated temporal activity patterns (r≥0.7). Same color = same group. Hover over the bar or G-label for details.">CW</th>
                 <th className="text-left px-2 py-1 sticky left-0 bg-background z-10 min-w-[100px]">Kinase</th>
                 <th className="text-center px-1 py-1 w-8" title="Direction: activation (▲) or inactivation (▼)">Dir</th>
                 <th className="text-center px-1 py-1 w-10">#Sub</th>
@@ -4813,12 +4814,24 @@ function KinaseActivityHeatmapView({
                   >
                     {/* Co-wave Group Color Bar */}
                     <td className="px-0 py-0 w-2">
-                      {cwColor ? (
-                        <div
-                          className={`w-1.5 h-full min-h-[20px] rounded-sm ${cwColor.bar}`}
-                          title={`Co-wave Group ${cwGroup}`}
-                        />
-                      ) : (
+                      {cwColor ? (() => {
+                        const grpInfo = heatmapData.cowave_groups?.find(g => g.group_id === cwGroup);
+                        const tipLines = [
+                          `Co-wave Group G${cwGroup}`,
+                          grpInfo?.dominant_peak ? `Peak: ${grpInfo.dominant_peak}` : "",
+                          grpInfo ? `Members (${grpInfo.size}): ${grpInfo.kinases.slice(0, 8).join(", ")}${grpInfo.kinases.length > 8 ? "..." : ""}` : "",
+                          grpInfo ? `Correlation: r=${grpInfo.mean_correlation.toFixed(2)}` : "",
+                          "",
+                          "Kinases in this group have highly correlated",
+                          "temporal activity patterns (r≥0.7).",
+                        ].filter(Boolean).join("\n");
+                        return (
+                          <div
+                            className={`w-1.5 h-full min-h-[20px] rounded-sm ${cwColor.bar}`}
+                            title={tipLines}
+                          />
+                        );
+                      })() : (
                         <div className="w-1.5 min-h-[20px]" />
                       )}
                     </td>
@@ -4826,9 +4839,17 @@ function KinaseActivityHeatmapView({
                     <td className="px-2 py-1 sticky left-0 bg-background z-10 font-medium whitespace-nowrap">
                       {selectedKinases.has(ks.kinase) && <span className="text-cyan-400 mr-1">●</span>}
                       {ks.kinase}
-                      {cwColor && (
-                        <span className={`ml-1 text-[8px] ${cwColor.text} opacity-70`}>G{cwGroup}</span>
-                      )}
+                      {cwColor && (() => {
+                        const grpInfo = heatmapData.cowave_groups?.find(g => g.group_id === cwGroup);
+                        return (
+                          <span
+                            className={`ml-1 text-[8px] ${cwColor.text} opacity-70 cursor-help`}
+                            title={grpInfo ? `G${cwGroup}: ${grpInfo.kinases.slice(0, 5).join(", ")}${grpInfo.kinases.length > 5 ? "..." : ""}${grpInfo.dominant_peak ? " | peak@" + grpInfo.dominant_peak : ""}` : `Group ${cwGroup}`}
+                          >
+                            G{cwGroup}
+                          </span>
+                        );
+                      })()}
                     </td>
                     {/* Direction indicator */}
                     <td className="text-center px-0.5 py-0.5">
@@ -4894,24 +4915,32 @@ function KinaseActivityHeatmapView({
               </span>
               <span className="ml-2">(Weighted mean Log2FC)</span>
             </div>
-            {/* Co-wave group legend */}
+             {/* Co-wave group legend — v9.48.1: enhanced with dominant_peak and explanation */}
             {heatmapData.cowave_groups && heatmapData.cowave_groups.length > 0 && (
-              <div className="flex items-center gap-2">
-                <span className="text-muted-foreground/70">CW Groups:</span>
-                {heatmapData.cowave_groups.slice(0, 6).map((grp) => {
-                  const color = COWAVE_GROUP_COLORS[grp.group_id % COWAVE_GROUP_COLORS.length];
-                  return (
-                    <span
-                      key={grp.group_id}
-                      className="flex items-center gap-0.5"
-                      title={`Group ${grp.group_id}: ${grp.kinases.join(", ")}\nMean r=${grp.mean_correlation.toFixed(2)}`}
-                    >
-                      <span className={`w-2 h-2 rounded-sm ${color.bar}`} />
-                      <span className={color.text}>G{grp.group_id}</span>
-                      <span className="opacity-50">({grp.size})</span>
-                    </span>
-                  );
-                })}
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center gap-1 flex-wrap">
+                  <span className="text-muted-foreground/70 font-medium">CW Groups</span>
+                  <span className="text-muted-foreground/50 text-[9px]">(kinases with correlated activity patterns, r≥0.7):</span>
+                </div>
+                <div className="flex items-center gap-3 flex-wrap">
+                  {heatmapData.cowave_groups.slice(0, 8).map((grp) => {
+                    const color = COWAVE_GROUP_COLORS[grp.group_id % COWAVE_GROUP_COLORS.length];
+                    return (
+                      <span
+                        key={grp.group_id}
+                        className="flex items-center gap-1 cursor-help"
+                        title={`Co-wave Group ${grp.group_id}\n${grp.kinases.join(", ")}\nMean correlation: r=${grp.mean_correlation.toFixed(2)}\n${grp.dominant_peak ? `Dominant peak: ${grp.dominant_peak}` : ""}\n\nKinases in this group show highly correlated temporal activity patterns.`}
+                      >
+                        <span className={`w-2.5 h-2.5 rounded-sm ${color.bar}`} />
+                        <span className={`${color.text} font-medium`}>G{grp.group_id}</span>
+                        {grp.dominant_peak && (
+                          <span className="text-muted-foreground/70 text-[9px]">@{grp.dominant_peak.replace(/min$/i, "m").replace(/hr$/i, "h")}</span>
+                        )}
+                        <span className="opacity-40 text-[9px]">({grp.size})</span>
+                      </span>
+                    );
+                  })}
+                </div>
               </div>
             )}
           </div>
@@ -5044,7 +5073,7 @@ function KinaseActivityHeatmapView({
           </div>
           <div className="text-muted-foreground">High Conf (≥70%)</div>
         </div>
-        <div className="bg-muted/30 rounded p-2 text-center">
+        <div className="bg-muted/30 rounded p-2 text-center cursor-help" title="Co-wave Groups: Clusters of kinases whose substrate activity profiles are highly correlated (Pearson r≥0.7). Kinases in the same group show similar temporal activation/inactivation patterns.">
           <div className="text-lg font-bold text-fuchsia-400">
             {heatmapData.cowave_groups?.length ?? 0}
           </div>
