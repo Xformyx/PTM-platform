@@ -42,6 +42,7 @@ import {
   Scissors,
   Activity,
   Boxes,
+  RefreshCw,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -318,6 +319,9 @@ interface GlobalKinaseModuleResponse {
   temporal_cascade?: TemporalCascade;
   effector_proteins?: EffectorProtein[];
   wave_kinase_profile?: WaveKinaseProfile[];
+  // v9.44: Cache metadata
+  _cached?: boolean;
+  _cache_hash?: string;
 }
 
 interface WaveKinaseProfile {
@@ -705,7 +709,7 @@ export default function KinaseModuleAnalysis({
   // ── Global Kinase Module annotation call (batched to avoid 524 timeout) ─
   const GLOBAL_ANNOTATE_BATCH_SIZE = 150; // PTMs per batch (keeps each call < 60s)
 
-  const runGlobalKinaseModules = useCallback(async () => {
+  const runGlobalKinaseModules = useCallback(async (forceRefresh = false) => {
     setGlobalKinaseLoading(true);
     setGlobalKinaseError(null);
     setGlobalKinaseBatchProgress(null);
@@ -719,16 +723,20 @@ export default function KinaseModuleAnalysis({
 
       // If PTM count is small enough, do a single call (no batching needed)
       if (allPtms.length <= GLOBAL_ANNOTATE_BATCH_SIZE) {
-        setGlobalKinaseBatchProgress({ current: 1, total: 1, phase: "Annotating..." });
+        setGlobalKinaseBatchProgress({ current: 1, total: 1, phase: forceRefresh ? "Re-analyzing..." : "Annotating..." });
         const result = await api.post<GlobalKinaseModuleResponse>(
           `/orders/${orderId}/global-kinase-modules`,
           {
             ptms: allPtms.map((p) => ({ gene: p.gene, position: p.position })),
             cowave_modules: cowaveModulesPayload,
+            force_refresh: forceRefresh,
           }
         );
         setGlobalKinaseResult(result);
         setActiveTab("kinaseModules");
+        if (result._cached) {
+          console.log("[GLOBAL-KINASE] Loaded from cache (instant). Use force_refresh to re-run.");
+        }
         return;
       }
 
@@ -754,6 +762,7 @@ export default function KinaseModuleAnalysis({
           {
             ptms: batches[bIdx],
             cowave_modules: cowaveModulesPayload,
+            force_refresh: forceRefresh,
           }
         );
         batchResults.push(batchResult);
@@ -1062,7 +1071,7 @@ export default function KinaseModuleAnalysis({
               size="sm"
               className="text-xs h-7 border-amber-400 text-amber-700 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-900/20"
               disabled={globalKinaseLoading || checkedPtmList.length === 0}
-              onClick={runGlobalKinaseModules}
+              onClick={() => runGlobalKinaseModules(false)}
             >
               {globalKinaseLoading ? (
                 <Loader2 className="h-3 w-3 animate-spin mr-1" />
@@ -1074,6 +1083,19 @@ export default function KinaseModuleAnalysis({
                 {checkedPtmList.length} PTMs
               </Badge>
             </Button>
+            {globalKinaseResult && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-xs h-7 text-muted-foreground hover:text-amber-600"
+                disabled={globalKinaseLoading}
+                onClick={() => runGlobalKinaseModules(true)}
+                title="Ignore cache and re-run full analysis"
+              >
+                <RefreshCw className="h-3 w-3 mr-1" />
+                Refresh
+              </Button>
+            )}
           </div>
         </div>
 
@@ -1963,7 +1985,7 @@ function CascadeView({
   motifError: string | null;
   globalKinaseResult: GlobalKinaseModuleResponse | null;
   globalKinaseLoading: boolean;
-  onRunGlobalKinase: () => void;
+  onRunGlobalKinase: (forceRefresh?: boolean) => void;
   isUbi?: boolean;
   highlightedKinase?: string | null;
   kinaseToReceptors?: Record<string, string[]>;
@@ -2017,7 +2039,7 @@ function CascadeView({
             size="sm"
             className={`text-xs h-7 ${isUbi ? "bg-orange-600 hover:bg-orange-700" : ""}`}
             disabled={globalKinaseLoading}
-            onClick={onRunGlobalKinase}
+            onClick={() => onRunGlobalKinase()}
           >
             {globalKinaseLoading ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Network className="h-3 w-3 mr-1" />}
             {isUbi ? "Build Ubi Cascade" : "Build Temporal Cascade"}
@@ -2592,7 +2614,7 @@ function GlobalKinaseModulesPanel({
 }: {
   result: GlobalKinaseModuleResponse | null;
   loading: boolean;
-  onRun: () => void;
+  onRun: (forceRefresh?: boolean) => void;
   ptmCount: number;
   vectorData: PtmTimeSeriesRow[];
   conditions: string[];
@@ -2622,7 +2644,7 @@ function GlobalKinaseModulesPanel({
           size="sm"
           className={`text-xs ${isUbi ? "bg-orange-600 hover:bg-orange-700" : ""}`}
           disabled={ptmCount === 0}
-          onClick={onRun}
+          onClick={() => onRun()}
         >
           {isUbi ? <Boxes className="h-3 w-3 mr-1" /> : <Sparkles className="h-3 w-3 mr-1" />}
           {isUbi ? `Run E3 Annotate (${ptmCount} sites)` : `Run Global Annotate (${ptmCount} PTMs)`}
@@ -3148,7 +3170,7 @@ function GlobalKinaseModulesPanel({
           size="sm"
           className="text-xs"
           disabled={loading}
-          onClick={onRun}
+          onClick={() => onRun(true)}
         >
           {loading ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Sparkles className="h-3 w-3 mr-1" />}
           Re-run Analysis

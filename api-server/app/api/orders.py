@@ -1139,6 +1139,13 @@ async def run_stage(
     order.current_stage = body.stage
     order.progress_pct = 0
     order.error_message = None
+
+    # v9.44: Invalidate kinase analysis cache when re-running from preprocessing
+    if body.stage == "preprocessing":
+        order.kinase_analysis_data = None
+        order.receptor_inference_data = None
+        order.signal_propagation_data = None
+
     await db.commit()
 
     from celery import Celery as CeleryClass
@@ -5184,9 +5191,44 @@ async def global_kinase_modules(
 
     ptms = body.get("ptms", [])
     cowave_modules_input = body.get("cowave_modules", [])
+    force_refresh = body.get("force_refresh", False)
 
     if not ptms:
         raise HTTPException(status_code=400, detail="ptms list is required")
+
+    # ── v9.44: Cache check ───────────────────────────────────────────────────────
+    # Return cached result if available and input hasn't changed
+    import hashlib as _hashlib
+    _ptm_keys_sorted = sorted(f"{p.get('gene','').upper()}_{p.get('position','')}" for p in ptms)
+    _cowave_keys_sorted = sorted(
+        f"{cw.get('id',0)}:{','.join(sorted(cw.get('ptm_keys',[])))}"
+        for cw in cowave_modules_input
+    ) if cowave_modules_input else []
+    _cache_input_str = f"{len(ptms)}|{'|'.join(_ptm_keys_sorted[:50])}|{'|'.join(_cowave_keys_sorted[:20])}"
+    _cache_hash = _hashlib.md5(_cache_input_str.encode()).hexdigest()[:12]
+
+    if not force_refresh and order.kinase_analysis_data:
+        _cached = order.kinase_analysis_data
+        _cached_hash = _cached.get("_cache_hash", "")
+        if _cached_hash == _cache_hash:
+            _log.info(f"[GLOBAL-KINASE] Cache HIT for order {order_id} (hash={_cache_hash})")
+            return {
+                "order_id": order_id,
+                "kinase_modules": _cached.get("kinase_modules", []),
+                "unassigned_ptms": _cached.get("unassigned_ptms", []),
+                "annotation_details": _cached.get("annotation_details", []),
+                "summary": _cached.get("summary", {}),
+                "cowave_cross_analysis": _cached.get("cowave_cross_analysis", {}),
+                "temporal_cascade": _cached.get("temporal_cascade", {}),
+                "effector_proteins": _cached.get("effector_proteins", []),
+                "wave_kinase_profile": _cached.get("wave_kinase_profile", []),
+                "_cached": True,
+                "_cache_hash": _cache_hash,
+            }
+        else:
+            _log.info(f"[GLOBAL-KINASE] Cache MISS for order {order_id} (stored={_cached_hash}, current={_cache_hash})")
+    else:
+        _log.info(f"[GLOBAL-KINASE] No cache or force_refresh for order {order_id}")
 
     _log.info(f"[GLOBAL-KINASE] Starting global kinase module analysis: {len(ptms)} PTMs")
 
@@ -6022,7 +6064,10 @@ async def global_kinase_modules(
                 "summary": summary,
                 "effector_proteins": effector_proteins,
                 "wave_kinase_profile": wave_kinase_profile,
+                "unassigned_ptms": unassigned,
+                "annotation_details": annotations,
                 "saved_at": _dt.utcnow().isoformat(),
+                "_cache_hash": _cache_hash,
             }
             await db.commit()
             _log.info(f"[GLOBAL-KINASE] Saved kinase_analysis_data to order {order_id} DB")
