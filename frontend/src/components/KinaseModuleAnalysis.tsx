@@ -612,8 +612,9 @@ export default function KinaseModuleAnalysis({
   const [activeTab, setActiveTab] = useState<"cowave" | "lookup" | "cascade" | "kinaseModules" | "signalFlow" | "heatmap" | "cascadeTimeline">("cowave");
   const [expandedModules, setExpandedModules] = useState<Set<string>>(new Set());
   const [manualSelection, setManualSelection] = useState<Set<string>>(new Set());
-  const [internalHighlightedKinase, setInternalHighlightedKinase] = useState<string | null>(null);
-
+   const [internalHighlightedKinase, setInternalHighlightedKinase] = useState<string | null>(null);
+  const [highlightedCwGroup, setHighlightedCwGroup] = useState<number | null>(null);
+  const [highlightedCwGroupKinases, setHighlightedCwGroupKinases] = useState<string[]>([]);
   // Merge external highlightedKinase (from receptor panel) with internal (from heatmap/timeline click)
   const effectiveHighlightedKinase = internalHighlightedKinase || highlightedKinase || null;
 
@@ -1598,6 +1599,8 @@ export default function KinaseModuleAnalysis({
             vectorData={vectorData}
             conditions={conditions}
             coWaveModules={coWaveModules}
+            highlightedCwGroup={highlightedCwGroup}
+            highlightedCwGroupKinases={highlightedCwGroupKinases}
           />
         )}
 
@@ -1624,8 +1627,10 @@ export default function KinaseModuleAnalysis({
             vectorData={vectorData}
             conditions={conditions}
             coWaveModules={coWaveModules}
-            onKinaseSelect={(kinase) => {
+            onKinaseSelect={(kinase, cwGroup, cwKinases) => {
               setInternalHighlightedKinase(kinase);
+              setHighlightedCwGroup(cwGroup ?? null);
+              setHighlightedCwGroupKinases(cwKinases || []);
               setActiveTab("signalFlow");
             }}
           />
@@ -3317,6 +3322,8 @@ function SignalFlowView({
   vectorData = [],
   conditions = [],
   coWaveModules = [],
+  highlightedCwGroup = null,
+  highlightedCwGroupKinases = [],
 }: {
   inferredReceptors: InferredReceptor[];
   globalKinaseResult: GlobalKinaseModuleResponse | null;
@@ -3324,6 +3331,8 @@ function SignalFlowView({
   vectorData?: PtmTimeSeriesRow[];
   conditions?: string[];
   coWaveModules?: CoWaveModule[];
+  highlightedCwGroup?: number | null;
+  highlightedCwGroupKinases?: string[];
 }) {
   const [selectedReceptor, setSelectedReceptor] = useState<string | null>(null);
   const [showEffectors, setShowEffectors] = useState(true);
@@ -3663,6 +3672,28 @@ function SignalFlowView({
         </div>
       </div>
 
+      {/* v9.48.2: CW Group highlight banner from Heatmap click */}
+      {highlightedCwGroup !== null && highlightedCwGroupKinases.length > 0 && (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-cyan-500/50 bg-cyan-900/20">
+          <span className="text-[11px] font-semibold text-cyan-300">CW Group G{highlightedCwGroup}</span>
+          <span className="text-[10px] text-cyan-400/80">({highlightedCwGroupKinases.length} kinases):</span>
+          <div className="flex flex-wrap gap-1">
+            {highlightedCwGroupKinases.map((k) => (
+              <span key={k} className="text-[9px] px-1.5 py-0.5 rounded bg-cyan-800/40 text-cyan-200 border border-cyan-500/30">
+                {k}
+              </span>
+            ))}
+          </div>
+          <button
+            className="ml-auto text-[9px] text-muted-foreground hover:text-foreground"
+            onClick={() => { /* clear is handled by parent */ }}
+            title="This banner shows the CW Group from Heatmap click. Kinases in this group are highlighted below."
+          >
+            ?
+          </button>
+        </div>
+      )}
+
       {/* Receptor selector — group-aware */}
       <div className="flex flex-wrap gap-1.5">
         <button
@@ -3827,16 +3858,26 @@ function SignalFlowView({
                       const kinaseKey = kinase.toUpperCase();
                       const ptms = kinaseToPtms[kinaseKey] || [];
                       const isUnique = primary.unique_kinases?.includes(kinase);
+                      const isCwHighlighted = highlightedCwGroupKinases.some(
+                        (k) => k.toUpperCase() === kinaseKey
+                      );
 
                       return (
                         <div key={kinase} className="space-y-1">
                           <div className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium ${
-                            isUnique
+                            isCwHighlighted
+                              ? "border-2 border-cyan-400 bg-cyan-900/30 text-cyan-200 ring-1 ring-cyan-400/50"
+                              : isUnique
                               ? "border-2 border-amber-400 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300"
                               : "border border-dashed border-amber-400/50 bg-amber-50/50 dark:bg-amber-900/10 text-amber-700/60 dark:text-amber-300/60"
                           }`}>
                             <Zap className="h-2.5 w-2.5" />
                             {kinase}
+                            {isCwHighlighted && highlightedCwGroup !== null && (
+                              <span className="ml-0.5 text-[8px] px-1 py-px rounded bg-cyan-700/50 text-cyan-200 border border-cyan-500/40">
+                                G{highlightedCwGroup}
+                              </span>
+                            )}
                             {isUnique && <span className="ml-0.5 text-[8px] text-amber-500">★</span>}
                             {kinaseConfidence[kinaseKey]?.cowave_boost > 0.3 && (
                               <span
@@ -4557,7 +4598,7 @@ function KinaseActivityHeatmapView({
   globalKinaseResult: GlobalKinaseModuleResponse;
   vectorData: PtmTimeSeriesRow[];
   conditions: string[];
-  onKinaseSelect?: (kinase: string) => void;
+  onKinaseSelect?: (kinase: string, cwGroup?: number, cwGroupKinases?: string[]) => void;
   coWaveModules?: CoWaveModule[];
 }) {
   const [heatmapData, setHeatmapData] = useState<KinaseHeatmapData | null>(null);
@@ -4841,7 +4882,10 @@ function KinaseActivityHeatmapView({
                         else next.add(ks.kinase);
                         return next;
                       });
-                      onKinaseSelect?.(ks.kinase);
+                      const cwKinases = cwGroup >= 0 && heatmapData?.cowave_groups
+                        ? heatmapData.cowave_groups.find(g => g.group_id === cwGroup)?.kinases || []
+                        : [];
+                      onKinaseSelect?.(ks.kinase, cwGroup >= 0 ? cwGroup : undefined, cwKinases);
                     }}
                   >
                     {/* Co-wave Group Color Bar */}
