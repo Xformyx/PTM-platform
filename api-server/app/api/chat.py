@@ -79,6 +79,21 @@ Effectors are non-PTM proteins from STRING (score ≥ 400) / BioGRID PPI partner
 - Multi-source (+1): kinase found in ≥ 2 databases
 → Strong (≥ 4), Moderate (2–3), Weak (≤ 1)
 
+**Kinase Activity Heatmap**: Computes per-kinase temporal activity scores by
+weighting each substrate's Log2FC by its activity class (de_novo=1.5x, regulated=1.2x,
+coordinated=1.0x, minor=0.5x). Shows how each kinase's overall activity changes over time.
+- Direction: activation (▲), inactivation (▼), or neutral
+- Coherence: intra-kinase substrate temporal correlation (-1 to +1)
+- Confidence: weighted evidence score based on substrate count, source quality
+
+**Co-Wave Groups (CW Groups)**: Kinases whose temporal activity score profiles are
+highly correlated (Pearson r≥0.7) are grouped together. Same CW Group = substrates
+phosphorylated by these kinases move together over time. This implies:
+- Shared upstream signaling input (common activating signal)
+- Participation in the same signaling cascade
+- Coordinated temporal regulation of downstream substrates
+Peak Synchronization: identifies timepoints where multiple kinases reach peak activity.
+
 **Temporal Co-movement**: Clusters PTMs by temporal profile similarity using
 correlation-based clustering. 8 canonical patterns: early_transient, sustained_up,
 delayed_response, biphasic, oscillatory, sustained_down, late_onset, gradual_decline.
@@ -272,6 +287,77 @@ def _build_kinase_analysis_context(order: Order) -> str:
     text = "\n".join(lines)
     if len(text) > MAX_KINASE_CHARS:
         text = text[:MAX_KINASE_CHARS] + "\n... [truncated]"
+    return text
+
+
+def _build_kinase_activity_heatmap_context(order: Order) -> str:
+    """Build Kinase Activity Heatmap context from DB (order.kinase_activity_heatmap).
+    Contains per-kinase temporal activity scores, CW Groups, coherence, and peak sync."""
+    heatmap = order.kinase_activity_heatmap
+    if not heatmap:
+        return ""
+
+    lines = []
+    conditions = heatmap.get("conditions", [])
+    kinase_scores = heatmap.get("kinase_scores", [])
+    cowave_groups = heatmap.get("cowave_groups", [])
+    peak_sync = heatmap.get("peak_sync", {})
+
+    if conditions:
+        lines.append(f"Time conditions: {', '.join(conditions)}")
+
+    # Co-Wave Groups (kinases with correlated temporal substrate activity, r≥0.7)
+    if cowave_groups:
+        lines.append(f"\nCo-Wave Groups ({len(cowave_groups)} groups detected):")
+        lines.append("(Kinases in the same CW Group have substrates whose phosphorylation")
+        lines.append(" levels move together over time — Pearson r≥0.7)")
+        for grp in cowave_groups:
+            gid = grp.get("group_id", "?")
+            kinases = grp.get("kinases", [])
+            size = grp.get("size", 0)
+            mean_corr = grp.get("mean_correlation", 0)
+            dom_peak = grp.get("dominant_peak", "")
+            lines.append(
+                f"  G{gid}: {', '.join(kinases)} "
+                f"(size={size}, r={mean_corr:.2f}, dominant_peak={dom_peak})"
+            )
+
+    # Peak Synchronization
+    if peak_sync:
+        lines.append(f"\nPeak Synchronization (kinases peaking at same timepoint):")
+        for cond, info in peak_sync.items():
+            ks_list = info.get("kinases", []) if isinstance(info, dict) else []
+            count = info.get("count", len(ks_list)) if isinstance(info, dict) else 0
+            lines.append(f"  {cond}: {count} kinases — {', '.join(ks_list[:10])}")
+
+    # Per-kinase activity scores
+    if kinase_scores:
+        lines.append(f"\nKinase Activity Scores ({len(kinase_scores)} kinases):")
+        lines.append("(Weighted mean Log2FC of substrates per timepoint; positive=activating, negative=inhibitory)")
+        for ks in kinase_scores[:40]:  # Top 40 kinases
+            kinase = ks.get("kinase", "")
+            scores = ks.get("scores", {})
+            sub_count = ks.get("substrate_count", 0)
+            confidence = ks.get("confidence", 0)
+            coherence = ks.get("coherence", 0)
+            direction = ks.get("direction", "")
+            peak_cond = ks.get("peak_condition", "")
+            peak_score = ks.get("peak_score", 0)
+            cw_group = ks.get("cowave_group", -1)
+
+            score_str = ", ".join(f"{c}={scores.get(c, 0):.2f}" for c in conditions)
+            cw_str = f", CW=G{cw_group}" if cw_group >= 0 else ""
+            lines.append(
+                f"  {kinase}: [{score_str}] "
+                f"(#sub={sub_count}, conf={confidence:.0%}, coh={coherence:.2f}, "
+                f"dir={direction}, peak={peak_cond}@{peak_score:.2f}{cw_str})"
+            )
+        if len(kinase_scores) > 40:
+            lines.append(f"  ... and {len(kinase_scores) - 40} more kinases")
+
+    text = "\n".join(lines)
+    if len(text) > 8000:
+        text = text[:8000] + "\n... [truncated]"
     return text
 
 
@@ -483,6 +569,11 @@ async def _assemble_context(
         if kinase_file:
             sections.append("[KINASE MODULE ANALYSIS]\n" + kinase_file)
 
+    # 5b. Kinase Activity Heatmap — temporal activity scores, CW Groups, coherence (from DB)
+    heatmap_ctx = _build_kinase_activity_heatmap_context(order)
+    if heatmap_ctx:
+        sections.append("[KINASE ACTIVITY HEATMAP: TEMPORAL SCORES & CO-WAVE GROUPS]\n" + heatmap_ctx)
+
     # 6. Signal Flow — receptor → kinase → substrate cascade (from DB)
     signal_flow = _build_signal_flow_context(order)
     if signal_flow:
@@ -529,8 +620,9 @@ SYSTEM_PROMPT_TEMPLATE = """당신은 POTATO AI입니다. PTM-Vector 분석 플�
 7. 방법론 질문에는 Pipeline Methodology 섹션을 참조하세요.
 8. 문헌 기반 답변 시 RAG collection 출처를 인용하세요.
 9. 데이터가 부족하면 솔직하게 "이 부분은 데이터가 부족해서 확실하게 말씀드리기 어렵네요" 라고 말하세요.
-10. 반드시 아래 제공된 [SIGNAL FLOW], [KINASE MODULE ANALYSIS], [ENRICHED PTM DATA] 섹션의 실제 데이터를 참조하여 답변하세요. 데이터에 있는 정보를 "없다"고 말하지 마세요.
-11. {language_instruction}
+10. 반드시 아래 제공된 [SIGNAL FLOW], [KINASE MODULE ANALYSIS], [KINASE ACTIVITY HEATMAP], [ENRICHED PTM DATA] 섹션의 실제 데이터를 참조하여 답변하세요. 데이터에 있는 정보를 "없다"고 말하지 마세요.
+11. [KINASE ACTIVITY HEATMAP] 섹션에는 각 kinase의 시간대별 activity score, Co-Wave Group (CW Group) 정보, coherence, direction, peak synchronization 데이터가 있습니다. 같은 CW Group에 속한 kinase들은 substrate의 phosphorylation 패턴이 시간적으로 상관관계(r≥0.7)를 보이므로, 이들은 같은 signaling cascade에 속하거나 공통 upstream signal에 반응하는 것으로 해석하세요.
+12. {language_instruction}
 
 {context}
 """
@@ -794,12 +886,14 @@ async def get_chat_context_info(
     has_kinase_db = bool(order.kinase_analysis_data and order.kinase_analysis_data.get("kinase_modules"))
     has_signal_flow = bool(order.receptor_inference_data and order.receptor_inference_data.get("receptors"))
     has_signal_prop = bool(order.signal_propagation_data)
+    has_heatmap = bool(order.kinase_activity_heatmap and order.kinase_activity_heatmap.get("kinase_scores"))
 
     available = {
         "report": (output_dir / f"comprehensive_report{file_suffix}.md").exists()
                   or (output_dir / "final_report.md").exists(),
         "enriched_ptms": (output_dir / f"enriched_ptm_data{file_suffix}.json").exists(),
         "kinase_modules": has_kinase_db or (output_dir / f"global_kinase_modules{file_suffix}.json").exists(),
+        "kinase_activity_heatmap": has_heatmap,
         "signal_flow": has_signal_flow,
         "signal_propagation": has_signal_prop,
         "comovement": (output_dir / f"temporal_comovement{file_suffix}.json").exists(),
