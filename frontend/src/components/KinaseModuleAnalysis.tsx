@@ -4582,14 +4582,13 @@ function CascadeTimelineView({
           {conditions.map((cond, idx) => {
             const group = phaseGroups[cond] || [];
             const colors = phaseColors[idx] || phaseColors[3];
-            const topKinases = group.slice(0, 12); // Show top 12 per phase
             return (
               <div key={cond} className={`rounded-lg border p-2 ${colors.bg} ${colors.border} min-h-[120px]`}>
                 <div className={`text-[9px] font-semibold mb-2 ${colors.text}`}>
                   {phaseLabels[idx] || `Phase ${idx + 1}`} ({group.length})
                 </div>
-                <div className="space-y-1">
-                  {topKinases.map(entry => (
+                <div className="space-y-1 max-h-[500px] overflow-y-auto">
+                  {group.map(entry => (
                     <div
                       key={entry.canonical}
                       className="flex items-center gap-1 text-[9px] cursor-pointer hover:bg-foreground/5 rounded px-1 py-0.5 transition-colors"
@@ -4603,9 +4602,6 @@ function CascadeTimelineView({
                       <span className="text-muted-foreground">{entry.peakScore > 0 ? "+" : ""}{entry.peakScore.toFixed(1)}</span>
                     </div>
                   ))}
-                  {group.length > 12 && (
-                    <div className="text-[8px] text-muted-foreground text-center">+{group.length - 12} more</div>
-                  )}
                 </div>
               </div>
             );
