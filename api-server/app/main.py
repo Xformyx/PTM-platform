@@ -101,6 +101,14 @@ async def _run_migrations(conn) -> None:
         conn, "orders", "kinase_analysis_data",
         "kinase_analysis_data JSON NULL"
     )
+    await _add_column_if_missing(
+        conn, "orders", "receptor_inference_data",
+        "receptor_inference_data JSON NULL"
+    )
+    await _add_column_if_missing(
+        conn, "orders", "kinase_activity_heatmap",
+        "kinase_activity_heatmap JSON NULL"
+    )
     # ptmquant_jobs: user_id FK (table created by create_all, this adds FK if missed)
     await _add_column_if_missing(
         conn, "ptmquant_jobs", "user_id",

@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
-# PTM Platform - Dev Deploy (커밋 없이 수정된 것만 빌드 & 재시작)
-# - 작업 중인 변경(uncommitted + staged)을 감지
-# - 감지 범위: api-server, mcp-server, frontend, workers, gateway, docker-compose.yml,
-#   docker-compose.override.yml(있을 때), .env
-# - 버전은 올리지 않음
+# PTM Platform - Dev Deploy (변경된 것만 빌드 & 재시작, 버전 변경 없음)
+# - git pull / commit: 마지막 dev-deploy 커밋 대비 git diff
+# - 로컬 편집: 마지막 dev-deploy 이후 파일 mtime (uncommitted)
+# - 감지 범위: api-server, mcp-server, frontend, workers, gateway, docker-compose*.yml, .env
 # Usage: ./scripts/dev-deploy.sh [--all]
 
 set -e
@@ -13,6 +12,7 @@ cd "$REPO_ROOT"
 
 VERSION_FILE="$REPO_ROOT/VERSION"
 LAST_DEV_BUILD="$REPO_ROOT/.last-dev-build"
+LAST_DEV_COMMIT="$REPO_ROOT/.last-dev-build-commit"
 
 # compose / .env 변경 시 컨테이너를 다시 만들어줄 앱 스택 (이미지 빌드는 별도 플래그)
 APP_STACK_SERVICES=(
@@ -38,9 +38,55 @@ FIND_EXCLUDE=(
   -not -name "*.pyc"
 )
 
-# 수정된 컴포넌트 감지: 마지막 빌드 이후 실제로 변경된 소스 파일만
-# (node_modules, __pycache__ 등 제외 — npm install/실행 시 불필요 빌드 방지)
-get_changed_components() {
+# 경로 → 컴포넌트 이름
+_add_component_for_path() {
+  local f="$1"
+  local -n _out=$2
+  [[ -z "$f" ]] && return
+  case "$f" in
+    api-server/*)     _out+=("api-server") ;;
+    mcp-server/*)     _out+=("mcp-server") ;;
+    frontend/*)       _out+=("frontend") ;;
+    workers/*)        _out+=("workers") ;;
+    gateway/*)        _out+=("gateway") ;;
+    docker-compose.yml|docker-compose.override.yml|docker-compose.gpu.yml)
+      _out+=("compose-file") ;;
+    .env)             _out+=("dotenv") ;;
+  esac
+}
+
+# git: 마지막 dev-deploy 커밋 이후 + 워킹트리/스테이징 변경
+get_changed_components_git() {
+  local result=()
+  local old_commit=""
+  local diff_files=""
+
+  if [[ -f "$LAST_DEV_COMMIT" ]]; then
+    old_commit=$(tr -d ' \n\r' < "$LAST_DEV_COMMIT")
+  elif [[ -f "$REPO_ROOT/GIT_HASH" ]]; then
+    # 이전 dev-deploy 스크립트는 커밋 파일이 없었음 — GIT_HASH로 한 번 추정
+    local short_hash
+    short_hash=$(tr -d ' \n\r' < "$REPO_ROOT/GIT_HASH")
+    old_commit=$(git rev-parse "$short_hash" 2>/dev/null || true)
+    [[ -n "$old_commit" ]] && echo "  (no .last-dev-build-commit; diff since GIT_HASH $short_hash)" >&2
+  fi
+
+  if [[ -n "$old_commit" ]]; then
+    diff_files=$(git diff --name-only "$old_commit" HEAD 2>/dev/null || true)
+  fi
+  diff_files+=$'\n'$(git diff --name-only HEAD 2>/dev/null || true)
+  diff_files+=$'\n'$(git diff --name-only --cached HEAD 2>/dev/null || true)
+
+  while IFS= read -r f; do
+    _add_component_for_path "$f" result
+  done <<< "$diff_files"
+
+  printf '%s\n' "${result[@]}" | sort -u
+}
+
+# mtime: 마지막 dev-deploy 이후 디스크에서 수정된 파일 (로컬 편집용)
+# Windows에서 git pull 후 mtime이 안 바뀌는 경우가 있어 git 감지와 병행
+get_changed_components_mtime() {
   local result=()
   local marker="$LAST_DEV_BUILD"
 
@@ -55,9 +101,8 @@ get_changed_components() {
     fi
   done
 
-  # 루트 compose / env (마커가 있을 때만 — 최초 실행은 위 디렉터리들로 전체 빌드가 이미 잡힘)
   if [[ -f "$marker" ]]; then
-    local root_files=(docker-compose.yml .env)
+    local root_files=(docker-compose.yml docker-compose.gpu.yml .env)
     [[ -f "$REPO_ROOT/docker-compose.override.yml" ]] && root_files+=(docker-compose.override.yml)
     for f in "${root_files[@]}"; do
       [[ -f "$REPO_ROOT/$f" ]] || continue
@@ -72,6 +117,17 @@ get_changed_components() {
   fi
 
   printf '%s\n' "${result[@]}" | sort -u
+}
+
+get_changed_components() {
+  local git_changed mtime_changed
+  git_changed=$(get_changed_components_git)
+  mtime_changed=$(get_changed_components_mtime)
+
+  if [[ -z "$git_changed" && -z "$mtime_changed" ]]; then
+    return
+  fi
+  printf '%s\n' $git_changed $mtime_changed | sort -u
 }
 
 # Main
@@ -90,10 +146,18 @@ if $FORCE_ALL; then
 else
   CHANGED=($(get_changed_components))
   if [[ ${#CHANGED[@]} -eq 0 ]]; then
-    echo "수정된 파일이 없습니다. --all 로 전체 빌드."
+    echo "변경 없음 (git/mtime). git pull 직후라면: ./scripts/dev-deploy.sh --all"
+    if [[ -f "$LAST_DEV_COMMIT" ]]; then
+      echo "  Last dev-deploy commit: $(cat "$LAST_DEV_COMMIT")"
+    fi
+    echo "  Current HEAD: $(git rev-parse --short HEAD 2>/dev/null || echo '?')"
     exit 0
   fi
   echo "Changed: ${CHANGED[*]}"
+  if [[ -f "$LAST_DEV_COMMIT" ]]; then
+    echo "  Since commit: $(cat "$LAST_DEV_COMMIT" | tr -d ' \n\r' | cut -c1-12)"
+  fi
+  echo "  Current HEAD: $(git rev-parse --short HEAD 2>/dev/null || echo '?')"
 fi
 
 # VERSION 파일에서 현재 버전 읽기 (올리지 않음), per-component로 export
@@ -153,6 +217,6 @@ else
 fi
 
 touch "$LAST_DEV_BUILD"
-# Update git hash for display
+git rev-parse HEAD > "$LAST_DEV_COMMIT" 2>/dev/null || true
 git rev-parse --short HEAD > "$REPO_ROOT/GIT_HASH" 2>/dev/null || true
 echo "Done. (Version: $_a.$_b.$_c.$_d)"

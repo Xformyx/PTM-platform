@@ -69,6 +69,7 @@ Thumbs.db
 .cache/
 .last-deploy
 .last-dev-build
+.last-dev-build-commit
 GIT_HASH
 =1.9.0
 api-server-log-grep.txt
