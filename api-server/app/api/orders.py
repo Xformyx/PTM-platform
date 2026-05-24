@@ -6213,15 +6213,18 @@ async def kinase_activity_heatmap(
 ):
     """Compute Kinase Activity Temporal Scores for heatmap/line chart.
 
-    For each kinase module, aggregate substrate Log2FC values per condition
-    using activity-class-weighted mean. Results are cached in DB.
+    Co-activation Sum scoring: for each kinase, sum the Log2FC of substrates
+    that pass significance threshold (q < 0.05 OR |Log2FC| >= 0.3) per condition.
+    This captures total signal output including both strong and coordinated weak signals.
+    Substrates are classified as exclusive (mapped to 1 kinase) or shared (2+ kinases).
 
     Request body:
       - kinase_modules: [{kinase, ptms: [{gene, position}], confidence_score}]
       - force_refresh: bool (default false)
 
     Response:
-      - kinase_scores: [{kinase, scores: {condition: float}, substrate_count, confidence, peak_condition, peak_score}]
+      - kinase_scores: [{kinase, scores, substrate_count, confidence, peak_condition, peak_score,
+                         coact_counts, exclusive_sums, shared_sums, exclusive_counts, shared_counts}]
       - conditions: [str]  (ordered)
       - _cached: bool
     """
@@ -6312,19 +6315,34 @@ async def kinase_activity_heatmap(
         return float(nums[0]) if nums else c
     conditions_sorted = sorted(all_conditions, key=_cond_sort_key)
 
-    # Activity class weights
-    ACTIVITY_WEIGHTS = {"de_novo": 1.5, "regulated": 1.2, "coordinated": 1.0, "minor": 0.5}
+    # ── Build PTM → kinase reverse map (for exclusive/shared classification) ──
+    ptm_to_kinases: dict[str, list[str]] = {}  # ptm_key -> [kinase_names]
+    for km in kinase_modules:
+        kn = km.get("kinase", "")
+        for ptm in km.get("ptms", []):
+            pk = f"{ptm.get('gene', '').upper()}_{str(ptm.get('position', '')).upper()}"
+            ptm_to_kinases.setdefault(pk, []).append(kn)
 
-    # Compute per-kinase activity score
+    # ── Co-activation Sum Scoring ──
+    # Threshold: include substrate if q < 0.05 OR |Log2FC| >= 0.3
+    FC_THRESHOLD = 0.3
+    Q_THRESHOLD = 0.05
+
     kinase_scores = []
     for km in kinase_modules:
         kinase_name = km.get("kinase", "")
         ptms = km.get("ptms", [])
         confidence = km.get("confidence_score", 0.5)
 
-        # Determine activity class for each PTM
-        weighted_sums: dict[str, float] = {c: 0.0 for c in conditions_sorted}
-        weight_totals: dict[str, float] = {c: 0.0 for c in conditions_sorted}
+        # Per-condition co-activation sum
+        scores: dict[str, float] = {c: 0.0 for c in conditions_sorted}
+        # Per-condition co-activated substrate count
+        coact_counts: dict[str, int] = {c: 0 for c in conditions_sorted}
+        # Per-condition exclusive/shared breakdown
+        exclusive_sums: dict[str, float] = {c: 0.0 for c in conditions_sorted}
+        shared_sums: dict[str, float] = {c: 0.0 for c in conditions_sorted}
+        exclusive_counts: dict[str, int] = {c: 0 for c in conditions_sorted}
+        shared_counts: dict[str, int] = {c: 0 for c in conditions_sorted}
 
         for ptm in ptms:
             ptm_key = f"{ptm.get('gene', '').upper()}_{str(ptm.get('position', '')).upper()}"
@@ -6332,32 +6350,35 @@ async def kinase_activity_heatmap(
             if not ts:
                 continue
 
-            # Determine activity class based on max |Log2FC| and q-value
-            max_abs_fc = max(abs(ts.get(c, 0)) for c in conditions_sorted) if conditions_sorted else 0
-            min_q = min((ptm_qvalues.get(ptm_key, {}).get(c) or 1.0) for c in conditions_sorted)
-            if max_abs_fc >= 1.0 and min_q < 0.05:
-                # Check if detected in control (simplified: if any condition has low FC, it's regulated)
-                act_class = "de_novo"  # simplified — frontend has more nuanced logic
-            elif max_abs_fc >= 0.5:
-                act_class = "coordinated" if len(ptms) >= 3 else "regulated"
-            else:
-                act_class = "minor"
+            # Determine if this PTM is exclusive to this kinase or shared
+            is_exclusive = len(ptm_to_kinases.get(ptm_key, [])) <= 1
 
-            w = ACTIVITY_WEIGHTS.get(act_class, 0.5)
             for c in conditions_sorted:
                 fc = ts.get(c, 0.0)
-                weighted_sums[c] += w * fc
-                weight_totals[c] += w
+                q_val = ptm_qvalues.get(ptm_key, {}).get(c)
 
-        # Compute weighted mean per condition
-        scores = {}
+                # Apply threshold: include if statistically significant OR |FC| >= threshold
+                passes_threshold = False
+                if q_val is not None and q_val < Q_THRESHOLD:
+                    passes_threshold = True
+                elif abs(fc) >= FC_THRESHOLD:
+                    passes_threshold = True
+
+                if passes_threshold:
+                    scores[c] += fc
+                    coact_counts[c] += 1
+                    if is_exclusive:
+                        exclusive_sums[c] += fc
+                        exclusive_counts[c] += 1
+                    else:
+                        shared_sums[c] += fc
+                        shared_counts[c] += 1
+
+        # Round scores
         for c in conditions_sorted:
-            if weight_totals[c] > 0:
-                scores[c] = round(weighted_sums[c] / weight_totals[c], 4)
-            else:
-                scores[c] = 0.0
+            scores[c] = round(scores[c], 4)
 
-        # Peak detection
+        # Peak detection (based on sum)
         if scores:
             peak_cond = max(scores, key=lambda c: abs(scores[c]))
             peak_score = scores[peak_cond]
@@ -6372,6 +6393,11 @@ async def kinase_activity_heatmap(
             "confidence": confidence,
             "peak_condition": peak_cond,
             "peak_score": round(peak_score, 4),
+            "coact_counts": coact_counts,
+            "exclusive_sums": {c: round(v, 3) for c, v in exclusive_sums.items()},
+            "shared_sums": {c: round(v, 3) for c, v in shared_sums.items()},
+            "exclusive_counts": exclusive_counts,
+            "shared_counts": shared_counts,
         })
 
     # ── Co-wave metadata: intra-kinase coherence ──
@@ -6422,7 +6448,8 @@ async def kinase_activity_heatmap(
         valid_kinase_names = []
         for ks_entry in kinase_scores:
             row = [ks_entry["scores"].get(c, 0.0) for c in conditions_sorted]
-            if any(abs(v) > 0.1 for v in row):
+            # With Sum scoring, threshold should be relative to substrate count
+            if any(abs(v) > 0.3 for v in row):
                 score_matrix.append(row)
                 valid_kinase_names.append(ks_entry["kinase"])
         if len(valid_kinase_names) >= 3:
@@ -6471,12 +6498,16 @@ async def kinase_activity_heatmap(
     for ks_entry in kinase_scores:
         ks_entry["cowave_group"] = kinase_to_group.get(ks_entry["kinase"], -1)
 
-    # ── Activation / Inactivation classification ──
+    # ── Activation / Inactivation classification (Sum-based) ──
+    # With Sum scoring, thresholds scale with substrate count.
+    # Use: if peak sum > 0 and co-activated count >= 2 in that condition
     for ks_entry in kinase_scores:
         peak = ks_entry.get("peak_score", 0)
-        if peak > 0.3:
+        peak_cond = ks_entry.get("peak_condition", "")
+        peak_coact = ks_entry.get("coact_counts", {}).get(peak_cond, 0)
+        if peak > 0 and peak_coact >= 2:
             ks_entry["direction"] = "activation"
-        elif peak < -0.3:
+        elif peak < 0 and peak_coact >= 2:
             ks_entry["direction"] = "inactivation"
         else:
             ks_entry["direction"] = "neutral"
@@ -6495,6 +6526,8 @@ async def kinase_activity_heatmap(
         "conditions": conditions_sorted,
         "peak_sync": peak_sync,
         "cowave_groups": cowave_groups,
+        "scoring_method": "coactivation_sum",
+        "scoring_threshold": {"q_value": Q_THRESHOLD, "fc_abs": FC_THRESHOLD},
         "_cache_hash": cache_hash,
         "computed_at": _dt.utcnow().isoformat(),
     }

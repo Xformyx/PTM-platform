@@ -4328,6 +4328,12 @@ interface KinaseActivityScore {
   coherence?: number;
   cowave_group?: number;
   direction?: "activation" | "inactivation" | "neutral";
+  // Co-activation Sum scoring fields
+  coact_counts?: Record<string, number>;  // per-condition co-activated substrate count
+  exclusive_sums?: Record<string, number>;
+  shared_sums?: Record<string, number>;
+  exclusive_counts?: Record<string, number>;
+  shared_counts?: Record<string, number>;
 }
 
 interface PeakSyncEntry {
@@ -4348,6 +4354,8 @@ interface KinaseHeatmapData {
   conditions: string[];
   peak_sync?: Record<string, PeakSyncEntry>;
   cowave_groups?: CowaveGroupEntry[];
+  scoring_method?: string;
+  scoring_threshold?: { q_value: number; fc_abs: number };
   _cached: boolean;
   _cache_hash?: string;
 }
@@ -4908,7 +4916,7 @@ function KinaseActivityHeatmapView({
                 <th className="text-center px-1 py-1 w-10 cursor-help" title="Confidence (Conf)&#10;&#10;Weighted evidence score (0–100%) based on:&#10;  • Number of substrates&#10;  • Source quality (PhosphoSitePlus, KEA3, motif)&#10;  • Annotation depth&#10;Higher = more reliable kinase-substrate assignment.">Conf</th>
                 <th className="text-center px-1 py-1 w-10 cursor-help" title="Coherence (Coh)&#10;&#10;Temporal coherence of substrate phosphorylation patterns (−1 to +1).&#10;Higher = substrates change more synchronously over time.&#10;Negative = substrates show opposing temporal patterns.">Coh</th>
                 {heatmapData.conditions.map((c) => (
-                  <th key={c} className="text-center px-1 py-1 min-w-[40px] max-w-[60px] truncate cursor-help" title={`${c}\n\nKinase Activity Score at this timepoint.\nPositive (warm colors) = activating\nNegative (cool colors) = inhibitory\nBased on weighted substrate phosphorylation changes.`}>
+                  <th key={c} className="text-center px-1 py-1 min-w-[40px] max-w-[60px] truncate cursor-help" title={`${c}\n\nCo-activation Sum at this timepoint.\n= Sum of Log2FC for substrates passing threshold\n  (q<0.05 or |Log2FC|≥0.3)\n\nPositive (warm) = substrates co-activated (phosphorylation up)\nNegative (cool) = substrates co-inhibited (phosphorylation down)\n\nHigher absolute value = more substrates moving together\nOR stronger individual changes (total signal output).`}>
                     {c.replace(/min$/i, "").replace(/hr$/i, "h")}
                   </th>
                 ))}
@@ -5010,11 +5018,26 @@ function KinaseActivityHeatmapView({
                     {/* Heatmap cells */}
                     {heatmapData.conditions.map((c) => {
                       const val = ks.scores[c] || 0;
+                      const coactN = ks.coact_counts?.[c] || 0;
+                      const exclSum = ks.exclusive_sums?.[c] || 0;
+                      const sharedSum = ks.shared_sums?.[c] || 0;
+                      const exclN = ks.exclusive_counts?.[c] || 0;
+                      const sharedN = ks.shared_counts?.[c] || 0;
+                      const tipLines = [
+                        `${ks.kinase} @ ${c}`,
+                        `Co-activation Sum: ${val.toFixed(2)}`,
+                        `Co-activated substrates: ${coactN} / ${ks.substrate_count}`,
+                        ``,
+                        `Exclusive (this kinase only): ${exclN} substrates, sum=${exclSum.toFixed(2)}`,
+                        `Shared (2+ kinases): ${sharedN} substrates, sum=${sharedSum.toFixed(2)}`,
+                        ``,
+                        `Threshold: q<0.05 or |FC|≥0.3`,
+                      ];
                       return (
                         <td
                           key={c}
                           className="px-0 py-0.5 text-center"
-                          title={`${ks.kinase} @ ${c}: ${val.toFixed(3)}`}
+                          title={tipLines.join("\n")}
                         >
                           <div
                             className="mx-auto w-full h-5 flex items-center justify-center text-[9px]"
@@ -5042,7 +5065,7 @@ function KinaseActivityHeatmapView({
               <span className="px-2 py-0.5 rounded text-white" style={{ backgroundColor: getHeatmapColor(maxAbsScore, maxAbsScore) }}>
                 +{maxAbsScore.toFixed(1)}
               </span>
-              <span className="ml-2">(Weighted mean Log2FC)</span>
+              <span className="ml-2">(Co-activation Sum: ΣLog2FC of significant substrates)</span>
             </div>
              {/* Co-wave group legend */}
             {heatmapData.cowave_groups && heatmapData.cowave_groups.length > 0 && (

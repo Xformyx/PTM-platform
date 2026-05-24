@@ -79,10 +79,15 @@ Effectors are non-PTM proteins from STRING (score ≥ 400) / BioGRID PPI partner
 - Multi-source (+1): kinase found in ≥ 2 databases
 → Strong (≥ 4), Moderate (2–3), Weak (≤ 1)
 
-**Kinase Activity Heatmap**: Computes per-kinase temporal activity scores by
-weighting each substrate's Log2FC by its activity class (de_novo=1.5x, regulated=1.2x,
-coordinated=1.0x, minor=0.5x). Shows how each kinase's overall activity changes over time.
-- Direction: activation (▲), inactivation (▼), or neutral
+**Kinase Activity Heatmap**: Computes per-kinase temporal activity scores using
+Co-activation Sum scoring: for each timepoint, sums the Log2FC of substrates that
+pass significance threshold (q<0.05 OR |Log2FC|≥0.3). This captures total signal
+output — both strong individual changes and coordinated weak signals that accumulate.
+Substrates are classified as:
+- Exclusive: mapped to only this kinase (stronger evidence of kinase-specific activity)
+- Shared: mapped to 2+ kinases (may reflect multi-kinase co-regulation)
+Higher absolute sum = more substrates co-activated together OR stronger changes.
+- Direction: activation (▲, substrates co-phosphorylated), inactivation (▼, co-dephosphorylated)
 - Coherence: intra-kinase substrate temporal correlation (-1 to +1)
 - Confidence: weighted evidence score based on substrate count, source quality
 
@@ -330,10 +335,15 @@ def _build_kinase_activity_heatmap_context(order: Order) -> str:
             count = info.get("count", len(ks_list)) if isinstance(info, dict) else 0
             lines.append(f"  {cond}: {count} kinases — {', '.join(ks_list[:10])}")
 
-    # Per-kinase activity scores
+    # Per-kinase activity scores (Co-activation Sum)
+    scoring_method = heatmap.get("scoring_method", "coactivation_sum")
+    threshold_info = heatmap.get("scoring_threshold", {})
     if kinase_scores:
         lines.append(f"\nKinase Activity Scores ({len(kinase_scores)} kinases):")
-        lines.append("(Weighted mean Log2FC of substrates per timepoint; positive=activating, negative=inhibitory)")
+        lines.append(f"Scoring: Co-activation Sum (ΣLog2FC of significant substrates per timepoint)")
+        lines.append(f"Threshold: q<{threshold_info.get('q_value', 0.05)} or |Log2FC|≥{threshold_info.get('fc_abs', 0.3)}")
+        lines.append("Higher absolute value = more substrates co-activated OR stronger individual changes.")
+        lines.append("Substrates classified as Exclusive (mapped to 1 kinase) or Shared (2+ kinases).")
         for ks in kinase_scores[:40]:  # Top 40 kinases
             kinase = ks.get("kinase", "")
             scores = ks.get("scores", {})
@@ -344,12 +354,20 @@ def _build_kinase_activity_heatmap_context(order: Order) -> str:
             peak_cond = ks.get("peak_condition", "")
             peak_score = ks.get("peak_score", 0)
             cw_group = ks.get("cowave_group", -1)
+            coact_counts = ks.get("coact_counts", {})
+            excl_counts = ks.get("exclusive_counts", {})
+            shared_counts = ks.get("shared_counts", {})
 
             score_str = ", ".join(f"{c}={scores.get(c, 0):.2f}" for c in conditions)
             cw_str = f", CW=G{cw_group}" if cw_group >= 0 else ""
+            # Co-activation detail for peak condition
+            peak_coact = coact_counts.get(peak_cond, 0)
+            peak_excl = excl_counts.get(peak_cond, 0)
+            peak_shared = shared_counts.get(peak_cond, 0)
             lines.append(
                 f"  {kinase}: [{score_str}] "
-                f"(#sub={sub_count}, conf={confidence:.0%}, coh={coherence:.2f}, "
+                f"(#sub={sub_count}, coact@peak={peak_coact} [excl={peak_excl}/shared={peak_shared}], "
+                f"conf={confidence:.0%}, coh={coherence:.2f}, "
                 f"dir={direction}, peak={peak_cond}@{peak_score:.2f}{cw_str})"
             )
         if len(kinase_scores) > 40:
@@ -621,7 +639,7 @@ SYSTEM_PROMPT_TEMPLATE = """당신은 POTATO AI입니다. PTM-Vector 분석 플�
 8. 문헌 기반 답변 시 RAG collection 출처를 인용하세요.
 9. 데이터가 부족하면 솔직하게 "이 부분은 데이터가 부족해서 확실하게 말씀드리기 어렵네요" 라고 말하세요.
 10. 반드시 아래 제공된 [SIGNAL FLOW], [KINASE MODULE ANALYSIS], [KINASE ACTIVITY HEATMAP], [ENRICHED PTM DATA] 섹션의 실제 데이터를 참조하여 답변하세요. 데이터에 있는 정보를 "없다"고 말하지 마세요.
-11. [KINASE ACTIVITY HEATMAP] 섹션에는 각 kinase의 시간대별 activity score, Co-Wave Group (CW Group) 정보, coherence, direction, peak synchronization 데이터가 있습니다. 같은 CW Group에 속한 kinase들은 substrate의 phosphorylation 패턴이 시간적으로 상관관계(r≥0.7)를 보이므로, 이들은 같은 signaling cascade에 속하거나 공통 upstream signal에 반응하는 것으로 해석하세요.
+11. [KINASE ACTIVITY HEATMAP] 섹션에는 각 kinase의 시간대별 Co-activation Sum score, Co-Wave Group (CW Group) 정보, coherence, direction, peak synchronization, exclusive/shared substrate 구분 데이터가 있습니다. Score는 유의한 substrate(q<0.05 or |FC|≥0.3)의 Log2FC 합산입니다. Exclusive substrate는 해당 kinase에만 매핑된 것이고, Shared는 2개 이상 kinase에 매핑된 것입니다. 같은 CW Group에 속한 kinase들은 substrate의 phosphorylation 패턴이 시간적으로 상관관계(r≥0.7)를 보이므로, 이들은 같은 signaling cascade에 속하거나 공통 upstream signal에 반응하는 것으로 해석하세요.
 12. {language_instruction}
 
 {context}
