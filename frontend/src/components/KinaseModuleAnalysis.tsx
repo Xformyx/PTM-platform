@@ -4649,7 +4649,7 @@ function CascadeTimelineView({
 
 // ── Kinase Activity Heatmap View ──────────────────────────────────────────────────
 
-type HeatmapSortMode = "peak_score" | "peak_time" | "confidence" | "substrate_count" | "alphabetical" | "cowave_group";
+type HeatmapSortMode = "peak_score" | "peak_time" | "confidence" | "substrate_count" | "alphabetical" | "cowave_group" | "condition_sort";
 type HeatmapViewMode = "heatmap" | "line";
 
 function KinaseActivityHeatmapView({
@@ -4678,6 +4678,7 @@ function KinaseActivityHeatmapView({
    const [selectedKinases, setSelectedKinases] = useState<Set<string>>(new Set());
   const [selectedCwGroupFilter, setSelectedCwGroupFilter] = useState<number | null>(null);
   const [signalTierFilter, setSignalTierFilter] = useState<"all" | "de_novo" | "regulated" | "minor">("all");
+  const [sortByCondition, setSortByCondition] = useState<string | null>(null);
   // Fetch heatmap data from backend
   const fetchHeatmapData = useCallback(async (forceRefresh = false) => {
     setLoading(true);
@@ -4772,10 +4773,26 @@ function KinaseActivityHeatmapView({
             return Math.abs(b.peak_score) - Math.abs(a.peak_score);
           });
           break;
+        case "condition_sort":
+          if (sortByCondition) {
+            scores.sort((a, b) => {
+              // Sort by total activation (|up| + |down|) at this condition
+              const getCondSignal = (ks: KinaseActivityScore) => {
+                if (signalTierFilter === "all") {
+                  return Math.abs(ks.up_sums?.[sortByCondition] || 0) + Math.abs(ks.down_sums?.[sortByCondition] || 0);
+                }
+                const tier = ks.tiers?.[signalTierFilter];
+                if (!tier) return 0;
+                return Math.abs(tier.up_sums?.[sortByCondition] || 0) + Math.abs(tier.down_sums?.[sortByCondition] || 0);
+              };
+              return getCondSignal(b) - getCondSignal(a);
+            });
+          }
+          break;
       }
     }
     return scores.slice(0, topN);
-  }, [heatmapData, sortMode, topN, signalTierFilter, getTierTotalSignal]);
+  }, [heatmapData, sortMode, topN, signalTierFilter, getTierTotalSignal, sortByCondition]);
 
   // Color scale for heatmap: blue(-) → white(0) → red(+)
   const getHeatmapColor = (value: number, maxAbs: number) => {
@@ -5015,8 +5032,19 @@ function KinaseActivityHeatmapView({
                 <th className="text-center px-1 py-1 w-10 cursor-help" title="Confidence (Conf)&#10;&#10;Weighted evidence score (0–100%) based on:&#10;  • Number of substrates&#10;  • Source quality (PhosphoSitePlus, KEA3, motif)&#10;  • Annotation depth&#10;Higher = more reliable kinase-substrate assignment.">Conf</th>
                 <th className="text-center px-1 py-1 w-10 cursor-help" title="Coherence (Coh)&#10;&#10;Temporal coherence of substrate phosphorylation patterns (−1 to +1).&#10;Higher = substrates change more synchronously over time.&#10;Negative = substrates show opposing temporal patterns.">Coh</th>
                 {heatmapData.conditions.map((c) => (
-                  <th key={c} className="text-center px-1 py-1 min-w-[40px] max-w-[60px] truncate cursor-help" title={`${c}\n\nCo-activation Sum at this timepoint.\n= Sum of Log2FC for substrates passing threshold\n  (q<0.05 or |Log2FC|≥0.3)\n\nPositive (warm) = substrates co-activated (phosphorylation up)\nNegative (cool) = substrates co-inhibited (phosphorylation down)\n\nHigher absolute value = more substrates moving together\nOR stronger individual changes (total signal output).`}>
+                  <th
+                    key={c}
+                    className={`text-center px-1 py-1 min-w-[40px] max-w-[60px] truncate cursor-pointer select-none transition-colors ${
+                      sortByCondition === c && sortMode === "condition_sort" ? "bg-amber-900/40 text-amber-300" : "hover:bg-muted/40 cursor-help"
+                    }`}
+                    title={`Click to sort by activation at ${c}\n\nCo-activation Sum at this timepoint.\n= Sum of Log2FC for substrates passing threshold\n  (q<0.05 or |Log2FC|\u22650.3)\n\nPositive (warm) = substrates co-activated (phosphorylation up)\nNegative (cool) = substrates co-inhibited (phosphorylation down)`}
+                    onClick={() => {
+                      setSortByCondition(c);
+                      setSortMode("condition_sort");
+                    }}
+                  >
                     {c.replace(/min$/i, "").replace(/hr$/i, "h")}
+                    {sortByCondition === c && sortMode === "condition_sort" && <span className="ml-0.5 text-amber-400">▼</span>}
                   </th>
                 ))}
               </tr>
