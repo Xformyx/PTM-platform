@@ -4683,6 +4683,8 @@ function KinaseActivityHeatmapView({
   const [signalTierFilter, setSignalTierFilter] = useState<"all" | "de_novo" | "regulated" | "minor">("all");
   const [sortByCondition, setSortByCondition] = useState<string | null>(null);
   const [patternFilter, setPatternFilter] = useState<string | null>(null);
+  const [hoveredLineKinase, setHoveredLineKinase] = useState<string | null>(null);
+  const [lineTooltip, setLineTooltip] = useState<{ x: number; y: number; kinase: string; condition: string; score: number } | null>(null);
   // Fetch heatmap data from backend
   const fetchHeatmapData = useCallback(async (forceRefresh = false) => {
     setLoading(true);
@@ -5435,7 +5437,11 @@ function KinaseActivityHeatmapView({
             </div>
 
             {/* Chart */}
-            <div className="relative" style={{ height: "420px" }}>
+            <div
+              className="relative"
+              style={{ height: "420px" }}
+              onMouseLeave={() => { setHoveredLineKinase(null); setLineTooltip(null); }}
+            >
               {/* Y-axis labels */}
               <div className="absolute left-0 top-0 bottom-8 w-12 flex flex-col justify-between text-[9px] text-muted-foreground">
                 <span>{maxAbsScore.toFixed(1)}</span>
@@ -5443,62 +5449,140 @@ function KinaseActivityHeatmapView({
                 <span>-{maxAbsScore.toFixed(1)}</span>
               </div>
               {/* Chart area */}
-              <svg
-                className="absolute left-12 top-0 right-0 bottom-8"
-                viewBox={`0 0 ${heatmapData.conditions.length * 60} 400`}
-                preserveAspectRatio="none"
-                style={{ width: "calc(100% - 48px)", height: "calc(100% - 32px)" }}
-              >
-                {/* Grid lines */}
-                <line x1="0" y1="200" x2={heatmapData.conditions.length * 60} y2="200" stroke="#444" strokeWidth="0.5" strokeDasharray="4" />
-                <line x1="0" y1="100" x2={heatmapData.conditions.length * 60} y2="100" stroke="#222" strokeWidth="0.5" strokeDasharray="2" />
-                <line x1="0" y1="300" x2={heatmapData.conditions.length * 60} y2="300" stroke="#222" strokeWidth="0.5" strokeDasharray="2" />
-                {/* Background: ALL kinases as faint gray lines */}
-                {sortedScores.map((ks) => {
-                  const isHighlighted = highlighted.length > 0 && highlighted.some((h) => h.kinase === ks.kinase);
-                  if (isHighlighted) return null; // draw highlighted ones on top
-                  const points = heatmapData.conditions.map((c, i) => {
-                    const x = i * 60 + 30;
-                    const y = 200 - (ks.scores[c] || 0) / maxAbsScore * 180;
-                    return `${x},${y}`;
-                  }).join(" ");
-                  return (
-                    <polyline
-                      key={ks.kinase}
-                      points={points}
-                      fill="none"
-                      stroke="#555"
-                      strokeWidth="1"
-                      opacity="0.25"
-                    />
-                  );
-                })}
-                {/* Highlighted kinases on top */}
-                {highlighted.map((ks, idx) => {
-                  const points = heatmapData.conditions.map((c, i) => {
-                    const x = i * 60 + 30;
-                    const y = 200 - (ks.scores[c] || 0) / maxAbsScore * 180;
-                    return `${x},${y}`;
-                  }).join(" ");
-                  const color = LINE_COLORS[idx % LINE_COLORS.length];
-                  return (
-                    <g key={ks.kinase}>
-                      <polyline
-                        points={points}
-                        fill="none"
-                        stroke={color}
-                        strokeWidth="2.5"
-                        opacity="0.9"
-                      />
-                      {heatmapData.conditions.map((c, i) => {
-                        const x = i * 60 + 30;
-                        const y = 200 - (ks.scores[c] || 0) / maxAbsScore * 180;
-                        return <circle key={c} cx={x} cy={y} r="3.5" fill={color} />;
+              {(() => {
+                const svgW = heatmapData.conditions.length * 60;
+                const svgH = 400;
+                // Clamp Y to [10, 390] to prevent overflow
+                const clampY = (rawY: number) => Math.max(10, Math.min(390, rawY));
+                const getY = (score: number) => clampY(200 - (score / maxAbsScore) * 180);
+                return (
+                  <svg
+                    className="absolute left-12 top-0 right-0 bottom-8"
+                    viewBox={`0 0 ${svgW} ${svgH}`}
+                    preserveAspectRatio="none"
+                    style={{ width: "calc(100% - 48px)", height: "calc(100% - 32px)", overflow: "hidden" }}
+                    onMouseMove={(e) => {
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      const mouseX = e.clientX - rect.left;
+                      const mouseY = e.clientY - rect.top;
+                      // Find closest condition (x-axis)
+                      const condIdx = Math.round((mouseX / rect.width * svgW - 30) / 60);
+                      const ci = Math.max(0, Math.min(heatmapData.conditions.length - 1, condIdx));
+                      const cond = heatmapData.conditions[ci];
+                      // Find closest kinase line at this condition
+                      const candidates = highlighted.length > 0 ? highlighted : sortedScores;
+                      let closest: typeof candidates[0] | null = null;
+                      let closestDist = Infinity;
+                      const mouseYSvg = mouseY / rect.height * svgH;
+                      for (const ks of candidates) {
+                        const score = ks.scores[cond] || 0;
+                        const lineY = getY(score);
+                        const dist = Math.abs(lineY - mouseYSvg);
+                        if (dist < closestDist) {
+                          closestDist = dist;
+                          closest = ks;
+                        }
+                      }
+                      if (closest && closestDist < 40) {
+                        setHoveredLineKinase(closest.kinase);
+                        setLineTooltip({
+                          x: e.clientX - rect.left,
+                          y: e.clientY - rect.top,
+                          kinase: closest.kinase,
+                          condition: cond,
+                          score: closest.scores[cond] || 0,
+                        });
+                      } else {
+                        setHoveredLineKinase(null);
+                        setLineTooltip(null);
+                      }
+                    }}
+                  >
+                    <defs>
+                      <clipPath id="lineChartClip">
+                        <rect x="0" y="0" width={svgW} height={svgH} />
+                      </clipPath>
+                    </defs>
+                    <g clipPath="url(#lineChartClip)">
+                      {/* Grid lines */}
+                      <line x1="0" y1="200" x2={svgW} y2="200" stroke="#444" strokeWidth="0.5" strokeDasharray="4" />
+                      <line x1="0" y1="100" x2={svgW} y2="100" stroke="#222" strokeWidth="0.5" strokeDasharray="2" />
+                      <line x1="0" y1="300" x2={svgW} y2="300" stroke="#222" strokeWidth="0.5" strokeDasharray="2" />
+                      {/* Background: ALL kinases as faint gray lines */}
+                      {sortedScores.map((ks) => {
+                        const isHighlighted = highlighted.length > 0 && highlighted.some((h) => h.kinase === ks.kinase);
+                        if (isHighlighted) return null;
+                        const points = heatmapData.conditions.map((c, i) => {
+                          const x = i * 60 + 30;
+                          const y = getY(ks.scores[c] || 0);
+                          return `${x},${y}`;
+                        }).join(" ");
+                        const isHovered = hoveredLineKinase === ks.kinase;
+                        return (
+                          <polyline
+                            key={ks.kinase}
+                            points={points}
+                            fill="none"
+                            stroke={isHovered ? "#fff" : "#555"}
+                            strokeWidth={isHovered ? 2.5 : 1}
+                            opacity={isHovered ? 0.9 : (hoveredLineKinase ? 0.1 : 0.25)}
+                          />
+                        );
+                      })}
+                      {/* Highlighted kinases on top */}
+                      {highlighted.map((ks, idx) => {
+                        const points = heatmapData.conditions.map((c, i) => {
+                          const x = i * 60 + 30;
+                          const y = getY(ks.scores[c] || 0);
+                          return `${x},${y}`;
+                        }).join(" ");
+                        const color = LINE_COLORS[idx % LINE_COLORS.length];
+                        const isHovered = hoveredLineKinase === ks.kinase;
+                        const dimmed = hoveredLineKinase && !isHovered;
+                        return (
+                          <g key={ks.kinase}>
+                            <polyline
+                              points={points}
+                              fill="none"
+                              stroke={color}
+                              strokeWidth={isHovered ? 4 : 2.5}
+                              opacity={dimmed ? 0.2 : 0.9}
+                            />
+                            {heatmapData.conditions.map((c, i) => {
+                              const x = i * 60 + 30;
+                              const y = getY(ks.scores[c] || 0);
+                              return <circle key={c} cx={x} cy={y} r={isHovered ? 5 : 3.5} fill={color} opacity={dimmed ? 0.2 : 1} />;
+                            })}
+                          </g>
+                        );
                       })}
                     </g>
-                  );
-                })}
-              </svg>
+                  </svg>
+                );
+              })()}
+              {/* Hover tooltip */}
+              {lineTooltip && (
+                <div
+                  className="absolute pointer-events-none z-50 bg-popover border border-border rounded px-2 py-1 shadow-lg text-[10px]"
+                  style={{
+                    left: `${Math.min(lineTooltip.x + 12, 300)}px`,
+                    top: `${lineTooltip.y - 30}px`,
+                    transform: lineTooltip.x > 250 ? "translateX(-110%)" : undefined,
+                  }}
+                >
+                  <div className="font-bold text-foreground">{lineTooltip.kinase}</div>
+                  <div className="text-muted-foreground">
+                    {lineTooltip.condition}: <span className={lineTooltip.score >= 0 ? "text-red-400" : "text-blue-400"}>{lineTooltip.score >= 0 ? "+" : ""}{lineTooltip.score.toFixed(2)}</span>
+                  </div>
+                  {(() => {
+                    const ks = sortedScores.find((s) => s.kinase === lineTooltip.kinase);
+                    if (ks?.temporal_pattern && ks.temporal_pattern.length > 0) {
+                      return <div className="text-muted-foreground/70">{ks.temporal_pattern.map((p) => getPatternLabel(p).label).join(", ")}</div>;
+                    }
+                    return null;
+                  })()}
+                </div>
+              )}
               {/* X-axis labels */}
               <div className="absolute left-12 bottom-0 right-0 flex justify-between text-[9px] text-muted-foreground">
                 {heatmapData.conditions.map((c) => (
