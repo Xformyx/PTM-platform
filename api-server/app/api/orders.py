@@ -6581,6 +6581,127 @@ async def kinase_activity_heatmap(
         else:
             ks_entry["direction"] = "neutral"
 
+    # ── Temporal Pattern Classification ──────────────────────────────────────
+    # Detect notable temporal patterns for each kinase across conditions.
+    # Works with any number of conditions (not hardcoded to 4 timepoints).
+    # Uses net signal per condition: up_sum + down_sum (signed)
+    SIGNAL_THRESHOLD = 1.0  # minimum |net signal| to consider "active"
+    EMERGENCE_RATIO = 5.0   # fold-change threshold for sudden appearance
+
+    n_conds = len(conditions_sorted)
+    for ks_entry in kinase_scores:
+        up_s = ks_entry.get("up_sums", {})
+        dn_s = ks_entry.get("down_sums", {})
+        # Net signal per condition (positive = net up, negative = net down)
+        net_signals = []
+        for c in conditions_sorted:
+            net = (up_s.get(c, 0) or 0) + (dn_s.get(c, 0) or 0)
+            net_signals.append(net)
+        # Absolute magnitude per condition
+        abs_signals = [abs(s) for s in net_signals]
+        max_abs = max(abs_signals) if abs_signals else 0
+
+        patterns: list[str] = []
+
+        if max_abs < SIGNAL_THRESHOLD:
+            patterns.append("inactive")
+            ks_entry["temporal_pattern"] = patterns
+            continue
+
+        # 1. Check active positions (which conditions have signal)
+        active_mask = [a >= SIGNAL_THRESHOLD for a in abs_signals]
+        first_active = next((i for i, v in enumerate(active_mask) if v), None)
+        last_active = next((i for i, v in reversed(list(enumerate(active_mask))) if v), None)
+        n_active = sum(active_mask)
+
+        # 2. Direction per active condition
+        directions = []  # +1, -1, or 0
+        for s in net_signals:
+            if s >= SIGNAL_THRESHOLD:
+                directions.append(1)
+            elif s <= -SIGNAL_THRESHOLD:
+                directions.append(-1)
+            else:
+                directions.append(0)
+
+        # ── Pattern: Sustained Activation / Inactivation ──
+        if n_active == n_conds and all(d == 1 for d in directions):
+            patterns.append("sustained_activation")
+        elif n_active == n_conds and all(d == -1 for d in directions):
+            patterns.append("sustained_inactivation")
+
+        # ── Pattern: Late Onset (first half inactive, second half active) ──
+        if first_active is not None and n_conds >= 3:
+            half = n_conds // 2
+            if first_active >= half and all(not active_mask[i] for i in range(half)):
+                patterns.append("late_onset")
+
+        # ── Pattern: Early Only (first half active, second half inactive) ──
+        if last_active is not None and n_conds >= 3:
+            half = (n_conds + 1) // 2  # ceiling
+            if last_active < half and all(not active_mask[i] for i in range(half, n_conds)):
+                patterns.append("early_only")
+
+        # ── Pattern: Sudden Emergence (signal jumps from ~0 to large) ──
+        for i in range(1, n_conds):
+            prev_abs = abs_signals[i - 1]
+            curr_abs = abs_signals[i]
+            if prev_abs < SIGNAL_THRESHOLD * 0.5 and curr_abs >= SIGNAL_THRESHOLD:
+                if curr_abs >= EMERGENCE_RATIO * max(prev_abs, 0.1):
+                    patterns.append(f"emergence_at_{conditions_sorted[i]}")
+                    break  # only first emergence
+
+        # ── Pattern: Sudden Disappearance (signal drops from large to ~0) ──
+        for i in range(1, n_conds):
+            prev_abs = abs_signals[i - 1]
+            curr_abs = abs_signals[i]
+            if prev_abs >= SIGNAL_THRESHOLD and curr_abs < SIGNAL_THRESHOLD * 0.3:
+                patterns.append(f"disappearance_at_{conditions_sorted[i]}")
+                break
+
+        # ── Pattern: Transient Spike (one condition >> neighbors) ──
+        for i in range(n_conds):
+            if abs_signals[i] < SIGNAL_THRESHOLD:
+                continue
+            neighbors = []
+            if i > 0:
+                neighbors.append(abs_signals[i - 1])
+            if i < n_conds - 1:
+                neighbors.append(abs_signals[i + 1])
+            if neighbors:
+                max_neighbor = max(neighbors)
+                if abs_signals[i] >= 3.0 * max(max_neighbor, 0.1):
+                    patterns.append(f"spike_at_{conditions_sorted[i]}")
+                    break
+
+        # ── Pattern: Direction Reversal (up→down or down→up) ──
+        active_dirs = [(i, d) for i, d in enumerate(directions) if d != 0]
+        if len(active_dirs) >= 2:
+            for j in range(1, len(active_dirs)):
+                if active_dirs[j][1] != active_dirs[j - 1][1]:
+                    reversal_cond = conditions_sorted[active_dirs[j][0]]
+                    patterns.append(f"reversal_at_{reversal_cond}")
+                    break
+
+        # ── Pattern: Progressive Amplification (monotonically increasing |signal|) ──
+        if n_active >= 3:
+            active_abs = [abs_signals[i] for i in range(n_conds) if active_mask[i]]
+            if all(active_abs[k] <= active_abs[k + 1] for k in range(len(active_abs) - 1)):
+                if active_abs[-1] >= 2.0 * active_abs[0]:
+                    patterns.append("progressive_amplification")
+
+        # ── Pattern: Progressive Decay (monotonically decreasing |signal|) ──
+        if n_active >= 3:
+            active_abs = [abs_signals[i] for i in range(n_conds) if active_mask[i]]
+            if all(active_abs[k] >= active_abs[k + 1] for k in range(len(active_abs) - 1)):
+                if active_abs[0] >= 2.0 * active_abs[-1]:
+                    patterns.append("progressive_decay")
+
+        if not patterns:
+            patterns.append("mixed")
+
+        ks_entry["temporal_pattern"] = patterns
+
     # Sort by peak_score descending
     kinase_scores.sort(key=lambda x: abs(x["peak_score"]), reverse=True)
 
@@ -6589,12 +6710,18 @@ async def kinase_activity_heatmap(
     if len(kinase_scores_filtered) < 5 and len(kinase_scores) >= 5:
         kinase_scores_filtered = kinase_scores[:20]
 
+    # Collect unique patterns for frontend filter UI
+    all_patterns: set[str] = set()
+    for ks in kinase_scores_filtered:
+        all_patterns.update(ks.get("temporal_pattern", []))
+
     # Save to DB
     result_data = {
         "kinase_scores": kinase_scores_filtered,
         "conditions": conditions_sorted,
         "peak_sync": peak_sync,
         "cowave_groups": cowave_groups,
+        "available_patterns": sorted(all_patterns),
         "scoring_method": "coactivation_sum",
         "scoring_threshold": {"q_value": Q_THRESHOLD, "fc_abs": FC_THRESHOLD},
         "_cache_hash": cache_hash,

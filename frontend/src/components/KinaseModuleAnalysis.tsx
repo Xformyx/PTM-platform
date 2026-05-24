@@ -4347,6 +4347,8 @@ interface KinaseActivityScore {
   shared_counts?: Record<string, number>;
   // Per-tier breakdown: de_novo (|FC|>=2), regulated (0.58<=|FC|<2), minor (0.3<=|FC|<0.58)
   tiers?: Record<"de_novo" | "regulated" | "minor", TierData>;
+  // Temporal pattern classification (auto-detected by backend)
+  temporal_pattern?: string[];
 }
 
 interface PeakSyncEntry {
@@ -4367,6 +4369,7 @@ interface KinaseHeatmapData {
   conditions: string[];
   peak_sync?: Record<string, PeakSyncEntry>;
   cowave_groups?: CowaveGroupEntry[];
+  available_patterns?: string[];
   scoring_method?: string;
   scoring_threshold?: { q_value: number; fc_abs: number };
   _cached: boolean;
@@ -4679,6 +4682,7 @@ function KinaseActivityHeatmapView({
   const [selectedCwGroupFilter, setSelectedCwGroupFilter] = useState<number | null>(null);
   const [signalTierFilter, setSignalTierFilter] = useState<"all" | "de_novo" | "regulated" | "minor">("all");
   const [sortByCondition, setSortByCondition] = useState<string | null>(null);
+  const [patternFilter, setPatternFilter] = useState<string | null>(null);
   // Fetch heatmap data from backend
   const fetchHeatmapData = useCallback(async (forceRefresh = false) => {
     setLoading(true);
@@ -5334,84 +5338,210 @@ function KinaseActivityHeatmapView({
         </div>
       )}
 
-      {/* Line Chart View */}
-      {viewMode === "line" && (
-        <div className="border border-border rounded-lg p-4">
-          <div className="relative" style={{ height: `${Math.max(300, Math.min(500, sortedScores.length * 15))}px` }}>
-            {/* Y-axis labels */}
-            <div className="absolute left-0 top-0 bottom-8 w-12 flex flex-col justify-between text-[9px] text-muted-foreground">
-              <span>{maxAbsScore.toFixed(1)}</span>
-              <span>0</span>
-              <span>-{maxAbsScore.toFixed(1)}</span>
+      {/* Line Chart View -- All kinases with pattern-based filtering */}
+      {viewMode === "line" && (() => {
+        // Determine which kinases match the current pattern filter
+        const patternMatched = patternFilter
+          ? sortedScores.filter((s) => (s.temporal_pattern || []).some((p) => p === patternFilter || p.includes(patternFilter)))
+          : [];
+        // Highlighted kinases: selected > pattern-filtered > none (show all gray)
+        const highlighted = selectedKinases.size > 0
+          ? sortedScores.filter((s) => selectedKinases.has(s.kinase))
+          : patternFilter
+            ? patternMatched
+            : [];
+        // All available patterns from backend
+        const availablePatterns = heatmapData.available_patterns || [];
+        // Pattern display labels
+        const PATTERN_LABELS: Record<string, { label: string; icon: string; color: string }> = {
+          sustained_activation: { label: "Sustained Up", icon: "//", color: "text-red-400" },
+          sustained_inactivation: { label: "Sustained Down", icon: "\\\\", color: "text-blue-400" },
+          late_onset: { label: "Late Onset", icon: "_/", color: "text-amber-400" },
+          early_only: { label: "Early Only", icon: "\\_", color: "text-yellow-400" },
+          progressive_amplification: { label: "Amplifying", icon: "/^", color: "text-emerald-400" },
+          progressive_decay: { label: "Decaying", icon: "\\v", color: "text-orange-400" },
+          mixed: { label: "Mixed", icon: "~", color: "text-gray-400" },
+          inactive: { label: "Inactive", icon: "-", color: "text-gray-500" },
+        };
+        // For dynamic patterns (emergence_at_X, spike_at_X, etc.), generate label
+        const getPatternLabel = (p: string) => {
+          if (PATTERN_LABELS[p]) return PATTERN_LABELS[p];
+          if (p.startsWith("emergence_at_")) return { label: `Emerge @${p.replace("emergence_at_", "")}`, icon: "+", color: "text-green-400" };
+          if (p.startsWith("disappearance_at_")) return { label: `Disappear @${p.replace("disappearance_at_", "")}`, icon: "x", color: "text-red-300" };
+          if (p.startsWith("spike_at_")) return { label: `Spike @${p.replace("spike_at_", "")}`, icon: "!", color: "text-yellow-300" };
+          if (p.startsWith("reversal_at_")) return { label: `Reversal @${p.replace("reversal_at_", "")}`, icon: "<>", color: "text-purple-400" };
+          return { label: p, icon: "*", color: "text-gray-400" };
+        };
+        // Group patterns by category for cleaner UI
+        const staticPatterns = availablePatterns.filter((p) => !p.includes("_at_"));
+        const dynamicPatterns = availablePatterns.filter((p) => p.includes("_at_"));
+
+        return (
+          <div className="border border-border rounded-lg p-4 space-y-3">
+            {/* Pattern filter buttons */}
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                <Activity className="w-3.5 h-3.5" />
+                <span className="font-medium">Temporal Pattern Filter</span>
+                <span className="text-muted-foreground/50">-- click to highlight kinases with that pattern</span>
+                {patternFilter && (
+                  <button
+                    className="ml-auto px-2 py-0.5 rounded bg-muted hover:bg-muted/80 text-[9px]"
+                    onClick={() => setPatternFilter(null)}
+                  >
+                    Clear filter
+                  </button>
+                )}
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {staticPatterns.map((p) => {
+                  const info = getPatternLabel(p);
+                  const count = sortedScores.filter((s) => (s.temporal_pattern || []).includes(p)).length;
+                  const isActive = patternFilter === p;
+                  return (
+                    <button
+                      key={p}
+                      className={`px-2 py-0.5 rounded text-[9px] border transition-colors ${
+                        isActive
+                          ? "border-cyan-500 bg-cyan-900/40 text-cyan-300"
+                          : "border-border hover:border-muted-foreground/50 text-muted-foreground hover:text-foreground"
+                      }`}
+                      onClick={() => setPatternFilter(isActive ? null : p)}
+                    >
+                      <span className={info.color}>{info.icon}</span> {info.label} <span className="opacity-50">({count})</span>
+                    </button>
+                  );
+                })}
+                {dynamicPatterns.length > 0 && <span className="text-muted-foreground/30">|</span>}
+                {dynamicPatterns.map((p) => {
+                  const info = getPatternLabel(p);
+                  const count = sortedScores.filter((s) => (s.temporal_pattern || []).some((tp) => tp === p)).length;
+                  const isActive = patternFilter === p;
+                  return (
+                    <button
+                      key={p}
+                      className={`px-2 py-0.5 rounded text-[9px] border transition-colors ${
+                        isActive
+                          ? "border-cyan-500 bg-cyan-900/40 text-cyan-300"
+                          : "border-border hover:border-muted-foreground/50 text-muted-foreground hover:text-foreground"
+                      }`}
+                      onClick={() => setPatternFilter(isActive ? null : p)}
+                    >
+                      <span className={info.color}>{info.icon}</span> {info.label} <span className="opacity-50">({count})</span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
-            {/* Chart area */}
-            <svg
-              className="absolute left-12 top-0 right-0 bottom-8"
-              viewBox={`0 0 ${heatmapData.conditions.length * 60} 400`}
-              preserveAspectRatio="none"
-              style={{ width: "calc(100% - 48px)", height: "calc(100% - 32px)" }}
-            >
-              {/* Grid lines */}
-              <line x1="0" y1="200" x2={heatmapData.conditions.length * 60} y2="200" stroke="#333" strokeWidth="0.5" strokeDasharray="4" />
-              <line x1="0" y1="100" x2={heatmapData.conditions.length * 60} y2="100" stroke="#222" strokeWidth="0.5" strokeDasharray="2" />
-              <line x1="0" y1="300" x2={heatmapData.conditions.length * 60} y2="300" stroke="#222" strokeWidth="0.5" strokeDasharray="2" />
-              {/* Lines for each kinase */}
-              {(selectedKinases.size > 0
-                ? sortedScores.filter((s) => selectedKinases.has(s.kinase))
-                : sortedScores.slice(0, 10)
-              ).map((ks, idx) => {
-                const points = heatmapData.conditions.map((c, i) => {
-                  const x = i * 60 + 30;
-                  const y = 200 - (ks.scores[c] || 0) / maxAbsScore * 180;
-                  return `${x},${y}`;
-                }).join(" ");
-                const color = LINE_COLORS[idx % LINE_COLORS.length];
-                return (
-                  <g key={ks.kinase}>
+
+            {/* Chart */}
+            <div className="relative" style={{ height: "420px" }}>
+              {/* Y-axis labels */}
+              <div className="absolute left-0 top-0 bottom-8 w-12 flex flex-col justify-between text-[9px] text-muted-foreground">
+                <span>{maxAbsScore.toFixed(1)}</span>
+                <span>0</span>
+                <span>-{maxAbsScore.toFixed(1)}</span>
+              </div>
+              {/* Chart area */}
+              <svg
+                className="absolute left-12 top-0 right-0 bottom-8"
+                viewBox={`0 0 ${heatmapData.conditions.length * 60} 400`}
+                preserveAspectRatio="none"
+                style={{ width: "calc(100% - 48px)", height: "calc(100% - 32px)" }}
+              >
+                {/* Grid lines */}
+                <line x1="0" y1="200" x2={heatmapData.conditions.length * 60} y2="200" stroke="#444" strokeWidth="0.5" strokeDasharray="4" />
+                <line x1="0" y1="100" x2={heatmapData.conditions.length * 60} y2="100" stroke="#222" strokeWidth="0.5" strokeDasharray="2" />
+                <line x1="0" y1="300" x2={heatmapData.conditions.length * 60} y2="300" stroke="#222" strokeWidth="0.5" strokeDasharray="2" />
+                {/* Background: ALL kinases as faint gray lines */}
+                {sortedScores.map((ks) => {
+                  const isHighlighted = highlighted.length > 0 && highlighted.some((h) => h.kinase === ks.kinase);
+                  if (isHighlighted) return null; // draw highlighted ones on top
+                  const points = heatmapData.conditions.map((c, i) => {
+                    const x = i * 60 + 30;
+                    const y = 200 - (ks.scores[c] || 0) / maxAbsScore * 180;
+                    return `${x},${y}`;
+                  }).join(" ");
+                  return (
                     <polyline
+                      key={ks.kinase}
                       points={points}
                       fill="none"
-                      stroke={color}
-                      strokeWidth="2"
-                      opacity="0.85"
+                      stroke="#555"
+                      strokeWidth="1"
+                      opacity="0.25"
                     />
-                    {heatmapData.conditions.map((c, i) => {
-                      const x = i * 60 + 30;
-                      const y = 200 - (ks.scores[c] || 0) / maxAbsScore * 180;
-                      return <circle key={c} cx={x} cy={y} r="3" fill={color} />;
-                    })}
-                  </g>
-                );
-              })}
-            </svg>
-            {/* X-axis labels */}
-            <div className="absolute left-12 bottom-0 right-0 flex justify-between text-[9px] text-muted-foreground">
-              {heatmapData.conditions.map((c) => (
-                <span key={c} className="text-center flex-1 truncate" title={c}>
-                  {c.replace(/min$/i, "'").replace(/hr$/i, "h")}
-                </span>
-              ))}
+                  );
+                })}
+                {/* Highlighted kinases on top */}
+                {highlighted.map((ks, idx) => {
+                  const points = heatmapData.conditions.map((c, i) => {
+                    const x = i * 60 + 30;
+                    const y = 200 - (ks.scores[c] || 0) / maxAbsScore * 180;
+                    return `${x},${y}`;
+                  }).join(" ");
+                  const color = LINE_COLORS[idx % LINE_COLORS.length];
+                  return (
+                    <g key={ks.kinase}>
+                      <polyline
+                        points={points}
+                        fill="none"
+                        stroke={color}
+                        strokeWidth="2.5"
+                        opacity="0.9"
+                      />
+                      {heatmapData.conditions.map((c, i) => {
+                        const x = i * 60 + 30;
+                        const y = 200 - (ks.scores[c] || 0) / maxAbsScore * 180;
+                        return <circle key={c} cx={x} cy={y} r="3.5" fill={color} />;
+                      })}
+                    </g>
+                  );
+                })}
+              </svg>
+              {/* X-axis labels */}
+              <div className="absolute left-12 bottom-0 right-0 flex justify-between text-[9px] text-muted-foreground">
+                {heatmapData.conditions.map((c) => (
+                  <span key={c} className="text-center flex-1 truncate" title={c}>
+                    {c.replace(/min$/i, "'").replace(/hr$/i, "h")}
+                  </span>
+                ))}
+              </div>
             </div>
+
+            {/* Legend for highlighted kinases */}
+            {highlighted.length > 0 && (
+              <div className="flex flex-wrap gap-2 text-[10px]">
+                {highlighted.map((ks, idx) => (
+                  <span key={ks.kinase} className="flex items-center gap-1">
+                    <span className="w-3 h-0.5 inline-block" style={{ backgroundColor: LINE_COLORS[idx % LINE_COLORS.length] }} />
+                    <span>{ks.kinase}</span>
+                    {ks.temporal_pattern && ks.temporal_pattern.length > 0 && (
+                      <span className="text-muted-foreground/60 text-[8px]">
+                        [{ks.temporal_pattern.map((p) => getPatternLabel(p).label).join(", ")}]
+                      </span>
+                    )}
+                  </span>
+                ))}
+              </div>
+            )}
+            {highlighted.length === 0 && (
+              <p className="text-[10px] text-muted-foreground">
+                All {sortedScores.length} kinases shown (gray). Select a pattern filter above or click kinase rows in heatmap to highlight.
+              </p>
+            )}
+            {/* Pattern summary */}
+            {patternFilter && patternMatched.length > 0 && (
+              <div className="text-[10px] text-muted-foreground bg-muted/20 rounded p-2">
+                <span className="font-medium text-cyan-400">{getPatternLabel(patternFilter).label}</span>
+                {" "} -- {patternMatched.length} kinase{patternMatched.length > 1 ? "s" : ""}:
+                {" "}{patternMatched.slice(0, 15).map((s) => s.kinase).join(", ")}
+                {patternMatched.length > 15 && ` ... +${patternMatched.length - 15} more`}
+              </div>
+            )}
           </div>
-          {/* Legend */}
-          <div className="flex flex-wrap gap-2 mt-3 text-[10px]">
-            {(selectedKinases.size > 0
-              ? sortedScores.filter((s) => selectedKinases.has(s.kinase))
-              : sortedScores.slice(0, 10)
-            ).map((ks, idx) => (
-              <span key={ks.kinase} className="flex items-center gap-1">
-                <span className="w-3 h-0.5 inline-block" style={{ backgroundColor: LINE_COLORS[idx % LINE_COLORS.length] }} />
-                {ks.kinase}
-              </span>
-            ))}
-          </div>
-          {selectedKinases.size === 0 && (
-            <p className="text-[10px] text-muted-foreground mt-1">
-              Showing top 10. Click kinase rows in heatmap to select specific kinases.
-            </p>
-          )}
-        </div>
-      )}
+        );
+      })()}
 
       {/* Summary stats */}
       <div className="grid grid-cols-6 gap-2 text-xs">
