@@ -6334,9 +6334,12 @@ async def kinase_activity_heatmap(
         ptms = km.get("ptms", [])
         confidence = km.get("confidence_score", 0.5)
 
-        # Per-condition co-activation sum
-        scores: dict[str, float] = {c: 0.0 for c in conditions_sorted}
-        # Per-condition co-activated substrate count
+        # Per-condition co-activation sum (split by direction)
+        up_sums: dict[str, float] = {c: 0.0 for c in conditions_sorted}
+        down_sums: dict[str, float] = {c: 0.0 for c in conditions_sorted}
+        up_counts: dict[str, int] = {c: 0 for c in conditions_sorted}
+        down_counts: dict[str, int] = {c: 0 for c in conditions_sorted}
+        # Per-condition co-activated substrate count (total)
         coact_counts: dict[str, int] = {c: 0 for c in conditions_sorted}
         # Per-condition exclusive/shared breakdown
         exclusive_sums: dict[str, float] = {c: 0.0 for c in conditions_sorted}
@@ -6365,8 +6368,15 @@ async def kinase_activity_heatmap(
                     passes_threshold = True
 
                 if passes_threshold:
-                    scores[c] += fc
                     coact_counts[c] += 1
+                    # Split by direction
+                    if fc > 0:
+                        up_sums[c] += fc
+                        up_counts[c] += 1
+                    elif fc < 0:
+                        down_sums[c] += fc  # negative value
+                        down_counts[c] += 1
+                    # Exclusive/shared tracking
                     if is_exclusive:
                         exclusive_sums[c] += fc
                         exclusive_counts[c] += 1
@@ -6374,11 +6384,23 @@ async def kinase_activity_heatmap(
                         shared_sums[c] += fc
                         shared_counts[c] += 1
 
-        # Round scores
+        # Compute dominant score per condition: max(|up_sum|, |down_sum|) with sign
+        scores: dict[str, float] = {}
         for c in conditions_sorted:
-            scores[c] = round(scores[c], 4)
+            up_val = up_sums[c]   # positive
+            dn_val = down_sums[c]  # negative
+            # Score = dominant direction (the one with larger absolute sum)
+            if abs(up_val) >= abs(dn_val):
+                scores[c] = round(up_val, 4)
+            else:
+                scores[c] = round(dn_val, 4)
 
-        # Peak detection (based on sum)
+        # Round up/down sums
+        for c in conditions_sorted:
+            up_sums[c] = round(up_sums[c], 3)
+            down_sums[c] = round(down_sums[c], 3)
+
+        # Peak detection (based on dominant score)
         if scores:
             peak_cond = max(scores, key=lambda c: abs(scores[c]))
             peak_score = scores[peak_cond]
@@ -6388,7 +6410,11 @@ async def kinase_activity_heatmap(
 
         kinase_scores.append({
             "kinase": kinase_name,
-            "scores": scores,
+            "scores": scores,  # dominant direction per condition
+            "up_sums": up_sums,
+            "down_sums": down_sums,
+            "up_counts": up_counts,
+            "down_counts": down_counts,
             "substrate_count": len(ptms),
             "confidence": confidence,
             "peak_condition": peak_cond,

@@ -4328,8 +4328,12 @@ interface KinaseActivityScore {
   coherence?: number;
   cowave_group?: number;
   direction?: "activation" | "inactivation" | "neutral";
-  // Co-activation Sum scoring fields
-  coact_counts?: Record<string, number>;  // per-condition co-activated substrate count
+  // Co-activation Sum scoring fields (direction-split)
+  up_sums?: Record<string, number>;    // sum of positive FC substrates per condition
+  down_sums?: Record<string, number>;  // sum of negative FC substrates per condition (negative values)
+  up_counts?: Record<string, number>;  // count of up-regulated substrates per condition
+  down_counts?: Record<string, number>; // count of down-regulated substrates per condition
+  coact_counts?: Record<string, number>;  // total co-activated substrate count
   exclusive_sums?: Record<string, number>;
   shared_sums?: Record<string, number>;
   exclusive_counts?: Record<string, number>;
@@ -4744,10 +4748,23 @@ function KinaseActivityHeatmapView({
     }
   };
 
-  // Max absolute value for normalization
+  // Max absolute value for normalization (based on up/down sums separately)
   const maxAbsScore = useMemo(() => {
     if (!sortedScores.length) return 1;
-    return Math.max(...sortedScores.flatMap((s) => Object.values(s.scores).map(Math.abs)), 0.1);
+    let maxVal = 0.1;
+    for (const s of sortedScores) {
+      if (s.up_sums) {
+        for (const v of Object.values(s.up_sums)) maxVal = Math.max(maxVal, Math.abs(v));
+      }
+      if (s.down_sums) {
+        for (const v of Object.values(s.down_sums)) maxVal = Math.max(maxVal, Math.abs(v));
+      }
+      // Fallback to scores if up/down not available
+      if (!s.up_sums && !s.down_sums) {
+        for (const v of Object.values(s.scores)) maxVal = Math.max(maxVal, Math.abs(v));
+      }
+    }
+    return maxVal;
   }, [sortedScores]);
 
   // Line chart colors
@@ -5015,9 +5032,12 @@ function KinaseActivityHeatmapView({
                         {(ks.coherence ?? 0).toFixed(2)}
                       </span>
                     </td>
-                    {/* Heatmap cells */}
+                    {/* Heatmap cells - split up/down */}
                     {heatmapData.conditions.map((c) => {
-                      const val = ks.scores[c] || 0;
+                      const upVal = ks.up_sums?.[c] || 0;
+                      const dnVal = ks.down_sums?.[c] || 0;  // negative
+                      const upN = ks.up_counts?.[c] || 0;
+                      const dnN = ks.down_counts?.[c] || 0;
                       const coactN = ks.coact_counts?.[c] || 0;
                       const exclSum = ks.exclusive_sums?.[c] || 0;
                       const sharedSum = ks.shared_sums?.[c] || 0;
@@ -5025,25 +5045,55 @@ function KinaseActivityHeatmapView({
                       const sharedN = ks.shared_counts?.[c] || 0;
                       const tipLines = [
                         `${ks.kinase} @ ${c}`,
-                        `Co-activation Sum: ${val.toFixed(2)}`,
-                        `Co-activated substrates: ${coactN} / ${ks.substrate_count}`,
+                        `▲ Up: ${upN} substrates, sum=+${upVal.toFixed(2)}`,
+                        `▼ Down: ${dnN} substrates, sum=${dnVal.toFixed(2)}`,
+                        `Total co-activated: ${coactN} / ${ks.substrate_count}`,
                         ``,
-                        `Exclusive (this kinase only): ${exclN} substrates, sum=${exclSum.toFixed(2)}`,
-                        `Shared (2+ kinases): ${sharedN} substrates, sum=${sharedSum.toFixed(2)}`,
-                        ``,
-                        `Threshold: q<0.05 or |FC|≥0.3`,
+                        `Exclusive: ${exclN} (sum=${exclSum.toFixed(2)})`,
+                        `Shared: ${sharedN} (sum=${sharedSum.toFixed(2)})`,
                       ];
+                      // Normalize bar heights (relative to maxAbsScore)
+                      const upHeight = maxAbsScore > 0 ? Math.min(1, upVal / maxAbsScore) : 0;
+                      const dnHeight = maxAbsScore > 0 ? Math.min(1, Math.abs(dnVal) / maxAbsScore) : 0;
                       return (
                         <td
                           key={c}
-                          className="px-0 py-0.5 text-center"
+                          className="px-0 py-0 text-center"
                           title={tipLines.join("\n")}
                         >
-                          <div
-                            className="mx-auto w-full h-5 flex items-center justify-center text-[9px]"
-                            style={{ backgroundColor: getHeatmapColor(val, maxAbsScore) }}
-                          >
-                            {Math.abs(val) >= maxAbsScore * 0.3 ? val.toFixed(1) : ""}
+                          <div className="mx-auto w-full h-6 flex flex-col">
+                            {/* Up bar (top half - red) */}
+                            <div className="flex-1 flex items-end justify-center relative overflow-hidden">
+                              <div
+                                className="absolute bottom-0 w-full transition-all"
+                                style={{
+                                  height: `${upHeight * 100}%`,
+                                  backgroundColor: getHeatmapColor(upVal, maxAbsScore),
+                                }}
+                              />
+                              {upVal >= maxAbsScore * 0.2 && (
+                                <span className="relative z-10 text-[8px] text-white/90 leading-none">
+                                  +{upVal.toFixed(1)}
+                                </span>
+                              )}
+                            </div>
+                            {/* Divider line */}
+                            <div className="h-px bg-gray-600/50 w-full" />
+                            {/* Down bar (bottom half - blue) */}
+                            <div className="flex-1 flex items-start justify-center relative overflow-hidden">
+                              <div
+                                className="absolute top-0 w-full transition-all"
+                                style={{
+                                  height: `${dnHeight * 100}%`,
+                                  backgroundColor: getHeatmapColor(dnVal, maxAbsScore),
+                                }}
+                              />
+                              {Math.abs(dnVal) >= maxAbsScore * 0.2 && (
+                                <span className="relative z-10 text-[8px] text-white/90 leading-none">
+                                  {dnVal.toFixed(1)}
+                                </span>
+                              )}
+                            </div>
                           </div>
                         </td>
                       );
@@ -5056,16 +5106,15 @@ function KinaseActivityHeatmapView({
           {/* Color legend */}
           <div className="flex items-center justify-between gap-2 py-2 px-3 text-[10px] text-muted-foreground">
             <div className="flex items-center gap-2">
-              <span className="px-2 py-0.5 rounded" style={{ backgroundColor: getHeatmapColor(-maxAbsScore, maxAbsScore) }}>
-                -{maxAbsScore.toFixed(1)}
+              <span className="flex flex-col items-center gap-0.5">
+                <span className="px-2 py-0.5 rounded text-white" style={{ backgroundColor: getHeatmapColor(maxAbsScore, maxAbsScore) }}>
+                  ▲ +{maxAbsScore.toFixed(0)}
+                </span>
+                <span className="px-2 py-0.5 rounded" style={{ backgroundColor: getHeatmapColor(-maxAbsScore, maxAbsScore) }}>
+                  ▼ -{maxAbsScore.toFixed(0)}
+                </span>
               </span>
-              <span>→</span>
-              <span className="px-2 py-0.5 rounded bg-background border border-border">0</span>
-              <span>→</span>
-              <span className="px-2 py-0.5 rounded text-white" style={{ backgroundColor: getHeatmapColor(maxAbsScore, maxAbsScore) }}>
-                +{maxAbsScore.toFixed(1)}
-              </span>
-              <span className="ml-2">(Co-activation Sum: ΣLog2FC of significant substrates)</span>
+              <span className="ml-2">(Co-activation Sum: ΣFC of substrates moving in same direction. Top=up, Bottom=down)</span>
             </div>
              {/* Co-wave group legend */}
             {heatmapData.cowave_groups && heatmapData.cowave_groups.length > 0 && (
