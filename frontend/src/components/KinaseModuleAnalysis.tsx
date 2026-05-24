@@ -4832,12 +4832,15 @@ function KinaseActivityHeatmapView({
     };
   }, [signalTierFilter]);
 
-  // Bar height normalization: max co-activated count across all visible kinases
-  // Bar height = co-activated count (absolute number), Number = Sum
-  const { maxUpCount, maxDownCount, maxUp, maxDown } = useMemo(() => {
-    if (!sortedScores.length) return { maxUpCount: 1, maxDownCount: 1, maxUp: 1, maxDown: 1 };
-    let mUpN = 1;
-    let mDnN = 1;
+  // Bar height = √(count) (sqrt scale to prevent domination by high-substrate kinases)
+  // Color intensity = average |FC| per substrate (quality of signal)
+  // Number = Sum (total signal)
+  const { maxSqrtUp, maxSqrtDown, maxAvgUp, maxAvgDown, maxUp, maxDown } = useMemo(() => {
+    if (!sortedScores.length) return { maxSqrtUp: 1, maxSqrtDown: 1, maxAvgUp: 1, maxAvgDown: 1, maxUp: 1, maxDown: 1 };
+    let mSqrtUp = 1;
+    let mSqrtDn = 1;
+    let mAvgUp = 0.1;
+    let mAvgDn = 0.1;
     let mUp = 0.1;
     let mDn = 0.1;
     for (const s of sortedScores) {
@@ -4845,11 +4848,13 @@ function KinaseActivityHeatmapView({
         const { upVal, dnVal, upN, dnN } = getEffectiveValues(s, c);
         mUp = Math.max(mUp, upVal);
         mDn = Math.max(mDn, Math.abs(dnVal));
-        mUpN = Math.max(mUpN, upN);
-        mDnN = Math.max(mDnN, dnN);
+        mSqrtUp = Math.max(mSqrtUp, Math.sqrt(upN));
+        mSqrtDn = Math.max(mSqrtDn, Math.sqrt(dnN));
+        if (upN > 0) mAvgUp = Math.max(mAvgUp, upVal / upN);
+        if (dnN > 0) mAvgDn = Math.max(mAvgDn, Math.abs(dnVal) / dnN);
       }
     }
-    return { maxUpCount: mUpN, maxDownCount: mDnN, maxUp: mUp, maxDown: mDn };
+    return { maxSqrtUp: mSqrtUp, maxSqrtDown: mSqrtDn, maxAvgUp: mAvgUp, maxAvgDown: mAvgDn, maxUp: mUp, maxDown: mDn };
   }, [sortedScores, heatmapData?.conditions, getEffectiveValues]);
 
   // Keep maxAbsScore for line chart and legacy uses
@@ -5162,10 +5167,20 @@ function KinaseActivityHeatmapView({
                         `Exclusive: ${exclN} (sum=${exclSum.toFixed(2)})`,
                         `Shared: ${sharedN} (sum=${sharedSum.toFixed(2)})`,
                       ];
-                      // Height = co-activated count (absolute number, normalized to max)
-                      // Color = fixed red(up) / blue(down), Number = Sum
-                      const upBarH = Math.min(1, upN / maxUpCount);
-                      const dnBarH = Math.min(1, dnN / maxDownCount);
+                      // Height = √(count) sqrt scale (prevents domination by high-substrate kinases)
+                      // Color intensity = avg |FC| per substrate (signal quality)
+                      // Number = Sum (total signal)
+                      const upBarH = upN > 0 ? Math.min(1, Math.sqrt(upN) / maxSqrtUp) : 0;
+                      const dnBarH = dnN > 0 ? Math.min(1, Math.sqrt(dnN) / maxSqrtDown) : 0;
+                      const upAvg = upN > 0 ? upVal / upN : 0;
+                      const dnAvg = dnN > 0 ? Math.abs(dnVal) / dnN : 0;
+                      // Color: red/blue with intensity based on avg FC (normalized to max avg)
+                      const upIntensity = Math.min(1, upAvg / maxAvgUp);
+                      const dnIntensity = Math.min(1, dnAvg / maxAvgDown);
+                      // Up: dark red (low avg) → bright red (high avg)
+                      const upColor = `rgb(${Math.round(80 + 175 * upIntensity)}, ${Math.round(20 + 20 * (1 - upIntensity))}, ${Math.round(20 + 20 * (1 - upIntensity))})`;
+                      // Down: dark blue (low avg) → bright blue (high avg)
+                      const dnColor = `rgb(${Math.round(20 + 20 * (1 - dnIntensity))}, ${Math.round(40 + 60 * dnIntensity)}, ${Math.round(80 + 175 * dnIntensity)})`;
                       return (
                         <td
                           key={c}
@@ -5173,14 +5188,14 @@ function KinaseActivityHeatmapView({
                           title={tipLines.join("\n")}
                         >
                           <div className="mx-auto w-full h-10 flex flex-col">
-                            {/* Up bar (top half - red): height=count/maxCount */}
+                            {/* Up bar (top half): height=√count, color intensity=avg FC */}
                             <div className="flex-1 flex items-end justify-center relative overflow-hidden">
                               {upN > 0 && (
                                 <div
                                   className="absolute bottom-0 w-full"
                                   style={{
                                     height: `${upBarH * 100}%`,
-                                    backgroundColor: "rgb(220, 60, 60)",
+                                    backgroundColor: upColor,
                                   }}
                                 />
                               )}
@@ -5192,14 +5207,14 @@ function KinaseActivityHeatmapView({
                             </div>
                             {/* Divider line */}
                             <div className="h-px bg-gray-500/70 w-full flex-shrink-0" />
-                            {/* Down bar (bottom half - blue): height=count/maxCount */}
+                            {/* Down bar (bottom half): height=√count, color intensity=avg FC */}
                             <div className="flex-1 flex items-start justify-center relative overflow-hidden">
                               {dnN > 0 && (
                                 <div
                                   className="absolute top-0 w-full"
                                   style={{
                                     height: `${dnBarH * 100}%`,
-                                    backgroundColor: "rgb(50, 100, 220)",
+                                    backgroundColor: dnColor,
                                   }}
                                 />
                               )}
@@ -5222,17 +5237,17 @@ function KinaseActivityHeatmapView({
           <div className="flex items-center justify-between gap-2 py-2 px-3 text-[10px] text-muted-foreground">
             <div className="flex items-center gap-2">
               <span className="flex flex-col items-center gap-0.5">
-                <span className="px-2 py-0.5 rounded text-white" style={{ backgroundColor: "rgb(220, 60, 60)" }}>
-                  ▲ Up
+                <span className="px-2 py-0.5 rounded text-white" style={{ backgroundColor: "rgb(255, 40, 40)" }}>
+                  ▲ Up (bright=strong)
                 </span>
-                <span className="px-2 py-0.5 rounded text-white" style={{ backgroundColor: "rgb(50, 100, 220)" }}>
-                  ▼ Down
+                <span className="px-2 py-0.5 rounded text-white" style={{ backgroundColor: "rgb(40, 100, 255)" }}>
+                  ▼ Down (bright=strong)
                 </span>
               </span>
               <span className="ml-2 flex flex-col">
-                <span>Bar height = co-activated count (how many substrates moved together)</span>
+                <span>Bar height = √(count) how many co-activated | Color intensity = avg |FC| per substrate</span>
                 <span className="text-[9px] text-muted-foreground/60">
-                  Number = ΣFC (total signal sum) | Normalized within {signalTierFilter === "all" ? "all tiers" : signalTierFilter} tier
+                  Number = ΣFC (total signal sum) | Bright = strong avg signal, Dark = weak avg signal
                 </span>
               </span>
             </div>
