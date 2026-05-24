@@ -4707,38 +4707,75 @@ function KinaseActivityHeatmapView({
   }, [fetchHeatmapData]);
 
   // Sort kinase scores
+  // Helper: get total co-activation magnitude for a kinase in the selected tier
+  const getTierTotalSignal = useCallback((ks: KinaseActivityScore) => {
+    if (!heatmapData) return 0;
+    let total = 0;
+    for (const c of heatmapData.conditions) {
+      if (signalTierFilter === "all") {
+        total += Math.abs(ks.up_sums?.[c] || 0) + Math.abs(ks.down_sums?.[c] || 0);
+      } else {
+        const tier = ks.tiers?.[signalTierFilter];
+        if (tier) {
+          total += Math.abs(tier.up_sums?.[c] || 0) + Math.abs(tier.down_sums?.[c] || 0);
+        }
+      }
+    }
+    return total;
+  }, [heatmapData, signalTierFilter]);
+
   const sortedScores = useMemo(() => {
     if (!heatmapData) return [];
     let scores = [...heatmapData.kinase_scores];
-    switch (sortMode) {
-      case "peak_score":
-        scores.sort((a, b) => Math.abs(b.peak_score) - Math.abs(a.peak_score));
-        break;
-      case "peak_time": {
-        const condOrder = heatmapData.conditions;
-        scores.sort((a, b) => condOrder.indexOf(a.peak_condition) - condOrder.indexOf(b.peak_condition));
-        break;
+
+    // When a specific tier is selected, filter out kinases with zero signal in that tier
+    if (signalTierFilter !== "all") {
+      scores = scores.filter((ks) => {
+        const tier = ks.tiers?.[signalTierFilter];
+        if (!tier) return false;
+        const conditions = heatmapData.conditions;
+        for (const c of conditions) {
+          if ((tier.up_sums?.[c] || 0) !== 0 || (tier.down_sums?.[c] || 0) !== 0) return true;
+        }
+        return false;
+      });
+    }
+
+    // Sort: when tier filter is active and sort is peak_score, sort by tier signal instead
+    if (signalTierFilter !== "all" && (sortMode === "peak_score" || sortMode === "substrate_count")) {
+      scores.sort((a, b) => getTierTotalSignal(b) - getTierTotalSignal(a));
+    } else {
+      switch (sortMode) {
+        case "peak_score":
+          scores.sort((a, b) => Math.abs(b.peak_score) - Math.abs(a.peak_score));
+          break;
+        case "peak_time": {
+          const condOrder = heatmapData.conditions;
+          scores.sort((a, b) => condOrder.indexOf(a.peak_condition) - condOrder.indexOf(b.peak_condition));
+          break;
+        }
+        case "confidence":
+          scores.sort((a, b) => b.confidence - a.confidence);
+          break;
+        case "substrate_count":
+          scores.sort((a, b) => b.substrate_count - a.substrate_count);
+          break;
+        case "alphabetical":
+          scores.sort((a, b) => a.kinase.localeCompare(b.kinase));
+          break;
+        case "cowave_group":
+          scores.sort((a, b) => {
+            const ga = a.cowave_group ?? 999;
+            const gb = b.cowave_group ?? 999;
+            if (ga !== gb) return ga - gb;
+            if (signalTierFilter !== "all") return getTierTotalSignal(b) - getTierTotalSignal(a);
+            return Math.abs(b.peak_score) - Math.abs(a.peak_score);
+          });
+          break;
       }
-      case "confidence":
-        scores.sort((a, b) => b.confidence - a.confidence);
-        break;
-      case "substrate_count":
-        scores.sort((a, b) => b.substrate_count - a.substrate_count);
-        break;
-      case "alphabetical":
-        scores.sort((a, b) => a.kinase.localeCompare(b.kinase));
-        break;
-      case "cowave_group":
-        scores.sort((a, b) => {
-          const ga = a.cowave_group ?? 999;
-          const gb = b.cowave_group ?? 999;
-          if (ga !== gb) return ga - gb;
-          return Math.abs(b.peak_score) - Math.abs(a.peak_score);
-        });
-        break;
     }
     return scores.slice(0, topN);
-  }, [heatmapData, sortMode, topN]);
+  }, [heatmapData, sortMode, topN, signalTierFilter, getTierTotalSignal]);
 
   // Color scale for heatmap: blue(-) → white(0) → red(+)
   const getHeatmapColor = (value: number, maxAbs: number) => {
