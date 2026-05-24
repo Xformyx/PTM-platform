@@ -6328,6 +6328,19 @@ async def kinase_activity_heatmap(
     FC_THRESHOLD = 0.3
     Q_THRESHOLD = 0.05
 
+    # Signal tier thresholds
+    DE_NOVO_THRESHOLD = 2.0   # |FC| >= 2.0
+    REGULATED_THRESHOLD = 0.58  # 0.58 <= |FC| < 2.0
+    # minor: 0.3 <= |FC| < 0.58
+
+    def _classify_tier(fc_abs: float) -> str:
+        if fc_abs >= DE_NOVO_THRESHOLD:
+            return "de_novo"
+        elif fc_abs >= REGULATED_THRESHOLD:
+            return "regulated"
+        else:
+            return "minor"
+
     kinase_scores = []
     for km in kinase_modules:
         kinase_name = km.get("kinase", "")
@@ -6346,6 +6359,20 @@ async def kinase_activity_heatmap(
         shared_sums: dict[str, float] = {c: 0.0 for c in conditions_sorted}
         exclusive_counts: dict[str, int] = {c: 0 for c in conditions_sorted}
         shared_counts: dict[str, int] = {c: 0 for c in conditions_sorted}
+
+        # Per-condition per-tier up/down sums
+        tier_up_sums: dict[str, dict[str, float]] = {
+            t: {c: 0.0 for c in conditions_sorted} for t in ("de_novo", "regulated", "minor")
+        }
+        tier_down_sums: dict[str, dict[str, float]] = {
+            t: {c: 0.0 for c in conditions_sorted} for t in ("de_novo", "regulated", "minor")
+        }
+        tier_up_counts: dict[str, dict[str, int]] = {
+            t: {c: 0 for c in conditions_sorted} for t in ("de_novo", "regulated", "minor")
+        }
+        tier_down_counts: dict[str, dict[str, int]] = {
+            t: {c: 0 for c in conditions_sorted} for t in ("de_novo", "regulated", "minor")
+        }
 
         for ptm in ptms:
             ptm_key = f"{ptm.get('gene', '').upper()}_{str(ptm.get('position', '')).upper()}"
@@ -6369,13 +6396,18 @@ async def kinase_activity_heatmap(
 
                 if passes_threshold:
                     coact_counts[c] += 1
+                    tier = _classify_tier(abs(fc))
                     # Split by direction
                     if fc > 0:
                         up_sums[c] += fc
                         up_counts[c] += 1
+                        tier_up_sums[tier][c] += fc
+                        tier_up_counts[tier][c] += 1
                     elif fc < 0:
                         down_sums[c] += fc  # negative value
                         down_counts[c] += 1
+                        tier_down_sums[tier][c] += fc
+                        tier_down_counts[tier][c] += 1
                     # Exclusive/shared tracking
                     if is_exclusive:
                         exclusive_sums[c] += fc
@@ -6408,6 +6440,16 @@ async def kinase_activity_heatmap(
             peak_cond = ""
             peak_score = 0.0
 
+        # Round tier sums
+        tier_data = {}
+        for tier in ("de_novo", "regulated", "minor"):
+            tier_data[tier] = {
+                "up_sums": {c: round(tier_up_sums[tier][c], 3) for c in conditions_sorted},
+                "down_sums": {c: round(tier_down_sums[tier][c], 3) for c in conditions_sorted},
+                "up_counts": tier_up_counts[tier],
+                "down_counts": tier_down_counts[tier],
+            }
+
         kinase_scores.append({
             "kinase": kinase_name,
             "scores": scores,  # dominant direction per condition
@@ -6415,6 +6457,7 @@ async def kinase_activity_heatmap(
             "down_sums": down_sums,
             "up_counts": up_counts,
             "down_counts": down_counts,
+            "tiers": tier_data,  # per-tier breakdown: de_novo, regulated, minor
             "substrate_count": len(ptms),
             "confidence": confidence,
             "peak_condition": peak_cond,

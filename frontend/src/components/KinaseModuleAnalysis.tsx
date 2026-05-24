@@ -4318,6 +4318,13 @@ function SignalFlowView({
 
 // ── Kinase Activity Heatmap + Line Chart View ────────────────────────────────────────
 
+interface TierData {
+  up_sums: Record<string, number>;
+  down_sums: Record<string, number>;
+  up_counts: Record<string, number>;
+  down_counts: Record<string, number>;
+}
+
 interface KinaseActivityScore {
   kinase: string;
   scores: Record<string, number>;
@@ -4338,6 +4345,8 @@ interface KinaseActivityScore {
   shared_sums?: Record<string, number>;
   exclusive_counts?: Record<string, number>;
   shared_counts?: Record<string, number>;
+  // Per-tier breakdown: de_novo (|FC|>=2), regulated (0.58<=|FC|<2), minor (0.3<=|FC|<0.58)
+  tiers?: Record<"de_novo" | "regulated" | "minor", TierData>;
 }
 
 interface PeakSyncEntry {
@@ -4668,6 +4677,7 @@ function KinaseActivityHeatmapView({
   const [topN, setTopN] = useState(20);
    const [selectedKinases, setSelectedKinases] = useState<Set<string>>(new Set());
   const [selectedCwGroupFilter, setSelectedCwGroupFilter] = useState<number | null>(null);
+  const [signalTierFilter, setSignalTierFilter] = useState<"all" | "de_novo" | "regulated" | "minor">("all");
   // Fetch heatmap data from backend
   const fetchHeatmapData = useCallback(async (forceRefresh = false) => {
     setLoading(true);
@@ -4748,24 +4758,43 @@ function KinaseActivityHeatmapView({
     }
   };
 
-  // Max absolute value for normalization (based on up/down sums separately)
-  const maxAbsScore = useMemo(() => {
-    if (!sortedScores.length) return 1;
-    let maxVal = 0.1;
+  // Get effective up/down values based on tier filter
+  const getEffectiveValues = useCallback((ks: KinaseActivityScore, c: string) => {
+    if (signalTierFilter === "all") {
+      return {
+        upVal: ks.up_sums?.[c] || 0,
+        dnVal: ks.down_sums?.[c] || 0,
+        upN: ks.up_counts?.[c] || 0,
+        dnN: ks.down_counts?.[c] || 0,
+      };
+    }
+    const tier = ks.tiers?.[signalTierFilter];
+    if (!tier) return { upVal: 0, dnVal: 0, upN: 0, dnN: 0 };
+    return {
+      upVal: tier.up_sums?.[c] || 0,
+      dnVal: tier.down_sums?.[c] || 0,
+      upN: tier.up_counts?.[c] || 0,
+      dnN: tier.down_counts?.[c] || 0,
+    };
+  }, [signalTierFilter]);
+
+  // Independent normalization: maxUp and maxDown computed separately
+  const { maxUp, maxDown } = useMemo(() => {
+    if (!sortedScores.length) return { maxUp: 1, maxDown: 1 };
+    let mUp = 0.1;
+    let mDn = 0.1;
     for (const s of sortedScores) {
-      if (s.up_sums) {
-        for (const v of Object.values(s.up_sums)) maxVal = Math.max(maxVal, Math.abs(v));
-      }
-      if (s.down_sums) {
-        for (const v of Object.values(s.down_sums)) maxVal = Math.max(maxVal, Math.abs(v));
-      }
-      // Fallback to scores if up/down not available
-      if (!s.up_sums && !s.down_sums) {
-        for (const v of Object.values(s.scores)) maxVal = Math.max(maxVal, Math.abs(v));
+      for (const c of (heatmapData?.conditions || [])) {
+        const { upVal, dnVal } = getEffectiveValues(s, c);
+        mUp = Math.max(mUp, upVal);
+        mDn = Math.max(mDn, Math.abs(dnVal));
       }
     }
-    return maxVal;
-  }, [sortedScores]);
+    return { maxUp: mUp, maxDown: mDn };
+  }, [sortedScores, heatmapData?.conditions, getEffectiveValues]);
+
+  // Keep maxAbsScore for line chart and legacy uses
+  const maxAbsScore = useMemo(() => Math.max(maxUp, maxDown), [maxUp, maxDown]);
 
   // Line chart colors
   const LINE_COLORS = [
@@ -4883,6 +4912,18 @@ function KinaseActivityHeatmapView({
 
           <option value={9999}>All</option>
         </select>
+        <span className="text-xs text-muted-foreground">Signal:</span>
+        <select
+          className="text-xs h-7 bg-background border border-border rounded px-2"
+          value={signalTierFilter}
+          onChange={(e) => setSignalTierFilter(e.target.value as typeof signalTierFilter)}
+          title="Filter by signal strength tier: de_novo (|FC|≥2), regulated (0.58≤|FC|<2), minor (0.3≤|FC|<0.58)"
+        >
+          <option value="all">All Tiers</option>
+          <option value="de_novo">De Novo (|FC|≥2)</option>
+          <option value="regulated">Regulated (0.58≤|FC|&lt;2)</option>
+          <option value="minor">Minor (0.3≤|FC|&lt;0.58)</option>
+        </select>
         <div className="ml-auto flex items-center gap-1">
           {heatmapData._cached && (
             <Badge variant="outline" className="text-[10px] h-5 text-green-400 border-green-600">cached</Badge>
@@ -4975,12 +5016,12 @@ function KinaseActivityHeatmapView({
                         ].filter(Boolean).join("\n");
                         return (
                           <div
-                            className={`w-1.5 h-full min-h-[20px] rounded-sm ${cwColor.bar}`}
+                            className={`w-1.5 h-full min-h-[40px] rounded-sm ${cwColor.bar}`}
                             title={tipLines}
                           />
                         );
                       })() : (
-                        <div className="w-1.5 min-h-[20px]" />
+                        <div className="w-1.5 min-h-[40px]" />
                       )}
                     </td>
                     {/* Kinase name */}
@@ -5032,19 +5073,18 @@ function KinaseActivityHeatmapView({
                         {(ks.coherence ?? 0).toFixed(2)}
                       </span>
                     </td>
-                    {/* Heatmap cells - split up/down */}
+                    {/* Heatmap cells - split up/down with independent normalization */}
                     {heatmapData.conditions.map((c) => {
-                      const upVal = ks.up_sums?.[c] || 0;
-                      const dnVal = ks.down_sums?.[c] || 0;  // negative
-                      const upN = ks.up_counts?.[c] || 0;
-                      const dnN = ks.down_counts?.[c] || 0;
+                      const { upVal, dnVal, upN, dnN } = getEffectiveValues(ks, c);
                       const coactN = ks.coact_counts?.[c] || 0;
                       const exclSum = ks.exclusive_sums?.[c] || 0;
                       const sharedSum = ks.shared_sums?.[c] || 0;
                       const exclN = ks.exclusive_counts?.[c] || 0;
                       const sharedN = ks.shared_counts?.[c] || 0;
+                      // Tier info for tooltip
+                      const tierLabel = signalTierFilter === "all" ? "All tiers" : signalTierFilter;
                       const tipLines = [
-                        `${ks.kinase} @ ${c}`,
+                        `${ks.kinase} @ ${c} [${tierLabel}]`,
                         `▲ Up: ${upN} substrates, sum=+${upVal.toFixed(2)}`,
                         `▼ Down: ${dnN} substrates, sum=${dnVal.toFixed(2)}`,
                         `Total co-activated: ${coactN} / ${ks.substrate_count}`,
@@ -5052,43 +5092,43 @@ function KinaseActivityHeatmapView({
                         `Exclusive: ${exclN} (sum=${exclSum.toFixed(2)})`,
                         `Shared: ${sharedN} (sum=${sharedSum.toFixed(2)})`,
                       ];
-                      // Normalize bar heights (relative to maxAbsScore)
-                      const upHeight = maxAbsScore > 0 ? Math.min(1, upVal / maxAbsScore) : 0;
-                      const dnHeight = maxAbsScore > 0 ? Math.min(1, Math.abs(dnVal) / maxAbsScore) : 0;
+                      // Independent normalization: up uses maxUp, down uses maxDown
+                      const upHeight = maxUp > 0 ? Math.min(1, upVal / maxUp) : 0;
+                      const dnHeight = maxDown > 0 ? Math.min(1, Math.abs(dnVal) / maxDown) : 0;
                       return (
                         <td
                           key={c}
                           className="px-0 py-0 text-center"
                           title={tipLines.join("\n")}
                         >
-                          <div className="mx-auto w-full h-6 flex flex-col">
+                          <div className="mx-auto w-full h-10 flex flex-col">
                             {/* Up bar (top half - red) */}
                             <div className="flex-1 flex items-end justify-center relative overflow-hidden">
                               <div
-                                className="absolute bottom-0 w-full transition-all"
+                                className="absolute bottom-0 w-full"
                                 style={{
                                   height: `${upHeight * 100}%`,
-                                  backgroundColor: getHeatmapColor(upVal, maxAbsScore),
+                                  backgroundColor: getHeatmapColor(upVal, maxUp),
                                 }}
                               />
-                              {upVal >= maxAbsScore * 0.2 && (
+                              {upVal >= maxUp * 0.15 && (
                                 <span className="relative z-10 text-[8px] text-white/90 leading-none">
                                   +{upVal.toFixed(1)}
                                 </span>
                               )}
                             </div>
                             {/* Divider line */}
-                            <div className="h-px bg-gray-600/50 w-full" />
+                            <div className="h-px bg-gray-500/70 w-full flex-shrink-0" />
                             {/* Down bar (bottom half - blue) */}
                             <div className="flex-1 flex items-start justify-center relative overflow-hidden">
                               <div
-                                className="absolute top-0 w-full transition-all"
+                                className="absolute top-0 w-full"
                                 style={{
                                   height: `${dnHeight * 100}%`,
-                                  backgroundColor: getHeatmapColor(dnVal, maxAbsScore),
+                                  backgroundColor: getHeatmapColor(dnVal, maxDown),
                                 }}
                               />
-                              {Math.abs(dnVal) >= maxAbsScore * 0.2 && (
+                              {Math.abs(dnVal) >= maxDown * 0.15 && (
                                 <span className="relative z-10 text-[8px] text-white/90 leading-none">
                                   {dnVal.toFixed(1)}
                                 </span>
@@ -5107,14 +5147,19 @@ function KinaseActivityHeatmapView({
           <div className="flex items-center justify-between gap-2 py-2 px-3 text-[10px] text-muted-foreground">
             <div className="flex items-center gap-2">
               <span className="flex flex-col items-center gap-0.5">
-                <span className="px-2 py-0.5 rounded text-white" style={{ backgroundColor: getHeatmapColor(maxAbsScore, maxAbsScore) }}>
-                  ▲ +{maxAbsScore.toFixed(0)}
+                <span className="px-2 py-0.5 rounded text-white" style={{ backgroundColor: getHeatmapColor(maxUp, maxUp) }}>
+                  ▲ +{maxUp.toFixed(1)}
                 </span>
-                <span className="px-2 py-0.5 rounded" style={{ backgroundColor: getHeatmapColor(-maxAbsScore, maxAbsScore) }}>
-                  ▼ -{maxAbsScore.toFixed(0)}
+                <span className="px-2 py-0.5 rounded" style={{ backgroundColor: getHeatmapColor(-maxDown, maxDown) }}>
+                  ▼ -{maxDown.toFixed(1)}
                 </span>
               </span>
-              <span className="ml-2">(Co-activation Sum: ΣFC of substrates moving in same direction. Top=up, Bottom=down)</span>
+              <span className="ml-2 flex flex-col">
+                <span>(Co-activation Sum: ΣFC of substrates moving in same direction. Top=up, Bottom=down)</span>
+                <span className="text-[9px] text-muted-foreground/60">
+                  Up/Down independently normalized | Signal: {signalTierFilter === "all" ? "All tiers" : signalTierFilter}
+                </span>
+              </span>
             </div>
              {/* Co-wave group legend */}
             {heatmapData.cowave_groups && heatmapData.cowave_groups.length > 0 && (
