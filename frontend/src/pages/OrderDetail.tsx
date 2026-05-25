@@ -2023,6 +2023,21 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
                       <span className="text-xs text-muted-foreground w-16 text-right flex-shrink-0">
                         {rec.downstream_ptm_count} PTM{rec.downstream_ptm_count !== 1 ? "s" : ""}
                       </span>
+                      {/* Confidence score */}
+                      {(rec as any).confidence_score != null && (
+                        <span
+                          className={`text-[10px] font-mono flex-shrink-0 w-10 text-right ${
+                            (rec as any).confidence_score >= 0.6
+                              ? "text-emerald-400"
+                              : (rec as any).confidence_score >= 0.4
+                                ? "text-yellow-400"
+                                : "text-muted-foreground"
+                          }`}
+                          title={`Confidence: ${((rec as any).confidence_score * 100).toFixed(0)}% (cowave=${((rec as any).cowave_score || 0).toFixed(1)}, convergence=${((rec as any).via_kinases || []).length} kinases, source=${source})`}
+                        >
+                          {((rec as any).confidence_score * 100).toFixed(0)}%
+                        </span>
+                      )}
                       {/* Source indicator */}
                       {source === "reactome" && (
                         <span className="text-[9px] text-emerald-500/70 flex-shrink-0" title="Mapped via Reactome pathway database">
@@ -2032,6 +2047,21 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
                       {source === "treatment_context" && (
                         <span className="text-[9px] text-sky-400/70 flex-shrink-0" title="Known receptor for treatment ligand (from experimental context)">
                           T
+                        </span>
+                      )}
+                      {source === "treatment_context_uniprot" && (
+                        <span className="text-[9px] text-sky-300/70 flex-shrink-0" title="UniProt receptor for treatment ligand">
+                          Tu
+                        </span>
+                      )}
+                      {source === "curated_kinase_receptor_db" && (
+                        <span className="text-[9px] text-purple-400/70 flex-shrink-0" title="Curated kinase-receptor database">
+                          C
+                        </span>
+                      )}
+                      {source === "e3_ligase_db" && (
+                        <span className="text-[9px] text-orange-400/70 flex-shrink-0" title="E3 ligase receptor database">
+                          E3
                         </span>
                       )}
                       {source === "literature" && (
@@ -2089,10 +2119,15 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
               })}
             </div>
             <p className="text-[10px] text-muted-foreground mt-2">
-              Receptors inferred from treatment context, Reactome pathway mapping, and literature annotations.
-              <span className="text-sky-400/70 ml-1">T</span> = Treatment context
+              Filtered by confidence score (convergence + temporal consistency + source reliability).
+              <span className="text-emerald-400 ml-1">Green %</span> = high confidence
+              <span className="text-yellow-400 ml-1">Yellow %</span> = moderate
+              <span className="text-muted-foreground ml-1">Gray %</span> = lower.
+              <span className="text-sky-400/70 ml-1">T</span> = Treatment
               <span className="text-emerald-500/70 ml-1">R</span> = Reactome
-              <span className="text-amber-400/70 ml-1">L</span> = Literature. Hover receptor name for details.
+              <span className="text-purple-400/70 ml-1">C</span> = Curated DB
+              <span className="text-orange-400/70 ml-1">E3</span> = E3 ligase
+              <span className="text-amber-400/70 ml-1">L</span> = Literature.
             </p>
           </div>
         );

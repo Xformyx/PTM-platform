@@ -366,6 +366,7 @@ interface InferredReceptor {
   shared_ptms?: string[];
   unique_ptm_ratio?: number;
   cowave_score?: number;
+  confidence_score?: number;
 }
 
 interface KinaseModuleAnalysisProps {

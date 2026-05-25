@@ -3101,10 +3101,123 @@ async def get_vector_plot_data(
                 "scoring_method": "hub_penalized_uniqueness",
             }
 
-        # ── Final sorting: cowave_score primary, downstream_ptm_count secondary ──
+        # ══════════════════════════════════════════════════════════════════════
+        # v10.2: Combined Confidence Score + Hard Filter
+        # ══════════════════════════════════════════════════════════════════════
+        # Source reliability mapping
+        _SOURCE_RELIABILITY = {
+            "treatment_context": 1.0,
+            "treatment_context_uniprot": 0.7,
+            "curated_kinase_receptor_db": 0.8,
+            "reactome": 0.6,
+            "e3_ligase_db": 0.7,
+            "ubiquitylation_db_client": 0.6,
+            "literature": 0.3,
+        }
+
+        # Normalize cowave_score for confidence calculation
+        _all_cowave_scores = [r.get("cowave_score", 0) for r in merged.values()]
+        _max_cowave = max(_all_cowave_scores) if _all_cowave_scores else 1.0
+        if _max_cowave == 0:
+            _max_cowave = 1.0
+
+        # Calculate confidence score for each receptor
+        for _ri in merged.values():
+            _vk = _ri.get("via_kinases", [])
+            _n_kinases = len(_vk)
+
+            # Component 1: Normalized cowave score (0~1)
+            _norm_cowave = _ri.get("cowave_score", 0) / _max_cowave
+
+            # Component 2: Convergence score — how many kinases point to this receptor
+            # Normalized: 1 kinase=0.2, 2=0.5, 3=0.7, 4+=0.9, 5+=1.0
+            _convergence = min(_n_kinases / 5.0, 1.0) if _n_kinases > 0 else 0.0
+
+            # Component 3: Source reliability
+            _source = _ri.get("source", "literature")
+            _source_rel = _SOURCE_RELIABILITY.get(_source, 0.3)
+
+            # Component 4: Unique PTM ratio (already calculated)
+            _upr = _ri.get("unique_ptm_ratio", 0.0)
+
+            # Component 5: Has receptor-specific curated DB
+            _has_db = 1.0 if _ri.get("has_receptor_specific_db") else 0.0
+
+            # Combined confidence score
+            _confidence = (
+                0.35 * _norm_cowave +
+                0.25 * _convergence +
+                0.20 * _source_rel +
+                0.10 * _upr +
+                0.10 * _has_db
+            )
+            _ri["confidence_score"] = round(_confidence, 4)
+
+        # ── Hard Filter ──
+        # Rule 1: via_kinases < 2 AND source != treatment_context → remove
+        # Rule 2: kinase_group_id exists → keep only the one with highest confidence in group
+        _filtered_merged: dict = {}
+        _group_best: dict = {}  # group_id → best receptor name
+
+        for _rn, _ri in merged.items():
+            _vk = _ri.get("via_kinases", [])
+            _source = _ri.get("source", "")
+
+            # Hard filter: single kinase AND not treatment context → skip
+            if len(_vk) < 2 and _source not in ("treatment_context", "treatment_context_uniprot"):
+                logging.getLogger("vector_plot").debug(
+                    f"Receptor '{_rn}' filtered: via_kinases={len(_vk)}, source={_source}"
+                )
+                continue
+
+            # Group dedup: keep best per kinase_group
+            _gid = _ri.get("kinase_group_id")
+            if _gid:
+                if _gid not in _group_best:
+                    _group_best[_gid] = (_rn, _ri["confidence_score"])
+                    _filtered_merged[_rn] = _ri
+                else:
+                    _prev_name, _prev_score = _group_best[_gid]
+                    if _ri["confidence_score"] > _prev_score:
+                        # Replace previous with current
+                        _filtered_merged.pop(_prev_name, None)
+                        _filtered_merged[_rn] = _ri
+                        _group_best[_gid] = (_rn, _ri["confidence_score"])
+                    # else: skip this one (lower score in same group)
+            else:
+                _filtered_merged[_rn] = _ri
+
+        # ── Soft Threshold: confidence >= 0.3 ──
+        _CONFIDENCE_THRESHOLD = 0.3
+        _above_threshold = {
+            rn: ri for rn, ri in _filtered_merged.items()
+            if ri["confidence_score"] >= _CONFIDENCE_THRESHOLD
+        }
+
+        # Safety: always keep at least top 5 if threshold is too aggressive
+        if len(_above_threshold) < 5 and len(_filtered_merged) >= 5:
+            _sorted_filtered = sorted(
+                _filtered_merged.values(),
+                key=lambda x: x["confidence_score"],
+                reverse=True,
+            )
+            _above_threshold = {r["name"]: r for r in _sorted_filtered[:5]}
+
+        # Also always keep treatment_context receptors regardless of threshold
+        for _rn, _ri in _filtered_merged.items():
+            if _ri.get("source") in ("treatment_context", "treatment_context_uniprot"):
+                _above_threshold[_rn] = _ri
+
+        logging.getLogger("vector_plot").info(
+            f"Receptor confidence filter: {len(merged)} raw → "
+            f"{len(_filtered_merged)} after hard filter → "
+            f"{len(_above_threshold)} after threshold ({_CONFIDENCE_THRESHOLD})"
+        )
+
+        # ── Final sorting: confidence_score primary, cowave_score secondary ──
         inferred_receptors = sorted(
-            merged.values(),
-            key=lambda x: (x.get("cowave_score", 0), x.get("downstream_ptm_count", 0)),
+            _above_threshold.values(),
+            key=lambda x: (x.get("confidence_score", 0), x.get("cowave_score", 0)),
             reverse=True,
         )
 
