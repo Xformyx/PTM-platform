@@ -399,6 +399,47 @@ def run_report_generation(self, order_id: int, config: dict):
         # v9.44: Load kinase_activity_heatmap + signal_propagation_data from DB
         kinase_activity_heatmap_from_db = {}
         signal_propagation_from_db = {}
+
+        # v10.1: Load vector_plot_raw_data (full TSV) for LLM access
+        vector_plot_raw_data = []
+        ptm_type_for_suffix = (config.get("experimental_context") or {}).get("ptm_type", "phosphorylation")
+        _vp_suffix = "_phospho" if ptm_type_for_suffix == "phosphorylation" else "_ubi"
+        for _vp_name in (f"ptm_vector_data_normalized{_vp_suffix}.tsv", f"ptm_vector_data_with_motifs{_vp_suffix}.tsv"):
+            _vp_path = order_output / _vp_name
+            if _vp_path.exists():
+                import csv as _csv
+                with open(_vp_path, "r", encoding="utf-8") as _vf:
+                    _reader = _csv.DictReader(_vf, delimiter="\t")
+                    for _row in _reader:
+                        _gene = _row.get("Gene.Name", _row.get("gene", ""))
+                        _pos = _row.get("PTM_Position", _row.get("position", ""))
+                        _cond = _row.get("Condition", "")
+                        try:
+                            _rel_fc = float(_row.get("PTM_Relative_Log2FC", "") or 0)
+                        except (ValueError, TypeError):
+                            _rel_fc = 0
+                        try:
+                            _prot_fc = float(_row.get("Protein_Log2FC", "") or 0)
+                        except (ValueError, TypeError):
+                            _prot_fc = 0
+                        vector_plot_raw_data.append({
+                            "gene": _gene, "position": str(_pos), "condition": _cond,
+                            "ptm_relative_log2fc": round(_rel_fc, 3),
+                            "protein_log2fc": round(_prot_fc, 3),
+                        })
+                logger.info(f"[Order {order_id}] Loaded {len(vector_plot_raw_data)} vector plot raw data rows from {_vp_name}")
+                break
+
+        # v10.1: Load pipeline_statistics for Methods section
+        pipeline_statistics = {}
+        _stats_path = order_output / f"pipeline_statistics{_vp_suffix}.json"
+        if _stats_path.exists():
+            try:
+                with open(_stats_path, "r", encoding="utf-8") as _sf:
+                    pipeline_statistics = json.load(_sf)
+                logger.info(f"[Order {order_id}] Loaded pipeline statistics from {_stats_path.name}")
+            except Exception as _stats_err:
+                logger.warning(f"[Order {order_id}] Could not load pipeline statistics: {_stats_err}")
         try:
             from common.db_engine import get_engine as _get_shared_engine
             from sqlalchemy import text as _text
@@ -455,8 +496,10 @@ def run_report_generation(self, order_id: int, config: dict):
             "kinase_activity_heatmap": kinase_activity_heatmap_from_db or config.get("kinase_activity_heatmap", {}),
             # v9.44: Signal propagation data for report generation
             "signal_propagation_data": signal_propagation_from_db,
-            # v9.44: Vector plot data reference for report generation
-            "vector_plot_data_available": True,
+            # v10.1: Vector plot raw data (full TSV) for LLM comprehensive access
+            "vector_plot_raw_data": vector_plot_raw_data,
+            # v10.1: Pipeline statistics for Methods section
+            "pipeline_statistics": pipeline_statistics,
         }
 
         # ── Cross-Talk mode: load secondary PTM data into initial_state ──

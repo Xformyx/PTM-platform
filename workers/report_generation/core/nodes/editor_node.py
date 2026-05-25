@@ -88,110 +88,34 @@ def _compile_report(
     collected_references = collected_references or []
     lines = []
 
+    # ═══════════════════════════════════════════════════════════════════════
+    # v10.1: Revised report structure (academic standard)
+    #   Title → Abstract → Introduction → Methods → Results → Network Figures
+    #   → Discussion (incl. Hypotheses) → Conclusion → Drug Repositioning
+    #   → Suggested Validation Experiments → References
+    # ═══════════════════════════════════════════════════════════════════════
+
     # Title — use LLM-generated title if available, otherwise fallback to report_title
     llm_title = sections.get("title", "").strip()
     final_title = llm_title if llm_title else title
     lines.append(f"# {final_title}\n")
     lines.append(f"*Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}*\n")
 
-    # Abstract (placed before Introduction for academic paper format)
+    # ── Abstract ──
     abstract = sections.get("abstract", "")
     if abstract:
         lines.append("## Abstract\n")
         lines.append(abstract)
         lines.append("")
 
-    # Introduction
+    # ── Introduction ──
     intro = sections.get("introduction", "")
     if intro:
         lines.append("## Introduction\n")
         lines.append(intro)
         lines.append("")
 
-    # Results
-    results = sections.get("results", "")
-    if results:
-        lines.append("## Results\n")
-        lines.append(results)
-        lines.append("")
-
-    # Network Analysis Figures — Base64 embedded or file-referenced
-    # v9.30: Fixed state reference bug — ptm_type is now passed as function argument
-    network_figure_section = generate_network_figure_section(network, ptm_type=ptm_type)
-    if network_figure_section:
-        lines.append(network_figure_section)
-    else:
-        # Fallback: file-referenced images + text legend
-        network_images = network.get("network_images", {})
-        legend = network.get("legends", {})
-        if network_images or legend:
-            lines.append("## Network Analysis\n")
-            if network_images:
-                for label, path in network_images.items():
-                    fname = Path(path).name if path else ""
-                    lines.append(f"![PTM Signaling Network — {label}]({fname})\n")
-            full_legend = legend.get("full_legend", "")
-            if full_legend:
-                lines.append(full_legend)
-            lines.append("")
-
-    # Discussion
-    discussion = sections.get("discussion", "")
-    if discussion:
-        lines.append("## Discussion\n")
-        lines.append(discussion)
-        lines.append("")
-
-    # Hypotheses summary
-    if hypotheses:
-        lines.append("## Hypotheses\n")
-        lines.append("| ID | Condition | Prediction | Confidence | Status |")
-        lines.append("|-----|-----------|------------|------------|--------|")
-        for h in hypotheses:
-            cond = h.get("condition", "")[:60]
-            pred = h.get("prediction", "")[:60]
-            conf = h.get("confidence", 0)
-            status = h.get("status", "generated")
-            lines.append(f"| {h.get('id', '?')} | {cond} | {pred} | {conf:.2f} | {status} |")
-        lines.append("")
-
-    # Conclusion
-    conclusion = sections.get("conclusion", "")
-    if conclusion:
-        lines.append("## Conclusion\n")
-        lines.append(conclusion)
-        lines.append("")
-
-    # Drug Repositioning (Extended Report)
-    if dr_results and dr_results.get("success") and dr_results.get("report_sections"):
-        lines.append("---\n")
-        lines.append("# Part II: Drug Repositioning Analysis\n")
-        lines.append(dr_results["report_sections"])
-        lines.append("")
-
-    # References
-    if collected_references:
-        lines.append("## References\n")
-        for idx, ref in enumerate(collected_references, 1):
-            pmid = ref.get("pmid", "")
-            title_str = ref.get("title", "Untitled")
-            journal = ref.get("journal", "")
-            pub_date = ref.get("pub_date", "")
-            gene = ref.get("gene", "")
-
-            ref_line = f"{idx}. {title_str}"
-            if journal:
-                ref_line += f" *{journal}*"
-            if pub_date:
-                ref_line += f" ({pub_date})."
-            if pmid:
-                ref_line += f" PMID: {pmid}."
-            if gene:
-                ref_line += f" [Related: {gene}]"
-            lines.append(ref_line)
-        lines.append("")
-
-    # Methods section — LLM-generated if available, fallback to static text
+    # ── Methods (moved before Results — academic standard) ──
     methods = sections.get("methods", "")
     if methods:
         lines.append("## Methods\n")
@@ -213,15 +137,97 @@ def _compile_report(
             )
         lines.append("")
 
-    # Suggested Validation Experiments — GAP F
+    # ── Results ──
+    results = sections.get("results", "")
+    if results:
+        lines.append("## Results\n")
+        lines.append(results)
+        lines.append("")
+
+    # ── Network Analysis Figures ──
+    network_figure_section = generate_network_figure_section(network, ptm_type=ptm_type)
+    if network_figure_section:
+        lines.append(network_figure_section)
+    else:
+        # Fallback: file-referenced images + text legend
+        network_images = network.get("network_images", {})
+        legend = network.get("legends", {})
+        if network_images or legend:
+            lines.append("## Network Analysis\n")
+            if network_images:
+                for label, path in network_images.items():
+                    fname = Path(path).name if path else ""
+                    lines.append(f"![PTM Signaling Network — {label}]({fname})\n")
+            full_legend = legend.get("full_legend", "")
+            if full_legend:
+                lines.append(full_legend)
+            lines.append("")
+
+    # ── Discussion ──
+    discussion = sections.get("discussion", "")
+    if discussion:
+        lines.append("## Discussion\n")
+        lines.append(discussion)
+        lines.append("")
+
+    # ── Hypotheses (as subsection after Discussion) ──
+    if hypotheses:
+        lines.append("### Generated Hypotheses\n")
+        lines.append("| ID | Condition | Prediction | Confidence | Status |")
+        lines.append("|-----|-----------|------------|------------|--------|")
+        for h in hypotheses:
+            cond = h.get("condition", "")[:60]
+            pred = h.get("prediction", "")[:60]
+            conf = h.get("confidence", 0)
+            status = h.get("status", "generated")
+            lines.append(f"| {h.get('id', '?')} | {cond} | {pred} | {conf:.2f} | {status} |")
+        lines.append("")
+
+    # ── Conclusion ──
+    conclusion = sections.get("conclusion", "")
+    if conclusion:
+        lines.append("## Conclusion\n")
+        lines.append(conclusion)
+        lines.append("")
+
+    # ── Drug Repositioning (Extended Report) ──
+    if dr_results and dr_results.get("success") and dr_results.get("report_sections"):
+        lines.append("---\n")
+        lines.append("## Drug Repositioning Analysis\n")
+        lines.append(dr_results["report_sections"])
+        lines.append("")
+
+    # ── Suggested Validation Experiments ──
     suggestion = sections.get("suggestion", "")
     if suggestion:
         lines.append("## Suggested Validation Experiments\n")
         lines.append(suggestion)
         lines.append("")
 
+    # ── References ──
+    if collected_references:
+        lines.append("## References\n")
+        for idx, ref in enumerate(collected_references, 1):
+            pmid = ref.get("pmid", "")
+            title_str = ref.get("title", "Untitled")
+            journal = ref.get("journal", "")
+            pub_date = ref.get("pub_date", "")
+            gene = ref.get("gene", "")
+
+            ref_line = f"{idx}. {title_str}"
+            if journal:
+                ref_line += f" *{journal}*"
+            if pub_date:
+                ref_line += f" ({pub_date})."
+            if pmid:
+                ref_line += f" PMID: {pmid}."
+            if gene:
+                ref_line += f" [Related: {gene}]"
+            lines.append(ref_line)
+        lines.append("")
+
     # Footer
     lines.append("---\n")
-    lines.append(f"*Report generated by PTM Analysis Platform v1.0*")
+    lines.append(f"*Report generated by PTM Analysis Platform v10.1*")
 
     return "\n".join(lines)

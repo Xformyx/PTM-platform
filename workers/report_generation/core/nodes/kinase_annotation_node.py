@@ -1704,13 +1704,57 @@ def _build_frontend_kinase_llm_context(frontend_kinase: dict, ptm_type: str, kin
                     score_parts.append(f"{c}:{v:+.2f}")
             score_str = ", ".join(score_parts) if score_parts else "flat"
 
+            # v10.1: Include temporal pattern classification
+            temporal_pattern = ks.get("temporal_pattern", "")
+            pattern_str = f", pattern={temporal_pattern}" if temporal_pattern else ""
+
             parts.append(
                 f"**{kinase_name}** [{cw_str}] — {sub_count} substrates, "
                 f"conf={confidence:.0%}, peak={peak_cond} ({peak_score:+.2f}), "
-                f"direction={direction}, coherence={coherence:.2f}"
+                f"direction={direction}, coherence={coherence:.2f}{pattern_str}"
             )
             parts.append(f"  Temporal profile: [{score_str}]")
             parts.append("")
+
+    # ── Section F2: Temporal Pattern Summary ──
+    if kinase_activity_heatmap and kinase_activity_heatmap.get("all_patterns"):
+        all_patterns = kinase_activity_heatmap["all_patterns"]
+        parts.append(f"### F2. {regulator_label} Temporal Pattern Classification")
+        parts.append("")
+        parts.append(
+            f"Each {regulator_label.lower()} was automatically classified into temporal activation "
+            f"patterns based on its activity score trajectory across all measured conditions. "
+            f"These patterns identify biologically significant behaviors such as sudden emergence, "
+            f"direction reversal, transient spikes, or progressive amplification/decay."
+        )
+        parts.append("")
+
+        # Group kinases by pattern
+        from collections import defaultdict as _defaultdict
+        pattern_groups = _defaultdict(list)
+        for kinase_name_p, patterns_list in all_patterns.items():
+            if isinstance(patterns_list, list):
+                for pat in patterns_list:
+                    pattern_groups[pat].append(kinase_name_p)
+            elif isinstance(patterns_list, str):
+                pattern_groups[patterns_list].append(kinase_name_p)
+
+        # Sort by number of kinases in each pattern
+        for pat, kinases_in_pat in sorted(pattern_groups.items(), key=lambda x: len(x[1]), reverse=True):
+            k_str = ", ".join(kinases_in_pat[:10])
+            if len(kinases_in_pat) > 10:
+                k_str += f" (+{len(kinases_in_pat) - 10} more)"
+            parts.append(f"**{pat}** ({len(kinases_in_pat)} {regulator_label.lower()}s): {k_str}")
+        parts.append("")
+
+        parts.append(
+            f"*Interpretation: Temporal patterns reveal the dynamic behavior of {regulator_label.lower()} "
+            f"activation. 'Emergence' patterns indicate newly activated signaling nodes at specific "
+            f"timepoints. 'Reversal' patterns suggest feedback regulation or pathway switching. "
+            f"'Spike' patterns indicate transient signaling bursts. 'Sustained' patterns represent "
+            f"persistent signaling that drives long-term cellular responses.*"
+        )
+        parts.append("")
 
     # ── Section G: Peak Synchronization Events ──
     if kinase_activity_heatmap and kinase_activity_heatmap.get("peak_sync"):

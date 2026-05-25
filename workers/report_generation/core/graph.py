@@ -123,6 +123,11 @@ class ReportState(TypedDict, total=False):
     rq_refinement_metadata: dict            # LLM refinement diagnostics
     copilot_review: dict                    # report co-pilot review output
 
+    # v10.1: Full vector plot raw data (all PTM + Non-PTM protein FC per condition)
+    vector_plot_raw_data: List[dict]  # [{gene, position, condition, ptm_relative_log2fc, protein_log2fc}]
+    # v10.1: Pipeline statistics for Methods section
+    pipeline_statistics: dict  # {step1_input, step2_quantification, ...}
+
     # Progress tracking
     progress_callback: Any
     error: Optional[str]

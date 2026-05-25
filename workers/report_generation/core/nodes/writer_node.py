@@ -214,6 +214,45 @@ def run_section_writing(state: dict) -> dict:
     sections: Dict[str, str] = {}
     prev_sections: Dict[str, str] = {}
 
+    # v10.1: Load vector_plot_raw_data and pipeline_statistics from state
+    vector_plot_raw_data = state.get("vector_plot_raw_data", []) or []
+    pipeline_statistics = state.get("pipeline_statistics", {}) or {}
+
+    # v10.1: Build full vector plot context for LLM (all PTM + Non-PTM FC values)
+    aux_vector_plot_full = ""
+    if vector_plot_raw_data:
+        vp_lines = [
+            "=== FULL VECTOR PLOT DATA (All PTM sites + Non-PTM protein abundance) ===",
+            "This table contains the complete quantitative data for ALL measured PTM sites and proteins.",
+            "Use this data to answer specific questions about individual proteins or PTM sites.",
+            "",
+            "| Gene | Position | Condition | PTM_Relative_Log2FC | Protein_Log2FC |",
+            "|------|----------|-----------|---------------------|----------------|",
+        ]
+        # Sort by absolute PTM FC for relevance, include all
+        sorted_vp = sorted(
+            vector_plot_raw_data,
+            key=lambda x: abs(float(x.get("ptm_relative_log2fc", 0) or 0)),
+            reverse=True
+        )
+        for row in sorted_vp:
+            gene = row.get("gene", "")
+            pos = row.get("position", "")
+            cond = row.get("condition", "")
+            ptm_fc = row.get("ptm_relative_log2fc", "")
+            prot_fc = row.get("protein_log2fc", "")
+            ptm_fc_str = f"{float(ptm_fc):+.3f}" if ptm_fc not in (None, "", "NA") else "NA"
+            prot_fc_str = f"{float(prot_fc):+.3f}" if prot_fc not in (None, "", "NA") else "NA"
+            vp_lines.append(f"| {gene} | {pos} | {cond} | {ptm_fc_str} | {prot_fc_str} |")
+        vp_lines.append("")
+        vp_lines.append("=== END FULL VECTOR PLOT DATA ===")
+        aux_vector_plot_full = "\n".join(vp_lines)
+        logger.info(f"[v10.1] Built full vector plot context: {len(vector_plot_raw_data)} rows, {len(aux_vector_plot_full):,} chars")
+
+    # Inject pipeline_statistics into experimental_context for Methods prompt
+    if pipeline_statistics:
+        context["pipeline_statistics"] = pipeline_statistics
+
     # v9.31: Pre-build auxiliary blocks once (reuse across sections)
     aux_ptm_data_summary = build_ptm_data_summary(parsed_ptms, ptm_type=ptm_type)
     aux_nonptm_temporal = build_nonptm_temporal_analysis(network_results, timepoints, ptm_type=ptm_type)
@@ -266,7 +305,9 @@ def run_section_writing(state: dict) -> dict:
             supplement_blocks.append(("signal_prop", aux_signal_prop))
             supplement_blocks.append(("timelag", aux_timelag))
             supplement_blocks.append(("ptm_data_summary", aux_ptm_data_summary))
-            # Priority 4 (lowest): figure context, writing example
+            # Priority 4 (vector plot full data): complete quantitative reference
+            supplement_blocks.append(("vector_plot_full", aux_vector_plot_full))
+            # Priority 5 (lowest): figure context, writing example
             if figure_gen.has_figures():
                 supplement_blocks.append(("figure_ctx", figure_gen.generate_figure_context_for_llm(section_type)))
             supplement_blocks.append(("v98_writing_example", v98_writing_example))
@@ -280,7 +321,9 @@ def run_section_writing(state: dict) -> dict:
             # Priority 2: v98 directive + structured data
             supplement_blocks.append(("v98_directive", v98_directive))
             supplement_blocks.append(("v98_structured_data", v98_structured_data))
-            # Priority 3: figure context
+            # Priority 3: vector plot full data
+            supplement_blocks.append(("vector_plot_full", aux_vector_plot_full))
+            # Priority 4: figure context
             if figure_gen.has_figures():
                 supplement_blocks.append(("figure_ctx", figure_gen.generate_figure_context_for_llm(section_type)))
 
@@ -1097,6 +1140,35 @@ IMPORTANT: Be specific about findings — mention key PTM sites and their implic
         n_conditions = len(set(p.get("condition", "") for p in ptms if p.get("condition")))
         has_network = bool(network and network.get("cytoscape_connected"))
 
+        # v10.1: Build pipeline statistics block for Methods
+        pipeline_stats = context.get("pipeline_statistics", {})
+        stats_block = ""
+        if pipeline_stats:
+            step1 = pipeline_stats.get("step1_input", {})
+            step2 = pipeline_stats.get("step2_quantification", {})
+            step3 = pipeline_stats.get("step3_filtering", {})
+            metadata = pipeline_stats.get("metadata", {})
+            ptm_filt = step2.get("ptm_filtering", {})
+            stats_lines = ["\nPipeline Processing Statistics (from actual preprocessing):"]
+            if step1.get("total_proteins"):
+                stats_lines.append(f"- Input proteins: {step1['total_proteins']}")
+            if step1.get("total_ptm_sites"):
+                stats_lines.append(f"- Input PTM sites: {step1['total_ptm_sites']}")
+            if step1.get("conditions"):
+                stats_lines.append(f"- Conditions: {', '.join(step1['conditions']) if isinstance(step1['conditions'], list) else step1['conditions']}")
+            if ptm_filt.get("ptm_sites"):
+                stats_lines.append(f"- PTM sites after filtering: {ptm_filt['ptm_sites']}")
+            if ptm_filt.get("proteins_with_ptm"):
+                stats_lines.append(f"- Proteins with PTM: {ptm_filt['proteins_with_ptm']}")
+            if step3:
+                if step3.get("significant_sites"):
+                    stats_lines.append(f"- Significant PTM sites (|Log2FC| > threshold): {step3['significant_sites']}")
+                if step3.get("fc_threshold"):
+                    stats_lines.append(f"- Log2FC threshold: {step3['fc_threshold']}")
+            if metadata.get("normalization_method"):
+                stats_lines.append(f"- Normalization: {metadata['normalization_method']}")
+            stats_block = "\n".join(stats_lines)
+
         return f"""Write a detailed Methods section (~800-1500 words) for this PTM analysis report.
 {single_tp_directive}
 Experimental System:
@@ -1106,6 +1178,7 @@ Experimental System:
 - PTM type analyzed: {ptm_type_str}
 - Total PTM sites: {n_ptms}
 - Number of conditions: {n_conditions}
+{stats_block}
 
 The Methods section MUST cover:
 1. **Sample Preparation and Mass Spectrometry**: Describe the general proteomics workflow for {ptm_type_str} analysis (enrichment strategy, LC-MS/MS, database search)
