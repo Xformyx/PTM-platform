@@ -190,10 +190,32 @@ def run_kinase_annotation(state: dict) -> dict:
                     from report_generation.core.nodes.signal_flow_figure import (
                         generate_signal_flow_figure,
                         generate_kinase_temporal_heatmap,
+                        generate_pathway_diagram,
                     )
+
+                    entity_label = "E3 Ligase" if ptm_type.lower().strip() in ("ubiquitylation", "ubiquitination") else "Kinase"
+
+                    # Figure A (v10.2): Pathway Diagram — publication-standard cascade arrows
                     if inferred_receptors:
-                        # v9.34: Include Non-PTM effector proteins in Signal Flow
                         _effector_data = (global_km or {}).get("effector_proteins", [])
+                        pd_path = generate_pathway_diagram(
+                            inferred_receptors=inferred_receptors,
+                            global_kinase_modules=global_km,
+                            enriched_ptm_data=enriched_data,
+                            output_dir=output_dir,
+                            ptm_type=ptm_type,
+                            experimental_context=state.get("experimental_context"),
+                            kinase_activity_heatmap=kinase_activity_heatmap,
+                            effector_proteins=_effector_data,
+                        )
+                        if pd_path:
+                            signal_flow_figures.append({
+                                "path": pd_path,
+                                "caption": f"Inferred Signaling Pathway: Receptor → {entity_label} → Substrate cascade",
+                                "type": "pathway_diagram",
+                            })
+
+                        # Signal Flow (4-layer) → Supplementary
                         sf_path = generate_signal_flow_figure(
                             inferred_receptors=inferred_receptors,
                             global_kinase_modules=global_km,
@@ -206,19 +228,22 @@ def run_kinase_annotation(state: dict) -> dict:
                         if sf_path:
                             signal_flow_figures.append({
                                 "path": sf_path,
-                                "caption": f"Signal Flow Diagram: Upstream Receptor → Kinase → PTM Substrate{_has_eff} signaling cascade",
-                                "type": "signal_flow",
+                                "caption": f"Detailed Signal Flow: Upstream Receptor → {entity_label} → PTM Substrate{_has_eff} (Supplementary)",
+                                "type": "signal_flow_supplementary",
                             })
+
+                    # Figure B: Kinase Temporal Activity Heatmap (directional)
                     ht_path = generate_kinase_temporal_heatmap(
                         global_kinase_modules=global_km,
                         output_dir=output_dir,
                         ptm_type=ptm_type,
+                        kinase_activity_heatmap=kinase_activity_heatmap,
                     )
                     if ht_path:
                         entity_label = "E3 Ligase" if ptm_type.lower().strip() in ("ubiquitylation", "ubiquitination") else "Kinase"
                         signal_flow_figures.append({
                             "path": ht_path,
-                            "caption": f"Temporal {entity_label} Activity Heatmap: substrate count per timepoint",
+                            "caption": f"Temporal {entity_label} Activity: Activation (Red) vs Inhibition (Blue) across conditions",
                             "type": "kinase_heatmap",
                         })
                 except Exception as fig_err:
@@ -362,12 +387,33 @@ def run_kinase_annotation(state: dict) -> dict:
                 from report_generation.core.nodes.signal_flow_figure import (
                     generate_signal_flow_figure,
                     generate_kinase_temporal_heatmap,
+                    generate_pathway_diagram,
                 )
 
-                # Figure A: Signal Flow Diagram (Receptor → Kinase → Substrate → Non-PTM Effector)
+                entity_label = "E3 Ligase" if ptm_type.lower().strip() in ("ubiquitylation", "ubiquitination") else "Kinase"
+
+                # Figure A (v10.2): Pathway Diagram — publication-standard cascade arrows
                 if inferred_receptors:
-                    # v9.34: Include Non-PTM effector proteins in Signal Flow
                     _effector_data = (global_km or {}).get("effector_proteins", [])
+                    pd_path = generate_pathway_diagram(
+                        inferred_receptors=inferred_receptors,
+                        global_kinase_modules=global_km,
+                        enriched_ptm_data=enriched_data,
+                        output_dir=output_dir,
+                        ptm_type=ptm_type,
+                        experimental_context=state.get("experimental_context"),
+                        kinase_activity_heatmap=kinase_activity_heatmap,
+                        effector_proteins=_effector_data,
+                    )
+                    if pd_path:
+                        signal_flow_figures.append({
+                            "path": pd_path,
+                            "caption": f"Inferred Signaling Pathway: Receptor → {entity_label} → Substrate cascade",
+                            "type": "pathway_diagram",
+                        })
+                        logger.info(f"[KINASE-ANNOTATION] Generated Pathway Diagram: {pd_path}")
+
+                    # Signal Flow (4-layer) → Supplementary
                     sf_path = generate_signal_flow_figure(
                         inferred_receptors=inferred_receptors,
                         global_kinase_modules=global_km,
@@ -376,28 +422,29 @@ def run_kinase_annotation(state: dict) -> dict:
                         ptm_type=ptm_type,
                         effector_proteins=_effector_data,
                     )
-                    _has_eff = " → Non-PTM Effector" if _effector_data else ""
+                    _has_eff = " + Non-PTM Effectors" if _effector_data else ""
                     if sf_path:
                         signal_flow_figures.append({
                             "path": sf_path,
-                            "caption": f"Signal Flow Diagram: Upstream Receptor → Kinase → PTM Substrate{_has_eff} signaling cascade",
-                            "type": "signal_flow",
+                            "caption": f"Detailed Signal Flow: Upstream Receptor → {entity_label} → PTM Substrate{_has_eff} (Supplementary)",
+                            "type": "signal_flow_supplementary",
                         })
-                        logger.info(f"[KINASE-ANNOTATION] Generated Signal Flow figure: {sf_path} (effectors={len(_effector_data)})")
+                        logger.info(f"[KINASE-ANNOTATION] Generated Signal Flow (supplementary): {sf_path}")
                 else:
-                    logger.info("[KINASE-ANNOTATION] No inferred receptors — skipping Signal Flow figure")
+                    logger.info("[KINASE-ANNOTATION] No inferred receptors — skipping pathway figures")
 
-                # Figure B: Kinase Temporal Activity Heatmap
+                # Figure B: Kinase Temporal Activity Heatmap (v10.2: directional)
                 ht_path = generate_kinase_temporal_heatmap(
                     global_kinase_modules=global_km,
                     output_dir=output_dir,
                     ptm_type=ptm_type,
+                    kinase_activity_heatmap=kinase_activity_heatmap,
                 )
                 if ht_path:
                     entity_label = "E3 Ligase" if ptm_type.lower().strip() in ("ubiquitylation", "ubiquitination") else "Kinase"
                     signal_flow_figures.append({
                         "path": ht_path,
-                        "caption": f"Temporal {entity_label} Activity Heatmap: substrate count per timepoint across active {entity_label.lower()}s",
+                        "caption": f"Temporal {entity_label} Activity: Activation (Red) vs Inhibition (Blue) across conditions",
                         "type": "kinase_heatmap",
                     })
                     logger.info(f"[KINASE-ANNOTATION] Generated Kinase Temporal Heatmap: {ht_path}")

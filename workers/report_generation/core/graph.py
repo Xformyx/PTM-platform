@@ -445,32 +445,75 @@ def format_citations(state: ReportState) -> dict:
                     comovement_supp_items = supp_items
 
             # Step 3 (v9.33): Signal Flow & Kinase Heatmap figures
+            # v10.2: Separate main figures (pathway_diagram, kinase_heatmap) from supplementary (signal_flow_supplementary)
             signal_flow_figures = state.get("signal_flow_figures", []) or []
             if signal_flow_figures:
                 sf_section_parts = []
-                sf_section_parts.append("\n### Kinase Module Analysis Figures\n")
+                sf_section_parts.append("\n### Signaling Pathway & Kinase Activity Figures\n")
                 entity_label = "E3 Ligase" if state.get('ptm_type', 'phosphorylation').lower().strip() in ('ubiquitylation', 'ubiquitination') else "Kinase"
+                sf_supp_items = []  # Collect supplementary items
                 for sf_fig in signal_flow_figures:
                     fig_path = sf_fig.get("path", "")
                     fig_caption = sf_fig.get("caption", "")
                     fig_type = sf_fig.get("type", "")
-                    if fig_path:
-                        if fig_type == "signal_flow":
-                            sf_section_parts.append(f"\n**Signal Flow Diagram** — Upstream receptor to downstream PTM substrate signaling cascade. "
-                                f"This diagram illustrates the inferred signal transduction pathways from membrane receptors through "
-                                f"intermediate {entity_label.lower()}s to their target PTM substrates, color-coded by activity classification "
-                                f"(de novo: orange, regulated: blue, minor: gray).\n")
-                            sf_section_parts.append(f"![{fig_caption}]({fig_path})\n")
-                        elif fig_type == "kinase_heatmap":
-                            sf_section_parts.append(f"\n**Temporal {entity_label} Activity Heatmap** — Shows which {entity_label.lower()}s are active at each timepoint "
-                                f"with substrate count intensity. This heatmap reveals the temporal dynamics of {entity_label.lower()} activation, "
-                                f"identifying early-response vs. sustained {entity_label.lower()}s and transitions in signaling activity over time.\n")
-                            sf_section_parts.append(f"![{fig_caption}]({fig_path})\n")
-                        else:
-                            sf_section_parts.append(f"![{fig_caption}]({fig_path})\n")
+                    if not fig_path:
+                        continue
+                    if fig_type == "pathway_diagram":
+                        sf_section_parts.append(f"\n**Inferred Signaling Pathway** — Publication-standard cascade diagram showing the inferred signal "
+                            f"transduction pathway from upstream receptors through intermediate {entity_label.lower()}s to their "
+                            f"target PTM substrates. Arrows indicate activation (→) or inhibition (⊣). "
+                            f"Node colors indicate direction: red = activation, blue = inhibition.\n")
+                        sf_section_parts.append(f"![{fig_caption}]({fig_path})\n")
+                    elif fig_type == "kinase_heatmap":
+                        sf_section_parts.append(f"\n**Temporal {entity_label} Activity Heatmap** — Directional heatmap showing {entity_label.lower()} "
+                            f"activation (red) and inhibition (blue) across experimental conditions. Color intensity reflects "
+                            f"average fold-change magnitude per substrate. Temporal pattern annotations (right) classify each "
+                            f"{entity_label.lower()} as sustained, early-only, late-onset, spike, or reversal.\n")
+                        sf_section_parts.append(f"![{fig_caption}]({fig_path})\n")
+                    elif fig_type == "signal_flow_supplementary":
+                        # Move to supplementary
+                        sf_supp_items.append((fig_caption, fig_path,
+                            f"Detailed 4-layer signal flow diagram showing all receptor-{entity_label.lower()}-substrate connections."))
+                    elif fig_type == "signal_flow":
+                        # Legacy: also move to supplementary
+                        sf_supp_items.append((fig_caption, fig_path,
+                            f"Detailed signal flow diagram showing receptor-{entity_label.lower()}-substrate connections."))
+                    else:
+                        sf_section_parts.append(f"![{fig_caption}]({fig_path})\n")
                 sf_combined = "\n".join(sf_section_parts)
                 parts.append(sf_combined)
-                logger.info(f"[FORMAT-CIT] Added {len(signal_flow_figures)} Signal Flow/Kinase figures ({len(sf_combined)} chars)")
+                logger.info(f"[FORMAT-CIT] Added main signaling figures ({len(sf_combined)} chars)")
+                # Add signal flow supplementary items to comovement_supp_items for end-of-report placement
+                if sf_supp_items:
+                    comovement_supp_items.extend(sf_supp_items)
+                    logger.info(f"[FORMAT-CIT] Moved {len(sf_supp_items)} signal flow figures to supplementary")
+
+            # Step 4 (v10.2): Context-aware PTM Heatmap — generated AFTER writing, using mentioned PTMs
+            try:
+                from .nodes.signal_flow_figure import generate_context_aware_ptm_heatmap
+                results_text = sections.get("results", "") + "\n" + sections.get("discussion", "")
+                output_dir = state.get("output_dir", "")
+                vector_plot_raw_data = state.get("vector_plot_raw_data", "")
+                if results_text and output_dir and vector_plot_raw_data:
+                    ctx_heatmap_path = generate_context_aware_ptm_heatmap(
+                        report_text=results_text,
+                        vector_plot_raw_data=vector_plot_raw_data,
+                        output_dir=output_dir,
+                        ptm_type=state.get('ptm_type', 'phosphorylation'),
+                    )
+                    if ctx_heatmap_path:
+                        entity_label = "E3 Ligase" if state.get('ptm_type', 'phosphorylation').lower().strip() in ('ubiquitylation', 'ubiquitination') else "Kinase"
+                        ctx_fig_section = (
+                            f"\n\n### Context-Relevant PTM Site Heatmap\n\n"
+                            f"**Key PTM Sites Referenced in This Report** \u2014 Heatmap showing the temporal "
+                            f"fold-change profiles of PTM sites specifically discussed in the Results and Discussion "
+                            f"sections above. Sites are clustered by temporal pattern similarity.\n\n"
+                            f"![Context-aware PTM Heatmap]({ctx_heatmap_path})\n"
+                        )
+                        parts.append(ctx_fig_section)
+                        logger.info(f"[FORMAT-CIT] Generated context-aware PTM heatmap: {ctx_heatmap_path}")
+            except Exception as ctx_err:
+                logger.warning(f"[FORMAT-CIT] Context-aware PTM heatmap generation failed: {ctx_err}")
 
     all_text = "\n\n".join(parts)
 

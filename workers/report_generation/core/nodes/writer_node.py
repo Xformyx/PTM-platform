@@ -938,29 +938,36 @@ Each major subsection should correspond to a key analytical output (figure or da
 - For each top pathway, identify which PTM proteins contribute and their Log2FC values
 - Highlight pathway convergence: where do multiple PTMs converge on the same signaling axis?
 
-### Part 2: Co-movement (Co-wave) Group Analysis (Figure 2)
-- Describe each co-wave group and its members
-- Explain the biological commonality within each group (shared pathway, function, localization)
-- Compare groups: what pathways/functions distinguish Group A from Group B?
-- Describe temporal patterns: which groups peak early (transient) vs late (sustained)?
-- How do co-wave patterns reveal coordinated signaling responses?
+### Part 2: Kinase/E3 Temporal Activity Analysis (Figure 2 — Kinase Activity Heatmap)
+- Describe the temporal activation patterns visible in the Kinase Activity Heatmap
+- Group kinases by their temporal pattern: sustained activation, early-only, late-onset, spike, reversal
+- For each pattern group, explain the biological significance:
+  * Sustained: persistent signaling (e.g., stress response, proliferation)
+  * Early-only: immediate-early response (e.g., MAPK cascade)
+  * Late-onset: secondary/adaptive response
+  * Spike: transient burst (e.g., checkpoint activation)
+  * Reversal: feedback inhibition or pathway switching
+- Quantify: number of co-activated substrates and sum FC for key kinases
+- Describe how co-wave groups relate to kinase activation timing
 
-### Part 3: Signal Flow — Receptor → Kinase → Substrate → Effector Cascade (Figure 3)
-- Trace the complete signal flow from upstream receptor activation through kinase cascade
-  to substrate modification and finally to non-PTM effector protein changes
+### Part 3: Signaling Pathway Cascade (Figure 3 — Pathway Diagram)
+- Describe the inferred signaling pathway from upstream receptors through kinases to substrates
+- Trace the signal flow as a narrative: which receptor is activated first, which kinases relay the signal,
+  and which substrates/effectors are the final targets
 - At each timepoint, describe which signaling layer is most active
-- Identify signal relay points and amplification nodes
 - For each kinase-substrate axis, INLINE mention the number of concordant Non-PTM downstream
   interactors as validation evidence (e.g., 'supported by N concordant downstream effectors')
 - Describe the evidence strength for each cascade connection:
   * Strong: confirmed kinase-substrate + concordant effectors + literature support
   * Moderate: predicted kinase-substrate + some effector concordance
   * Inferred: motif-based prediction only
+- IMPORTANT: Describe the pathway in text as well (e.g., '{treatment} → EGFR → RAS/RAF → MEK1/2 → ERK1/2 → substrate phosphorylation')
 
-### Part 4: Cascade Detail — Key Signaling Axes (Figure 4)
-- For each major kinase identified, detail its substrate targets and temporal activation
-- Present cascade diagrams showing the specific signaling axes
-- Quantify: Log2FC values, number of substrates, timepoint of peak activity
+### Part 4: Key PTM Site Dynamics (Figure 4 — Context PTM Heatmap)
+- For the most important PTM sites discussed in Parts 1-3, describe their temporal profiles in detail
+- Group sites by functional category (kinase substrates, transcription factors, cytoskeletal, metabolic)
+- Quantify: exact Log2FC values at each timepoint for key sites
+- Highlight any unexpected patterns (e.g., a known activation site showing inhibition)
 
 ### Part 5: Research Question Integration
 - For EACH research question, provide a dedicated subsection (### heading) that integrates
