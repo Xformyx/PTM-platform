@@ -665,7 +665,13 @@ def _generate_directional_heatmap(
     pattern_labels = []
 
     for i, ks in enumerate(sorted_scores):
-        kinase_labels.append(ks.get("kinase", "Unknown"))
+        # v10.3: Include substrate count in kinase label for completeness
+        k_name = ks.get("kinase", "Unknown")
+        sub_count = ks.get("substrate_count", 0)
+        if sub_count > 0:
+            kinase_labels.append(f"{k_name} (n={sub_count})")
+        else:
+            kinase_labels.append(k_name)
         pattern_labels.append(ks.get("temporal_pattern", "mixed"))
         scores = ks.get("scores", {})
         for j, c in enumerate(conditions):
@@ -786,7 +792,7 @@ def _generate_directional_heatmap(
         0.5, 0.01,
         f"Score = weighted sum of substrate Log2FC per condition. "
         f"Positive (red) = substrates up-regulated; Negative (blue) = substrates down-regulated. "
-        f"Rows grouped by detected temporal pattern.",
+        f"Rows grouped by detected temporal pattern. (n=N) = number of PTM substrates per {entity_label.lower()}.",
         fontsize=7, color="#6b7280", ha="center", va="bottom", style="italic",
     )
 

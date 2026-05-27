@@ -982,8 +982,25 @@ This is the most important section of the report.
 - You MUST explicitly name the treatment/stimulus ({treatment}) when describing PTM responses.
   Never use generic terms like 'the treatment'.
 - ALL answers to research questions MUST be framed through the PTM Vector / activation-centric perspective.
-- When referencing figures, use 'Figure N' format (e.g., 'As shown in Figure 1, ...').
 - Each Part should flow naturally into the next, building a coherent signaling narrative.
+
+=== MANDATORY FIGURE REFERENCE RULES (v10.3) ===
+You MUST include explicit inline figure references in the text using the format '(Figure N)'.
+The report contains these main figures:
+  - **Figure 1**: Canonical Pathway Distribution Bar Graph (pathway enrichment landscape)
+  - **Figure 2**: Temporal Kinase Activity Heatmap (activation/inhibition direction per condition)
+  - **Figure 3**: Context-Relevant PTM Site Heatmap (key PTM sites discussed in this report)
+  - **Figure 4**: Inferred Signaling Pathway Diagram (receptor → kinase → substrate cascade)
+
+For EACH Part, you MUST reference the corresponding figure AT LEAST ONCE:
+  - Part 1 → '(Figure 1)' or 'As shown in Figure 1, ...'
+  - Part 2 → '(Figure 2)' or 'The kinase temporal heatmap (Figure 2) reveals ...'
+  - Part 3 → '(Figure 4)' or 'The pathway diagram (Figure 4) illustrates ...'
+  - Part 4 → '(Figure 3)' or 'The PTM site heatmap (Figure 3) shows ...'
+
+Do NOT omit figure references. Every analytical claim about pathway enrichment, kinase activity,
+signaling cascades, or PTM dynamics MUST be anchored to its corresponding figure.
+=== END FIGURE REFERENCE RULES ===
 {combined_lit}"""
 
     elif section_type == "discussion":
@@ -1099,6 +1116,17 @@ Structure (8 core topics):
 
 IMPORTANT: For each discussion point, provide evidence from your data AND from the literature. Cite the provided references extensively. ALL interpretations must be grounded in the PTM Vector framework — activation states as signaling vectors.
 - You MUST explicitly name the treatment/stimulus ({treatment}) throughout the Discussion. Never use generic terms.
+
+=== MANDATORY FIGURE REFERENCE RULES (v10.3) ===
+You MUST reference the main figures when discussing their corresponding data:
+  - **Figure 1** (Pathway Distribution): Reference when discussing pathway convergence or enrichment.
+  - **Figure 2** (Kinase Activity Heatmap): Reference when discussing temporal kinase patterns.
+  - **Figure 3** (Context PTM Heatmap): Reference when discussing specific PTM site dynamics.
+  - **Figure 4** (Pathway Diagram): Reference when discussing the receptor→kinase→substrate cascade.
+
+Use the format '(Figure N)' or 'as illustrated in Figure N'. Each figure should be referenced
+at least once in the Discussion to anchor interpretive claims to the analytical evidence.
+=== END FIGURE REFERENCE RULES ===
 {combined_lit}"""
 
     elif section_type == "conclusion":

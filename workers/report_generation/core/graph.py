@@ -415,103 +415,184 @@ def format_citations(state: ReportState) -> dict:
             parts.append(sections[key])
             logger.info(f"[FORMAT-CIT] Added section: {key} ({len(sections[key])} chars)")
         if key == "results":
-            # v8.7: Figure ordering: Fig 1 (Pathway) → Fig 2-6 (Co-movement) → Supplementary at end
-            # v9.4: When co-movement is absent (< 3 timepoints), promote cascade/cytoscape to main figures
+            # ═══════════════════════════════════════════════════════════════════
+            # v10.3: Figure Placement Overhaul
+            # Main Figures:  Fig 1 (Pathway Bar) → Fig 2 (Kinase Heatmap) →
+            #                Fig 3 (Context PTM Heatmap) → Fig 4 (Pathway Diagram)
+            # Supplementary: Co-movement figures + Signal Flow 4-layer + Cascade
+            # ═══════════════════════════════════════════════════════════════════
             comovement_figures = state.get("comovement_figures", [])
-            has_comovement = bool(comovement_figures)
 
-            # Step 1: Network section (Fig 1 = Pathway; cascade/cytoscape = main or supp based on co-movement)
+            # Step 1: Network section — Fig 1 (Pathway Bar) only as main.
+            # Force cascade/cytoscape to supplementary (has_comovement=True always)
             net_main, net_supp = generate_network_figure_section(
                 network_analysis,
                 supplementary_start=1,
                 ptm_type=state.get('ptm_type', 'phosphorylation'),
-                has_comovement=has_comovement,
+                has_comovement=True,  # v10.3: always push cascade/cytoscape to supplementary
             )
             if net_main:
                 parts.append(net_main)
-                logger.info(f"[FORMAT-CIT] Added network main section ({len(net_main)} chars, has_comovement={has_comovement})")
+                logger.info(f"[FORMAT-CIT] Added network main section ({len(net_main)} chars) — Fig 1 only")
             else:
                 logger.warning("[FORMAT-CIT] network main section is EMPTY")
-            network_supp_section = net_supp  # store for appending at end (empty when promoted to main)
+            network_supp_section = net_supp  # store for appending at end
 
-            # Step 2: Co-movement MAIN figures (Fig 2 = Burst, Fig 3-6 = Clusters)
+            # Step 2 (v10.3): Co-movement → ALL to Supplementary (no main figures)
             if comovement_figures:
                 result = _build_comovement_figure_section(comovement_figures, network_analysis, ptm_type=state.get('ptm_type', 'phosphorylation'))
                 if result:
                     main_section, supp_items, _next_fig = result
+                    # v10.3: Move ALL co-movement figures to supplementary
+                    # Parse main_section for any figure images and add them to supp_items
                     if main_section:
-                        parts.append(main_section)
-                        logger.info(f"[FORMAT-CIT] Added co-movement main section ({len(main_section)} chars)")
-                    comovement_supp_items = supp_items
+                        # Extract image references from main_section and add to supplementary
+                        import re as _re_cm
+                        cm_figures = _re_cm.findall(r'!\[([^\]]*)\]\(([^)]+)\)', main_section)
+                        for cm_cap, cm_path in cm_figures:
+                            comovement_supp_items.append((
+                                cm_cap or "Temporal PTM Co-movement",
+                                cm_path,
+                                "Temporal Log₂FC profiles of co-moving PTM cluster members. "
+                                "Solid lines = PTM proteins; dashed lines = linked Non-PTM interactors."
+                            ))
+                        logger.info(f"[FORMAT-CIT] v10.3: Moved {len(cm_figures)} co-movement figures to supplementary (was main)")
+                    if supp_items:
+                        comovement_supp_items.extend(supp_items)
 
-            # Step 3 (v9.33): Signal Flow & Kinase Heatmap figures
-            # v10.2: Separate main figures (pathway_diagram, kinase_heatmap) from supplementary (signal_flow_supplementary)
+            # Step 3 (v10.3): Signal Flow & Kinase Heatmap figures
+            # Main: kinase_heatmap (Fig 2) + pathway_diagram (Fig 4)
+            # Supplementary: signal_flow_supplementary, signal_flow (legacy)
             signal_flow_figures = state.get("signal_flow_figures", []) or []
+            entity_label = "E3 Ligase" if state.get('ptm_type', 'phosphorylation').lower().strip() in ('ubiquitylation', 'ubiquitination') else "Kinase"
+            fig_num = 2  # Fig 1 is Pathway Bar from network_node
+
             if signal_flow_figures:
                 sf_section_parts = []
-                sf_section_parts.append("\n### Signaling Pathway & Kinase Activity Figures\n")
-                entity_label = "E3 Ligase" if state.get('ptm_type', 'phosphorylation').lower().strip() in ('ubiquitylation', 'ubiquitination') else "Kinase"
                 sf_supp_items = []  # Collect supplementary items
-                for sf_fig in signal_flow_figures:
+
+                # Sort: kinase_heatmap first (Fig 2), then pathway_diagram (Fig 4 — after Fig 3 context PTM)
+                kinase_heatmap_figs = [f for f in signal_flow_figures if f.get("type") == "kinase_heatmap"]
+                pathway_diagram_figs = [f for f in signal_flow_figures if f.get("type") == "pathway_diagram"]
+                other_main_figs = [f for f in signal_flow_figures if f.get("type") not in (
+                    "kinase_heatmap", "pathway_diagram", "signal_flow_supplementary", "signal_flow")]
+                supp_figs = [f for f in signal_flow_figures if f.get("type") in ("signal_flow_supplementary", "signal_flow")]
+
+                # Fig 2: Kinase Temporal Activity Heatmap
+                for sf_fig in kinase_heatmap_figs:
                     fig_path = sf_fig.get("path", "")
                     fig_caption = sf_fig.get("caption", "")
-                    fig_type = sf_fig.get("type", "")
                     if not fig_path:
                         continue
-                    if fig_type == "pathway_diagram":
-                        sf_section_parts.append(f"\n**Inferred Signaling Pathway** — Publication-standard cascade diagram showing the inferred signal "
-                            f"transduction pathway from upstream receptors through intermediate {entity_label.lower()}s to their "
-                            f"target PTM substrates. Arrows indicate activation (→) or inhibition (⊣). "
-                            f"Node colors indicate direction: red = activation, blue = inhibition.\n")
-                        sf_section_parts.append(f"![{fig_caption}]({fig_path})\n")
-                    elif fig_type == "kinase_heatmap":
-                        sf_section_parts.append(f"\n**Temporal {entity_label} Activity Heatmap** — Directional heatmap showing {entity_label.lower()} "
-                            f"activation (red) and inhibition (blue) across experimental conditions. Color intensity reflects "
-                            f"average fold-change magnitude per substrate. Temporal pattern annotations (right) classify each "
-                            f"{entity_label.lower()} as sustained, early-only, late-onset, spike, or reversal.\n")
-                        sf_section_parts.append(f"![{fig_caption}]({fig_path})\n")
-                    elif fig_type == "signal_flow_supplementary":
-                        # Move to supplementary
+                    sf_section_parts.append(
+                        f"\n### Figure {fig_num}. Temporal {entity_label} Activity Heatmap\n\n"
+                        f"Directional heatmap showing {entity_label.lower()} "
+                        f"activation (red) and inhibition (blue) across experimental conditions. "
+                        f"Color intensity reflects average fold-change magnitude per substrate. "
+                        f"Temporal pattern annotations (right) classify each "
+                        f"{entity_label.lower()} as sustained, early-only, late-onset, spike, or reversal. "
+                        f"Substrate count (n=N) indicates the number of PTM substrates contributing to each score.\n\n"
+                        f"![{fig_caption}]({fig_path})\n\n---\n"
+                    )
+                    logger.info(f"[FORMAT-CIT] v10.3: Kinase Heatmap inserted as Figure {fig_num}")
+                    fig_num += 1
+
+                # Fig 3 placeholder — Context PTM Heatmap will be inserted in Step 4 below
+                # We store fig_num for pathway_diagram (Fig 4) after context heatmap
+                context_ptm_fig_num = fig_num  # This will be Fig 3
+                fig_num += 1  # Reserve Fig 3 for context PTM heatmap
+
+                # Fig 4: Pathway Diagram
+                for sf_fig in pathway_diagram_figs:
+                    fig_path = sf_fig.get("path", "")
+                    fig_caption = sf_fig.get("caption", "")
+                    if not fig_path:
+                        continue
+                    sf_section_parts.append(
+                        f"\n### Figure {fig_num}. Inferred Signaling Pathway Diagram\n\n"
+                        f"Publication-standard cascade diagram showing the inferred signal "
+                        f"transduction pathway from upstream receptors through intermediate {entity_label.lower()}s to their "
+                        f"target PTM substrates. Arrows indicate activation (→) or inhibition (⊣). "
+                        f"Node colors indicate direction: red = activation, blue = inhibition.\n\n"
+                        f"![{fig_caption}]({fig_path})\n\n---\n"
+                    )
+                    logger.info(f"[FORMAT-CIT] v10.3: Pathway Diagram inserted as Figure {fig_num}")
+                    fig_num += 1
+
+                # Other main figures (if any)
+                for sf_fig in other_main_figs:
+                    fig_path = sf_fig.get("path", "")
+                    fig_caption = sf_fig.get("caption", "")
+                    if fig_path:
+                        sf_section_parts.append(f"\n![{fig_caption}]({fig_path})\n")
+
+                # Supplementary: signal_flow, signal_flow_supplementary
+                for sf_fig in supp_figs:
+                    fig_path = sf_fig.get("path", "")
+                    fig_caption = sf_fig.get("caption", "")
+                    if fig_path:
                         sf_supp_items.append((fig_caption, fig_path,
                             f"Detailed 4-layer signal flow diagram showing all receptor-{entity_label.lower()}-substrate connections."))
-                    elif fig_type == "signal_flow":
-                        # Legacy: also move to supplementary
-                        sf_supp_items.append((fig_caption, fig_path,
-                            f"Detailed signal flow diagram showing receptor-{entity_label.lower()}-substrate connections."))
-                    else:
-                        sf_section_parts.append(f"![{fig_caption}]({fig_path})\n")
+
                 sf_combined = "\n".join(sf_section_parts)
                 parts.append(sf_combined)
                 logger.info(f"[FORMAT-CIT] Added main signaling figures ({len(sf_combined)} chars)")
-                # Add signal flow supplementary items to comovement_supp_items for end-of-report placement
+                # Add signal flow supplementary items
                 if sf_supp_items:
                     comovement_supp_items.extend(sf_supp_items)
                     logger.info(f"[FORMAT-CIT] Moved {len(sf_supp_items)} signal flow figures to supplementary")
+            else:
+                context_ptm_fig_num = fig_num
+                fig_num += 1
 
-            # Step 4 (v10.2): Context-aware PTM Heatmap — generated AFTER writing, using mentioned PTMs
+            # Step 4 (v10.3): Context-aware PTM Heatmap — Fig 3 (post-writing, uses mentioned PTMs)
             try:
                 from .nodes.signal_flow_figure import generate_context_aware_ptm_heatmap
-                results_text = sections.get("results", "") + "\n" + sections.get("discussion", "")
+                sections_for_ctx = {
+                    "results": sections.get("results", ""),
+                    "discussion": sections.get("discussion", ""),
+                    "abstract": sections.get("abstract", ""),
+                    "conclusion": sections.get("conclusion", ""),
+                }
                 output_dir = state.get("output_dir", "")
-                vector_plot_raw_data = state.get("vector_plot_raw_data", "")
-                if results_text and output_dir and vector_plot_raw_data:
+                vector_plot_raw_data = state.get("vector_plot_raw_data", [])
+                # Get conditions from kinase_activity_heatmap or network_analysis
+                kah = state.get("kinase_activity_heatmap", {}) or {}
+                ctx_conditions = kah.get("conditions", [])
+                if not ctx_conditions:
+                    # Fallback: extract from network_analysis timepoints
+                    na = state.get("network_analysis", {}) or {}
+                    ctx_conditions = na.get("timepoints", [])
+                if not ctx_conditions and vector_plot_raw_data:
+                    # Fallback: extract unique conditions from raw data
+                    ctx_conditions = sorted(set(
+                        r.get("condition", "") for r in vector_plot_raw_data if r.get("condition")
+                    ))
+
+                if output_dir and vector_plot_raw_data and ctx_conditions:
                     ctx_heatmap_path = generate_context_aware_ptm_heatmap(
-                        report_text=results_text,
+                        sections=sections_for_ctx,
                         vector_plot_raw_data=vector_plot_raw_data,
+                        conditions=ctx_conditions,
                         output_dir=output_dir,
                         ptm_type=state.get('ptm_type', 'phosphorylation'),
                     )
                     if ctx_heatmap_path:
-                        entity_label = "E3 Ligase" if state.get('ptm_type', 'phosphorylation').lower().strip() in ('ubiquitylation', 'ubiquitination') else "Kinase"
                         ctx_fig_section = (
-                            f"\n\n### Context-Relevant PTM Site Heatmap\n\n"
-                            f"**Key PTM Sites Referenced in This Report** \u2014 Heatmap showing the temporal "
-                            f"fold-change profiles of PTM sites specifically discussed in the Results and Discussion "
-                            f"sections above. Sites are clustered by temporal pattern similarity.\n\n"
-                            f"![Context-aware PTM Heatmap]({ctx_heatmap_path})\n"
+                            f"\n\n### Figure {context_ptm_fig_num}. Key PTM Sites Referenced in This Report\n\n"
+                            f"Heatmap showing the temporal fold-change profiles (Log₂FC) of PTM sites "
+                            f"specifically discussed in the Results and Discussion sections above. "
+                            f"Sites are clustered by temporal pattern similarity. "
+                            f"Red = up-regulated; Blue = down-regulated.\n\n"
+                            f"![Context-aware PTM Heatmap]({ctx_heatmap_path})\n\n---\n"
                         )
                         parts.append(ctx_fig_section)
-                        logger.info(f"[FORMAT-CIT] Generated context-aware PTM heatmap: {ctx_heatmap_path}")
+                        logger.info(f"[FORMAT-CIT] v10.3: Context-aware PTM heatmap inserted as Figure {context_ptm_fig_num}")
+                    else:
+                        logger.info("[FORMAT-CIT] Context-aware PTM heatmap returned None — skipping")
+                else:
+                    logger.info(f"[FORMAT-CIT] Skipping context PTM heatmap: output_dir={bool(output_dir)}, "
+                                f"raw_data={bool(vector_plot_raw_data)}, conditions={bool(ctx_conditions)}")
             except Exception as ctx_err:
                 logger.warning(f"[FORMAT-CIT] Context-aware PTM heatmap generation failed: {ctx_err}")
 
