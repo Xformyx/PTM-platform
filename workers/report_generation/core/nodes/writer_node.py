@@ -880,6 +880,9 @@ IMPORTANT: Write a thorough, detailed introduction. The ChromaDB collection refe
                 f"it MUST be prominently discussed as a key finding.\n"
             )
 
+        entity_label = "E3 Ligase" if ptm_type_label.lower().strip() in ("ubiquitylation", "ubiquitination") else "Kinase"
+        entity_label_lower = entity_label.lower()
+
         return f"""Write a detailed Results section (MINIMUM 1500 words, target 3000-5000 words) for this PTM analysis report.
 {analysis_context_block}
 {single_tp_directive}
@@ -894,15 +897,15 @@ Log2FC) serve as activity indicators showing the direction and magnitude of sign
 You MUST interpret ALL findings through this framework:
 1. **Activation-centric interpretation**: PTM Log2FC values indicate activation (+) or inhibition (-)
    of the modified protein. Use these as primary evidence for signaling pathway activity.
-2. **Receptor → Kinase → Substrate → Non-PTM cascade**: Trace the signal flow from upstream
-   receptors through kinases to their substrates, and finally to non-PTM effector proteins.
+2. **Receptor → {entity_label} → Substrate → Non-PTM cascade**: Trace the signal flow from upstream
+   receptors through {entity_label_lower}s to their substrates, and finally to non-PTM effector proteins.
    Describe HOW the signal propagates through each layer at each timepoint.
-   **Non-PTM proteins as VALIDATION EVIDENCE**: When describing each kinase-substrate relationship,
+   **Non-PTM proteins as VALIDATION EVIDENCE**: When describing each {entity_label_lower}-substrate relationship,
    INLINE mention the Non-PTM effector proteins that support it as concordant downstream evidence.
-   The NUMBER of concordant Non-PTM proteins strengthens confidence in the kinase-substrate axis.
-   Do NOT list Non-PTM proteins separately — weave them into kinase-substrate discussions.
+   The NUMBER of concordant Non-PTM proteins strengthens confidence in the {entity_label_lower}-substrate axis.
+   Do NOT list Non-PTM proteins separately — weave them into {entity_label_lower}-substrate discussions.
 3. **Temporal signal propagation**: At each timepoint, describe which layer of the cascade
-   is most active. Early timepoints often show receptor/kinase activation; later timepoints
+   is most active. Early timepoints often show receptor/{entity_label_lower} activation; later timepoints
    show substrate modification and non-PTM effector changes.
 4. **Temporally coordinated substrate group analysis**: PTMs that change together across timepoints
    form temporally coordinated groups. For each group, explain:
@@ -926,7 +929,7 @@ PTM Data:
 
 {hyp_summary}
 (NOTE: The above hypotheses are AUXILIARY context only — do NOT structure Results around them.
-Results must be driven by the experimental data and the receptor→kinase→substrate→effector
+Results must be driven by the experimental data and the receptor→{entity_label_lower}→substrate→effector
 signal flow evidence. Hypotheses may be referenced in Discussion for interpretive context.)
 
 Structure (Figure-Centric, Nature Style):
@@ -938,34 +941,34 @@ Each major subsection should correspond to a key analytical output (figure or da
 - For each top pathway, identify which PTM proteins contribute and their Log2FC values
 - Highlight pathway convergence: where do multiple PTMs converge on the same signaling axis?
 
-### Part 2: Kinase/E3 Temporal Activity Analysis (Figure 2 — Kinase Activity Heatmap)
-- Describe the temporal activation patterns visible in the Kinase Activity Heatmap
-- Group kinases by their temporal pattern: sustained activation, early-only, late-onset, spike, reversal
+### Part 2: {entity_label} Temporal Activity Analysis (Figure 2 — {entity_label} Activity Heatmap)
+- Describe the temporal activation patterns visible in the {entity_label} Activity Heatmap
+- Group {entity_label_lower}s by their temporal pattern: sustained activation, early-only, late-onset, spike, reversal
 - For each pattern group, explain the biological significance:
   * Sustained: persistent signaling (e.g., stress response, proliferation)
   * Early-only: immediate-early response (e.g., MAPK cascade)
   * Late-onset: secondary/adaptive response
   * Spike: transient burst (e.g., checkpoint activation)
   * Reversal: feedback inhibition or pathway switching
-- Quantify: number of co-activated substrates and sum FC for key kinases
-- Describe how temporally coordinated substrate groups relate to kinase activation timing
+- Quantify: number of co-activated substrates and sum FC for key {entity_label_lower}s
+- Describe how temporally coordinated substrate groups relate to {entity_label_lower} activation timing
 
 ### Part 3: Signaling Pathway Cascade (Figure 3 — Pathway Diagram)
-- Describe the inferred signaling pathway from upstream receptors through kinases to substrates
-- Trace the signal flow as a narrative: which receptor is activated first, which kinases relay the signal,
+- Describe the inferred signaling pathway from upstream receptors through {entity_label_lower}s to substrates
+- Trace the signal flow as a narrative: which receptor is activated first, which {entity_label_lower}s relay the signal,
   and which substrates/effectors are the final targets
 - At each timepoint, describe which signaling layer is most active
-- For each kinase-substrate axis, INLINE mention the number of concordant Non-PTM downstream
+- For each {entity_label_lower}-substrate axis, INLINE mention the number of concordant Non-PTM downstream
   interactors as validation evidence (e.g., 'supported by N concordant downstream effectors')
 - Describe the evidence strength for each cascade connection:
-  * Strong: confirmed kinase-substrate + concordant effectors + literature support
-  * Moderate: predicted kinase-substrate + some effector concordance
+  * Strong: confirmed {entity_label_lower}-substrate + concordant effectors + literature support
+  * Moderate: predicted {entity_label_lower}-substrate + some effector concordance
   * Inferred: motif-based prediction only
-- IMPORTANT: Describe the pathway in text as well (e.g., '{treatment} → EGFR → RAS/RAF → MEK1/2 → ERK1/2 → substrate phosphorylation')
+- IMPORTANT: Describe the pathway in text as well (e.g., '{treatment} → EGFR → RAS/RAF → MEK1/2 → ERK1/2 → substrate {ptm_type_label}')
 
 ### Part 4: Key PTM Site Dynamics (Figure 4 — Context PTM Heatmap)
 - For the most important PTM sites discussed in Parts 1-3, describe their temporal profiles in detail
-- Group sites by functional category (kinase substrates, transcription factors, cytoskeletal, metabolic)
+- Group sites by functional category ({entity_label_lower} substrates, transcription factors, cytoskeletal, metabolic)
 - Quantify: exact Log2FC values at each timepoint for key sites
 - Highlight any unexpected patterns (e.g., a known activation site showing inhibition)
 
@@ -988,17 +991,17 @@ This is the most important section of the report.
 You MUST include explicit inline figure references in the text using the format '(Figure N)'.
 The report contains these main figures:
   - **Figure 1**: Canonical Pathway Distribution Bar Graph (pathway enrichment landscape)
-  - **Figure 2**: Temporal Kinase Activity Heatmap (activation/inhibition direction per condition)
+  - **Figure 2**: Temporal {entity_label} Activity Heatmap (activation/inhibition direction per condition)
   - **Figure 3**: Context-Relevant PTM Site Heatmap (key PTM sites discussed in this report)
-  - **Figure 4**: Inferred Signaling Pathway Diagram (receptor → kinase → substrate cascade)
+  - **Figure 4**: Inferred Signaling Pathway Diagram (receptor → {entity_label_lower} → substrate cascade)
 
 For EACH Part, you MUST reference the corresponding figure AT LEAST ONCE:
   - Part 1 → '(Figure 1)' or 'As shown in Figure 1, ...'
-  - Part 2 → '(Figure 2)' or 'The kinase temporal heatmap (Figure 2) reveals ...'
+  - Part 2 → '(Figure 2)' or 'The {entity_label_lower} temporal heatmap (Figure 2) reveals ...'
   - Part 3 → '(Figure 4)' or 'The pathway diagram (Figure 4) illustrates ...'
   - Part 4 → '(Figure 3)' or 'The PTM site heatmap (Figure 3) shows ...'
 
-Do NOT omit figure references. Every analytical claim about pathway enrichment, kinase activity,
+Do NOT omit figure references. Every analytical claim about pathway enrichment, {entity_label_lower} activity,
 signaling cascades, or PTM dynamics MUST be anchored to its corresponding figure.
 === END FIGURE REFERENCE RULES ===
 {combined_lit}"""
@@ -1068,6 +1071,9 @@ signaling cascades, or PTM dynamics MUST be anchored to its corresponding figure
                 f"Never use generic terms like 'the treatment'.\n"
             )
 
+        entity_label = "E3 Ligase" if ptm_type_str.lower().strip() in ("ubiquitylation", "ubiquitination") else "Kinase"
+        entity_label_lower = entity_label.lower()
+
         return f"""Write a comprehensive Discussion section (MINIMUM 1500 words, target 2000-3000 words) for this PTM analysis report.
 {analysis_context_block}
 {single_tp_directive}
@@ -1076,17 +1082,17 @@ signaling cascades, or PTM dynamics MUST be anchored to its corresponding figure
 === PTM ACTIVITY PROFILE DISCUSSION FRAMEWORK ===
 This report uses the **PTM activity profile** approach. In the Discussion, you MUST:
 - Interpret all findings through the lens of PTM activation states as signaling activity profiles
-- Discuss the receptor → kinase → substrate → non-PTM effector cascade and how it evolves over time
+- Discuss the receptor → {entity_label_lower} → substrate → non-PTM effector cascade and how it evolves over time
 - Analyze temporally coordinated substrate groups: what unites members of each group, how groups differ,
   and how temporal coordination patterns shift across timepoints
 - Compare the observed signaling cascade with known canonical pathways from the literature
 - Discuss whether the temporal signal propagation pattern suggests signal amplification,
   relay, feedback, or termination at each stage
-- **Non-PTM proteins as VALIDATION EVIDENCE**: When discussing each kinase-substrate relationship,
+- **Non-PTM proteins as VALIDATION EVIDENCE**: When discussing each {entity_label_lower}-substrate relationship,
   INLINE mention the Non-PTM effector proteins that support it. The number of concordant
-  Non-PTM proteins strengthens confidence in the kinase-substrate axis. Use temporal concordance
+  Non-PTM proteins strengthens confidence in the {entity_label_lower}-substrate axis. Use temporal concordance
   (time-lag between substrate PTM peak and Non-PTM protein change) as directional evidence.
-  Do NOT create a separate section for Non-PTM proteins — weave them into kinase-substrate discussions.
+  Do NOT create a separate section for Non-PTM proteins — weave them into {entity_label_lower}-substrate discussions.
 === END PTM ACTIVITY PROFILE DISCUSSION FRAMEWORK ===
 
 Results Summary:
@@ -1101,15 +1107,16 @@ PTM Biological Context:
 {cell_signaling_block}
 
 Structure (8 core topics):
-1. **Primary Signaling Mechanism (PTM Activity Profile Perspective)**: Interpret the main PTM signaling mechanism through the PTM activity profile framework. How do the observed PTM activation profiles form a coherent signaling response? Trace the signal from receptor to effector.
-2. **Temporal Signal Propagation**: Discuss how the signaling cascade evolves over time. Which signaling layers (receptor/kinase/substrate/effector) are active at each timepoint? Where are the signal relay and amplification points? How does the signal terminate or sustain?
+1. **Primary Signaling Mechanism (PTM Activity Profile Perspective)**: Interpret the main PTM signaling mechanism through the PTM activity profile framework. How do the observed PTM activation profiles form a coherent signaling response? Trace the signal from receptor to {entity_label_lower} to substrate to effector.
+2. **Temporal Signal Propagation**: Discuss how the signaling cascade evolves over time. Which signaling layers (receptor/{entity_label_lower}/substrate/effector) are active at each timepoint? Where are the signal relay and amplification points? How does the signal terminate or sustain?
 3. **Temporally Coordinated Substrate Group Interpretation**: For each temporally coordinated group identified in the Results:
    - What is the biological commonality (shared pathway, function, or subcellular localization)?
    - How does this group's temporal pattern (early transient, sustained, delayed) relate to its function?
    - What distinguishes this group from other temporally coordinated groups?
    - How do these temporal coordination patterns change across timepoints (which groups lead, which follow)?
 4. **Mechanistic Insight**: How specific PTM sites contribute to the observed response — relate each key site to known {('E3 ligase-substrate' if ptm_type_str.lower().strip() in ('ubiquitylation', 'ubiquitination') else 'kinase-substrate')} relationships and signaling cascades
-5. **Non-PTM Validation Evidence** (IMPORTANT — NOT a standalone section): When discussing each kinase-substrate relationship in topics 1-4 above, INLINE mention the Non-PTM effector proteins that support it. For example: 'The MAPK1→STAT3(S727) axis is further validated by concordant changes in N downstream interactors (e.g., HSP90, CDC37).' The NUMBER of concordant Non-PTM proteins strengthens the confidence in each kinase-substrate relationship. Use temporal concordance (time-lag) as evidence of signal directionality. Do NOT create a separate subsection for Non-PTM proteins — weave them into the kinase-substrate discussions above
+5. **Non-PTM Validation Evidence** (IMPORTANT — NOT a standalone section): When discussing each {entity_label_lower}-substrate relationship in topics 1-4 above, INLINE mention the Non-PTM effector proteins that support it. For example: 'The MAPK1→STAT3(S727) axis is further validated by concordant changes in N downstream interactors (e.g., HSP90, CDC37).' The NUMBER of concordant Non-PTM proteins strengthens the confidence in each {entity_label_lower}-substrate relationship. Use temporal concordance (time-lag) as evidence 
+of signal directionality. Do NOT create a separate subsection for Non-PTM proteins — weave them into the {entity_label_lower}-substrate discussions above
 6. **Cell Signaling Commonality**: Discuss shared pathway memberships and cross-pathway interactions. Explain whether signaling cascades represent signal amplification, relay, or termination
 7. **Comparison with Literature**: Compare and contrast your findings with published studies. Specifically compare the observed PTM activity profiles with known signaling models from the literature.
 8. **Limitations and Future Directions**: Acknowledge limitations and propose follow-up experiments
@@ -1120,13 +1127,13 @@ IMPORTANT: For each discussion point, provide evidence from your data AND from t
 === MANDATORY FIGURE REFERENCE RULES (v10.5) ===
 You MUST reference ALL four main figures in the Discussion. This is NON-NEGOTIABLE:
   - **Figure 1** (Pathway Distribution): Reference when discussing pathway convergence or enrichment.
-  - **Figure 2** (Kinase Activity Heatmap): Reference when discussing temporal kinase patterns.
+  - **Figure 2** ({entity_label} Activity Heatmap): Reference when discussing temporal {entity_label_lower} patterns.
   - **Figure 3** (Context PTM Heatmap): Reference when discussing specific PTM site dynamics.
     You MUST write something like: 'The temporal dynamics of these key sites are visualized in Figure 3,
     which confirms the [pattern] observed across [timepoints].'
-  - **Figure 4** (Pathway Diagram): Reference when discussing the receptor→kinase→substrate cascade.
+  - **Figure 4** (Pathway Diagram): Reference when discussing the receptor→{entity_label_lower}→substrate cascade.
     You MUST write something like: 'The inferred signaling cascade (Figure 4) illustrates how
-    [receptor] signals propagate through [kinase] to [substrate].'
+    [receptor] signals propagate through [{entity_label_lower}] to [substrate].'
 
 Use the format '(Figure N)' or 'as illustrated in Figure N'. Each figure MUST be referenced
 at least once in the Discussion. If a figure is not referenced, the Discussion is INCOMPLETE.
