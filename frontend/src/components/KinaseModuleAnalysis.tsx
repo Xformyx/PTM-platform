@@ -568,10 +568,11 @@ function detectCoWaveModules(
 
 // ── Status icon/badge helpers ───────────────────────────────────────────────
 
-const STATUS_CONFIG = {
+const STATUS_CONFIG_BASE = {
   known: {
     icon: ShieldCheck,
     label: "Known Kinase",
+    labelUbi: "Known E3 Ligase",
     color: "text-green-600 dark:text-green-400",
     bg: "bg-green-50 dark:bg-green-900/20",
     border: "border-green-300 dark:border-green-700",
@@ -580,6 +581,7 @@ const STATUS_CONFIG = {
   motif_only: {
     icon: FlaskConical,
     label: "Motif Predicted",
+    labelUbi: "Motif Predicted",
     color: "text-amber-600 dark:text-amber-400",
     bg: "bg-amber-50 dark:bg-amber-900/20",
     border: "border-amber-300 dark:border-amber-700",
@@ -588,12 +590,14 @@ const STATUS_CONFIG = {
   novel_candidate: {
     icon: Sparkles,
     label: "Novel Candidate",
+    labelUbi: "Novel Candidate",
     color: "text-purple-600 dark:text-purple-400",
     bg: "bg-purple-50 dark:bg-purple-900/20",
     border: "border-purple-300 dark:border-purple-700",
     badgeCls: "border-purple-500 text-purple-700 dark:text-purple-400",
   },
 } as const;
+const STATUS_CONFIG = STATUS_CONFIG_BASE;
 
 // ── Main Component ───────────────────────────────────────────────────────────
 
@@ -1074,7 +1078,7 @@ export default function KinaseModuleAnalysis({
         </CardTitle>
         <p className="text-xs text-muted-foreground">
           {isUbi
-            ? "Co-wave module detection, E3 Ligase annotation (RING/HECT/RBR), Ubiquitin chain type classification (K48/K63/Mono), and Phospho-Ub cross-talk inference."
+            ? "Temporal module detection, E3 Ligase annotation (RING/HECT/RBR), Ubiquitin chain type classification (K48/K63/Mono), and Phospho-Ub cross-talk inference."
             : "Co-wave module detection, multi-source kinase annotation (8 sources + motif prediction), and cascade inference. PTMs co-moving in the same time-point waves likely share common upstream kinases."}
         </p>
       </CardHeader>
@@ -1087,7 +1091,7 @@ export default function KinaseModuleAnalysis({
             className="text-xs h-7"
             onClick={() => { setActiveTab("cowave"); setInternalHighlightedKinase(null); }}
           >
-            <GitMerge className="h-3 w-3 mr-1" /> Co-wave Modules
+            <GitMerge className="h-3 w-3 mr-1" /> {isUbi ? "Temporal Modules" : "Co-wave Modules"}
           </Button>
           <Button
             variant={activeTab === "lookup" ? "default" : "ghost"}
@@ -1136,7 +1140,7 @@ export default function KinaseModuleAnalysis({
               className="text-xs h-7"
               onClick={() => setActiveTab("heatmap")}
             >
-              <Activity className="h-3 w-3 mr-1" /> Kinase Heatmap
+              <Activity className="h-3 w-3 mr-1" /> {isUbi ? "E3 Heatmap" : "Kinase Heatmap"}
             </Button>
           )}
           {globalKinaseResult && conditions.length > 1 && (
@@ -1226,7 +1230,7 @@ export default function KinaseModuleAnalysis({
                 <AlertTriangle className="h-4 w-4" />
                 <AlertTitle>Insufficient Time Points</AlertTitle>
                 <AlertDescription className="text-xs">
-                  Co-wave detection requires at least 3 time points. Current: {conditions.length}
+                  {isUbi ? "Temporal module" : "Co-wave"} detection requires at least 3 time points. Current: {conditions.length}
                 </AlertDescription>
               </Alert>
             )}
@@ -1234,7 +1238,7 @@ export default function KinaseModuleAnalysis({
             {coWaveModules.length === 0 && conditions.length >= 3 && (
               <div className="text-center py-6 text-sm text-muted-foreground">
                 <Info className="h-8 w-8 mx-auto mb-2 opacity-40" />
-                No co-wave modules detected. Enable more PTMs in the checklist above, or try a different trend filter.
+                No {isUbi ? "temporal" : "co-wave"} modules detected. Enable more PTMs in the checklist above, or try a different trend filter.
               </div>
             )}
 
@@ -1310,9 +1314,9 @@ export default function KinaseModuleAnalysis({
                           <Badge
                             variant="outline"
                             className="text-[9px] border-cyan-500 text-cyan-600 dark:text-cyan-400 cursor-help"
-                            title={`Linked kinases (Heatmap): ${kinaseNames.slice(0, 6).join(", ")}${kinaseNames.length > 6 ? "..." : ""}\nThese kinases have substrates in this Co-Wave module.\nSwitch to Heatmap tab to see their activity patterns.`}
+                            title={`Linked ${isUbi ? "E3 ligases" : "kinases"} (Heatmap): ${kinaseNames.slice(0, 6).join(", ")}${kinaseNames.length > 6 ? "..." : ""}\nThese ${isUbi ? "E3 ligases" : "kinases"} have substrates in this ${isUbi ? "Temporal" : "Co-Wave"} module.\nSwitch to Heatmap tab to see their activity patterns.`}
                           >
-                            ↔ {kinaseNames.length} kinases
+                            ↔ {kinaseNames.length} {isUbi ? "E3 ligases" : "kinases"}
                           </Badge>
                         );
                       })()}
@@ -1409,7 +1413,7 @@ export default function KinaseModuleAnalysis({
                           const actClassConfig = ({
                             de_novo: { symbol: "★", color: "text-[#E65100]", title: "De novo (no control signal)" },
                             regulated: { symbol: "●", color: "text-[#1565C0]", title: "Regulated (q<0.05, |FC|≥1)" },
-                            coordinated: { symbol: "◆", color: "text-[#7B1FA2]", title: "Coordinated (co-wave boosted, |FC|≥0.5)" },
+                            coordinated: { symbol: "◆", color: "text-[#7B1FA2]", title: `Coordinated (${isUbi ? "temporal" : "co-wave"} boosted, |FC|≥0.5)` },
                             minor: { symbol: "◇", color: "text-[#4CAF50]", title: "Minor (sub-threshold)" },
                           } as Record<string, { symbol: string; color: string; title: string }>)[actClass];
 
@@ -1423,7 +1427,7 @@ export default function KinaseModuleAnalysis({
                               }`}
                               title={
                                 ann
-                                  ? `[${actClassConfig.title}] ${statusCfg?.label}${
+                                  ? `[${actClassConfig.title}] ${isUbi ? statusCfg?.labelUbi : statusCfg?.label}${
                                       ann.known_kinases.length > 0
                                         ? ` | Known: ${ann.known_kinases.map((k) => k.display_name || k.kinase).join(", ")}`
                                         : ""
@@ -1628,6 +1632,7 @@ export default function KinaseModuleAnalysis({
             vectorData={vectorData}
             conditions={conditions}
             coWaveModules={coWaveModules}
+            isUbi={isUbi}
             onSelectPtms={onSelectPtms}
             onKinaseSelect={(kinase, cwGroup, cwKinases) => {
               setInternalHighlightedKinase(kinase);
@@ -1844,8 +1849,8 @@ function MotifAnnotationPanel({ annotation, isUbi = false }: { annotation: Motif
       )}
       {annotation.group_inference && annotation.group_inference.anchor_kinases.length === 0 && (
         <div className="text-xs text-muted-foreground bg-muted/50 rounded p-2">
-          <strong>Group Inference:</strong> No anchor kinases found in this group.
-          Run annotation on more PTMs or include PTMs with known kinase information.
+          <strong>Group Inference:</strong> No anchor {isUbi ? "E3 ligases" : "kinases"} found in this group.
+          Run annotation on more PTMs or include PTMs with known {isUbi ? "E3 ligase" : "kinase"} information.
         </div>
       )}
 
@@ -2002,7 +2007,7 @@ function GroupInferencePanel({ inference }: { inference: GroupInference }) {
             <div className="space-y-1">
               <p className="text-[10px] font-medium text-blue-700 dark:text-blue-400 flex items-center gap-1">
                 <ArrowRight className="h-3 w-3" />
-                Inferred by co-wave + motif match ({km.inferred_count})
+                Inferred by {isUbi ? "temporal" : "co-wave"} + motif match ({km.inferred_count})
               </p>
               <div className="flex flex-wrap gap-1">
                 {km.inferred_ptms.map((ptm) => {
@@ -2130,7 +2135,7 @@ function CascadeView({
     return (
       <div className="text-center py-6 text-sm text-muted-foreground">
         <BarChart3 className="h-8 w-8 mx-auto mb-2 opacity-40" />
-        Run co-wave detection first (enable PTMs in the chart above).
+        Run {isUbi ? "temporal module" : "co-wave"} detection first (enable PTMs in the chart above).
         {isUbi ? "Cascade view shows temporal ordering of E3 ligase modules and ubiquitylation dynamics." : "Cascade view shows temporal ordering of kinase modules."}
       </div>
     );
@@ -2203,7 +2208,7 @@ function CascadeView({
           </Alert>
 
           {/* Fallback: basic co-wave module timeline */}
-          <div className="text-xs font-medium text-muted-foreground mb-2">Basic Co-wave Module Timeline (preview):</div>
+          <div className="text-xs font-medium text-muted-foreground mb-2">Basic {isUbi ? "Temporal" : "Co-wave"} Module Timeline (preview):</div>
           <div className="flex items-center gap-0 overflow-x-auto pb-2">
             {sortedModules.map((mod, idx) => (
               <div key={mod.id} className="flex items-center">
@@ -3051,7 +3056,7 @@ function GlobalKinaseModulesPanel({
               {mod.cowave_overlap && mod.cowave_overlap.length > 0 && (
                 <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
                   <GitMerge className="h-3 w-3" />
-                  Co-wave overlap:
+                  {isUbi ? "Temporal" : "Co-wave"} overlap:
                   {mod.cowave_overlap.map((ov) => (
                     <Badge key={ov.cowave_id} variant="outline" className="text-[9px]">
                       {ov.cowave_label} ({ov.shared_ptms.length} PTMs)
@@ -3255,7 +3260,7 @@ function GlobalKinaseModulesPanel({
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="text-[10px] h-7">Co-wave Module</TableHead>
+                    <TableHead className="text-[10px] h-7">{isUbi ? "Temporal Module" : "Co-wave Module"}</TableHead>
                     <TableHead className="text-[10px] h-7">{isUbi ? "Total Sites" : "Total PTMs"}</TableHead>
                     <TableHead className="text-[10px] h-7">{isUbi ? "Overlapping E3 Modules" : "Overlapping Kinase Modules"}</TableHead>
                   </TableRow>
@@ -3693,7 +3698,7 @@ function SignalFlowView({
             {/* Header row */}
             <div className="flex items-center gap-2">
               <span className="text-[11px] font-semibold text-cyan-300">CW Group G{highlightedCwGroup}</span>
-              <span className="text-[10px] text-cyan-400/80">({highlightedCwGroupKinases.length} kinases, {totalSubstrates} substrate PTMs):</span>
+              <span className="text-[10px] text-cyan-400/80">({highlightedCwGroupKinases.length} {isUbi ? "E3 ligases" : "kinases"}, {totalSubstrates} substrate PTMs):</span>
               <div className="flex flex-wrap gap-1">
                 {highlightedCwGroupKinases.map((k) => (
                   <span key={k} className="text-[9px] px-1.5 py-0.5 rounded bg-cyan-800/40 text-cyan-200 border border-cyan-500/30">
@@ -3703,7 +3708,7 @@ function SignalFlowView({
               </div>
               <button
                 className="ml-auto text-[9px] text-muted-foreground hover:text-foreground"
-                title="CW Group: kinases with correlated substrate activity (r≥0.7). Substrates listed below."
+                title={`CW Group: ${isUbi ? "E3 ligases" : "kinases"} with correlated substrate activity (r≥0.7). Substrates listed below.`}
               >
                 ?
               </button>
@@ -4660,6 +4665,7 @@ function KinaseActivityHeatmapView({
   onKinaseSelect,
   onSelectPtms,
   coWaveModules = [],
+  isUbi = false,
 }: {
   orderId: number;
   globalKinaseResult: GlobalKinaseModuleResponse;
@@ -4668,6 +4674,7 @@ function KinaseActivityHeatmapView({
   onKinaseSelect?: (kinase: string, cwGroup?: number, cwGroupKinases?: string[]) => void;
   onSelectPtms?: (keys: string[]) => void;
   coWaveModules?: CoWaveModule[];
+  isUbi?: boolean;
 }) {
   const [heatmapData, setHeatmapData] = useState<KinaseHeatmapData | null>(null);
   const [loading, setLoading] = useState(false);
@@ -5034,19 +5041,19 @@ function KinaseActivityHeatmapView({
               )}
               {/* Main header row */}
               <tr className="border-b border-border">
-                <th className="w-2 px-0 py-1 cursor-help" title="Co-Wave Group (CW)&#10;&#10;Color bar = kinases with correlated temporal substrate activity (Pearson r≥0.7).&#10;Same color = same group.&#10;&#10;G-label (e.g. G2) = CW Group number.&#10;Kinases in the same group have substrates whose&#10;phosphorylation levels move together over time.&#10;&#10;Click a group in the legend below to filter Vector Plot.">CW</th>
-                <th className="text-left px-2 py-1 sticky left-0 bg-background z-10 min-w-[100px] cursor-help" title="Kinase&#10;&#10;Name of the kinase (or kinase family).&#10;G-label shows its Co-Wave Group number.">Kinase</th>
-                <th className="text-center px-1 py-1 w-8 cursor-help" title="Direction&#10;&#10;Overall activation direction of this kinase's substrates:&#10;  ▲ = activating (substrates phosphorylation increases)&#10;  ▼ = inhibitory (substrates phosphorylation decreases)&#10;  ↕ = mixed">Dir</th>
-                <th className="text-center px-1 py-1 w-10 cursor-help" title="Number of Substrates (#Sub)&#10;&#10;Total confirmed + inferred phosphorylation substrates&#10;for this kinase in the current dataset.">#Sub</th>
-                <th className="text-center px-1 py-1 w-10 cursor-help" title="Confidence (Conf)&#10;&#10;Weighted evidence score (0–100%) based on:&#10;  • Number of substrates&#10;  • Source quality (PhosphoSitePlus, KEA3, motif)&#10;  • Annotation depth&#10;Higher = more reliable kinase-substrate assignment.">Conf</th>
-                <th className="text-center px-1 py-1 w-10 cursor-help" title="Coherence (Coh)&#10;&#10;Temporal coherence of substrate phosphorylation patterns (−1 to +1).&#10;Higher = substrates change more synchronously over time.&#10;Negative = substrates show opposing temporal patterns.">Coh</th>
+                <th className="w-2 px-0 py-1 cursor-help" title={`Co-Wave Group (CW)\n\nColor bar = ${isUbi ? "E3 ligases" : "kinases"} with correlated temporal substrate activity (Pearson r≥0.7).\nSame color = same group.\n\nG-label (e.g. G2) = CW Group number.\n${isUbi ? "E3 ligases" : "Kinases"} in the same group have substrates whose\n${isUbi ? "ubiquitylation" : "phosphorylation"} levels move together over time.\n\nClick a group in the legend below to filter Vector Plot.`}>CW</th>
+                <th className="text-left px-2 py-1 sticky left-0 bg-background z-10 min-w-[100px] cursor-help" title={`${isUbi ? "E3 Ligase" : "Kinase"}\n\nName of the ${isUbi ? "E3 ligase" : "kinase"} (or ${isUbi ? "E3 ligase" : "kinase"} family).\nG-label shows its Co-Wave Group number.`}>{isUbi ? "E3 Ligase" : "Kinase"}</th>
+                <th className="text-center px-1 py-1 w-8 cursor-help" title={`Direction\n\nOverall activation direction of this ${isUbi ? "E3 ligase" : "kinase"}'s substrates:\n  ▲ = activating (substrates ${isUbi ? "ubiquitylation" : "phosphorylation"} increases)\n  ▼ = inhibitory (substrates ${isUbi ? "ubiquitylation" : "phosphorylation"} decreases)\n  ↕ = mixed`}>Dir</th>
+                <th className="text-center px-1 py-1 w-10 cursor-help" title={`Number of Substrates (#Sub)\n\nTotal confirmed + inferred ${isUbi ? "ubiquitylation" : "phosphorylation"} substrates\nfor this ${isUbi ? "E3 ligase" : "kinase"} in the current dataset.`}>#Sub</th>
+                <th className="text-center px-1 py-1 w-10 cursor-help" title={`Confidence (Conf)\n\nWeighted evidence score (0–100%) based on:\n  • Number of substrates\n  • Source quality (${isUbi ? "UbiBrowser, literature" : "PhosphoSitePlus, KEA3, motif"})\n  • Annotation depth\nHigher = more reliable ${isUbi ? "E3 ligase" : "kinase"}-substrate assignment.`}>Conf</th>
+                <th className="text-center px-1 py-1 w-10 cursor-help" title={`Coherence (Coh)\n\nTemporal coherence of substrate ${isUbi ? "ubiquitylation" : "phosphorylation"} patterns (−1 to +1).\nHigher = substrates change more synchronously over time.\nNegative = substrates show opposing temporal patterns.`}>Coh</th>
                 {heatmapData.conditions.map((c) => (
                   <th
                     key={c}
                     className={`text-center px-1 py-1 min-w-[40px] max-w-[60px] truncate cursor-pointer select-none transition-colors ${
                       sortByCondition === c && sortMode === "condition_sort" ? "bg-amber-900/40 text-amber-300" : "hover:bg-muted/40 cursor-help"
                     }`}
-                    title={`Click to sort by activation at ${c}\n\nCo-activation Sum at this timepoint.\n= Sum of Log2FC for substrates passing threshold\n  (q<0.05 or |Log2FC|\u22650.3)\n\nPositive (warm) = substrates co-activated (phosphorylation up)\nNegative (cool) = substrates co-inhibited (phosphorylation down)`}
+                    title={`Click to sort by activation at ${c}\n\nCo-activation Sum at this timepoint.\n= Sum of Log2FC for substrates passing threshold\n  (q<0.05 or |Log2FC|≥0.3)\n\nPositive (warm) = substrates co-activated (${isUbi ? "ubiquitylation" : "phosphorylation"} up)\nNegative (cool) = substrates co-inhibited (${isUbi ? "ubiquitylation" : "phosphorylation"} down)`}
                     onClick={() => {
                       setSortByCondition(c);
                       setSortMode("condition_sort");
@@ -5259,7 +5266,7 @@ function KinaseActivityHeatmapView({
               <div className="flex flex-col gap-1">
                 <div className="flex items-center gap-1 flex-wrap">
                   <span className="text-muted-foreground/70 font-medium">CW Groups</span>
-                  <span className="text-muted-foreground/50 text-[9px]">(kinases with correlated activity, r≥0.7 — <span className="text-cyan-400">click group to filter Vector Plot</span>):</span>
+                  <span className="text-muted-foreground/50 text-[9px]">({isUbi ? "E3 ligases" : "kinases"} with correlated activity, r≥0.7 — <span className="text-cyan-400">click group to filter Vector Plot</span>):</span>
                 </div>
                 <div className="flex items-center gap-3 flex-wrap">
                   {heatmapData.cowave_groups.map((grp) => {
@@ -5652,7 +5659,7 @@ function KinaseActivityHeatmapView({
           </div>
           <div className="text-muted-foreground">High Conf (≥70%)</div>
         </div>
-        <div className="bg-muted/30 rounded p-2 text-center cursor-help" title="Co-wave Groups: Clusters of kinases whose substrate activity profiles are highly correlated (Pearson r≥0.7). Kinases in the same group show similar temporal activation/inactivation patterns.">
+        <div className="bg-muted/30 rounded p-2 text-center cursor-help" title={`Co-wave Groups: Clusters of ${isUbi ? "E3 ligases" : "kinases"} whose substrate activity profiles are highly correlated (Pearson r≥0.7). ${isUbi ? "E3 ligases" : "Kinases"} in the same group show similar temporal activation/inactivation patterns.`}>
           <div className="text-lg font-bold text-fuchsia-400">
             {heatmapData.cowave_groups?.length ?? 0}
           </div>
