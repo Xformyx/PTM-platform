@@ -498,26 +498,29 @@ def format_citations(state: ReportState) -> dict:
                     fig_num += 1
 
                 # Fig 3 placeholder — Context PTM Heatmap will be inserted in Step 4 below
-                # We store fig_num for pathway_diagram (Fig 4) after context heatmap
+                # We store fig_num for context heatmap and pathway_diagram
                 context_ptm_fig_num = fig_num  # This will be Fig 3
                 fig_num += 1  # Reserve Fig 3 for context PTM heatmap
+                pathway_diagram_fig_num = fig_num  # This will be Fig 4
+                fig_num += 1  # Reserve Fig 4 for pathway diagram
 
-                # Fig 4: Pathway Diagram
+                # NOTE: Pathway Diagram (Fig 4) will be inserted AFTER Context PTM (Fig 3)
+                # in Step 4 below to maintain correct ordering in the final document.
+                pathway_diagram_section = ""
                 for sf_fig in pathway_diagram_figs:
                     fig_path = sf_fig.get("path", "")
                     fig_caption = sf_fig.get("caption", "")
                     if not fig_path:
                         continue
-                    sf_section_parts.append(
-                        f"\n### Figure {fig_num}. Inferred Signaling Pathway Diagram\n\n"
+                    pathway_diagram_section = (
+                        f"\n### Figure {pathway_diagram_fig_num}. Inferred Signaling Pathway Diagram\n\n"
                         f"Publication-standard cascade diagram showing the inferred signal "
                         f"transduction pathway from upstream receptors through intermediate {entity_label.lower()}s to their "
                         f"target PTM substrates. Arrows indicate activation (→) or inhibition (⊣). "
                         f"Node colors indicate direction: red = activation, blue = inhibition.\n\n"
                         f"![{fig_caption}]({fig_path})\n\n---\n"
                     )
-                    logger.info(f"[FORMAT-CIT] v10.3: Pathway Diagram inserted as Figure {fig_num}")
-                    fig_num += 1
+                    logger.info(f"[FORMAT-CIT] v10.3: Pathway Diagram prepared as Figure {pathway_diagram_fig_num}")
 
                 # Other main figures (if any)
                 for sf_fig in other_main_figs:
@@ -544,6 +547,7 @@ def format_citations(state: ReportState) -> dict:
             else:
                 context_ptm_fig_num = fig_num
                 fig_num += 1
+                pathway_diagram_section = ""
 
             # Step 4 (v10.3): Context-aware PTM Heatmap — Fig 3 (post-writing, uses mentioned PTMs)
             try:
@@ -595,6 +599,12 @@ def format_citations(state: ReportState) -> dict:
                                 f"raw_data={bool(vector_plot_raw_data)}, conditions={bool(ctx_conditions)}")
             except Exception as ctx_err:
                 logger.warning(f"[FORMAT-CIT] Context-aware PTM heatmap generation failed: {ctx_err}")
+
+            # Step 5 (v10.5): Insert Pathway Diagram (Fig 4) AFTER Context PTM (Fig 3)
+            # This ensures correct Figure ordering: Fig 2 → Fig 3 → Fig 4
+            if signal_flow_figures and pathway_diagram_section:
+                parts.append(pathway_diagram_section)
+                logger.info(f"[FORMAT-CIT] v10.5: Pathway Diagram inserted as Figure {pathway_diagram_fig_num} (after Fig 3)")
 
     all_text = "\n\n".join(parts)
 

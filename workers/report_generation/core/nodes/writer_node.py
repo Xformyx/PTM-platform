@@ -1117,16 +1117,30 @@ Structure (8 core topics):
 IMPORTANT: For each discussion point, provide evidence from your data AND from the literature. Cite the provided references extensively. ALL interpretations must be grounded in the PTM activity profile framework — activation states as signaling activity profiles.
 - You MUST explicitly name the treatment/stimulus ({treatment}) throughout the Discussion. Never use generic terms.
 
-=== MANDATORY FIGURE REFERENCE RULES (v10.3) ===
-You MUST reference the main figures when discussing their corresponding data:
+=== MANDATORY FIGURE REFERENCE RULES (v10.5) ===
+You MUST reference ALL four main figures in the Discussion. This is NON-NEGOTIABLE:
   - **Figure 1** (Pathway Distribution): Reference when discussing pathway convergence or enrichment.
   - **Figure 2** (Kinase Activity Heatmap): Reference when discussing temporal kinase patterns.
   - **Figure 3** (Context PTM Heatmap): Reference when discussing specific PTM site dynamics.
+    You MUST write something like: 'The temporal dynamics of these key sites are visualized in Figure 3,
+    which confirms the [pattern] observed across [timepoints].'
   - **Figure 4** (Pathway Diagram): Reference when discussing the receptor→kinase→substrate cascade.
+    You MUST write something like: 'The inferred signaling cascade (Figure 4) illustrates how
+    [receptor] signals propagate through [kinase] to [substrate].'
 
-Use the format '(Figure N)' or 'as illustrated in Figure N'. Each figure should be referenced
-at least once in the Discussion to anchor interpretive claims to the analytical evidence.
+Use the format '(Figure N)' or 'as illustrated in Figure N'. Each figure MUST be referenced
+at least once in the Discussion. If a figure is not referenced, the Discussion is INCOMPLETE.
 === END FIGURE REFERENCE RULES ===
+
+=== MANDATORY SUPPLEMENTARY DISCUSSION (v10.5) ===
+The Supplementary Figures contain temporally coordinated substrate groups (cluster analysis).
+Even though these are in the Supplementary section, you MUST discuss them in the Discussion:
+  - Mention that temporally coordinated substrate groups were identified (Supplementary Figures).
+  - Discuss the biological significance of the major temporal coordination patterns observed.
+  - Explain how these temporally coordinated groups support or extend the main findings.
+  - Reference them as '(Supplementary Figures 1-N)' when discussing temporal coordination patterns.
+This ensures the Discussion provides a comprehensive interpretation of ALL analytical results.
+=== END SUPPLEMENTARY DISCUSSION ===
 {combined_lit}"""
 
     elif section_type == "conclusion":
