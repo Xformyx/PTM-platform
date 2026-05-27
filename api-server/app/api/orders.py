@@ -3677,6 +3677,47 @@ async def get_order_statistics(
 
 
 # ---------------------------------------------------------------------------
+# v10.7: Ubiquitin Chain Linkage Analysis
+# ---------------------------------------------------------------------------
+
+@router.get("/{order_id}/ubiquitin-linkage")
+async def get_ubiquitin_linkage(
+    order_id: int,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Return ubiquitin chain linkage ratio analysis (temporal)."""
+    import json as _json
+    from app.config import get_settings
+    settings = get_settings()
+
+    result = await db.execute(select(Order).where(Order.id == order_id))
+    order = result.scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    await _check_order_access_async(order, user, db)
+
+    if order.ptm_type != "ubiquitylation":
+        return {"detected": False, "message": "Linkage analysis only available for ubiquitylation orders"}
+
+    output_dir = Path(settings.OUTPUT_DIR) / order.order_code
+    if not output_dir.exists():
+        return {"detected": False, "message": "Output directory not found"}
+
+    file_suffix = "_ubi"
+    linkage_file = output_dir / f"ubiquitin_linkage_analysis{file_suffix}.json"
+    if not linkage_file.exists():
+        return {"detected": False, "message": "Linkage analysis not yet computed"}
+
+    try:
+        with open(linkage_file, "r", encoding="utf-8") as f:
+            data = _json.load(f)
+        return data
+    except Exception as e:
+        return {"detected": False, "message": f"Error loading linkage data: {str(e)}"}
+
+
+# ---------------------------------------------------------------------------
 # Order Articles — articles used during analysis
 # ---------------------------------------------------------------------------
 

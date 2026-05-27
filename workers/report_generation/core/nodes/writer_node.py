@@ -218,6 +218,47 @@ def run_section_writing(state: dict) -> dict:
     vector_plot_raw_data = state.get("vector_plot_raw_data", []) or []
     pipeline_statistics = state.get("pipeline_statistics", {}) or {}
 
+    # v10.7: Load ubiquitin linkage analysis data
+    ubiquitin_linkage_data = state.get("ubiquitin_linkage_data", {}) or {}
+    aux_linkage_context = ""
+    if ubiquitin_linkage_data.get("detected"):
+        summary = ubiquitin_linkage_data.get("summary", {})
+        temporal_ratios = ubiquitin_linkage_data.get("temporal_ratios", {})
+        conditions = temporal_ratios.get("conditions", [])
+        ratios = temporal_ratios.get("ratios", {})
+        interps = summary.get("interpretations", [])
+        linkage_lines = [
+            "=== UBIQUITIN CHAIN LINKAGE ANALYSIS (from MS data) ===",
+            "The following chain types were DIRECTLY DETECTED in the mass spectrometry data",
+            "by identifying GlyGly (GG) modifications on ubiquitin protein lysine residues.",
+            "",
+            f"Detected chain types: {', '.join(summary.get('detected_types', []))}",
+            f"Dominant type: {summary.get('dominant_type', 'N/A')}",
+            "",
+            "| Chain Type | Avg Ratio (%) | Temporal Trend | Biological Function |",
+            "|------------|---------------|----------------|---------------------|",
+        ]
+        for interp in interps:
+            linkage_lines.append(
+                f"| {interp['linkage_type']} | {interp['ratio_percent']:.1f}% | "
+                f"{interp['trend']} | {interp['function']} |"
+            )
+        if conditions and ratios:
+            linkage_lines.append("")
+            linkage_lines.append("Temporal distribution per condition:")
+            for cond in conditions:
+                cond_ratios = ratios.get(cond, {})
+                parts = [f"{lt}: {v:.1f}%" for lt, v in sorted(cond_ratios.items(), key=lambda x: -x[1])]
+                linkage_lines.append(f"  {cond}: {', '.join(parts)}")
+        linkage_lines.append("")
+        linkage_lines.append(
+            "IMPORTANT: Use this empirical chain type data to STRENGTHEN your interpretation "
+            "of ubiquitylation functional outcomes. When a substrate is modified, reference "
+            "the dominant chain type to infer whether it undergoes degradation (K48), "
+            "signaling (K63), or other functions."
+        )
+        aux_linkage_context = "\n".join(linkage_lines)
+
     # v10.1: Build full vector plot context for LLM (all PTM + Non-PTM FC values)
     aux_vector_plot_full = ""
     if vector_plot_raw_data:
@@ -307,6 +348,9 @@ def run_section_writing(state: dict) -> dict:
             supplement_blocks.append(("ptm_data_summary", aux_ptm_data_summary))
             # Priority 4 (vector plot full data): complete quantitative reference
             supplement_blocks.append(("vector_plot_full", aux_vector_plot_full))
+            # Priority 4b (v10.7): Ubiquitin chain linkage empirical data
+            if aux_linkage_context:
+                supplement_blocks.append(("ubi_linkage", aux_linkage_context))
             # Priority 5 (lowest): figure context, writing example
             if figure_gen.has_figures():
                 supplement_blocks.append(("figure_ctx", figure_gen.generate_figure_context_for_llm(section_type)))
@@ -323,6 +367,9 @@ def run_section_writing(state: dict) -> dict:
             supplement_blocks.append(("v98_structured_data", v98_structured_data))
             # Priority 3: vector plot full data
             supplement_blocks.append(("vector_plot_full", aux_vector_plot_full))
+            # Priority 3b (v10.7): Ubiquitin chain linkage empirical data
+            if aux_linkage_context:
+                supplement_blocks.append(("ubi_linkage", aux_linkage_context))
             # Priority 4: figure context
             if figure_gen.has_figures():
                 supplement_blocks.append(("figure_ctx", figure_gen.generate_figure_context_for_llm(section_type)))

@@ -127,6 +127,8 @@ class ReportState(TypedDict, total=False):
     vector_plot_raw_data: List[dict]  # [{gene, position, condition, ptm_relative_log2fc, protein_log2fc}]
     # v10.1: Pipeline statistics for Methods section
     pipeline_statistics: dict  # {step1_input, step2_quantification, ...}
+    # v10.7: Ubiquitin chain linkage analysis (ubi mode only)
+    ubiquitin_linkage_data: dict  # {detected, linkage_data, temporal_ratios, summary, chart_data}
 
     # Progress tracking
     progress_callback: Any

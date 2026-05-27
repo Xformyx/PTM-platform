@@ -440,6 +440,18 @@ def run_report_generation(self, order_id: int, config: dict):
                 logger.info(f"[Order {order_id}] Loaded pipeline statistics from {_stats_path.name}")
             except Exception as _stats_err:
                 logger.warning(f"[Order {order_id}] Could not load pipeline statistics: {_stats_err}")
+        # v10.7: Load ubiquitin linkage analysis (ubi mode only)
+        ubiquitin_linkage_data = {}
+        _linkage_path = order_output / f"ubiquitin_linkage_analysis{_vp_suffix}.json"
+        if _linkage_path.exists():
+            try:
+                with open(_linkage_path, "r", encoding="utf-8") as _lf:
+                    ubiquitin_linkage_data = json.load(_lf)
+                if ubiquitin_linkage_data.get("detected"):
+                    logger.info(f"[Order {order_id}] Loaded ubiquitin linkage analysis: {len(ubiquitin_linkage_data.get('summary', {}).get('detected_types', []))} chain types")
+            except Exception as _link_err:
+                logger.warning(f"[Order {order_id}] Could not load linkage analysis: {_link_err}")
+
         try:
             from common.db_engine import get_engine as _get_shared_engine
             from sqlalchemy import text as _text
@@ -500,6 +512,8 @@ def run_report_generation(self, order_id: int, config: dict):
             "vector_plot_raw_data": vector_plot_raw_data,
             # v10.1: Pipeline statistics for Methods section
             "pipeline_statistics": pipeline_statistics,
+            # v10.7: Ubiquitin chain linkage analysis (ubi mode only)
+            "ubiquitin_linkage_data": ubiquitin_linkage_data,
         }
 
         # ── Cross-Talk mode: load secondary PTM data into initial_state ──

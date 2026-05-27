@@ -392,6 +392,22 @@ def run_preprocessing(self, order_id: int, config: dict):
                 except Exception as vec_err:
                     logger.warning(f"[Order {order_id}] PTM vector report failed (non-fatal): {vec_err}")
 
+        # ── Ubiquitin Linkage Analysis (ubi mode only) ────────────────────
+        if ptm_mode == "ubi":
+            try:
+                from preprocessing.core.ubiquitin_linkage_analyzer import UbiquitinLinkageAnalyzer
+                linkage_analyzer = UbiquitinLinkageAnalyzer(
+                    output_dir=str(order_output),
+                    file_suffix=file_suffix,
+                )
+                linkage_result = linkage_analyzer.analyze()
+                if linkage_result.get("detected"):
+                    logger.info(f"[Order {order_id}] Ubiquitin linkage analysis: {len(linkage_result['summary']['detected_types'])} chain types detected")
+                else:
+                    logger.info(f"[Order {order_id}] Ubiquitin linkage analysis: no linkage data in dataset")
+            except Exception as link_err:
+                logger.warning(f"[Order {order_id}] Ubiquitin linkage analysis failed (non-fatal): {link_err}")
+
         # ================================================================
         # Step 2: Unified Enrichment — domain + motif (50% – 70%)
         # ================================================================

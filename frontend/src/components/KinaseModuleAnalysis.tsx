@@ -614,7 +614,7 @@ export default function KinaseModuleAnalysis({
   inferredReceptors = [],
 }: KinaseModuleAnalysisProps) {
   const isUbi = ptmType.toLowerCase().includes("ubiquityl") || ptmType.toLowerCase().includes("ubiquitin");
-  const [activeTab, setActiveTab] = useState<"cowave" | "lookup" | "cascade" | "kinaseModules" | "signalFlow" | "heatmap" | "cascadeTimeline">("cowave");
+  const [activeTab, setActiveTab] = useState<"cowave" | "lookup" | "cascade" | "kinaseModules" | "signalFlow" | "heatmap" | "cascadeTimeline" | "chainLinkage">("cowave");
   const [expandedModules, setExpandedModules] = useState<Set<string>>(new Set());
   const [manualSelection, setManualSelection] = useState<Set<string>>(new Set());
    const [internalHighlightedKinase, setInternalHighlightedKinase] = useState<string | null>(null);
@@ -1153,6 +1153,16 @@ export default function KinaseModuleAnalysis({
               <Clock className="h-3 w-3 mr-1" /> Cascade Timeline
             </Button>
           )}
+          {isUbi && (
+            <Button
+              variant={activeTab === "chainLinkage" ? "default" : "ghost"}
+              size="sm"
+              className="text-xs h-7"
+              onClick={() => setActiveTab("chainLinkage")}
+            >
+              <Link2 className="h-3 w-3 mr-1" /> Chain Linkage
+            </Button>
+          )}
           <div className="ml-auto">
             <Button
               variant="outline"
@@ -1655,6 +1665,11 @@ export default function KinaseModuleAnalysis({
               setActiveTab("signalFlow");
             }}
           />
+        )}
+
+        {/* ── Tab: Chain Linkage (Ubiquitylation only) ────────────────────────── */}
+        {activeTab === "chainLinkage" && isUbi && (
+          <ChainLinkageView orderId={orderId} conditions={conditions} />
         )}
       </CardContent>
     </Card>
@@ -5664,6 +5679,306 @@ function KinaseActivityHeatmapView({
             {heatmapData.cowave_groups?.length ?? 0}
           </div>
           <div className="text-muted-foreground">CW Groups</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+// ── Chain Linkage View (Ubiquitylation only) ─────────────────────────────────
+
+interface LinkageInterpretation {
+  linkage_type: string;
+  ratio_percent: number;
+  trend: string;
+  function: string;
+  avg_log2fc: number;
+}
+
+interface LinkageData {
+  detected: boolean;
+  message?: string;
+  linkage_data?: Array<{
+    linkage_type: string;
+    position: number;
+    gene: string;
+    conditions: Record<string, number>;
+  }>;
+  temporal_ratios?: {
+    conditions: string[];
+    ratios: Record<string, Record<string, number>>;
+  };
+  summary?: {
+    detected_types: string[];
+    dominant_type: string;
+    interpretations: LinkageInterpretation[];
+  };
+  chart_data?: {
+    type: string;
+    labels: string[];
+    datasets: Array<{
+      label: string;
+      data: number[];
+      backgroundColor: string;
+    }>;
+  };
+}
+
+// Chain type color mapping
+const CHAIN_COLORS: Record<string, string> = {
+  K48: "#ef4444",   // red — degradation
+  K63: "#3b82f6",   // blue — signaling
+  K11: "#f59e0b",   // amber — cell cycle
+  K27: "#8b5cf6",   // purple — immune
+  K29: "#10b981",   // emerald — Wnt
+  K33: "#06b6d4",   // cyan — kinase regulation
+  K6: "#ec4899",    // pink — DNA repair
+  M1: "#6366f1",    // indigo — NF-kB
+};
+
+const CHAIN_FUNCTIONS: Record<string, string> = {
+  K48: "Proteasomal degradation",
+  K63: "Non-degradative signaling (NF-κB, DDR, endosomal)",
+  K11: "Cell cycle regulation, ERAD",
+  K27: "Innate immune signaling (STING/MAVS)",
+  K29: "Wnt signaling, lysosomal degradation",
+  K33: "Kinase regulation, TCR signaling",
+  K6: "DNA repair, mitophagy (BRCA1/Parkin)",
+  M1: "Linear NF-κB activation (LUBAC)",
+};
+
+function ChainLinkageView({ orderId, conditions }: { orderId: number; conditions: string[] }) {
+  const [data, setData] = useState<LinkageData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const fetchData = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const result = await api.get<LinkageData>(`/orders/${orderId}/ubiquitin-linkage`);
+        if (!cancelled) setData(result);
+      } catch (err: any) {
+        if (!cancelled) setError(err?.message || "Failed to load linkage data");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    fetchData();
+    return () => { cancelled = true; };
+  }, [orderId]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <Loader2 className="h-5 w-5 animate-spin mr-2" />
+        <span className="text-sm text-muted-foreground">Loading chain linkage analysis...</span>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex items-center justify-center py-12 text-destructive">
+        <AlertTriangle className="h-4 w-4 mr-2" />
+        <span className="text-sm">{error}</span>
+      </div>
+    );
+  }
+
+  if (!data?.detected) {
+    return (
+      <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+        <Link2 className="h-8 w-8 mb-2 opacity-50" />
+        <p className="text-sm font-medium">No ubiquitin chain linkage data detected</p>
+        <p className="text-xs mt-1">
+          {data?.message || "Ubiquitin protein (UBB/UBC/UBA52/RPS27A) GlyGly peptides were not found in the dataset."}
+        </p>
+        <p className="text-xs mt-2 text-muted-foreground/70 max-w-md text-center">
+          Chain linkage analysis requires detection of GlyGly modifications on ubiquitin's own lysine residues
+          (K6, K11, K27, K29, K33, K48, K63). These are typically detected in deep ubiquitylome datasets.
+        </p>
+      </div>
+    );
+  }
+
+  const { temporal_ratios, summary, linkage_data } = data;
+  const conds = temporal_ratios?.conditions || [];
+  const ratios = temporal_ratios?.ratios || {};
+  const detectedTypes = summary?.detected_types || [];
+  const interpretations = summary?.interpretations || [];
+
+  return (
+    <div className="space-y-4">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-sm font-semibold flex items-center gap-2">
+            <Link2 className="h-4 w-4 text-blue-500" />
+            Ubiquitin Chain Linkage Analysis
+          </h3>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Empirical chain type distribution from MS-detected GlyGly modifications on ubiquitin protein
+          </p>
+        </div>
+        <Badge variant="secondary" className="text-xs">
+          {detectedTypes.length} chain type{detectedTypes.length !== 1 ? "s" : ""} detected
+        </Badge>
+      </div>
+
+      {/* Summary cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+        {interpretations.map((interp) => (
+          <div
+            key={interp.linkage_type}
+            className="border rounded-lg p-2.5 bg-card"
+            style={{ borderLeftColor: CHAIN_COLORS[interp.linkage_type] || "#6b7280", borderLeftWidth: "3px" }}
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold" style={{ color: CHAIN_COLORS[interp.linkage_type] || "#6b7280" }}>
+                {interp.linkage_type}
+              </span>
+              <span className="text-xs font-mono">{interp.ratio_percent.toFixed(1)}%</span>
+            </div>
+            <p className="text-[10px] text-muted-foreground mt-1 line-clamp-2">
+              {CHAIN_FUNCTIONS[interp.linkage_type] || interp.function}
+            </p>
+            <div className="flex items-center gap-1 mt-1">
+              <TrendingUp className="h-2.5 w-2.5 text-muted-foreground" />
+              <span className="text-[10px] text-muted-foreground">{interp.trend}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Temporal Stacked Bar Chart */}
+      {conds.length > 0 && (
+        <div className="border rounded-lg p-3 bg-card">
+          <h4 className="text-xs font-semibold mb-3">Temporal Chain Type Distribution</h4>
+          <div className="space-y-2">
+            {conds.map((cond) => {
+              const condRatios = ratios[cond] || {};
+              const sortedTypes = Object.entries(condRatios).sort((a, b) => b[1] - a[1]);
+              return (
+                <div key={cond} className="flex items-center gap-2">
+                  <span className="text-[10px] font-mono w-12 text-right text-muted-foreground shrink-0">
+                    {cond}
+                  </span>
+                  <div className="flex-1 flex h-6 rounded overflow-hidden bg-muted/30">
+                    {sortedTypes.map(([lt, pct]) => (
+                      <div
+                        key={lt}
+                        className="h-full flex items-center justify-center text-[9px] font-bold text-white transition-all"
+                        style={{
+                          width: `${pct}%`,
+                          backgroundColor: CHAIN_COLORS[lt] || "#6b7280",
+                          minWidth: pct > 3 ? undefined : "0px",
+                        }}
+                        title={`${lt}: ${pct.toFixed(1)}%`}
+                      >
+                        {pct >= 10 ? `${lt}` : ""}
+                      </div>
+                    ))}
+                  </div>
+                  <span className="text-[10px] text-muted-foreground w-10 shrink-0">
+                    {sortedTypes[0]?.[0] || ""}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+          {/* Legend */}
+          <div className="flex flex-wrap gap-2 mt-3 pt-2 border-t">
+            {detectedTypes.map((lt) => (
+              <div key={lt} className="flex items-center gap-1">
+                <div
+                  className="w-2.5 h-2.5 rounded-sm"
+                  style={{ backgroundColor: CHAIN_COLORS[lt] || "#6b7280" }}
+                />
+                <span className="text-[10px]">{lt}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Detailed linkage data table */}
+      {linkage_data && linkage_data.length > 0 && (
+        <div className="border rounded-lg p-3 bg-card">
+          <h4 className="text-xs font-semibold mb-2">Detected Ubiquitin Linkage Sites</h4>
+          <div className="overflow-x-auto">
+            <table className="w-full text-[10px]">
+              <thead>
+                <tr className="border-b">
+                  <th className="text-left py-1 px-1.5 font-medium">Chain Type</th>
+                  <th className="text-left py-1 px-1.5 font-medium">Position</th>
+                  <th className="text-left py-1 px-1.5 font-medium">Gene</th>
+                  {conds.map((c) => (
+                    <th key={c} className="text-right py-1 px-1.5 font-medium">{c}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {linkage_data.map((row, i) => (
+                  <tr key={i} className="border-b border-muted/30 hover:bg-muted/20">
+                    <td className="py-1 px-1.5">
+                      <span
+                        className="font-bold"
+                        style={{ color: CHAIN_COLORS[row.linkage_type] || "#6b7280" }}
+                      >
+                        {row.linkage_type}
+                      </span>
+                    </td>
+                    <td className="py-1 px-1.5 font-mono">K{row.position}</td>
+                    <td className="py-1 px-1.5">{row.gene}</td>
+                    {conds.map((c) => {
+                      const val = row.conditions[c];
+                      return (
+                        <td key={c} className="text-right py-1 px-1.5 font-mono">
+                          {val !== undefined ? (
+                            <span className={val > 0 ? "text-red-500" : val < 0 ? "text-blue-500" : ""}>
+                              {val > 0 ? "+" : ""}{val.toFixed(2)}
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="text-[9px] text-muted-foreground mt-2">
+            Values represent Log2FC of GlyGly modification on ubiquitin lysine residues.
+            Positive = increased chain formation; Negative = decreased chain formation.
+          </p>
+        </div>
+      )}
+
+      {/* Interpretation note */}
+      <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg p-3">
+        <div className="flex items-start gap-2">
+          <Info className="h-3.5 w-3.5 text-blue-500 mt-0.5 shrink-0" />
+          <div className="text-[10px] text-blue-800 dark:text-blue-200 space-y-1">
+            <p className="font-medium">How to interpret chain linkage data:</p>
+            <p>
+              • <strong>K48 dominance</strong>: Suggests proteasomal degradation is the primary ubiquitylation outcome
+            </p>
+            <p>
+              • <strong>K63 dominance</strong>: Indicates non-degradative signaling (NF-κB, DNA damage response, endosomal sorting)
+            </p>
+            <p>
+              • <strong>Temporal shift</strong>: A change from K63→K48 over time may indicate transition from signaling to degradation
+            </p>
+            <p>
+              • <strong>Co-detection of K48+K63</strong>: Mixed chain types suggest complex regulation with both degradative and signaling roles
+            </p>
+          </div>
         </div>
       </div>
     </div>
