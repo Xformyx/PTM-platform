@@ -132,17 +132,17 @@ class FigureInformationGenerator:
         # ── Co-movement Figures (v8.0) — these remain as main figures ──
         for cf in self.comovement_figures:
             cf_type = cf.get("type", "unknown")
-            cf_caption = cf.get("caption", "Temporal Co-movement Analysis")
+            cf_caption = cf.get("caption", "Temporal Coordination Analysis")
             if cf_type in ("heatmap", "supplementary_heatmap"):
                 fig_map["comovement_heatmap"] = {
                     "figure_number": main_fig_num,
                     "figure_label": f"Figure {main_fig_num}",
-                    "display_name": "Temporal PTM Co-movement Cluster Heatmap",
+                    "display_name": "Temporal PTM Coordination Cluster Heatmap",
                     "description": (
                         "Hierarchical clustering heatmap of PTM temporal profiles. "
                         "Rows represent individual PTM sites, columns represent time points. "
                         "Color intensity reflects Log2FC magnitude. Dendrogram and cluster "
-                        "color bars group co-moving PTMs that share similar temporal dynamics. "
+                        "color bars group temporally coordinated PTMs that share similar temporal dynamics. "
                         "Clusters reveal coordinated phosphorylation waves."
                     ),
                     "panel_index": 0,
@@ -173,7 +173,7 @@ class FigureInformationGenerator:
                     "description": (
                         f"Line plot showing the temporal Log2FC profiles of PTM sites in {cf_caption}. "
                         "Solid lines represent PTM proteins; dashed lines represent linked Non-PTM interactors. "
-                        "Shaded area indicates the cluster envelope. Co-moving PTMs share similar "
+                        "Shaded area indicates the cluster envelope. Temporally coordinated PTMs share similar "
                         "temporal dynamics, suggesting coordinated regulation."
                     ),
                     "panel_index": 0,
@@ -521,7 +521,7 @@ class FigureInformationGenerator:
 
         # v8.0: Add co-movement analysis context
         if self.comovement_llm_context:
-            lines.append("**Temporal PTM Co-movement Analysis:**")
+            lines.append("**Temporal PTM Coordination Analysis:**")
             lines.append(self.comovement_llm_context)
             lines.append("")
 

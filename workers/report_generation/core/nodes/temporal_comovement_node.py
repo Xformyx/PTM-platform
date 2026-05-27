@@ -1147,7 +1147,7 @@ def _generate_comovement_figures(
                     "path": burst_fig_path,
                     "caption": (
                         f"Transient {ptm_type} burst dynamics. "
-                        f"{len(burst_clusters)} co-movement cluster(s) comprising "
+                        f"{len(burst_clusters)} temporally coordinated cluster(s) comprising "
                         f"{n_sites} PTM sites exhibited rapid activation followed by "
                         f"return to baseline. Peak responses observed at "
                         f"{', '.join(sorted(peak_tps))}. "
@@ -1171,7 +1171,7 @@ def _generate_comovement_figures(
         if heatmap_path:
             figures.append({
                 "path": heatmap_path,
-                "caption": "Temporal Co-movement Heatmap: PTM sites grouped by "
+                "caption": "Temporal Coordination Heatmap: PTM sites grouped by "
                            "correlated temporal dynamics. Color intensity represents "
                            "Log2FC magnitude (red=activated, blue=inhibited). "
                            "Left sidebar: cluster assignments. "
@@ -1732,7 +1732,7 @@ def _generate_summary_heatmap(
     )
 
     ax_heatmap.set_title(
-        "Temporal PTM Co-movement Analysis",
+        "Temporal PTM Coordination Analysis",
         fontsize=13, fontweight="normal", pad=12
     )
 
@@ -2057,9 +2057,9 @@ def _build_comovement_llm_context(
         cluster_fig_map[c["cluster_id"]] = fig_cluster_start + i
 
     parts = [
-        "\n## TEMPORAL PTM CO-MOVEMENT ANALYSIS\n",
+        "\n## TEMPORAL PTM COORDINATION ANALYSIS\n",
         "Correlation-based hierarchical clustering of PTM Log2FC time-series "
-        "vectors identified the following co-movement clusters. Transient burst "
+        "profiles identified the following temporally coordinated substrate groups. Transient burst "
         f"clusters are the primary focus of this analysis (Figure {fig_burst}).\n",
     ]
 
@@ -2079,7 +2079,7 @@ def _build_comovement_llm_context(
 
     # ── SECONDARY: Other pattern clusters (with individual figures) ──
     if other_clusters:
-        parts.append("\n### Other Co-movement Patterns")
+        parts.append("\n### Other Temporal Coordination Patterns")
         parts.append(
             f"{len(other_clusters)} additional cluster(s) with non-burst patterns "
             f"were detected. Each cluster has its own figure for detailed inspection.\n"
@@ -2235,11 +2235,11 @@ def _build_comovement_llm_context(
         "   - For EACH cluster (Figures 2-6), you are provided with:\n"
         "     (a) Per-Gene Pathway Mapping: the pathways each cluster member\n"
         "         participates in, from the same 3-Layer enrichment shown in Figure 1.\n"
-        "     (b) Shared Pathways Explaining Co-movement: pathways shared by 2+\n"
+        "     (b) Shared Pathways Explaining Temporal Coordination: pathways shared by 2+\n"
         "         cluster members, which explain WHY they move together.\n"
         "   - When discussing each cluster, you MUST:\n"
         "     * Identify the shared pathways from the Per-Gene Pathway Mapping data\n"
-        "     * Explicitly state: 'These proteins co-move because they share\n"
+        "     * Explicitly state: 'These proteins are temporally coordinated because they share\n"
         "       membership in [pathway name(s)] (Figure 1), suggesting coordinated\n"
         "       regulation within this signaling axis.'\n"
         "     * If a cluster's shared pathways overlap with Figure 1's top pathways,\n"
@@ -2379,7 +2379,7 @@ def _append_cluster_detail(
     # v8.10: Shared pathways across cluster members (from per-gene 3-Layer data)
     per_gene_shared = ann.get("per_gene_shared_pathways", [])
     if per_gene_shared:
-        parts.append("\nShared Pathways Explaining Co-movement (from 3-Layer Enrichment):")
+        parts.append("\nShared Pathways Explaining Temporal Coordination (from 3-Layer Enrichment):")
         parts.append("  (Pathways shared by 2+ cluster members — these explain")
         parts.append("   why these proteins move together in the same temporal pattern)")
         for pw in per_gene_shared[:8]:

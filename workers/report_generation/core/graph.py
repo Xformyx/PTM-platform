@@ -250,12 +250,12 @@ def _build_comovement_figure_section(comovement_figures: list, network_analysis:
     heatmap_figs = [f for f in comovement_figures if f.get("type") in ("heatmap", "supplementary_heatmap")]
 
     # ── Main Figures Section ──
-    main_section = "\n## Temporal PTM Co-movement Analysis\n\n"
+    main_section = "\n## Temporal PTM Coordination Analysis\n\n"
     main_section += (
-        "The following figures show the results of temporal co-movement clustering analysis. "
+        "The following figures show the results of temporal substrate coordination analysis. "
         "PTM sites with correlated temporal dynamics were grouped into clusters using "
         "hierarchical clustering of their Log2FC time-series profiles. "
-        "Co-moving PTMs within the same cluster suggest coordinated regulation, "
+        "Temporally coordinated PTMs within the same cluster suggest coordinated regulation, "
         f"potentially sharing upstream {'E3 ligases' if ptm_type.lower().strip() in ('ubiquitylation', 'ubiquitination') else 'kinases'} or participating in the same signaling cascade.\n\n"
     )
 
@@ -304,7 +304,7 @@ def _build_comovement_figure_section(comovement_figures: list, network_analysis:
     # Supplementary: Heatmap
     for cf in heatmap_figs:
         img_ref = _resolve_figure_path(cf, Path)
-        cf_caption = cf.get("caption", "Co-movement Heatmap")
+        cf_caption = cf.get("caption", "Temporal Coordination Heatmap")
         if img_ref:
             supp_items.append((
                 cf_caption, img_ref,
@@ -451,9 +451,9 @@ def format_citations(state: ReportState) -> dict:
                         cm_figures = _re_cm.findall(r'!\[([^\]]*)\]\(([^)]+)\)', main_section)
                         for cm_cap, cm_path in cm_figures:
                             comovement_supp_items.append((
-                                cm_cap or "Temporal PTM Co-movement",
+                                cm_cap or "Temporal PTM Coordination",
                                 cm_path,
-                                "Temporal Log₂FC profiles of co-moving PTM cluster members. "
+                                "Temporal Log₂FC profiles of temporally coordinated PTM cluster members. "
                                 "Solid lines = PTM proteins; dashed lines = linked Non-PTM interactors."
                             ))
                         logger.info(f"[FORMAT-CIT] v10.3: Moved {len(cm_figures)} co-movement figures to supplementary (was main)")
