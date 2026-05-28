@@ -634,30 +634,46 @@ def format_citations(state: ReportState) -> dict:
     logger.info(f"[FORMAT-CIT] LLM inline citation numbers found: {cited_numbers[:20]}{'...' if len(cited_numbers) > 20 else ''} (total {len(cited_numbers)})")
     logger.info(f"[FORMAT-CIT] collected_references count: {len(collected_refs)}")
 
-    # Build Reference objects from collected_references (PubMed papers)
+    # v10.8: Build Reference objects from collected_references (ChromaDB + PubMed unified)
+    # ChromaDB refs are first [1]~[N], PubMed refs follow [N+1]~[N+M]
     ref_objects: list = []
+    n_chromadb_refs = 0
     for ref_dict in collected_refs:
-        ref = Reference(
-            authors=ref_dict.get("authors", ""),
-            title=ref_dict.get("title", "Untitled"),
-            journal=ref_dict.get("journal", ""),
-            year=str(ref_dict.get("pub_date", ""))[:4],
-            pmid=str(ref_dict.get("pmid", "")),
-            doi=ref_dict.get("doi", ""),
-        )
+        is_chromadb = ref_dict.get("chromadb_ref", False)
+        if is_chromadb:
+            n_chromadb_refs += 1
+            ref = Reference(
+                authors=ref_dict.get("authors", ""),
+                title=ref_dict.get("title", "Untitled"),
+                journal=ref_dict.get("journal", ""),  # collection name as journal
+                year=str(ref_dict.get("year", "")),
+                pmid="",
+                doi="",
+            )
+        else:
+            ref = Reference(
+                authors=ref_dict.get("authors", ""),
+                title=ref_dict.get("title", "Untitled"),
+                journal=ref_dict.get("journal", ""),
+                year=str(ref_dict.get("pub_date", ref_dict.get("year", "")))[:4],
+                pmid=str(ref_dict.get("pmid", "")),
+                doi=ref_dict.get("doi", ""),
+            )
         ref_objects.append(ref)
+    logger.info(f"[FORMAT-CIT] Reference breakdown: {n_chromadb_refs} ChromaDB + {len(ref_objects) - n_chromadb_refs} PubMed = {len(ref_objects)} total")
 
     # Build the ## References section
     # Strategy: include all collected references so that every [N] the LLM
     # used has a matching entry.  References beyond what the LLM cited are
     # also included as supporting literature.
+    # v10.8: ChromaDB refs have no PMID/DOI — render with collection name as source
     ref_lines = ["## References\n"]
     for idx, ref in enumerate(ref_objects, 1):
         entry_parts = []
         if ref.authors:
             entry_parts.append(ref.authors.rstrip("."))
         if ref.title:
-            entry_parts.append(f"{ref.title.rstrip('.')}.")
+            entry_parts.append(f"{ref.title.rstrip('.')}.") 
         journal_part = ""
         if ref.journal:
             journal_part = f"*{ref.journal}*"

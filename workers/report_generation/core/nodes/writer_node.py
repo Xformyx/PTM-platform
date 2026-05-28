@@ -310,9 +310,14 @@ def run_section_writing(state: dict) -> dict:
         f"receptor={len(receptor_llm_context):,}"
     )
 
+    # v10.8: Accumulate ChromaDB refs across all sections for unified References
+    _all_section_chroma_refs: list = []
+    _chroma_refs_lock = __import__('threading').Lock()
+
     # ── Per-section writer (extracted for parallel execution) ──
     def _write_one(section_type, snap_prev):
-        prompt = _build_section_prompt(
+        # v10.8: _build_section_prompt now returns (prompt_str, chromadb_refs_list)
+        result = _build_section_prompt(
             section_type, research_results, validated_hypotheses,
             network_analysis, parsed_ptms, context, questions,
             snap_prev, retriever, comprehensive_summary,
@@ -321,6 +326,16 @@ def run_section_writing(state: dict) -> dict:
             temporal_kinase_cascade=state.get("temporal_kinase_cascade"),
             inferred_receptors=state.get("inferred_receptors"),
         )
+        # v10.8: Unpack tuple (backward-compatible with str fallback)
+        if isinstance(result, tuple):
+            prompt, chroma_refs = result
+        else:
+            prompt, chroma_refs = result, []
+
+        # v10.8: Thread-safe accumulation of ChromaDB refs
+        if chroma_refs:
+            with _chroma_refs_lock:
+                _all_section_chroma_refs.extend(chroma_refs)
 
         # v9.31: Budget-aware prompt enhancement
         # Build supplementary blocks with priority, respecting per-section budget
@@ -546,9 +561,24 @@ def run_section_writing(state: dict) -> dict:
             f"Provider={llm.provider}, Model={llm.model}"
         )
 
+    # v10.8: Deduplicate ChromaDB refs by title (same paper may appear in multiple sections)
+    seen_titles = set()
+    unique_chroma_refs = []
+    for ref in _all_section_chroma_refs:
+        title_key = ref.get("title", "").strip().lower()
+        if title_key and title_key not in seen_titles:
+            seen_titles.add(title_key)
+            unique_chroma_refs.append(ref)
+    logger.info(f"[v10.8] Collected {len(_all_section_chroma_refs)} total ChromaDB refs, "
+                f"{len(unique_chroma_refs)} unique after dedup")
+
+    # v10.8: Prepend ChromaDB refs to PubMed refs for unified numbering
+    # ChromaDB refs are [1]~[N], PubMed refs are [N+1]~[N+M]
+    unified_references = unique_chroma_refs + (all_references or [])
+
     return {
         "sections": sections,
-        "collected_references": all_references,
+        "collected_references": unified_references,
         "llm_fallback_sections": fallback_sections,
     }
 
@@ -567,8 +597,15 @@ def _build_section_prompt(
     chromadb_results: int = 10,
     temporal_kinase_cascade: dict = None,
     inferred_receptors: list = None,
-) -> str:
-    """Build LLM prompt for a specific report section."""
+) -> tuple:
+    """Build LLM prompt for a specific report section.
+    
+    Returns:
+        tuple: (prompt_str, chromadb_refs_list)
+            - prompt_str: The full LLM prompt text
+            - chromadb_refs_list: List of ChromaDB reference dicts with title, authors, year, source, collection
+              These should be prepended to collected_references for unified numbering.
+    """
     all_references = all_references or []
 
     single_time_point = context.get("single_time_point", False)
@@ -597,6 +634,10 @@ def _build_section_prompt(
         retriever.search_for_section(section_type, keywords, n_results=chromadb_results)
         if section_type != "introduction" else []
     )
+
+    # v10.8: Collect ChromaDB refs for unified numbering
+    _all_chroma_results = list(rag_results)  # copy; will extend with cascade results
+
     if rag_results:
         ref_lines = []
         for idx, r in enumerate(rag_results[:chromadb_results], 1):
@@ -621,6 +662,7 @@ def _build_section_prompt(
             max_queries=5,
         )
         if cascade_results:
+            _all_chroma_results.extend(cascade_results)  # v10.8: track all chroma results
             # Number cascade refs starting after general refs
             start_idx = len(rag_results) + 1 if rag_results else 1
             cascade_lines = []
@@ -640,8 +682,27 @@ def _build_section_prompt(
             )
             logger.info(f"[v9.35] Added {len(cascade_results)} cascade-specific references for {section_type}")
 
+    # --- v10.8: Compute ChromaDB ref count for PubMed offset ---
+    n_chroma_refs = len(_all_chroma_results)
+
+    # v10.8: Convert ChromaDB results to reference dicts for unified References section
+    _chromadb_refs_for_section = [
+        {
+            "title": r.get("title", r.get("source", "Unknown")),
+            "authors": r.get("authors", r.get("metadata", {}).get("authors", "") if isinstance(r.get("metadata"), dict) else ""),
+            "year": str(r.get("year", r.get("metadata", {}).get("year", "") if isinstance(r.get("metadata"), dict) else "")),
+            "journal": r.get("collection", ""),
+            "pmid": "",
+            "doi": "",
+            "source_type": r.get("source_type", "research_article"),
+            "chromadb_ref": True,  # marker to distinguish from PubMed refs
+        }
+        for r in _all_chroma_results
+    ]
+
     # --- PubMed references from enriched PTM data ---
-    pubmed_context = _format_pubmed_references(all_references, section_type, ptms)
+    # v10.8: PubMed refs start numbering AFTER ChromaDB refs for unified numbering
+    pubmed_context = _format_pubmed_references(all_references, section_type, ptms, start_idx=n_chroma_refs + 1)
 
     # PTM summary (with recent findings) — configurable detail count
     ptm_summary = _ptm_summary_text(ptms[:50], detail_count=ptm_detail_count)
@@ -794,7 +855,7 @@ INSTRUCTIONS:
 - **Temporally coordinated groups**: Mention the major temporally coordinated substrate groups and their biological significance.
 - Highlight the cell signaling commonalities among activated proteins based on PTM activity profile values.
 - Write a comprehensive abstract that captures ALL major findings. Be specific about PTM sites using the correct terminology: '{get_vocabulary(ptm_type_label)["modification_at_site"].format(site=get_vocabulary(ptm_type_label)["site_prefixes"][0] + "48", gene="GENE_NAME")}'. NEVER use terminology from a different PTM type.
-{combined_lit}"""
+{combined_lit}""", _chromadb_refs_for_section
 
     elif section_type == "introduction":
         comp_intro = ""
@@ -805,17 +866,19 @@ INSTRUCTIONS:
         # For introduction, we fetch double the normal amount to provide richer background
         intro_rag_results = retriever.search_for_section("introduction", keywords, n_results=chromadb_results * 2)
         intro_chromadb_emphasis = ""
+        # v10.8: Compute intro-specific ChromaDB count for PubMed offset
+        n_intro_chroma = len(intro_rag_results) if intro_rag_results else 0
         if intro_rag_results:
             intro_ref_lines = []
             for idx, r in enumerate(intro_rag_results[:min(chromadb_results * 2, 20)], 1):
                 title_str = r.get("title", "Unknown")
                 source_type = r.get("source_type", "research_article")
                 intro_ref_lines.append(
-                    f"--- ChromaDB Reference [{idx}] ({source_type}) ---\n"
+                    f"--- Reference [{idx}] ({source_type}) ---\n"
                     f"Source: {title_str}\n{r['document'][:500]}"
                 )
             intro_chromadb_emphasis = (
-                "\n\n**CRITICAL — Published Literature from Collection (ChromaDB Vector Search):**\n"
+                "\n\n**CRITICAL — Published Literature from Collection (Vector Search):**\n"
                 "The following excerpts are from review papers, textbooks, and research articles in the collection. "
                 "You MUST heavily reference these in the Introduction to establish the scientific background. "
                 "Cite using numbered brackets (e.g., [1], [2]). NEVER mention 'ChromaDB' or 'knowledge base'. "
@@ -826,8 +889,10 @@ INSTRUCTIONS:
                 "  - Provide background on key proteins and PTM sites identified in the data\n\n"
                 + "\n\n".join(intro_ref_lines)
             )
+        # v10.8: Re-format PubMed refs for introduction with intro-specific offset
+        pubmed_context = _format_pubmed_references(all_references, "introduction", ptms, start_idx=n_intro_chroma + 1)
 
-        return f"""Write a comprehensive Introduction section (~1500-2500 words) for this PTM analysis report.
+        intro_prompt = f"""Write a comprehensive Introduction section (~1500-2500 words) for this PTM analysis report.
 {analysis_context_block}
 {single_tp_directive}
 Experimental System: {tissue}, {treatment}{bio_focus_line}
@@ -852,6 +917,21 @@ Structure (7-9 paragraphs):
 IMPORTANT: Write a thorough, detailed introduction. The ChromaDB collection references below are your PRIMARY source for background information. Cite as many of them as possible to establish context. Discuss the biological significance of each research question. Use the comprehensive analysis context provided above to enrich your writing with specific PTM data and findings.
 {intro_chromadb_emphasis}
 {pubmed_context}"""
+        # v10.8: Introduction has its own dedicated ChromaDB search — build intro-specific refs
+        _intro_chroma_refs = [
+            {
+                "title": r.get("title", r.get("source", "Unknown")),
+                "authors": r.get("authors", r.get("metadata", {}).get("authors", "") if isinstance(r.get("metadata"), dict) else ""),
+                "year": str(r.get("year", r.get("metadata", {}).get("year", "") if isinstance(r.get("metadata"), dict) else "")),
+                "journal": r.get("collection", ""),
+                "pmid": "",
+                "doi": "",
+                "source_type": r.get("source_type", "research_article"),
+                "chromadb_ref": True,
+            }
+            for r in (intro_rag_results or [])
+        ]
+        return intro_prompt, _intro_chroma_refs
 
     elif section_type == "results":
         research_str = ""
@@ -1051,7 +1131,7 @@ For EACH Part, you MUST reference the corresponding figure AT LEAST ONCE:
 Do NOT omit figure references. Every analytical claim about pathway enrichment, {entity_label_lower} activity,
 signaling cascades, or PTM dynamics MUST be anchored to its corresponding figure.
 === END FIGURE REFERENCE RULES ===
-{combined_lit}"""
+{combined_lit}""", _chromadb_refs_for_section
 
     elif section_type == "discussion":
         ptm_type_str = context.get("ptm_type", "phosphorylation")
@@ -1195,7 +1275,7 @@ Even though these are in the Supplementary section, you MUST discuss them in the
   - Reference them as '(Supplementary Figures 1-N)' when discussing temporal coordination patterns.
 This ensures the Discussion provides a comprehensive interpretation of ALL analytical results.
 === END SUPPLEMENTARY DISCUSSION ===
-{combined_lit}"""
+{combined_lit}""", _chromadb_refs_for_section
 
     elif section_type == "conclusion":
         results_text = prev_sections.get("results", "")[:2000]
@@ -1230,7 +1310,7 @@ Summarize through the PTM activity profile framework:
 8. Specific future research directions with concrete experimental suggestions
 
 IMPORTANT: Be specific about findings — mention key PTM sites and their implications. The conclusion must capture the PTM activity profile interpretation: how PTM activation states reveal the signaling logic of the cellular response to {treatment}. Reference the results and discussion sections. Cite relevant references.
-{combined_lit}"""
+{combined_lit}""", _chromadb_refs_for_section
 
     # GAP B: Methods section
     elif section_type == "methods":
@@ -1295,7 +1375,7 @@ The Methods section MUST cover:
 5. **Statistical Analysis**: Describe significance thresholds and multiple testing correction
 6. **Report Generation**: LLM-assisted scientific writing with anti-hallucination validation
 
-IMPORTANT: Write in past tense. Be specific about computational tools and databases used. Do NOT include results or interpretations."""
+IMPORTANT: Write in past tense. Be specific about computational tools and databases used. Do NOT include results or interpretations.""", []
 
     # GAP F: Suggestion section (validation experiments)
     elif section_type == "suggestion":
@@ -1339,7 +1419,7 @@ Also include:
 - **Clinical Translation**: Steps toward therapeutic application if applicable
 
 IMPORTANT: Be SPECIFIC — name actual antibodies, inhibitors, cell lines, and experimental conditions. Generic suggestions are not useful.
-{combined_lit}"""
+{combined_lit}""", _chromadb_refs_for_section
 
     if section_type == "title":
         intro = prev_sections.get("introduction", "")[:600]
@@ -1364,9 +1444,9 @@ INSTRUCTIONS:
 - Follow academic paper title conventions. Use the correct omics term for this PTM type: '{get_vocabulary(ptm_type_label)["omics_name"]}'. Example: 'Comprehensive {get_vocabulary(ptm_type_label)["omics_name"]} Analysis Reveals ...'. NEVER use an omics term from a different PTM type.
 - Include the PTM type ({ptm_type_label}), the experimental system ({tissue}), and the treatment ({treatment}).
 - The title should reflect the PTM activity profile approach: temporal {ptm_type_label} activation dynamics and signaling cascade analysis in {tissue} in response to {treatment}.
-- Keep it under 25 words."""
+- Keep it under 25 words.""", []
 
-    return f"Write the {section_type} section for a PTM analysis report.\n{single_tp_directive}{ptm_summary}"
+    return f"Write the {section_type} section for a PTM analysis report.\n{single_tp_directive}{ptm_summary}", []
 
 
 # ---------------------------------------------------------------------------
@@ -1483,8 +1563,12 @@ def _collect_all_references(ptms: list) -> list:
     return refs
 
 
-def _format_pubmed_references(all_refs: list, section_type: str, ptms: list) -> str:
-    """Format PubMed references as prompt context, selecting the most relevant for each section."""
+def _format_pubmed_references(all_refs: list, section_type: str, ptms: list, start_idx: int = 1) -> str:
+    """Format PubMed references as prompt context, selecting the most relevant for each section.
+    
+    Args:
+        start_idx: Starting reference number (v10.8: offset after ChromaDB refs for unified numbering).
+    """
     if not all_refs:
         return ""
 
@@ -1493,7 +1577,7 @@ def _format_pubmed_references(all_refs: list, section_type: str, ptms: list) -> 
     selected = all_refs[:max_refs]
 
     lines = []
-    for idx, ref in enumerate(selected, 1):
+    for idx, ref in enumerate(selected, start_idx):
         entry = f"--- Reference [{idx}] (PMID: {ref['pmid']}) ---"
         entry += f"\nTitle: {ref['title']}"
         entry += f"\nJournal: {ref['journal']} ({ref['pub_date']})"
