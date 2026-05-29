@@ -27,9 +27,10 @@ async def health_check() -> dict[str, str]:
 
 @router.get("/version")
 async def get_version() -> dict[str, str]:
-    """Return platform version (AAA.BBB.CCC.DDD) and git hash. Read from mounted files."""
+    """Return platform version (AAA.BBB.CCC.DDD), git hash, and commit date. Read from mounted files."""
     v = "001.001.001.001"
     git_hash = ""
+    git_date = ""
     try:
         with open("/app/VERSION", "r") as f:
             v = f.read().strip() or "001.001.001.001"
@@ -40,7 +41,12 @@ async def get_version() -> dict[str, str]:
             git_hash = f.read().strip() or ""
     except FileNotFoundError:
         pass
-    return {"version": v, "git_hash": git_hash}
+    try:
+        with open("/app/GIT_DATE", "r") as f:
+            git_date = f.read().strip() or ""
+    except FileNotFoundError:
+        pass
+    return {"version": v, "git_hash": git_hash, "git_date": git_date}
 
 
 @router.get("/health/detailed")

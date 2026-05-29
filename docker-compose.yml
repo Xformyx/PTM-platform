@@ -90,6 +90,7 @@ services:
     volumes:
       - ./VERSION:/app/VERSION:ro
       - ./GIT_HASH:/app/GIT_HASH:ro
+      - ./GIT_DATE:/app/GIT_DATE:ro
       - ./api-server/app:/app/app
       - ./data:/app/data
       - ./storage/reports:/app/storage/reports

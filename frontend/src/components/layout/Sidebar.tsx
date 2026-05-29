@@ -208,27 +208,48 @@ function formatVersionDisplay(raw: string): string {
 function VersionDisplay({ collapsed }: { collapsed?: boolean }) {
   const [version, setVersion] = useState<string>("—");
   const [gitHash, setGitHash] = useState<string>("");
+  const [gitDate, setGitDate] = useState<string>("");
   useEffect(() => {
     fetch("/api/version")
       .then((r) => r.ok ? r.json() : null)
       .then((d) => {
         if (d?.version) setVersion(formatVersionDisplay(d.version));
         if (d?.git_hash) setGitHash(d.git_hash);
+        if (d?.git_date) setGitDate(d.git_date);
       })
       .catch(() => {});
   }, []);
-  const display = gitHash ? `Version : ${version} (${gitHash})` : `Version : ${version}`;
+
+  const hashPart = gitHash ? gitHash.slice(0, 7) : "";
+  const tooltip = [
+    `Version: ${version}`,
+    hashPart ? `Commit: ${hashPart}` : "",
+    gitDate ? `Built: ${gitDate}` : "",
+  ].filter(Boolean).join(" · ");
+
   return (
     <div
       className={cn(
         "shrink-0 px-3 py-2 border-t",
-        collapsed ? "flex justify-center" : "text-center"
+        collapsed ? "flex justify-center" : ""
       )}
-      title={display}
+      title={tooltip}
     >
-      <span className="text-[10px] text-muted-foreground font-mono">
-        {display}
-      </span>
+      {collapsed ? (
+        <span className="text-[9px] text-muted-foreground font-mono">{hashPart || "—"}</span>
+      ) : (
+        <div className="space-y-0.5">
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] text-muted-foreground font-mono">v{version}</span>
+            {hashPart && (
+              <span className="text-[9px] font-mono px-1 py-0.5 rounded bg-muted text-muted-foreground">{hashPart}</span>
+            )}
+          </div>
+          {gitDate && (
+            <div className="text-[9px] text-muted-foreground/60 font-mono">{gitDate}</div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

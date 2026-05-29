@@ -1189,7 +1189,7 @@ async def run_stage(
             "rag_llm_model": (order.report_options or {}).get("rag_llm_model"),
             "rag_llm_provider": (order.report_options or {}).get("rag_llm_provider"),
             "report_title": (order.report_options or {}).get("report_title", "PTM Comprehensive Analysis Report"),
-            "chain_to_next": False,
+            "chain_to_next": True,
         }
         task = celery_app.send_task(
             "preprocessing.tasks.run_preprocessing",
@@ -1215,7 +1215,7 @@ async def run_stage(
             "rag_llm_model": (order.report_options or {}).get("rag_llm_model"),
             "rag_llm_provider": (order.report_options or {}).get("rag_llm_provider"),
             "report_title": (order.report_options or {}).get("report_title", "PTM Comprehensive Analysis Report"),
-            "chain_to_next": False,
+            "chain_to_next": True,
         }
         task = celery_app.send_task(
             "rag_enrichment.tasks.run_rag_enrichment",
