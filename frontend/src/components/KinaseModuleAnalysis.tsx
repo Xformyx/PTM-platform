@@ -1616,6 +1616,7 @@ export default function KinaseModuleAnalysis({
             coWaveModules={coWaveModules}
             highlightedCwGroup={highlightedCwGroup}
             highlightedCwGroupKinases={highlightedCwGroupKinases}
+            isUbi={isUbi}
           />
         )}
 
@@ -1860,7 +1861,7 @@ function MotifAnnotationPanel({ annotation, isUbi = false }: { annotation: Motif
 
       {/* ── Group-level Anchor Kinase Inference ── */}
       {annotation.group_inference && annotation.group_inference.anchor_kinases.length > 0 && (
-        <GroupInferencePanel inference={annotation.group_inference} />
+        <GroupInferencePanel inference={annotation.group_inference} isUbi={isUbi} />
       )}
       {annotation.group_inference && annotation.group_inference.anchor_kinases.length === 0 && (
         <div className="text-xs text-muted-foreground bg-muted/50 rounded p-2">
@@ -1953,7 +1954,7 @@ function MotifAnnotationPanel({ annotation, isUbi = false }: { annotation: Motif
 
 // ── Group Inference Panel ────────────────────────────────────────────────────────
 
-function GroupInferencePanel({ inference }: { inference: GroupInference }) {
+function GroupInferencePanel({ inference, isUbi = false }: { inference: GroupInference; isUbi?: boolean }) {
   const { anchor_kinases, inferred_assignments, novel_candidates, summary_text } = inference;
 
   return (
@@ -3346,6 +3347,7 @@ function SignalFlowView({
   coWaveModules = [],
   highlightedCwGroup = null,
   highlightedCwGroupKinases = [],
+  isUbi = false,
 }: {
   inferredReceptors: InferredReceptor[];
   globalKinaseResult: GlobalKinaseModuleResponse | null;
@@ -3355,6 +3357,7 @@ function SignalFlowView({
   coWaveModules?: CoWaveModule[];
   highlightedCwGroup?: number | null;
   highlightedCwGroupKinases?: string[];
+  isUbi?: boolean;
 }) {
   const [selectedReceptor, setSelectedReceptor] = useState<string | null>(null);
   const [showEffectors, setShowEffectors] = useState(true);
