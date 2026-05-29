@@ -191,11 +191,17 @@ for c in "${CHANGED[@]}"; do
 done
 BUILD_SERVICES=($(printf '%s\n' "${BUILD_SERVICES[@]}" | sort -u))
 
+# GPU overlay 자동 감지 (docker-compose.gpu.yml 존재하면 항상 포함)
+COMPOSE_CMD=(docker compose)
+if [[ -f "$REPO_ROOT/docker-compose.gpu.yml" ]]; then
+  COMPOSE_CMD+=(--file docker-compose.yml --file docker-compose.gpu.yml)
+fi
+
 if [[ ${#BUILD_SERVICES[@]} -eq 0 ]]; then
   echo "Build: (skip — no image rebuild needed)"
 else
   echo "Building: ${BUILD_SERVICES[*]}"
-  docker compose build "${BUILD_SERVICES[@]}"
+  "${COMPOSE_CMD[@]}" build "${BUILD_SERVICES[@]}"
 fi
 
 # Restart
@@ -217,7 +223,7 @@ if [[ ${#RESTART_SERVICES[@]} -eq 0 ]]; then
   echo "Warning: nothing to restart."
 else
   echo "Restarting: ${RESTART_SERVICES[*]}"
-  docker compose up -d "${RESTART_SERVICES[@]}"
+  "${COMPOSE_CMD[@]}" up -d "${RESTART_SERVICES[@]}"
 fi
 
 touch "$LAST_DEV_BUILD"
