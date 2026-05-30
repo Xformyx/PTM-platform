@@ -9,7 +9,9 @@ services:
     image: mysql:8.0
     container_name: ptm-mysql
     platform: linux/amd64
-    command: --max-connections=300
+    command: >
+      --max-connections=300
+      --binlog-expire-logs-seconds=604800
     ports:
       - "3306:3306"
     volumes:
