@@ -6582,7 +6582,7 @@ async def kinase_activity_heatmap(
             return []
         n_subs = len(valid_keys)
         if n_subs < MIN_SUBSTRATES_FOR_CLUSTERING or n_conditions < 2:
-            return [{"ptm_keys": valid_keys, "cluster_id": 0, "is_dominant": True}]
+            return [{"ptm_keys": valid_keys, "cluster_id": 0, "size": n_subs, "coherence": _compute_coherence_for_keys(valid_keys), "is_dominant": True}]
         arr = np.array(raw_vectors, dtype=np.float64)
         norms = np.linalg.norm(arr, axis=1, keepdims=True)
         norms[norms < 1e-9] = 1.0
@@ -6592,7 +6592,7 @@ async def kinase_activity_heatmap(
         try:
             labels = _numpy_kmeans(arr_normed, k=k, n_init=10, max_iter=300, seed=42)
         except Exception:
-            return [{"ptm_keys": valid_keys, "cluster_id": 0, "is_dominant": True}]
+            return [{"ptm_keys": valid_keys, "cluster_id": 0, "size": n_subs, "coherence": _compute_coherence_for_keys(valid_keys), "is_dominant": True}]
         cluster_map: dict[int, list[str]] = {}
         for idx, label in enumerate(labels):
             cluster_map.setdefault(int(label), []).append(valid_keys[idx])
