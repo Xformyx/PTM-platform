@@ -396,8 +396,69 @@ def _auto_run_global_analysis(order_id: int, enriched_data: list, config: dict) 
 
 
 def _compute_kinase_activity_heatmap(enriched_data: list, kinase_result: dict, ptm_type: str) -> dict:
-    """Compute per-kinase per-condition weighted activity scores from enriched PTM data."""
+    """Compute per-kinase per-condition weighted activity scores from enriched PTM data.
+
+    v11.0: Substrate Temporal Clustering
+    ------------------------------------
+    Instead of naively averaging all substrates (which causes signal cancellation
+    when substrates have opposing temporal patterns), we:
+      1. Cluster substrates by L2-normalized temporal trajectory (K-Means)
+      2. Score each cluster independently per condition
+      3. Select the dominant cluster (highest coherence × signal strength)
+      4. Report dominant cluster metrics as the kinase's primary activity
+      5. Preserve all cluster details for frontend drill-down
+    """
     import numpy as np
+
+    # ── Pure-numpy K-Means (no sklearn dependency) ──
+    def _numpy_kmeans(data: np.ndarray, k: int, n_init: int = 10,
+                      max_iter: int = 300, seed: int = 42) -> np.ndarray:
+        """K-Means clustering using only numpy. Returns label array."""
+        rng = np.random.RandomState(seed)
+        n_samples, n_features = data.shape
+        best_labels = np.zeros(n_samples, dtype=int)
+        best_inertia = np.inf
+
+        for _ in range(n_init):
+            # K-Means++ initialization
+            centers = np.empty((k, n_features), dtype=data.dtype)
+            idx = rng.randint(0, n_samples)
+            centers[0] = data[idx]
+            for c in range(1, k):
+                dists = np.min(
+                    np.sum((data[:, None, :] - centers[None, :c, :]) ** 2, axis=2),
+                    axis=1,
+                )
+                probs = dists / max(dists.sum(), 1e-12)
+                idx = rng.choice(n_samples, p=probs)
+                centers[c] = data[idx]
+
+            # Iterate
+            labels = np.zeros(n_samples, dtype=int)
+            for _it in range(max_iter):
+                # Assign
+                dists = np.sum(
+                    (data[:, None, :] - centers[None, :, :]) ** 2, axis=2
+                )  # (n_samples, k)
+                new_labels = np.argmin(dists, axis=1)
+                if np.array_equal(new_labels, labels) and _it > 0:
+                    break
+                labels = new_labels
+                # Update centers
+                for ci in range(k):
+                    mask = labels == ci
+                    if mask.any():
+                        centers[ci] = data[mask].mean(axis=0)
+
+            inertia = sum(
+                np.sum((data[labels == ci] - centers[ci]) ** 2)
+                for ci in range(k)
+            )
+            if inertia < best_inertia:
+                best_inertia = inertia
+                best_labels = labels.copy()
+
+        return best_labels
 
     # Extract conditions from enriched data
     conditions = set()
@@ -434,6 +495,8 @@ def _compute_kinase_activity_heatmap(enriched_data: list, kinase_result: dict, p
     if not conditions:
         return {"kinase_scores": [], "conditions": [], "_cached": True}
 
+    n_conditions = len(conditions)
+
     # Activity class weights
     def _get_weight(gene, pos, cond):
         key = (gene, pos)
@@ -447,7 +510,166 @@ def _compute_kinase_activity_heatmap(enriched_data: list, kinase_result: dict, p
             return 1.0  # coordinated-eligible
         return 0.5  # minor
 
+    # ── Helper: compute weighted score for a subset of members per condition ──
+    def _score_members(member_list, conditions):
+        """Return {cond: weighted_avg_score} for given members."""
+        scores = {}
+        for cond in conditions:
+            wsum, wtot = 0.0, 0.0
+            for g, p in member_list:
+                val = ptm_values.get((g, p, cond), 0.0)
+                w = _get_weight(g, p, cond)
+                wsum += val * w
+                wtot += w
+            scores[cond] = round(wsum / max(wtot, 1e-9), 4)
+        return scores
+
+    # ── Helper: compute coherence for a subset of members ──
+    def _compute_coherence(member_list, conditions):
+        """Return mean pairwise Pearson r for member trajectories."""
+        vectors = []
+        for g, p in member_list:
+            row = [ptm_values.get((g, p, c), 0.0) for c in conditions]
+            if any(v != 0 for v in row):
+                vectors.append(row)
+        if len(vectors) < 2:
+            return 0.0
+        try:
+            arr = np.array(vectors)
+            corr_matrix = np.corrcoef(arr)
+            n = corr_matrix.shape[0]
+            upper = [corr_matrix[i][j] for i in range(n) for j in range(i + 1, n)
+                     if not np.isnan(corr_matrix[i][j])]
+            return round(float(np.mean(upper)), 3) if upper else 0.0
+        except Exception:
+            return 0.0
+
+    # ── Helper: cluster substrates by temporal trajectory shape ──
+    MIN_SUBSTRATES_FOR_CLUSTERING = 10
+
+    def _cluster_substrates(members, conditions):
+        """Cluster substrates by L2-normalized temporal trajectory.
+
+        Returns list of clusters, each = {cluster_id, member_keys, size, scores,
+        coherence, peak_condition, peak_score, direction, is_dominant}.
+        If n < MIN_SUBSTRATES_FOR_CLUSTERING, returns single cluster with all members.
+        """
+        # Build trajectory matrix
+        valid_members = []  # [(gene, pos)]
+        raw_vectors = []    # [[fc_cond1, fc_cond2, ...]]
+        for m in members:
+            g = m.get("gene", "").upper()
+            p = str(m.get("position", "")).upper()
+            row = [ptm_values.get((g, p, c), 0.0) for c in conditions]
+            if any(v != 0 for v in row):
+                valid_members.append((g, p))
+                raw_vectors.append(row)
+
+        if not valid_members:
+            return []
+
+        n_subs = len(valid_members)
+
+        # ── Single-cluster fallback ──
+        if n_subs < MIN_SUBSTRATES_FOR_CLUSTERING or n_conditions < 2:
+            scores = _score_members(valid_members, conditions)
+            coh = _compute_coherence(valid_members, conditions)
+            peak_c = max(conditions, key=lambda c: abs(scores.get(c, 0)))
+            peak_s = scores.get(peak_c, 0)
+            direction = "activation" if peak_s > 0.3 else ("inactivation" if peak_s < -0.3 else "neutral")
+            return [{
+                "cluster_id": 0,
+                "member_keys": valid_members,
+                "size": n_subs,
+                "scores": scores,
+                "coherence": coh,
+                "peak_condition": peak_c,
+                "peak_score": peak_s,
+                "direction": direction,
+                "is_dominant": True,
+            }]
+
+        # ── K-Means on L2-normalized trajectories (shape-based clustering) ──
+        arr = np.array(raw_vectors, dtype=np.float64)
+        # L2-normalize: [+0.5, +1, +0.5, 0] and [+2, +4, +2, 0] → same direction
+        norms = np.linalg.norm(arr, axis=1, keepdims=True)
+        norms[norms < 1e-9] = 1.0  # avoid division by zero
+        arr_normed = arr / norms
+
+        # Determine K: scale with substrate count, cap at 4
+        k = min(4, max(2, n_subs // 50))
+        # Ensure k <= n_subs
+        k = min(k, n_subs)
+
+        try:
+            labels = _numpy_kmeans(arr_normed, k=k, n_init=10, max_iter=300, seed=42)
+        except Exception:
+            # Fallback: single cluster
+            scores = _score_members(valid_members, conditions)
+            coh = _compute_coherence(valid_members, conditions)
+            peak_c = max(conditions, key=lambda c: abs(scores.get(c, 0)))
+            peak_s = scores.get(peak_c, 0)
+            direction = "activation" if peak_s > 0.3 else ("inactivation" if peak_s < -0.3 else "neutral")
+            return [{
+                "cluster_id": 0,
+                "member_keys": valid_members,
+                "size": n_subs,
+                "scores": scores,
+                "coherence": coh,
+                "peak_condition": peak_c,
+                "peak_score": peak_s,
+                "direction": direction,
+                "is_dominant": True,
+            }]
+
+        # ── Build cluster details ──
+        cluster_members = {}  # label -> [(gene, pos)]
+        for idx, label in enumerate(labels):
+            label = int(label)
+            cluster_members.setdefault(label, []).append(valid_members[idx])
+
+        clusters = []
+        best_score = -1.0
+        best_idx = 0
+
+        for cid, c_members in sorted(cluster_members.items()):
+            c_size = len(c_members)
+            c_scores = _score_members(c_members, conditions)
+            c_coh = _compute_coherence(c_members, conditions)
+            c_peak_c = max(conditions, key=lambda c: abs(c_scores.get(c, 0)))
+            c_peak_s = c_scores.get(c_peak_c, 0)
+            c_dir = "activation" if c_peak_s > 0.3 else ("inactivation" if c_peak_s < -0.3 else "neutral")
+
+            # Dominant cluster selection score:
+            # coherence × √(size) × max(|score|)
+            # Rewards: pattern consistency, statistical power, signal strength
+            dominance = max(c_coh, 0.01) * (c_size ** 0.5) * max(abs(c_peak_s), 0.01)
+
+            clusters.append({
+                "cluster_id": cid,
+                "member_keys": c_members,
+                "size": c_size,
+                "scores": c_scores,
+                "coherence": c_coh,
+                "peak_condition": c_peak_c,
+                "peak_score": c_peak_s,
+                "direction": c_dir,
+                "is_dominant": False,
+                "_dominance_score": round(dominance, 4),
+            })
+
+            if dominance > best_score:
+                best_score = dominance
+                best_idx = len(clusters) - 1
+
+        if clusters:
+            clusters[best_idx]["is_dominant"] = True
+
+        return clusters
+
+    # ══════════════════════════════════════════════════════════════════════════
     # Build kinase -> PTM mapping from kinase_result
+    # ══════════════════════════════════════════════════════════════════════════
     kinase_modules = kinase_result.get("kinase_modules", kinase_result.get("kinase_module_list", []))
     kinase_scores = []
 
@@ -457,64 +679,50 @@ def _compute_kinase_activity_heatmap(enriched_data: list, kinase_result: dict, p
         if not kinase_name or not members:
             continue
 
-        scores = {}
-        for cond in conditions:
-            weighted_sum = 0.0
-            weight_total = 0.0
-            for m in members:
-                g = m.get("gene", "").upper()
-                p = str(m.get("position", "")).upper()
-                val = ptm_values.get((g, p, cond), 0.0)
-                w = _get_weight(g, p, cond)
-                weighted_sum += val * w
-                weight_total += w
-            scores[cond] = round(weighted_sum / max(weight_total, 1e-9), 4)
+        # ── v11.0: Cluster substrates by temporal trajectory ──
+        clusters = _cluster_substrates(members, conditions)
+        if not clusters:
+            continue
 
-        # Find peak
-        peak_cond = max(conditions, key=lambda c: abs(scores.get(c, 0)))
-        peak_score = scores.get(peak_cond, 0)
+        # Find dominant cluster
+        dominant = next((c for c in clusters if c["is_dominant"]), clusters[0])
+
+        # Use dominant cluster's metrics as the kinase's primary activity
+        scores = dominant["scores"]
+        peak_cond = dominant["peak_condition"]
+        peak_score = dominant["peak_score"]
+        coherence = dominant["coherence"]
+        direction = dominant["direction"]
 
         confidence = km.get("confidence_score", 0.5)
+
+        # Serialize cluster_details for output (strip member_keys to save space)
+        cluster_details = []
+        for cl in clusters:
+            cluster_details.append({
+                "cluster_id": cl["cluster_id"],
+                "size": cl["size"],
+                "scores": cl["scores"],
+                "coherence": cl["coherence"],
+                "peak_condition": cl["peak_condition"],
+                "peak_score": round(cl["peak_score"], 4),
+                "direction": cl["direction"],
+                "is_dominant": cl["is_dominant"],
+            })
 
         kinase_scores.append({
             "kinase": kinase_name,
             "scores": scores,
-            "substrate_count": len(members),
+            "substrate_count": dominant["size"],       # dominant cluster size
+            "total_substrates": len(members),           # original total
             "confidence": confidence,
             "peak_condition": peak_cond,
             "peak_score": peak_score,
+            "coherence": coherence,                     # dominant cluster coherence
+            "direction": direction,
+            "n_clusters": len(clusters),
+            "cluster_details": cluster_details,
         })
-
-    # ── Co-wave metadata: intra-kinase coherence ──
-    # For each kinase, compute how synchronized its substrates move across conditions
-    for ks in kinase_scores:
-        kinase_name = ks["kinase"]
-        km_match = next((km for km in kinase_modules if km.get("kinase") == kinase_name), None)
-        if km_match and len(conditions) >= 2:
-            members = km_match.get("members", [])
-            # Build matrix: rows=substrates, cols=conditions
-            vectors = []
-            for m in members:
-                g, p = m.get("gene", "").upper(), str(m.get("position", "")).upper()
-                row = [ptm_values.get((g, p, c), 0.0) for c in conditions]
-                if any(v != 0 for v in row):
-                    vectors.append(row)
-            if len(vectors) >= 2:
-                arr = np.array(vectors)
-                # Pairwise Pearson correlation mean = coherence
-                try:
-                    corr_matrix = np.corrcoef(arr)
-                    # Upper triangle (excluding diagonal)
-                    n = corr_matrix.shape[0]
-                    upper = [corr_matrix[i][j] for i in range(n) for j in range(i+1, n)
-                             if not np.isnan(corr_matrix[i][j])]
-                    ks["coherence"] = round(float(np.mean(upper)), 3) if upper else 0.0
-                except Exception:
-                    ks["coherence"] = 0.0
-            else:
-                ks["coherence"] = 0.0
-        else:
-            ks["coherence"] = 0.0
 
     # ── Peak Synchronization: find kinases that peak at the same condition ──
     peak_groups = {}  # condition -> list of kinase names
@@ -533,9 +741,9 @@ def _compute_kinase_activity_heatmap(enriched_data: list, kinase_result: dict, p
             }
 
     # ── Co-wave group assignment (kinase-level) ──
-    # Cluster kinases by temporal profile similarity
+    # Cluster kinases by temporal profile similarity (using dominant cluster scores)
     cowave_groups = []
-    if len(kinase_scores) >= 3 and len(conditions) >= 2:
+    if len(kinase_scores) >= 3 and n_conditions >= 2:
         # Build kinase score matrix
         score_matrix = []
         valid_kinases = []
@@ -556,7 +764,7 @@ def _compute_kinase_activity_heatmap(enriched_data: list, kinase_result: dict, p
                         continue
                     group = [i]
                     visited.add(i)
-                    for j in range(i+1, len(valid_kinases)):
+                    for j in range(i + 1, len(valid_kinases)):
                         if j not in visited and not np.isnan(corr[i][j]) and corr[i][j] >= 0.7:
                             group.append(j)
                             visited.add(j)
@@ -581,20 +789,10 @@ def _compute_kinase_activity_heatmap(enriched_data: list, kinase_result: dict, p
     for ks in kinase_scores:
         ks["cowave_group"] = kinase_to_group.get(ks["kinase"], -1)
 
-    # ── Activation / Inactivation classification ──
-    for ks in kinase_scores:
-        peak = ks.get("peak_score", 0)
-        if peak > 0.3:
-            ks["direction"] = "activation"  # kinase activation (substrates phosphorylated)
-        elif peak < -0.3:
-            ks["direction"] = "inactivation"  # phosphatase action / kinase suppression
-        else:
-            ks["direction"] = "neutral"
-
     # Sort by peak_score descending
     kinase_scores.sort(key=lambda x: abs(x["peak_score"]), reverse=True)
 
-    # Filter: only include kinases with ≥2 substrates for meaningful activity
+    # Filter: only include kinases with ≥2 substrates in dominant cluster
     kinase_scores_filtered = [ks for ks in kinase_scores if ks["substrate_count"] >= 2]
     # If filtering removes too many, keep top kinases even with 1 substrate
     if len(kinase_scores_filtered) < 5 and len(kinase_scores) >= 5:

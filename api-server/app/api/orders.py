@@ -6495,26 +6495,159 @@ async def kinase_activity_heatmap(
         else:
             return "minor"
 
+    import numpy as np
+    n_conditions = len(conditions_sorted)
+
+    # ── v11.0: Pure-numpy K-Means for substrate temporal clustering ──
+    MIN_SUBSTRATES_FOR_CLUSTERING = 10
+
+    def _numpy_kmeans(data: np.ndarray, k: int, n_init: int = 10,
+                      max_iter: int = 300, seed: int = 42) -> np.ndarray:
+        """K-Means clustering using only numpy. Returns label array."""
+        rng = np.random.RandomState(seed)
+        n_samples, n_features = data.shape
+        best_labels = np.zeros(n_samples, dtype=int)
+        best_inertia = np.inf
+        for _ in range(n_init):
+            centers = np.empty((k, n_features), dtype=data.dtype)
+            idx = rng.randint(0, n_samples)
+            centers[0] = data[idx]
+            for c_idx in range(1, k):
+                dists = np.min(
+                    np.sum((data[:, None, :] - centers[None, :c_idx, :]) ** 2, axis=2),
+                    axis=1,
+                )
+                probs = dists / max(dists.sum(), 1e-12)
+                idx = rng.choice(n_samples, p=probs)
+                centers[c_idx] = data[idx]
+            labels = np.zeros(n_samples, dtype=int)
+            for _it in range(max_iter):
+                dists = np.sum(
+                    (data[:, None, :] - centers[None, :, :]) ** 2, axis=2
+                )
+                new_labels = np.argmin(dists, axis=1)
+                if np.array_equal(new_labels, labels) and _it > 0:
+                    break
+                labels = new_labels
+                for ci in range(k):
+                    mask = labels == ci
+                    if mask.any():
+                        centers[ci] = data[mask].mean(axis=0)
+            inertia = sum(
+                np.sum((data[labels == ci] - centers[ci]) ** 2)
+                for ci in range(k)
+            )
+            if inertia < best_inertia:
+                best_inertia = inertia
+                best_labels = labels.copy()
+        return best_labels
+
+    def _compute_coherence_for_keys(ptm_keys_list):
+        """Compute mean pairwise Pearson r for a list of PTM keys."""
+        vectors = []
+        for pk in ptm_keys_list:
+            ts = ptm_timeseries.get(pk, {})
+            if ts:
+                row = [ts.get(c, 0.0) for c in conditions_sorted]
+                if any(v != 0 for v in row):
+                    vectors.append(row)
+        if len(vectors) < 2:
+            return 0.0
+        try:
+            arr = np.array(vectors)
+            corr_matrix = np.corrcoef(arr)
+            n = corr_matrix.shape[0]
+            upper = [corr_matrix[i][j] for i in range(n) for j in range(i + 1, n)
+                     if not np.isnan(corr_matrix[i][j])]
+            return round(float(np.mean(upper)), 3) if upper else 0.0
+        except Exception:
+            return 0.0
+
+    def _cluster_ptms_by_trajectory(ptm_list):
+        """Cluster PTMs by L2-normalized temporal trajectory.
+        Returns list of clusters: [{ptm_keys, size, coherence, ...}].
+        """
+        valid_keys = []
+        raw_vectors = []
+        for ptm in ptm_list:
+            pk = f"{ptm.get('gene', '').upper()}_{str(ptm.get('position', '')).upper()}"
+            ts = ptm_timeseries.get(pk, {})
+            if not ts:
+                continue
+            row = [ts.get(c, 0.0) for c in conditions_sorted]
+            if any(v != 0 for v in row):
+                valid_keys.append(pk)
+                raw_vectors.append(row)
+        if not valid_keys:
+            return []
+        n_subs = len(valid_keys)
+        if n_subs < MIN_SUBSTRATES_FOR_CLUSTERING or n_conditions < 2:
+            return [{"ptm_keys": valid_keys, "cluster_id": 0, "is_dominant": True}]
+        arr = np.array(raw_vectors, dtype=np.float64)
+        norms = np.linalg.norm(arr, axis=1, keepdims=True)
+        norms[norms < 1e-9] = 1.0
+        arr_normed = arr / norms
+        k = min(4, max(2, n_subs // 50))
+        k = min(k, n_subs)
+        try:
+            labels = _numpy_kmeans(arr_normed, k=k, n_init=10, max_iter=300, seed=42)
+        except Exception:
+            return [{"ptm_keys": valid_keys, "cluster_id": 0, "is_dominant": True}]
+        cluster_map: dict[int, list[str]] = {}
+        for idx, label in enumerate(labels):
+            cluster_map.setdefault(int(label), []).append(valid_keys[idx])
+        clusters = []
+        best_score = -1.0
+        best_idx = 0
+        for cid, c_keys in sorted(cluster_map.items()):
+            c_coh = _compute_coherence_for_keys(c_keys)
+            # Compute peak signal for dominance scoring
+            c_peak = 0.0
+            for c in conditions_sorted:
+                c_sum = sum(ptm_timeseries.get(pk, {}).get(c, 0.0) for pk in c_keys)
+                c_avg = c_sum / max(len(c_keys), 1)
+                if abs(c_avg) > abs(c_peak):
+                    c_peak = c_avg
+            dominance = max(c_coh, 0.01) * (len(c_keys) ** 0.5) * max(abs(c_peak), 0.01)
+            clusters.append({
+                "ptm_keys": c_keys,
+                "cluster_id": cid,
+                "size": len(c_keys),
+                "coherence": c_coh,
+                "is_dominant": False,
+                "_dominance_score": round(dominance, 4),
+            })
+            if dominance > best_score:
+                best_score = dominance
+                best_idx = len(clusters) - 1
+        if clusters:
+            clusters[best_idx]["is_dominant"] = True
+        return clusters
+
+    # ── Main scoring loop with substrate clustering ──
     kinase_scores = []
     for km in kinase_modules:
         kinase_name = km.get("kinase", "")
         ptms = km.get("ptms", [])
         confidence = km.get("confidence_score", 0.5)
 
-        # Per-condition co-activation sum (split by direction)
+        # v11.0: Cluster substrates by temporal trajectory
+        clusters = _cluster_ptms_by_trajectory(ptms)
+        if not clusters:
+            continue
+        dominant = next((cl for cl in clusters if cl["is_dominant"]), clusters[0])
+        dominant_keys = set(dominant["ptm_keys"])
+
+        # Score using ONLY dominant cluster substrates
         up_sums: dict[str, float] = {c: 0.0 for c in conditions_sorted}
         down_sums: dict[str, float] = {c: 0.0 for c in conditions_sorted}
         up_counts: dict[str, int] = {c: 0 for c in conditions_sorted}
         down_counts: dict[str, int] = {c: 0 for c in conditions_sorted}
-        # Per-condition co-activated substrate count (total)
         coact_counts: dict[str, int] = {c: 0 for c in conditions_sorted}
-        # Per-condition exclusive/shared breakdown
         exclusive_sums: dict[str, float] = {c: 0.0 for c in conditions_sorted}
         shared_sums: dict[str, float] = {c: 0.0 for c in conditions_sorted}
         exclusive_counts: dict[str, int] = {c: 0 for c in conditions_sorted}
         shared_counts: dict[str, int] = {c: 0 for c in conditions_sorted}
-
-        # Per-condition per-tier up/down sums
         tier_up_sums: dict[str, dict[str, float]] = {
             t: {c: 0.0 for c in conditions_sorted} for t in ("de_novo", "regulated", "minor")
         }
@@ -6530,39 +6663,34 @@ async def kinase_activity_heatmap(
 
         for ptm in ptms:
             ptm_key = f"{ptm.get('gene', '').upper()}_{str(ptm.get('position', '')).upper()}"
+            # Only score substrates in the dominant cluster
+            if ptm_key not in dominant_keys:
+                continue
             ts = ptm_timeseries.get(ptm_key, {})
             if not ts:
                 continue
-
-            # Determine if this PTM is exclusive to this kinase or shared
             is_exclusive = len(ptm_to_kinases.get(ptm_key, [])) <= 1
-
             for c in conditions_sorted:
                 fc = ts.get(c, 0.0)
                 q_val = ptm_qvalues.get(ptm_key, {}).get(c)
-
-                # Apply threshold: include if statistically significant OR |FC| >= threshold
                 passes_threshold = False
                 if q_val is not None and q_val < Q_THRESHOLD:
                     passes_threshold = True
                 elif abs(fc) >= FC_THRESHOLD:
                     passes_threshold = True
-
                 if passes_threshold:
                     coact_counts[c] += 1
                     tier = _classify_tier(abs(fc))
-                    # Split by direction
                     if fc > 0:
                         up_sums[c] += fc
                         up_counts[c] += 1
                         tier_up_sums[tier][c] += fc
                         tier_up_counts[tier][c] += 1
                     elif fc < 0:
-                        down_sums[c] += fc  # negative value
+                        down_sums[c] += fc
                         down_counts[c] += 1
                         tier_down_sums[tier][c] += fc
                         tier_down_counts[tier][c] += 1
-                    # Exclusive/shared tracking
                     if is_exclusive:
                         exclusive_sums[c] += fc
                         exclusive_counts[c] += 1
@@ -6570,23 +6698,19 @@ async def kinase_activity_heatmap(
                         shared_sums[c] += fc
                         shared_counts[c] += 1
 
-        # Compute dominant score per condition: max(|up_sum|, |down_sum|) with sign
+        # Compute dominant score per condition
         scores: dict[str, float] = {}
         for c in conditions_sorted:
-            up_val = up_sums[c]   # positive
-            dn_val = down_sums[c]  # negative
-            # Score = dominant direction (the one with larger absolute sum)
+            up_val = up_sums[c]
+            dn_val = down_sums[c]
             if abs(up_val) >= abs(dn_val):
                 scores[c] = round(up_val, 4)
             else:
                 scores[c] = round(dn_val, 4)
-
-        # Round up/down sums
         for c in conditions_sorted:
             up_sums[c] = round(up_sums[c], 3)
             down_sums[c] = round(down_sums[c], 3)
 
-        # Peak detection (based on dominant score)
         if scores:
             peak_cond = max(scores, key=lambda c: abs(scores[c]))
             peak_score = scores[peak_cond]
@@ -6594,7 +6718,6 @@ async def kinase_activity_heatmap(
             peak_cond = ""
             peak_score = 0.0
 
-        # Round tier sums
         tier_data = {}
         for tier in ("de_novo", "regulated", "minor"):
             tier_data[tier] = {
@@ -6604,15 +6727,40 @@ async def kinase_activity_heatmap(
                 "down_counts": tier_down_counts[tier],
             }
 
+        # Cluster details for frontend (strip ptm_keys to save space)
+        cluster_details = []
+        for cl in clusters:
+            cl_peak = 0.0
+            cl_scores_dict: dict[str, float] = {}
+            for c in conditions_sorted:
+                c_sum = sum(ptm_timeseries.get(pk, {}).get(c, 0.0) for pk in cl["ptm_keys"])
+                c_avg = round(c_sum / max(len(cl["ptm_keys"]), 1), 4)
+                cl_scores_dict[c] = c_avg
+                if abs(c_avg) > abs(cl_peak):
+                    cl_peak = c_avg
+            cl_peak_cond = max(conditions_sorted, key=lambda c: abs(cl_scores_dict.get(c, 0)))
+            cl_dir = "activation" if cl_peak > 0.3 else ("inactivation" if cl_peak < -0.3 else "neutral")
+            cluster_details.append({
+                "cluster_id": cl["cluster_id"],
+                "size": cl["size"],
+                "scores": cl_scores_dict,
+                "coherence": cl["coherence"],
+                "peak_condition": cl_peak_cond,
+                "peak_score": round(cl_peak, 4),
+                "direction": cl_dir,
+                "is_dominant": cl["is_dominant"],
+            })
+
         kinase_scores.append({
             "kinase": kinase_name,
-            "scores": scores,  # dominant direction per condition
+            "scores": scores,
             "up_sums": up_sums,
             "down_sums": down_sums,
             "up_counts": up_counts,
             "down_counts": down_counts,
-            "tiers": tier_data,  # per-tier breakdown: de_novo, regulated, minor
-            "substrate_count": len(ptms),
+            "tiers": tier_data,
+            "substrate_count": dominant["size"],        # dominant cluster size
+            "total_substrates": len(ptms),               # original total
             "confidence": confidence,
             "peak_condition": peak_cond,
             "peak_score": round(peak_score, 4),
@@ -6621,37 +6769,10 @@ async def kinase_activity_heatmap(
             "shared_sums": {c: round(v, 3) for c, v in shared_sums.items()},
             "exclusive_counts": exclusive_counts,
             "shared_counts": shared_counts,
+            "coherence": dominant.get("coherence", 0.0),  # dominant cluster coherence
+            "n_clusters": len(clusters),
+            "cluster_details": cluster_details,
         })
-
-    # ── Co-wave metadata: intra-kinase coherence ──
-    import numpy as np
-    for ks_entry in kinase_scores:
-        kinase_name = ks_entry["kinase"]
-        km_match = next((km for km in kinase_modules if km.get("kinase") == kinase_name), None)
-        if km_match and len(conditions_sorted) >= 2:
-            ptms_list = km_match.get("ptms", [])
-            vectors = []
-            for ptm in ptms_list:
-                pk = f"{ptm.get('gene', '').upper()}_{str(ptm.get('position', '')).upper()}"
-                ts = ptm_timeseries.get(pk, {})
-                if ts:
-                    row = [ts.get(c, 0.0) for c in conditions_sorted]
-                    if any(v != 0 for v in row):
-                        vectors.append(row)
-            if len(vectors) >= 2:
-                arr = np.array(vectors)
-                try:
-                    corr_matrix = np.corrcoef(arr)
-                    n = corr_matrix.shape[0]
-                    upper = [corr_matrix[i][j] for i in range(n) for j in range(i+1, n)
-                             if not np.isnan(corr_matrix[i][j])]
-                    ks_entry["coherence"] = round(float(np.mean(upper)), 3) if upper else 0.0
-                except Exception:
-                    ks_entry["coherence"] = 0.0
-            else:
-                ks_entry["coherence"] = 0.0
-        else:
-            ks_entry["coherence"] = 0.0
 
     # ── Peak Synchronization ──
     peak_groups: dict[str, list[str]] = {}
@@ -6671,7 +6792,6 @@ async def kinase_activity_heatmap(
         valid_kinase_names = []
         for ks_entry in kinase_scores:
             row = [ks_entry["scores"].get(c, 0.0) for c in conditions_sorted]
-            # With Sum scoring, threshold should be relative to substrate count
             if any(abs(v) > 0.3 for v in row):
                 score_matrix.append(row)
                 valid_kinase_names.append(ks_entry["kinase"])
@@ -6686,12 +6806,11 @@ async def kinase_activity_heatmap(
                         continue
                     group = [i]
                     visited.add(i)
-                    for j in range(i+1, len(valid_kinase_names)):
+                    for j in range(i + 1, len(valid_kinase_names)):
                         if j not in visited and not np.isnan(corr[i][j]) and corr[i][j] >= 0.7:
                             group.append(j)
                             visited.add(j)
                     if len(group) >= 2:
-                        # v9.48.1: Compute dominant peak condition for this group
                         _grp_kinases = [valid_kinase_names[idx] for idx in group]
                         _peak_counts: dict[str, int] = {}
                         for _gk in _grp_kinases:
@@ -6722,8 +6841,6 @@ async def kinase_activity_heatmap(
         ks_entry["cowave_group"] = kinase_to_group.get(ks_entry["kinase"], -1)
 
     # ── Activation / Inactivation classification (Sum-based) ──
-    # With Sum scoring, thresholds scale with substrate count.
-    # Use: if peak sum > 0 and co-activated count >= 2 in that condition
     for ks_entry in kinase_scores:
         peak = ks_entry.get("peak_score", 0)
         peak_cond = ks_entry.get("peak_condition", "")

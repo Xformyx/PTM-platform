@@ -4373,6 +4373,19 @@ interface KinaseActivityScore {
   tiers?: Record<"de_novo" | "regulated" | "minor", TierData>;
   // Temporal pattern classification (auto-detected by backend)
   temporal_pattern?: string[];
+  // v11.0: Substrate temporal clustering
+  total_substrates?: number;   // original total before clustering
+  n_clusters?: number;         // number of trajectory clusters found
+  cluster_details?: {
+    cluster_id: number;
+    size: number;
+    scores: Record<string, number>;
+    coherence: number;
+    peak_condition: string;
+    peak_score: number;
+    direction: string;
+    is_dominant: boolean;
+  }[];
 }
 
 interface PeakSyncEntry {
@@ -5159,8 +5172,17 @@ function KinaseActivityHeatmapView({
                         <span className="text-muted-foreground/50 text-[9px]">—</span>
                       )}
                     </td>
-                    {/* Substrate count */}
-                    <td className="text-center px-1 py-0.5 text-muted-foreground">{ks.substrate_count}</td>
+                    {/* Substrate count (dominant cluster / total) */}
+                    <td className="text-center px-1 py-0.5 text-muted-foreground"
+                      title={ks.total_substrates && ks.total_substrates !== ks.substrate_count
+                        ? `Dominant cluster: ${ks.substrate_count} substrates\nTotal substrates: ${ks.total_substrates}\nClusters found: ${ks.n_clusters ?? 1}\n\nSubstrates are clustered by temporal trajectory shape.\nOnly the dominant cluster (highest coherence × signal) is scored.`
+                        : `${ks.substrate_count} substrates`}
+                    >
+                      {ks.total_substrates && ks.total_substrates !== ks.substrate_count
+                        ? <><span className="text-foreground">{ks.substrate_count}</span><span className="text-muted-foreground/50 text-[9px]">/{ks.total_substrates}</span></>
+                        : ks.substrate_count
+                      }
+                    </td>
                     {/* Confidence */}
                     <td className="text-center px-1 py-0.5">
                       <span className={`${ks.confidence >= 0.7 ? "text-green-400" : ks.confidence >= 0.4 ? "text-yellow-400" : "text-red-400"}`}>
@@ -5171,7 +5193,7 @@ function KinaseActivityHeatmapView({
                     <td className="text-center px-1 py-0.5">
                       <span
                         className={`text-[10px] ${getCoherenceColor(ks.coherence ?? 0)}`}
-                        title={`Intra-kinase substrate coherence: ${(ks.coherence ?? 0).toFixed(3)}\n(mean pairwise Pearson r of substrate profiles)`}
+                        title={`Intra-kinase substrate coherence: ${(ks.coherence ?? 0).toFixed(3)}\n(mean pairwise Pearson r of substrate profiles)${ks.n_clusters && ks.n_clusters > 1 ? `\n\nBased on dominant cluster (${ks.substrate_count}/${ks.total_substrates ?? ks.substrate_count} substrates)\n${ks.n_clusters} trajectory clusters detected` : ""}`}
                       >
                         {(ks.coherence ?? 0).toFixed(2)}
                       </span>
@@ -5190,7 +5212,7 @@ function KinaseActivityHeatmapView({
                         `${ks.kinase} @ ${c} [${tierLabel}]`,
                         `▲ Up: ${upN} substrates, sum=+${upVal.toFixed(2)}`,
                         `▼ Down: ${dnN} substrates, sum=${dnVal.toFixed(2)}`,
-                        `Total co-activated: ${coactN} / ${ks.substrate_count}`,
+                        `Total co-activated: ${coactN} / ${ks.substrate_count}${ks.total_substrates && ks.total_substrates !== ks.substrate_count ? ` (dominant cluster of ${ks.total_substrates} total)` : ""}`,
                         ``,
                         `Exclusive: ${exclN} (sum=${exclSum.toFixed(2)})`,
                         `Shared: ${sharedN} (sum=${sharedSum.toFixed(2)})`,
