@@ -10,6 +10,27 @@ set -e
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
+# COMPOSE_GPU from .env: true | false | auto (default auto = Docker NVIDIA runtime 감지)
+if [[ -f "$REPO_ROOT/.env" ]]; then
+  _cg=$(grep -E '^COMPOSE_GPU=' "$REPO_ROOT/.env" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d ' "\r' || true)
+  [[ -n "$_cg" ]] && COMPOSE_GPU="$_cg"
+fi
+
+# GPU compose overlay: Mac(Apple Silicon) 등 NVIDIA 없는 환경에서는 사용하지 않음
+_use_gpu_compose() {
+  local mode="${COMPOSE_GPU:-auto}"
+  mode=$(echo "$mode" | tr '[:upper:]' '[:lower:]')
+  case "$mode" in
+    1|true|yes|on) return 0 ;;
+    0|false|no|off) return 1 ;;
+    auto)
+      docker info 2>/dev/null | grep -qi nvidia && return 0
+      return 1
+      ;;
+    *) return 1 ;;
+  esac
+}
+
 VERSION_FILE="$REPO_ROOT/VERSION"
 LAST_DEV_BUILD="$REPO_ROOT/.last-dev-build"
 LAST_DEV_COMMIT="$REPO_ROOT/.last-dev-build-commit"
@@ -38,20 +59,19 @@ FIND_EXCLUDE=(
   -not -name "*.pyc"
 )
 
-# 경로 → 컴포넌트 이름
-_add_component_for_path() {
+# 경로 → 컴포넌트 이름 (stdout; bash 3.2 호환 — local -n 미사용)
+_component_for_path() {
   local f="$1"
-  local -n _out=$2
-  [[ -z "$f" ]] && return
+  [[ -z "$f" ]] && return 0
   case "$f" in
-    api-server/*)     _out+=("api-server") ;;
-    mcp-server/*)     _out+=("mcp-server") ;;
-    frontend/*)       _out+=("frontend") ;;
-    workers/*)        _out+=("workers") ;;
-    gateway/*)        _out+=("gateway") ;;
+    api-server/*)     echo "api-server" ;;
+    mcp-server/*)     echo "mcp-server" ;;
+    frontend/*)       echo "frontend" ;;
+    workers/*)        echo "workers" ;;
+    gateway/*)        echo "gateway" ;;
     docker-compose.yml|docker-compose.override.yml|docker-compose.gpu.yml)
-      _out+=("compose-file") ;;
-    .env)             _out+=("dotenv") ;;
+      echo "compose-file" ;;
+    .env)             echo "dotenv" ;;
   esac
 }
 
@@ -78,7 +98,9 @@ get_changed_components_git() {
   diff_files+=$'\n'$(git diff --name-only --cached HEAD 2>/dev/null || true)
 
   while IFS= read -r f; do
-    _add_component_for_path "$f" result
+    local c
+    c=$(_component_for_path "$f")
+    [[ -n "$c" ]] && result+=("$c")
   done <<< "$diff_files"
 
   printf '%s\n' "${result[@]}" | sort -u
@@ -191,10 +213,12 @@ for c in "${CHANGED[@]}"; do
 done
 BUILD_SERVICES=($(printf '%s\n' "${BUILD_SERVICES[@]}" | sort -u))
 
-# GPU overlay 자동 감지 (docker-compose.gpu.yml 존재하면 항상 포함)
 COMPOSE_CMD=(docker compose)
-if [[ -f "$REPO_ROOT/docker-compose.gpu.yml" ]]; then
+if [[ -f "$REPO_ROOT/docker-compose.gpu.yml" ]] && _use_gpu_compose; then
   COMPOSE_CMD+=(--file docker-compose.yml --file docker-compose.gpu.yml)
+  echo "Compose: GPU overlay (NVIDIA)"
+elif [[ -f "$REPO_ROOT/docker-compose.gpu.yml" ]]; then
+  echo "Compose: base only (no NVIDIA — set COMPOSE_GPU=true on GPU servers)"
 fi
 
 if [[ ${#BUILD_SERVICES[@]} -eq 0 ]]; then

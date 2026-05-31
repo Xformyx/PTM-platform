@@ -5,11 +5,13 @@
 # 사전 조건: NVIDIA Container Toolkit 설치
 #   https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html
 #
-# 실행:
-#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+# 실행 (NVIDIA Container Toolkit 필요 — Mac에서는 사용하지 마세요):
+#   COMPOSE_GPU=true docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+#   또는 .env 에 COMPOSE_GPU=true 후 ./scripts/dev-deploy.sh
 #
-# 중단:
-#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml down
+# Mac / GPU 없음:
+#   docker compose up -d   (기본 compose 만)
+#   .env: COMPOSE_GPU=false  (또는 생략 — dev-deploy 가 auto 로 감지)
 # =============================================================================
 
 services:
