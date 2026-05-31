@@ -30,7 +30,7 @@ logger = logging.getLogger("ptm-workers.rag-enrichment")
 OUTPUT_DIR = os.getenv("OUTPUT_DIR", "/data/outputs")
 
 
-def _auto_run_global_analysis(order_id: int, enriched_data: list, config: dict) -> dict:
+def _auto_run_global_analysis(order_id: int, enriched_data: list, config: dict, mcp_client=None) -> dict:
     """v9.44: Auto-run Global Kinase Modules + Activity Heatmap after RAG enrichment.
 
     Self-contained implementation — no cross-worker imports.
@@ -325,6 +325,291 @@ def _auto_run_global_analysis(order_id: int, enriched_data: list, config: dict) 
                 "total_count": len(members),
             })
         kinase_module_list.sort(key=lambda x: x["total_count"], reverse=True)
+
+        # ══════════════════════════════════════════════════════════════════════════
+        # Step D.5: Temporal Substrate Clustering + Cluster-wise KEA3 Refinement
+        # ══════════════════════════════════════════════════════════════════════════
+        # This step:
+        #   1. Clusters ALL regulated PTM sites by temporal trajectory (global)
+        #   2. Runs KEA3 enrichment per cluster to identify time-specific kinases
+        #   3. Filters kinase-substrate edges: only keep substrates whose temporal
+        #      cluster matches the kinase's enriched cluster(s)
+        # Result: each kinase module retains only temporally-consistent substrates.
+        # ══════════════════════════════════════════════════════════════════════════
+        import numpy as np
+
+        def _temporal_refinement(all_ptm_entries, kinase_module_list, enriched_data, mcp):
+            """Global temporal clustering -> cluster-wise KEA3 -> edge filtering.
+
+            Returns refined kinase_module_list with temporally-filtered members.
+            Falls back to original list if clustering fails or MCP unavailable.
+            """
+            MIN_CLUSTER_SIZE = 5
+            MAX_CLUSTERS = 6
+            MIN_PTMS_FOR_REFINEMENT = 30
+
+            # ── 1. Build global PTM timeseries matrix ──
+            conditions = set()
+            ptm_timeseries = {}  # ptm_key -> {cond: log2fc}
+            for item in enriched_data:
+                gene = (item.get("Gene.Name") or item.get("gene", "")).strip().upper()
+                pos = str(item.get("PTM_Position") or item.get("position", "")).strip().upper()
+                cond = item.get("Condition") or item.get("condition", "")
+                log2fc = item.get("PTM_Relative_Log2FC") or item.get("ptm_relative_log2fc") or item.get("Log2FC") or item.get("log2fc")
+                if not gene or not pos or not cond:
+                    continue
+                conditions.add(cond)
+                ptm_key = f"{gene}_{pos}"
+                if ptm_key not in ptm_timeseries:
+                    ptm_timeseries[ptm_key] = {}
+                try:
+                    ptm_timeseries[ptm_key][cond] = float(log2fc) if log2fc is not None else 0.0
+                except (ValueError, TypeError):
+                    ptm_timeseries[ptm_key][cond] = 0.0
+
+            conditions = sorted(conditions)
+            n_conditions = len(conditions)
+            if n_conditions < 2 or len(ptm_timeseries) < MIN_PTMS_FOR_REFINEMENT:
+                logger.info(f"[Order {order_id}] Temporal refinement skipped: {len(ptm_timeseries)} PTMs, {n_conditions} conditions")
+                return kinase_module_list
+
+            # Filter: only PTMs with at least one non-zero value
+            valid_ptm_keys = []
+            raw_vectors = []
+            for pk, ts in ptm_timeseries.items():
+                row = [ts.get(c, 0.0) for c in conditions]
+                if any(abs(v) >= 0.3 for v in row):  # minimum signal threshold
+                    valid_ptm_keys.append(pk)
+                    raw_vectors.append(row)
+
+            n_valid = len(valid_ptm_keys)
+            if n_valid < MIN_PTMS_FOR_REFINEMENT:
+                logger.info(f"[Order {order_id}] Temporal refinement skipped: only {n_valid} valid PTMs")
+                return kinase_module_list
+
+            # ── 2. L2-normalize and K-Means cluster ──
+            arr = np.array(raw_vectors, dtype=np.float64)
+            norms = np.linalg.norm(arr, axis=1, keepdims=True)
+            norms[norms < 1e-9] = 1.0
+            arr_normed = arr / norms
+
+            # Determine K based on dataset size
+            k = min(MAX_CLUSTERS, max(2, n_valid // 100))
+            k = min(k, n_valid)
+
+            def _simple_kmeans(data, k, n_init=10, max_iter=200, seed=42):
+                rng = np.random.RandomState(seed)
+                n, d = data.shape
+                best_labels = np.zeros(n, dtype=int)
+                best_inertia = np.inf
+                for _ in range(n_init):
+                    # K-Means++ init
+                    centers = np.empty((k, d))
+                    centers[0] = data[rng.randint(n)]
+                    for c in range(1, k):
+                        dists = np.min(np.sum((data[:, None] - centers[:c]) ** 2, axis=2), axis=1)
+                        probs = dists / (dists.sum() + 1e-12)
+                        centers[c] = data[rng.choice(n, p=probs)]
+                    labels = np.zeros(n, dtype=int)
+                    for _ in range(max_iter):
+                        dists = np.sum((data[:, None] - centers) ** 2, axis=2)
+                        new_labels = np.argmin(dists, axis=1)
+                        if np.array_equal(new_labels, labels):
+                            break
+                        labels = new_labels
+                        for c in range(k):
+                            mask = labels == c
+                            if mask.any():
+                                centers[c] = data[mask].mean(axis=0)
+                    inertia = sum(np.sum((data[labels == c] - centers[c]) ** 2) for c in range(k))
+                    if inertia < best_inertia:
+                        best_inertia = inertia
+                        best_labels = labels.copy()
+                return best_labels
+
+            try:
+                labels = _simple_kmeans(arr_normed, k=k)
+            except Exception as e:
+                logger.warning(f"[Order {order_id}] Temporal clustering failed: {e}")
+                return kinase_module_list
+
+            # Build cluster -> PTM key mapping
+            temporal_clusters = {}  # cluster_id -> {ptm_keys, centroid, pattern_label}
+            for idx, label in enumerate(labels):
+                label = int(label)
+                if label not in temporal_clusters:
+                    temporal_clusters[label] = {"ptm_keys": [], "vectors": []}
+                temporal_clusters[label]["ptm_keys"].append(valid_ptm_keys[idx])
+                temporal_clusters[label]["vectors"].append(raw_vectors[idx])
+
+            # Compute centroid and assign pattern label for each cluster
+            for cid, cdata in temporal_clusters.items():
+                centroid = np.mean(cdata["vectors"], axis=0)
+                cdata["centroid"] = centroid.tolist()
+                cdata["size"] = len(cdata["ptm_keys"])
+                # Pattern label: find peak condition
+                peak_idx = int(np.argmax(np.abs(centroid)))
+                peak_val = centroid[peak_idx]
+                direction = "up" if peak_val > 0 else "down"
+                cdata["pattern_label"] = f"{direction}_{conditions[peak_idx]}"
+                cdata["peak_condition"] = conditions[peak_idx]
+                cdata["peak_direction"] = direction
+                del cdata["vectors"]  # free memory
+
+            # Filter out tiny clusters
+            temporal_clusters = {cid: c for cid, c in temporal_clusters.items()
+                                 if c["size"] >= MIN_CLUSTER_SIZE}
+
+            logger.info(
+                f"[Order {order_id}] Temporal clustering: {n_valid} PTMs -> "
+                f"{len(temporal_clusters)} clusters: "
+                + ", ".join(f"C{cid}({c['pattern_label']}, n={c['size']})"
+                           for cid, c in sorted(temporal_clusters.items()))
+            )
+
+            if not temporal_clusters:
+                return kinase_module_list
+
+            # ── 3. Cluster-wise KEA3 enrichment ──
+            cluster_kinase_ranks = {}  # cluster_id -> {kinase_canonical: rank}
+
+            if mcp:
+                for cid, cdata in sorted(temporal_clusters.items()):
+                    # Extract unique gene names from PTM keys (GENE_POS -> GENE)
+                    gene_set = set()
+                    for pk in cdata["ptm_keys"]:
+                        parts = pk.rsplit("_", 1)
+                        if parts:
+                            gene_set.add(parts[0])
+                    gene_list = sorted(gene_set)
+
+                    if len(gene_list) < 3:
+                        continue
+
+                    try:
+                        kea3_result = mcp.query_kea3(gene_list, top_n=20)
+                        kinases = kea3_result.get("kinases", [])
+                        rank_map = {}
+                        for rank_idx, k_entry in enumerate(kinases):
+                            k_name = k_entry.get("kinase", "") if isinstance(k_entry, dict) else str(k_entry)
+                            if k_name:
+                                canonical, _ = normalize_kinase_name(k_name)
+                                if canonical:
+                                    rank_map[canonical] = rank_idx + 1
+                        cluster_kinase_ranks[cid] = rank_map
+                        logger.info(
+                            f"[Order {order_id}] KEA3 cluster C{cid} ({cdata['pattern_label']}): "
+                            f"{len(gene_list)} genes -> {len(kinases)} kinases enriched"
+                        )
+                    except Exception as e:
+                        logger.warning(f"[Order {order_id}] KEA3 failed for cluster C{cid}: {e}")
+                        continue
+            else:
+                logger.info(f"[Order {order_id}] No MCP client — skipping cluster-wise KEA3")
+
+            # ── 4. Temporal Edge Filtering ──
+            # For each kinase module, keep only substrates that belong to a temporal
+            # cluster where the kinase is enriched (KEA3 rank <= 20).
+            ptm_to_cluster = {}  # ptm_key -> cluster_id
+            for cid, cdata in temporal_clusters.items():
+                for pk in cdata["ptm_keys"]:
+                    ptm_to_cluster[pk] = cid
+
+            refined_modules = []
+            for km in kinase_module_list:
+                kinase_canon = km.get("canonical", "")
+                members = km.get("members", [])
+                if not members:
+                    continue
+
+                # Determine which clusters this kinase is enriched in
+                enriched_clusters = set()
+                if cluster_kinase_ranks:
+                    for cid, rank_map in cluster_kinase_ranks.items():
+                        if kinase_canon in rank_map:
+                            enriched_clusters.add(cid)
+                    # Also check family-level matches
+                    if not enriched_clusters:
+                        for cid, rank_map in cluster_kinase_ranks.items():
+                            for ranked_kinase in rank_map:
+                                if are_kinases_same_family(kinase_canon, ranked_kinase):
+                                    enriched_clusters.add(cid)
+                                    break
+
+                # Filter members
+                filtered_members = []
+                for m in members:
+                    ptm_key = m.get("key", f"{m.get('gene', '').upper()}_{str(m.get('position', '')).upper()}")
+                    cid = ptm_to_cluster.get(ptm_key)
+                    if cid is None:
+                        # PTM not in any temporal cluster (below signal threshold)
+                        # Keep confirmed members even if below threshold
+                        if m.get("membership") == "confirmed":
+                            filtered_members.append(m)
+                        continue
+                    if enriched_clusters:
+                        # KEA3-based filtering: keep if in enriched cluster
+                        if cid in enriched_clusters:
+                            filtered_members.append(m)
+                    else:
+                        # No KEA3 data: keep all clustered members (no filtering)
+                        filtered_members.append(m)
+
+                # Ensure minimum substrate count (don't over-filter)
+                MIN_FILTERED = 5
+                if len(filtered_members) < MIN_FILTERED:
+                    # Fall back to original members
+                    filtered_members = members
+                    temporal_filter_applied = False
+                else:
+                    temporal_filter_applied = True
+
+                # Build refined module
+                refined_km = dict(km)
+                refined_km["members"] = filtered_members
+                refined_km["confirmed_count"] = sum(1 for m in filtered_members if m.get("membership") == "confirmed")
+                refined_km["inferred_count"] = sum(1 for m in filtered_members if m.get("membership") == "inferred")
+                refined_km["total_count"] = len(filtered_members)
+                refined_km["temporal_filter_applied"] = temporal_filter_applied
+                refined_km["original_total_count"] = len(members)
+                if enriched_clusters:
+                    refined_km["enriched_clusters"] = sorted(enriched_clusters)
+                    refined_km["enriched_patterns"] = [
+                        temporal_clusters[cid]["pattern_label"]
+                        for cid in sorted(enriched_clusters)
+                        if cid in temporal_clusters
+                    ]
+                refined_modules.append(refined_km)
+
+            refined_modules.sort(key=lambda x: x["total_count"], reverse=True)
+
+            # Log summary
+            n_filtered = sum(1 for m in refined_modules if m.get("temporal_filter_applied"))
+            avg_reduction = 0.0
+            if n_filtered > 0:
+                reductions = [
+                    1 - (m["total_count"] / max(m["original_total_count"], 1))
+                    for m in refined_modules if m.get("temporal_filter_applied")
+                ]
+                avg_reduction = sum(reductions) / len(reductions)
+            logger.info(
+                f"[Order {order_id}] Temporal refinement: {n_filtered}/{len(refined_modules)} modules filtered, "
+                f"avg substrate reduction: {avg_reduction:.1%}"
+            )
+
+            return refined_modules
+
+        # Execute temporal refinement
+        try:
+            kinase_module_list = _temporal_refinement(
+                all_ptm_entries, kinase_module_list, enriched_data, mcp_client
+            )
+            publish_progress(order_id, "rag_enrichment", "global_analysis", "running", 93,
+                             "Temporal substrate refinement completed")
+        except Exception as e:
+            logger.warning(f"[Order {order_id}] Temporal refinement failed (non-fatal): {e}")
+            import traceback as _tb2
+            logger.warning(f"[Order {order_id}] Traceback: {_tb2.format_exc()}")
 
         # ── Step E: Summary ──
         summary = {
@@ -1332,7 +1617,7 @@ def run_rag_enrichment(self, order_id: int, config: dict):
             report_config["secondary_output_dir"] = str(order_output / "secondary_ptm") if (order_output / "secondary_ptm").exists() else str(order_output)
             logger.info(f"[Order {order_id}] Cross-Talk report_config: secondary_enriched={secondary_enriched_json_path}, secondary_md={secondary_md_path_out}")
         # ── v9.44: Auto-run Global Annotate + Upstream Inference before Report Gen ──
-        _auto_analysis_data = _auto_run_global_analysis(order_id, enriched_ptms, config)
+        _auto_analysis_data = _auto_run_global_analysis(order_id, enriched_ptms, config, mcp_client=mcp)
         if _auto_analysis_data:
             report_config["kinase_analysis_data"] = _auto_analysis_data.get("kinase_analysis_data", {})
             report_config["kinase_activity_heatmap"] = _auto_analysis_data.get("kinase_activity_heatmap", {})

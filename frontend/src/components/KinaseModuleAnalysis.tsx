@@ -214,6 +214,11 @@ interface GlobalKinaseModule {
   // v9.44: Co-wave confidence scoring
   confidence_score?: number;
   cowave_boost?: number;
+  // v11.1: Temporal substrate refinement
+  temporal_filter_applied?: boolean;
+  original_total_count?: number;
+  enriched_clusters?: number[];
+  enriched_patterns?: string[];
 }
 
 interface CowaveCrossEntry {
@@ -1984,8 +1989,15 @@ function GroupInferencePanel({ inference, isUbi = false }: { inference: GroupInf
               <Zap className="h-4 w-4 text-yellow-500" />
               <span className="text-sm font-bold text-foreground" title={km.canonical ? `Canonical: ${km.canonical}` : ""}>{km.kinase}</span>
               <Badge variant="outline" className="text-[10px] h-5">
-                {km.total_count} PTMs total
+                {km.temporal_filter_applied && km.original_total_count
+                  ? `${km.total_count}/${km.original_total_count} PTMs`
+                  : `${km.total_count} PTMs total`}
               </Badge>
+              {km.enriched_patterns && km.enriched_patterns.length > 0 && (
+                <Badge variant="outline" className="text-[9px] h-4 border-blue-500/50 text-blue-400">
+                  {km.enriched_patterns[0]}
+                </Badge>
+              )}
             </div>
             <div className="flex gap-1">
               {km.sources.map((s) => {
@@ -2974,7 +2986,9 @@ function GlobalKinaseModulesPanel({
                     {mod.canonical}
                   </button>
                   <Badge variant="outline" className="text-[9px]">
-                    {mod.total_count} {isUbi ? "sites" : "PTMs"}
+                    {(mod as any).temporal_filter_applied && (mod as any).original_total_count
+                      ? `${mod.total_count}/${(mod as any).original_total_count} ${isUbi ? "sites" : "PTMs"}`
+                      : `${mod.total_count} ${isUbi ? "sites" : "PTMs"}`}
                   </Badge>
                   {/* E3 family badge (ubiquitylation mode) */}
                   {isUbi && (() => {
