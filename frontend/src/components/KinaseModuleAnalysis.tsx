@@ -165,6 +165,9 @@ interface KinaseModule {
   inferred_ptms: string[];
   inferred_count: number;
   total_count: number;
+  temporal_filter_applied?: boolean;
+  original_total_count?: number;
+  enriched_patterns?: string[];
 }
 
 interface GroupInference {
