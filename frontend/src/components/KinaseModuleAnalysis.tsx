@@ -5361,19 +5361,18 @@ function KinaseActivityHeatmapView({
                               else next.add(ks.kinase);
                               return next;
                             });
-                            // Auto-fetch GO data for this row's substrates
-                            if (isExpanding && ks.substrates && !goLocLoading) {
+                            // Auto-fetch GO data for this row's substrates (independent of goLocLoading)
+                            if (isExpanding && ks.substrates) {
                               const rowGenes = ks.substrates.map(s => s.gene.toUpperCase());
                               const missingGenes = rowGenes.filter(g => !(g in goLocCache));
                               if (missingGenes.length > 0) {
-                                setGoLocLoading(true);
                                 api.post<{ gene_localizations: Record<string, string[]>; summary: Record<string, number> }>(
                                   `/orders/${orderId}/substrate-go-localization`,
                                   { genes: missingGenes }
                                 ).then((data) => {
                                   setGoLocCache(prev => ({ ...prev, ...data.gene_localizations }));
-                                }).catch(() => {}).finally(() => {
-                                  setGoLocLoading(false);
+                                }).catch((err) => {
+                                  console.error('[GO-CC] Fetch failed:', err);
                                 });
                               }
                             }

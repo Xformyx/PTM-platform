@@ -7485,8 +7485,8 @@ async def substrate_go_localization(
             # Search UniProt for the gene
             query = f"gene_exact:{gene}"
             if uniprot_organism_id:
-                query += f"+AND+organism_id:{uniprot_organism_id}"
-            query += "+AND+reviewed:true"
+                query += f" AND organism_id:{uniprot_organism_id}"
+            query += " AND reviewed:true"
 
             resp = await client.get(
                 f"{UNIPROT_BASE}/search",
