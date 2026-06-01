@@ -6367,10 +6367,13 @@ async def kinase_activity_heatmap(
 ):
     """Compute Kinase Activity Temporal Scores for heatmap/line chart.
 
-    Co-activation Sum scoring: for each kinase, sum the Log2FC of substrates
-    that pass significance threshold (q < 0.05 OR |Log2FC| >= 0.3) per condition.
-    This captures total signal output including both strong and coordinated weak signals.
-    Substrates are classified as exclusive (mapped to 1 kinase) or shared (2+ kinases).
+    v11.3: Stratified Clustering + Winsorized Mean scoring.
+    - Substrates grouped by magnitude tier (Strong >5.0, Moderate 2-5, Weak <=2.0)
+    - Within each tier: K-Means with Absolute Correlation (1-|r|) distance
+    - Dominant cluster selected by: coherence × √size × |peak_score| × tier_bonus
+    - Per-condition score = Winsorized Mean (5th/95th percentile)
+    - Legacy up_sums/down_sums retained for backward compatibility
+    - Substrates classified as exclusive (mapped to 1 kinase) or shared (2+ kinases)
 
     Request body:
       - kinase_modules: [{kinase, ptms: [{gene, position}], confidence_score}]
@@ -6378,7 +6381,7 @@ async def kinase_activity_heatmap(
 
     Response:
       - kinase_scores: [{kinase, scores, substrate_count, confidence, peak_condition, peak_score,
-                         coact_counts, exclusive_sums, shared_sums, exclusive_counts, shared_counts}]
+                         cluster_details, coact_counts, exclusive_sums, shared_sums, ...}]
       - conditions: [str]  (ordered)
       - _cached: bool
     """
@@ -6399,11 +6402,18 @@ async def kinase_activity_heatmap(
     hash_input = f"{order_id}|{len(kinase_modules)}|{'|'.join(km_keys[:30])}"
     cache_hash = hashlib.md5(hash_input.encode()).hexdigest()[:12]
 
-    # Check cache
+    # Check cache — v11.3 Pure Renderer pattern:
+    # Priority 1: If pipeline already computed & stored results (same hash), serve directly.
+    # Priority 2: If force_refresh, recompute from scratch.
     if not force_refresh and order.kinase_activity_heatmap:
         cached = order.kinase_activity_heatmap
         if cached.get("_cache_hash") == cache_hash:
             return {**cached, "_cached": True}
+        # Even if hash differs (kinase modules changed), still serve stale cache
+        # with a flag so frontend knows it's outdated but usable.
+        # Only recompute below if force_refresh or no cache at all.
+        if not force_refresh:
+            return {**cached, "_cached": True, "_stale": True}
 
     # Load vector data (time-series)
     from app.config import get_settings
@@ -7128,7 +7138,7 @@ async def kinase_activity_heatmap(
         "peak_sync": peak_sync,
         "cowave_groups": cowave_groups,
         "available_patterns": sorted(all_patterns),
-        "scoring_method": "coactivation_sum",
+        "scoring_method": "stratified_winsorized_mean_v11.3",
         "scoring_threshold": {"q_value": Q_THRESHOLD, "fc_abs": FC_THRESHOLD},
         "_cache_hash": cache_hash,
         "computed_at": _dt.utcnow().isoformat(),

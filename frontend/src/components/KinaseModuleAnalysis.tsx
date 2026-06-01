@@ -4402,6 +4402,8 @@ interface KinaseActivityScore {
     peak_score: number;
     direction: string;
     is_dominant: boolean;
+    // v11.3: Magnitude tier of this cluster
+    tier?: "strong" | "moderate" | "weak" | "mixed";
   }[];
 }
 
@@ -5039,7 +5041,7 @@ function KinaseActivityHeatmapView({
           className="text-xs h-7 bg-background border border-border rounded px-2"
           value={signalTierFilter}
           onChange={(e) => setSignalTierFilter(e.target.value as typeof signalTierFilter)}
-          title="Filter by signal strength tier: de_novo (|FC|≥2), regulated (0.58≤|FC|<2), minor (0.3≤|FC|<0.58)"
+          title="Filter by per-substrate signal tier (legacy breakdown):\n  de_novo: |FC|≥2\n  regulated: 0.58≤|FC|<2\n  minor: 0.3≤|FC|<0.58\n\nNote: v11.3 Magnitude Tier (S/M/W badge) is based on\nmax |Log2FC| across all conditions per substrate."
         >
           <option value="all">All Tiers</option>
           <option value="de_novo">De Novo (|FC|≥2)</option>
@@ -5094,7 +5096,7 @@ function KinaseActivityHeatmapView({
                 <th className="text-center px-1 py-1 w-8 cursor-help" title={`Direction\n\nOverall activation direction of this ${isUbi ? "E3 ligase" : "kinase"}'s substrates:\n  ▲ = activating (substrates ${isUbi ? "ubiquitylation" : "phosphorylation"} increases)\n  ▼ = inhibitory (substrates ${isUbi ? "ubiquitylation" : "phosphorylation"} decreases)\n  ↕ = mixed`}>Dir</th>
                 <th className="text-center px-1 py-1 w-10 cursor-help" title={`Number of Substrates (#Sub)\n\nTotal confirmed + inferred ${isUbi ? "ubiquitylation" : "phosphorylation"} substrates\nfor this ${isUbi ? "E3 ligase" : "kinase"} in the current dataset.`}>#Sub</th>
                 <th className="text-center px-1 py-1 w-10 cursor-help" title={`Confidence (Conf)\n\nWeighted evidence score (0–100%) based on:\n  • Number of substrates\n  • Source quality (${isUbi ? "UbiBrowser, literature" : "PhosphoSitePlus, KEA3, motif"})\n  • Annotation depth\nHigher = more reliable ${isUbi ? "E3 ligase" : "kinase"}-substrate assignment.`}>Conf</th>
-                <th className="text-center px-1 py-1 w-10 cursor-help" title={`Coherence (Coh)\n\nTemporal coherence of substrate ${isUbi ? "ubiquitylation" : "phosphorylation"} patterns (−1 to +1).\nHigher = substrates change more synchronously over time.\nNegative = substrates show opposing temporal patterns.`}>Coh</th>
+                <th className="text-center px-1 py-1 w-10 cursor-help" title={`Coherence (Coh)\n\nMean pairwise |Pearson r| within dominant cluster (0 to 1).\nv11.3: Uses absolute correlation so anti-correlated\nsubstrates (inhibitory targets) also score high.\n\nHigher = substrates change more synchronously over time.\n0.7+ = strong co-regulation, 0.4-0.7 = moderate.`}>Coh</th>
                 {heatmapData.conditions.map((c) => (
                   <th
                     key={c}
@@ -5157,10 +5159,39 @@ function KinaseActivityHeatmapView({
                         <div className="w-1.5 min-h-[40px]" />
                       )}
                     </td>
-                    {/* Kinase name */}
+                    {/* Kinase name + v11.3 Tier Badge */}
                     <td className="px-2 py-1 sticky left-0 bg-background z-10 font-medium whitespace-nowrap">
                       {selectedKinases.has(ks.kinase) && <span className="text-cyan-400 mr-1">●</span>}
                       {ks.kinase}
+                      {/* v11.3: Magnitude Tier badge from dominant cluster */}
+                      {(() => {
+                        const domCluster = ks.cluster_details?.find(cd => cd.is_dominant);
+                        const tier = domCluster?.tier;
+                        if (!tier || tier === "mixed") return null;
+                        const tierStyles: Record<string, string> = {
+                          strong: "bg-red-500/20 text-red-300 border-red-500/40",
+                          moderate: "bg-amber-500/20 text-amber-300 border-amber-500/40",
+                          weak: "bg-slate-500/20 text-slate-300 border-slate-500/40",
+                        };
+                        const tierLabels: Record<string, string> = {
+                          strong: "S",
+                          moderate: "M",
+                          weak: "W",
+                        };
+                        const tierTitles: Record<string, string> = {
+                          strong: "Tier 1 (Strong): max |Log2FC| > 5.0\nDe novo / high-amplitude substrates",
+                          moderate: "Tier 2 (Moderate): 2.0 < max |Log2FC| ≤ 5.0\nRegulated substrates",
+                          weak: "Tier 3 (Weak): max |Log2FC| ≤ 2.0\nMinor change substrates",
+                        };
+                        return (
+                          <span
+                            className={`ml-1 inline-flex items-center justify-center w-3.5 h-3.5 text-[8px] font-bold rounded border cursor-help ${tierStyles[tier] || ""}`}
+                            title={tierTitles[tier] || tier}
+                          >
+                            {tierLabels[tier] || tier[0].toUpperCase()}
+                          </span>
+                        );
+                      })()}
                       {cwColor && (() => {
                         const grpInfo = heatmapData.cowave_groups?.find(g => g.group_id === cwGroup);
                         return (
@@ -5191,9 +5222,14 @@ function KinaseActivityHeatmapView({
                     </td>
                     {/* Substrate count (dominant cluster / total) */}
                     <td className="text-center px-1 py-0.5 text-muted-foreground"
-                      title={ks.total_substrates && ks.total_substrates !== ks.substrate_count
-                        ? `Dominant cluster: ${ks.substrate_count} substrates\nTotal substrates: ${ks.total_substrates}\nClusters found: ${ks.n_clusters ?? 1}\n\nSubstrates are clustered by temporal trajectory shape.\nOnly the dominant cluster (highest coherence × signal) is scored.`
-                        : `${ks.substrate_count} substrates`}
+                      title={(() => {
+                        const domCl = ks.cluster_details?.find(cd => cd.is_dominant);
+                        const tierStr = domCl?.tier ? `Magnitude Tier: ${domCl.tier.charAt(0).toUpperCase() + domCl.tier.slice(1)}\n` : "";
+                        if (ks.total_substrates && ks.total_substrates !== ks.substrate_count) {
+                          return `Dominant cluster: ${ks.substrate_count} substrates\n${tierStr}Total substrates: ${ks.total_substrates}\nClusters found: ${ks.n_clusters ?? 1}\n\nv11.3 Stratified Clustering:\nSubstrates grouped by magnitude tier, then\nclustered by Absolute Correlation (1-|r|) K-Means.\nOnly the dominant cluster (coherence × √size × |peak| × tier_bonus) is scored.`;
+                        }
+                        return `${ks.substrate_count} substrates${tierStr ? "\n" + tierStr : ""}`;
+                      })()}
                     >
                       {ks.total_substrates && ks.total_substrates !== ks.substrate_count
                         ? <><span className="text-foreground">{ks.substrate_count}</span><span className="text-muted-foreground/50 text-[9px]">/{ks.total_substrates}</span></>
@@ -5210,7 +5246,7 @@ function KinaseActivityHeatmapView({
                     <td className="text-center px-1 py-0.5">
                       <span
                         className={`text-[10px] ${getCoherenceColor(ks.coherence ?? 0)}`}
-                        title={`Intra-kinase substrate coherence: ${(ks.coherence ?? 0).toFixed(3)}\n(mean pairwise Pearson r of substrate profiles)${ks.n_clusters && ks.n_clusters > 1 ? `\n\nBased on dominant cluster (${ks.substrate_count}/${ks.total_substrates ?? ks.substrate_count} substrates)\n${ks.n_clusters} trajectory clusters detected` : ""}`}
+                        title={`Intra-kinase substrate coherence: ${(ks.coherence ?? 0).toFixed(3)}\n(mean pairwise |Pearson r| within dominant cluster)\n\nv11.3: Uses Absolute Correlation (|r|) so anti-correlated\nsubstrates (inhibitory targets) also contribute positively.\nRange: 0 (random) to 1 (perfectly co-regulated).${ks.n_clusters && ks.n_clusters > 1 ? `\n\nBased on dominant cluster (${ks.substrate_count}/${ks.total_substrates ?? ks.substrate_count} substrates)\n${ks.n_clusters} trajectory clusters detected` : ""}`}
                       >
                         {(ks.coherence ?? 0).toFixed(2)}
                       </span>
@@ -5225,15 +5261,21 @@ function KinaseActivityHeatmapView({
                       const sharedN = ks.shared_counts?.[c] || 0;
                       // Tier info for tooltip
                       const tierLabel = signalTierFilter === "all" ? "All tiers" : signalTierFilter;
+                      const domClusterInfo = ks.cluster_details?.find(cd => cd.is_dominant);
+                      const clusterScore = domClusterInfo?.scores?.[c];
+                      const clusterTier = domClusterInfo?.tier;
                       const tipLines = [
                         `${ks.kinase} @ ${c} [${tierLabel}]`,
+                        clusterScore !== undefined ? `Winsorized Mean Score: ${clusterScore.toFixed(3)}` : "",
+                        clusterTier ? `Dominant Cluster Tier: ${clusterTier.charAt(0).toUpperCase() + clusterTier.slice(1)}` : "",
+                        ``,
                         `▲ Up: ${upN} substrates, sum=+${upVal.toFixed(2)}`,
                         `▼ Down: ${dnN} substrates, sum=${dnVal.toFixed(2)}`,
                         `Total co-activated: ${coactN} / ${ks.substrate_count}${ks.total_substrates && ks.total_substrates !== ks.substrate_count ? ` (dominant cluster of ${ks.total_substrates} total)` : ""}`,
                         ``,
                         `Exclusive: ${exclN} (sum=${exclSum.toFixed(2)})`,
                         `Shared: ${sharedN} (sum=${sharedSum.toFixed(2)})`,
-                      ];
+                      ].filter(Boolean);
                       // Height = √(count) sqrt scale (prevents domination by high-substrate kinases)
                       // Color intensity = avg |FC| per substrate (signal quality)
                       // Number = Sum (total signal)
@@ -5316,6 +5358,13 @@ function KinaseActivityHeatmapView({
                 <span className="text-[9px] text-muted-foreground/60">
                   Number = ΣFC (total signal sum) | Bright = strong avg signal, Dark = weak avg signal
                 </span>
+              </span>
+              {/* v11.3: Magnitude Tier legend */}
+              <span className="ml-3 flex items-center gap-1.5">
+                <span className="text-muted-foreground/70 font-medium">Tier:</span>
+                <span className="inline-flex items-center justify-center w-3.5 h-3.5 text-[8px] font-bold rounded border bg-red-500/20 text-red-300 border-red-500/40" title="Tier 1 (Strong): max |Log2FC| > 5.0">S</span>
+                <span className="inline-flex items-center justify-center w-3.5 h-3.5 text-[8px] font-bold rounded border bg-amber-500/20 text-amber-300 border-amber-500/40" title="Tier 2 (Moderate): 2.0 < max |Log2FC| ≤ 5.0">M</span>
+                <span className="inline-flex items-center justify-center w-3.5 h-3.5 text-[8px] font-bold rounded border bg-slate-500/20 text-slate-300 border-slate-500/40" title="Tier 3 (Weak): max |Log2FC| ≤ 2.0">W</span>
               </span>
             </div>
              {/* Co-wave group legend */}

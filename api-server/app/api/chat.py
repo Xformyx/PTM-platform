@@ -79,17 +79,23 @@ Effectors are non-PTM proteins from STRING (score ≥ 400) / BioGRID PPI partner
 - Multi-source (+1): kinase found in ≥ 2 databases
 → Strong (≥ 4), Moderate (2–3), Weak (≤ 1)
 
-**Kinase Activity Heatmap**: Computes per-kinase temporal activity scores using
-Co-activation Sum scoring: for each timepoint, sums the Log2FC of substrates that
-pass significance threshold (q<0.05 OR |Log2FC|≥0.3). This captures total signal
-output — both strong individual changes and coordinated weak signals that accumulate.
-Substrates are classified as:
-- Exclusive: mapped to only this kinase (stronger evidence of kinase-specific activity)
-- Shared: mapped to 2+ kinases (may reflect multi-kinase co-regulation)
-Higher absolute sum = more substrates co-activated together OR stronger changes.
-- Direction: activation (▲, substrates co-phosphorylated), inactivation (▼, co-dephosphorylated)
-- Coherence: intra-kinase substrate temporal correlation (-1 to +1)
+**Kinase Activity Heatmap** (v11.3 — Stratified Clustering + Winsorized Mean):
+Computes per-kinase temporal activity scores through:
+1. Stratified Clustering: substrates grouped by magnitude tier:
+   - Tier 1 (Strong): max |Log2FC| > 5.0 (de novo / high-amplitude)
+   - Tier 2 (Moderate): 2.0 < max |Log2FC| ≤ 5.0
+   - Tier 3 (Weak): max |Log2FC| ≤ 2.0
+2. Within each tier, K-Means with Absolute Correlation (1-|r|) distance:
+   - Anti-correlated substrates (e.g., +3 and -3) cluster together
+   - Sign-folded before clustering, then tagged as positive/negative targets
+3. Dominant cluster selection: coherence × √size × |peak_score| × tier_bonus
+4. Scoring: Winsorized Mean (5th/95th percentile) per condition — outlier-robust
+   - NOT a sum; represents average substrate response magnitude
+   - Each timepoint scored independently (never averaged across time)
+- Direction: activation (▲, positive Winsorized Mean), inactivation (▼, negative)
+- Coherence: mean pairwise |Pearson r| within dominant cluster (0 to 1 scale)
 - Confidence: weighted evidence score based on substrate count, source quality
+- Substrates classified as Exclusive (1 kinase) or Shared (2+ kinases)
 
 **Co-Wave Groups (CW Groups)**: Kinases whose temporal activity score profiles are
 highly correlated (Pearson r≥0.7) are grouped together. Same CW Group = substrates
@@ -335,14 +341,14 @@ def _build_kinase_activity_heatmap_context(order: Order) -> str:
             count = info.get("count", len(ks_list)) if isinstance(info, dict) else 0
             lines.append(f"  {cond}: {count} kinases — {', '.join(ks_list[:10])}")
 
-    # Per-kinase activity scores (Co-activation Sum)
-    scoring_method = heatmap.get("scoring_method", "coactivation_sum")
+    # Per-kinase activity scores (v11.3: Stratified Clustering + Winsorized Mean)
     threshold_info = heatmap.get("scoring_threshold", {})
     if kinase_scores:
         lines.append(f"\nKinase Activity Scores ({len(kinase_scores)} kinases):")
-        lines.append(f"Scoring: Co-activation Sum (ΣLog2FC of significant substrates per timepoint)")
+        lines.append(f"Scoring: Winsorized Mean (5th/95th percentile) of dominant cluster substrates per condition")
+        lines.append(f"Clustering: Stratified by magnitude tier (Strong >5.0, Moderate 2-5, Weak ≤2.0) + Absolute Correlation K-Means")
         lines.append(f"Threshold: q<{threshold_info.get('q_value', 0.05)} or |Log2FC|≥{threshold_info.get('fc_abs', 0.3)}")
-        lines.append("Higher absolute value = more substrates co-activated OR stronger individual changes.")
+        lines.append("Score = average substrate response magnitude (NOT sum). Higher |score| = stronger directional signal.")
         lines.append("Substrates classified as Exclusive (mapped to 1 kinase) or Shared (2+ kinases).")
         for ks in kinase_scores[:40]:  # Top 40 kinases
             kinase = ks.get("kinase", "")
@@ -639,7 +645,7 @@ SYSTEM_PROMPT_TEMPLATE = """당신은 POTATO AI입니다. PTM-Vector 분석 플�
 8. 문헌 기반 답변 시 RAG collection 출처를 인용하세요.
 9. 데이터가 부족하면 솔직하게 "이 부분은 데이터가 부족해서 확실하게 말씀드리기 어렵네요" 라고 말하세요.
 10. 반드시 아래 제공된 [SIGNAL FLOW], [KINASE MODULE ANALYSIS], [KINASE ACTIVITY HEATMAP], [ENRICHED PTM DATA] 섹션의 실제 데이터를 참조하여 답변하세요. 데이터에 있는 정보를 "없다"고 말하지 마세요.
-11. [KINASE ACTIVITY HEATMAP] 섹션에는 각 kinase의 시간대별 Co-activation Sum score, Co-Wave Group (CW Group) 정보, coherence, direction, peak synchronization, exclusive/shared substrate 구분 데이터가 있습니다. Score는 유의한 substrate(q<0.05 or |FC|≥0.3)의 Log2FC 합산입니다. Exclusive substrate는 해당 kinase에만 매핑된 것이고, Shared는 2개 이상 kinase에 매핑된 것입니다. 같은 CW Group에 속한 kinase들은 substrate의 phosphorylation 패턴이 시간적으로 상관관계(r≥0.7)를 보이므로, 이들은 같은 signaling cascade에 속하거나 공통 upstream signal에 반응하는 것으로 해석하세요.
+11. [KINASE ACTIVITY HEATMAP] 섹션에는 각 kinase의 시간대별 Winsorized Mean score, Co-Wave Group (CW Group) 정보, coherence, direction, peak synchronization, exclusive/shared substrate 구분 데이터가 있습니다. Score는 dominant cluster substrate의 Winsorized Mean(5th/95th percentile)으로, 합산이 아닌 평균 응답 크기입니다. Substrate는 Magnitude Tier(Strong >5.0, Moderate 2-5, Weak ≤2.0)별로 분류되어 Absolute Correlation K-Means로 클러스터링됩니다. Exclusive substrate는 해당 kinase에만 매핑된 것이고, Shared는 2개 이상 kinase에 매핑된 것입니다. 같은 CW Group에 속한 kinase들은 substrate의 phosphorylation 패턴이 시간적으로 상관관계(r≥0.7)를 보이므로, 이들은 같은 signaling cascade에 속하거나 공통 upstream signal에 반응하는 것으로 해석하세요.
 12. {language_instruction}
 
 {context}
