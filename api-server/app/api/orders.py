@@ -7041,6 +7041,58 @@ async def kinase_activity_heatmap(
         all_substrate_genes = [p.get("gene", "") for p in ptms]
         nuclear_ev = _compute_nuclear_evidence(all_substrate_genes)
 
+        # v11.3.3: Regulator Self-PTM Temporal Tracking
+        # Check if the kinase/E3 ligase gene itself has PTM entries in the dataset.
+        # If so, compute temporal correlation between substrate-inferred activity
+        # and the regulator's own PTM changes — this validates the activity inference.
+        self_ptm_data: list[dict] = []
+        kinase_gene_upper = kinase_name.strip().upper()
+        # Find all PTM keys matching the kinase gene name
+        for ptm_key_sp, ts_sp in ptm_timeseries.items():
+            sp_gene = ptm_key_sp.split("_")[0] if "_" in ptm_key_sp else ptm_key_sp
+            if sp_gene.upper() != kinase_gene_upper:
+                continue
+            sp_site = ptm_key_sp.split("_", 1)[1] if "_" in ptm_key_sp else ""
+            # Build temporal vectors for correlation
+            self_vec = [ts_sp.get(c, 0.0) for c in conditions_sorted]
+            activity_vec = [scores.get(c, 0.0) for c in conditions_sorted]
+            # Skip if self-PTM has no signal
+            if not any(abs(v) >= 0.3 for v in self_vec):
+                continue
+            # Compute Pearson correlation
+            sp_corr = 0.0
+            try:
+                self_arr = np.array(self_vec)
+                act_arr = np.array(activity_vec)
+                if np.std(self_arr) > 1e-9 and np.std(act_arr) > 1e-9:
+                    sp_corr = float(np.corrcoef(self_arr, act_arr)[0, 1])
+                    if np.isnan(sp_corr):
+                        sp_corr = 0.0
+            except Exception:
+                sp_corr = 0.0
+            # Determine self-PTM peak
+            sp_peak_c = max(conditions_sorted, key=lambda c: abs(ts_sp.get(c, 0.0)))
+            sp_peak_fc = ts_sp.get(sp_peak_c, 0.0)
+            # Classify relationship
+            if sp_corr >= 0.7:
+                sp_relationship = "concordant"  # self-PTM tracks with substrate activity
+            elif sp_corr <= -0.7:
+                sp_relationship = "discordant"  # anti-correlated (possibly inhibitory site)
+            else:
+                sp_relationship = "independent"
+            self_ptm_data.append({
+                "ptm_key": ptm_key_sp,
+                "gene": sp_gene,
+                "site": sp_site,
+                "timeseries": {c: round(ts_sp.get(c, 0.0), 4) for c in conditions_sorted},
+                "peak_condition": sp_peak_c,
+                "peak_fc": round(sp_peak_fc, 4),
+                "correlation_with_activity": round(sp_corr, 4),
+                "relationship": sp_relationship,
+            })
+        # Sort by absolute correlation (most informative first)
+        self_ptm_data.sort(key=lambda x: abs(x.get("correlation_with_activity", 0)), reverse=True)
+
         kinase_scores.append({
             "kinase": kinase_name,
             "scores": scores,
@@ -7066,6 +7118,8 @@ async def kinase_activity_heatmap(
             "same_time_clusters": same_time_clusters,
             # v11.3.2: Nuclear-exclusive substrate evidence
             "nuclear_evidence": nuclear_ev,
+            # v11.3.3: Regulator self-PTM temporal tracking
+            "self_ptm": self_ptm_data if self_ptm_data else None,
             # v11.3: Include dominant cluster substrate list
             "substrates": [
                 {

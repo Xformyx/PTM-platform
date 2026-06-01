@@ -1768,10 +1768,21 @@ def _build_frontend_kinase_llm_context(frontend_kinase: dict, ptm_type: str, kin
                     nuc_parts.append(f"NucT2[{','.join(t2_genes[:5])}]")
                 nuc_str = f", nuclear_evidence={nuclear_ev.get('score', 0)} ({' '.join(nuc_parts)})"
 
+            # v11.3.3: Self-PTM inline summary
+            self_ptm_list = ks.get("self_ptm") or []
+            self_ptm_str = ""
+            if self_ptm_list:
+                sp_parts = []
+                for sp in self_ptm_list[:3]:
+                    sp_parts.append(
+                        f"{sp.get('site', '')}(r={sp.get('correlation_with_activity', 0):+.2f},{sp.get('relationship', '')})"
+                    )
+                self_ptm_str = f", self_ptm=[{'; '.join(sp_parts)}]"
+
             parts.append(
                 f"**{kinase_name}** [{cw_str}] — {sub_count} substrates, "
                 f"conf={confidence:.0%}, peak={peak_cond} ({peak_score:+.2f}), "
-                f"direction={direction}, coherence={coherence:.2f}{pattern_str}{nuc_str}"
+                f"direction={direction}, coherence={coherence:.2f}{pattern_str}{nuc_str}{self_ptm_str}"
             )
             parts.append(f"  Temporal profile: [{score_str}]")
             parts.append("")
@@ -1875,6 +1886,43 @@ def _build_frontend_kinase_llm_context(frontend_kinase: dict, ptm_type: str, kin
                     f"[{gene_str}]"
                 )
             parts.append("")
+
+    # ── Section G3: Regulator Self-PTM Temporal Tracking ──
+    if kinase_activity_heatmap and kinase_activity_heatmap.get("kinase_scores"):
+        ks_list_sp = kinase_activity_heatmap["kinase_scores"]
+        self_ptm_kinases = [
+            ks for ks in ks_list_sp
+            if ks.get("self_ptm") and not ks.get("is_sub_pattern")
+        ]
+        if self_ptm_kinases:
+            parts.append(f"### G3. {regulator_label} Self-PTM Temporal Tracking")
+            parts.append("")
+            parts.append(
+                f"The following {regulator_label.lower()}s have their own PTM sites detected in the "
+                f"experimental data. By comparing the temporal profile of these self-PTM changes "
+                f"with the substrate-inferred activity profile, we can validate the activity "
+                f"inference and identify activation/inhibitory phosphorylation sites. "
+                f"Concordant (r≥0.7) sites likely represent activation marks. "
+                f"Discordant (r≤-0.7) sites may represent inhibitory marks or feedback regulation."
+            )
+            parts.append("")
+            # Sort by number of self-PTM sites
+            for ks in sorted(self_ptm_kinases, key=lambda x: len(x.get("self_ptm", [])), reverse=True)[:20]:
+                kinase_name_sp = ks.get("kinase", "")
+                self_ptms = ks.get("self_ptm", [])
+                parts.append(f"**{kinase_name_sp}** — {len(self_ptms)} self-PTM site(s) detected:")
+                for sp in self_ptms[:5]:
+                    r_val = sp.get('correlation_with_activity', 0)
+                    rel = sp.get('relationship', 'independent')
+                    ts_str = ", ".join(f"{c}:{v:+.2f}" for c, v in sp.get('timeseries', {}).items())
+                    parts.append(
+                        f"  {sp.get('ptm_key', '')} — peak@{sp.get('peak_condition', '')} "
+                        f"({sp.get('peak_fc', 0):+.2f}), r={r_val:+.3f} ({rel})"
+                    )
+                    parts.append(f"    Temporal: [{ts_str}]")
+                if len(self_ptms) > 5:
+                    parts.append(f"  (+{len(self_ptms) - 5} more sites)")
+                parts.append("")
 
     # ── Section H: Non-PTM Effector Proteins (Downstream Functional Outputs) ──
     effector_proteins = frontend_kinase.get("effector_proteins", [])

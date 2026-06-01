@@ -400,6 +400,25 @@ def _build_kinase_activity_heatmap_context(order: Order) -> str:
                     f"(T1={ne.get('tier1_count', 0)}, T2={ne.get('tier2_count', 0)}) [{gene_str}]"
                 )
 
+    # v11.3.3: Regulator Self-PTM Temporal Tracking Summary
+    if kinase_scores:
+        self_ptm_kinases = [
+            ks for ks in kinase_scores
+            if ks.get("self_ptm") and not ks.get("is_sub_pattern")
+        ]
+        if self_ptm_kinases:
+            lines.append(f"\nRegulator Self-PTM Tracking ({len(self_ptm_kinases)} regulators with own PTM detected):")
+            lines.append("Concordant (r≥0.7): self-PTM tracks with substrate activity (likely activation site)")
+            lines.append("Discordant (r≤-0.7): anti-correlated (likely inhibitory site or feedback)")
+            for ks in sorted(self_ptm_kinases, key=lambda x: len(x.get("self_ptm", [])), reverse=True)[:15]:
+                sp_list = ks.get("self_ptm", [])
+                sp_strs = []
+                for sp in sp_list[:3]:
+                    sp_strs.append(
+                        f"{sp.get('site', '')}(r={sp.get('correlation_with_activity', 0):+.2f},{sp.get('relationship', '')})"
+                    )
+                lines.append(f"  {ks.get('kinase', '')}: {'; '.join(sp_strs)}")
+
     text = "\n".join(lines)
     if len(text) > 8000:
         text = text[:8000] + "\n... [truncated]"

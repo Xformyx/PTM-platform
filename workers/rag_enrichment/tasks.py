@@ -1309,6 +1309,56 @@ def _compute_kinase_activity_heatmap(enriched_data: list, kinase_result: dict, p
             for gp in dominant.get("member_keys", [])
         ]
 
+        # v11.3.3: Regulator Self-PTM Temporal Tracking
+        # Check if the kinase/E3 ligase gene itself has PTM entries in the dataset.
+        self_ptm_data: list = []
+        kinase_gene_upper = kinase_name.strip().upper()
+        # Collect all (gene, position) pairs matching the kinase gene
+        self_ptm_sites = set()
+        for (g, p, c) in ptm_values:
+            if g == kinase_gene_upper:
+                self_ptm_sites.add((g, p))
+        for (sp_gene, sp_site) in sorted(self_ptm_sites):
+            # Build temporal vectors
+            self_vec = [ptm_values.get((sp_gene, sp_site, c), 0.0) for c in conditions]
+            activity_vec = [scores.get(c, 0.0) for c in conditions]
+            # Skip if self-PTM has no signal
+            if not any(abs(v) >= 0.3 for v in self_vec):
+                continue
+            # Compute Pearson correlation
+            sp_corr = 0.0
+            try:
+                self_arr = np.array(self_vec)
+                act_arr = np.array(activity_vec)
+                if np.std(self_arr) > 1e-9 and np.std(act_arr) > 1e-9:
+                    sp_corr = float(np.corrcoef(self_arr, act_arr)[0, 1])
+                    if np.isnan(sp_corr):
+                        sp_corr = 0.0
+            except Exception:
+                sp_corr = 0.0
+            # Determine self-PTM peak
+            sp_peak_c = max(conditions, key=lambda c: abs(ptm_values.get((sp_gene, sp_site, c), 0.0)))
+            sp_peak_fc = ptm_values.get((sp_gene, sp_site, sp_peak_c), 0.0)
+            # Classify relationship
+            if sp_corr >= 0.7:
+                sp_relationship = "concordant"
+            elif sp_corr <= -0.7:
+                sp_relationship = "discordant"
+            else:
+                sp_relationship = "independent"
+            self_ptm_data.append({
+                "ptm_key": f"{sp_gene}_{sp_site}",
+                "gene": sp_gene,
+                "site": sp_site,
+                "timeseries": {c: round(ptm_values.get((sp_gene, sp_site, c), 0.0), 4) for c in conditions},
+                "peak_condition": sp_peak_c,
+                "peak_fc": round(sp_peak_fc, 4),
+                "correlation_with_activity": round(sp_corr, 4),
+                "relationship": sp_relationship,
+            })
+        # Sort by absolute correlation
+        self_ptm_data.sort(key=lambda x: abs(x.get("correlation_with_activity", 0)), reverse=True)
+
         kinase_scores.append({
             "kinase": kinase_name,
             "scores": scores,
@@ -1325,6 +1375,8 @@ def _compute_kinase_activity_heatmap(enriched_data: list, kinase_result: dict, p
             "same_time_clusters": same_time_clusters,
             # v11.3.2: Nuclear-exclusive substrate evidence
             "nuclear_evidence": nuclear_ev,
+            # v11.3.3: Regulator self-PTM temporal tracking
+            "self_ptm": self_ptm_data if self_ptm_data else None,
             # v11.3: Substrate list from dominant cluster
             "substrates": substrates_list,
         })

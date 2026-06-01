@@ -4434,6 +4434,17 @@ interface KinaseActivityScore {
     tier1_genes: string[];
     tier2_genes: string[];
   };
+  // v11.3.3: Regulator self-PTM temporal tracking
+  self_ptm?: {
+    ptm_key: string;
+    gene: string;
+    site: string;
+    timeseries: Record<string, number>;
+    peak_condition: string;
+    peak_fc: number;
+    correlation_with_activity: number;
+    relationship: "concordant" | "discordant" | "independent";
+  }[] | null;
 }
 
 interface PeakSyncEntry {
@@ -5468,6 +5479,54 @@ function KinaseActivityHeatmapView({
                             {ne.tier1_count > 0 ? "🧬" : "🔬"}
                             <span className="font-medium">nuc</span>
                             <span className="opacity-70">{displayGenes.join(",")}</span>
+                          </span>
+                        );
+                      })()}
+                      {/* v11.3.3: Regulator self-PTM correlation badge */}
+                      {!ks.is_sub_pattern && ks.self_ptm && ks.self_ptm.length > 0 && (() => {
+                        const spList = ks.self_ptm!;
+                        // Determine badge style based on best relationship
+                        const hasConcordant = spList.some(sp => sp.relationship === "concordant");
+                        const hasDiscordant = spList.some(sp => sp.relationship === "discordant");
+                        let badgeClass = "bg-gray-500/15 text-gray-300 border-gray-500/30"; // independent
+                        let emoji = "📊";
+                        if (hasConcordant && hasDiscordant) {
+                          badgeClass = "bg-amber-500/20 text-amber-300 border-amber-500/40";
+                          emoji = "⚡";
+                        } else if (hasConcordant) {
+                          badgeClass = "bg-emerald-500/20 text-emerald-300 border-emerald-500/40";
+                          emoji = "✓";
+                        } else if (hasDiscordant) {
+                          badgeClass = "bg-rose-500/20 text-rose-300 border-rose-500/40";
+                          emoji = "⊘";
+                        }
+                        // Build tooltip
+                        const tipLines: string[] = [
+                          `Self-PTM Temporal Tracking (${spList.length} site${spList.length > 1 ? "s" : ""})`,
+                          "",
+                          "Compares this regulator's own PTM changes",
+                          "with its substrate-inferred activity profile.",
+                          "",
+                        ];
+                        for (const sp of spList.slice(0, 5)) {
+                          const r = sp.correlation_with_activity;
+                          const relLabel = sp.relationship === "concordant" ? "✓ concordant (likely activation site)"
+                            : sp.relationship === "discordant" ? "⊘ discordant (likely inhibitory site)"
+                            : "— independent";
+                          tipLines.push(`${sp.site}: peak@${sp.peak_condition} (${sp.peak_fc > 0 ? "+" : ""}${sp.peak_fc.toFixed(2)})`);
+                          tipLines.push(`  r=${r > 0 ? "+" : ""}${r.toFixed(3)} → ${relLabel}`);
+                        }
+                        if (spList.length > 5) tipLines.push(`  +${spList.length - 5} more sites`);
+                        // Compact display
+                        const topSite = spList[0];
+                        return (
+                          <span
+                            className={`ml-1 text-[8px] px-1 py-0 rounded border cursor-help inline-flex items-center gap-0.5 ${badgeClass}`}
+                            title={tipLines.join("\n")}
+                          >
+                            {emoji}
+                            <span className="font-medium">self</span>
+                            <span className="opacity-70">{topSite.site}(r={topSite.correlation_with_activity > 0 ? "+" : ""}{topSite.correlation_with_activity.toFixed(2)})</span>
                           </span>
                         );
                       })()}
