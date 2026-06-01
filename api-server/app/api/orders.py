@@ -6896,6 +6896,45 @@ async def kinase_activity_heatmap(
                 "tier": cl.get("tier", "mixed"),
             })
 
+        # ── v11.3.1: Collect same-time clusters BEFORE building parent entry ──
+        # Same-time clusters (same peak as parent) are shown in tooltip only, not as separate rows
+        same_time_clusters: list[dict] = []
+        if len(clusters) >= 2:
+            for _stc_cl in clusters:
+                if _stc_cl["is_dominant"]:
+                    continue
+                if _stc_cl["size"] < 3:
+                    continue
+                if "_scores" in _stc_cl:
+                    _stc_peak_cond = _stc_cl.get("_peak_condition", "")
+                    _stc_peak_score = _stc_cl.get("_peak_score", 0.0)
+                else:
+                    _stc_scores = {}
+                    for c in conditions_sorted:
+                        c_vals = [ptm_timeseries.get(pk, {}).get(c, 0.0) for pk in _stc_cl["ptm_keys"]]
+                        _stc_scores[c] = round(float(np.mean(c_vals)) if c_vals else 0.0, 4)
+                    _stc_peak_cond = max(conditions_sorted, key=lambda c: abs(_stc_scores.get(c, 0))) if _stc_scores else ""
+                    _stc_peak_score = _stc_scores.get(_stc_peak_cond, 0.0)
+                if abs(_stc_peak_score) < 0.3:
+                    continue
+                if _stc_peak_cond == peak_cond:
+                    same_time_clusters.append({
+                        "tier": _stc_cl.get("tier", "mixed"),
+                        "size": _stc_cl["size"],
+                        "peak_score": round(_stc_peak_score, 4),
+                        "substrates": [
+                            {
+                                "gene": pk.split("_")[0] if "_" in pk else pk,
+                                "site": pk.split("_", 1)[1] if "_" in pk else "",
+                                "peak_fc": round(float(max(
+                                    (ptm_timeseries.get(pk, {}).get(c, 0.0) for c in conditions_sorted),
+                                    key=abs, default=0.0
+                                )), 3),
+                            }
+                            for pk in _stc_cl["ptm_keys"]
+                        ],
+                    })
+
         kinase_scores.append({
             "kinase": kinase_name,
             "scores": scores,
@@ -6917,6 +6956,8 @@ async def kinase_activity_heatmap(
             "coherence": dominant.get("coherence", 0.0),  # dominant cluster coherence
             "n_clusters": len(clusters),
             "cluster_details": cluster_details,
+            # v11.3.1: Same-time clusters (same peak as parent) for tooltip display only
+            "same_time_clusters": same_time_clusters,
             # v11.3: Include dominant cluster substrate list
             "substrates": [
                 {
@@ -6955,6 +6996,9 @@ async def kinase_activity_heatmap(
                     sub_peak_score = sub_scores.get(sub_peak_cond, 0.0)
                 # Skip if peak signal is negligible
                 if abs(sub_peak_score) < 0.3:
+                    continue
+                # v11.3.1: Skip same-time clusters (already collected for parent tooltip above)
+                if sub_peak_cond == peak_cond:
                     continue
                 # Auto-label: use actual peak condition as label (e.g., "5min", "12h")
                 # Also keep positional category for translocation detection

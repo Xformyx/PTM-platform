@@ -4419,6 +4419,13 @@ interface KinaseActivityScore {
   }[];
   // v11.3: Positional category for translocation detection
   sub_pattern_category?: string;
+  // v11.3.1: Same-time clusters (same peak as parent) — shown in tooltip only, not as separate rows
+  same_time_clusters?: {
+    tier: string;
+    size: number;
+    peak_score: number;
+    substrates: { gene: string; site: string; peak_fc: number }[];
+  }[];
 }
 
 interface PeakSyncEntry {
@@ -4846,7 +4853,8 @@ function KinaseActivityHeatmapView({
         }
       }
       setGoLocData({ gene_localizations: merged, summary });
-    }).catch(() => {
+    }).catch((err) => {
+      console.error('[GO-CC] Heatmap cell fetch failed:', err?.message || err);
       // Don't null out existing data on error
     }).finally(() => {
       setGoLocLoading(false);
@@ -5297,6 +5305,25 @@ function KinaseActivityHeatmapView({
                       ) : (
                         <>{ks.kinase}</>
                       )}
+                      {/* v11.3.1: Same-time cluster count badge (tooltip shows details) */}
+                      {!ks.is_sub_pattern && ks.same_time_clusters && ks.same_time_clusters.length > 0 && (() => {
+                        const stc = ks.same_time_clusters!;
+                        const tierMap: Record<string, string> = { strong: "S", moderate: "M", weak: "W", mixed: "?" };
+                        const totalSubs = stc.reduce((sum, c) => sum + c.size, 0);
+                        const tipLines = stc.map(c =>
+                          `[${tierMap[c.tier] || c.tier}] ${c.size} substrates (peak=${c.peak_score > 0 ? "+" : ""}${c.peak_score})\n` +
+                          c.substrates.slice(0, 5).map(s => `  ${s.gene} ${s.site} ${s.peak_fc > 0 ? "+" : ""}${s.peak_fc}`).join("\n") +
+                          (c.substrates.length > 5 ? `\n  ...+${c.substrates.length - 5} more` : "")
+                        ).join("\n\n");
+                        return (
+                          <span
+                            className="ml-1 text-[8px] px-1 py-0 rounded border bg-violet-500/15 text-violet-300 border-violet-500/30 cursor-help"
+                            title={`Same-time clusters (peak@${ks.peak_condition})\n${stc.length} additional cluster(s), ${totalSubs} substrates\n\n${tipLines}\n\nThese clusters peak at the same time as the dominant\ncluster but with different magnitude tiers.`}
+                          >
+                            +{stc.length}
+                          </span>
+                        );
+                      })()}
                       {/* v11.3: Magnitude Tier badge from dominant cluster */}
                       {(() => {
                         const domCluster = ks.cluster_details?.find(cd => cd.is_dominant);
@@ -5535,9 +5562,14 @@ function KinaseActivityHeatmapView({
                               cytoplasm: "bg-green-500/20 text-green-300 border-green-500/40",
                               membrane: "bg-blue-500/20 text-blue-300 border-blue-500/40",
                               mitochondrion: "bg-orange-500/20 text-orange-300 border-orange-500/40",
-                              er: "bg-yellow-500/20 text-yellow-300 border-yellow-500/40",
-                              golgi: "bg-pink-500/20 text-pink-300 border-pink-500/40",
+                              "endoplasmic reticulum": "bg-yellow-500/20 text-yellow-300 border-yellow-500/40",
+                              "golgi apparatus": "bg-pink-500/20 text-pink-300 border-pink-500/40",
                               cytoskeleton: "bg-teal-500/20 text-teal-300 border-teal-500/40",
+                              extracellular: "bg-red-500/20 text-red-300 border-red-500/40",
+                              centrosome: "bg-indigo-500/20 text-indigo-300 border-indigo-500/40",
+                              ribosome: "bg-amber-500/20 text-amber-300 border-amber-500/40",
+                              lysosome: "bg-rose-500/20 text-rose-300 border-rose-500/40",
+                              peroxisome: "bg-lime-500/20 text-lime-300 border-lime-500/40",
                             };
                             return (
                               <span
@@ -5550,14 +5582,24 @@ function KinaseActivityHeatmapView({
                                 <span className={`text-[8px] ${sub.peak_fc > 0 ? "text-red-400" : "text-blue-400"}`}>
                                   {sub.peak_fc > 0 ? "+" : ""}{sub.peak_fc.toFixed(1)}
                                 </span>
-                                {locs.slice(0, 2).map((loc) => (
-                                  <span
-                                    key={loc}
-                                    className={`text-[7px] px-0.5 rounded border ${locColor[loc] || "bg-slate-500/20 text-slate-300 border-slate-500/40"}`}
-                                  >
-                                    {loc.slice(0, 3)}
-                                  </span>
-                                ))}
+                                {locs.slice(0, 2).map((loc) => {
+                                  const abbrev: Record<string, string> = {
+                                    nucleus: "nuc", cytoplasm: "cyt", membrane: "mem",
+                                    mitochondrion: "mit", "endoplasmic reticulum": "ER",
+                                    "golgi apparatus": "gol", cytoskeleton: "csk",
+                                    extracellular: "ext", centrosome: "cen",
+                                    ribosome: "rib", lysosome: "lys", peroxisome: "per",
+                                  };
+                                  return (
+                                    <span
+                                      key={loc}
+                                      className={`text-[7px] px-0.5 rounded border ${locColor[loc] || "bg-slate-500/20 text-slate-300 border-slate-500/40"}`}
+                                      title={loc}
+                                    >
+                                      {abbrev[loc] || loc.slice(0, 3)}
+                                    </span>
+                                  );
+                                })}
                               </span>
                             );
                           })}
