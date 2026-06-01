@@ -4376,6 +4376,11 @@ interface KinaseActivityScore {
   coherence?: number;
   cowave_group?: number;
   direction?: "activation" | "inactivation" | "neutral";
+  // v11.3 Multi-pattern fields
+  parent_kinase?: string;          // if this is a sub-pattern, the parent kinase name
+  is_sub_pattern?: boolean;        // true for non-dominant cluster entries
+  sub_pattern_label?: string;      // "early_response" | "mid_response" | "late_response"
+  translocation_flag?: string;     // "potential_nuclear_translocation" if detected
   // Co-activation Sum scoring fields (direction-split)
   up_sums?: Record<string, number>;    // sum of positive FC substrates per condition
   down_sums?: Record<string, number>;  // sum of negative FC substrates per condition (negative values)
@@ -4426,6 +4431,16 @@ interface KinaseHeatmapData {
   peak_sync?: Record<string, PeakSyncEntry>;
   cowave_groups?: CowaveGroupEntry[];
   available_patterns?: string[];
+  translocation_candidates?: {
+    kinase: string;
+    early_peak: string;
+    late_peak: string;
+    cytoplasm_genes: number;
+    nucleus_genes: number;
+    total_genes: number;
+    hypothesis: string;
+    description: string;
+  }[];
   scoring_method?: string;
   scoring_threshold?: { q_value: number; fc_abs: number };
   _cached: boolean;
@@ -4737,6 +4752,11 @@ function KinaseActivityHeatmapView({
   const [signalTierFilter, setSignalTierFilter] = useState<"all" | "de_novo" | "regulated" | "minor">("all");
   const [sortByCondition, setSortByCondition] = useState<string | null>(null);
   const [patternFilter, setPatternFilter] = useState<string | null>(null);
+  const [showSubPatterns, setShowSubPatterns] = useState(false);
+  // v11.3: GO Localization dashboard state
+  const [goLocSelection, setGoLocSelection] = useState<{ kinase: string; condition: string } | null>(null);
+  const [goLocData, setGoLocData] = useState<{ gene_localizations: Record<string, string[]>; summary: Record<string, number> } | null>(null);
+  const [goLocLoading, setGoLocLoading] = useState(false);
   const [hoveredLineKinase, setHoveredLineKinase] = useState<string | null>(null);
   const [lineTooltip, setLineTooltip] = useState<{ x: number; y: number; kinase: string; condition: string; score: number } | null>(null);
   // Fetch heatmap data from backend
@@ -4767,6 +4787,39 @@ function KinaseActivityHeatmapView({
     }
   }, [fetchHeatmapData]);
 
+  // v11.3: Fetch GO Cellular Component data when a heatmap cell is clicked
+  useEffect(() => {
+    if (!goLocSelection) return;
+    const { kinase } = goLocSelection;
+    // Find substrate genes for this kinase from globalKinaseResult
+    const kinaseUpper = kinase.toUpperCase();
+    const genes: string[] = [];
+    for (const mod of globalKinaseResult.kinase_modules) {
+      if (mod.kinase.toUpperCase() === kinaseUpper || (mod.canonical || "").toUpperCase() === kinaseUpper) {
+        for (const m of mod.members) {
+          if (!genes.includes(m.gene.toUpperCase())) {
+            genes.push(m.gene.toUpperCase());
+          }
+        }
+      }
+    }
+    if (genes.length === 0) {
+      setGoLocData(null);
+      return;
+    }
+    setGoLocLoading(true);
+    api.post<{ gene_localizations: Record<string, string[]>; summary: Record<string, number> }>(
+      `/orders/${orderId}/substrate-go-localization`,
+      { genes }
+    ).then((data) => {
+      setGoLocData(data);
+    }).catch(() => {
+      setGoLocData(null);
+    }).finally(() => {
+      setGoLocLoading(false);
+    });
+  }, [goLocSelection, globalKinaseResult, orderId]);
+
   // Sort kinase scores
   // Helper: get total co-activation magnitude for a kinase in the selected tier
   const getTierTotalSignal = useCallback((ks: KinaseActivityScore) => {
@@ -4788,6 +4841,11 @@ function KinaseActivityHeatmapView({
   const sortedScores = useMemo(() => {
     if (!heatmapData) return [];
     let scores = [...heatmapData.kinase_scores];
+
+    // v11.3: Filter sub-patterns based on toggle
+    if (!showSubPatterns) {
+      scores = scores.filter((ks) => !ks.is_sub_pattern);
+    }
 
     // When a specific tier is selected, filter out kinases with zero signal in that tier
     if (signalTierFilter !== "all") {
@@ -4852,7 +4910,7 @@ function KinaseActivityHeatmapView({
       }
     }
     return scores.slice(0, topN);
-  }, [heatmapData, sortMode, topN, signalTierFilter, getTierTotalSignal, sortByCondition]);
+  }, [heatmapData, sortMode, topN, signalTierFilter, getTierTotalSignal, sortByCondition, showSubPatterns]);
 
   // Color scale for heatmap: blue(-) → white(0) → red(+)
   const getHeatmapColor = (value: number, maxAbs: number) => {
@@ -5048,9 +5106,22 @@ function KinaseActivityHeatmapView({
           <option value="regulated">Regulated (0.58≤|FC|&lt;2)</option>
           <option value="minor">Minor (0.3≤|FC|&lt;0.58)</option>
         </select>
+        {/* v11.3: Multi-pattern toggle */}
+        <label className="flex items-center gap-1 text-xs text-muted-foreground cursor-pointer ml-2" title="Show non-dominant cluster sub-patterns\n(e.g., early vs late response phases)">
+          <input
+            type="checkbox"
+            checked={showSubPatterns}
+            onChange={(e) => setShowSubPatterns(e.target.checked)}
+            className="w-3 h-3 rounded"
+          />
+          Sub-patterns
+        </label>
         <div className="ml-auto flex items-center gap-1">
           {heatmapData._cached && (
             <Badge variant="outline" className="text-[10px] h-5 text-green-400 border-green-600">cached</Badge>
+          )}
+          {(heatmapData as any)._stale && (
+            <Badge variant="outline" className="text-[10px] h-5 text-amber-400 border-amber-600">outdated</Badge>
           )}
           <Button size="sm" variant="ghost" className="text-xs h-7" onClick={() => fetchHeatmapData(true)}>
             <RefreshCw className="h-3 w-3 mr-1" /> Refresh
@@ -5160,9 +5231,21 @@ function KinaseActivityHeatmapView({
                       )}
                     </td>
                     {/* Kinase name + v11.3 Tier Badge */}
-                    <td className="px-2 py-1 sticky left-0 bg-background z-10 font-medium whitespace-nowrap">
+                    <td className={`px-2 py-1 sticky left-0 bg-background z-10 font-medium whitespace-nowrap ${ks.is_sub_pattern ? "pl-6" : ""}`}>
+                      {ks.is_sub_pattern && (
+                        <span className="text-muted-foreground/40 mr-1 text-[9px]">└─</span>
+                      )}
                       {selectedKinases.has(ks.kinase) && <span className="text-cyan-400 mr-1">●</span>}
-                      {ks.kinase}
+                      {ks.is_sub_pattern ? (
+                        <span className="text-muted-foreground/80 italic">
+                          {ks.parent_kinase}
+                          <span className={`ml-1 text-[9px] px-1 py-0.5 rounded ${ks.sub_pattern_label === "early_response" ? "bg-blue-500/20 text-blue-300" : ks.sub_pattern_label === "late_response" ? "bg-orange-500/20 text-orange-300" : "bg-purple-500/20 text-purple-300"}`}>
+                            {ks.sub_pattern_label === "early_response" ? "Early" : ks.sub_pattern_label === "late_response" ? "Late" : "Mid"}
+                          </span>
+                        </span>
+                      ) : (
+                        <>{ks.kinase}</>
+                      )}
                       {/* v11.3: Magnitude Tier badge from dominant cluster */}
                       {(() => {
                         const domCluster = ks.cluster_details?.find(cd => cd.is_dominant);
@@ -5209,6 +5292,15 @@ function KinaseActivityHeatmapView({
                           </span>
                         );
                       })()}
+                      {/* v11.3: Translocation flag */}
+                      {ks.translocation_flag && (
+                        <span
+                          className="ml-1 text-[9px] cursor-help"
+                          title={`🔄 Potential Nuclear Translocation detected\n\nThis kinase shows early cytoplasmic substrate activity\nfollowed by late nuclear substrate activity,\nsuggesting the kinase translocates from\ncytoplasm to nucleus over time.\n\nClick a heatmap cell to view GO localization details.`}
+                        >
+                          🔄
+                        </span>
+                      )}
                     </td>
                     {/* Direction indicator */}
                     <td className="text-center px-0.5 py-0.5">
@@ -5293,8 +5385,12 @@ function KinaseActivityHeatmapView({
                       return (
                         <td
                           key={c}
-                          className="px-0 py-0 text-center"
-                          title={tipLines.join("\n")}
+                          className="px-0 py-0 text-center cursor-pointer hover:ring-1 hover:ring-cyan-500/50"
+                          title={tipLines.join("\n") + "\n\n🔬 Click to view GO Cellular Component distribution"}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setGoLocSelection({ kinase: ks.parent_kinase || ks.kinase, condition: c });
+                          }}
                         >
                           <div className="mx-auto w-full h-10 flex flex-col">
                             {/* Up bar (top half): height=√count, color intensity=avg FC */}
@@ -5435,6 +5531,20 @@ function KinaseActivityHeatmapView({
               <span>Peak Sync: conditions where 3+ kinases reach peak activity simultaneously</span>
             </div>
           )}
+          {/* Translocation candidates legend */}
+          {heatmapData.translocation_candidates && heatmapData.translocation_candidates.length > 0 && (
+            <div className="flex items-center gap-2 px-3 pb-2 text-[10px] text-muted-foreground border-t border-border/30 pt-2 mt-1">
+              <span>🔄</span>
+              <span className="font-medium text-foreground/80">Translocation Detected:</span>
+              {heatmapData.translocation_candidates.map((tc) => (
+                <span key={tc.kinase} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-purple-500/10 border border-purple-500/30 text-purple-300">
+                  <span className="font-medium">{tc.kinase}</span>
+                  <span className="text-[8px] text-muted-foreground">({tc.early_peak}→{tc.late_peak})</span>
+                </span>
+              ))}
+              <span className="text-muted-foreground/60 ml-1">Early cytoplasm → Late nucleus</span>
+            </div>
+          )}
           {/* Direction legend */}
           <div className="flex items-center gap-4 px-3 pb-2 text-[10px] text-muted-foreground">
             <span className="flex items-center gap-1">
@@ -5445,8 +5555,94 @@ function KinaseActivityHeatmapView({
               <span className="text-blue-400 font-bold">▼</span>
               <span>Inactivation: substrates de-phosphorylated (phosphatase action / kinase suppressed)</span>
             </span>
-            <span className="ml-auto text-cyan-400">→ Click row to view in Signal Flow</span>
+            <span className="ml-auto text-cyan-400">→ Click cell to view GO localization | Click row for Signal Flow</span>
           </div>
+
+          {/* v11.3: GO Cellular Component Localization Dashboard */}
+          {goLocSelection && (
+            <div className="border-t border-border mt-2 pt-3 px-3 pb-3">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium text-foreground">🔬 GO Cellular Component Distribution</span>
+                  <Badge variant="outline" className="text-[10px] h-5">{goLocSelection.kinase} @ {goLocSelection.condition}</Badge>
+                </div>
+                <Button size="sm" variant="ghost" className="text-xs h-6" onClick={() => setGoLocSelection(null)}>
+                  ✕ Close
+                </Button>
+              </div>
+              {goLocLoading ? (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground py-4">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Fetching GO annotations from UniProt...
+                </div>
+              ) : goLocData && goLocData.summary && Object.keys(goLocData.summary).length > 0 ? (
+                <div className="flex flex-col gap-2">
+                  {/* Bar chart - simple CSS bars */}
+                  <div className="grid gap-1">
+                    {Object.entries(goLocData.summary).slice(0, 10).map(([term, count]) => {
+                      const maxCount = Math.max(...Object.values(goLocData.summary));
+                      const pct = maxCount > 0 ? (count / maxCount) * 100 : 0;
+                      const totalGenes = Object.keys(goLocData.gene_localizations).length;
+                      // Color coding by compartment
+                      const colorMap: Record<string, string> = {
+                        nucleus: "bg-purple-500",
+                        cytoplasm: "bg-green-500",
+                        membrane: "bg-blue-500",
+                        mitochondrion: "bg-orange-500",
+                        "endoplasmic reticulum": "bg-yellow-500",
+                        "golgi apparatus": "bg-pink-500",
+                        cytoskeleton: "bg-teal-500",
+                        extracellular: "bg-red-500",
+                        centrosome: "bg-indigo-500",
+                        ribosome: "bg-amber-500",
+                        lysosome: "bg-rose-500",
+                        peroxisome: "bg-lime-500",
+                      };
+                      const barColor = colorMap[term] || "bg-slate-500";
+                      return (
+                        <div key={term} className="flex items-center gap-2 text-xs">
+                          <span className="w-28 text-right text-muted-foreground truncate" title={term}>
+                            {term.charAt(0).toUpperCase() + term.slice(1)}
+                          </span>
+                          <div className="flex-1 h-4 bg-muted/30 rounded overflow-hidden relative">
+                            <div
+                              className={`h-full ${barColor} rounded opacity-80 transition-all`}
+                              style={{ width: `${pct}%` }}
+                            />
+                            <span className="absolute inset-0 flex items-center px-1 text-[9px] text-white/90 font-medium">
+                              {count} / {totalGenes} genes ({((count / totalGenes) * 100).toFixed(0)}%)
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {/* Gene list per compartment (collapsible) */}
+                  <details className="text-[10px] text-muted-foreground mt-1">
+                    <summary className="cursor-pointer hover:text-foreground">Show gene details per compartment</summary>
+                    <div className="mt-1 grid grid-cols-2 gap-x-4 gap-y-1 pl-2">
+                      {Object.entries(goLocData.summary).slice(0, 8).map(([term]) => {
+                        const genesInTerm = Object.entries(goLocData.gene_localizations)
+                          .filter(([, locs]) => locs.includes(term))
+                          .map(([g]) => g);
+                        return (
+                          <div key={term}>
+                            <span className="font-medium text-foreground/80">{term}:</span>{" "}
+                            <span>{genesInTerm.slice(0, 8).join(", ")}{genesInTerm.length > 8 ? ` +${genesInTerm.length - 8}` : ""}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </details>
+                  <div className="text-[9px] text-muted-foreground/60 mt-1">
+                    Data source: UniProt GO Cellular Component annotations | {Object.keys(goLocData.gene_localizations).length} genes queried
+                  </div>
+                </div>
+              ) : goLocData ? (
+                <div className="text-sm text-muted-foreground py-2">No GO Cellular Component annotations found for substrates of {goLocSelection.kinase}.</div>
+              ) : null}
+            </div>
+          )}
         </div>
       )}
 

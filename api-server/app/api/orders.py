@@ -6919,6 +6919,76 @@ async def kinase_activity_heatmap(
             "cluster_details": cluster_details,
         })
 
+        # ── v11.3 Multi-pattern: Emit non-dominant clusters as sub-pattern entries ──
+        # This allows the frontend to display multiple temporal phases per kinase
+        # (e.g., CDK1 early cytoplasmic targets vs CDK1 late nuclear targets)
+        if len(clusters) >= 2:
+            for cl in clusters:
+                if cl["is_dominant"]:
+                    continue
+                # Only emit sub-patterns with meaningful signal
+                if cl["size"] < 3:
+                    continue
+                if "_scores" in cl:
+                    sub_scores = dict(cl["_scores"])
+                    sub_peak_cond = cl.get("_peak_condition", "")
+                    sub_peak_score = cl.get("_peak_score", 0.0)
+                else:
+                    sub_scores = {}
+                    for c in conditions_sorted:
+                        c_vals = [ptm_timeseries.get(pk, {}).get(c, 0.0) for pk in cl["ptm_keys"]]
+                        sub_scores[c] = round(float(np.mean(c_vals)) if c_vals else 0.0, 4)
+                    sub_peak_cond = max(conditions_sorted, key=lambda c: abs(sub_scores.get(c, 0))) if sub_scores else ""
+                    sub_peak_score = sub_scores.get(sub_peak_cond, 0.0)
+                # Skip if peak signal is negligible
+                if abs(sub_peak_score) < 0.3:
+                    continue
+                # Auto-label based on temporal position
+                cond_idx = conditions_sorted.index(sub_peak_cond) if sub_peak_cond in conditions_sorted else 0
+                if cond_idx <= len(conditions_sorted) // 3:
+                    sub_label = "early_response"
+                elif cond_idx >= len(conditions_sorted) * 2 // 3:
+                    sub_label = "late_response"
+                else:
+                    sub_label = "mid_response"
+                sub_dir = "activation" if sub_peak_score > 0.3 else ("inactivation" if sub_peak_score < -0.3 else "neutral")
+                kinase_scores.append({
+                    "kinase": f"{kinase_name}_c{cl['cluster_id']}",
+                    "parent_kinase": kinase_name,
+                    "is_sub_pattern": True,
+                    "sub_pattern_label": sub_label,
+                    "scores": sub_scores,
+                    "up_sums": {c: 0.0 for c in conditions_sorted},
+                    "down_sums": {c: 0.0 for c in conditions_sorted},
+                    "up_counts": {c: 0 for c in conditions_sorted},
+                    "down_counts": {c: 0 for c in conditions_sorted},
+                    "tiers": {},
+                    "substrate_count": cl["size"],
+                    "total_substrates": len(ptms),
+                    "confidence": confidence * 0.7,  # slightly lower confidence for sub-patterns
+                    "peak_condition": sub_peak_cond,
+                    "peak_score": round(sub_peak_score, 4),
+                    "coact_counts": {c: 0 for c in conditions_sorted},
+                    "exclusive_sums": {c: 0.0 for c in conditions_sorted},
+                    "shared_sums": {c: 0.0 for c in conditions_sorted},
+                    "exclusive_counts": {c: 0 for c in conditions_sorted},
+                    "shared_counts": {c: 0 for c in conditions_sorted},
+                    "coherence": cl.get("coherence", 0.0),
+                    "n_clusters": 1,
+                    "cluster_details": [{
+                        "cluster_id": cl["cluster_id"],
+                        "size": cl["size"],
+                        "scores": sub_scores,
+                        "coherence": cl.get("coherence", 0.0),
+                        "peak_condition": sub_peak_cond,
+                        "peak_score": round(sub_peak_score, 4),
+                        "direction": sub_dir,
+                        "is_dominant": True,
+                        "tier": cl.get("tier", "mixed"),
+                    }],
+                    "direction": sub_dir,
+                })
+
     # ── Peak Synchronization ──
     peak_groups: dict[str, list[str]] = {}
     for ks_entry in kinase_scores:
@@ -7131,6 +7201,87 @@ async def kinase_activity_heatmap(
     for ks in kinase_scores_filtered:
         all_patterns.update(ks.get("temporal_pattern", []))
 
+    # ── v11.3: Translocation Auto-Detection ──────────────────────────────────
+    # For multi-pattern kinases, compare early vs late cluster substrate genes.
+    # If early cluster genes are predominantly cytoplasmic and late cluster genes
+    # are predominantly nuclear, flag as "potential_translocation".
+    # This uses cached GO localization data if available.
+    translocation_candidates: list[dict] = []
+    if order.substrate_go_localization:
+        go_cache = order.substrate_go_localization.get("gene_localizations", {})
+        if go_cache:
+            # Group sub-patterns by parent kinase
+            parent_sub_map: dict[str, list[dict]] = {}
+            for ks_entry in kinase_scores_filtered:
+                if ks_entry.get("is_sub_pattern") and ks_entry.get("parent_kinase"):
+                    parent_sub_map.setdefault(ks_entry["parent_kinase"], []).append(ks_entry)
+
+            for parent, subs in parent_sub_map.items():
+                early_subs = [s for s in subs if s.get("sub_pattern_label") == "early_response"]
+                late_subs = [s for s in subs if s.get("sub_pattern_label") == "late_response"]
+                if not early_subs or not late_subs:
+                    continue
+
+                # Get substrate genes for early and late clusters
+                # Find parent module to get member genes per cluster
+                parent_mod = None
+                for km in kinase_modules:
+                    if km.get("kinase", "").upper() == parent.upper():
+                        parent_mod = km
+                        break
+                if not parent_mod:
+                    continue
+
+                # Get all substrate genes for this kinase
+                all_genes = list(set(p.split("_")[0].upper() for p in parent_mod.get("ptms", [])))
+
+                # Count GO CC terms for all genes
+                cytoplasm_count = 0
+                nucleus_count = 0
+                for gene in all_genes:
+                    locs = go_cache.get(gene, [])
+                    if "cytoplasm" in locs:
+                        cytoplasm_count += 1
+                    if "nucleus" in locs:
+                        nucleus_count += 1
+
+                total = len(all_genes)
+                if total < 4:
+                    continue
+
+                # Heuristic: if both cytoplasm and nucleus are represented,
+                # and early peaks before late, it's a translocation candidate
+                early_peak_idx = min(
+                    conditions_sorted.index(s["peak_condition"])
+                    for s in early_subs if s["peak_condition"] in conditions_sorted
+                )
+                late_peak_idx = max(
+                    conditions_sorted.index(s["peak_condition"])
+                    for s in late_subs if s["peak_condition"] in conditions_sorted
+                )
+
+                if (early_peak_idx < late_peak_idx and
+                    cytoplasm_count >= 2 and nucleus_count >= 2 and
+                    (cytoplasm_count + nucleus_count) >= total * 0.4):
+                    translocation_candidates.append({
+                        "kinase": parent,
+                        "early_peak": conditions_sorted[early_peak_idx],
+                        "late_peak": conditions_sorted[late_peak_idx],
+                        "cytoplasm_genes": cytoplasm_count,
+                        "nucleus_genes": nucleus_count,
+                        "total_genes": total,
+                        "hypothesis": "potential_nuclear_translocation",
+                        "description": f"{parent} shows early cytoplasmic substrate activity "
+                                       f"({conditions_sorted[early_peak_idx]}) followed by late nuclear "
+                                       f"substrate activity ({conditions_sorted[late_peak_idx]}), "
+                                       f"suggesting kinase nuclear translocation.",
+                    })
+                    # Tag the parent entry
+                    for ks_entry in kinase_scores_filtered:
+                        if ks_entry.get("kinase") == parent:
+                            ks_entry["translocation_flag"] = "potential_nuclear_translocation"
+                            break
+
     # Save to DB
     result_data = {
         "kinase_scores": kinase_scores_filtered,
@@ -7138,6 +7289,7 @@ async def kinase_activity_heatmap(
         "peak_sync": peak_sync,
         "cowave_groups": cowave_groups,
         "available_patterns": sorted(all_patterns),
+        "translocation_candidates": translocation_candidates,
         "scoring_method": "stratified_winsorized_mean_v11.3",
         "scoring_threshold": {"q_value": Q_THRESHOLD, "fc_abs": FC_THRESHOLD},
         "_cache_hash": cache_hash,
@@ -7176,3 +7328,212 @@ async def validate_treatment(
 
     suggestions = suggest_corrections_for_treatment(treatment_text, max_suggestions=5)
     return {"suggestions": suggestions}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GO Cellular Component Localization endpoint (v11.3)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.post("/{order_id}/substrate-go-localization")
+async def substrate_go_localization(
+    order_id: int,
+    body: dict = Body(...),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Fetch GO Cellular Component annotations for substrate genes from UniProt.
+
+    This enables the Heatmap ↔ GO Localization dashboard to show where
+    substrates are located in the cell (nucleus, cytoplasm, membrane, etc.),
+    supporting translocation hypothesis generation.
+
+    Request body:
+      - genes: [str]  (list of gene names to query)
+      - force_refresh: bool (default false)
+
+    Response:
+      - gene_localizations: {GENE: ["nucleus", "cytoplasm", ...]}
+      - summary: {term: count}
+      - _cached: bool
+    """
+    import httpx
+    from datetime import datetime as _dt
+
+    result = await db.execute(select(Order).where(Order.id == order_id))
+    order = result.scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    await _check_order_access_async(order, user, db)
+
+    genes = body.get("genes", [])
+    force_refresh = body.get("force_refresh", False)
+
+    if not genes:
+        raise HTTPException(status_code=400, detail="No genes provided")
+
+    # Check cache
+    if not force_refresh and order.substrate_go_localization:
+        cached = order.substrate_go_localization
+        cached_genes = set(cached.get("gene_localizations", {}).keys())
+        requested_genes = set(g.upper() for g in genes)
+        # If all requested genes are already cached, return immediately
+        if requested_genes.issubset(cached_genes):
+            # Filter to only requested genes
+            filtered = {g: cached["gene_localizations"].get(g.upper(), []) for g in genes}
+            summary: dict[str, int] = {}
+            for locs in filtered.values():
+                for loc in locs:
+                    summary[loc] = summary.get(loc, 0) + 1
+            return {
+                "gene_localizations": filtered,
+                "summary": dict(sorted(summary.items(), key=lambda x: -x[1])),
+                "_cached": True,
+            }
+
+    # Determine species/organism
+    species_lower = (order.species or "human").lower()
+    uniprot_organism_id = (
+        "10090" if "mouse" in species_lower or "mus" in species_lower
+        else "9606" if "human" in species_lower or "homo" in species_lower
+        else "10116" if "rat" in species_lower or "rattus" in species_lower
+        else ""
+    )
+
+    UNIPROT_BASE = "https://rest.uniprot.org/uniprotkb"
+
+    # Canonical GO CC term normalization
+    GO_CC_KEYWORDS = {
+        "nucleus": ["nucleus", "nuclear", "nucleoplasm", "nucleolus", "chromatin"],
+        "cytoplasm": ["cytoplasm", "cytosol"],
+        "membrane": ["membrane", "plasma membrane", "cell membrane"],
+        "mitochondrion": ["mitochondri"],
+        "endoplasmic reticulum": ["endoplasmic reticulum", "er membrane"],
+        "golgi apparatus": ["golgi"],
+        "cytoskeleton": ["cytoskeleton", "actin", "microtubule"],
+        "extracellular": ["extracellular", "secreted"],
+        "centrosome": ["centrosome", "centriole"],
+        "ribosome": ["ribosom"],
+        "lysosome": ["lysosom", "endosom"],
+        "peroxisome": ["peroxisom"],
+    }
+
+    def _normalize_go_cc(raw_locations: list[str]) -> list[str]:
+        """Normalize raw GO CC / subcellular location strings to canonical terms."""
+        normalized: set[str] = set()
+        for raw in raw_locations:
+            raw_lower = raw.lower()
+            for canonical, keywords in GO_CC_KEYWORDS.items():
+                if any(kw in raw_lower for kw in keywords):
+                    normalized.add(canonical)
+                    break
+            else:
+                # Keep original if no match (but cleaned up)
+                cleaned = raw.strip().rstrip(".").lower()
+                if cleaned and len(cleaned) > 2:
+                    normalized.add(cleaned)
+        return sorted(normalized)
+
+    async def _fetch_go_cc_for_gene(client: httpx.AsyncClient, gene: str) -> list[str]:
+        """Fetch GO Cellular Component terms for a single gene from UniProt."""
+        raw_locations: list[str] = []
+        try:
+            # Search UniProt for the gene
+            query = f"gene_exact:{gene}"
+            if uniprot_organism_id:
+                query += f"+AND+organism_id:{uniprot_organism_id}"
+            query += "+AND+reviewed:true"
+
+            resp = await client.get(
+                f"{UNIPROT_BASE}/search",
+                params={
+                    "query": query,
+                    "fields": "accession,cc_subcellular_location,xref_go",
+                    "format": "json",
+                    "size": "1",
+                },
+            )
+            if resp.status_code != 200:
+                return []
+
+            data = resp.json()
+            entries = data.get("results", [])
+            if not entries:
+                return []
+            entry = entries[0]
+
+            # Extract from subcellularLocations comment
+            for comment in entry.get("comments", []):
+                if comment.get("commentType") == "SUBCELLULAR LOCATION":
+                    for sub_loc in comment.get("subcellularLocations", []):
+                        loc_val = sub_loc.get("location", {}).get("value", "")
+                        if loc_val:
+                            raw_locations.append(loc_val)
+
+            # Extract from GO cross-references (Cellular Component = C)
+            for xref in entry.get("uniProtKBCrossReferences", []):
+                if xref.get("database") == "GO":
+                    go_id = xref.get("id", "")
+                    props = xref.get("properties", [])
+                    for prop in props:
+                        if prop.get("key") == "GoTerm" and prop.get("value", "").startswith("C:"):
+                            # "C:nucleus" → "nucleus"
+                            term = prop["value"][2:]
+                            raw_locations.append(term)
+
+        except Exception:
+            pass
+
+        return _normalize_go_cc(raw_locations)
+
+    # Batch fetch with concurrency limit
+    import asyncio
+    gene_localizations: dict[str, list[str]] = {}
+    unique_genes = list(set(g.upper() for g in genes))
+
+    # Use existing cache as base
+    if order.substrate_go_localization:
+        gene_localizations = dict(order.substrate_go_localization.get("gene_localizations", {}))
+
+    # Only fetch genes not already cached (unless force_refresh)
+    genes_to_fetch = unique_genes if force_refresh else [
+        g for g in unique_genes if g not in gene_localizations
+    ]
+
+    if genes_to_fetch:
+        BATCH_SIZE = 10
+        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+            for i in range(0, len(genes_to_fetch), BATCH_SIZE):
+                batch = genes_to_fetch[i:i + BATCH_SIZE]
+                tasks = [_fetch_go_cc_for_gene(client, g) for g in batch]
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                for gene, result in zip(batch, results):
+                    if isinstance(result, Exception):
+                        gene_localizations[gene] = []
+                    else:
+                        gene_localizations[gene] = result
+                # Small delay between batches to avoid rate limiting
+                if i + BATCH_SIZE < len(genes_to_fetch):
+                    await asyncio.sleep(0.5)
+
+    # Build summary for requested genes only
+    summary: dict[str, int] = {}
+    filtered_localizations: dict[str, list[str]] = {}
+    for g in unique_genes:
+        locs = gene_localizations.get(g, [])
+        filtered_localizations[g] = locs
+        for loc in locs:
+            summary[loc] = summary.get(loc, 0) + 1
+
+    # Save full cache to DB (accumulative)
+    cache_data = {
+        "gene_localizations": gene_localizations,
+        "fetched_at": _dt.utcnow().isoformat(),
+    }
+    order.substrate_go_localization = cache_data
+    await db.commit()
+
+    return {
+        "gene_localizations": filtered_localizations,
+        "summary": dict(sorted(summary.items(), key=lambda x: -x[1])),
+        "_cached": False,
+    }

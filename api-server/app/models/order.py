@@ -99,6 +99,9 @@ class Order(Base):
     # Kinase Activity Temporal Heatmap data (JSON) — computed from vector_data + kinase_modules
     # {kinase_scores: [{kinase, conditions, scores, substrate_count, confidence}], conditions, _cache_hash}
     kinase_activity_heatmap: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    # GO Cellular Component localization data (JSON) — fetched from UniProt
+    # {gene_localizations: {GENE: ["nucleus", "cytoplasm", ...]}, summary: {term: count}, fetched_at}
+    substrate_go_localization: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
     # Watchdog
     watchdog_alerted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
