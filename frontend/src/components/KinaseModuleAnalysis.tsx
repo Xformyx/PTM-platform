@@ -4445,6 +4445,9 @@ interface KinaseActivityScore {
     correlation_with_activity: number;
     relationship: "concordant" | "discordant" | "independent";
   }[] | null;
+  // v11.3.4: Shared-substrate deduplication
+  hidden_by_self_ptm?: boolean;   // true if superseded by a self-PTM kinase in same substrate group
+  superseded_by?: string[];       // kinase(s) with self-PTM that supersede this one
 }
 
 interface PeakSyncEntry {
@@ -4906,6 +4909,9 @@ function KinaseActivityHeatmapView({
     if (!showSubPatterns) {
       scores = scores.filter((ks) => !ks.is_sub_pattern);
     }
+
+    // v11.3.4: Hide kinases superseded by self-PTM kinases in same substrate group
+    scores = scores.filter((ks) => !ks.hidden_by_self_ptm);
 
     // When a specific tier is selected, filter out kinases with zero signal in that tier
     if (signalTierFilter !== "all") {

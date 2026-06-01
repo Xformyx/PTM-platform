@@ -1455,6 +1455,66 @@ def _compute_kinase_activity_heatmap(enriched_data: list, kinase_result: dict, p
     if len(kinase_scores_filtered) < 5 and len(kinase_scores) >= 5:
         kinase_scores_filtered = kinase_scores[:20]  # fallback: top 20 regardless
 
+    # ── v11.3.4: Shared-substrate deduplication ──────────────────────────────
+    # When multiple kinases share highly overlapping substrate sets (Jaccard ≥ 0.8),
+    # and some have self-PTM detected, hide those without self-PTM.
+    _substrate_gene_sets: dict[str, set[str]] = {}
+    for ks_entry in kinase_scores_filtered:
+        if ks_entry.get("is_sub_pattern"):
+            continue
+        genes = set(
+            s["gene"].upper() for s in ks_entry.get("substrates", [])
+            if s.get("gene")
+        )
+        if genes:
+            _substrate_gene_sets[ks_entry["kinase"]] = genes
+
+    _overlap_groups: list[set[str]] = []
+    _assigned: set[str] = set()
+    _kinase_list = list(_substrate_gene_sets.keys())
+    for i, k1 in enumerate(_kinase_list):
+        if k1 in _assigned:
+            continue
+        group = {k1}
+        g1 = _substrate_gene_sets[k1]
+        for k2 in _kinase_list[i+1:]:
+            if k2 in _assigned:
+                continue
+            g2 = _substrate_gene_sets[k2]
+            if not g1 or not g2:
+                continue
+            jaccard = len(g1 & g2) / len(g1 | g2)
+            if jaccard >= 0.8:
+                group.add(k2)
+        if len(group) >= 2:
+            _overlap_groups.append(group)
+            _assigned.update(group)
+
+    _hidden_kinases: set[str] = set()
+    for group in _overlap_groups:
+        has_self_ptm = [
+            k for k in group
+            if any(
+                ks.get("self_ptm") for ks in kinase_scores_filtered
+                if ks.get("kinase") == k and not ks.get("is_sub_pattern")
+            )
+        ]
+        if has_self_ptm:
+            for k in group:
+                if k not in has_self_ptm:
+                    _hidden_kinases.add(k)
+
+    for ks_entry in kinase_scores_filtered:
+        if ks_entry.get("kinase") in _hidden_kinases and not ks_entry.get("is_sub_pattern"):
+            ks_entry["hidden_by_self_ptm"] = True
+            for group in _overlap_groups:
+                if ks_entry["kinase"] in group:
+                    ks_entry["superseded_by"] = [
+                        k for k in group
+                        if k != ks_entry["kinase"] and k not in _hidden_kinases
+                    ]
+                    break
+
     return {
         "kinase_scores": kinase_scores_filtered,
         "conditions": conditions,
