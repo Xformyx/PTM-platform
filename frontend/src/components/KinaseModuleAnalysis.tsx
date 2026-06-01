@@ -4768,6 +4768,8 @@ function KinaseActivityHeatmapView({
   const [goLocSelection, setGoLocSelection] = useState<{ kinase: string; condition: string } | null>(null);
   const [goLocData, setGoLocData] = useState<{ gene_localizations: Record<string, string[]>; summary: Record<string, number> } | null>(null);
   const [goLocLoading, setGoLocLoading] = useState(false);
+  // v11.3: Accumulative GO cache — stores all fetched gene localizations across all kinases
+  const [goLocCache, setGoLocCache] = useState<Record<string, string[]>>({});
   const [hoveredLineKinase, setHoveredLineKinase] = useState<string | null>(null);
   const [lineTooltip, setLineTooltip] = useState<{ x: number; y: number; kinase: string; condition: string; score: number } | null>(null);
   // Fetch heatmap data from backend
@@ -4799,6 +4801,7 @@ function KinaseActivityHeatmapView({
   }, [fetchHeatmapData]);
 
   // v11.3: Fetch GO Cellular Component data when a heatmap cell is clicked
+  // Accumulative: merges new gene data into goLocCache so all expanded rows can show badges
   useEffect(() => {
     if (!goLocSelection) return;
     const { kinase } = goLocSelection;
@@ -4808,24 +4811,43 @@ function KinaseActivityHeatmapView({
     for (const mod of globalKinaseResult.kinase_modules) {
       if (mod.kinase.toUpperCase() === kinaseUpper || (mod.canonical || "").toUpperCase() === kinaseUpper) {
         for (const m of mod.members) {
-          if (!genes.includes(m.gene.toUpperCase())) {
-            genes.push(m.gene.toUpperCase());
-          }
+          const g = m.gene.toUpperCase();
+          if (!genes.includes(g)) genes.push(g);
         }
       }
     }
-    if (genes.length === 0) {
-      setGoLocData(null);
+    if (genes.length === 0) return;
+    // Only fetch genes not already in cache
+    const newGenes = genes.filter(g => !(g in goLocCache));
+    if (newGenes.length === 0) {
+      // Already have all data — just update goLocData for the dashboard
+      const summary: Record<string, number> = {};
+      for (const g of genes) {
+        for (const loc of (goLocCache[g] || [])) {
+          summary[loc] = (summary[loc] || 0) + 1;
+        }
+      }
+      setGoLocData({ gene_localizations: goLocCache, summary });
       return;
     }
     setGoLocLoading(true);
     api.post<{ gene_localizations: Record<string, string[]>; summary: Record<string, number> }>(
       `/orders/${orderId}/substrate-go-localization`,
-      { genes }
+      { genes: newGenes }
     ).then((data) => {
-      setGoLocData(data);
+      // Merge into accumulative cache
+      setGoLocCache(prev => ({ ...prev, ...data.gene_localizations }));
+      // Compute full summary for current selection
+      const merged = { ...goLocCache, ...data.gene_localizations };
+      const summary: Record<string, number> = {};
+      for (const g of genes) {
+        for (const loc of (merged[g] || [])) {
+          summary[loc] = (summary[loc] || 0) + 1;
+        }
+      }
+      setGoLocData({ gene_localizations: merged, summary });
     }).catch(() => {
-      setGoLocData(null);
+      // Don't null out existing data on error
     }).finally(() => {
       setGoLocLoading(false);
     });
@@ -5332,15 +5354,28 @@ function KinaseActivityHeatmapView({
                           title={expandedSubstrates.has(ks.kinase) ? "Hide substrates" : `Show ${ks.substrates.length} substrates with GO localization`}
                           onClick={(e) => {
                             e.stopPropagation();
+                            const isExpanding = !expandedSubstrates.has(ks.kinase);
                             setExpandedSubstrates((prev) => {
                               const next = new Set(prev);
                               if (next.has(ks.kinase)) next.delete(ks.kinase);
                               else next.add(ks.kinase);
                               return next;
                             });
-                            // Auto-fetch GO data if not loaded
-                            if (!goLocData && !goLocLoading) {
-                              setGoLocSelection({ kinase: ks.parent_kinase || ks.kinase, condition: ks.peak_condition });
+                            // Auto-fetch GO data for this row's substrates
+                            if (isExpanding && ks.substrates && !goLocLoading) {
+                              const rowGenes = ks.substrates.map(s => s.gene.toUpperCase());
+                              const missingGenes = rowGenes.filter(g => !(g in goLocCache));
+                              if (missingGenes.length > 0) {
+                                setGoLocLoading(true);
+                                api.post<{ gene_localizations: Record<string, string[]>; summary: Record<string, number> }>(
+                                  `/orders/${orderId}/substrate-go-localization`,
+                                  { genes: missingGenes }
+                                ).then((data) => {
+                                  setGoLocCache(prev => ({ ...prev, ...data.gene_localizations }));
+                                }).catch(() => {}).finally(() => {
+                                  setGoLocLoading(false);
+                                });
+                              }
                             }
                           }}
                         >
@@ -5495,7 +5530,7 @@ function KinaseActivityHeatmapView({
                       <td colSpan={2 + (heatmapData?.conditions?.length || 0) + 4} className="px-4 py-2">
                         <div className="flex flex-wrap gap-1.5 max-h-[120px] overflow-y-auto">
                           {ks.substrates.map((sub) => {
-                            const locs = goLocData?.gene_localizations?.[sub.gene.toUpperCase()] || [];
+                            const locs = goLocCache[sub.gene.toUpperCase()] || goLocData?.gene_localizations?.[sub.gene.toUpperCase()] || [];
                             const locColor: Record<string, string> = {
                               nucleus: "bg-purple-500/20 text-purple-300 border-purple-500/40",
                               cytoplasm: "bg-green-500/20 text-green-300 border-green-500/40",
@@ -5509,7 +5544,7 @@ function KinaseActivityHeatmapView({
                               <span
                                 key={sub.ptm_key}
                                 className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-border/50 text-[10px] bg-background/50"
-                                title={`${sub.gene} ${sub.site}\nPeak |Log2FC|: ${sub.peak_fc}\nGO CC: ${locs.length > 0 ? locs.join(", ") : "(not loaded — click heatmap cell)"}`}
+                                title={`${sub.gene} ${sub.site}\nPeak |Log2FC|: ${sub.peak_fc}\nGO CC: ${locs.length ? locs.join(", ") : goLocLoading ? "(loading...)" : "(no GO CC annotation)"}`}
                               >
                                 <span className="font-medium text-foreground/90">{sub.gene}</span>
                                 <span className="text-muted-foreground/60">{sub.site}</span>

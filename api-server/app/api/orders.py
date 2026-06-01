@@ -7287,14 +7287,18 @@ async def kinase_activity_heatmap(
 
                 # Heuristic: if both cytoplasm and nucleus are represented,
                 # and early peaks before late, it's a translocation candidate
-                early_peak_idx = min(
+                early_indices = [
                     conditions_sorted.index(s["peak_condition"])
-                    for s in early_subs if s["peak_condition"] in conditions_sorted
-                )
-                late_peak_idx = max(
+                    for s in early_subs if s.get("peak_condition") in conditions_sorted
+                ]
+                late_indices = [
                     conditions_sorted.index(s["peak_condition"])
-                    for s in late_subs if s["peak_condition"] in conditions_sorted
-                )
+                    for s in late_subs if s.get("peak_condition") in conditions_sorted
+                ]
+                if not early_indices or not late_indices:
+                    continue
+                early_peak_idx = min(early_indices)
+                late_peak_idx = max(late_indices)
 
                 if (early_peak_idx < late_peak_idx and
                     cytoplasm_count >= 2 and nucleus_count >= 2 and
