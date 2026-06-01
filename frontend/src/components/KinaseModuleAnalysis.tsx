@@ -5457,16 +5457,25 @@ function KinaseActivityHeatmapView({
                         const badgeStyle = ne.tier1_count > 0
                           ? "bg-purple-500/20 text-purple-300 border-purple-500/40"  // Tier1 = confirmed nuclear
                           : "bg-indigo-500/15 text-indigo-300 border-indigo-500/30"; // Tier2 only = likely nuclear
+                        // v11.3.4b: Check cluster membership details
+                        const t1Details = (ne as any).tier1_details as { gene: string; in_dominant: boolean }[] | undefined;
+                        const t2Details = (ne as any).tier2_details as { gene: string; in_dominant: boolean }[] | undefined;
+                        const t1InDom = t1Details?.filter(d => d.in_dominant).map(d => d.gene) || [];
+                        const t1NotDom = t1Details?.filter(d => !d.in_dominant).map(d => d.gene) || [];
+                        const t2InDom = t2Details?.filter(d => d.in_dominant).map(d => d.gene) || [];
+                        const t2NotDom = t2Details?.filter(d => !d.in_dominant).map(d => d.gene) || [];
                         // Build tooltip
                         const tipParts: string[] = [];
                         if (ne.tier1_count > 0) {
                           tipParts.push(`🧬 Tier 1 (Absolute Nuclear Markers): ${ne.tier1_count}`);
-                          tipParts.push(`  ${ne.tier1_genes.join(", ")}`);
+                          if (t1InDom.length > 0) tipParts.push(`  ★ In dominant cluster: ${t1InDom.join(", ")}`);
+                          if (t1NotDom.length > 0) tipParts.push(`  ○ In other cluster(s): ${t1NotDom.join(", ")}`);
                           tipParts.push("");
                         }
                         if (ne.tier2_count > 0) {
                           tipParts.push(`🔬 Tier 2 (Predominantly Nuclear): ${ne.tier2_count}`);
-                          tipParts.push(`  ${ne.tier2_genes.slice(0, 10).join(", ")}${ne.tier2_genes.length > 10 ? ` +${ne.tier2_genes.length - 10}` : ""}`);
+                          if (t2InDom.length > 0) tipParts.push(`  ★ In dominant cluster: ${t2InDom.slice(0, 8).join(", ")}${t2InDom.length > 8 ? ` +${t2InDom.length - 8}` : ""}`);
+                          if (t2NotDom.length > 0) tipParts.push(`  ○ In other cluster(s): ${t2NotDom.slice(0, 8).join(", ")}${t2NotDom.length > 8 ? ` +${t2NotDom.length - 8}` : ""}`);
                           tipParts.push("");
                         }
                         tipParts.push(`Nuclear Evidence Score: ${ne.score} (T1×2 + T2×1)`);
@@ -5481,10 +5490,19 @@ function KinaseActivityHeatmapView({
                           tipParts.push("remodelers, TFs) are predominantly nuclear.");
                           tipParts.push("Suggests likely nuclear kinase activity.");
                         }
-                        // Compact display: show top gene names
-                        const displayGenes = ne.tier1_genes.length > 0
-                          ? ne.tier1_genes.slice(0, 3)
-                          : ne.tier2_genes.slice(0, 2);
+                        if (t1NotDom.length > 0 || t2NotDom.length > 0) {
+                          tipParts.push("");
+                          tipParts.push("Note: Some nuclear markers are in non-dominant");
+                          tipParts.push("clusters (different temporal pattern from main activity).");
+                        }
+                        // Compact display: show genes with cluster indicator
+                        // Prioritize genes in dominant cluster, then others
+                        const domGenes = [...t1InDom, ...t2InDom];
+                        const otherGenes = [...t1NotDom, ...t2NotDom];
+                        const displayGenes = domGenes.length > 0
+                          ? domGenes.slice(0, 3)
+                          : otherGenes.slice(0, 3);
+                        const clusterNote = domGenes.length === 0 && otherGenes.length > 0 ? "†" : "";
                         return (
                           <span
                             className={`ml-1 text-[8px] px-1 py-0 rounded border cursor-help inline-flex items-center gap-0.5 ${badgeStyle}`}
@@ -5492,7 +5510,7 @@ function KinaseActivityHeatmapView({
                           >
                             {ne.tier1_count > 0 ? "🧬" : "🔬"}
                             <span className="font-medium">nuc</span>
-                            <span className="opacity-70">{displayGenes.join(",")}</span>
+                            <span className="opacity-70">{displayGenes.join(",")}{clusterNote}</span>
                           </span>
                         );
                       })()}

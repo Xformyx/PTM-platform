@@ -1275,6 +1275,23 @@ def _compute_kinase_activity_heatmap(enriched_data: list, kinase_result: dict, p
         # v11.3.2: Compute nuclear evidence from ALL substrates
         all_substrate_genes = [m.get("gene", "") for m in members]
         nuclear_ev = _compute_nuclear_evidence(all_substrate_genes)
+        # v11.3.4b: Annotate each nuclear marker gene with cluster membership
+        if nuclear_ev["score"] > 0:
+            _gene_cluster_map: dict[str, int] = {}
+            for cl in clusters:
+                cl_id = cl.get("cluster_id", 0)
+                for pk in cl.get("ptm_keys", []):
+                    gene_part = pk.split("_")[0].upper() if "_" in pk else pk.upper()
+                    _gene_cluster_map[gene_part] = cl_id
+            dominant_cluster_id = dominant.get("cluster_id", 0)
+            nuclear_ev["tier1_details"] = [
+                {"gene": g, "in_dominant": _gene_cluster_map.get(g, -1) == dominant_cluster_id}
+                for g in nuclear_ev["tier1_genes"]
+            ]
+            nuclear_ev["tier2_details"] = [
+                {"gene": g, "in_dominant": _gene_cluster_map.get(g, -1) == dominant_cluster_id}
+                for g in nuclear_ev["tier2_genes"]
+            ]
 
         # v11.3.1: Collect same-time clusters (same peak as parent) for tooltip
         same_time_clusters: list = []
