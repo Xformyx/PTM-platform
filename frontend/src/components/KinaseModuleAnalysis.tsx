@@ -13,7 +13,7 @@
  * Receives time-series data + selected PTMs from the parent TopNTimeSeriesPlot.
  */
 
-import { useState, useMemo, useCallback, useEffect } from "react";
+import { useState, useMemo, useCallback, useEffect, Fragment } from "react";
 import {
   Loader2,
   Search,
@@ -5220,7 +5220,7 @@ function KinaseActivityHeatmapView({
                 const cwGroup = ks.cowave_group ?? -1;
                 const cwColor = cwGroup >= 0 ? COWAVE_GROUP_COLORS[cwGroup % COWAVE_GROUP_COLORS.length] : null;
                 return (
-                <React.Fragment key={ks.kinase}>
+                <Fragment key={ks.kinase}>
                   <tr
                     className="border-b border-border/30 hover:bg-muted/20 cursor-pointer"
                     onClick={() => {
@@ -5531,7 +5531,7 @@ function KinaseActivityHeatmapView({
                       </td>
                     </tr>
                   )}
-                </React.Fragment>
+                </Fragment>
               );
               })}
             </tbody>
