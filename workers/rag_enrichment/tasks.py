@@ -846,14 +846,118 @@ def _compute_kinase_activity_heatmap(enriched_data: list, kinase_result: dict, p
             return 0.0
 
     # ── Helper: cluster substrates by temporal trajectory shape ──
+    # v11.3: Stratified Clustering (Magnitude Tiers) + Absolute Correlation
     MIN_SUBSTRATES_FOR_CLUSTERING = 10
 
-    def _cluster_substrates(members, conditions):
-        """Cluster substrates by L2-normalized temporal trajectory.
+    # Magnitude tier thresholds
+    TIER1_THRESHOLD = 5.0   # De novo / Strong: max |Log2FC| > 5.0
+    TIER2_THRESHOLD = 2.0   # Regulated / Moderate: 2.0 < max |Log2FC| <= 5.0
+    # Tier 3: max |Log2FC| <= 2.0 (Minor / Weak)
 
-        Returns list of clusters, each = {cluster_id, member_keys, size, scores,
-        coherence, peak_condition, peak_score, direction, is_dominant}.
-        If n < MIN_SUBSTRATES_FOR_CLUSTERING, returns single cluster with all members.
+    def _assign_tier(member_vector):
+        """Assign magnitude tier based on max absolute Log2FC across conditions."""
+        max_abs = max(abs(v) for v in member_vector)
+        if max_abs > TIER1_THRESHOLD:
+            return 1  # Strong / De novo
+        elif max_abs > TIER2_THRESHOLD:
+            return 2  # Regulated / Moderate
+        else:
+            return 3  # Minor / Weak
+
+    def _abs_corr_distance(arr_normed):
+        """Compute distance matrix using 1 - |Pearson r| (absolute correlation).
+
+        This groups substrates with the SAME temporal shape regardless of sign:
+        [+2, +4, +3, +1] and [-2, -4, -3, -1] will cluster together (|r| = 1.0).
+        After clustering, we tag members as 'positive' or 'negative' targets.
+        """
+        n = arr_normed.shape[0]
+        corr = np.corrcoef(arr_normed)
+        # Handle NaN (constant rows)
+        corr = np.nan_to_num(corr, nan=0.0)
+        # Distance = 1 - |r|
+        dist = 1.0 - np.abs(corr)
+        np.fill_diagonal(dist, 0.0)
+        return dist
+
+    def _kmeans_with_abs_corr(arr_normed, k, n_init=10, max_iter=300, seed=42):
+        """K-Means using 1 - |r| as distance metric.
+
+        Standard K-Means uses Euclidean distance. To use correlation-based distance,
+        we transform the data: project onto unit sphere in correlation space.
+        For absolute correlation, we additionally take abs of normalized vectors
+        before clustering (so anti-correlated patterns map to same direction).
+        """
+        # Strategy: fold sign — map all vectors to positive-dominant direction
+        # then cluster by Euclidean on L2-normed folded vectors
+        n, d = arr_normed.shape
+
+        # For each vector, if sum < 0, flip sign (fold into positive half-space)
+        folded = arr_normed.copy()
+        for i in range(n):
+            if np.sum(folded[i]) < 0:
+                folded[i] = -folded[i]
+
+        # Re-normalize after folding
+        norms = np.linalg.norm(folded, axis=1, keepdims=True)
+        norms[norms < 1e-9] = 1.0
+        folded = folded / norms
+
+        # Standard K-Means on folded vectors
+        return _numpy_kmeans(folded, k=k, n_init=n_init, max_iter=max_iter, seed=seed)
+
+    def _compute_coherence_abs(member_list, conditions):
+        """Compute coherence using absolute Pearson r.
+
+        This correctly handles anti-correlated substrates within the same
+        regulatory module (e.g., kinase activates some, inhibits others).
+        Returns mean pairwise |r| for member trajectories.
+        """
+        vectors = []
+        for g, p in member_list:
+            row = [ptm_values.get((g, p, c), 0.0) for c in conditions]
+            if any(v != 0 for v in row):
+                vectors.append(row)
+        if len(vectors) < 2:
+            return 0.0
+        try:
+            arr = np.array(vectors)
+            corr_matrix = np.corrcoef(arr)
+            n = corr_matrix.shape[0]
+            upper = [abs(corr_matrix[i][j]) for i in range(n) for j in range(i + 1, n)
+                     if not np.isnan(corr_matrix[i][j])]
+            return round(float(np.mean(upper)), 3) if upper else 0.0
+        except Exception:
+            return 0.0
+
+    def _tag_sign_groups(member_list, conditions):
+        """Tag each member as 'positive' or 'negative' target based on net FC direction.
+
+        Within an absolute-correlation cluster, some substrates go up and some go down.
+        This separates them for biological interpretation.
+        """
+        positive_targets = []
+        negative_targets = []
+        for g, p in member_list:
+            net_fc = sum(ptm_values.get((g, p, c), 0.0) for c in conditions)
+            if net_fc >= 0:
+                positive_targets.append((g, p))
+            else:
+                negative_targets.append((g, p))
+        return positive_targets, negative_targets
+
+    def _cluster_substrates(members, conditions):
+        """Cluster substrates using Stratified (Magnitude Tier) + Absolute Correlation.
+
+        v11.3 Algorithm:
+          1. Assign each substrate to a Magnitude Tier (Strong/Moderate/Weak)
+          2. Within each tier, cluster by absolute-correlation K-Means
+             (anti-correlated substrates group together)
+          3. Tag positive/negative targets within each cluster
+          4. Score each sub-cluster independently
+          5. Select dominant cluster across all tiers
+
+        Returns list of clusters with sign-tagged members.
         """
         # Build trajectory matrix
         valid_members = []  # [(gene, pos)]
@@ -874,10 +978,11 @@ def _compute_kinase_activity_heatmap(enriched_data: list, kinase_result: dict, p
         # ── Single-cluster fallback ──
         if n_subs < MIN_SUBSTRATES_FOR_CLUSTERING or n_conditions < 2:
             scores = _score_members(valid_members, conditions)
-            coh = _compute_coherence(valid_members, conditions)
+            coh = _compute_coherence_abs(valid_members, conditions)
             peak_c = max(conditions, key=lambda c: abs(scores.get(c, 0)))
             peak_s = scores.get(peak_c, 0)
             direction = "activation" if peak_s > 0.3 else ("inactivation" if peak_s < -0.3 else "neutral")
+            pos_targets, neg_targets = _tag_sign_groups(valid_members, conditions)
             return [{
                 "cluster_id": 0,
                 "member_keys": valid_members,
@@ -888,26 +993,122 @@ def _compute_kinase_activity_heatmap(enriched_data: list, kinase_result: dict, p
                 "peak_score": peak_s,
                 "direction": direction,
                 "is_dominant": True,
+                "tier": "mixed",
+                "positive_targets": len(pos_targets),
+                "negative_targets": len(neg_targets),
             }]
 
-        # ── K-Means on L2-normalized trajectories (shape-based clustering) ──
-        arr = np.array(raw_vectors, dtype=np.float64)
-        # L2-normalize: [+0.5, +1, +0.5, 0] and [+2, +4, +2, 0] → same direction
-        norms = np.linalg.norm(arr, axis=1, keepdims=True)
-        norms[norms < 1e-9] = 1.0  # avoid division by zero
-        arr_normed = arr / norms
+        # ── Step 1: Assign Magnitude Tiers ──
+        tiers = {1: [], 2: [], 3: []}  # tier -> [(idx, (gene, pos), vector)]
+        for idx, (member, vec) in enumerate(zip(valid_members, raw_vectors)):
+            tier = _assign_tier(vec)
+            tiers[tier].append((idx, member, vec))
 
-        # Determine K: scale with substrate count, cap at 4
-        k = min(4, max(2, n_subs // 50))
-        # Ensure k <= n_subs
-        k = min(k, n_subs)
+        # ── Step 2: Cluster within each tier using absolute correlation ──
+        all_clusters = []
+        cluster_id_counter = 0
 
-        try:
-            labels = _numpy_kmeans(arr_normed, k=k, n_init=10, max_iter=300, seed=42)
-        except Exception:
-            # Fallback: single cluster
+        tier_names = {1: "strong", 2: "moderate", 3: "weak"}
+
+        for tier_num in [1, 2, 3]:
+            tier_data = tiers[tier_num]
+            if not tier_data:
+                continue
+
+            tier_members = [(d[1][0], d[1][1]) for d in tier_data]
+            tier_vectors = [d[2] for d in tier_data]
+            n_tier = len(tier_members)
+
+            if n_tier < MIN_SUBSTRATES_FOR_CLUSTERING:
+                # Too few for clustering — treat as single cluster
+                scores = _score_members(tier_members, conditions)
+                coh = _compute_coherence_abs(tier_members, conditions)
+                peak_c = max(conditions, key=lambda c: abs(scores.get(c, 0)))
+                peak_s = scores.get(peak_c, 0)
+                direction = "activation" if peak_s > 0.3 else ("inactivation" if peak_s < -0.3 else "neutral")
+                pos_targets, neg_targets = _tag_sign_groups(tier_members, conditions)
+
+                # Dominant selection score
+                dominance = max(coh, 0.01) * (n_tier ** 0.5) * max(abs(peak_s), 0.01)
+
+                all_clusters.append({
+                    "cluster_id": cluster_id_counter,
+                    "member_keys": tier_members,
+                    "size": n_tier,
+                    "scores": scores,
+                    "coherence": coh,
+                    "peak_condition": peak_c,
+                    "peak_score": peak_s,
+                    "direction": direction,
+                    "is_dominant": False,
+                    "tier": tier_names[tier_num],
+                    "positive_targets": len(pos_targets),
+                    "negative_targets": len(neg_targets),
+                    "_dominance_score": round(dominance, 4),
+                })
+                cluster_id_counter += 1
+                continue
+
+            # L2-normalize for shape-based clustering
+            arr = np.array(tier_vectors, dtype=np.float64)
+            norms = np.linalg.norm(arr, axis=1, keepdims=True)
+            norms[norms < 1e-9] = 1.0
+            arr_normed = arr / norms
+
+            # K within tier: scale with tier size, cap at 3
+            k_tier = min(3, max(2, n_tier // 30))
+            k_tier = min(k_tier, n_tier)
+
+            try:
+                labels = _kmeans_with_abs_corr(arr_normed, k=k_tier, n_init=10, max_iter=300, seed=42)
+            except Exception:
+                labels = np.zeros(n_tier, dtype=int)
+
+            # Build sub-clusters within this tier
+            tier_cluster_members = {}  # label -> [(gene, pos)]
+            for idx, label in enumerate(labels):
+                label = int(label)
+                tier_cluster_members.setdefault(label, []).append(tier_members[idx])
+
+            for sub_cid, c_members in sorted(tier_cluster_members.items()):
+                c_size = len(c_members)
+                if c_size < 2:
+                    continue  # skip singleton clusters
+
+                c_scores = _score_members(c_members, conditions)
+                c_coh = _compute_coherence_abs(c_members, conditions)
+                c_peak_c = max(conditions, key=lambda c: abs(c_scores.get(c, 0)))
+                c_peak_s = c_scores.get(c_peak_c, 0)
+                c_dir = "activation" if c_peak_s > 0.3 else ("inactivation" if c_peak_s < -0.3 else "neutral")
+                pos_targets, neg_targets = _tag_sign_groups(c_members, conditions)
+
+                # Dominant selection: coherence × √size × |peak_score|
+                # Tier 1 (strong) gets 2x bonus, Tier 2 gets 1.5x
+                tier_bonus = {1: 2.0, 2: 1.5, 3: 1.0}[tier_num]
+                dominance = max(c_coh, 0.01) * (c_size ** 0.5) * max(abs(c_peak_s), 0.01) * tier_bonus
+
+                all_clusters.append({
+                    "cluster_id": cluster_id_counter,
+                    "member_keys": c_members,
+                    "size": c_size,
+                    "scores": c_scores,
+                    "coherence": c_coh,
+                    "peak_condition": c_peak_c,
+                    "peak_score": c_peak_s,
+                    "direction": c_dir,
+                    "is_dominant": False,
+                    "tier": tier_names[tier_num],
+                    "positive_targets": len(pos_targets),
+                    "negative_targets": len(neg_targets),
+                    "_dominance_score": round(dominance, 4),
+                })
+                cluster_id_counter += 1
+
+        # ── Step 3: Select dominant cluster across all tiers ──
+        if not all_clusters:
+            # Extreme fallback: no valid clusters formed
             scores = _score_members(valid_members, conditions)
-            coh = _compute_coherence(valid_members, conditions)
+            coh = _compute_coherence_abs(valid_members, conditions)
             peak_c = max(conditions, key=lambda c: abs(scores.get(c, 0)))
             peak_s = scores.get(peak_c, 0)
             direction = "activation" if peak_s > 0.3 else ("inactivation" if peak_s < -0.3 else "neutral")
@@ -921,52 +1122,16 @@ def _compute_kinase_activity_heatmap(enriched_data: list, kinase_result: dict, p
                 "peak_score": peak_s,
                 "direction": direction,
                 "is_dominant": True,
+                "tier": "mixed",
+                "positive_targets": n_subs,
+                "negative_targets": 0,
             }]
 
-        # ── Build cluster details ──
-        cluster_members = {}  # label -> [(gene, pos)]
-        for idx, label in enumerate(labels):
-            label = int(label)
-            cluster_members.setdefault(label, []).append(valid_members[idx])
+        # Find dominant by dominance score
+        best_idx = max(range(len(all_clusters)), key=lambda i: all_clusters[i]["_dominance_score"])
+        all_clusters[best_idx]["is_dominant"] = True
 
-        clusters = []
-        best_score = -1.0
-        best_idx = 0
-
-        for cid, c_members in sorted(cluster_members.items()):
-            c_size = len(c_members)
-            c_scores = _score_members(c_members, conditions)
-            c_coh = _compute_coherence(c_members, conditions)
-            c_peak_c = max(conditions, key=lambda c: abs(c_scores.get(c, 0)))
-            c_peak_s = c_scores.get(c_peak_c, 0)
-            c_dir = "activation" if c_peak_s > 0.3 else ("inactivation" if c_peak_s < -0.3 else "neutral")
-
-            # Dominant cluster selection score:
-            # coherence × √(size) × max(|score|)
-            # Rewards: pattern consistency, statistical power, signal strength
-            dominance = max(c_coh, 0.01) * (c_size ** 0.5) * max(abs(c_peak_s), 0.01)
-
-            clusters.append({
-                "cluster_id": cid,
-                "member_keys": c_members,
-                "size": c_size,
-                "scores": c_scores,
-                "coherence": c_coh,
-                "peak_condition": c_peak_c,
-                "peak_score": c_peak_s,
-                "direction": c_dir,
-                "is_dominant": False,
-                "_dominance_score": round(dominance, 4),
-            })
-
-            if dominance > best_score:
-                best_score = dominance
-                best_idx = len(clusters) - 1
-
-        if clusters:
-            clusters[best_idx]["is_dominant"] = True
-
-        return clusters
+        return all_clusters
 
     # ══════════════════════════════════════════════════════════════════════════
     # Build kinase -> PTM mapping from kinase_result

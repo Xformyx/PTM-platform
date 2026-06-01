@@ -6543,7 +6543,9 @@ async def kinase_activity_heatmap(
         return best_labels
 
     def _compute_coherence_for_keys(ptm_keys_list):
-        """Compute mean pairwise Pearson r for a list of PTM keys."""
+        """Compute mean pairwise |Pearson r| for a list of PTM keys.
+        v11.3: Uses absolute correlation to correctly handle anti-correlated
+        substrates within the same regulatory module."""
         vectors = []
         for pk in ptm_keys_list:
             ts = ptm_timeseries.get(pk, {})
@@ -6557,14 +6559,52 @@ async def kinase_activity_heatmap(
             arr = np.array(vectors)
             corr_matrix = np.corrcoef(arr)
             n = corr_matrix.shape[0]
-            upper = [corr_matrix[i][j] for i in range(n) for j in range(i + 1, n)
+            upper = [abs(corr_matrix[i][j]) for i in range(n) for j in range(i + 1, n)
                      if not np.isnan(corr_matrix[i][j])]
             return round(float(np.mean(upper)), 3) if upper else 0.0
         except Exception:
             return 0.0
 
+    # ── Winsorized Mean constants (v11.2+) ──
+    WINSORIZE_LOWER = 5   # percentile
+    WINSORIZE_UPPER = 95  # percentile
+
+    # v11.3: Magnitude tier thresholds for Stratified Clustering
+    TIER1_THRESHOLD = 5.0   # De novo / Strong: max |Log2FC| > 5.0
+    TIER2_THRESHOLD = 2.0   # Regulated / Moderate: 2.0 < max |Log2FC| <= 5.0
+    # Tier 3: max |Log2FC| <= 2.0 (Minor / Weak)
+
+    def _assign_tier_api(fc_vector):
+        """Assign magnitude tier based on max absolute Log2FC."""
+        max_abs = max(abs(v) for v in fc_vector) if fc_vector else 0
+        if max_abs > TIER1_THRESHOLD:
+            return 1  # Strong
+        elif max_abs > TIER2_THRESHOLD:
+            return 2  # Moderate
+        else:
+            return 3  # Weak
+
+    def _kmeans_abs_corr_api(arr_normed, k, n_init=10, max_iter=300, seed=42):
+        """K-Means using absolute correlation: fold sign then Euclidean."""
+        n, d = arr_normed.shape
+        folded = arr_normed.copy()
+        for i in range(n):
+            if np.sum(folded[i]) < 0:
+                folded[i] = -folded[i]
+        norms = np.linalg.norm(folded, axis=1, keepdims=True)
+        norms[norms < 1e-9] = 1.0
+        folded = folded / norms
+        return _numpy_kmeans(folded, k=k, n_init=n_init, max_iter=max_iter, seed=seed)
+
     def _cluster_ptms_by_trajectory(ptm_list):
-        """Cluster PTMs by L2-normalized temporal trajectory.
+        """v11.3: Stratified Clustering (Magnitude Tiers) + Absolute Correlation.
+
+        Algorithm:
+          1. Assign each substrate to a Magnitude Tier (Strong/Moderate/Weak)
+          2. Within each tier, cluster by absolute-correlation K-Means
+          3. Score each sub-cluster independently (Winsorized Mean)
+          4. Select dominant cluster across all tiers (with tier bonus)
+
         Returns list of clusters: [{ptm_keys, size, coherence, ...}].
         """
         valid_keys = []
@@ -6581,52 +6621,123 @@ async def kinase_activity_heatmap(
         if not valid_keys:
             return []
         n_subs = len(valid_keys)
-        if n_subs < MIN_SUBSTRATES_FOR_CLUSTERING or n_conditions < 2:
-            return [{"ptm_keys": valid_keys, "cluster_id": 0, "size": n_subs, "coherence": _compute_coherence_for_keys(valid_keys), "is_dominant": True}]
-        arr = np.array(raw_vectors, dtype=np.float64)
-        norms = np.linalg.norm(arr, axis=1, keepdims=True)
-        norms[norms < 1e-9] = 1.0
-        arr_normed = arr / norms
-        k = min(4, max(2, n_subs // 50))
-        k = min(k, n_subs)
-        try:
-            labels = _numpy_kmeans(arr_normed, k=k, n_init=10, max_iter=300, seed=42)
-        except Exception:
-            return [{"ptm_keys": valid_keys, "cluster_id": 0, "size": n_subs, "coherence": _compute_coherence_for_keys(valid_keys), "is_dominant": True}]
-        cluster_map: dict[int, list[str]] = {}
-        for idx, label in enumerate(labels):
-            cluster_map.setdefault(int(label), []).append(valid_keys[idx])
-        clusters = []
-        best_score = -1.0
-        best_idx = 0
-        for cid, c_keys in sorted(cluster_map.items()):
-            c_coh = _compute_coherence_for_keys(c_keys)
-            # Compute peak signal for dominance scoring
-            c_peak = 0.0
-            for c in conditions_sorted:
-                c_sum = sum(ptm_timeseries.get(pk, {}).get(c, 0.0) for pk in c_keys)
-                c_avg = c_sum / max(len(c_keys), 1)
-                if abs(c_avg) > abs(c_peak):
-                    c_peak = c_avg
-            dominance = max(c_coh, 0.01) * (len(c_keys) ** 0.5) * max(abs(c_peak), 0.01)
-            clusters.append({
-                "ptm_keys": c_keys,
-                "cluster_id": cid,
-                "size": len(c_keys),
-                "coherence": c_coh,
-                "is_dominant": False,
-                "_dominance_score": round(dominance, 4),
-            })
-            if dominance > best_score:
-                best_score = dominance
-                best_idx = len(clusters) - 1
-        if clusters:
-            clusters[best_idx]["is_dominant"] = True
-        return clusters
 
-    # ── Main scoring loop with substrate clustering + Winsorized Mean (v11.2) ──
-    WINSORIZE_LOWER = 5   # percentile
-    WINSORIZE_UPPER = 95  # percentile
+        # Fallback: too few substrates or conditions
+        if n_subs < MIN_SUBSTRATES_FOR_CLUSTERING or n_conditions < 2:
+            coh = _compute_coherence_for_keys(valid_keys)
+            return [{"ptm_keys": valid_keys, "cluster_id": 0, "size": n_subs,
+                     "coherence": coh, "is_dominant": True, "tier": "mixed"}]
+
+        # ── Step 1: Assign Magnitude Tiers ──
+        tiers: dict[int, list[tuple[int, str, list[float]]]] = {1: [], 2: [], 3: []}
+        for idx, (pk, vec) in enumerate(zip(valid_keys, raw_vectors)):
+            tier = _assign_tier_api(vec)
+            tiers[tier].append((idx, pk, vec))
+
+        # ── Step 2: Cluster within each tier ──
+        all_clusters = []
+        cluster_id_counter = 0
+        tier_names = {1: "strong", 2: "moderate", 3: "weak"}
+        tier_bonus_map = {1: 2.0, 2: 1.5, 3: 1.0}
+
+        for tier_num in [1, 2, 3]:
+            tier_data = tiers[tier_num]
+            if not tier_data:
+                continue
+
+            tier_keys = [d[1] for d in tier_data]
+            tier_vectors = [d[2] for d in tier_data]
+            n_tier = len(tier_keys)
+
+            if n_tier < MIN_SUBSTRATES_FOR_CLUSTERING:
+                # Too few — single cluster for this tier
+                coh = _compute_coherence_for_keys(tier_keys)
+                # Compute Winsorized Mean score per condition
+                tier_scores = {}
+                for c in conditions_sorted:
+                    vals = [ptm_timeseries.get(pk, {}).get(c, 0.0) for pk in tier_keys]
+                    non_zero = [v for v in vals if v != 0]
+                    if len(non_zero) >= 5:
+                        arr_v = np.array(non_zero)
+                        lo = float(np.percentile(arr_v, WINSORIZE_LOWER))
+                        hi = float(np.percentile(arr_v, WINSORIZE_UPPER))
+                    else:
+                        lo, hi = -1e9, 1e9
+                    winsorized = [max(lo, min(hi, v)) for v in vals if v != 0 or abs(v) >= FC_THRESHOLD]
+                    tier_scores[c] = round(float(np.mean(winsorized)), 4) if winsorized else 0.0
+                peak_c = max(conditions_sorted, key=lambda c: abs(tier_scores.get(c, 0)))
+                peak_s = tier_scores.get(peak_c, 0)
+                dominance = max(coh, 0.01) * (n_tier ** 0.5) * max(abs(peak_s), 0.01) * tier_bonus_map[tier_num]
+                all_clusters.append({
+                    "ptm_keys": tier_keys, "cluster_id": cluster_id_counter,
+                    "size": n_tier, "coherence": coh, "is_dominant": False,
+                    "tier": tier_names[tier_num],
+                    "_dominance_score": round(dominance, 4),
+                    "_scores": tier_scores, "_peak_condition": peak_c, "_peak_score": peak_s,
+                })
+                cluster_id_counter += 1
+                continue
+
+            # L2-normalize for shape clustering
+            arr = np.array(tier_vectors, dtype=np.float64)
+            norms = np.linalg.norm(arr, axis=1, keepdims=True)
+            norms[norms < 1e-9] = 1.0
+            arr_normed = arr / norms
+
+            k_tier = min(3, max(2, n_tier // 30))
+            k_tier = min(k_tier, n_tier)
+
+            try:
+                labels = _kmeans_abs_corr_api(arr_normed, k=k_tier, n_init=10, max_iter=300, seed=42)
+            except Exception:
+                labels = np.zeros(n_tier, dtype=int)
+
+            # Build sub-clusters
+            tier_cluster_map: dict[int, list[str]] = {}
+            for idx_l, label in enumerate(labels):
+                tier_cluster_map.setdefault(int(label), []).append(tier_keys[idx_l])
+
+            for sub_cid, c_keys in sorted(tier_cluster_map.items()):
+                c_size = len(c_keys)
+                if c_size < 2:
+                    continue
+                c_coh = _compute_coherence_for_keys(c_keys)
+                # Winsorized Mean score per condition
+                c_scores = {}
+                for c in conditions_sorted:
+                    vals = [ptm_timeseries.get(pk, {}).get(c, 0.0) for pk in c_keys]
+                    non_zero = [v for v in vals if v != 0]
+                    if len(non_zero) >= 5:
+                        arr_v = np.array(non_zero)
+                        lo = float(np.percentile(arr_v, WINSORIZE_LOWER))
+                        hi = float(np.percentile(arr_v, WINSORIZE_UPPER))
+                    else:
+                        lo, hi = -1e9, 1e9
+                    winsorized = [max(lo, min(hi, v)) for v in vals if abs(v) >= FC_THRESHOLD or v != 0]
+                    c_scores[c] = round(float(np.mean(winsorized)), 4) if winsorized else 0.0
+                c_peak_c = max(conditions_sorted, key=lambda c: abs(c_scores.get(c, 0)))
+                c_peak_s = c_scores.get(c_peak_c, 0)
+                dominance = max(c_coh, 0.01) * (c_size ** 0.5) * max(abs(c_peak_s), 0.01) * tier_bonus_map[tier_num]
+                all_clusters.append({
+                    "ptm_keys": c_keys, "cluster_id": cluster_id_counter,
+                    "size": c_size, "coherence": c_coh, "is_dominant": False,
+                    "tier": tier_names[tier_num],
+                    "_dominance_score": round(dominance, 4),
+                    "_scores": c_scores, "_peak_condition": c_peak_c, "_peak_score": c_peak_s,
+                })
+                cluster_id_counter += 1
+
+        # ── Step 3: Select dominant cluster ──
+        if not all_clusters:
+            coh = _compute_coherence_for_keys(valid_keys)
+            return [{"ptm_keys": valid_keys, "cluster_id": 0, "size": n_subs,
+                     "coherence": coh, "is_dominant": True, "tier": "mixed"}]
+
+        best_idx = max(range(len(all_clusters)), key=lambda i: all_clusters[i]["_dominance_score"])
+        all_clusters[best_idx]["is_dominant"] = True
+        return all_clusters
+
+    # ── Main scoring loop with substrate clustering + Winsorized Mean (v11.3) ──
 
     kinase_scores = []
     for km in kinase_modules:
@@ -6634,49 +6745,50 @@ async def kinase_activity_heatmap(
         ptms = km.get("ptms", [])
         confidence = km.get("confidence_score", 0.5)
 
-        # v11.0: Cluster substrates by temporal trajectory
+        # v11.3: Cluster substrates by temporal trajectory (Stratified + AbsCorr)
         clusters = _cluster_ptms_by_trajectory(ptms)
         if not clusters:
             continue
         dominant = next((cl for cl in clusters if cl["is_dominant"]), clusters[0])
         dominant_keys = set(dominant["ptm_keys"])
 
-        # Collect raw FC values per condition for dominant cluster substrates
-        # (for Winsorization)
-        raw_fc_per_cond: dict[str, list[float]] = {c: [] for c in conditions_sorted}
-        ptm_fc_map: dict[str, dict[str, float]] = {}  # ptm_key -> {cond -> fc}
-        ptm_q_map: dict[str, dict[str, float | None]] = {}
-        ptm_exclusive_map: dict[str, bool] = {}
-
-        for ptm in ptms:
-            ptm_key = f"{ptm.get('gene', '').upper()}_{str(ptm.get('position', '')).upper()}"
-            if ptm_key not in dominant_keys:
-                continue
-            ts = ptm_timeseries.get(ptm_key, {})
-            if not ts:
-                continue
-            ptm_fc_map[ptm_key] = {}
-            ptm_q_map[ptm_key] = {}
-            ptm_exclusive_map[ptm_key] = len(ptm_to_kinases.get(ptm_key, [])) <= 1
+        # v11.3: Use pre-computed _scores from dominant cluster when available
+        if "_scores" in dominant:
+            scores = dict(dominant["_scores"])
+            peak_cond = dominant.get("_peak_condition", "")
+            peak_score = dominant.get("_peak_score", 0.0)
+        else:
+            # Fallback: compute Winsorized Mean from raw PTM data
+            _raw_fc: dict[str, list[float]] = {c: [] for c in conditions_sorted}
+            for pk in dominant_keys:
+                ts = ptm_timeseries.get(pk, {})
+                if not ts:
+                    continue
+                for c in conditions_sorted:
+                    fc = ts.get(c, 0.0)
+                    if fc != 0 or abs(fc) >= FC_THRESHOLD:
+                        _raw_fc[c].append(fc)
+            scores = {}
             for c in conditions_sorted:
-                fc = ts.get(c, 0.0)
-                ptm_fc_map[ptm_key][c] = fc
-                ptm_q_map[ptm_key][c] = ptm_qvalues.get(ptm_key, {}).get(c)
-                raw_fc_per_cond[c].append(fc)
-
-        # Compute Winsorization bounds per condition
-        winsor_bounds: dict[str, tuple[float, float]] = {}
-        for c in conditions_sorted:
-            vals = raw_fc_per_cond[c]
-            if len(vals) >= 5:
-                arr_vals = np.array(vals)
-                lower = float(np.percentile(arr_vals, WINSORIZE_LOWER))
-                upper = float(np.percentile(arr_vals, WINSORIZE_UPPER))
-                winsor_bounds[c] = (lower, upper)
+                vals = _raw_fc[c]
+                if len(vals) >= 5:
+                    arr_v = np.array(vals)
+                    lo = float(np.percentile(arr_v, WINSORIZE_LOWER))
+                    hi = float(np.percentile(arr_v, WINSORIZE_UPPER))
+                    winsorized = [max(lo, min(hi, v)) for v in vals]
+                    scores[c] = round(float(np.mean(winsorized)), 4)
+                elif vals:
+                    scores[c] = round(float(np.mean(vals)), 4)
+                else:
+                    scores[c] = 0.0
+            if scores:
+                peak_cond = max(scores, key=lambda c: abs(scores[c]))
+                peak_score = scores[peak_cond]
             else:
-                winsor_bounds[c] = (-1e9, 1e9)  # no Winsorization for tiny sets
+                peak_cond = ""
+                peak_score = 0.0
 
-        # Score with Winsorized values
+        # Legacy up_sums/down_sums for backward compatibility + temporal pattern
         up_sums: dict[str, float] = {c: 0.0 for c in conditions_sorted}
         down_sums: dict[str, float] = {c: 0.0 for c in conditions_sorted}
         up_counts: dict[str, int] = {c: 0 for c in conditions_sorted}
@@ -6698,27 +6810,24 @@ async def kinase_activity_heatmap(
         tier_down_counts: dict[str, dict[str, int]] = {
             t: {c: 0 for c in conditions_sorted} for t in ("de_novo", "regulated", "minor")
         }
-        # For Winsorized Mean direction score
-        winsorized_fc_per_cond: dict[str, list[float]] = {c: [] for c in conditions_sorted}
 
-        for ptm_key, fc_dict in ptm_fc_map.items():
-            is_exclusive = ptm_exclusive_map.get(ptm_key, False)
+        # Compute legacy sums from dominant cluster PTMs
+        for pk in dominant_keys:
+            ts = ptm_timeseries.get(pk, {})
+            if not ts:
+                continue
+            is_exclusive = len(ptm_to_kinases.get(pk, [])) <= 1
             for c in conditions_sorted:
-                fc_raw = fc_dict.get(c, 0.0)
-                # Apply Winsorization
-                lo, hi = winsor_bounds[c]
-                fc = max(lo, min(hi, fc_raw))
-
-                q_val = ptm_q_map.get(ptm_key, {}).get(c)
+                fc = ts.get(c, 0.0)
+                q_val = ptm_qvalues.get(pk, {}).get(c)
                 passes_threshold = False
                 if q_val is not None and q_val < Q_THRESHOLD:
                     passes_threshold = True
                 elif abs(fc) >= FC_THRESHOLD:
                     passes_threshold = True
                 if passes_threshold:
-                    winsorized_fc_per_cond[c].append(fc)
                     coact_counts[c] += 1
-                    tier = _classify_tier(abs(fc_raw))  # tier based on raw FC
+                    tier = _classify_tier(abs(fc))
                     if fc > 0:
                         up_sums[c] += fc
                         up_counts[c] += 1
@@ -6736,24 +6845,9 @@ async def kinase_activity_heatmap(
                         shared_sums[c] += fc
                         shared_counts[c] += 1
 
-        # v11.2: Direction score = Winsorized Mean (not sum)
-        scores: dict[str, float] = {}
-        for c in conditions_sorted:
-            vals = winsorized_fc_per_cond[c]
-            if vals:
-                scores[c] = round(float(np.mean(vals)), 4)
-            else:
-                scores[c] = 0.0
         for c in conditions_sorted:
             up_sums[c] = round(up_sums[c], 3)
             down_sums[c] = round(down_sums[c], 3)
-
-        if scores:
-            peak_cond = max(scores, key=lambda c: abs(scores[c]))
-            peak_score = scores[peak_cond]
-        else:
-            peak_cond = ""
-            peak_score = 0.0
 
         tier_data = {}
         for tier in ("de_novo", "regulated", "minor"):
@@ -6764,28 +6858,32 @@ async def kinase_activity_heatmap(
                 "down_counts": tier_down_counts[tier],
             }
 
-        # Cluster details for frontend (strip ptm_keys to save space)
+        # v11.3: Cluster details — use pre-computed _scores from clusters
         cluster_details = []
         for cl in clusters:
-            cl_peak = 0.0
-            cl_scores_dict: dict[str, float] = {}
-            for c in conditions_sorted:
-                c_sum = sum(ptm_timeseries.get(pk, {}).get(c, 0.0) for pk in cl["ptm_keys"])
-                c_avg = round(c_sum / max(len(cl["ptm_keys"]), 1), 4)
-                cl_scores_dict[c] = c_avg
-                if abs(c_avg) > abs(cl_peak):
-                    cl_peak = c_avg
-            cl_peak_cond = max(conditions_sorted, key=lambda c: abs(cl_scores_dict.get(c, 0)))
-            cl_dir = "activation" if cl_peak > 0.3 else ("inactivation" if cl_peak < -0.3 else "neutral")
+            if "_scores" in cl:
+                cl_scores_dict = dict(cl["_scores"])
+                cl_peak_cond = cl.get("_peak_condition", "")
+                cl_peak_score = cl.get("_peak_score", 0.0)
+            else:
+                # Fallback: compute from raw PTM values
+                cl_scores_dict = {}
+                for c in conditions_sorted:
+                    c_sum = sum(ptm_timeseries.get(pk, {}).get(c, 0.0) for pk in cl["ptm_keys"])
+                    cl_scores_dict[c] = round(c_sum / max(len(cl["ptm_keys"]), 1), 4)
+                cl_peak_cond = max(conditions_sorted, key=lambda c: abs(cl_scores_dict.get(c, 0)))
+                cl_peak_score = cl_scores_dict.get(cl_peak_cond, 0.0)
+            cl_dir = "activation" if cl_peak_score > 0.3 else ("inactivation" if cl_peak_score < -0.3 else "neutral")
             cluster_details.append({
                 "cluster_id": cl["cluster_id"],
                 "size": cl["size"],
                 "scores": cl_scores_dict,
                 "coherence": cl["coherence"],
                 "peak_condition": cl_peak_cond,
-                "peak_score": round(cl_peak, 4),
+                "peak_score": round(cl_peak_score, 4),
                 "direction": cl_dir,
                 "is_dominant": cl["is_dominant"],
+                "tier": cl.get("tier", "mixed"),
             })
 
         kinase_scores.append({
