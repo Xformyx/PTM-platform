@@ -4909,6 +4909,24 @@ function KinaseActivityHeatmapView({
           break;
       }
     }
+    // v11.3: Re-arrange sub-patterns to appear directly after their parent
+    if (showSubPatterns) {
+      const result: KinaseActivityScore[] = [];
+      const subsByParent = new Map<string, KinaseActivityScore[]>();
+      for (const s of scores) {
+        if (s.is_sub_pattern && s.parent_kinase) {
+          if (!subsByParent.has(s.parent_kinase)) subsByParent.set(s.parent_kinase, []);
+          subsByParent.get(s.parent_kinase)!.push(s);
+        }
+      }
+      for (const s of scores) {
+        if (s.is_sub_pattern) continue;
+        result.push(s);
+        const children = subsByParent.get(s.kinase);
+        if (children) result.push(...children);
+      }
+      return result.slice(0, topN);
+    }
     return scores.slice(0, topN);
   }, [heatmapData, sortMode, topN, signalTierFilter, getTierTotalSignal, sortByCondition, showSubPatterns]);
 
@@ -5239,8 +5257,8 @@ function KinaseActivityHeatmapView({
                       {ks.is_sub_pattern ? (
                         <span className="text-muted-foreground/80 italic">
                           {ks.parent_kinase}
-                          <span className={`ml-1 text-[9px] px-1 py-0.5 rounded ${ks.sub_pattern_label === "early_response" ? "bg-blue-500/20 text-blue-300" : ks.sub_pattern_label === "late_response" ? "bg-orange-500/20 text-orange-300" : "bg-purple-500/20 text-purple-300"}`}>
-                            {ks.sub_pattern_label === "early_response" ? "Early" : ks.sub_pattern_label === "late_response" ? "Late" : "Mid"}
+                          <span className="ml-1 text-[9px] px-1 py-0.5 rounded bg-sky-500/20 text-sky-300 border border-sky-500/30">
+                            peak@{ks.sub_pattern_label || ks.peak_condition || "?"}
                           </span>
                         </span>
                       ) : (

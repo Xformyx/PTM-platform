@@ -6943,20 +6943,23 @@ async def kinase_activity_heatmap(
                 # Skip if peak signal is negligible
                 if abs(sub_peak_score) < 0.3:
                     continue
-                # Auto-label based on temporal position
+                # Auto-label: use actual peak condition as label (e.g., "5min", "12h")
+                # Also keep positional category for translocation detection
                 cond_idx = conditions_sorted.index(sub_peak_cond) if sub_peak_cond in conditions_sorted else 0
                 if cond_idx <= len(conditions_sorted) // 3:
-                    sub_label = "early_response"
+                    sub_label_category = "early_response"
                 elif cond_idx >= len(conditions_sorted) * 2 // 3:
-                    sub_label = "late_response"
+                    sub_label_category = "late_response"
                 else:
-                    sub_label = "mid_response"
+                    sub_label_category = "mid_response"
+                sub_label = sub_peak_cond  # Use actual condition name (e.g., "5min", "12h")
                 sub_dir = "activation" if sub_peak_score > 0.3 else ("inactivation" if sub_peak_score < -0.3 else "neutral")
                 kinase_scores.append({
                     "kinase": f"{kinase_name}_c{cl['cluster_id']}",
                     "parent_kinase": kinase_name,
                     "is_sub_pattern": True,
                     "sub_pattern_label": sub_label,
+                    "sub_pattern_category": sub_label_category,  # early/mid/late for translocation detection
                     "scores": sub_scores,
                     "up_sums": {c: 0.0 for c in conditions_sorted},
                     "down_sums": {c: 0.0 for c in conditions_sorted},
@@ -7006,6 +7009,9 @@ async def kinase_activity_heatmap(
         score_matrix = []
         valid_kinase_names = []
         for ks_entry in kinase_scores:
+            # v11.3: Exclude sub-patterns from co-wave correlation (they inherit parent group)
+            if ks_entry.get("is_sub_pattern"):
+                continue
             row = [ks_entry["scores"].get(c, 0.0) for c in conditions_sorted]
             if any(abs(v) > 0.3 for v in row):
                 score_matrix.append(row)
@@ -7053,7 +7059,11 @@ async def kinase_activity_heatmap(
         for k in grp["kinases"]:
             kinase_to_group[k] = grp["group_id"]
     for ks_entry in kinase_scores:
-        ks_entry["cowave_group"] = kinase_to_group.get(ks_entry["kinase"], -1)
+        if ks_entry.get("is_sub_pattern"):
+            # Sub-patterns inherit parent's co-wave group
+            ks_entry["cowave_group"] = kinase_to_group.get(ks_entry.get("parent_kinase", ""), -1)
+        else:
+            ks_entry["cowave_group"] = kinase_to_group.get(ks_entry["kinase"], -1)
 
     # ── Activation / Inactivation classification (Sum-based) ──
     for ks_entry in kinase_scores:
@@ -7217,8 +7227,8 @@ async def kinase_activity_heatmap(
                     parent_sub_map.setdefault(ks_entry["parent_kinase"], []).append(ks_entry)
 
             for parent, subs in parent_sub_map.items():
-                early_subs = [s for s in subs if s.get("sub_pattern_label") == "early_response"]
-                late_subs = [s for s in subs if s.get("sub_pattern_label") == "late_response"]
+                early_subs = [s for s in subs if s.get("sub_pattern_category") == "early_response"]
+                late_subs = [s for s in subs if s.get("sub_pattern_category") == "late_response"]
                 if not early_subs or not late_subs:
                     continue
 
