@@ -7269,7 +7269,12 @@ async def kinase_activity_heatmap(
                     continue
 
                 # Get all substrate genes for this kinase
-                all_genes = list(set(p.split("_")[0].upper() for p in parent_mod.get("ptms", [])))
+                # ptms is a list of dicts: [{gene, position}, ...]
+                all_genes = list(set(
+                    (p.get("gene", "") if isinstance(p, dict) else p.split("_")[0]).upper()
+                    for p in parent_mod.get("ptms", [])
+                    if (p.get("gene", "") if isinstance(p, dict) else p)
+                ))
 
                 # Count GO CC terms for all genes
                 cytoplasm_count = 0
