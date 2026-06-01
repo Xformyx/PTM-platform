@@ -766,9 +766,8 @@ def _compute_kinase_activity_heatmap(enriched_data: list, kinase_result: dict, p
             raw_fc = float(log2fc) if log2fc is not None else 0.0
         except (ValueError, TypeError):
             raw_fc = 0.0
-        # Cap extreme Log2FC values (pseudocount artifacts)
-        LOG2FC_CAP = 5.0
-        ptm_values[(gene, pos, cond)] = max(-LOG2FC_CAP, min(LOG2FC_CAP, raw_fc))
+        # v11.2: Store raw Log2FC (no cap). Winsorization applied per-kinase during scoring.
+        ptm_values[(gene, pos, cond)] = raw_fc
         try:
             ptm_qvalues[(gene, pos, cond)] = float(q_val) if q_val is not None else 1.0
         except (ValueError, TypeError):
@@ -796,13 +795,30 @@ def _compute_kinase_activity_heatmap(enriched_data: list, kinase_result: dict, p
         return 0.5  # minor
 
     # ── Helper: compute weighted score for a subset of members per condition ──
+    WINSORIZE_LOWER = 5   # percentile
+    WINSORIZE_UPPER = 95  # percentile
+
     def _score_members(member_list, conditions):
-        """Return {cond: weighted_avg_score} for given members."""
+        """Return {cond: Winsorized weighted_avg_score} for given members.
+        v11.2: Applies per-condition Winsorization (5th/95th percentile) before
+        weighted averaging to prevent extreme outliers from dominating."""
         scores = {}
         for cond in conditions:
+            # Collect raw values for Winsorization bounds
+            raw_vals = [ptm_values.get((g, p, cond), 0.0) for g, p in member_list]
+            non_zero = [v for v in raw_vals if v != 0.0]
+            if len(non_zero) >= 5:
+                arr_v = np.array(non_zero)
+                lo = float(np.percentile(arr_v, WINSORIZE_LOWER))
+                hi = float(np.percentile(arr_v, WINSORIZE_UPPER))
+            else:
+                lo, hi = -1e9, 1e9  # no Winsorization for tiny sets
+
             wsum, wtot = 0.0, 0.0
             for g, p in member_list:
-                val = ptm_values.get((g, p, cond), 0.0)
+                val_raw = ptm_values.get((g, p, cond), 0.0)
+                # Apply Winsorization
+                val = max(lo, min(hi, val_raw))
                 w = _get_weight(g, p, cond)
                 wsum += val * w
                 wtot += w

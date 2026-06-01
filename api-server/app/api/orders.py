@@ -6458,8 +6458,8 @@ async def kinase_activity_heatmap(
             _raw_fc = float(_raw_fc_raw) if _raw_fc_raw is not None else 0.0
         except (ValueError, TypeError):
             _raw_fc = 0.0
-        _LOG2FC_CAP = 5.0
-        ptm_timeseries[key][cond] = max(-_LOG2FC_CAP, min(_LOG2FC_CAP, _raw_fc))
+        # v11.2: Store raw Log2FC (no cap). Winsorization applied per-kinase during scoring.
+        ptm_timeseries[key][cond] = _raw_fc
         ptm_qvalues[key][cond] = row["q_value"]
 
     # Sort conditions (try numeric extraction for time-series)
@@ -6624,7 +6624,10 @@ async def kinase_activity_heatmap(
             clusters[best_idx]["is_dominant"] = True
         return clusters
 
-    # ── Main scoring loop with substrate clustering ──
+    # ── Main scoring loop with substrate clustering + Winsorized Mean (v11.2) ──
+    WINSORIZE_LOWER = 5   # percentile
+    WINSORIZE_UPPER = 95  # percentile
+
     kinase_scores = []
     for km in kinase_modules:
         kinase_name = km.get("kinase", "")
@@ -6638,7 +6641,42 @@ async def kinase_activity_heatmap(
         dominant = next((cl for cl in clusters if cl["is_dominant"]), clusters[0])
         dominant_keys = set(dominant["ptm_keys"])
 
-        # Score using ONLY dominant cluster substrates
+        # Collect raw FC values per condition for dominant cluster substrates
+        # (for Winsorization)
+        raw_fc_per_cond: dict[str, list[float]] = {c: [] for c in conditions_sorted}
+        ptm_fc_map: dict[str, dict[str, float]] = {}  # ptm_key -> {cond -> fc}
+        ptm_q_map: dict[str, dict[str, float | None]] = {}
+        ptm_exclusive_map: dict[str, bool] = {}
+
+        for ptm in ptms:
+            ptm_key = f"{ptm.get('gene', '').upper()}_{str(ptm.get('position', '')).upper()}"
+            if ptm_key not in dominant_keys:
+                continue
+            ts = ptm_timeseries.get(ptm_key, {})
+            if not ts:
+                continue
+            ptm_fc_map[ptm_key] = {}
+            ptm_q_map[ptm_key] = {}
+            ptm_exclusive_map[ptm_key] = len(ptm_to_kinases.get(ptm_key, [])) <= 1
+            for c in conditions_sorted:
+                fc = ts.get(c, 0.0)
+                ptm_fc_map[ptm_key][c] = fc
+                ptm_q_map[ptm_key][c] = ptm_qvalues.get(ptm_key, {}).get(c)
+                raw_fc_per_cond[c].append(fc)
+
+        # Compute Winsorization bounds per condition
+        winsor_bounds: dict[str, tuple[float, float]] = {}
+        for c in conditions_sorted:
+            vals = raw_fc_per_cond[c]
+            if len(vals) >= 5:
+                arr_vals = np.array(vals)
+                lower = float(np.percentile(arr_vals, WINSORIZE_LOWER))
+                upper = float(np.percentile(arr_vals, WINSORIZE_UPPER))
+                winsor_bounds[c] = (lower, upper)
+            else:
+                winsor_bounds[c] = (-1e9, 1e9)  # no Winsorization for tiny sets
+
+        # Score with Winsorized values
         up_sums: dict[str, float] = {c: 0.0 for c in conditions_sorted}
         down_sums: dict[str, float] = {c: 0.0 for c in conditions_sorted}
         up_counts: dict[str, int] = {c: 0 for c in conditions_sorted}
@@ -6660,27 +6698,27 @@ async def kinase_activity_heatmap(
         tier_down_counts: dict[str, dict[str, int]] = {
             t: {c: 0 for c in conditions_sorted} for t in ("de_novo", "regulated", "minor")
         }
+        # For Winsorized Mean direction score
+        winsorized_fc_per_cond: dict[str, list[float]] = {c: [] for c in conditions_sorted}
 
-        for ptm in ptms:
-            ptm_key = f"{ptm.get('gene', '').upper()}_{str(ptm.get('position', '')).upper()}"
-            # Only score substrates in the dominant cluster
-            if ptm_key not in dominant_keys:
-                continue
-            ts = ptm_timeseries.get(ptm_key, {})
-            if not ts:
-                continue
-            is_exclusive = len(ptm_to_kinases.get(ptm_key, [])) <= 1
+        for ptm_key, fc_dict in ptm_fc_map.items():
+            is_exclusive = ptm_exclusive_map.get(ptm_key, False)
             for c in conditions_sorted:
-                fc = ts.get(c, 0.0)
-                q_val = ptm_qvalues.get(ptm_key, {}).get(c)
+                fc_raw = fc_dict.get(c, 0.0)
+                # Apply Winsorization
+                lo, hi = winsor_bounds[c]
+                fc = max(lo, min(hi, fc_raw))
+
+                q_val = ptm_q_map.get(ptm_key, {}).get(c)
                 passes_threshold = False
                 if q_val is not None and q_val < Q_THRESHOLD:
                     passes_threshold = True
                 elif abs(fc) >= FC_THRESHOLD:
                     passes_threshold = True
                 if passes_threshold:
+                    winsorized_fc_per_cond[c].append(fc)
                     coact_counts[c] += 1
-                    tier = _classify_tier(abs(fc))
+                    tier = _classify_tier(abs(fc_raw))  # tier based on raw FC
                     if fc > 0:
                         up_sums[c] += fc
                         up_counts[c] += 1
@@ -6698,15 +6736,14 @@ async def kinase_activity_heatmap(
                         shared_sums[c] += fc
                         shared_counts[c] += 1
 
-        # Compute dominant score per condition
+        # v11.2: Direction score = Winsorized Mean (not sum)
         scores: dict[str, float] = {}
         for c in conditions_sorted:
-            up_val = up_sums[c]
-            dn_val = down_sums[c]
-            if abs(up_val) >= abs(dn_val):
-                scores[c] = round(up_val, 4)
+            vals = winsorized_fc_per_cond[c]
+            if vals:
+                scores[c] = round(float(np.mean(vals)), 4)
             else:
-                scores[c] = round(dn_val, 4)
+                scores[c] = 0.0
         for c in conditions_sorted:
             up_sums[c] = round(up_sums[c], 3)
             down_sums[c] = round(down_sums[c], 3)
