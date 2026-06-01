@@ -4410,6 +4410,15 @@ interface KinaseActivityScore {
     // v11.3: Magnitude tier of this cluster
     tier?: "strong" | "moderate" | "weak" | "mixed";
   }[];
+  // v11.3: Substrate list for this kinase's dominant cluster (or sub-pattern cluster)
+  substrates?: {
+    ptm_key: string;
+    gene: string;
+    site: string;
+    peak_fc: number;
+  }[];
+  // v11.3: Positional category for translocation detection
+  sub_pattern_category?: string;
 }
 
 interface PeakSyncEntry {
@@ -4753,6 +4762,8 @@ function KinaseActivityHeatmapView({
   const [sortByCondition, setSortByCondition] = useState<string | null>(null);
   const [patternFilter, setPatternFilter] = useState<string | null>(null);
   const [showSubPatterns, setShowSubPatterns] = useState(false);
+  // v11.3: Expandable substrate list state
+  const [expandedSubstrates, setExpandedSubstrates] = useState<Set<string>>(new Set());
   // v11.3: GO Localization dashboard state
   const [goLocSelection, setGoLocSelection] = useState<{ kinase: string; condition: string } | null>(null);
   const [goLocData, setGoLocData] = useState<{ gene_localizations: Record<string, string[]>; summary: Record<string, number> } | null>(null);
@@ -5209,8 +5220,8 @@ function KinaseActivityHeatmapView({
                 const cwGroup = ks.cowave_group ?? -1;
                 const cwColor = cwGroup >= 0 ? COWAVE_GROUP_COLORS[cwGroup % COWAVE_GROUP_COLORS.length] : null;
                 return (
+                <React.Fragment key={ks.kinase}>
                   <tr
-                    key={ks.kinase}
                     className="border-b border-border/30 hover:bg-muted/20 cursor-pointer"
                     onClick={() => {
                       setSelectedKinases((prev) => {
@@ -5310,6 +5321,32 @@ function KinaseActivityHeatmapView({
                           </span>
                         );
                       })()}
+                      {/* v11.3: Substrate expand/collapse button */}
+                      {ks.substrates && ks.substrates.length > 0 && (
+                        <button
+                          className={`ml-1 text-[9px] px-1 py-0 rounded border transition-colors ${
+                            expandedSubstrates.has(ks.kinase)
+                              ? "bg-cyan-500/20 text-cyan-300 border-cyan-500/40"
+                              : "bg-muted/30 text-muted-foreground/60 border-border/50 hover:text-foreground/80"
+                          }`}
+                          title={expandedSubstrates.has(ks.kinase) ? "Hide substrates" : `Show ${ks.substrates.length} substrates with GO localization`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setExpandedSubstrates((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(ks.kinase)) next.delete(ks.kinase);
+                              else next.add(ks.kinase);
+                              return next;
+                            });
+                            // Auto-fetch GO data if not loaded
+                            if (!goLocData && !goLocLoading) {
+                              setGoLocSelection({ kinase: ks.parent_kinase || ks.kinase, condition: ks.peak_condition });
+                            }
+                          }}
+                        >
+                          {expandedSubstrates.has(ks.kinase) ? "▾" : "▸"} {ks.substrates.length}
+                        </button>
+                      )}
                       {/* v11.3: Translocation flag */}
                       {ks.translocation_flag && (
                         <span
@@ -5452,7 +5489,50 @@ function KinaseActivityHeatmapView({
                       );
                     })}
                   </tr>
-                );
+                  {/* v11.3: Expandable substrate list row */}
+                  {expandedSubstrates.has(ks.kinase) && ks.substrates && ks.substrates.length > 0 && (
+                    <tr key={`${ks.kinase}_substrates`} className="bg-muted/10">
+                      <td colSpan={2 + (heatmapData?.conditions?.length || 0) + 4} className="px-4 py-2">
+                        <div className="flex flex-wrap gap-1.5 max-h-[120px] overflow-y-auto">
+                          {ks.substrates.map((sub) => {
+                            const locs = goLocData?.gene_localizations?.[sub.gene.toUpperCase()] || [];
+                            const locColor: Record<string, string> = {
+                              nucleus: "bg-purple-500/20 text-purple-300 border-purple-500/40",
+                              cytoplasm: "bg-green-500/20 text-green-300 border-green-500/40",
+                              membrane: "bg-blue-500/20 text-blue-300 border-blue-500/40",
+                              mitochondrion: "bg-orange-500/20 text-orange-300 border-orange-500/40",
+                              er: "bg-yellow-500/20 text-yellow-300 border-yellow-500/40",
+                              golgi: "bg-pink-500/20 text-pink-300 border-pink-500/40",
+                              cytoskeleton: "bg-teal-500/20 text-teal-300 border-teal-500/40",
+                            };
+                            return (
+                              <span
+                                key={sub.ptm_key}
+                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-border/50 text-[10px] bg-background/50"
+                                title={`${sub.gene} ${sub.site}\nPeak |Log2FC|: ${sub.peak_fc}\nGO CC: ${locs.length > 0 ? locs.join(", ") : "(not loaded — click heatmap cell)"}`}
+                              >
+                                <span className="font-medium text-foreground/90">{sub.gene}</span>
+                                <span className="text-muted-foreground/60">{sub.site}</span>
+                                <span className={`text-[8px] ${sub.peak_fc > 0 ? "text-red-400" : "text-blue-400"}`}>
+                                  {sub.peak_fc > 0 ? "+" : ""}{sub.peak_fc.toFixed(1)}
+                                </span>
+                                {locs.slice(0, 2).map((loc) => (
+                                  <span
+                                    key={loc}
+                                    className={`text-[7px] px-0.5 rounded border ${locColor[loc] || "bg-slate-500/20 text-slate-300 border-slate-500/40"}`}
+                                  >
+                                    {loc.slice(0, 3)}
+                                  </span>
+                                ))}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
+              );
               })}
             </tbody>
           </table>

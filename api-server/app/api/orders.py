@@ -6917,6 +6917,19 @@ async def kinase_activity_heatmap(
             "coherence": dominant.get("coherence", 0.0),  # dominant cluster coherence
             "n_clusters": len(clusters),
             "cluster_details": cluster_details,
+            # v11.3: Include dominant cluster substrate list
+            "substrates": [
+                {
+                    "ptm_key": pk,
+                    "gene": pk.split("_")[0] if "_" in pk else pk,
+                    "site": pk.split("_", 1)[1] if "_" in pk else "",
+                    "peak_fc": round(float(max(
+                        (ptm_timeseries.get(pk, {}).get(c, 0.0) for c in conditions_sorted),
+                        key=abs, default=0.0
+                    )), 3),
+                }
+                for pk in dominant["ptm_keys"]
+            ],
         })
 
         # ── v11.3 Multi-pattern: Emit non-dominant clusters as sub-pattern entries ──
@@ -6990,6 +7003,19 @@ async def kinase_activity_heatmap(
                         "tier": cl.get("tier", "mixed"),
                     }],
                     "direction": sub_dir,
+                    # v11.3: Include substrate list for frontend display
+                    "substrates": [
+                        {
+                            "ptm_key": pk,
+                            "gene": pk.split("_")[0] if "_" in pk else pk,
+                            "site": pk.split("_", 1)[1] if "_" in pk else "",
+                            "peak_fc": round(float(max(
+                                (ptm_timeseries.get(pk, {}).get(c, 0.0) for c in conditions_sorted),
+                                key=abs, default=0.0
+                            )), 3),
+                        }
+                        for pk in cl["ptm_keys"]
+                    ],
                 })
 
     # ── Peak Synchronization ──
