@@ -4755,7 +4755,7 @@ function CascadeTimelineView({
 // ── Kinase Activity Heatmap View ──────────────────────────────────────────────────
 
 type HeatmapSortMode = "peak_score" | "peak_time" | "confidence" | "substrate_count" | "alphabetical" | "cowave_group" | "condition_sort";
-type HeatmapViewMode = "heatmap" | "line";
+type HeatmapViewMode = "heatmap" | "line" | "selfPtm";
 
 function KinaseActivityHeatmapView({
   orderId,
@@ -5139,6 +5139,14 @@ function KinaseActivityHeatmapView({
             onClick={() => setViewMode("line")}
           >
             Line Chart
+          </Button>
+          <Button
+            size="sm"
+            variant={viewMode === "selfPtm" ? "default" : "ghost"}
+            className="text-xs h-7"
+            onClick={() => setViewMode("selfPtm")}
+          >
+            Self-PTM
           </Button>
         </div>
         <span className="text-xs text-muted-foreground">Sort:</span>
@@ -6216,6 +6224,195 @@ function KinaseActivityHeatmapView({
                 {patternMatched.length > 15 && ` ... +${patternMatched.length - 15} more`}
               </div>
             )}
+          </div>
+        );
+      })()}
+
+      {/* Self-PTM Temporal View */}
+      {viewMode === "selfPtm" && (() => {
+        // Collect all kinases that have self_ptm data
+        const selfPtmKinases = sortedScores.filter(
+          (ks) => ks.self_ptm && ks.self_ptm.length > 0 && !ks.is_sub_pattern
+        );
+
+        if (selfPtmKinases.length === 0) {
+          return (
+            <div className="text-center text-muted-foreground py-8">
+              <p className="text-sm">No self-PTM data detected for any kinase in this dataset.</p>
+              <p className="text-xs mt-1">Self-PTM tracking requires the kinase/E3 ligase gene itself to have PTM entries in the experimental data.</p>
+            </div>
+          );
+        }
+
+        // Color scale for FC values
+        const getColor = (fc: number) => {
+          if (fc >= 2) return "bg-red-600 text-white";
+          if (fc >= 1) return "bg-red-500/80 text-white";
+          if (fc >= 0.5) return "bg-red-400/60 text-white";
+          if (fc > 0.1) return "bg-red-300/40 text-foreground";
+          if (fc <= -2) return "bg-blue-600 text-white";
+          if (fc <= -1) return "bg-blue-500/80 text-white";
+          if (fc <= -0.5) return "bg-blue-400/60 text-white";
+          if (fc < -0.1) return "bg-blue-300/40 text-foreground";
+          return "bg-muted/20 text-muted-foreground";
+        };
+
+        // Relationship badge
+        const getRelBadge = (rel: string) => {
+          if (rel === "concordant") return { cls: "text-emerald-400", icon: "\u2713", label: "Concordant" };
+          if (rel === "discordant") return { cls: "text-rose-400", icon: "\u2298", label: "Discordant" };
+          return { cls: "text-gray-400", icon: "\u2014", label: "Independent" };
+        };
+
+        return (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <h4 className="text-sm font-medium text-foreground">Regulator Self-PTM Temporal Activity</h4>
+                <p className="text-[10px] text-muted-foreground">
+                  Shows PTM changes on the kinase/E3 ligase protein itself over time. Concordant sites (r\u22650.7) track with substrate activity = likely activation marks. Discordant (r\u2264-0.7) = likely inhibitory.
+                </p>
+              </div>
+              <span className="text-[10px] text-muted-foreground bg-muted/30 px-2 py-1 rounded">
+                {selfPtmKinases.length} regulators with self-PTM detected
+              </span>
+            </div>
+
+            {/* Table header */}
+            <div className="overflow-x-auto">
+              <table className="w-full text-[10px] border-collapse">
+                <thead>
+                  <tr className="border-b border-border/50">
+                    <th className="text-left px-2 py-1 font-medium text-muted-foreground w-24">Kinase</th>
+                    <th className="text-left px-2 py-1 font-medium text-muted-foreground w-20">Site</th>
+                    <th className="text-center px-1 py-1 font-medium text-muted-foreground w-14">r</th>
+                    <th className="text-center px-1 py-1 font-medium text-muted-foreground w-20">Relationship</th>
+                    {heatmapData.conditions.map((c) => (
+                      <th key={c} className="text-center px-1 py-1 font-medium text-muted-foreground min-w-[50px]" title={c}>
+                        {c.replace(/min$/i, "'").replace(/hr$/i, "h")}
+                      </th>
+                    ))}
+                    <th className="text-center px-1 py-1 font-medium text-muted-foreground w-16">Peak</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {selfPtmKinases.map((ks) => {
+                    const sites = ks.self_ptm!;
+                    return sites.map((sp, spIdx) => (
+                      <tr
+                        key={`${ks.kinase}_${sp.site}`}
+                        className={`border-b border-border/20 hover:bg-muted/20 ${spIdx === 0 ? "border-t border-border/40" : ""}`}
+                      >
+                        {/* Kinase name - only show on first site */}
+                        <td className="px-2 py-1 font-medium text-foreground">
+                          {spIdx === 0 ? (
+                            <span title={`${ks.kinase} — ${sites.length} self-PTM site(s)`}>
+                              {ks.kinase}
+                              {sites.length > 1 && <span className="text-muted-foreground/50 ml-0.5">({sites.length})</span>}
+                            </span>
+                          ) : null}
+                        </td>
+                        {/* Site */}
+                        <td className="px-2 py-1 font-mono text-cyan-300">{sp.site}</td>
+                        {/* Correlation */}
+                        <td className="text-center px-1 py-1">
+                          <span className={sp.correlation_with_activity >= 0.7 ? "text-emerald-400 font-bold" : sp.correlation_with_activity <= -0.7 ? "text-rose-400 font-bold" : "text-muted-foreground"}>
+                            {sp.correlation_with_activity > 0 ? "+" : ""}{sp.correlation_with_activity.toFixed(2)}
+                          </span>
+                        </td>
+                        {/* Relationship */}
+                        <td className="text-center px-1 py-1">
+                          {(() => {
+                            const badge = getRelBadge(sp.relationship);
+                            return <span className={`${badge.cls} font-medium`}>{badge.icon} {badge.label}</span>;
+                          })()}
+                        </td>
+                        {/* Temporal values */}
+                        {heatmapData.conditions.map((c) => {
+                          const val = sp.timeseries[c] ?? 0;
+                          return (
+                            <td key={c} className="text-center px-0.5 py-0.5">
+                              <span
+                                className={`inline-block w-full px-1 py-0.5 rounded text-[9px] font-mono ${getColor(val)}`}
+                                title={`${sp.gene}_${sp.site} @ ${c}: ${val > 0 ? "+" : ""}${val.toFixed(3)} Log2FC`}
+                              >
+                                {Math.abs(val) < 0.01 ? "0" : (val > 0 ? "+" : "") + val.toFixed(2)}
+                              </span>
+                            </td>
+                          );
+                        })}
+                        {/* Peak */}
+                        <td className="text-center px-1 py-1 text-[9px]">
+                          <span className="text-muted-foreground">{sp.peak_condition?.replace(/min$/i, "'").replace(/hr$/i, "h")}</span>
+                          <br />
+                          <span className={sp.peak_fc >= 0 ? "text-red-400" : "text-blue-400"}>
+                            {sp.peak_fc > 0 ? "+" : ""}{sp.peak_fc.toFixed(2)}
+                          </span>
+                        </td>
+                      </tr>
+                    ));
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Substrate-inferred activity comparison row */}
+            <div className="mt-2">
+              <h5 className="text-[10px] font-medium text-muted-foreground mb-1">Comparison: Substrate-Inferred Activity (for reference)</h5>
+              <div className="overflow-x-auto">
+                <table className="w-full text-[10px] border-collapse">
+                  <thead>
+                    <tr className="border-b border-border/30">
+                      <th className="text-left px-2 py-1 font-medium text-muted-foreground w-24">Kinase</th>
+                      <th className="text-left px-2 py-1 font-medium text-muted-foreground w-20"></th>
+                      <th className="text-center px-1 py-1 font-medium text-muted-foreground w-14"></th>
+                      <th className="text-center px-1 py-1 font-medium text-muted-foreground w-20">Type</th>
+                      {heatmapData.conditions.map((c) => (
+                        <th key={c} className="text-center px-1 py-1 font-medium text-muted-foreground min-w-[50px]" title={c}>
+                          {c.replace(/min$/i, "'").replace(/hr$/i, "h")}
+                        </th>
+                      ))}
+                      <th className="text-center px-1 py-1 font-medium text-muted-foreground w-16">Peak</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selfPtmKinases.map((ks) => (
+                      <tr key={`activity_${ks.kinase}`} className="border-b border-border/20 bg-muted/10">
+                        <td className="px-2 py-1 font-medium text-foreground/70">{ks.kinase}</td>
+                        <td className="px-2 py-1 text-muted-foreground/50 italic">activity</td>
+                        <td className="text-center px-1 py-1"></td>
+                        <td className="text-center px-1 py-1 text-amber-400/70 text-[9px]">substrate-inferred</td>
+                        {heatmapData.conditions.map((c) => {
+                          const val = ks.scores[c] ?? 0;
+                          return (
+                            <td key={c} className="text-center px-0.5 py-0.5">
+                              <span
+                                className={`inline-block w-full px-1 py-0.5 rounded text-[9px] font-mono ${getColor(val)}`}
+                                title={`${ks.kinase} substrate activity @ ${c}: ${val > 0 ? "+" : ""}${val.toFixed(3)}`}
+                              >
+                                {Math.abs(val) < 0.01 ? "0" : (val > 0 ? "+" : "") + val.toFixed(2)}
+                              </span>
+                            </td>
+                          );
+                        })}
+                        <td className="text-center px-1 py-1 text-[9px]">
+                          <span className="text-muted-foreground">{ks.peak_condition?.replace(/min$/i, "'").replace(/hr$/i, "h")}</span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Legend */}
+            <div className="flex items-center gap-4 text-[9px] text-muted-foreground pt-2 border-t border-border/30">
+              <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-red-500/80"></span> Up (Log2FC &gt; 0)</span>
+              <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-blue-500/80"></span> Down (Log2FC &lt; 0)</span>
+              <span className="flex items-center gap-1"><span className="text-emerald-400 font-bold">\u2713</span> Concordant (r\u22650.7)</span>
+              <span className="flex items-center gap-1"><span className="text-rose-400 font-bold">\u2298</span> Discordant (r\u2264-0.7)</span>
+              <span className="flex items-center gap-1"><span className="text-gray-400">\u2014</span> Independent</span>
+            </div>
           </div>
         );
       })()}
