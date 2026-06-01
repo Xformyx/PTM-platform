@@ -1755,10 +1755,23 @@ def _build_frontend_kinase_llm_context(frontend_kinase: dict, ptm_type: str, kin
             temporal_pattern = ks.get("temporal_pattern", "")
             pattern_str = f", pattern={temporal_pattern}" if temporal_pattern else ""
 
+            # v11.3.2: Nuclear evidence
+            nuclear_ev = ks.get("nuclear_evidence", {})
+            nuc_str = ""
+            if nuclear_ev and nuclear_ev.get("score", 0) > 0:
+                t1_genes = nuclear_ev.get("tier1_genes", [])
+                t2_genes = nuclear_ev.get("tier2_genes", [])
+                nuc_parts = []
+                if t1_genes:
+                    nuc_parts.append(f"NucT1[{','.join(t1_genes[:5])}]")
+                if t2_genes:
+                    nuc_parts.append(f"NucT2[{','.join(t2_genes[:5])}]")
+                nuc_str = f", nuclear_evidence={nuclear_ev.get('score', 0)} ({' '.join(nuc_parts)})"
+
             parts.append(
                 f"**{kinase_name}** [{cw_str}] — {sub_count} substrates, "
                 f"conf={confidence:.0%}, peak={peak_cond} ({peak_score:+.2f}), "
-                f"direction={direction}, coherence={coherence:.2f}{pattern_str}"
+                f"direction={direction}, coherence={coherence:.2f}{pattern_str}{nuc_str}"
             )
             parts.append(f"  Temporal profile: [{score_str}]")
             parts.append("")
@@ -1823,6 +1836,44 @@ def _build_frontend_kinase_llm_context(frontend_kinase: dict, ptm_type: str, kin
                 k_str += f" (+{len(kinases) - 10} more)"
             parts.append(f"**{cond}** — {count} {regulator_label.lower()}s peak simultaneously:")
             parts.append(f"  {k_str}")
+            parts.append("")
+
+    # ── Section G2: Nuclear-Exclusive Substrate Evidence Summary ──
+    if kinase_activity_heatmap and kinase_activity_heatmap.get("kinase_scores"):
+        ks_list = kinase_activity_heatmap["kinase_scores"]
+        nuc_kinases = [
+            ks for ks in ks_list
+            if ks.get("nuclear_evidence", {}).get("score", 0) > 0
+            and not ks.get("is_sub_pattern")
+        ]
+        if nuc_kinases:
+            parts.append(f"### G2. Nuclear-Exclusive Substrate Evidence")
+            parts.append("")
+            parts.append(
+                f"The following {regulator_label.lower()}s have substrates that are exclusively or "
+                f"predominantly localized in the nucleus. This provides direct biochemical evidence "
+                f"that these {regulator_label.lower()}s were active inside the nucleus during the "
+                f"experimental conditions. Tier 1 markers (histones, lamins, PCNA, PARP1, DNA-PKcs, "
+                f"RNA Pol II) never leave the nucleus. Tier 2 markers (splicing factors, chromatin "
+                f"remodelers, transcription factors) are predominantly nuclear."
+            )
+            parts.append("")
+            parts.append("Scoring: Tier1 substrates = 2 points each, Tier2 = 1 point each.")
+            parts.append("")
+            # Sort by nuclear evidence score
+            for ks in sorted(nuc_kinases, key=lambda x: x.get("nuclear_evidence", {}).get("score", 0), reverse=True)[:20]:
+                ne = ks.get("nuclear_evidence", {})
+                kinase_name = ks.get("kinase", "")
+                t1_genes = ne.get("tier1_genes", [])
+                t2_genes = ne.get("tier2_genes", [])
+                t1_str = f"T1: {', '.join(t1_genes[:8])}" if t1_genes else ""
+                t2_str = f"T2: {', '.join(t2_genes[:8])}" if t2_genes else ""
+                gene_str = "; ".join(filter(None, [t1_str, t2_str]))
+                parts.append(
+                    f"**{kinase_name}** — Nuclear Score: {ne.get('score', 0)} "
+                    f"(T1={ne.get('tier1_count', 0)}, T2={ne.get('tier2_count', 0)}) "
+                    f"[{gene_str}]"
+                )
             parts.append("")
 
     # ── Section H: Non-PTM Effector Proteins (Downstream Functional Outputs) ──

@@ -680,6 +680,102 @@ def _auto_run_global_analysis(order_id: int, enriched_data: list, config: dict, 
         return {}
 
 
+# ── v11.3.2: Nuclear-Exclusive Substrate Evidence ──────────────────────────────
+_NUCLEAR_TIER1_GENES: set = {
+    # Histones — the most definitive nuclear markers
+    "H2AFX", "H2AFZ", "H2AFY", "H2AFY2", "H2AFB1",
+    "H2BC1", "H2BC3", "H2BC4", "H2BC5", "H2BC6", "H2BC7", "H2BC8",
+    "H2BC9", "H2BC10", "H2BC11", "H2BC12", "H2BC13", "H2BC14", "H2BC15",
+    "H2BC17", "H2BC18", "H2BC21",
+    "H2AC1", "H2AC4", "H2AC6", "H2AC7", "H2AC8", "H2AC11",
+    "H2AC12", "H2AC13", "H2AC14", "H2AC15", "H2AC16", "H2AC17",
+    "H2AC18", "H2AC19", "H2AC20", "H2AC21",
+    "H3C1", "H3C2", "H3C3", "H3C4", "H3C6", "H3C7", "H3C8",
+    "H3C10", "H3C11", "H3C12", "H3C13", "H3C14", "H3C15",
+    "H4C1", "H4C2", "H4C3", "H4C4", "H4C5", "H4C6", "H4C8",
+    "H4C9", "H4C11", "H4C12", "H4C13", "H4C14", "H4C15", "H4C16",
+    "H1-0", "H1-1", "H1-2", "H1-3", "H1-4", "H1-5", "H1-6", "H1-10",
+    # Legacy HIST nomenclature
+    "HIST1H1A", "HIST1H1B", "HIST1H1C", "HIST1H1D", "HIST1H1E",
+    "HIST1H2AA", "HIST1H2AB", "HIST1H2AC", "HIST1H2AD", "HIST1H2AE",
+    "HIST1H2AG", "HIST1H2AH", "HIST1H2AI", "HIST1H2AJ", "HIST1H2AK",
+    "HIST1H2AL", "HIST1H2AM",
+    "HIST1H2BA", "HIST1H2BB", "HIST1H2BC", "HIST1H2BD", "HIST1H2BE",
+    "HIST1H2BF", "HIST1H2BG", "HIST1H2BH", "HIST1H2BI", "HIST1H2BJ",
+    "HIST1H2BK", "HIST1H2BL", "HIST1H2BM", "HIST1H2BN", "HIST1H2BO",
+    "HIST1H3A", "HIST1H3B", "HIST1H3C", "HIST1H3D", "HIST1H3E",
+    "HIST1H3F", "HIST1H3G", "HIST1H3H", "HIST1H3I", "HIST1H3J",
+    "HIST1H4A", "HIST1H4B", "HIST1H4C", "HIST1H4D", "HIST1H4E",
+    "HIST1H4F", "HIST1H4G", "HIST1H4H", "HIST1H4I", "HIST1H4J",
+    "HIST1H4K", "HIST1H4L",
+    "HIST2H2AA3", "HIST2H2AB", "HIST2H2AC", "HIST2H2BE", "HIST2H3A",
+    "HIST2H3C", "HIST2H3D", "HIST2H4A", "HIST2H4B",
+    "HIST3H2A", "HIST3H2BB", "HIST3H3",
+    "H3F3A", "H3F3B", "H3F3C",
+    "CENPA", "MACROH2A1", "MACROH2A2",
+    # Nuclear Lamins
+    "LMNA", "LMNB1", "LMNB2",
+    # RNA Pol II
+    "POLR2A",
+    # DNA Replication
+    "PCNA",
+    # DNA Repair
+    "PARP1", "XRCC5", "XRCC6", "PRKDC",
+    # Nucleolar
+    "FBL", "NCL", "NPM1",
+}
+_NUCLEAR_TIER2_GENES: set = {
+    # Splicing factors
+    "SRSF1", "SRSF2", "SRSF3", "SRSF4", "SRSF5", "SRSF6", "SRSF7",
+    "SRSF8", "SRSF9", "SRSF10", "SRSF11", "SRSF12",
+    "SRRM1", "SRRM2", "U2AF1", "U2AF2", "SF3B1", "SF3A1",
+    "SNRPD1", "SNRPD2", "SNRPD3", "SNRPE", "SNRPF", "SNRPG",
+    "PRPF8", "PRPF19", "PRPF31", "PRPF40A",
+    # Chromatin remodeling
+    "SMARCA4", "SMARCA2", "SMARCC1", "SMARCC2",
+    "CHD1", "CHD3", "CHD4",
+    "HDAC1", "HDAC2", "KAT2A", "KAT2B", "EP300", "CREBBP",
+    # DNA repair & replication
+    "BRCA1", "BRCA2", "RAD51", "RAD50", "NBN", "MRE11",
+    "ATR", "ATRIP", "CHEK1", "CHEK2",
+    "RPA1", "RPA2", "RPA3",
+    "MCM2", "MCM3", "MCM4", "MCM5", "MCM6", "MCM7",
+    "ORC1", "ORC2", "ORC3", "ORC4", "ORC5", "ORC6",
+    # Transcription factors
+    "TP53", "RB1", "MYC", "MYCN",
+    "JUN", "FOS", "JUNB", "JUND", "FOSB", "FOSL1", "FOSL2",
+    "SP1", "SP3", "E2F1", "E2F2", "E2F3", "E2F4",
+    # Mediator
+    "MED1", "MED12", "MED14", "MED15", "MED23", "MED24",
+    # Cohesin/Condensin
+    "SMC1A", "SMC3", "RAD21", "STAG1", "STAG2",
+    "SMC2", "SMC4", "NCAPD2", "NCAPG", "NCAPH",
+    # Topoisomerases
+    "TOP1", "TOP2A", "TOP2B",
+}
+
+
+def _compute_nuclear_evidence(substrate_genes: list) -> dict:
+    """Compute nuclear evidence score from substrate gene list.
+    Returns dict with tier1/tier2 hits, total score, and matched gene names."""
+    t1_hits = []
+    t2_hits = []
+    for g in substrate_genes:
+        gu = g.upper() if g else ""
+        if gu in _NUCLEAR_TIER1_GENES:
+            t1_hits.append(gu)
+        elif gu in _NUCLEAR_TIER2_GENES:
+            t2_hits.append(gu)
+    score = len(t1_hits) * 2 + len(t2_hits)
+    return {
+        "score": score,
+        "tier1_count": len(t1_hits),
+        "tier2_count": len(t2_hits),
+        "tier1_genes": sorted(set(t1_hits)),
+        "tier2_genes": sorted(set(t2_hits)),
+    }
+
+
 def _compute_kinase_activity_heatmap(enriched_data: list, kinase_result: dict, ptm_type: str) -> dict:
     """Compute per-kinase per-condition weighted activity scores from enriched PTM data.
 
@@ -1176,6 +1272,43 @@ def _compute_kinase_activity_heatmap(enriched_data: list, kinase_result: dict, p
                 "is_dominant": cl["is_dominant"],
             })
 
+        # v11.3.2: Compute nuclear evidence from ALL substrates
+        all_substrate_genes = [m.get("gene", "") for m in members]
+        nuclear_ev = _compute_nuclear_evidence(all_substrate_genes)
+
+        # v11.3.1: Collect same-time clusters (same peak as parent) for tooltip
+        same_time_clusters: list = []
+        if len(clusters) >= 2:
+            for _stc_cl in clusters:
+                if _stc_cl["is_dominant"]:
+                    continue
+                if _stc_cl["size"] < 3:
+                    continue
+                _stc_peak = _stc_cl.get("peak_condition", "")
+                _stc_peak_score = _stc_cl.get("peak_score", 0.0)
+                if abs(_stc_peak_score) < 0.3:
+                    continue
+                if _stc_peak == peak_cond:
+                    same_time_clusters.append({
+                        "tier": _stc_cl.get("tier", "mixed"),
+                        "size": _stc_cl["size"],
+                        "peak_score": round(_stc_peak_score, 4),
+                        "substrates": [
+                            {"gene": gp[0], "site": gp[1]}
+                            for gp in _stc_cl.get("member_keys", [])[:10]
+                        ],
+                    })
+
+        # v11.3: Build substrate list from dominant cluster
+        substrates_list = [
+            {
+                "ptm_key": f"{gp[0]}_{gp[1]}",
+                "gene": gp[0],
+                "site": gp[1],
+            }
+            for gp in dominant.get("member_keys", [])
+        ]
+
         kinase_scores.append({
             "kinase": kinase_name,
             "scores": scores,
@@ -1188,6 +1321,12 @@ def _compute_kinase_activity_heatmap(enriched_data: list, kinase_result: dict, p
             "direction": direction,
             "n_clusters": len(clusters),
             "cluster_details": cluster_details,
+            # v11.3.1: Same-time clusters for tooltip
+            "same_time_clusters": same_time_clusters,
+            # v11.3.2: Nuclear-exclusive substrate evidence
+            "nuclear_evidence": nuclear_ev,
+            # v11.3: Substrate list from dominant cluster
+            "substrates": substrates_list,
         })
 
     # ── Peak Synchronization: find kinases that peak at the same condition ──

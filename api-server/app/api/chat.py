@@ -379,6 +379,27 @@ def _build_kinase_activity_heatmap_context(order: Order) -> str:
         if len(kinase_scores) > 40:
             lines.append(f"  ... and {len(kinase_scores) - 40} more kinases")
 
+    # v11.3.2: Nuclear-Exclusive Substrate Evidence Summary
+    if kinase_scores:
+        nuc_kinases = [
+            ks for ks in kinase_scores
+            if ks.get("nuclear_evidence", {}).get("score", 0) > 0
+            and not ks.get("is_sub_pattern")
+        ]
+        if nuc_kinases:
+            lines.append(f"\nNuclear-Exclusive Substrate Evidence ({len(nuc_kinases)} kinases with nuclear markers):")
+            lines.append("Tier1 (histones, lamins, PCNA, PARP1, DNA-PKcs, RNA Pol II) = 2pts each")
+            lines.append("Tier2 (splicing factors, chromatin remodelers, TFs) = 1pt each")
+            for ks in sorted(nuc_kinases, key=lambda x: x.get("nuclear_evidence", {}).get("score", 0), reverse=True)[:15]:
+                ne = ks.get("nuclear_evidence", {})
+                t1 = ne.get("tier1_genes", [])
+                t2 = ne.get("tier2_genes", [])
+                gene_str = ", ".join(t1[:5] + t2[:5])
+                lines.append(
+                    f"  {ks.get('kinase', '')}: NucScore={ne.get('score', 0)} "
+                    f"(T1={ne.get('tier1_count', 0)}, T2={ne.get('tier2_count', 0)}) [{gene_str}]"
+                )
+
     text = "\n".join(lines)
     if len(text) > 8000:
         text = text[:8000] + "\n... [truncated]"
