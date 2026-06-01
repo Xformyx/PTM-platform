@@ -4426,6 +4426,14 @@ interface KinaseActivityScore {
     peak_score: number;
     substrates: { gene: string; site: string; peak_fc: number }[];
   }[];
+  // v11.3.2: Nuclear-exclusive substrate evidence
+  nuclear_evidence?: {
+    score: number;
+    tier1_count: number;
+    tier2_count: number;
+    tier1_genes: string[];
+    tier2_genes: string[];
+  };
 }
 
 interface PeakSyncEntry {
@@ -5417,6 +5425,52 @@ function KinaseActivityHeatmapView({
                           🔄
                         </span>
                       )}
+                      {/* v11.3.2: Nuclear-exclusive substrate evidence badge */}
+                      {!ks.is_sub_pattern && ks.nuclear_evidence && ks.nuclear_evidence.score > 0 && (() => {
+                        const ne = ks.nuclear_evidence!;
+                        // Badge style based on evidence strength
+                        const badgeStyle = ne.tier1_count > 0
+                          ? "bg-purple-500/20 text-purple-300 border-purple-500/40"  // Tier1 = confirmed nuclear
+                          : "bg-indigo-500/15 text-indigo-300 border-indigo-500/30"; // Tier2 only = likely nuclear
+                        // Build tooltip
+                        const tipParts: string[] = [];
+                        if (ne.tier1_count > 0) {
+                          tipParts.push(`🧬 Tier 1 (Absolute Nuclear Markers): ${ne.tier1_count}`);
+                          tipParts.push(`  ${ne.tier1_genes.join(", ")}`);
+                          tipParts.push("");
+                        }
+                        if (ne.tier2_count > 0) {
+                          tipParts.push(`🔬 Tier 2 (Predominantly Nuclear): ${ne.tier2_count}`);
+                          tipParts.push(`  ${ne.tier2_genes.slice(0, 10).join(", ")}${ne.tier2_genes.length > 10 ? ` +${ne.tier2_genes.length - 10}` : ""}`);
+                          tipParts.push("");
+                        }
+                        tipParts.push(`Nuclear Evidence Score: ${ne.score} (T1×2 + T2×1)`);
+                        tipParts.push("");
+                        if (ne.tier1_count > 0) {
+                          tipParts.push("Tier 1 substrates (histones, lamins, PCNA, PARP1,");
+                          tipParts.push("DNA-PKcs, RNA Pol II) are exclusively nuclear.");
+                          tipParts.push("Their phosphorylation is direct evidence that");
+                          tipParts.push("this kinase was active inside the nucleus.");
+                        } else {
+                          tipParts.push("Tier 2 substrates (splicing factors, chromatin");
+                          tipParts.push("remodelers, TFs) are predominantly nuclear.");
+                          tipParts.push("Suggests likely nuclear kinase activity.");
+                        }
+                        // Compact display: show top gene names
+                        const displayGenes = ne.tier1_genes.length > 0
+                          ? ne.tier1_genes.slice(0, 3)
+                          : ne.tier2_genes.slice(0, 2);
+                        return (
+                          <span
+                            className={`ml-1 text-[8px] px-1 py-0 rounded border cursor-help inline-flex items-center gap-0.5 ${badgeStyle}`}
+                            title={tipParts.join("\n")}
+                          >
+                            {ne.tier1_count > 0 ? "🧬" : "🔬"}
+                            <span className="font-medium">nuc</span>
+                            <span className="opacity-70">{displayGenes.join(",")}</span>
+                          </span>
+                        );
+                      })()}
                     </td>
                     {/* Direction indicator */}
                     <td className="text-center px-0.5 py-0.5">
