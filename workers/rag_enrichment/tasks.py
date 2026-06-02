@@ -1322,9 +1322,27 @@ def _compute_kinase_activity_heatmap(enriched_data: list, kinase_result: dict, p
                 "ptm_key": f"{gp[0]}_{gp[1]}",
                 "gene": gp[0],
                 "site": gp[1],
+                "cluster": "dominant",
             }
             for gp in dominant.get("member_keys", [])
         ]
+        # v11.3.4b: Add nuclear marker substrates from non-dominant clusters with temporal data
+        for cl in clusters:
+            if cl["is_dominant"]:
+                continue
+            for gp in cl.get("member_keys", []):
+                gene_upper = gp[0].upper()
+                if gene_upper in _NUCLEAR_TIER1_GENES or gene_upper in _NUCLEAR_TIER2_GENES:
+                    temporal = {c: round(ptm_values.get((gp[0], gp[1], c), 0.0), 3) for c in conditions}
+                    substrates_list.append({
+                        "ptm_key": f"{gp[0]}_{gp[1]}",
+                        "gene": gp[0],
+                        "site": gp[1],
+                        "peak_fc": round(float(max((ptm_values.get((gp[0], gp[1], c), 0.0) for c in conditions), key=abs, default=0.0)), 3),
+                        "temporal": temporal,
+                        "cluster": "non_dominant_nuclear",
+                        "nuclear_tier": 1 if gene_upper in _NUCLEAR_TIER1_GENES else 2,
+                    })
 
         # v11.3.3: Regulator Self-PTM Temporal Tracking
         # Check if the kinase/E3 ligase gene itself has PTM entries in the dataset.

@@ -5700,7 +5700,8 @@ function KinaseActivityHeatmapView({
                     <tr key={`${ks.kinase}_substrates`} className="bg-muted/10">
                       <td colSpan={2 + (heatmapData?.conditions?.length || 0) + 4} className="px-4 py-2">
                         <div className="flex flex-wrap gap-1.5 max-h-[120px] overflow-y-auto">
-                          {ks.substrates.map((sub) => {
+                          {ks.substrates.map((sub: any) => {
+                            const isNonDomNuclear = sub.cluster === "non_dominant_nuclear";
                             const locs = goLocCache[sub.gene.toUpperCase()] || goLocData?.gene_localizations?.[sub.gene.toUpperCase()] || [];
                             const locColor: Record<string, string> = {
                               nucleus: "bg-purple-500/20 text-purple-300 border-purple-500/40",
@@ -5719,14 +5720,48 @@ function KinaseActivityHeatmapView({
                             return (
                               <span
                                 key={sub.ptm_key}
-                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-border/50 text-[10px] bg-background/50"
-                                title={`${sub.gene} ${sub.site}\nPeak |Log2FC|: ${sub.peak_fc}\nGO CC: ${locs.length ? locs.join(", ") : goLocLoading ? "(loading...)" : "(no GO CC annotation)"}`}
+                                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] ${isNonDomNuclear ? "border-purple-500/60 bg-purple-500/10 ring-1 ring-purple-500/30" : "border-border/50 bg-background/50"}`}
+                                title={(() => {
+                                  let tip = `${sub.gene} ${sub.site}\nPeak |Log2FC|: ${sub.peak_fc}`;
+                                  if (isNonDomNuclear && sub.temporal && heatmapData?.conditions) {
+                                    tip += `\n\n🧬 Nuclear marker (Tier ${sub.nuclear_tier || "?"}) \u2014 non-dominant cluster`;
+                                    tip += `\nTemporal FC: ${heatmapData.conditions.map((c: string) => `${c}: ${(sub.temporal[c] || 0) > 0 ? "+" : ""}${(sub.temporal[c] || 0).toFixed(2)}`).join(" | ")}`;
+                                  } else if (isNonDomNuclear) {
+                                    tip += "\n🧬 Nuclear marker (from non-dominant temporal cluster)";
+                                  }
+                                  tip += `\nGO CC: ${locs.length ? locs.join(", ") : goLocLoading ? "(loading...)" : "(no GO CC annotation)"}`;
+                                  return tip;
+                                })()}
                               >
-                                <span className="font-medium text-foreground/90">{sub.gene}</span>
+                                {isNonDomNuclear && <span className="text-[8px]">🧬</span>}
+                                <span className={`font-medium ${isNonDomNuclear ? "text-purple-300" : "text-foreground/90"}`}>{sub.gene}</span>
                                 <span className="text-muted-foreground/60">{sub.site}</span>
                                 <span className={`text-[8px] ${sub.peak_fc > 0 ? "text-red-400" : "text-blue-400"}`}>
                                   {sub.peak_fc > 0 ? "+" : ""}{sub.peak_fc.toFixed(1)}
                                 </span>
+                                {/* v11.3.4b: Show temporal mini-bars for nuclear markers */}
+                                {isNonDomNuclear && sub.temporal && heatmapData?.conditions && (
+                                  <span className="inline-flex items-center gap-px ml-0.5">
+                                    {heatmapData.conditions.map((cond: string) => {
+                                      const fc = sub.temporal[cond] || 0;
+                                      const maxAbs = Math.max(...Object.values(sub.temporal as Record<string, number>).map(Math.abs), 0.1);
+                                      const intensity = Math.min(Math.abs(fc) / maxAbs, 1);
+                                      const bg = fc > 0
+                                        ? `rgba(239, 68, 68, ${0.2 + intensity * 0.6})`
+                                        : fc < 0
+                                        ? `rgba(59, 130, 246, ${0.2 + intensity * 0.6})`
+                                        : "rgba(100, 100, 100, 0.2)";
+                                      return (
+                                        <span
+                                          key={cond}
+                                          className="inline-block w-[6px] h-[10px] rounded-sm"
+                                          style={{ backgroundColor: bg }}
+                                          title={`${cond}: ${fc > 0 ? "+" : ""}${fc.toFixed(2)}`}
+                                        />
+                                      );
+                                    })}
+                                  </span>
+                                )}
                                 {locs.slice(0, 2).map((loc) => {
                                   const abbrev: Record<string, string> = {
                                     nucleus: "nuc", cytoplasm: "cyt", membrane: "mem",

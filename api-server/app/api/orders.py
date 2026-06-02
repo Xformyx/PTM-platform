@@ -7140,18 +7140,41 @@ async def kinase_activity_heatmap(
             "nuclear_evidence": nuclear_ev,
             # v11.3.3: Regulator self-PTM temporal tracking
             "self_ptm": self_ptm_data if self_ptm_data else None,
-            # v11.3: Include dominant cluster substrate list
+            # v11.3: Include dominant cluster substrate list + nuclear markers from other clusters
             "substrates": [
-                {
-                    "ptm_key": pk,
-                    "gene": pk.split("_")[0] if "_" in pk else pk,
-                    "site": pk.split("_", 1)[1] if "_" in pk else "",
-                    "peak_fc": round(float(max(
-                        (ptm_timeseries.get(pk, {}).get(c, 0.0) for c in conditions_sorted),
-                        key=abs, default=0.0
-                    )), 3),
-                }
-                for pk in dominant["ptm_keys"]
+                *[
+                    {
+                        "ptm_key": pk,
+                        "gene": pk.split("_")[0] if "_" in pk else pk,
+                        "site": pk.split("_", 1)[1] if "_" in pk else "",
+                        "peak_fc": round(float(max(
+                            (ptm_timeseries.get(pk, {}).get(c, 0.0) for c in conditions_sorted),
+                            key=abs, default=0.0
+                        )), 3),
+                        "cluster": "dominant",
+                    }
+                    for pk in dominant["ptm_keys"]
+                ],
+                # v11.3.4b: Include nuclear marker substrates from non-dominant clusters
+                # with full temporal vector so frontend can show time-resolved nuclear activity
+                *[
+                    {
+                        "ptm_key": pk,
+                        "gene": pk.split("_")[0] if "_" in pk else pk,
+                        "site": pk.split("_", 1)[1] if "_" in pk else "",
+                        "peak_fc": round(float(max(
+                            (ptm_timeseries.get(pk, {}).get(c, 0.0) for c in conditions_sorted),
+                            key=abs, default=0.0
+                        )), 3),
+                        "temporal": {c: round(ptm_timeseries.get(pk, {}).get(c, 0.0), 3) for c in conditions_sorted},
+                        "cluster": "non_dominant_nuclear",
+                        "nuclear_tier": 1 if (pk.split("_")[0].upper() if "_" in pk else pk.upper()) in _NUCLEAR_TIER1_GENES else 2,
+                    }
+                    for cl in clusters if not cl["is_dominant"]
+                    for pk in cl.get("ptm_keys", [])
+                    if (pk.split("_")[0].upper() if "_" in pk else pk.upper()) in _NUCLEAR_TIER1_GENES
+                    or (pk.split("_")[0].upper() if "_" in pk else pk.upper()) in _NUCLEAR_TIER2_GENES
+                ],
             ],
         })
 
