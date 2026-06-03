@@ -1235,6 +1235,37 @@ def _compute_kinase_activity_heatmap(enriched_data: list, kinase_result: dict, p
     kinase_modules = kinase_result.get("kinase_modules", kinase_result.get("kinase_module_list", []))
     kinase_scores = []
 
+    # v11.3.5: Filter out non-kinase entries (drugs, cyclins, etc.)
+    _NON_KINASE_BLACKLIST = {
+        "RAPAMYCIN", "WORTMANNIN", "STAUROSPORINE", "INSULIN",
+        "NOCODAZOLE", "TAXOL", "PACLITAXEL", "DOXORUBICIN",
+        "CISPLATIN", "ETOPOSIDE", "CAMPTOTHECIN", "THAPSIGARGIN",
+        "PHORBOL", "PMA", "TPA", "EGF", "PDGF", "FGF", "NGF",
+        "TNF", "TNFA", "IL1", "IL6", "IFNG", "LPS",
+        "OKADAIC ACID", "CALYCULIN", "PERVANADATE",
+        "SORBITOL", "ANISOMYCIN", "ARSENITE",
+        "UV", "IONIZING RADIATION", "GAMMA RADIATION",
+        "CYCLIN", "CYCLIN A", "CYCLIN B", "CYCLIN D", "CYCLIN E",
+        "CYCLIN A1", "CYCLIN A2", "CYCLIN B1", "CYCLIN B2",
+        "CYCLIN D1", "CYCLIN D2", "CYCLIN D3",
+        "CYCLIN E1", "CYCLIN E2",
+        "KINASE", "PHOSPHATASE", "PROTEASE", "LIGASE",
+        "RECEPTOR", "CHANNEL", "TRANSPORTER",
+    }
+    def _is_non_kinase(name: str) -> bool:
+        upper = name.upper()
+        if upper in _NON_KINASE_BLACKLIST:
+            return True
+        for bl in _NON_KINASE_BLACKLIST:
+            if upper.startswith(bl + " ") or upper.startswith(bl + "/"):
+                return True
+        return False
+
+    kinase_modules = [
+        km for km in kinase_modules
+        if not _is_non_kinase(km.get("kinase", ""))
+    ]
+
     for km in kinase_modules:
         kinase_name = km.get("kinase", "")
         members = km.get("members", [])

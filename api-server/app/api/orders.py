@@ -5455,7 +5455,36 @@ async def global_kinase_modules(
                 "RESULT", "LEVEL", "FACTOR", "COMPLEX", "FAMILY", "GROUP",
                 "REGION", "SEQUENCE", "RESIDUE", "MOTIF", "SUBSTRATE",
             }
+            # v11.3.5: Blacklist non-kinase entries (drugs, regulatory subunits, etc.)
+            _NON_KINASE_BLACKLIST = {
+                # Drugs / inhibitors / treatments
+                "RAPAMYCIN", "WORTMANNIN", "STAUROSPORINE", "INSULIN",
+                "NOCODAZOLE", "TAXOL", "PACLITAXEL", "DOXORUBICIN",
+                "CISPLATIN", "ETOPOSIDE", "CAMPTOTHECIN", "THAPSIGARGIN",
+                "PHORBOL", "PMA", "TPA", "EGF", "PDGF", "FGF", "NGF",
+                "TNF", "TNFA", "IL1", "IL6", "IFNG", "LPS",
+                "OKADAIC ACID", "CALYCULIN", "PERVANADATE",
+                "SORBITOL", "ANISOMYCIN", "ARSENITE",
+                "UV", "IONIZING RADIATION", "GAMMA RADIATION",
+                # Regulatory subunits (not kinases themselves)
+                "CYCLIN", "CYCLIN A", "CYCLIN B", "CYCLIN D", "CYCLIN E",
+                "CYCLIN A1", "CYCLIN A2", "CYCLIN B1", "CYCLIN B2",
+                "CYCLIN D1", "CYCLIN D2", "CYCLIN D3",
+                "CYCLIN E1", "CYCLIN E2",
+                # Generic terms that slip through
+                "KINASE", "PHOSPHATASE", "PROTEASE", "LIGASE",
+                "RECEPTOR", "CHANNEL", "TRANSPORTER",
+            }
             if not canon or len(canon) < 3 or canon in _KINASE_STOP_WORDS:
+                continue
+            if canon in _NON_KINASE_BLACKLIST:
+                continue
+            # Also check display name (case-insensitive) for multi-word drug names
+            _disp_upper = display.upper()
+            if _disp_upper in _NON_KINASE_BLACKLIST:
+                continue
+            # Partial match: "Cyclin D1/cdk4" starts with "CYCLIN"
+            if any(_disp_upper.startswith(bl + " ") or _disp_upper.startswith(bl + "/") for bl in _NON_KINASE_BLACKLIST):
                 continue
 
             if canon not in kinase_members:
@@ -6481,6 +6510,38 @@ async def kinase_activity_heatmap(
 
     # ── Build PTM → kinase reverse map (for exclusive/shared classification) ──
     ptm_to_kinases: dict[str, list[str]] = {}  # ptm_key -> [kinase_names]
+    # v11.3.5: Filter out non-kinase entries (drugs, cyclins, etc.) from kinase_modules
+    _HEATMAP_NON_KINASE_BLACKLIST = {
+        "RAPAMYCIN", "WORTMANNIN", "STAUROSPORINE", "INSULIN",
+        "NOCODAZOLE", "TAXOL", "PACLITAXEL", "DOXORUBICIN",
+        "CISPLATIN", "ETOPOSIDE", "CAMPTOTHECIN", "THAPSIGARGIN",
+        "PHORBOL", "PMA", "TPA", "EGF", "PDGF", "FGF", "NGF",
+        "TNF", "TNFA", "IL1", "IL6", "IFNG", "LPS",
+        "OKADAIC ACID", "CALYCULIN", "PERVANADATE",
+        "SORBITOL", "ANISOMYCIN", "ARSENITE",
+        "UV", "IONIZING RADIATION", "GAMMA RADIATION",
+        "CYCLIN", "CYCLIN A", "CYCLIN B", "CYCLIN D", "CYCLIN E",
+        "CYCLIN A1", "CYCLIN A2", "CYCLIN B1", "CYCLIN B2",
+        "CYCLIN D1", "CYCLIN D2", "CYCLIN D3",
+        "CYCLIN E1", "CYCLIN E2",
+        "KINASE", "PHOSPHATASE", "PROTEASE", "LIGASE",
+        "RECEPTOR", "CHANNEL", "TRANSPORTER",
+    }
+    def _is_non_kinase(name: str) -> bool:
+        upper = name.upper()
+        if upper in _HEATMAP_NON_KINASE_BLACKLIST:
+            return True
+        # Check if name starts with a blacklisted term (e.g. "Cyclin D1/cdk4")
+        for bl in _HEATMAP_NON_KINASE_BLACKLIST:
+            if upper.startswith(bl + " ") or upper.startswith(bl + "/"):
+                return True
+        return False
+
+    kinase_modules = [
+        km for km in kinase_modules
+        if not _is_non_kinase(km.get("kinase", ""))
+    ]
+
     for km in kinase_modules:
         kn = km.get("kinase", "")
         for ptm in km.get("ptms", []):
