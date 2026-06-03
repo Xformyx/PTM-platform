@@ -5724,12 +5724,19 @@ function KinaseActivityHeatmapView({
                                 title={(() => {
                                   let tip = `${sub.gene} ${sub.site}`;
                                   // v11.3.5b: Show current selected condition value + peak info
+                                  // Derive peak condition for tooltip
+                                  const tipPeakCond = sub.peak_condition
+                                    || (sub.temporal && heatmapData?.conditions
+                                        ? heatmapData.conditions.reduce((best: string, c: string) => Math.abs(sub.temporal[c] || 0) > Math.abs(sub.temporal[best] || 0) ? c : best, heatmapData.conditions[0])
+                                        : null)
+                                    || ks.peak_condition
+                                    || "?";
                                   if (sortByCondition && sortMode === "condition_sort" && sub.temporal) {
                                     const currentVal = sub.temporal[sortByCondition] || 0;
                                     tip += `\n현재 값: ${currentVal > 0 ? "+" : ""}${currentVal.toFixed(2)} (${sortByCondition})`;
-                                    tip += ` | 최고 활성: ${sub.peak_fc > 0 ? "+" : ""}${sub.peak_fc.toFixed(2)} (${sub.peak_condition || "peak"} peak)`;
+                                    tip += ` | 최고 활성: ${sub.peak_fc > 0 ? "+" : ""}${sub.peak_fc.toFixed(2)} (${tipPeakCond})`;
                                   } else {
-                                    tip += `\nPeak |Log2FC|: ${sub.peak_fc > 0 ? "+" : ""}${sub.peak_fc.toFixed(2)} @ ${sub.peak_condition || "peak"}`;
+                                    tip += `\nPeak |Log2FC|: ${sub.peak_fc > 0 ? "+" : ""}${sub.peak_fc.toFixed(2)} @ ${tipPeakCond}`;
                                   }
                                   if (sub.temporal && heatmapData?.conditions) {
                                     tip += `\nTemporal: ${heatmapData.conditions.map((c: string) => `${c}: ${(sub.temporal[c] || 0) > 0 ? "+" : ""}${(sub.temporal[c] || 0).toFixed(1)}`).join(" | ")}`;
@@ -5749,9 +5756,16 @@ function KinaseActivityHeatmapView({
                                   const displayFc = (sortByCondition && sortMode === "condition_sort" && sub.temporal)
                                     ? (sub.temporal[sortByCondition] || 0)
                                     : sub.peak_fc;
+                                  // Derive peak condition: prefer sub.peak_condition, then compute from temporal, then use parent ks.peak_condition
+                                  const derivedPeakCond = sub.peak_condition
+                                    || (sub.temporal && heatmapData?.conditions
+                                        ? heatmapData.conditions.reduce((best: string, c: string) => Math.abs(sub.temporal[c] || 0) > Math.abs(sub.temporal[best] || 0) ? c : best, heatmapData.conditions[0])
+                                        : null)
+                                    || ks.peak_condition
+                                    || "";
                                   const displayLabel = (sortByCondition && sortMode === "condition_sort" && sub.temporal)
-                                    ? sortByCondition.replace(/min$/i, "").replace(/hr$/i, "h")
-                                    : (sub.peak_condition ? sub.peak_condition.replace(/min$/i, "").replace(/hr$/i, "h") : "pk");
+                                    ? sortByCondition
+                                    : derivedPeakCond;
                                   return (
                                     <span className={`text-[8px] ${displayFc > 0 ? "text-red-400" : displayFc < 0 ? "text-blue-400" : "text-gray-400"}`}>
                                       {displayFc > 0 ? "+" : ""}{displayFc.toFixed(1)}
