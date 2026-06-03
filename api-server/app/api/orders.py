@@ -4019,6 +4019,8 @@ _KINASE_ALIAS_MAP: dict[str, str] = {
     "GSK3": "GSK3B", "GSK3_MINIMAL": "GSK3B",
     "GSK3A": "GSK3A", "GSK3B": "GSK3B",
     "GSK-3": "GSK3B", "GSK-3BETA": "GSK3B", "GSK-3ALPHA": "GSK3A",
+    "GSK3BETA": "GSK3B", "GSK3ALPHA": "GSK3A",
+    "GSK-3B": "GSK3B", "GSK-3A": "GSK3A",
     # PLK family
     "PLK1": "PLK1", "PLK1_EXTENDED": "PLK1",
     "PLK2": "PLK2", "PLK3": "PLK3", "PLK4": "PLK4",
@@ -4104,43 +4106,57 @@ for _alias, _canonical in _KINASE_ALIAS_MAP.items():
     _KINASE_FAMILY_MEMBERS[_canonical_upper].add(_alias.upper())
 
 
+# Greek letter → single-letter suffix mapping for kinase name normalization
+_GREEK_SUFFIX_MAP = {
+    "ALPHA": "A", "BETA": "B", "GAMMA": "G", "DELTA": "D",
+    "EPSILON": "E", "ZETA": "Z", "ETA": "H", "THETA": "T",
+    "IOTA": "I", "KAPPA": "K", "LAMBDA": "L",
+}
+
 def normalize_kinase_name(raw_name: str) -> tuple[str, str]:
     """Normalize a kinase name to its canonical form.
-
     Returns (canonical_name, display_name):
       - canonical_name: HGNC gene symbol or standardized family name (uppercase)
       - display_name: human-readable form for UI display
-
     Strategy:
       1. Exact match in alias map (case-insensitive)
       2. Strip common suffixes (" kinase", " family") and retry
-      3. Try prefix matching for numbered isoforms (e.g., "CDK" matches "CDK1")
+      3. Handle hyphenated/spaced variants (e.g., "CDK-1" → "CDK1")
+      3b. Greek letter suffix normalization (e.g., "GSK3beta" → "GSK3B")
       4. Fallback: uppercase the raw name
     """
     if not raw_name or not raw_name.strip():
         return ("", "")
-
     name = raw_name.strip()
     name_upper = name.upper()
-
     # 1. Exact match
     if name_upper in _KINASE_ALIAS_MAP:
         canonical = _KINASE_ALIAS_MAP[name_upper]
         return (canonical.upper(), canonical)
-
     # 2. Strip common suffixes and retry
     import re as _re_norm
     cleaned = _re_norm.sub(r'\s*(kinase|family|protein|enzyme)\s*$', '', name_upper, flags=_re_norm.IGNORECASE).strip()
     if cleaned and cleaned != name_upper and cleaned in _KINASE_ALIAS_MAP:
         canonical = _KINASE_ALIAS_MAP[cleaned]
         return (canonical.upper(), canonical)
-
     # 3. Handle hyphenated/spaced variants (e.g., "CDK-1" → "CDK1")
     no_sep = _re_norm.sub(r'[-\s]+', '', name_upper)
     if no_sep != name_upper and no_sep in _KINASE_ALIAS_MAP:
         canonical = _KINASE_ALIAS_MAP[no_sep]
         return (canonical.upper(), canonical)
-
+    # 3b. Greek letter suffix normalization (e.g., "GSK3BETA" → "GSK3B", "PKCDELTA" → "PKCD")
+    for greek, letter in _GREEK_SUFFIX_MAP.items():
+        if name_upper.endswith(greek):
+            greek_normalized = name_upper[:-len(greek)] + letter
+            if greek_normalized in _KINASE_ALIAS_MAP:
+                canonical = _KINASE_ALIAS_MAP[greek_normalized]
+                return (canonical.upper(), canonical)
+            # Also try without separators in the prefix
+            no_sep_greek = _re_norm.sub(r'[-\s]+', '', greek_normalized)
+            if no_sep_greek in _KINASE_ALIAS_MAP:
+                canonical = _KINASE_ALIAS_MAP[no_sep_greek]
+                return (canonical.upper(), canonical)
+            break  # Only one Greek suffix possible
     # 4. Fallback: return uppercase
     return (name_upper, name)
 
