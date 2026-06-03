@@ -7212,6 +7212,10 @@ async def kinase_activity_heatmap(
                             (ptm_timeseries.get(pk, {}).get(c, 0.0) for c in conditions_sorted),
                             key=abs, default=0.0
                         )), 3),
+                        # v11.3.5b: Include full temporal vector for interactive time-column selection
+                        "temporal": {c: round(ptm_timeseries.get(pk, {}).get(c, 0.0), 3) for c in conditions_sorted},
+                        # Also include peak condition for tooltip
+                        "peak_condition": max(conditions_sorted, key=lambda c, _pk=pk: abs(ptm_timeseries.get(_pk, {}).get(c, 0.0))) if conditions_sorted else "",
                         "cluster": "dominant",
                     }
                     for pk in dominant["ptm_keys"]
@@ -7228,6 +7232,7 @@ async def kinase_activity_heatmap(
                             key=abs, default=0.0
                         )), 3),
                         "temporal": {c: round(ptm_timeseries.get(pk, {}).get(c, 0.0), 3) for c in conditions_sorted},
+                        "peak_condition": max(conditions_sorted, key=lambda c, _pk=pk: abs(ptm_timeseries.get(_pk, {}).get(c, 0.0))) if conditions_sorted else "",
                         "cluster": "non_dominant_nuclear",
                         "nuclear_tier": 1 if (pk.split("_")[0].upper() if "_" in pk else pk.upper()) in _NUCLEAR_TIER1_GENES else 2,
                     }

@@ -5722,12 +5722,20 @@ function KinaseActivityHeatmapView({
                                 key={sub.ptm_key}
                                 className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] ${isNonDomNuclear ? "border-purple-500/60 bg-purple-500/10 ring-1 ring-purple-500/30" : "border-border/50 bg-background/50"}`}
                                 title={(() => {
-                                  let tip = `${sub.gene} ${sub.site}\nPeak |Log2FC|: ${sub.peak_fc}`;
-                                  if (isNonDomNuclear && sub.temporal && heatmapData?.conditions) {
-                                    tip += `\n\n🧬 Nuclear marker (Tier ${sub.nuclear_tier || "?"}) \u2014 non-dominant cluster`;
-                                    tip += `\nTemporal FC: ${heatmapData.conditions.map((c: string) => `${c}: ${(sub.temporal[c] || 0) > 0 ? "+" : ""}${(sub.temporal[c] || 0).toFixed(2)}`).join(" | ")}`;
-                                  } else if (isNonDomNuclear) {
-                                    tip += "\n🧬 Nuclear marker (from non-dominant temporal cluster)";
+                                  let tip = `${sub.gene} ${sub.site}`;
+                                  // v11.3.5b: Show current selected condition value + peak info
+                                  if (sortByCondition && sortMode === "condition_sort" && sub.temporal) {
+                                    const currentVal = sub.temporal[sortByCondition] || 0;
+                                    tip += `\n현재 값: ${currentVal > 0 ? "+" : ""}${currentVal.toFixed(2)} (${sortByCondition})`;
+                                    tip += ` | 최고 활성: ${sub.peak_fc > 0 ? "+" : ""}${sub.peak_fc.toFixed(2)} (${sub.peak_condition || "peak"} peak)`;
+                                  } else {
+                                    tip += `\nPeak |Log2FC|: ${sub.peak_fc > 0 ? "+" : ""}${sub.peak_fc.toFixed(2)} @ ${sub.peak_condition || "peak"}`;
+                                  }
+                                  if (sub.temporal && heatmapData?.conditions) {
+                                    tip += `\nTemporal: ${heatmapData.conditions.map((c: string) => `${c}: ${(sub.temporal[c] || 0) > 0 ? "+" : ""}${(sub.temporal[c] || 0).toFixed(1)}`).join(" | ")}`;
+                                  }
+                                  if (isNonDomNuclear) {
+                                    tip += `\n\n🧬 Nuclear marker (Tier ${sub.nuclear_tier || "?"}) — non-dominant cluster`;
                                   }
                                   tip += `\nGO CC: ${locs.length ? locs.join(", ") : goLocLoading ? "(loading...)" : "(no GO CC annotation)"}`;
                                   return tip;
@@ -5736,9 +5744,21 @@ function KinaseActivityHeatmapView({
                                 {isNonDomNuclear && <span className="text-[8px]">🧬</span>}
                                 <span className={`font-medium ${isNonDomNuclear ? "text-purple-300" : "text-foreground/90"}`}>{sub.gene}</span>
                                 <span className="text-muted-foreground/60">{sub.site}</span>
-                                <span className={`text-[8px] ${sub.peak_fc > 0 ? "text-red-400" : "text-blue-400"}`}>
-                                  {sub.peak_fc > 0 ? "+" : ""}{sub.peak_fc.toFixed(1)}
-                                </span>
+                                {(() => {
+                                  // v11.3.5b: Show FC for selected time column, or peak_fc if none selected
+                                  const displayFc = (sortByCondition && sortMode === "condition_sort" && sub.temporal)
+                                    ? (sub.temporal[sortByCondition] || 0)
+                                    : sub.peak_fc;
+                                  const displayLabel = (sortByCondition && sortMode === "condition_sort" && sub.temporal)
+                                    ? sortByCondition.replace(/min$/i, "").replace(/hr$/i, "h")
+                                    : (sub.peak_condition ? sub.peak_condition.replace(/min$/i, "").replace(/hr$/i, "h") : "pk");
+                                  return (
+                                    <span className={`text-[8px] ${displayFc > 0 ? "text-red-400" : displayFc < 0 ? "text-blue-400" : "text-gray-400"}`}>
+                                      {displayFc > 0 ? "+" : ""}{displayFc.toFixed(1)}
+                                      <span className="text-muted-foreground/50 ml-0.5">@{displayLabel}</span>
+                                    </span>
+                                  );
+                                })()}
                                 {/* v11.3.4b: Show temporal mini-bars for nuclear markers */}
                                 {isNonDomNuclear && sub.temporal && heatmapData?.conditions && (
                                   <span className="inline-flex items-center gap-px ml-0.5">
