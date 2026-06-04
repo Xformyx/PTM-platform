@@ -3660,10 +3660,12 @@ function SignalFlowView({
   }, [groupedReceptors, kinaseTemporalMap, conditions]);
 
   // v11.4: Temporal Signal Dominance — group receptors by peak timepoint for summary strip
+  // Composite score = kinase_activity × confidence_weight
+  // This ensures high-confidence receptors (like NOTCH1) rank appropriately even if
+  // some of their via_kinases lack substrate annotations in the current PTM set
   const temporalDominance = useMemo(() => {
     if (!conditions.length || !Object.keys(kinaseTemporalMap).length) return [];
 
-    // For each condition/timepoint, compute aggregate receptor activity score
     const result: { condition: string; receptors: { name: string; class: string; score: number; confidence: number }[] }[] = [];
 
     for (const cond of conditions) {
@@ -3672,6 +3674,7 @@ function SignalFlowView({
       for (const { primary } of groupedReceptors) {
         const kinases = primary.via_kinases || [];
         if (!kinases.length) continue;
+        const confidence = primary.confidence_score || 0;
 
         // Compute average kinase activity at this timepoint for this receptor
         let totalScore = 0;
@@ -3683,17 +3686,24 @@ function SignalFlowView({
             count++;
           }
         }
-        if (count > 0) {
+
+        // Composite: activity × (0.4 + 0.6 × confidence)
+        // High confidence receptors get boosted; low confidence ones are dampened
+        const rawActivity = count > 0 ? totalScore / count : 0;
+        const confidenceWeight = 0.4 + 0.6 * confidence;
+        const compositeScore = rawActivity * confidenceWeight;
+
+        if (compositeScore > 0) {
           receptorScores.push({
             name: primary.name,
             class: primary.receptor_class,
-            score: totalScore / count,
-            confidence: primary.confidence_score || 0,
+            score: compositeScore,
+            confidence,
           });
         }
       }
 
-      // Sort by activity score at this timepoint
+      // Sort by composite score at this timepoint
       receptorScores.sort((a, b) => b.score - a.score);
       result.push({ condition: cond, receptors: receptorScores.slice(0, 5) });
     }
