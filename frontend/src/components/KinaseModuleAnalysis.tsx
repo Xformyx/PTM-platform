@@ -3665,56 +3665,54 @@ function SignalFlowView({
     return map;
   }, [groupedReceptors, kinaseTemporalMap, conditions]);
 
-  // v11.4c: Temporal Signal Dominance — top active receptors AT each timepoint
-  // Uses top 12 receptors (same pool as detail cards below)
-  // For each timepoint, shows receptors with highest activity AT that timepoint
-  // (not just peak-based grouping, which can leave timepoints empty)
+  // v11.4d: Temporal Signal Dominance — group receptors by their activation timepoint
+  // Uses the same ⚡ badge logic (earliestPeak from receptorTemporalClass) for grouping
+  // Ranked by confidence_score within each timepoint group
+  // This ensures consistency: the summary shows the same timepoint as the ⚡ badge on each card
   const temporalDominance = useMemo(() => {
-    if (!conditions.length || !Object.keys(kinaseTemporalMap).length) return [];
-
-    // Only consider top receptors (same pool as detail cards below)
+    if (!conditions.length) return [];
     const topReceptors = groupedReceptors.slice(0, Math.min(groupedReceptors.length, 12));
 
-    const result: { condition: string; receptors: { name: string; class: string; score: number; confidence: number }[] }[] = [];
+    // Group receptors by their activation timepoint (earliestPeak)
+    const byTimepoint: Record<string, { name: string; class: string; score: number; confidence: number }[]> = {};
+    for (const cond of conditions) byTimepoint[cond] = [];
 
-    for (const cond of conditions) {
-      const receptorScores: { name: string; class: string; score: number; confidence: number }[] = [];
+    for (const { primary } of topReceptors) {
+      const recTemporal = receptorTemporalClass[primary.name];
+      if (!recTemporal || recTemporal.class === "unknown") continue;
+      const activationTime = recTemporal.earliestPeak;
+      if (!byTimepoint[activationTime]) continue;
 
-      for (const { primary } of topReceptors) {
-        const kinases = primary.via_kinases || [];
-        if (!kinases.length) continue;
-        const confidence = primary.confidence_score || 0;
-
-        // Compute average kinase activity at this specific timepoint
-        // Use absScores (mean of |FC|) to capture total activity even when substrates go both up and down
-        let totalScore = 0;
-        let count = 0;
-        for (const k of kinases) {
-          const temporal = kinaseTemporalMap[k.toUpperCase()];
-          if (temporal && temporal.absScores[cond] !== undefined) {
-            totalScore += temporal.absScores[cond];
-            count++;
-          }
-        }
-
-        if (count > 0) {
-          const rawActivity = totalScore / count;
-          receptorScores.push({
-            name: primary.name,
-            class: primary.receptor_class,
-            score: rawActivity,
-            confidence,
-          });
+      const confidence = primary.confidence_score || 0;
+      // Use absScores for activity magnitude display (secondary info)
+      const kinases = primary.via_kinases || [];
+      let activityAtPeak = 0;
+      let cnt = 0;
+      for (const k of kinases) {
+        const temporal = kinaseTemporalMap[k.toUpperCase()];
+        if (temporal && temporal.absScores && temporal.absScores[activationTime] !== undefined) {
+          activityAtPeak += temporal.absScores[activationTime];
+          cnt++;
         }
       }
 
-      // Sort by activity at this timepoint, use confidence as tiebreaker
-      receptorScores.sort((a, b) => b.score - a.score || b.confidence - a.confidence);
-      result.push({ condition: cond, receptors: receptorScores.slice(0, 3) });
+      byTimepoint[activationTime].push({
+        name: primary.name,
+        class: primary.receptor_class,
+        score: cnt > 0 ? activityAtPeak / cnt : 0,
+        confidence,
+      });
     }
 
+    // Sort each group by confidence (primary) then activity (secondary)
+    const result: { condition: string; receptors: { name: string; class: string; score: number; confidence: number }[] }[] = [];
+    for (const cond of conditions) {
+      const group = byTimepoint[cond];
+      group.sort((a, b) => b.confidence - a.confidence || b.score - a.score);
+      result.push({ condition: cond, receptors: group.slice(0, 4) });
+    }
     return result;
-  }, [conditions, kinaseTemporalMap, groupedReceptors]);
+  }, [conditions, kinaseTemporalMap, groupedReceptors, receptorTemporalClass]);
 
   const groupsToShow = selectedReceptor
     ? groupedReceptors.filter(g =>
@@ -3844,18 +3842,18 @@ function SignalFlowView({
         <div className="rounded-lg border border-border/60 bg-card/30 p-3 space-y-2">
           <div className="flex items-center gap-2 mb-1">
             <span className="text-[10px] font-semibold text-orange-300">⚡ Temporal Signal Dominance</span>
-            <span className="text-[9px] text-muted-foreground">— Top active receptors at each timepoint (from detail pool below)</span>
+            <span className="text-[9px] text-muted-foreground">— Receptors grouped by activation timepoint (confidence-ranked)</span>
           </div>
           <div className="grid gap-1.5" style={{ gridTemplateColumns: `repeat(${Math.min(temporalDominance.length, 6)}, 1fr)` }}>
             {temporalDominance.map(({ condition, receptors }) => {
-              const maxScore = Math.max(...receptors.map(r => r.score), 0.01);
+              const maxConf = Math.max(...receptors.map(r => r.confidence), 0.01);
               return (
                 <div key={condition} className="space-y-1">
                   <div className="text-[10px] font-bold text-center text-foreground/80 border-b border-border/40 pb-0.5">
                     {condition}
                   </div>
                   {receptors.slice(0, 3).map((rec, idx) => {
-                    const barWidth = Math.max(Math.round((rec.score / maxScore) * 100), 8);
+                    const barWidth = Math.max(Math.round((rec.confidence / maxConf) * 100), 8);
                     const isTop = idx === 0;
                     return (
                       <div key={rec.name} className="flex items-center gap-1">
@@ -3877,7 +3875,7 @@ function SignalFlowView({
                           </div>
                         </div>
                         <span className={`text-[8px] flex-shrink-0 ${isTop ? "text-orange-300" : "text-muted-foreground"}`}>
-                          {rec.score.toFixed(1)}
+                          {Math.round(rec.confidence * 100)}%
                         </span>
                       </div>
                     );
