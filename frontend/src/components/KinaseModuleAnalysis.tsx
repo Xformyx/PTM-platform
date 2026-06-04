@@ -3665,19 +3665,22 @@ function SignalFlowView({
     return map;
   }, [groupedReceptors, kinaseTemporalMap, conditions]);
 
-  // v11.5c: Temporal Signal Dominance — consistent confidence ranking across all timepoints.
-  // Shows the SAME top 3 receptors (by confidence, matching button bar) in EVERY column.
-  // Bar width = relative activity at that timepoint (normalized to receptor's own peak).
-  // This maintains ranking consistency while revealing temporal signal dynamics.
+  // v11.5d: Temporal Signal Dominance — "Who dominates at each timepoint?"
+  // Score = confidence × activity_fraction (activity at this time / receptor's peak activity)
+  // This allows RANK CHANGES across timepoints:
+  //   - High-confidence receptors stay on top when activity is similar
+  //   - But a receptor with delayed peak can overtake others at later timepoints
+  //   - Low-confidence receptors only appear if their temporal activity is dramatically higher
+  // Populates all columns naturally since every receptor has some activity at each timepoint.
   const temporalDominance = useMemo(() => {
     if (!conditions.length) return [];
-    // Take top 3 receptors by confidence (same order as button bar)
-    const top3 = groupedReceptors.slice(0, 3);
+    // Use top 12 receptors (same pool as button bar)
+    const pool = groupedReceptors.slice(0, Math.min(groupedReceptors.length, 12));
 
-    // Pre-compute activity per receptor per condition
+    // Step 1: Compute activity per receptor per condition
     const activityMap: Record<string, Record<string, number>> = {};
     const peakActivity: Record<string, number> = {};
-    for (const { primary } of top3) {
+    for (const { primary } of pool) {
       const kinases = primary.via_kinases || [];
       if (!kinases.length) continue;
       activityMap[primary.name] = {};
@@ -3699,21 +3702,28 @@ function SignalFlowView({
       peakActivity[primary.name] = maxAct;
     }
 
-    // Build result: same 3 receptors in every column, bar width = activity/peakActivity
+    // Step 2: For each timepoint, compute dominance_score and rank
     const result: { condition: string; receptors: { name: string; class: string; score: number; confidence: number }[] }[] = [];
     for (const cond of conditions) {
-      const receptorsAtTime: { name: string; class: string; score: number; confidence: number }[] = [];
-      for (const { primary } of top3) {
+      const scored: { name: string; class: string; score: number; confidence: number }[] = [];
+      for (const { primary } of pool) {
         const activity = activityMap[primary.name]?.[cond] ?? 0;
         const peak = peakActivity[primary.name] || 1;
-        receptorsAtTime.push({
-          name: primary.name,
-          class: primary.receptor_class || "",
-          score: activity / peak, // normalized 0~1 (fraction of own peak)
-          confidence: primary.confidence_score || 0,
-        });
+        const confidence = primary.confidence_score || 0;
+        const activityFraction = activity / peak; // 0~1: how active is this receptor NOW vs its own peak
+        const dominanceScore = confidence * activityFraction;
+        if (dominanceScore > 0.01) {
+          scored.push({
+            name: primary.name,
+            class: primary.receptor_class || "",
+            score: dominanceScore,
+            confidence,
+          });
+        }
       }
-      result.push({ condition: cond, receptors: receptorsAtTime });
+      // Sort by dominance score — allows natural rank changes across timepoints
+      scored.sort((a, b) => b.score - a.score);
+      result.push({ condition: cond, receptors: scored.slice(0, 3) });
     }
     return result;
   }, [conditions, kinaseTemporalMap, groupedReceptors]);
@@ -3846,7 +3856,7 @@ function SignalFlowView({
         <div className="rounded-lg border border-border/60 bg-card/30 p-3 space-y-2">
           <div className="flex items-center gap-2 mb-1">
             <span className="text-[10px] font-semibold text-orange-300">⚡ Temporal Signal Dominance</span>
-            <span className="text-[9px] text-muted-foreground">— Receptors ranked by confidence, bar = relative activity at each timepoint</span>
+            <span className="text-[9px] text-muted-foreground">— Dominant receptors at each timepoint (confidence × temporal activity)</span>
           </div>
           <div className="grid gap-1.5" style={{ gridTemplateColumns: `repeat(${Math.min(temporalDominance.length, 6)}, 1fr)` }}>
             {temporalDominance.map(({ condition, receptors }) => {
@@ -3859,7 +3869,10 @@ function SignalFlowView({
                     <div className="text-[8px] text-muted-foreground/50 text-center py-1">—</div>
                   )}
                   {receptors.slice(0, 3).map((rec, idx) => {
-                    const barWidth = Math.max(Math.round(rec.score * 100), 8);
+                    // score is dominanceScore (confidence × activityFraction), max ~0.68
+                    // Normalize bar to column's top scorer for visual clarity
+                    const colMax = receptors[0]?.score || 0.01;
+                    const barWidth = Math.max(Math.round((rec.score / colMax) * 100), 8);
                     const isTop = idx === 0;
                     return (
                       <div key={rec.name} className="flex items-center gap-1">
