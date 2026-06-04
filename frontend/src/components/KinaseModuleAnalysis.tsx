@@ -3659,6 +3659,48 @@ function SignalFlowView({
     return map;
   }, [groupedReceptors, kinaseTemporalMap, conditions]);
 
+  // v11.4: Temporal Signal Dominance — group receptors by peak timepoint for summary strip
+  const temporalDominance = useMemo(() => {
+    if (!conditions.length || !Object.keys(kinaseTemporalMap).length) return [];
+
+    // For each condition/timepoint, compute aggregate receptor activity score
+    const result: { condition: string; receptors: { name: string; class: string; score: number; confidence: number }[] }[] = [];
+
+    for (const cond of conditions) {
+      const receptorScores: { name: string; class: string; score: number; confidence: number }[] = [];
+
+      for (const { primary } of groupedReceptors) {
+        const kinases = primary.via_kinases || [];
+        if (!kinases.length) continue;
+
+        // Compute average kinase activity at this timepoint for this receptor
+        let totalScore = 0;
+        let count = 0;
+        for (const k of kinases) {
+          const temporal = kinaseTemporalMap[k.toUpperCase()];
+          if (temporal && temporal.scores[cond] !== undefined) {
+            totalScore += Math.abs(temporal.scores[cond]);
+            count++;
+          }
+        }
+        if (count > 0) {
+          receptorScores.push({
+            name: primary.name,
+            class: primary.receptor_class,
+            score: totalScore / count,
+            confidence: primary.confidence_score || 0,
+          });
+        }
+      }
+
+      // Sort by activity score at this timepoint
+      receptorScores.sort((a, b) => b.score - a.score);
+      result.push({ condition: cond, receptors: receptorScores.slice(0, 5) });
+    }
+
+    return result;
+  }, [conditions, kinaseTemporalMap, groupedReceptors]);
+
   const groupsToShow = selectedReceptor
     ? groupedReceptors.filter(g =>
         g.members.some(m => m.name === selectedReceptor)
@@ -3781,6 +3823,56 @@ function SignalFlowView({
           </div>
         );
       })()}
+
+      {/* v11.4: Temporal Signal Dominance Summary Strip */}
+      {showTemporalOverlay && temporalDominance.length > 0 && (
+        <div className="rounded-lg border border-border/60 bg-card/30 p-3 space-y-2">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-[10px] font-semibold text-orange-300">⚡ Temporal Signal Dominance</span>
+            <span className="text-[9px] text-muted-foreground">— Top active receptors per timepoint (by downstream kinase activity)</span>
+          </div>
+          <div className="grid gap-1.5" style={{ gridTemplateColumns: `repeat(${Math.min(temporalDominance.length, 6)}, 1fr)` }}>
+            {temporalDominance.map(({ condition, receptors }) => {
+              const maxScore = Math.max(...receptors.map(r => r.score), 0.01);
+              return (
+                <div key={condition} className="space-y-1">
+                  <div className="text-[10px] font-bold text-center text-foreground/80 border-b border-border/40 pb-0.5">
+                    {condition}
+                  </div>
+                  {receptors.slice(0, 3).map((rec, idx) => {
+                    const barWidth = Math.max(Math.round((rec.score / maxScore) * 100), 8);
+                    const isTop = idx === 0;
+                    return (
+                      <div key={rec.name} className="flex items-center gap-1">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-0.5">
+                            <span className={`text-[9px] truncate ${isTop ? "font-semibold text-foreground" : "text-muted-foreground"}`}>
+                              {rec.name}
+                            </span>
+                          </div>
+                          <div className="h-1 rounded-full bg-muted/30 overflow-hidden mt-0.5">
+                            <div
+                              className="h-full rounded-full transition-all"
+                              style={{
+                                width: `${barWidth}%`,
+                                backgroundColor: isTop ? "#f97316" : idx === 1 ? "#fb923c" : "#fdba74",
+                                opacity: isTop ? 1 : 0.7,
+                              }}
+                            />
+                          </div>
+                        </div>
+                        <span className={`text-[8px] flex-shrink-0 ${isTop ? "text-orange-300" : "text-muted-foreground"}`}>
+                          {rec.score.toFixed(1)}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Receptor selector — group-aware */}
       <div className="flex flex-wrap gap-1.5">
