@@ -3665,41 +3665,44 @@ function SignalFlowView({
     return map;
   }, [groupedReceptors, kinaseTemporalMap, conditions]);
 
-  // v11.5d: Temporal Signal Dominance — "Who dominates at each timepoint?"
-  // Score = confidence × activity_fraction (activity at this time / receptor's peak activity)
-  // This allows RANK CHANGES across timepoints:
-  //   - High-confidence receptors stay on top when activity is similar
-  //   - But a receptor with delayed peak can overtake others at later timepoints
-  //   - Low-confidence receptors only appear if their temporal activity is dramatically higher
-  // Populates all columns naturally since every receptor has some activity at each timepoint.
+  // v11.5e: Temporal Signal Dominance — uses |signed mean FC| for temporal variation.
+  // 
+  // Key insight: mean(|FC|) across 667 substrates barely changes over time (always ~0.5)
+  // because large modules always have "some" activity. But SIGNED mean FC captures the
+  // NET directional signal: at 6h it might be +0.8 (strong activation), at 48h it might
+  // be -0.2 (mild reversal). |signed mean| varies dramatically across timepoints.
+  //
+  // Score = confidence × |signed_mean_FC_at_time| / max(|signed_mean_FC| across times)
+  // This produces genuine rank changes because different kinases have different temporal
+  // profiles in their net directional signal.
   const temporalDominance = useMemo(() => {
     if (!conditions.length) return [];
-    // Use top 12 receptors (same pool as button bar)
     const pool = groupedReceptors.slice(0, Math.min(groupedReceptors.length, 12));
 
-    // Step 1: Compute activity per receptor per condition
-    const activityMap: Record<string, Record<string, number>> = {};
-    const peakActivity: Record<string, number> = {};
+    // Step 1: For each receptor, compute |signed mean FC| at each timepoint
+    const signalMap: Record<string, Record<string, number>> = {};
+    const peakSignal: Record<string, number> = {};
     for (const { primary } of pool) {
       const kinases = primary.via_kinases || [];
       if (!kinases.length) continue;
-      activityMap[primary.name] = {};
-      let maxAct = 0;
+      signalMap[primary.name] = {};
+      let maxSig = 0;
       for (const cond of conditions) {
-        let activitySum = 0;
+        let signedSum = 0;
         let cnt = 0;
         for (const k of kinases) {
           const temporal = kinaseTemporalMap[k.toUpperCase()];
-          if (temporal && temporal.absScores && temporal.absScores[cond] !== undefined) {
-            activitySum += temporal.absScores[cond];
+          if (temporal && temporal.scores && temporal.scores[cond] !== undefined) {
+            signedSum += temporal.scores[cond]; // signed mean FC
             cnt++;
           }
         }
-        const activity = cnt > 0 ? activitySum / cnt : 0;
-        activityMap[primary.name][cond] = activity;
-        if (activity > maxAct) maxAct = activity;
+        // Use |signed mean| — captures net directional signal strength
+        const signal = cnt > 0 ? Math.abs(signedSum / cnt) : 0;
+        signalMap[primary.name][cond] = signal;
+        if (signal > maxSig) maxSig = signal;
       }
-      peakActivity[primary.name] = maxAct;
+      peakSignal[primary.name] = maxSig;
     }
 
     // Step 2: For each timepoint, compute dominance_score and rank
@@ -3707,11 +3710,11 @@ function SignalFlowView({
     for (const cond of conditions) {
       const scored: { name: string; class: string; score: number; confidence: number }[] = [];
       for (const { primary } of pool) {
-        const activity = activityMap[primary.name]?.[cond] ?? 0;
-        const peak = peakActivity[primary.name] || 1;
+        const signal = signalMap[primary.name]?.[cond] ?? 0;
+        const peak = peakSignal[primary.name] || 1;
         const confidence = primary.confidence_score || 0;
-        const activityFraction = activity / peak; // 0~1: how active is this receptor NOW vs its own peak
-        const dominanceScore = confidence * activityFraction;
+        const signalFraction = signal / peak; // 0~1: how strong is NET signal now vs peak
+        const dominanceScore = confidence * signalFraction;
         if (dominanceScore > 0.01) {
           scored.push({
             name: primary.name,
@@ -3721,7 +3724,6 @@ function SignalFlowView({
           });
         }
       }
-      // Sort by dominance score — allows natural rank changes across timepoints
       scored.sort((a, b) => b.score - a.score);
       result.push({ condition: cond, receptors: scored.slice(0, 3) });
     }
@@ -3856,7 +3858,7 @@ function SignalFlowView({
         <div className="rounded-lg border border-border/60 bg-card/30 p-3 space-y-2">
           <div className="flex items-center gap-2 mb-1">
             <span className="text-[10px] font-semibold text-orange-300">⚡ Temporal Signal Dominance</span>
-            <span className="text-[9px] text-muted-foreground">— Dominant receptors at each timepoint (confidence × temporal activity)</span>
+            <span className="text-[9px] text-muted-foreground">— Receptors ranked by confidence × net signal strength (confidence-ranked)</span>
           </div>
           <div className="grid gap-1.5" style={{ gridTemplateColumns: `repeat(${Math.min(temporalDominance.length, 6)}, 1fr)` }}>
             {temporalDominance.map(({ condition, receptors }) => {
@@ -3894,7 +3896,7 @@ function SignalFlowView({
                           </div>
                         </div>
                         <span className={`text-[8px] flex-shrink-0 ${isTop ? "text-orange-300" : "text-muted-foreground"}`}>
-                          {Math.round(rec.confidence * 100)}%
+                          {Math.round(rec.score * 100)}%
                         </span>
                       </div>
                     );
