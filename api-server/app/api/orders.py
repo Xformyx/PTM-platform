@@ -3102,6 +3102,64 @@ async def get_vector_plot_data(
             }
 
         # ══════════════════════════════════════════════════════════════════════
+        # v11.5: Specificity-Weighted Activity Score
+        # Rewards receptors whose UNIQUE substrates are actively regulated
+        # De novo PTMs (pseudocount artifacts) get discounted amplitude
+        # ══════════════════════════════════════════════════════════════════════
+        # Build per-PTM activity classification and max |FC| from vector_data
+        _ptm_activity_class: dict = {}  # ptm_label -> "de_novo" | "regulated" | "minor"
+        _ptm_max_abs_fc: dict = {}  # ptm_label -> max |FC| across conditions
+        _ptm_is_denovo: set = set()
+        for r in vector_data:
+            _lbl = f"{r['gene']} {r['position']}".strip()
+            if r.get("control_pseudocount_used"):
+                _ptm_is_denovo.add(_lbl)
+            _cur_fc = abs(r.get("ptm_relative_log2fc", 0) or 0)
+            if _lbl not in _ptm_max_abs_fc or _cur_fc > _ptm_max_abs_fc[_lbl]:
+                _ptm_max_abs_fc[_lbl] = _cur_fc
+        # Classify each PTM
+        _ptm_min_q: dict = {}
+        for r in vector_data:
+            _lbl = f"{r['gene']} {r['position']}".strip()
+            _q = r.get("q_value")
+            if _q is not None and (not isinstance(_q, float) or not __import__("math").isnan(_q)):
+                if _lbl not in _ptm_min_q or _q < _ptm_min_q[_lbl]:
+                    _ptm_min_q[_lbl] = _q
+        for _lbl in _ptm_max_abs_fc:
+            if _lbl in _ptm_is_denovo:
+                _ptm_activity_class[_lbl] = "de_novo"
+            elif _ptm_min_q.get(_lbl, 1.0) < 0.05 and _ptm_max_abs_fc[_lbl] >= 1.0:
+                _ptm_activity_class[_lbl] = "regulated"
+            else:
+                _ptm_activity_class[_lbl] = "minor"
+        # Signal weight and FC cap per class
+        _SIGNAL_WEIGHT = {"de_novo": 0.3, "regulated": 1.0, "minor": 0.5}
+        _FC_CAP = {"de_novo": 1.0, "regulated": 3.0, "minor": 3.0}
+        # Compute specificity-weighted activity score per receptor
+        for _ri in merged.values():
+            _ds_ptms = set(_ri.get("downstream_ptms", []))
+            _unique_set = set(_ri.get("unique_ptms", []))
+            _total_weighted_activity = 0.0
+            _unique_regulated_count = 0
+            for _p in _ds_ptms:
+                _cls = _ptm_activity_class.get(_p, "minor")
+                _w = _SIGNAL_WEIGHT[_cls]
+                _fc = min(_ptm_max_abs_fc.get(_p, 0.0), _FC_CAP[_cls])
+                # Unique PTMs get full weight; shared PTMs get discounted by sharing factor
+                _sharing_factor = 1.0 if _p in _unique_set else (1.0 / max(_all_ptm_freq.get(_p, 1), 1))
+                _total_weighted_activity += _w * _fc * _sharing_factor
+                # Count unique regulated PTMs (strongest pathway-specific signal)
+                if _p in _unique_set and _cls == "regulated":
+                    _unique_regulated_count += 1
+            # Normalize
+            _max_possible = max(len(_ds_ptms), 1) * 1.0 * 3.0  # if all regulated at cap
+            _specificity_score = min(_total_weighted_activity / _max_possible, 1.0)
+            _unique_reg_ratio = _unique_regulated_count / max(len(_ds_ptms), 1)
+            _ri["specificity_score"] = round(_specificity_score, 4)
+            _ri["unique_regulated_ratio"] = round(_unique_reg_ratio, 4)
+            _ri["unique_regulated_count"] = _unique_regulated_count
+
+        # ══════════════════════════════════════════════════════════════════════
         # v10.2: Combined Confidence Score + Hard Filter
         # ══════════════════════════════════════════════════════════════════════
         # Source reliability mapping
@@ -3143,12 +3201,16 @@ async def get_vector_plot_data(
             # Component 5: Has receptor-specific curated DB
             _has_db = 1.0 if _ri.get("has_receptor_specific_db") else 0.0
 
-            # Combined confidence score
+            # Component 6: Specificity-weighted activity score (v11.5)
+            _spec_score = _ri.get("specificity_score", 0.0)
+            _urr = _ri.get("unique_regulated_ratio", 0.0)
+            # Combined confidence score (v11.5: specificity-weighted)
             _confidence = (
-                0.35 * _norm_cowave +
-                0.25 * _convergence +
-                0.20 * _source_rel +
-                0.10 * _upr +
+                0.30 * _norm_cowave +
+                0.20 * _convergence +
+                0.15 * _source_rel +
+                0.20 * _spec_score +
+                0.05 * _urr +
                 0.10 * _has_db
             )
             _ri["confidence_score"] = round(_confidence, 4)
