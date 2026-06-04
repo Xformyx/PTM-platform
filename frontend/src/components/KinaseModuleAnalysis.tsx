@@ -3518,6 +3518,7 @@ function SignalFlowView({
       peakScore: number;
       direction: "activation" | "inactivation" | "neutral";
       scores: Record<string, number>;
+      absScores: Record<string, number>; // mean(|FC|) per condition — captures total activity regardless of direction
       peakOrder: number; // 0-based index in conditions array
     }> = {};
     if (!globalKinaseResult || !vectorData.length || !conditions.length) return map;
@@ -3536,18 +3537,22 @@ function SignalFlowView({
       if (mod.members.length < 1) continue;
 
       const scores: Record<string, number> = {};
+      const absScores: Record<string, number> = {};
       for (const cond of conditions) {
         let sum = 0;
+        let absSum = 0;
         let count = 0;
         for (const m of mod.members) {
           const lookupKey = `${m.gene.toUpperCase()}|${m.position.toUpperCase()}|${cond}`;
           const val = ptmLookup[lookupKey];
           if (val !== undefined) {
             sum += val;
+            absSum += Math.abs(val);
             count++;
           }
         }
         scores[cond] = count > 0 ? sum / count : 0;
+        absScores[cond] = count > 0 ? absSum / count : 0;
       }
 
       // Find peak
@@ -3568,6 +3573,7 @@ function SignalFlowView({
         peakScore: peakVal,
         direction,
         scores,
+        absScores,
         peakOrder: conditions.indexOf(peakCond),
       };
     }
@@ -3680,12 +3686,13 @@ function SignalFlowView({
         const confidence = primary.confidence_score || 0;
 
         // Compute average kinase activity at this specific timepoint
+        // Use absScores (mean of |FC|) to capture total activity even when substrates go both up and down
         let totalScore = 0;
         let count = 0;
         for (const k of kinases) {
           const temporal = kinaseTemporalMap[k.toUpperCase()];
-          if (temporal && temporal.scores[cond] !== undefined) {
-            totalScore += Math.abs(temporal.scores[cond]);
+          if (temporal && temporal.absScores[cond] !== undefined) {
+            totalScore += temporal.absScores[cond];
             count++;
           }
         }
