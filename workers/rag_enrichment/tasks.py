@@ -667,9 +667,32 @@ def _auto_run_global_analysis(order_id: int, enriched_data: list, config: dict, 
         publish_progress(order_id, "rag_enrichment", "global_analysis", "completed", 95,
                          f"Global analysis done: {n_modules} modules ({elapsed}s)")
 
+        # ── v11.5f: Auto-run Receptor Inference ──────────────────────────────
+        receptor_inference_result = {}
+        try:
+            from common.receptor_inference import run_receptor_inference
+            receptor_inference_result = run_receptor_inference(
+                order_id=order_id,
+                enriched_data=enriched_data,
+                kinase_analysis_data=kinase_result,
+                config=config,
+            )
+            if receptor_inference_result:
+                logger.info(
+                    f"[Order {order_id}] Auto receptor inference: "
+                    f"{len(receptor_inference_result.get('receptors', []))} receptors inferred"
+                )
+        except Exception as _rec_err:
+            logger.warning(
+                f"[Order {order_id}] Auto receptor inference failed (non-fatal): {_rec_err}"
+            )
+            import traceback as _rec_tb
+            logger.warning(f"[Order {order_id}] Receptor traceback: {_rec_tb.format_exc()}")
+
         return {
             "kinase_analysis_data": kinase_result,
             "kinase_activity_heatmap": heatmap_data,
+            "receptor_inference_data": receptor_inference_result,
         }
     except Exception as e:
         logger.warning(f"[Order {order_id}] Auto global analysis failed (non-fatal): {e}")
@@ -2123,7 +2146,15 @@ def run_rag_enrichment(self, order_id: int, config: dict):
         if _auto_analysis_data:
             report_config["kinase_analysis_data"] = _auto_analysis_data.get("kinase_analysis_data", {})
             report_config["kinase_activity_heatmap"] = _auto_analysis_data.get("kinase_activity_heatmap", {})
-            logger.info(f"[Order {order_id}] Auto global analysis completed — kinase modules + heatmap cached")
+            # v11.5f: Include receptor inference data in report_config
+            _rec_data = _auto_analysis_data.get("receptor_inference_data", {})
+            if _rec_data:
+                report_config["receptor_inference_data"] = _rec_data
+                logger.info(
+                    f"[Order {order_id}] Auto receptor inference included: "
+                    f"{len(_rec_data.get('receptors', []))} receptors"
+                )
+            logger.info(f"[Order {order_id}] Auto global analysis completed — kinase modules + heatmap + receptors cached")
 
         _status_before_chain = get_order_status(order_id)
         if config.get("chain_to_next", True) and _status_before_chain == "rag_enrichment":

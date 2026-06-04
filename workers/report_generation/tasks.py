@@ -479,6 +479,16 @@ def run_report_generation(self, order_id: int, config: dict):
         except Exception as _rec_err:
             logger.warning(f"[Order {order_id}] Could not load analysis data from DB: {_rec_err}")
 
+        # v11.5f: Fallback — use receptor_inference_data from report_config if DB is empty
+        if not inferred_receptors_from_db:
+            _config_rid = config.get("receptor_inference_data", {})
+            if _config_rid and _config_rid.get("receptors"):
+                inferred_receptors_from_db = _config_rid["receptors"]
+                logger.info(
+                    f"[Order {order_id}] Loaded {len(inferred_receptors_from_db)} inferred receptors "
+                    f"from report_config (auto-pipeline fallback)"
+                )
+
         initial_state = {
             "order_id": order_id,
             "enriched_ptm_data": enriched_data,
