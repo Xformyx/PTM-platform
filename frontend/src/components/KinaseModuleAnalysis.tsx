@@ -3659,24 +3659,27 @@ function SignalFlowView({
     return map;
   }, [groupedReceptors, kinaseTemporalMap, conditions]);
 
-  // v11.4: Temporal Signal Dominance — group receptors by peak timepoint for summary strip
-  // Composite score = kinase_activity × confidence_weight
-  // This ensures high-confidence receptors (like NOTCH1) rank appropriately even if
-  // some of their via_kinases lack substrate annotations in the current PTM set
+  // v11.4b: Temporal Signal Dominance — show which top receptors peak at each timepoint
+  // Only uses receptors that appear in the detail view below (top N by confidence)
+  // Shows receptors whose kinase activity PEAKS at that timepoint (not just raw score)
   const temporalDominance = useMemo(() => {
     if (!conditions.length || !Object.keys(kinaseTemporalMap).length) return [];
 
-    const result: { condition: string; receptors: { name: string; class: string; score: number; confidence: number }[] }[] = [];
+    // Only consider top receptors (same pool as detail cards below)
+    const topReceptors = groupedReceptors.slice(0, Math.min(groupedReceptors.length, 12));
 
-    for (const cond of conditions) {
-      const receptorScores: { name: string; class: string; score: number; confidence: number }[] = [];
+    // For each receptor, compute its activity profile across all timepoints
+    const receptorProfiles: { name: string; class: string; confidence: number; scores: Record<string, number>; peakCond: string; peakScore: number }[] = [];
 
-      for (const { primary } of groupedReceptors) {
-        const kinases = primary.via_kinases || [];
-        if (!kinases.length) continue;
-        const confidence = primary.confidence_score || 0;
+    for (const { primary } of topReceptors) {
+      const kinases = primary.via_kinases || [];
+      if (!kinases.length) continue;
 
-        // Compute average kinase activity at this timepoint for this receptor
+      const scores: Record<string, number> = {};
+      let peakCond = conditions[0];
+      let peakScore = 0;
+
+      for (const cond of conditions) {
         let totalScore = 0;
         let count = 0;
         for (const k of kinases) {
@@ -3686,26 +3689,38 @@ function SignalFlowView({
             count++;
           }
         }
-
-        // Composite: activity × (0.4 + 0.6 × confidence)
-        // High confidence receptors get boosted; low confidence ones are dampened
-        const rawActivity = count > 0 ? totalScore / count : 0;
-        const confidenceWeight = 0.4 + 0.6 * confidence;
-        const compositeScore = rawActivity * confidenceWeight;
-
-        if (compositeScore > 0) {
-          receptorScores.push({
-            name: primary.name,
-            class: primary.receptor_class,
-            score: compositeScore,
-            confidence,
-          });
+        const avg = count > 0 ? totalScore / count : 0;
+        scores[cond] = avg;
+        if (avg > peakScore) {
+          peakScore = avg;
+          peakCond = cond;
         }
       }
 
-      // Sort by composite score at this timepoint
-      receptorScores.sort((a, b) => b.score - a.score);
-      result.push({ condition: cond, receptors: receptorScores.slice(0, 5) });
+      if (peakScore > 0) {
+        receptorProfiles.push({
+          name: primary.name,
+          class: primary.receptor_class,
+          confidence: primary.confidence_score || 0,
+          scores,
+          peakCond,
+          peakScore,
+        });
+      }
+    }
+
+    // Group receptors by their peak timepoint
+    const result: { condition: string; receptors: { name: string; class: string; score: number; confidence: number }[] }[] = [];
+
+    for (const cond of conditions) {
+      // Receptors that PEAK at this condition, sorted by confidence then peak score
+      const peakingHere = receptorProfiles
+        .filter(r => r.peakCond === cond)
+        .sort((a, b) => b.confidence - a.confidence || b.peakScore - a.peakScore)
+        .slice(0, 4)
+        .map(r => ({ name: r.name, class: r.class, score: r.peakScore, confidence: r.confidence }));
+
+      result.push({ condition: cond, receptors: peakingHere });
     }
 
     return result;
@@ -3839,7 +3854,7 @@ function SignalFlowView({
         <div className="rounded-lg border border-border/60 bg-card/30 p-3 space-y-2">
           <div className="flex items-center gap-2 mb-1">
             <span className="text-[10px] font-semibold text-orange-300">⚡ Temporal Signal Dominance</span>
-            <span className="text-[9px] text-muted-foreground">— Top active receptors per timepoint (by downstream kinase activity)</span>
+            <span className="text-[9px] text-muted-foreground">— Receptors grouped by peak activity timepoint (confidence-ranked)</span>
           </div>
           <div className="grid gap-1.5" style={{ gridTemplateColumns: `repeat(${Math.min(temporalDominance.length, 6)}, 1fr)` }}>
             {temporalDominance.map(({ condition, receptors }) => {
