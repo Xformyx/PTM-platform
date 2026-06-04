@@ -3614,8 +3614,9 @@ function SignalFlowView({
     const result: { primary: InferredReceptor; members: InferredReceptor[] }[] = [];
 
     for (const [, members] of groups) {
+      // Within a group, pick primary by confidence_score (consistent with Inferred Upstream Receptors panel)
       const sorted = [...members].sort(
-        (a, b) => (b.downstream_ptm_count || 0) - (a.downstream_ptm_count || 0)
+        (a, b) => (b.confidence_score || 0) - (a.confidence_score || 0) || (b.downstream_ptm_count || 0) - (a.downstream_ptm_count || 0)
       );
       result.push({ primary: sorted[0], members: sorted });
     }
@@ -3624,8 +3625,9 @@ function SignalFlowView({
       result.push({ primary: rec, members: [rec] });
     }
 
+    // Sort groups by confidence_score (consistent with Inferred Upstream Receptors panel)
     return result.sort(
-      (a, b) => (b.primary.downstream_ptm_count || 0) - (a.primary.downstream_ptm_count || 0)
+      (a, b) => (b.primary.confidence_score || 0) - (a.primary.confidence_score || 0) || (b.primary.downstream_ptm_count || 0) - (a.primary.downstream_ptm_count || 0)
     );
   }, [inferredReceptors]);
 
@@ -3808,12 +3810,12 @@ function SignalFlowView({
               ? `${primary.name.length > 12 ? primary.name.slice(0, 10) + "…" : primary.name} +${members.length - 1}`
               : primary.name.length > 20 ? primary.name.slice(0, 18) + "…" : primary.name
             }
-            {primary.uniqueness_score != null && (
+            {primary.confidence_score != null && (
               <span className={`ml-1 text-[8px] ${
-                (primary.uniqueness_score || 0) > 0.6 ? "text-green-400" :
-                (primary.uniqueness_score || 0) > 0.3 ? "text-yellow-400" : "text-red-400"
+                (primary.confidence_score || 0) > 0.6 ? "text-green-400" :
+                (primary.confidence_score || 0) > 0.4 ? "text-yellow-400" : "text-red-400"
               }`}>
-                {((primary.uniqueness_score || 0) * 100).toFixed(0)}%
+                {((primary.confidence_score || 0) * 100).toFixed(0)}%
               </span>
             )}
           </button>
