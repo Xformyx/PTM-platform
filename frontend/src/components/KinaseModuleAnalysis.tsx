@@ -43,6 +43,7 @@ import {
   Activity,
   Boxes,
   RefreshCw,
+  Target,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -58,6 +59,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { api } from "@/lib/api";
+import IPOverlayView from "@/components/IPOverlayView";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -622,7 +624,7 @@ export default function KinaseModuleAnalysis({
   inferredReceptors = [],
 }: KinaseModuleAnalysisProps) {
   const isUbi = ptmType.toLowerCase().includes("ubiquityl") || ptmType.toLowerCase().includes("ubiquitin");
-  const [activeTab, setActiveTab] = useState<"cowave" | "lookup" | "cascade" | "kinaseModules" | "signalFlow" | "heatmap" | "cascadeTimeline" | "chainLinkage">("cowave");
+  const [activeTab, setActiveTab] = useState<"cowave" | "lookup" | "cascade" | "kinaseModules" | "signalFlow" | "heatmap" | "cascadeTimeline" | "chainLinkage" | "ipOverlay">("cowave");
   const [expandedModules, setExpandedModules] = useState<Set<string>>(new Set());
   const [manualSelection, setManualSelection] = useState<Set<string>>(new Set());
    const [internalHighlightedKinase, setInternalHighlightedKinase] = useState<string | null>(null);
@@ -1171,6 +1173,14 @@ export default function KinaseModuleAnalysis({
               <Link2 className="h-3 w-3 mr-1" /> Chain Linkage
             </Button>
           )}
+          <Button
+            variant={activeTab === "ipOverlay" ? "default" : "ghost"}
+            size="sm"
+            className="text-xs h-7"
+            onClick={() => setActiveTab("ipOverlay")}
+          >
+            <Target className="h-3 w-3 mr-1" /> IP Overlay
+          </Button>
           <div className="ml-auto">
             <Button
               variant="outline"
@@ -1679,6 +1689,15 @@ export default function KinaseModuleAnalysis({
         {/* ── Tab: Chain Linkage (Ubiquitylation only) ────────────────────────── */}
         {activeTab === "chainLinkage" && isUbi && (
           <ChainLinkageView orderId={orderId} conditions={conditions} />
+        )}
+        {activeTab === "ipOverlay" && (
+          <IPOverlayView
+            orderId={orderId}
+            vectorData={vectorData}
+            conditions={conditions}
+            globalKinaseModules={globalKinaseResult?.kinase_modules || null}
+            inferredReceptors={inferredReceptors}
+          />
         )}
       </CardContent>
     </Card>

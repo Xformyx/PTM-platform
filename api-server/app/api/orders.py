@@ -412,6 +412,7 @@ async def get_order(
         "cross_talk_data": order.cross_talk_data,
         "signal_propagation_data": order.signal_propagation_data,
         "receptor_inference_data": order.receptor_inference_data,
+        "ip_overlay_data": order.ip_overlay_data,
         "is_shared": share_access is not None,
         "share_access": share_access,
         "started_at": order.started_at.isoformat() + "Z" if order.started_at else None,
@@ -8042,4 +8043,65 @@ async def substrate_go_localization(
         "gene_localizations": filtered_localizations,
         "summary": dict(sorted(summary.items(), key=lambda x: -x[1])),
         "_cached": False,
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# IP Overlay: Save immunoprecipitation cross-reference data
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.post("/{order_id}/save-ip-overlay-data")
+async def save_ip_overlay_data(
+    order_id: int,
+    body: dict = Body(...),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Save IP (immunoprecipitation) overlay cross-reference data to DB.
+
+    Request body:
+    {
+        bait: str,
+        condition: str,  # e.g. "PDCD5 knockout"
+        prey_proteins: [{gene, log2fc, q_value, spectral_count, ...}],
+        cross_reference: {
+            substrates: [{gene, position, ...}],
+            kinases: [{gene, module_name, substrate_count, ...}],
+            receptor_chain: [{gene, receptor, ...}],
+            not_found: [str]
+        }
+    }
+    """
+    from datetime import datetime as _dt
+
+    result = await db.execute(select(Order).where(Order.id == order_id))
+    order = result.scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    await _require_write_access(order, user, db)
+
+    bait = body.get("bait", "")
+    prey_proteins = body.get("prey_proteins", [])
+    cross_reference = body.get("cross_reference", {})
+    condition = body.get("condition", "")
+
+    order.ip_overlay_data = {
+        "bait": bait,
+        "condition": condition,
+        "prey_proteins": prey_proteins,
+        "cross_reference": cross_reference,
+        "saved_at": _dt.utcnow().isoformat(),
+    }
+    await db.commit()
+
+    logger.info(
+        f"[SAVE-IP] Saved IP overlay data to order {order_id}: "
+        f"bait={bait}, {len(prey_proteins)} prey proteins"
+    )
+
+    return {
+        "status": "ok",
+        "order_id": order_id,
+        "bait": bait,
+        "prey_count": len(prey_proteins),
     }
