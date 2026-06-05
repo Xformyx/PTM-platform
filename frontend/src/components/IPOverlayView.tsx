@@ -3,17 +3,19 @@
  * ────────────────────────────────────────────────────────────────────────────
  * IP (Immunoprecipitation) Overlay Analysis View
  *
- * Allows users to upload IP data (bait + prey proteins) and cross-reference
+ * Allows users to input IP data (bait + prey proteins) via text and cross-reference
  * with PTM substrate data to reveal:
  *   1. Which prey proteins are PTM substrates in the dataset
  *   2. Temporal activity changes of prey proteins after bait removal
  *   3. Which kinase modules contain prey proteins as substrates
  *   4. Signal chain connections (Receptor → Kinase → IP Prey as substrate)
+ *
+ * Input format: "PROTEIN_NAME (ACCESSION)" comma-separated
+ * e.g. "PDCD5 (Q21103)" for bait, "CCT2 (P78371), HDAC1 (Q13547), ..." for prey
  */
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import {
   Loader2,
-  Upload,
   Target,
   Activity,
   Network,
@@ -21,16 +23,13 @@ import {
   AlertTriangle,
   ArrowRight,
   Trash2,
-  FileSpreadsheet,
   Zap,
 } from "lucide-react";
-import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
-import * as XLSX from "xlsx";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -63,28 +62,22 @@ interface InferredReceptor {
 
 interface PreyProtein {
   gene: string;
-  log2fc: number;
-  q_value?: number;
-  spectral_count?: number;
-  unique_peptides?: number;
+  accession: string | null;
 }
 
 interface CrossRefResult {
-  // Prey found as PTM substrates
   substrates: {
     gene: string;
     position: string;
     conditions: { condition: string; fc: number; q_value?: number | null }[];
     kinases: string[];
   }[];
-  // Prey found as kinase in modules
   kinases: {
     gene: string;
     module_name: string;
     substrate_count: number;
     substrates: string[];
   }[];
-  // Prey connected to receptor signaling
   receptor_chain: {
     prey_gene: string;
     role: "substrate" | "kinase";
@@ -93,7 +86,6 @@ interface CrossRefResult {
     via_kinase?: string;
     confidence?: number;
   }[];
-  // Prey not found in any analysis
   not_found: string[];
 }
 
@@ -105,10 +97,32 @@ interface IPOverlayViewProps {
   inferredReceptors: InferredReceptor[];
   savedIpData?: {
     bait: string;
+    bait_accession: string | null;
     condition: string;
+    prey_text: string;
     prey_proteins: PreyProtein[];
     cross_reference: CrossRefResult;
   } | null;
+}
+
+// ── Parser ───────────────────────────────────────────────────────────────────
+
+function parseProteinEntry(entry: string): { gene: string; accession: string | null } {
+  const trimmed = entry.trim();
+  // Match pattern: "PROTEIN_NAME (ACCESSION)" or just "PROTEIN_NAME"
+  const match = trimmed.match(/^([A-Za-z0-9_.-]+)\s*(?:\(([A-Za-z0-9_.-]+)\))?$/);
+  if (match) {
+    return { gene: match[1].toUpperCase(), accession: match[2] || null };
+  }
+  // Fallback: treat entire string as gene name
+  return { gene: trimmed.toUpperCase(), accession: null };
+}
+
+function parseProteinList(text: string): PreyProtein[] {
+  if (!text.trim()) return [];
+  // Split by comma, semicolon, or newline
+  const entries = text.split(/[,;\n]+/).filter((e) => e.trim());
+  return entries.map(parseProteinEntry).filter((p) => p.gene.length > 0);
 }
 
 // ── Component ────────────────────────────────────────────────────────────────
@@ -121,48 +135,21 @@ export default function IPOverlayView({
   inferredReceptors,
   savedIpData,
 }: IPOverlayViewProps) {
-  const [bait, setBait] = useState(savedIpData?.bait || "");
+  const [baitInput, setBaitInput] = useState(savedIpData?.bait ? `${savedIpData.bait}${savedIpData.bait_accession ? ` (${savedIpData.bait_accession})` : ""}` : "");
   const [conditionLabel, setConditionLabel] = useState(savedIpData?.condition || "");
+  const [preyText, setPreyText] = useState(savedIpData?.prey_text || "");
   const [preyProteins, setPreyProteins] = useState<PreyProtein[]>(savedIpData?.prey_proteins || []);
   const [crossRef, setCrossRef] = useState<CrossRefResult | null>(savedIpData?.cross_reference || null);
   const [loading, setLoading] = useState(false);
-  const [fileName, setFileName] = useState<string>("");
 
-  // ── File Upload Handler ──────────────────────────────────────────────────
+  // Parse bait
+  const baitParsed = useMemo(() => parseProteinEntry(baitInput), [baitInput]);
 
-  const handleFileUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setFileName(file.name);
-
-    const data = await file.arrayBuffer();
-    const workbook = XLSX.read(data, { type: "array" });
-    const sheet = workbook.Sheets[workbook.SheetNames[0]];
-    const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet);
-
-    // Parse prey proteins from Excel
-    const parsed: PreyProtein[] = [];
-    for (const row of rows) {
-      // Try common column names
-      const gene = (row["Gene"] || row["gene"] || row["Prey"] || row["prey"] || row["Gene names"] || row["Protein"] || "") as string;
-      const log2fc = parseFloat(String(row["Log2FC"] || row["log2fc"] || row["Log2_FC"] || row["Fold_Enrichment"] || row["FC"] || "0"));
-      const qVal = parseFloat(String(row["q_value"] || row["Q_Value"] || row["FDR"] || row["adj_pvalue"] || ""));
-      const sc = parseInt(String(row["Spectral_Count"] || row["spectral_count"] || row["SC"] || "0"));
-      const up = parseInt(String(row["Unique_Peptides"] || row["unique_peptides"] || row["UP"] || "0"));
-
-      if (gene && gene.trim()) {
-        parsed.push({
-          gene: gene.trim().toUpperCase(),
-          log2fc: isNaN(log2fc) ? 0 : log2fc,
-          q_value: isNaN(qVal) ? undefined : qVal,
-          spectral_count: isNaN(sc) ? undefined : sc,
-          unique_peptides: isNaN(up) ? undefined : up,
-        });
-      }
-    }
-
+  // Auto-parse prey text
+  useEffect(() => {
+    const parsed = parseProteinList(preyText);
     setPreyProteins(parsed);
-  }, []);
+  }, [preyText]);
 
   // ── Cross-Reference Analysis ─────────────────────────────────────────────
 
@@ -286,20 +273,22 @@ export default function IPOverlayView({
 
     // Save to backend
     api.post(`/orders/${orderId}/save-ip-overlay-data`, {
-      bait,
+      bait: baitParsed.gene,
+      bait_accession: baitParsed.accession,
       condition: conditionLabel,
+      prey_text: preyText,
       prey_proteins: preyProteins,
       cross_reference: result,
     }).catch((err) => console.warn("Failed to save IP overlay data:", err));
-  }, [preyProteins, vectorData, globalKinaseModules, inferredReceptors, orderId, bait, conditionLabel]);
+  }, [preyProteins, vectorData, globalKinaseModules, inferredReceptors, orderId, baitParsed, conditionLabel, preyText]);
 
   // ── Clear ────────────────────────────────────────────────────────────────
 
   const handleClear = () => {
     setPreyProteins([]);
     setCrossRef(null);
-    setFileName("");
-    setBait("");
+    setPreyText("");
+    setBaitInput("");
     setConditionLabel("");
   };
 
@@ -322,26 +311,26 @@ export default function IPOverlayView({
 
   return (
     <div className="space-y-4">
-      {/* Upload Section */}
+      {/* Input Section */}
       <div className="border rounded-lg p-4 bg-muted/20">
         <div className="flex items-center gap-2 mb-3">
           <Target className="h-4 w-4 text-cyan-500" />
-          <span className="text-sm font-semibold">IP Data Upload</span>
-          {fileName && (
+          <span className="text-sm font-semibold">IP Data Input</span>
+          {preyProteins.length > 0 && (
             <Badge variant="outline" className="text-xs ml-2">
-              <FileSpreadsheet className="h-3 w-3 mr-1" /> {fileName}
+              {preyProteins.length} prey parsed
             </Badge>
           )}
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
           <div>
-            <Label className="text-xs text-muted-foreground">Bait Protein</Label>
+            <Label className="text-xs text-muted-foreground">Bait Protein — e.g. PDCD5 (Q21103)</Label>
             <Input
-              value={bait}
-              onChange={(e) => setBait(e.target.value)}
-              placeholder="e.g. PDCD5"
-              className="h-8 text-xs"
+              value={baitInput}
+              onChange={(e) => setBaitInput(e.target.value)}
+              placeholder="PDCD5 (Q21103)"
+              className="h-8 text-xs font-mono"
             />
           </div>
           <div>
@@ -349,42 +338,46 @@ export default function IPOverlayView({
             <Input
               value={conditionLabel}
               onChange={(e) => setConditionLabel(e.target.value)}
-              placeholder="e.g. PDCD5 knockout"
+              placeholder="e.g. PDCD5 knockout / degradation"
               className="h-8 text-xs"
             />
-          </div>
-          <div>
-            <Label className="text-xs text-muted-foreground">IP Data File (.xlsx)</Label>
-            <Input
-              type="file"
-              accept=".xlsx,.xls,.csv"
-              onChange={handleFileUpload}
-              className="h-8 text-xs"
-            />
-          </div>
-          <div className="flex items-end gap-2">
-            <Button
-              size="sm"
-              className="h-8 text-xs"
-              disabled={preyProteins.length === 0 || loading}
-              onClick={runCrossReference}
-            >
-              {loading ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Zap className="h-3 w-3 mr-1" />}
-              Cross-Reference
-            </Button>
-            {crossRef && (
-              <Button size="sm" variant="ghost" className="h-8 text-xs" onClick={handleClear}>
-                <Trash2 className="h-3 w-3 mr-1" /> Clear
-              </Button>
-            )}
           </div>
         </div>
 
-        {preyProteins.length > 0 && !crossRef && (
-          <p className="text-xs text-muted-foreground">
-            {preyProteins.length} prey proteins loaded. Click "Cross-Reference" to analyze.
-          </p>
-        )}
+        <div className="mb-3">
+          <Label className="text-xs text-muted-foreground">
+            Prey Proteins — comma-separated, format: NAME (ACCESSION)
+          </Label>
+          <textarea
+            value={preyText}
+            onChange={(e) => setPreyText(e.target.value)}
+            placeholder="CCT2 (P78371), HDAC1 (Q13547), HDAC2 (Q92769), PPP2CA (P67775), MLST8 (Q9BVC4), BUB3 (O43684), ..."
+            className="w-full mt-1 p-2 rounded-md border bg-background text-xs font-mono min-h-[80px] resize-y focus:outline-none focus:ring-1 focus:ring-cyan-500"
+            rows={3}
+          />
+          {preyProteins.length > 0 && (
+            <p className="text-[10px] text-muted-foreground mt-1">
+              Parsed: {preyProteins.map((p) => p.gene).join(", ")}
+            </p>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            className="h-8 text-xs"
+            disabled={preyProteins.length === 0 || !baitInput.trim() || loading}
+            onClick={runCrossReference}
+          >
+            {loading ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Zap className="h-3 w-3 mr-1" />}
+            Cross-Reference ({preyProteins.length} prey)
+          </Button>
+          {crossRef && (
+            <Button size="sm" variant="ghost" className="h-8 text-xs" onClick={handleClear}>
+              <Trash2 className="h-3 w-3 mr-1" /> Clear
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* Results */}
@@ -392,7 +385,7 @@ export default function IPOverlayView({
         <div className="space-y-4">
           {/* Summary Cards */}
           <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
-            <SummaryCard label="Total Prey" value={stats.totalPrey} icon={<Target className="h-3.5 w-3.5" />} color="text-slate-400" />
+            <SummaryCard label="Total Prey" value={stats.totalPrey} icon={<Target className="h-3.5 w-3.5" />} color="text-foreground" />
             <SummaryCard label="As Substrate" value={stats.asSubstrate} icon={<Activity className="h-3.5 w-3.5" />} color="text-green-400" />
             <SummaryCard label="As Kinase" value={stats.asKinase} icon={<Zap className="h-3.5 w-3.5" />} color="text-amber-400" />
             <SummaryCard label="In Signal Chain" value={stats.inReceptorChain} icon={<Network className="h-3.5 w-3.5" />} color="text-cyan-400" />
@@ -400,10 +393,11 @@ export default function IPOverlayView({
           </div>
 
           {/* Interpretation Banner */}
-          {bait && (
+          {baitParsed.gene && (
             <div className="border border-cyan-500/30 rounded-lg p-3 bg-cyan-500/5">
               <p className="text-xs text-cyan-300">
-                <strong>{bait}</strong> removal ({conditionLabel}) releases {stats.asSubstrate + stats.asKinase} interactors
+                <strong>{baitParsed.gene}</strong>{baitParsed.accession && <span className="text-muted-foreground"> ({baitParsed.accession})</span>}{" "}
+                removal ({conditionLabel}) releases {stats.asSubstrate + stats.asKinase} interactors
                 that are active in this PTM dataset.
                 {stats.asKinase > 0 && ` ${stats.asKinase} are kinases controlling downstream substrates.`}
                 {stats.uniqueReceptors > 0 && ` Connected to ${stats.uniqueReceptors} upstream receptor(s).`}
@@ -419,7 +413,7 @@ export default function IPOverlayView({
                 Prey Proteins Found as PTM Substrates ({crossRef.substrates.length})
               </h4>
               <p className="text-[10px] text-muted-foreground mb-2">
-                These {bait} interactors have PTM changes in the dataset — {bait} may have been sequestering them.
+                These {baitParsed.gene} interactors have PTM changes in the dataset — {baitParsed.gene} may have been sequestering them.
               </p>
               <div className="overflow-x-auto">
                 <table className="w-full text-xs">
@@ -479,7 +473,7 @@ export default function IPOverlayView({
                 Prey Proteins as Kinases ({crossRef.kinases.length})
               </h4>
               <p className="text-[10px] text-muted-foreground mb-2">
-                These {bait} interactors are kinases with identified substrate modules — {bait} removal may activate their kinase activity.
+                These {baitParsed.gene} interactors are kinases with identified substrate modules — {baitParsed.gene} removal may activate their kinase activity.
               </p>
               <div className="space-y-2">
                 {crossRef.kinases.map((k, i) => (
