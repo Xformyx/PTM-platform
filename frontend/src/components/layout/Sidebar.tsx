@@ -782,12 +782,12 @@ export default function Sidebar({ className, collapsed = false, onToggle }: Side
     >
       {/* Logo + toggle */}
       <div className={cn("flex items-center py-5 shrink-0", collapsed ? "justify-center px-0" : "gap-3 px-4")}>
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary">
-          <FlaskConical className="h-5 w-5 text-primary-foreground" />
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary overflow-hidden">
+          <img src="/logo.png" alt="MKI" className="h-7 w-7 object-contain" />
         </div>
         {!collapsed && (
           <div className="flex-1 min-w-0">
-            <h1 className="text-base font-semibold tracking-tight">InsightOmics Platform</h1>
+            <h1 className="text-sm font-semibold tracking-tight leading-tight">Meta-Kinetics<br/>Intelligence</h1>
           </div>
         )}
         <button
