@@ -300,6 +300,55 @@ def run_section_writing(state: dict) -> dict:
     aux_timelag = build_ptm_protein_timelag_analysis(network_results, timepoints, ptm_type=ptm_type)
     aux_pathway_ctx = build_pathway_context_for_llm(parsed_ptms)
     aux_signal_prop = build_signal_propagation_json(network_results, timepoints, ptm_type=ptm_type)
+
+    # v11.6: IP Overlay context for LLM (physical interaction evidence from immunoprecipitation)
+    ip_overlay_data = state.get("ip_overlay_data", {}) or {}
+    aux_ip_overlay_context = ""
+    if ip_overlay_data and ip_overlay_data.get("results"):
+        bait = ip_overlay_data.get("bait", {})
+        bait_gene = bait.get("gene", "unknown")
+        condition = ip_overlay_data.get("condition", "")
+        results = ip_overlay_data.get("results", {})
+        prey_as_substrates = results.get("preyAsSubstrates", [])
+        prey_as_kinases = results.get("preyAsKinases", [])
+        signal_chain = results.get("signalChain", [])
+        ip_lines = [
+            "=== IP (IMMUNOPRECIPITATION) OVERLAY DATA ===",
+            f"Bait protein: {bait_gene} | Condition: {condition}",
+            "Physical interactors (prey) cross-referenced with PTM data:",
+            "",
+        ]
+        if prey_as_substrates:
+            ip_lines.append("--- Prey proteins found as PTM substrates ---")
+            for p in prey_as_substrates[:10]:
+                gene = p.get("gene", "")
+                ptms = p.get("ptms", [])
+                kinases = p.get("kinases", [])
+                ip_lines.append(f"  {gene}: {len(ptms)} PTM sites, kinases: {', '.join(kinases[:3])}")
+                for ptm in ptms[:3]:
+                    cond = ptm.get("condition", "")
+                    fc = ptm.get("fc", 0)
+                    try:
+                        fc_val = float(fc)
+                        ip_lines.append(f"    - {ptm.get('position', '')} at {cond}: FC={fc_val:+.2f}")
+                    except (ValueError, TypeError):
+                        ip_lines.append(f"    - {ptm.get('position', '')} at {cond}: FC={fc}")
+        if prey_as_kinases:
+            ip_lines.append("--- Prey proteins acting as kinases ---")
+            for p in prey_as_kinases[:5]:
+                ip_lines.append(f"  {p.get('gene', '')} kinase module: {len(p.get('substrates', []))} substrates")
+        if signal_chain:
+            ip_lines.append("--- Prey proteins in signal chain (Receptor\u2192Kinase\u2192Substrate) ---")
+            for p in signal_chain[:5]:
+                ip_lines.append(f"  {p.get('gene', '')} \u2014 {p.get('chainDescription', '')}")
+        ip_lines.append("")
+        ip_lines.append("INTERPRETATION GUIDANCE: These proteins physically interact with the bait protein.")
+        ip_lines.append("Their PTM changes reflect direct consequences of bait protein removal/degradation.")
+        ip_lines.append("Prioritize discussing these physical interactors when explaining signaling mechanisms.")
+        ip_lines.append("=== END IP OVERLAY DATA ===")
+        aux_ip_overlay_context = "\n".join(ip_lines)
+        logger.info(f"[v11.6] Built IP overlay context: bait={bait_gene}, {len(prey_as_substrates)} prey-substrates, {len(aux_ip_overlay_context):,} chars")
+
     logger.info(
         f"[v9.31] Aux block sizes: ptm_data={len(aux_ptm_data_summary):,}, "
         f"nonptm_temporal={len(aux_nonptm_temporal):,}, timelag={len(aux_timelag):,}, "
@@ -307,7 +356,8 @@ def run_section_writing(state: dict) -> dict:
         f"v98_directive={len(v98_directive):,}, v98_structured={len(v98_structured_data):,}, "
         f"v98_example={len(v98_writing_example):,}, "
         f"temporal_kinase={len(temporal_kinase_cascade_llm_context):,}, "
-        f"receptor={len(receptor_llm_context):,}"
+        f"receptor={len(receptor_llm_context):,}, "
+        f"ip_overlay={len(aux_ip_overlay_context):,}"
     )
 
     # v10.8: Accumulate ChromaDB refs across all sections for unified References
@@ -352,6 +402,9 @@ def run_section_writing(state: dict) -> dict:
             supplement_blocks.append(("comovement", comovement_llm_context))
             supplement_blocks.append(("temporal_kinase", temporal_kinase_cascade_llm_context))
             supplement_blocks.append(("receptor_ctx", receptor_llm_context))
+            # v11.6: IP overlay — physical interaction evidence (Priority 1, after receptor)
+            if aux_ip_overlay_context:
+                supplement_blocks.append(("ip_overlay", aux_ip_overlay_context))
             supplement_blocks.append(("nonptm_temporal", aux_nonptm_temporal))
             # Priority 2 (important): v98 + structured data
             supplement_blocks.append(("v98_directive", v98_directive))
@@ -376,6 +429,9 @@ def run_section_writing(state: dict) -> dict:
             supplement_blocks.append(("comovement", comovement_llm_context))
             supplement_blocks.append(("temporal_kinase", temporal_kinase_cascade_llm_context))
             supplement_blocks.append(("receptor_ctx", receptor_llm_context))
+            # v11.6: IP overlay — physical interaction evidence (Priority 1, after receptor)
+            if aux_ip_overlay_context:
+                supplement_blocks.append(("ip_overlay", aux_ip_overlay_context))
             supplement_blocks.append(("nonptm_temporal", aux_nonptm_temporal))
             # Priority 2: v98 directive + structured data
             supplement_blocks.append(("v98_directive", v98_directive))

@@ -399,7 +399,8 @@ def run_report_generation(self, order_id: int, config: dict):
         # v9.44: Load kinase_activity_heatmap + signal_propagation_data from DB
         kinase_activity_heatmap_from_db = {}
         signal_propagation_from_db = {}
-
+        # v11.6: IP overlay data (physical interaction evidence)
+        ip_overlay_from_db = {}
         # v10.1: Load vector_plot_raw_data (full TSV) for LLM access
         vector_plot_raw_data = []
         ptm_type_for_suffix = (config.get("experimental_context") or {}).get("ptm_type", "phosphorylation")
@@ -460,7 +461,7 @@ def run_report_generation(self, order_id: int, config: dict):
                 _row = _conn.execute(
                     _text(
                         "SELECT receptor_inference_data, kinase_activity_heatmap, "
-                        "signal_propagation_data FROM orders WHERE id = :oid"
+                        "signal_propagation_data, ip_overlay_data FROM orders WHERE id = :oid"
                     ),
                     {"oid": order_id},
                 ).fetchone()
@@ -476,6 +477,9 @@ def run_report_generation(self, order_id: int, config: dict):
                 if _row[2]:
                     signal_propagation_from_db = _row[2] if isinstance(_row[2], dict) else _json.loads(_row[2])
                     logger.info(f"[Order {order_id}] Loaded signal propagation data from DB")
+                if _row[3]:
+                    ip_overlay_from_db = _row[3] if isinstance(_row[3], dict) else _json.loads(_row[3])
+                    logger.info(f"[Order {order_id}] Loaded IP overlay data from DB (bait: {ip_overlay_from_db.get('bait', {}).get('gene', 'unknown')})")
         except Exception as _rec_err:
             logger.warning(f"[Order {order_id}] Could not load analysis data from DB: {_rec_err}")
 
@@ -524,6 +528,8 @@ def run_report_generation(self, order_id: int, config: dict):
             "pipeline_statistics": pipeline_statistics,
             # v10.7: Ubiquitin chain linkage analysis (ubi mode only)
             "ubiquitin_linkage_data": ubiquitin_linkage_data,
+            # v11.6: IP (Immunoprecipitation) overlay data — physical interaction evidence
+            "ip_overlay_data": ip_overlay_from_db,
         }
 
         # ── Cross-Talk mode: load secondary PTM data into initial_state ──
