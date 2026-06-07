@@ -25,6 +25,7 @@ from report_generation.core.dynamic_prompt_generator import (
     build_ptm_protein_timelag_analysis,
     build_pathway_context_for_llm,
     build_signal_propagation_json,
+    build_tf_activity_inference,
     format_condition_display_name,
 )
 from report_generation.core.figure_context import FigureInformationGenerator
@@ -300,7 +301,11 @@ def run_section_writing(state: dict) -> dict:
     aux_timelag = build_ptm_protein_timelag_analysis(network_results, timepoints, ptm_type=ptm_type)
     aux_pathway_ctx = build_pathway_context_for_llm(parsed_ptms)
     aux_signal_prop = build_signal_propagation_json(network_results, timepoints, ptm_type=ptm_type)
-
+    # v11.8: TF Activity Inference from non-PTM protein dynamics
+    organism = context.get("organism", "")
+    aux_tf_inference_context, tf_inference_data = build_tf_activity_inference(
+        network_results, timepoints, ptm_type=ptm_type, organism=organism
+    )
     # v11.6: IP Overlay context for LLM (physical interaction evidence from immunoprecipitation)
     ip_overlay_data = state.get("ip_overlay_data", {}) or {}
     aux_ip_overlay_context = ""
@@ -357,7 +362,8 @@ def run_section_writing(state: dict) -> dict:
         f"v98_example={len(v98_writing_example):,}, "
         f"temporal_kinase={len(temporal_kinase_cascade_llm_context):,}, "
         f"receptor={len(receptor_llm_context):,}, "
-        f"ip_overlay={len(aux_ip_overlay_context):,}"
+        f"ip_overlay={len(aux_ip_overlay_context):,}, "
+        f"tf_inference={len(aux_tf_inference_context):,}"
     )
 
     # v10.8: Accumulate ChromaDB refs across all sections for unified References
@@ -406,6 +412,9 @@ def run_section_writing(state: dict) -> dict:
             if aux_ip_overlay_context:
                 supplement_blocks.append(("ip_overlay", aux_ip_overlay_context))
             supplement_blocks.append(("nonptm_temporal", aux_nonptm_temporal))
+            # v11.8: TF Activity Inference (Priority 1 — cross-validates PTM→TF→target narrative)
+            if aux_tf_inference_context:
+                supplement_blocks.append(("tf_inference", aux_tf_inference_context))
             # Priority 2 (important): v98 + structured data
             supplement_blocks.append(("v98_directive", v98_directive))
             supplement_blocks.append(("v98_structured_data", v98_structured_data))
@@ -433,6 +442,9 @@ def run_section_writing(state: dict) -> dict:
             if aux_ip_overlay_context:
                 supplement_blocks.append(("ip_overlay", aux_ip_overlay_context))
             supplement_blocks.append(("nonptm_temporal", aux_nonptm_temporal))
+            # v11.8: TF Activity Inference (Priority 1 — cross-validates PTM→TF→target narrative)
+            if aux_tf_inference_context:
+                supplement_blocks.append(("tf_inference", aux_tf_inference_context))
             # Priority 2: v98 directive + structured data
             supplement_blocks.append(("v98_directive", v98_directive))
             supplement_blocks.append(("v98_structured_data", v98_structured_data))
@@ -444,7 +456,6 @@ def run_section_writing(state: dict) -> dict:
             # Priority 4: figure context
             if figure_gen.has_figures():
                 supplement_blocks.append(("figure_ctx", figure_gen.generate_figure_context_for_llm(section_type)))
-
         elif section_type == "introduction":
             supplement_blocks.append(("receptor_ctx", receptor_llm_context))
 
@@ -636,6 +647,7 @@ def run_section_writing(state: dict) -> dict:
         "sections": sections,
         "collected_references": unified_references,
         "llm_fallback_sections": fallback_sections,
+        "tf_inference_data": tf_inference_data if tf_inference_data else {},
     }
 
 

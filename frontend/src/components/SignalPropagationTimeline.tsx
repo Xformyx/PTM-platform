@@ -6,7 +6,7 @@ import {
   ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   Legend, ReferenceLine, Cell, BarChart, Bar, LineChart, Line,
 } from "recharts";
-import { Activity, ArrowRight, Clock, Zap, Timer, RefreshCw, TrendingUp, TrendingDown } from "lucide-react";
+import { Activity, ArrowRight, Clock, Zap, Timer, RefreshCw, TrendingUp, TrendingDown, Dna, CheckCircle2, AlertCircle } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -61,6 +61,32 @@ interface Summary {
   transcriptional_count: number;
 }
 
+interface TFInference {
+  tf: string;
+  n_overlap: number;
+  pvalue: number;
+  fdr: number;
+  fold_enrichment: number;
+  dominant_mode: string;
+  overlap_genes: string[];
+  cross_validated: boolean;
+  validation_type: string;
+}
+interface TFInferenceData {
+  species: string;
+  n_changed_proteins: number;
+  n_early_changed: number;
+  n_late_changed: number;
+  all_inferred_tfs: TFInference[];
+  cross_validated_tfs: TFInference[];
+  nonptm_only_tfs: TFInference[];
+  temporal_inference: {
+    early: TFInference[];
+    late: TFInference[];
+  };
+  sources: string[];
+  ptm_modified_proteins_checked: number;
+}
 interface SignalPropagationData {
   mode: 'ptm_only' | 'crosstalk';
   ptm_type?: string;
@@ -72,6 +98,7 @@ interface SignalPropagationData {
   self_timelags: SelfTimeLag[];
   cascade_timelags: CascadeTimeLag[];
   summary: Summary;
+  tf_inferences?: TFInferenceData;
 }
 
 interface Props {
@@ -241,7 +268,7 @@ export default function SignalPropagationTimeline({ data }: Props) {
         </div>
 
         <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="grid w-full grid-cols-4 mb-4">
+          <TabsList className="grid w-full grid-cols-5 mb-4">
             <TabsTrigger value="overview" className="text-xs">
               <Zap className="h-3 w-3 mr-1" />
               Overview
@@ -257,6 +284,10 @@ export default function SignalPropagationTimeline({ data }: Props) {
             <TabsTrigger value="cascade" className="text-xs">
               <ArrowRight className="h-3 w-3 mr-1" />
               Cascade
+            </TabsTrigger>
+            <TabsTrigger value="tf_activity" className="text-xs" disabled={!data.tf_inferences}>
+              <Dna className="h-3 w-3 mr-1" />
+              TF Activity
             </TabsTrigger>
           </TabsList>
 
@@ -689,6 +720,145 @@ export default function SignalPropagationTimeline({ data }: Props) {
                 <ArrowRight className="h-12 w-12 mx-auto mb-3 opacity-30" />
                 <p className="text-sm font-medium">No cascade data available</p>
                 <p className="text-xs mt-1">PTM substrate → effector protein 간 시간적 연결이 감지되지 않았습니다</p>
+              </div>
+            )}
+          </TabsContent>
+
+          {/* ── TF Activity Tab ── */}
+          <TabsContent value="tf_activity">
+            {data.tf_inferences ? (
+              <div className="space-y-4">
+                {/* Summary Stats */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <div className="bg-muted/50 rounded-lg p-3 text-center">
+                    <p className="text-2xl font-bold text-primary">{data.tf_inferences.n_changed_proteins}</p>
+                    <p className="text-xs text-muted-foreground">Changed Proteins</p>
+                  </div>
+                  <div className="bg-muted/50 rounded-lg p-3 text-center">
+                    <p className="text-2xl font-bold text-green-500">{data.tf_inferences.cross_validated_tfs.length}</p>
+                    <p className="text-xs text-muted-foreground">Cross-Validated TFs</p>
+                  </div>
+                  <div className="bg-muted/50 rounded-lg p-3 text-center">
+                    <p className="text-2xl font-bold text-amber-500">{data.tf_inferences.nonptm_only_tfs.length}</p>
+                    <p className="text-xs text-muted-foreground">NonPTM-Inferred TFs</p>
+                  </div>
+                  <div className="bg-muted/50 rounded-lg p-3 text-center">
+                    <p className="text-2xl font-bold text-blue-500">{data.tf_inferences.all_inferred_tfs.length}</p>
+                    <p className="text-xs text-muted-foreground">Total Inferred TFs</p>
+                  </div>
+                </div>
+
+                {/* Cross-Validated TFs (High Confidence) */}
+                {data.tf_inferences.cross_validated_tfs.length > 0 && (
+                  <div>
+                    <h4 className="text-sm font-semibold flex items-center gap-1 mb-2">
+                      <CheckCircle2 className="h-4 w-4 text-green-500" />
+                      Cross-Validated TFs (PTM + Target Gene Convergent)
+                    </h4>
+                    <div className="space-y-2">
+                      {data.tf_inferences.cross_validated_tfs.map((tf, i) => (
+                        <div key={i} className="border rounded-lg p-3 bg-green-500/5">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <Badge variant="default" className="bg-green-600 text-xs">{tf.tf}</Badge>
+                              <span className="text-xs text-muted-foreground">
+                                {tf.n_overlap} targets | fold={tf.fold_enrichment.toFixed(1)}x
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <Badge variant="outline" className="text-xs">
+                                {tf.dominant_mode === 'activation' ? '↑' : tf.dominant_mode === 'repression' ? '↓' : '↕'} {tf.dominant_mode}
+                              </Badge>
+                              <Badge variant="outline" className="text-xs">
+                                FDR={tf.fdr < 0.001 ? tf.fdr.toExponential(1) : tf.fdr.toFixed(3)}
+                              </Badge>
+                            </div>
+                          </div>
+                          {tf.overlap_genes.length > 0 && (
+                            <p className="text-xs text-muted-foreground mt-1">
+                              Targets: {tf.overlap_genes.slice(0, 8).join(', ')}
+                              {tf.overlap_genes.length > 8 && ` (+${tf.overlap_genes.length - 8} more)`}
+                            </p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* NonPTM-Only Inferred TFs */}
+                {data.tf_inferences.nonptm_only_tfs.length > 0 && (
+                  <div>
+                    <h4 className="text-sm font-semibold flex items-center gap-1 mb-2">
+                      <AlertCircle className="h-4 w-4 text-amber-500" />
+                      NonPTM-Inferred TFs (Target Gene Evidence Only)
+                    </h4>
+                    <div className="space-y-2">
+                      {data.tf_inferences.nonptm_only_tfs.slice(0, 5).map((tf, i) => (
+                        <div key={i} className="border rounded-lg p-3 bg-amber-500/5">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <Badge variant="secondary" className="text-xs">{tf.tf}</Badge>
+                              <span className="text-xs text-muted-foreground">
+                                {tf.n_overlap} targets | p={tf.pvalue < 0.001 ? tf.pvalue.toExponential(1) : tf.pvalue.toFixed(3)}
+                              </span>
+                            </div>
+                            <Badge variant="outline" className="text-xs">
+                              {tf.dominant_mode === 'activation' ? '↑' : '↓'} {tf.dominant_mode}
+                            </Badge>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Temporal Resolution */}
+                {(data.tf_inferences.temporal_inference.early.length > 0 || data.tf_inferences.temporal_inference.late.length > 0) && (
+                  <div>
+                    <h4 className="text-sm font-semibold flex items-center gap-1 mb-2">
+                      <Clock className="h-4 w-4 text-blue-500" />
+                      Temporal Resolution
+                    </h4>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {data.tf_inferences.temporal_inference.early.length > 0 && (
+                        <div className="border rounded-lg p-3">
+                          <p className="text-xs font-medium text-muted-foreground mb-1">Early Responders (≤15min)</p>
+                          <p className="text-xs text-muted-foreground italic mb-1">Post-translational activation</p>
+                          <div className="flex flex-wrap gap-1">
+                            {data.tf_inferences.temporal_inference.early.filter(t => t.fdr < 0.1).slice(0, 5).map((tf, i) => (
+                              <Badge key={i} variant="outline" className="text-xs">{tf.tf}</Badge>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {data.tf_inferences.temporal_inference.late.length > 0 && (
+                        <div className="border rounded-lg p-3">
+                          <p className="text-xs font-medium text-muted-foreground mb-1">Late Responders (&gt;15min)</p>
+                          <p className="text-xs text-muted-foreground italic mb-1">Transcriptional program</p>
+                          <div className="flex flex-wrap gap-1">
+                            {data.tf_inferences.temporal_inference.late.filter(t => t.fdr < 0.1).slice(0, 5).map((tf, i) => (
+                              <Badge key={i} variant="outline" className="text-xs">{tf.tf}</Badge>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Data Sources */}
+                <div className="text-xs text-muted-foreground flex items-center gap-2 pt-2 border-t">
+                  <span>Sources: {data.tf_inferences.sources.join(', ')}</span>
+                  <span>|</span>
+                  <span>Species: {data.tf_inferences.species}</span>
+                </div>
+              </div>
+            ) : (
+              <div className="text-center py-8 text-muted-foreground">
+                <Dna className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                <p className="text-sm font-medium">TF Activity Inference not available</p>
+                <p className="text-xs mt-1">리포트 생성 시 자동으로 계산됩니다 (DoRothEA + TRRUST)</p>
               </div>
             )}
           </TabsContent>

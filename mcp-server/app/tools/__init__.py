@@ -14,6 +14,7 @@ from .kea3 import query_kea3
 from .reactome import query_reactome
 from .enrichr import query_enrichr, query_enrichr_string_enrichment
 from .string_enrichment import query_string_indirect_pathways
+from .tf_targets import query_tf_targets, infer_tf_activity, infer_tf_activity_batch
 
 __all__ = [
     "query_uniprot", "query_kegg", "query_stringdb", "query_interpro",
@@ -29,4 +30,6 @@ __all__ = [
     "query_reactome",
     "query_enrichr", "query_enrichr_string_enrichment",
     "query_string_indirect_pathways",
+    # v11.8: TF Activity Inference (DoRothEA + TRRUST)
+    "query_tf_targets", "infer_tf_activity", "infer_tf_activity_batch",
 ]

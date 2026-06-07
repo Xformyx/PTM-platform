@@ -21,6 +21,8 @@ from .tools import (
     query_reactome,
     query_enrichr, query_enrichr_string_enrichment,
     query_string_indirect_pathways,
+    # v11.8: TF Activity Inference
+    query_tf_targets, infer_tf_activity, infer_tf_activity_batch,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -496,3 +498,63 @@ async def cache_clear_all_articles():
     """Clear all cached articles and search results."""
     count = await clear_all_cached_articles(app.state.redis)
     return {"deleted_count": count}
+
+
+# ===========================================================================
+# TF Activity Inference Endpoints (v11.8: DoRothEA + TRRUST)
+# ===========================================================================
+@app.get("/tools/tf_targets/{tf_name}")
+async def tool_tf_targets(
+    tf_name: str,
+    species: str = Query("mouse", description="Species: mouse or human"),
+    min_confidence: str = Query("medium", description="Minimum confidence: very_high, high, medium"),
+):
+    """Get all known target genes for a transcription factor."""
+    return await query_tf_targets(
+        tf_name=tf_name,
+        species=species,
+        min_confidence=min_confidence,
+        redis=app.state.redis,
+    )
+
+
+class TFInferRequest(BaseModel):
+    gene_list: list[str]
+    species: str = "mouse"
+    min_confidence: str = "medium"
+    min_targets_overlap: int = 3
+    top_n: int = 20
+
+
+@app.post("/tools/tf_targets/infer")
+async def tool_tf_infer(req: TFInferRequest):
+    """Infer active TFs from a list of changed genes (Fisher's exact test)."""
+    return await infer_tf_activity(
+        gene_list=req.gene_list,
+        species=req.species,
+        min_confidence=req.min_confidence,
+        min_targets_overlap=req.min_targets_overlap,
+        top_n=req.top_n,
+        redis=app.state.redis,
+    )
+
+
+class TFInferBatchRequest(BaseModel):
+    gene_sets: dict[str, list[str]]
+    species: str = "mouse"
+    min_confidence: str = "medium"
+    min_targets_overlap: int = 3
+    top_n: int = 10
+
+
+@app.post("/tools/tf_targets/infer_batch")
+async def tool_tf_infer_batch(req: TFInferBatchRequest):
+    """Infer TF activity for multiple gene sets (e.g., per-timepoint)."""
+    return await infer_tf_activity_batch(
+        gene_sets=req.gene_sets,
+        species=req.species,
+        min_confidence=req.min_confidence,
+        min_targets_overlap=req.min_targets_overlap,
+        top_n=req.top_n,
+        redis=app.state.redis,
+    )

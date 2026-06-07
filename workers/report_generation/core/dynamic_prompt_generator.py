@@ -1559,3 +1559,245 @@ def build_structured_crosstalk_data_for_llm(
     lines.append("")
 
     return ("\n".join(lines), unique_proteins, log2fc_values)
+
+
+# ---------------------------------------------------------------------------
+# v11.8: TF Activity Inference from Non-PTM Protein Changes
+# ---------------------------------------------------------------------------
+
+def build_tf_activity_inference(
+    network_results: dict,
+    timepoints: list,
+    ptm_type: str = "phosphorylation",
+    organism: str = "",
+) -> tuple:
+    """
+    Infer transcription factor activity from non-PTM protein temporal changes.
+
+    Strategy:
+    1. Collect non-PTM proteins that show significant change (|FC| >= 0.3)
+       grouped by temporal onset (early vs late responders)
+    2. Call MCP server's TF inference endpoint (DoRothEA + TRRUST)
+    3. Cross-validate with PTM-inferred kinase->TF relationships
+    4. Return (llm_context_string, tf_inference_json_for_frontend)
+
+    Args:
+        network_results: Full network analysis results dict
+        timepoints: Sorted list of timepoint labels
+        ptm_type: Type of PTM being analyzed
+        organism: Organism name (for species mapping)
+
+    Returns:
+        Tuple of (llm_context_str, tf_inference_data_dict)
+    """
+    from common.temporal_utils import tp_to_minutes
+
+    networks = network_results.get("networks", {})
+    if not networks or not timepoints:
+        return ("", {})
+
+    # --- Step 1: Collect changed non-PTM proteins per timepoint ---
+    nonptm_temporal = {}  # gene -> {tp: log2fc}
+    for tp in timepoints:
+        net = networks.get(tp, {})
+        if not isinstance(net, dict):
+            continue
+        for node in net.get("non_ptm_nodes", []):
+            if not isinstance(node, dict):
+                continue
+            gene = node.get("gene", node.get("id", "Unknown"))
+            if not gene or gene == "Unknown":
+                continue
+            protein_log2fc = node.get("protein_log2fc", node.get("log2fc", 0))
+            if gene not in nonptm_temporal:
+                nonptm_temporal[gene] = {}
+            nonptm_temporal[gene][tp] = protein_log2fc
+
+    if not nonptm_temporal:
+        return ("", {})
+
+    # Identify significantly changed genes per temporal window
+    THRESHOLD = 0.3
+    early_changed = set()  # genes changed at early timepoints (<=15min)
+    late_changed = set()   # genes changed at late timepoints (>15min)
+    all_changed = set()
+
+    for gene, tp_data in nonptm_temporal.items():
+        for tp, fc in tp_data.items():
+            if abs(fc) >= THRESHOLD:
+                all_changed.add(gene)
+                if tp_to_minutes(tp) <= 15:
+                    early_changed.add(gene)
+                else:
+                    late_changed.add(gene)
+
+    if len(all_changed) < 5:
+        return ("", {})
+
+    # --- Step 2: Call MCP TF inference endpoint ---
+    species = "mouse"  # default
+    org_lower = organism.lower() if organism else ""
+    if "human" in org_lower or "homo" in org_lower:
+        species = "human"
+    elif "mouse" in org_lower or "mus" in org_lower or "murine" in org_lower:
+        species = "mouse"
+
+    try:
+        from common.mcp_client import MCPClient
+        mcp = MCPClient()
+    except Exception as e:
+        logger.warning(f"[v11.8] Cannot initialize MCP client for TF inference: {e}")
+        return ("", {})
+
+    # Infer TFs from all changed genes
+    tf_result_all = mcp.infer_tf_activity(
+        gene_list=list(all_changed),
+        species=species,
+        min_confidence="medium",
+        min_targets_overlap=3,
+        top_n=15,
+    )
+
+    # Also do per-temporal-window inference for temporal resolution
+    tf_result_temporal = {}
+    if early_changed and len(early_changed) >= 3:
+        tf_result_temporal["early"] = mcp.infer_tf_activity(
+            gene_list=list(early_changed),
+            species=species,
+            min_confidence="medium",
+            min_targets_overlap=2,
+            top_n=10,
+        )
+    if late_changed and len(late_changed) >= 3:
+        tf_result_temporal["late"] = mcp.infer_tf_activity(
+            gene_list=list(late_changed),
+            species=species,
+            min_confidence="medium",
+            min_targets_overlap=2,
+            top_n=10,
+        )
+
+    # --- Step 3: Cross-validate with PTM data (kinase->TF links) ---
+    # Collect PTM-modified proteins that are known TFs
+    ptm_modified_tfs = set()
+    for tp in timepoints:
+        net = networks.get(tp, {})
+        if not isinstance(net, dict):
+            continue
+        for node_type in ["active_nodes", "inhibited_nodes"]:
+            for node in net.get(node_type, []):
+                if not isinstance(node, dict):
+                    continue
+                gene = node.get("gene", "")
+                if gene:
+                    ptm_modified_tfs.add(gene.upper())
+
+    # Check which inferred TFs are also PTM-modified (cross-validation)
+    inferred_tfs = tf_result_all.get("inferred_tfs", [])
+    cross_validated = []
+    nonptm_only_tfs = []
+
+    for tf_entry in inferred_tfs:
+        tf_name = tf_entry.get("tf", "")
+        if tf_name in ptm_modified_tfs:
+            tf_entry["cross_validated"] = True
+            tf_entry["validation_type"] = "PTM+NonPTM_convergent"
+            cross_validated.append(tf_entry)
+        else:
+            tf_entry["cross_validated"] = False
+            tf_entry["validation_type"] = "NonPTM_inferred_only"
+            nonptm_only_tfs.append(tf_entry)
+
+    # --- Step 4: Build LLM context string ---
+    lines = [
+        "",
+        "## TF ACTIVITY INFERENCE FROM NON-PTM PROTEIN DYNAMICS",
+        f"(DoRothEA + TRRUST | species={species} | {len(all_changed)} changed proteins analyzed)",
+        "",
+    ]
+
+    if cross_validated:
+        lines.append("### CROSS-VALIDATED TFs (PTM modification + target gene expression convergent)")
+        lines.append("These TFs are BOTH post-translationally modified in the PTM data AND their")
+        lines.append("known target genes show coordinated abundance changes - HIGH CONFIDENCE axes.")
+        lines.append("")
+        for tf in cross_validated[:8]:
+            pval_str = f"{tf['pvalue']:.2e}" if tf.get('pvalue', 1) < 0.05 else f"{tf.get('pvalue', 1):.2e}"
+            lines.append(
+                f"  **{tf['tf']}** - {tf['n_overlap']} targets changed "
+                f"(p={pval_str}, FDR={tf.get('fdr', 1):.2e}, "
+                f"fold={tf.get('fold_enrichment', 0):.1f}x) "
+                f"[{tf.get('dominant_mode', 'unknown')}]"
+            )
+            overlap_genes = tf.get("overlap_genes", [])
+            if overlap_genes:
+                lines.append(f"    Targets: {', '.join(overlap_genes[:8])}")
+        lines.append("")
+
+    if nonptm_only_tfs:
+        sig_nonptm = [t for t in nonptm_only_tfs if t.get("fdr", 1) < 0.1]
+        if sig_nonptm:
+            lines.append("### NON-PTM INFERRED TFs (target gene evidence only, no PTM on TF detected)")
+            lines.append("These TFs show target gene activation but NO detectable PTM modification.")
+            lines.append("Possible explanations: (1) PTM below detection limit, (2) non-PTM activation,")
+            lines.append("(3) constitutively active TF with newly synthesized targets.")
+            lines.append("")
+            for tf in sig_nonptm[:5]:
+                pval_str = f"{tf['pvalue']:.2e}"
+                lines.append(
+                    f"  {tf['tf']} - {tf['n_overlap']} targets changed "
+                    f"(p={pval_str}, FDR={tf.get('fdr', 1):.2e}) "
+                    f"[{tf.get('dominant_mode', 'unknown')}]"
+                )
+            lines.append("")
+
+    # Temporal resolution
+    if tf_result_temporal:
+        lines.append("### TEMPORAL RESOLUTION OF TF ACTIVITY")
+        if "early" in tf_result_temporal:
+            early_tfs = tf_result_temporal["early"].get("inferred_tfs", [])
+            sig_early = [t for t in early_tfs if t.get("fdr", 1) < 0.1]
+            if sig_early:
+                lines.append(f"  Early responders (<=15min): {', '.join(t['tf'] for t in sig_early[:5])}")
+                lines.append("  -> Likely post-translational activation (no time for transcription)")
+        if "late" in tf_result_temporal:
+            late_tfs = tf_result_temporal["late"].get("inferred_tfs", [])
+            sig_late = [t for t in late_tfs if t.get("fdr", 1) < 0.1]
+            if sig_late:
+                lines.append(f"  Late responders (>15min): {', '.join(t['tf'] for t in sig_late[:5])}")
+                lines.append("  -> Likely transcriptional program activation")
+        lines.append("")
+
+    lines.append("### INTERPRETATION GUIDANCE")
+    lines.append("- Cross-validated TFs represent HIGH-CONFIDENCE signaling axes")
+    lines.append("- Use temporal resolution to distinguish post-translational vs transcriptional mechanisms")
+    lines.append("- Discuss PTM->TF->target gene cascades as complete signaling narratives")
+    lines.append("- Discordant cases (PTM present but no target activation) suggest non-transcriptional PTM functions")
+    lines.append("")
+
+    llm_context = "\n".join(lines)
+
+    # --- Step 5: Build frontend JSON data ---
+    tf_inference_data = {
+        "species": species,
+        "n_changed_proteins": len(all_changed),
+        "n_early_changed": len(early_changed),
+        "n_late_changed": len(late_changed),
+        "all_inferred_tfs": inferred_tfs[:15],
+        "cross_validated_tfs": cross_validated[:10],
+        "nonptm_only_tfs": [t for t in nonptm_only_tfs if t.get("fdr", 1) < 0.1][:10],
+        "temporal_inference": {
+            "early": tf_result_temporal.get("early", {}).get("inferred_tfs", [])[:10],
+            "late": tf_result_temporal.get("late", {}).get("inferred_tfs", [])[:10],
+        },
+        "sources": ["DoRothEA (A/B/C)", "TRRUST v2"],
+        "ptm_modified_proteins_checked": len(ptm_modified_tfs),
+    }
+
+    logger.info(
+        f"[v11.8] TF Activity Inference: {len(all_changed)} changed proteins -> "
+        f"{len(inferred_tfs)} TFs inferred, {len(cross_validated)} cross-validated, "
+        f"context={len(llm_context):,} chars"
+    )
+
+    return (llm_context, tf_inference_data)

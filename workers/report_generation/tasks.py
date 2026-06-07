@@ -693,6 +693,30 @@ def run_report_generation(self, order_id: int, config: dict):
         graph = build_report_graph()
         final_state = graph.invoke(initial_state)
 
+        # v11.8: Save TF inference data to signal_propagation_data (append tf_inferences key)
+        _tf_inf = final_state.get("tf_inference_data") or {}
+        if _tf_inf and _tf_inf.get("inferred_tfs"):
+            try:
+                from common.db_engine import get_engine as _get_tf_engine
+                from sqlalchemy import text as _tf_text
+                _spd = signal_propagation_from_db.copy() if signal_propagation_from_db else {}
+                _spd["tf_inferences"] = _tf_inf
+                _tf_eng = _get_tf_engine()
+                with _tf_eng.connect() as _tf_conn:
+                    _tf_conn.execute(
+                        _tf_text(
+                            "UPDATE orders SET signal_propagation_data = :spd WHERE id = :oid"
+                        ),
+                        {"oid": order_id, "spd": json.dumps(_spd, default=str)},
+                    )
+                    _tf_conn.commit()
+                logger.info(
+                    f"[Order {order_id}] Saved TF inference data to signal_propagation_data "
+                    f"({len(_tf_inf.get('inferred_tfs', []))} TFs)"
+                )
+            except Exception as _tf_save_err:
+                logger.warning(f"[Order {order_id}] Could not save TF inference data: {_tf_save_err}")
+
         # Post-process: PTM terminology + citation insertion + fake ref removal
         try:
             from common.report_postprocessor import postprocess_full_report

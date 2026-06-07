@@ -129,6 +129,8 @@ class ReportState(TypedDict, total=False):
     pipeline_statistics: dict  # {step1_input, step2_quantification, ...}
     # v10.7: Ubiquitin chain linkage analysis (ubi mode only)
     ubiquitin_linkage_data: dict  # {detected, linkage_data, temporal_ratios, summary, chart_data}
+    # v11.8: TF Activity Inference from non-PTM protein dynamics
+    tf_inference_data: dict  # {inferred_tfs, cross_validated, novel_findings, summary}
 
     # Progress tracking
     progress_callback: Any

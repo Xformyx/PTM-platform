@@ -606,6 +606,70 @@ class MCPClient:
             logger.warning(f"MCP gene aliases failed for {gene}: {e}")
             return []
 
+    # ------------------------------------------------------------------
+    # TF Activity Inference (v11.8: DoRothEA + TRRUST)
+    # ------------------------------------------------------------------
+    def query_tf_targets(self, tf_name: str, species: str = "mouse",
+                         min_confidence: str = "medium") -> dict:
+        """Get all known target genes for a transcription factor."""
+        try:
+            r = self.session.get(
+                f"{self.base_url}/tools/tf_targets/{tf_name}",
+                params={"species": species, "min_confidence": min_confidence},
+                timeout=self.timeout,
+            )
+            r.raise_for_status()
+            return r.json()
+        except Exception as e:
+            logger.warning(f"MCP TF targets failed for {tf_name}: {e}")
+            return {"tf": tf_name, "targets": [], "total_targets": 0}
+
+    def infer_tf_activity(self, gene_list: List[str], species: str = "mouse",
+                          min_confidence: str = "medium",
+                          min_targets_overlap: int = 3,
+                          top_n: int = 20) -> dict:
+        """Infer active TFs from a list of changed genes."""
+        try:
+            r = self.session.post(
+                f"{self.base_url}/tools/tf_targets/infer",
+                json={
+                    "gene_list": gene_list,
+                    "species": species,
+                    "min_confidence": min_confidence,
+                    "min_targets_overlap": min_targets_overlap,
+                    "top_n": top_n,
+                },
+                timeout=self.timeout * 2,
+            )
+            r.raise_for_status()
+            return r.json()
+        except Exception as e:
+            logger.warning(f"MCP TF inference failed: {e}")
+            return {"gene_list_size": len(gene_list), "inferred_tfs": []}
+
+    def infer_tf_activity_batch(self, gene_sets: dict, species: str = "mouse",
+                                min_confidence: str = "medium",
+                                min_targets_overlap: int = 3,
+                                top_n: int = 10) -> dict:
+        """Infer TF activity for multiple gene sets (per-timepoint)."""
+        try:
+            r = self.session.post(
+                f"{self.base_url}/tools/tf_targets/infer_batch",
+                json={
+                    "gene_sets": gene_sets,
+                    "species": species,
+                    "min_confidence": min_confidence,
+                    "min_targets_overlap": min_targets_overlap,
+                    "top_n": top_n,
+                },
+                timeout=self.timeout * 3,
+            )
+            r.raise_for_status()
+            return r.json()
+        except Exception as e:
+            logger.warning(f"MCP TF inference batch failed: {e}")
+            return {"n_sets": len(gene_sets), "results": {}}
+
     def close(self):
         s = getattr(self._local, "session", None)
         if s is not None:
