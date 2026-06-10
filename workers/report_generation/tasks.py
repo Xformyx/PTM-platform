@@ -751,7 +751,6 @@ def run_report_generation(self, order_id: int, config: dict):
                 else:
                     logger.warning(f"[Order {order_id}] Post-process: skipped rpt_path='{rpt_path}' (exists={Path(rpt_path).exists() if rpt_path else 'N/A'}, endswith_md={rpt_path.endswith('.md') if rpt_path else 'N/A'})")
         except Exception as pp_err:
-            import traceback
             logger.warning(f"[Order {order_id}] Post-processing skipped: {pp_err}")
             logger.warning(f"[Order {order_id}] Post-processing traceback:\n{traceback.format_exc()}")
 
