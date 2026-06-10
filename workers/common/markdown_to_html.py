@@ -211,9 +211,16 @@ def _convert_md_to_html_body(
             else:
                 abs_path = Path(src) if Path(src).is_absolute() else Path(output_dir) / src
                 if abs_path.exists():
+                    ext = abs_path.suffix.lower()
+                    mime = {
+                        '.jpg': 'image/jpeg',
+                        '.jpeg': 'image/jpeg',
+                        '.webp': 'image/webp',
+                        '.gif': 'image/gif',
+                    }.get(ext, 'image/png')
                     with open(abs_path, 'rb') as f:
                         b64 = base64.b64encode(f.read()).decode('utf-8')
-                    img_src = f"data:image/png;base64,{b64}"
+                    img_src = f"data:{mime};base64,{b64}"
                 else:
                     img_src = src
             html_parts.append(

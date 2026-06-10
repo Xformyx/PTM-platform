@@ -280,6 +280,8 @@ export default function RerunOptionsModal({
       onOpenChange(false);
     } catch (e) {
       console.error(e);
+      const msg = e instanceof Error ? e.message : "알 수 없는 오류가 발생했습니다.";
+      alert(`분석 실행에 실패했습니다: ${msg}`);
     } finally {
       setSubmitting(false);
     }

@@ -702,7 +702,10 @@ def build_structured_protein_data_for_llm(
     # Sort PTM proteins by max absolute Log2FC
     sorted_ptms = sorted(
         ptm_data.items(),
-        key=lambda x: max(abs(x[1].get(tp, {}).get("ptm_log2fc", 0)) for tp in timepoints if tp in x[1]),
+        key=lambda x: max(
+            (abs(x[1].get(tp, {}).get("ptm_log2fc", 0)) for tp in timepoints if tp in x[1]),
+            default=0,
+        ),
         reverse=True,
     )
 
@@ -1219,7 +1222,7 @@ def build_pathway_context_for_llm(
         down = len(ptms) - up
         top_genes = sorted(ptms, key=lambda x: abs(float(x.get("ptm_relative_log2fc", 0))), reverse=True)
         gene_list = ", ".join(
-            f"{p['gene']}-{p.get('position', '?')}(FC={float(p.get('ptm_relative_log2fc', 0)):.2f})"
+            f"{p.get('gene', p.get('Gene', '?'))}-{p.get('position', p.get('Position', '?'))}(FC={float(p.get('ptm_relative_log2fc', 0)):.2f})"
             for p in top_genes[:5]
         )
         lines.append(f"### {pw_name} ({len(ptms)} PTMs: {up} up, {down} down)")
@@ -1432,7 +1435,7 @@ def format_condition_display_name(condition: str) -> str:
         elif _re.match(r'^\d+$', w):
             formatted.append(w)  # keep numbers as-is
         else:
-            formatted.append(w.capitalize() if not w[0].isupper() else w)
+            formatted.append(w.capitalize() if w and not w[0].isupper() else w)
 
     return " ".join(formatted)
 
@@ -1593,6 +1596,9 @@ def build_tf_activity_inference(
     from common.temporal_utils import tp_to_minutes
 
     networks = network_results.get("networks", {})
+    if not networks:
+        # Fallback: some callers store per-timepoint data under 'timepoint_results'
+        networks = network_results.get("timepoint_results", {})
     if not networks or not timepoints:
         return ("", {})
 
@@ -1699,7 +1705,7 @@ def build_tf_activity_inference(
 
     for tf_entry in inferred_tfs:
         tf_name = tf_entry.get("tf", "")
-        if tf_name in ptm_modified_tfs:
+        if tf_name.upper() in ptm_modified_tfs:
             tf_entry["cross_validated"] = True
             tf_entry["validation_type"] = "PTM+NonPTM_convergent"
             cross_validated.append(tf_entry)

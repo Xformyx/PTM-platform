@@ -13,7 +13,7 @@
  * Receives time-series data + selected PTMs from the parent TopNTimeSeriesPlot.
  */
 
-import { useState, useMemo, useCallback, useEffect, Fragment } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef, Fragment } from "react";
 import {
   Loader2,
   Search,
@@ -390,6 +390,7 @@ interface KinaseModuleAnalysisProps {
   ptmType?: string; // v9.14: 'phosphorylation' | 'ubiquitylation'
   highlightedKinase?: string | null; // v9.21: from receptor panel click
   inferredReceptors?: InferredReceptor[]; // v9.21: for Signal Flow tab + receptor badges
+  ipOverlayData?: Record<string, unknown> | null; // saved IP overlay state from order
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -622,6 +623,7 @@ export default function KinaseModuleAnalysis({
   ptmType = "phosphorylation",
   highlightedKinase,
   inferredReceptors = [],
+  ipOverlayData,
 }: KinaseModuleAnalysisProps) {
   const isUbi = ptmType.toLowerCase().includes("ubiquityl") || ptmType.toLowerCase().includes("ubiquitin");
   const [activeTab, setActiveTab] = useState<"cowave" | "lookup" | "cascade" | "kinaseModules" | "signalFlow" | "heatmap" | "cascadeTimeline" | "chainLinkage" | "ipOverlay">("cowave");
@@ -1697,6 +1699,7 @@ export default function KinaseModuleAnalysis({
             conditions={conditions}
             globalKinaseModules={globalKinaseResult?.kinase_modules || null}
             inferredReceptors={inferredReceptors}
+            savedIpData={ipOverlayData as any}
           />
         )}
       </CardContent>
@@ -4947,6 +4950,8 @@ function KinaseActivityHeatmapView({
   // v11.3: Accumulative GO cache — stores all fetched gene localizations across all kinases
   const [goLocCache, setGoLocCache] = useState<Record<string, string[]>>({});
   const [hoveredLineKinase, setHoveredLineKinase] = useState<string | null>(null);
+  // Track previous globalKinaseResult reference to avoid spurious heatmap re-fetches
+  const prevKinaseResultRef = useRef<typeof globalKinaseResult | null>(null);
   const [lineTooltip, setLineTooltip] = useState<{ x: number; y: number; kinase: string; condition: string; score: number } | null>(null);
   // Fetch heatmap data from backend
   const fetchHeatmapData = useCallback(async (forceRefresh = false) => {
@@ -4971,10 +4976,12 @@ function KinaseActivityHeatmapView({
   }, [orderId, globalKinaseResult]);
 
   useEffect(() => {
-    if (globalKinaseResult?.kinase_modules?.length > 0) {
-      fetchHeatmapData(false);
-    }
-  }, [fetchHeatmapData]);
+    if (!globalKinaseResult?.kinase_modules?.length) return;
+    // Skip if the result reference hasn't changed (prevents spurious re-fetches on re-renders)
+    if (prevKinaseResultRef.current === globalKinaseResult) return;
+    prevKinaseResultRef.current = globalKinaseResult;
+    fetchHeatmapData(false);
+  }, [fetchHeatmapData, globalKinaseResult]);
 
   // v11.3: Fetch GO Cellular Component data when a heatmap cell is clicked
   // Accumulative: merges new gene data into goLocCache so all expanded rows can show badges
@@ -5028,7 +5035,7 @@ function KinaseActivityHeatmapView({
     }).finally(() => {
       setGoLocLoading(false);
     });
-  }, [goLocSelection, globalKinaseResult, orderId]);
+  }, [goLocSelection, globalKinaseResult, orderId, goLocCache]);
 
   // Sort kinase scores
   // Helper: get total co-activation magnitude for a kinase in the selected tier

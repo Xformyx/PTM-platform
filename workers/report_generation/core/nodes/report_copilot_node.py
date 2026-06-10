@@ -160,9 +160,9 @@ def _summarize_top_ptms(enriched: list, n: int = 10) -> str:
         return "(No enriched PTM data)"
     scored = []
     for p in enriched:
-        gene = p.get("gene_name", p.get("Gene_Name", "?"))
+        gene = p.get("gene", p.get("gene_name", p.get("Gene_Name", "?")))
         pos = p.get("position", p.get("Position", "?"))
-        fc = p.get("fold_change", p.get("Fold_Change", 0))
+        fc = p.get("ptm_relative_log2fc", p.get("fold_change", p.get("Fold_Change", 0)))
         try:
             abs_fc = abs(float(fc))
         except (ValueError, TypeError):

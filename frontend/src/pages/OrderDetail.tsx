@@ -2140,6 +2140,7 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
           ptmType={ptmType}
           highlightedKinase={selectedHighlightKinase}
           inferredReceptors={data.inferred_receptors || []}
+          ipOverlayData={order?.ip_overlay_data ?? null}
           vectorData={data.vector_data.map((row) => ({
             gene: row.gene,
             position: row.position,
@@ -2755,6 +2756,8 @@ export default function OrderDetail() {
         lastLogIdRef.current = Math.max(...l.logs.map((x) => x.id));
       }
       setLlmConfig(lc);
+      setLoading(false);
+    }).catch(() => {
       setLoading(false);
     });
   }, [orderId]);
@@ -4151,7 +4154,7 @@ export default function OrderDetail() {
                   )}
 
                   {/* Signal Propagation Timeline */}
-                  {order.signal_propagation_data && (
+                  {order.signal_propagation_data?.summary && (
                     <SignalPropagationTimeline data={order.signal_propagation_data as any} />
                   )}
                 </>

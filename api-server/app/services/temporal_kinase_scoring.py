@@ -185,12 +185,16 @@ MOTIF_FAMILY_MEMBERS = {
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def parse_time_minutes(cond: str) -> float:
-    """Parse condition string like '5min', '1h', '24h' to minutes."""
+    """Parse condition string like '5min', '1h', '24h' to minutes.
+
+    Bare numbers (no unit) are treated as minutes, consistent with tp_to_minutes
+    in common/temporal_utils.py (e.g., 'peak: 5' in co-wave labels → 5 min).
+    """
     m = re.match(r'([\d.]+)\s*(h|hr|hour|min|m|s|sec)?', cond, re.IGNORECASE)
     if not m:
         return 0.0
     val = float(m.group(1))
-    unit = (m.group(2) or 'h').lower()
+    unit = (m.group(2) or 'min').lower()
     if unit.startswith('s'):
         return val / 60
     if unit.startswith('m'):

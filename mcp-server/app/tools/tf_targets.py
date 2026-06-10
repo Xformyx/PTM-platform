@@ -10,6 +10,7 @@ Data sources:
 - DoRothEA (OmniPath): Confidence levels A, B, C (mouse + human)
 - TRRUST v2: Manually curated TF-target interactions (mouse + human)
 """
+import hashlib
 import json
 import logging
 import os
@@ -38,7 +39,7 @@ def _load_species_data(species: str) -> dict:
     filepath = _DATA_DIR / filename
     if not filepath.exists():
         logger.warning(f"TF-target data not found: {filepath}")
-        _tf_data[species] = {"tf_to_targets": {}, "target_to_tfs": {}}
+        _tf_data[species] = {"tf_to_targets": {}, "target_to_tfs": {}, "_missing": True}
         return _tf_data[species]
 
     logger.info(f"Loading TF-target data from {filepath}")
@@ -81,11 +82,23 @@ async def query_tf_targets(
     data = _load_species_data(species)
     tf_to_targets = data.get("tf_to_targets", {})
 
+    if not tf_to_targets:
+        return {
+            "tf": tf_name.upper(),
+            "species": species,
+            "total_targets": 0,
+            "targets": [],
+            "sources": [],
+            "error": f"No TF-target data available for species '{species}'",
+        }
+
     tf_upper = tf_name.upper()
     targets = tf_to_targets.get(tf_upper, [])
 
     # Filter by confidence
     confidence_order = ["very_high", "high", "medium", "low"]
+    if min_confidence not in confidence_order:
+        logger.warning(f"Invalid min_confidence '{min_confidence}', defaulting to 'medium'")
     min_idx = confidence_order.index(min_confidence) if min_confidence in confidence_order else 2
 
     filtered = []
@@ -159,7 +172,8 @@ async def infer_tf_activity(
 
     # Cache check
     gene_key = ",".join(sorted(set(g.upper() for g in gene_list)))
-    cache_key = f"tf_infer:{hash(gene_key)}:{species}:{min_confidence}:{min_targets_overlap}"
+    _gene_hash = hashlib.md5(gene_key.encode()).hexdigest()[:16]
+    cache_key = f"tf_infer:{_gene_hash}:{species}:{min_confidence}:{min_targets_overlap}"
     if redis:
         cached = await redis.get(cache_key)
         if cached:
@@ -169,12 +183,23 @@ async def infer_tf_activity(
     tf_to_targets = data.get("tf_to_targets", {})
     target_to_tfs = data.get("target_to_tfs", {})
 
+    if not tf_to_targets:
+        return {
+            "gene_list_size": len(gene_list),
+            "species": species,
+            "inferred_tfs": [],
+            "error": f"No TF-target data available for species '{species}'",
+        }
+
     # Normalize input
     gene_set = set(g.upper() for g in gene_list)
 
-    # Background: all genes that are targets of at least one TF
+    # Background: all unique target genes in the DB
     all_target_genes = set(target_to_tfs.keys())
     bg_size = background_size or len(all_target_genes)
+
+    # Filter gene_set to only genes present in the DB background for a valid contingency table
+    effective_gene_set = gene_set & all_target_genes
 
     # Confidence filter
     confidence_order = ["very_high", "high", "medium", "low"]
@@ -195,7 +220,7 @@ async def infer_tf_activity(
             continue
 
         # Overlap
-        overlap = gene_set & tf_target_genes
+        overlap = effective_gene_set & tf_target_genes
         n_overlap = len(overlap)
 
         if n_overlap < min_targets_overlap:
@@ -203,12 +228,13 @@ async def infer_tf_activity(
 
         # Fisher's exact test (one-sided, over-representation)
         # Contingency table:
-        #                    In gene_list    Not in gene_list
-        # TF targets:        n_overlap       len(tf_targets) - n_overlap
-        # Non-TF targets:    len(gene_set)-n_overlap   bg_size - ...
+        #                    In effective_gene_set   Not in effective_gene_set
+        # TF targets:        n_overlap               len(tf_targets) - n_overlap
+        # Non-TF targets:    len(eff_set)-n_overlap  bg_size - ...
+        # All cells are non-negative because effective_gene_set ⊆ all_target_genes ⊆ background
         a = n_overlap
         b = len(tf_target_genes) - n_overlap
-        c = len(gene_set) - n_overlap
+        c = len(effective_gene_set) - n_overlap
         d = bg_size - a - b - c
 
         if d < 0:
@@ -236,8 +262,8 @@ async def infer_tf_activity(
             "overlap_genes": sorted(overlap),
             "pvalue": pvalue,
             "fold_enrichment": round(
-                (n_overlap / len(gene_set)) / (len(tf_target_genes) / bg_size), 2
-            ) if len(gene_set) > 0 and len(tf_target_genes) > 0 else 0,
+                (n_overlap / len(effective_gene_set)) / (len(tf_target_genes) / bg_size), 2
+            ) if len(effective_gene_set) > 0 and len(tf_target_genes) > 0 else 0,
             "dominant_mode": dominant_mode,
             "mode_counts": dict(modes),
             "sources": sorted(sources),
@@ -246,16 +272,25 @@ async def infer_tf_activity(
     # Sort by p-value
     tf_results.sort(key=lambda x: x["pvalue"])
 
-    # BH FDR correction
+    # Benjamini-Hochberg FDR correction (monotone step-up procedure)
     n_tests = len(tf_results)
-    for i, r in enumerate(tf_results):
-        r["fdr"] = min(r["pvalue"] * n_tests / (i + 1), 1.0)
+    if n_tests > 0:
+        # tf_results is already sorted by p-value ascending
+        fdrs = [r["pvalue"] * n_tests / (i + 1) for i, r in enumerate(tf_results)]
+        # Enforce monotonicity by reverse cumulative minimum
+        running_min = 1.0
+        for i in range(n_tests - 1, -1, -1):
+            running_min = min(fdrs[i], running_min)
+            fdrs[i] = running_min
+        for r, fdr in zip(tf_results, fdrs):
+            r["fdr"] = round(min(fdr, 1.0), 6)
 
     # Top N
     top_results = tf_results[:top_n]
 
     result = {
         "gene_list_size": len(gene_set),
+        "effective_gene_list_size": len(effective_gene_set),
         "species": species,
         "background_size": bg_size,
         "total_tfs_tested": n_tests,

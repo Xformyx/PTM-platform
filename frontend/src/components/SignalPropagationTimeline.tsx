@@ -194,7 +194,7 @@ export default function SignalPropagationTimeline({ data }: Props) {
 
   // ── Pattern distribution bar data ──
   const patternBarData = useMemo(() => {
-    return Object.entries(data.summary.pattern_counts)
+    return Object.entries(data.summary?.pattern_counts ?? {})
       .filter(([k]) => k !== 'stable_baseline')
       .map(([pattern, count]) => ({
         pattern: PATTERN_LABELS[pattern] || pattern,
@@ -206,7 +206,9 @@ export default function SignalPropagationTimeline({ data }: Props) {
 
   // ── Mechanism distribution ──
   const mechanismData = useMemo(() => {
-    const { immediate_count, rapid_relay_count, transcriptional_count } = data.summary;
+    const immediate_count = data.summary?.immediate_count ?? 0;
+    const rapid_relay_count = data.summary?.rapid_relay_count ?? 0;
+    const transcriptional_count = data.summary?.transcriptional_count ?? 0;
     return [
       { name: 'Post-translational (≤5min)', value: immediate_count, fill: '#ef4444' },
       { name: 'Rapid relay (5-20min)', value: rapid_relay_count, fill: '#f59e0b' },
@@ -218,8 +220,8 @@ export default function SignalPropagationTimeline({ data }: Props) {
   const effectorLineData = useMemo(() => {
     const responsive = data.nonptm_effectors.filter(e => e.pattern !== 'stable_baseline');
     const top8 = responsive.slice(0, 8);
-    return data.timepoints.map((tp, i) => {
-      const point: Record<string, any> = { timepoint: tp, minutes: data.timepoint_minutes[i] };
+    return (data.timepoints ?? []).map((tp, i) => {
+      const point: Record<string, any> = { timepoint: tp, minutes: data.timepoint_minutes?.[i] ?? 0 };
       top8.forEach(e => {
         point[e.gene] = e.temporal_data[tp] || 0;
       });
@@ -250,19 +252,19 @@ export default function SignalPropagationTimeline({ data }: Props) {
         {/* Summary Stats */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
           <div className="p-3 rounded-lg bg-emerald-50 border border-emerald-200 text-center">
-            <p className="text-2xl font-bold text-emerald-700">{data.summary.responsive_effectors}</p>
+            <p className="text-2xl font-bold text-emerald-700">{data.summary?.responsive_effectors ?? 0}</p>
             <p className="text-xs text-emerald-600">Responsive Effectors</p>
           </div>
           <div className="p-3 rounded-lg bg-green-50 border border-green-200 text-center">
-            <p className="text-2xl font-bold text-green-700">{data.summary.causal_count}</p>
+            <p className="text-2xl font-bold text-green-700">{data.summary?.causal_count ?? 0}</p>
             <p className="text-xs text-green-600">Causal (PTM→Protein)</p>
           </div>
           <div className="p-3 rounded-lg bg-orange-50 border border-orange-200 text-center">
-            <p className="text-2xl font-bold text-orange-700">{data.summary.feedback_count}</p>
+            <p className="text-2xl font-bold text-orange-700">{data.summary?.feedback_count ?? 0}</p>
             <p className="text-xs text-orange-600">Feedback Loops</p>
           </div>
           <div className="p-3 rounded-lg bg-blue-50 border border-blue-200 text-center">
-            <p className="text-2xl font-bold text-blue-700">{data.summary.forward_propagation_count}</p>
+            <p className="text-2xl font-bold text-blue-700">{data.summary?.forward_propagation_count ?? 0}</p>
             <p className="text-xs text-blue-600">Signal Cascades</p>
           </div>
         </div>

@@ -116,14 +116,14 @@ def get_cached_best_match(
                 cached_pmids = set(json.loads(row[1]))
             except Exception:
                 continue
-            if cached_pmids and cached_pmids.issubset(requested) and len(cached_pmids) > best_count:
+            if cached_pmids and cached_pmids == requested and len(cached_pmids) > best_count:
                 best_result = json.loads(row[0])
                 best_count = len(cached_pmids)
 
         if best_result is not None:
             logger.info(
-                f"[PhaseB-Cache SUBSET HIT] {gene} {position} / {task_name} "
-                f"— reused {best_count}/{len(pmids)} articles from cache"
+                f"[PhaseB-Cache EXACT HIT] {gene} {position} / {task_name} "
+                f"— matched {best_count} articles from cache"
             )
         return best_result
     except Exception as e:

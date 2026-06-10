@@ -279,7 +279,10 @@ export default function IPOverlayView({
       prey_text: preyText,
       prey_proteins: preyProteins,
       cross_reference: result,
-    }).catch((err) => console.warn("Failed to save IP overlay data:", err));
+    }).catch((err) => {
+      console.warn("Failed to save IP overlay data:", err);
+      alert("IP Overlay 데이터 저장에 실패했습니다. 네트워크 연결을 확인해 주세요.");
+    });
   }, [preyProteins, vectorData, globalKinaseModules, inferredReceptors, orderId, baitParsed, conditionLabel, preyText]);
 
   // ── Clear ────────────────────────────────────────────────────────────────

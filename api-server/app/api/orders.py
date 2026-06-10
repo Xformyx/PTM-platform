@@ -715,6 +715,7 @@ async def duplicate_order(
     source = result.scalar_one_or_none()
     if not source:
         raise HTTPException(status_code=404, detail="Source order not found")
+    await _check_order_access_async(source, user, db)
 
     new_code = body.new_order_name.strip()
     _validate_order_code(new_code)
@@ -5420,7 +5421,7 @@ async def global_kinase_modules(
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    await _require_write_access(order, user, db)
+    await _check_order_access_async(order, user, db)
 
     ptms = body.get("ptms", [])
     cowave_modules_input = body.get("cowave_modules", [])
@@ -5492,6 +5493,9 @@ async def global_kinase_modules(
             "wave_kinase_profile": [],
             "_cached": False,
         }
+
+    # Cache MISS — about to compute and write results to DB
+    await _require_write_access(order, user, db)
 
     _log.info(f"[GLOBAL-KINASE] Starting global kinase module analysis: {len(ptms)} PTMs")
 
@@ -6500,7 +6504,7 @@ async def kinase_activity_heatmap(
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    await _check_order_access_async(order, user, db)
+    await _require_write_access(order, user, db)
 
     kinase_modules = body.get("kinase_modules", [])
     force_refresh = body.get("force_refresh", False)
@@ -7870,7 +7874,7 @@ async def substrate_go_localization(
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    await _check_order_access_async(order, user, db)
+    await _require_write_access(order, user, db)
 
     genes = body.get("genes", [])
     force_refresh = body.get("force_refresh", False)
@@ -8081,14 +8085,18 @@ async def save_ip_overlay_data(
     await _require_write_access(order, user, db)
 
     bait = body.get("bait", "")
+    bait_accession = body.get("bait_accession", "")
     prey_proteins = body.get("prey_proteins", [])
+    prey_text = body.get("prey_text", "")
     cross_reference = body.get("cross_reference", {})
     condition = body.get("condition", "")
 
     order.ip_overlay_data = {
         "bait": bait,
+        "bait_accession": bait_accession,
         "condition": condition,
         "prey_proteins": prey_proteins,
+        "prey_text": prey_text,
         "cross_reference": cross_reference,
         "saved_at": _dt.utcnow().isoformat(),
     }

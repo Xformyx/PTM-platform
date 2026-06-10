@@ -1,5 +1,7 @@
 import asyncio
 import logging
+import os
+import secrets
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -191,16 +193,22 @@ async def _seed_admin(session: AsyncSession) -> None:
     result = await session.execute(select(User).limit(1))
     if result.scalar_one_or_none() is not None:
         return
+    admin_password = os.getenv("ADMIN_DEFAULT_PASSWORD", "")
+    if not admin_password:
+        admin_password = secrets.token_urlsafe(16)
+        logger.warning(
+            f"ADMIN_DEFAULT_PASSWORD not set — generated random admin password: {admin_password}"
+        )
     admin = User(
         email="admin@ptm.local",
-        password_hash=hash_password("admin1234"),
+        password_hash=hash_password(admin_password),
         name="Admin",
         role="admin",
         must_change_password=False,
     )
     session.add(admin)
     await session.commit()
-    logger.info("Created default admin user: admin@ptm.local / admin1234")
+    logger.info("Created default admin user: admin@ptm.local")
 
 
 _MYSQL_NON_RETRY_CODES = frozenset({1044, 1045, 1049, 1146})

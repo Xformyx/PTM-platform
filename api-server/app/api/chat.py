@@ -34,6 +34,7 @@ from app.dependencies import get_current_user
 from app.models.chat_message import ChatMessage as ChatMessageDB  # DB model (renamed to avoid clash)
 from app.models.order import Order
 from app.models.rag_collection import RagCollection
+from app.api.orders import _check_order_access_async, _require_write_access
 
 router = APIRouter(prefix="/orders", tags=["chat"])
 logger = logging.getLogger("ptm-platform.chat")
@@ -721,6 +722,7 @@ async def chat_with_analysis(
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+    await _check_order_access_async(order, user, db)
 
     # Resolve RAG collection names from IDs
     rag_collection_names: List[str] = []
@@ -942,6 +944,7 @@ async def get_chat_context_info(
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+    await _check_order_access_async(order, user, db)
 
     output_dir = Path(settings.OUTPUT_DIR) / (order.order_code or str(order.id))
     file_suffix = "_phospho" if (order.ptm_type or "phosphorylation") == "phosphorylation" else "_ubi"
@@ -1009,6 +1012,12 @@ async def get_chat_history(
     user=Depends(get_current_user),
 ):
     """Load persisted chat history for this order (current user only)."""
+    order_result = await db.execute(select(Order).where(Order.id == order_id))
+    order = order_result.scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    await _check_order_access_async(order, user, db)
+
     result = await db.execute(
         select(ChatMessageDB)
         .where(ChatMessageDB.order_id == order_id, ChatMessageDB.user_id == user.id)
@@ -1036,6 +1045,12 @@ async def clear_chat_history(
 ):
     """Clear all chat history for this order (current user only)."""
     from sqlalchemy import delete
+
+    order_result = await db.execute(select(Order).where(Order.id == order_id))
+    order = order_result.scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    await _check_order_access_async(order, user, db)
 
     await db.execute(
         delete(ChatMessageDB).where(
@@ -1122,6 +1137,7 @@ async def apply_chat_to_report(
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+    await _require_write_access(order, user, db)
 
     # Load chat history
     msg_result = await db.execute(

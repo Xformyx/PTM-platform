@@ -203,22 +203,24 @@ def _render_pptx(slide_data: dict, output_path: str, figure_dir: Path) -> str:
 
 
 def _collect_figures(output_dir: Path) -> dict[str, Path]:
-    mapping: dict[str, Path] = {}
+    """Collect one PNG per figure type, selecting the most recently modified file."""
+    candidates: dict[str, list[Path]] = {}
     if not output_dir.exists():
-        return mapping
+        return {}
     for p in output_dir.glob("*.png"):
         name = p.stem.lower()
         if "signal_flow" in name:
-            mapping.setdefault("signal_flow", p)
+            candidates.setdefault("signal_flow", []).append(p)
         elif "comovement" in name or "co_movement" in name:
-            mapping.setdefault("comovement", p)
+            candidates.setdefault("comovement", []).append(p)
         elif "cascade" in name or "signaling_cascade" in name:
-            mapping.setdefault("cascade", p)
+            candidates.setdefault("cascade", []).append(p)
         elif "network" in name or "cytoscape" in name:
-            mapping.setdefault("network", p)
+            candidates.setdefault("network", []).append(p)
         elif "heatmap" in name:
-            mapping.setdefault("heatmap", p)
-    return mapping
+            candidates.setdefault("heatmap", []).append(p)
+    # Pick the most recently modified file for each type
+    return {k: max(v, key=lambda p: p.stat().st_mtime) for k, v in candidates.items()}
 
 
 def _load_report_text(output_dir: Path, file_suffix: str) -> str:
@@ -255,9 +257,9 @@ def _load_data_summary(output_dir: Path, file_suffix: str) -> str:
     lines = [f"Total PTMs: {len(data)}"]
     scored = []
     for p in data:
-        gene = p.get("gene_name", p.get("Gene_Name", "?"))
+        gene = p.get("gene", p.get("gene_name", p.get("Gene_Name", "?")))
         pos = p.get("position", p.get("Position", "?"))
-        fc = p.get("fold_change", p.get("Fold_Change", 0))
+        fc = p.get("ptm_relative_log2fc", p.get("fold_change", p.get("Fold_Change", 0)))
         try:
             abs_fc = abs(float(fc))
         except (ValueError, TypeError):
@@ -467,7 +469,11 @@ def generate_pptx_for_order_sync(
     data_summary = _load_data_summary(output_dir, file_suffix)
     figures = _collect_figures(output_dir)
     figure_list = ", ".join(figures.keys()) if figures else "None"
+    # research_questions: prefer explicit list; fall back to ai_questions text entries
     rqs = report_opts.get("research_questions") or []
+    if not rqs:
+        ai_qs = report_opts.get("ai_questions") or []
+        rqs = [q.get("question", q) if isinstance(q, dict) else q for q in ai_qs if q]
 
     user_prompt = USER_PROMPT_TEMPLATE.format(
         order_code=order_code,

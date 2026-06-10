@@ -29,6 +29,20 @@ logger = logging.getLogger("ptm-workers.rag-enrichment")
 
 OUTPUT_DIR = os.getenv("OUTPUT_DIR", "/data/outputs")
 
+# Generic terms that should never be treated as valid kinase names
+_KINASE_STOP_WORDS = {
+    "OF", "THE", "AND", "FOR", "WITH", "THIS", "THAT", "FROM",
+    "BY", "TO", "IN", "ON", "AT", "IS", "IT", "AS", "OR", "AN",
+    "BE", "IF", "NO", "NOT", "BUT", "ALL", "CAN", "HAD", "HAS",
+    "HER", "HIS", "HOW", "ITS", "MAY", "NEW", "NOW", "OLD", "OUR",
+    "OUT", "OWN", "SAY", "SHE", "TOO", "USE", "WAY", "WHO", "BOY",
+    "DID", "GET", "HIM", "LET", "PUT", "RUN", "SET", "TOP", "WHY",
+    "CELL", "GENE", "PROTEIN", "DOMAIN", "SITE", "TYPE", "ROLE",
+    "ACTIVITY", "FUNCTION", "PATHWAY", "SIGNAL", "TARGET", "EFFECT",
+    "RESULT", "LEVEL", "FACTOR", "COMPLEX", "FAMILY", "GROUP",
+    "REGION", "SEQUENCE", "RESIDUE", "MOTIF", "SUBSTRATE",
+}
+
 
 def _auto_run_global_analysis(order_id: int, enriched_data: list, config: dict, mcp_client=None) -> dict:
     """v9.44: Auto-run Global Kinase Modules + Activity Heatmap after RAG enrichment.
@@ -235,18 +249,6 @@ def _auto_run_global_analysis(order_id: int, enriched_data: list, config: dict, 
                 display = kk.get("display_name", kk.get("kinase", ""))
                 source = kk.get("source", "unknown")
                 # Filter out invalid kinase names (stop words, too short, generic terms)
-                _KINASE_STOP_WORDS = {
-                    "OF", "THE", "AND", "FOR", "WITH", "THIS", "THAT", "FROM",
-                    "BY", "TO", "IN", "ON", "AT", "IS", "IT", "AS", "OR", "AN",
-                    "BE", "IF", "NO", "NOT", "BUT", "ALL", "CAN", "HAD", "HAS",
-                    "HER", "HIS", "HOW", "ITS", "MAY", "NEW", "NOW", "OLD", "OUR",
-                    "OUT", "OWN", "SAY", "SHE", "TOO", "USE", "WAY", "WHO", "BOY",
-                    "DID", "GET", "HIM", "LET", "PUT", "RUN", "SET", "TOP", "WHY",
-                    "CELL", "GENE", "PROTEIN", "DOMAIN", "SITE", "TYPE", "ROLE",
-                    "ACTIVITY", "FUNCTION", "PATHWAY", "SIGNAL", "TARGET", "EFFECT",
-                    "RESULT", "LEVEL", "FACTOR", "COMPLEX", "FAMILY", "GROUP",
-                    "REGION", "SEQUENCE", "RESIDUE", "MOTIF", "SUBSTRATE",
-                }
                 if not canon or len(canon) < 3 or canon in _KINASE_STOP_WORDS:
                     continue
                 if canon not in kinase_members:

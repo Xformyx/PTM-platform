@@ -27,6 +27,8 @@ Categories covered:
 Last updated: v9.19.4
 """
 
+import re
+
 LIGAND_RECEPTOR_DB: list[dict] = [
     # ═══════════════════════════════════════════════════════════════════════
     # 1. MYOKINES / EXERCISE FACTORS
@@ -1198,15 +1200,16 @@ def score_uniprot_receptor(
     matched_kinases = active_lower & downstream_lower
     score += 3 * len(matched_kinases)
 
-    # +5 if also in Reactome
+    # +5 if also in Reactome (token match OR partial match, de-duplicated to prevent double-add)
     reactome_lower = {r.lower() for r in reactome_receptor_names}
-    if any(token in reactome_lower for token in name_tokens):
+    _reactome_matched = any(token in reactome_lower for token in name_tokens)
+    if not _reactome_matched:
+        for rn in reactome_receptor_names:
+            if receptor_name.lower() in rn.lower() or rn.lower() in receptor_name.lower():
+                _reactome_matched = True
+                break
+    if _reactome_matched:
         score += 5
-    # Also check partial match
-    for rn in reactome_receptor_names:
-        if receptor_name.lower() in rn.lower() or rn.lower() in receptor_name.lower():
-            score += 5
-            break
 
     # +1 for phospho-relevant class
     if receptor_class in ("RTK", "Integrin"):
@@ -1402,7 +1405,7 @@ def lookup_receptors_for_treatment(treatment_text: str) -> list[dict]:
     # ── Step 1: Internal DB lookup ────────────────────────────────────────────
     for entry in LIGAND_RECEPTOR_DB:
         for alias in entry["ligand_aliases"]:
-            if alias in text_lower:
+            if re.search(r'\b' + re.escape(alias) + r'\b', text_lower):
                 for rec in entry["receptors"]:
                     rec_key = rec["name"]
                     if rec_key not in seen_receptors:
@@ -1725,9 +1728,11 @@ def get_receptors_for_e3_ligase(e3_name: str) -> list[dict]:
     canonical = _E3_ALIASES.get(name_lower)
     if canonical:
         return _E3_UPSTREAM_RECEPTORS.get(canonical, [])
-    # Partial match (e.g., "NEDD4" matches "NEDD4" but not "NEDD4L")
+    # Partial match — only allow word-boundary prefixes to prevent NEDD4 matching NEDD4L
     for key in _E3_LOWER_INDEX:
-        if name_lower == key or (len(name_lower) >= 4 and name_lower in key):
+        if (key == name_lower
+                or key.startswith(name_lower + "_")
+                or key.startswith(name_lower + "-")):
             return _E3_LOWER_INDEX[key]
     return []
 

@@ -79,6 +79,10 @@ async def list_tools():
             {"name": "query_reactome", "description": "Reactome pathway information per gene", "status": "active"},
             {"name": "query_enrichr", "description": "Enrichr gene-set enrichment analysis", "status": "active"},
             {"name": "query_string_indirect", "description": "STRING indirect pathway inference for genes with no KEGG pathways", "status": "active"},
+            # v11.8: TF Activity Inference
+            {"name": "query_tf_targets", "description": "Get known target genes for a transcription factor (DoRothEA + TRRUST)", "status": "active"},
+            {"name": "infer_tf_activity", "description": "Infer active TFs from a gene list via Fisher's exact test enrichment", "status": "active"},
+            {"name": "infer_tf_activity_batch", "description": "Infer TF activity for multiple gene sets (e.g., per-timepoint)", "status": "active"},
         ]
     }
 

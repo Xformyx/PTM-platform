@@ -249,6 +249,22 @@ def run_receptor_inference(
     treatment_text = experimental_context.get("treatment", "")
     top_n_setting = config.get("top_n_ptms", 50)
 
+    # ── Normalize kinase_analysis_data schema ──
+    # _auto_run_global_analysis() returns {kinase_modules: [...]} where each module has
+    # {kinase, canonical, members: [{gene, position, ...}]}.
+    # Older/alternative callers may pass {modules: [...]} with {kinase_name, substrates: [...]}.
+    # Build a unified view so the extraction loop below works for both.
+    if "kinase_modules" in kinase_analysis_data and "modules" not in kinase_analysis_data:
+        _normalized_modules = []
+        for _m in kinase_analysis_data["kinase_modules"]:
+            _normalized_modules.append({
+                **_m,
+                "kinase_name": _m.get("kinase_name") or _m.get("kinase", ""),
+                # Map "members" → "substrates" so existing extraction code works
+                "substrates": _m.get("substrates") or _m.get("members", []),
+            })
+        kinase_analysis_data = {**kinase_analysis_data, "modules": _normalized_modules}
+
     # ── Extract kinase names from kinase_analysis_data ──
     kinase_names_set: set = set()
     kinase_ptm_map: dict = {}  # kinase_name -> set of ptm_labels
@@ -259,7 +275,7 @@ def run_receptor_inference(
         if kin_name:
             kinase_names_set.add(kin_name)
             ptm_labels = set()
-            for sub in mod.get("substrates", []):
+            for sub in mod.get("substrates") or mod.get("members", []):
                 lbl = sub.get("label") or f"{sub.get('gene', '')} {sub.get('position', '')}".strip()
                 if lbl:
                     ptm_labels.add(lbl)

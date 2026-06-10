@@ -21,7 +21,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 from celery import current_app
-from sqlalchemy import text
+from sqlalchemy import text, bindparam
 
 from common.db_engine import get_engine as _get_engine
 from common.db_update import (
@@ -43,6 +43,8 @@ TASK_NAME_MAP = {
 }
 
 STAGE_LOCK_KEYS = {
+    "preprocessing": "preprocessing_lock:{order_id}",
+    "rag_enrichment": "rag_enrichment_lock:{order_id}",
     "report_generation": "report_gen_lock:{order_id}",
 }
 
@@ -56,8 +58,8 @@ def _get_active_orders() -> list[dict]:
                 "SELECT id, order_code, status, current_stage, progress_pct, "
                 "stage_detail, watchdog_alerted_at, watchdog_restart_count, started_at "
                 "FROM orders WHERE status IN :statuses"
-            ),
-            {"statuses": ACTIVE_STATUSES},
+            ).bindparams(bindparam("statuses", expanding=True)),
+            {"statuses": list(ACTIVE_STATUSES)},
         ).fetchall()
     return [
         {
@@ -234,8 +236,24 @@ def check_stalled_orders(self):
         no_task_stall = get_int("WATCHDOG_NO_TASK_STALL_MINUTES", 15)
         no_progress_stall = get_int("WATCHDOG_NO_PROGRESS_STALL_MINUTES", 60)
 
+        # Track (order_id -> progress_pct) from previous cycle if available via Redis.
+        # Falls back to a simple in-memory dict for single-process deployments.
+        try:
+            import redis as _redis_mod, os as _os
+            _redis_url = _os.getenv("CELERY_BROKER_URL", "redis://redis:6379/1")
+            _r = _redis_mod.from_url(_redis_url, decode_responses=True)
+            _pct_store_key = "watchdog:prev_progress_pct"
+            _prev_pct_raw = _r.hgetall(_pct_store_key)
+            _prev_pct: dict[int, float] = {int(k): float(v) for k, v in _prev_pct_raw.items()}
+        except Exception:
+            _r = None
+            _prev_pct = {}
+
+        _cur_pct: dict[int, float] = {}
+
         for order in active_orders:
             order_id = order["id"]
+            _cur_pct[order_id] = order.get("progress_pct", 0.0)
 
             if _is_in_cooldown(order["watchdog_alerted_at"]):
                 continue
@@ -254,6 +272,12 @@ def check_stalled_orders(self):
                 else:
                     minutes_since_log = 0
 
+            # Also detect stall via progress_pct: no change since last watchdog cycle
+            _pct_unchanged = (
+                order_id in _prev_pct
+                and _cur_pct.get(order_id, 0.0) == _prev_pct[order_id]
+            )
+
             if not has_celery_task and minutes_since_log >= no_task_stall:
                 reason = (
                     f"No active Celery task found and no log activity for "
@@ -262,9 +286,13 @@ def check_stalled_orders(self):
                 _handle_stalled_order(order, reason)
 
             elif has_celery_task and minutes_since_log >= no_progress_stall:
+                _pct_info = (
+                    f", progress_pct stuck at {_cur_pct.get(order_id, 0):.1f}%"
+                    if _pct_unchanged else ""
+                )
                 reason = (
                     f"Celery task is running but no progress updates for "
-                    f"{int(minutes_since_log)} minutes (possible hang)"
+                    f"{int(minutes_since_log)} minutes (possible hang){_pct_info}"
                 )
                 _handle_stalled_order(order, reason)
 
@@ -272,6 +300,14 @@ def check_stalled_orders(self):
             f"[Watchdog] Check complete — {len(active_orders)} active orders, "
             f"{len(celery_active_ids)} Celery tasks"
         )
+
+        # Persist current progress_pct for stall detection in the next cycle
+        if _r is not None and _cur_pct:
+            try:
+                _r.hset(_pct_store_key, mapping={str(k): str(v) for k, v in _cur_pct.items()})
+                _r.expire(_pct_store_key, 3600)
+            except Exception:
+                pass
 
     except Exception as e:
         logger.error(f"[Watchdog] check_stalled_orders failed: {e}", exc_info=True)

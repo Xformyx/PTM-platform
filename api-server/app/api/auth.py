@@ -1,5 +1,7 @@
 import logging
 import re
+import secrets
+import string
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -18,7 +20,11 @@ from app.models.user import User
 router = APIRouter(prefix="/auth", tags=["auth"])
 logger = logging.getLogger("ptm-platform.auth")
 
-DEFAULT_PASSWORD = "ptm1234"
+
+def _generate_temp_password(length: int = 16) -> str:
+    """Generate a cryptographically random temporary password."""
+    alphabet = string.ascii_letters + string.digits + "!@#$%^&*"
+    return "".join(secrets.choice(alphabet) for _ in range(length))
 
 
 def _extract_ip(request: Request) -> str:
@@ -100,7 +106,22 @@ async def login(body: LoginRequest, request: Request, db: AsyncSession = Depends
     result = await db.execute(select(User).where(User.email == email))
     user = result.scalar_one_or_none()
 
-    if not user or not verify_password(body.password, user.password_hash):
+    if not user:
+        await _record_login(
+            db, email=email, user_id=None, user_name=None,
+            reason="user_not_found", login_status="failed", request=request,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email or password",
+        )
+
+    if not verify_password(body.password, user.password_hash):
+        await _record_login(
+            db, email=email, user_id=user.id, user_name=user.name,
+            reason="invalid_password", login_status="failed", request=request,
+        )
+        logger.warning(f"Failed login attempt for: {email} from {_extract_ip(request)}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
@@ -205,9 +226,10 @@ async def create_user(
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Email already registered")
 
+    temp_password = _generate_temp_password()
     new_user = User(
         email=body.email,
-        password_hash=hash_password(DEFAULT_PASSWORD),
+        password_hash=hash_password(temp_password),
         name=body.name,
         role=body.role,
         must_change_password=True,
@@ -223,6 +245,7 @@ async def create_user(
         "role": new_user.role,
         "is_active": new_user.is_active,
         "must_change_password": new_user.must_change_password,
+        "temporary_password": temp_password,
     }
 
 
