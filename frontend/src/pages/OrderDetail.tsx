@@ -1309,6 +1309,13 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
   const [highlightedModulePtmLabels, setHighlightedModulePtmLabels] = useState<Set<string>>(new Set());
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [refreshingReceptors, setRefreshingReceptors] = useState(false);
+  // v11.9: fetch ip_overlay_data from order (previously referenced non-existent 'order' variable)
+  const [ipOverlayData, setIpOverlayData] = useState<Record<string, unknown> | null>(null);
+  useEffect(() => {
+    api.get<{ ip_overlay_data?: Record<string, unknown> | null }>(`/orders/${orderId}`)
+      .then((o) => setIpOverlayData(o.ip_overlay_data ?? null))
+      .catch(() => setIpOverlayData(null));
+  }, [orderId]);
 
   const fetchVectorPlotData = (forceRefresh = false) => {
     const params = forceRefresh ? "?force_refresh=true" : "";
@@ -2140,7 +2147,7 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
           ptmType={ptmType}
           highlightedKinase={selectedHighlightKinase}
           inferredReceptors={data.inferred_receptors || []}
-          ipOverlayData={order?.ip_overlay_data ?? null}
+          ipOverlayData={ipOverlayData}
           vectorData={data.vector_data.map((row) => ({
             gene: row.gene,
             position: row.position,
