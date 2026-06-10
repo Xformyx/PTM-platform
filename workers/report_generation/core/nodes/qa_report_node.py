@@ -1,497 +1,504 @@
 """
-Q&A Report Generator Node — generates detailed Q&A analysis from report sections.
+Q&A Report Generator Node — System-Level Thematic Q&A (v11.9).
 
-Ported from ptm-rag-backend/src/qaReportGenerator.ts (v3.1).
+Restructured from per-PTM Q&A (220+ LLM calls) to system-level thematic analysis
+(15-20 LLM calls total). Uses the full report + co-movement + kinase cascade +
+TF inference data as context for each theme.
 
-Strategy: 2-Pass Approach
-  - Pass 1: Detailed PTM Analysis (9-10 Q&As per PTM)
-  - Pass 2: Global Cell-Signaling Trends (10-15 Q&As across all PTMs)
+Strategy: 5 Themes × 3-4 Q&A pairs (sequential execution)
+  Theme 1: Signaling Cascade & Temporal Dynamics
+  Theme 2: Cross-talk & Co-regulation
+  Theme 3: Mechanism of Action (Drug/Treatment)
+  Theme 4: Therapeutic Implications
+  Theme 5: Validation & Limitations
 
 Features:
-  - Professor-Postdoc two-model approach (question model + answer model)
-  - Quick Facts section with comprehensive metadata
-  - Quality gates (question count, data validation, entity disambiguation)
-  - Comprehensive Report parsing for PTM section extraction
+  - System-level analysis (not per-PTM)
+  - Full context injection (report + kinase + TF + co-movement)
+  - Sequential execution (cloud-API friendly, respects rate limits)
+  - Structured Q&A with evidence-based answers
 """
 
 import logging
 import os
-import re
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
 from common.llm_client import LLMClient
 
 logger = logging.getLogger(__name__)
 
-_LLM_WORKERS = int(os.getenv("REPORT_LLM_WORKERS", "4"))
 
-QA_SYSTEM_PROMPT = (
-    "You are an expert in post-translational modification (PTM) biology and cell signaling. "
-    "Generate insightful, research-level Q&A pairs that help researchers understand "
-    "the biological significance of PTM findings. Focus on cell signaling mechanisms, "
-    "pathway interactions, and functional implications."
-)
+# ---------------------------------------------------------------------------
+# System Prompt
+# ---------------------------------------------------------------------------
+
+QA_SYSTEM_PROMPT = """\
+You are an expert in post-translational modification (PTM) biology, cell signaling,
+and systems pharmacology. You are reviewing a comprehensive PTM analysis report
+and generating research-level Q&A pairs that help researchers understand the
+biological significance of the findings at a SYSTEMS level.
+
+Key principles:
+- Focus on signaling MECHANISMS, not just descriptions of individual PTMs
+- Connect observations to upstream/downstream pathway logic
+- Reference specific data points (fold-changes, timepoints, kinase scores)
+- Distinguish between established knowledge and novel findings
+- Be critical about limitations and alternative interpretations
+"""
 
 
 # ---------------------------------------------------------------------------
-# Report Parser — extracts PTM sections from Comprehensive Report
+# Theme Definitions
 # ---------------------------------------------------------------------------
 
-@dataclass
-class PTMSection:
-    gene: str = ""
-    position: str = ""
-    full_section: str = ""
-    ptm_type: str = ""
-    ptm_log2fc: float = 0.0
-    protein_log2fc: float = 0.0
-    pathways: List[str] = field(default_factory=list)
-    kinases: List[str] = field(default_factory=list)
-    novelty: str = ""
+THEMES = [
+    {
+        "id": "signaling_cascade",
+        "title": "Signaling Cascade & Temporal Dynamics",
+        "n_questions": 4,
+        "focus": """\
+Focus on the temporal ORDER of signaling events:
+- Which kinases/pathways are activated first vs. later?
+- How do early phosphorylation events propagate to downstream effectors?
+- What do co-movement clusters reveal about coordinated signaling modules?
+- Are there temporal delays suggesting transcriptional vs. post-translational regulation?
+- How does the kinase cascade data support or contradict canonical pathway models?
+""",
+    },
+    {
+        "id": "crosstalk_coregulation",
+        "title": "Cross-talk & Co-regulation",
+        "n_questions": 4,
+        "focus": """\
+Focus on INTERACTIONS between pathways:
+- Which kinase modules share substrates or show coordinated activity?
+- What does co-movement clustering reveal about pathway cross-talk?
+- Are there opposing pathways (e.g., pro-survival vs. apoptotic) simultaneously active?
+- How do transcription factor (TF) activity patterns correlate with kinase modules?
+- What novel cross-talk relationships are suggested by the data?
+""",
+    },
+    {
+        "id": "mechanism_of_action",
+        "title": "Mechanism of Action",
+        "n_questions": 4,
+        "focus": """\
+Focus on the DRUG/TREATMENT mechanism:
+- What is the primary signaling target based on the earliest PTM changes?
+- How does the observed kinase activity pattern explain the treatment's mechanism?
+- Which off-target effects are suggested by unexpected pathway activations?
+- How do the inferred upstream receptors connect to the treatment's known pharmacology?
+- What compensatory/resistance mechanisms are suggested by late-stage PTM changes?
+""",
+    },
+    {
+        "id": "therapeutic_implications",
+        "title": "Therapeutic Implications",
+        "n_questions": 3,
+        "focus": """\
+Focus on TRANSLATIONAL significance:
+- Which identified kinases/pathways represent actionable drug targets?
+- What combination therapy strategies are suggested by the cross-talk data?
+- Are there biomarker candidates (early-responding PTMs) for treatment monitoring?
+- How do the TF activity changes suggest potential resistance mechanisms?
+- What patient stratification strategies are implied by the signaling patterns?
+""",
+    },
+    {
+        "id": "validation_limitations",
+        "title": "Validation & Limitations",
+        "n_questions": 3,
+        "focus": """\
+Focus on DATA QUALITY and INTERPRETATION LIMITS:
+- Which findings are well-supported by multiple evidence sources vs. single-source?
+- What are the key assumptions in the kinase inference that could affect conclusions?
+- Which novel PTM sites lack literature validation and require experimental confirmation?
+- How might the experimental design (timepoints, cell type) limit generalizability?
+- What orthogonal experiments would strengthen the key conclusions?
+""",
+    },
+]
 
 
-@dataclass
-class ExperimentalContext:
-    cell_type: str = ""
-    treatment: str = ""
-    time_points: str = ""
-    control: str = ""
-    biological_question: str = ""
+# ---------------------------------------------------------------------------
+# Context Builders
+# ---------------------------------------------------------------------------
+
+MAX_SECTION_CHARS = 5000
+MAX_CONTEXT_CHARS = 3000
 
 
-def extract_experimental_context(report_content: str) -> ExperimentalContext:
-    """Extract experimental context from the Comprehensive Report."""
-    ctx = ExperimentalContext()
-    lines = report_content.split("\n")
+def _build_report_summary(sections: Dict[str, str]) -> str:
+    """Build a condensed report summary from written sections."""
+    parts = []
+    for name in ("introduction", "results", "discussion", "conclusion"):
+        content = sections.get(name, "")
+        if content:
+            # Take first N chars of each section
+            truncated = content[:MAX_SECTION_CHARS]
+            if len(content) > MAX_SECTION_CHARS:
+                truncated += "\n[... truncated ...]"
+            parts.append(f"### {name.title()}\n{truncated}")
+    return "\n\n".join(parts) if parts else "(No report sections available)"
 
-    in_context = False
+
+def _build_kinase_context(state: dict) -> str:
+    """Build kinase cascade + module context."""
+    lines = []
+
+    # Kinase cascade LLM context (already formatted)
+    cascade_ctx = state.get("temporal_kinase_cascade_llm_context", "")
+    if cascade_ctx:
+        lines.append("=== TEMPORAL KINASE CASCADE ===")
+        lines.append(cascade_ctx[:MAX_CONTEXT_CHARS])
+
+    # Global kinase modules summary
+    gkm = state.get("global_kinase_modules") or {}
+    modules = gkm.get("kinase_modules") or []
+    if modules:
+        lines.append("\n=== KINASE MODULES (top 10) ===")
+        for m in modules[:10]:
+            name = m.get("kinase", m.get("name", "?"))
+            subs = m.get("substrates", [])
+            score = m.get("evidence_score", m.get("total_evidence", 0))
+            sources = m.get("sources", [])
+            lines.append(
+                f"- {name}: {len(subs)} substrates, evidence={score}, "
+                f"sources={','.join(sources[:3]) if sources else 'N/A'}"
+            )
+
+    return "\n".join(lines) if lines else ""
+
+
+def _build_comovement_context(state: dict) -> str:
+    """Build co-movement cluster context."""
+    ctx = state.get("comovement_llm_context", "")
+    if ctx:
+        return ctx[:MAX_CONTEXT_CHARS]
+
+    # Fallback: build from comovement_analysis
+    cm = state.get("comovement_analysis") or {}
+    clusters = cm.get("clusters") or []
+    if not clusters:
+        return ""
+
+    lines = ["=== CO-MOVEMENT CLUSTERS ==="]
+    for c in clusters[:8]:
+        cid = c.get("cluster_id", c.get("id", "?"))
+        pattern = c.get("pattern", c.get("label", ""))
+        members = c.get("members", [])
+        member_str = ", ".join(m.get("label", str(m)) if isinstance(m, dict) else str(m) for m in members[:5])
+        lines.append(f"- Cluster {cid} ({pattern}): {len(members)} members [{member_str}...]")
+    return "\n".join(lines)
+
+
+def _build_tf_context(state: dict) -> str:
+    """Build TF activity inference context."""
+    tf_data = state.get("tf_inference_data") or {}
+    if not tf_data:
+        return ""
+
+    lines = ["=== TF ACTIVITY INFERENCE (DoRothEA + TRRUST) ==="]
+
+    inferred = tf_data.get("inferred_tfs") or []
+    if inferred:
+        lines.append(f"Total inferred TFs: {len(inferred)}")
+        for tf in inferred[:10]:
+            name = tf.get("tf_name", tf.get("name", "?"))
+            pval = tf.get("p_value", tf.get("pval", "N/A"))
+            targets_hit = tf.get("targets_hit", tf.get("overlap", 0))
+            direction = tf.get("direction", "")
+            lines.append(f"- {name}: p={pval}, targets_hit={targets_hit}, direction={direction}")
+
+    cross_val = tf_data.get("cross_validated") or []
+    if cross_val:
+        lines.append(f"\nCross-validated TF-Kinase links: {len(cross_val)}")
+        for cv in cross_val[:5]:
+            lines.append(f"- {cv.get('tf', '?')} ↔ {cv.get('kinase', '?')}: {cv.get('mechanism', '')}")
+
+    novel = tf_data.get("novel_findings") or []
+    if novel:
+        lines.append(f"\nNovel findings: {len(novel)}")
+        for nf in novel[:3]:
+            lines.append(f"- {nf.get('description', str(nf)[:100])}")
+
+    return "\n".join(lines)
+
+
+def _build_experimental_context(state: dict) -> str:
+    """Build experimental context summary."""
+    ctx = state.get("experimental_context") or {}
+    if not ctx:
+        return ""
+
+    lines = ["=== EXPERIMENTAL CONTEXT ==="]
+    for key in ("cell_type", "tissue", "treatment", "time_points", "control", "biological_question", "organism"):
+        val = ctx.get(key, "")
+        if val:
+            lines.append(f"- {key.replace('_', ' ').title()}: {val}")
+    return "\n".join(lines)
+
+
+def _build_crosstalk_context(state: dict) -> str:
+    """Build cross-talk analysis context (if available)."""
+    ct = state.get("crosstalk_data") or state.get("cross_talk_data") or {}
+    if not ct:
+        return ""
+
+    lines = ["=== CROSS-TALK ANALYSIS ==="]
+    summary = ct.get("summary", "")
+    if summary:
+        lines.append(summary[:1500])
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Q&A Generation
+# ---------------------------------------------------------------------------
+
+def _build_theme_prompt(
+    theme: dict,
+    report_summary: str,
+    experimental_ctx: str,
+    kinase_ctx: str,
+    comovement_ctx: str,
+    tf_ctx: str,
+    crosstalk_ctx: str,
+) -> str:
+    """Build the prompt for generating Q&A pairs for a specific theme."""
+    n_q = theme["n_questions"]
+
+    prompt = f"""## Theme: {theme['title']}
+
+{theme['focus']}
+
+Generate exactly {n_q} Q&A pairs for this theme based on the data below.
+
+### FORMAT REQUIREMENTS
+For each Q&A pair, use this exact format:
+Q: [Specific, data-grounded question]
+A: [Detailed answer (200-400 words) citing specific data points, fold-changes, timepoints, and kinase/pathway names from the provided context]
+
+---
+
+## AVAILABLE DATA
+
+{experimental_ctx}
+
+## REPORT CONTENT
+{report_summary}
+
+"""
+    # Add supplementary context blocks (only non-empty ones)
+    if kinase_ctx:
+        prompt += f"\n{kinase_ctx}\n"
+    if comovement_ctx:
+        prompt += f"\n{comovement_ctx}\n"
+    if tf_ctx:
+        prompt += f"\n{tf_ctx}\n"
+    if crosstalk_ctx:
+        prompt += f"\n{crosstalk_ctx}\n"
+
+    prompt += f"""
+---
+
+## INSTRUCTIONS
+- Generate exactly {n_q} Q&A pairs for the theme "{theme['title']}"
+- Each answer MUST reference specific data from the context above
+- Do NOT repeat information already covered in the report — add NEW analytical depth
+- Focus on SYSTEMS-LEVEL interpretation, not individual PTM descriptions
+- Be critical: acknowledge uncertainties and alternative interpretations
+"""
+    return prompt
+
+
+def _parse_qa_pairs(text: str) -> List[Dict[str, str]]:
+    """Parse Q&A pairs from LLM response."""
+    pairs = []
+    lines = text.split("\n")
+    current_q = ""
+    current_a_lines = []
+
     for line in lines:
         stripped = line.strip()
-        if stripped == "## Experimental Context":
-            in_context = True
-            continue
-        if in_context and stripped.startswith("## "):
-            break
-        if in_context:
-            if "**Cell Type:**" in stripped:
-                ctx.cell_type = stripped.split("**Cell Type:**")[-1].strip()
-            elif "**Treatment:**" in stripped:
-                ctx.treatment = stripped.split("**Treatment:**")[-1].strip()
-            elif "**Time Points:**" in stripped:
-                ctx.time_points = stripped.split("**Time Points:**")[-1].strip()
-            elif "**Control:**" in stripped:
-                ctx.control = stripped.split("**Control:**")[-1].strip()
-            elif "**Biological Question:**" in stripped:
-                ctx.biological_question = stripped.split("**Biological Question:**")[-1].strip()
+        if stripped.startswith("Q:") or stripped.startswith("**Q:**"):
+            # Save previous pair
+            if current_q and current_a_lines:
+                pairs.append({
+                    "question": current_q,
+                    "answer": "\n".join(current_a_lines).strip(),
+                })
+            current_q = stripped.replace("**Q:**", "").replace("Q:", "").strip()
+            current_a_lines = []
+        elif stripped.startswith("A:") or stripped.startswith("**A:**"):
+            answer_start = stripped.replace("**A:**", "").replace("A:", "").strip()
+            current_a_lines = [answer_start]
+        elif current_a_lines is not None and current_q:
+            # Continue accumulating answer text
+            current_a_lines.append(line)
 
-    return ctx
+    # Save last pair
+    if current_q and current_a_lines:
+        pairs.append({
+            "question": current_q,
+            "answer": "\n".join(current_a_lines).strip(),
+        })
 
-
-def extract_ptm_sections(report_content: str) -> List[PTMSection]:
-    """Extract individual PTM sections from the Comprehensive Report."""
-    sections: List[PTMSection] = []
-    lines = report_content.split("\n")
-
-    # Match PTM section headers: ### 1. GENE_NAME POSITION or ### GENE POSITION
-    ptm_header_re = re.compile(
-        r"^###\s+(?:\d+\.\s+)?([A-Z0-9]+)\s+((?:Ser|Thr|Tyr|Lys|Arg|Cys|His|S|T|Y|K|R|C|H)\d+)",
-        re.IGNORECASE,
-    )
-
-    current_section: Optional[PTMSection] = None
-    current_lines: List[str] = []
-
-    for line in lines:
-        m = ptm_header_re.match(line.strip())
-        if m:
-            # Save previous section
-            if current_section:
-                current_section.full_section = "\n".join(current_lines)
-                _enrich_section_metadata(current_section)
-                sections.append(current_section)
-
-            current_section = PTMSection(gene=m.group(1), position=m.group(2))
-            current_lines = [line]
-        elif current_section:
-            current_lines.append(line)
-
-    # Save last section
-    if current_section:
-        current_section.full_section = "\n".join(current_lines)
-        _enrich_section_metadata(current_section)
-        sections.append(current_section)
-
-    return sections
-
-
-def _enrich_section_metadata(section: PTMSection):
-    """Extract metadata from section text."""
-    text = section.full_section
-
-    # Extract PTM Log2FC
-    m = re.search(r"PTM\s*(?:Relative\s*)?Log2FC[:\s]*([-\d.]+)", text, re.IGNORECASE)
-    if m:
-        try:
-            section.ptm_log2fc = float(m.group(1))
-        except ValueError:
-            pass
-
-    # Extract Protein Log2FC
-    m = re.search(r"Protein\s*Log2FC[:\s]*([-\d.]+)", text, re.IGNORECASE)
-    if m:
-        try:
-            section.protein_log2fc = float(m.group(1))
-        except ValueError:
-            pass
-
-    # Extract PTM type
-    for ptm_type in ("Phosphorylation", "Ubiquitylation", "Acetylation", "Methylation"):
-        if ptm_type.lower() in text.lower():
-            section.ptm_type = ptm_type
-            break
-
-    # Extract novelty
-    if "novel" in text.lower():
-        section.novelty = "novel"
-    elif "known" in text.lower():
-        section.novelty = "known"
-
-    # Extract pathways
-    pathway_re = re.compile(r"(?:Pathway|KEGG)[:\s]*(.+)", re.IGNORECASE)
-    for m in pathway_re.finditer(text):
-        pathways = [p.strip() for p in m.group(1).split(",")]
-        section.pathways.extend(pathways)
-
-    # Extract kinases
-    kinase_re = re.compile(r"(?:Kinase|Upstream)[:\s]*(.+)", re.IGNORECASE)
-    for m in kinase_re.finditer(text):
-        kinases = [k.strip() for k in m.group(1).split(",")]
-        section.kinases.extend(kinases)
+    return pairs
 
 
 # ---------------------------------------------------------------------------
-# Q&A Generation Prompts
+# Main Generator Class
 # ---------------------------------------------------------------------------
 
-def _build_ptm_question_prompt(section: PTMSection, context: ExperimentalContext) -> str:
-    """Build prompt for generating questions about a specific PTM."""
-    return f"""Based on the following PTM analysis data, generate 9-10 insightful research questions.
+class SystemLevelQAGenerator:
+    """Generates system-level thematic Q&A reports (v11.9)."""
 
-PTM: {section.gene} {section.position} ({section.ptm_type or 'Phosphorylation'})
-PTM Log2FC: {section.ptm_log2fc:.3f}
-Protein Log2FC: {section.protein_log2fc:.3f}
-Novelty: {section.novelty or 'unknown'}
-Pathways: {', '.join(section.pathways[:5]) if section.pathways else 'Not determined'}
-Upstream regulators: {', '.join(section.kinases[:5]) if section.kinases else 'Not determined'}
-
-Experimental Context:
-- Cell Type: {context.cell_type}
-- Treatment: {context.treatment}
-- Biological Question: {context.biological_question}
-
-Section Content:
-{section.full_section[:2000]}
-
-Generate questions covering:
-1. Mechanism of regulation (kinase/phosphatase involved)
-2. Functional consequence of this PTM
-3. Pathway context and cross-talk
-4. Disease relevance
-5. Comparison with known literature
-6. Novelty assessment (if novel site)
-7. Temporal dynamics
-8. Therapeutic targeting potential
-9. Protein-protein interaction effects
-10. Cell signaling network impact
-
-Format each question on a new line starting with "Q:" followed by the question text.
-Output questions only, no numbering."""
-
-
-def _build_ptm_answer_prompt(
-    section: PTMSection, context: ExperimentalContext, question: str,
-) -> str:
-    """Build prompt for answering a specific question about a PTM."""
-    return f"""Answer the following question about a PTM finding in detail.
-
-Question: {question}
-
-PTM Data:
-- Gene: {section.gene}
-- Position: {section.position}
-- PTM Type: {section.ptm_type or 'Phosphorylation'}
-- PTM Log2FC: {section.ptm_log2fc:.3f}
-- Protein Log2FC: {section.protein_log2fc:.3f}
-- Novelty: {section.novelty or 'unknown'}
-- Pathways: {', '.join(section.pathways[:5]) if section.pathways else 'Not determined'}
-- Upstream regulators: {', '.join(section.kinases[:5]) if section.kinases else 'Not determined'}
-
-Experimental Context:
-- Cell Type: {context.cell_type}
-- Treatment: {context.treatment}
-- Biological Question: {context.biological_question}
-
-Section Content:
-{section.full_section[:2000]}
-
-Provide a detailed, evidence-based answer (150-300 words).
-Focus on cell signaling biological meaning, not just describing the PTM itself.
-Include specific mechanisms, pathway connections, and functional implications.
-If referencing literature, cite with PMID when available."""
-
-
-def _build_global_trends_prompt(
-    report_content: str, context: ExperimentalContext, ptm_count: int,
-) -> str:
-    """Build prompt for global cell-signaling trend analysis."""
-    return f"""Based on the complete PTM analysis report below, generate 10-15 Q&A pairs
-about global cell-signaling trends observed across all {ptm_count} PTM sites.
-
-Experimental Context:
-- Cell Type: {context.cell_type}
-- Treatment: {context.treatment}
-- Biological Question: {context.biological_question}
-
-Report Summary (first 4000 chars):
-{report_content[:4000]}
-
-Focus on:
-1. Overall signaling pathway activation/inhibition patterns
-2. Cross-talk between pathways (e.g., MAPK-PI3K, mTOR-AMPK)
-3. Temporal dynamics of signaling cascades
-4. Metabolic reprogramming signals
-5. Cytoskeletal reorganization coordination
-6. Transcription factor activation patterns
-7. Feedback loops and regulatory circuits
-8. Novel signaling connections discovered
-9. Therapeutic targeting opportunities
-10. Comparison with canonical signaling models
-
-For each Q&A pair, format as:
-Q: [Question]
-A: [Detailed answer, 150-300 words]
-
-Generate comprehensive, research-level Q&A pairs."""
-
-
-# ---------------------------------------------------------------------------
-# Q&A Report Generator
-# ---------------------------------------------------------------------------
-
-class QAReportGenerator:
-    """Generates Q&A analysis reports from Comprehensive PTM Reports."""
-
-    def __init__(
-        self,
-        llm_client: LLMClient,
-        question_model: Optional[str] = None,
-        answer_model: Optional[str] = None,
-        use_two_model: bool = True,
-    ):
+    def __init__(self, llm_client: LLMClient):
         self.llm = llm_client
-        self.question_model = question_model
-        self.answer_model = answer_model
-        self.use_two_model = use_two_model and question_model and answer_model
 
     def generate(
         self,
-        report_content: str,
+        state: dict,
         progress_callback=None,
     ) -> str:
         """
-        Generate Q&A report from a Comprehensive Report.
+        Generate system-level Q&A report from pipeline state.
 
         Args:
-            report_content: Full text of the Comprehensive Analysis Report
+            state: Full LangGraph state dict with all analysis results
             progress_callback: Optional callback(pct, msg)
 
         Returns:
             Markdown string of the Q&A report.
         """
         if progress_callback:
-            progress_callback(0, "Parsing comprehensive report")
+            progress_callback(0, "Building context for system-level Q&A")
 
-        # 1. Extract context and PTM sections
-        context = extract_experimental_context(report_content)
-        ptm_sections = extract_ptm_sections(report_content)
+        # 1. Build context blocks from state
+        sections = state.get("sections") or {}
+        report_summary = _build_report_summary(sections)
+        experimental_ctx = _build_experimental_context(state)
+        kinase_ctx = _build_kinase_context(state)
+        comovement_ctx = _build_comovement_context(state)
+        tf_ctx = _build_tf_context(state)
+        crosstalk_ctx = _build_crosstalk_context(state)
 
-        logger.info(f"Extracted {len(ptm_sections)} PTM sections for Q&A generation")
+        logger.info(
+            f"[QA-v11.9] Context sizes: report={len(report_summary)}, "
+            f"kinase={len(kinase_ctx)}, comovement={len(comovement_ctx)}, "
+            f"tf={len(tf_ctx)}, crosstalk={len(crosstalk_ctx)}"
+        )
 
-        if not ptm_sections:
-            return "# Q&A Report\n\nNo PTM sections found in the comprehensive report."
+        # 2. Generate Q&A for each theme (sequential — cloud-API friendly)
+        all_theme_results: List[Dict] = []
+        total_themes = len(THEMES)
+        total_calls = 0
 
-        # 2. Pass 1: Per-PTM Q&A (parallel)
-        n_ptms = len(ptm_sections)
+        for i, theme in enumerate(THEMES):
+            if progress_callback:
+                pct = 5 + (i / total_themes) * 85
+                progress_callback(pct, f"Generating Q&A: {theme['title']}")
+
+            logger.info(f"[QA-v11.9] Theme {i+1}/{total_themes}: {theme['title']}")
+
+            prompt = _build_theme_prompt(
+                theme=theme,
+                report_summary=report_summary,
+                experimental_ctx=experimental_ctx,
+                kinase_ctx=kinase_ctx,
+                comovement_ctx=comovement_ctx,
+                tf_ctx=tf_ctx,
+                crosstalk_ctx=crosstalk_ctx,
+            )
+
+            response = self.llm.generate(
+                prompt=prompt,
+                system_prompt=QA_SYSTEM_PROMPT,
+                temperature=0.5,
+                max_tokens=4000,
+            )
+            total_calls += 1
+
+            # Check for LLM error
+            if response.startswith("[LLM Error"):
+                logger.error(f"[QA-v11.9] LLM error for theme '{theme['title']}': {response[:200]}")
+                all_theme_results.append({
+                    "theme": theme,
+                    "qa_pairs": [],
+                    "raw_response": response,
+                    "error": True,
+                })
+                continue
+
+            # Parse Q&A pairs
+            qa_pairs = _parse_qa_pairs(response)
+            logger.info(
+                f"[QA-v11.9] Theme '{theme['title']}': {len(qa_pairs)} Q&A pairs parsed"
+            )
+
+            all_theme_results.append({
+                "theme": theme,
+                "qa_pairs": qa_pairs,
+                "raw_response": response,
+                "error": False,
+            })
+
+        # 3. Assemble final report
         if progress_callback:
-            progress_callback(10, f"Generating Q&A for {n_ptms} PTMs (Pass 1, {min(_LLM_WORKERS, n_ptms)} workers)")
+            progress_callback(92, "Assembling Q&A report")
 
-        def _do_ptm_qa(idx_section):
-            idx, section = idx_section
-            return idx, self._generate_ptm_qa(section, context)
+        report = self._assemble_report(all_theme_results, state)
 
-        workers = min(_LLM_WORKERS, n_ptms)
-        ordered: dict = {}
-        with ThreadPoolExecutor(max_workers=workers) as pool:
-            futs = {pool.submit(_do_ptm_qa, (i, s)): i for i, s in enumerate(ptm_sections)}
-            for fut in as_completed(futs):
-                idx, block = fut.result()
-                ordered[idx] = block
-                if progress_callback:
-                    done = len(ordered)
-                    pct = 10 + (done / n_ptms) * 60
-                    progress_callback(pct, f"Q&A done {done}/{n_ptms}")
-
-        ptm_qa_blocks: List[str] = [ordered[i] for i in range(n_ptms)]
-
-        # 3. Pass 2: Global Trends
-        if progress_callback:
-            progress_callback(75, "Generating global signaling trends (Pass 2)")
-
-        global_qa = self._generate_global_trends(report_content, context, len(ptm_sections))
-
-        # 4. Assemble report
-        if progress_callback:
-            progress_callback(90, "Assembling Q&A report")
-
-        report = self._assemble_report(ptm_qa_blocks, global_qa, context, len(ptm_sections))
+        logger.info(
+            f"[QA-v11.9] Complete: {total_calls} LLM calls, "
+            f"{sum(len(r['qa_pairs']) for r in all_theme_results)} total Q&A pairs"
+        )
 
         if progress_callback:
             progress_callback(100, "Q&A report complete")
 
         return report
 
-    def _generate_ptm_qa(self, section: PTMSection, context: ExperimentalContext) -> str:
-        """Generate Q&A for a single PTM section."""
-        # Generate questions
-        q_prompt = _build_ptm_question_prompt(section, context)
+    def _assemble_report(self, theme_results: List[Dict], state: dict) -> str:
+        """Assemble the final Q&A report from theme results."""
+        ctx = state.get("experimental_context") or {}
 
-        if self.use_two_model:
-            q_llm = LLMClient(provider=self.llm.provider, model=self.question_model)
-            questions_text = q_llm.generate(
-                prompt=q_prompt,
-                system_prompt=QA_SYSTEM_PROMPT,
-                temperature=0.7,
-                max_tokens=2000,
-            )
-        else:
-            questions_text = self.llm.generate(
-                prompt=q_prompt,
-                system_prompt=QA_SYSTEM_PROMPT,
-                temperature=0.7,
-                max_tokens=2000,
-            )
-
-        # Parse questions
-        questions = [
-            line.replace("Q:", "").strip()
-            for line in questions_text.split("\n")
-            if line.strip().startswith("Q:")
-        ]
-
-        if not questions:
-            # Fallback: split by numbered lines
-            questions = [
-                re.sub(r"^\d+[\.\)]\s*", "", line).strip()
-                for line in questions_text.split("\n")
-                if re.match(r"^\d+[\.\)]", line.strip())
-            ]
-
-        if not questions:
-            logger.warning(f"No questions generated for {section.gene} {section.position}")
-            return ""
-
-        # Generate answers for each question
-        qa_pairs: List[str] = []
-        for q in questions[:10]:  # Cap at 10 questions per PTM
-            a_prompt = _build_ptm_answer_prompt(section, context, q)
-
-            if self.use_two_model:
-                a_llm = LLMClient(provider=self.llm.provider, model=self.answer_model)
-                answer = a_llm.generate(
-                    prompt=a_prompt,
-                    system_prompt=QA_SYSTEM_PROMPT,
-                    temperature=0.5,
-                    max_tokens=1500,
-                )
-            else:
-                answer = self.llm.generate(
-                    prompt=a_prompt,
-                    system_prompt=QA_SYSTEM_PROMPT,
-                    temperature=0.5,
-                    max_tokens=1500,
-                )
-
-            qa_pairs.append(f"**Q:** {q}\n\n**A:** {answer}\n")
-
-        # Build Quick Facts
-        quick_facts = self._build_quick_facts(section)
-
-        return (
-            f"### {section.gene} {section.position}\n\n"
-            f"{quick_facts}\n\n"
-            + "\n---\n\n".join(qa_pairs)
-        )
-
-    def _generate_global_trends(
-        self, report_content: str, context: ExperimentalContext, ptm_count: int,
-    ) -> str:
-        """Generate global cell-signaling trend Q&A."""
-        prompt = _build_global_trends_prompt(report_content, context, ptm_count)
-
-        response = self.llm.generate(
-            prompt=prompt,
-            system_prompt=QA_SYSTEM_PROMPT,
-            temperature=0.6,
-            max_tokens=6000,
-        )
-
-        return response
-
-    def _build_quick_facts(self, section: PTMSection) -> str:
-        """Build Quick Facts summary for a PTM section."""
-        facts = [f"| Property | Value |", f"|---|---|"]
-        facts.append(f"| Gene | {section.gene} |")
-        facts.append(f"| Position | {section.position} |")
-        facts.append(f"| PTM Type | {section.ptm_type or 'Phosphorylation'} |")
-        facts.append(f"| PTM Log2FC | {section.ptm_log2fc:.3f} |")
-        facts.append(f"| Protein Log2FC | {section.protein_log2fc:.3f} |")
-        facts.append(f"| Novelty | {section.novelty or 'Unknown'} |")
-        if section.pathways:
-            facts.append(f"| Pathways | {', '.join(section.pathways[:3])} |")
-        if section.kinases:
-            facts.append(f"| Upstream Regulators | {', '.join(section.kinases[:3])} |")
-        return "\n".join(facts)
-
-    def _assemble_report(
-        self,
-        ptm_qa_blocks: List[str],
-        global_qa: str,
-        context: ExperimentalContext,
-        ptm_count: int,
-    ) -> str:
-        """Assemble the final Q&A report."""
         header = (
-            f"# PTM Q&A Analysis Report\n\n"
-            f"## Experimental Context\n\n"
-            f"- **Cell Type:** {context.cell_type}\n"
-            f"- **Treatment:** {context.treatment}\n"
-            f"- **Biological Question:** {context.biological_question}\n"
-            f"- **Total PTMs Analyzed:** {ptm_count}\n\n"
-            f"---\n\n"
+            "# System-Level Q&A Analysis Report\n\n"
+            "## Experimental Context\n\n"
+            f"- **Cell Type:** {ctx.get('cell_type', ctx.get('tissue', 'N/A'))}\n"
+            f"- **Treatment:** {ctx.get('treatment', 'N/A')}\n"
+            f"- **Biological Question:** {ctx.get('biological_question', 'N/A')}\n\n"
+            "> This Q&A report provides system-level analysis across 5 thematic areas,\n"
+            "> integrating kinase cascade, co-movement, TF inference, and cross-talk data.\n\n"
+            "---\n\n"
         )
 
-        ptm_section = "## Part 1: Detailed PTM Analysis\n\n"
-        ptm_section += "\n\n---\n\n".join(b for b in ptm_qa_blocks if b)
+        body_parts = []
+        for result in theme_results:
+            theme = result["theme"]
+            qa_pairs = result["qa_pairs"]
 
-        global_section = (
-            f"\n\n---\n\n"
-            f"## Part 2: Global Cell-Signaling Trends\n\n"
-            f"{global_qa}\n"
-        )
+            section = f"## {theme['title']}\n\n"
 
-        return header + ptm_section + global_section
+            if result.get("error"):
+                section += "> ⚠️ Q&A generation failed for this theme. See logs for details.\n\n"
+            elif not qa_pairs:
+                # Fallback: include raw response if parsing failed
+                raw = result.get("raw_response", "")
+                if raw and not raw.startswith("[LLM Error"):
+                    section += raw + "\n\n"
+                else:
+                    section += "> No Q&A pairs generated for this theme.\n\n"
+            else:
+                for j, pair in enumerate(qa_pairs, 1):
+                    section += f"### Q{j}: {pair['question']}\n\n"
+                    section += f"{pair['answer']}\n\n"
+
+            body_parts.append(section)
+
+        return header + "\n---\n\n".join(body_parts)
 
 
 # ---------------------------------------------------------------------------
@@ -499,54 +506,31 @@ class QAReportGenerator:
 # ---------------------------------------------------------------------------
 
 def run_qa_report_generation(state: dict) -> dict:
-    """LangGraph node: Generate Q&A report from completed sections."""
+    """LangGraph node: Generate system-level thematic Q&A report (v11.9)."""
     cb = state.get("progress_callback")
     if cb:
-        cb(92, "Generating Q&A report")
+        cb(92, "Generating system-level Q&A report")
 
     sections = state.get("sections", {})
     if not sections:
-        logger.warning("No sections available for Q&A generation")
+        logger.warning("[QA-v11.9] No sections available for Q&A generation")
         return {"qa_report": ""}
 
-    # Reconstruct comprehensive report from sections
-    report_parts = []
-    context = state.get("experimental_context", {})
-
-    # Add experimental context header
-    report_parts.append("## Experimental Context\n")
-    report_parts.append(f"- **Cell Type:** {context.get('cell_type', context.get('tissue', ''))}")
-    report_parts.append(f"- **Treatment:** {context.get('treatment', '')}")
-    report_parts.append(f"- **Biological Question:** {context.get('biological_question', '')}")
-    report_parts.append("")
-
-    # Add sections
-    for section_name in ("introduction", "results", "discussion", "conclusion"):
-        content = sections.get(section_name, "")
-        if content:
-            report_parts.append(f"## {section_name.title()}\n\n{content}\n")
-
-    report_content = "\n".join(report_parts)
-
-    # Create Q&A generator
+    # Create LLM client
     llm = LLMClient(
         provider=state.get("llm_provider", "ollama"),
         model=state.get("llm_model"),
     )
 
-    generator = QAReportGenerator(
-        llm_client=llm,
-        question_model=state.get("qa_question_model"),
-        answer_model=state.get("qa_answer_model"),
-        use_two_model=bool(state.get("qa_question_model") and state.get("qa_answer_model")),
-    )
+    generator = SystemLevelQAGenerator(llm_client=llm)
 
     # Remap internal 0-100% progress to the 92-95% overall range
     def _qa_inner_cb(pct, msg):
-        mapped = 92 + (pct / 100) * 3
-        cb(mapped, msg)
+        if cb:
+            mapped = 92 + (pct / 100) * 3
+            cb(mapped, msg)
 
-    qa_report = generator.generate(report_content, progress_callback=_qa_inner_cb if cb else None)
+    qa_report = generator.generate(state, progress_callback=_qa_inner_cb)
 
     if cb:
         cb(95, "Q&A report generated")

@@ -21,6 +21,8 @@ Environment variables:
 
 import logging
 import os
+import threading
+import time
 from typing import Optional
 
 import requests
@@ -42,6 +44,35 @@ GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
 
 # Global provider preference
 DEFAULT_PROVIDER = os.getenv("LLM_PROVIDER", "auto")
+
+# --------------------------------------------------------------------------
+# Rate Limiter for Cloud APIs (Gemini 2.5 Pro: 150 RPM, Flash: 2000 RPM)
+# Skipped for local Ollama (no rate limit).
+# --------------------------------------------------------------------------
+_CLOUD_RPM = int(os.getenv("LLM_CLOUD_RPM", "100"))  # conservative default
+_RATE_LIMIT_MAX_RETRIES = int(os.getenv("LLM_RATE_LIMIT_RETRIES", "5"))
+
+
+class _CloudRateLimiter:
+    """Thread-safe token-bucket rate limiter for cloud API calls."""
+
+    def __init__(self, rpm: int = 100):
+        self._interval = 60.0 / max(rpm, 1)
+        self._lock = threading.Lock()
+        self._last_call = 0.0
+
+    def wait(self):
+        """Block until the next request is allowed."""
+        with self._lock:
+            now = time.time()
+            elapsed = now - self._last_call
+            if elapsed < self._interval:
+                sleep_time = self._interval - elapsed
+                time.sleep(sleep_time)
+            self._last_call = time.time()
+
+
+_cloud_rate_limiter = _CloudRateLimiter(rpm=_CLOUD_RPM)
 
 # Known valid model names per provider (for validation / normalization)
 _KNOWN_GEMINI_MODELS = {
@@ -494,51 +525,101 @@ class LLMClient:
         # v9.30: Increase timeout for large prompts (600s for cloud APIs)
         timeout = 600
 
-        try:
-            r = requests.post(
-                f"{base_url}/chat/completions",
-                json=payload, headers=headers, timeout=timeout,
-            )
-            r.raise_for_status()
-            result = r.json()["choices"][0]["message"]["content"].strip()
-            logger.info(
-                f"[LLM] {model}: success, response={len(result):,} chars, "
-                f"{len(result.split()):,} words"
-            )
-            return result
-        except requests.HTTPError as e:
-            status = getattr(r, 'status_code', 'unknown')
-            body = getattr(r, 'text', '')[:500]
-            error_msg = (
-                f"{model}@{base_url} returned HTTP {status}. "
-                f"Prompt size: {total_prompt_chars:,} chars. "
-                f"Response: {body}. "
-                f"Please check: (1) model name is a valid API model ID "
-                f"(e.g. 'gemini-2.5-flash', not 'Gemini'), "
-                f"(2) API key is valid, "
-                f"(3) prompt is within context window limits."
-            )
-            logger.error(f"OpenAI-compatible generation failed: {error_msg}")
-            return f"[LLM Error: {error_msg}]"
-        except requests.ConnectionError:
-            error_msg = (
-                f"Cannot connect to {base_url}. "
-                f"Please check network connectivity and API endpoint URL."
-            )
-            logger.error(error_msg)
-            return f"[LLM Error: {error_msg}]"
-        except requests.Timeout:
-            error_msg = (
-                f"Request to {model}@{base_url} timed out ({timeout}s). "
-                f"Prompt size: {total_prompt_chars:,} chars. "
-                f"The prompt may be too large or the API may be overloaded."
-            )
-            logger.error(error_msg)
-            return f"[LLM Error: {error_msg}]"
-        except Exception as e:
-            error_msg = (
-                f"OpenAI-compatible generation failed ({model}@{base_url}): {e}. "
-                f"Prompt size: {total_prompt_chars:,} chars."
-            )
-            logger.error(error_msg)
-            return f"[LLM Error: {error_msg}]"
+        # v11.9: Rate limiter — wait before sending request to cloud API
+        _cloud_rate_limiter.wait()
+
+        # v11.9: Retry loop with exponential backoff for 429/5xx errors
+        for attempt in range(1, _RATE_LIMIT_MAX_RETRIES + 1):
+            try:
+                r = requests.post(
+                    f"{base_url}/chat/completions",
+                    json=payload, headers=headers, timeout=timeout,
+                )
+                # Handle 429 TooManyRequests with retry
+                if r.status_code == 429:
+                    retry_after = r.headers.get("Retry-After")
+                    if retry_after:
+                        wait_time = min(float(retry_after), 120)
+                    else:
+                        wait_time = min(2 ** attempt * 5, 120)  # 10s, 20s, 40s, 80s, 120s
+                    logger.warning(
+                        f"[LLM] {model}: 429 TooManyRequests (attempt {attempt}/{_RATE_LIMIT_MAX_RETRIES}), "
+                        f"waiting {wait_time:.0f}s before retry..."
+                    )
+                    if attempt < _RATE_LIMIT_MAX_RETRIES:
+                        time.sleep(wait_time)
+                        _cloud_rate_limiter.wait()  # re-acquire rate limit slot
+                        continue
+                    else:
+                        body = r.text[:500]
+                        error_msg = (
+                            f"{model}@{base_url} returned 429 TooManyRequests after "
+                            f"{_RATE_LIMIT_MAX_RETRIES} retries. Response: {body}"
+                        )
+                        logger.error(error_msg)
+                        return f"[LLM Error: {error_msg}]"
+
+                # Handle 5xx server errors with retry
+                if r.status_code >= 500:
+                    wait_time = min(2 ** attempt * 3, 60)
+                    logger.warning(
+                        f"[LLM] {model}: HTTP {r.status_code} server error "
+                        f"(attempt {attempt}/{_RATE_LIMIT_MAX_RETRIES}), "
+                        f"waiting {wait_time:.0f}s..."
+                    )
+                    if attempt < _RATE_LIMIT_MAX_RETRIES:
+                        time.sleep(wait_time)
+                        continue
+
+                r.raise_for_status()
+                result = r.json()["choices"][0]["message"]["content"].strip()
+                logger.info(
+                    f"[LLM] {model}: success, response={len(result):,} chars, "
+                    f"{len(result.split()):,} words"
+                )
+                return result
+
+            except requests.HTTPError as e:
+                status = getattr(r, 'status_code', 'unknown')
+                body = getattr(r, 'text', '')[:500]
+                error_msg = (
+                    f"{model}@{base_url} returned HTTP {status}. "
+                    f"Prompt size: {total_prompt_chars:,} chars. "
+                    f"Response: {body}. "
+                    f"Please check: (1) model name is a valid API model ID "
+                    f"(e.g. 'gemini-2.5-flash', not 'Gemini'), "
+                    f"(2) API key is valid, "
+                    f"(3) prompt is within context window limits."
+                )
+                logger.error(f"OpenAI-compatible generation failed: {error_msg}")
+                return f"[LLM Error: {error_msg}]"
+            except requests.ConnectionError:
+                error_msg = (
+                    f"Cannot connect to {base_url}. "
+                    f"Please check network connectivity and API endpoint URL."
+                )
+                logger.error(error_msg)
+                return f"[LLM Error: {error_msg}]"
+            except requests.Timeout:
+                error_msg = (
+                    f"Request to {model}@{base_url} timed out ({timeout}s). "
+                    f"Prompt size: {total_prompt_chars:,} chars. "
+                    f"The prompt may be too large or the API may be overloaded."
+                )
+                logger.error(error_msg)
+                # Timeout is retryable
+                if attempt < _RATE_LIMIT_MAX_RETRIES:
+                    logger.info(f"[LLM] Retrying after timeout (attempt {attempt})...")
+                    time.sleep(5)
+                    continue
+                return f"[LLM Error: {error_msg}]"
+            except Exception as e:
+                error_msg = (
+                    f"OpenAI-compatible generation failed ({model}@{base_url}): {e}. "
+                    f"Prompt size: {total_prompt_chars:,} chars."
+                )
+                logger.error(error_msg)
+                return f"[LLM Error: {error_msg}]"
+
+        # Should not reach here, but safety fallback
+        return "[LLM Error: All retry attempts exhausted]"
