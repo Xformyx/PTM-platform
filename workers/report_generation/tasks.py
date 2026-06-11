@@ -657,7 +657,7 @@ def run_report_generation(self, order_id: int, config: dict):
             # Retry up to 3 times: Ollama may be busy with other requests (RAG Phase B).
             test_response = None
             for _attempt in range(3):
-                test_response = preflight_llm.generate("Respond with OK.", max_tokens=10)
+                test_response = preflight_llm.generate("Respond with OK.", max_tokens=100)
                 if test_response and not test_response.startswith("[LLM Error"):
                     break
                 logger.warning(f"[Order {order_id}] LLM pre-flight attempt {_attempt + 1}/3 failed, retrying in 10s…")

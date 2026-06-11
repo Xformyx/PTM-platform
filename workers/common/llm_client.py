@@ -513,12 +513,21 @@ class LLMClient:
         # v11.9: Gemini 2.5 models require 'max_completion_tokens' instead of 'max_tokens'
         is_gemini = "generativelanguage.googleapis.com" in base_url
         token_key = "max_completion_tokens" if is_gemini else "max_tokens"
+        # Gemini 2.5 thinking models consume thinking tokens from max_completion_tokens.
+        # Ensure minimum 1024 so short prompts don't get truncated by thinking overhead.
+        effective_max_tokens = max(max_tokens, 1024) if is_gemini else max_tokens
         payload = {
             "model": model,
             "messages": messages,
             "temperature": temp,
-            token_key: max_tokens,
+            token_key: effective_max_tokens,
         }
+        # For Gemini 2.5 thinking models: set thinking budget to avoid
+        # thinking consuming all of max_completion_tokens for trivial prompts
+        if is_gemini and "2.5" in model:
+            payload["thinking"] = {
+                "thinking_budget": min(effective_max_tokens // 2, 8192),
+            }
 
         headers = {
             "Content-Type": "application/json",
