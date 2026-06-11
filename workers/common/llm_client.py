@@ -510,11 +510,14 @@ class LLMClient:
             f"max_tokens={max_tokens}, temp={temp}"
         )
 
+        # v11.9: Gemini 2.5 models require 'max_completion_tokens' instead of 'max_tokens'
+        is_gemini = "generativelanguage.googleapis.com" in base_url
+        token_key = "max_completion_tokens" if is_gemini else "max_tokens"
         payload = {
             "model": model,
             "messages": messages,
             "temperature": temp,
-            "max_tokens": max_tokens,
+            token_key: max_tokens,
         }
 
         headers = {
@@ -572,7 +575,48 @@ class LLMClient:
                         continue
 
                 r.raise_for_status()
-                result = r.json()["choices"][0]["message"]["content"].strip()
+                resp_json = r.json()
+                # v11.9: Robust response parsing — Gemini OpenAI-compat endpoint
+                # may return different structures (thinking models, refusals, etc.)
+                try:
+                    choices = resp_json.get("choices", [])
+                    if not choices:
+                        error_msg = (
+                            f"{model}@{base_url}: API returned empty choices. "
+                            f"Response keys: {list(resp_json.keys())}. "
+                            f"Full response (truncated): {str(resp_json)[:500]}"
+                        )
+                        logger.error(error_msg)
+                        return f"[LLM Error: {error_msg}]"
+                    message = choices[0].get("message", {})
+                    # Gemini 2.5 thinking models may put content in 'parts' or omit 'content'
+                    content = message.get("content")
+                    if content is None:
+                        # Fallback: check for 'parts' (Gemini native format leak)
+                        parts = message.get("parts", [])
+                        if parts:
+                            content = "\n".join(
+                                p.get("text", "") for p in parts if p.get("text")
+                            )
+                        # Still None? Check finish_reason for refusal
+                        if not content:
+                            finish_reason = choices[0].get("finish_reason", "unknown")
+                            error_msg = (
+                                f"{model}@{base_url}: response has no content. "
+                                f"finish_reason={finish_reason}. "
+                                f"Message keys: {list(message.keys())}. "
+                                f"Prompt size: {total_prompt_chars:,} chars."
+                            )
+                            logger.error(error_msg)
+                            return f"[LLM Error: {error_msg}]"
+                    result = content.strip()
+                except (KeyError, IndexError, TypeError) as parse_err:
+                    error_msg = (
+                        f"{model}@{base_url}: failed to parse response: {parse_err}. "
+                        f"Response (truncated): {str(resp_json)[:500]}"
+                    )
+                    logger.error(error_msg)
+                    return f"[LLM Error: {error_msg}]"
                 logger.info(
                     f"[LLM] {model}: success, response={len(result):,} chars, "
                     f"{len(result.split()):,} words"
