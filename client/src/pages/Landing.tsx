@@ -1,9 +1,10 @@
 // Landing.tsx — Mekii PTM Platform Landing Page
-// Production-quality implementation matching the slide mockup PDF
-import { useLocation } from "wouter";
+// For integration into the existing PTM platform frontend (React 18 + react-router-dom v7 + Tailwind CSS v3)
+// Place this file at: frontend/src/pages/Landing.tsx
+import { useNavigate } from "react-router-dom";
 import { useEffect, useRef, useState, useCallback } from "react";
 
-// Hero background image
+// Hero background image (hosted on CloudFront)
 const HERO_BG = "https://d2xsxph8kpxj0f.cloudfront.net/91523048/cgED92igVd7rWrNnRft4Ln/hero-network-bg-8tAHonomEo5vKDVzkhCguq.webp";
 
 // ===== Scroll Reveal Hook =====
@@ -37,9 +38,9 @@ const eyebrowStyle = "text-sm font-semibold tracking-[0.3em] uppercase mb-4";
 const headlineStyle = "font-extrabold leading-[1.05] tracking-tight";
 
 export default function Landing() {
-  const [, setLocation] = useLocation();
+  const navigate = useNavigate();
 
-  const handleStartFree = () => setLocation("/manual");
+  const handleStartFree = () => navigate("/login");
   const scrollTo = (id: string) => {
     document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
   };
@@ -208,28 +209,23 @@ function ProblemSection() {
         <div className="flex-1 max-w-xl">
           <p className={`${eyebrowStyle} text-[#00e676]`}>THE PROBLEM</p>
           <h2 className={`${headlineStyle} text-3xl sm:text-4xl md:text-5xl text-white mb-6`}>
-            하나의 인산화 부위,<br />여러 Kinase의 가능성
+            단일 PTM Site로는<br />Kinase를 특정할 수<br />없습니다
           </h2>
           <p className="text-gray-400 text-base md:text-lg leading-relaxed mb-8">
-            단일 PTM site는 여러 kinase에 의해 조절될 수 있습니다. 기존 도구로는 어떤 kinase가 실제로 활성화되었는지 구분할 수 없습니다.
+            하나의 인산화 부위(phosphosite)는 평균 3-5개의 kinase에 의해 인산화될 수 있습니다. 기존 도구는 이 1:N 문제를 해결하지 못합니다.
           </p>
           {/* Warning bullets */}
           <div className="space-y-3 mb-8">
             {[
-              "동일 site를 인산화하는 kinase가 3~5개 이상",
-              "항체 기반 검증은 시간과 비용이 기하급수적",
-              "기존 enrichment 분석은 1:N 문제를 무시"
+              "단일 site 기반 분석 → 다수 kinase 후보 (구분 불가)",
+              "시간 정보 미활용 → 인과관계 추론 불가",
+              "단일 PTM 유형만 지원 → 전체 신호 파악 불가"
             ].map((text, i) => (
               <div key={i} className="flex items-start gap-3">
                 <span className="mt-0.5 w-5 h-5 flex items-center justify-center rounded-full border border-red-500/60 text-red-400 text-xs shrink-0">!</span>
                 <span className="text-gray-300 text-sm">{text}</span>
               </div>
             ))}
-          </div>
-          {/* Bottom statement */}
-          <div className="border-t border-white/10 pt-6">
-            <p className="text-red-400 font-bold text-lg mb-2">1 Site → N Kinases = 구분 불가</p>
-            <p className="text-[#00e676] font-semibold text-base">→ Co-Wave가 이 문제를 해결합니다</p>
           </div>
         </div>
 
@@ -242,29 +238,40 @@ function ProblemSection() {
             </div>
             {/* Surrounding kinase nodes */}
             {[
-              { name: "AKT1", angle: -60, color: "teal" },
-              { name: "S6K", angle: 60, color: "teal" },
-              { name: "RSK", angle: 180, color: "teal" },
+              { name: "AKT1", angle: -90, color: "teal" },
+              { name: "S6K", angle: 210, color: "teal" },
+              { name: "RSK", angle: -30, color: "teal" },
             ].map((node) => {
               const rad = (node.angle * Math.PI) / 180;
               const x = 50 + 38 * Math.cos(rad);
               const y = 50 + 38 * Math.sin(rad);
               return (
-                <div key={node.name} className="absolute w-14 h-14 rounded-full bg-teal-900/40 border border-teal-500/50 flex items-center justify-center shadow-[0_0_20px_rgba(0,200,150,0.15)]" style={{ left: `${x}%`, top: `${y}%`, transform: "translate(-50%, -50%)" }}>
-                  <span className="text-teal-300 text-[11px] font-semibold">{node.name}</span>
+                <div key={node.name} className="absolute w-14 h-14 rounded-full bg-gray-800/80 border border-gray-600/50 flex items-center justify-center" style={{ left: `${x}%`, top: `${y}%`, transform: "translate(-50%, -50%)" }}>
+                  <span className="text-gray-300 text-[11px] font-semibold">{node.name}</span>
                 </div>
               );
             })}
             {/* Question marks */}
-            <div className="absolute top-[15%] left-[15%] text-red-400/60 text-4xl font-bold">?</div>
-            <div className="absolute bottom-[15%] right-[15%] text-red-400/40 text-6xl font-bold">?</div>
+            <div className="absolute top-[22%] left-[35%] text-red-400/70 text-2xl font-bold">?</div>
+            <div className="absolute top-[55%] left-[22%] text-red-400/50 text-2xl font-bold">?</div>
+            <div className="absolute top-[55%] right-[22%] text-red-400/50 text-2xl font-bold">?</div>
             {/* Dashed lines */}
             <svg className="absolute inset-0 w-full h-full" viewBox="0 0 100 100">
-              <line x1="50" y1="50" x2="72" y2="31" stroke="#ef4444" strokeWidth="0.5" strokeDasharray="2,2" opacity="0.6" />
-              <line x1="50" y1="50" x2="72" y2="69" stroke="#ef4444" strokeWidth="0.5" strokeDasharray="2,2" opacity="0.6" />
-              <line x1="50" y1="50" x2="12" y2="50" stroke="#ef4444" strokeWidth="0.5" strokeDasharray="2,2" opacity="0.6" />
+              <line x1="50" y1="50" x2="50" y2="12" stroke="#ef4444" strokeWidth="0.5" strokeDasharray="2,2" opacity="0.6" />
+              <line x1="50" y1="50" x2="17" y2="69" stroke="#ef4444" strokeWidth="0.5" strokeDasharray="2,2" opacity="0.6" />
+              <line x1="50" y1="50" x2="83" y2="69" stroke="#ef4444" strokeWidth="0.5" strokeDasharray="2,2" opacity="0.6" />
             </svg>
+            {/* Bottom label */}
+            <div className="absolute bottom-0 left-1/2 -translate-x-1/2 text-center">
+              <p className="text-sm text-gray-400">1 Site → N Kinases = <span className="text-red-400 font-bold">구분 불가</span></p>
+            </div>
           </div>
+        </div>
+      </div>
+      {/* Bottom green banner */}
+      <div className="relative z-10 max-w-[1400px] mx-auto px-6 md:px-10 mt-8">
+        <div className="border-t border-[#00c853]/30 pt-6 text-center">
+          <p className="text-[#00e676] font-bold text-lg">→ Co-Wave가 이 문제를 해결합니다</p>
         </div>
       </div>
     </section>
@@ -326,12 +333,11 @@ function CoWaveChart() {
     const paths: { d: string; color: string; opacity: number; width: number }[] = [];
     const seed = (n: number) => ((Math.sin(n * 127.1) * 43758.5453) % 1 + 1) % 1;
 
-    // Orange/amber cluster - high amplitude, X-crossing pattern (like the real screenshot)
+    // Orange/amber cluster - high amplitude, X-crossing pattern
     for (let i = 0; i < 40; i++) {
       const s = seed(i);
       const baseY = 20 + i * 1.2;
       const amp = 30 + s * 40;
-      // Create X-crossing pattern: lines go from top-left to bottom-right, then back up
       const y1 = baseY - amp * 0.3 + s * 10;
       const y2 = baseY + amp * 0.8 - s * 15;
       const y3 = baseY - amp * 0.5 + s * 20;
@@ -344,7 +350,7 @@ function CoWaveChart() {
       });
     }
 
-    // Green cluster - medium amplitude, gentler waves
+    // Green cluster - medium amplitude
     for (let i = 0; i < 30; i++) {
       const s = seed(i + 100);
       const baseY = 130 + i * 0.8;
@@ -357,7 +363,7 @@ function CoWaveChart() {
       });
     }
 
-    // Blue/cyan cluster - low amplitude, stable
+    // Blue/cyan cluster - low amplitude
     for (let i = 0; i < 20; i++) {
       const s = seed(i + 200);
       const baseY = 170 + i * 0.6;
@@ -399,7 +405,7 @@ function CoWaveChart() {
           {[100, 200, 300].map(x => (
             <g key={x}>
               {[30, 60, 90, 130, 150, 170].map((y, i) => (
-                <circle key={i} cx={x} cy={y + (seed(x + i) - 0.5) * 10} r="1.5" fill={`hsl(${20 + i * 30}, 80%, 60%)`} opacity="0.6" />
+                <circle key={i} cx={x} cy={y + (pseudoRandom(x + i) - 0.5) * 10} r="1.5" fill={`hsl(${20 + i * 30}, 80%, 60%)`} opacity="0.6" />
               ))}
             </g>
           ))}
@@ -414,16 +420,16 @@ function CoWaveChart() {
 }
 
 // Deterministic pseudo-random for chart
-function seed(n: number) { return ((Math.sin(n * 127.1) * 43758.5453) % 1 + 1) % 1; }
+function pseudoRandom(n: number) { return ((Math.sin(n * 127.1) * 43758.5453) % 1 + 1) % 1; }
 
 // ===== USE CASES =====
 function UseCasesSection() {
   const { ref, visible } = useReveal();
   const cases = [
-    { icon: "⚡", title: "Kinase Activity\nProfiling", desc: "수백 개 kinase의 활성을 동시에 정량 추론", badge: "Multi-PTM", glow: "teal" },
-    { icon: "🔗", title: "PTM Cross-talk\nDiscovery", desc: "서로 다른 PTM 간 상호작용 패턴 자동 탐지", badge: "5종 PTM 통합", glow: "amber" },
-    { icon: "〰️", title: "Temporal\nCo-movement", desc: "시계열 데이터에서 동조 패턴 클러스터링", badge: "Patent-Pending", glow: "teal" },
-    { icon: "🗺️", title: "Signaling Cascade\nMapping", desc: "상위→하위 신호전달 경로를 시간순으로 재구성", badge: "AI-Powered", glow: "amber" },
+    { icon: "⚡", title: "Kinase Activity\nProfiling", desc: "기질 PTM 변화 패턴으로 상위 kinase의 활성도를 정량 추론", badge: "Weighted Activity Score", glow: "teal" },
+    { icon: "🔗", title: "PTM Cross-talk\nDiscovery", desc: "인산화-유비퀴틴화-아세틸화 간 상호작용 네트워크 발견", badge: "Multi-PTM Integration", glow: "amber" },
+    { icon: "〰️", title: "Temporal\nCo-movement", desc: "시계열 데이터에서 동조하는 PTM 클러스터를 자동 식별", badge: "Co-Wave Technology", glow: "teal" },
+    { icon: "🗺️", title: "Signaling Cascade\nMapping", desc: "세포 구획별 신호전달 경로를 자동 재구성하여 시각화", badge: "AI-Powered Diagrams", glow: "amber" },
   ];
 
   return (
@@ -447,6 +453,7 @@ function UseCasesSection() {
             </div>
           ))}
         </div>
+        <p className="text-center text-gray-500 text-sm mt-8">각 분석은 독립적으로 또는 통합적으로 실행 가능합니다</p>
       </div>
     </section>
   );
@@ -496,7 +503,7 @@ function PlatformDemoSection() {
                 <h4 className="text-xs font-semibold text-gray-300 mb-2">Kinase Activity Heatmap</h4>
                 <div className="grid grid-cols-4 gap-1">
                   {Array.from({ length: 32 }).map((_, i) => (
-                    <div key={i} className="aspect-square rounded-sm" style={{ backgroundColor: `hsl(${70 + seed(i + 50) * 60}, ${40 + seed(i + 10) * 30}%, ${15 + seed(i + 20) * 35}%)` }} />
+                    <div key={i} className="aspect-square rounded-sm" style={{ backgroundColor: `hsl(${70 + pseudoRandom(i + 50) * 60}, ${40 + pseudoRandom(i + 10) * 30}%, ${15 + pseudoRandom(i + 20) * 35}%)` }} />
                   ))}
                 </div>
                 <div className="flex justify-between mt-2 text-[9px] text-gray-600">
