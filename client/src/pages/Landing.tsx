@@ -1,9 +1,52 @@
 // Landing.tsx — Mekii PTM Platform Landing Page
 // Design: "Deep-Space Scientific Observatory" — Dark theme, Sora headlines, Inter body
-// Inspired by the slide mockup with futuristic biotech aesthetic
+// Matches the slide mockup: left-aligned hero text + network bg + Kinase Activity Heatmap
 
 import { useLocation } from "wouter";
-import { ArrowRight, Lock, Zap, Brain, BarChart3, Network, Clock, FileText, ChevronRight } from "lucide-react";
+import { ArrowRight, Lock, Zap, Brain, BarChart3, Network, FileText, ChevronRight } from "lucide-react";
+
+// Kinase Activity Heatmap data
+const HEATMAP_KINASES = ["RTK", "PI3K", "AKT", "MEK1/2", "ERK1/2", "mTOR", "STAT3", "JNK", "p38", "GSK3β"];
+const HEATMAP_CONDITIONS = ["Ctrl", "EGF", "IGF-1", "TNFα", "Insulin", "Stress"];
+// Values 0-4 representing activity levels (0=low, 4=high)
+const HEATMAP_DATA = [
+  [0, 4, 3, 2, 3, 1], // RTK
+  [0, 3, 3, 1, 2, 0], // PI3K
+  [0, 3, 3, 1, 3, 0], // AKT
+  [0, 4, 2, 2, 1, 1], // MEK1/2
+  [0, 4, 2, 3, 1, 2], // ERK1/2
+  [0, 2, 3, 1, 3, 0], // mTOR
+  [0, 1, 1, 3, 0, 2], // STAT3
+  [0, 2, 1, 3, 0, 3], // JNK
+  [0, 1, 1, 2, 0, 3], // p38
+  [0, 1, 1, 1, 2, 2], // GSK3β
+];
+
+function getHeatmapColor(value: number): string {
+  const colors = [
+    "#1a2a1a", // 0 - very dark (low)
+    "#2d4a1f", // 1
+    "#4a7a2a", // 2
+    "#7ab33a", // 3
+    "#c8e64a", // 4 - bright yellow-green (high)
+  ];
+  return colors[value] || colors[0];
+}
+
+// Network nodes for background visualization
+const NETWORK_NODES = [
+  { id: "RTK", x: 28, y: 12 },
+  { id: "PI3K", x: 52, y: 18 },
+  { id: "AKT", x: 45, y: 38 },
+  { id: "MEK1/2", x: 50, y: 52 },
+  { id: "ERK1/2", x: 55, y: 68 },
+  { id: "mTOR", x: 42, y: 82 },
+  { id: "STAT3", x: 58, y: 88 },
+];
+
+const NETWORK_EDGES = [
+  [0, 1], [1, 2], [2, 3], [3, 4], [2, 5], [4, 6], [1, 5],
+];
 
 export default function Landing() {
   const [, setLocation] = useLocation();
@@ -13,22 +56,17 @@ export default function Landing() {
 
       {/* Navigation */}
       <nav className="fixed top-0 left-0 right-0 z-50 bg-[#0a0e1a]/80 backdrop-blur-md border-b border-white/5">
-        <div className="max-w-7xl mx-auto px-6 flex items-center justify-between h-16">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#00e676] to-[#00c853] flex items-center justify-center">
-              <span className="text-[#0a0e1a] font-bold text-sm" style={{ fontFamily: "'Sora', sans-serif" }}>M</span>
-            </div>
-            <span className="text-xl font-bold text-[#e0f7fa]" style={{ fontFamily: "'Sora', sans-serif" }}>
-              Mekii
-            </span>
-          </div>
+        <div className="max-w-7xl mx-auto px-6 lg:px-10 flex items-center justify-between h-16">
+          <span className="text-2xl font-bold text-[#e0f7fa] italic" style={{ fontFamily: "'Sora', sans-serif" }}>
+            Mekii
+          </span>
           <div className="hidden md:flex items-center gap-8">
             <a href="#use-cases" className="text-sm text-gray-400 hover:text-white transition-colors">Use Cases</a>
             <a href="#technology" className="text-sm text-gray-400 hover:text-white transition-colors">Technology</a>
             <a href="#comparison" className="text-sm text-gray-400 hover:text-white transition-colors">Why Mekii</a>
             <button
               onClick={() => setLocation("/manual")}
-              className="px-4 py-2 rounded-full bg-[#00e676] text-[#0a0e1a] text-sm font-semibold hover:bg-[#00c853] transition-colors"
+              className="px-5 py-2 rounded-full bg-[#00e676] text-[#0a0e1a] text-sm font-bold hover:bg-[#00c853] transition-colors"
               style={{ fontFamily: "'Sora', sans-serif" }}
             >
               Start Free
@@ -37,79 +75,154 @@ export default function Landing() {
         </div>
       </nav>
 
-      {/* Hero Section */}
-      <section className="relative min-h-screen flex items-center justify-center pt-16">
+      {/* Hero Section — Left-aligned text + Network BG + Heatmap right */}
+      <section className="relative min-h-screen flex items-center pt-16">
         {/* Background network visualization */}
         <div className="absolute inset-0 overflow-hidden">
-          <div className="absolute inset-0 bg-gradient-radial from-[#0a1a2a] via-[#0a0e1a] to-[#0a0e1a]" />
-          {/* Animated dots/network effect */}
-          <div className="absolute inset-0 opacity-20">
-            <svg className="w-full h-full" viewBox="0 0 1200 800" fill="none">
-              <circle cx="200" cy="300" r="3" fill="#00e676" opacity="0.6" />
-              <circle cx="400" cy="200" r="2" fill="#00e676" opacity="0.4" />
-              <circle cx="600" cy="400" r="4" fill="#00e676" opacity="0.5" />
-              <circle cx="800" cy="250" r="2" fill="#00e676" opacity="0.3" />
-              <circle cx="1000" cy="350" r="3" fill="#00e676" opacity="0.6" />
-              <circle cx="300" cy="500" r="2" fill="#ffd740" opacity="0.4" />
-              <circle cx="700" cy="550" r="3" fill="#ffd740" opacity="0.3" />
-              <circle cx="900" cy="450" r="2" fill="#00e676" opacity="0.5" />
-              <line x1="200" y1="300" x2="400" y2="200" stroke="#00e676" strokeWidth="0.5" opacity="0.2" />
-              <line x1="400" y1="200" x2="600" y2="400" stroke="#00e676" strokeWidth="0.5" opacity="0.2" />
-              <line x1="600" y1="400" x2="800" y2="250" stroke="#00e676" strokeWidth="0.5" opacity="0.15" />
-              <line x1="800" y1="250" x2="1000" y2="350" stroke="#00e676" strokeWidth="0.5" opacity="0.2" />
-              <line x1="300" y1="500" x2="600" y2="400" stroke="#ffd740" strokeWidth="0.5" opacity="0.15" />
-              <line x1="700" y1="550" x2="900" y2="450" stroke="#ffd740" strokeWidth="0.5" opacity="0.15" />
-            </svg>
+          <div className="absolute inset-0 bg-gradient-to-br from-[#0a1a2a] via-[#0a0e1a] to-[#0a0e1a]" />
+          {/* Network nodes and edges */}
+          <svg className="absolute inset-0 w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid slice">
+            {/* Edges */}
+            {NETWORK_EDGES.map(([from, to], i) => (
+              <line
+                key={`edge-${i}`}
+                x1={NETWORK_NODES[from].x}
+                y1={NETWORK_NODES[from].y}
+                x2={NETWORK_NODES[to].x}
+                y2={NETWORK_NODES[to].y}
+                stroke="#00e676"
+                strokeWidth="0.15"
+                opacity="0.3"
+              />
+            ))}
+            {/* Nodes */}
+            {NETWORK_NODES.map((node, i) => (
+              <g key={`node-${i}`}>
+                <circle cx={node.x} cy={node.y} r="0.8" fill="#00e676" opacity="0.5" />
+                <circle cx={node.x} cy={node.y} r="0.4" fill="#00e676" opacity="0.9" />
+                <text
+                  x={node.x}
+                  y={node.y - 1.5}
+                  fill="#00e676"
+                  fontSize="1.5"
+                  textAnchor="middle"
+                  opacity="0.7"
+                  fontFamily="Sora"
+                >
+                  {node.id}
+                </text>
+              </g>
+            ))}
+            {/* Additional ambient dots */}
+            <circle cx="15" cy="30" r="0.3" fill="#00e676" opacity="0.2" />
+            <circle cx="70" cy="15" r="0.3" fill="#00e676" opacity="0.15" />
+            <circle cx="80" cy="40" r="0.3" fill="#00e676" opacity="0.2" />
+            <circle cx="20" cy="70" r="0.3" fill="#00e676" opacity="0.15" />
+            <circle cx="65" cy="75" r="0.3" fill="#00e676" opacity="0.2" />
+          </svg>
+        </div>
+
+        <div className="relative z-10 max-w-7xl mx-auto px-6 lg:px-10 w-full grid lg:grid-cols-[1fr_auto] gap-8 items-center">
+          {/* Left: Hero text */}
+          <div className="max-w-2xl">
+            <h1
+              className="text-5xl sm:text-6xl md:text-7xl lg:text-8xl font-extrabold text-[#e0f7fa] leading-[0.95] mb-6"
+              style={{ fontFamily: "'Sora', sans-serif" }}
+            >
+              Proteomics의<br />끝을 본다
+            </h1>
+            <p
+              className="text-lg sm:text-xl md:text-2xl text-[#cfd8dc] font-medium mb-3"
+              style={{ fontFamily: "'Sora', sans-serif", fontWeight: 400 }}
+            >
+              Western Blot 1000장으로도 볼 수 없던 인사이트
+            </p>
+            <p className="text-lg text-[#00e676] mb-10" style={{ fontFamily: "'Sora', sans-serif" }}>
+              항체 없이도, 효소 활성의 지도를 그린다
+            </p>
+
+            <div className="flex flex-wrap items-center gap-4 mb-8">
+              <button
+                onClick={() => setLocation("/manual")}
+                className="px-8 py-4 rounded-xl bg-[#00e676] text-[#0a0e1a] font-bold text-lg hover:bg-[#00c853] transition-all hover:shadow-[0_0_30px_rgba(0,230,118,0.3)] flex items-center gap-2"
+                style={{ fontFamily: "'Sora', sans-serif" }}
+              >
+                무료 분석 시작 <ArrowRight className="w-5 h-5" />
+              </button>
+              <button
+                className="px-8 py-4 rounded-xl border-2 border-[#e0f7fa]/30 text-[#e0f7fa] font-semibold text-lg hover:border-[#e0f7fa]/60 transition-all"
+                style={{ fontFamily: "'Sora', sans-serif" }}
+              >
+                데모 보기
+              </button>
+            </div>
+
+            <div className="flex items-center gap-2 text-[#ffd740] text-sm">
+              <Lock className="w-4 h-4" />
+              <span style={{ fontFamily: "'Sora', sans-serif" }}>Patent-Pending Co-Wave Technology</span>
+            </div>
+          </div>
+
+          {/* Right: Kinase Activity Heatmap */}
+          <div className="hidden lg:block">
+            <div className="bg-[#0d1525]/90 backdrop-blur-sm border border-white/10 rounded-2xl p-5 w-[380px]">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-sm font-bold text-white" style={{ fontFamily: "'Sora', sans-serif" }}>
+                  Kinase Activity Heatmap
+                </h3>
+                <div className="flex items-center gap-1.5">
+                  <div className="w-2 h-2 rounded-full bg-[#00e676]" />
+                  <span className="text-[10px] text-gray-400">Co-Wave Signal Intensity</span>
+                </div>
+              </div>
+              {/* Column headers */}
+              <div className="grid" style={{ gridTemplateColumns: "60px repeat(6, 1fr)", gap: "2px" }}>
+                <div /> {/* empty corner */}
+                {HEATMAP_CONDITIONS.map((cond) => (
+                  <div key={cond} className="text-center text-[9px] text-gray-400 pb-1" style={{ fontFamily: "'Sora', sans-serif" }}>
+                    {cond}
+                  </div>
+                ))}
+                {/* Rows */}
+                {HEATMAP_KINASES.map((kinase, rowIdx) => (
+                  <>
+                    <div key={`label-${kinase}`} className="text-[10px] text-gray-300 flex items-center pr-2" style={{ fontFamily: "'Sora', sans-serif" }}>
+                      {kinase}
+                    </div>
+                    {HEATMAP_DATA[rowIdx].map((val, colIdx) => (
+                      <div
+                        key={`cell-${rowIdx}-${colIdx}`}
+                        className="aspect-square rounded-sm"
+                        style={{ backgroundColor: getHeatmapColor(val) }}
+                      />
+                    ))}
+                  </>
+                ))}
+              </div>
+              {/* Legend */}
+              <div className="flex items-center justify-between mt-3 px-1">
+                <span className="text-[9px] text-gray-500">Low</span>
+                <div className="flex-1 mx-2 h-2 rounded-full" style={{ background: "linear-gradient(to right, #1a2a1a, #2d4a1f, #4a7a2a, #7ab33a, #c8e64a)" }} />
+                <span className="text-[9px] text-gray-500">High</span>
+              </div>
+              <div className="text-center mt-1">
+                <span className="text-[9px] text-gray-500">Activity</span>
+              </div>
+            </div>
           </div>
         </div>
 
-        <div className="relative z-10 text-center max-w-5xl mx-auto px-6">
-          <h1
-            className="text-4xl sm:text-5xl md:text-7xl font-bold text-[#e0f7fa] leading-tight mb-6"
-            style={{ fontFamily: "'Sora', sans-serif" }}
-          >
-            Proteomics의 끝을 본다
-          </h1>
-          <p
-            className="text-xl sm:text-2xl md:text-3xl text-[#cfd8dc] font-medium mb-4"
-            style={{ fontFamily: "'Sora', sans-serif", fontWeight: 500 }}
-          >
-            Western Blot 1000장으로도 볼 수 없던 인사이트
-          </p>
-          <p className="text-lg sm:text-xl text-[#00e676] mb-10">
-            항체 없이도, 효소 활성의 지도를 그린다
-          </p>
-
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-8">
-            <button
-              onClick={() => setLocation("/manual")}
-              className="px-8 py-4 rounded-full bg-[#00e676] text-[#0a0e1a] font-bold text-lg hover:bg-[#00c853] transition-all hover:shadow-[0_0_30px_rgba(0,230,118,0.3)] flex items-center gap-2"
-              style={{ fontFamily: "'Sora', sans-serif" }}
-            >
-              무료 분석 시작 <ArrowRight className="w-5 h-5" />
-            </button>
-            <button
-              className="px-8 py-4 rounded-full border-2 border-[#e0f7fa]/30 text-[#e0f7fa] font-semibold text-lg hover:border-[#e0f7fa]/60 transition-all"
-              style={{ fontFamily: "'Sora', sans-serif" }}
-            >
-              데모 보기
-            </button>
-          </div>
-
-          <div className="flex items-center justify-center gap-2 text-[#ffd740] text-sm">
-            <Lock className="w-4 h-4" />
-            <span style={{ fontFamily: "'Sora', sans-serif" }}>Patent-Pending Co-Wave Technology</span>
-          </div>
-
-          <div className="mt-12 flex flex-wrap items-center justify-center gap-4 text-xs text-gray-500">
+        {/* Bottom PTM types bar */}
+        <div className="absolute bottom-8 left-0 right-0 z-10">
+          <div className="flex flex-wrap items-center justify-center gap-4 text-xs text-gray-500">
             <span>Phosphoproteomics</span>
-            <span className="w-1 h-1 rounded-full bg-gray-600" />
+            <span className="w-1.5 h-1.5 rounded-full bg-[#00e676]" />
             <span>Ubiquitylation</span>
-            <span className="w-1 h-1 rounded-full bg-gray-600" />
+            <span className="w-1.5 h-1.5 rounded-full bg-[#00e676]" />
             <span>Acetylation</span>
-            <span className="w-1 h-1 rounded-full bg-gray-600" />
+            <span className="w-1.5 h-1.5 rounded-full bg-[#00e676]" />
             <span>Methylation</span>
-            <span className="w-1 h-1 rounded-full bg-gray-600" />
+            <span className="w-1.5 h-1.5 rounded-full bg-[#00e676]" />
             <span>SUMOylation</span>
           </div>
         </div>
@@ -200,10 +313,10 @@ export default function Landing() {
             </div>
             <div className="relative">
               <div className="bg-[#0d1525] border border-white/10 rounded-2xl p-6 overflow-hidden">
-                {/* Simplified Co-Wave visualization */}
+                {/* Co-Wave visualization — dense multi-line temporal plot */}
                 <div className="relative h-64">
                   <svg className="w-full h-full" viewBox="0 0 400 200" fill="none">
-                    {/* Grid lines */}
+                    {/* Grid */}
                     <line x1="50" y1="20" x2="50" y2="180" stroke="#1a2a3a" strokeWidth="0.5" />
                     <line x1="50" y1="180" x2="380" y2="180" stroke="#1a2a3a" strokeWidth="0.5" />
                     <line x1="50" y1="100" x2="380" y2="100" stroke="#1a2a3a" strokeWidth="0.5" strokeDasharray="2" />
@@ -212,19 +325,22 @@ export default function Landing() {
                     <text x="170" y="195" fill="#666" fontSize="9" fontFamily="Sora">12h</text>
                     <text x="260" y="195" fill="#666" fontSize="9" fontFamily="Sora">24h</text>
                     <text x="350" y="195" fill="#666" fontSize="9" fontFamily="Sora">48h</text>
-                    {/* Orange cluster - high amplitude synchronized */}
+                    {/* Orange cluster — high amplitude synchronized waves */}
                     <path d="M60,120 C100,110 130,40 170,30 C210,20 250,50 290,35 C330,20 360,30 380,25" stroke="#ff9800" strokeWidth="1.5" opacity="0.8" fill="none" />
                     <path d="M60,125 C100,115 130,50 170,40 C210,30 250,60 290,45 C330,30 360,40 380,35" stroke="#ffb74d" strokeWidth="1.2" opacity="0.7" fill="none" />
                     <path d="M60,130 C100,120 130,55 170,45 C210,35 250,65 290,50 C330,35 360,45 380,40" stroke="#ffa726" strokeWidth="1" opacity="0.6" fill="none" />
                     <path d="M60,135 C100,125 130,60 170,50 C210,40 250,70 290,55 C330,40 360,50 380,45" stroke="#ff9800" strokeWidth="1" opacity="0.5" fill="none" />
                     <path d="M60,140 C100,130 130,65 170,55 C210,45 250,75 290,60 C330,45 360,55 380,50" stroke="#ffb74d" strokeWidth="0.8" opacity="0.4" fill="none" />
-                    {/* Green cluster - moderate amplitude */}
+                    <path d="M60,145 C100,135 130,70 170,60 C210,50 250,80 290,65 C330,50 360,60 380,55" stroke="#ffa726" strokeWidth="0.7" opacity="0.35" fill="none" />
+                    {/* Green cluster — moderate amplitude */}
                     <path d="M60,110 C100,108 130,95 170,90 C210,85 250,88 290,85 C330,82 360,80 380,78" stroke="#4caf50" strokeWidth="1.2" opacity="0.7" fill="none" />
                     <path d="M60,115 C100,112 130,100 170,95 C210,90 250,93 290,90 C330,87 360,85 380,83" stroke="#66bb6a" strokeWidth="1" opacity="0.6" fill="none" />
                     <path d="M60,118 C100,115 130,105 170,100 C210,95 250,98 290,95 C330,92 360,90 380,88" stroke="#81c784" strokeWidth="0.8" opacity="0.5" fill="none" />
-                    {/* Blue cluster - low amplitude, stable */}
+                    <path d="M60,108 C100,106 130,98 170,94 C210,90 250,92 290,88 C330,85 360,83 380,80" stroke="#a5d6a7" strokeWidth="0.7" opacity="0.4" fill="none" />
+                    {/* Blue cluster — low amplitude, stable */}
                     <path d="M60,105 C100,106 130,108 170,107 C210,106 250,107 290,108 C330,107 360,106 380,107" stroke="#42a5f5" strokeWidth="1" opacity="0.6" fill="none" />
                     <path d="M60,100 C100,101 130,103 170,102 C210,101 250,102 290,103 C330,102 360,101 380,102" stroke="#64b5f6" strokeWidth="0.8" opacity="0.5" fill="none" />
+                    <path d="M60,95 C100,96 130,97 170,96 C210,95 250,96 290,97 C330,96 360,95 380,96" stroke="#90caf9" strokeWidth="0.6" opacity="0.4" fill="none" />
                     {/* Annotation */}
                     <text x="280" y="25" fill="#00e676" fontSize="8" fontFamily="Sora">✓ Co-Wave Detected</text>
                   </svg>
@@ -445,13 +561,13 @@ export default function Landing() {
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-8">
             <button
               onClick={() => setLocation("/manual")}
-              className="px-10 py-5 rounded-full bg-[#00e676] text-[#0a0e1a] font-bold text-lg hover:bg-[#00c853] transition-all hover:shadow-[0_0_40px_rgba(0,230,118,0.3)] flex items-center gap-2"
+              className="px-10 py-5 rounded-xl bg-[#00e676] text-[#0a0e1a] font-bold text-lg hover:bg-[#00c853] transition-all hover:shadow-[0_0_40px_rgba(0,230,118,0.3)] flex items-center gap-2"
               style={{ fontFamily: "'Sora', sans-serif" }}
             >
               무료 분석 시작 <ArrowRight className="w-5 h-5" />
             </button>
             <button
-              className="px-10 py-5 rounded-full border-2 border-[#e0f7fa]/30 text-[#e0f7fa] font-semibold text-lg hover:border-[#e0f7fa]/60 transition-all"
+              className="px-10 py-5 rounded-xl border-2 border-[#e0f7fa]/30 text-[#e0f7fa] font-semibold text-lg hover:border-[#e0f7fa]/60 transition-all"
               style={{ fontFamily: "'Sora', sans-serif" }}
             >
               데모 예약
@@ -468,7 +584,7 @@ export default function Landing() {
       {/* Footer */}
       <footer className="py-8 px-6 border-t border-white/5">
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
-          <span className="text-[#e0f7fa] font-bold" style={{ fontFamily: "'Sora', sans-serif" }}>Mekii</span>
+          <span className="text-xl font-bold text-[#e0f7fa] italic" style={{ fontFamily: "'Sora', sans-serif" }}>Mekii</span>
           <div className="flex gap-6 text-xs text-gray-500">
             <a href="#" className="hover:text-gray-300 transition-colors">이용약관</a>
             <a href="#" className="hover:text-gray-300 transition-colors">개인정보처리방침</a>
