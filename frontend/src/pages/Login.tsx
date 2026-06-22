@@ -34,10 +34,12 @@ export default function Login() {
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
       <div className="w-full max-w-md">
         {/* Logo */}
-        <div className="flex flex-col items-center gap-3 mb-8">
-          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary shadow-lg overflow-hidden">
-            <img src="/logo.png" alt="MKI" className="h-10 w-10 object-contain" />
-          </div>
+        <div className="flex flex-col items-center gap-4 mb-8">
+          <img
+            src="/mekii-logo.png"
+            alt="Mekii"
+            className="h-28 w-auto max-w-[220px] object-contain"
+          />
           <div className="text-center">
             <h1 className="text-2xl font-bold tracking-tight">Meta-Kinetics Intelligence</h1>
             <p className="text-sm text-muted-foreground mt-1">PTM-Oriented Translational AI-driven Targeting Omics</p>
