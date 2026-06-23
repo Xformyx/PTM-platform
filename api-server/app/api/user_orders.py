@@ -35,6 +35,43 @@ router = APIRouter(prefix="/orders", tags=["user-orders"])
 logger = logging.getLogger("ptm-platform.user-orders")
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _build_condition_map(sample_cfg: dict | list | None) -> dict:
+    """Build {filename: condition_label} from sample_config."""
+    condition_map = {}
+    if not sample_cfg:
+        return condition_map
+    samples = []
+    if isinstance(sample_cfg, dict):
+        samples = sample_cfg.get("samples", [])
+    elif isinstance(sample_cfg, list):
+        samples = sample_cfg
+    for entry in samples:
+        fname = entry.get("file_name") or entry.get("File_Name", "")
+        if not fname:
+            continue
+        group = (entry.get("group") or entry.get("Group", "")).strip()
+        condition = (entry.get("condition") or entry.get("Condition", "")).strip()
+        replicate = entry.get("replicate") or entry.get("Replicate")
+        if group.lower() == "control":
+            condition_map[fname] = "Control"
+        elif condition:
+            cond_group = condition
+            if replicate is not None:
+                suffix = f"_{replicate}"
+                if cond_group.endswith(suffix):
+                    cond_group = cond_group[: -len(suffix)]
+            condition_map[fname] = cond_group if cond_group else condition
+        elif group:
+            condition_map[fname] = group
+        else:
+            condition_map[fname] = "Unknown"
+    return condition_map
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Schemas
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -440,11 +477,92 @@ async def create_order_from_user(
 
     logger.info(f"User order created: {order_code} (id={order.id}) by user {getattr(user, 'email', 'internal')}")
 
+    # ── Auto-start pipeline (same logic as admin start_order) ──────────────
+    order.status = "queued"
+    order.current_stage = "preprocessing"
+    order.progress_pct = 0
+    order.started_at = datetime.now(timezone.utc)
+    order.run_by_user_id = user.id if getattr(user, "id", 0) != 0 else None
+    await db.commit()
+
+    # Build condition_map from sample_config
+    condition_map = _build_condition_map(sample_config)
+
+    ptm_mode = "phospho" if ptm_type == "phosphorylation" else "ubi"
+    species_map = {"mouse": "10090", "human": "9606", "rat": "10116"}
+    kegg_map = {"mouse": "mmu", "human": "hsa", "rat": "rno"}
+    species_lower = (species or "mouse").lower()
+
+    # Gather ChromaDB collections for RAG retrieval (use all active)
+    coll_result = await db.execute(
+        select(RagCollection.chromadb_name).where(RagCollection.is_active == True)
+    )
+    active_collections = [r[0] for r in coll_result.fetchall()]
+    logger.info(f"Order {order_code}: using {len(active_collections)} active RAG collections")
+
+    task_config = {
+        "order_code": order.order_code,
+        "pr_matrix_path": order.pr_matrix_path,
+        "pg_matrix_path": order.pg_matrix_path,
+        "fasta_path": order.fasta_path,
+        "config_xlsx_path": None,
+        "secondary_pr_matrix_path": None,
+        "secondary_pg_matrix_path": None,
+        "ptm_mode": ptm_mode,
+        "condition_map": condition_map if condition_map else None,
+        "single_time_point": sample_config.get("single_time_point", False) if isinstance(sample_config, dict) else False,
+        "species_tax_id": species_map.get(species_lower, "10090"),
+        "kegg_organism": kegg_map.get(species_lower, "mmu"),
+        "analysis_options": None,
+        "chromadb_collections": active_collections,
+        "llm_provider": report_options.get("llm_provider", "ollama"),
+        "llm_model": report_options.get("llm_model"),
+        "rag_enrichment_llm_model": report_options.get("llm_model"),
+        "rag_enrichment_llm_provider": report_options.get("llm_provider", "ollama"),
+        "rag_llm_model": report_options.get("llm_model"),
+        "rag_llm_provider": report_options.get("llm_provider", "ollama"),
+        "report_title": f"{project_name} - PTM Analysis Report",
+        "research_questions": questions,
+        "report_type": "comprehensive",
+        "report_config": {},
+        "analysis_mode": "ptm_only",
+        "top_n_ptms": 50,
+        "ptm_selection_mode": "top_n",
+        "secondary_ptm_type": None,
+        "secondary_sample_config": None,
+        "secondary_condition_map": None,
+    }
+
+    # Dispatch Celery task
+    from celery import Celery as CeleryClass
+    celery_app = CeleryClass("ptm_workers")
+    celery_app.conf.broker_url = os.getenv("CELERY_BROKER_URL", "redis://redis:6379/1")
+    celery_app.conf.result_backend = os.getenv("CELERY_RESULT_BACKEND", "redis://redis:6379/2")
+
+    task = celery_app.send_task(
+        "preprocessing.tasks.run_preprocessing",
+        args=[order.id, task_config],
+        queue="preprocessing",
+    )
+    logger.info(f"Order {order_code} auto-dispatched — task_id={task.id}")
+
+    # Log the dispatch
+    db_log = OrderLog(
+        order_id=order.id,
+        stage="preprocessing",
+        step="dispatch",
+        status="started",
+        progress_pct=0,
+        message=f"Auto-dispatched from User UI (task_id={task.id})",
+    )
+    db.add(db_log)
+    await db.commit()
+
     return {
         "order_id": order.id,
         "order_code": order.order_code,
-        "status": order.status,
-        "message": "Analysis created successfully",
+        "status": "queued",
+        "message": "Analysis created and pipeline started automatically",
     }
 
 

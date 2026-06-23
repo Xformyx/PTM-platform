@@ -142,7 +142,7 @@ export default function AnalysisReport() {
               {/* Stage pipeline indicator */}
               <div className="flex items-center justify-between mb-5">
                 {[
-                  { key: "registered", label: "대기 중", desc: "분석 대기열에 등록됨" },
+                  { key: "registered", label: "시작 중", desc: "분석 준비 중" },
                   { key: "preprocessing", label: "전처리", desc: "데이터 정제 및 PTM 정량" },
                   { key: "rag_enrichment", label: "AI 분석", desc: "문헌 검색 및 생물학적 해석" },
                   { key: "report_generation", label: "보고서 생성", desc: "종합 보고서 작성 중" },
@@ -182,8 +182,8 @@ export default function AnalysisReport() {
                     {(() => {
                       const s = order.current_stage || order.status;
                       const labels: Record<string, string> = {
-                        registered: "분석 준비 중...",
-                        queued: "분석 대기열에서 순서를 기다리고 있습니다...",
+                        registered: "분석을 시작하고 있습니다...",
+                        queued: "분석 파이프라인을 준비하고 있습니다...",
                         preprocessing: "데이터를 전처리하고 있습니다",
                         rag_enrichment: "AI가 문헌을 검색하고 분석하고 있습니다",
                         report_generation: "종합 보고서를 작성하고 있습니다",
@@ -195,7 +195,7 @@ export default function AnalysisReport() {
                     {order.stage_detail || (() => {
                       const s = order.current_stage || order.status;
                       const hints: Record<string, string> = {
-                        registered: "Admin이 분석을 시작하면 자동으로 진행됩니다",
+                        registered: "잠시만 기다려주세요. 자동으로 시작됩니다",
                         queued: "곧 시작됩니다. 잠시만 기다려주세요",
                         preprocessing: "mzML 파일에서 PTM을 정량하고 통계 분석을 수행합니다 (약 5-15분)",
                         rag_enrichment: "PubMed, UniProt, KEGG 등에서 관련 정보를 수집하고 LLM이 해석합니다 (약 10-30분)",
