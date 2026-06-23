@@ -21,6 +21,7 @@ import {
   Loader2,
   CheckCircle2,
   XCircle,
+  StopCircle,
   Clock,
   ScatterChart,
   Activity,
@@ -62,7 +63,7 @@ export default function AnalysisReport() {
       try {
         const data = await api.get<Order>(`/orders/${id}`);
         setOrder(data);
-        if (data.status === "completed" || data.status === "failed") {
+        if (data.status === "completed" || data.status === "failed" || data.status === "cancelled") {
           clearInterval(interval);
         }
       } catch {
@@ -93,8 +94,9 @@ export default function AnalysisReport() {
     );
   }
 
-  const isRunning = !["completed", "failed"].includes(order.status);
+  const isRunning = !["completed", "failed", "cancelled"].includes(order.status);
   const isCompleted = order.status === "completed";
+  const isCancelled = order.status === "cancelled";
 
   return (
     <div className="flex h-[calc(100vh-4rem)] overflow-hidden">
@@ -207,7 +209,26 @@ export default function AnalysisReport() {
                 </div>
               </div>
               <Progress value={order.progress_pct} className="h-2" />
-              <p className="text-xs text-muted-foreground mt-2 text-right">{order.progress_pct}%</p>
+              <div className="flex items-center justify-between mt-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-destructive hover:text-destructive hover:bg-destructive/10 gap-1.5 h-7 px-2"
+                  onClick={async () => {
+                    if (!confirm("분석을 중단하시겠습니까? 이 작업은 되돌릴 수 없습니다.")) return;
+                    try {
+                      await api.post(`/orders/${order.id}/cancel`);
+                      setOrder({ ...order, status: "cancelled" });
+                    } catch (err) {
+                      console.error("Cancel failed:", err);
+                    }
+                  }}
+                >
+                  <StopCircle className="h-3.5 w-3.5" />
+                  분석 중단
+                </Button>
+                <p className="text-xs text-muted-foreground">{order.progress_pct}%</p>
+              </div>
             </CardContent>
           </Card>
         )}
@@ -278,6 +299,22 @@ export default function AnalysisReport() {
             </CardContent>
           </Card>
         )}
+
+        {/* Cancelled State */}
+        {isCancelled && (
+          <Card className="border-orange-500/30">
+            <CardContent className="py-8 flex flex-col items-center">
+              <StopCircle className="h-12 w-12 text-orange-500 mb-3" />
+              <h3 className="font-semibold mb-1">분석이 중단되었습니다</h3>
+              <p className="text-sm text-muted-foreground text-center max-w-md">
+                사용자에 의해 분석이 취소되었습니다.
+              </p>
+              <Button variant="outline" className="mt-4" onClick={() => navigate("/app/new")}>
+                새 분석 시작
+              </Button>
+            </CardContent>
+          </Card>
+        )}
       </div>
 
       {/* Right: Mekii AI Chat Panel */}
@@ -301,6 +338,7 @@ function StatusBadge({ status }: { status: string }) {
     report_generation: { label: "Reporting", color: "bg-purple-100 text-purple-800", icon: <Loader2 className="h-3 w-3 animate-spin" /> },
     completed: { label: "Completed", color: "bg-green-100 text-green-800", icon: <CheckCircle2 className="h-3 w-3" /> },
     failed: { label: "Failed", color: "bg-red-100 text-red-800", icon: <XCircle className="h-3 w-3" /> },
+    cancelled: { label: "Cancelled", color: "bg-orange-100 text-orange-800", icon: <StopCircle className="h-3 w-3" /> },
   };
   const c = config[status] || config.pending;
   return (
