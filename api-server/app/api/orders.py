@@ -1315,7 +1315,7 @@ async def cancel_order(
         raise HTTPException(status_code=404, detail="Order not found")
     await _require_write_access(order, user, db)
 
-    running_statuses = ("queued", "running", "preprocessing", "rag_enrichment", "report_generation")
+    running_statuses = ("registered", "queued", "running", "preprocessing", "rag_enrichment", "report_generation")
     if order.status not in running_statuses:
         raise HTTPException(
             status_code=400,
