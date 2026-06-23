@@ -9,10 +9,8 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import {
-  FlaskConical,
   ArrowRight,
   Globe,
-  ChevronDown,
   Zap,
   Brain,
   Network,
@@ -25,12 +23,12 @@ type Lang = "ko" | "en";
 
 const t: Record<string, Record<Lang, string>> = {
   heroTitle: {
-    ko: "PTM 데이터에서\n생물학적 의미를 발견하다",
-    en: "Discover Biological\nMeaning from PTM Data",
+    ko: "Proteomics의\n끝을 본다",
+    en: "See the End of\nProteomics",
   },
   heroSub: {
-    ko: "PTM 데이터를 업로드하면, AI가 Upstream Regulator, Signaling Cascade, MoA를 자동으로 분석합니다.",
-    en: "Upload your PTM data. AI automatically analyzes Upstream Regulators, Signaling Cascades, and Mechanism of Action.",
+    ko: "Western Blot 1000장으로도 볼 수 없던 인사이트\n항체 없이도, 효소 활성의 지도를 그린다",
+    en: "Insights that 1000 Western Blots couldn't reveal\nMapping enzyme activity without antibodies",
   },
   cta: { ko: "무료 분석 시작", en: "Start Free Analysis" },
   demo: { ko: "데모 보기", en: "View Demo" },
@@ -89,9 +87,7 @@ export default function Landing() {
       <nav className="fixed top-0 left-0 right-0 z-50 bg-[#0a0a0f]/80 backdrop-blur-xl border-b border-white/5">
         <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="h-8 w-8 rounded-lg bg-emerald-500 flex items-center justify-center">
-              <FlaskConical className="h-4 w-4 text-white" />
-            </div>
+            <img src="/mekii-logo.png" alt="Mekii" className="h-8 w-8 object-contain" />
             <span className="text-lg font-bold tracking-tight">Mekii</span>
           </div>
 
@@ -196,9 +192,7 @@ export default function Landing() {
       <footer className="border-t border-white/5 py-8 px-6">
         <div className="max-w-6xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="h-6 w-6 rounded bg-emerald-500 flex items-center justify-center">
-              <FlaskConical className="h-3 w-3 text-white" />
-            </div>
+            <img src="/mekii-logo.png" alt="Mekii" className="h-6 w-6 object-contain" />
             <span className="text-sm font-semibold">Mekii</span>
           </div>
           <p className="text-xs text-white/30">&copy; 2024 Xformyx. All rights reserved.</p>
