@@ -257,7 +257,7 @@ function VersionDisplay({ collapsed }: { collapsed?: boolean }) {
 function CreateUserModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
-  const [role, setRole] = useState<"admin" | "analyst" | "viewer">("analyst");
+  const [role, setRole] = useState<"admin" | "analyst">("analyst");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
@@ -343,15 +343,14 @@ function CreateUserModal({ open, onClose }: { open: boolean; onClose: () => void
               <Label htmlFor="cu-role">Role</Label>
               <Select
                 value={role}
-                onValueChange={(v) => setRole(v as "admin" | "analyst" | "viewer")}
+                onValueChange={(v) => setRole(v as "admin" | "analyst")}
                 disabled={loading}
               >
                 <SelectTrigger id="cu-role">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="viewer">일반 사용자 (Viewer)</SelectItem>
-                  <SelectItem value="analyst">분석가 (Analyst)</SelectItem>
+                  <SelectItem value="analyst">일반 사용자 (User)</SelectItem>
                   <SelectItem value="admin">관리자 (Admin)</SelectItem>
                 </SelectContent>
               </Select>
@@ -488,8 +487,8 @@ function ManageUsersModal({ open, onClose }: { open: boolean; onClose: () => voi
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-1.5">
                         <p className="text-sm font-medium truncate">{u.name}</p>
-                        <Badge variant={u.role === "admin" ? "default" : u.role === "viewer" ? "outline" : "secondary"} className={`text-[10px] h-4 px-1 ${u.role === "viewer" ? "text-blue-600 border-blue-300" : ""}`}>
-                          {u.role === "admin" ? "Admin" : u.role === "analyst" ? "Analyst" : "Viewer"}
+                        <Badge variant={u.role === "admin" ? "default" : "secondary"} className="text-[10px] h-4 px-1">
+                          {u.role === "admin" ? "Admin" : "User"}
                         </Badge>
                         {!u.is_active && (
                           <Badge variant="outline" className="text-[10px] h-4 px-1 text-red-500 border-red-300">

@@ -109,7 +109,7 @@ function LandingGuard() {
     );
   }
   if (user) {
-    if (user.role === "admin" || user.role === "analyst") {
+    if (user.role === "admin") {
       return <Navigate to="/admin" replace />;
     }
     return <Navigate to="/app" replace />;
@@ -128,7 +128,7 @@ function LoginGuard() {
     );
   }
   if (user) {
-    if (user.role === "admin" || user.role === "analyst") {
+    if (user.role === "admin") {
       return <Navigate to="/admin" replace />;
     }
     return <Navigate to="/app" replace />;
