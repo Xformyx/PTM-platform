@@ -29,8 +29,8 @@ const t: Record<string, Record<Lang, string>> = {
     en: "Discover Biological\nMeaning from PTM Data",
   },
   heroSub: {
-    ko: "Phosphoproteomics 데이터를 업로드하면, AI가 Kinase Activity, Signaling Cascade, MoA를 자동으로 분석합니다.",
-    en: "Upload your phosphoproteomics data. AI automatically analyzes Kinase Activity, Signaling Cascades, and Mechanism of Action.",
+    ko: "PTM 데이터를 업로드하면, AI가 Upstream Regulator, Signaling Cascade, MoA를 자동으로 분석합니다.",
+    en: "Upload your PTM data. AI automatically analyzes Upstream Regulators, Signaling Cascades, and Mechanism of Action.",
   },
   cta: { ko: "무료 분석 시작", en: "Start Free Analysis" },
   demo: { ko: "데모 보기", en: "View Demo" },
@@ -41,23 +41,23 @@ const t: Record<string, Record<Lang, string>> = {
   },
   feat2Title: { ko: "AI 리포트 생성", en: "AI Report Generation" },
   feat2Desc: {
-    ko: "ChromaDB 기반 문헌 참조와 LLM이 논문 수준의 분석 리포트를 자동 작성",
-    en: "ChromaDB-powered literature references and LLM automatically generate publication-quality reports",
+    ko: "관련 최신 문헌을 자동으로 참조하여, 논문에 바로 쓸 수 있는 분석 리포트를 생성합니다",
+    en: "Automatically references relevant latest literature to generate publication-ready analysis reports",
   },
   feat3Title: { ko: "Signaling Cascade", en: "Signaling Cascade" },
   feat3Desc: {
-    ko: "Receptor → Kinase → Substrate 경로를 시간순으로 재구성하여 MoA 해석",
-    en: "Reconstruct Receptor → Kinase → Substrate pathways temporally for MoA interpretation",
+    ko: "Receptor → Regulator → Substrate 경로를 시간순으로 재구성하여 MoA를 해석합니다",
+    en: "Reconstruct Receptor → Regulator → Substrate pathways temporally for MoA interpretation",
   },
-  feat4Title: { ko: "Kinase Module 분석", en: "Kinase Module Analysis" },
+  feat4Title: { ko: "Regulator Network 분석", en: "Regulator Network Analysis" },
   feat4Desc: {
-    ko: "8개 데이터베이스 + AI 예측으로 kinase-substrate 네트워크를 완전 재구성",
-    en: "Fully reconstruct kinase-substrate networks using 8 databases + AI prediction",
+    ko: "알려진 regulator 뿐 아니라, 새로운 enzyme-substrate 관계까지 AI가 예측합니다",
+    en: "AI predicts not only known regulators but also novel enzyme-substrate relationships",
   },
   feat5Title: { ko: "4분면 Vector Plot", en: "4-Quadrant Vector Plot" },
   feat5Desc: {
-    ko: "단백질 발현 변화와 PTM 점유율 변화를 분리하여 진짜 kinase activity만 포착",
-    en: "Separate protein expression changes from PTM occupancy changes to capture true kinase activity",
+    ko: "단백질 발현 변화와 PTM 점유율 변화를 분리하여 진짜 regulator activity만 포착합니다",
+    en: "Separate protein expression changes from PTM occupancy changes to capture true regulator activity",
   },
   feat6Title: { ko: "복잡한 설정 없이 바로 분석", en: "No Complex Setup Required" },
   feat6Desc: {
