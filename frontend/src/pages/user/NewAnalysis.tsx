@@ -79,7 +79,7 @@ export default function NewAnalysis() {
   // ── File handling ──────────────────────────────────────────────────────
   const detectFileType = (filename: string): UploadedFile["type"] => {
     const lower = filename.toLowerCase();
-    if (lower.endsWith(".raw") || lower.endsWith(".mzml") || lower.endsWith(".wiff") || lower.endsWith(".d")) return "raw_data";
+    if (lower.endsWith(".mzml")) return "raw_data";
     if (lower.endsWith(".fasta") || lower.endsWith(".fa")) return "fasta";
     return "reference_paper";
   };
@@ -199,7 +199,7 @@ export default function NewAnalysis() {
       <div className="mb-8">
         <h1 className="text-2xl font-bold tracking-tight">New Analysis</h1>
         <p className="text-muted-foreground mt-1">
-          질량분석 데이터(Raw/mzML)를 업로드하고 실험을 설명해주세요. Mekii가 자동으로 처리합니다.
+          mzML 파일을 업로드하고 실험을 설명해주세요. Mekii가 자동으로 처리합니다.
         </p>
       </div>
 
@@ -254,7 +254,7 @@ export default function NewAnalysis() {
                     <span className="text-sm font-medium">질량분석 데이터</span>
                     {hasRawData && <Check className="h-3 w-3 text-green-600" />}
                   </div>
-                  <p className="text-xs text-muted-foreground">.raw, .mzML, .wiff, .d 파일 (Thermo Orbitrap Tribrid급 이상, DIA 모드 권장)</p>
+                  <p className="text-xs text-muted-foreground">.mzML 파일 (Thermo Orbitrap Tribrid급 이상, DIA 모드 권장)</p>
                 </div>
                 <div className={`p-3 rounded-lg border-2 border-dashed ${hasFasta ? "border-green-300 bg-green-50 dark:bg-green-900/10" : "border-muted"}`}>
                   <div className="flex items-center gap-2 mb-1">
@@ -269,7 +269,7 @@ export default function NewAnalysis() {
               {/* Processing info */}
               <div className="p-3 rounded-lg bg-primary/5 border border-primary/20">
                 <p className="text-xs text-primary">
-                  💡 업로드된 Raw/mzML 파일은 Mekii의 자체 개발 search engine이 자동으로 PTM 정량 분석을 시작합니다.
+                  💡 업로드된 mzML 파일은 Mekii의 자체 개발 search engine이 자동으로 PTM 정량 분석을 시작합니다.
                 </p>
               </div>
 
@@ -279,7 +279,7 @@ export default function NewAnalysis() {
                   ref={fileInputRef}
                   type="file"
                   multiple
-                  accept=".raw,.mzml,.mzML,.wiff,.d,.fasta,.fa,.pdf"
+                  accept=".mzml,.mzML,.fasta,.fa,.pdf"
                   onChange={handleFileSelect}
                   className="hidden"
                 />
@@ -288,7 +288,7 @@ export default function NewAnalysis() {
                   Select Files
                 </Button>
                 <span className="text-xs text-muted-foreground">
-                  Supported: .raw, .mzML, .wiff, .d, .fasta, .fa, .pdf (reference papers)
+                  Supported: .mzML, .fasta, .fa, .pdf (reference papers)
                 </span>
               </div>
 

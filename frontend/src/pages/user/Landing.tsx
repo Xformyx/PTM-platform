@@ -69,8 +69,8 @@ const t: Record<string, Record<Lang, string>> = {
   },
   footerCta: { ko: "지금 바로 시작하세요", en: "Get Started Now" },
   footerSub: {
-    ko: "질량분석 데이터(Raw/mzML)만 업로드하세요. 나머지는 Mekii AI가 처리합니다.",
-    en: "Just upload your mass spectrometry data (Raw/mzML). Mekii AI handles the rest.",
+    ko: "mzML 파일만 업로드하세요. 나머지는 Mekii AI가 처리합니다.",
+    en: "Just upload your mzML file. Mekii AI handles the rest.",
   },
   nav: { ko: "한국어", en: "English" },
 };
