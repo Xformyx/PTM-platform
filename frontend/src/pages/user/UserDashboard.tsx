@@ -12,7 +12,6 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Plus,
-  FlaskConical,
   Clock,
   CheckCircle2,
   XCircle,
@@ -74,7 +73,7 @@ export default function UserDashboard() {
         <Card className="border-dashed">
           <CardContent className="flex flex-col items-center justify-center py-16">
             <div className="h-16 w-16 rounded-2xl bg-primary/10 flex items-center justify-center mb-4">
-              <FlaskConical className="h-8 w-8 text-primary" />
+              <img src="/mekii-logo.png" alt="Mekii" className="h-10 w-10 object-contain" />
             </div>
             <h3 className="text-lg font-semibold mb-2">No analyses yet</h3>
             <p className="text-muted-foreground text-center max-w-md mb-6">
@@ -138,7 +137,7 @@ function AnalysisCard({ order, onClick }: { order: Order; onClick: () => void })
       <CardContent className="flex items-center gap-4 py-4 px-5">
         {/* Icon */}
         <div className="h-10 w-10 rounded-lg bg-primary/5 flex items-center justify-center shrink-0">
-          <FlaskConical className="h-5 w-5 text-primary" />
+          <img src="/mekii-logo.png" alt="Mekii" className="h-6 w-6 object-contain" />
         </div>
 
         {/* Info */}

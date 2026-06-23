@@ -21,7 +21,6 @@ import {
   Upload,
   FileText,
   Database,
-  FlaskConical,
   Sparkles,
   Check,
   X,

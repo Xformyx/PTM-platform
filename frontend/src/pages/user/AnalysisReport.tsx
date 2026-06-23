@@ -18,7 +18,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import MekiiChat from "@/components/user/MekiiChat";
 import {
   ArrowLeft,
-  FlaskConical,
   Loader2,
   CheckCircle2,
   XCircle,
