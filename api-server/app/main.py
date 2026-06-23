@@ -10,7 +10,7 @@ from sqlalchemy import select, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api import articles, auth, chat, events, health, llm, notifications, orders, presentation, ptmquant, rag, settings as settings_api, system
+from app.api import articles, auth, chat, events, health, llm, notifications, orders, presentation, ptmquant, rag, settings as settings_api, system, user_orders
 from app.middleware.security import SecurityMiddleware
 from app.config import get_settings
 from app.core.database import engine, Base
@@ -368,3 +368,4 @@ app.include_router(articles.router, prefix="/api")
 app.include_router(chat.router, prefix="/api")
 app.include_router(presentation.router, prefix="/api")
 app.include_router(ptmquant.router, prefix="/api")
+app.include_router(user_orders.router, prefix="/api")
