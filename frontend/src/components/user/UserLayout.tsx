@@ -15,7 +15,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
-  FlaskConical,
   Plus,
   History,
   LogOut,
@@ -41,12 +40,11 @@ export default function UserLayout() {
         {/* Left: Logo + Nav */}
         <div className="flex items-center gap-8">
           <Link to="/app" className="flex items-center gap-2 group">
-            <div className="h-8 w-8 rounded-lg bg-primary flex items-center justify-center">
-              <FlaskConical className="h-4 w-4 text-primary-foreground" />
-            </div>
-            <span className="text-lg font-bold tracking-tight group-hover:text-primary transition-colors">
-              Mekii
-            </span>
+            <img
+              src="/mekii-logo.png"
+              alt="Mekii"
+              className="h-9 w-auto object-contain"
+            />
           </Link>
 
           <nav className="hidden md:flex items-center gap-1">
