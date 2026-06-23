@@ -38,6 +38,113 @@ logger = logging.getLogger("ptm-platform.user-orders")
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Metadata columns in DIA-NN output TSVs (not sample data)
+METADATA_COLUMNS = frozenset([
+    "Protein.Group", "Protein.Ids", "Protein.Names", "Genes",
+    "First.Protein.Description", "Proteotypic", "Stripped.Sequence",
+    "Modified.Sequence", "Precursor.Charge", "Precursor.Id",
+])
+
+
+def _read_tsv_sample_columns(tsv_path: str) -> list[str]:
+    """Read the first line of a TSV file and extract sample columns.
+    Sample columns are those NOT in METADATA_COLUMNS (typically ending with .mzML).
+    This mirrors the Admin frontend's readTsvHeaders + extractSampleColumns logic.
+    """
+    try:
+        with open(tsv_path, "r", encoding="utf-8") as f:
+            header_line = f.readline().strip()
+        headers = header_line.split("\t")
+        sample_cols = [h.strip() for h in headers if h.strip() and h.strip() not in METADATA_COLUMNS]
+        return sample_cols
+    except Exception as e:
+        logger.warning(f"Failed to read TSV headers from {tsv_path}: {e}")
+        return []
+
+
+def _build_condition_map_from_tsv(
+    sample_columns: list[str],
+    sample_mapping: list[dict],
+    description: str = "",
+) -> dict:
+    """Build condition_map by matching actual TSV sample columns with LLM-inferred mapping.
+    Uses basename matching and substring matching (same logic as PTMQuantificationAnalyzer).
+    If LLM mapping doesn't cover all columns, falls back to pattern-based inference.
+    """
+    condition_map = {}
+
+    if not sample_columns:
+        return condition_map
+
+    # Build a lookup from LLM-inferred sample_mapping
+    llm_map = {}  # {filename: {condition, group, replicate}}
+    for entry in sample_mapping:
+        fname = entry.get("filename", "")
+        if fname:
+            llm_map[fname] = entry
+            # Also store basename for matching
+            basename = os.path.basename(fname)
+            if basename != fname:
+                llm_map[basename] = entry
+
+    # Try to match each actual sample column with LLM mapping
+    matched_count = 0
+    for col in sample_columns:
+        col_basename = os.path.basename(col)
+        matched_entry = None
+
+        # Exact match
+        if col in llm_map:
+            matched_entry = llm_map[col]
+        elif col_basename in llm_map:
+            matched_entry = llm_map[col_basename]
+        else:
+            # Substring match
+            for key, entry in llm_map.items():
+                key_basename = os.path.basename(key)
+                if col_basename in key or key_basename in col or col_basename == key_basename:
+                    matched_entry = entry
+                    break
+
+        if matched_entry:
+            group = (matched_entry.get("group") or matched_entry.get("condition", "")).strip()
+            condition = matched_entry.get("condition", "").strip()
+            # Determine if this is a control sample
+            control_keywords = {"control", "ctrl", "con", "wt", "wildtype", "untreated", "baseline"}
+            if group.lower() in control_keywords or condition.lower() in control_keywords:
+                condition_map[col] = "Control"
+            elif condition:
+                # Strip replicate suffix if present
+                replicate = matched_entry.get("replicate")
+                cond_group = condition
+                if replicate is not None:
+                    suffix = f"_{replicate}"
+                    if cond_group.endswith(suffix):
+                        cond_group = cond_group[:-len(suffix)]
+                condition_map[col] = cond_group if cond_group else condition
+            elif group:
+                condition_map[col] = group
+            else:
+                condition_map[col] = "Unknown"
+            matched_count += 1
+        else:
+            # Fallback: pattern-based inference from column name
+            col_lower = col.lower()
+            if "control" in col_lower or "ctrl" in col_lower or "cont_" in col_lower:
+                condition_map[col] = "Control"
+            elif "_a_" in col or "_A_" in col:
+                condition_map[col] = "A"
+            elif "_b_" in col or "_B_" in col:
+                condition_map[col] = "B"
+            elif "_c_" in col or "_C_" in col:
+                condition_map[col] = "C"
+            else:
+                condition_map[col] = "Unknown"
+
+    logger.info(f"Condition map: {matched_count}/{len(sample_columns)} columns matched via LLM mapping")
+    return condition_map
+
+
 def _build_condition_map(sample_cfg: dict | list | None) -> dict:
     """Build {filename: condition_label} from sample_config."""
     condition_map = {}
@@ -128,6 +235,9 @@ Rules:
 - If TSV search result files are provided (pr_matrix, pg_matrix), note them as pre-processed data
 - If description mentions specific treatments, time points, or cell types, use them for conditions
 - Be conservative: if uncertain, set confidence to "low"
+- CRITICAL: If "Actual Sample Columns from PR Matrix TSV" are provided, the sample_mapping MUST use those EXACT column names as the "filename" field. Do NOT invent or modify filenames.
+- Each sample column (usually ending with .mzML) should appear exactly once in sample_mapping
+- Infer condition/group from patterns in the column names (e.g., "Control_", "Treatment_", replicate numbers)
 """
 
 
@@ -141,10 +251,27 @@ async def infer_config(
     user=Depends(get_current_user),
 ):
     """Use LLM to infer analysis configuration from uploaded files and description."""
+    import tempfile
+
     # Build context for LLM
     file_info = []
+    tsv_sample_columns = []  # Actual sample columns from PR matrix TSV
+
     for f, ft in zip(files, file_types):
         file_info.append({"filename": f.filename, "type": ft, "size_mb": round(f.size / 1024 / 1024, 2) if f.size else 0})
+
+        # If this is a search_result (TSV), read its headers to get actual sample columns
+        if ft == "search_result" and not tsv_sample_columns:
+            fname_lower = (f.filename or "").lower()
+            if "pr" in fname_lower or "precursor" in fname_lower or not tsv_sample_columns:
+                # Save temporarily to read headers
+                content_bytes = await f.read()
+                await f.seek(0)  # Reset for later use
+                tmp_path = Path(tempfile.gettempdir()) / f"infer_{f.filename}"
+                tmp_path.write_bytes(content_bytes)
+                tsv_sample_columns = _read_tsv_sample_columns(str(tmp_path))
+                tmp_path.unlink(missing_ok=True)
+                logger.info(f"Read {len(tsv_sample_columns)} sample columns from {f.filename}")
 
     # Parse research questions
     questions = []
@@ -154,8 +281,18 @@ async def infer_config(
         except json.JSONDecodeError:
             questions = [research_questions]
 
+    # Build user prompt with actual TSV sample columns for accurate mapping
+    tsv_columns_section = ""
+    if tsv_sample_columns:
+        tsv_columns_section = f"""\n## Actual Sample Columns from PR Matrix TSV
+These are the REAL column names in the uploaded TSV file. Your sample_mapping MUST use these EXACT filenames:
+{json.dumps(tsv_sample_columns, indent=2)}
+
+IMPORTANT: Each entry in sample_mapping must have a 'filename' that EXACTLY matches one of the above column names."""
+
     user_prompt = f"""## Uploaded Files
 {json.dumps(file_info, indent=2)}
+{tsv_columns_section}
 
 ## Experiment Description
 {description}
@@ -485,8 +622,19 @@ async def create_order_from_user(
     order.run_by_user_id = user.id if getattr(user, "id", 0) != 0 else None
     await db.commit()
 
-    # Build condition_map from sample_config
-    condition_map = _build_condition_map(sample_config)
+    # Build condition_map from ACTUAL TSV headers (matching Admin mode behavior)
+    # This reads the real sample column names from the pr_matrix file
+    # and matches them with the LLM-inferred sample_mapping
+    sample_columns = _read_tsv_sample_columns(pr_path) if pr_path and "pending_preprocessing" not in pr_path else []
+    sample_mapping_for_map = config_data.get("sample_mapping", [])
+
+    if sample_columns:
+        # Use actual TSV columns for accurate condition_map (same as Admin mode)
+        condition_map = _build_condition_map_from_tsv(sample_columns, sample_mapping_for_map, description)
+        logger.info(f"Order {order_code}: condition_map built from {len(sample_columns)} TSV columns: {condition_map}")
+    else:
+        # Fallback to LLM-based sample_config (mzML-only workflow)
+        condition_map = _build_condition_map(sample_config)
 
     ptm_mode = "phospho" if ptm_type == "phosphorylation" else "ubi"
     species_map = {"mouse": "10090", "human": "9606", "rat": "10116"}
