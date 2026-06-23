@@ -24,6 +24,7 @@ import {
   Sparkles,
   Check,
   X,
+  Plus,
   Loader2,
   ArrowRight,
   ArrowLeft,
@@ -66,7 +67,7 @@ export default function NewAnalysis() {
   const [step, setStep] = useState<Step>("upload");
   const [files, setFiles] = useState<UploadedFile[]>([]);
   const [description, setDescription] = useState("");
-  const [researchQuestion, setResearchQuestion] = useState("");
+  const [researchQuestions, setResearchQuestions] = useState<string[]>([""]);
   const [inferring, setInferring] = useState(false);
   const [inferredConfig, setInferredConfig] = useState<InferredConfig | null>(null);
   const [inferError, setInferError] = useState<string | null>(null);
@@ -74,6 +75,7 @@ export default function NewAnalysis() {
   const [editingField, setEditingField] = useState<string | null>(null);
   const [correctionText, setCorrectionText] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const pdfInputRef = useRef<HTMLInputElement>(null);
 
   // ── File handling ──────────────────────────────────────────────────────
   const detectFileType = (filename: string): UploadedFile["type"] => {
@@ -99,6 +101,17 @@ export default function NewAnalysis() {
   const removeFile = (index: number) => {
     setFiles((prev) => prev.filter((_, i) => i !== index));
   };
+  const handlePdfSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFiles = Array.from(e.target.files || []);
+    const newFiles: UploadedFile[] = selectedFiles.map((f) => ({
+      name: f.name,
+      size: f.size,
+      type: "reference_paper" as const,
+      file: f,
+    }));
+    setFiles((prev) => [...prev, ...newFiles]);
+    if (pdfInputRef.current) pdfInputRef.current.value = "";
+  }, []);
 
   const hasRawData = files.some((f) => f.type === "raw_data");
   const hasFasta = files.some((f) => f.type === "fasta");
@@ -116,9 +129,9 @@ export default function NewAnalysis() {
         formData.append("files", f.file);
         formData.append("file_types", f.type);
       });
-      formData.append("description", description);
-      if (researchQuestion) formData.append("research_question", researchQuestion);
-
+            formData.append("description", description);
+      const validQuestions = researchQuestions.filter((q) => q.trim());
+      if (validQuestions.length > 0) formData.append("research_questions", JSON.stringify(validQuestions));
       const result = await fetch("/api/orders/infer-config", {
         method: "POST",
         headers: { Authorization: `Bearer ${localStorage.getItem("ptm-token")}` },
@@ -176,7 +189,8 @@ export default function NewAnalysis() {
       });
       formData.append("config", JSON.stringify(inferredConfig));
       formData.append("description", description);
-      if (researchQuestion) formData.append("research_question", researchQuestion);
+      const validQs = researchQuestions.filter((q) => q.trim());
+      if (validQs.length > 0) formData.append("research_questions", JSON.stringify(validQs));
 
       const result = await fetch("/api/orders/create-from-user", {
         method: "POST",
@@ -349,22 +363,50 @@ export default function NewAnalysis() {
                 </p>
               </div>
 
-              <Separator />
-
+                            <Separator />
               <div>
-                <Label htmlFor="question" className="text-sm flex items-center gap-2">
+                <Label className="text-sm flex items-center gap-2 mb-2">
                   <BookOpen className="h-3.5 w-3.5" />
-                  Research Question (optional)
+                  Research Questions (optional)
                 </Label>
-                <textarea
-                  id="question"
-                  value={researchQuestion}
-                  onChange={(e) => setResearchQuestion(e.target.value)}
-                  placeholder="e.g., What is the mechanism of action (MoA) of EGF signaling in HeLa cells? Which kinases are activated in the early response?"
-                  className="mt-1.5 w-full min-h-[80px] rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring resize-y"
-                />
-                <p className="text-xs text-muted-foreground mt-1">
-                  This guides the AI report generation. The report will focus on answering this question.
+                <div className="space-y-2">
+                  {researchQuestions.map((q, idx) => (
+                    <div key={idx} className="flex items-start gap-2">
+                      <span className="text-xs text-muted-foreground mt-2.5 shrink-0 w-5 text-right">{idx + 1}.</span>
+                      <textarea
+                        value={q}
+                        onChange={(e) => {
+                          const updated = [...researchQuestions];
+                          updated[idx] = e.target.value;
+                          setResearchQuestions(updated);
+                        }}
+                        placeholder={idx === 0 ? "e.g., What is the mechanism of action (MoA) of EGF signaling in HeLa cells?" : "Add another research question..."}
+                        className="flex-1 min-h-[60px] rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring resize-y"
+                      />
+                      {researchQuestions.length > 1 && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 mt-1 shrink-0 text-muted-foreground hover:text-destructive"
+                          onClick={() => setResearchQuestions(researchQuestions.filter((_, i) => i !== idx))}
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="mt-2 gap-1.5 text-xs"
+                  onClick={() => setResearchQuestions([...researchQuestions, ""])}
+                >
+                  <Plus className="h-3 w-3" />
+                  Add Question
+                </Button>
+                <p className="text-xs text-muted-foreground mt-1.5">
+                  These guide the AI report generation. The report will focus on answering these questions.
                 </p>
               </div>
             </CardContent>
@@ -383,23 +425,36 @@ export default function NewAnalysis() {
                 Upload relevant papers (PDF). These will be indexed into ChromaDB and used by the AI
                 to provide more contextual analysis and literature-grounded interpretations.
               </p>
-              {files.filter((f) => f.type === "reference_paper").length > 0 ? (
-                <div className="space-y-2">
+              {files.filter((f) => f.type === "reference_paper").length > 0 && (
+                <div className="space-y-2 mb-3">
                   {files
-                    .filter((f) => f.type === "reference_paper")
-                    .map((f, i) => (
-                      <div key={i} className="flex items-center gap-2 text-sm">
-                        <BookOpen className="h-3.5 w-3.5 text-muted-foreground" />
-                        <span className="truncate">{f.name}</span>
-                        <Badge variant="secondary" className="text-[10px]">PDF</Badge>
+                    .map((f, originalIdx) => ({ f, originalIdx }))
+                    .filter(({ f }) => f.type === "reference_paper")
+                    .map(({ f, originalIdx }) => (
+                      <div key={originalIdx} className="flex items-center gap-2 text-sm p-2 rounded-lg bg-muted/50">
+                        <BookOpen className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                        <span className="truncate flex-1">{f.name}</span>
+                        <Badge variant="secondary" className="text-[10px] shrink-0">PDF</Badge>
+                        <span className="text-xs text-muted-foreground shrink-0">{(f.size / 1024 / 1024).toFixed(1)} MB</span>
+                        <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => removeFile(originalIdx)}>
+                          <X className="h-3 w-3" />
+                        </Button>
                       </div>
                     ))}
                 </div>
-              ) : (
-                <p className="text-xs text-muted-foreground italic">
-                  No reference papers uploaded. You can add PDFs using the file selector above.
-                </p>
               )}
+              <input
+                ref={pdfInputRef}
+                type="file"
+                multiple
+                accept=".pdf"
+                onChange={handlePdfSelect}
+                className="hidden"
+              />
+              <Button variant="outline" size="sm" onClick={() => pdfInputRef.current?.click()} className="gap-2">
+                <Upload className="h-3.5 w-3.5" />
+                Upload PDFs
+              </Button>
             </CardContent>
           </Card>
 
