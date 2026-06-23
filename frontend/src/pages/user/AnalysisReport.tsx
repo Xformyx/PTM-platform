@@ -139,12 +139,70 @@ export default function AnalysisReport() {
         {isRunning && (
           <Card className="mb-6">
             <CardContent className="py-6">
+              {/* Stage pipeline indicator */}
+              <div className="flex items-center justify-between mb-5">
+                {[
+                  { key: "registered", label: "대기 중", desc: "분석 대기열에 등록됨" },
+                  { key: "preprocessing", label: "전처리", desc: "데이터 정제 및 PTM 정량" },
+                  { key: "rag_enrichment", label: "AI 분석", desc: "문헌 검색 및 생물학적 해석" },
+                  { key: "report_generation", label: "보고서 생성", desc: "종합 보고서 작성 중" },
+                ].map((stage, idx, arr) => {
+                  const stageOrder = ["registered", "queued", "preprocessing", "rag_enrichment", "report_generation"];
+                  const currentIdx = stageOrder.indexOf(order.current_stage || order.status);
+                  const thisIdx = stageOrder.indexOf(stage.key);
+                  const isActive = thisIdx === currentIdx;
+                  const isDone = thisIdx < currentIdx;
+                  return (
+                    <div key={stage.key} className="flex items-center flex-1">
+                      <div className="flex flex-col items-center flex-1">
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all ${
+                          isDone ? "bg-green-500/20 text-green-400 ring-2 ring-green-500/40" :
+                          isActive ? "bg-primary/20 text-primary ring-2 ring-primary animate-pulse" :
+                          "bg-muted text-muted-foreground"
+                        }`}>
+                          {isDone ? <CheckCircle2 className="h-4 w-4" /> : idx + 1}
+                        </div>
+                        <span className={`text-[11px] mt-1.5 text-center leading-tight ${
+                          isActive ? "text-primary font-medium" : isDone ? "text-green-400" : "text-muted-foreground"
+                        }`}>{stage.label}</span>
+                      </div>
+                      {idx < arr.length - 1 && (
+                        <div className={`h-0.5 flex-1 mx-1 rounded ${isDone ? "bg-green-500/40" : "bg-muted"}`} />
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Current status detail */}
               <div className="flex items-center gap-3 mb-3">
                 <Loader2 className="h-5 w-5 animate-spin text-primary" />
                 <div>
-                  <p className="font-medium">Analysis in Progress</p>
+                  <p className="font-medium">
+                    {(() => {
+                      const s = order.current_stage || order.status;
+                      const labels: Record<string, string> = {
+                        registered: "분석 준비 중...",
+                        queued: "분석 대기열에서 순서를 기다리고 있습니다...",
+                        preprocessing: "데이터를 전처리하고 있습니다",
+                        rag_enrichment: "AI가 문헌을 검색하고 분석하고 있습니다",
+                        report_generation: "종합 보고서를 작성하고 있습니다",
+                      };
+                      return labels[s] || "분석을 진행하고 있습니다...";
+                    })()}
+                  </p>
                   <p className="text-sm text-muted-foreground">
-                    {order.stage_detail || `Stage: ${order.current_stage || "Initializing"}`}
+                    {order.stage_detail || (() => {
+                      const s = order.current_stage || order.status;
+                      const hints: Record<string, string> = {
+                        registered: "Admin이 분석을 시작하면 자동으로 진행됩니다",
+                        queued: "곧 시작됩니다. 잠시만 기다려주세요",
+                        preprocessing: "mzML 파일에서 PTM을 정량하고 통계 분석을 수행합니다 (약 5-15분)",
+                        rag_enrichment: "PubMed, UniProt, KEGG 등에서 관련 정보를 수집하고 LLM이 해석합니다 (약 10-30분)",
+                        report_generation: "모든 분석 결과를 종합하여 보고서를 생성합니다 (약 5-10분)",
+                      };
+                      return hints[s] || "";
+                    })()}
                   </p>
                 </div>
               </div>
