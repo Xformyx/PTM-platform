@@ -69,8 +69,8 @@ const t: Record<string, Record<Lang, string>> = {
   },
   footerCta: { ko: "지금 바로 시작하세요", en: "Get Started Now" },
   footerSub: {
-    ko: "DIA-NN 결과 파일만 있으면 됩니다. 나머지는 Mekii AI가 처리합니다.",
-    en: "All you need is your DIA-NN output files. Mekii AI handles the rest.",
+    ko: "질량분석 데이터(Raw/mzML)만 업로드하세요. 나머지는 Mekii AI가 처리합니다.",
+    en: "Just upload your mass spectrometry data (Raw/mzML). Mekii AI handles the rest.",
   },
   nav: { ko: "한국어", en: "English" },
 };
