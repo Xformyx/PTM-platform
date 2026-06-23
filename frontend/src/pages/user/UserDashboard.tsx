@@ -38,8 +38,8 @@ export default function UserDashboard() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    api.get<Order[]>("/orders")
-      .then((data) => setOrders(data))
+    api.get<{ orders: Order[]; total: number }>("/orders")
+      .then((data) => setOrders(data.orders || []))
       .catch(console.error)
       .finally(() => setLoading(false));
   }, []);
@@ -78,8 +78,8 @@ export default function UserDashboard() {
             </div>
             <h3 className="text-lg font-semibold mb-2">No analyses yet</h3>
             <p className="text-muted-foreground text-center max-w-md mb-6">
-              Upload your DIA-NN output files and let Mekii AI analyze your PTM data.
-              Get kinase activity profiles, signaling cascades, and AI-generated reports.
+              mzML 파일을 업로드하면 Mekii AI가 PTM 데이터를 분석합니다.
+              Upstream regulator 프로파일, signaling cascade, AI 리포트를 제공합니다.
             </p>
             <Button onClick={() => navigate("/app/new")} className="gap-2">
               <Plus className="h-4 w-4" />
