@@ -37,7 +37,7 @@ import {
 interface UploadedFile {
   name: string;
   size: number;
-  type: "raw_data" | "fasta" | "reference_paper";
+  type: "raw_data" | "fasta" | "reference_paper" | "search_result";
   file: File;
 }
 
@@ -80,6 +80,7 @@ export default function NewAnalysis() {
     const lower = filename.toLowerCase();
     if (lower.endsWith(".mzml")) return "raw_data";
     if (lower.endsWith(".fasta") || lower.endsWith(".fa")) return "fasta";
+    if (lower.endsWith(".tsv") || lower.endsWith(".csv")) return "search_result";
     return "reference_paper";
   };
 
@@ -101,7 +102,8 @@ export default function NewAnalysis() {
 
   const hasRawData = files.some((f) => f.type === "raw_data");
   const hasFasta = files.some((f) => f.type === "fasta");
-  const canProceed = hasRawData && hasFasta && description.trim().length > 0;
+  const hasSearchResult = files.some((f) => f.type === "search_result");
+  const canProceed = (hasRawData || hasSearchResult) && hasFasta && description.trim().length > 0;
 
   // ── AI Inference ───────────────────────────────────────────────────────
   const handleInfer = async () => {
@@ -246,7 +248,7 @@ export default function NewAnalysis() {
             </CardHeader>
             <CardContent className="space-y-4">
               {/* Required files info */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 <div className={`p-3 rounded-lg border-2 border-dashed ${hasRawData ? "border-green-300 bg-green-50 dark:bg-green-900/10" : "border-muted"}`}>
                   <div className="flex items-center gap-2 mb-1">
                     <FileText className="h-4 w-4 text-primary" />
@@ -263,6 +265,14 @@ export default function NewAnalysis() {
                   </div>
                   <p className="text-xs text-muted-foreground">Protein FASTA DB (데이터 검색에 사용할 FASTA)</p>
                 </div>
+                <div className={`p-3 rounded-lg border-2 border-dashed ${hasSearchResult ? "border-green-300 bg-green-50 dark:bg-green-900/10" : "border-muted"}`}>
+                  <div className="flex items-center gap-2 mb-1">
+                    <Database className="h-4 w-4 text-primary" />
+                    <span className="text-sm font-medium">Search Result</span>
+                    {hasSearchResult && <Check className="h-3 w-3 text-green-600" />}
+                  </div>
+                  <p className="text-xs text-muted-foreground">report.pr_matrix.tsv / report.pg_matrix.tsv</p>
+                </div>
               </div>
 
               {/* Processing info */}
@@ -278,7 +288,7 @@ export default function NewAnalysis() {
                   ref={fileInputRef}
                   type="file"
                   multiple
-                  accept=".mzml,.mzML,.fasta,.fa,.pdf"
+                  accept=".mzml,.mzML,.fasta,.fa,.pdf,.tsv,.csv"
                   onChange={handleFileSelect}
                   className="hidden"
                 />
@@ -287,7 +297,7 @@ export default function NewAnalysis() {
                   Select Files
                 </Button>
                 <span className="text-xs text-muted-foreground">
-                  Supported: .mzML, .fasta, .fa, .pdf (reference papers)
+                  Supported: .mzML, .fasta, .fa, .tsv, .csv, .pdf
                 </span>
               </div>
 
