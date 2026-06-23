@@ -34,10 +34,10 @@ const t: Record<string, Record<Lang, string>> = {
   },
   cta: { ko: "무료 분석 시작", en: "Start Free Analysis" },
   demo: { ko: "데모 보기", en: "View Demo" },
-  feat1Title: { ko: "Co-Wave 알고리즘", en: "Co-Wave Algorithm" },
+  feat1Title: { ko: "Coactivation Profiling", en: "Coactivation Profiling" },
   feat1Desc: {
-    ko: "시계열 PTM 데이터에서 kinase activity를 2D 점유율 좌표계로 정밀 추론",
-    en: "Precisely infer kinase activity from time-series PTM data using 2D occupancy coordinates",
+    ko: "Occupancy 기반 분석으로 정확한 upstream regulator를 식별합니다",
+    en: "Identify precise upstream regulators through occupancy-based coactivation analysis",
   },
   feat2Title: { ko: "AI 리포트 생성", en: "AI Report Generation" },
   feat2Desc: {
@@ -59,10 +59,10 @@ const t: Record<string, Record<Lang, string>> = {
     ko: "단백질 발현 변화와 PTM 점유율 변화를 분리하여 진짜 kinase activity만 포착",
     en: "Separate protein expression changes from PTM occupancy changes to capture true kinase activity",
   },
-  feat6Title: { ko: "3분 안에 결과", en: "Results in 3 Minutes" },
+  feat6Title: { ko: "복잡한 설정 없이 바로 분석", en: "No Complex Setup Required" },
   feat6Desc: {
-    ko: "파일 업로드부터 AI 리포트까지, 복잡한 설정 없이 3분 안에 완료",
-    en: "From file upload to AI report, completed in 3 minutes without complex configuration",
+    ko: "파일만 업로드하세요. 복잡한 일은 Mekii AI가 합니다",
+    en: "Just upload your files. Mekii AI handles the complexity",
   },
   sectionFeatures: { ko: "핵심 기능", en: "Core Features" },
   sectionFeatSub: {
