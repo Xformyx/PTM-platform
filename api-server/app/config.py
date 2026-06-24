@@ -31,7 +31,11 @@ class Settings(BaseSettings):
 
     # Ollama
     OLLAMA_URL: str = "http://localhost:11434"
-    DEFAULT_LLM_MODEL: str = "qwen2.5:7b"
+    LLM_MODEL: str = "gemma3:27b"
+
+    @property
+    def DEFAULT_LLM_MODEL(self) -> str:  # noqa: N802
+        return self.LLM_MODEL
 
     # MCP Server
     MCP_SERVER_URL: str = "http://localhost:8001"
