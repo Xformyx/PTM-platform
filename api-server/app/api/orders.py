@@ -902,6 +902,7 @@ async def start_order(
         "analysis_mode": report_opts.get("analysis_mode", "ptm_only"),
         "top_n_ptms": report_opts.get("top_n_ptms", 50),
         "ptm_selection_mode": report_opts.get("ptm_selection_mode", "top_n"),
+        "experimental_context": {**(order.analysis_context or {}), "ptm_type": order.ptm_type},
         "secondary_ptm_type": order.secondary_ptm_type,
         "secondary_sample_config": order.secondary_sample_config,
         "secondary_condition_map": _build_condition_map(order.secondary_sample_config) if order.secondary_sample_config else None,
