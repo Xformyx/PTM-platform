@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import re
+import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
@@ -62,8 +63,12 @@ def _read_tsv_sample_columns(tsv_path: str) -> list[str]:
         return []
 
 
-# Default regex pattern (same as Admin frontend default)
-DEFAULT_REGEX_PATTERN = r"_([^_]+?)_(\d+)\.\w+$"
+# Default regex pattern: handles multiple common TSV column name formats:
+#   - With extension:  ..._Condition_3.mzML  → group(1)=Condition, group(2)=3
+#   - Without extension: ..._Condition_3     → group(1)=Condition, group(2)=3
+#   - With R prefix:  ..._Condition_R3       → group(1)=Condition, group(2)=3
+#   - Simple:         Condition_R3           → group(1)=Condition, group(2)=3
+DEFAULT_REGEX_PATTERN = r"(?:^|_)([^_]+?)_[Rr]?(\d+)(?:\.\w+)?$"
 # Control keywords for auto-detection
 CONTROL_KEYWORDS = {"control", "ctrl", "con", "wt", "wildtype", "untreated", "baseline", "sham", "vehicle"}
 
@@ -440,6 +445,33 @@ async def create_order_from_user(
     Creates an Order in the DB and saves files to the input directory.
     """
     try:
+        return await _create_order_from_user_impl(
+            files=files, file_types=file_types, config=config,
+            description=description, research_questions=research_questions,
+            db=db, settings=settings, user=user,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"create_order_from_user unhandled error: {exc}\n{traceback.format_exc()}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal server error: {type(exc).__name__}: {exc}",
+        )
+
+
+async def _create_order_from_user_impl(
+    files: List[UploadFile],
+    file_types: List[str],
+    config: str,
+    description: str,
+    research_questions: Optional[str],
+    db: AsyncSession,
+    settings: Settings,
+    user,
+):
+    """Internal implementation of create_order_from_user."""
+    try:
         config_data = json.loads(config)
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid config JSON")
@@ -693,7 +725,7 @@ async def create_order_from_user(
         "analysis_mode": report_opts.get("analysis_mode", "ptm_only"),
         "top_n_ptms": report_opts.get("top_n_ptms", 50),
         "ptm_selection_mode": report_opts.get("ptm_selection_mode", "top_n"),
-        "experimental_context": {**(order.analysis_context or {}), "ptm_type": order.ptm_type},
+        "experimental_context": {**(order.analysis_context if isinstance(order.analysis_context, dict) else {}), "ptm_type": order.ptm_type},
         "secondary_ptm_type": getattr(order, 'secondary_ptm_type', None),
         "secondary_sample_config": getattr(order, 'secondary_sample_config', None),
         "secondary_condition_map": _build_condition_map(getattr(order, 'secondary_sample_config', None)) if getattr(order, 'secondary_sample_config', None) else None,
