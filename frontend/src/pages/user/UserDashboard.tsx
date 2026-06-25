@@ -25,8 +25,8 @@ const STATUS_CONFIG: Record<string, { label: string; icon: React.ReactNode; colo
   pending: { label: "Pending", icon: <Clock className="h-3.5 w-3.5" />, color: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300" },
   running: { label: "Running", icon: <Loader2 className="h-3.5 w-3.5 animate-spin" />, color: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300" },
   preprocessing: { label: "Processing", icon: <Loader2 className="h-3.5 w-3.5 animate-spin" />, color: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300" },
-  rag_enrichment: { label: "Enriching", icon: <Loader2 className="h-3.5 w-3.5 animate-spin" />, color: "bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300" },
-  report_generation: { label: "Generating Report", icon: <Loader2 className="h-3.5 w-3.5 animate-spin" />, color: "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300" },
+  rag_enrichment: { label: "AI 분석 중", icon: <Loader2 className="h-3.5 w-3.5 animate-spin" />, color: "bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300" },
+  report_generation: { label: "보고서 작성 중", icon: <Loader2 className="h-3.5 w-3.5 animate-spin" />, color: "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300" },
   completed: { label: "Completed", icon: <CheckCircle2 className="h-3.5 w-3.5" />, color: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300" },
   failed: { label: "Failed", icon: <XCircle className="h-3.5 w-3.5" />, color: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300" },
 };
