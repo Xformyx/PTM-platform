@@ -62,86 +62,56 @@ def _read_tsv_sample_columns(tsv_path: str) -> list[str]:
         return []
 
 
-def _build_condition_map_from_tsv(
-    sample_columns: list[str],
-    sample_mapping: list[dict],
-    description: str = "",
-) -> dict:
-    """Build condition_map by matching actual TSV sample columns with LLM-inferred mapping.
-    Uses basename matching and substring matching (same logic as PTMQuantificationAnalyzer).
-    If LLM mapping doesn't cover all columns, falls back to pattern-based inference.
+# Default regex pattern (same as Admin frontend default)
+DEFAULT_REGEX_PATTERN = r"_([^_]+?)_(\d+)\.\w+$"
+# Control keywords for auto-detection
+CONTROL_KEYWORDS = {"control", "ctrl", "con", "wt", "wildtype", "untreated", "baseline", "sham", "vehicle"}
+
+
+def _auto_parse_tsv_columns(sample_columns: list[str], contrasts: list[dict] = None) -> dict:
+    """Auto-parse TSV sample columns into condition_map using regex.
+    This is IDENTICAL to Admin frontend's autoParseColumns logic:
+    1. Extract basename from each column
+    2. Apply regex to get condition and replicate
+    3. If condition matches control keyword → "Control"
+    4. Otherwise use condition label as-is
+
+    Returns {full_column_name: condition_label} dict.
     """
     condition_map = {}
-
     if not sample_columns:
         return condition_map
 
-    # Build a lookup from LLM-inferred sample_mapping
-    llm_map = {}  # {filename: {condition, group, replicate}}
-    for entry in sample_mapping:
-        fname = entry.get("filename", "")
-        if fname:
-            llm_map[fname] = entry
-            # Also store basename for matching
-            basename = os.path.basename(fname)
-            if basename != fname:
-                llm_map[basename] = entry
+    # Determine control keyword from contrasts if available
+    control_kw = "control"  # default
+    if contrasts:
+        for c in contrasts:
+            ctrl = (c.get("control") or "").strip().lower()
+            if ctrl:
+                control_kw = ctrl
+                break
 
-    # Try to match each actual sample column with LLM mapping
-    matched_count = 0
+    regex = re.compile(DEFAULT_REGEX_PATTERN)
+
     for col in sample_columns:
-        col_basename = os.path.basename(col)
-        matched_entry = None
-
-        # Exact match
-        if col in llm_map:
-            matched_entry = llm_map[col]
-        elif col_basename in llm_map:
-            matched_entry = llm_map[col_basename]
-        else:
-            # Substring match
-            for key, entry in llm_map.items():
-                key_basename = os.path.basename(key)
-                if col_basename in key or key_basename in col or col_basename == key_basename:
-                    matched_entry = entry
-                    break
-
-        if matched_entry:
-            group = (matched_entry.get("group") or matched_entry.get("condition", "")).strip()
-            condition = matched_entry.get("condition", "").strip()
-            # Determine if this is a control sample
-            control_keywords = {"control", "ctrl", "con", "wt", "wildtype", "untreated", "baseline"}
-            if group.lower() in control_keywords or condition.lower() in control_keywords:
+        basename = os.path.basename(col)
+        match = regex.search(basename)
+        if match:
+            cond_label = match.group(1)
+            # Check if this is a control sample
+            if cond_label.lower() == control_kw.lower() or cond_label.lower() in CONTROL_KEYWORDS:
                 condition_map[col] = "Control"
-            elif condition:
-                # Strip replicate suffix if present
-                replicate = matched_entry.get("replicate")
-                cond_group = condition
-                if replicate is not None:
-                    suffix = f"_{replicate}"
-                    if cond_group.endswith(suffix):
-                        cond_group = cond_group[:-len(suffix)]
-                condition_map[col] = cond_group if cond_group else condition
-            elif group:
-                condition_map[col] = group
             else:
-                condition_map[col] = "Unknown"
-            matched_count += 1
+                condition_map[col] = cond_label
         else:
-            # Fallback: pattern-based inference from column name
+            # Fallback: check if column name contains control keywords
             col_lower = col.lower()
-            if "control" in col_lower or "ctrl" in col_lower or "cont_" in col_lower:
+            if any(kw in col_lower for kw in CONTROL_KEYWORDS):
                 condition_map[col] = "Control"
-            elif "_a_" in col or "_A_" in col:
-                condition_map[col] = "A"
-            elif "_b_" in col or "_B_" in col:
-                condition_map[col] = "B"
-            elif "_c_" in col or "_C_" in col:
-                condition_map[col] = "C"
             else:
                 condition_map[col] = "Unknown"
 
-    logger.info(f"Condition map: {matched_count}/{len(sample_columns)} columns matched via LLM mapping")
+    logger.info(f"Auto-parsed condition_map from {len(sample_columns)} columns: {condition_map}")
     return condition_map
 
 
@@ -547,20 +517,65 @@ async def create_order_from_user(
         pg_path = str(input_dir / "pending_preprocessing_pg.tsv")
         Path(pg_path).touch()
 
-    # Build sample_config from inferred config
-    sample_mapping = config_data.get("sample_mapping", [])
-    sample_config = {
-        "source": "user_ui",
-        "samples": [
-            {
-                "file_name": s.get("filename", ""),
-                "condition": s.get("condition", ""),
-                "group": s.get("condition", ""),
-                "replicate": s.get("replicate", 1),
-            }
-            for s in sample_mapping
-        ],
-    }
+    # Build sample_config from ACTUAL TSV columns (same as Admin mode)
+    # Read real sample columns from PR matrix and auto-parse with regex
+    tsv_columns = _read_tsv_sample_columns(pr_path) if pr_path and "pending_preprocessing" not in pr_path else []
+    contrasts_for_parse = config_data.get("contrasts", [])
+
+    if tsv_columns:
+        # Deterministic auto-parse (identical to Admin frontend)
+        regex = re.compile(DEFAULT_REGEX_PATTERN)
+        control_kw = "control"
+        if contrasts_for_parse:
+            for c in contrasts_for_parse:
+                ctrl = (c.get("control") or "").strip().lower()
+                if ctrl:
+                    control_kw = ctrl
+                    break
+
+        parsed_samples = []
+        for col in tsv_columns:
+            basename = os.path.basename(col)
+            match = regex.search(basename)
+            if match:
+                cond_label = match.group(1)
+                rep = int(match.group(2)) if match.group(2) else 1
+                is_ctrl = cond_label.lower() == control_kw or cond_label.lower() in CONTROL_KEYWORDS
+                parsed_samples.append({
+                    "file_name": col,
+                    "condition": f"{cond_label}_{rep}",
+                    "group": "Control" if is_ctrl else "Treatment",
+                    "replicate": rep,
+                })
+            else:
+                parsed_samples.append({
+                    "file_name": col,
+                    "condition": basename,
+                    "group": "Treatment",
+                    "replicate": 1,
+                })
+
+        sample_config = {
+            "source": "auto_parse",
+            "regex_pattern": DEFAULT_REGEX_PATTERN,
+            "single_time_point": False,
+            "samples": parsed_samples,
+        }
+    else:
+        # Fallback: use LLM-inferred sample_mapping
+        sample_mapping = config_data.get("sample_mapping", [])
+        sample_config = {
+            "source": "user_ui",
+            "samples": [
+                {
+                    "file_name": s.get("filename", ""),
+                    "condition": s.get("condition", ""),
+                    "group": s.get("condition", ""),
+                    "replicate": s.get("replicate", 1),
+                }
+                for s in sample_mapping
+            ],
+        }
 
     # Build report_options
     questions = []
@@ -622,18 +637,17 @@ async def create_order_from_user(
     order.run_by_user_id = user.id if getattr(user, "id", 0) != 0 else None
     await db.commit()
 
-    # Build condition_map from ACTUAL TSV headers (matching Admin mode behavior)
-    # This reads the real sample column names from the pr_matrix file
-    # and matches them with the LLM-inferred sample_mapping
+    # Build condition_map from ACTUAL TSV headers (same as Admin mode)
+    # Uses deterministic regex parsing - no LLM involved
     sample_columns = _read_tsv_sample_columns(pr_path) if pr_path and "pending_preprocessing" not in pr_path else []
-    sample_mapping_for_map = config_data.get("sample_mapping", [])
+    contrasts = config_data.get("contrasts", [])
 
     if sample_columns:
-        # Use actual TSV columns for accurate condition_map (same as Admin mode)
-        condition_map = _build_condition_map_from_tsv(sample_columns, sample_mapping_for_map, description)
-        logger.info(f"Order {order_code}: condition_map built from {len(sample_columns)} TSV columns: {condition_map}")
+        # Auto-parse TSV columns with regex (identical to Admin frontend logic)
+        condition_map = _auto_parse_tsv_columns(sample_columns, contrasts)
+        logger.info(f"Order {order_code}: condition_map from {len(sample_columns)} TSV columns: {condition_map}")
     else:
-        # Fallback to LLM-based sample_config (mzML-only workflow)
+        # Fallback to sample_config-based mapping (mzML-only workflow)
         condition_map = _build_condition_map(sample_config)
 
     ptm_mode = "phospho" if ptm_type == "phosphorylation" else "ubi"
