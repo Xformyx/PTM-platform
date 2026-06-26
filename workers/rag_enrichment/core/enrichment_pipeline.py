@@ -22,6 +22,7 @@ v9.29.0 — Parallel Enrichment:
 
 import logging
 import math
+import os
 import re
 import threading
 import time
@@ -188,9 +189,10 @@ class RAGEnrichmentPipeline:
         self.enable_fulltext = enable_fulltext
         self.enable_ptm_validation = enable_ptm_validation
         if enable_llm_analysis:
-            # Model: RAG Enrichment → Paper Read → Report. Provider follows the tier that supplied the model.
+            # Model priority: explicit param → env RAG_ENRICHMENT_LLM_MODEL → fallback to report model
+            _env_rag_model = os.getenv("RAG_ENRICHMENT_LLM_MODEL", "").strip() or None
             effective_model = (
-                rag_enrichment_llm_model or rag_llm_model or llm_model
+                rag_enrichment_llm_model or _env_rag_model or rag_llm_model or llm_model
             )
             if rag_enrichment_llm_model:
                 eff_provider = (

@@ -624,7 +624,9 @@ async def _create_order_from_user_impl(
         "ptm_selection_mode": "top_n",
         "research_questions": questions,
         "llm_provider": "ollama",
-        "llm_model": settings.DEFAULT_LLM_MODEL,
+        "llm_model": "qwen3.5:27b",  # User mode: fixed model for report generation
+        "rag_enrichment_llm_model": "qwen2.5:14b",  # User mode: lighter model for RAG enrichment
+        "rag_enrichment_llm_provider": "ollama",
     }
 
     # Build analysis_context

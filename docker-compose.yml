@@ -243,6 +243,8 @@ services:
       OLLAMA_URL: http://host.docker.internal:11434
       LLM_MODEL: ${LLM_MODEL:-gemma3:27b}
       LLM_PROVIDER: ${LLM_PROVIDER:-auto}
+      # RAG Enrichment dedicated model (lighter model for speed; falls back to LLM_MODEL if unset)
+      RAG_ENRICHMENT_LLM_MODEL: ${RAG_ENRICHMENT_LLM_MODEL:-qwen2.5:14b}
       # RAG Enrichment parallelism (2 PTMs × up to 6 LLM sub-tasks = ~12 max Ollama requests)
       # Increase only if Ollama can handle more simultaneous requests without queue buildup
       RAG_PTM_WORKERS: ${RAG_PTM_WORKERS:-2}
