@@ -125,7 +125,7 @@ export default function RagManagement() {
         <StaggerContainer className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
           {collections.map((c) => (
             <StaggerItem key={c.id}>
-              <Card className="cursor-pointer hover:border-primary/30 transition-colors" onClick={() => navigate(`/rag/${c.id}`)}>
+              <Card className="cursor-pointer hover:border-primary/30 transition-colors" onClick={() => navigate(`/admin/rag/${c.id}`)}>
                 <CardContent className="p-5">
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center gap-2">

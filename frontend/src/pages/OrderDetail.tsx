@@ -3125,7 +3125,7 @@ export default function OrderDetail() {
         analysis_context: opts.analysis_context,
       });
       setDuplicateModalOpen(false);
-      navigate(`/orders/${result.id}`);
+      navigate(`/admin/orders/${result.id}`);
     } catch (err: any) {
       alert(err?.message || "Duplication failed");
       throw err;
@@ -3160,7 +3160,7 @@ export default function OrderDetail() {
       {/* Header */}
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-4">
-          <Button variant="ghost" size="icon" onClick={() => navigate("/orders")}>
+          <Button variant="ghost" size="icon" onClick={() => navigate("/admin/orders")}>
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <div>

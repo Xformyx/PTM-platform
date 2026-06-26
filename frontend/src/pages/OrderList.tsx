@@ -380,7 +380,7 @@ export default function OrderList() {
           <p className="text-sm text-muted-foreground">{total} total orders</p>
         </div>
         <Button asChild>
-          <Link to="/orders/new">
+          <Link to="/admin/orders/new">
             <PlusCircle className="mr-2 h-4 w-4" />
             New Order
           </Link>
@@ -467,11 +467,11 @@ export default function OrderList() {
                   <TableRow
                     key={order.id}
                     className="cursor-pointer"
-                    onClick={() => navigate(`/orders/${order.id}`)}
+                    onClick={() => navigate(`/admin/orders/${order.id}`)}
                   >
                     <TableCell className="truncate" title={order.order_code}>
                       <Link
-                        to={`/orders/${order.id}`}
+                        to={`/admin/orders/${order.id}`}
                         className="font-mono text-primary hover:underline font-medium"
                         onClick={(e) => e.stopPropagation()}
                       >

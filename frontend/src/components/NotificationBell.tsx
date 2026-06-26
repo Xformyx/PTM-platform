@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
+import { useAuth } from "@/contexts/AuthContext";
 import { Bell, CheckCheck, Loader2, Trash2, CheckCircle2, XCircle, AlertTriangle, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -27,6 +28,7 @@ interface NotificationBellProps {
 
 export default function NotificationBell({ compact }: NotificationBellProps) {
   const navigate = useNavigate();
+  const { isAdmin } = useAuth();
   const [unreadCount, setUnreadCount] = useState(0);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(false);
@@ -74,7 +76,7 @@ export default function NotificationBell({ compact }: NotificationBellProps) {
       setUnreadCount((c) => Math.max(0, c - 1));
       if (n.order_id) {
         setOpen(false);
-        navigate(`/orders/${n.order_id}`);
+        navigate(isAdmin ? `/admin/orders/${n.order_id}` : `/app/${n.order_id}`);
       }
     } catch {
       // ignore

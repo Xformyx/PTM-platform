@@ -1,4 +1,4 @@
-import { Navigate, Routes, Route } from 'react-router-dom';
+import { Navigate, Routes, Route, useParams } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import Layout from '@/components/layout/Layout';
 import UserLayout from '@/components/user/UserLayout';
@@ -93,7 +93,16 @@ export default function App() {
       {/* Legacy routes: redirect old paths to /admin */}
       <Route path="/orders" element={<Navigate to="/admin/orders" replace />} />
       <Route path="/orders/new" element={<Navigate to="/admin/orders/new" replace />} />
-      <Route path="/orders/:id" element={<Navigate to="/admin/orders/:id" replace />} />
+      <Route path="/orders/:id" element={<LegacyOrderRedirect />} />
+      <Route path="/rag" element={<Navigate to="/admin/rag" replace />} />
+      <Route path="/rag/:id" element={<LegacyRagRedirect />} />
+      <Route path="/llm" element={<Navigate to="/admin/llm" replace />} />
+      <Route path="/articles" element={<Navigate to="/admin/articles" replace />} />
+      <Route path="/reports" element={<Navigate to="/admin/reports" replace />} />
+      <Route path="/logs" element={<Navigate to="/admin/logs" replace />} />
+      <Route path="/settings" element={<Navigate to="/admin/settings" replace />} />
+      <Route path="/system-monitor" element={<Navigate to="/admin/system-monitor" replace />} />
+      <Route path="/ptmquant" element={<Navigate to="/admin/ptmquant" replace />} />
     </Routes>
   );
 }
@@ -115,6 +124,18 @@ function LandingGuard() {
     return <Navigate to="/app" replace />;
   }
   return <Landing />;
+}
+
+/** Redirect /orders/:id → /admin/orders/:id with the actual param value */
+function LegacyOrderRedirect() {
+  const { id } = useParams<{ id: string }>();
+  return <Navigate to={`/admin/orders/${id}`} replace />;
+}
+
+/** Redirect /rag/:id → /admin/rag/:id with the actual param value */
+function LegacyRagRedirect() {
+  const { id } = useParams<{ id: string }>();
+  return <Navigate to={`/admin/rag/${id}`} replace />;
 }
 
 /** Redirect already-logged-in users away from /login */

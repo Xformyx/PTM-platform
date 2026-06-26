@@ -282,7 +282,7 @@ export default function Dashboard() {
                     <TableRow
                       key={order.id}
                       className="cursor-pointer"
-                      onClick={() => navigate(`/orders/${order.id}`)}
+                      onClick={() => navigate(`/admin/orders/${order.id}`)}
                     >
                       <TableCell className="font-mono text-primary">{order.order_code}</TableCell>
                       <TableCell>{order.project_name}</TableCell>

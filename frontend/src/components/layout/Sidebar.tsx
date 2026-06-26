@@ -58,12 +58,12 @@ interface NavItem {
 }
 
 const mainNav: NavItem[] = [
-  { path: "/", label: "Dashboard", icon: LayoutDashboard, end: true },
-  { path: "/orders", label: "Orders", icon: ClipboardList, end: true },
-  { path: "/ptmquant", label: "PTMQuant", icon: FlaskConical },
-  { path: "/rag", label: "RAG Collections", icon: Library },
-  { path: "/llm", label: "LLM Models", icon: Brain },
-  { path: "/articles", label: "Article Cache", icon: BookOpen },
+  { path: "/admin", label: "Dashboard", icon: LayoutDashboard, end: true },
+  { path: "/admin/orders", label: "Orders", icon: ClipboardList, end: true },
+  { path: "/admin/ptmquant", label: "PTMQuant", icon: FlaskConical },
+  { path: "/admin/rag", label: "RAG Collections", icon: Library },
+  { path: "/admin/llm", label: "LLM Models", icon: Brain },
+  { path: "/admin/articles", label: "Article Cache", icon: BookOpen },
 ];
 
 function NavItemLink({ item, collapsed = false }: { item: NavItem; collapsed?: boolean }) {
@@ -822,7 +822,7 @@ export default function Sidebar({ className, collapsed = false, onToggle }: Side
       {/* System Monitor — admin only */}
       {isAdmin && (
         <div className="px-2 py-1">
-          <NavLink to="/system-monitor" title={collapsed ? "System Monitor" : undefined}>
+          <NavLink to="/admin/system-monitor" title={collapsed ? "System Monitor" : undefined}>
             {({ isActive }) => (
               <div
                 className={cn(
@@ -853,7 +853,7 @@ export default function Sidebar({ className, collapsed = false, onToggle }: Side
         <>
           <Separator />
           <div className="px-2 py-2">
-            <NavLink to="/settings" title={collapsed ? "Settings" : undefined}>
+            <NavLink to="/admin/settings" title={collapsed ? "Settings" : undefined}>
               {({ isActive }) => (
                 <div
                   className={cn(

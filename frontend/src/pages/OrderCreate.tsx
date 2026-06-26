@@ -553,7 +553,7 @@ export default function OrderCreate() {
 
     try {
       const result = await api.upload<{ id: number; order_code: string }>("/orders", formData);
-      navigate(`/orders/${result.id}`);
+      navigate(`/admin/orders/${result.id}`);
     } catch (e: any) {
       setError(e.message);
     } finally {

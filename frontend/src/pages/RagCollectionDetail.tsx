@@ -217,7 +217,7 @@ export default function RagCollectionDetail() {
       <div className="flex flex-col items-center justify-center py-20">
         <AlertCircle className="h-12 w-12 text-muted-foreground/40 mb-3" />
         <p className="text-sm text-muted-foreground">Collection not found</p>
-        <Button variant="outline" className="mt-4" onClick={() => navigate("/rag")}>
+        <Button variant="outline" className="mt-4" onClick={() => navigate("/admin/rag")}>
           <ArrowLeft className="h-4 w-4 mr-2" /> Back to Collections
         </Button>
       </div>
@@ -234,7 +234,7 @@ export default function RagCollectionDetail() {
     <div className="space-y-6 p-6 max-w-5xl mx-auto">
       {/* Header */}
       <div className="flex items-center gap-3">
-        <Button variant="ghost" size="icon" onClick={() => navigate("/rag")}>
+        <Button variant="ghost" size="icon" onClick={() => navigate("/admin/rag")}>
           <ArrowLeft className="h-5 w-5" />
         </Button>
         <div className="flex-1 min-w-0">
