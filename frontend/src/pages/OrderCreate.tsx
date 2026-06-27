@@ -40,6 +40,34 @@ function isCloudProviderSelection(val: string): boolean {
   return !!(p && CLOUD_PROVIDERS.includes(p as any));
 }
 
+/** Minimum model size (in billions) for RAG Enrichment to ensure quality */
+const MIN_RAG_MODEL_SIZE_B = 14;
+
+/** Extract model size in billions from model name (e.g., 'qwen2.5:14b' -> 14) */
+function getModelSizeB(modelName: string): number {
+  if (!modelName) return 0;
+  // Cloud providers are unrestricted
+  if (isCloudProviderSelection(modelName)) return 0;
+  const lower = modelName.toLowerCase();
+  // Parse size tag after colon (Ollama format: 'name:sizeb')
+  if (lower.includes(":")) {
+    const tag = lower.split(":")[1];
+    const m = tag?.match(/^(\d+(?:\.\d+)?)b/);
+    if (m) return Math.floor(parseFloat(m[1]));
+  }
+  // Fallback: find NNb pattern
+  const m = lower.match(/[:\-_](\d+(?:\.\d+)?)b/);
+  if (m) return Math.floor(parseFloat(m[1]));
+  return 0;
+}
+
+/** Check if selected RAG model is below minimum size */
+function isRagModelTooSmall(modelName: string): boolean {
+  if (!modelName) return false; // default is fine
+  const size = getModelSizeB(modelName);
+  return size > 0 && size < MIN_RAG_MODEL_SIZE_B;
+}
+
 // ── Types ────────────────────────────────────────────────────────────────────
 
 interface SampleEntry {
@@ -1293,6 +1321,16 @@ export default function OrderCreate() {
                   <p className="text-xs text-muted-foreground">
                     RAG Enrichment 단계(Abstract 분석, 키나제 예측 등) 전용. 미선택 시 Report 모델을 사용합니다.
                   </p>
+                  {isRagModelTooSmall(form.rag_enrichment_llm_model) && (
+                    <div className="flex items-start gap-2 p-2 rounded-md bg-amber-500/10 border border-amber-500/30">
+                      <AlertCircle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
+                      <p className="text-xs text-amber-500">
+                        선택한 모델({form.rag_enrichment_llm_model})은 {getModelSizeB(form.rag_enrichment_llm_model)}B로,
+                        RAG Enrichment 최소 권장 크기({MIN_RAG_MODEL_SIZE_B}B) 미만입니다.
+                        JSON 파싱 실패 및 hallucination 위험이 높아 서버에서 자동으로 qwen2.5:14b로 대체됩니다.
+                      </p>
+                    </div>
+                  )}
                 </div>
 
                 {/* LLM Model for Report Generation */}

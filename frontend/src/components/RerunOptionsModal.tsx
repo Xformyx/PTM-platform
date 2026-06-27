@@ -24,6 +24,27 @@ function isCloudProviderSelection(val: string): boolean {
   return !!(p && CLOUD_PROVIDERS.includes(p as any));
 }
 
+/** Minimum model size (in billions) for RAG Enrichment */
+const MIN_RAG_MODEL_SIZE_B = 14;
+function getModelSizeB(modelName: string): number {
+  if (!modelName) return 0;
+  if (isCloudProviderSelection(modelName)) return 0;
+  const lower = modelName.toLowerCase();
+  if (lower.includes(":")) {
+    const tag = lower.split(":")[1];
+    const m = tag?.match(/^(\d+(?:\.\d+)?)b/);
+    if (m) return Math.floor(parseFloat(m[1]));
+  }
+  const m = lower.match(/[:\-_](\d+(?:\.\d+)?)b/);
+  if (m) return Math.floor(parseFloat(m[1]));
+  return 0;
+}
+function isRagModelTooSmall(modelName: string): boolean {
+  if (!modelName) return false;
+  const size = getModelSizeB(modelName);
+  return size > 0 && size < MIN_RAG_MODEL_SIZE_B;
+}
+
 interface Order {
   id: number;
   order_code: string;
@@ -506,6 +527,13 @@ export default function RerunOptionsModal({
                 <p className="text-[10px] text-muted-foreground">
                   RAG Enrichment 단계(Abstract/키나제 예측 등). 미선택 시 Report 모델을 사용합니다.
                 </p>
+                {isRagModelTooSmall(ragEnrichmentLlmModel) && (
+                  <div className="flex items-start gap-1.5 p-1.5 rounded bg-amber-500/10 border border-amber-500/30">
+                    <p className="text-[10px] text-amber-500">
+                      ⚠️ {getModelSizeB(ragEnrichmentLlmModel)}B 모델은 최소 권장({MIN_RAG_MODEL_SIZE_B}B) 미만입니다. 서버에서 qwen2.5:14b로 자동 대체됩니다.
+                    </p>
+                  </div>
+                )}
               </div>
               <div className="space-y-1.5">
                 <Label className="text-xs">LLM Model (Report Generation)</Label>

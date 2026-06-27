@@ -194,6 +194,19 @@ class RAGEnrichmentPipeline:
             effective_model = (
                 rag_enrichment_llm_model or _env_rag_model or rag_llm_model or llm_model
             )
+            # v12.0: Minimum model size enforcement for RAG Enrichment
+            # Models smaller than 14B produce unreliable JSON and high hallucination rates
+            _MIN_RAG_MODEL_SIZE_B = int(os.getenv("RAG_MIN_MODEL_SIZE_B", "14"))
+            _FALLBACK_RAG_MODEL = os.getenv("RAG_ENRICHMENT_LLM_MODEL", "qwen2.5:14b").strip()
+            if effective_model:
+                _detected_size = self._get_model_size_b(effective_model)
+                if 0 < _detected_size < _MIN_RAG_MODEL_SIZE_B:
+                    logger.warning(
+                        f"[v12.0] RAG Enrichment model '{effective_model}' is {_detected_size}B, "
+                        f"below minimum ({_MIN_RAG_MODEL_SIZE_B}B). Replacing with '{_FALLBACK_RAG_MODEL}' "
+                        f"to ensure analysis quality."
+                    )
+                    effective_model = _FALLBACK_RAG_MODEL
             if rag_enrichment_llm_model:
                 eff_provider = (
                     rag_enrichment_llm_provider
@@ -234,6 +247,45 @@ class RAGEnrichmentPipeline:
 
         # Level 2: Gene-level result cache
         self._gene_cache = _GeneCache()
+
+    # ------------------------------------------------------------------
+    # Model size detection
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _get_model_size_b(model_name: str) -> int:
+        """Extract model size in billions from model name string.
+
+        Examples:
+            'gemma3:4b' -> 4
+            'qwen2.5:14b' -> 14
+            'qwen3.5:27b' -> 27
+            'gemma3:27b-it-qat' -> 27
+            'llama3.1:8b' -> 8
+            'phi3:3.8b' -> 3
+            'gpt-4.1-mini' -> 0 (cloud model, no size restriction)
+            'gemini-2.5-flash' -> 0 (cloud model, no size restriction)
+        Returns:
+            Size in billions, or 0 if not detectable (cloud models are unrestricted).
+        """
+        if not model_name:
+            return 0
+        # Cloud providers are unrestricted (return 0 to skip size check)
+        cloud_prefixes = ("gpt-", "gemini-", "claude-", "o1-", "o3-", "o4-")
+        if any(model_name.lower().startswith(p) for p in cloud_prefixes):
+            return 0
+        lower = model_name.lower()
+        # Priority: parse size tag after colon (Ollama format: 'name:sizeb')
+        if ":" in lower:
+            tag = lower.split(":", 1)[1]
+            match = re.match(r"(\d+(?:\.\d+)?)b", tag)
+            if match:
+                return int(float(match.group(1)))
+        # Fallback: find NNb pattern preceded by delimiter
+        match = re.search(r"(?:^|[:\-_])(\d+(?:\.\d+)?)b", lower)
+        if match:
+            return int(float(match.group(1)))
+        return 0
 
     # ------------------------------------------------------------------
     # Thread-safe progress reporting
