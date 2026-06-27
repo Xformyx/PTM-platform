@@ -5,7 +5,7 @@ Restructured from per-PTM Q&A (220+ LLM calls) to system-level thematic analysis
 (15-20 LLM calls total). Uses the full report + co-movement + kinase cascade +
 TF inference data as context for each theme.
 
-Strategy: 5 Themes × 3-4 Q&A pairs (sequential execution)
+Strategy: 5 Themes × 3-4 Q&A pairs (parallel execution via ThreadPoolExecutor)
   Theme 1: Signaling Cascade & Temporal Dynamics
   Theme 2: Cross-talk & Co-regulation
   Theme 3: Mechanism of Action (Drug/Treatment)
@@ -15,12 +15,13 @@ Strategy: 5 Themes × 3-4 Q&A pairs (sequential execution)
 Features:
   - System-level analysis (not per-PTM)
   - Full context injection (report + kinase + TF + co-movement)
-  - Sequential execution (cloud-API friendly, respects rate limits)
+  - Parallel execution (5 themes simultaneously, configurable via QA_LLM_WORKERS env var)
   - Structured Q&A with evidence-based answers
 """
 
 import logging
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, List, Optional
 
 from common.llm_client import LLMClient
@@ -390,18 +391,15 @@ class SystemLevelQAGenerator:
             f"tf={len(tf_ctx)}, crosstalk={len(crosstalk_ctx)}"
         )
 
-        # 2. Generate Q&A for each theme (sequential — cloud-API friendly)
-        all_theme_results: List[Dict] = []
+        # 2. Generate Q&A for all themes in parallel (ThreadPoolExecutor)
+        # v11.10: Parallelized — 5 themes have no cross-dependencies
+        _QA_WORKERS = int(os.getenv("QA_LLM_WORKERS", "5"))
         total_themes = len(THEMES)
         total_calls = 0
 
-        for i, theme in enumerate(THEMES):
-            if progress_callback:
-                pct = 5 + (i / total_themes) * 85
-                progress_callback(pct, f"Generating Q&A: {theme['title']}")
-
-            logger.info(f"[QA-v11.9] Theme {i+1}/{total_themes}: {theme['title']}")
-
+        # Pre-build all prompts (thread-safe, no shared mutable state)
+        theme_prompts = []
+        for theme in THEMES:
             prompt = _build_theme_prompt(
                 theme=theme,
                 report_summary=report_summary,
@@ -411,38 +409,59 @@ class SystemLevelQAGenerator:
                 tf_ctx=tf_ctx,
                 crosstalk_ctx=crosstalk_ctx,
             )
+            theme_prompts.append((theme, prompt))
 
+        if progress_callback:
+            progress_callback(5, f"Generating Q&A: {total_themes} themes in parallel ({_QA_WORKERS} workers)")
+
+        logger.info(f"[QA-v11.10] Starting parallel Q&A generation: {total_themes} themes, {_QA_WORKERS} workers")
+
+        def _generate_one_theme(theme_prompt_pair):
+            """Generate Q&A for a single theme (thread-safe)."""
+            theme, prompt = theme_prompt_pair
             response = self.llm.generate(
                 prompt=prompt,
                 system_prompt=QA_SYSTEM_PROMPT,
                 temperature=0.5,
                 max_tokens=4000,
             )
-            total_calls += 1
-
-            # Check for LLM error
             if response.startswith("[LLM Error"):
-                logger.error(f"[QA-v11.9] LLM error for theme '{theme['title']}': {response[:200]}")
-                all_theme_results.append({
+                logger.error(f"[QA-v11.10] LLM error for theme '{theme['title']}': {response[:200]}")
+                return {
                     "theme": theme,
                     "qa_pairs": [],
                     "raw_response": response,
                     "error": True,
-                })
-                continue
-
-            # Parse Q&A pairs
+                }
             qa_pairs = _parse_qa_pairs(response)
-            logger.info(
-                f"[QA-v11.9] Theme '{theme['title']}': {len(qa_pairs)} Q&A pairs parsed"
-            )
-
-            all_theme_results.append({
+            logger.info(f"[QA-v11.10] Theme '{theme['title']}': {len(qa_pairs)} Q&A pairs parsed")
+            return {
                 "theme": theme,
                 "qa_pairs": qa_pairs,
                 "raw_response": response,
                 "error": False,
-            })
+            }
+
+        # Preserve original theme order in results
+        all_theme_results: List[Dict] = [None] * total_themes
+        workers = min(_QA_WORKERS, total_themes)
+
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            future_to_idx = {
+                pool.submit(_generate_one_theme, tp): idx
+                for idx, tp in enumerate(theme_prompts)
+            }
+            for fut in as_completed(future_to_idx):
+                idx = future_to_idx[fut]
+                result = fut.result()
+                all_theme_results[idx] = result
+                total_calls += 1
+                if progress_callback:
+                    pct = 5 + (total_calls / total_themes) * 85
+                    progress_callback(pct, f"Q&A done: {result['theme']['title']}")
+                logger.info(
+                    f"[QA-v11.10] Completed {total_calls}/{total_themes}: {result['theme']['title']}"
+                )
 
         # 3. Assemble final report
         if progress_callback:

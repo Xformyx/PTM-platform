@@ -587,9 +587,9 @@ def run_section_writing(state: dict) -> dict:
         return section_type, content
 
     # ── Phase 1: independent sections (parallel) ──
+    # intro, results, methods have no cross-dependencies
     phase1_set = {"introduction", "results", "methods"}
     phase1_sections = [s for s in SECTION_ORDER if s in phase1_set]
-    phase2_sections = [s for s in SECTION_ORDER if s not in phase1_set]
 
     workers = min(_LLM_WORKERS, len(phase1_sections))
     logger.info(f"[writer] Phase 1: writing {phase1_sections} in parallel ({workers} workers)")
@@ -606,15 +606,27 @@ def run_section_writing(state: dict) -> dict:
                 cb(74, f"Section {st} done")
             logger.info(f"[writer] Phase 1 done: {st} ({len(content):,} chars)")
 
-    # ── Phase 2: dependent sections (sequential) ──
+    # ── Phase 1.5: discussion (depends only on results, which is now available) ──
+    logger.info("[writer] Phase 1.5: writing discussion (depends on results only)")
+    if cb:
+        cb(76, "Writing discussion")
+    st, content = _write_one("discussion", dict(prev_sections))
+    sections[st] = content
+    prev_sections[st] = content
+    logger.info(f"[writer] Phase 1.5 done: discussion ({len(content):,} chars)")
+
+    # ── Phase 2: remaining dependent sections (sequential) ──
+    # conclusion needs discussion, suggestion needs conclusion, abstract needs all, title needs abstract
+    phase2_sections = [s for s in SECTION_ORDER if s not in phase1_set and s != "discussion"]
     logger.info(f"[writer] Phase 2: writing {phase2_sections} sequentially")
     for i, section_type in enumerate(phase2_sections):
         if cb:
-            pct = 76 + (i / max(len(phase2_sections), 1)) * 14
+            pct = 78 + (i / max(len(phase2_sections), 1)) * 12
             cb(pct, f"Writing {section_type}")
         st, content = _write_one(section_type, dict(prev_sections))
         sections[st] = content
         prev_sections[st] = content
+        logger.info(f"[writer] Phase 2 done: {st} ({len(content):,} chars)")
 
     if cb:
         cb(90, "All sections written")
