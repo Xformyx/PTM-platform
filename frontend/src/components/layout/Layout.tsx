@@ -34,7 +34,7 @@ export default function Layout() {
       {/* Main Content */}
       <div className="flex flex-1 flex-col overflow-hidden">
         {/* Top Header */}
-        <header className="flex h-14 items-center gap-4 border-b bg-card px-6">
+        <header className="flex h-14 items-center gap-4 border-b bg-card px-6 shrink-0">
           <Button
             variant="ghost"
             size="icon"
@@ -44,7 +44,7 @@ export default function Layout() {
             <Menu className="h-5 w-5" />
           </Button>
           <div className="flex-1" />
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-2">
             <NotificationBell />
             <div className="h-7 w-7 rounded-full bg-primary/10 flex items-center justify-center text-xs font-semibold text-primary select-none">
               {user?.name?.charAt(0).toUpperCase() ?? "U"}
@@ -56,7 +56,7 @@ export default function Layout() {
         </header>
 
         {/* Page Content */}
-        <main className="flex-1 overflow-y-auto">
+        <main className="flex-1 overflow-y-auto bg-muted/20">
           <div className="w-full p-6">
             <AnimatePresence mode="wait">
               <motion.div

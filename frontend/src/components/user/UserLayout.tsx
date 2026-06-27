@@ -1,6 +1,6 @@
 /**
  * UserLayout — Simplified layout for general users.
- * Clean top navigation with minimal options.
+ * Clean top navigation with OmicsHorizon-inspired teal brand identity.
  * No sidebar, no admin tools.
  */
 import { Outlet, useLocation, useNavigate, Link } from "react-router-dom";
@@ -36,25 +36,30 @@ export default function UserLayout() {
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-background">
       {/* Top Navigation */}
-      <header className="flex h-16 items-center justify-between border-b bg-card px-6 shrink-0">
-        {/* Left: Logo + Nav */}
-        <div className="flex items-center gap-8">
-          <Link to="/app" className="flex items-center gap-2 group">
+      <header className="flex h-14 items-center justify-between border-b bg-card px-6 shrink-0">
+        {/* Left: Logo + Brand + Nav */}
+        <div className="flex items-center gap-6">
+          <Link to="/app" className="flex items-center gap-2.5 group">
             <img
               src="/mekii-logo.png"
               alt="Mekii"
-              className="h-9 w-auto object-contain"
+              className="h-8 w-auto object-contain"
             />
+            <span className="text-lg font-bold tracking-tight text-primary hidden sm:block">
+              Mekii
+            </span>
           </Link>
+
+          <div className="hidden md:block h-5 w-px bg-border" />
 
           <nav className="hidden md:flex items-center gap-1">
             <Link to="/app">
               <Button
                 variant={location.pathname === "/app" ? "secondary" : "ghost"}
                 size="sm"
-                className="gap-2"
+                className="gap-2 text-xs font-medium"
               >
-                <History className="h-4 w-4" />
+                <History className="h-3.5 w-3.5" />
                 My Analyses
               </Button>
             </Link>
@@ -62,9 +67,9 @@ export default function UserLayout() {
               <Button
                 variant={location.pathname === "/app/new" ? "secondary" : "ghost"}
                 size="sm"
-                className="gap-2"
+                className="gap-2 text-xs font-medium"
               >
-                <Plus className="h-4 w-4" />
+                <Plus className="h-3.5 w-3.5" />
                 New Analysis
               </Button>
             </Link>
@@ -105,7 +110,7 @@ export default function UserLayout() {
       </header>
 
       {/* Page Content */}
-      <main className="flex-1 overflow-y-auto">
+      <main className="flex-1 overflow-y-auto bg-muted/20">
         <AnimatePresence mode="wait">
           <motion.div
             key={location.pathname}
