@@ -81,11 +81,13 @@ export default function Login() {
             </svg>
           </div>
           <div className="relative z-10">
-            <h2 className="text-white/90 text-lg font-medium leading-relaxed mt-8">
-              Beyond analysis,<br />
-              systematize your lab's knowledge<br />
-              with Co-Scientist AI.
+            <h2 className="text-white/90 text-xl font-medium leading-relaxed mt-8 italic">
+              "Every post-translational mark<br />
+              has a story."<br />
             </h2>
+            <p className="text-white/70 text-sm mt-3 font-light">
+              We read the proteome to tell it.
+            </p>
           </div>
           <div className="relative z-10">
             <p className="text-white/60 text-xs">
