@@ -14,9 +14,13 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
-import { Separator } from "@/components/ui/separator";
-import { Skeleton } from "@/components/ui/skeleton";
+// Separator and Skeleton removed (unused)
 import MekiiChat from "@/components/user/MekiiChat";
+import { AnalysisStatisticsTab } from "@/components/AnalysisStatisticsTab";
+import CrossTalkVennDiagram from "@/components/CrossTalkVennDiagram";
+import CrossTalkHeatmap from "@/components/CrossTalkHeatmap";
+import CrossTalkSequentialGating from "@/components/CrossTalkSequentialGating";
+import SignalPropagationTimeline from "@/components/SignalPropagationTimeline";
 import {
   ArrowLeft,
   Loader2,
@@ -144,8 +148,29 @@ export default function AnalysisReport() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {isCompleted && (
-              <Button variant="outline" size="sm" className="gap-1">
+            {isCompleted && order.result_files && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1"
+                onClick={() => {
+                  const rf = order.result_files as any;
+                  const reports: string[] = rf?.report_files || [];
+                  const allFiles: string[] = rf?.all_files || [];
+                  // Prefer report files, fallback to all files
+                  const toDownload = reports.length > 0 ? reports : allFiles;
+                  if (toDownload.length === 0) {
+                    alert("No report files available yet.");
+                    return;
+                  }
+                  toDownload.forEach((filename: string) => {
+                    api.downloadFile(
+                      `/orders/${order.id}/files/${encodeURIComponent(filename)}`,
+                      filename,
+                    );
+                  });
+                }}
+              >
                 <Download className="h-3.5 w-3.5" />
                 Report
               </Button>
@@ -319,10 +344,10 @@ export default function AnalysisReport() {
               <KinaseActivityTab orderId={order.id} />
             </TabsContent>
             <TabsContent value="cascade">
-              <CascadeTab orderId={order.id} />
+              <CascadeTab orderId={order.id} order={order} />
             </TabsContent>
             <TabsContent value="timeline">
-              <TimelineTab orderId={order.id} />
+              <TimelineTab orderId={order.id} order={order} />
             </TabsContent>
             <TabsContent value="modules">
               <ModulesTab orderId={order.id} />
@@ -577,130 +602,453 @@ function OverviewTab({ order }: { order: Order }) {
             Analysis completed successfully. Use the tabs above to explore detailed results,
             or ask Mekii AI questions about your data in the chat panel.
           </p>
-          <Separator className="my-4" />
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div>
-              <p className="text-xs text-muted-foreground">PTM Sites</p>
-              <p className="text-lg font-bold">-</p>
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground">Active Kinases</p>
-              <p className="text-lg font-bold">-</p>
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground">Cascades</p>
-              <p className="text-lg font-bold">-</p>
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground">Modules</p>
-              <p className="text-lg font-bold">-</p>
-            </div>
-          </div>
         </CardContent>
       </Card>
+      <AnalysisStatisticsTab orderId={order.id} />
     </div>
   );
 }
 
+type VectorRow = {
+  gene: string;
+  position: string;
+  condition: string;
+  protein_log2fc: number;
+  ptm_relative_log2fc: number;
+  ptm_absolute_log2fc: number;
+  control_pseudocount_used?: boolean;
+  p_value?: number | null;
+  q_value?: number | null;
+};
+
+function parseTimeOrder(cond: string): number {
+  const m = cond.match(/(\d+(?:\.\d+)?)\s*(h|hr|hour|min|m)?/i);
+  if (!m) return 0;
+  let v = parseFloat(m[1]);
+  const unit = (m[2] || "h").toLowerCase();
+  if (unit.startsWith("m") || unit === "min") v /= 60;
+  return v;
+}
+
 function VectorPlotTab({ orderId }: { orderId: number }) {
+  const [data, setData] = useState<{ vector_data: VectorRow[] } | null>(null);
+  const [plotFiles, setPlotFiles] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [metric, setMetric] = useState<"relative" | "absolute">("relative");
+
+  useEffect(() => {
+    Promise.all([
+      api.get<{ vector_data: VectorRow[] }>(`/orders/${orderId}/vector-plot-data`).catch(() => null),
+      api.get<{ files: string[] }>(`/orders/${orderId}/vector-plots`).catch(() => ({ files: [] })),
+    ]).then(([vd, pf]) => {
+      if (vd) setData({ vector_data: vd.vector_data || [] });
+      setPlotFiles((pf as any)?.files || []);
+    }).finally(() => setLoading(false));
+  }, [orderId]);
+
+  if (loading) {
+    return (
+      <Card>
+        <CardContent className="flex flex-col items-center justify-center py-12">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground mb-3" />
+          <p className="text-sm text-muted-foreground">Loading vector plot data...</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const yKey = metric === "relative" ? "ptm_relative_log2fc" : "ptm_absolute_log2fc";
+  const conditions = data?.vector_data
+    ? Array.from(new Set(data.vector_data.map((r) => r.condition).filter((c) => c && c !== "Control")))
+        .sort((a, b) => parseTimeOrder(a) - parseTimeOrder(b))
+    : [];
+
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base flex items-center gap-2">
-          <ScatterChart className="h-4 w-4" />
-          4-Quadrant Vector Plot
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="aspect-square max-h-[500px] bg-muted/30 rounded-lg flex items-center justify-center border">
-          <p className="text-sm text-muted-foreground">
-            Vector Plot visualization (Protein Log2FC × PTM Relative Log2FC)
+    <div className="space-y-4">
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2">
+            <ScatterChart className="h-4 w-4" />
+            4-Quadrant Vector Plot
+          </CardTitle>
+          <p className="text-xs text-muted-foreground">
+            Protein Log2FC vs PTM Relative/Absolute Log2FC. Each dot represents a PTM site.
           </p>
-        </div>
-        <p className="text-xs text-muted-foreground mt-2">
-          X-axis: Protein abundance change (Log2FC) | Y-axis: PTM occupancy change (Relative Log2FC)
-        </p>
-      </CardContent>
-    </Card>
+        </CardHeader>
+        <CardContent>
+          {data?.vector_data?.length ? (
+            <>
+              <div className="flex gap-2 mb-4">
+                <Button
+                  variant={metric === "relative" ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setMetric("relative")}
+                >
+                  PTM Relative
+                </Button>
+                <Button
+                  variant={metric === "absolute" ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setMetric("absolute")}
+                >
+                  PTM Absolute
+                </Button>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {conditions.map((cond) => {
+                  const rows = data.vector_data.filter((r) => r.condition === cond);
+                  return (
+                    <div key={cond} className="border rounded-lg p-3">
+                      <p className="text-xs font-medium mb-2 text-center">{cond}</p>
+                      <div className="aspect-square max-h-[300px] relative bg-muted/10 rounded">
+                        <svg viewBox="-1.5 -1.5 3 3" className="w-full h-full">
+                          <line x1="-1.5" y1="0" x2="1.5" y2="0" stroke="currentColor" strokeWidth="0.01" opacity="0.3" />
+                          <line x1="0" y1="-1.5" x2="0" y2="1.5" stroke="currentColor" strokeWidth="0.01" opacity="0.3" />
+                          {rows.map((r, i) => {
+                            const x = Math.max(-1.4, Math.min(1.4, r.protein_log2fc));
+                            const y = Math.max(-1.4, Math.min(1.4, -(r[yKey] ?? 0)));
+                            return (
+                              <circle
+                                key={i}
+                                cx={x}
+                                cy={y}
+                                r="0.02"
+                                fill="hsl(174, 72%, 36%)"
+                                opacity="0.6"
+                              >
+                                <title>{`${r.gene} ${r.position}\nProtein: ${r.protein_log2fc.toFixed(2)}\nPTM: ${(r[yKey] ?? 0).toFixed(2)}`}</title>
+                              </circle>
+                            );
+                          })}
+                        </svg>
+                      </div>
+                      <p className="text-[10px] text-muted-foreground text-center mt-1">
+                        {rows.length} PTM sites
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          ) : (
+            <div className="h-[300px] bg-muted/30 rounded-lg flex items-center justify-center border">
+              <p className="text-sm text-muted-foreground">No vector plot data available</p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+      {/* Static PNG plots */}
+      {plotFiles.length > 0 && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm">Static Report Plots (PNG)</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-wrap gap-2">
+              {plotFiles.map((f) => (
+                <Button
+                  key={f}
+                  variant="outline"
+                  size="sm"
+                  className="gap-1 text-xs"
+                  onClick={() => api.downloadFile(`/orders/${orderId}/files/${encodeURIComponent(f)}`, f)}
+                >
+                  <Download className="h-3 w-3" /> {f}
+                </Button>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+    </div>
   );
 }
 
 function KinaseActivityTab({ orderId }: { orderId: number }) {
+  const [data, setData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    api
+      .get<any>(`/orders/${orderId}/vector-plot-data`)
+      .then((d) => setData(d))
+      .catch(() => setData(null))
+      .finally(() => setLoading(false));
+  }, [orderId]);
+
+  if (loading) {
+    return (
+      <Card>
+        <CardContent className="flex flex-col items-center justify-center py-12">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground mb-3" />
+          <p className="text-sm text-muted-foreground">Loading kinase activity data...</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const receptors = data?.inferred_receptors || [];
+  const cowave = data?.cowave_analysis;
+
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base flex items-center gap-2">
-          <Activity className="h-4 w-4" />
-          Kinase Activity Heatmap
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="h-[400px] bg-muted/30 rounded-lg flex items-center justify-center border">
-          <p className="text-sm text-muted-foreground">
-            Kinase activity heatmap (Co-Wave analysis results)
-          </p>
-        </div>
-      </CardContent>
-    </Card>
+    <div className="space-y-4">
+      {/* Inferred Receptors */}
+      {receptors.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <Activity className="h-4 w-4" />
+              Inferred Upstream Receptors
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              {receptors.slice(0, 12).map((rec: any, i: number) => (
+                <div key={i} className="border rounded-lg p-3 space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="font-medium text-sm">{rec.name}</span>
+                    <Badge variant="outline" className="text-[10px]">{rec.receptor_class}</Badge>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {rec.downstream_ptm_count} downstream PTMs
+                  </p>
+                  {rec.via_kinases?.length > 0 && (
+                    <p className="text-[10px] text-muted-foreground">
+                      via: {rec.via_kinases.slice(0, 4).join(", ")}
+                    </p>
+                  )}
+                  {rec.signaling_pathway && (
+                    <p className="text-[10px] text-primary/80">{rec.signaling_pathway}</p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+      {/* Co-Wave Analysis Summary */}
+      {cowave && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Co-Wave Divergence Analysis</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-muted-foreground">
+              Co-Wave analysis detected temporal divergence patterns in PTM dynamics.
+              See the Modules tab for detailed kinase module groupings.
+            </p>
+          </CardContent>
+        </Card>
+      )}
+      {/* Fallback */}
+      {receptors.length === 0 && !cowave && (
+        <Card>
+          <CardContent className="flex flex-col items-center justify-center py-12">
+            <Activity className="h-12 w-12 text-muted-foreground/40 mb-3" />
+            <p className="text-sm text-muted-foreground">
+              No kinase activity data available for this analysis.
+            </p>
+          </CardContent>
+        </Card>
+      )}
+    </div>
   );
 }
 
-function CascadeTab({ orderId }: { orderId: number }) {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base flex items-center gap-2">
-          <Network className="h-4 w-4" />
-          Signaling Cascade
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="h-[400px] bg-muted/30 rounded-lg flex items-center justify-center border">
+function CascadeTab({ orderId, order }: { orderId: number; order: Order }) {
+  const crossTalkData = order.cross_talk_data as any;
+
+  if (!crossTalkData) {
+    return (
+      <Card>
+        <CardContent className="flex flex-col items-center justify-center py-12">
+          <Network className="h-12 w-12 text-muted-foreground/40 mb-3" />
           <p className="text-sm text-muted-foreground">
-            Receptor → Kinase → Substrate cascade visualization
+            {order.report_options?.analysis_mode === "cross_talk"
+              ? "Cross-Talk 분석 데이터를 불러올 수 없습니다."
+              : "이 분석에는 Cross-Talk 데이터가 포함되어 있지 않습니다."}
           </p>
-        </div>
-      </CardContent>
-    </Card>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <Network className="h-4 w-4" />
+            PTM Cross-Talk Analysis
+          </CardTitle>
+          <p className="text-xs text-muted-foreground">
+            Phosphorylation과 Ubiquitylation 간의 Cross-Talk 패턴 분석 결과
+          </p>
+        </CardHeader>
+      </Card>
+      {crossTalkData?.primary_summary && crossTalkData?.secondary_summary && (
+        <CrossTalkVennDiagram
+          dualPTMProteins={crossTalkData.dual_ptm_proteins ?? []}
+          primarySummary={crossTalkData.primary_summary}
+          secondarySummary={crossTalkData.secondary_summary}
+          sharedNonPTM={crossTalkData.shared_nonptm ?? []}
+          primaryOnlyNonPTM={crossTalkData.primary_only_nonptm ?? []}
+          secondaryOnlyNonPTM={crossTalkData.secondary_only_nonptm ?? []}
+        />
+      )}
+      {crossTalkData?.dual_ptm_proteins?.length > 0 && (
+        <CrossTalkHeatmap
+          dualPTMProteins={crossTalkData.dual_ptm_proteins}
+          primaryPtmType={crossTalkData.primary_ptm_type ?? "phosphorylation"}
+          secondaryPtmType={crossTalkData.secondary_ptm_type ?? "ubiquitylation"}
+        />
+      )}
+      {crossTalkData?.sequential_gating?.length > 0 && (
+        <CrossTalkSequentialGating
+          gatingEvents={crossTalkData.sequential_gating}
+          primaryPtmType={crossTalkData.primary_ptm_type ?? "phosphorylation"}
+          secondaryPtmType={crossTalkData.secondary_ptm_type ?? "ubiquitylation"}
+        />
+      )}
+    </div>
   );
 }
 
-function TimelineTab({ orderId }: { orderId: number }) {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base flex items-center gap-2">
-          <Timer className="h-4 w-4" />
-          Temporal Timeline
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="h-[400px] bg-muted/30 rounded-lg flex items-center justify-center border">
+function TimelineTab({ orderId, order }: { orderId: number; order: Order }) {
+  const spData = order.signal_propagation_data as any;
+
+  if (!spData?.summary) {
+    return (
+      <Card>
+        <CardContent className="flex flex-col items-center justify-center py-12">
+          <Timer className="h-12 w-12 text-muted-foreground/40 mb-3" />
           <p className="text-sm text-muted-foreground">
-            Signal propagation timeline (temporal kinase activation order)
+            Signal propagation timeline 데이터가 없습니다.
+            Multi-time-point 데이터에서만 생성됩니다.
           </p>
-        </div>
-      </CardContent>
-    </Card>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <SignalPropagationTimeline data={spData} />
+    </div>
   );
 }
 
 function ModulesTab({ orderId }: { orderId: number }) {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base flex items-center gap-2">
-          <Boxes className="h-4 w-4" />
-          Kinase Modules
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="h-[400px] bg-muted/30 rounded-lg flex items-center justify-center border">
+  const [data, setData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    api
+      .get<any>(`/orders/${orderId}/vector-plot-data`)
+      .then((d) => setData(d))
+      .catch(() => setData(null))
+      .finally(() => setLoading(false));
+  }, [orderId]);
+
+  if (loading) {
+    return (
+      <Card>
+        <CardContent className="flex flex-col items-center justify-center py-12">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground mb-3" />
+          <p className="text-sm text-muted-foreground">Loading module data...</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const topNPtms = data?.top_n_ptms || [];
+  const vectorData = data?.vector_data || [];
+  const receptors = data?.inferred_receptors || [];
+
+  if (!topNPtms.length) {
+    return (
+      <Card>
+        <CardContent className="flex flex-col items-center justify-center py-12">
+          <Boxes className="h-12 w-12 text-muted-foreground/40 mb-3" />
           <p className="text-sm text-muted-foreground">
-            Co-Wave kinase modules (anchor → inferred → novel substrates)
+            Kinase module data is not available for this analysis.
           </p>
-        </div>
-      </CardContent>
-    </Card>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  // Show a summary of top PTMs and their protein classes
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <Boxes className="h-4 w-4" />
+            Top N PTM Sites ({topNPtms.length})
+          </CardTitle>
+          <p className="text-xs text-muted-foreground">
+            Most significant PTM sites identified by the analysis pipeline
+          </p>
+        </CardHeader>
+        <CardContent>
+          <div className="max-h-[400px] overflow-y-auto">
+            <table className="w-full text-sm">
+              <thead className="sticky top-0 bg-card">
+                <tr className="border-b">
+                  <th className="text-left py-2 px-2 text-xs font-medium text-muted-foreground">Gene</th>
+                  <th className="text-left py-2 px-2 text-xs font-medium text-muted-foreground">Position</th>
+                  <th className="text-left py-2 px-2 text-xs font-medium text-muted-foreground">Protein Class</th>
+                </tr>
+              </thead>
+              <tbody>
+                {topNPtms.slice(0, 50).map((ptm: any, i: number) => (
+                  <tr key={i} className="border-b border-muted/50">
+                    <td className="py-1.5 px-2 font-mono text-xs">{ptm.gene}</td>
+                    <td className="py-1.5 px-2 font-mono text-xs">{ptm.position}</td>
+                    <td className="py-1.5 px-2">
+                      {ptm.protein_class ? (
+                        <Badge variant="outline" className="text-[10px]">
+                          {ptm.protein_class.role}
+                        </Badge>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {topNPtms.length > 50 && (
+            <p className="text-xs text-muted-foreground mt-2 text-center">
+              Showing 50 of {topNPtms.length} PTM sites
+            </p>
+          )}
+        </CardContent>
+      </Card>
+      {/* Receptor summary */}
+      {receptors.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm">Upstream Receptor Summary</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-wrap gap-2">
+              {receptors.slice(0, 8).map((rec: any, i: number) => (
+                <Badge key={i} variant="outline" className="text-xs gap-1">
+                  {rec.name} ({rec.downstream_ptm_count} PTMs)
+                </Badge>
+              ))}
+              {receptors.length > 8 && (
+                <Badge variant="secondary" className="text-xs">
+                  +{receptors.length - 8} more
+                </Badge>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+    </div>
   );
 }
