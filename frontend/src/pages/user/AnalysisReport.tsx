@@ -28,7 +28,7 @@ import {
   XCircle,
   StopCircle,
   Clock,
-  ScatterChart,
+  ScatterChart as ScatterChartIcon,
   Activity,
   Network,
   Timer,
@@ -38,7 +38,21 @@ import {
   MessageSquare,
   PanelRightOpen,
   PanelRightClose,
+  ZoomIn,
+  ZoomOut,
 } from "lucide-react";
+import {
+  ScatterChart,
+  Scatter,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip as RechartsTooltip,
+  ResponsiveContainer,
+  ReferenceLine,
+} from "recharts";
+
+const SCATTER_PALETTE = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf"];
 
 export default function AnalysisReport() {
   const { id } = useParams<{ id: string }>();
@@ -313,7 +327,7 @@ export default function AnalysisReport() {
                 Overview
               </TabsTrigger>
               <TabsTrigger value="vector" className="gap-1.5">
-                <ScatterChart className="h-3.5 w-3.5" />
+                <ScatterChartIcon className="h-3.5 w-3.5" />
                 Vector Plot
               </TabsTrigger>
               <TabsTrigger value="kinase" className="gap-1.5">
@@ -635,7 +649,7 @@ function VectorPlotTab({ orderId }: { orderId: number }) {
   const [plotFiles, setPlotFiles] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [metric, setMetric] = useState<"relative" | "absolute">("relative");
-
+  const [zoom, setZoom] = useState(1);
   useEffect(() => {
     Promise.all([
       api.get<{ vector_data: VectorRow[] }>(`/orders/${orderId}/vector-plot-data`).catch(() => null),
@@ -645,7 +659,6 @@ function VectorPlotTab({ orderId }: { orderId: number }) {
       setPlotFiles((pf as any)?.files || []);
     }).finally(() => setLoading(false));
   }, [orderId]);
-
   if (loading) {
     return (
       <Card>
@@ -656,87 +669,134 @@ function VectorPlotTab({ orderId }: { orderId: number }) {
       </Card>
     );
   }
-
-  const yKey = metric === "relative" ? "ptm_relative_log2fc" : "ptm_absolute_log2fc";
-  const conditions = data?.vector_data
-    ? Array.from(new Set(data.vector_data.map((r) => r.condition).filter((c) => c && c !== "Control")))
-        .sort((a, b) => parseTimeOrder(a) - parseTimeOrder(b))
-    : [];
-
-  return (
-    <div className="space-y-4">
+  if (!data?.vector_data?.length) {
+    return (
       <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base flex items-center gap-2">
-            <ScatterChart className="h-4 w-4" />
-            4-Quadrant Vector Plot
-          </CardTitle>
-          <p className="text-xs text-muted-foreground">
-            Protein Log2FC vs PTM Relative/Absolute Log2FC. Each dot represents a PTM site.
-          </p>
-        </CardHeader>
-        <CardContent>
-          {data?.vector_data?.length ? (
-            <>
-              <div className="flex gap-2 mb-4">
-                <Button
-                  variant={metric === "relative" ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => setMetric("relative")}
-                >
-                  PTM Relative
-                </Button>
-                <Button
-                  variant={metric === "absolute" ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => setMetric("absolute")}
-                >
-                  PTM Absolute
-                </Button>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {conditions.map((cond) => {
-                  const rows = data.vector_data.filter((r) => r.condition === cond);
-                  return (
-                    <div key={cond} className="border rounded-lg p-3">
-                      <p className="text-xs font-medium mb-2 text-center">{cond}</p>
-                      <div className="aspect-square max-h-[300px] relative bg-muted/10 rounded">
-                        <svg viewBox="-1.5 -1.5 3 3" className="w-full h-full">
-                          <line x1="-1.5" y1="0" x2="1.5" y2="0" stroke="currentColor" strokeWidth="0.01" opacity="0.3" />
-                          <line x1="0" y1="-1.5" x2="0" y2="1.5" stroke="currentColor" strokeWidth="0.01" opacity="0.3" />
-                          {rows.map((r, i) => {
-                            const x = Math.max(-1.4, Math.min(1.4, r.protein_log2fc));
-                            const y = Math.max(-1.4, Math.min(1.4, -(r[yKey] ?? 0)));
-                            return (
-                              <circle
-                                key={i}
-                                cx={x}
-                                cy={y}
-                                r="0.02"
-                                fill="hsl(174, 72%, 36%)"
-                                opacity="0.6"
-                              >
-                                <title>{`${r.gene} ${r.position}\nProtein: ${r.protein_log2fc.toFixed(2)}\nPTM: ${(r[yKey] ?? 0).toFixed(2)}`}</title>
-                              </circle>
-                            );
-                          })}
-                        </svg>
-                      </div>
-                      <p className="text-[10px] text-muted-foreground text-center mt-1">
-                        {rows.length} PTM sites
-                      </p>
-                    </div>
-                  );
-                })}
-              </div>
-            </>
-          ) : (
-            <div className="h-[300px] bg-muted/30 rounded-lg flex items-center justify-center border">
-              <p className="text-sm text-muted-foreground">No vector plot data available</p>
-            </div>
-          )}
+        <CardContent className="flex flex-col items-center justify-center py-12 rounded-lg border bg-muted/20">
+          <ScatterChartIcon className="h-12 w-12 text-muted-foreground/40 mb-3" />
+          <p className="text-sm text-muted-foreground text-center">Scatter data will appear here after preprocessing completes.</p>
         </CardContent>
       </Card>
+    );
+  }
+  const yKey = metric === "relative" ? "ptm_relative_log2fc" : "ptm_absolute_log2fc";
+  const conditions = Array.from(
+    new Set(data.vector_data.map((r) => r.condition).filter((c) => c && c !== "Control"))
+  ).sort((a, b) => parseTimeOrder(a) - parseTimeOrder(b));
+  const chartsByCond = conditions.map((cond) => {
+    const rows = data.vector_data.filter((r) => r.condition === cond);
+    const points = rows.map((r) => ({
+      x: r.protein_log2fc ?? 0,
+      y: (r[yKey as keyof VectorRow] as number) ?? 0,
+      name: `${r.gene} ${r.position}`.trim() || `${r.gene}${r.position}`,
+    }));
+    return { condition: cond, points };
+  });
+  const allX = data.vector_data.map((r) => r.protein_log2fc ?? 0);
+  const allY = data.vector_data.map((r) => (r[yKey as keyof VectorRow] as number) ?? 0);
+  const xMin = Math.min(...allX);
+  const xMax = Math.max(...allX);
+  const yMin = Math.min(...allY);
+  const yMax = Math.max(...allY);
+  const domainPadding = Math.max(Math.abs(xMax - xMin), Math.abs(yMax - yMin)) * 0.1 / zoom;
+  const xDomain = [xMin - domainPadding, xMax + domainPadding];
+  const yDomain = [yMin - domainPadding, yMax + domainPadding];
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex gap-1">
+          <Button
+            variant={metric === "relative" ? "default" : "outline"}
+            size="sm"
+            onClick={() => setMetric("relative")}
+          >
+            PTM Relative
+          </Button>
+          <Button
+            variant={metric === "absolute" ? "default" : "outline"}
+            size="sm"
+            onClick={() => setMetric("absolute")}
+          >
+            PTM Absolute
+          </Button>
+        </div>
+        <div className="flex items-center gap-1">
+          <Button variant="outline" size="sm" onClick={() => setZoom((z) => Math.min(4, z + 0.5))}>
+            <ZoomIn className="h-3.5 w-3.5" /> Zoom In
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => setZoom((z) => Math.max(0.5, z - 0.5))}>
+            <ZoomOut className="h-3.5 w-3.5" /> Zoom Out
+          </Button>
+          <span className="text-xs text-muted-foreground ml-1">{zoom.toFixed(1)}x</span>
+        </div>
+      </div>
+      <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+        {chartsByCond.map(({ condition, points }, idx) => (
+          <Card key={condition} className="overflow-hidden">
+            <CardHeader className="py-2 px-4">
+              <CardTitle className="text-sm flex items-center gap-2">
+                <span className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: SCATTER_PALETTE[idx % SCATTER_PALETTE.length] }} />
+                {condition} ({metric === "relative" ? "PTM Relative" : "PTM Absolute"})
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-2">
+              <div className="h-[280px] w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <ScatterChart margin={{ top: 8, right: 8, bottom: 24, left: 24 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                    <XAxis
+                      type="number"
+                      dataKey="x"
+                      name="Protein Log2FC"
+                      domain={xDomain}
+                      tick={{ fontSize: 10 }}
+                    />
+                    <YAxis
+                      type="number"
+                      dataKey="y"
+                      name={metric === "relative" ? "PTM Relative Log2FC" : "PTM Absolute Log2FC"}
+                      domain={yDomain}
+                      tick={{ fontSize: 10 }}
+                    />
+                    <RechartsTooltip
+                      cursor={{ strokeDasharray: "3 3" }}
+                      content={({ active, payload }) => {
+                        if (!active || !payload?.[0]) return null;
+                        const p = payload[0].payload;
+                        return (
+                          <div className="rounded-md border bg-background px-3 py-2 text-sm shadow-md">
+                            <p className="font-medium">{p.name}</p>
+                            <p className="text-muted-foreground">
+                              Protein: {p.x.toFixed(3)} · {metric === "relative" ? "PTM Rel" : "PTM Abs"}: {p.y.toFixed(3)}
+                            </p>
+                          </div>
+                        );
+                      }}
+                    />
+                    {metric === "relative" && [-1, -0.5, 0, 0.5, 1].map((y) => (
+                      <ReferenceLine key={y} y={y} stroke="#ef4444" strokeDasharray={y === 0 ? undefined : "3 3"} strokeOpacity={0.5} />
+                    ))}
+                    {metric === "relative" && <ReferenceLine x={0} stroke="#ef4444" strokeDasharray="3 3" strokeOpacity={0.5} />}
+                    {metric === "absolute" && (
+                      <>
+                        <ReferenceLine x={0} stroke="#ef4444" strokeDasharray="3 3" strokeOpacity={0.5} />
+                        <ReferenceLine y={0} stroke="#ef4444" strokeDasharray="3 3" strokeOpacity={0.5} />
+                        <ReferenceLine segment={[{ x: Math.min(xMin, yMin), y: Math.min(xMin, yMin) }, { x: Math.max(xMax, yMax), y: Math.max(xMax, yMax) }]} stroke="#000" strokeDasharray="3 3" strokeOpacity={0.6} />
+                      </>
+                    )}
+                    <Scatter
+                      name={condition}
+                      data={points}
+                      fill={SCATTER_PALETTE[idx % SCATTER_PALETTE.length]}
+                      fillOpacity={0.7}
+                    />
+                  </ScatterChart>
+                </ResponsiveContainer>
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
       {/* Static PNG plots */}
       {plotFiles.length > 0 && (
         <Card>
