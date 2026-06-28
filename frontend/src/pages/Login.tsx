@@ -1,10 +1,43 @@
-import { useState, FormEvent } from "react";
+import { useState, useEffect, FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { Eye, EyeOff, Loader2 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+
+function TypingTagline() {
+  const text = "Meta-Kinetics Intelligence";
+  const [displayed, setDisplayed] = useState("");
+  const [showCursor, setShowCursor] = useState(true);
+
+  useEffect(() => {
+    let i = 0;
+    const interval = setInterval(() => {
+      i++;
+      setDisplayed(text.slice(0, i));
+      if (i >= text.length) {
+        clearInterval(interval);
+        // Blink cursor a few times then hide
+        setTimeout(() => setShowCursor(false), 2000);
+      }
+    }, 60);
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <div className="flex items-center gap-1.5 mt-1 h-5">
+      <span className="inline-block w-6 h-px bg-gradient-to-r from-transparent to-primary/50" />
+      <span className="text-[11px] font-medium tracking-[0.2em] uppercase text-primary/70">
+        {displayed}
+        {showCursor && (
+          <span className="inline-block w-[2px] h-3 ml-0.5 bg-primary/70 animate-pulse" />
+        )}
+      </span>
+      <span className="inline-block w-6 h-px bg-gradient-to-l from-transparent to-primary/50" />
+    </div>
+  );
+}
 
 export default function Login() {
   const navigate = useNavigate();
@@ -64,18 +97,13 @@ export default function Login() {
         {/* Right panel — login form */}
         <div className="flex flex-col justify-center p-8 md:p-12">
           {/* Logo */}
-          <div className="flex flex-col items-center gap-3 mb-8">
+          <div className="flex flex-col items-center gap-4 mb-8">
             <img
               src="/mekii-logo.png"
               alt="Mekii"
-              className="h-20 w-auto max-w-[180px] object-contain"
+              className="h-24 w-auto max-w-[200px] object-contain drop-shadow-lg"
             />
-            <h1 className="text-2xl font-bold tracking-tight text-primary">
-              Mekii
-            </h1>
-            <p className="text-xs text-muted-foreground text-center">
-              Meta-Kinetics Intelligence Platform
-            </p>
+            <TypingTagline />
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
