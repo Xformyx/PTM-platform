@@ -672,11 +672,11 @@ async def _assemble_context(
 # ── SSE Streaming Endpoint ───────────────────────────────────────────────────
 
 
-SYSTEM_PROMPT_TEMPLATE = """당신은 POTATO AI입니다. PTM-Vector 분석 플랫폼에 내장된 연구 도우미입니다.
+SYSTEM_PROMPT_TEMPLATE = """당신은 MEKII AI입니다. PTM-Vector 분석 플랫폼에 내장된 연구 도우미입니다.
 아래 제공된 분석 데이터를 기반으로 연구자의 질문에 답변합니다.
 
 필수 규칙:
-1. 모든 답변은 반드시 "저는 POTATO AI 입니다. 연구자님의 질문에 대해 답하겠습니다." 로 시작하세요.
+1. 모든 답변은 반드시 "저는 MEKII AI 입니다. 연구자님의 질문에 대해 답하겠습니다." 로 시작하세요.
 2. 핵심만 간결하게 답변하세요. 3-5문장 이내로 핵심 결론을 먼저 말하고, 마지막에 "더 자세히 설명해드릴까요?" 라고 물어보세요.
 3. 사용자가 "자세히", "구체적으로", "더 설명해줘" 등을 요청하면 그때 상세하게 데이터를 인용하며 설명하세요.
 4. 딸딸한 학술체가 아니라, 동료 연구자에게 말하듯 자연스러운 구어체로 대화하세요. ("이건 ~해요", "아마 ~일 거예요", "~로 보이네요" 등)
@@ -1065,7 +1065,7 @@ async def clear_chat_history(
 # ── Chat Insight Extractor — chatbot → report feedback ────────────────────
 
 _INSIGHT_SYSTEM_PROMPT = """\
-You are analyzing a conversation between a researcher and POTATO AI
+You are analyzing a conversation between a researcher and MEKII AI
 (a PTM analysis assistant). Extract actionable insights that should be
 incorporated into the analysis report.
 
@@ -1154,7 +1154,7 @@ async def apply_chat_to_report(
 
     conversation_lines = []
     for i, m in enumerate(messages):
-        role = "Researcher" if m.role == "user" else "POTATO AI"
+        role = "Researcher" if m.role == "user" else "MEKII AI"
         conversation_lines.append(f"[{i+1}] {role}: {m.content}")
     conversation_text = "\n\n".join(conversation_lines)
 

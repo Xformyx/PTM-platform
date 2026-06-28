@@ -76,3 +76,5 @@ GIT_DATE
 api-server-log-grep.txt
 api-server-log-grep.txt
 api-server-log-grep.txt
+.project-config.json
+.vite/

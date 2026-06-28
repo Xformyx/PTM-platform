@@ -379,7 +379,7 @@ export default function ChatPanel({ orderId, viewContext, isOpen, onToggle }: Ch
       >
         <PanelRightOpen className="h-4 w-4 text-primary shrink-0" />
         <span className="text-[11px] font-semibold text-primary [writing-mode:vertical-lr]">
-          POTATO AI
+          MEKII AI
         </span>
       </div>
     );
@@ -400,7 +400,7 @@ export default function ChatPanel({ orderId, viewContext, isOpen, onToggle }: Ch
             <PanelRightClose className="h-4 w-4 text-muted-foreground" />
           </Button>
           <Sparkles className="h-4 w-4 text-primary" />
-          <span className="font-semibold text-sm">POTATO AI</span>
+          <span className="font-semibold text-sm">MEKII AI</span>
           {historyLoaded && messages.length > 0 && (
             <span className="text-[10px] text-muted-foreground flex items-center gap-1">
               <History className="h-3 w-3" />
@@ -509,7 +509,7 @@ export default function ChatPanel({ orderId, viewContext, isOpen, onToggle }: Ch
               <MessageSquare className="h-6 w-6 text-primary" />
             </div>
             <div>
-              <p className="text-sm font-medium">POTATO AI</p>
+              <p className="text-sm font-medium">MEKII AI</p>
               <p className="text-xs text-muted-foreground mt-1 max-w-[260px]">
                 분석 결과에 대해 질문하세요. Report, Kinase Module, Signal Flow, Evidence Scoring 데이터를 참조하여 답변합니다.
               </p>

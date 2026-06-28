@@ -42,7 +42,7 @@ MAX_SUMMARY_CHARS = 3000
 # ---------------------------------------------------------------------------
 
 SYSTEM_PROMPT = """\
-You are POTATO AI operating in **Report Co-pilot Mode**. Your role is to
+You are MEKII AI operating in **Report Co-pilot Mode**. Your role is to
 review a draft PTM analysis report and identify gaps, inconsistencies,
 or opportunities for deeper analysis.
 
