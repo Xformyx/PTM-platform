@@ -1556,11 +1556,33 @@ function MultiSiteDivergencePanel({
   }
 
   // Condition column width
-  const COL_W = 80;
+  const COL_W = 90;
   const GENE_LABEL_W = 80;
-  const ROW_H = 72; // px per gene row
-  const SPARK_W = 64;
-  const SPARK_H = 24;
+  const SPARK_W = 68;
+  const SPARK_H = 26;
+
+  // Compute per-gene row height based on max sites sharing the same condition
+  // Activating sites go above center, inhibitory sites go below center
+  // Each site needs ~38px vertical space
+  const SITE_SLOT_H = 38;
+  const CENTER_GAP = 10; // gap between activation zone and inhibition zone
+  function geneRowLayout(sites: typeof geneSites extends Map<string, Array<infer T>> ? Array<T> : never[]) {
+    // Count max activating and inhibitory sites at same condition
+    const actByCondIdx = new Map<number, number>();
+    const inhByCondIdx = new Map<number, number>();
+    sites.forEach((s) => {
+      const idx = s.peakCondIdx;
+      if (s.peakFC >= 0) actByCondIdx.set(idx, (actByCondIdx.get(idx) ?? 0) + 1);
+      else inhByCondIdx.set(idx, (inhByCondIdx.get(idx) ?? 0) + 1);
+    });
+    const maxAct = Math.max(0, ...Array.from(actByCondIdx.values()));
+    const maxInh = Math.max(0, ...Array.from(inhByCondIdx.values()));
+    const actZoneH = maxAct * SITE_SLOT_H;
+    const inhZoneH = maxInh * SITE_SLOT_H;
+    const totalH = Math.max(72, actZoneH + CENTER_GAP + inhZoneH + 16);
+    const centerY = actZoneH + CENTER_GAP / 2 + 8; // y of the horizontal center line
+    return { totalH, centerY, actZoneH, inhZoneH };
+  }
 
   return (
     <div className="rounded-lg border bg-card">
@@ -1631,21 +1653,50 @@ function MultiSiteDivergencePanel({
               const sites = geneSites.get(gene) ?? [];
               const geneEntries = byGene.get(gene) ?? [];
               const isHovered = hoveredGene === gene;
+              const { totalH, centerY } = geneRowLayout(sites);
+
+              // Assign Y positions: activating sites above center, inhibitory below
+              // Track slot index per condIdx per direction
+              const actSlotCounter = new Map<number, number>();
+              const inhSlotCounter = new Map<number, number>();
+              const sitePositions = sites.map((site) => {
+                const isAct = site.peakFC >= 0;
+                const condIdx = site.peakCondIdx;
+                const cx = condIdx * COL_W + COL_W / 2;
+                const r = bubbleR(site.peakFC);
+                let cy: number;
+                if (isAct) {
+                  const slot = actSlotCounter.get(condIdx) ?? 0;
+                  actSlotCounter.set(condIdx, slot + 1);
+                  // Stack upward from centerY: slot 0 is closest to center
+                  cy = centerY - r - 4 - slot * SITE_SLOT_H;
+                } else {
+                  const slot = inhSlotCounter.get(condIdx) ?? 0;
+                  inhSlotCounter.set(condIdx, slot + 1);
+                  // Stack downward from centerY
+                  cy = centerY + r + 4 + slot * SITE_SLOT_H;
+                }
+                return { ...site, cx, cy, r };
+              });
+
+              // Build a map for connector endpoint lookup
+              const siteYMap = new Map<string, { cx: number; cy: number; r: number }>();
+              sitePositions.forEach((s) => siteYMap.set(s.position, { cx: s.cx, cy: s.cy, r: s.r }));
 
               return (
                 <div
                   key={gene}
-                  className={`flex items-center border-b border-border/20 last:border-0 transition-colors ${
+                  className={`flex items-start border-b border-border/20 last:border-0 transition-colors ${
                     isHovered ? "bg-muted/20" : ""
                   }`}
-                  style={{ minWidth: GENE_LABEL_W + COL_W * conditions.length, minHeight: ROW_H }}
+                  style={{ minWidth: GENE_LABEL_W + COL_W * conditions.length, minHeight: totalH }}
                   onMouseEnter={() => setHoveredGene(gene)}
                   onMouseLeave={() => setHoveredGene(null)}
                 >
                   {/* Gene label */}
                   <div
-                    style={{ width: GENE_LABEL_W }}
-                    className="shrink-0 pr-3 text-right text-[11px] font-bold text-foreground/80 self-center"
+                    style={{ width: GENE_LABEL_W, paddingTop: centerY - 7 }}
+                    className="shrink-0 pr-3 text-right text-[11px] font-bold text-foreground/80"
                   >
                     {gene}
                   </div>
@@ -1653,43 +1704,56 @@ function MultiSiteDivergencePanel({
                   {/* Swimlane SVG canvas */}
                   <svg
                     width={COL_W * conditions.length}
-                    height={ROW_H}
+                    height={totalH}
                     className="overflow-visible"
                     style={{ minWidth: COL_W * conditions.length }}
                   >
                     {/* Horizontal center line */}
                     <line
-                      x1={0} y1={ROW_H / 2}
-                      x2={COL_W * conditions.length} y2={ROW_H / 2}
-                      stroke="currentColor" strokeOpacity="0.1" strokeWidth="1"
+                      x1={0} y1={centerY}
+                      x2={COL_W * conditions.length} y2={centerY}
+                      stroke="currentColor" strokeOpacity="0.12" strokeWidth="1"
                     />
+                    {/* Activation zone label */}
+                    <text x={4} y={Math.max(12, centerY - 6)} fontSize="8" fill="#ef4444" opacity="0.5" fontWeight="600">ACT</text>
+                    {/* Inhibition zone label */}
+                    <text x={4} y={Math.min(totalH - 4, centerY + 14)} fontSize="8" fill="#3b82f6" opacity="0.5" fontWeight="600">INH</text>
 
                     {/* Connector lines between paired sites */}
                     {geneEntries
                       .filter((e) => patternFilter === "all" || e.pattern === patternFilter)
                       .map((e, ei) => {
-                        const idxA = conditions.indexOf(e.siteA.peakCondition);
-                        const idxB = conditions.indexOf(e.siteB.peakCondition);
-                        if (idxA < 0 || idxB < 0) return null;
-                        const xA = idxA * COL_W + COL_W / 2;
-                        const xB = idxB * COL_W + COL_W / 2;
-                        const yMid = ROW_H / 2;
+                        const posA = siteYMap.get(e.siteA.position);
+                        const posB = siteYMap.get(e.siteB.position);
+                        if (!posA || !posB) return null;
                         const color = connectorColor(e.pattern);
-                        // Arrow marker id
                         const markerId = `arrow-${gene}-${ei}`;
+                        // Draw curved connector between the two bubbles
+                        const dx = posB.cx - posA.cx;
+                        const dy = posB.cy - posA.cy;
+                        const dist = Math.sqrt(dx * dx + dy * dy);
+                        if (dist < 1) return null;
+                        // Endpoint on bubble edge
+                        const ex1 = posA.cx + (dx / dist) * (posA.r + 2);
+                        const ey1 = posA.cy + (dy / dist) * (posA.r + 2);
+                        const ex2 = posB.cx - (dx / dist) * (posB.r + 4);
+                        const ey2 = posB.cy - (dy / dist) * (posB.r + 4);
+                        // Bezier control point (arc above/below)
+                        const midX = (ex1 + ex2) / 2;
+                        const midY = (ey1 + ey2) / 2 - Math.abs(dx) * 0.15;
                         return (
                           <g key={ei}>
                             <defs>
                               <marker id={markerId} markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
-                                <path d="M0,0 L0,6 L6,3 z" fill={color} opacity="0.7" />
+                                <path d="M0,0 L0,6 L6,3 z" fill={color} opacity="0.8" />
                               </marker>
                             </defs>
-                            <line
-                              x1={xA} y1={yMid}
-                              x2={xB - bubbleR(e.siteB.peakFC) - 2} y2={yMid}
+                            <path
+                              d={`M${ex1.toFixed(1)},${ey1.toFixed(1)} Q${midX.toFixed(1)},${midY.toFixed(1)} ${ex2.toFixed(1)},${ey2.toFixed(1)}`}
+                              fill="none"
                               stroke={color}
                               strokeWidth="1.5"
-                              strokeOpacity="0.6"
+                              strokeOpacity="0.65"
                               strokeDasharray={e.pattern === "multisite_coordination" ? "3,2" : undefined}
                               markerEnd={`url(#${markerId})`}
                             />
@@ -1698,17 +1762,14 @@ function MultiSiteDivergencePanel({
                       })}
 
                     {/* Bubble nodes per site */}
-                    {sites.map((site) => {
-                      const condIdx = conditions.indexOf(site.peakCondition);
-                      if (condIdx < 0) return null;
-                      const cx = condIdx * COL_W + COL_W / 2;
-                      const cy = ROW_H / 2;
-                      const r = bubbleR(site.peakFC);
+                    {sitePositions.map((site) => {
+                      const { cx, cy, r } = site;
                       const isAct = site.peakFC > 0;
                       const fill = isAct ? "#ef4444" : "#3b82f6";
                       const fillLight = isAct ? "rgba(239,68,68,0.15)" : "rgba(59,130,246,0.15)";
                       const strokeStyle = site.isDeNovo ? "4,2" : undefined;
-                      const key = `${gene}_${site.position}`;
+                      // Label goes above bubble for activating, below for inhibitory
+                      const labelY = isAct ? cy - r - 5 : cy + r + 12;
 
                       return (
                         <g
@@ -1719,24 +1780,23 @@ function MultiSiteDivergencePanel({
                           <title>{`${site.label}: ${site.peakFC > 0 ? "+" : ""}${site.peakFC.toFixed(2)} @ ${site.peakCondition}${site.isDeNovo ? " ⚡de novo" : ""}`}</title>
                           {/* Outer glow for de_novo */}
                           {site.isDeNovo && (
-                            <circle cx={cx} cy={cy} r={r + 4} fill="none" stroke="#f97316" strokeWidth="1" strokeOpacity="0.4" strokeDasharray="2,2" />
+                            <circle cx={cx} cy={cy} r={r + 4} fill="none" stroke="#f97316" strokeWidth="1.2" strokeOpacity="0.5" strokeDasharray="2,2" />
                           )}
                           {/* Main bubble */}
                           <circle cx={cx} cy={cy} r={r} fill={fillLight} stroke={fill} strokeWidth={site.activityClass === "minor" ? 1 : 2} strokeDasharray={strokeStyle} />
-                          {/* Site label */}
+                          {/* Site label — colored by direction */}
                           <text
                             x={cx}
-                            y={cy - r - 4}
+                            y={labelY}
                             textAnchor="middle"
                             fontSize="9"
-                            fill="currentColor"
-                            opacity="0.75"
-                            fontWeight="600"
+                            fill={fill}
+                            fontWeight="700"
                           >
-                            {site.position}
+                            {site.position}{site.isDeNovo ? " ⚡" : ""}
                           </text>
-                          {/* FC value inside bubble (if large enough) */}
-                          {r >= 12 && (
+                          {/* FC value inside bubble */}
+                          {r >= 11 && (
                             <text
                               x={cx}
                               y={cy + 3.5}
