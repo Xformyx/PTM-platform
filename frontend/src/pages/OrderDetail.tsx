@@ -1426,6 +1426,50 @@ function computeMultiSiteDivergence(
   return results;
 }
 
+// ── Sparkline SVG (mini time-series for each site) ───────────────────────
+function SiteSpark({
+  values,
+  width = 72,
+  height = 28,
+  isActivating,
+}: {
+  values: number[];
+  width?: number;
+  height?: number;
+  isActivating: boolean;
+}) {
+  if (values.length < 2) return null;
+  const maxAbs = Math.max(...values.map(Math.abs), 0.1);
+  const pad = 3;
+  const w = width - pad * 2;
+  const h = height - pad * 2;
+  const mid = pad + h / 2;
+  const pts = values.map((v, i) => {
+    const x = pad + (i / (values.length - 1)) * w;
+    const y = mid - (v / maxAbs) * (h / 2);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  });
+  const color = isActivating ? "#ef4444" : "#3b82f6";
+  const fill = isActivating ? "rgba(239,68,68,0.08)" : "rgba(59,130,246,0.08)";
+  // Area fill path
+  const areaD = `M${pts[0]} ` + pts.slice(1).map((p) => `L${p}`).join(" ") + ` L${(pad + w).toFixed(1)},${mid.toFixed(1)} L${pad},${mid.toFixed(1)} Z`;
+  return (
+    <svg width={width} height={height} className="overflow-visible shrink-0">
+      <line x1={pad} y1={mid} x2={pad + w} y2={mid} stroke="currentColor" strokeOpacity="0.15" strokeWidth="0.5" />
+      <path d={areaD} fill={fill} />
+      <polyline points={pts.join(" ")} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
+      {values.map((v, i) => {
+        const x = pad + (i / (values.length - 1)) * w;
+        const y = mid - (v / maxAbs) * (h / 2);
+        const isPeak = Math.abs(v) === Math.max(...values.map(Math.abs));
+        return isPeak ? (
+          <circle key={i} cx={x.toFixed(1)} cy={y.toFixed(1)} r="2.5" fill={color} />
+        ) : null;
+      })}
+    </svg>
+  );
+}
+
 function MultiSiteDivergencePanel({
   uniquePtms,
   vectorByPtm,
@@ -1443,6 +1487,7 @@ function MultiSiteDivergencePanel({
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const [patternFilter, setPatternFilter] = useState<DivergencePattern | "all">("all");
+  const [hoveredGene, setHoveredGene] = useState<string | null>(null);
 
   const entries = useMemo(
     () => computeMultiSiteDivergence(uniquePtms, vectorByPtm, conditions, ptmActivityClass, ptmPseudocountUsed),
@@ -1452,30 +1497,74 @@ function MultiSiteDivergencePanel({
 
   if (entries.length === 0) return null;
 
+  // Group entries by gene for swimlane display
+  const byGene = new Map<string, SitePairEntry[]>();
+  entries.forEach((e) => {
+    if (!byGene.has(e.gene)) byGene.set(e.gene, []);
+    byGene.get(e.gene)!.push(e);
+  });
+
+  // Collect all unique sites per gene (across all pairs)
+  const geneSites = new Map<string, Array<{ position: string; label: string; peakFC: number; peakCondition: string; peakCondIdx: number; isDeNovo: boolean; activityClass: "de_novo" | "regulated" | "minor"; values: number[] }>>();
+  byGene.forEach((geneEntries, gene) => {
+    const siteMap = new Map<string, (typeof geneSites extends Map<string, Array<infer T>> ? T : never)>();
+    geneEntries.forEach((e) => {
+      [e.siteA, e.siteB].forEach((s) => {
+        if (!siteMap.has(s.position)) {
+          const key = `${gene}_${s.position}`;
+          const arr = vectorByPtm.get(key) ?? [];
+          const values = conditions.map((c) => arr.find((r) => r.condition === c)?.value ?? 0);
+          const peakCondIdx = conditions.indexOf(s.peakCondition);
+          siteMap.set(s.position, {
+            position: s.position,
+            label: s.label,
+            peakFC: s.peakFC,
+            peakCondition: s.peakCondition,
+            peakCondIdx: peakCondIdx >= 0 ? peakCondIdx : 0,
+            isDeNovo: s.isDeNovo,
+            activityClass: s.activityClass,
+            values,
+          });
+        }
+      });
+    });
+    // Sort sites by peak condition index (time order)
+    geneSites.set(gene, Array.from(siteMap.values()).sort((a, b) => a.peakCondIdx - b.peakCondIdx));
+  });
+
   const counts: Record<DivergencePattern, number> = { signal_attenuation: 0, sequential_regulation: 0, multisite_coordination: 0 };
   entries.forEach((e) => { counts[e.pattern]++; });
 
-  const filtered = patternFilter === "all" ? entries : entries.filter((e) => e.pattern === patternFilter);
+  const filteredGenes = patternFilter === "all"
+    ? Array.from(byGene.keys())
+    : Array.from(byGene.entries()).filter(([, gEntries]) => gEntries.some((e) => e.pattern === patternFilter)).map(([g]) => g);
 
-  function SiteBadge({ site }: { site: SitePairEntry["siteA"] }) {
-    const acColor =
-      site.activityClass === "de_novo"
-        ? "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400 border-orange-300 dark:border-orange-700"
-        : site.activityClass === "regulated"
-        ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 border-blue-300 dark:border-blue-700"
-        : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400 border-slate-300 dark:border-slate-600";
-    return (
-      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium border ${acColor}`}>
-        {site.isDeNovo && <span title="De novo site">⚡</span>}
-        <span className="font-semibold">{site.position}</span>
-        <span className="opacity-75">{site.peakFC > 0 ? "▲" : "▼"} {Math.abs(site.peakFC).toFixed(2)}</span>
-        <span className="opacity-55 text-[9px]">@ {site.peakCondition}</span>
-      </span>
-    );
+  // Max bubble radius in px
+  const BUBBLE_R_MAX = 18;
+  const BUBBLE_R_MIN = 6;
+  const allFCs = Array.from(geneSites.values()).flatMap((sites) => sites.map((s) => Math.abs(s.peakFC)));
+  const globalMaxFC = Math.max(...allFCs, 1);
+  function bubbleR(fc: number) {
+    return BUBBLE_R_MIN + ((Math.abs(fc) / globalMaxFC) * (BUBBLE_R_MAX - BUBBLE_R_MIN));
   }
+
+  // Pattern color for connector line between sites
+  function connectorColor(pattern: DivergencePattern) {
+    if (pattern === "signal_attenuation") return "#f97316"; // orange
+    if (pattern === "sequential_regulation") return "#3b82f6"; // blue
+    return "#10b981"; // emerald
+  }
+
+  // Condition column width
+  const COL_W = 80;
+  const GENE_LABEL_W = 80;
+  const ROW_H = 72; // px per gene row
+  const SPARK_W = 64;
+  const SPARK_H = 24;
 
   return (
     <div className="rounded-lg border bg-card">
+      {/* Header */}
       <button
         className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-muted/30 transition-colors rounded-t-lg"
         onClick={() => setCollapsed((v) => !v)}
@@ -1524,49 +1613,207 @@ function MultiSiteDivergencePanel({
             })}
           </div>
 
-          {patternFilter !== "all" && (
-            <p className="text-[11px] text-muted-foreground italic px-1">
-              {DIVERGENCE_META[patternFilter].description}
-            </p>
-          )}
+          {/* ── Bubble Swimlane ── */}
+          <div className="overflow-x-auto">
+            {/* Condition header row */}
+            <div
+              className="flex items-center text-[10px] text-muted-foreground font-medium border-b border-border/40 pb-1 mb-1"
+              style={{ minWidth: GENE_LABEL_W + COL_W * conditions.length }}
+            >
+              <div style={{ width: GENE_LABEL_W }} className="shrink-0 pr-2 text-right">Protein</div>
+              {conditions.map((c) => (
+                <div key={c} style={{ width: COL_W }} className="shrink-0 text-center truncate px-1">{c}</div>
+              ))}
+            </div>
 
-          <div className="space-y-2">
-            {filtered.map((entry, idx) => {
-              const meta = DIVERGENCE_META[entry.pattern];
+            {/* Gene swimlane rows */}
+            {filteredGenes.map((gene) => {
+              const sites = geneSites.get(gene) ?? [];
+              const geneEntries = byGene.get(gene) ?? [];
+              const isHovered = hoveredGene === gene;
+
               return (
                 <div
-                  key={idx}
-                  className={`rounded-md border p-3 ${meta.bgColor} ${meta.borderColor} cursor-pointer hover:opacity-80 transition-opacity`}
-                  onClick={() => onHighlightPtms([entry.siteA.label, entry.siteB.label])}
-                  title="클릭하면 차트에서 해당 PTM을 하이라이트합니다"
+                  key={gene}
+                  className={`flex items-center border-b border-border/20 last:border-0 transition-colors ${
+                    isHovered ? "bg-muted/20" : ""
+                  }`}
+                  style={{ minWidth: GENE_LABEL_W + COL_W * conditions.length, minHeight: ROW_H }}
+                  onMouseEnter={() => setHoveredGene(gene)}
+                  onMouseLeave={() => setHoveredGene(null)}
                 >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <span className={`text-[11px] font-bold ${meta.color}`}>{entry.gene}</span>
-                      <SiteBadge site={entry.siteA} />
-                      <span className="text-[10px] text-muted-foreground">→</span>
-                      <SiteBadge site={entry.siteB} />
-                    </div>
-                    <Badge
-                      variant="outline"
-                      className={`text-[9px] shrink-0 ${meta.color} ${meta.borderColor} whitespace-nowrap`}
-                    >
-                      {meta.label}
-                    </Badge>
+                  {/* Gene label */}
+                  <div
+                    style={{ width: GENE_LABEL_W }}
+                    className="shrink-0 pr-3 text-right text-[11px] font-bold text-foreground/80 self-center"
+                  >
+                    {gene}
                   </div>
-                  <p className="text-[10px] text-muted-foreground mt-1.5 leading-relaxed">{entry.description}</p>
+
+                  {/* Swimlane SVG canvas */}
+                  <svg
+                    width={COL_W * conditions.length}
+                    height={ROW_H}
+                    className="overflow-visible"
+                    style={{ minWidth: COL_W * conditions.length }}
+                  >
+                    {/* Horizontal center line */}
+                    <line
+                      x1={0} y1={ROW_H / 2}
+                      x2={COL_W * conditions.length} y2={ROW_H / 2}
+                      stroke="currentColor" strokeOpacity="0.1" strokeWidth="1"
+                    />
+
+                    {/* Connector lines between paired sites */}
+                    {geneEntries
+                      .filter((e) => patternFilter === "all" || e.pattern === patternFilter)
+                      .map((e, ei) => {
+                        const idxA = conditions.indexOf(e.siteA.peakCondition);
+                        const idxB = conditions.indexOf(e.siteB.peakCondition);
+                        if (idxA < 0 || idxB < 0) return null;
+                        const xA = idxA * COL_W + COL_W / 2;
+                        const xB = idxB * COL_W + COL_W / 2;
+                        const yMid = ROW_H / 2;
+                        const color = connectorColor(e.pattern);
+                        // Arrow marker id
+                        const markerId = `arrow-${gene}-${ei}`;
+                        return (
+                          <g key={ei}>
+                            <defs>
+                              <marker id={markerId} markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+                                <path d="M0,0 L0,6 L6,3 z" fill={color} opacity="0.7" />
+                              </marker>
+                            </defs>
+                            <line
+                              x1={xA} y1={yMid}
+                              x2={xB - bubbleR(e.siteB.peakFC) - 2} y2={yMid}
+                              stroke={color}
+                              strokeWidth="1.5"
+                              strokeOpacity="0.6"
+                              strokeDasharray={e.pattern === "multisite_coordination" ? "3,2" : undefined}
+                              markerEnd={`url(#${markerId})`}
+                            />
+                          </g>
+                        );
+                      })}
+
+                    {/* Bubble nodes per site */}
+                    {sites.map((site) => {
+                      const condIdx = conditions.indexOf(site.peakCondition);
+                      if (condIdx < 0) return null;
+                      const cx = condIdx * COL_W + COL_W / 2;
+                      const cy = ROW_H / 2;
+                      const r = bubbleR(site.peakFC);
+                      const isAct = site.peakFC > 0;
+                      const fill = isAct ? "#ef4444" : "#3b82f6";
+                      const fillLight = isAct ? "rgba(239,68,68,0.15)" : "rgba(59,130,246,0.15)";
+                      const strokeStyle = site.isDeNovo ? "4,2" : undefined;
+                      const key = `${gene}_${site.position}`;
+
+                      return (
+                        <g
+                          key={site.position}
+                          className="cursor-pointer"
+                          onClick={() => onHighlightPtms([site.label])}
+                        >
+                          <title>{`${site.label}: ${site.peakFC > 0 ? "+" : ""}${site.peakFC.toFixed(2)} @ ${site.peakCondition}${site.isDeNovo ? " ⚡de novo" : ""}`}</title>
+                          {/* Outer glow for de_novo */}
+                          {site.isDeNovo && (
+                            <circle cx={cx} cy={cy} r={r + 4} fill="none" stroke="#f97316" strokeWidth="1" strokeOpacity="0.4" strokeDasharray="2,2" />
+                          )}
+                          {/* Main bubble */}
+                          <circle cx={cx} cy={cy} r={r} fill={fillLight} stroke={fill} strokeWidth={site.activityClass === "minor" ? 1 : 2} strokeDasharray={strokeStyle} />
+                          {/* Site label */}
+                          <text
+                            x={cx}
+                            y={cy - r - 4}
+                            textAnchor="middle"
+                            fontSize="9"
+                            fill="currentColor"
+                            opacity="0.75"
+                            fontWeight="600"
+                          >
+                            {site.position}
+                          </text>
+                          {/* FC value inside bubble (if large enough) */}
+                          {r >= 12 && (
+                            <text
+                              x={cx}
+                              y={cy + 3.5}
+                              textAnchor="middle"
+                              fontSize="8"
+                              fill={fill}
+                              fontWeight="700"
+                            >
+                              {site.peakFC > 0 ? "+" : ""}{site.peakFC.toFixed(1)}
+                            </text>
+                          )}
+                        </g>
+                      );
+                    })}
+                  </svg>
+
+                  {/* Sparklines column (one per site, stacked) */}
+                  <div className="flex flex-col gap-0.5 pl-2 self-center">
+                    {sites.map((site) => {
+                      const isAct = site.peakFC > 0;
+                      return (
+                        <div
+                          key={site.position}
+                          className="flex items-center gap-1 cursor-pointer"
+                          onClick={() => onHighlightPtms([site.label])}
+                          title={`${site.label} time-series`}
+                        >
+                          <span
+                            className="text-[8px] font-mono w-10 text-right shrink-0"
+                            style={{ color: isAct ? "#ef4444" : "#3b82f6" }}
+                          >
+                            {site.position}
+                          </span>
+                          <SiteSpark
+                            values={site.values}
+                            width={SPARK_W}
+                            height={SPARK_H}
+                            isActivating={isAct}
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               );
             })}
           </div>
 
-          <div className="pt-1 border-t border-border/50 flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-muted-foreground">
-            <span><span className="font-semibold">▲</span> Activating (peak FC &gt; 0)</span>
-            <span><span className="font-semibold">▼</span> Inhibitory (peak FC &lt; 0)</span>
-            <span>⚡ De novo (control에서 미검출)</span>
-            <span className="text-blue-600 dark:text-blue-400 font-medium">■ Regulated</span>
-            <span className="text-orange-600 dark:text-orange-400 font-medium">■ De novo</span>
-            <span className="text-slate-500 font-medium">■ Minor</span>
+          {/* Pattern legend */}
+          <div className="pt-2 border-t border-border/50 grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1 text-[10px] text-muted-foreground">
+            <span className="flex items-center gap-1">
+              <svg width="20" height="8"><line x1="0" y1="4" x2="20" y2="4" stroke="#f97316" strokeWidth="1.5" /><path d="M16,1 L16,7 L20,4 z" fill="#f97316" /></svg>
+              Signal Attenuation
+            </span>
+            <span className="flex items-center gap-1">
+              <svg width="20" height="8"><line x1="0" y1="4" x2="20" y2="4" stroke="#3b82f6" strokeWidth="1.5" /><path d="M16,1 L16,7 L20,4 z" fill="#3b82f6" /></svg>
+              Sequential Regulation
+            </span>
+            <span className="flex items-center gap-1">
+              <svg width="20" height="8"><line x1="0" y1="4" x2="20" y2="4" stroke="#10b981" strokeWidth="1.5" strokeDasharray="3,2" /><path d="M16,1 L16,7 L20,4 z" fill="#10b981" /></svg>
+              Multisite Coordination
+            </span>
+            <span className="flex items-center gap-1">
+              <svg width="12" height="12"><circle cx="6" cy="6" r="5" fill="rgba(239,68,68,0.15)" stroke="#ef4444" strokeWidth="2" /></svg>
+              Activating (FC &gt; 0)
+            </span>
+            <span className="flex items-center gap-1">
+              <svg width="12" height="12"><circle cx="6" cy="6" r="5" fill="rgba(59,130,246,0.15)" stroke="#3b82f6" strokeWidth="2" /></svg>
+              Inhibitory (FC &lt; 0)
+            </span>
+            <span className="flex items-center gap-1">
+              <svg width="12" height="12"><circle cx="6" cy="6" r="4" fill="none" stroke="#f97316" strokeWidth="1" strokeDasharray="2,2" /></svg>
+              ⚡ De novo
+            </span>
+            <span className="col-span-2 sm:col-span-3 text-[9px] opacity-60">
+              버블 크기 = |FC| 크기. 클릭 시 라인 차트에서 하이라이트.
+            </span>
           </div>
         </div>
       )}

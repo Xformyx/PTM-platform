@@ -160,8 +160,13 @@ def run_temporal_comovement(state: dict) -> dict:
             ptm_type=ptm_type,
         )
 
-        # Step 8: Build LLM context
-        llm_context = _build_comovement_llm_context(clusters, singletons, timepoints, ptm_type=ptm_type)
+        # Step 8: Build LLM context (v9.30: include multi-site divergence analysis)
+        llm_context = _build_comovement_llm_context(
+            clusters, singletons, timepoints,
+            ptm_type=ptm_type,
+            sig_matrix=sig_matrix,
+            sig_meta=sig_meta,
+        )
 
         # Build summary
         summary = {
@@ -2025,14 +2030,110 @@ def _pattern_display_name(pattern: str, ptm_type: str = "phosphorylation") -> st
 # STEP 8: LLM CONTEXT BUILDER
 # ═══════════════════════════════════════════════════════════════════════════
 
+def _compute_multisite_divergence_for_report(
+    sig_matrix: np.ndarray,
+    sig_meta: list,
+    timepoints: list,
+) -> list:
+    """Compute multi-site temporal divergence pairs for LLM report injection.
+
+    Returns a list of dicts describing site pairs within the same protein that
+    show divergent temporal patterns (signal attenuation, sequential regulation,
+    or multisite coordination).
+    """
+    if sig_matrix is None or len(sig_meta) < 2 or len(timepoints) < 3:
+        return []
+
+    # Build per-gene site data
+    gene_sites: Dict[str, List[dict]] = defaultdict(list)
+    for i, meta in enumerate(sig_meta):
+        gene = meta.get("gene", "")
+        site = meta.get("site", "")
+        if not gene or not site:
+            continue
+        values = sig_matrix[i].tolist()
+        peak_idx = int(np.argmax(np.abs(sig_matrix[i])))
+        peak_fc = float(sig_matrix[i][peak_idx])
+        gene_sites[gene].append({
+            "site": site,
+            "key": meta.get("key", f"{gene}({site})"),
+            "values": values,
+            "peak_fc": peak_fc,
+            "peak_tp": timepoints[peak_idx],
+            "peak_tp_idx": peak_idx,
+            "activity_class": meta.get("activity_class", "minor"),
+            "is_de_novo": meta.get("control_pseudocount_used", False),
+        })
+
+    results = []
+    for gene, sites in gene_sites.items():
+        if len(sites) < 2:
+            continue
+        # Only consider sites that are at least regulated or de_novo
+        sig_sites = [s for s in sites if s["activity_class"] in ("regulated", "de_novo")]
+        if len(sig_sites) < 1:
+            continue
+        # Generate all pairs (at least one must be regulated/de_novo)
+        for i in range(len(sites)):
+            for j in range(i + 1, len(sites)):
+                sA = sites[i]
+                sB = sites[j]
+                # At least one must be regulated or de_novo
+                if sA["activity_class"] == "minor" and sB["activity_class"] == "minor":
+                    continue
+                # Sort by peak time
+                early, late = (sA, sB) if sA["peak_tp_idx"] <= sB["peak_tp_idx"] else (sB, sA)
+                # Classify pattern
+                same_wave = early["peak_tp_idx"] == late["peak_tp_idx"]
+                early_act = early["peak_fc"] > 0
+                late_act = late["peak_fc"] > 0
+                if same_wave:
+                    pattern = "multisite_coordination"
+                    description = (
+                        f"{gene} {early['site']} and {late['site']} peak simultaneously at "
+                        f"{early['peak_tp']}, suggesting co-regulation by a single kinase "
+                        f"(multisite phosphorylation) or a tightly coupled signaling complex."
+                    )
+                elif early_act != late_act:
+                    pattern = "signal_attenuation"
+                    act_site = early if early_act else late
+                    inh_site = late if early_act else early
+                    description = (
+                        f"{gene} {act_site['site']} activates early ({act_site['peak_tp']}, "
+                        f"FC={act_site['peak_fc']:+.2f}) followed by {inh_site['site']} "
+                        f"inhibitory signal at {inh_site['peak_tp']} (FC={inh_site['peak_fc']:+.2f}), "
+                        f"consistent with a signal attenuation or negative feedback mechanism."
+                    )
+                else:
+                    pattern = "sequential_regulation"
+                    direction = "activating" if early_act else "inhibitory"
+                    description = (
+                        f"{gene} shows sequential {direction} regulation: {early['site']} peaks at "
+                        f"{early['peak_tp']} (FC={early['peak_fc']:+.2f}), followed by {late['site']} "
+                        f"at {late['peak_tp']} (FC={late['peak_fc']:+.2f}), suggesting two independent "
+                        f"kinases regulate this protein in temporal sequence."
+                    )
+                results.append({
+                    "gene": gene,
+                    "siteA": early,
+                    "siteB": late,
+                    "pattern": pattern,
+                    "description": description,
+                })
+    return results
+
+
 def _build_comovement_llm_context(
     clusters: list, singletons: list, timepoints: list,
     ptm_type: str = "phosphorylation",
+    sig_matrix: Optional[np.ndarray] = None,
+    sig_meta: Optional[list] = None,
 ) -> str:
     """Build structured text for LLM injection into write_sections.
 
     v8.4: Transient burst clusters are presented first with detailed context.
     v8.10: PTM-type-aware labels and ubiquitylation-specific interpretation.
+    v9.30: Multi-site temporal divergence analysis added.
     """
     if not clusters:
         return ""
@@ -2282,6 +2383,56 @@ def _build_comovement_llm_context(
         "   - Always name the specific Non-PTM proteins involved and discuss\n"
         "     their known biological roles in the experimental context.\n"
     )
+
+    # ── v9.30: Multi-site Temporal Divergence Analysis ──
+    divergence_pairs = _compute_multisite_divergence_for_report(sig_matrix, sig_meta or [], timepoints)
+    if divergence_pairs:
+        pattern_order = ["signal_attenuation", "sequential_regulation", "multisite_coordination"]
+        pattern_labels = {
+            "signal_attenuation": "Signal Attenuation (Activation → Inhibition)",
+            "sequential_regulation": "Sequential Kinase Regulation (two independent kinases)",
+            "multisite_coordination": "Multisite Coordination (single kinase, multiple sites)",
+        }
+        parts.append("\n## MULTI-SITE TEMPORAL DIVERGENCE ANALYSIS\n")
+        parts.append(
+            "The following proteins contain multiple phosphorylation sites with "
+            "divergent temporal dynamics. These intra-protein site pairs reveal "
+            "distinct regulatory mechanisms operating on the same protein substrate:\n"
+        )
+        for pat in pattern_order:
+            pat_pairs = [p for p in divergence_pairs if p["pattern"] == pat]
+            if not pat_pairs:
+                continue
+            parts.append(f"### {pattern_labels[pat]}")
+            for pair in pat_pairs[:8]:  # limit to 8 per pattern
+                de_novo_note = ""
+                if pair["siteA"].get("is_de_novo"):
+                    de_novo_note += f" [⚡ {pair['siteA']['site']} is de novo]"
+                if pair["siteB"].get("is_de_novo"):
+                    de_novo_note += f" [⚡ {pair['siteB']['site']} is de novo]"
+                parts.append(f"- {pair['description']}{de_novo_note}")
+            parts.append("")
+        parts.append(
+            "INSTRUCTIONS FOR DISCUSSION SECTION — MULTI-SITE DIVERGENCE:\n"
+            "   - Incorporate the above intra-protein site divergence findings into the "
+            "Discussion section as a dedicated subsection titled "
+            "'Intra-protein Temporal Divergence and Regulatory Complexity'.\n"
+            "   - For Signal Attenuation pairs: discuss the biological significance of "
+            "early activation followed by late inhibitory phosphorylation — this is a "
+            "hallmark of negative feedback regulation or receptor desensitization.\n"
+            "   - For Sequential Regulation pairs: propose which upstream kinases might "
+            "be responsible for each site, referencing kinase-substrate databases if "
+            "available in the ChromaDB context. Discuss the biological consequence of "
+            "sequential vs. simultaneous phosphorylation.\n"
+            "   - For Multisite Coordination pairs: discuss the possibility of a single "
+            "kinase performing multisite phosphorylation, or a tightly coupled signaling "
+            "complex. Reference known multisite phosphorylation mechanisms if available.\n"
+            "   - De novo sites (⚡) should be highlighted as potentially novel regulatory "
+            "events not previously detected in control conditions.\n"
+            "   - Connect these findings to the cluster-level co-movement analysis above: "
+            "if two sites of the same protein belong to different clusters, this is strong "
+            "evidence for independent upstream regulators.\n"
+        )
 
     return "\n".join(parts)
 
