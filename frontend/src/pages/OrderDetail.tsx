@@ -1289,6 +1289,291 @@ type TopNVectorPlotRow = {
   q_value?: number | null;
 };
 
+// ── MultiSiteDivergencePanel ────────────────────────────────────────────────
+// Finds same-protein multi-site pairs across different wave modules and classifies
+// them into 3 biological patterns.
+type DivergencePattern = "signal_attenuation" | "sequential_regulation" | "multisite_coordination";
+
+interface SitePairEntry {
+  gene: string;
+  siteA: { position: string; label: string; waveLabel: string; peakCondition: string; peakFC: number; isDeNovo: boolean; activityClass: "de_novo" | "regulated" | "minor" };
+  siteB: { position: string; label: string; waveLabel: string; peakCondition: string; peakFC: number; isDeNovo: boolean; activityClass: "de_novo" | "regulated" | "minor" };
+  pattern: DivergencePattern;
+  description: string;
+}
+
+const DIVERGENCE_META: Record<DivergencePattern, { label: string; color: string; bgColor: string; borderColor: string; description: string }> = {
+  signal_attenuation: {
+    label: "Signal Attenuation",
+    color: "text-orange-700 dark:text-orange-400",
+    bgColor: "bg-orange-50 dark:bg-orange-950/30",
+    borderColor: "border-orange-300 dark:border-orange-700",
+    description: "Activating (early wave) + Inhibitory (late wave) → 신호 감쇠 메커니즘",
+  },
+  sequential_regulation: {
+    label: "Sequential Regulation",
+    color: "text-blue-700 dark:text-blue-400",
+    bgColor: "bg-blue-50 dark:bg-blue-950/30",
+    borderColor: "border-blue-300 dark:border-blue-700",
+    description: "두 site가 서로 다른 wave → 두 독립 kinase가 순차 조절",
+  },
+  multisite_coordination: {
+    label: "Multisite Coordination",
+    color: "text-emerald-700 dark:text-emerald-400",
+    bgColor: "bg-emerald-50 dark:bg-emerald-950/30",
+    borderColor: "border-emerald-300 dark:border-emerald-700",
+    description: "같은 wave에 속하는 여러 site → 한 kinase의 multisite phosphorylation",
+  },
+};
+
+function computeMultiSiteDivergence(
+  uniquePtms: Array<{ gene: string; position: string; label: string }>,
+  vectorByPtm: Map<string, Array<{ condition: string; value: number }>>,
+  conditions: string[],
+  ptmActivityClass: Map<string, "de_novo" | "regulated" | "minor">,
+  ptmPseudocountUsed: Map<string, boolean>,
+): SitePairEntry[] {
+  if (conditions.length < 3 || uniquePtms.length < 2) return [];
+
+  // Assign each PTM to a wave module (peak condition index)
+  const ptmPeak = new Map<string, { condIdx: number; peakCondition: string; peakFC: number }>();
+  uniquePtms.forEach((p) => {
+    const key = `${p.gene}_${p.position}`;
+    const arr = vectorByPtm.get(key);
+    if (!arr) return;
+    let bestIdx = 0;
+    let bestAbs = 0;
+    conditions.forEach((cond, idx) => {
+      const row = arr.find((r) => r.condition === cond);
+      const v = row?.value ?? 0;
+      if (Math.abs(v) > bestAbs) { bestAbs = Math.abs(v); bestIdx = idx; }
+    });
+    const peakRow = arr.find((r) => r.condition === conditions[bestIdx]);
+    ptmPeak.set(key, { condIdx: bestIdx, peakCondition: conditions[bestIdx], peakFC: peakRow?.value ?? 0 });
+  });
+
+  // Group PTMs by gene
+  const byGene = new Map<string, typeof uniquePtms>();
+  uniquePtms.forEach((p) => {
+    if (!byGene.has(p.gene)) byGene.set(p.gene, []);
+    byGene.get(p.gene)!.push(p);
+  });
+
+  const results: SitePairEntry[] = [];
+  const seenPairs = new Set<string>();
+
+  byGene.forEach((sites, gene) => {
+    if (sites.length < 2) return;
+    for (let i = 0; i < sites.length; i++) {
+      for (let j = i + 1; j < sites.length; j++) {
+        const pA = sites[i];
+        const pB = sites[j];
+        const keyA = `${pA.gene}_${pA.position}`;
+        const keyB = `${pB.gene}_${pB.position}`;
+        const pairKey = [keyA, keyB].sort().join("|");
+        if (seenPairs.has(pairKey)) continue;
+        seenPairs.add(pairKey);
+
+        const peakA = ptmPeak.get(keyA);
+        const peakB = ptmPeak.get(keyB);
+        if (!peakA || !peakB) continue;
+
+        const acA = ptmActivityClass.get(keyA) ?? "minor";
+        const acB = ptmActivityClass.get(keyB) ?? "minor";
+        // Only include pairs where at least one site is regulated or de_novo
+        if (acA === "minor" && acB === "minor") continue;
+
+        const isDeNovoA = ptmPseudocountUsed.get(keyA) ?? false;
+        const isDeNovoB = ptmPseudocountUsed.get(keyB) ?? false;
+
+        // Order by peak time (early → late)
+        const [early, late] = peakA.condIdx <= peakB.condIdx ? [pA, pB] : [pB, pA];
+        const [earlyPeak, latePeak] = peakA.condIdx <= peakB.condIdx ? [peakA, peakB] : [peakB, peakA];
+        const [earlyAC, lateAC] = peakA.condIdx <= peakB.condIdx ? [acA, acB] : [acB, acA];
+        const [earlyDeNovo, lateDeNovo] = peakA.condIdx <= peakB.condIdx ? [isDeNovoA, isDeNovoB] : [isDeNovoB, isDeNovoA];
+
+        let pattern: DivergencePattern;
+        let description: string;
+
+        if (peakA.condIdx === peakB.condIdx) {
+          pattern = "multisite_coordination";
+          description = `${gene} ${early.position} + ${late.position}이 동일 wave (peak: ${earlyPeak.peakCondition})에서 동시 활성화 → 한 kinase의 multisite phosphorylation`;
+        } else if (earlyPeak.peakFC > 0 && latePeak.peakFC < 0) {
+          pattern = "signal_attenuation";
+          description = `${gene} ${early.position} (early activating, +${earlyPeak.peakFC.toFixed(2)}) → ${late.position} (late inhibitory, ${latePeak.peakFC.toFixed(2)}) → 신호 감쇠 메커니즘`;
+        } else if (earlyPeak.peakFC < 0 && latePeak.peakFC > 0) {
+          pattern = "signal_attenuation";
+          description = `${gene} ${early.position} (early inhibitory, ${earlyPeak.peakFC.toFixed(2)}) → ${late.position} (late activating, +${latePeak.peakFC.toFixed(2)}) → 억제 후 활성화 패턴`;
+        } else {
+          pattern = "sequential_regulation";
+          const dir = earlyPeak.peakFC > 0 && latePeak.peakFC > 0 ? "두 Activating site" : "두 Inhibitory site";
+          description = `${gene} ${early.position} (wave: ${earlyPeak.peakCondition}) → ${late.position} (wave: ${latePeak.peakCondition}) → ${dir}가 순차 조절`;
+        }
+
+        results.push({
+          gene,
+          siteA: { position: early.position, label: early.label, waveLabel: `Wave (peak: ${earlyPeak.peakCondition})`, peakCondition: earlyPeak.peakCondition, peakFC: earlyPeak.peakFC, isDeNovo: earlyDeNovo, activityClass: earlyAC },
+          siteB: { position: late.position, label: late.label, waveLabel: `Wave (peak: ${latePeak.peakCondition})`, peakCondition: latePeak.peakCondition, peakFC: latePeak.peakFC, isDeNovo: lateDeNovo, activityClass: lateAC },
+          pattern,
+          description,
+        });
+      }
+    }
+  });
+
+  const ORDER: Record<DivergencePattern, number> = { signal_attenuation: 0, sequential_regulation: 1, multisite_coordination: 2 };
+  results.sort((a, b) => ORDER[a.pattern] - ORDER[b.pattern]);
+  return results;
+}
+
+function MultiSiteDivergencePanel({
+  uniquePtms,
+  vectorByPtm,
+  conditions,
+  ptmActivityClass,
+  ptmPseudocountUsed,
+  onHighlightPtms,
+}: {
+  uniquePtms: Array<{ gene: string; position: string; label: string }>;
+  vectorByPtm: Map<string, Array<{ condition: string; value: number }>>;
+  conditions: string[];
+  ptmActivityClass: Map<string, "de_novo" | "regulated" | "minor">;
+  ptmPseudocountUsed: Map<string, boolean>;
+  onHighlightPtms: (labels: string[]) => void;
+}) {
+  const [collapsed, setCollapsed] = useState(false);
+  const [patternFilter, setPatternFilter] = useState<DivergencePattern | "all">("all");
+
+  const entries = useMemo(
+    () => computeMultiSiteDivergence(uniquePtms, vectorByPtm, conditions, ptmActivityClass, ptmPseudocountUsed),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [uniquePtms.length, conditions.join(",")]
+  );
+
+  if (entries.length === 0) return null;
+
+  const counts: Record<DivergencePattern, number> = { signal_attenuation: 0, sequential_regulation: 0, multisite_coordination: 0 };
+  entries.forEach((e) => { counts[e.pattern]++; });
+
+  const filtered = patternFilter === "all" ? entries : entries.filter((e) => e.pattern === patternFilter);
+
+  function SiteBadge({ site }: { site: SitePairEntry["siteA"] }) {
+    const acColor =
+      site.activityClass === "de_novo"
+        ? "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400 border-orange-300 dark:border-orange-700"
+        : site.activityClass === "regulated"
+        ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 border-blue-300 dark:border-blue-700"
+        : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400 border-slate-300 dark:border-slate-600";
+    return (
+      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium border ${acColor}`}>
+        {site.isDeNovo && <span title="De novo site">⚡</span>}
+        <span className="font-semibold">{site.position}</span>
+        <span className="opacity-75">{site.peakFC > 0 ? "▲" : "▼"} {Math.abs(site.peakFC).toFixed(2)}</span>
+        <span className="opacity-55 text-[9px]">@ {site.peakCondition}</span>
+      </span>
+    );
+  }
+
+  return (
+    <div className="rounded-lg border bg-card">
+      <button
+        className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-muted/30 transition-colors rounded-t-lg"
+        onClick={() => setCollapsed((v) => !v)}
+      >
+        <div className="flex items-center gap-2">
+          <GitMerge className="h-4 w-4 text-muted-foreground" />
+          <span className="text-sm font-semibold">Multi-site Temporal Divergence</span>
+          <Badge variant="secondary" className="text-[10px] px-1.5 py-0">{entries.length} pairs</Badge>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] text-muted-foreground hidden sm:inline">같은 단백질 내 site 간 시간적 분기 패턴</span>
+          {collapsed ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronUp className="h-4 w-4 text-muted-foreground" />}
+        </div>
+      </button>
+
+      {!collapsed && (
+        <div className="px-4 pb-4 space-y-3">
+          {/* Pattern filter */}
+          <div className="flex flex-wrap gap-1.5 pt-1">
+            <button
+              onClick={() => setPatternFilter("all")}
+              className={`px-2.5 py-1 rounded-full text-[11px] font-medium border transition-colors ${
+                patternFilter === "all"
+                  ? "bg-foreground text-background border-foreground"
+                  : "bg-background text-muted-foreground border-border hover:border-foreground/50"
+              }`}
+            >
+              All ({entries.length})
+            </button>
+            {(Object.keys(DIVERGENCE_META) as DivergencePattern[]).map((pat) => {
+              const meta = DIVERGENCE_META[pat];
+              if (counts[pat] === 0) return null;
+              return (
+                <button
+                  key={pat}
+                  onClick={() => setPatternFilter(pat)}
+                  className={`px-2.5 py-1 rounded-full text-[11px] font-medium border transition-colors ${
+                    patternFilter === pat
+                      ? `${meta.bgColor} ${meta.color} ${meta.borderColor}`
+                      : "bg-background text-muted-foreground border-border hover:border-foreground/50"
+                  }`}
+                >
+                  {meta.label} ({counts[pat]})
+                </button>
+              );
+            })}
+          </div>
+
+          {patternFilter !== "all" && (
+            <p className="text-[11px] text-muted-foreground italic px-1">
+              {DIVERGENCE_META[patternFilter].description}
+            </p>
+          )}
+
+          <div className="space-y-2">
+            {filtered.map((entry, idx) => {
+              const meta = DIVERGENCE_META[entry.pattern];
+              return (
+                <div
+                  key={idx}
+                  className={`rounded-md border p-3 ${meta.bgColor} ${meta.borderColor} cursor-pointer hover:opacity-80 transition-opacity`}
+                  onClick={() => onHighlightPtms([entry.siteA.label, entry.siteB.label])}
+                  title="클릭하면 차트에서 해당 PTM을 하이라이트합니다"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className={`text-[11px] font-bold ${meta.color}`}>{entry.gene}</span>
+                      <SiteBadge site={entry.siteA} />
+                      <span className="text-[10px] text-muted-foreground">→</span>
+                      <SiteBadge site={entry.siteB} />
+                    </div>
+                    <Badge
+                      variant="outline"
+                      className={`text-[9px] shrink-0 ${meta.color} ${meta.borderColor} whitespace-nowrap`}
+                    >
+                      {meta.label}
+                    </Badge>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground mt-1.5 leading-relaxed">{entry.description}</p>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="pt-1 border-t border-border/50 flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-muted-foreground">
+            <span><span className="font-semibold">▲</span> Activating (peak FC &gt; 0)</span>
+            <span><span className="font-semibold">▼</span> Inhibitory (peak FC &lt; 0)</span>
+            <span>⚡ De novo (control에서 미검출)</span>
+            <span className="text-blue-600 dark:text-blue-400 font-medium">■ Regulated</span>
+            <span className="text-orange-600 dark:text-orange-400 font-medium">■ De novo</span>
+            <span className="text-slate-500 font-medium">■ Minor</span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── TopNTimeSeriesPlot ───────────────────────────────────────────────────────
 function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId: number; ptmType?: string }) {
   const isUbi = ptmType.toLowerCase().includes("ubiquityl") || ptmType.toLowerCase().includes("ubiquitin");
@@ -2139,6 +2424,23 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
           </div>
         );
       })()}
+
+      {/* ── Multi-site Temporal Divergence Panel ── */}
+      {conditions.length >= 3 && (
+        <MultiSiteDivergencePanel
+          uniquePtms={uniquePtms}
+          vectorByPtm={vectorByPtm}
+          conditions={conditions}
+          ptmActivityClass={ptmActivityClass}
+          ptmPseudocountUsed={ptmPseudocountUsed}
+          onHighlightPtms={(labels) => {
+            setHighlightedModulePtmLabels((prev) => {
+              const same = prev.size === labels.length && labels.every((l) => prev.has(l));
+              return same ? new Set() : new Set(labels);
+            });
+          }}
+        />
+      )}
 
       {/* ── Kinase / E3 Ligase Module Analysis Panel ── */}
       {conditions.length >= 3 && (
