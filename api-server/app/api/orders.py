@@ -3287,6 +3287,20 @@ async def get_vector_plot_data(
                 f"coordination={sum(1 for p in _divergence_pairs if p['pattern']=='multisite_coordination')})"
             )
 
+        # v12.0: Priority sort divergence_pairs before slicing
+        # Order: Signal Attenuation > Sequential > Coordination
+        # Within same pattern: higher combined |FC|, de_novo involvement first
+        _PATTERN_PRIORITY = {
+            "signal_attenuation": 0,
+            "sequential_regulation": 1,
+            "multisite_coordination": 2,
+        }
+        _divergence_pairs.sort(key=lambda _p: (
+            _PATTERN_PRIORITY.get(_p.get("pattern", ""), 3),
+            -(abs(_p.get("fc_a", 0)) + abs(_p.get("fc_b", 0))),
+            -int(bool(_p.get("de_novo_a", False) or _p.get("de_novo_b", False))),
+        ))
+
         # Signal weight and FC cap per class (with divergence-based de_novo boost)
         _SIGNAL_WEIGHT = {"de_novo": 0.3, "regulated": 1.0, "minor": 0.5}
         _FC_CAP = {"de_novo": 1.0, "regulated": 3.0, "minor": 3.0}
