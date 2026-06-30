@@ -3135,7 +3135,159 @@ async def get_vector_plot_data(
                 _ptm_activity_class[_lbl] = "regulated"
             else:
                 _ptm_activity_class[_lbl] = "minor"
-        # Signal weight and FC cap per class
+        # ══════════════════════════════════════════════════════════════════════
+        # v12.0: Multi-site Temporal Divergence Analysis for Receptor Scoring
+        # ══════════════════════════════════════════════════════════════════════
+        # Compute intra-protein site pairs with divergent temporal patterns.
+        # This data is used to: (1) reweight de_novo sites involved in feedback,
+        # (2) compute temporal_cascade_score per receptor, (3) validate kinase predictions via motif.
+        _divergence_pairs: list[dict] = []  # [{gene, siteA, siteB, pattern, ...}]
+        _ptm_divergence_boost: dict = {}  # ptm_label -> boost factor for de_novo reweighting
+        _ptm_to_cluster: dict = {}  # ptm_label -> cluster_id
+        _cluster_kinase_map: dict = {}  # cluster_id -> [kinases]
+
+        # Build ptm→cluster mapping from _cluster_patterns (if available)
+        if '_cluster_patterns' in locals() and _cluster_patterns:
+            for cp in _cluster_patterns:
+                cid = cp["cluster_id"]
+                _cluster_kinase_map[cid] = cp.get("specific_kinases", []) + cp.get("hub_kinases", [])
+                for plbl in cp.get("ptm_labels", []):
+                    _ptm_to_cluster[plbl] = cid
+
+        # Build enriched lookup: gene_pos -> enriched entry (for motif/domain/kinase info)
+        _enriched_lookup: dict = {}  # "GENE POS" -> enriched dict
+        if 'enriched' in locals() and enriched:
+            for _en_ptm in enriched:
+                _en_gene = _en_ptm.get("gene") or _en_ptm.get("Gene.Name", "")
+                _en_pos = _en_ptm.get("position") or _en_ptm.get("PTM_Position", "")
+                _en_lbl = f"{_en_gene} {_en_pos}".strip()
+                if _en_lbl:
+                    _enriched_lookup[_en_lbl] = _en_ptm
+
+        # Compute divergence pairs (only if multi-timepoint and _ptm_time_matrix available)
+        if '_ptm_time_matrix' in locals() and _ptm_time_matrix and '_parseable' in locals() and len(_parseable) >= 3:
+            # Group PTMs by gene
+            _gene_sites: dict = {}  # gene -> [(label, position)]
+            for _lbl in _ptm_time_matrix:
+                _parts = _lbl.rsplit(" ", 1)
+                if len(_parts) == 2:
+                    _g, _p = _parts
+                    if _g not in _gene_sites:
+                        _gene_sites[_g] = []
+                    _gene_sites[_g].append(_lbl)
+
+            for _gene, _sites in _gene_sites.items():
+                if len(_sites) < 2:
+                    continue
+                # For each site: compute peak condition and peak FC
+                _site_peaks: dict = {}  # label -> {peak_cond, peak_fc, peak_idx, is_denovo}
+                for _s in _sites:
+                    _ts = _ptm_time_matrix.get(_s, {})
+                    _best_cond = None
+                    _best_fc = 0.0
+                    _best_idx = 0
+                    for _ci, _c in enumerate(_parseable):
+                        _fc_val = _ts.get(_c, 0.0)
+                        if abs(_fc_val) > abs(_best_fc):
+                            _best_fc = _fc_val
+                            _best_cond = _c
+                            _best_idx = _ci
+                    _site_peaks[_s] = {
+                        "peak_cond": _best_cond,
+                        "peak_fc": _best_fc,
+                        "peak_idx": _best_idx,
+                        "is_denovo": _s in _ptm_is_denovo,
+                        "cluster_id": _ptm_to_cluster.get(_s),
+                    }
+
+                # Generate all pairs
+                for i in range(len(_sites)):
+                    for j in range(i + 1, len(_sites)):
+                        _sA = _sites[i]
+                        _sB = _sites[j]
+                        _pA = _site_peaks[_sA]
+                        _pB = _site_peaks[_sB]
+                        # Skip if both are minor
+                        _clsA = _ptm_activity_class.get(_sA, "minor")
+                        _clsB = _ptm_activity_class.get(_sB, "minor")
+                        if _clsA == "minor" and _clsB == "minor":
+                            continue
+                        # Determine pattern
+                        _fcA = _pA["peak_fc"]
+                        _fcB = _pB["peak_fc"]
+                        _idxA = _pA["peak_idx"]
+                        _idxB = _pB["peak_idx"]
+                        # Ensure A is earlier
+                        if _idxA > _idxB:
+                            _sA, _sB = _sB, _sA
+                            _pA, _pB = _pB, _pA
+                            _fcA, _fcB = _fcB, _fcA
+                            _idxA, _idxB = _idxB, _idxA
+                            _clsA, _clsB = _clsB, _clsA
+                        # Classify pattern
+                        if _idxA == _idxB:
+                            _pattern = "multisite_coordination"
+                        elif (_fcA > 0 and _fcB < 0) or (_fcA < 0 and _fcB > 0):
+                            _pattern = "signal_attenuation"
+                        else:
+                            _pattern = "sequential_regulation"
+
+                        # Temporal lag
+                        _temporal_lag = _idxB - _idxA
+                        # FC ratio
+                        _fc_ratio = abs(_fcB) / max(abs(_fcA), 0.01)
+
+                        # Get motif context from enriched data
+                        _enA = _enriched_lookup.get(_sA, {})
+                        _enB = _enriched_lookup.get(_sB, {})
+                        _motifA = _enA.get("Enhanced_Matched_Motifs") or _enA.get("Matched_Motifs", "")
+                        _motifB = _enB.get("Enhanced_Matched_Motifs") or _enB.get("Matched_Motifs", "")
+                        _ragA = _enA.get("rag_enrichment", {}) or {}
+                        _ragB = _enB.get("rag_enrichment", {}) or {}
+                        _ks_A = _ragA.get("regulation", {}).get("kinase_substrate", []) if isinstance(_ragA.get("regulation"), dict) else []
+                        _ks_B = _ragB.get("regulation", {}).get("kinase_substrate", []) if isinstance(_ragB.get("regulation"), dict) else []
+                        _pathA = set(_ragA.get("pathways", []) if isinstance(_ragA.get("pathways"), list) else [])
+                        _pathB = set(_ragB.get("pathways", []) if isinstance(_ragB.get("pathways"), list) else [])
+                        _shared_pathways = _pathA & _pathB
+
+                        _pair = {
+                            "gene": _gene,
+                            "siteA": _sA, "siteB": _sB,
+                            "pattern": _pattern,
+                            "fcA": _fcA, "fcB": _fcB,
+                            "peak_condA": _pA["peak_cond"], "peak_condB": _pB["peak_cond"],
+                            "temporal_lag": _temporal_lag,
+                            "fc_ratio": round(_fc_ratio, 3),
+                            "clusterA": _pA["cluster_id"], "clusterB": _pB["cluster_id"],
+                            "is_denovoA": _pA["is_denovo"], "is_denovoB": _pB["is_denovo"],
+                            "motifA": str(_motifA)[:80], "motifB": str(_motifB)[:80],
+                            "ks_kinasesA": [k.get("kinase", k) if isinstance(k, dict) else str(k) for k in (_ks_A or [])][:5],
+                            "ks_kinasesB": [k.get("kinase", k) if isinstance(k, dict) else str(k) for k in (_ks_B or [])][:5],
+                            "shared_pathways": list(_shared_pathways)[:5],
+                        }
+                        _divergence_pairs.append(_pair)
+
+                        # De novo reweighting: if de_novo site is part of Signal Attenuation
+                        # (late inhibitory feedback), boost its weight from 0.3 → 0.7
+                        if _pattern == "signal_attenuation":
+                            if _pB["is_denovo"] and _fcB < 0:  # late inhibitory de_novo
+                                _ptm_divergence_boost[_sB] = 0.7
+                            if _pA["is_denovo"] and _fcA > 0:  # early activating de_novo
+                                _ptm_divergence_boost[_sA] = 0.6
+                        elif _pattern == "sequential_regulation":
+                            if _pA["is_denovo"]:
+                                _ptm_divergence_boost[_sA] = 0.5
+                            if _pB["is_denovo"]:
+                                _ptm_divergence_boost[_sB] = 0.5
+
+            logging.getLogger("vector_plot").info(
+                f"MultiSiteDivergence: {len(_divergence_pairs)} pairs found "
+                f"(attenuation={sum(1 for p in _divergence_pairs if p['pattern']=='signal_attenuation')}, "
+                f"sequential={sum(1 for p in _divergence_pairs if p['pattern']=='sequential_regulation')}, "
+                f"coordination={sum(1 for p in _divergence_pairs if p['pattern']=='multisite_coordination')})"
+            )
+
+        # Signal weight and FC cap per class (with divergence-based de_novo boost)
         _SIGNAL_WEIGHT = {"de_novo": 0.3, "regulated": 1.0, "minor": 0.5}
         _FC_CAP = {"de_novo": 1.0, "regulated": 3.0, "minor": 3.0}
         # Compute specificity-weighted activity score per receptor
@@ -3147,6 +3299,9 @@ async def get_vector_plot_data(
             for _p in _ds_ptms:
                 _cls = _ptm_activity_class.get(_p, "minor")
                 _w = _SIGNAL_WEIGHT[_cls]
+                # v12.0: Apply divergence-based de_novo boost
+                if _cls == "de_novo" and _p in _ptm_divergence_boost:
+                    _w = _ptm_divergence_boost[_p]  # boosted from 0.3 to 0.5-0.7
                 _fc = min(_ptm_max_abs_fc.get(_p, 0.0), _FC_CAP[_cls])
                 # Unique PTMs get full weight; shared PTMs get discounted by sharing factor
                 _sharing_factor = 1.0 if _p in _unique_set else (1.0 / max(_all_ptm_freq.get(_p, 1), 1))
@@ -3161,6 +3316,76 @@ async def get_vector_plot_data(
             _ri["specificity_score"] = round(_specificity_score, 4)
             _ri["unique_regulated_ratio"] = round(_unique_reg_ratio, 4)
             _ri["unique_regulated_count"] = _unique_regulated_count
+
+        # ══════════════════════════════════════════════════════════════════════
+        # v12.0: Temporal Cascade Score per Receptor (from MultiSiteDivergence)
+        # ══════════════════════════════════════════════════════════════════════
+        # For each receptor, check if its downstream PTMs are involved in divergence pairs.
+        # If so, compute a temporal_cascade_score that reflects:
+        # (1) Motif validation: receptor's kinase matches site motif → higher confidence
+        # (2) Feedback detection: signal_attenuation pairs → receptor controls a feedback loop
+        # (3) Cascade depth: sequential_regulation pairs → receptor initiates a multi-step cascade
+        # (4) Pathway coherence: shared pathways between divergent sites → intra-pathway regulation
+        for _ri in merged.values():
+            _ds_ptms = set(_ri.get("downstream_ptms", []))
+            _via_kinases = _ri.get("via_kinases", [])
+            _cascade_score = 0.0
+            _motif_validations = 0
+            _feedback_loops = 0
+            _cascade_steps = 0
+            _pathway_coherence = 0
+
+            for _dp in _divergence_pairs:
+                _sA = _dp["siteA"]
+                _sB = _dp["siteB"]
+                # Check if at least one site in this pair is downstream of this receptor
+                _has_A = _sA in _ds_ptms
+                _has_B = _sB in _ds_ptms
+                if not (_has_A or _has_B):
+                    continue
+
+                # (1) Motif validation: check if receptor's kinases match site motifs
+                _via_lower = {k.lower() for k in _via_kinases}
+                for _ks_k in (_dp.get("ks_kinasesA", []) if _has_A else []):
+                    if isinstance(_ks_k, str) and _ks_k.lower() in _via_lower:
+                        _motif_validations += 1
+                for _ks_k in (_dp.get("ks_kinasesB", []) if _has_B else []):
+                    if isinstance(_ks_k, str) and _ks_k.lower() in _via_lower:
+                        _motif_validations += 1
+
+                # (2) Feedback detection
+                if _dp["pattern"] == "signal_attenuation" and _has_A and _has_B:
+                    _feedback_loops += 1
+                    _cascade_score += 0.15  # Strong evidence: receptor controls both activation and feedback
+                elif _dp["pattern"] == "signal_attenuation" and (_has_A or _has_B):
+                    _cascade_score += 0.08  # Partial: receptor involved in one arm of feedback
+
+                # (3) Cascade depth
+                if _dp["pattern"] == "sequential_regulation":
+                    _cascade_steps += 1
+                    _lag_bonus = min(_dp["temporal_lag"] * 0.03, 0.12)  # longer lag = deeper cascade
+                    _cascade_score += 0.10 + _lag_bonus
+
+                # (4) Pathway coherence
+                if _dp.get("shared_pathways"):
+                    _pathway_coherence += 1
+                    _cascade_score += 0.05
+
+                # (5) Multisite coordination: receptor's kinase phosphorylates multiple sites simultaneously
+                if _dp["pattern"] == "multisite_coordination" and _has_A and _has_B:
+                    _cascade_score += 0.12  # Processive phosphorylation evidence
+
+            # Motif validation bonus (independent of divergence pattern)
+            if _motif_validations > 0:
+                _cascade_score += min(_motif_validations * 0.08, 0.24)
+
+            # Cap at 1.0
+            _cascade_score = min(_cascade_score, 1.0)
+            _ri["temporal_cascade_score"] = round(_cascade_score, 4)
+            _ri["divergence_feedback_loops"] = _feedback_loops
+            _ri["divergence_cascade_steps"] = _cascade_steps
+            _ri["divergence_motif_validations"] = _motif_validations
+            _ri["divergence_pathway_coherence"] = _pathway_coherence
 
         # ══════════════════════════════════════════════════════════════════════
         # v10.2: Combined Confidence Score + Hard Filter
@@ -3207,14 +3432,19 @@ async def get_vector_plot_data(
             # Component 6: Specificity-weighted activity score (v11.5)
             _spec_score = _ri.get("specificity_score", 0.0)
             _urr = _ri.get("unique_regulated_ratio", 0.0)
-            # Combined confidence score (v11.5: specificity-weighted)
+            # Component 7: Temporal cascade score from MultiSiteDivergence (v12.0)
+            _tcs = _ri.get("temporal_cascade_score", 0.0)
+            # Combined confidence score (v12.0: with temporal_cascade_score)
+            # Weights rebalanced: cowave 0.25, convergence 0.18, source 0.12,
+            # specificity 0.18, urr 0.05, db 0.07, temporal_cascade 0.15
             _confidence = (
-                0.30 * _norm_cowave +
-                0.20 * _convergence +
-                0.15 * _source_rel +
-                0.20 * _spec_score +
+                0.25 * _norm_cowave +
+                0.18 * _convergence +
+                0.12 * _source_rel +
+                0.18 * _spec_score +
                 0.05 * _urr +
-                0.10 * _has_db
+                0.07 * _has_db +
+                0.15 * _tcs
             )
             _ri["confidence_score"] = round(_confidence, 4)
 
@@ -3229,11 +3459,18 @@ async def get_vector_plot_data(
             _source = _ri.get("source", "")
 
             # Hard filter: single kinase AND not treatment context → skip
+            # v12.0: Exception - if motif-validated by MultiSiteDivergence, keep it
+            _has_motif_validation = _ri.get("divergence_motif_validations", 0) > 0
             if len(_vk) < 2 and _source not in ("treatment_context", "treatment_context_uniprot"):
-                logging.getLogger("vector_plot").debug(
-                    f"Receptor '{_rn}' filtered: via_kinases={len(_vk)}, source={_source}"
-                )
-                continue
+                if not _has_motif_validation:
+                    logging.getLogger("vector_plot").debug(
+                        f"Receptor '{_rn}' filtered: via_kinases={len(_vk)}, source={_source}"
+                    )
+                    continue
+                else:
+                    logging.getLogger("vector_plot").info(
+                        f"Receptor '{_rn}' retained despite single kinase: motif-validated by divergence"
+                    )
 
             # Group dedup: keep best per kinase_group
             _gid = _ri.get("kinase_group_id")
@@ -3293,6 +3530,7 @@ async def get_vector_plot_data(
                 "top_n_setting": top_n_setting,
                 "locked": lock_receptor,
                 "cowave_analysis": _cowave_analysis,
+                "divergence_pairs": _divergence_pairs[:50],  # v12.0: limit storage
                 "saved_at": __import__('datetime').datetime.utcnow().isoformat(),
             }
             await db.commit()
@@ -3327,6 +3565,7 @@ async def get_vector_plot_data(
         "source": "enriched" if enriched_path.exists() else "preprocessing",
         "inferred_receptors": inferred_receptors,  # v9.18
         "cowave_analysis": _cowave_analysis if '_cowave_analysis' in locals() else None,  # v9.42
+        "divergence_pairs": _divergence_pairs[:30] if '_divergence_pairs' in locals() else [],  # v12.0
     }
 
 
