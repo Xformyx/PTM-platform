@@ -2412,6 +2412,147 @@ def _build_comovement_llm_context(
                     de_novo_note += f" [⚡ {pair['siteB']['site']} is de novo]"
                 parts.append(f"- {pair['description']}{de_novo_note}")
             parts.append("")
+
+        # ── v9.31: HYBRID CROSS-REFERENCE — Divergence ↔ Co-wave Predicted Kinases ──
+        # Build PTM key → cluster mapping
+        ptm_to_cluster: Dict[str, dict] = {}
+        for cluster in clusters:
+            for md in cluster.get("member_details", []):
+                ptm_to_cluster[md["key"]] = cluster
+
+        cross_ref_entries = []
+        for pair in divergence_pairs:
+            gene = pair["gene"]
+            siteA_key = pair["siteA"]["key"]
+            siteB_key = pair["siteB"]["key"]
+            clusterA = ptm_to_cluster.get(siteA_key)
+            clusterB = ptm_to_cluster.get(siteB_key)
+
+            if not clusterA and not clusterB:
+                continue  # both unclustered, skip
+
+            entry_parts = []
+            entry_parts.append(
+                f"\n  ● {gene} | {pair['siteA']['site']} ↔ {pair['siteB']['site']} "
+                f"| Pattern: {pair['pattern'].replace('_', ' ').title()}"
+            )
+
+            # Site A cluster info
+            if clusterA:
+                cidA = clusterA["cluster_id"]
+                patternA = clusterA["pattern"]
+                peakA = clusterA["peak_timepoint"]
+                kinasesA = clusterA.get("annotations", {}).get("shared_kinases", [])
+                kinase_strA = ", ".join(k["kinase"] for k in kinasesA[:3]) if kinasesA else "unknown"
+                entry_parts.append(
+                    f"    Site {pair['siteA']['site']}: Cluster {cidA} ({patternA}, "
+                    f"peak={peakA}) | Predicted kinase(s): {kinase_strA}"
+                )
+            else:
+                entry_parts.append(
+                    f"    Site {pair['siteA']['site']}: UNCLUSTERED (unique temporal profile)"
+                )
+
+            # Site B cluster info
+            if clusterB:
+                cidB = clusterB["cluster_id"]
+                patternB = clusterB["pattern"]
+                peakB = clusterB["peak_timepoint"]
+                kinasesB = clusterB.get("annotations", {}).get("shared_kinases", [])
+                kinase_strB = ", ".join(k["kinase"] for k in kinasesB[:3]) if kinasesB else "unknown"
+                entry_parts.append(
+                    f"    Site {pair['siteB']['site']}: Cluster {cidB} ({patternB}, "
+                    f"peak={peakB}) | Predicted kinase(s): {kinase_strB}"
+                )
+            else:
+                entry_parts.append(
+                    f"    Site {pair['siteB']['site']}: UNCLUSTERED (unique temporal profile)"
+                )
+
+            # Cross-reference interpretation hint
+            if clusterA and clusterB:
+                if clusterA["cluster_id"] == clusterB["cluster_id"]:
+                    entry_parts.append(
+                        f"    → SAME CLUSTER: Both sites co-move, confirming coordinated "
+                        f"regulation by the same kinase or signaling complex."
+                    )
+                else:
+                    # Different clusters — check if kinases form a known pathway link
+                    kinasesA_set = {k["kinase"] for k in kinasesA} if kinasesA else set()
+                    kinasesB_set = {k["kinase"] for k in kinasesB} if kinasesB else set()
+                    shared_kinases = kinasesA_set & kinasesB_set
+                    if shared_kinases:
+                        entry_parts.append(
+                            f"    → DIFFERENT CLUSTERS but SHARED KINASE(S): {', '.join(shared_kinases)} "
+                            f"— same kinase may phosphorylate both sites at different rates "
+                            f"(distributive mechanism, ultrasensitive switch)."
+                        )
+                    elif pair["pattern"] == "signal_attenuation":
+                        entry_parts.append(
+                            f"    → FEEDBACK LOOP CANDIDATE: Early site kinase ({kinase_strA}) "
+                            f"may activate a downstream pathway that triggers late site "
+                            f"kinase ({kinase_strB}), forming a negative feedback circuit."
+                        )
+                    elif pair["pattern"] == "sequential_regulation":
+                        entry_parts.append(
+                            f"    → INDEPENDENT KINASE CASCADE: {kinase_strA} (early) and "
+                            f"{kinase_strB} (late) represent two distinct upstream pathways "
+                            f"converging on {gene} at different speeds."
+                        )
+                    else:
+                        entry_parts.append(
+                            f"    → DIFFERENT CLUSTERS: Independent regulatory inputs from "
+                            f"distinct kinases ({kinase_strA} vs {kinase_strB})."
+                        )
+
+            # Additional context: temporal profile correlation between the two sites
+            valuesA = pair["siteA"].get("values", [])
+            valuesB = pair["siteB"].get("values", [])
+            if valuesA and valuesB and len(valuesA) == len(valuesB):
+                corr = float(np.corrcoef(valuesA, valuesB)[0, 1]) if len(valuesA) > 2 else 0.0
+                entry_parts.append(
+                    f"    Pearson correlation between sites: r={corr:.3f} "
+                    f"({'anti-correlated' if corr < -0.3 else 'weakly correlated' if abs(corr) < 0.3 else 'positively correlated'})"
+                )
+
+            cross_ref_entries.append("\n".join(entry_parts))
+
+        if cross_ref_entries:
+            parts.append(
+                "\n## CROSS-REFERENCE: Multi-site Divergence ↔ Co-wave Cluster Kinase Predictions\n"
+            )
+            parts.append(
+                "The following table links each divergent site pair to its co-wave cluster "
+                "assignment and predicted upstream kinases. Use this to VALIDATE, REFINE, or "
+                "CHALLENGE the kinase predictions made at the cluster level:\n"
+            )
+            for entry in cross_ref_entries[:12]:  # limit to 12 entries
+                parts.append(entry)
+            parts.append("")
+            parts.append(
+                "CROSS-REFERENCE INTERPRETATION RULES:\n"
+                "  - When two sites are in DIFFERENT clusters with DIFFERENT predicted kinases:\n"
+                "    This STRENGTHENS the multi-site divergence interpretation. The cluster-level\n"
+                "    kinase predictions provide specific candidates for each temporal phase.\n"
+                "    Name these kinases explicitly in the Discussion.\n"
+                "  - When two sites are in DIFFERENT clusters but SHARE a predicted kinase:\n"
+                "    This suggests DISTRIBUTIVE phosphorylation by the same kinase, where the\n"
+                "    kinase releases the substrate between phosphorylation events, creating a\n"
+                "    time delay. This is a hallmark of ultrasensitive switch-like behavior.\n"
+                "  - When two sites are in the SAME cluster:\n"
+                "    This CONFIRMS processive multisite phosphorylation or scaffold-mediated\n"
+                "    co-regulation. The cluster's predicted kinase is the single regulator.\n"
+                "  - When a site is UNCLUSTERED (singleton):\n"
+                "    This site has a unique temporal profile not shared by other PTMs. It may\n"
+                "    represent a highly specific regulatory event with a dedicated kinase.\n"
+                "  - FEEDBACK LOOP CANDIDATES are especially important: when Signal Attenuation\n"
+                "    pairs map to different clusters, the early cluster's kinase likely activates\n"
+                "    a pathway that eventually triggers the late cluster's kinase. Trace this\n"
+                "    signaling cascade using pathway data from Figure 1.\n"
+                "  - Anti-correlated site pairs (r < -0.3) provide the strongest evidence for\n"
+                "    opposing regulatory mechanisms on the same protein.\n"
+            )
+
         parts.append(
             "INSTRUCTIONS FOR DISCUSSION SECTION — MULTI-SITE TEMPORAL DIVERGENCE (CRITICAL):\n"
             "   Incorporate the above intra-protein site divergence findings into the "
