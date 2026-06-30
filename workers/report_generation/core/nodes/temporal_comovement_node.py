@@ -166,6 +166,7 @@ def run_temporal_comovement(state: dict) -> dict:
             ptm_type=ptm_type,
             sig_matrix=sig_matrix,
             sig_meta=sig_meta,
+            enriched_data=enriched_data,
         )
 
         # Build summary
@@ -2128,6 +2129,7 @@ def _build_comovement_llm_context(
     ptm_type: str = "phosphorylation",
     sig_matrix: Optional[np.ndarray] = None,
     sig_meta: Optional[list] = None,
+    enriched_data: Optional[list] = None,
 ) -> str:
     """Build structured text for LLM injection into write_sections.
 
@@ -2514,6 +2516,213 @@ def _build_comovement_llm_context(
                     f"    Pearson correlation between sites: r={corr:.3f} "
                     f"({'anti-correlated' if corr < -0.3 else 'weakly correlated' if abs(corr) < 0.3 else 'positively correlated'})"
                 )
+
+            # ── v9.32: 6 ADDITIONAL ENRICHMENT ITEMS per divergence pair ──
+            # Build gene-level enrichment lookup from enriched_data
+            _gene_enr: Dict[str, dict] = {}
+            if enriched_data:
+                for _ed in enriched_data:
+                    _g = _ed.get("gene") or _ed.get("Gene.Name", "")
+                    if _g and _g == gene:
+                        _p = str(_ed.get("position") or _ed.get("PTM_Position", ""))
+                        _gene_enr[_p] = _ed
+
+            siteA_pos = pair["siteA"]["site"]  # e.g. "Y1068"
+            siteB_pos = pair["siteB"]["site"]
+            edA = _gene_enr.get(siteA_pos, {})
+            edB = _gene_enr.get(siteB_pos, {})
+            enrA = edA.get("rag_enrichment", {})
+            enrB = edB.get("rag_enrichment", {})
+
+            # ─── (1) SITE-SPECIFIC MOTIF CONTEXT (±7aa flanking sequence) ───
+            motif_info_parts = []
+            for label, ed_entry, enr_entry, site_name in [
+                ("A", edA, enrA, siteA_pos), ("B", edB, enrB, siteB_pos)
+            ]:
+                seq = ""
+                for seq_key in ("Enhanced_Sequence_Window", "Sequence_Window",
+                                "sequence_window", "flanking_sequence"):
+                    val = ed_entry.get(seq_key, "") or enr_entry.get(seq_key, "")
+                    if val and isinstance(val, str) and len(val) > 3:
+                        seq = val.strip()
+                        break
+                motifs_str = ed_entry.get("Enhanced_Matched_Motifs", "") or ed_entry.get("Motifs", "")
+                if seq or motifs_str:
+                    motif_line = f"      Site {site_name}: "
+                    if seq:
+                        motif_line += f"Flanking={seq} "
+                    if motifs_str:
+                        motif_line += f"| Motifs=[{motifs_str}]"
+                    motif_info_parts.append(motif_line)
+            if motif_info_parts:
+                entry_parts.append("    [MOTIF CONTEXT]")
+                entry_parts.extend(motif_info_parts)
+
+            # ─── (2) KNOWN KINASE-SUBSTRATE RELATIONSHIPS ───
+            ks_parts = []
+            for label, enr_entry, site_name in [
+                ("A", enrA, siteA_pos), ("B", enrB, siteB_pos)
+            ]:
+                reg = enr_entry.get("regulation", {})
+                ks_pairs = reg.get("kinase_substrate", [])
+                upstream = reg.get("upstream_regulators", [])
+                kp = enr_entry.get("kinase_prediction", {})
+                predicted = kp.get("predicted_kinases", []) if isinstance(kp, dict) else []
+                known_kinases = []
+                for ks in ks_pairs:
+                    if isinstance(ks, dict):
+                        k_name = ks.get("kinase", ks.get("name", ""))
+                        if k_name:
+                            known_kinases.append(f"{k_name}(KS-db)")
+                    elif isinstance(ks, str) and ks:
+                        known_kinases.append(f"{ks}(KS-db)")
+                for ur in upstream[:3]:
+                    ur_name = ur if isinstance(ur, str) else ur.get("name", "")
+                    if ur_name and ur_name not in [k.split("(")[0] for k in known_kinases]:
+                        known_kinases.append(f"{ur_name}(literature)")
+                for pk in predicted[:2]:
+                    pk_name = pk if isinstance(pk, str) else pk.get("kinase", "")
+                    pk_conf = pk.get("confidence", "?") if isinstance(pk, dict) else "?"
+                    pk_mech = pk.get("mechanism", "") if isinstance(pk, dict) else ""
+                    if pk_name and pk_name not in [k.split("(")[0] for k in known_kinases]:
+                        known_kinases.append(f"{pk_name}(predicted,{pk_conf})")
+                if known_kinases:
+                    ks_parts.append(f"      Site {site_name}: {', '.join(known_kinases[:5])}")
+            if ks_parts:
+                entry_parts.append("    [KNOWN/PREDICTED KINASE-SUBSTRATE]")
+                entry_parts.extend(ks_parts)
+
+            # ─── (3) PATHWAY MEMBERSHIP OVERLAP ───
+            pathwaysA = set()
+            pathwaysB = set()
+            for pw in enrA.get("pathways", []):
+                pw_name = pw.get("name", "") if isinstance(pw, dict) else str(pw)
+                if pw_name:
+                    pathwaysA.add(pw_name)
+            for pw in enrB.get("pathways", []):
+                pw_name = pw.get("name", "") if isinstance(pw, dict) else str(pw)
+                if pw_name:
+                    pathwaysB.add(pw_name)
+            # Also check reactome
+            for rpw in enrA.get("reactome", {}).get("signaling_pathways", []):
+                rpw_name = rpw.get("name", "") if isinstance(rpw, dict) else str(rpw)
+                if rpw_name:
+                    pathwaysA.add(rpw_name)
+            for rpw in enrB.get("reactome", {}).get("signaling_pathways", []):
+                rpw_name = rpw.get("name", "") if isinstance(rpw, dict) else str(rpw)
+                if rpw_name:
+                    pathwaysB.add(rpw_name)
+            shared_pws = pathwaysA & pathwaysB
+            unique_A = pathwaysA - pathwaysB
+            unique_B = pathwaysB - pathwaysA
+            if shared_pws or (unique_A and unique_B):
+                entry_parts.append("    [PATHWAY CONTEXT]")
+                if shared_pws:
+                    entry_parts.append(f"      Shared pathways: {', '.join(sorted(shared_pws)[:5])}")
+                if unique_A:
+                    entry_parts.append(f"      {siteA_pos}-specific: {', '.join(sorted(unique_A)[:3])}")
+                if unique_B:
+                    entry_parts.append(f"      {siteB_pos}-specific: {', '.join(sorted(unique_B)[:3])}")
+                if shared_pws:
+                    entry_parts.append(
+                        f"      → Both sites in same pathway ({', '.join(sorted(shared_pws)[:2])}) "
+                        f"supports intra-pathway feedback/sequential regulation."
+                    )
+                elif unique_A and unique_B:
+                    entry_parts.append(
+                        f"      → Sites in DIFFERENT pathways → convergence of distinct "
+                        f"signaling axes on same protein."
+                    )
+
+            # ─── (4) PROTEIN DOMAIN CONTEXT ───
+            domainsA = edA.get("Domains", "")
+            domainsB = edB.get("Domains", "")
+            if domainsA or domainsB:
+                entry_parts.append("    [DOMAIN CONTEXT]")
+                if domainsA:
+                    entry_parts.append(f"      {siteA_pos} domain: {domainsA}")
+                if domainsB:
+                    entry_parts.append(f"      {siteB_pos} domain: {domainsB}")
+                if domainsA and domainsB and domainsA != domainsB:
+                    entry_parts.append(
+                        f"      → Sites in DIFFERENT domains → distinct functional consequences "
+                        f"(e.g., kinase domain vs regulatory tail)."
+                    )
+                elif domainsA and domainsB and domainsA == domainsB:
+                    entry_parts.append(
+                        f"      → Sites in SAME domain → may cooperatively regulate domain activity."
+                    )
+
+            # ─── (5) TEMPORAL LAG (Δt between peaks) ───
+            peakA_idx = pair["siteA"]["peak_tp_idx"]
+            peakB_idx = pair["siteB"]["peak_tp_idx"]
+            delta_tp = abs(peakB_idx - peakA_idx)
+            if delta_tp > 0 and len(timepoints) > 1:
+                tp_early = timepoints[min(peakA_idx, peakB_idx)]
+                tp_late = timepoints[max(peakA_idx, peakB_idx)]
+                entry_parts.append(
+                    f"    [TEMPORAL LAG] Δt = {tp_early} → {tp_late} "
+                    f"(steps={delta_tp}/{len(timepoints)-1})"
+                )
+                # Interpret lag magnitude
+                lag_fraction = delta_tp / (len(timepoints) - 1)
+                if lag_fraction <= 0.25:
+                    entry_parts.append(
+                        f"      → Short lag: consistent with direct kinase cascade "
+                        f"(kinaseA → kinaseB, no transcriptional delay)."
+                    )
+                elif lag_fraction <= 0.5:
+                    entry_parts.append(
+                        f"      → Medium lag: may involve intermediate signaling steps "
+                        f"or protein synthesis-dependent amplification."
+                    )
+                else:
+                    entry_parts.append(
+                        f"      → Long lag: suggests transcriptional feedback, "
+                        f"de novo protein synthesis, or secondary signaling wave."
+                    )
+
+            # ─── (6) FC RATIO (signal magnitude comparison) ───
+            fcA = pair["siteA"]["peak_fc"]
+            fcB = pair["siteB"]["peak_fc"]
+            if abs(fcA) > 0.01 and abs(fcB) > 0.01:
+                ratio = abs(fcB) / abs(fcA)
+                entry_parts.append(
+                    f"    [FC MAGNITUDE] |FC_early|={abs(fcA):.2f}, |FC_late|={abs(fcB):.2f}, "
+                    f"ratio(late/early)={ratio:.2f}"
+                )
+                if pair["pattern"] == "signal_attenuation":
+                    if ratio > 1.0:
+                        entry_parts.append(
+                            f"      → Inhibitory signal STRONGER than activating → "
+                            f"strong negative feedback (complete signal shutdown)."
+                        )
+                    elif ratio > 0.5:
+                        entry_parts.append(
+                            f"      → Inhibitory signal comparable to activating → "
+                            f"balanced feedback (signal dampening, not shutdown)."
+                        )
+                    else:
+                        entry_parts.append(
+                            f"      → Inhibitory signal WEAKER than activating → "
+                            f"partial attenuation (signal persists but modulated)."
+                        )
+                elif pair["pattern"] == "sequential_regulation":
+                    if ratio > 1.5:
+                        entry_parts.append(
+                            f"      → Late site has STRONGER signal → signal amplification "
+                            f"(second kinase amplifies the initial signal)."
+                        )
+                    elif ratio < 0.67:
+                        entry_parts.append(
+                            f"      → Late site has WEAKER signal → signal decay "
+                            f"(second kinase provides maintenance, not amplification)."
+                        )
+                    else:
+                        entry_parts.append(
+                            f"      → Similar magnitude → parallel independent regulation "
+                            f"(two kinases of comparable activity)."
+                        )
 
             cross_ref_entries.append("\n".join(entry_parts))
 
