@@ -2035,6 +2035,7 @@ def _compute_multisite_divergence_for_report(
     sig_matrix: np.ndarray,
     sig_meta: list,
     timepoints: list,
+    ptm_type: str = "phosphorylation",
 ) -> list:
     """Compute multi-site temporal divergence pairs for LLM report injection.
 
@@ -2092,8 +2093,8 @@ def _compute_multisite_divergence_for_report(
                     pattern = "multisite_coordination"
                     description = (
                         f"{gene} {early['site']} and {late['site']} peak simultaneously at "
-                        f"{early['peak_tp']}, suggesting co-regulation by a single kinase "
-                        f"(multisite phosphorylation) or a tightly coupled signaling complex."
+                        f"{early['peak_tp']}, suggesting co-regulation by a single enzyme "
+                        f"(multisite {ptm_type}) or a tightly coupled signaling complex."
                     )
                 elif early_act != late_act:
                     pattern = "signal_attenuation"
@@ -2387,7 +2388,7 @@ def _build_comovement_llm_context(
     )
 
     # ── v9.30: Multi-site Temporal Divergence Analysis ──
-    divergence_pairs = _compute_multisite_divergence_for_report(sig_matrix, sig_meta or [], timepoints)
+    divergence_pairs = _compute_multisite_divergence_for_report(sig_matrix, sig_meta or [], timepoints, ptm_type=ptm_type)
     if divergence_pairs:
         pattern_order = ["signal_attenuation", "sequential_regulation", "multisite_coordination"]
         pattern_labels = {
@@ -2397,7 +2398,7 @@ def _build_comovement_llm_context(
         }
         parts.append("\n## MULTI-SITE TEMPORAL DIVERGENCE ANALYSIS\n")
         parts.append(
-            "The following proteins contain multiple phosphorylation sites with "
+            f"The following proteins contain multiple {ptm_type} sites with "
             "divergent temporal dynamics. These intra-protein site pairs reveal "
             "distinct regulatory mechanisms operating on the same protein substrate:\n"
         )

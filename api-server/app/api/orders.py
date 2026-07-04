@@ -2089,6 +2089,7 @@ async def get_vector_plot_data(
     if _use_cached:
         inferred_receptors = _cached_receptors
         _cowave_analysis = _cached_receptor_data.get("cowave_analysis")  # v9.42: restore from cache
+        _divergence_pairs = _cached_receptor_data.get("divergence_pairs", [])  # v12.0: restore from cache
 
     if not _use_cached:
         # --- Source A: upstream_regulators (existing, kept for backward compat) ---
@@ -3297,8 +3298,8 @@ async def get_vector_plot_data(
         }
         _divergence_pairs.sort(key=lambda _p: (
             _PATTERN_PRIORITY.get(_p.get("pattern", ""), 3),
-            -(abs(_p.get("fc_a", 0)) + abs(_p.get("fc_b", 0))),
-            -int(bool(_p.get("de_novo_a", False) or _p.get("de_novo_b", False))),
+            -(abs(_p.get("fcA", 0)) + abs(_p.get("fcB", 0))),
+            -int(bool(_p.get("is_denovoA", False) or _p.get("is_denovoB", False))),
         ))
 
         # Signal weight and FC cap per class (with divergence-based de_novo boost)

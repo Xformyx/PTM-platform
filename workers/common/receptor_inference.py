@@ -516,6 +516,126 @@ def run_receptor_inference(
         else:
             _ptm_activity_class[lbl] = "minor"
 
+    # ── v12.0: Multi-site Temporal Divergence (uses condition_data from enriched_data) ──
+    _divergence_pairs: list = []
+    _ptm_divergence_boost: dict = {}
+
+    try:
+        from common.temporal_utils import tp_to_minutes
+
+        # Build time matrix: ptm_label -> {condition: fc}
+        _ptm_time_matrix: dict = {}
+        for _r in (enriched_data or []):
+            _g = _r.get("gene") or _r.get("Gene.Name", "")
+            _pos = _r.get("position") or _r.get("PTM_Position", "")
+            if not _g or not _pos:
+                continue
+            _lbl = f"{_g} {_pos}".strip()
+            for _cd in (_r.get("condition_data") or []):
+                _cond = _cd.get("condition", "")
+                _fc_val = _cd.get("ptm_relative_log2fc") or _cd.get("log2fc") or 0
+                if _cond and _fc_val is not None:
+                    if _lbl not in _ptm_time_matrix:
+                        _ptm_time_matrix[_lbl] = {}
+                    _ptm_time_matrix[_lbl][_cond] = float(_fc_val)
+
+        if _ptm_time_matrix:
+            # Sort conditions by time
+            _all_conds = sorted(
+                {c for vals in _ptm_time_matrix.values() for c in vals},
+                key=lambda c: tp_to_minutes(c),
+            )
+            _parseable = [c for c in _all_conds if tp_to_minutes(c) >= 0]
+
+            if len(_parseable) >= 3:
+                # Group by gene
+                _gene_sites: dict = {}
+                for _lbl in _ptm_time_matrix:
+                    _parts = _lbl.rsplit(" ", 1)
+                    if len(_parts) == 2:
+                        _gn, _ps = _parts
+                        _gene_sites.setdefault(_gn, []).append(_lbl)
+
+                for _gene, _sites in _gene_sites.items():
+                    if len(_sites) < 2:
+                        continue
+                    # Compute peak per site
+                    _site_peaks: dict = {}
+                    for _s in _sites:
+                        _ts = _ptm_time_matrix.get(_s, {})
+                        _best_fc, _best_cond, _best_idx = 0.0, None, 0
+                        for _ci, _c in enumerate(_parseable):
+                            _fv = _ts.get(_c, 0.0)
+                            if abs(_fv) > abs(_best_fc):
+                                _best_fc, _best_cond, _best_idx = _fv, _c, _ci
+                        _site_peaks[_s] = {
+                            "peak_cond": _best_cond,
+                            "peak_fc": _best_fc,
+                            "peak_idx": _best_idx,
+                            "is_denovo": _s in _ptm_is_denovo,
+                        }
+
+                    for _i in range(len(_sites)):
+                        for _j in range(_i + 1, len(_sites)):
+                            _sA, _sB = _sites[_i], _sites[_j]
+                            _pA, _pB = _site_peaks[_sA], _site_peaks[_sB]
+                            _clsA = _ptm_activity_class.get(_sA, "minor")
+                            _clsB = _ptm_activity_class.get(_sB, "minor")
+                            if _clsA == "minor" and _clsB == "minor":
+                                continue
+                            _fcA, _fcB = _pA["peak_fc"], _pB["peak_fc"]
+                            _idxA, _idxB = _pA["peak_idx"], _pB["peak_idx"]
+                            # Ensure A is earlier
+                            if _idxA > _idxB:
+                                _sA, _sB = _sB, _sA
+                                _pA, _pB = _pB, _pA
+                                _fcA, _fcB = _fcB, _fcA
+                                _idxA, _idxB = _idxB, _idxA
+                            if _idxA == _idxB:
+                                _pattern = "multisite_coordination"
+                            elif (_fcA > 0 and _fcB < 0) or (_fcA < 0 and _fcB > 0):
+                                _pattern = "signal_attenuation"
+                            else:
+                                _pattern = "sequential_regulation"
+
+                            _divergence_pairs.append({
+                                "gene": _gene,
+                                "siteA": _sA, "siteB": _sB,
+                                "pattern": _pattern,
+                                "fcA": _fcA, "fcB": _fcB,
+                                "peak_condA": _pA["peak_cond"],
+                                "peak_condB": _pB["peak_cond"],
+                                "temporal_lag": _idxB - _idxA,
+                                "fc_ratio": round(abs(_fcB) / max(abs(_fcA), 0.01), 3),
+                                "is_denovoA": _pA["is_denovo"],
+                                "is_denovoB": _pB["is_denovo"],
+                            })
+
+                            if _pattern == "signal_attenuation":
+                                if _pB["is_denovo"] and _fcB < 0:
+                                    _ptm_divergence_boost[_sB] = 0.7
+                                if _pA["is_denovo"] and _fcA > 0:
+                                    _ptm_divergence_boost[_sA] = 0.6
+                            elif _pattern == "sequential_regulation":
+                                if _pA["is_denovo"]:
+                                    _ptm_divergence_boost[_sA] = 0.5
+                                if _pB["is_denovo"]:
+                                    _ptm_divergence_boost[_sB] = 0.5
+
+                # Sort by pattern priority and |FC|
+                _DPRIORITY = {"signal_attenuation": 0, "sequential_regulation": 1, "multisite_coordination": 2}
+                _divergence_pairs.sort(key=lambda _p: (
+                    _DPRIORITY.get(_p.get("pattern", ""), 3),
+                    -(abs(_p.get("fcA", 0)) + abs(_p.get("fcB", 0))),
+                    -int(bool(_p.get("is_denovoA") or _p.get("is_denovoB"))),
+                ))
+                logger.info(
+                    f"[Order {order_id}] MultiSiteDivergence (worker): "
+                    f"{len(_divergence_pairs)} pairs, {len(_ptm_divergence_boost)} boosted PTMs"
+                )
+    except Exception as _div_err:
+        logger.warning(f"[Order {order_id}] Multi-site divergence computation failed (non-fatal): {_div_err}")
+
     _SIGNAL_WEIGHT = {"de_novo": 0.3, "regulated": 1.0, "minor": 0.5}
     _FC_CAP = {"de_novo": 1.0, "regulated": 3.0, "minor": 3.0}
 
@@ -527,6 +647,9 @@ def run_receptor_inference(
         for _p in _ds_ptms:
             _cls = _ptm_activity_class.get(_p, "minor")
             _w = _SIGNAL_WEIGHT[_cls]
+            # v12.0: Apply divergence-based de_novo boost
+            if _cls == "de_novo" and _p in _ptm_divergence_boost:
+                _w = _ptm_divergence_boost[_p]
             _fc = min(_ptm_max_abs_fc.get(_p, 0.0), _FC_CAP[_cls])
             _sharing_factor = 1.0 if _p in _unique_set else (1.0 / max(all_ptm_freq.get(_p, 1), 1))
             _total_weighted_activity += _w * _fc * _sharing_factor
@@ -630,6 +753,7 @@ def run_receptor_inference(
         "top_n_setting": top_n_setting,
         "locked": False,
         "cowave_analysis": _cowave_analysis,
+        "divergence_pairs": _divergence_pairs[:50],  # v12.0: multi-site temporal divergence
         "saved_at": __import__('datetime').datetime.utcnow().isoformat(),
         "source": "auto_pipeline",  # Mark as auto-computed (not from frontend)
     }

@@ -1492,7 +1492,7 @@ function MultiSiteDivergencePanel({
   const entries = useMemo(
     () => computeMultiSiteDivergence(uniquePtms, vectorByPtm, conditions, ptmActivityClass, ptmPseudocountUsed),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [uniquePtms.length, conditions.join(",")]
+    [uniquePtms.length, conditions.join(","), vectorByPtm.size, ptmActivityClass.size, ptmPseudocountUsed.size]
   );
 
   if (entries.length === 0) return null;
