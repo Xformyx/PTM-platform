@@ -3251,6 +3251,95 @@ async def get_vector_plot_data(
                         _pathB = set(_ragB.get("pathways", []) if isinstance(_ragB.get("pathways"), list) else [])
                         _shared_pathways = _pathA & _pathB
 
+                        # v12.1 #1: covered_by_cowave
+                        _covered_by_cowave = (
+                            _pA["cluster_id"] is not None and _pB["cluster_id"] is not None
+                            and _pA["cluster_id"] == _pB["cluster_id"]
+                        )
+
+                        # v12.1 #3: Real time-based lag (minutes)
+                        _lag_minutes = None
+                        _lag_fraction = _temporal_lag / max(len(_parseable) - 1, 1)
+                        _is_meaningful_lag = _temporal_lag >= 1
+                        if _temporal_lag > 0:
+                            _tp_early_min = _parse_time_minutes(_parseable[_idxA])
+                            _tp_late_min = _parse_time_minutes(_parseable[_idxB])
+                            if _tp_early_min != float('inf') and _tp_late_min != float('inf'):
+                                _lag_minutes = round(abs(_tp_late_min - _tp_early_min), 1)
+                                _is_meaningful_lag = _lag_minutes >= 5.0
+
+                        # v12.1 #4: Confidence tier (MAD-based effect_size)
+                        _all_fc_for_mad = [abs(_ptm_max_abs_fc.get(k, 0)) for k in _ptm_max_abs_fc if abs(_ptm_max_abs_fc.get(k, 0)) > 0.01]
+                        if _all_fc_for_mad:
+                            _med_fc = float(sorted(_all_fc_for_mad)[len(_all_fc_for_mad)//2])
+                            _mad_fc = float(sorted([abs(x - _med_fc) for x in _all_fc_for_mad])[len(_all_fc_for_mad)//2])
+                            if _mad_fc < 0.1:
+                                _mad_fc = 0.1
+                        else:
+                            _mad_fc = 1.0
+                        _effect_size = abs(_fcA - _fcB) / _mad_fc
+                        if _effect_size >= 2.0:
+                            _confidence_tier = "High"
+                        elif _effect_size >= 1.0:
+                            _confidence_tier = "Medium"
+                        else:
+                            _confidence_tier = "Low"
+
+                        # v12.1 #5: Resolution warning
+                        _resolution_warning = None
+                        if len(_parseable) <= 3:
+                            _resolution_warning = f"LOW_RESOLUTION ({len(_parseable)} timepoints)"
+
+                        # v12.1 #6: Permutation p-value
+                        _p_value = None
+                        _is_significant = None
+                        _tsA = _ptm_time_matrix.get(_sA, {})
+                        _tsB = _ptm_time_matrix.get(_sB, {})
+                        _valsA = [_tsA.get(c, 0.0) for c in _parseable]
+                        _valsB = [_tsB.get(c, 0.0) for c in _parseable]
+                        if len(_valsA) >= 3:
+                            import numpy as _np_perm
+                            _arrA = _np_perm.array(_valsA)
+                            _arrB = _np_perm.array(_valsB)
+                            _obs_div = float(_np_perm.sum((_arrA - _arrB) ** 2))
+                            _combined = _np_perm.concatenate([_arrA, _arrB])
+                            _half = len(_arrA)
+                            _rng = _np_perm.random.default_rng(seed=42)
+                            _count_ge = 0
+                            for _ in range(1000):
+                                _perm = _rng.permutation(_combined)
+                                if float(_np_perm.sum((_perm[:_half] - _perm[_half:]) ** 2)) >= _obs_div:
+                                    _count_ge += 1
+                            _p_value = round((_count_ge + 1) / 1001, 4)
+                            _is_significant = _p_value < 0.05
+
+                        # v12.1 #2: Disambiguation
+                        _interpretation = "likely_independent_kinases"
+                        _disambig_conf = "low"
+                        _ks_set_A = {(k.get("kinase", "") if isinstance(k, dict) else str(k)).upper() for k in (_ks_A or []) if k}
+                        _ks_set_B = {(k.get("kinase", "") if isinstance(k, dict) else str(k)).upper() for k in (_ks_B or []) if k}
+                        _shared_ks = _ks_set_A & _ks_set_B
+                        # Motif family check
+                        _motifA_low = str(_motifA).lower()
+                        _motifB_low = str(_motifB).lower()
+                        _fam_kw = [
+                            ("proline_directed", ["sp", "tp", "pxsp", "mapk", "cdk", "erk"]),
+                            ("basophilic", ["rxxs", "rxs", "akt", "pkc", "pka"]),
+                            ("acidophilic", ["sxxe", "sxxd", "ck2", "ck1"]),
+                        ]
+                        _famA = {fn for fn, kws in _fam_kw if any(kw in _motifA_low for kw in kws)}
+                        _famB = {fn for fn, kws in _fam_kw if any(kw in _motifB_low for kw in kws)}
+                        _same_fam = bool(_famA and _famB and _famA & _famB)
+                        if _shared_ks:
+                            _interpretation = "confirmed_single_kinase"
+                            _disambig_conf = "high"
+                        elif _same_fam and _pattern == "multisite_coordination":
+                            _interpretation = "likely_distributive"
+                            _disambig_conf = "medium"
+                        elif _same_fam:
+                            _interpretation = "likely_same_kinase_family"
+                            _disambig_conf = "medium"
+
                         _pair = {
                             "gene": _gene,
                             "siteA": _sA, "siteB": _sB,
@@ -3265,6 +3354,18 @@ async def get_vector_plot_data(
                             "ks_kinasesA": [k.get("kinase", k) if isinstance(k, dict) else str(k) for k in (_ks_A or [])][:5],
                             "ks_kinasesB": [k.get("kinase", k) if isinstance(k, dict) else str(k) for k in (_ks_B or [])][:5],
                             "shared_pathways": list(_shared_pathways)[:5],
+                            # v12.1 enhancements
+                            "covered_by_cowave": _covered_by_cowave,
+                            "interpretation": _interpretation,
+                            "disambiguation_confidence": _disambig_conf,
+                            "lag_minutes": _lag_minutes,
+                            "lag_fraction": round(_lag_fraction, 3),
+                            "is_meaningful_lag": _is_meaningful_lag,
+                            "effect_size": round(_effect_size, 3),
+                            "confidence_tier": _confidence_tier,
+                            "resolution_warning": _resolution_warning,
+                            "p_value": _p_value,
+                            "is_significant": _is_significant,
                         }
                         _divergence_pairs.append(_pair)
 
@@ -3358,6 +3459,11 @@ async def get_vector_plot_data(
                 _has_B = _sB in _ds_ptms
                 if not (_has_A or _has_B):
                     continue
+                # v12.1 #4: Low confidence tier pairs do not contribute to scoring
+                if _dp.get("confidence_tier") == "Low":
+                    continue
+                # v12.1 #6: Non-significant pairs (p>0.05) get halved contribution
+                _sig_multiplier = 0.5 if (_dp.get("is_significant") is False) else 1.0
 
                 # (1) Motif validation: check if receptor's kinases match site motifs
                 _via_lower = {k.lower() for k in _via_kinases}
@@ -3371,24 +3477,24 @@ async def get_vector_plot_data(
                 # (2) Feedback detection
                 if _dp["pattern"] == "signal_attenuation" and _has_A and _has_B:
                     _feedback_loops += 1
-                    _cascade_score += 0.15  # Strong evidence: receptor controls both activation and feedback
+                    _cascade_score += 0.15 * _sig_multiplier
                 elif _dp["pattern"] == "signal_attenuation" and (_has_A or _has_B):
-                    _cascade_score += 0.08  # Partial: receptor involved in one arm of feedback
+                    _cascade_score += 0.08 * _sig_multiplier
 
                 # (3) Cascade depth
                 if _dp["pattern"] == "sequential_regulation":
                     _cascade_steps += 1
-                    _lag_bonus = min(_dp["temporal_lag"] * 0.03, 0.12)  # longer lag = deeper cascade
-                    _cascade_score += 0.10 + _lag_bonus
+                    _lag_bonus = min(_dp["temporal_lag"] * 0.03, 0.12)
+                    _cascade_score += (0.10 + _lag_bonus) * _sig_multiplier
 
                 # (4) Pathway coherence
                 if _dp.get("shared_pathways"):
                     _pathway_coherence += 1
-                    _cascade_score += 0.05
+                    _cascade_score += 0.05 * _sig_multiplier
 
                 # (5) Multisite coordination: receptor's kinase phosphorylates multiple sites simultaneously
                 if _dp["pattern"] == "multisite_coordination" and _has_A and _has_B:
-                    _cascade_score += 0.12  # Processive phosphorylation evidence
+                    _cascade_score += 0.12 * _sig_multiplier
 
             # Motif validation bonus (independent of divergence pattern)
             if _motif_validations > 0:

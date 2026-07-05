@@ -1300,6 +1300,15 @@ interface SitePairEntry {
   siteB: { position: string; label: string; waveLabel: string; peakCondition: string; peakFC: number; isDeNovo: boolean; activityClass: "de_novo" | "regulated" | "minor" };
   pattern: DivergencePattern;
   description: string;
+  // v12.1 enhancements
+  confidenceTier: "High" | "Medium" | "Low";
+  pValue: number | null;
+  isSignificant: boolean | null;
+  lagMinutes: number | null;
+  lagFraction: number;
+  isMeaningfulLag: boolean;
+  effectSize: number;
+  resolutionWarning: string | null;
 }
 
 const DIVERGENCE_META: Record<DivergencePattern, { label: string; color: string; bgColor: string; borderColor: string; description: string }> = {
@@ -1410,19 +1419,109 @@ function computeMultiSiteDivergence(
           description = `${gene} ${early.position} (wave: ${earlyPeak.peakCondition}) → ${late.position} (wave: ${latePeak.peakCondition}) → ${dir}가 순차 조절`;
         }
 
+        // v12.1 #3: Lag computation
+        const lagIdx = Math.abs(latePeak.condIdx - earlyPeak.condIdx);
+        const lagFraction = lagIdx / Math.max(conditions.length - 1, 1);
+        // Try to parse real time from condition names
+        let lagMinutes: number | null = null;
+        let isMeaningfulLag = lagIdx >= 1;
+        const parseTimeMin = (cond: string): number | null => {
+          const m = cond.match(/(\d+(?:\.\d+)?)\s*min/i);
+          if (m) return parseFloat(m[1]);
+          const h = cond.match(/(\d+(?:\.\d+)?)\s*(?:hr|hour|h)$/i);
+          if (h) return parseFloat(h[1]) * 60;
+          const s = cond.match(/(\d+(?:\.\d+)?)\s*sec/i);
+          if (s) return parseFloat(s[1]) / 60;
+          return null;
+        };
+        if (lagIdx > 0) {
+          const tEarly = parseTimeMin(earlyPeak.peakCondition);
+          const tLate = parseTimeMin(latePeak.peakCondition);
+          if (tEarly !== null && tLate !== null) {
+            lagMinutes = Math.round(Math.abs(tLate - tEarly) * 10) / 10;
+            isMeaningfulLag = lagMinutes >= 5.0;
+          }
+        }
+
+        // v12.1 #4: Confidence tier (MAD-based effect_size)
+        const allFCsForMAD = Array.from(ptmPeak.values()).map((p) => Math.abs(p.peakFC)).filter((v) => v > 0.01);
+        let madFC = 1.0;
+        if (allFCsForMAD.length > 0) {
+          const sorted = [...allFCsForMAD].sort((a, b) => a - b);
+          const medFC = sorted[Math.floor(sorted.length / 2)];
+          const deviations = allFCsForMAD.map((v) => Math.abs(v - medFC)).sort((a, b) => a - b);
+          madFC = Math.max(deviations[Math.floor(deviations.length / 2)], 0.1);
+        }
+        const effectSize = Math.abs(earlyPeak.peakFC - latePeak.peakFC) / madFC;
+        let confidenceTier: "High" | "Medium" | "Low" = "Low";
+        if (effectSize >= 2.0) confidenceTier = "High";
+        else if (effectSize >= 1.0) confidenceTier = "Medium";
+
+        // v12.1 #5: Resolution warning
+        const resolutionWarning = conditions.length <= 3 ? `LOW RESOLUTION: Only ${conditions.length} timepoints` : null;
+
+        // v12.1 #6: Permutation p-value
+        let pValue: number | null = null;
+        let isSignificant: boolean | null = null;
+        const keyEarly = `${gene}_${early.position}`;
+        const keyLate = `${gene}_${late.position}`;
+        const arrEarly = vectorByPtm.get(keyEarly);
+        const arrLate = vectorByPtm.get(keyLate);
+        if (arrEarly && arrLate && conditions.length >= 3) {
+          const valsE = conditions.map((c) => arrEarly.find((r) => r.condition === c)?.value ?? 0);
+          const valsL = conditions.map((c) => arrLate.find((r) => r.condition === c)?.value ?? 0);
+          const obsDivergence = valsE.reduce((sum, v, i) => sum + (v - valsL[i]) ** 2, 0);
+          const combined = [...valsE, ...valsL];
+          const half = valsE.length;
+          let countGE = 0;
+          const nPerm = 500; // reduced for frontend performance
+          // Simple seeded PRNG (xorshift32)
+          let seed = 42;
+          const xorshift = () => { seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5; return (seed >>> 0) / 4294967296; };
+          for (let p = 0; p < nPerm; p++) {
+            // Fisher-Yates shuffle
+            const perm = [...combined];
+            for (let i = perm.length - 1; i > 0; i--) {
+              const j = Math.floor(xorshift() * (i + 1));
+              [perm[i], perm[j]] = [perm[j], perm[i]];
+            }
+            const permDiv = perm.slice(0, half).reduce((sum, v, i) => sum + (v - perm[half + i]) ** 2, 0);
+            if (permDiv >= obsDivergence) countGE++;
+          }
+          pValue = Math.round(((countGE + 1) / (nPerm + 1)) * 10000) / 10000;
+          isSignificant = pValue < 0.05;
+        }
+
         results.push({
           gene,
           siteA: { position: early.position, label: early.label, waveLabel: `Wave (peak: ${earlyPeak.peakCondition})`, peakCondition: earlyPeak.peakCondition, peakFC: earlyPeak.peakFC, isDeNovo: earlyDeNovo, activityClass: earlyAC },
           siteB: { position: late.position, label: late.label, waveLabel: `Wave (peak: ${latePeak.peakCondition})`, peakCondition: latePeak.peakCondition, peakFC: latePeak.peakFC, isDeNovo: lateDeNovo, activityClass: lateAC },
           pattern,
           description,
+          confidenceTier,
+          pValue,
+          isSignificant,
+          lagMinutes,
+          lagFraction,
+          isMeaningfulLag,
+          effectSize: Math.round(effectSize * 1000) / 1000,
+          resolutionWarning,
         });
       }
     }
   });
 
   const ORDER: Record<DivergencePattern, number> = { signal_attenuation: 0, sequential_regulation: 1, multisite_coordination: 2 };
-  results.sort((a, b) => ORDER[a.pattern] - ORDER[b.pattern]);
+  const TIER_ORDER: Record<string, number> = { High: 0, Medium: 1, Low: 2 };
+  results.sort((a, b) => {
+    const patDiff = ORDER[a.pattern] - ORDER[b.pattern];
+    if (patDiff !== 0) return patDiff;
+    // Within same pattern: High > Medium > Low confidence
+    const tierDiff = (TIER_ORDER[a.confidenceTier] ?? 3) - (TIER_ORDER[b.confidenceTier] ?? 3);
+    if (tierDiff !== 0) return tierDiff;
+    // Then by effect size descending
+    return b.effectSize - a.effectSize;
+  });
   return results;
 }
 
@@ -1741,8 +1840,18 @@ function MultiSiteDivergencePanel({
                         // Bezier control point (arc above/below)
                         const midX = (ex1 + ex2) / 2;
                         const midY = (ey1 + ey2) / 2 - Math.abs(dx) * 0.15;
+                        // v12.1: confidence tier badge color
+                        const tierColor = e.confidenceTier === "High" ? "#16a34a" : e.confidenceTier === "Medium" ? "#ca8a04" : "#9ca3af";
+                        const tierLabel = e.confidenceTier === "High" ? "H" : e.confidenceTier === "Medium" ? "M" : "L";
+                        const tooltipParts = [`Tier: ${e.confidenceTier}`, `Effect: ${e.effectSize.toFixed(2)}`];
+                        if (e.pValue !== null) tooltipParts.push(`p=${e.pValue.toFixed(3)}${e.isSignificant ? " *" : " (ns)"}`);
+                        if (e.lagMinutes !== null) tooltipParts.push(`Lag: ${e.lagMinutes}min`);
+                        else if (e.lagFraction > 0) tooltipParts.push(`LagFrac: ${(e.lagFraction * 100).toFixed(0)}%`);
+                        if (e.resolutionWarning) tooltipParts.push(e.resolutionWarning);
+                        const connTooltip = tooltipParts.join(" | ");
                         return (
                           <g key={ei}>
+                            <title>{connTooltip}</title>
                             <defs>
                               <marker id={markerId} markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
                                 <path d="M0,0 L0,6 L6,3 z" fill={color} opacity="0.8" />
@@ -1752,11 +1861,14 @@ function MultiSiteDivergencePanel({
                               d={`M${ex1.toFixed(1)},${ey1.toFixed(1)} Q${midX.toFixed(1)},${midY.toFixed(1)} ${ex2.toFixed(1)},${ey2.toFixed(1)}`}
                               fill="none"
                               stroke={color}
-                              strokeWidth="1.5"
-                              strokeOpacity="0.65"
-                              strokeDasharray={e.pattern === "multisite_coordination" ? "3,2" : undefined}
+                              strokeWidth={e.confidenceTier === "Low" ? "1" : "1.5"}
+                              strokeOpacity={e.confidenceTier === "Low" ? "0.35" : e.isSignificant === false ? "0.5" : "0.65"}
+                              strokeDasharray={e.pattern === "multisite_coordination" ? "3,2" : e.confidenceTier === "Low" ? "2,3" : undefined}
                               markerEnd={`url(#${markerId})`}
                             />
+                            {/* Confidence tier badge at midpoint */}
+                            <circle cx={midX} cy={midY - 2} r="5" fill={tierColor} opacity="0.85" />
+                            <text x={midX} y={midY + 1} textAnchor="middle" fontSize="6" fill="white" fontWeight="700">{tierLabel}</text>
                           </g>
                         );
                       })}
@@ -1871,9 +1983,26 @@ function MultiSiteDivergencePanel({
               <svg width="12" height="12"><circle cx="6" cy="6" r="4" fill="none" stroke="#f97316" strokeWidth="1" strokeDasharray="2,2" /></svg>
               ⚡ De novo
             </span>
-            <span className="col-span-2 sm:col-span-3 text-[9px] opacity-60">
-              버블 크기 = |FC| 크기. 클릭 시 라인 차트에서 하이라이트.
+            <span className="flex items-center gap-1">
+              <svg width="12" height="12"><circle cx="6" cy="6" r="5" fill="#16a34a" opacity="0.85" /><text x="6" y="9" textAnchor="middle" fontSize="6" fill="white" fontWeight="700">H</text></svg>
+              High Confidence
             </span>
+            <span className="flex items-center gap-1">
+              <svg width="12" height="12"><circle cx="6" cy="6" r="5" fill="#ca8a04" opacity="0.85" /><text x="6" y="9" textAnchor="middle" fontSize="6" fill="white" fontWeight="700">M</text></svg>
+              Medium
+            </span>
+            <span className="flex items-center gap-1">
+              <svg width="12" height="12"><circle cx="6" cy="6" r="5" fill="#9ca3af" opacity="0.85" /><text x="6" y="9" textAnchor="middle" fontSize="6" fill="white" fontWeight="700">L</text></svg>
+              Low (tentative)
+            </span>
+            <span className="col-span-2 sm:col-span-3 text-[9px] opacity-60">
+              버블 크기 = |FC| 크기. 클릭 시 라인 차트에서 하이라이트. 커넥터 hover 시 p-value/lag/effect size 확인.
+            </span>
+            {entries[0]?.resolutionWarning && (
+              <span className="col-span-2 sm:col-span-3 text-[9px] text-amber-600 dark:text-amber-400 font-medium">
+                ⚠️ {entries[0].resolutionWarning}
+              </span>
+            )}
           </div>
         </div>
       )}

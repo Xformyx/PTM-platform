@@ -2036,15 +2036,51 @@ def _compute_multisite_divergence_for_report(
     sig_meta: list,
     timepoints: list,
     ptm_type: str = "phosphorylation",
+    enriched_data: Optional[list] = None,
+    clusters: Optional[list] = None,
 ) -> list:
     """Compute multi-site temporal divergence pairs for LLM report injection.
 
     Returns a list of dicts describing site pairs within the same protein that
     show divergent temporal patterns (signal attenuation, sequential regulation,
     or multisite coordination).
+
+    v12.1 enhancements:
+    - #1 covered_by_cowave flag: marks pairs where both sites belong to the same co-wave cluster
+    - #2 disambiguation: interpretation + disambiguation_confidence fields based on motif/KS-db
+    - #3 lag_minutes / lag_fraction / is_meaningful_lag (real time-based)
+    - #4 confidence_tier (High/Medium/Low via MAD-based effect_size)
+    - #5 resolution_warning (n_timepoints <= 3)
+    - #6 permutation p_value + is_significant
     """
     if sig_matrix is None or len(sig_meta) < 2 or len(timepoints) < 3:
         return []
+
+    n_timepoints = len(timepoints)
+
+    # ── Parse real timepoints to minutes for #3 ──
+    tp_minutes = []
+    for tp in timepoints:
+        tp_minutes.append(tp_to_minutes(tp))
+    # If any timepoint is unparseable (-1), fall back to index-based
+    _has_real_time = all(m >= 0 for m in tp_minutes)
+
+    # ── Build PTM key → cluster mapping for #1 (covered_by_cowave) ──
+    _ptm_cluster_map: Dict[str, int] = {}  # ptm_key -> cluster_id
+    if clusters:
+        for cl in clusters:
+            cid = cl.get("cluster_id", 0)
+            for md in cl.get("member_details", []):
+                _ptm_cluster_map[md["key"]] = cid
+
+    # ── Build enriched lookup for #2 (disambiguation) ──
+    _enr_by_gene_site: Dict[str, dict] = {}  # "GENE SITE" -> enriched entry
+    if enriched_data:
+        for _ed in enriched_data:
+            _g = _ed.get("gene") or _ed.get("Gene.Name", "")
+            _p = str(_ed.get("position") or _ed.get("PTM_Position", ""))
+            if _g and _p:
+                _enr_by_gene_site[f"{_g} {_p}"] = _ed
 
     # Build per-gene site data
     gene_sites: Dict[str, List[dict]] = defaultdict(list)
@@ -2066,6 +2102,21 @@ def _compute_multisite_divergence_for_report(
             "activity_class": meta.get("activity_class", "minor"),
             "is_de_novo": meta.get("control_pseudocount_used", False),
         })
+
+    # ── Collect all |FC| values for MAD calculation (#4 confidence tier) ──
+    all_fc_values = []
+    for i in range(sig_matrix.shape[0]):
+        for v in sig_matrix[i]:
+            if abs(float(v)) > 0.01:
+                all_fc_values.append(abs(float(v)))
+    if all_fc_values:
+        _median_fc = float(np.median(all_fc_values))
+        _mad_fc = float(np.median([abs(x - _median_fc) for x in all_fc_values]))
+        if _mad_fc < 0.1:
+            _mad_fc = 0.1  # floor to avoid division by near-zero
+    else:
+        _median_fc = 0.0
+        _mad_fc = 1.0
 
     results = []
     for gene, sites in gene_sites.items():
@@ -2091,10 +2142,12 @@ def _compute_multisite_divergence_for_report(
                 late_act = late["peak_fc"] > 0
                 if same_wave:
                     pattern = "multisite_coordination"
+                    # v12.1 #2: Hedged language (hypothesis-level)
                     description = (
                         f"{gene} {early['site']} and {late['site']} peak simultaneously at "
-                        f"{early['peak_tp']}, suggesting co-regulation by a single enzyme "
-                        f"(multisite {ptm_type}) or a tightly coupled signaling complex."
+                        f"{early['peak_tp']}, consistent with co-regulation by a single enzyme "
+                        f"(multisite {ptm_type}) or a tightly coupled signaling complex "
+                        f"(hypothesis; requires kinase assay validation)."
                     )
                 elif early_act != late_act:
                     pattern = "signal_attenuation"
@@ -2103,8 +2156,9 @@ def _compute_multisite_divergence_for_report(
                     description = (
                         f"{gene} {act_site['site']} activates early ({act_site['peak_tp']}, "
                         f"FC={act_site['peak_fc']:+.2f}) followed by {inh_site['site']} "
-                        f"inhibitory signal at {inh_site['peak_tp']} (FC={inh_site['peak_fc']:+.2f}), "
-                        f"consistent with a signal attenuation or negative feedback mechanism."
+                        f"inhibitory signal at {inh_site['peak_tp']} (FC={inh_site['peak_fc']:+.2f}). "
+                        f"This temporal pattern is consistent with signal attenuation or "
+                        f"negative feedback, though alternative explanations cannot be excluded."
                     )
                 else:
                     pattern = "sequential_regulation"
@@ -2112,15 +2166,135 @@ def _compute_multisite_divergence_for_report(
                     description = (
                         f"{gene} shows sequential {direction} regulation: {early['site']} peaks at "
                         f"{early['peak_tp']} (FC={early['peak_fc']:+.2f}), followed by {late['site']} "
-                        f"at {late['peak_tp']} (FC={late['peak_fc']:+.2f}), suggesting two independent "
-                        f"kinases regulate this protein in temporal sequence."
+                        f"at {late['peak_tp']} (FC={late['peak_fc']:+.2f}). This may indicate two "
+                        f"independent kinases regulating this protein in temporal sequence, "
+                        f"pending site-specific kinase validation."
                     )
+
+                # ── #1: covered_by_cowave flag ──
+                clusterA = _ptm_cluster_map.get(early["key"])
+                clusterB = _ptm_cluster_map.get(late["key"])
+                covered_by_cowave = (clusterA is not None and clusterB is not None
+                                     and clusterA == clusterB)
+
+                # ── #3: Real time-based lag ──
+                delta_idx = abs(late["peak_tp_idx"] - early["peak_tp_idx"])
+                lag_fraction = delta_idx / max(n_timepoints - 1, 1)
+                if _has_real_time and delta_idx > 0:
+                    lag_minutes = abs(tp_minutes[late["peak_tp_idx"]] - tp_minutes[early["peak_tp_idx"]])
+                else:
+                    lag_minutes = None  # cannot compute real lag
+                # is_meaningful_lag: at least 1 step AND (if real time available) >= 5 min
+                is_meaningful_lag = delta_idx >= 1 and (
+                    lag_minutes is None or lag_minutes >= 5.0
+                )
+
+                # ── #4: Confidence tier (effect_size via MAD) ──
+                effect_size = abs(early["peak_fc"] - late["peak_fc"]) / _mad_fc
+                if effect_size >= 2.0:
+                    confidence_tier = "High"
+                elif effect_size >= 1.0:
+                    confidence_tier = "Medium"
+                else:
+                    confidence_tier = "Low"
+
+                # ── #5: Resolution warning ──
+                resolution_warning = None
+                if n_timepoints <= 3:
+                    resolution_warning = (
+                        f"LOW RESOLUTION: Only {n_timepoints} timepoints available. "
+                        f"Pattern classification may be unreliable; interpret with caution."
+                    )
+
+                # ── #6: Permutation-based p-value ──
+                p_value = None
+                is_significant = None
+                valuesA = np.array(early["values"])
+                valuesB = np.array(late["values"])
+                if len(valuesA) >= 3 and len(valuesB) >= 3:
+                    observed_divergence = float(np.sum((valuesA - valuesB) ** 2))
+                    n_perm = 1000
+                    count_ge = 0
+                    combined = np.concatenate([valuesA, valuesB])
+                    half = len(valuesA)
+                    rng = np.random.default_rng(seed=42)
+                    for _ in range(n_perm):
+                        perm = rng.permutation(combined)
+                        perm_div = float(np.sum((perm[:half] - perm[half:]) ** 2))
+                        if perm_div >= observed_divergence:
+                            count_ge += 1
+                    p_value = (count_ge + 1) / (n_perm + 1)  # +1 correction
+                    is_significant = p_value < 0.05
+
+                # ── #2: Disambiguation (motif/KS-db based) ──
+                interpretation = "likely_independent_kinases"  # default
+                disambiguation_confidence = "low"
+                edA = _enr_by_gene_site.get(f"{gene} {early['site']}", {})
+                edB = _enr_by_gene_site.get(f"{gene} {late['site']}", {})
+                ragA = edA.get("rag_enrichment", {}) or {}
+                ragB = edB.get("rag_enrichment", {}) or {}
+                # Extract motif families
+                motifA = str(edA.get("Enhanced_Matched_Motifs", "") or edA.get("Motifs", "")).lower()
+                motifB = str(edB.get("Enhanced_Matched_Motifs", "") or edB.get("Motifs", "")).lower()
+                # Extract known kinases
+                ks_A = ragA.get("regulation", {}).get("kinase_substrate", []) if isinstance(ragA.get("regulation"), dict) else []
+                ks_B = ragB.get("regulation", {}).get("kinase_substrate", []) if isinstance(ragB.get("regulation"), dict) else []
+                kinases_A = {(k.get("kinase", "") if isinstance(k, dict) else str(k)).upper() for k in (ks_A or []) if k}
+                kinases_B = {(k.get("kinase", "") if isinstance(k, dict) else str(k)).upper() for k in (ks_B or []) if k}
+                shared_kinases = kinases_A & kinases_B
+
+                # Check same motif family (proline-directed, basophilic, acidophilic)
+                _motif_families = [
+                    ("proline_directed", ["sp", "tp", "pxsp", "mapk", "cdk", "erk", "jnk"]),
+                    ("basophilic", ["rxxs", "rxs", "akt", "pkc", "pka", "agc"]),
+                    ("acidophilic", ["sxxe", "sxxd", "ck2", "ck1"]),
+                ]
+                familyA = set()
+                familyB = set()
+                for fam_name, keywords in _motif_families:
+                    if any(kw in motifA for kw in keywords):
+                        familyA.add(fam_name)
+                    if any(kw in motifB for kw in keywords):
+                        familyB.add(fam_name)
+
+                same_motif_family = bool(familyA and familyB and familyA & familyB)
+
+                if shared_kinases:
+                    interpretation = "confirmed_single_kinase"
+                    disambiguation_confidence = "high"
+                elif same_motif_family and pattern == "multisite_coordination":
+                    interpretation = "likely_distributive"
+                    disambiguation_confidence = "medium"
+                elif same_motif_family:
+                    interpretation = "likely_same_kinase_family"
+                    disambiguation_confidence = "medium"
+                else:
+                    interpretation = "likely_independent_kinases"
+                    disambiguation_confidence = "low"
+
                 results.append({
                     "gene": gene,
                     "siteA": early,
                     "siteB": late,
                     "pattern": pattern,
                     "description": description,
+                    # v12.1 #1
+                    "covered_by_cowave": covered_by_cowave,
+                    # v12.1 #2
+                    "interpretation": interpretation,
+                    "disambiguation_confidence": disambiguation_confidence,
+                    # v12.1 #3
+                    "lag_minutes": round(lag_minutes, 1) if lag_minutes is not None else None,
+                    "lag_fraction": round(lag_fraction, 3),
+                    "is_meaningful_lag": is_meaningful_lag,
+                    # v12.1 #4
+                    "effect_size": round(effect_size, 3),
+                    "confidence_tier": confidence_tier,
+                    # v12.1 #5
+                    "resolution_warning": resolution_warning,
+                    # v12.1 #6
+                    "p_value": round(p_value, 4) if p_value is not None else None,
+                    "is_significant": is_significant,
                 })
     return results
 
@@ -2387,8 +2561,11 @@ def _build_comovement_llm_context(
         "     their known biological roles in the experimental context.\n"
     )
 
-    # ── v9.30: Multi-site Temporal Divergence Analysis ──
-    divergence_pairs = _compute_multisite_divergence_for_report(sig_matrix, sig_meta or [], timepoints, ptm_type=ptm_type)
+    # ── v9.30 / v12.1: Multi-site Temporal Divergence Analysis ──
+    divergence_pairs = _compute_multisite_divergence_for_report(
+        sig_matrix, sig_meta or [], timepoints, ptm_type=ptm_type,
+        enriched_data=enriched_data, clusters=clusters,
+    )
     if divergence_pairs:
         pattern_order = ["signal_attenuation", "sequential_regulation", "multisite_coordination"]
         pattern_labels = {
@@ -2402,6 +2579,12 @@ def _build_comovement_llm_context(
             "divergent temporal dynamics. These intra-protein site pairs reveal "
             "distinct regulatory mechanisms operating on the same protein substrate:\n"
         )
+
+        # v12.1 #5: Resolution warning (global)
+        _first_pair_warning = divergence_pairs[0].get("resolution_warning")
+        if _first_pair_warning:
+            parts.append(f"⚠️ {_first_pair_warning}\n")
+
         for pat in pattern_order:
             pat_pairs = [p for p in divergence_pairs if p["pattern"] == pat]
             if not pat_pairs:
@@ -2413,7 +2596,22 @@ def _build_comovement_llm_context(
                     de_novo_note += f" [⚡ {pair['siteA']['site']} is de novo]"
                 if pair["siteB"].get("is_de_novo"):
                     de_novo_note += f" [⚡ {pair['siteB']['site']} is de novo]"
-                parts.append(f"- {pair['description']}{de_novo_note}")
+                # v12.1: append confidence/significance metadata
+                meta_tags = []
+                if pair.get("confidence_tier"):
+                    meta_tags.append(f"Tier={pair['confidence_tier']}")
+                if pair.get("lag_minutes") is not None:
+                    meta_tags.append(f"Lag={pair['lag_minutes']}min")
+                elif pair.get("lag_fraction", 0) > 0:
+                    meta_tags.append(f"LagFrac={pair['lag_fraction']:.2f}")
+                if pair.get("p_value") is not None:
+                    meta_tags.append(f"p={pair['p_value']:.3f}")
+                if pair.get("interpretation") and pair["interpretation"] != "likely_independent_kinases":
+                    meta_tags.append(f"Interp={pair['interpretation']}")
+                if pair.get("covered_by_cowave"):
+                    meta_tags.append("COVERED_BY_COWAVE")
+                meta_str = f" [{', '.join(meta_tags)}]" if meta_tags else ""
+                parts.append(f"- {pair['description']}{de_novo_note}{meta_str}")
             parts.append("")
 
         # ── v9.31: HYBRID CROSS-REFERENCE — Divergence ↔ Co-wave Predicted Kinases ──
@@ -2742,15 +2940,15 @@ def _build_comovement_llm_context(
             parts.append(
                 "CROSS-REFERENCE INTERPRETATION RULES:\n"
                 "  - When two sites are in DIFFERENT clusters with DIFFERENT predicted kinases:\n"
-                "    This STRENGTHENS the multi-site divergence interpretation. The cluster-level\n"
+                "    This supports the multi-site divergence interpretation. The cluster-level\n"
                 "    kinase predictions provide specific candidates for each temporal phase.\n"
                 "    Name these kinases explicitly in the Discussion.\n"
                 "  - When two sites are in DIFFERENT clusters but SHARE a predicted kinase:\n"
-                "    This suggests DISTRIBUTIVE phosphorylation by the same kinase, where the\n"
+                "    This is consistent with distributive phosphorylation by the same kinase, where the\n"
                 "    kinase releases the substrate between phosphorylation events, creating a\n"
                 "    time delay. This is a hallmark of ultrasensitive switch-like behavior.\n"
                 "  - When two sites are in the SAME cluster:\n"
-                "    This CONFIRMS processive multisite phosphorylation or scaffold-mediated\n"
+                "    This is consistent with processive multisite phosphorylation or scaffold-mediated\n"
                 "    co-regulation. The cluster's predicted kinase is the single regulator.\n"
                 "  - When a site is UNCLUSTERED (singleton):\n"
                 "    This site has a unique temporal profile not shared by other PTMs. It may\n"
@@ -2831,9 +3029,9 @@ def _build_comovement_llm_context(
             "        occurs under the experimental stimulus.\n"
             "      - Connect these findings to the cluster-level co-movement analysis: "
             "        if two sites of the same protein belong to DIFFERENT clusters, this "
-            "        is strong evidence for independent upstream regulators operating on "
+            "        suggests independent upstream regulators may be operating on "
             "        distinct temporal scales.\n"
-            "      - If two sites belong to the SAME cluster, this confirms coordinated "
+            "      - If two sites belong to the SAME cluster, this is consistent with coordinated "
             "        regulation, likely by the same kinase or within the same signaling "
             "        complex.\n"
             "      - Discuss the BIOLOGICAL CONSEQUENCE of each divergence pattern for "
@@ -2843,7 +3041,35 @@ def _build_comovement_llm_context(
             "      - When possible, propose a MECHANISTIC MODEL showing the temporal "
             "        sequence: stimulus → early kinase activation → early site "
             "        phosphorylation → downstream effector → late kinase activation → "
-            "        late site phosphorylation → signal outcome.\n"
+            "        late site phosphorylation → signal outcome.\n\n"
+            "   E) REDUNDANCY AVOIDANCE (v12.1 — CRITICAL):\n"
+            "      - Co-wave analysis (above) describes INTER-protein temporal coordination.\n"
+            "      - Multi-site divergence describes INTRA-protein mechanistic detail.\n"
+            "      - DO NOT repeat the same kinase predictions or pathway descriptions\n"
+            "        that were already stated in the Co-wave cluster sections.\n"
+            "      - Pairs marked [COVERED_BY_COWAVE] mean BOTH sites belong to the SAME\n"
+            "        co-wave cluster. For these pairs, only add NOVEL mechanistic insight\n"
+            "        (e.g., processive vs distributive mechanism, domain-level interpretation)\n"
+            "        that was NOT already covered in the cluster-level discussion.\n"
+            "      - Pairs WITHOUT the COVERED_BY_COWAVE tag are FULLY NOVEL — provide\n"
+            "        complete mechanistic interpretation for these.\n"
+            "      - Focus divergence discussion on: (1) intra-protein regulatory logic,\n"
+            "        (2) kinase mechanism type (processive/distributive), (3) temporal\n"
+            "        gating implications, (4) feedback loop architecture.\n\n"
+            "   F) INTERPRETATION CONFIDENCE (v12.1):\n"
+            "      - Each pair has a confidence_tier (High/Medium/Low) based on effect size.\n"
+            "        LOW tier pairs should be mentioned briefly or omitted if space is limited.\n"
+            "      - Each pair has a p_value from permutation testing. Pairs with p>0.05\n"
+            "        (not significant) should be presented as 'tentative observations' only.\n"
+            "      - Disambiguation labels (confirmed_single_kinase, likely_distributive,\n"
+            "        likely_same_kinase_family, likely_independent_kinases) indicate the\n"
+            "        level of evidence for the proposed mechanism. Use hedged language\n"
+            "        ('consistent with', 'may indicate', 'suggests') for low-confidence\n"
+            "        interpretations. Only use definitive language ('confirms', 'demonstrates')\n"
+            "        for confirmed_single_kinase with High confidence tier.\n"
+            "      - If resolution_warning is present, explicitly acknowledge the limited\n"
+            "        temporal resolution in the discussion and note that additional timepoints\n"
+            "        would strengthen the interpretation.\n"
         )
 
     return "\n".join(parts)

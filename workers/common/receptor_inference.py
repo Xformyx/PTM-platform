@@ -598,6 +598,63 @@ def run_receptor_inference(
                             else:
                                 _pattern = "sequential_regulation"
 
+                            _temporal_lag = _idxB - _idxA
+                            _fc_ratio = round(abs(_fcB) / max(abs(_fcA), 0.01), 3)
+
+                            # v12.1 #3: Real time-based lag
+                            _lag_minutes_w = None
+                            _lag_fraction_w = _temporal_lag / max(len(_parseable) - 1, 1)
+                            _is_meaningful_lag_w = _temporal_lag >= 1
+                            if _temporal_lag > 0:
+                                _tp_early_m = tp_to_minutes(_parseable[_idxA])
+                                _tp_late_m = tp_to_minutes(_parseable[_idxB])
+                                if _tp_early_m >= 0 and _tp_late_m >= 0:
+                                    _lag_minutes_w = round(abs(_tp_late_m - _tp_early_m), 1)
+                                    _is_meaningful_lag_w = _lag_minutes_w >= 5.0
+
+                            # v12.1 #4: Confidence tier
+                            _all_fc_w = [abs(v) for v in _ptm_max_abs_fc.values() if abs(v) > 0.01]
+                            if _all_fc_w:
+                                _med_w = float(sorted(_all_fc_w)[len(_all_fc_w)//2])
+                                _mad_w = float(sorted([abs(x - _med_w) for x in _all_fc_w])[len(_all_fc_w)//2])
+                                if _mad_w < 0.1:
+                                    _mad_w = 0.1
+                            else:
+                                _mad_w = 1.0
+                            _effect_size_w = abs(_fcA - _fcB) / _mad_w
+                            if _effect_size_w >= 2.0:
+                                _conf_tier_w = "High"
+                            elif _effect_size_w >= 1.0:
+                                _conf_tier_w = "Medium"
+                            else:
+                                _conf_tier_w = "Low"
+
+                            # v12.1 #5: Resolution warning
+                            _res_warn_w = f"LOW_RESOLUTION ({len(_parseable)} tp)" if len(_parseable) <= 3 else None
+
+                            # v12.1 #6: Permutation p-value
+                            _p_val_w = None
+                            _is_sig_w = None
+                            _tsA_w = _ptm_time_matrix.get(_sA, {})
+                            _tsB_w = _ptm_time_matrix.get(_sB, {})
+                            _vA_w = [_tsA_w.get(c, 0.0) for c in _parseable]
+                            _vB_w = [_tsB_w.get(c, 0.0) for c in _parseable]
+                            if len(_vA_w) >= 3:
+                                import numpy as _npw
+                                _aA = _npw.array(_vA_w)
+                                _aB = _npw.array(_vB_w)
+                                _obs = float(_npw.sum((_aA - _aB) ** 2))
+                                _comb = _npw.concatenate([_aA, _aB])
+                                _h = len(_aA)
+                                _rng_w = _npw.random.default_rng(seed=42)
+                                _cnt = 0
+                                for _ in range(1000):
+                                    _pm = _rng_w.permutation(_comb)
+                                    if float(_npw.sum((_pm[:_h] - _pm[_h:]) ** 2)) >= _obs:
+                                        _cnt += 1
+                                _p_val_w = round((_cnt + 1) / 1001, 4)
+                                _is_sig_w = _p_val_w < 0.05
+
                             _divergence_pairs.append({
                                 "gene": _gene,
                                 "siteA": _sA, "siteB": _sB,
@@ -605,10 +662,19 @@ def run_receptor_inference(
                                 "fcA": _fcA, "fcB": _fcB,
                                 "peak_condA": _pA["peak_cond"],
                                 "peak_condB": _pB["peak_cond"],
-                                "temporal_lag": _idxB - _idxA,
-                                "fc_ratio": round(abs(_fcB) / max(abs(_fcA), 0.01), 3),
+                                "temporal_lag": _temporal_lag,
+                                "fc_ratio": _fc_ratio,
                                 "is_denovoA": _pA["is_denovo"],
                                 "is_denovoB": _pB["is_denovo"],
+                                # v12.1 enhancements
+                                "lag_minutes": _lag_minutes_w,
+                                "lag_fraction": round(_lag_fraction_w, 3),
+                                "is_meaningful_lag": _is_meaningful_lag_w,
+                                "effect_size": round(_effect_size_w, 3),
+                                "confidence_tier": _conf_tier_w,
+                                "resolution_warning": _res_warn_w,
+                                "p_value": _p_val_w,
+                                "is_significant": _is_sig_w,
                             })
 
                             if _pattern == "signal_attenuation":
