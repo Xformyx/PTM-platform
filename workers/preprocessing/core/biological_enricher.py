@@ -61,11 +61,16 @@ class BiologicalEnricher:
 
     @staticmethod
     def _clean_protein_id(pid: str) -> str:
+        """Clean protein ID, preserving UniProt isoform suffixes (e.g. P12345-2)."""
+        import re as _re
         if "|" in pid:
             parts = pid.split("|")
             if len(parts) >= 2:
                 return parts[1]
+        # Preserve UniProt isoform suffixes (e.g. P12345-2, Q9WTQ5-3)
         if "-" in pid:
+            if _re.match(r'^[A-Z][0-9A-Z]{5,9}-\d+$', pid.strip()):
+                return pid.strip()  # valid isoform accession — keep as-is
             return pid.split("-")[0]
         return pid.strip()
 

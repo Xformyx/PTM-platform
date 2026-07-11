@@ -37,11 +37,21 @@ async def query_interpro(
 
 
 def _clean_protein_id(protein_id: str) -> str:
+    """Clean protein ID from FASTA-style headers, preserving isoform suffixes.
+
+    UniProt isoform IDs (e.g. P12345-2, Q9WTQ5-3) are valid accessions
+    supported by the InterPro API and must NOT be stripped.
+    """
+    import re as _re
     if "|" in protein_id:
         parts = protein_id.split("|")
         if len(parts) >= 2:
             return parts[1]
+    # Preserve UniProt isoform suffixes (e.g. P12345-2, Q9WTQ5-3)
+    # Pattern: 1 uppercase letter + 5 alphanumeric + dash + digits
     if "-" in protein_id:
+        if _re.match(r'^[A-Z][0-9A-Z]{5,9}-\d+$', protein_id.strip()):
+            return protein_id.strip()  # valid isoform accession — keep as-is
         return protein_id.split("-")[0]
     return protein_id.strip()
 
