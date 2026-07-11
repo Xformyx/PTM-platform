@@ -3137,17 +3137,19 @@ async def get_vector_plot_data(
             else:
                 _ptm_activity_class[_lbl] = "minor"
         # ══════════════════════════════════════════════════════════════════════
-        # v12.0: Multi-site Temporal Divergence Analysis for Receptor Scoring
+        # v12.1: Multi-site Temporal Divergence via shared BiologicalRelationship
         # ══════════════════════════════════════════════════════════════════════
-        # Compute intra-protein site pairs with divergent temporal patterns.
-        # This data is used to: (1) reweight de_novo sites involved in feedback,
-        # (2) compute temporal_cascade_score per receptor, (3) validate kinase predictions via motif.
-        _divergence_pairs: list[dict] = []  # [{gene, siteA, siteB, pattern, ...}]
-        _ptm_divergence_boost: dict = {}  # ptm_label -> boost factor for de_novo reweighting
-        _ptm_to_cluster: dict = {}  # ptm_label -> cluster_id
-        _cluster_kinase_map: dict = {}  # cluster_id -> [kinases]
+        from app.core.biological_relationship import (
+            TemporalDivergencePair as _TDP,
+            compute_divergence_pairs as _compute_div_pairs,
+        )
 
-        # Build ptm→cluster mapping from _cluster_patterns (if available)
+        _divergence_pairs: list[dict] = []
+        _ptm_divergence_boost: dict = {}
+        _ptm_to_cluster: dict = {}
+        _cluster_kinase_map: dict = {}
+
+        # Build ptm→cluster mapping
         if '_cluster_patterns' in locals() and _cluster_patterns:
             for cp in _cluster_patterns:
                 cid = cp["cluster_id"]
@@ -3155,8 +3157,8 @@ async def get_vector_plot_data(
                 for plbl in cp.get("ptm_labels", []):
                     _ptm_to_cluster[plbl] = cid
 
-        # Build enriched lookup: gene_pos -> enriched entry (for motif/domain/kinase info)
-        _enriched_lookup: dict = {}  # "GENE POS" -> enriched dict
+        # Build enriched lookup for biological context
+        _enriched_lookup: dict = {}
         if 'enriched' in locals() and enriched:
             for _en_ptm in enriched:
                 _en_gene = _en_ptm.get("gene") or _en_ptm.get("Gene.Name", "")
@@ -3165,243 +3167,25 @@ async def get_vector_plot_data(
                 if _en_lbl:
                     _enriched_lookup[_en_lbl] = _en_ptm
 
-        # Compute divergence pairs (only if multi-timepoint and _ptm_time_matrix available)
+        # Compute divergence pairs using shared function
         if '_ptm_time_matrix' in locals() and _ptm_time_matrix and '_parseable' in locals() and len(_parseable) >= 3:
-            # Group PTMs by gene
-            _gene_sites: dict = {}  # gene -> [(label, position)]
-            for _lbl in _ptm_time_matrix:
-                _parts = _lbl.rsplit(" ", 1)
-                if len(_parts) == 2:
-                    _g, _p = _parts
-                    if _g not in _gene_sites:
-                        _gene_sites[_g] = []
-                    _gene_sites[_g].append(_lbl)
-
-            for _gene, _sites in _gene_sites.items():
-                if len(_sites) < 2:
-                    continue
-                # For each site: compute peak condition and peak FC
-                _site_peaks: dict = {}  # label -> {peak_cond, peak_fc, peak_idx, is_denovo}
-                for _s in _sites:
-                    _ts = _ptm_time_matrix.get(_s, {})
-                    _best_cond = None
-                    _best_fc = 0.0
-                    _best_idx = 0
-                    for _ci, _c in enumerate(_parseable):
-                        _fc_val = _ts.get(_c, 0.0)
-                        if abs(_fc_val) > abs(_best_fc):
-                            _best_fc = _fc_val
-                            _best_cond = _c
-                            _best_idx = _ci
-                    _site_peaks[_s] = {
-                        "peak_cond": _best_cond,
-                        "peak_fc": _best_fc,
-                        "peak_idx": _best_idx,
-                        "is_denovo": _s in _ptm_is_denovo,
-                        "cluster_id": _ptm_to_cluster.get(_s),
-                    }
-
-                # Generate all pairs
-                for i in range(len(_sites)):
-                    for j in range(i + 1, len(_sites)):
-                        _sA = _sites[i]
-                        _sB = _sites[j]
-                        _pA = _site_peaks[_sA]
-                        _pB = _site_peaks[_sB]
-                        # Skip if both are minor
-                        _clsA = _ptm_activity_class.get(_sA, "minor")
-                        _clsB = _ptm_activity_class.get(_sB, "minor")
-                        if _clsA == "minor" and _clsB == "minor":
-                            continue
-                        # Determine pattern
-                        _fcA = _pA["peak_fc"]
-                        _fcB = _pB["peak_fc"]
-                        _idxA = _pA["peak_idx"]
-                        _idxB = _pB["peak_idx"]
-                        # Ensure A is earlier
-                        if _idxA > _idxB:
-                            _sA, _sB = _sB, _sA
-                            _pA, _pB = _pB, _pA
-                            _fcA, _fcB = _fcB, _fcA
-                            _idxA, _idxB = _idxB, _idxA
-                            _clsA, _clsB = _clsB, _clsA
-                        # Classify pattern
-                        if _idxA == _idxB:
-                            _pattern = "multisite_coordination"
-                        elif (_fcA > 0 and _fcB < 0) or (_fcA < 0 and _fcB > 0):
-                            _pattern = "signal_attenuation"
-                        else:
-                            _pattern = "sequential_regulation"
-
-                        # Temporal lag
-                        _temporal_lag = _idxB - _idxA
-                        # FC ratio
-                        _fc_ratio = abs(_fcB) / max(abs(_fcA), 0.01)
-
-                        # Get motif context from enriched data
-                        _enA = _enriched_lookup.get(_sA, {})
-                        _enB = _enriched_lookup.get(_sB, {})
-                        _motifA = _enA.get("Enhanced_Matched_Motifs") or _enA.get("Matched_Motifs", "")
-                        _motifB = _enB.get("Enhanced_Matched_Motifs") or _enB.get("Matched_Motifs", "")
-                        _ragA = _enA.get("rag_enrichment", {}) or {}
-                        _ragB = _enB.get("rag_enrichment", {}) or {}
-                        _ks_A = _ragA.get("regulation", {}).get("kinase_substrate", []) if isinstance(_ragA.get("regulation"), dict) else []
-                        _ks_B = _ragB.get("regulation", {}).get("kinase_substrate", []) if isinstance(_ragB.get("regulation"), dict) else []
-                        _pathA = set(_ragA.get("pathways", []) if isinstance(_ragA.get("pathways"), list) else [])
-                        _pathB = set(_ragB.get("pathways", []) if isinstance(_ragB.get("pathways"), list) else [])
-                        _shared_pathways = _pathA & _pathB
-
-                        # v12.1 #1: covered_by_cowave
-                        _covered_by_cowave = (
-                            _pA["cluster_id"] is not None and _pB["cluster_id"] is not None
-                            and _pA["cluster_id"] == _pB["cluster_id"]
-                        )
-
-                        # v12.1 #3: Real time-based lag (minutes)
-                        _lag_minutes = None
-                        _lag_fraction = _temporal_lag / max(len(_parseable) - 1, 1)
-                        _is_meaningful_lag = _temporal_lag >= 1
-                        if _temporal_lag > 0:
-                            _tp_early_min = _parse_time_minutes(_parseable[_idxA])
-                            _tp_late_min = _parse_time_minutes(_parseable[_idxB])
-                            if _tp_early_min != float('inf') and _tp_late_min != float('inf'):
-                                _lag_minutes = round(abs(_tp_late_min - _tp_early_min), 1)
-                                _is_meaningful_lag = _lag_minutes >= 5.0
-
-                        # v12.1 #4: Confidence tier (MAD-based effect_size)
-                        _all_fc_for_mad = [abs(_ptm_max_abs_fc.get(k, 0)) for k in _ptm_max_abs_fc if abs(_ptm_max_abs_fc.get(k, 0)) > 0.01]
-                        if _all_fc_for_mad:
-                            _med_fc = float(sorted(_all_fc_for_mad)[len(_all_fc_for_mad)//2])
-                            _mad_fc = float(sorted([abs(x - _med_fc) for x in _all_fc_for_mad])[len(_all_fc_for_mad)//2])
-                            if _mad_fc < 0.1:
-                                _mad_fc = 0.1
-                        else:
-                            _mad_fc = 1.0
-                        _effect_size = abs(_fcA - _fcB) / _mad_fc
-                        if _effect_size >= 2.0:
-                            _confidence_tier = "High"
-                        elif _effect_size >= 1.0:
-                            _confidence_tier = "Medium"
-                        else:
-                            _confidence_tier = "Low"
-
-                        # v12.1 #5: Resolution warning
-                        _resolution_warning = None
-                        if len(_parseable) <= 3:
-                            _resolution_warning = f"LOW_RESOLUTION ({len(_parseable)} timepoints)"
-
-                        # v12.1 #6: Permutation p-value
-                        _p_value = None
-                        _is_significant = None
-                        _tsA = _ptm_time_matrix.get(_sA, {})
-                        _tsB = _ptm_time_matrix.get(_sB, {})
-                        _valsA = [_tsA.get(c, 0.0) for c in _parseable]
-                        _valsB = [_tsB.get(c, 0.0) for c in _parseable]
-                        if len(_valsA) >= 3:
-                            import numpy as _np_perm
-                            _arrA = _np_perm.array(_valsA)
-                            _arrB = _np_perm.array(_valsB)
-                            _obs_div = float(_np_perm.sum((_arrA - _arrB) ** 2))
-                            _combined = _np_perm.concatenate([_arrA, _arrB])
-                            _half = len(_arrA)
-                            _rng = _np_perm.random.default_rng(seed=42)
-                            _count_ge = 0
-                            for _ in range(1000):
-                                _perm = _rng.permutation(_combined)
-                                if float(_np_perm.sum((_perm[:_half] - _perm[_half:]) ** 2)) >= _obs_div:
-                                    _count_ge += 1
-                            _p_value = round((_count_ge + 1) / 1001, 4)
-                            _is_significant = _p_value < 0.05
-
-                        # v12.1 #2: Disambiguation
-                        _interpretation = "likely_independent_kinases"
-                        _disambig_conf = "low"
-                        _ks_set_A = {(k.get("kinase", "") if isinstance(k, dict) else str(k)).upper() for k in (_ks_A or []) if k}
-                        _ks_set_B = {(k.get("kinase", "") if isinstance(k, dict) else str(k)).upper() for k in (_ks_B or []) if k}
-                        _shared_ks = _ks_set_A & _ks_set_B
-                        # Motif family check
-                        _motifA_low = str(_motifA).lower()
-                        _motifB_low = str(_motifB).lower()
-                        _fam_kw = [
-                            ("proline_directed", ["sp", "tp", "pxsp", "mapk", "cdk", "erk"]),
-                            ("basophilic", ["rxxs", "rxs", "akt", "pkc", "pka"]),
-                            ("acidophilic", ["sxxe", "sxxd", "ck2", "ck1"]),
-                        ]
-                        _famA = {fn for fn, kws in _fam_kw if any(kw in _motifA_low for kw in kws)}
-                        _famB = {fn for fn, kws in _fam_kw if any(kw in _motifB_low for kw in kws)}
-                        _same_fam = bool(_famA and _famB and _famA & _famB)
-                        if _shared_ks:
-                            _interpretation = "confirmed_single_kinase"
-                            _disambig_conf = "high"
-                        elif _same_fam and _pattern == "multisite_coordination":
-                            _interpretation = "likely_distributive"
-                            _disambig_conf = "medium"
-                        elif _same_fam:
-                            _interpretation = "likely_same_kinase_family"
-                            _disambig_conf = "medium"
-
-                        _pair = {
-                            "gene": _gene,
-                            "siteA": _sA, "siteB": _sB,
-                            "pattern": _pattern,
-                            "fcA": _fcA, "fcB": _fcB,
-                            "peak_condA": _pA["peak_cond"], "peak_condB": _pB["peak_cond"],
-                            "temporal_lag": _temporal_lag,
-                            "fc_ratio": round(_fc_ratio, 3),
-                            "clusterA": _pA["cluster_id"], "clusterB": _pB["cluster_id"],
-                            "is_denovoA": _pA["is_denovo"], "is_denovoB": _pB["is_denovo"],
-                            "motifA": str(_motifA)[:80], "motifB": str(_motifB)[:80],
-                            "ks_kinasesA": [k.get("kinase", k) if isinstance(k, dict) else str(k) for k in (_ks_A or [])][:5],
-                            "ks_kinasesB": [k.get("kinase", k) if isinstance(k, dict) else str(k) for k in (_ks_B or [])][:5],
-                            "shared_pathways": list(_shared_pathways)[:5],
-                            # v12.1 enhancements
-                            "covered_by_cowave": _covered_by_cowave,
-                            "interpretation": _interpretation,
-                            "disambiguation_confidence": _disambig_conf,
-                            "lag_minutes": _lag_minutes,
-                            "lag_fraction": round(_lag_fraction, 3),
-                            "is_meaningful_lag": _is_meaningful_lag,
-                            "effect_size": round(_effect_size, 3),
-                            "confidence_tier": _confidence_tier,
-                            "resolution_warning": _resolution_warning,
-                            "p_value": _p_value,
-                            "is_significant": _is_significant,
-                        }
-                        _divergence_pairs.append(_pair)
-
-                        # De novo reweighting: if de_novo site is part of Signal Attenuation
-                        # (late inhibitory feedback), boost its weight from 0.3 → 0.7
-                        if _pattern == "signal_attenuation":
-                            if _pB["is_denovo"] and _fcB < 0:  # late inhibitory de_novo
-                                _ptm_divergence_boost[_sB] = 0.7
-                            if _pA["is_denovo"] and _fcA > 0:  # early activating de_novo
-                                _ptm_divergence_boost[_sA] = 0.6
-                        elif _pattern == "sequential_regulation":
-                            if _pA["is_denovo"]:
-                                _ptm_divergence_boost[_sA] = 0.5
-                            if _pB["is_denovo"]:
-                                _ptm_divergence_boost[_sB] = 0.5
-
+            _pair_objs, _ptm_divergence_boost = _compute_div_pairs(
+                ptm_time_matrix=_ptm_time_matrix,
+                ordered_conditions=_parseable,
+                ptm_activity_class=_ptm_activity_class,
+                ptm_is_denovo=_ptm_is_denovo,
+                enriched_lookup=_enriched_lookup,
+                ptm_cluster_map=_ptm_to_cluster,
+                ptm_type=ptm_type if 'ptm_type' in locals() else "phosphorylation",
+            )
+            # Store as dicts (include AI layer for each pair)
+            _divergence_pairs = [p.to_dict() for p in _pair_objs]
             logging.getLogger("vector_plot").info(
                 f"MultiSiteDivergence: {len(_divergence_pairs)} pairs found "
                 f"(attenuation={sum(1 for p in _divergence_pairs if p['pattern']=='signal_attenuation')}, "
                 f"sequential={sum(1 for p in _divergence_pairs if p['pattern']=='sequential_regulation')}, "
                 f"coordination={sum(1 for p in _divergence_pairs if p['pattern']=='multisite_coordination')})"
             )
-
-        # v12.0: Priority sort divergence_pairs before slicing
-        # Order: Signal Attenuation > Sequential > Coordination
-        # Within same pattern: higher combined |FC|, de_novo involvement first
-        _PATTERN_PRIORITY = {
-            "signal_attenuation": 0,
-            "sequential_regulation": 1,
-            "multisite_coordination": 2,
-        }
-        _divergence_pairs.sort(key=lambda _p: (
-            _PATTERN_PRIORITY.get(_p.get("pattern", ""), 3),
-            -(abs(_p.get("fcA", 0)) + abs(_p.get("fcB", 0))),
-            -int(bool(_p.get("is_denovoA", False) or _p.get("is_denovoB", False))),
-        ))
 
         # Signal weight and FC cap per class (with divergence-based de_novo boost)
         _SIGNAL_WEIGHT = {"de_novo": 0.3, "regulated": 1.0, "minor": 0.5}

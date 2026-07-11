@@ -516,31 +516,25 @@ def run_receptor_inference(
         else:
             _ptm_activity_class[lbl] = "minor"
 
-    # ── v12.0: Multi-site Temporal Divergence (uses condition_data from enriched_data) ──
+    # ── v12.1: Multi-site Temporal Divergence via shared BiologicalRelationship ──
     _divergence_pairs: list = []
     _ptm_divergence_boost: dict = {}
 
     try:
         from common.temporal_utils import tp_to_minutes
+        from common.biological_relationship import (
+            TemporalDivergencePair,
+            build_ptm_time_matrix_from_enriched,
+            compute_divergence_pairs,
+        )
 
-        # Build time matrix: ptm_label -> {condition: fc}
-        _ptm_time_matrix: dict = {}
-        for _r in (enriched_data or []):
-            _g = _r.get("gene") or _r.get("Gene.Name", "")
-            _pos = _r.get("position") or _r.get("PTM_Position", "")
-            if not _g or not _pos:
-                continue
-            _lbl = f"{_g} {_pos}".strip()
-            for _cd in (_r.get("condition_data") or []):
-                _cond = _cd.get("condition", "")
-                _fc_val = _cd.get("ptm_relative_log2fc") or _cd.get("log2fc") or 0
-                if _cond and _fc_val is not None:
-                    if _lbl not in _ptm_time_matrix:
-                        _ptm_time_matrix[_lbl] = {}
-                    _ptm_time_matrix[_lbl][_cond] = float(_fc_val)
+        _ptm_time_matrix, _ptm_is_denovo_from_cond = build_ptm_time_matrix_from_enriched(
+            enriched_data or []
+        )
+        # Merge de_novo sets (condition_data path + main enriched path)
+        _ptm_is_denovo.update(_ptm_is_denovo_from_cond)
 
         if _ptm_time_matrix:
-            # Sort conditions by time
             _all_conds = sorted(
                 {c for vals in _ptm_time_matrix.values() for c in vals},
                 key=lambda c: tp_to_minutes(c),
@@ -548,153 +542,16 @@ def run_receptor_inference(
             _parseable = [c for c in _all_conds if tp_to_minutes(c) >= 0]
 
             if len(_parseable) >= 3:
-                # Group by gene
-                _gene_sites: dict = {}
-                for _lbl in _ptm_time_matrix:
-                    _parts = _lbl.rsplit(" ", 1)
-                    if len(_parts) == 2:
-                        _gn, _ps = _parts
-                        _gene_sites.setdefault(_gn, []).append(_lbl)
-
-                for _gene, _sites in _gene_sites.items():
-                    if len(_sites) < 2:
-                        continue
-                    # Compute peak per site
-                    _site_peaks: dict = {}
-                    for _s in _sites:
-                        _ts = _ptm_time_matrix.get(_s, {})
-                        _best_fc, _best_cond, _best_idx = 0.0, None, 0
-                        for _ci, _c in enumerate(_parseable):
-                            _fv = _ts.get(_c, 0.0)
-                            if abs(_fv) > abs(_best_fc):
-                                _best_fc, _best_cond, _best_idx = _fv, _c, _ci
-                        _site_peaks[_s] = {
-                            "peak_cond": _best_cond,
-                            "peak_fc": _best_fc,
-                            "peak_idx": _best_idx,
-                            "is_denovo": _s in _ptm_is_denovo,
-                        }
-
-                    for _i in range(len(_sites)):
-                        for _j in range(_i + 1, len(_sites)):
-                            _sA, _sB = _sites[_i], _sites[_j]
-                            _pA, _pB = _site_peaks[_sA], _site_peaks[_sB]
-                            _clsA = _ptm_activity_class.get(_sA, "minor")
-                            _clsB = _ptm_activity_class.get(_sB, "minor")
-                            if _clsA == "minor" and _clsB == "minor":
-                                continue
-                            _fcA, _fcB = _pA["peak_fc"], _pB["peak_fc"]
-                            _idxA, _idxB = _pA["peak_idx"], _pB["peak_idx"]
-                            # Ensure A is earlier
-                            if _idxA > _idxB:
-                                _sA, _sB = _sB, _sA
-                                _pA, _pB = _pB, _pA
-                                _fcA, _fcB = _fcB, _fcA
-                                _idxA, _idxB = _idxB, _idxA
-                            if _idxA == _idxB:
-                                _pattern = "multisite_coordination"
-                            elif (_fcA > 0 and _fcB < 0) or (_fcA < 0 and _fcB > 0):
-                                _pattern = "signal_attenuation"
-                            else:
-                                _pattern = "sequential_regulation"
-
-                            _temporal_lag = _idxB - _idxA
-                            _fc_ratio = round(abs(_fcB) / max(abs(_fcA), 0.01), 3)
-
-                            # v12.1 #3: Real time-based lag
-                            _lag_minutes_w = None
-                            _lag_fraction_w = _temporal_lag / max(len(_parseable) - 1, 1)
-                            _is_meaningful_lag_w = _temporal_lag >= 1
-                            if _temporal_lag > 0:
-                                _tp_early_m = tp_to_minutes(_parseable[_idxA])
-                                _tp_late_m = tp_to_minutes(_parseable[_idxB])
-                                if _tp_early_m >= 0 and _tp_late_m >= 0:
-                                    _lag_minutes_w = round(abs(_tp_late_m - _tp_early_m), 1)
-                                    _is_meaningful_lag_w = _lag_minutes_w >= 5.0
-
-                            # v12.1 #4: Confidence tier
-                            _all_fc_w = [abs(v) for v in _ptm_max_abs_fc.values() if abs(v) > 0.01]
-                            if _all_fc_w:
-                                _med_w = float(sorted(_all_fc_w)[len(_all_fc_w)//2])
-                                _mad_w = float(sorted([abs(x - _med_w) for x in _all_fc_w])[len(_all_fc_w)//2])
-                                if _mad_w < 0.1:
-                                    _mad_w = 0.1
-                            else:
-                                _mad_w = 1.0
-                            _effect_size_w = abs(_fcA - _fcB) / _mad_w
-                            if _effect_size_w >= 2.0:
-                                _conf_tier_w = "High"
-                            elif _effect_size_w >= 1.0:
-                                _conf_tier_w = "Medium"
-                            else:
-                                _conf_tier_w = "Low"
-
-                            # v12.1 #5: Resolution warning
-                            _res_warn_w = f"LOW_RESOLUTION ({len(_parseable)} tp)" if len(_parseable) <= 3 else None
-
-                            # v12.1 #6: Permutation p-value
-                            _p_val_w = None
-                            _is_sig_w = None
-                            _tsA_w = _ptm_time_matrix.get(_sA, {})
-                            _tsB_w = _ptm_time_matrix.get(_sB, {})
-                            _vA_w = [_tsA_w.get(c, 0.0) for c in _parseable]
-                            _vB_w = [_tsB_w.get(c, 0.0) for c in _parseable]
-                            if len(_vA_w) >= 3:
-                                import numpy as _npw
-                                _aA = _npw.array(_vA_w)
-                                _aB = _npw.array(_vB_w)
-                                _obs = float(_npw.sum((_aA - _aB) ** 2))
-                                _comb = _npw.concatenate([_aA, _aB])
-                                _h = len(_aA)
-                                _rng_w = _npw.random.default_rng(seed=42)
-                                _cnt = 0
-                                for _ in range(1000):
-                                    _pm = _rng_w.permutation(_comb)
-                                    if float(_npw.sum((_pm[:_h] - _pm[_h:]) ** 2)) >= _obs:
-                                        _cnt += 1
-                                _p_val_w = round((_cnt + 1) / 1001, 4)
-                                _is_sig_w = _p_val_w < 0.05
-
-                            _divergence_pairs.append({
-                                "gene": _gene,
-                                "siteA": _sA, "siteB": _sB,
-                                "pattern": _pattern,
-                                "fcA": _fcA, "fcB": _fcB,
-                                "peak_condA": _pA["peak_cond"],
-                                "peak_condB": _pB["peak_cond"],
-                                "temporal_lag": _temporal_lag,
-                                "fc_ratio": _fc_ratio,
-                                "is_denovoA": _pA["is_denovo"],
-                                "is_denovoB": _pB["is_denovo"],
-                                # v12.1 enhancements
-                                "lag_minutes": _lag_minutes_w,
-                                "lag_fraction": round(_lag_fraction_w, 3),
-                                "is_meaningful_lag": _is_meaningful_lag_w,
-                                "effect_size": round(_effect_size_w, 3),
-                                "confidence_tier": _conf_tier_w,
-                                "resolution_warning": _res_warn_w,
-                                "p_value": _p_val_w,
-                                "is_significant": _is_sig_w,
-                            })
-
-                            if _pattern == "signal_attenuation":
-                                if _pB["is_denovo"] and _fcB < 0:
-                                    _ptm_divergence_boost[_sB] = 0.7
-                                if _pA["is_denovo"] and _fcA > 0:
-                                    _ptm_divergence_boost[_sA] = 0.6
-                            elif _pattern == "sequential_regulation":
-                                if _pA["is_denovo"]:
-                                    _ptm_divergence_boost[_sA] = 0.5
-                                if _pB["is_denovo"]:
-                                    _ptm_divergence_boost[_sB] = 0.5
-
-                # Sort by pattern priority and |FC|
-                _DPRIORITY = {"signal_attenuation": 0, "sequential_regulation": 1, "multisite_coordination": 2}
-                _divergence_pairs.sort(key=lambda _p: (
-                    _DPRIORITY.get(_p.get("pattern", ""), 3),
-                    -(abs(_p.get("fcA", 0)) + abs(_p.get("fcB", 0))),
-                    -int(bool(_p.get("is_denovoA") or _p.get("is_denovoB"))),
-                ))
+                _pair_objs, _ptm_divergence_boost = compute_divergence_pairs(
+                    ptm_time_matrix=_ptm_time_matrix,
+                    ordered_conditions=_parseable,
+                    ptm_activity_class=_ptm_activity_class,
+                    ptm_is_denovo=_ptm_is_denovo,
+                    ptm_type=ptm_type,
+                )
+                # Serialize to dicts for storage; keep as TemporalDivergencePair objects
+                # for immediate use in this function
+                _divergence_pairs = [p.to_dict() for p in _pair_objs]
                 logger.info(
                     f"[Order {order_id}] MultiSiteDivergence (worker): "
                     f"{len(_divergence_pairs)} pairs, {len(_ptm_divergence_boost)} boosted PTMs"
