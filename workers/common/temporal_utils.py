@@ -119,3 +119,43 @@ def infer_gating_mechanism(
         return "Conformational change-mediated (leading PTM alters protein structure, exposing lagging PTM site)"
     else:
         return "Transcription/translation-dependent (leading PTM triggers gene expression changes affecting lagging PTM)"
+
+
+def condition_sort_key(c: str) -> float:
+    """Sort key that normalizes time-unit condition labels to minutes.
+
+    Handles mixed units so that '30min' and '0.5hr' both → 30.0.
+    Supported units: sec/s, min/m, hr/h/hour, d/day.
+    Non-time strings (e.g. 'Control', 'Hypoxia') → inf (sort last).
+
+    Use as: sorted(conditions, key=condition_sort_key)
+
+    Examples:
+        '0hr'    → 0.0
+        '30min'  → 30.0
+        '0.5hr'  → 30.0
+        '1hr'    → 60.0
+        '2hr'    → 120.0
+        '30sec'  → 0.5
+        '1day'   → 1440.0
+        'Control'→ inf
+    """
+    c_str = str(c).strip()
+    m = re.match(r'^([\d.]+)\s*(sec|s|min|m|hr|h|hour|d|day)s?$', c_str, re.IGNORECASE)
+    if m:
+        val = float(m.group(1))
+        unit = m.group(2).lower()
+        if unit in ('sec', 's'):
+            return val / 60.0
+        elif unit in ('min', 'm'):
+            return val
+        elif unit in ('hr', 'h', 'hour'):
+            return val * 60.0
+        elif unit in ('d', 'day'):
+            return val * 1440.0
+    # Bare number (assume minutes)
+    m2 = re.match(r'^([\d.]+)$', c_str)
+    if m2:
+        return float(m2.group(1))
+    # Non-time string → sort last
+    return float('inf')

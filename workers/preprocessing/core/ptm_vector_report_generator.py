@@ -18,15 +18,40 @@ logger = logging.getLogger(__name__)
 
 
 def _natural_sort_key(s: str):
-    """Sort key that extracts leading numeric value for natural ordering.
-    
-    Examples: '2min' -> (2.0, 'min'), '10min' -> (10.0, 'min'),
-              '1.5hour' -> (1.5, 'hour'), 'Control' -> (inf, 'Control')
+    """Sort key that normalizes time-unit conditions to minutes for correct ordering.
+
+    Handles mixed units: '30min' and '0.5hr' both → 30.0 minutes.
+    Supported units: sec/s, min/m, hr/h/hour, d/day.
+    Non-time strings (e.g. 'Control') sort last alphabetically.
+
+    Examples:
+        '0hr'    → (0.0, '')
+        '30min'  → (30.0, '')
+        '0.5hr'  → (30.0, '')
+        '1hr'    → (60.0, '')
+        '2hr'    → (120.0, '')
+        '1day'   → (1440.0, '')
+        'Control'→ (inf, 'Control')
     """
-    s_str = str(s)
-    m = re.match(r'^([\d.]+)\s*(.*)', s_str)
+    s_str = str(s).strip()
+    # Try to match number + time unit
+    m = re.match(r'^([\d.]+)\s*(sec|s|min|m|hr|h|hour|d|day)s?$', s_str, re.IGNORECASE)
     if m:
-        return (float(m.group(1)), m.group(2))
+        val = float(m.group(1))
+        unit = m.group(2).lower()
+        if unit in ('sec', 's'):
+            return (val / 60.0, '')
+        elif unit in ('min', 'm'):
+            return (val, '')
+        elif unit in ('hr', 'h', 'hour'):
+            return (val * 60.0, '')
+        elif unit in ('d', 'day'):
+            return (val * 1440.0, '')
+    # Bare number (assume minutes)
+    m2 = re.match(r'^([\d.]+)$', s_str)
+    if m2:
+        return (float(m2.group(1)), '')
+    # Non-time string → sort last, alphabetically
     return (float('inf'), s_str)
 
 

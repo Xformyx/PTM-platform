@@ -27,6 +27,8 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
+from common.temporal_utils import condition_sort_key
+
 logger = logging.getLogger(__name__)
 
 # ─── Constants ────────────────────────────────────────────────────────────────
@@ -302,7 +304,7 @@ class UbiquitinLinkageAnalyzer:
             logger.warning("[LINKAGE] No intensity/FC column found for ratio calculation")
             return {"conditions": [], "ratios": {}, "raw_values": {}}
 
-        conditions = sorted(df[cond_col].unique().tolist())
+        conditions = sorted(df[cond_col].unique().tolist(), key=condition_sort_key)
         ratios = {}  # condition -> {linkage_type: ratio}
         raw_values = {}  # condition -> {linkage_type: value}
 

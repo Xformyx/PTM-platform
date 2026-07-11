@@ -27,6 +27,8 @@ import re
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
+from common.temporal_utils import condition_sort_key
+
 logger = logging.getLogger(__name__)
 
 
@@ -436,7 +438,7 @@ class ComprehensiveReportGenerator:
         if len(cond_data) < 2:
             return ""
 
-        sorted_conds = sorted(cond_data, key=lambda c: c.get("condition", ""))
+        sorted_conds = sorted(cond_data, key=lambda c: condition_sort_key(c.get("condition", "")))
         first = sorted_conds[0]
         last = sorted_conds[-1]
 
@@ -1636,7 +1638,7 @@ class ComprehensiveReportGenerator:
             lines.append("Time-course analysis of PTM changes across conditions:\n")
 
             # Build a unified table with all conditions as columns
-            condition_labels = sorted(temporal_data.keys())
+            condition_labels = sorted(temporal_data.keys(), key=condition_sort_key)
             # Collect all unique PTMs across conditions
             ptm_temporal = {}  # "gene pos" -> {condition: {fc, cls}}
             for cond, entries in temporal_data.items():

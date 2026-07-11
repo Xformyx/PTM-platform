@@ -1096,12 +1096,22 @@ function ScatterPlotsInteractive({ orderId }: { orderId: number }) {
 }
 
 function parseTimeOrder(cond: string): number {
-  const m = cond.match(/(\d+(?:\.\d+)?)\s*(h|hr|hour|min|m)?/i);
-  if (!m) return 0;
-  let v = parseFloat(m[1]);
-  const unit = (m[2] || "h").toLowerCase();
-  if (unit.startsWith("m") || unit === "min") v /= 60;
-  return v;
+  // Normalize to minutes for correct time-series ordering.
+  // Handles mixed units: '30min' and '0.5hr' both → 30.0 minutes.
+  const m = cond.match(/^(\d+(?:\.\d+)?)\s*(sec|s|min|m|hr|h|hour|d|day)s?$/i);
+  if (m) {
+    const val = parseFloat(m[1]);
+    const unit = m[2].toLowerCase();
+    if (unit === "sec" || unit === "s") return val / 60;
+    if (unit === "min" || unit === "m") return val;
+    if (unit === "hr" || unit === "h" || unit === "hour") return val * 60;
+    if (unit === "d" || unit === "day") return val * 1440;
+  }
+  // Bare number (assume minutes)
+  const m2 = cond.match(/^(\d+(?:\.\d+)?)$/);
+  if (m2) return parseFloat(m2[1]);
+  // Non-time string → sort last
+  return Infinity;
 }
 
 // ── PTM Trend Classification ─────────────────────────────────────────────────

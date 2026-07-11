@@ -35,6 +35,7 @@ from common.phase_b_cache import get_cached, get_cached_best_match, set_cached
 from common.llm_client import LLMClient
 from common.mcp_client import MCPClient
 from common.local_data_loader import HPALocalLoader, GTExLocalLoader
+from common.temporal_utils import condition_sort_key
 from .regulation_extractor import RegulationExtractor
 from .abstract_analyzer import AbstractAnalyzer
 from .llm_kinase_predictor import LLMKinasePredictor
@@ -1606,7 +1607,7 @@ class RAGEnrichmentPipeline:
                 cond = ptm.get("Condition") or ptm.get("condition", "")
                 if cond:
                     conditions_set.add(cond)
-            conditions = sorted(conditions_set) if conditions_set else [""]
+            conditions = sorted(conditions_set, key=condition_sort_key) if conditions_set else [""]
 
         for condition in conditions:
             # Filter vectors for this condition

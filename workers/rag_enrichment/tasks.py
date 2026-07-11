@@ -23,6 +23,7 @@ from common.db_update import get_order_status, update_order_status
 from common.notifications import notify_order_status
 from common.mcp_client import MCPClient
 from common.progress import publish_analysis_log, publish_progress
+from common.temporal_utils import condition_sort_key
 from common.webhook import send_step_webhook
 
 logger = logging.getLogger("ptm-workers.rag-enrichment")
@@ -369,7 +370,7 @@ def _auto_run_global_analysis(order_id: int, enriched_data: list, config: dict, 
                 except (ValueError, TypeError):
                     ptm_timeseries[ptm_key][cond] = 0.0
 
-            conditions = sorted(conditions)
+            conditions = sorted(conditions, key=condition_sort_key)
             n_conditions = len(conditions)
             if n_conditions < 2 or len(ptm_timeseries) < MIN_PTMS_FOR_REFINEMENT:
                 logger.info(f"[Order {order_id}] Temporal refinement skipped: {len(ptm_timeseries)} PTMs, {n_conditions} conditions")
@@ -896,7 +897,7 @@ def _compute_kinase_activity_heatmap(enriched_data: list, kinase_result: dict, p
         if is_pseudo:
             ptm_de_novo.add((gene, pos))
 
-    conditions = sorted(conditions)
+    conditions = sorted(conditions, key=condition_sort_key)
     if not conditions:
         return {"kinase_scores": [], "conditions": [], "_cached": True}
 
@@ -1713,7 +1714,7 @@ def run_rag_enrichment(self, order_id: int, config: dict):
             # Classification-based selection (ported from ptm-vector-ai)
             from rag_enrichment.core.enrichment_pipeline import RAGEnrichmentPipeline
             all_ptm_records = df.to_dict("records")
-            conditions_list = sorted(df[cond_col].dropna().unique().tolist()) if cond_col in df.columns else None
+            conditions_list = sorted(df[cond_col].dropna().unique().tolist(), key=condition_sort_key) if cond_col in df.columns else None
             classified_ptms = RAGEnrichmentPipeline.select_ptms_by_classification(
                 ptm_data=all_ptm_records,
                 conditions=conditions_list,

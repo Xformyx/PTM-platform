@@ -72,6 +72,8 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+from common.temporal_utils import condition_sort_key
+
 logger = logging.getLogger(__name__)
 
 CYTOSCAPE_HOST = os.getenv("CYTOSCAPE_HOST", "host.docker.internal")
@@ -2835,7 +2837,7 @@ def _generate_cytoscape_networks(
                     conditions.add(cond)
 
             if len(conditions) > 1:
-                for cond in sorted(conditions):
+                for cond in sorted(conditions, key=condition_sort_key):
                     cond_ptm_genes = {
                         ptm["gene"]
                         for ptm in parsed_ptms

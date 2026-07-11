@@ -14,6 +14,8 @@ from typing import Any, Dict, List, Optional, TypedDict
 
 from langgraph.graph import END, StateGraph
 
+from common.temporal_utils import condition_sort_key
+
 logger = logging.getLogger(__name__)
 
 
@@ -575,7 +577,7 @@ def format_citations(state: ReportState) -> dict:
                     # Fallback: extract unique conditions from raw data
                     ctx_conditions = sorted(set(
                         r.get("condition", "") for r in vector_plot_raw_data if r.get("condition")
-                    ))
+                    ), key=condition_sort_key)
 
                 if output_dir and vector_plot_raw_data and ctx_conditions:
                     ctx_heatmap_path = generate_context_aware_ptm_heatmap(

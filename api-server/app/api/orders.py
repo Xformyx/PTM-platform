@@ -6945,11 +6945,31 @@ async def kinase_activity_heatmap(
         ptm_timeseries[key][cond] = _raw_fc
         ptm_qvalues[key][cond] = row["q_value"]
 
-    # Sort conditions (try numeric extraction for time-series)
+    # Sort conditions by actual time value (unit-aware: sec/min/hr/day)
     import re
     def _cond_sort_key(c: str):
-        nums = re.findall(r"[\d.]+", c)
-        return float(nums[0]) if nums else c
+        """Sort key that normalizes time-unit conditions to minutes.
+        Handles mixed units: '30min' and '0.5hr' both → 30.0.
+        """
+        c_str = str(c).strip()
+        m = re.match(r'^([\d.]+)\s*(sec|s|min|m|hr|h|hour|d|day)s?$', c_str, re.IGNORECASE)
+        if m:
+            val = float(m.group(1))
+            unit = m.group(2).lower()
+            if unit in ('sec', 's'):
+                return val / 60.0
+            elif unit in ('min', 'm'):
+                return val
+            elif unit in ('hr', 'h', 'hour'):
+                return val * 60.0
+            elif unit in ('d', 'day'):
+                return val * 1440.0
+        # Bare number (assume minutes)
+        m2 = re.match(r'^([\d.]+)$', c_str)
+        if m2:
+            return float(m2.group(1))
+        # Non-time string → sort last
+        return float('inf')
     conditions_sorted = sorted(all_conditions, key=_cond_sort_key)
 
     # ── Build PTM → kinase reverse map (for exclusive/shared classification) ──
