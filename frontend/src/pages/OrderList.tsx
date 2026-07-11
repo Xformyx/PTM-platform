@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { Link, useNavigate } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
-import { PlusCircle, ClipboardList, Play, ChevronDown, ChevronUp, ChevronsUpDown, AlertCircle, Trash2, Square, Share2, Loader2 } from "lucide-react";
+import { PlusCircle, ClipboardList, Play, ChevronDown, ChevronUp, ChevronsUpDown, AlertCircle, Trash2, Square, Share2, Loader2, GitCompareArrows } from "lucide-react";
 import { api } from "@/lib/api";
 import type { Order } from "@/lib/types";
 import { Card, CardContent } from "@/components/ui/card";
@@ -156,6 +156,7 @@ export default function OrderList() {
   const [stoppingOrderId, setStoppingOrderId] = useState<number | null>(null);
   const stopRequestRef = useRef(false);
   const [startingOrderId, setStartingOrderId] = useState<number | null>(null);
+  const [compareSelection, setCompareSelection] = useState<number[]>([]);
 
   const [colWidths, setColWidths] = useState<number[]>(() => loadOrderListColWidths());
   const colWidthsRef = useRef<number[]>(colWidths);
@@ -379,12 +380,29 @@ export default function OrderList() {
           <h1 className="text-2xl font-bold tracking-tight">Orders</h1>
           <p className="text-sm text-muted-foreground">{total} total orders</p>
         </div>
-        <Button asChild>
-          <Link to="/admin/orders/new">
-            <PlusCircle className="mr-2 h-4 w-4" />
-            New Order
-          </Link>
-        </Button>
+        <div className="flex items-center gap-2">
+          {compareSelection.length === 2 && (
+            <Button
+              variant="outline"
+              className="border-primary text-primary hover:bg-primary/10"
+              onClick={() => navigate(`/admin/compare?a=${compareSelection[0]}&b=${compareSelection[1]}`)}
+            >
+              <GitCompareArrows className="mr-2 h-4 w-4" />
+              Compare ({compareSelection.length})
+            </Button>
+          )}
+          {compareSelection.length === 1 && (
+            <Badge variant="outline" className="text-muted-foreground py-1">
+              Select 1 more to compare
+            </Badge>
+          )}
+          <Button asChild>
+            <Link to="/admin/orders/new">
+              <PlusCircle className="mr-2 h-4 w-4" />
+              New Order
+            </Link>
+          </Button>
+        </div>
       </div>
 
       {/* Filter Badges */}
@@ -413,6 +431,9 @@ export default function OrderList() {
               </colgroup>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-8 px-2">
+                    <span className="sr-only">Compare</span>
+                  </TableHead>
                   <TableHead className="relative">
                     Order ID
                     <ColResizeHandle colIndex={0} onStart={startColResize} />
@@ -466,9 +487,25 @@ export default function OrderList() {
                 {filtered.map((order) => (
                   <TableRow
                     key={order.id}
-                    className="cursor-pointer"
+                    className={cn("cursor-pointer", compareSelection.includes(order.id) && "bg-primary/5")}
                     onClick={() => navigate(`/admin/orders/${order.id}`)}
                   >
+                    <TableCell className="px-2" onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary cursor-pointer"
+                        checked={compareSelection.includes(order.id)}
+                        disabled={order.status !== "completed" || (!compareSelection.includes(order.id) && compareSelection.length >= 2)}
+                        title={order.status !== "completed" ? "Only completed orders can be compared" : compareSelection.length >= 2 && !compareSelection.includes(order.id) ? "Max 2 orders" : "Select for comparison"}
+                        onChange={() => {
+                          setCompareSelection((prev) =>
+                            prev.includes(order.id)
+                              ? prev.filter((id) => id !== order.id)
+                              : [...prev, order.id]
+                          );
+                        }}
+                      />
+                    </TableCell>
                     <TableCell className="truncate" title={order.order_code}>
                       <Link
                         to={`/admin/orders/${order.id}`}
