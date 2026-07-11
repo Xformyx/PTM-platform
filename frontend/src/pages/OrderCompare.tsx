@@ -1,15 +1,17 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useSearchParams, Link } from "react-router-dom";
-import { ArrowLeft, GitCompareArrows, Loader2, AlertCircle, RefreshCw } from "lucide-react";
+import { ArrowLeft, GitCompareArrows, Loader2, AlertCircle, RefreshCw, Send, MessageSquare } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { api } from "@/lib/api";
-import type { Order } from "@/lib/types";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAuth } from "@/contexts/AuthContext";
+import { CLOUD_MODEL_PRESETS, CLOUD_PROVIDER_SENTINEL, type CloudProvider } from "@/lib/llm-models";
 
 /* ─── Types ─── */
 interface CompareMetadata {
@@ -21,6 +23,19 @@ interface CompareMetadata {
   shared_sites: number;
   unique_a_sites: number;
   unique_b_sites: number;
+}
+
+interface LlmModelOption {
+  id: number;
+  name: string;
+  provider: string;
+  model_id: string;
+  is_active: boolean;
+}
+
+interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
 }
 
 /* ─── Helpers ─── */
@@ -56,6 +71,15 @@ function OrderInfoCard({ order }: { order: CompareMetadata["order_a"] }) {
   );
 }
 
+/** Parse model selector value into provider + model_id */
+function parseModelValue(value: string): { provider: string; model: string } {
+  const idx = value.indexOf(":");
+  if (idx < 0) return { provider: "ollama", model: value };
+  const provider = value.slice(0, idx);
+  const model = value.slice(idx + 1);
+  return { provider, model: model === CLOUD_PROVIDER_SENTINEL ? "" : model };
+}
+
 /* ─── Main Component ─── */
 export default function OrderCompare() {
   const [searchParams] = useSearchParams();
@@ -63,15 +87,45 @@ export default function OrderCompare() {
   const orderAId = searchParams.get("a");
   const orderBId = searchParams.get("b");
 
+  // State
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [metadata, setMetadata] = useState<CompareMetadata | null>(null);
+
+  // LLM Model
+  const [llmModels, setLlmModels] = useState<LlmModelOption[]>([]);
+  const [selectedModel, setSelectedModel] = useState<string>("");
+
+  // User instructions
+  const [userInstructions, setUserInstructions] = useState("");
+
+  // Report streaming
   const [report, setReport] = useState("");
   const [streaming, setStreaming] = useState(false);
-  const reportRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
-  /* Fetch metadata (quick) */
+  // Chat Q&A
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatStreaming, setChatStreaming] = useState(false);
+  const chatAbortRef = useRef<AbortController | null>(null);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
+  /* Fetch LLM models */
+  useEffect(() => {
+    api.get<{ models: LlmModelOption[] }>("/llm/models").then((d: { models: LlmModelOption[] }) => {
+      const active = d.models.filter((m: LlmModelOption) => m.is_active);
+      setLlmModels(active);
+      if (active.length > 0 && !selectedModel) {
+        // Default to first ollama model or first model
+        const ollamaModel = active.find((m: LlmModelOption) => m.provider === "ollama");
+        const defaultModel = ollamaModel || active[0];
+        setSelectedModel(`${defaultModel.provider}:${defaultModel.model_id}`);
+      }
+    }).catch(() => {});
+  }, []);
+
+  /* Fetch metadata (summary) */
   const fetchMetadata = useCallback(async () => {
     if (!orderAId || !orderBId) {
       setError("Two order IDs are required (query params: a, b)");
@@ -79,11 +133,34 @@ export default function OrderCompare() {
       return;
     }
     try {
-      const data = await api.get<CompareMetadata>(`/compare/metadata?order_a_id=${orderAId}&order_b_id=${orderBId}`);
-      setMetadata(data);
+      const token = localStorage.getItem("token");
+      const res = await fetch("/api/compare/summary", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ order_id_a: parseInt(orderAId), order_id_b: parseInt(orderBId) }),
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({ detail: "Unknown error" }));
+        throw new Error(errData.detail || `HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      // Map the summary response to CompareMetadata format
+      setMetadata({
+        order_a: data.order_a,
+        order_b: data.order_b,
+        shared_genes: data.stats?.total_shared || 0,
+        unique_a_genes: data.stats?.total_a_only || 0,
+        unique_b_genes: data.stats?.total_b_only || 0,
+        shared_sites: data.stats?.total_shared || 0,
+        unique_a_sites: data.stats?.total_a_only || 0,
+        unique_b_sites: data.stats?.total_b_only || 0,
+      });
       setError(null);
-    } catch (err: any) {
-      setError(err.message || "Failed to load comparison metadata");
+    } catch (err: unknown) {
+      setError((err as Error).message || "Failed to load comparison metadata");
     } finally {
       setLoading(false);
     }
@@ -98,11 +175,23 @@ export default function OrderCompare() {
     setStreaming(true);
     setReport("");
 
+    const { provider, model } = parseModelValue(selectedModel);
+
     try {
       const token = localStorage.getItem("token");
-      const res = await fetch(`/api/compare/report?order_a_id=${orderAId}&order_b_id=${orderBId}`, {
-        method: "GET",
-        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      const res = await fetch("/api/compare/report", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          order_id_a: parseInt(orderAId),
+          order_id_b: parseInt(orderBId),
+          llm_model: model || undefined,
+          llm_provider: provider || undefined,
+          user_instructions: userInstructions.trim() || undefined,
+        }),
         signal: controller.signal,
       });
       if (!res.ok) {
@@ -126,29 +215,125 @@ export default function OrderCompare() {
             if (payload === "[DONE]") break;
             try {
               const parsed = JSON.parse(payload);
-              if (parsed.content) {
+              if (parsed.type === "token" && parsed.content) {
                 setReport((prev) => prev + parsed.content);
+              } else if (parsed.type === "error") {
+                setReport((prev) => prev + `\n\n---\n**Error:** ${parsed.message}`);
               }
             } catch {
-              // non-JSON line, treat as raw text
-              setReport((prev) => prev + payload);
+              // non-JSON line
             }
           }
         }
       }
-    } catch (err: any) {
-      if (err.name !== "AbortError") {
-        setReport((prev) => prev + `\n\n---\n**Error:** ${err.message}`);
+    } catch (err: unknown) {
+      if ((err as Error).name !== "AbortError") {
+        setReport((prev) => prev + `\n\n---\n**Error:** ${(err as Error).message}`);
       }
     } finally {
       setStreaming(false);
       abortRef.current = null;
     }
-  }, [orderAId, orderBId]);
+  }, [orderAId, orderBId, selectedModel, userInstructions]);
 
-  useEffect(() => {
-    fetchMetadata();
-  }, [fetchMetadata]);
+  /* Send chat message */
+  const sendChatMessage = useCallback(async () => {
+    if (!chatInput.trim() || !orderAId || !orderBId || chatStreaming) return;
+    const userMsg: ChatMessage = { role: "user", content: chatInput.trim() };
+    const updatedMessages = [...chatMessages, userMsg];
+    setChatMessages(updatedMessages);
+    setChatInput("");
+    setChatStreaming(true);
+
+    if (chatAbortRef.current) chatAbortRef.current.abort();
+    const controller = new AbortController();
+    chatAbortRef.current = controller;
+
+    const { provider, model } = parseModelValue(selectedModel);
+
+    // Add empty assistant message that will be filled by streaming
+    setChatMessages((prev) => [...prev, { role: "assistant", content: "" }]);
+
+    try {
+      const token = localStorage.getItem("token");
+      const res = await fetch("/api/compare/chat", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          order_id_a: parseInt(orderAId),
+          order_id_b: parseInt(orderBId),
+          messages: updatedMessages,
+          llm_model: model || undefined,
+          llm_provider: provider || undefined,
+        }),
+        signal: controller.signal,
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({ detail: "Unknown error" }));
+        throw new Error(errData.detail || `HTTP ${res.status}`);
+      }
+
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error("No response body");
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            const payload = line.slice(6);
+            try {
+              const parsed = JSON.parse(payload);
+              if (parsed.type === "token" && parsed.content) {
+                setChatMessages((prev) => {
+                  const updated = [...prev];
+                  const last = updated[updated.length - 1];
+                  if (last && last.role === "assistant") {
+                    updated[updated.length - 1] = { ...last, content: last.content + parsed.content };
+                  }
+                  return updated;
+                });
+              } else if (parsed.type === "error") {
+                setChatMessages((prev) => {
+                  const updated = [...prev];
+                  const last = updated[updated.length - 1];
+                  if (last && last.role === "assistant") {
+                    updated[updated.length - 1] = { ...last, content: last.content + `\n\n**Error:** ${parsed.message}` };
+                  }
+                  return updated;
+                });
+              }
+            } catch {}
+          }
+        }
+      }
+    } catch (err: unknown) {
+      if ((err as Error).name !== "AbortError") {
+        setChatMessages((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last && last.role === "assistant") {
+            updated[updated.length - 1] = { ...last, content: `**Error:** ${(err as Error).message}` };
+          }
+          return updated;
+        });
+      }
+    } finally {
+      setChatStreaming(false);
+      chatAbortRef.current = null;
+    }
+  }, [chatInput, chatMessages, orderAId, orderBId, selectedModel, chatStreaming]);
+
+  useEffect(() => { fetchMetadata(); }, [fetchMetadata]);
 
   /* Auto-start streaming after metadata loads */
   useEffect(() => {
@@ -157,12 +342,39 @@ export default function OrderCompare() {
     }
   }, [metadata]);
 
+  /* Scroll chat to bottom */
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [chatMessages]);
+
   /* Cleanup on unmount */
   useEffect(() => {
     return () => {
       if (abortRef.current) abortRef.current.abort();
+      if (chatAbortRef.current) chatAbortRef.current.abort();
     };
   }, []);
+
+  // Build model options for selector
+  const modelOptions: { value: string; label: string; group: string }[] = [];
+  // Ollama models from DB
+  llmModels.filter((m) => m.provider === "ollama").forEach((m) => {
+    modelOptions.push({ value: `ollama:${m.model_id}`, label: m.name, group: "Ollama (Local)" });
+  });
+  // Cloud models
+  (Object.keys(CLOUD_MODEL_PRESETS) as CloudProvider[]).forEach((provider) => {
+    // Check if this provider has a registered key in llmModels
+    const hasProvider = llmModels.some((m: LlmModelOption) => m.provider === provider);
+    if (hasProvider) {
+      CLOUD_MODEL_PRESETS[provider].forEach((preset: { id: string; name: string }) => {
+        modelOptions.push({
+          value: `${provider}:${preset.id}`,
+          label: preset.name,
+          group: provider.charAt(0).toUpperCase() + provider.slice(1),
+        });
+      });
+    }
+  });
 
   if (!orderAId || !orderBId) {
     return (
@@ -180,10 +392,7 @@ export default function OrderCompare() {
     return (
       <div className="space-y-6">
         <Skeleton className="h-8 w-64" />
-        <div className="grid grid-cols-2 gap-4">
-          <Skeleton className="h-24" />
-          <Skeleton className="h-24" />
-        </div>
+        <div className="grid grid-cols-2 gap-4"><Skeleton className="h-24" /><Skeleton className="h-24" /></div>
         <Skeleton className="h-[400px]" />
       </div>
     );
@@ -217,15 +426,6 @@ export default function OrderCompare() {
             <p className="text-sm text-muted-foreground">Cross-order PTM comparison</p>
           </div>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={streamReport}
-          disabled={streaming}
-        >
-          <RefreshCw className={`h-4 w-4 mr-1 ${streaming ? "animate-spin" : ""}`} />
-          {streaming ? "Generating..." : "Regenerate"}
-        </Button>
       </div>
 
       {/* Order Info Cards */}
@@ -240,13 +440,67 @@ export default function OrderCompare() {
       {metadata && (
         <div className="flex flex-wrap gap-3 justify-center">
           <SummaryCard label="Shared Genes" value={metadata.shared_genes} />
-          <SummaryCard label={`Unique to A`} value={metadata.unique_a_genes} sub={metadata.order_a.order_code} />
-          <SummaryCard label={`Unique to B`} value={metadata.unique_b_genes} sub={metadata.order_b.order_code} />
+          <SummaryCard label="Unique to A" value={metadata.unique_a_genes} sub={metadata.order_a.order_code} />
+          <SummaryCard label="Unique to B" value={metadata.unique_b_genes} sub={metadata.order_b.order_code} />
           <SummaryCard label="Shared Sites" value={metadata.shared_sites} />
-          <SummaryCard label={`Unique Sites A`} value={metadata.unique_a_sites} sub={metadata.order_a.order_code} />
-          <SummaryCard label={`Unique Sites B`} value={metadata.unique_b_sites} sub={metadata.order_b.order_code} />
+          <SummaryCard label="Unique Sites A" value={metadata.unique_a_sites} sub={metadata.order_a.order_code} />
+          <SummaryCard label="Unique Sites B" value={metadata.unique_b_sites} sub={metadata.order_b.order_code} />
         </div>
       )}
+
+      {/* LLM Model Selector + User Instructions */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm font-medium">Analysis Settings</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {/* Model Selector */}
+          <div className="flex items-center gap-4">
+            <label className="text-sm font-medium text-muted-foreground whitespace-nowrap">LLM Model</label>
+            <Select value={selectedModel} onValueChange={setSelectedModel}>
+              <SelectTrigger className="w-[280px]">
+                <SelectValue placeholder="Select model..." />
+              </SelectTrigger>
+              <SelectContent>
+                {modelOptions.map((opt) => (
+                  <SelectItem key={opt.value} value={opt.value}>
+                    <span className="flex items-center gap-2">
+                      <Badge variant="outline" className="text-[9px] px-1">{opt.group}</Badge>
+                      {opt.label}
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* User Instructions */}
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-muted-foreground">
+              비교 분석 주요 요지 (Focus Points)
+            </label>
+            <Textarea
+              placeholder="비교 분석 시 집중할 내용을 입력하세요. 여러 문장 입력 가능합니다.&#10;예: 두 물질의 ERK/MAPK pathway 활성화 차이를 중점적으로 분석해줘.&#10;예: AKT substrate의 temporal dynamics가 어떻게 다른지 비교해줘."
+              value={userInstructions}
+              onChange={(e) => setUserInstructions(e.target.value)}
+              rows={3}
+              className="resize-y"
+            />
+          </div>
+
+          {/* Generate Button */}
+          <div className="flex justify-end">
+            <Button
+              onClick={streamReport}
+              disabled={streaming}
+              size="sm"
+            >
+              <RefreshCw className={`h-4 w-4 mr-1 ${streaming ? "animate-spin" : ""}`} />
+              {streaming ? "Generating..." : report ? "Regenerate Report" : "Generate Report"}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Comparative Report (Streaming Markdown) */}
       <Card>
@@ -254,10 +508,15 @@ export default function OrderCompare() {
           <CardTitle className="text-lg flex items-center gap-2">
             Comparative Report
             {streaming && <Loader2 className="h-4 w-4 animate-spin text-primary" />}
+            {!streaming && report && (
+              <Badge variant="secondary" className="text-[10px]">
+                {parseModelValue(selectedModel).model || "default"}
+              </Badge>
+            )}
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div ref={reportRef} className="prose prose-sm dark:prose-invert max-w-none">
+          <div className="prose prose-sm dark:prose-invert max-w-none">
             {report ? (
               <ReactMarkdown remarkPlugins={[remarkGfm]}>{report}</ReactMarkdown>
             ) : streaming ? (
@@ -266,8 +525,81 @@ export default function OrderCompare() {
                 <span>Analyzing and comparing two orders...</span>
               </div>
             ) : (
-              <p className="text-muted-foreground">Report will appear here.</p>
+              <p className="text-muted-foreground">Report will appear here after generation.</p>
             )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Q&A Chat Panel */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-lg flex items-center gap-2">
+            <MessageSquare className="h-5 w-5 text-primary" />
+            Follow-up Q&A
+            <span className="text-xs text-muted-foreground font-normal ml-2">
+              비교 결과에 대해 추가 질문을 할 수 있습니다 (데이터 기반 답변)
+            </span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {/* Chat Messages */}
+          {chatMessages.length > 0 && (
+            <div className="max-h-[500px] overflow-y-auto space-y-4 border rounded-lg p-4 bg-muted/20">
+              {chatMessages.map((msg, i) => (
+                <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+                  <div
+                    className={`max-w-[85%] rounded-lg px-4 py-2 ${
+                      msg.role === "user"
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-card border"
+                    }`}
+                  >
+                    {msg.role === "assistant" ? (
+                      <div className="prose prose-sm dark:prose-invert max-w-none">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                          {msg.content || "..."}
+                        </ReactMarkdown>
+                      </div>
+                    ) : (
+                      <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                    )}
+                  </div>
+                </div>
+              ))}
+              {chatStreaming && (
+                <div className="flex justify-start">
+                  <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                </div>
+              )}
+              <div ref={chatEndRef} />
+            </div>
+          )}
+
+          {/* Chat Input */}
+          <div className="flex gap-2">
+            <Textarea
+              placeholder="비교 결과에 대해 질문하세요...&#10;예: ERK pathway가 두 물질에서 공통으로 활성화되는 이유는?&#10;예: Drug A에서만 나타나는 AKT substrate들의 기능은?"
+              value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  sendChatMessage();
+                }
+              }}
+              rows={2}
+              className="resize-y flex-1"
+              disabled={chatStreaming}
+            />
+            <Button
+              onClick={sendChatMessage}
+              disabled={!chatInput.trim() || chatStreaming}
+              size="icon"
+              className="h-auto"
+            >
+              <Send className="h-4 w-4" />
+            </Button>
           </div>
         </CardContent>
       </Card>

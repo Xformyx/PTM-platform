@@ -32,6 +32,15 @@ class CompareRequest(BaseModel):
     order_id_b: int
     llm_model: Optional[str] = None
     llm_provider: Optional[str] = None
+    user_instructions: Optional[str] = None  # User's comparison focus points
+
+
+class CompareChatRequest(BaseModel):
+    order_id_a: int
+    order_id_b: int
+    messages: list[dict]  # [{"role": "user"|"assistant", "content": "..."}]
+    llm_model: Optional[str] = None
+    llm_provider: Optional[str] = None
 
 
 class CompareSummary(BaseModel):
@@ -327,6 +336,7 @@ def _build_comparison_prompt(
     comparison_data: dict,
     report_a: str,
     report_b: str,
+    user_instructions: str = "",
 ) -> str:
     """Build the LLM prompt for comparative analysis."""
     order_a = comparison_data["order_a"]
@@ -380,6 +390,9 @@ B-only Receptors: {', '.join(comparison_data['b_only_receptors'][:10])}
 ═══ ORDER B REPORT (excerpt) ═══
 {report_b_trunc}
 
+═══ USER FOCUS POINTS ═══
+{user_focus}
+
 ═══ INSTRUCTIONS ═══
 
 Write a structured comparative analysis report in Korean with the following sections:
@@ -414,7 +427,9 @@ RULES:
 - Clearly distinguish between confirmed observations and hypotheses.
 - Write in academic Korean with English gene/protein names.
 - Keep each section concise but informative (200-400 words per section).
+- If USER FOCUS POINTS are provided, prioritize addressing those questions/topics throughout the report.
 """
+    prompt = prompt.replace("{user_focus}", user_instructions if user_instructions else "(No specific focus points provided — perform general comparative analysis)")
     return prompt
 
 
@@ -507,7 +522,7 @@ async def stream_comparison_report(
     comparison = _build_comparison_data(order_a, order_b, vector_a, vector_b)
     report_a = _load_report_md(output_dir_a, order_a.ptm_type)
     report_b = _load_report_md(output_dir_b, order_b.ptm_type)
-    prompt = _build_comparison_prompt(comparison, report_a, report_b)
+    prompt = _build_comparison_prompt(comparison, report_a, report_b, body.user_instructions or "")
 
     # Determine LLM settings
     llm_model = body.llm_model or (order_a.report_options or {}).get("llm_model") or os.getenv("LLM_MODEL", "gemma3:27b")
@@ -633,6 +648,238 @@ async def stream_comparison_report(
             yield f"data: {json.dumps({'type': 'error', 'message': 'Cannot connect to LLM service'})}\n\n"
         except Exception as e:
             logger.exception("Comparison report streaming error")
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)[:200]})}\n\n"
+
+    return StreamingResponse(
+        _stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.post("/chat")
+async def stream_comparison_chat(
+    body: CompareChatRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Stream follow-up Q&A about the comparison (SSE). Data-grounded answers."""
+    from app.config import get_settings
+    settings = get_settings()
+
+    # Load both orders
+    result_a = await db.execute(select(Order).where(Order.id == body.order_id_a))
+    order_a = result_a.scalar_one_or_none()
+    result_b = await db.execute(select(Order).where(Order.id == body.order_id_b))
+    order_b = result_b.scalar_one_or_none()
+
+    if not order_a or not order_b:
+        raise HTTPException(status_code=404, detail="One or both orders not found")
+
+    await _check_order_access(order_a, user, db)
+    await _check_order_access(order_b, user, db)
+
+    if order_a.status != "completed" or order_b.status != "completed":
+        raise HTTPException(status_code=400, detail="Both orders must be completed")
+
+    # Load data for context
+    output_dir_a = Path(settings.OUTPUT_DIR) / order_a.order_code
+    output_dir_b = Path(settings.OUTPUT_DIR) / order_b.order_code
+    vector_a = _load_vector_data(output_dir_a, order_a.ptm_type)
+    vector_b = _load_vector_data(output_dir_b, order_b.ptm_type)
+    comparison = _build_comparison_data(order_a, order_b, vector_a, vector_b)
+    report_a = _load_report_md(output_dir_a, order_a.ptm_type)
+    report_b = _load_report_md(output_dir_b, order_b.ptm_type)
+
+    # Build system prompt with data context
+    order_a_info = comparison["order_a"]
+    order_b_info = comparison["order_b"]
+    stats = comparison["stats"]
+
+    # Truncate reports for context window
+    max_report_len = 6000
+    report_a_trunc = report_a[:max_report_len] if len(report_a) > max_report_len else report_a
+    report_b_trunc = report_b[:max_report_len] if len(report_b) > max_report_len else report_b
+
+    top_shared = comparison["shared_ptms"][:20]
+    shared_table = "\n".join(
+        f"  {p['gene']} {p['position']}: A={p['a_max_fc']:+.2f}, B={p['b_max_fc']:+.2f}, r={p['correlation']:.2f}, class={p['classification']}"
+        for p in top_shared
+    )
+
+    # A-only top PTMs
+    a_only_table = "\n".join(
+        f"  {p['gene']} {p['position']}: max_fc={p['max_fc']:+.2f}"
+        for p in comparison["a_only_ptms"][:15]
+    )
+    b_only_table = "\n".join(
+        f"  {p['gene']} {p['position']}: max_fc={p['max_fc']:+.2f}"
+        for p in comparison["b_only_ptms"][:15]
+    )
+
+    system_prompt = f"""You are a senior proteomics bioinformatician specializing in comparative PTM analysis.
+You are answering follow-up questions about a comparison between two PTM time-series experiments.
+
+CRITICAL RULE: Base ALL answers strictly on the provided data. If the data does not contain information to answer a question, say so explicitly. NEVER fabricate data or conclusions.
+
+═══ DATA CONTEXT ═══
+
+Order A: {order_a_info['project_name']} ({order_a_info['species']}, {order_a_info['ptm_type']})
+  Conditions: {', '.join(order_a_info['conditions'])}
+
+Order B: {order_b_info['project_name']} ({order_b_info['species']}, {order_b_info['ptm_type']})
+  Conditions: {', '.join(order_b_info['conditions'])}
+
+Stats: Shared={stats['total_shared']}, A-only={stats['total_a_only']}, B-only={stats['total_b_only']}
+Direction concordance: {stats['direction_concordance']:.1%}
+Classification: {json.dumps(stats.get('classification_counts', {{}}))}
+
+Shared Kinases: {', '.join(comparison['shared_kinases'][:15])}
+A-only Kinases: {', '.join(comparison['a_only_kinases'][:10])}
+B-only Kinases: {', '.join(comparison['b_only_kinases'][:10])}
+Shared Receptors: {', '.join(comparison['shared_receptors'][:10])}
+A-only Receptors: {', '.join(comparison['a_only_receptors'][:10])}
+B-only Receptors: {', '.join(comparison['b_only_receptors'][:10])}
+
+TOP SHARED PTMs:
+{shared_table}
+
+A-ONLY PTMs:
+{a_only_table}
+
+B-ONLY PTMs:
+{b_only_table}
+
+═══ ORDER A REPORT (excerpt) ═══
+{report_a_trunc}
+
+═══ ORDER B REPORT (excerpt) ═══
+{report_b_trunc}
+
+═══ RESPONSE RULES ═══
+- Answer in Korean with English gene/protein names.
+- Always cite specific data points (gene names, fold-change values, correlations) from the context above.
+- If a question requires data not present in the context, state clearly: "현재 제공된 데이터에서는 이 정보를 확인할 수 없습니다."
+- Be concise but thorough. Use markdown formatting for clarity.
+"""
+
+    # Build messages list for LLM
+    llm_messages = [{"role": "system", "content": system_prompt}]
+    for msg in body.messages:
+        if msg.get("role") in ("user", "assistant"):
+            llm_messages.append({"role": msg["role"], "content": msg["content"]})
+
+    # Determine LLM settings
+    llm_model = body.llm_model or os.getenv("LLM_MODEL", "gemma3:27b")
+    llm_provider = body.llm_provider or os.getenv("LLM_PROVIDER", "auto")
+    ollama_url = settings.OLLAMA_URL
+    openai_key = os.getenv("OPENAI_API_KEY", "")
+    gemini_key = os.getenv("GEMINI_API_KEY", "")
+
+    async def _stream():
+        try:
+            use_provider = llm_provider
+            if use_provider == "auto":
+                try:
+                    async with httpx.AsyncClient(timeout=httpx.Timeout(5.0)) as client:
+                        resp = await client.get(f"{ollama_url}/api/tags")
+                        if resp.status_code == 200:
+                            use_provider = "ollama"
+                        else:
+                            use_provider = "openai" if openai_key else ("gemini" if gemini_key else "ollama")
+                except Exception:
+                    use_provider = "openai" if openai_key else ("gemini" if gemini_key else "ollama")
+
+            if use_provider == "ollama":
+                async with httpx.AsyncClient(timeout=httpx.Timeout(10.0, read=600.0)) as client:
+                    async with client.stream(
+                        "POST",
+                        f"{ollama_url}/api/chat",
+                        json={
+                            "model": llm_model,
+                            "messages": llm_messages,
+                            "stream": True,
+                            "options": {
+                                "temperature": 0.4,
+                                "num_predict": 4096,
+                                "num_ctx": 32768,
+                            },
+                        },
+                    ) as resp:
+                        if resp.status_code != 200:
+                            yield f"data: {json.dumps({'type': 'error', 'message': f'LLM error: {resp.status_code}'})}\n\n"
+                            return
+                        async for line in resp.aiter_lines():
+                            if not line.strip():
+                                continue
+                            try:
+                                data = json.loads(line)
+                                content = data.get("message", {}).get("content", "")
+                                done = data.get("done", False)
+                                if content:
+                                    yield f"data: {json.dumps({'type': 'token', 'content': content})}\n\n"
+                                if done:
+                                    yield f"data: {json.dumps({'type': 'done'})}\n\n"
+                            except json.JSONDecodeError:
+                                continue
+
+            elif use_provider in ("openai", "gemini"):
+                api_key = openai_key if use_provider == "openai" else gemini_key
+                base_url = (
+                    os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
+                    if use_provider == "openai"
+                    else "https://generativelanguage.googleapis.com/v1beta/openai"
+                )
+                model = llm_model if llm_model != "gemma3:27b" else (
+                    os.getenv("OPENAI_MODEL", "gpt-4.1-mini") if use_provider == "openai"
+                    else os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+                )
+
+                async with httpx.AsyncClient(timeout=httpx.Timeout(10.0, read=600.0)) as client:
+                    async with client.stream(
+                        "POST",
+                        f"{base_url}/chat/completions",
+                        headers={
+                            "Authorization": f"Bearer {api_key}",
+                            "Content-Type": "application/json",
+                        },
+                        json={
+                            "model": model,
+                            "messages": llm_messages,
+                            "stream": True,
+                            "temperature": 0.4,
+                            "max_tokens": 4096,
+                        },
+                    ) as resp:
+                        if resp.status_code != 200:
+                            error_text = ""
+                            async for chunk in resp.aiter_text():
+                                error_text += chunk
+                            yield f"data: {json.dumps({'type': 'error', 'message': f'API error ({resp.status_code}): {error_text[:200]}'})}\n\n"
+                            return
+                        async for line in resp.aiter_lines():
+                            if not line.startswith("data: "):
+                                continue
+                            payload = line[6:]
+                            if payload.strip() == "[DONE]":
+                                yield f"data: {json.dumps({'type': 'done'})}\n\n"
+                                break
+                            try:
+                                data = json.loads(payload)
+                                delta = data.get("choices", [{}])[0].get("delta", {})
+                                content = delta.get("content", "")
+                                if content:
+                                    yield f"data: {json.dumps({'type': 'token', 'content': content})}\n\n"
+                            except (json.JSONDecodeError, IndexError):
+                                continue
+
+        except httpx.ConnectError:
+            yield f"data: {json.dumps({'type': 'error', 'message': 'Cannot connect to LLM service'})}\n\n"
+        except Exception as e:
+            logger.exception("Comparison chat streaming error")
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)[:200]})}\n\n"
 
     return StreamingResponse(
