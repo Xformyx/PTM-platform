@@ -76,6 +76,9 @@ def run_temporal_comovement(state: dict) -> dict:
         pathway_candidates = state.get("pathway_candidates", {})
         output_dir = state.get("output_dir", "/tmp")
         ptm_type = state.get("ptm_type", "phosphorylation")  # v8.10
+        # v12.2: Species-aware enrichment
+        _exp_ctx = state.get("experimental_context") or {}
+        species_tax_id = state.get("species_tax_id") or _exp_ctx.get("species_tax_id", "10090")
 
         # v8.3 Fix: network_node returns timepoint_results (not networks)
         # timepoint_results: {tp: {active_ptm_nodes, inhibited_ptm_nodes, non_ptm_nodes, ...}}
@@ -149,7 +152,7 @@ def run_temporal_comovement(state: dict) -> dict:
         clusters = _annotate_clusters(clusters, enriched_data, pw_candidates_list, ptm_type=ptm_type)
 
         # Step 5b: Enrichr cluster-level enrichment (Layer 2: 3-Layer Pathway Enrichment)
-        clusters = _enrich_clusters_with_enrichr(clusters)
+        clusters = _enrich_clusters_with_enrichr(clusters, species_tax_id=species_tax_id)
 
         # Step 6: Link to Non-PTM interactors
         clusters = _link_to_nonptm_interactors(clusters, networks, timepoints)
@@ -813,7 +816,7 @@ def _annotate_clusters(
 # STEP 5b: ENRICHR CLUSTER-LEVEL ENRICHMENT (Layer 2)
 # ═══════════════════════════════════════════════════════════════════════════
 
-def _enrich_clusters_with_enrichr(clusters: list) -> list:
+def _enrich_clusters_with_enrichr(clusters: list, species_tax_id: str = "10090") -> list:
     """Enrich each cluster with Enrichr pathway enrichment analysis.
 
     Layer 2 of 3-Layer Pathway Enrichment: submits each cluster's gene list
@@ -838,15 +841,16 @@ def _enrich_clusters_with_enrichr(clusters: list) -> list:
             if len(cluster_genes) < 2:
                 continue
 
-            # Query Enrichr with cluster gene list
+            # Query Enrichr with cluster gene list (species-aware libraries)
+            _enrichr_libs_map = {
+                "9606": ["KEGG_2021_Human", "Reactome_2022", "MSigDB_Hallmark_2020", "WikiPathway_2023_Human"],
+                "10090": ["KEGG_2019_Mouse", "Reactome_2022", "MSigDB_Hallmark_2020", "WikiPathways_2019_Mouse"],
+                "10116": ["KEGG_2019_Rat", "Reactome_2022", "MSigDB_Hallmark_2020", "WikiPathways_2019_Rat"],
+            }
+            _enrichr_libs = _enrichr_libs_map.get(str(species_tax_id), _enrichr_libs_map["10090"])
             enrichr_result = mcp.query_enrichr(
                 gene_list=cluster_genes,
-                libraries=[
-                    "KEGG_2021_Human",
-                    "Reactome_2022",
-                    "MSigDB_Hallmark_2020",
-                    "WikiPathway_2023_Human",
-                ],
+                libraries=_enrichr_libs,
                 description=f"Cluster_{cluster['cluster_id']}_{cluster.get('pattern', 'unknown')}",
                 top_n=10,
             )
@@ -854,7 +858,7 @@ def _enrich_clusters_with_enrichr(clusters: list) -> list:
             # Also query STRING functional enrichment
             string_enrich = mcp.query_string_enrichment(
                 gene_list=cluster_genes,
-                species=10090,
+                species=int(species_tax_id),
             )
 
             # Merge enrichment results into cluster annotations

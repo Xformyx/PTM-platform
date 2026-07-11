@@ -730,6 +730,8 @@ def run_preprocessing(self, order_id: int, config: dict):
             "order_code": order_code,
             "preprocessing_output_dir": str(order_output),
             "ptm_mode": ptm_mode,
+            "species_tax_id": config.get("species_tax_id", "10090"),
+            "kegg_organism": config.get("kegg_organism", "mmu"),
             "experimental_context": config.get("experimental_context"),
             "top_n_ptms": config.get("top_n_ptms", 50),
             "ptm_selection_mode": config.get("ptm_selection_mode", "top_n"),

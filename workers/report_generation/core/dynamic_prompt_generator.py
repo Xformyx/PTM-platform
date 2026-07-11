@@ -1645,6 +1645,8 @@ def build_tf_activity_inference(
     org_lower = organism.lower() if organism else ""
     if "human" in org_lower or "homo" in org_lower:
         species = "human"
+    elif "rat" in org_lower or "rattus" in org_lower:
+        species = "rat"
     elif "mouse" in org_lower or "mus" in org_lower or "murine" in org_lower:
         species = "mouse"
 

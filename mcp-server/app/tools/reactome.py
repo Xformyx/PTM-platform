@@ -63,7 +63,7 @@ async def _fetch_reactome_pathways(
         async with httpx.AsyncClient(timeout=timeout) as client:
             # Step 1: Resolve gene name → UniProt ID
             # Use UniProt search to find human ortholog
-            uniprot_id = await _resolve_uniprot_id(client, gene_name, timeout)
+            uniprot_id = await _resolve_uniprot_id(client, gene_name, timeout, organism=organism)
             if not uniprot_id:
                 logger.debug(f"No UniProt ID found for {gene_name}")
                 return empty
@@ -102,9 +102,23 @@ async def _fetch_reactome_pathways(
                 stable_id = pw.get("stId", "")
                 species = pw.get("speciesName", "")
 
-                # Only include Homo sapiens pathways (Reactome is human-centric)
-                if species and "homo" not in species.lower():
-                    continue
+                # Filter pathways by the requested organism
+                if species:
+                    _sp_lower = species.lower()
+                    _org_lower = organism.lower()
+                    if "mus" in _org_lower or "mouse" in _org_lower:
+                        if "mus musculus" not in _sp_lower:
+                            continue
+                    elif "rattus" in _org_lower or "rat" in _org_lower:
+                        if "rattus" not in _sp_lower:
+                            continue
+                    elif "homo" in _org_lower or "human" in _org_lower:
+                        if "homo" not in _sp_lower:
+                            continue
+                    else:
+                        # Unknown organism — keep homo sapiens as fallback
+                        if "homo" not in _sp_lower:
+                            continue
 
                 entry = {
                     "id": stable_id,
@@ -136,14 +150,33 @@ async def _fetch_reactome_pathways(
         return empty
 
 
+# Organism → NCBI taxonomy ID mapping for UniProt queries
+_ORGANISM_TAX_MAP = {
+    "mus musculus": "10090", "mouse": "10090",
+    "homo sapiens": "9606", "human": "9606",
+    "rattus norvegicus": "10116", "rat": "10116",
+}
+
+
+def _resolve_organism_id(organism: str) -> str:
+    """Map organism string to NCBI taxonomy ID. Defaults to 9606 (human)."""
+    org_lower = organism.lower().strip()
+    for key, tax_id in _ORGANISM_TAX_MAP.items():
+        if key in org_lower:
+            return tax_id
+    return "9606"
+
+
 async def _resolve_uniprot_id(
-    client: httpx.AsyncClient, gene_name: str, timeout: float
+    client: httpx.AsyncClient, gene_name: str, timeout: float,
+    organism: str = "Mus musculus",
 ) -> Optional[str]:
-    """Resolve a gene name to a human UniProt ID (reviewed/Swiss-Prot preferred)."""
+    """Resolve a gene name to a UniProt ID for the given organism (reviewed/Swiss-Prot preferred)."""
+    tax_id = _resolve_organism_id(organism)
     try:
-        # Search UniProt for human protein with this gene name
+        # Search UniProt for protein with this gene name in the target organism
         params = {
-            "query": f"gene_exact:{gene_name} AND organism_id:9606 AND reviewed:true",
+            "query": f"gene_exact:{gene_name} AND organism_id:{tax_id} AND reviewed:true",
             "format": "json",
             "size": "1",
             "fields": "accession",
@@ -160,7 +193,7 @@ async def _resolve_uniprot_id(
                 return results[0].get("primaryAccession", "")
 
         # Fallback: try without reviewed filter
-        params["query"] = f"gene_exact:{gene_name} AND organism_id:9606"
+        params["query"] = f"gene_exact:{gene_name} AND organism_id:{tax_id}"
         resp = await client.get(
             f"{UNIPROT_ID_MAP_URL}/uniprotkb/search",
             params=params,
@@ -171,6 +204,20 @@ async def _resolve_uniprot_id(
             results = data.get("results", [])
             if results:
                 return results[0].get("primaryAccession", "")
+
+        # Fallback 2: If non-human organism, try human ortholog (Reactome is human-centric)
+        if tax_id != "9606":
+            params["query"] = f"gene_exact:{gene_name} AND organism_id:9606 AND reviewed:true"
+            resp = await client.get(
+                f"{UNIPROT_ID_MAP_URL}/uniprotkb/search",
+                params=params,
+                timeout=timeout,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                results = data.get("results", [])
+                if results:
+                    return results[0].get("primaryAccession", "")
 
     except Exception as e:
         logger.debug(f"UniProt ID resolution failed for {gene_name}: {e}")

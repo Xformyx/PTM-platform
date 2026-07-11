@@ -29,7 +29,18 @@ logger = logging.getLogger(__name__)
 REACTOME_BASE = "https://reactome.org/ContentService"
 CACHE_PREFIX = "reactome:kinase_receptors"
 CACHE_TTL_SECONDS = 90 * 24 * 3600  # 90 days
-SPECIES_ID = 9606
+# Species ID mapping for Reactome API
+_SPECIES_ID_MAP = {
+    "9606": 9606, "human": 9606, "homo sapiens": 9606,
+    "10090": 48887, "mouse": 48887, "mus musculus": 48887,  # Reactome uses dbId 48887 for mouse
+    "10116": 48898, "rat": 48898, "rattus norvegicus": 48898,  # Reactome uses dbId 48898 for rat
+}
+_SPECIES_NAME_MAP = {
+    "9606": "Homo sapiens", "human": "Homo sapiens", "homo sapiens": "Homo sapiens",
+    "10090": "Mus musculus", "mouse": "Mus musculus", "mus musculus": "Mus musculus",
+    "10116": "Rattus norvegicus", "rat": "Rattus norvegicus", "rattus norvegicus": "Rattus norvegicus",
+}
+SPECIES_ID = 9606  # default, overridden by _get_species_id()
 
 _SIGNALING_BY_RE = re.compile(r"^Signaling by (.+)$", re.IGNORECASE)
 _SKIP_NAMES = {
@@ -100,10 +111,10 @@ def _get_redis_client():
         return None
 
 
-def _reactome_lookup_kinase_sync(gene_name: str) -> list[dict]:
+def _reactome_lookup_kinase_sync(gene_name: str, species: str = "9606") -> list[dict]:
     """Sync version of Reactome kinase→receptor lookup with Redis caching."""
     redis_client = _get_redis_client()
-    cache_key = f"{CACHE_PREFIX}:{gene_name.upper()}"
+    cache_key = f"{CACHE_PREFIX}:{gene_name.upper()}:{species}"
 
     # Check Redis cache
     if redis_client:
@@ -118,9 +129,10 @@ def _reactome_lookup_kinase_sync(gene_name: str) -> list[dict]:
     receptors = []
     try:
         # Step 1: Search entity
+        _species_name = _SPECIES_NAME_MAP.get(str(species).lower(), "Homo sapiens")
         resp = requests.get(
             f"{REACTOME_BASE}/search/query",
-            params={"query": gene_name, "species": "Homo sapiens", "types": "Protein"},
+            params={"query": gene_name, "species": _species_name, "types": "Protein"},
             timeout=10, verify=False,
         )
         if resp.status_code != 200:
@@ -137,9 +149,10 @@ def _reactome_lookup_kinase_sync(gene_name: str) -> list[dict]:
             return []
 
         # Step 2: Get pathways
+        _reactome_species_id = _SPECIES_ID_MAP.get(str(species).lower(), 9606)
         resp2 = requests.get(
             f"{REACTOME_BASE}/data/pathways/low/entity/{stid}/allForms",
-            params={"species": SPECIES_ID},
+            params={"species": _reactome_species_id},
             timeout=10, verify=False,
         )
         if resp2.status_code != 200:
@@ -196,12 +209,12 @@ def _reactome_lookup_kinase_sync(gene_name: str) -> list[dict]:
     return receptors
 
 
-def _reactome_lookup_kinases_sync(kinase_names: list[str]) -> dict[str, list[dict]]:
+def _reactome_lookup_kinases_sync(kinase_names: list[str], species: str = "9606") -> dict[str, list[dict]]:
     """Batch sync Reactome lookup for multiple kinases."""
     result = {}
     for name in kinase_names:
         try:
-            result[name] = _reactome_lookup_kinase_sync(name)
+            result[name] = _reactome_lookup_kinase_sync(name, species=species)
         except Exception as e:
             logger.warning(f"Reactome lookup failed for {name}: {e}")
             result[name] = []
@@ -248,6 +261,8 @@ def run_receptor_inference(
     ptm_type = experimental_context.get("ptm_type", "phosphorylation")
     treatment_text = experimental_context.get("treatment", "")
     top_n_setting = config.get("top_n_ptms", 50)
+    # Species for Reactome API queries
+    _species_tax = config.get("species_tax_id") or experimental_context.get("species_tax_id", "9606")
 
     # ── Normalize kinase_analysis_data schema ──
     # _auto_run_global_analysis() returns {kinase_modules: [...]} where each module has
@@ -293,7 +308,7 @@ def run_receptor_inference(
     reactome_receptors: dict = {}
     try:
         kinase_list = sorted(kinase_names_set)[:30]
-        kinase_receptor_map = _reactome_lookup_kinases_sync(kinase_list)
+        kinase_receptor_map = _reactome_lookup_kinases_sync(kinase_list, species=_species_tax)
 
         receptor_kinase_map: dict = defaultdict(lambda: {
             "kinases": [], "receptor_class": "", "pathway": "", "signaling_pathway": ""

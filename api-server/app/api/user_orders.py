@@ -636,6 +636,7 @@ async def _create_order_from_user_impl(
         "contrasts": config_data.get("contrasts", []),
         "detected_modifications": config_data.get("detected_modifications", []),
         "reference_pdfs": reference_pdfs,
+        "organism": config_data.get("organism", "mouse"),
         "source": "user_ui",
     }
 

@@ -111,8 +111,9 @@ def extract_antibody_info(text: str, protein: str) -> Optional[str]:
 class CrossSitePTMSearcher:
     """Searches for PTM evidence across multiple databases via MCP."""
 
-    def __init__(self, mcp_base_url: str = MCP_URL):
+    def __init__(self, mcp_base_url: str = MCP_URL, organism: str = "Mouse"):
         self.mcp_url = mcp_base_url.rstrip("/")
+        self.organism = organism
 
     async def search(
         self,
@@ -351,7 +352,7 @@ class CrossSitePTMSearcher:
             async with httpx.AsyncClient(timeout=30) as client:
                 resp = await client.get(
                     f"{self.mcp_url}/tools/iptmnet/{protein}",
-                    params={"position": site, "organism": "Mouse"},
+                    params={"position": site, "organism": self.organism},
                 )
                 if resp.status_code != 200:
                     return []

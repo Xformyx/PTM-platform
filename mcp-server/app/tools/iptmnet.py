@@ -28,6 +28,10 @@ KNOWN_UNIPROT_AC: Dict[str, Dict[str, str]] = {
     "Human": {
         "THRAP3": "Q9Y2W1", "VCAN": "P13611", "A2M": "P01023",
     },
+    "Rat": {
+        "THRAP3": "Q5XIF4", "VCAN": "Q9ERB4", "A2M": "P06238",
+        "TNS1": "D3ZYM7", "BIN1": "O08838",
+    },
 }
 
 IPTMNET_BASE = "https://research.bioinformatics.udel.edu/iptmnet"

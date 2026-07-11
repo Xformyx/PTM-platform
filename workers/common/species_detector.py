@@ -83,6 +83,16 @@ def detect_species_from_tsv(df: pd.DataFrame) -> Tuple[str, str, str]:
             logger.info(f"Species detected via gene format: mouse (title_case={title_ratio:.1%})")
             return "mouse", "medium", f"Gene name format: {title_ratio:.0%} Title Case (Mouse pattern)"
         elif upper_ratio > 0.7:
+            # Both human and rat use UPPERCASE gene names.
+            # Disambiguate using rat-specific identifier prefixes (RGD, LOC, ENSRNOG, RT1, NEWGENE).
+            _RAT_MARKERS = ("RT1", "LOC", "NEWGENE", "RGD", "ENSRNOG")
+            rat_marker_hits = sum(
+                1 for g in genes
+                if any(g.upper().startswith(m) for m in _RAT_MARKERS)
+            )
+            if rat_marker_hits / total > 0.02:  # >2% rat-specific identifiers
+                logger.info(f"Species detected via gene format: rat (upper_case={upper_ratio:.1%}, rat_markers={rat_marker_hits})")
+                return "rat", "medium", f"Gene name format: UPPERCASE with {rat_marker_hits} rat-specific markers"
             logger.info(f"Species detected via gene format: human (upper_case={upper_ratio:.1%})")
             return "human", "medium", f"Gene name format: {upper_ratio:.0%} UPPERCASE (Human pattern)"
 
