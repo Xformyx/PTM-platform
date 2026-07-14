@@ -423,8 +423,9 @@ export default function OrderList() {
       <Card>
         <CardContent className="p-0 overflow-x-auto">
           {filtered.length > 0 ? (
-            <Table ref={tableRef} className="w-full table-fixed min-w-[920px]">
+            <Table ref={tableRef} className="w-full table-fixed min-w-[1200px]">
               <colgroup>
+                <col style={{ width: "36px" }} />
                 {colWidths.map((pct, i) => (
                   <col key={i} style={{ width: `${pct}%` }} />
                 ))}
@@ -552,7 +553,7 @@ export default function OrderList() {
                       })()}
                     </TableCell>
                     <TableCell>
-                      <div className="flex items-center gap-2 min-w-[120px]">
+                      <div className="flex items-center gap-1.5">
                         {(() => {
                           const stageWeights: Record<string, [number, number]> = { preprocessing: [0, 15], rag_enrichment: [15, 50], report_generation: [50, 100] };
                           const raw = order.status === "completed" ? 100 : order.progress_pct;
@@ -564,7 +565,7 @@ export default function OrderList() {
                             <>
                               <Progress
                                 value={displayPct}
-                                className="w-20"
+                                className="w-16"
                                 indicatorClassName={
                                   order.status === "failed" ? "bg-destructive"
                                     : order.stage_detail?.startsWith("Halted:") ? "bg-red-400"
@@ -579,17 +580,17 @@ export default function OrderList() {
                         })()}
                       </div>
                     </TableCell>
-                    <TableCell className="font-mono text-muted-foreground whitespace-nowrap">
+                    <TableCell className="font-mono text-muted-foreground whitespace-nowrap overflow-hidden">
                       {fmtElapsed(order)}
                     </TableCell>
                     <TableCell
-                      className="text-muted-foreground whitespace-nowrap"
+                      className="text-muted-foreground whitespace-nowrap overflow-hidden"
                       title={order.created_by ? `Created by: ${order.created_by}` : undefined}
                     >
                       {fmtDate(order.created_at)}
                     </TableCell>
                     <TableCell
-                      className="text-muted-foreground whitespace-nowrap"
+                      className="text-muted-foreground whitespace-nowrap overflow-hidden"
                       title={order.run_by ? `Run by: ${order.run_by}` : undefined}
                     >
                       {order.status === "completed" ? fmtDate(order.completed_at) : "—"}
