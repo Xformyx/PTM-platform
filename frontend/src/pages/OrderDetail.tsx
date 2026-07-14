@@ -10,7 +10,7 @@ import {
   MessageSquare, Loader2, ToggleLeft, ToggleRight, Square, StopCircle,
   ChartScatter, TrendingUp, ZoomIn, ZoomOut, GitMerge, BarChart3,
   LayoutDashboard, FileOutput, Share2, CopyPlus, ChevronLeft, ChevronRight,
-  Presentation,
+  Presentation, FlaskConical,
 } from "lucide-react";
 import { ShareOrderModal } from "@/components/ShareOrderModal";
 import { Input } from "@/components/ui/input";
@@ -39,6 +39,7 @@ import CrossTalkHeatmap from "@/components/CrossTalkHeatmap";
 import CrossTalkSequentialGating from "@/components/CrossTalkSequentialGating";
 import SignalPropagationTimeline from "@/components/SignalPropagationTimeline";
 import { OrderArticlesTab } from "@/components/OrderArticlesTab";
+import { CoScientistTab } from "@/components/CoScientistTab";
 import KinaseModuleAnalysis from "@/components/KinaseModuleAnalysis";
 import ChatPanel from "@/components/ChatPanel";
 import {
@@ -4404,6 +4405,10 @@ export default function OrderDetail() {
               <FileOutput className="h-3.5 w-3.5 mr-1.5" />
               Results
             </TabsTrigger>
+            <TabsTrigger value="coscientist">
+              <FlaskConical className="h-3.5 w-3.5 mr-1.5" />
+              Co-Scientist
+            </TabsTrigger>
           </TabsList>
           <Button variant="outline" size="sm" className="shrink-0" onClick={() => setDuplicateModalOpen(true)}>
             <CopyPlus className="h-3.5 w-3.5 mr-1.5" />
@@ -4932,6 +4937,15 @@ export default function OrderDetail() {
         {/* Articles Tab */}
         <TabsContent value="articles" className="mt-4">
           <OrderArticlesTab orderCode={order.order_code} orderStatus={order.status} />
+        </TabsContent>
+
+        {/* Co-Scientist Tab */}
+        <TabsContent value="coscientist" className="mt-4">
+          <CoScientistTab
+            orderId={order.id}
+            orderCode={order.order_code}
+            orderStatus={order.status}
+          />
         </TabsContent>
       </Tabs>
 
