@@ -40,8 +40,8 @@ class Settings(BaseSettings):
     # MCP Server
     MCP_SERVER_URL: str = "http://localhost:8001"
 
-    # Co-Scientist
-    COSCIENTIST_API_URL: str = "http://localhost:8080"
+    # Co-Scientist (container name used as DNS hostname inside ptm-platform-network)
+    COSCIENTIST_API_URL: str = "http://ptm-coscientist-api:8080"
 
     # Cytoscape (Report network visualization)
     CYTOSCAPE_HOST: str = "host.docker.internal"

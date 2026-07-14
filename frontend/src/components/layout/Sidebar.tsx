@@ -23,6 +23,7 @@ import {
   Loader2,
   ChevronLeft,
   ChevronRight,
+  Microscope,
   type LucideIcon,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -61,6 +62,7 @@ const mainNav: NavItem[] = [
   { path: "/admin", label: "Dashboard", icon: LayoutDashboard, end: true },
   { path: "/admin/orders", label: "Orders", icon: ClipboardList, end: true },
   { path: "/admin/ptmquant", label: "PTMQuant", icon: FlaskConical },
+  { path: "/admin/coscientist", label: "Co-Scientist", icon: Microscope },
   { path: "/admin/rag", label: "RAG Collections", icon: Library },
   { path: "/admin/llm", label: "LLM Models", icon: Brain },
   { path: "/admin/articles", label: "Article Cache", icon: BookOpen },

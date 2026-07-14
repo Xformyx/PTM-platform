@@ -18,6 +18,7 @@ import Settings from '@/pages/Settings';
 import SystemMonitor from '@/pages/SystemMonitor';
 import PTMQuant from '@/pages/PTMQuant';
 import OrderCompare from '@/pages/OrderCompare';
+import CoScientistPage from '@/pages/CoScientistPage';
 import Landing from '@/pages/user/Landing';
 import UserDashboard from '@/pages/user/UserDashboard';
 import NewAnalysis from '@/pages/user/NewAnalysis';
@@ -90,6 +91,7 @@ export default function App() {
         <Route path="settings" element={<Settings />} />
         <Route path="ptmquant" element={<PTMQuant />} />
         <Route path="compare" element={<OrderCompare />} />
+        <Route path="coscientist" element={<CoScientistPage />} />
       </Route>
 
       {/* Legacy routes: redirect old paths to /admin */}
