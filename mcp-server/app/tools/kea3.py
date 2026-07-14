@@ -51,6 +51,10 @@ async def query_kea3(
 
     Parameters:
         gene_list: List of substrate gene symbols (e.g., ["ACC1", "AMPK", "mTOR"])
+                   Gene symbols are automatically uppercased before submission because
+                   KEA3 uses human orthologue symbols (ALL CAPS) internally.
+                   This ensures rat (Egfr → EGFR) and mouse (Mapk1 → MAPK1) genes
+                   are correctly matched against KEA3's PhosphoSitePlus-based database.
         top_n: Number of top kinases to return
         redis: Optional Redis client for caching
 
@@ -64,8 +68,13 @@ async def query_kea3(
             "error": "At least 2 genes required for KEA3 analysis",
         }
 
+    # Normalize to uppercase — KEA3 uses human orthologue gene symbols (ALL CAPS).
+    # Rat genes arrive as "Egfr", "Mapk1"; mouse as "Egfr", "Mapk1"; human as "EGFR".
+    # Uppercasing all gene symbols maximizes hit rate across species.
+    normalized_genes = list(dict.fromkeys(g.upper() for g in gene_list if g))
+
     # Cache key
-    sorted_genes = sorted(set(g.upper() for g in gene_list))
+    sorted_genes = sorted(normalized_genes)
     cache_key = f"kea3:{':'.join(sorted_genes[:20])}"
     if redis:
         try:
@@ -85,7 +94,7 @@ async def query_kea3(
     }
 
     payload = {
-        "gene_set": gene_list,
+        "gene_set": normalized_genes,
         "query_name": "PTM-Platform Query",
     }
 

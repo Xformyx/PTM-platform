@@ -165,6 +165,7 @@ class RAGEnrichmentPipeline:
         rag_llm_provider: Optional[str] = None,
         llm_provider: str = "ollama",
         llm_model: Optional[str] = None,
+        species: str = "mouse",
     ):
         self.mcp = mcp_client
         self.reg_extractor = RegulationExtractor()
@@ -235,7 +236,7 @@ class RAGEnrichmentPipeline:
         if enable_fulltext:
             self.fulltext_analyzer = FullTextAnalyzer()
         if enable_ptm_validation:
-            self.ptm_validator = PTMValidator(mcp_client=mcp_client)
+            self.ptm_validator = PTMValidator(mcp_client=mcp_client, species=species)
         # Log local data availability
         if HPALocalLoader.is_available():
             logger.info("HPA local data available — will use local-first strategy")

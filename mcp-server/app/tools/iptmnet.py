@@ -24,13 +24,49 @@ KNOWN_UNIPROT_AC: Dict[str, Dict[str, str]] = {
         "Thrap3": "Q569Z6", "Vcan": "Q62059", "A2m": "Q61838",
         "Tns1": "Q8BYW7", "Bin1": "O08539", "Gorasp2": "Q9CWW6",
         "Rbm39": "Q8VH51",
+        "Egfr": "Q01279", "Mapk1": "P63085", "Mapk3": "Q63844",
+        "Akt1": "P31750", "Src": "P05480", "Stat3": "P42227",
+        "Tp53": "P02340", "Myc": "P09416", "Jun": "P05627",
+        "Fos": "P01101", "Rb1": "P13405",
     },
     "Human": {
         "THRAP3": "Q9Y2W1", "VCAN": "P13611", "A2M": "P01023",
+        "EGFR": "P00533", "MAPK1": "P28482", "MAPK3": "P27361",
+        "AKT1": "P31749", "SRC": "P12931", "STAT3": "P40763",
+        "TP53": "P04637", "MYC": "P01106", "JUN": "P05412",
+        "FOS": "P01100", "RB1": "P06400",
     },
     "Rat": {
+        # Common proteins with curated UniProt ACs to skip slow API search
         "THRAP3": "Q5XIF4", "VCAN": "Q9ERB4", "A2M": "P06238",
         "TNS1": "D3ZYM7", "BIN1": "O08838",
+        # Kinases / signalling proteins frequently studied in rat
+        "Egfr": "P06803", "EGFR": "P06803",
+        "Mapk1": "P63086", "MAPK1": "P63086",  # ERK2
+        "Mapk3": "Q63844", "MAPK3": "Q63844",  # ERK1
+        "Akt1": "P47196", "AKT1": "P47196",
+        "Src": "P00523", "SRC": "P00523",
+        "Stat3": "P52631", "STAT3": "P52631",
+        "Tp53": "P10361", "TP53": "P10361",
+        "Myc": "P09416", "MYC": "P09416",
+        "Jun": "P17325", "JUN": "P17325",
+        "Fos": "P13325", "FOS": "P13325",
+        "Rb1": "Q9Z1N4", "RB1": "Q9Z1N4",
+        # Cardiac / metabolic
+        "Tnnt2": "P23693", "TNNT2": "P23693",
+        "Prkaa1": "Q9Z1M7", "PRKAA1": "Q9Z1M7",   # AMPK α1
+        "Prkaa2": "Q9Z1M6", "PRKAA2": "Q9Z1M6",   # AMPK α2
+        "Mtor": "P42346", "MTOR": "P42346",
+        "Pik3ca": "Q9Z1U3", "PIK3CA": "Q9Z1U3",
+        "Pten": "O54724", "PTEN": "O54724",
+        "Gsk3b": "P18265", "GSK3B": "P18265",
+        "Cdkn1a": "Q63318", "CDKN1A": "Q63318",   # p21
+        "Cdkn2a": "Q9Z1B9", "CDKN2A": "Q9Z1B9",   # p16
+        "Hif1a": "Q9Z2A9", "HIF1A": "Q9Z2A9",
+        "Nfkb1": "Q63100", "NFKB1": "Q63100",
+        "Rela": "Q63318", "RELA": "Q63318",
+        "Mapk14": "Q9Z1B5", "MAPK14": "Q9Z1B5",   # p38 MAPK
+        "Mapk8": "Q9WTU6", "MAPK8": "Q9WTU6",     # JNK1
     },
 }
 

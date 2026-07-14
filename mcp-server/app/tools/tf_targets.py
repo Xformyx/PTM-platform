@@ -29,27 +29,59 @@ _DATA_DIR = Path(__file__).parent.parent.parent / "data"
 
 _tf_data: Dict[str, dict] = {}  # species -> {tf_to_targets, target_to_tfs}
 
+# Species fallback chain: if data is missing, try these fallbacks in order.
+# Rat (rno) → Mouse (mmu): rat and mouse share ~85% TF-target regulatory architecture,
+# making mouse data a reasonable proxy when rat-specific DoRothEA/TRRUST is unavailable.
+_SPECIES_FALLBACK: Dict[str, str] = {
+    "rat": "mouse",
+    "rno": "mouse",
+}
+
+# Canonical name normalisation (various aliases → our internal key)
+_SPECIES_ALIASES: Dict[str, str] = {
+    "human": "human", "hsa": "human", "9606": "human",
+    "mouse": "mouse", "mmu": "mouse", "10090": "mouse",
+    "rat": "rat", "rno": "rat", "10116": "rat",
+}
+
 
 def _load_species_data(species: str) -> dict:
-    """Load TF-target data for a species (lazy singleton)."""
-    if species in _tf_data:
-        return _tf_data[species]
+    """Load TF-target data for a species (lazy singleton).
 
-    filename = f"tf_target_{species}.json"
+    Falls back to a related species when the requested data file is absent.
+    Rat samples fall back to mouse TF-target data.
+    """
+    species_key = _SPECIES_ALIASES.get(species.lower(), species.lower())
+
+    if species_key in _tf_data:
+        return _tf_data[species_key]
+
+    filename = f"tf_target_{species_key}.json"
     filepath = _DATA_DIR / filename
     if not filepath.exists():
+        fallback = _SPECIES_FALLBACK.get(species_key)
+        if fallback:
+            logger.warning(
+                f"TF-target data not found for '{species_key}' ({filepath}). "
+                f"Falling back to '{fallback}' data — results are approximate."
+            )
+            fallback_data = _load_species_data(fallback)
+            # Cache under original key so subsequent calls are fast
+            _tf_data[species_key] = dict(fallback_data, _fallback_species=fallback)
+            return _tf_data[species_key]
+
         logger.warning(f"TF-target data not found: {filepath}")
-        _tf_data[species] = {"tf_to_targets": {}, "target_to_tfs": {}, "_missing": True}
-        return _tf_data[species]
+        _tf_data[species_key] = {"tf_to_targets": {}, "target_to_tfs": {}, "_missing": True}
+        return _tf_data[species_key]
 
     logger.info(f"Loading TF-target data from {filepath}")
     with open(filepath) as f:
         data = json.load(f)
-    _tf_data[species] = data
+    _tf_data[species_key] = data
     n_tfs = len(data.get("tf_to_targets", {}))
     n_targets = len(data.get("target_to_tfs", {}))
-    logger.info(f"Loaded {species}: {n_tfs} TFs, {n_targets} target genes")
-    return _tf_data[species]
+    logger.info(f"Loaded {species_key}: {n_tfs} TFs, {n_targets} target genes")
+    return _tf_data[species_key]
 
 
 # ---------------------------------------------------------------------------
@@ -133,6 +165,13 @@ async def query_tf_targets(
         "targets": sorted(target_map.values(), key=lambda x: x["gene"]),
         "sources": ["DoRothEA", "TRRUST"],
     }
+    # Surface fallback warning so callers know the data source
+    if data.get("_fallback_species"):
+        result["species_fallback"] = data["_fallback_species"]
+        result["fallback_note"] = (
+            f"Rat-specific TF-target data not available; using {data['_fallback_species']} "
+            "orthologue data as proxy. Results may not reflect rat-specific regulation."
+        )
 
     if redis:
         await redis.set(cache_key, json.dumps(result), ex=86400 * 7)
@@ -298,6 +337,13 @@ async def infer_tf_activity(
         "inferred_tfs": top_results,
         "sources": ["DoRothEA (A/B/C)", "TRRUST v2"],
     }
+    # Surface fallback info when rat data is absent
+    if data.get("_fallback_species"):
+        result["species_fallback"] = data["_fallback_species"]
+        result["fallback_note"] = (
+            f"Rat-specific TF-target data not available; using {data['_fallback_species']} "
+            "orthologue data as proxy. Results are indicative — validate against rat literature."
+        )
 
     if redis:
         await redis.set(cache_key, json.dumps(result), ex=86400)

@@ -295,8 +295,16 @@ def filter_by_context_relevance(
 class PTMValidator:
     """Validates PTM sites against external databases via MCP."""
 
-    def __init__(self, mcp_client: MCPClient):
+    # Map internal species strings → iPTMnet organism parameter
+    _SPECIES_TO_IPTMNET: dict = {
+        "human": "Human", "hsa": "Human", "9606": "Human",
+        "mouse": "Mouse", "mmu": "Mouse", "10090": "Mouse",
+        "rat": "Rat", "rno": "Rat", "10116": "Rat",
+    }
+
+    def __init__(self, mcp_client: MCPClient, species: str = "mouse"):
         self.mcp = mcp_client
+        self.iptmnet_organism = self._SPECIES_TO_IPTMNET.get(species.lower(), "Mouse")
 
     def validate(
         self,
@@ -340,7 +348,7 @@ class PTMValidator:
         # 2. iPTMnet query — uses MCPClient.query_iptmnet()
         try:
             iptmnet_data = self.mcp.query_iptmnet(
-                gene=gene, position=position,
+                gene=gene, position=position, organism=self.iptmnet_organism,
             )
             sites_found = iptmnet_data.get("sites_found", 0)
             novelty_info = iptmnet_data.get("novelty") or {}
@@ -579,7 +587,7 @@ class PTMValidator:
         # Query iPTMnet for all known sites on this gene (empty position = all sites)
         try:
             all_sites_data = self.mcp.query_iptmnet(
-                gene=gene, position="",
+                gene=gene, position="", organism=self.iptmnet_organism,
             )
             sites_found = all_sites_data.get("sites_found", 0)
             if sites_found > 0:

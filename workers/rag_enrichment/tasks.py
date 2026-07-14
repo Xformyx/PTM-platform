@@ -1899,6 +1899,9 @@ def run_rag_enrichment(self, order_id: int, config: dict):
         rag_llm_model = config.get("rag_llm_model")
         rag_llm_provider = config.get("rag_llm_provider")
         report_llm_provider = config.get("llm_provider", "ollama")
+        _order_species = (experimental_context.get("organism") or
+                          experimental_context.get("species") or
+                          config.get("species") or "mouse")
 
         def _env_bool(name: str, default: bool = True) -> bool:
             return os.getenv(name, "true" if default else "false").lower() not in ("false", "0", "no")
@@ -1914,6 +1917,7 @@ def run_rag_enrichment(self, order_id: int, config: dict):
             rag_llm_provider=rag_llm_provider,
             llm_provider=report_llm_provider,
             llm_model=config.get("llm_model"),
+            species=_order_species,
         )
 
         # Cancellation: poll DB every 5 s; set event when order becomes cancelled.
@@ -2063,6 +2067,7 @@ def run_rag_enrichment(self, order_id: int, config: dict):
                     rag_llm_provider=rag_llm_provider,
                     llm_provider=report_llm_provider,
                     llm_model=config.get("llm_model"),
+                    species=_order_species,
                 )
                 sec_enriched = sec_pipeline.enrich_ptm_data(
                     ptm_data=sec_ptm_data,
