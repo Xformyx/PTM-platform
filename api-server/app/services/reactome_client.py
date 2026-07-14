@@ -27,7 +27,32 @@ logger = logging.getLogger(__name__)
 REACTOME_BASE = "https://reactome.org/ContentService"
 CACHE_PREFIX = "reactome:kinase_receptors"
 CACHE_TTL = timedelta(days=90)
-SPECIES_ID = 9606  # Homo sapiens
+
+# Species mapping: NCBI taxonomy ID and Reactome species name
+_SPECIES_MAP: dict[str, dict] = {
+    "human": {"tax_id": 9606, "name": "Homo sapiens"},
+    "homo": {"tax_id": 9606, "name": "Homo sapiens"},
+    "mouse": {"tax_id": 10090, "name": "Mus musculus"},
+    "mus": {"tax_id": 10090, "name": "Mus musculus"},
+    "rat": {"tax_id": 10116, "name": "Rattus norvegicus"},
+    "rattus": {"tax_id": 10116, "name": "Rattus norvegicus"},
+}
+
+
+def _resolve_species(species: str) -> tuple[int, str]:
+    """Resolve species string to (tax_id, reactome_species_name).
+
+    Defaults to Homo sapiens (9606) if species is empty or unrecognized.
+    """
+    if not species:
+        return 9606, "Homo sapiens"
+    sp_lower = species.lower()
+    for key, info in _SPECIES_MAP.items():
+        if key in sp_lower:
+            return info["tax_id"], info["name"]
+    # Default: Homo sapiens
+    return 9606, "Homo sapiens"
+
 
 # Patterns to extract receptor names from pathway hierarchy
 # e.g. "Signaling by EGFR", "Signaling by NTRK2 (TRKB)"
@@ -98,12 +123,14 @@ def _extract_receptor_from_name(name: str) -> Optional[str]:
 # ---------------------------------------------------------------------------
 # Reactome API calls (with httpx)
 # ---------------------------------------------------------------------------
-async def _search_entity(client: httpx.AsyncClient, gene_name: str) -> Optional[str]:
+async def _search_entity(
+    client: httpx.AsyncClient, gene_name: str, species_name: str = "Homo sapiens"
+) -> Optional[str]:
     """Search Reactome for a protein entity and return its stId."""
     url = f"{REACTOME_BASE}/search/query"
     params = {
         "query": gene_name,
-        "species": "Homo sapiens",
+        "species": species_name,
         "types": "Protein",
     }
     try:
@@ -123,10 +150,12 @@ async def _search_entity(client: httpx.AsyncClient, gene_name: str) -> Optional[
         return None
 
 
-async def _get_pathways(client: httpx.AsyncClient, entity_stid: str) -> list[dict]:
+async def _get_pathways(
+    client: httpx.AsyncClient, entity_stid: str, species_id: int = 9606
+) -> list[dict]:
     """Get low-level pathways containing all forms of the entity."""
     url = f"{REACTOME_BASE}/data/pathways/low/entity/{entity_stid}/allForms"
-    params = {"species": SPECIES_ID}
+    params = {"species": species_id}
     try:
         resp = await client.get(url, params=params, timeout=10)
         if resp.status_code != 200:
@@ -154,7 +183,8 @@ async def _get_ancestors(client: httpx.AsyncClient, pathway_stid: str) -> list[l
 # Core logic: kinase → receptor mapping
 # ---------------------------------------------------------------------------
 async def _lookup_receptors_for_kinase(
-    client: httpx.AsyncClient, gene_name: str
+    client: httpx.AsyncClient, gene_name: str,
+    species_id: int = 9606, species_name: str = "Homo sapiens",
 ) -> list[dict]:
     """
     Given a kinase gene name, find upstream receptors via Reactome pathway hierarchy.
@@ -162,12 +192,12 @@ async def _lookup_receptors_for_kinase(
       {"receptor": str, "receptor_class": str, "pathway": str, "pathway_id": str}
     """
     # Step 1: search entity
-    stid = await _search_entity(client, gene_name)
+    stid = await _search_entity(client, gene_name, species_name=species_name)
     if not stid:
         return []
 
     # Step 2: get pathways
-    pathways = await _get_pathways(client, stid)
+    pathways = await _get_pathways(client, stid, species_id=species_id)
     if not pathways:
         return []
 
@@ -207,14 +237,20 @@ async def _lookup_receptors_for_kinase(
 # ---------------------------------------------------------------------------
 # Public API with Redis caching
 # ---------------------------------------------------------------------------
-async def get_receptors_for_kinase(gene_name: str) -> list[dict]:
+async def get_receptors_for_kinase(gene_name: str, species: str = "") -> list[dict]:
     """
     Get upstream receptors for a kinase, with Redis caching.
-    Cache key: reactome:kinase_receptors:{gene_name}
+    Cache key: reactome:kinase_receptors:{species_id}:{gene_name}
     Cache TTL: 90 days
+
+    Args:
+        gene_name: Kinase gene symbol (e.g. "MAPK1")
+        species: Species string (e.g. "Rattus norvegicus", "human", "mouse").
+                 Defaults to Homo sapiens if empty.
     """
+    species_id, species_name = _resolve_species(species)
     redis = await get_redis()
-    cache_key = f"{CACHE_PREFIX}:{gene_name.upper()}"
+    cache_key = f"{CACHE_PREFIX}:{species_id}:{gene_name.upper()}"
 
     # Check cache
     try:
@@ -226,7 +262,9 @@ async def get_receptors_for_kinase(gene_name: str) -> list[dict]:
 
     # Cache miss — call Reactome API
     async with httpx.AsyncClient(verify=False) as client:
-        receptors = await _lookup_receptors_for_kinase(client, gene_name)
+        receptors = await _lookup_receptors_for_kinase(
+            client, gene_name, species_id=species_id, species_name=species_name
+        )
 
     # Store in cache (even empty results to avoid repeated lookups)
     try:
@@ -241,12 +279,19 @@ async def get_receptors_for_kinase(gene_name: str) -> list[dict]:
     return receptors
 
 
-async def get_receptors_for_kinases(kinase_names: list[str]) -> dict[str, list[dict]]:
+async def get_receptors_for_kinases(
+    kinase_names: list[str], species: str = ""
+) -> dict[str, list[dict]]:
     """
     Batch lookup: get upstream receptors for multiple kinases.
     Returns {kinase_name: [receptor_info, ...]}
+
+    Args:
+        kinase_names: List of kinase gene symbols.
+        species: Species string (e.g. "Rattus norvegicus", "human", "mouse").
+                 Defaults to Homo sapiens if empty.
     """
-    tasks = [get_receptors_for_kinase(name) for name in kinase_names]
+    tasks = [get_receptors_for_kinase(name, species=species) for name in kinase_names]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     output = {}

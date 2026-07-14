@@ -624,6 +624,19 @@ class RAGEnrichmentPipeline:
         position = ptm.get("position") or ptm.get("PTM_Position", "Unknown")
         ptm_type = ptm.get("ptm_type") or ptm.get("PTM_Type", "Phosphorylation")
         species = (context or {}).get("organism") or (context or {}).get("species", "")
+        # Derive KEGG organism code and NCBI tax_id from species string
+        _sp_lower = species.lower() if species else ""
+        _kegg_org = (
+            "rno" if "rat" in _sp_lower or "rattus" in _sp_lower
+            else "hsa" if "human" in _sp_lower or "homo" in _sp_lower
+            else "mmu"  # default mouse
+        )
+        _tax_id = (
+            10116 if "rat" in _sp_lower or "rattus" in _sp_lower
+            else 9606 if "human" in _sp_lower or "homo" in _sp_lower
+            else 10090
+        )
+        _is_human = ("human" in _sp_lower or "homo" in _sp_lower)
         protein_id = ptm.get("protein_id") or ptm.get("Protein.Group", "")
 
         # ══════════════════════════════════════════════════════════════
@@ -645,13 +658,13 @@ class RAGEnrichmentPipeline:
                 return {"search_result": {}, "articles": []}
 
         def _kegg():
-            cache_key = f"{gene}__kegg"
+            cache_key = f"{gene}__kegg__{_kegg_org}"
             cached = self._gene_cache.get(cache_key)
             if cached is not None:
                 logger.debug(f"[CACHE HIT] KEGG for {gene}")
                 return cached
             try:
-                kegg_info = self.mcp.query_kegg(gene)
+                kegg_info = self.mcp.query_kegg(gene, organism=_kegg_org)
                 kegg_pathways = kegg_info.get("pathways", [])
                 kegg_pw_names = [p.get("name", str(p)) if isinstance(p, dict) else str(p) for p in kegg_pathways[:5]]
                 logger.info(f"[Layer1-KEGG] {gene}: {len(kegg_pathways)} pathways → {kegg_pw_names}")
@@ -705,6 +718,10 @@ class RAGEnrichmentPipeline:
                 return result
 
         def _hpa():
+            # HPA (Human Protein Atlas) is human-only; skip for non-human species
+            if not _is_human:
+                logger.debug(f"[SKIP] HPA for {gene}: non-human species ({species})")
+                return {"hpa_data": {}}
             cache_key = f"{gene}__hpa"
             cached = self._gene_cache.get(cache_key)
             if cached is not None:
@@ -722,6 +739,10 @@ class RAGEnrichmentPipeline:
                 return result
 
         def _gtex():
+            # GTEx is human-only; skip for non-human species
+            if not _is_human:
+                logger.debug(f"[SKIP] GTEx for {gene}: non-human species ({species})")
+                return {"gtex_data": {}}
             cache_key = f"{gene}__gtex"
             cached = self._gene_cache.get(cache_key)
             if cached is not None:
@@ -739,13 +760,13 @@ class RAGEnrichmentPipeline:
                 return result
 
         def _biogrid():
-            cache_key = f"{gene}__biogrid"
+            cache_key = f"{gene}__biogrid__{_tax_id}"
             cached = self._gene_cache.get(cache_key)
             if cached is not None:
                 logger.debug(f"[CACHE HIT] BioGRID for {gene}")
                 return cached
             try:
-                biogrid_data = self.mcp.query_biogrid(gene)
+                biogrid_data = self.mcp.query_biogrid(gene, organism=_tax_id)
                 result = {"biogrid_data": biogrid_data}
                 self._gene_cache.set(cache_key, result)
                 return result

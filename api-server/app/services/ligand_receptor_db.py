@@ -1305,11 +1305,18 @@ def _extract_tokens_from_treatment(treatment_text: str) -> list[str]:
     return list(dict.fromkeys(tokens))  # deduplicate while preserving order
 
 
-def _lookup_uniprot_fallback(ligand_token: str, max_results: int = 5) -> list[dict]:
+def _lookup_uniprot_fallback(
+    ligand_token: str, max_results: int = 5, organism_id: int = 9606
+) -> list[dict]:
     """
     Fallback: search UniProt for receptors of a given ligand.
-    Uses query: '{ligand} receptor AND organism_id:9606 AND reviewed:true AND keyword:KW-0675'
+    Uses query: '{ligand} receptor AND organism_id:{organism_id} AND reviewed:true AND keyword:KW-0675'
     Returns list of receptor dicts or empty list.
+
+    Args:
+        ligand_token: Ligand name to search for.
+        max_results: Maximum number of results to return.
+        organism_id: NCBI taxonomy ID (9606=human, 10090=mouse, 10116=rat).
     """
     import urllib.request
     import urllib.parse
@@ -1321,7 +1328,7 @@ def _lookup_uniprot_fallback(ligand_token: str, max_results: int = 5) -> list[di
     if not ligand_token or len(ligand_token) < 2:
         return []
 
-    query = f"{ligand_token} receptor AND organism_id:9606 AND reviewed:true AND keyword:KW-0675"
+    query = f"{ligand_token} receptor AND organism_id:{organism_id} AND reviewed:true AND keyword:KW-0675"
     url = (
         "https://rest.uniprot.org/uniprotkb/search"
         f"?query={urllib.parse.quote(query)}"
@@ -1378,7 +1385,9 @@ def _lookup_uniprot_fallback(ligand_token: str, max_results: int = 5) -> list[di
     return results
 
 
-def lookup_receptors_for_treatment(treatment_text: str) -> list[dict]:
+def lookup_receptors_for_treatment(
+    treatment_text: str, species: str = ""
+) -> list[dict]:
     """
     Given a treatment text (e.g., "irisin 100ng/ml" or "EGF + TNFα"),
     find matching ligands and return their known receptors.
@@ -1387,6 +1396,12 @@ def lookup_receptors_for_treatment(treatment_text: str) -> list[dict]:
         1. Internal LIGAND_RECEPTOR_DB (fast, curated)
         2. UniProt API fallback (for ligands not in internal DB)
         3. Empty list (if neither source finds anything)
+
+    Args:
+        treatment_text: Treatment description string.
+        species: Species string (e.g. "Rattus norvegicus", "human", "mouse").
+                 Used for UniProt organism_id in fallback queries.
+                 Defaults to human (9606) if empty.
 
     Returns a list of dicts with keys:
         ligand, receptor_name, receptor_class, pathway, evidence, source
@@ -1419,6 +1434,14 @@ def lookup_receptors_for_treatment(treatment_text: str) -> list[dict]:
                 break  # Found matching alias, no need to check others for this entry
 
     # ── Step 2: UniProt fallback for unmatched tokens ─────────────────────────
+    # Resolve organism_id from species string
+    _sp_lower = species.lower() if species else ""
+    _organism_id = (
+        10116 if "rat" in _sp_lower or "rattus" in _sp_lower
+        else 9606 if "human" in _sp_lower or "homo" in _sp_lower
+        else 10090 if "mouse" in _sp_lower or "mus" in _sp_lower
+        else 9606  # default human
+    )
     # Extract candidate tokens from treatment text
     tokens = _extract_tokens_from_treatment(treatment_text)
     for token in tokens:
@@ -1433,7 +1456,7 @@ def lookup_receptors_for_treatment(treatment_text: str) -> list[dict]:
         if len(token) < 2:
             continue
         # Query UniProt
-        uniprot_results = _lookup_uniprot_fallback(token, max_results=5)
+        uniprot_results = _lookup_uniprot_fallback(token, max_results=5, organism_id=_organism_id)
         for r in uniprot_results:
             if r["receptor_name"] not in seen_receptors:
                 seen_receptors.add(r["receptor_name"])

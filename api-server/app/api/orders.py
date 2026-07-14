@@ -2323,7 +2323,7 @@ async def get_vector_plot_data(
                 logging.getLogger("vector_plot").info(
                     f"Reactome: querying receptors for {len(kinase_list)} kinases: {kinase_list}"
                 )
-                kinase_receptor_map = await get_receptors_for_kinases(kinase_list)
+                kinase_receptor_map = await get_receptors_for_kinases(kinase_list, species=order.species or "")
 
                 # Aggregate: receptor → {kinases that link to it}
                 receptor_kinase_map: dict = defaultdict(lambda: {
@@ -2609,7 +2609,7 @@ async def get_vector_plot_data(
                     lookup_receptors_for_treatment,
                     score_uniprot_receptor,
                 )
-                matches = lookup_receptors_for_treatment(treatment_text)
+                matches = lookup_receptors_for_treatment(treatment_text, species=order.species or "")
                 # Reactome receptor names for cross-validation bonus
                 reactome_names: set[str] = set(reactome_receptors.keys())
 
