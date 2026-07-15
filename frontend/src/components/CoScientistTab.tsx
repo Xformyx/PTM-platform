@@ -52,7 +52,9 @@ import {
   ArrowRight,
   BookOpen,
   Microscope,
+  Cpu,
 } from "lucide-react";
+import { Input } from "@/components/ui/input";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -206,6 +208,9 @@ export function CoScientistTab({ orderId, orderCode, orderStatus }: Props) {
   const [goal, setGoal] = useState("");
   const [maxIterations, setMaxIterations] = useState("3");
   const [selectedCollections, setSelectedCollections] = useState<string[]>([]);
+  const [llmProvider, setLlmProvider] = useState("auto");
+  const [llmModel, setLlmModel] = useState("");
+  const [ollamaModels, setOllamaModels] = useState<string[]>([]);
 
   // Session
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -235,6 +240,14 @@ export function CoScientistTab({ orderId, orderCode, orderStatus }: Props) {
       .catch((e: any) => setHealthError(e.message ?? "Connection failed"))
       .finally(() => setHealthLoading(false));
   }, [BASE]);
+
+  // ─── Fetch Ollama model list for selector ─────────────────────────────────
+  useEffect(() => {
+    api
+      .get<{ models: { name: string }[] }>("/llm/models")
+      .then((res) => setOllamaModels((res.models ?? []).map((m) => m.name)))
+      .catch(() => {/* non-fatal */});
+  }, []);
 
   // ─── Poll session ─────────────────────────────────────────────────────────
   useEffect(() => {
@@ -266,6 +279,8 @@ export function CoScientistTab({ orderId, orderCode, orderStatus }: Props) {
         research_goal: goal,
         max_iterations: parseInt(maxIterations),
         rag_collections: selectedCollections.length ? selectedCollections : null,
+        llm_provider: llmProvider === "auto" ? "" : llmProvider,
+        llm_model: llmModel.trim(),
       });
       setSessionId(res.session_id);
     } catch (e: any) {
@@ -500,6 +515,83 @@ export function CoScientistTab({ orderId, orderCode, orderStatus }: Props) {
                 </Select>
               </div>
             )}
+          </div>
+
+          {/* LLM Model selector */}
+          <div className="space-y-2 rounded-md border border-dashed border-border/60 px-3 py-2.5">
+            <Label className="text-xs text-muted-foreground flex items-center gap-1.5">
+              <Cpu className="h-3 w-3" />
+              LLM
+            </Label>
+            <div className="grid grid-cols-2 gap-2">
+              <Select value={llmProvider} onValueChange={(v) => { setLlmProvider(v); setLlmModel(""); }} disabled={running}>
+                <SelectTrigger className="h-8 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="auto" className="text-xs">Auto (server default)</SelectItem>
+                  <SelectItem value="ollama" className="text-xs">Ollama (local)</SelectItem>
+                  <SelectItem value="openai" className="text-xs">OpenAI</SelectItem>
+                  <SelectItem value="gemini" className="text-xs">Gemini</SelectItem>
+                </SelectContent>
+              </Select>
+
+              {/* Model name — dropdown for Ollama, text input for others */}
+              {llmProvider === "ollama" ? (
+                <Select value={llmModel} onValueChange={setLlmModel} disabled={running}>
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue placeholder={ollamaModels[0] ?? "model name"} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {ollamaModels.map((m) => (
+                      <SelectItem key={m} value={m} className="text-xs font-mono">{m}</SelectItem>
+                    ))}
+                    {ollamaModels.length === 0 && (
+                      <SelectItem value="" disabled className="text-xs text-muted-foreground">No models found</SelectItem>
+                    )}
+                  </SelectContent>
+                </Select>
+              ) : llmProvider === "openai" ? (
+                <Select value={llmModel || "gpt-4.1-mini"} onValueChange={setLlmModel} disabled={running}>
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {["gpt-4.1-mini", "gpt-4.1", "gpt-4o", "o4-mini"].map((m) => (
+                      <SelectItem key={m} value={m} className="text-xs font-mono">{m}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : llmProvider === "gemini" ? (
+                <Select value={llmModel || "gemini-2.5-flash"} onValueChange={setLlmModel} disabled={running}>
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"].map((m) => (
+                      <SelectItem key={m} value={m} className="text-xs font-mono">{m}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <Input
+                  className="h-8 text-xs font-mono"
+                  placeholder="server default"
+                  value={llmModel}
+                  onChange={(e) => setLlmModel(e.target.value)}
+                  disabled={running}
+                />
+              )}
+            </div>
+            <p className="text-[10px] text-muted-foreground leading-tight">
+              {llmProvider === "auto"
+                ? "Ollama → OpenAI → Gemini 순으로 자동 선택"
+                : llmProvider === "ollama"
+                ? "로컬 Ollama — 속도 느림, API 비용 없음"
+                : llmProvider === "openai"
+                ? "OpenAI API — 빠르고 안정적, API 비용 발생"
+                : "Gemini API — 빠르고 안정적, API 비용 발생"}
+            </p>
           </div>
 
           {/* Errors */}

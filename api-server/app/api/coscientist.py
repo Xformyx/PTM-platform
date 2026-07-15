@@ -72,6 +72,8 @@ class CoScientistRunRequest(BaseModel):
     research_goal: str = ""
     rag_collections: Optional[List[str]] = None
     max_iterations: int = 3
+    llm_provider: str = ""   # "" | "auto" | "ollama" | "openai" | "gemini"
+    llm_model: str = ""      # e.g. "gemma3:27b", "gpt-4.1-mini"
 
 
 class CoScientistMultiRunRequest(BaseModel):
@@ -81,6 +83,8 @@ class CoScientistMultiRunRequest(BaseModel):
     ptm_type: str = "phosphorylation"
     rag_collections: Optional[List[str]] = None
     max_iterations: int = 3
+    llm_provider: str = ""
+    llm_model: str = ""
 
 
 class CoScientistFeedbackRequest(BaseModel):
@@ -120,6 +124,8 @@ async def coscientist_run(
         "ptm_type": order.ptm_type or "phosphorylation",
         "rag_collections": req.rag_collections,
         "max_iterations": req.max_iterations,
+        "llm_provider": req.llm_provider,
+        "llm_model": req.llm_model,
     }
     return await _proxy_post("/run", payload)
 
@@ -249,6 +255,8 @@ async def coscientist_run_standalone(req: CoScientistMultiRunRequest) -> JSONRes
         "ptm_type": req.ptm_type,
         "rag_collections": req.rag_collections,
         "max_iterations": req.max_iterations,
+        "llm_provider": req.llm_provider,
+        "llm_model": req.llm_model,
     }
     return await _proxy_post("/run", payload)
 
