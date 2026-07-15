@@ -261,8 +261,14 @@ export function CoScientistTab({ orderId, orderCode, orderStatus }: Props) {
           setRunning(false);
           clearInterval(pollRef.current!);
         }
-      } catch {
-        // ignore transient
+      } catch (e: any) {
+        // 404 = session gone (container restarted); stop polling
+        if (e?.status === 404 || e?.response?.status === 404 || String(e?.message).includes("404")) {
+          setRunning(false);
+          setRunError("세션이 만료됐습니다. 다시 시작해주세요.");
+          clearInterval(pollRef.current!);
+        }
+        // other errors: ignore (transient network issue)
       }
     }, 4000);
     return () => clearInterval(pollRef.current!);
