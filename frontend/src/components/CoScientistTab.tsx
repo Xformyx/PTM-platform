@@ -53,6 +53,7 @@ import {
   BookOpen,
   Microscope,
   Cpu,
+  StopCircle,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 
@@ -256,7 +257,7 @@ export function CoScientistTab({ orderId, orderCode, orderStatus }: Props) {
       try {
         const data = await api.get<SessionResponse>(`${BASE}/session/${sessionId}`);
         setSession(data);
-        if (data.status !== "running") {
+        if (data.status !== "running" && data.status !== "cancelling") {
           setRunning(false);
           clearInterval(pollRef.current!);
         }
@@ -315,6 +316,17 @@ export function CoScientistTab({ orderId, orderCode, orderStatus }: Props) {
     } catch (e: any) {
       setRunError(e.message);
       setRunning(false);
+    }
+  }
+
+  async function handleCancel() {
+    if (!sessionId || !running) return;
+    try {
+      await api.post(`${BASE}/session/${sessionId}/cancel`);
+      // Optimistically reflect the cancelling state; poller will update to cancelled
+      setSession((s) => s ? { ...s, status: "cancelling" } : s);
+    } catch (e: any) {
+      setRunError(`Stop failed: ${e.message}`);
     }
   }
 
@@ -436,12 +448,70 @@ export function CoScientistTab({ orderId, orderCode, orderStatus }: Props) {
       {/* ── Run config ─────────────────────────────────────────────────── */}
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-sm flex items-center gap-2">
-            <div className="flex h-7 w-7 items-center justify-center rounded-md bg-violet-500/10">
-              <FlaskConical className="h-3.5 w-3.5 text-violet-500" />
+          <div className="flex items-start justify-between gap-2">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <div className="flex h-7 w-7 items-center justify-center rounded-md bg-violet-500/10">
+                <FlaskConical className="h-3.5 w-3.5 text-violet-500" />
+              </div>
+              AI Research Studio
+            </CardTitle>
+            {/* LLM quick-pick — always visible in header */}
+            <div className="flex items-center gap-1 shrink-0">
+              <Cpu className="h-3 w-3 text-muted-foreground" />
+              <Select
+                value={llmProvider}
+                onValueChange={(v) => { setLlmProvider(v); setLlmModel(""); }}
+                disabled={running}
+              >
+                <SelectTrigger className="h-7 text-xs w-28 border-dashed">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="auto" className="text-xs">Auto</SelectItem>
+                  <SelectItem value="ollama" className="text-xs">Ollama</SelectItem>
+                  <SelectItem value="openai" className="text-xs">OpenAI</SelectItem>
+                  <SelectItem value="gemini" className="text-xs">Gemini</SelectItem>
+                </SelectContent>
+              </Select>
+              {llmProvider === "ollama" ? (
+                <Select value={llmModel} onValueChange={setLlmModel} disabled={running}>
+                  <SelectTrigger className="h-7 text-xs w-32 border-dashed">
+                    <SelectValue placeholder={ollamaModels[0] ?? "model"} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {ollamaModels.map((m) => (
+                      <SelectItem key={m} value={m} className="text-xs font-mono">{m}</SelectItem>
+                    ))}
+                    {ollamaModels.length === 0 && (
+                      <SelectItem value="" disabled className="text-xs text-muted-foreground">No models</SelectItem>
+                    )}
+                  </SelectContent>
+                </Select>
+              ) : llmProvider === "openai" ? (
+                <Select value={llmModel || "gpt-4.1-mini"} onValueChange={setLlmModel} disabled={running}>
+                  <SelectTrigger className="h-7 text-xs w-28 border-dashed">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {["gpt-4.1-mini", "gpt-4.1", "gpt-4o", "o4-mini"].map((m) => (
+                      <SelectItem key={m} value={m} className="text-xs font-mono">{m}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : llmProvider === "gemini" ? (
+                <Select value={llmModel || "gemini-2.5-flash"} onValueChange={setLlmModel} disabled={running}>
+                  <SelectTrigger className="h-7 text-xs w-36 border-dashed">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"].map((m) => (
+                      <SelectItem key={m} value={m} className="text-xs font-mono">{m}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : null}
             </div>
-            Co-Scientist Pipeline
-          </CardTitle>
+          </div>
         </CardHeader>
         <CardContent className="space-y-4">
           {/* Pipeline flow */}
@@ -449,75 +519,7 @@ export function CoScientistTab({ orderId, orderCode, orderStatus }: Props) {
 
           <Separator />
 
-          {/* Goal input */}
-          <div className="space-y-1.5">
-            <Label className="text-xs text-muted-foreground">Research Goal</Label>
-            <Textarea
-              placeholder="e.g., Find novel therapeutic targets related to MAPK signaling in liver fibrosis"
-              value={goal}
-              onChange={(e) => setGoal(e.target.value)}
-              rows={2}
-              disabled={running}
-              className="text-sm resize-none"
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            {/* Iterations */}
-            <div className="space-y-1.5">
-              <Label className="text-xs text-muted-foreground">Iterations</Label>
-              <Select value={maxIterations} onValueChange={setMaxIterations} disabled={running}>
-                <SelectTrigger className="h-8 text-xs">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {["1", "2", "3", "5"].map((v) => (
-                    <SelectItem key={v} value={v} className="text-xs">
-                      {v} iteration{v !== "1" ? "s" : ""}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* Collections */}
-            {collections.length > 0 && (
-              <div className="space-y-1.5">
-                <Label className="text-xs text-muted-foreground">
-                  ChromaDB Collections
-                  <span className="ml-1 opacity-60">(empty = all)</span>
-                </Label>
-                <Select
-                  onValueChange={(v) =>
-                    setSelectedCollections((prev) =>
-                      prev.includes(v) ? prev.filter((c) => c !== v) : [...prev, v]
-                    )
-                  }
-                  disabled={running}
-                >
-                  <SelectTrigger className="h-8 text-xs">
-                    <SelectValue
-                      placeholder={
-                        selectedCollections.length
-                          ? selectedCollections.join(", ")
-                          : "All collections"
-                      }
-                    />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {collections.map((c) => (
-                      <SelectItem key={c} value={c} className="text-xs">
-                        {selectedCollections.includes(c) && "✓ "}
-                        {c}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-          </div>
-
-          {/* LLM Model selector */}
+          {/* LLM detail (expanded) — only when not auto */}
           <div className="space-y-2 rounded-md border border-dashed border-border/60 px-3 py-2.5">
             <Label className="text-xs text-muted-foreground flex items-center gap-1.5">
               <Cpu className="h-3 w-3" />
@@ -594,6 +596,74 @@ export function CoScientistTab({ orderId, orderCode, orderStatus }: Props) {
             </p>
           </div>
 
+          {/* Goal input */}
+          <div className="space-y-1.5">
+            <Label className="text-xs text-muted-foreground">Research Goal</Label>
+            <Textarea
+              placeholder="e.g., Find novel therapeutic targets related to MAPK signaling in liver fibrosis"
+              value={goal}
+              onChange={(e) => setGoal(e.target.value)}
+              rows={2}
+              disabled={running}
+              className="text-sm resize-none"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            {/* Iterations */}
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Iterations</Label>
+              <Select value={maxIterations} onValueChange={setMaxIterations} disabled={running}>
+                <SelectTrigger className="h-8 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {["1", "2", "3", "5"].map((v) => (
+                    <SelectItem key={v} value={v} className="text-xs">
+                      {v} iteration{v !== "1" ? "s" : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Collections */}
+            {collections.length > 0 && (
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">
+                  ChromaDB Collections
+                  <span className="ml-1 opacity-60">(empty = all)</span>
+                </Label>
+                <Select
+                  onValueChange={(v) =>
+                    setSelectedCollections((prev) =>
+                      prev.includes(v) ? prev.filter((c) => c !== v) : [...prev, v]
+                    )
+                  }
+                  disabled={running}
+                >
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue
+                      placeholder={
+                        selectedCollections.length
+                          ? selectedCollections.join(", ")
+                          : "All collections"
+                      }
+                    />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {collections.map((c) => (
+                      <SelectItem key={c} value={c} className="text-xs">
+                        {selectedCollections.includes(c) && "✓ "}
+                        {c}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+          </div>
+
           {/* Errors */}
           {runError && (
             <div className="flex items-start gap-2 rounded-md border border-destructive/50 bg-destructive/5 px-3 py-2 text-xs text-destructive">
@@ -602,33 +672,50 @@ export function CoScientistTab({ orderId, orderCode, orderStatus }: Props) {
             </div>
           )}
 
-          <Button
-            onClick={handleRun}
-            disabled={running}
-            className="w-full"
-            size="sm"
-          >
-            {running ? (
-              <>
-                <Loader2 className="h-3.5 w-3.5 mr-2 animate-spin" />
-                Running pipeline…
-              </>
-            ) : sessionId ? (
-              <>
-                <RefreshCw className="h-3.5 w-3.5 mr-2" />
-                Re-run from scratch
-              </>
-            ) : (
-              <>
-                <Lightbulb className="h-3.5 w-3.5 mr-2" />
-                Generate Hypotheses
-              </>
+          <div className="flex gap-2">
+            <Button
+              onClick={handleRun}
+              disabled={running}
+              className="flex-1"
+              size="sm"
+            >
+              {running ? (
+                <>
+                  <Loader2 className="h-3.5 w-3.5 mr-2 animate-spin" />
+                  {session?.status === "cancelling" ? "Stopping…" : "Researching…"}
+                </>
+              ) : sessionId ? (
+                <>
+                  <RefreshCw className="h-3.5 w-3.5 mr-2" />
+                  Re-analyze
+                </>
+              ) : (
+                <>
+                  <Lightbulb className="h-3.5 w-3.5 mr-2" />
+                  Start Co-Scientist
+                </>
+              )}
+            </Button>
+            {running && session?.status !== "cancelling" && (
+              <Button
+                onClick={handleCancel}
+                variant="destructive"
+                size="sm"
+                className="shrink-0 gap-1.5"
+                title="파이프라인 중단"
+              >
+                <StopCircle className="h-3.5 w-3.5" />
+                Stop
+              </Button>
             )}
-          </Button>
+          </div>
 
           {sessionId && (
             <p className="text-[10px] text-muted-foreground text-center font-mono">
               session: {sessionId}
+              {session?.status === "cancelled" && (
+                <span className="ml-2 text-amber-500">— 중단됨</span>
+              )}
             </p>
           )}
         </CardContent>

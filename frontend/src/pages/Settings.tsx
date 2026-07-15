@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { cn } from "@/lib/utils";
@@ -69,7 +70,7 @@ const CATEGORY_CONFIG: Record<string, { label: string; icon: typeof Shield; desc
     description: "각 파이프라인 워커의 동시 처리 수입니다. 변경 후 서비스 재시작이 필요합니다.",
   },
   rag_enrichment: {
-    label: "RAG Enrichment (LLM 농화 설정)",
+    label: "RAG Enrichment (LLM 정보 보강)",
     icon: Zap,
     description: "RAG Enrichment Stage의 LLM 호출 방식을 조정합니다. 변경 즉시 다음 분석부터 적용됩니다.",
   },
@@ -209,6 +210,126 @@ function lsRemoveUpload(uploadId: string) {
   localStorage.setItem(UPLOADS_LS_KEY, JSON.stringify(all));
 }
 
+/* ── 재사용 헬퍼 컴포넌트 ─────────────────────────────────────────────── */
+
+interface SysTabHeaderProps {
+  title: string;
+  desc: string;
+  sysSaved: boolean;
+  sysError: string | null;
+  sysSaving: boolean;
+  hasSysChanges: boolean;
+  onSave: () => void;
+}
+function SysTabHeader({ title, desc, sysSaved, sysError, sysSaving, hasSysChanges, onSave }: SysTabHeaderProps) {
+  return (
+    <div className="flex items-center justify-between">
+      <div>
+        <h2 className="text-lg font-semibold">{title}</h2>
+        <p className="text-sm text-muted-foreground">{desc}</p>
+      </div>
+      <div className="flex items-center gap-2">
+        {sysSaved && (
+          <span className="flex items-center gap-1 text-sm text-emerald-600">
+            <CheckCircle2 className="h-4 w-4" /> 저장 완료
+          </span>
+        )}
+        {sysError && (
+          <span className="flex items-center gap-1 text-sm text-destructive">
+            <AlertTriangle className="h-4 w-4" /> {sysError}
+          </span>
+        )}
+        <Button onClick={onSave} disabled={sysSaving || !hasSysChanges} className="gap-2">
+          {sysSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+          {sysSaving ? "저장 중..." : "저장"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+interface SysSettingRowProps {
+  s: SystemSetting;
+  sysEdits: Record<string, string>;
+  onEdit: (key: string, val: string) => void;
+  dockerMemInfo?: { docker_limit_gb: number | null; host_total_gb: number | null } | null;
+}
+function SysSettingRow({ s, sysEdits, onEdit, dockerMemInfo }: SysSettingRowProps) {
+  const label = SETTING_LABELS[s.key] || s.key;
+  const isBoolean = s.value_type === "boolean";
+  const isChanged = sysEdits[s.key] !== s.value;
+  const currentVal = Number(sysEdits[s.key] ?? s.value);
+  return (
+    <div className="flex items-center justify-between gap-4 rounded-lg border px-4 py-3">
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <p className="text-sm font-medium">{label}</p>
+          {isChanged && (
+            <Badge variant="outline" className="text-[10px] h-4 px-1 border-blue-400 text-blue-600">변경됨</Badge>
+          )}
+        </div>
+        <p className="text-xs text-muted-foreground mt-0.5">
+          {SETTING_DESCRIPTIONS[s.key] || s.description || ""}
+        </p>
+        <p className="text-[10px] text-muted-foreground/60 font-mono mt-0.5">{s.key}</p>
+      </div>
+      <div className="shrink-0">
+        {s.key === "PTMQUANT_DEFAULT_MEMORY_GB" ? (
+          <div className="w-56 space-y-1.5">
+            <div className="flex items-center justify-between">
+              <span className={cn(
+                "text-xs font-mono font-semibold px-1.5 py-0.5 rounded",
+                currentVal < 24 ? "bg-red-500/15 text-red-600"
+                  : currentVal < 32 ? "bg-yellow-500/15 text-yellow-600"
+                  : "bg-green-500/15 text-green-600"
+              )}>
+                {currentVal} GB
+              </span>
+              {dockerMemInfo?.docker_limit_gb && currentVal > dockerMemInfo.docker_limit_gb && (
+                <span className="text-[10px] text-red-500">Docker 한계 초과</span>
+              )}
+            </div>
+            <input
+              type="range"
+              min={8}
+              max={Math.max(96, dockerMemInfo?.docker_limit_gb ?? 96)}
+              step={4}
+              value={currentVal}
+              onChange={(e) => onEdit(s.key, e.target.value)}
+              className="w-full h-1.5 accent-primary cursor-pointer"
+            />
+            <div className="flex justify-between text-[10px] text-muted-foreground">
+              <span>8 GB</span>
+              <span className="text-green-600 font-medium">32 GB 권장</span>
+              <span>{Math.max(96, dockerMemInfo?.docker_limit_gb ?? 96)} GB</span>
+            </div>
+          </div>
+        ) : isBoolean ? (
+          <Toggle
+            checked={sysEdits[s.key]?.toLowerCase() === "true"}
+            onChange={(v) => onEdit(s.key, v ? "true" : "false")}
+          />
+        ) : s.value_type === "integer" ? (
+          <Input
+            type="number"
+            min={0}
+            value={sysEdits[s.key] ?? ""}
+            onChange={(e) => onEdit(s.key, e.target.value)}
+            className="w-28 text-right"
+          />
+        ) : (
+          <Input
+            type="text"
+            value={sysEdits[s.key] ?? ""}
+            onChange={(e) => onEdit(s.key, e.target.value)}
+            className="w-72"
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function Settings() {
   const { user, updateUser } = useAuth();
   const [localSettings, setLocalSettings] = useState<PtmSettings>(loadSettings);
@@ -339,6 +460,9 @@ export default function Settings() {
   }, {});
 
   const categoryOrder = ["ptmquant", "watchdog", "performance", "rag_enrichment", "integration", "worker"];
+  const systemCats   = ["watchdog", "integration", "worker"];
+  const llmCats      = ["performance", "rag_enrichment"];
+  const ptmquantCats = ["ptmquant"];
 
   // PTMQuant: Docker memory info
   const [dockerMemInfo, setDockerMemInfo] = useState<{ docker_limit_gb: number | null; host_total_gb: number | null } | null>(null);
@@ -845,6 +969,30 @@ export default function Settings() {
         <p className="text-sm text-muted-foreground mt-1">플랫폼 및 시스템 설정을 관리합니다</p>
       </div>
 
+      <Tabs defaultValue="general" className="space-y-4">
+        <TabsList className={`grid w-full ${isAdmin ? "grid-cols-5 max-w-2xl" : "grid-cols-4 max-w-xl"}`}>
+          <TabsTrigger value="general" className="gap-1 text-xs">
+            <Monitor className="h-3.5 w-3.5" /> 일반
+          </TabsTrigger>
+          <TabsTrigger value="system" className="gap-1 text-xs">
+            <Server className="h-3.5 w-3.5" /> 시스템
+          </TabsTrigger>
+          <TabsTrigger value="llm" className="gap-1 text-xs">
+            <Zap className="h-3.5 w-3.5" /> LLM
+          </TabsTrigger>
+          <TabsTrigger value="ptmquant" className="gap-1 text-xs">
+            <FlaskConical className="h-3.5 w-3.5" /> PTMQuant
+          </TabsTrigger>
+          {isAdmin && (
+            <TabsTrigger value="fileshare" className="gap-1 text-xs">
+              <FolderOpen className="h-3.5 w-3.5" /> 파일 공유
+            </TabsTrigger>
+          )}
+        </TabsList>
+
+        {/* ── 일반 탭 ───────────────────────────────────────────────── */}
+        <TabsContent value="general" className="space-y-6 mt-0">
+
       {/* Resource Monitoring (local) */}
       <Card>
         <CardHeader>
@@ -910,182 +1058,127 @@ export default function Settings() {
         </CardContent>
       </Card>
 
-      {/* System Settings Header */}
-      <Separator />
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-semibold">System Configuration</h2>
-          <p className="text-sm text-muted-foreground">
-            서버 측 설정 — 변경 시 즉시 적용됩니다 (Worker Concurrency 제외)
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          {sysSaved && (
-            <span className="flex items-center gap-1 text-sm text-emerald-600">
-              <CheckCircle2 className="h-4 w-4" /> 저장 완료
-            </span>
-          )}
-          {sysError && (
-            <span className="flex items-center gap-1 text-sm text-destructive">
-              <AlertTriangle className="h-4 w-4" /> {sysError}
-            </span>
-          )}
-          <Button
-            onClick={handleSysSave}
-            disabled={sysSaving || !hasSysChanges}
-            className="gap-2"
-          >
-            {sysSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-            {sysSaving ? "저장 중..." : "Save System Settings"}
-          </Button>
-        </div>
-      </div>
+        </TabsContent>
 
-      {sysLoading ? (
-        <div className="flex items-center justify-center py-12">
-          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-        </div>
-      ) : (
-        categoryOrder.map((cat) => {
-          const items = grouped[cat];
-          if (!items || items.length === 0) return null;
-          const config = CATEGORY_CONFIG[cat];
-          if (!config) return null;
-          const Icon = config.icon;
-
-          return (
-            <Card key={cat}>
-              <CardHeader>
-                <CardTitle className="text-base flex items-center gap-2">
-                  <Icon className="h-4 w-4" /> {config.label}
-                  {cat === "worker" && (
-                    <Badge variant="outline" className="text-[10px] h-5 px-1.5 border-amber-400 text-amber-600">
-                      재시작 필요
-                    </Badge>
-                  )}
-                </CardTitle>
-                <CardDescription>{config.description}</CardDescription>
-              </CardHeader>
-              <CardContent>
-                {/* PTMQuant: Docker memory info banner */}
-                {cat === "ptmquant" && dockerMemInfo && (
-                  <div className={cn(
-                    "mb-4 flex items-start gap-3 rounded-lg border px-4 py-3",
-                    dockerMemInfo.docker_limit_gb && dockerMemInfo.docker_limit_gb < 24
-                      ? "border-red-300 bg-red-50 dark:bg-red-950/20"
-                      : "border-blue-300 bg-blue-50 dark:bg-blue-950/20"
-                  )}>
-                    <MemoryStick className={cn("h-4 w-4 mt-0.5 shrink-0",
-                      dockerMemInfo.docker_limit_gb && dockerMemInfo.docker_limit_gb < 24
-                        ? "text-red-500" : "text-blue-500"
-                    )} />
-                    <div className="text-sm space-y-0.5">
-                      <p className="font-medium">
-                        Docker 메모리: <span className="font-mono">{dockerMemInfo.docker_limit_gb ?? "??"} GB</span>
-                        {dockerMemInfo.docker_limit_gb && dockerMemInfo.docker_limit_gb < 24 && (
-                          <span className="ml-2 text-red-600 text-xs">(Phospho 패스에 부족 — Docker Desktop에서 늘려주세요)</span>
-                        )}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        Docker Desktop → Settings → Resources → Memory 에서 조정하세요.
-                        PTMQuant 기본 메모리는 이 값을 초과할 수 없습니다.
-                      </p>
-                    </div>
+        {/* ── 시스템 탭 ─────────────────────────────────────────────── */}
+        <TabsContent value="system" className="space-y-6 mt-0">
+          <SysTabHeader title="System Configuration" desc="서버 측 설정 — 변경 시 즉시 적용됩니다 (Worker Concurrency 제외)" sysSaved={sysSaved} sysError={sysError} sysSaving={sysSaving} hasSysChanges={hasSysChanges} onSave={handleSysSave} />
+          {sysLoading ? (
+            <div className="flex items-center justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+          ) : systemCats.map((cat) => {
+            const items = grouped[cat];
+            if (!items || items.length === 0) return null;
+            const config = CATEGORY_CONFIG[cat];
+            if (!config) return null;
+            const Icon = config.icon;
+            return (
+              <Card key={cat}>
+                <CardHeader>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Icon className="h-4 w-4" /> {config.label}
+                    {cat === "worker" && (
+                      <Badge variant="outline" className="text-[10px] h-5 px-1.5 border-amber-400 text-amber-600">
+                        재시작 필요
+                      </Badge>
+                    )}
+                  </CardTitle>
+                  <CardDescription>{config.description}</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-4">
+                    {items.map((s) => <SysSettingRow key={s.key} s={s} sysEdits={sysEdits} onEdit={handleSysEdit} />)}
                   </div>
-                )}
-                <div className="space-y-4">
-                  {items.map((s) => {
-                    const label = SETTING_LABELS[s.key] || s.key;
-                    const isBoolean = s.value_type === "boolean";
-                    const isChanged = sysEdits[s.key] !== s.value;
-                    const currentVal = Number(sysEdits[s.key] ?? s.value);
+                </CardContent>
+              </Card>
+            );
+          })}
+        </TabsContent>
 
-                    return (
-                      <div key={s.key} className="flex items-center justify-between gap-4 rounded-lg border px-4 py-3">
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2">
-                            <p className="text-sm font-medium">{label}</p>
-                            {isChanged && (
-                              <Badge variant="outline" className="text-[10px] h-4 px-1 border-blue-400 text-blue-600">
-                                변경됨
-                              </Badge>
-                            )}
-                          </div>
-                          <p className="text-xs text-muted-foreground mt-0.5">
-                            {SETTING_DESCRIPTIONS[s.key] || s.description || ""}
-                          </p>
-                          <p className="text-[10px] text-muted-foreground/60 font-mono mt-0.5">
-                            {s.key}
-                          </p>
-                        </div>
-                        <div className="shrink-0">
-                          {/* PTMQuant memory: show slider instead of plain input */}
-                          {s.key === "PTMQUANT_DEFAULT_MEMORY_GB" ? (
-                            <div className="w-56 space-y-1.5">
-                              <div className="flex items-center justify-between">
-                                <span className={cn(
-                                  "text-xs font-mono font-semibold px-1.5 py-0.5 rounded",
-                                  currentVal < 24 ? "bg-red-500/15 text-red-600"
-                                    : currentVal < 32 ? "bg-yellow-500/15 text-yellow-600"
-                                    : "bg-green-500/15 text-green-600"
-                                )}>
-                                  {currentVal} GB
-                                </span>
-                                {dockerMemInfo?.docker_limit_gb && currentVal > dockerMemInfo.docker_limit_gb && (
-                                  <span className="text-[10px] text-red-500">Docker 한계 초과</span>
-                                )}
-                              </div>
-                              <input
-                                type="range"
-                                min={8}
-                                max={Math.max(96, dockerMemInfo?.docker_limit_gb ?? 96)}
-                                step={4}
-                                value={currentVal}
-                                onChange={(e) => handleSysEdit(s.key, e.target.value)}
-                                className="w-full h-1.5 accent-primary cursor-pointer"
-                              />
-                              <div className="flex justify-between text-[10px] text-muted-foreground">
-                                <span>8 GB</span>
-                                <span className="text-green-600 font-medium">32 GB 권장</span>
-                                <span>{Math.max(96, dockerMemInfo?.docker_limit_gb ?? 96)} GB</span>
-                              </div>
-                            </div>
-                          ) : isBoolean ? (
-                            <Toggle
-                              checked={sysEdits[s.key]?.toLowerCase() === "true"}
-                              onChange={(v) => handleSysEdit(s.key, v ? "true" : "false")}
-                            />
-                          ) : s.value_type === "integer" ? (
-                            <Input
-                              type="number"
-                              min={0}
-                              value={sysEdits[s.key] ?? ""}
-                              onChange={(e) => handleSysEdit(s.key, e.target.value)}
-                              className="w-28 text-right"
-                            />
-                          ) : (
-                            <Input
-                              type="text"
-                              value={sysEdits[s.key] ?? ""}
-                              onChange={(e) => handleSysEdit(s.key, e.target.value)}
-                              className="w-72"
-                            />
+        {/* ── LLM 탭 ────────────────────────────────────────────────── */}
+        <TabsContent value="llm" className="space-y-6 mt-0">
+          <SysTabHeader title="LLM Configuration" desc="LLM 성능 및 RAG 정보 보강 단계의 설정을 조정합니다." sysSaved={sysSaved} sysError={sysError} sysSaving={sysSaving} hasSysChanges={hasSysChanges} onSave={handleSysSave} />
+          {sysLoading ? (
+            <div className="flex items-center justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+          ) : llmCats.map((cat) => {
+            const items = grouped[cat];
+            if (!items || items.length === 0) return null;
+            const config = CATEGORY_CONFIG[cat];
+            if (!config) return null;
+            const Icon = config.icon;
+            return (
+              <Card key={cat}>
+                <CardHeader>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Icon className="h-4 w-4" /> {config.label}
+                  </CardTitle>
+                  <CardDescription>{config.description}</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-4">
+                    {items.map((s) => <SysSettingRow key={s.key} s={s} sysEdits={sysEdits} onEdit={handleSysEdit} />)}
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })}
+        </TabsContent>
+
+        {/* ── PTMQuant 탭 ───────────────────────────────────────────── */}
+        <TabsContent value="ptmquant" className="space-y-6 mt-0">
+          <SysTabHeader title="PTMQuant Configuration" desc="PTMQuant 작업 생성 시 자동으로 적용되는 기본 설정입니다. 작업별로 개별 조정도 가능합니다." sysSaved={sysSaved} sysError={sysError} sysSaving={sysSaving} hasSysChanges={hasSysChanges} onSave={handleSysSave} />
+          {sysLoading ? (
+            <div className="flex items-center justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+          ) : ptmquantCats.map((cat) => {
+            const items = grouped[cat];
+            if (!items || items.length === 0) return null;
+            const config = CATEGORY_CONFIG[cat];
+            if (!config) return null;
+            const Icon = config.icon;
+            return (
+              <Card key={cat}>
+                <CardHeader>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Icon className="h-4 w-4" /> {config.label}
+                  </CardTitle>
+                  <CardDescription>{config.description}</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {dockerMemInfo && (
+                    <div className={cn(
+                      "mb-4 flex items-start gap-3 rounded-lg border px-4 py-3",
+                      dockerMemInfo.docker_limit_gb && dockerMemInfo.docker_limit_gb < 24
+                        ? "border-red-300 bg-red-50 dark:bg-red-950/20"
+                        : "border-blue-300 bg-blue-50 dark:bg-blue-950/20"
+                    )}>
+                      <MemoryStick className={cn("h-4 w-4 mt-0.5 shrink-0",
+                        dockerMemInfo.docker_limit_gb && dockerMemInfo.docker_limit_gb < 24
+                          ? "text-red-500" : "text-blue-500"
+                      )} />
+                      <div className="text-sm space-y-0.5">
+                        <p className="font-medium">
+                          Docker 메모리: <span className="font-mono">{dockerMemInfo.docker_limit_gb ?? "??"} GB</span>
+                          {dockerMemInfo.docker_limit_gb && dockerMemInfo.docker_limit_gb < 24 && (
+                            <span className="ml-2 text-red-600 text-xs">(Phospho 패스에 부족 — Docker Desktop에서 늘려주세요)</span>
                           )}
-                        </div>
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          호스트 RAM: {dockerMemInfo.host_total_gb ?? "??"} GB · Phospho 패스 권장 메모리: 32 GB 이상
+                        </p>
                       </div>
-                    );
-                  })}
-                </div>
-              </CardContent>
-            </Card>
-          );
-        })
-      )}
+                    </div>
+                  )}
+                  <div className="space-y-4">
+                    {items.map((s) => <SysSettingRow key={s.key} s={s} sysEdits={sysEdits} onEdit={handleSysEdit} dockerMemInfo={dockerMemInfo} />)}
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })}
+        </TabsContent>
 
-      {/* ── Admin File Share ── */}
-      {isAdmin && (
-        <>
-          <Separator />
+        {/* ── 파일 공유 탭 ──────────────────────────────────────────── */}
+        {isAdmin && (
+        <TabsContent value="fileshare" className="space-y-6 mt-0">
           <Card>
             <CardHeader>
               <div className="flex items-center justify-between">
@@ -1421,8 +1514,10 @@ export default function Settings() {
               )}
             </CardContent>
           </Card>
-        </>
-      )}
+        </TabsContent>
+        )}
+
+      </Tabs>
     </div>
   );
 }

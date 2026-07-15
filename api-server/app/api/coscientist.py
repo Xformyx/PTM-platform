@@ -158,6 +158,17 @@ async def coscientist_feedback(
     return await _proxy_post(f"/session/{session_id}/feedback", payload)
 
 
+@router.post("/orders/{order_id}/coscientist/session/{session_id}/cancel")
+async def coscientist_cancel(
+    order_id: int,
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Request cancellation of a running Co-Scientist session."""
+    await _get_order_or_404(order_id, db)
+    return await _proxy_post(f"/session/{session_id}/cancel")
+
+
 @router.post("/orders/{order_id}/coscientist/session/{session_id}/rerun")
 async def coscientist_rerun(
     order_id: int,
@@ -279,6 +290,12 @@ async def coscientist_feedback_standalone(
         "content": req.content,
     }
     return await _proxy_post(f"/session/{session_id}/feedback", payload)
+
+
+@router.post("/coscientist/session/{session_id}/cancel")
+async def coscientist_cancel_standalone(session_id: str) -> JSONResponse:
+    """Request cancellation of a running standalone Co-Scientist session."""
+    return await _proxy_post(f"/session/{session_id}/cancel")
 
 
 @router.post("/coscientist/session/{session_id}/rerun")

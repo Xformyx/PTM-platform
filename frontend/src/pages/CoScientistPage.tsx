@@ -60,6 +60,8 @@ import {
   X,
   ExternalLink,
   LayersIcon,
+  Cpu,
+  StopCircle,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -186,6 +188,10 @@ export default function CoScientistPage() {
   const [running, setRunning] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
 
+  // LLM selector
+  const [llmProvider, setLlmProvider] = useState("auto");
+  const [llmModel, setLlmModel] = useState("");
+
   // Feedback
   const [feedback, setFeedback] = useState("");
   const [feedbackType, setFeedbackType] = useState("direction");
@@ -222,7 +228,7 @@ export default function CoScientistPage() {
       try {
         const data = await api.get<SessionResponse>(`/coscientist/session/${sessionId}`);
         setSession(data);
-        if (data.status !== "running") {
+        if (data.status !== "running" && data.status !== "cancelling") {
           setRunning(false);
           clearInterval(pollRef.current!);
         }
@@ -277,11 +283,23 @@ export default function CoScientistPage() {
         ptm_type: ptmType,
         max_iterations: parseInt(maxIterations),
         rag_collections: selectedCollections.length ? selectedCollections : null,
+        llm_provider: llmProvider === "auto" ? "" : llmProvider,
+        llm_model: llmModel,
       });
       setSessionId(res.session_id);
     } catch (e: any) {
       setRunError(e.message);
       setRunning(false);
+    }
+  }
+
+  async function handleCancel() {
+    if (!sessionId || !running) return;
+    try {
+      await api.post(`/coscientist/session/${sessionId}/cancel`);
+      setSession((s) => s ? { ...s, status: "cancelling" } : s);
+    } catch (e: any) {
+      setRunError(`Stop failed: ${e.message}`);
     }
   }
 
@@ -525,12 +543,65 @@ export default function CoScientistPage() {
           {/* Config card */}
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-sm flex items-center gap-2">
-                <div className="flex h-7 w-7 items-center justify-center rounded-md bg-violet-500/10">
-                  <Lightbulb className="h-3.5 w-3.5 text-violet-500" />
+              <div className="flex items-start justify-between gap-2">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-md bg-violet-500/10">
+                    <Lightbulb className="h-3.5 w-3.5 text-violet-500" />
+                  </div>
+                  AI Research Studio
+                </CardTitle>
+                {/* LLM quick-pick */}
+                <div className="flex items-center gap-1 shrink-0">
+                  <Cpu className="h-3 w-3 text-muted-foreground" />
+                  <Select value={llmProvider} onValueChange={(v) => { setLlmProvider(v); setLlmModel(""); }} disabled={running}>
+                    <SelectTrigger className="h-6 text-[10px] w-20 px-1.5">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="auto" className="text-xs">Auto</SelectItem>
+                      <SelectItem value="ollama" className="text-xs">Ollama</SelectItem>
+                      <SelectItem value="openai" className="text-xs">OpenAI</SelectItem>
+                      <SelectItem value="gemini" className="text-xs">Gemini</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {llmProvider === "ollama" && (
+                    <Select value={llmModel} onValueChange={setLlmModel} disabled={running}>
+                      <SelectTrigger className="h-6 text-[10px] w-28 px-1.5">
+                        <SelectValue placeholder="model…" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {["gemma3:27b","gemma3:12b","gemma3:4b","llama3.3:70b","qwen2.5:7b"].map((m) => (
+                          <SelectItem key={m} value={m} className="text-xs">{m}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                  {llmProvider === "openai" && (
+                    <Select value={llmModel} onValueChange={setLlmModel} disabled={running}>
+                      <SelectTrigger className="h-6 text-[10px] w-28 px-1.5">
+                        <SelectValue placeholder="model…" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {["gpt-4o","gpt-4o-mini","o3-mini"].map((m) => (
+                          <SelectItem key={m} value={m} className="text-xs">{m}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                  {llmProvider === "gemini" && (
+                    <Select value={llmModel} onValueChange={setLlmModel} disabled={running}>
+                      <SelectTrigger className="h-6 text-[10px] w-36 px-1.5">
+                        <SelectValue placeholder="model…" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {["gemini-2.5-flash","gemini-2.5-pro","gemini-2.0-flash"].map((m) => (
+                          <SelectItem key={m} value={m} className="text-xs">{m}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
                 </div>
-                Pipeline Config
-              </CardTitle>
+              </div>
             </CardHeader>
             <CardContent className="space-y-4">
               <PipelineSteps running={running} completed={!!isCompleted} />
@@ -612,22 +683,37 @@ export default function CoScientistPage() {
                 </div>
               )}
 
-              <Button
-                className="w-full"
-                size="sm"
-                onClick={handleRun}
-                disabled={running || selectedCodes.size === 0 || serviceOk === false}
-              >
-                {running ? (
-                  <><Loader2 className="h-3.5 w-3.5 mr-2 animate-spin" />Running pipeline…</>
-                ) : (
-                  <><Lightbulb className="h-3.5 w-3.5 mr-2" />
-                  {selectedCodes.size === 0
-                    ? "Select experiments first"
-                    : `Generate from ${selectedCodes.size} order${selectedCodes.size !== 1 ? "s" : ""}`}
-                  </>
+              <div className="flex gap-2">
+                <Button
+                  className="flex-1"
+                  size="sm"
+                  onClick={handleRun}
+                  disabled={running || selectedCodes.size === 0 || serviceOk === false}
+                >
+                  {running ? (
+                    <><Loader2 className="h-3.5 w-3.5 mr-2 animate-spin" />
+                    {session?.status === "cancelling" ? "Stopping…" : "Researching…"}</>
+                  ) : (
+                    <><Lightbulb className="h-3.5 w-3.5 mr-2" />
+                    {selectedCodes.size === 0
+                      ? "Select experiments first"
+                      : `Start Co-Scientist (${selectedCodes.size})`}
+                    </>
+                  )}
+                </Button>
+                {running && session?.status !== "cancelling" && (
+                  <Button
+                    onClick={handleCancel}
+                    variant="destructive"
+                    size="sm"
+                    className="shrink-0 gap-1.5"
+                    title="파이프라인 중단"
+                  >
+                    <StopCircle className="h-3.5 w-3.5" />
+                    Stop
+                  </Button>
                 )}
-              </Button>
+              </div>
 
               {sessionId && (
                 <p className="text-[10px] text-muted-foreground text-center font-mono">
