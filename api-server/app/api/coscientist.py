@@ -130,6 +130,16 @@ async def coscientist_run(
     return await _proxy_post("/run", payload)
 
 
+@router.get("/orders/{order_id}/coscientist/sessions")
+async def coscientist_sessions_for_order(
+    order_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """List all Co-Scientist sessions for a specific order."""
+    order = await _get_order_or_404(order_id, db)
+    return await _proxy_get(f"/sessions?order_code={order.order_code}")
+
+
 @router.get("/orders/{order_id}/coscientist/session/{session_id}")
 async def coscientist_session(
     order_id: int,
@@ -270,6 +280,12 @@ async def coscientist_run_standalone(req: CoScientistMultiRunRequest) -> JSONRes
         "llm_model": req.llm_model,
     }
     return await _proxy_post("/run", payload)
+
+
+@router.get("/coscientist/sessions")
+async def coscientist_sessions_standalone() -> JSONResponse:
+    """List all standalone Co-Scientist sessions."""
+    return await _proxy_get("/sessions")
 
 
 @router.get("/coscientist/session/{session_id}")

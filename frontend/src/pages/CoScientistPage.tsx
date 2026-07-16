@@ -62,6 +62,8 @@ import {
   LayersIcon,
   Cpu,
   StopCircle,
+  History,
+  Clock,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -107,6 +109,18 @@ interface SessionResponse {
   total_hypotheses: number;
   top_hypotheses: Hypothesis[];
   experiment_designs: ExperimentDesign[];
+  error?: string;
+}
+
+interface SessionMeta {
+  session_id: string;
+  status: string;
+  created_at: string;
+  order_codes: string[];
+  total_hypotheses: number;
+  iteration: number;
+  research_goal: string;
+  ptm_type: string;
 }
 
 // ─── Pipeline step visualization ──────────────────────────────────────────────
@@ -191,6 +205,11 @@ export default function CoScientistPage() {
   // LLM selector
   const [llmProvider, setLlmProvider] = useState("auto");
   const [llmModel, setLlmModel] = useState("");
+
+  // History
+  const [history, setHistory] = useState<SessionMeta[]>([]);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
   // Feedback
   const [feedback, setFeedback] = useState("");
@@ -308,6 +327,30 @@ export default function CoScientistPage() {
       setSession((s) => s ? { ...s, status: "cancelling" } : s);
     } catch (e: any) {
       setRunError(`Stop failed: ${e.message}`);
+    }
+  }
+
+  async function loadHistory() {
+    setHistoryLoading(true);
+    try {
+      const data = await api.get<{ sessions: SessionMeta[] }>("/coscientist/sessions");
+      setHistory(data.sessions ?? []);
+    } catch { /* non-fatal */ }
+    finally { setHistoryLoading(false); }
+  }
+
+  async function loadSessionFromHistory(sid: string) {
+    try {
+      const data = await api.get<SessionResponse>(`/coscientist/session/${sid}`);
+      setSession(data);
+      setSessionId(sid);
+      setRunning(false);
+      setHistoryOpen(false);
+      setTimeout(() => {
+        document.getElementById("cs-results")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 150);
+    } catch (e: any) {
+      setRunError(`세션 로드 실패: ${e.message}`);
     }
   }
 
@@ -747,6 +790,70 @@ export default function CoScientistPage() {
             </div>
           )}
 
+          {/* Session History */}
+          <Card>
+            <CardHeader
+              className="pb-3 cursor-pointer select-none"
+              onClick={() => { setHistoryOpen((o) => !o); if (!historyOpen) loadHistory(); }}
+            >
+              <CardTitle className="text-sm flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-md bg-slate-500/10">
+                    <History className="h-3.5 w-3.5 text-slate-500" />
+                  </div>
+                  Session History
+                </div>
+                <ChevronDown className={`h-3.5 w-3.5 text-muted-foreground transition-transform ${historyOpen ? "rotate-180" : ""}`} />
+              </CardTitle>
+            </CardHeader>
+            {historyOpen && (
+              <CardContent className="pt-0 space-y-1">
+                {historyLoading ? (
+                  <div className="flex justify-center py-4"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /></div>
+                ) : history.length === 0 ? (
+                  <p className="text-xs text-muted-foreground text-center py-3">이전 세션 없음</p>
+                ) : (
+                  <div className="space-y-1">
+                    {history.map((h) => {
+                      const isActive = h.session_id === sessionId;
+                      const dt = h.created_at ? new Date(h.created_at).toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : "";
+                      const statusColor = h.status === "completed" ? "text-emerald-600 bg-emerald-50 border-emerald-200 dark:bg-emerald-950/30 dark:border-emerald-800" : h.status === "cancelled" ? "text-amber-600 bg-amber-50 border-amber-200 dark:bg-amber-950/30 dark:border-amber-800" : h.status.startsWith("error") ? "text-red-600 bg-red-50 border-red-200 dark:bg-red-950/30 dark:border-red-800" : "text-slate-600 bg-slate-50 border-slate-200";
+                      return (
+                        <button
+                          key={h.session_id}
+                          onClick={() => loadSessionFromHistory(h.session_id)}
+                          className={`w-full text-left rounded-md border px-3 py-2 text-xs transition-colors hover:bg-muted/60 ${isActive ? "border-violet-400 bg-violet-50/60 dark:bg-violet-950/20" : "border-border"}`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-mono text-[10px] text-muted-foreground">{h.session_id}</span>
+                            <span className={`px-1.5 py-0.5 rounded border text-[10px] font-medium ${statusColor}`}>
+                              {h.status === "completed" ? "완료" : h.status === "cancelled" ? "중단" : h.status.startsWith("error") ? "오류" : h.status}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2 mt-1 text-muted-foreground">
+                            <Clock className="h-2.5 w-2.5 shrink-0" />
+                            <span>{dt}</span>
+                            <span>·</span>
+                            <span>{h.total_hypotheses}개 가설</span>
+                            <span>·</span>
+                            <span>{h.iteration} iter</span>
+                          </div>
+                          {h.research_goal && (
+                            <p className="mt-1 text-[10px] text-muted-foreground truncate">{h.research_goal}</p>
+                          )}
+                          {h.order_codes.length > 0 && (
+                            <p className="mt-0.5 text-[10px] text-muted-foreground truncate">{h.order_codes.join(", ")}</p>
+                          )}
+                          {isActive && <span className="text-[10px] text-violet-500 font-medium">현재 보는 세션</span>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </CardContent>
+            )}
+          </Card>
+
           {/* Feedback (after completion) */}
           {!running && isCompleted && (
             <Card>
@@ -807,7 +914,7 @@ export default function CoScientistPage() {
 
       {/* ── Results: hypotheses + experiment designs ─────────────────────── */}
       {!running && session && isCompleted && (
-        <div className="space-y-4">
+        <div id="cs-results" className="space-y-4">
           {/* Summary */}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
