@@ -64,6 +64,7 @@ class PTMQuantificationAnalyzer:
         self.fasta_dict: Dict[str, str] = {}
         self.protein_names: Dict[str, str] = {}
         self.gene_names: Dict[str, str] = {}
+        self.diann_genes: Dict[str, str] = {}  # Protein.Group → Genes from DIA-NN matrix
 
         self._progress = progress_callback or (lambda p, m: None)
 
@@ -200,6 +201,54 @@ class PTMQuantificationAnalyzer:
         except Exception:
             return "Unknown protein", "Unknown"
 
+    @staticmethod
+    def _split_protein_ids(protein_group: str) -> List[str]:
+        """Split DIA-NN Protein.Group (may contain ';'-separated IDs)."""
+        return [p.strip() for p in str(protein_group).split(";") if p.strip()]
+
+    def _resolve_from_dict(self, protein_group: str, mapping: Dict[str, str], default: str = "") -> str:
+        """Look up by full Protein.Group, then by each individual UniProt ID."""
+        if protein_group in mapping:
+            val = mapping[protein_group]
+            if val and str(val).lower() not in ("unknown", "nan", ""):
+                return val
+        for pid in self._split_protein_ids(protein_group):
+            if pid in mapping:
+                val = mapping[pid]
+                if val and str(val).lower() not in ("unknown", "nan", ""):
+                    return val
+        return default
+
+    def _resolve_gene_name(self, protein_group: str) -> str:
+        """Resolve gene name: DIA-NN Genes column first, then FASTA GN= lookup."""
+        if protein_group in self.diann_genes:
+            g = str(self.diann_genes[protein_group]).strip()
+            if g and g.lower() not in ("unknown", "nan"):
+                return g.split(";")[0].strip()
+        for pid in self._split_protein_ids(protein_group):
+            if pid in self.diann_genes:
+                g = str(self.diann_genes[pid]).strip()
+                if g and g.lower() not in ("unknown", "nan"):
+                    return g.split(";")[0].strip()
+        return self._resolve_from_dict(protein_group, self.gene_names, "Unknown") or "Unknown"
+
+    def _resolve_protein_name(self, protein_group: str) -> str:
+        return self._resolve_from_dict(protein_group, self.protein_names, "Unknown protein") or "Unknown protein"
+
+    def _build_diann_gene_map(self) -> None:
+        """Build Protein.Group → Genes map from DIA-NN PR/PG matrices."""
+        self.diann_genes = {}
+        for df in (getattr(self, "pg_matrix", None), getattr(self, "pr_matrix", None)):
+            if df is None or "Genes" not in df.columns or "Protein.Group" not in df.columns:
+                continue
+            for _, row in df[["Protein.Group", "Genes"]].drop_duplicates("Protein.Group").iterrows():
+                pg = str(row["Protein.Group"])
+                gene = str(row["Genes"]).strip()
+                if gene and gene.lower() not in ("nan", "unknown") and pg not in self.diann_genes:
+                    self.diann_genes[pg] = gene
+        if self.diann_genes:
+            logger.info(f"DIA-NN gene map: {len(self.diann_genes):,} protein groups")
+
     # ------------------------------------------------------------------
     # Data loading & condition mapping
     # ------------------------------------------------------------------
@@ -221,6 +270,7 @@ class PTMQuantificationAnalyzer:
             self.sample_columns = [col for col in self.pr_matrix.columns if col.endswith(".mzML")]
             logger.info(f"Samples: {len(self.sample_columns)}")
 
+            self._build_diann_gene_map()
             self.create_condition_mapping()
             return True
         except Exception as e:
@@ -395,8 +445,14 @@ class PTMQuantificationAnalyzer:
 
             target_unimod_ids = [uid for uid, info in VARIABLE_MODIFICATIONS.items() if info["name"] == ptm_type]
 
-            if protein_id in self.fasta_dict:
-                protein_sequence = self.fasta_dict[protein_id]
+            candidate_ids = self._split_protein_ids(protein_id)
+            if protein_id in self.fasta_dict and protein_id not in candidate_ids:
+                candidate_ids.insert(0, protein_id)
+
+            for pid in candidate_ids:
+                if pid not in self.fasta_dict:
+                    continue
+                protein_sequence = self.fasta_dict[pid]
                 clean_sequence = re.sub(r"\([^)]*\)", "", modified_sequence)
                 peptide_start = protein_sequence.find(clean_sequence)
 
@@ -418,8 +474,8 @@ class PTMQuantificationAnalyzer:
                         else:
                             i += 1
 
-                if modified_sequence.startswith("(UniMod:1)"):
-                    return "N-term"
+                    if modified_sequence.startswith("(UniMod:1)"):
+                        return "N-term"
 
             for match in re.finditer(r"([A-Z])\(UniMod:(\d+)\)", modified_sequence):
                 residue, unimod_id = match.group(1), match.group(2)
@@ -595,8 +651,8 @@ class PTMQuantificationAnalyzer:
             for idx, row in pg.iterrows():
                 protein_group = row["Protein.Group"]
                 control_mean = row["Control_Mean"]
-                protein_name = self.protein_names.get(protein_group, "Unknown protein")
-                gene_name = self.gene_names.get(protein_group, "Unknown")
+                protein_name = self._resolve_protein_name(protein_group)
+                gene_name = self._resolve_gene_name(protein_group)
                 has_ptm = protein_group in ptm_proteins_set
 
                 for treatment in self.treatment_conditions:
