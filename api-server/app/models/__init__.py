@@ -1,4 +1,5 @@
 from app.models.chat_message import ChatMessage
+from app.models.comparison_report import ComparisonReport
 from app.models.llm_model import LlmModel
 from app.models.login_attempt import LoginAttempt
 from app.models.notification import Notification
@@ -21,6 +22,7 @@ __all__ = [
     "LlmModel",
     "Report",
     "ChatMessage",
+    "ComparisonReport",
     "SystemSetting",
     "PTMQuantJob",
 ]

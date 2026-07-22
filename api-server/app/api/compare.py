@@ -7,6 +7,7 @@ shared signaling mechanisms, treatment-specific responses, and temporal dynamics
 import json
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -19,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.dependencies import get_current_user
+from app.models.comparison_report import ComparisonReport
 from app.models.order import Order
 
 logger = logging.getLogger(__name__)
@@ -107,52 +109,230 @@ def _load_report_md(output_dir: Path, ptm_type: str) -> str:
     return candidates[0].read_text(encoding="utf-8", errors="replace")
 
 
-def _extract_conditions(vector_data: list[dict]) -> list[str]:
-    """Extract condition names from vector data columns."""
+_CHATML_TOKEN_RE = re.compile(
+    r"<\|(?:im_start|im_end|endoftext|system|user|assistant)\|>",
+    re.IGNORECASE,
+)
+
+
+def _sanitize_llm_chunk(text: str) -> str:
+    """Strip ChatML / template tokens that some models leak into output."""
+    if not text:
+        return text
+    return _CHATML_TOKEN_RE.sub("", text)
+
+
+def _make_ollama_stream_filter():
+    """Return a stateful filter function for a single streaming response.
+
+    Handles two thinking-token styles:
+    - ``message.thinking`` field  → ignored (already separated by Ollama)
+    - ``<thought>...</thought>`` / ``<think>...</think>`` embedded in content
+      (e.g. exaone-deep) → strip the thinking block, pass through the rest
+    """
+    buf = ""
+    in_think = False
+    think_done = False
+    OPEN_TAGS = ("<thought>", "<think>", "<thinking>")
+    CLOSE_TAGS = ("</thought>", "</think>", "</thinking>")
+
+    def filter_chunk(chunk: str) -> str:
+        nonlocal buf, in_think, think_done
+        if not chunk:
+            return ""
+        if think_done:
+            return chunk
+        buf += chunk
+        # Try to detect opening tag in accumulated buffer
+        for otag in OPEN_TAGS:
+            if otag in buf:
+                in_think = True
+                break
+        if in_think:
+            for ctag in CLOSE_TAGS:
+                if ctag in buf:
+                    # Strip everything up to and including the closing tag
+                    idx = buf.index(ctag) + len(ctag)
+                    remainder = buf[idx:].lstrip("\n")
+                    buf = ""
+                    think_done = True
+                    return remainder
+            # Still inside thinking block — emit nothing
+            return ""
+        # No opening tag found; once we've accumulated enough to be sure,
+        # flush and mark done
+        if len(buf) >= 30:
+            think_done = True
+            out = buf
+            buf = ""
+            return out
+        return ""
+
+    return filter_chunk
+
+
+def _ollama_chat_payload(
+    model: str,
+    messages: list[dict],
+    *,
+    temperature: float,
+    num_predict: int,
+    num_ctx: int = 32768,
+) -> dict:
+    """Build an Ollama /api/chat payload.
+
+    ``think: false`` suppresses internal reasoning for models that support it
+    (qwen3.5, glm-4.7, etc.). The streaming filter above handles models that
+    embed thinking in ``<thought>`` / ``<think>`` tags within the content field.
+    """
+    return {
+        "model": model,
+        "messages": messages,
+        "stream": True,
+        "think": False,
+        "options": {
+            "temperature": temperature,
+            "num_predict": num_predict,
+            "num_ctx": num_ctx,
+        },
+    }
+
+
+def _condition_sort_key(s: str) -> tuple:
+    """Sort time-point labels chronologically (0.5h, 1h, 24h, ...)."""
+    s_str = str(s).strip()
+    m = re.match(r"^([\d.]+)\s*(sec|s|min|m|hr|h|hour|d|day)s?$", s_str, re.IGNORECASE)
+    if m:
+        val = float(m.group(1))
+        unit = m.group(2).lower()
+        if unit in ("sec", "s"):
+            return (val / 60.0, "")
+        if unit in ("min", "m"):
+            return (val, "")
+        if unit in ("hr", "h", "hour"):
+            return (val * 60.0, "")
+        if unit in ("d", "day"):
+            return (val * 1440.0, "")
+    m2 = re.match(r"^([\d.]+)$", s_str)
+    if m2:
+        return (float(m2.group(1)), "")
+    return (float("inf"), s_str)
+
+
+def _is_long_format(vector_data: list[dict]) -> bool:
+    if not vector_data:
+        return False
+    row = vector_data[0]
+    return bool(row.get("Condition") or row.get("condition"))
+
+
+def _extract_wide_conditions(vector_data: list[dict]) -> list[str]:
+    """Extract condition columns from wide-format vector data."""
     if not vector_data:
         return []
-    # Condition columns are those that look like time-points (e.g., 0hr, 30min, 1hr)
-    skip_cols = {"Gene", "Position", "Protein", "Motif", "Sequence", "UniProt_ID",
-                 "PTM_Score", "Localization_Prob", "Motif_Class", "Kinase_Prediction",
-                 "gene", "position", "protein", "motif", "sequence", "uniprot_id",
-                 "ptm_score", "localization_prob", "motif_class", "kinase_prediction",
-                 "max_abs_fc", "peak_condition", "direction", "cluster_id"}
+    skip_cols = {
+        "Gene", "Position", "Protein", "Motif", "Sequence", "UniProt_ID",
+        "PTM_Score", "Localization_Prob", "Motif_Class", "Kinase_Prediction",
+        "gene", "position", "protein", "motif", "sequence", "uniprot_id",
+        "ptm_score", "localization_prob", "motif_class", "kinase_prediction",
+        "max_abs_fc", "peak_condition", "direction", "cluster_id",
+        "Gene.Name", "PTM_Position", "Condition", "Comparison",
+        "PTM_Relative_Log2FC", "PTM_Absolute_Log2FC", "Protein.Group",
+    }
+    skip_lower = {c.lower() for c in skip_cols}
     first_row = vector_data[0]
     conditions = []
     for col in first_row.keys():
-        if col not in skip_cols and col.lower() not in {c.lower() for c in skip_cols}:
-            # Try to parse as a numeric value (fold-change)
-            try:
-                float(first_row[col])
-                conditions.append(col)
-            except (ValueError, TypeError):
+        if col in skip_cols or col.lower() in skip_lower:
+            continue
+        try:
+            float(first_row[col])
+            conditions.append(col)
+        except (ValueError, TypeError):
+            continue
+    return sorted(conditions, key=_condition_sort_key)
+
+
+def _parse_vector_sites(vector_data: list[dict]) -> tuple[list[str], dict[str, dict]]:
+    """Parse vector TSV rows into per-site time series (long or wide format)."""
+    if not vector_data:
+        return [], {}
+
+    if _is_long_format(vector_data):
+        conditions_set: set[str] = set()
+        sites: dict[str, dict] = {}
+        for row in vector_data:
+            gene = (
+                row.get("Gene.Name") or row.get("Gene") or row.get("gene") or ""
+            ).strip()
+            position = str(
+                row.get("PTM_Position") or row.get("Position") or row.get("position") or ""
+            ).strip()
+            if not gene and not position:
                 continue
-    return conditions
+            key = f"{gene}_{position}"
+            cond = (row.get("Condition") or row.get("condition") or "").strip()
+            if not cond:
+                continue
+            fc_raw = row.get("PTM_Relative_Log2FC")
+            if fc_raw in (None, ""):
+                fc_raw = row.get("PTM_Absolute_Log2FC")
+            try:
+                fc = float(fc_raw or 0)
+            except (ValueError, TypeError):
+                fc = 0.0
+            conditions_set.add(cond)
+            if key not in sites:
+                sites[key] = {
+                    "gene": gene,
+                    "position": position,
+                    "values": {},
+                    "max_abs_fc": 0.0,
+                }
+            sites[key]["values"][cond] = fc
+            abs_fc = abs(fc)
+            if abs_fc > sites[key]["max_abs_fc"]:
+                sites[key]["max_abs_fc"] = abs_fc
+        conditions = sorted(conditions_set, key=_condition_sort_key)
+        return conditions, sites
 
-
-def _extract_top_ptms(vector_data: list[dict], top_n: int = 50) -> list[dict]:
-    """Extract top N PTMs by max absolute fold-change."""
-    ptms = []
-    conditions = _extract_conditions(vector_data)
+    conditions = _extract_wide_conditions(vector_data)
+    sites = {}
     for row in vector_data:
-        gene = row.get("Gene") or row.get("gene", "")
-        position = row.get("Position") or row.get("position", "")
+        gene = (row.get("Gene") or row.get("gene") or "").strip()
+        position = str(row.get("Position") or row.get("position") or "").strip()
+        if not gene and not position:
+            continue
+        key = f"{gene}_{position}"
         values = {}
         max_abs = 0.0
         for cond in conditions:
             try:
                 v = float(row.get(cond, 0))
-                values[cond] = v
-                if abs(v) > max_abs:
-                    max_abs = abs(v)
             except (ValueError, TypeError):
-                values[cond] = 0.0
-        ptms.append({
+                v = 0.0
+            values[cond] = v
+            if abs(v) > max_abs:
+                max_abs = abs(v)
+        sites[key] = {
             "gene": gene,
             "position": position,
             "values": values,
             "max_abs_fc": max_abs,
-        })
+        }
+    return conditions, sites
+
+
+def _extract_conditions(vector_data: list[dict]) -> list[str]:
+    """Extract ordered condition names from vector data."""
+    conditions, _ = _parse_vector_sites(vector_data)
+    return conditions
+
+
+def _extract_top_ptms(vector_data: list[dict], top_n: int = 50) -> list[dict]:
+    """Extract top N PTMs by max absolute fold-change."""
+    _, sites = _parse_vector_sites(vector_data)
+    ptms = list(sites.values())
     ptms.sort(key=lambda x: x["max_abs_fc"], reverse=True)
     return ptms[:top_n]
 
@@ -191,21 +371,14 @@ def _build_comparison_data(
     vector_a: list[dict], vector_b: list[dict],
 ) -> dict:
     """Build the comparison summary data."""
-    # Extract top PTMs
-    top_a = _extract_top_ptms(vector_a)
-    top_b = _extract_top_ptms(vector_b)
-
-    # Build lookup by gene+position
-    a_map = {f"{p['gene']}_{p['position']}": p for p in top_a}
-    b_map = {f"{p['gene']}_{p['position']}": p for p in top_b}
+    conds_a, a_map = _parse_vector_sites(vector_a)
+    conds_b, b_map = _parse_vector_sites(vector_b)
 
     shared_keys = set(a_map.keys()) & set(b_map.keys())
     a_only_keys = set(a_map.keys()) - set(b_map.keys())
     b_only_keys = set(b_map.keys()) - set(a_map.keys())
 
     # Find common conditions for correlation
-    conds_a = _extract_conditions(vector_a)
-    conds_b = _extract_conditions(vector_b)
     common_conds = [c for c in conds_a if c in conds_b]
 
     # Classify shared PTMs
@@ -231,6 +404,10 @@ def _build_comparison_data(
         if (a_max > 0 and b_max > 0) or (a_max < 0 and b_max < 0):
             concordant += 1
 
+        # Build per-condition profile strings for prompt use
+        a_profile = {c: round(pa["values"].get(c, 0.0), 3) for c in common_conds} if common_conds else {}
+        b_profile = {c: round(pb["values"].get(c, 0.0), 3) for c in common_conds} if common_conds else {}
+
         shared_ptms.append({
             "gene": pa["gene"],
             "position": pa["position"],
@@ -238,6 +415,8 @@ def _build_comparison_data(
             "b_max_fc": round(b_max, 3),
             "correlation": round(corr, 3),
             "classification": classification,
+            "a_profile": a_profile,
+            "b_profile": b_profile,
         })
 
     shared_ptms.sort(key=lambda x: abs(x["correlation"]), reverse=True)
@@ -338,98 +517,121 @@ def _build_comparison_prompt(
     report_b: str,
     user_instructions: str = "",
 ) -> str:
-    """Build the LLM prompt for comparative analysis."""
+    """Build the LLM prompt for comparative analysis from structured data.
+
+    Uses structured PTM time-series data directly instead of the raw report files
+    to give the LLM high-quality, unambiguous input.
+    """
     order_a = comparison_data["order_a"]
     order_b = comparison_data["order_b"]
     stats = comparison_data["stats"]
+    common_conds = stats.get("common_conditions", [])
 
-    # Truncate reports if too long (keep first 8000 chars each)
-    max_report_len = 8000
-    report_a_trunc = report_a[:max_report_len] if len(report_a) > max_report_len else report_a
-    report_b_trunc = report_b[:max_report_len] if len(report_b) > max_report_len else report_b
+    # ── Shared PTMs: top 30 with temporal profiles ──────────────────────────
+    top_shared = sorted(
+        comparison_data["shared_ptms"],
+        key=lambda p: max(abs(p["a_max_fc"]), abs(p["b_max_fc"])),
+        reverse=True,
+    )[:30]
 
-    # Top shared PTMs for context
-    top_shared = comparison_data["shared_ptms"][:20]
-    shared_table = "\n".join(
-        f"  {p['gene']} {p['position']}: A={p['a_max_fc']:+.2f}, B={p['b_max_fc']:+.2f}, r={p['correlation']:.2f}, class={p['classification']}"
-        for p in top_shared
+    shared_lines = []
+    for p in top_shared:
+        gene_pos = f"{p['gene']} {p['position']}"
+        if common_conds and p.get("a_profile") and p.get("b_profile"):
+            a_vals = "  ".join(f"{c}:{p['a_profile'].get(c, 0):+.2f}" for c in common_conds)
+            b_vals = "  ".join(f"{c}:{p['b_profile'].get(c, 0):+.2f}" for c in common_conds)
+            shared_lines.append(
+                f"  {gene_pos}  [r={p['correlation']:.2f}, class={p['classification']}]\n"
+                f"    A: {a_vals}\n"
+                f"    B: {b_vals}"
+            )
+        else:
+            shared_lines.append(
+                f"  {gene_pos}  A_max={p['a_max_fc']:+.2f}  B_max={p['b_max_fc']:+.2f}"
+                f"  r={p['correlation']:.2f}  class={p['classification']}"
+            )
+
+    # ── A-only and B-only PTMs: top 20 each ─────────────────────────────────
+    top_a_only = sorted(comparison_data["a_only_ptms"], key=lambda p: abs(p["max_fc"]), reverse=True)[:20]
+    top_b_only = sorted(comparison_data["b_only_ptms"], key=lambda p: abs(p["max_fc"]), reverse=True)[:20]
+    a_only_lines = [f"  {p['gene']} {p['position']}  max_fc={p['max_fc']:+.2f}" for p in top_a_only]
+    b_only_lines = [f"  {p['gene']} {p['position']}  max_fc={p['max_fc']:+.2f}" for p in top_b_only]
+
+    user_focus = (
+        user_instructions.strip()
+        if user_instructions and user_instructions.strip()
+        else "일반적인 비교 분석 수행 (공통 경로, 물질 특이적 반응, temporal dynamics 비교)"
     )
 
-    prompt = f"""You are a senior proteomics bioinformatician. Analyze the comparison between two PTM time-series experiments and write a comprehensive comparative report.
+    prompt = f"""당신은 PTM(번역 후 변형) 프로테오믹스 전문 선임 연구자입니다.
+두 PTM 시계열 실험의 비교 분석 리포트를 아래 제공된 정량적 데이터를 기반으로 한국어로 작성하세요.
 
-═══ EXPERIMENT OVERVIEW ═══
+════ 실험 정보 ════
 
-Order A: {order_a['project_name']}
-  - Species: {order_a['species']}, PTM: {order_a['ptm_type']}
-  - Conditions (timepoints): {', '.join(order_a['conditions'])}
+[실험 A] {order_a['project_name']}
+  - 종: {order_a['species']}, PTM 유형: {order_a['ptm_type']}
+  - 시간대(조건): {', '.join(order_a['conditions'])}
 
-Order B: {order_b['project_name']}
-  - Species: {order_b['species']}, PTM: {order_b['ptm_type']}
-  - Conditions (timepoints): {', '.join(order_b['conditions'])}
+[실험 B] {order_b['project_name']}
+  - 종: {order_b['species']}, PTM 유형: {order_b['ptm_type']}
+  - 시간대(조건): {', '.join(order_b['conditions'])}
 
-═══ QUANTITATIVE COMPARISON SUMMARY ═══
+════ 정량적 비교 요약 ════
 
-Shared PTMs: {stats['total_shared']} | A-only: {stats['total_a_only']} | B-only: {stats['total_b_only']}
-Direction concordance: {stats['direction_concordance']:.1%}
-Classification: {json.dumps(stats['classification_counts'])}
+공통 PTM site: {stats['total_shared']}개  |  A 전용: {stats['total_a_only']}개  |  B 전용: {stats['total_b_only']}개
+방향 일치율: {stats['direction_concordance']:.1%}
+반응 패턴 분류: {json.dumps(stats['classification_counts'], ensure_ascii=False)}
 
-Shared Kinases ({stats['shared_kinase_count']}): {', '.join(comparison_data['shared_kinases'][:15])}
-A-only Kinases: {', '.join(comparison_data['a_only_kinases'][:10])}
-B-only Kinases: {', '.join(comparison_data['b_only_kinases'][:10])}
+공통 Kinase ({stats['shared_kinase_count']}개): {', '.join(comparison_data['shared_kinases'][:20]) or '없음'}
+A 전용 Kinase: {', '.join(comparison_data['a_only_kinases'][:15]) or '없음'}
+B 전용 Kinase: {', '.join(comparison_data['b_only_kinases'][:15]) or '없음'}
 
-Shared Receptors ({stats['shared_receptor_count']}): {', '.join(comparison_data['shared_receptors'][:10])}
-A-only Receptors: {', '.join(comparison_data['a_only_receptors'][:10])}
-B-only Receptors: {', '.join(comparison_data['b_only_receptors'][:10])}
+공통 Receptor ({stats['shared_receptor_count']}개): {', '.join(comparison_data['shared_receptors'][:15]) or '없음'}
+A 전용 Receptor: {', '.join(comparison_data['a_only_receptors'][:10]) or '없음'}
+B 전용 Receptor: {', '.join(comparison_data['b_only_receptors'][:10]) or '없음'}
 
-═══ TOP SHARED PTMs (by correlation) ═══
-{shared_table}
+════ 공통 PTM 상위 {len(top_shared)}개 — 시계열 프로파일 ════
+(조건: {', '.join(common_conds) if common_conds else 'N/A'})
 
-═══ ORDER A REPORT (excerpt) ═══
-{report_a_trunc}
+{chr(10).join(shared_lines) if shared_lines else '공통 PTM 없음'}
 
-═══ ORDER B REPORT (excerpt) ═══
-{report_b_trunc}
+════ A 전용 PTM 상위 {len(top_a_only)}개 ════
 
-═══ USER FOCUS POINTS ═══
+{chr(10).join(a_only_lines) if a_only_lines else '없음'}
+
+════ B 전용 PTM 상위 {len(top_b_only)}개 ════
+
+{chr(10).join(b_only_lines) if b_only_lines else '없음'}
+
+════ 분석 초점 ════
+
 {user_focus}
 
-═══ INSTRUCTIONS ═══
+════ 작성 지시 ════
 
-Write a structured comparative analysis report in Korean with the following sections:
+위 데이터를 바탕으로 다음 6개 섹션의 비교 분석 리포트를 작성하세요.
+각 섹션당 200~400단어, 구체적인 유전자명·위치·수치 인용 필수.
 
 ## 1. 공통 Signaling Mechanism
-- Identify shared pathways activated by both treatments
-- Explain the biological significance of common kinase/receptor activation
+두 실험에서 공통으로 활성화된 신호전달 경로 및 kinase 서술
 
-## 2. 물질 특이적 반응 (Treatment-Specific Responses)
-- For each treatment, describe unique signaling events
-- Explain what these differences reveal about mechanism of action
+## 2. 물질 특이적 반응
+각 실험에서만 나타나는 고유한 신호 이벤트 서술 및 작용기전 해석
 
 ## 3. Temporal Dynamics 비교
-- Compare the timing of responses (early vs late, transient vs sustained)
-- Identify any delayed or dose-dependent patterns
+반응 타이밍 비교 (조기/후기, 일시적/지속적), 지연 반응 또는 용량 의존 패턴 식별
 
 ## 4. Kinase Activity 비교
-- Compare active kinases between treatments
-- Identify shared vs unique substrate phosphorylation patterns
+두 실험의 kinase 활성 차이 비교, 공통/고유 기질 인산화 패턴 해석
 
-## 5. Receptor → Cascade 분기점 (Signaling Divergence)
-- Map where shared upstream signals diverge into treatment-specific cascades
-- Identify the branching points in signaling networks
+## 5. Signaling Divergence 분기점
+공통 상위 신호에서 실험별로 어떻게 분기되는지 경로 매핑
 
-## 6. 치료적 함의 (Therapeutic Implications)
-- Suggest potential drug targets based on shared/unique pathways
-- Discuss synergy or antagonism possibilities
+## 6. 치료적 함의
+공통/고유 경로 기반 약물 타겟 제안, 병용 또는 길항 가능성 논의
 
-RULES:
-- Base ALL conclusions on the provided data. Do NOT fabricate findings.
-- Use specific gene names, positions, and fold-change values from the data.
-- Clearly distinguish between confirmed observations and hypotheses.
-- Write in academic Korean with English gene/protein names.
-- Keep each section concise but informative (200-400 words per section).
-- If USER FOCUS POINTS are provided, prioritize addressing those questions/topics throughout the report.
+주의: 제공된 데이터에 근거한 결론만 작성하고, 데이터가 없는 경우 추측임을 명시하세요.
 """
-    prompt = prompt.replace("{user_focus}", user_instructions if user_instructions else "(No specific focus points provided — perform general comparative analysis)")
     return prompt
 
 
@@ -560,33 +762,37 @@ async def stream_comparison_report(
                     async with client.stream(
                         "POST",
                         f"{ollama_url}/api/chat",
-                        json={
-                            "model": llm_model,
-                            "messages": [
+                        json=_ollama_chat_payload(
+                            llm_model,
+                            [
                                 {"role": "system", "content": "You are a senior proteomics bioinformatician specializing in comparative PTM analysis."},
                                 {"role": "user", "content": prompt},
                             ],
-                            "stream": True,
-                            "options": {
-                                "temperature": 0.6,
-                                "num_predict": 8192,
-                                "num_ctx": 32768,
-                            },
-                        },
+                            temperature=0.6,
+                            num_predict=8192,
+                        ),
                     ) as resp:
                         if resp.status_code != 200:
                             yield f"data: {json.dumps({'type': 'error', 'message': f'LLM error: {resp.status_code}'})}\n\n"
                             return
+                        had_content = False
+                        think_filter = _make_ollama_stream_filter()
                         async for line in resp.aiter_lines():
                             if not line.strip():
                                 continue
                             try:
                                 data = json.loads(line)
-                                content = data.get("message", {}).get("content", "")
+                                raw = data.get("message", {}).get("content", "")
+                                content = _sanitize_llm_chunk(think_filter(raw))
                                 done = data.get("done", False)
-                                if content:
+                                if content and content.strip():
+                                    had_content = True
                                     yield f"data: {json.dumps({'type': 'token', 'content': content})}\n\n"
                                 if done:
+                                    if not had_content:
+                                        reason = data.get("done_reason", "unknown")
+                                        model_hint = "gemma3:27b 또는 qwen2.5:14b 모델을 선택해 주세요."
+                                        yield f"data: {json.dumps({'type': 'error', 'message': f'선택한 모델이 비교 분석 리포트를 생성하지 못했습니다 (reason={reason}). {model_hint}'})}\n\n"
                                     yield f"data: {json.dumps({'type': 'done'})}\n\n"
                             except json.JSONDecodeError:
                                 continue
@@ -638,7 +844,7 @@ async def stream_comparison_report(
                             try:
                                 data = json.loads(payload)
                                 delta = data.get("choices", [{}])[0].get("delta", {})
-                                content = delta.get("content", "")
+                                content = _sanitize_llm_chunk(delta.get("content", ""))
                                 if content:
                                     yield f"data: {json.dumps({'type': 'token', 'content': content})}\n\n"
                             except (json.JSONDecodeError, IndexError):
@@ -658,6 +864,198 @@ async def stream_comparison_report(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+# ─── Saved Report Endpoints ───────────────────────────────────────────────────
+
+class SaveReportRequest(BaseModel):
+    order_id_a: int
+    order_id_b: int
+    report_text: str
+    chat_messages: Optional[list] = None
+    llm_model: Optional[str] = None
+    user_instructions: Optional[str] = None
+
+
+@router.post("/save")
+async def save_comparison_report(
+    body: SaveReportRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Save (upsert) a comparison report for a given order pair and user."""
+    from app.models.comparison_report import ComparisonReport as CR
+    user_id = user.id if user else None
+
+    stmt = select(CR).where(
+        CR.order_id_a == body.order_id_a,
+        CR.order_id_b == body.order_id_b,
+        CR.user_id == user_id,
+    )
+    result = await db.execute(stmt)
+    existing = result.scalar_one_or_none()
+
+    if existing:
+        existing.report_text = body.report_text
+        existing.chat_messages = body.chat_messages
+        existing.llm_model = body.llm_model
+        existing.user_instructions = body.user_instructions
+        record = existing
+    else:
+        record = CR(
+            order_id_a=body.order_id_a,
+            order_id_b=body.order_id_b,
+            user_id=user_id,
+            report_text=body.report_text,
+            chat_messages=body.chat_messages,
+            llm_model=body.llm_model,
+            user_instructions=body.user_instructions,
+        )
+        db.add(record)
+
+    await db.commit()
+    await db.refresh(record)
+
+    return {
+        "id": record.id,
+        "report_text": record.report_text or "",
+        "chat_messages": record.chat_messages or [],
+        "llm_model": record.llm_model,
+        "created_at": record.created_at.isoformat(),
+        "updated_at": record.updated_at.isoformat(),
+    }
+
+
+@router.post("/save-chat")
+async def save_comparison_chat_only(
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Update only chat_messages for an existing comparison report."""
+    from app.models.comparison_report import ComparisonReport as CR
+    order_id_a: int = body.get("order_id_a")
+    order_id_b: int = body.get("order_id_b")
+    chat_messages: list = body.get("chat_messages", [])
+    user_id = user.id if user else None
+
+    stmt = select(CR).where(
+        CR.order_id_a == order_id_a,
+        CR.order_id_b == order_id_b,
+        CR.user_id == user_id,
+    )
+    result = await db.execute(stmt)
+    existing = result.scalar_one_or_none()
+
+    if existing:
+        existing.chat_messages = chat_messages
+        await db.commit()
+        return {"ok": True}
+    return {"ok": False, "detail": "No saved report found for this pair"}
+
+
+@router.get("/saved")
+async def get_saved_report(
+    a: int = Query(..., description="Order A ID"),
+    b: int = Query(..., description="Order B ID"),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Retrieve a previously saved comparison report for the given order pair."""
+    from app.models.comparison_report import ComparisonReport as CR
+    user_id = user.id if user else None
+
+    stmt = select(CR).where(
+        CR.order_id_a == a,
+        CR.order_id_b == b,
+        CR.user_id == user_id,
+    )
+    result = await db.execute(stmt)
+    record = result.scalar_one_or_none()
+
+    if not record:
+        raise HTTPException(status_code=404, detail="No saved report found")
+
+    return {
+        "id": record.id,
+        "order_id_a": record.order_id_a,
+        "order_id_b": record.order_id_b,
+        "report_text": record.report_text or "",
+        "chat_messages": record.chat_messages or [],
+        "llm_model": record.llm_model,
+        "user_instructions": record.user_instructions,
+        "created_at": record.created_at.isoformat(),
+        "updated_at": record.updated_at.isoformat(),
+    }
+
+
+@router.get("/list")
+async def list_comparison_reports(
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """List all saved comparison reports for the current user, with order metadata."""
+    from app.models.comparison_report import ComparisonReport as CR
+    user_id = user.id if user else None
+
+    stmt = (
+        select(CR)
+        .where(CR.user_id == user_id)
+        .order_by(CR.updated_at.desc())
+    )
+    result = await db.execute(stmt)
+    records = result.scalars().all()
+
+    # Collect all order IDs to batch-fetch order metadata
+    order_ids = {r.order_id_a for r in records} | {r.order_id_b for r in records}
+    orders_map: dict[int, dict] = {}
+    if order_ids:
+        ord_result = await db.execute(
+            select(Order).where(Order.id.in_(order_ids))
+        )
+        for o in ord_result.scalars().all():
+            orders_map[o.id] = {
+                "id": o.id,
+                "order_code": o.order_code,
+                "project_name": o.project_name,
+            }
+
+    return [
+        {
+            "id": r.id,
+            "order_id_a": r.order_id_a,
+            "order_id_b": r.order_id_b,
+            "order_a": orders_map.get(r.order_id_a, {"id": r.order_id_a, "order_code": "?", "project_name": "Unknown"}),
+            "order_b": orders_map.get(r.order_id_b, {"id": r.order_id_b, "order_code": "?", "project_name": "Unknown"}),
+            "llm_model": r.llm_model,
+            "chat_count": len(r.chat_messages) if r.chat_messages else 0,
+            "created_at": r.created_at.isoformat(),
+            "updated_at": r.updated_at.isoformat(),
+        }
+        for r in records
+    ]
+
+
+@router.delete("/saved/{report_id}")
+async def delete_comparison_report(
+    report_id: int,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Delete a saved comparison report (only the owner can delete)."""
+    from app.models.comparison_report import ComparisonReport as CR
+    user_id = user.id if user else None
+
+    stmt = select(CR).where(CR.id == report_id, CR.user_id == user_id)
+    result = await db.execute(stmt)
+    record = result.scalar_one_or_none()
+
+    if not record:
+        raise HTTPException(status_code=404, detail="Report not found or not owned by you")
+
+    await db.delete(record)
+    await db.commit()
+    return {"ok": True}
 
 
 @router.post("/chat")
@@ -699,72 +1097,62 @@ async def stream_comparison_chat(
     order_b_info = comparison["order_b"]
     stats = comparison["stats"]
 
-    # Truncate reports for context window
-    max_report_len = 6000
-    report_a_trunc = report_a[:max_report_len] if len(report_a) > max_report_len else report_a
-    report_b_trunc = report_b[:max_report_len] if len(report_b) > max_report_len else report_b
+    common_conds = stats.get("common_conditions", [])
+    top_shared = sorted(
+        comparison["shared_ptms"],
+        key=lambda p: max(abs(p["a_max_fc"]), abs(p["b_max_fc"])),
+        reverse=True,
+    )[:20]
 
-    top_shared = comparison["shared_ptms"][:20]
-    shared_table = "\n".join(
-        f"  {p['gene']} {p['position']}: A={p['a_max_fc']:+.2f}, B={p['b_max_fc']:+.2f}, r={p['correlation']:.2f}, class={p['classification']}"
-        for p in top_shared
-    )
+    def _fmt_shared(p: dict) -> str:
+        gene_pos = f"{p['gene']} {p['position']}"
+        if common_conds and p.get("a_profile") and p.get("b_profile"):
+            a_v = "  ".join(f"{c}:{p['a_profile'].get(c,0):+.2f}" for c in common_conds[:6])
+            b_v = "  ".join(f"{c}:{p['b_profile'].get(c,0):+.2f}" for c in common_conds[:6])
+            return f"  {gene_pos} [r={p['correlation']:.2f}]\n    A: {a_v}\n    B: {b_v}"
+        return f"  {gene_pos}: A={p['a_max_fc']:+.2f}, B={p['b_max_fc']:+.2f}, r={p['correlation']:.2f}"
 
-    # A-only top PTMs
+    shared_table = "\n".join(_fmt_shared(p) for p in top_shared)
     a_only_table = "\n".join(
-        f"  {p['gene']} {p['position']}: max_fc={p['max_fc']:+.2f}"
-        for p in comparison["a_only_ptms"][:15]
+        f"  {p['gene']} {p['position']}: {p['max_fc']:+.2f}"
+        for p in sorted(comparison["a_only_ptms"], key=lambda x: abs(x["max_fc"]), reverse=True)[:15]
     )
     b_only_table = "\n".join(
-        f"  {p['gene']} {p['position']}: max_fc={p['max_fc']:+.2f}"
-        for p in comparison["b_only_ptms"][:15]
+        f"  {p['gene']} {p['position']}: {p['max_fc']:+.2f}"
+        for p in sorted(comparison["b_only_ptms"], key=lambda x: abs(x["max_fc"]), reverse=True)[:15]
     )
 
-    system_prompt = f"""You are a senior proteomics bioinformatician specializing in comparative PTM analysis.
-You are answering follow-up questions about a comparison between two PTM time-series experiments.
+    system_prompt = f"""당신은 PTM 프로테오믹스 전문 선임 연구자입니다. 두 실험 비교 결과에 대한 후속 질문에 답변합니다.
 
-CRITICAL RULE: Base ALL answers strictly on the provided data. If the data does not contain information to answer a question, say so explicitly. NEVER fabricate data or conclusions.
+중요 규칙: 아래 데이터에 근거한 답변만 하세요. 데이터에 없는 내용은 추측임을 명시하세요.
 
-═══ DATA CONTEXT ═══
+[실험 A] {order_a_info['project_name']} ({order_a_info['species']}, {order_a_info['ptm_type']})
+  조건: {', '.join(order_a_info['conditions'])}
 
-Order A: {order_a_info['project_name']} ({order_a_info['species']}, {order_a_info['ptm_type']})
-  Conditions: {', '.join(order_a_info['conditions'])}
+[실험 B] {order_b_info['project_name']} ({order_b_info['species']}, {order_b_info['ptm_type']})
+  조건: {', '.join(order_b_info['conditions'])}
 
-Order B: {order_b_info['project_name']} ({order_b_info['species']}, {order_b_info['ptm_type']})
-  Conditions: {', '.join(order_b_info['conditions'])}
+공통 PTM: {stats['total_shared']}개 | A 전용: {stats['total_a_only']}개 | B 전용: {stats['total_b_only']}개
+방향 일치율: {stats['direction_concordance']:.1%}
+반응 패턴: {json.dumps(stats.get('classification_counts', {{}}), ensure_ascii=False)}
 
-Stats: Shared={stats['total_shared']}, A-only={stats['total_a_only']}, B-only={stats['total_b_only']}
-Direction concordance: {stats['direction_concordance']:.1%}
-Classification: {json.dumps(stats.get('classification_counts', {{}}))}
+공통 Kinase: {', '.join(comparison['shared_kinases'][:20]) or '없음'}
+A 전용 Kinase: {', '.join(comparison['a_only_kinases'][:15]) or '없음'}
+B 전용 Kinase: {', '.join(comparison['b_only_kinases'][:15]) or '없음'}
+공통 Receptor: {', '.join(comparison['shared_receptors'][:15]) or '없음'}
+A 전용 Receptor: {', '.join(comparison['a_only_receptors'][:10]) or '없음'}
+B 전용 Receptor: {', '.join(comparison['b_only_receptors'][:10]) or '없음'}
 
-Shared Kinases: {', '.join(comparison['shared_kinases'][:15])}
-A-only Kinases: {', '.join(comparison['a_only_kinases'][:10])}
-B-only Kinases: {', '.join(comparison['b_only_kinases'][:10])}
-Shared Receptors: {', '.join(comparison['shared_receptors'][:10])}
-A-only Receptors: {', '.join(comparison['a_only_receptors'][:10])}
-B-only Receptors: {', '.join(comparison['b_only_receptors'][:10])}
+공통 PTM 상위 20개 (조건: {', '.join(common_conds[:6]) if common_conds else 'N/A'}):
+{shared_table or '없음'}
 
-TOP SHARED PTMs:
-{shared_table}
+A 전용 PTM:
+{a_only_table or '없음'}
 
-A-ONLY PTMs:
-{a_only_table}
+B 전용 PTM:
+{b_only_table or '없음'}
 
-B-ONLY PTMs:
-{b_only_table}
-
-═══ ORDER A REPORT (excerpt) ═══
-{report_a_trunc}
-
-═══ ORDER B REPORT (excerpt) ═══
-{report_b_trunc}
-
-═══ RESPONSE RULES ═══
-- Answer in Korean with English gene/protein names.
-- Always cite specific data points (gene names, fold-change values, correlations) from the context above.
-- If a question requires data not present in the context, state clearly: "현재 제공된 데이터에서는 이 정보를 확인할 수 없습니다."
-- Be concise but thorough. Use markdown formatting for clarity.
-"""
+답변 형식: 한국어, 영문 유전자명 사용, 구체적 수치 인용, 마크다운 형식."""
 
     # Build messages list for LLM
     llm_messages = [{"role": "system", "content": system_prompt}]
@@ -798,30 +1186,33 @@ B-ONLY PTMs:
                     async with client.stream(
                         "POST",
                         f"{ollama_url}/api/chat",
-                        json={
-                            "model": llm_model,
-                            "messages": llm_messages,
-                            "stream": True,
-                            "options": {
-                                "temperature": 0.4,
-                                "num_predict": 4096,
-                                "num_ctx": 32768,
-                            },
-                        },
+                        json=_ollama_chat_payload(
+                            llm_model,
+                            llm_messages,
+                            temperature=0.4,
+                            num_predict=4096,
+                        ),
                     ) as resp:
                         if resp.status_code != 200:
                             yield f"data: {json.dumps({'type': 'error', 'message': f'LLM error: {resp.status_code}'})}\n\n"
                             return
+                        had_content = False
+                        think_filter = _make_ollama_stream_filter()
                         async for line in resp.aiter_lines():
                             if not line.strip():
                                 continue
                             try:
                                 data = json.loads(line)
-                                content = data.get("message", {}).get("content", "")
+                                raw = data.get("message", {}).get("content", "")
+                                content = _sanitize_llm_chunk(think_filter(raw))
                                 done = data.get("done", False)
-                                if content:
+                                if content and content.strip():
+                                    had_content = True
                                     yield f"data: {json.dumps({'type': 'token', 'content': content})}\n\n"
                                 if done:
+                                    if not had_content:
+                                        reason = data.get("done_reason", "unknown")
+                                        yield f"data: {json.dumps({'type': 'error', 'message': f'모델이 답변을 생성하지 못했습니다 (reason={reason}). gemma3:27b 또는 qwen2.5:14b를 선택해 주세요.'})}\n\n"
                                     yield f"data: {json.dumps({'type': 'done'})}\n\n"
                             except json.JSONDecodeError:
                                 continue
@@ -870,7 +1261,7 @@ B-ONLY PTMs:
                             try:
                                 data = json.loads(payload)
                                 delta = data.get("choices", [{}])[0].get("delta", {})
-                                content = delta.get("content", "")
+                                content = _sanitize_llm_chunk(delta.get("content", ""))
                                 if content:
                                     yield f"data: {json.dumps({'type': 'token', 'content': content})}\n\n"
                             except (json.JSONDecodeError, IndexError):

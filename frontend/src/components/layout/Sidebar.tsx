@@ -24,6 +24,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Microscope,
+  GitCompareArrows,
   type LucideIcon,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -61,6 +62,7 @@ interface NavItem {
 const mainNav: NavItem[] = [
   { path: "/admin", label: "Dashboard", icon: LayoutDashboard, end: true },
   { path: "/admin/orders", label: "Orders", icon: ClipboardList, end: true },
+  { path: "/admin/compare-history", label: "Compare History", icon: GitCompareArrows },
   { path: "/admin/ptmquant", label: "PTMQuant", icon: FlaskConical },
   { path: "/admin/coscientist", label: "Co-Scientist", icon: Microscope },
   { path: "/admin/rag", label: "RAG Collections", icon: Library },

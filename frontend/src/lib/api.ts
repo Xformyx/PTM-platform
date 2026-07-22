@@ -1,7 +1,7 @@
 const API_BASE = '/api';
 const TOKEN_KEY = 'ptm-token';
 
-function getAuthHeader(): Record<string, string> {
+export function getAuthHeader(): Record<string, string> {
   const token = localStorage.getItem(TOKEN_KEY);
   return token ? { Authorization: `Bearer ${token}` } : {};
 }

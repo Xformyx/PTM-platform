@@ -3,7 +3,7 @@ import { useSearchParams, Link } from "react-router-dom";
 import { ArrowLeft, GitCompareArrows, Loader2, AlertCircle, RefreshCw, Send, MessageSquare } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { api } from "@/lib/api";
+import { api, getAuthHeader } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -100,7 +100,9 @@ export default function OrderCompare() {
   const [userInstructions, setUserInstructions] = useState("");
 
   // Report streaming
-  const [report, setReport] = useState("");
+  const [report, setReport] = useState<string>("");
+  const [reportSavedAt, setReportSavedAt] = useState<string | null>(null);
+  const [savedReportId, setSavedReportId] = useState<number | null>(null);
   const [streaming, setStreaming] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -117,9 +119,14 @@ export default function OrderCompare() {
       const active = d.models.filter((m: LlmModelOption) => m.is_active);
       setLlmModels(active);
       if (active.length > 0 && !selectedModel) {
-        // Default to first ollama model or first model
+        // Prefer gemma3:27b, then any gemma3/qwen2.5 (known Korean-capable models),
+        // then first Ollama model, then first available.
+        const preferred = ["gemma3:27b", "qwen2.5:14b", "qwen3.5:27b", "gemma3:12b", "gemma3:4b"];
+        const bestMatch = preferred
+          .map((id) => active.find((m: LlmModelOption) => m.model_id === id && m.provider === "ollama"))
+          .find(Boolean);
         const ollamaModel = active.find((m: LlmModelOption) => m.provider === "ollama");
-        const defaultModel = ollamaModel || active[0];
+        const defaultModel = bestMatch || ollamaModel || active[0];
         setSelectedModel(`${defaultModel.provider}:${defaultModel.model_id}`);
       }
     }).catch(() => {});
@@ -133,12 +140,11 @@ export default function OrderCompare() {
       return;
     }
     try {
-      const token = localStorage.getItem("token");
       const res = await fetch("/api/compare/summary", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...getAuthHeader(),
         },
         body: JSON.stringify({ order_id_a: parseInt(orderAId), order_id_b: parseInt(orderBId) }),
       });
@@ -178,12 +184,11 @@ export default function OrderCompare() {
     const { provider, model } = parseModelValue(selectedModel);
 
     try {
-      const token = localStorage.getItem("token");
       const res = await fetch("/api/compare/report", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...getAuthHeader(),
         },
         body: JSON.stringify({
           order_id_a: parseInt(orderAId),
@@ -233,6 +238,33 @@ export default function OrderCompare() {
     } finally {
       setStreaming(false);
       abortRef.current = null;
+      // Auto-save completed report to DB
+      setReport((finalReport) => {
+        if (finalReport && !finalReport.includes("**Error:**") && orderAId && orderBId) {
+          const { model } = parseModelValue(selectedModel);
+          fetch("/api/compare/save", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", ...getAuthHeader() },
+            body: JSON.stringify({
+              order_id_a: parseInt(orderAId),
+              order_id_b: parseInt(orderBId),
+              report_text: finalReport,
+              llm_model: model || undefined,
+              user_instructions: userInstructions.trim() || undefined,
+            }),
+          })
+            .then((r) => r.json())
+            .then((d) => {
+              if (d.id) {
+                setSavedReportId(d.id);
+                const kst = new Date(d.updated_at + "Z").toLocaleString("ko-KR", { timeZone: "Asia/Seoul" });
+                setReportSavedAt(kst);
+              }
+            })
+            .catch(() => { /* save failed silently */ });
+        }
+        return finalReport;
+      });
     }
   }, [orderAId, orderBId, selectedModel, userInstructions]);
 
@@ -255,12 +287,11 @@ export default function OrderCompare() {
     setChatMessages((prev) => [...prev, { role: "assistant", content: "" }]);
 
     try {
-      const token = localStorage.getItem("token");
       const res = await fetch("/api/compare/chat", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...getAuthHeader(),
         },
         body: JSON.stringify({
           order_id_a: parseInt(orderAId),
@@ -333,14 +364,54 @@ export default function OrderCompare() {
     }
   }, [chatInput, chatMessages, orderAId, orderBId, selectedModel, chatStreaming]);
 
+  /* Persist chat messages to DB whenever they change (debounced) */
+  useEffect(() => {
+    if (!orderAId || !orderBId || chatMessages.length === 0 || !savedReportId) return;
+    const timer = setTimeout(() => {
+      fetch("/api/compare/save-chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...getAuthHeader() },
+        body: JSON.stringify({
+          order_id_a: parseInt(orderAId),
+          order_id_b: parseInt(orderBId),
+          chat_messages: chatMessages,
+        }),
+      }).catch(() => { /* ignore */ });
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [chatMessages, orderAId, orderBId, savedReportId]);
+
   useEffect(() => { fetchMetadata(); }, [fetchMetadata]);
 
-  /* Auto-start streaming after metadata loads */
+  /* Load saved report from DB on mount */
+  useEffect(() => {
+    if (!orderAId || !orderBId) return;
+    fetch(`/api/compare/saved?a=${orderAId}&b=${orderBId}`, {
+      headers: { ...getAuthHeader() },
+    })
+      .then((r) => {
+        if (r.status === 404) return null;
+        return r.json();
+      })
+      .then((d) => {
+        if (d && d.report_text) {
+          setReport(d.report_text);
+          setSavedReportId(d.id);
+          if (d.chat_messages?.length > 0) setChatMessages(d.chat_messages);
+          const kst = new Date(d.updated_at + "Z").toLocaleString("ko-KR", { timeZone: "Asia/Seoul" });
+          setReportSavedAt(kst);
+        }
+      })
+      .catch(() => { /* no saved report */ });
+  }, [orderAId, orderBId]);
+
+  /* Auto-start streaming only when no saved report exists */
   useEffect(() => {
     if (metadata && !report && !streaming) {
       streamReport();
     }
-  }, [metadata]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [metadata, report]);
 
   /* Scroll chat to bottom */
   useEffect(() => {
@@ -505,13 +576,18 @@ export default function OrderCompare() {
       {/* Comparative Report (Streaming Markdown) */}
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-lg flex items-center gap-2">
+          <CardTitle className="text-lg flex items-center gap-2 flex-wrap">
             Comparative Report
             {streaming && <Loader2 className="h-4 w-4 animate-spin text-primary" />}
             {!streaming && report && (
               <Badge variant="secondary" className="text-[10px]">
                 {parseModelValue(selectedModel).model || "default"}
               </Badge>
+            )}
+            {!streaming && reportSavedAt && (
+              <span className="text-xs text-muted-foreground font-normal ml-auto flex items-center gap-1">
+                <span className="text-green-500">●</span> 저장됨 {reportSavedAt}
+              </span>
             )}
           </CardTitle>
         </CardHeader>
