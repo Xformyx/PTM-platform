@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useSearchParams, Link } from "react-router-dom";
-import { ArrowLeft, GitCompareArrows, Loader2, AlertCircle, RefreshCw, Send, MessageSquare } from "lucide-react";
+import { ArrowLeft, GitCompareArrows, Loader2, AlertCircle, RefreshCw, Send, MessageSquare, FileDown } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { api, getAuthHeader } from "@/lib/api";
@@ -127,6 +127,9 @@ export default function OrderCompare() {
   const [chatStreaming, setChatStreaming] = useState(false);
   const chatAbortRef = useRef<AbortController | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
+
+  // PDF Export
+  const [pdfExporting, setPdfExporting] = useState(false);
 
   /* Fetch LLM models */
   useEffect(() => {
@@ -602,6 +605,52 @@ export default function OrderCompare() {
               <span className="text-xs text-muted-foreground font-normal ml-auto flex items-center gap-1">
                 <span className="text-green-500">●</span> 저장됨 {reportSavedAt}
               </span>
+            )}
+            {!streaming && report && reportSavedAt && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="ml-2 gap-1.5"
+                disabled={pdfExporting}
+                onClick={async () => {
+                  if (!orderAId || !orderBId) return;
+                  setPdfExporting(true);
+                  try {
+                    const res = await fetch("/api/compare/export-pdf", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json", ...getAuthHeader() },
+                      body: JSON.stringify({ order_id_a: Number(orderAId), order_id_b: Number(orderBId) }),
+                    });
+                    if (!res.ok) {
+                      const err = await res.json().catch(() => ({ detail: "PDF 생성 실패" }));
+                      alert(err.detail || "PDF 생성에 실패했습니다.");
+                      return;
+                    }
+                    const blob = await res.blob();
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    const disposition = res.headers.get("Content-Disposition");
+                    const filenameMatch = disposition?.match(/filename="?([^"]+)"?/);
+                    a.href = url;
+                    a.download = filenameMatch?.[1] || "comparative_report.pdf";
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                  } catch (e) {
+                    alert("PDF 내보내기 중 오류가 발생했습니다.");
+                  } finally {
+                    setPdfExporting(false);
+                  }
+                }}
+              >
+                {pdfExporting ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <FileDown className="h-3.5 w-3.5" />
+                )}
+                PDF
+              </Button>
             )}
           </CardTitle>
         </CardHeader>
