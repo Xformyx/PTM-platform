@@ -36,12 +36,14 @@
     },
   )
 
-  // Typography
+  // Typography — Latin primary, Korean fallback (Noto KR subset OTFs)
   set text(
-    font: ("Libertinus Serif", "Noto Serif CJK KR", "Noto Sans CJK KR", "Noto Sans KR"),
+    font: ("Libertinus Serif", "Noto Serif KR", "Noto Sans KR"),
     size: 10pt,
     lang: "ko",
   )
+  // Ensure code/raw blocks also fall back to Hangul-capable fonts
+  show raw: set text(font: ("DejaVu Sans Mono", "Noto Sans KR", "Noto Serif KR"))
   set par(leading: 0.78em, spacing: 0.9em, justify: true)
 
   // Heading styles
