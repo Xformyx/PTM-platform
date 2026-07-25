@@ -71,6 +71,21 @@ function OrderInfoCard({ order }: { order: CompareMetadata["order_a"] }) {
   );
 }
 
+/**
+ * Throw on HTTP errors; redirect to /login on 401 (expired/missing token).
+ * Mirrors the behaviour of the api module's request() for raw fetch calls.
+ */
+async function assertOk(res: Response): Promise<void> {
+  if (res.ok) return;
+  if (res.status === 401) {
+    localStorage.removeItem("ptm-token");
+    window.location.href = "/login";
+    throw new Error("Unauthorized");
+  }
+  const errData = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
+  throw new Error(errData.detail || `HTTP ${res.status}`);
+}
+
 /** Parse model selector value into provider + model_id */
 function parseModelValue(value: string): { provider: string; model: string } {
   const idx = value.indexOf(":");
@@ -148,10 +163,7 @@ export default function OrderCompare() {
         },
         body: JSON.stringify({ order_id_a: parseInt(orderAId), order_id_b: parseInt(orderBId) }),
       });
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({ detail: "Unknown error" }));
-        throw new Error(errData.detail || `HTTP ${res.status}`);
-      }
+      await assertOk(res);
       const data = await res.json();
       // Map the summary response to CompareMetadata format
       setMetadata({
@@ -199,10 +211,7 @@ export default function OrderCompare() {
         }),
         signal: controller.signal,
       });
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({ detail: "Unknown error" }));
-        throw new Error(errData.detail || `HTTP ${res.status}`);
-      }
+      await assertOk(res);
       const reader = res.body?.getReader();
       if (!reader) throw new Error("No response body");
       const decoder = new TextDecoder();
@@ -390,6 +399,11 @@ export default function OrderCompare() {
       headers: { ...getAuthHeader() },
     })
       .then((r) => {
+        if (r.status === 401) {
+          localStorage.removeItem("ptm-token");
+          window.location.href = "/login";
+          return null;
+        }
         if (r.status === 404) return null;
         return r.json();
       })
