@@ -48,7 +48,8 @@ def markdown_to_typst(markdown_text: str) -> str:
             continue
 
         if in_code_block:
-            result.append(line)
+            # Escape specials so raw report snippets can't break Typst markup
+            result.append(_escape_typst_markup(line))
             continue
 
         # Tables
@@ -125,23 +126,56 @@ def markdown_to_typst(markdown_text: str) -> str:
     return "\n".join(result)
 
 
+def _escape_typst_markup(text: str) -> str:
+    """Escape characters that have special meaning in Typst markup mode.
+
+    Notably, bare '<' starts a label (`<label>`) and causes 'unclosed label'
+    when used in scientific text such as 'p < 0.05'.
+    """
+    return re.sub(r"([\\#<>@$_*\[\]])", r"\\\1", text)
+
+
 def _convert_inline(text: str) -> str:
-    """Convert inline markdown formatting to Typst."""
-    # Bold: **text** → *text*
-    text = re.sub(r"\*\*(.+?)\*\*", r"*\1*", text)
-    # Italic: *text* (single) → _text_ (but not inside bold)
-    # Be careful: after bold conversion, single * is Typst bold
-    # We handle _text_ style italic from markdown
-    text = re.sub(r"(?<!\*)_(.+?)_(?!\*)", r"_\1_", text)
-    # Inline code: `text` → `text` (same in Typst)
+    """Convert inline markdown formatting to Typst, escaping special chars."""
+    protected: list[str] = []
+
+    def _protect(replacement: str) -> str:
+        protected.append(replacement)
+        return f"\x00{len(protected) - 1}\x00"
+
+    # Inline code: `text` → raw escaped text in backticks
+    def _code_repl(m: re.Match) -> str:
+        return _protect(f"`{_escape_typst_markup(m.group(1))}`")
+
+    text = re.sub(r"`([^`]+)`", _code_repl, text)
+
     # Links: [text](url) → #link("url")[text]
-    text = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r'#link("\2")[\1]', text)
-    # Escape < and > to prevent Typst label/math interpretation
-    # Replace < with \< and > with \> but preserve existing Typst commands
-    text = text.replace("<", "\\<")
-    text = text.replace(">", "\\>")
-    # Escape remaining # characters that are NOT part of Typst commands
-    text = re.sub(r"(?<!`)#(?!(?:link|quote|table|line|import|show|set|let|v|text|block|grid|align|counter|page|heading|raw|box|image|figure|par|strong|emph))", r"\\#", text)
+    def _link_repl(m: re.Match) -> str:
+        label = _escape_typst_markup(m.group(1))
+        url = m.group(2).replace("\\", "\\\\").replace('"', '\\"')
+        return _protect(f'#link("{url}")[{label}]')
+
+    text = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", _link_repl, text)
+
+    # Bold: **text** → *text*
+    def _bold_repl(m: re.Match) -> str:
+        return _protect(f"*{_escape_typst_markup(m.group(1))}*")
+
+    text = re.sub(r"\*\*(.+?)\*\*", _bold_repl, text)
+
+    # Italic: _text_ → _text_ (Typst emphasis)
+    def _italic_repl(m: re.Match) -> str:
+        return _protect(f"_{_escape_typst_markup(m.group(1))}_")
+
+    text = re.sub(r"(?<!\*)_(.+?)_(?!\*)", _italic_repl, text)
+
+    # Escape remaining markup-mode specials (p < 0.05, #tags, gene_names, etc.)
+    text = _escape_typst_markup(text)
+
+    # Restore protected intentional Typst markup
+    for i, replacement in enumerate(protected):
+        text = text.replace(f"\x00{i}\x00", replacement)
+
     return text
 
 
