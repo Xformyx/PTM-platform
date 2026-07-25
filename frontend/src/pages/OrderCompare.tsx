@@ -39,6 +39,104 @@ interface ChatMessage {
 }
 
 /* ─── Helpers ─── */
+/** Known section titles — split glued LLM headings like "##2. TitleBody...". */
+const SECTION_TITLES = [
+  /Temporal Substrate Activity\s*비교/i,
+  /Temporal Signaling Cascade\s*비교/i,
+  /Co-Wave\s*기반\s*Upstream Regulator\s*비교/i,
+  /공통\s*Signaling Mechanism/i,
+  /물질\s*특이적\s*반응\s*및\s*작용기전/,
+  /Kinase Activity\s*정량\s*비교/i,
+  /Signaling Divergence\s*분기점/i,
+  /종합\s*결론\s*및\s*치료적\s*함의/,
+  /Temporal Substrate Activity Comparison/i,
+  /Temporal Signaling Cascade Comparison/i,
+  /Co-Wave[- ]Based Upstream Regulator Comparison/i,
+  /Shared Signaling Mechanisms?/i,
+  /Condition[- ]Specific Responses?(?:\s+and\s+Mechanisms?)?/i,
+  /Quantitative Kinase Activity Comparison/i,
+  /Signaling Divergence(?:\s+Branch\s*Points?)?/i,
+  /Conclusions?(?:\s+and\s+Therapeutic Implications?)?/i,
+];
+
+function paragraphizeBody(body: string): string {
+  let t = body.trim();
+  if (!t) return "";
+  if ((t.match(/\n/g) || []).length >= 2) {
+    return t.replace(/\n{3,}/g, "\n\n");
+  }
+  // Korean sentence end → paragraph
+  t = t.replace(/([다요임음석]\.|다\.)\s*(?=[가-힣A-Za-z(\[])/g, "$1\n\n");
+  // English sentence end
+  t = t.replace(/([.!?])\s+(?=[\(\[]?[A-Z0-9])/g, "$1\n\n");
+  t = t.replace(/([^\n])\s*[•▪‣]\s*/g, "$1\n\n- ");
+  t = t.replace(/([.다요임음])\s*-\s+(?=[A-Za-z가-힣])/g, "$1\n\n- ");
+  return t.replace(/\n{3,}/g, "\n\n").trim();
+}
+
+/**
+ * Repair wall-of-text LLM reports (often zero newlines) into readable Markdown.
+ * Example: "## 1. Title비교본문...있다.##2. NextTitle본문"
+ */
+function normalizeMarkdown(md: string): string {
+  let text = (md || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
+  if (!text) return "";
+
+  // "##2." / "##  2." → "## 2. "
+  text = text.replace(/#{1,4}\s*(\d+)\.\s*/g, "## $1. ");
+  // Force break before numbered headings even when glued mid-string
+  text = text.replace(/(## \d+\. )/g, (m, _p, offset, str) =>
+    offset > 0 && str[offset - 1] !== "\n" ? `\n\n${m}` : m
+  );
+
+  const parts = text.split(/(?=## \d+\. )/);
+  const out: string[] = [];
+
+  for (const raw of parts) {
+    const part = raw.trim();
+    if (!part) continue;
+    const m = part.match(/^(## \d+\. )([\s\S]*)$/);
+    if (!m) {
+      out.push(paragraphizeBody(part));
+      continue;
+    }
+    const prefix = m[1];
+    const rest = m[2];
+    let title = "";
+    let body = rest;
+    let matched = false;
+    for (const re of SECTION_TITLES) {
+      const tm = rest.match(re);
+      if (tm && tm.index === 0) {
+        title = tm[0].trim();
+        body = rest.slice(tm[0].length).trim();
+        matched = true;
+        break;
+      }
+    }
+    if (!matched) {
+      const soft = rest.match(
+        /^(.{5,80}?)(?=(?:실험|시간|두 |본 |A |B |In |The |This |Based |Overall ))/
+      );
+      if (soft) {
+        title = soft[1].trim();
+        body = rest.slice(soft[1].length).trim();
+      } else {
+        title = rest.slice(0, 40).trim();
+        body = rest.slice(40).trim();
+        const sp = title.lastIndexOf(" ");
+        if (sp > 10) {
+          body = (title.slice(sp + 1) + body).trim();
+          title = title.slice(0, sp).trim();
+        }
+      }
+    }
+    out.push(`${prefix}${title}\n\n${paragraphizeBody(body)}`.trimEnd());
+  }
+
+  return out.join("\n\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
 function SummaryCard({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
   return (
     <div className="flex flex-col items-center justify-center p-4 rounded-lg bg-muted/50 border min-w-[120px]">
@@ -254,9 +352,10 @@ export default function OrderCompare() {
     } finally {
       setStreaming(false);
       abortRef.current = null;
-      // Auto-save completed report to DB
+      // Normalize wall-of-text LLM output, then auto-save
       setReport((finalReport) => {
-        if (finalReport && !finalReport.includes("**Error:**") && orderAId && orderBId) {
+        const normalized = normalizeMarkdown(finalReport);
+        if (normalized && !normalized.includes("**Error:**") && orderAId && orderBId) {
           const { model } = parseModelValue(selectedModel);
           fetch("/api/compare/save", {
             method: "POST",
@@ -264,7 +363,7 @@ export default function OrderCompare() {
             body: JSON.stringify({
               order_id_a: parseInt(orderAId),
               order_id_b: parseInt(orderBId),
-              report_text: finalReport,
+              report_text: normalized,
               llm_model: model || undefined,
               user_instructions: userInstructions.trim() || undefined,
             }),
@@ -279,7 +378,7 @@ export default function OrderCompare() {
             })
             .catch(() => { /* save failed silently */ });
         }
-        return finalReport;
+        return normalized;
       });
     }
   }, [orderAId, orderBId, selectedModel, userInstructions]);
@@ -417,7 +516,7 @@ export default function OrderCompare() {
       })
       .then((d) => {
         if (d && d.report_text) {
-          setReport(d.report_text);
+          setReport(normalizeMarkdown(d.report_text));
           setSavedReportId(d.id);
           if (d.chat_messages?.length > 0) setChatMessages(d.chat_messages);
           const kst = new Date(d.updated_at + "Z").toLocaleString("ko-KR", { timeZone: "Asia/Seoul" });
@@ -673,9 +772,19 @@ export default function OrderCompare() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="prose prose-sm dark:prose-invert max-w-none">
+          <div className="prose prose-sm dark:prose-invert max-w-none leading-relaxed
+            prose-headings:font-semibold prose-headings:tracking-tight
+            prose-h1:text-xl prose-h1:mt-8 prose-h1:mb-4
+            prose-h2:text-lg prose-h2:mt-7 prose-h2:mb-3
+            prose-h3:text-base prose-h3:mt-5 prose-h3:mb-2
+            prose-p:my-3 prose-p:leading-7
+            prose-ul:my-3 prose-ol:my-3 prose-li:my-1
+            prose-table:my-4
+            [&>*:first-child]:mt-0">
             {report ? (
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{report}</ReactMarkdown>
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {normalizeMarkdown(report)}
+              </ReactMarkdown>
             ) : streaming ? (
               <div className="flex items-center gap-2 text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -713,9 +822,9 @@ export default function OrderCompare() {
                     }`}
                   >
                     {msg.role === "assistant" ? (
-                      <div className="prose prose-sm dark:prose-invert max-w-none">
+                      <div className="prose prose-sm dark:prose-invert max-w-none leading-relaxed prose-p:my-2 prose-headings:mt-3 prose-headings:mb-2">
                         <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                          {msg.content || "..."}
+                          {normalizeMarkdown(msg.content || "...")}
                         </ReactMarkdown>
                       </div>
                     ) : (

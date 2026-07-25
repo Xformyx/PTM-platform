@@ -16,6 +16,133 @@ from typing import Optional
 TEMPLATE_DIR = Path(__file__).parent.parent.parent / "templates" / "comparative_report"
 
 
+# Known comparative-report section titles (ko/en) — used to split glued headings.
+_SECTION_TITLE_PATTERNS = [
+    r"Temporal Substrate Activity\s*비교",
+    r"Temporal Signaling Cascade\s*비교",
+    r"Co-Wave\s*기반\s*Upstream Regulator\s*비교",
+    r"공통\s*Signaling Mechanism",
+    r"물질\s*특이적\s*반응\s*및\s*작용기전",
+    r"Kinase Activity\s*정량\s*비교",
+    r"Signaling Divergence\s*분기점",
+    r"종합\s*결론\s*및\s*치료적\s*함의",
+    r"Temporal Substrate Activity Comparison",
+    r"Temporal Signaling Cascade Comparison",
+    r"Co-Wave[- ]Based Upstream Regulator Comparison",
+    r"Shared Signaling Mechanisms?",
+    r"Condition[- ]Specific Responses?(?:\s+and\s+Mechanisms?)?",
+    r"Quantitative Kinase Activity Comparison",
+    r"Signaling Divergence(?:\s+Branch\s*Points?)?",
+    r"Conclusions?(?:\s+and\s+Therapeutic Implications?)?",
+]
+_SECTION_TITLE_RE = re.compile(
+    r"(?:%s)" % "|".join(f"(?:{p})" for p in _SECTION_TITLE_PATTERNS),
+    re.IGNORECASE,
+)
+
+
+def _paragraphize_body(body: str) -> str:
+    """Insert paragraph breaks into a wall-of-text body."""
+    body = body.strip()
+    if not body:
+        return ""
+    # Already has structure — only lightly normalize
+    if body.count("\n") >= 2:
+        body = re.sub(r"\n{3,}", "\n\n", body)
+        return body
+
+    # Korean sentence end → new paragraph
+    body = re.sub(r"([다요임음석]\.|다\.)\s*(?=[가-힣A-Za-z(\[])", r"\1\n\n", body)
+    # English sentence end (.!?) followed by capital / digit / (
+    body = re.sub(r"([.!?])\s+(?=[\(\[]?[A-Z0-9])", r"\1\n\n", body)
+    # Bullet-like fragments glued mid-text: "있다.- SPAG9" or "있다.• "
+    body = re.sub(r"([^\n])\s*([•▪‣])\s*", r"\1\n\n- ", body)
+    body = re.sub(r"([.다요임음])\s*-\s+(?=[A-Za-z가-힣])", r"\1\n\n- ", body)
+    body = re.sub(r"\n{3,}", "\n\n", body)
+    return body.strip()
+
+
+def _normalize_markdown_spacing(markdown_text: str) -> str:
+    """Repair LLM markdown that often arrives as a single line with glued headings.
+
+    Observed model output::
+        ## 1. Temporal Substrate Activity 비교시간대별로...있다.##2. Temporal...
+
+    We split section headings, detach titles from bodies, and paragraphize.
+    """
+    text = (markdown_text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not text:
+        return ""
+
+    # Normalize "##2." / "##  2." / "# # 2." → "## 2. "
+    text = re.sub(r"#{1,4}\s*(\d+)\.\s*", r"## \1. ", text)
+
+    # Force newline before every numbered ## heading (even mid-string).
+    # Do NOT match bare "#{1,4} " — that would split "##" into "#\n\n#".
+    text = re.sub(r"(?<!\n)(## \d+\. )", r"\n\n\1", text)
+
+    parts = re.split(r"(?=## \d+\. )", text)
+    out: list[str] = []
+    for part in parts:
+        part = part.strip()
+        if not part:
+            continue
+        m = re.match(r"(## \d+\. )([\s\S]*)", part)
+        if not m:
+            out.append(_paragraphize_body(part))
+            continue
+        prefix, rest = m.group(1), m.group(2)
+        title_match = _SECTION_TITLE_RE.match(rest)
+        if title_match:
+            title = title_match.group(0).strip()
+            body = rest[title_match.end():].strip()
+        else:
+            # Fallback: take up to ~80 chars or until Hangul/Latin body cue
+            soft = re.match(
+                r"^(.{5,80}?)(?=(?:실험|시간|두 |본 |A |B |In |The |This |Based |Overall ))",
+                rest,
+            )
+            if soft:
+                title = soft.group(1).strip()
+                body = rest[soft.end():].strip()
+            else:
+                # Last resort: first 40 chars as title
+                title = rest[:40].strip()
+                body = rest[40:].strip()
+                # Prefer breaking at last space in title window
+                sp = title.rfind(" ")
+                if sp > 10:
+                    body = (title[sp + 1:] + body).strip()
+                    title = title[:sp].strip()
+        out.append(f"{prefix}{title}\n\n{_paragraphize_body(body)}".rstrip())
+
+    text = "\n\n".join(out)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip() + "\n"
+
+
+def _is_prose_line(line: str) -> bool:
+    """True if line is ordinary paragraph text (not structural markdown)."""
+    s = line.strip()
+    if not s:
+        return False
+    if s.startswith("```"):
+        return False
+    if s.startswith("|"):
+        return False
+    if s.startswith("> "):
+        return False
+    if re.match(r"^#{1,4}\s", s):
+        return False
+    if re.match(r"^[-*]\s", s):
+        return False
+    if re.match(r"^\d+\.\s", s):
+        return False
+    if re.match(r"^---+$", s):
+        return False
+    return True
+
+
 def markdown_to_typst(markdown_text: str) -> str:
     """Convert LLM-generated markdown to Typst markup.
 
@@ -27,13 +154,16 @@ def markdown_to_typst(markdown_text: str) -> str:
     - Code blocks
     - Lists
     - Blockquotes
+    - Paragraph breaks (blank lines / consecutive prose lines)
     """
+    markdown_text = _normalize_markdown_spacing(markdown_text)
     lines = markdown_text.split("\n")
     result = []
     in_table = False
     table_rows = []
     in_code_block = False
     code_lang = ""
+    prev_was_prose = False
 
     for line in lines:
         # Code blocks
@@ -45,11 +175,13 @@ def markdown_to_typst(markdown_text: str) -> str:
             else:
                 in_code_block = False
                 result.append("```")
+            prev_was_prose = False
             continue
 
         if in_code_block:
             # Escape specials so raw report snippets can't break Typst markup
             result.append(_escape_typst_markup(line))
+            prev_was_prose = False
             continue
 
         # Tables
@@ -62,10 +194,12 @@ def markdown_to_typst(markdown_text: str) -> str:
                 in_table = True
                 table_rows = []
             table_rows.append(cells)
+            prev_was_prose = False
             continue
         elif in_table:
             # Flush table
             result.append(_convert_table(table_rows))
+            result.append("")
             in_table = False
             table_rows = []
 
@@ -86,13 +220,20 @@ def markdown_to_typst(markdown_text: str) -> str:
                 typst_prefix = "=="
             else:
                 typst_prefix = "==="
+            if result and result[-1] != "":
+                result.append("")
             result.append(f"{typst_prefix} {_convert_inline(heading_text.strip())}")
             result.append("")
+            prev_was_prose = False
             continue
 
         # Blockquotes
         if line.startswith("> "):
+            if result and result[-1] != "":
+                result.append("")
             result.append(f"#quote[{_convert_inline(line[2:])}]")
+            result.append("")
+            prev_was_prose = False
             continue
 
         # Unordered lists
@@ -100,7 +241,10 @@ def markdown_to_typst(markdown_text: str) -> str:
             indent = len(line) - len(line.lstrip())
             text = re.sub(r"^\s*[-*]\s+", "", line)
             prefix = "  " * (indent // 2)
+            if prev_was_prose and result and result[-1] != "":
+                result.append("")
             result.append(f"{prefix}- {_convert_inline(text)}")
+            prev_was_prose = False
             continue
 
         # Ordered lists
@@ -108,22 +252,43 @@ def markdown_to_typst(markdown_text: str) -> str:
             indent = len(line) - len(line.lstrip())
             text = re.sub(r"^\s*\d+\.\s+", "", line)
             prefix = "  " * (indent // 2)
+            if prev_was_prose and result and result[-1] != "":
+                result.append("")
             result.append(f"{prefix}+ {_convert_inline(text)}")
+            prev_was_prose = False
             continue
 
         # Horizontal rule
         if re.match(r"^---+$", line.strip()):
+            result.append("")
             result.append("#line(length: 100%, stroke: 0.5pt + rgb(\"#e2e8f0\"))")
+            result.append("")
+            prev_was_prose = False
             continue
 
-        # Regular paragraph
-        result.append(_convert_inline(line))
+        # Blank line → paragraph break
+        if not line.strip():
+            if result and result[-1] != "":
+                result.append("")
+            prev_was_prose = False
+            continue
+
+        # Regular paragraph — force break between consecutive prose lines
+        # so single-newline LLM output does not collapse into one wall of text
+        converted = _convert_inline(line)
+        if prev_was_prose and result and result[-1] != "":
+            result.append("")
+        result.append(converted)
+        prev_was_prose = _is_prose_line(line)
 
     # Flush remaining table
     if in_table:
         result.append(_convert_table(table_rows))
 
-    return "\n".join(result)
+    # Trim trailing blank lines but keep internal paragraph breaks
+    while result and result[-1] == "":
+        result.pop()
+    return "\n".join(result) + "\n"
 
 
 def _escape_typst_markup(text: str) -> str:

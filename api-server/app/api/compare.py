@@ -1335,6 +1335,13 @@ Wave Kinase Profile에서 예측된 upstream regulator를 비교하되:
 - 제공된 데이터에 근거한 결론만 작성하고, 데이터가 없는 경우 추측임을 명시하세요.
 - 각 substrate의 생물학적 기능 설명은 일반적으로 알려진 지식(예: AKT-mTOR pathway, MAPK cascade)을 활용하되, 인산화 데이터 자체는 제공된 수치만 사용하세요.
 - "~로 알려져 있다", "~를 시사한다", "~와 일치한다" 등의 표현을 사용하여 데이터 해석과 일반 지식을 구분하세요.
+
+★ 출력 포맷 (Markdown 필수) ★
+- 반드시 Markdown으로 작성하세요. 섹션 제목은 `## 1. ...`, 하위 제목은 `###`를 사용하세요.
+- 문단과 문단 사이에는 반드시 빈 줄(blank line)을 넣으세요. 한 줄로 이어 쓰지 마세요.
+- 제목 다음에도 빈 줄을 넣은 뒤 본문을 시작하세요.
+- 목록은 `- ` 또는 `1. `를 사용하고, 목록 앞뒤에 빈 줄을 두세요.
+- 표가 필요하면 GitHub-flavored pipe table을 사용하세요.
 {"" if language == "ko" else chr(10) + "IMPORTANT: Write the ENTIRE report in English. All section titles, descriptions, and analysis must be in English. Use scientific English appropriate for a peer-reviewed publication."}
 """
     return prompt
@@ -1445,9 +1452,15 @@ async def stream_comparison_report(
     # Language and system message
     report_language = body.language or "ko"
     sys_msg = (
-        "You are a senior proteomics bioinformatician specializing in comparative PTM analysis. Answer in Korean."
+        "You are a senior proteomics bioinformatician specializing in comparative PTM analysis. "
+        "Answer in Korean. CRITICAL FORMAT: Output valid Markdown with real newline characters. "
+        "Each heading must be on its own line (e.g. '\\n## 1. Title\\n\\n'). "
+        "Never glue the next section onto the previous sentence. Put a blank line between every paragraph."
         if report_language == "ko"
-        else "You are a senior proteomics bioinformatician specializing in comparative PTM analysis. Answer in English."
+        else "You are a senior proteomics bioinformatician specializing in comparative PTM analysis. "
+        "Answer in English. CRITICAL FORMAT: Output valid Markdown with real newline characters. "
+        "Each heading must be on its own line (e.g. '\\n## 1. Title\\n\\n'). "
+        "Never glue the next section onto the previous sentence. Put a blank line between every paragraph."
     )
 
     # Determine provider and endpoint

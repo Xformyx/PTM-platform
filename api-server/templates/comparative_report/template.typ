@@ -44,7 +44,8 @@
   )
   // Ensure code/raw blocks also fall back to Hangul-capable fonts
   show raw: set text(font: ("DejaVu Sans Mono", "Noto Sans KR", "Noto Serif KR"))
-  set par(leading: 0.78em, spacing: 0.9em, justify: true)
+  // Clear paragraph gaps so Korean/English body text is readable
+  set par(leading: 0.85em, spacing: 1.15em, first-line-indent: 0pt, justify: true)
 
   // Heading styles
   set heading(numbering: "1.1")
