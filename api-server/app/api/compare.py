@@ -1226,46 +1226,101 @@ B 전용 Receptor: {', '.join(comparison_data['b_only_receptors'][:10]) or '없�
 ════ 작성 지시 ════
 
 위 데이터를 바탕으로 다음 8개 섹션의 비교 분석 리포트를 작성하세요.
-각 섹션당 300~500단어, 구체적인 유전자명·위치·수치 인용 필수.
+각 섹션당 500~800단어, 구체적인 유전자명·인산화 위치(예: S473, T202/Y204)·log2FC 수치 인용 필수.
+
+★ 핵심 분석 원칙 — Substrate 수준 상세 기전 해석 ★
+
+단순히 "A에서는 X가 활성화되고 B에서는 Y가 활성화된다"는 나열식 기술을 절대 하지 마세요.
+반드시 다음과 같은 기전적 해석(mechanistic interpretation)을 포함해야 합니다:
+
+1) 각 substrate의 인산화가 갖는 생물학적 의미를 설명하세요.
+   예: "AKT1 S473의 인산화는 mTORC2에 의해 매개되며, 이는 cell survival signaling의 완전한 활성화를 의미한다.
+   A 조건에서 1h에 이미 peak를 보이는 반면 B 조건에서는 3h까지 지연되므로, Cu-amyloid가 mTORC2-AKT axis를
+   더 빠르게 활성화함을 시사한다."
+
+2) 한 조건에만 존재하는 substrate의 기능적 의미를 반드시 설명하세요.
+   예: "BAD S136은 A 조건에서만 인산화되며(log2FC=1.8, 3h), 이는 AKT에 의한 pro-apoptotic BAD의 불활성화를
+   의미한다. B 조건에서 BAD 인산화가 부재하다는 것은 apoptosis 억제 기전이 작동하지 않음을 시사하며,
+   이는 B 조건에서 관찰되는 caspase-3 관련 substrate(CASP3 D175 등)의 활성화와 일치한다."
+
+3) Substrate 간의 시간적 연결(temporal linkage)을 추적하세요.
+   예: "0.5h에 MAPK1 T202/Y204가 인산화된 후(log2FC=2.1), 1h에 RSK2 S227(log2FC=1.5)이 뒤따르고,
+   3h에 CREB1 S133(log2FC=1.2)이 활성화되는 패턴은 전형적인 ERK→RSK→CREB signaling cascade의
+   시간적 전파를 보여준다. 이 cascade는 A 조건에서만 완전하게 관찰되며, B 조건에서는 RSK2 단계에서
+   중단되어 CREB1 활성화가 일어나지 않는다."
+
+4) Kinase-substrate 관계를 통한 cascade 연속성을 설명하세요.
+   예: "CDK1이 3h에 활성화되면서 그 기질인 RB1 S780, LMNA S22, VIM S55가 순차적으로 인산화되는 패턴은
+   G2/M transition의 진행을 나타낸다. 특히 A 조건에서 CDK1 activity score가 B 대비 2배 높으며(0.85 vs 0.42),
+   이에 따라 downstream substrate의 인산화 정도도 비례하여 증가한다."
+
+5) 조건 간 차이의 생물학적 결과(biological consequence)를 명시하세요.
+   예: "A 조건에서 NF-κB pathway의 핵심 substrate인 IKKβ S177/S181, IκBα S32/S36, p65 S536이
+   모두 0.5-1h에 인산화되는 반면, B 조건에서는 IKKβ만 약하게 활성화되고 downstream이 전파되지 않는다.
+   이는 A 조건이 완전한 NF-κB 활성화를 통해 pro-inflammatory cytokine 발현을 유도하는 반면,
+   B 조건은 초기 신호만 발생하고 전사 수준까지 도달하지 못함을 의미한다."
+
+위와 같은 수준의 상세한 기전적 해석을 모든 섹션에 적용하세요.
 
 ## 1. Temporal Substrate Activity 비교
-시간대별로 활성화(|log2FC|>0.5)되는 substrate 수를 비교하여 반응 규모의 시간적 차이를 서술.
-Peak activation timing 분포를 비교하여 어느 시간대에 가장 많은 substrate가 반응하는지 분석.
-Early/Mid/Late responder 비율을 비교하여 두 실험의 temporal response 패턴 차이를 해석.
-Temporal shift가 큰 공통 substrate를 식별하여 동일 단백질이 다른 시간대에 인산화되는 현상을 설명.
+시간대별로 활성화(|log2FC|>0.5)되는 substrate 수를 비교하되, 단순 카운트를 넘어서:
+- 각 시간대의 대표적 substrate 3-5개를 선정하여 그 인산화의 생물학적 의미를 설명.
+- Peak activation timing이 다른 공통 substrate를 식별하고, 그 temporal shift가 signaling cascade에 미치는 영향을 해석.
+- Early responder substrate가 later time의 어떤 substrate 인산화로 이어지는지 cascade 연결을 추적.
+- A에만/B에만 존재하는 substrate의 기능을 설명하고, 그 부재/존재가 세포 반응에 미치는 결과를 논의.
 
 ## 2. Temporal Signaling Cascade 비교
-시간대별로 어떤 kinase가 활성화되는지 두 실험을 나란히 비교.
-Co-Wave Group 정보를 활용하여 동시에 활성화되는 kinase 클러스터를 식별.
-Cascade Flow(시간대 간 kinase 유지/신규/소실)를 비교하여 신호전달 흐름의 차이를 서술.
+시간대별 kinase 활성화를 비교하되:
+- 각 kinase가 활성화될 때 어떤 substrate를 인산화하는지 구체적으로 연결.
+- Cascade Flow에서 "유지"되는 kinase는 어떤 substrate를 지속적으로 인산화하여 signaling을 유지하는지 설명.
+- "신규" 등장하는 kinase는 어떤 upstream 신호에 의해 활성화되었는지, 그리고 어떤 새로운 downstream을 열어주는지 해석.
+- "소실"되는 kinase의 비활성화가 어떤 signaling branch의 종료를 의미하는지 논의.
+- Co-Wave Group 내 kinase들이 동시에 활성화되는 이유(공통 upstream receptor/signal)를 추론.
 
 ## 3. Co-Wave 기반 Upstream Regulator 비교
-Wave Kinase Profile에서 예측된 upstream regulator(receptor, kinase)를 비교.
-각 wave의 tier, peak timing, suggested receptor를 대조하여 상위 신호 입력의 차이를 해석.
+Wave Kinase Profile에서 예측된 upstream regulator를 비교하되:
+- 각 wave의 kinase들이 인산화하는 substrate를 구체적으로 나열하여 wave의 생물학적 기능을 정의.
+- 두 실험에서 동일 wave에 속하는 kinase의 substrate 구성 차이를 분석.
+- Suggested receptor가 다른 경우, 그 receptor 차이가 downstream signaling에 미치는 영향을 cascade로 추적.
 
 ## 4. 공통 Signaling Mechanism
-두 실험에서 공통으로 활성화된 신호전달 경로 및 kinase를 서술.
-공통 kinase의 substrate 구성 차이도 분석 (동일 kinase가 다른 substrate를 인산화하는 패턴).
+두 실험에서 공통으로 활성화된 경로를 서술하되:
+- 공통 kinase가 두 실험에서 인산화하는 substrate 목록을 비교하여, 동일 kinase가 다른 substrate를 선택하는 패턴을 분석.
+- 이러한 substrate 선택의 차이가 같은 kinase를 통해서도 다른 세포 반응(예: proliferation vs apoptosis)을 유도할 수 있음을 설명.
+- 공통 경로 내에서도 인산화 강도(log2FC)나 timing의 미세한 차이가 있다면, 그 차이의 생물학적 의미를 해석.
 
 ## 5. 물질 특이적 반응 및 작용기전
-각 실험에서만 나타나는 고유한 신호 이벤트를 서술.
-Signal Flow (Receptor → Kinase → Substrate) 정보를 활용하여 작용기전을 설명.
-Effector protein 차이도 포함.
+각 실험 고유의 신호 이벤트를 서술하되:
+- A에만 존재하는 substrate의 인산화가 어떤 cellular process를 활성화/억제하는지 구체적으로 설명.
+- B에만 존재하는 substrate에 대해서도 동일하게 기전을 설명.
+- Signal Flow (Receptor → Kinase → Substrate → Cellular outcome)의 전체 경로를 추적.
+- 한쪽에만 존재하는 substrate가 다른 시간대의 다른 substrate 인산화와 어떻게 연결되는지 temporal cascade로 설명.
+- Effector protein의 차이가 최종적으로 어떤 세포 표현형(phenotype) 차이를 유발하는지 논의.
 
 ## 6. Kinase Activity 정량 비교
-두 실험의 kinase activity score를 시간대별로 직접 비교.
-coherence, direction, peak timing 차이를 해석.
-공통/고유 기질 인산화 패턴의 생물학적 의미를 설명.
+두 실험의 kinase activity score를 비교하되:
+- Activity score 차이가 큰 kinase의 substrate 인산화 패턴을 구체적으로 대조.
+- Coherence가 높은 kinase는 어떤 substrate들을 일관되게 인산화하는지 나열.
+- Peak timing 차이가 있는 kinase의 경우, 그 timing 차이가 downstream substrate의 인산화 시점에 어떻게 반영되는지 추적.
+- 한 실험에서 activity가 높은 kinase의 substrate가 다른 실험에서는 다른 kinase에 의해 인산화되는지 확인.
 
 ## 7. Signaling Divergence 분기점
-공통 상위 신호에서 실험별로 어떻게 분기되는지 경로 매핑.
-Temporal co-movement cluster 차이를 활용하여 분기 시점과 원인을 식별.
+공통 상위 신호에서 실험별 분기를 매핑하되:
+- 분기점이 되는 구체적인 substrate(node)를 식별하고, 그 substrate의 인산화 유무/강도가 어떻게 다른 downstream branch를 활성화하는지 설명.
+- Temporal co-movement cluster 차이를 활용하여, 같은 시간대에 함께 움직이는 substrate 그룹이 어떤 pathway를 형성하는지 해석.
+- 분기 이후 각 branch가 도달하는 최종 effector와 cellular outcome을 명시.
 
 ## 8. 종합 결론 및 치료적 함의
-두 실험의 세포신호전달 차이를 종합하여 작용기전의 핵심 차이를 명확히 설명.
-공통/고유 경로 기반 약물 타겟 제안, 병용 또는 길항 가능성 논의.
+두 실험의 세포신호전달 차이를 종합하되:
+- 핵심 차이를 substrate 수준에서 3-5개의 구체적인 예시와 함께 요약.
+- 각 실험이 유도하는 세포 반응(survival, apoptosis, inflammation, proliferation 등)을 substrate 근거와 함께 명시.
+- 약물 타겟 제안 시, 어떤 substrate/kinase를 표적으로 하면 어떤 downstream이 차단/활성화되는지 cascade로 설명.
+- 병용/길항 가능성을 논의할 때, 구체적인 substrate 수준의 근거를 제시.
 
-주의: 제공된 데이터에 근거한 결론만 작성하고, 데이터가 없는 경우 추측임을 명시하세요.
+주의사항:
+- 제공된 데이터에 근거한 결론만 작성하고, 데이터가 없는 경우 추측임을 명시하세요.
+- 각 substrate의 생물학적 기능 설명은 일반적으로 알려진 지식(예: AKT-mTOR pathway, MAPK cascade)을 활용하되, 인산화 데이터 자체는 제공된 수치만 사용하세요.
+- "~로 알려져 있다", "~를 시사한다", "~와 일치한다" 등의 표현을 사용하여 데이터 해석과 일반 지식을 구분하세요.
 """
     return prompt
 
