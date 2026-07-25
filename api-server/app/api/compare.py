@@ -1520,7 +1520,7 @@ async def stream_comparison_report(
                             ],
                             "stream": True,
                             "temperature": 0.6,
-                            "max_tokens": 8192,
+                            "max_tokens": 16384,
                         },
                     ) as resp:
                         if resp.status_code != 200:
@@ -2047,7 +2047,7 @@ B 전용 PTM:
                             "messages": llm_messages,
                             "stream": True,
                             "temperature": 0.4,
-                            "max_tokens": 4096,
+                            "max_tokens": 8192,
                         },
                     ) as resp:
                         if resp.status_code != 200:
