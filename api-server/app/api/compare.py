@@ -109,6 +109,357 @@ def _load_report_md(output_dir: Path, ptm_type: str) -> str:
     return candidates[0].read_text(encoding="utf-8", errors="replace")
 
 
+# ─── Comparative Context Builders ────────────────────────────────────────────
+# These functions extract rich temporal/mechanistic data from each order
+# and format them as side-by-side comparisons for the LLM prompt.
+
+
+def _build_kinase_heatmap_comparison(order_a: Order, order_b: Order) -> str:
+    """Compare kinase activity heatmaps: temporal scores, co-wave groups, peak sync."""
+    lines = []
+
+    for label, order in [("A", order_a), ("B", order_b)]:
+        heatmap = order.kinase_activity_heatmap
+        if not heatmap:
+            lines.append(f"[실험 {label}] Kinase Activity Heatmap: 데이터 없음")
+            continue
+
+        conditions = heatmap.get("conditions", [])
+        kinase_scores = heatmap.get("kinase_scores", [])
+        cowave_groups = heatmap.get("cowave_groups", [])
+
+        lines.append(f"[실험 {label}] 시간대: {', '.join(conditions)}")
+
+        # Co-Wave Groups
+        if cowave_groups:
+            lines.append(f"  Co-Wave Groups ({len(cowave_groups)}개):")
+            for grp in cowave_groups:
+                gid = grp.get("group_id", "?")
+                kinases = grp.get("kinases", [])
+                mean_corr = grp.get("mean_correlation", 0)
+                dom_peak = grp.get("dominant_peak", "")
+                lines.append(
+                    f"    G{gid}: {', '.join(kinases)} "
+                    f"(r={mean_corr:.2f}, peak={dom_peak})"
+                )
+
+        # Top kinase scores with temporal profile
+        if kinase_scores:
+            lines.append(f"  Kinase Activity Scores (상위 25개):")
+            for ks in kinase_scores[:25]:
+                kinase = ks.get("kinase", "")
+                scores = ks.get("scores", {})
+                sub_count = ks.get("substrate_count", 0)
+                coherence = ks.get("coherence", 0)
+                direction = ks.get("direction", "")
+                peak_cond = ks.get("peak_condition", "")
+                peak_score = ks.get("peak_score", 0)
+                cw_group = ks.get("cowave_group", -1)
+
+                score_str = ", ".join(f"{c}={scores.get(c, 0):.2f}" for c in conditions)
+                cw_str = f", CW=G{cw_group}" if cw_group >= 0 else ""
+                lines.append(
+                    f"    {kinase}: [{score_str}] "
+                    f"(#sub={sub_count}, coh={coherence:.2f}, "
+                    f"dir={direction}, peak={peak_cond}@{peak_score:.2f}{cw_str})"
+                )
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+def _build_temporal_cascade_comparison(order_a: Order, order_b: Order) -> str:
+    """Compare temporal cascades: time-ordered kinase activation and cascade flow."""
+    lines = []
+
+    for label, order in [("A", order_a), ("B", order_b)]:
+        kad = order.kinase_analysis_data or {}
+        tc = kad.get("temporal_cascade", {})
+        if not tc or not tc.get("timepoints"):
+            lines.append(f"[실험 {label}] Temporal Cascade: 데이터 없음")
+            continue
+
+        timepoints = tc.get("timepoints", [])
+        lines.append(f"[실험 {label}] Temporal Cascade ({len(timepoints)} timepoints):")
+
+        for tp in timepoints:
+            cond = tp.get("condition", "")
+            minutes = tp.get("minutes", 0)
+            ptm_count = tp.get("ptm_count", 0)
+            kinases = tp.get("kinases", [])
+            kinase_names = [k.get("canonical", "") or k.get("kinase", "") for k in kinases[:10]]
+            lines.append(
+                f"  {cond} ({minutes}min): {ptm_count} PTMs, "
+                f"활성 kinase=[{', '.join(kinase_names)}]"
+            )
+
+        # Cascade flow (transitions between timepoints)
+        cascade_flow = tc.get("cascade_flow", [])
+        if cascade_flow:
+            lines.append(f"  Cascade Flow (시간대 간 전이):")
+            for flow in cascade_flow:
+                fr = flow.get("from", "")
+                to = flow.get("to", "")
+                shared = flow.get("shared_kinases", [])
+                new = flow.get("new_kinases", [])
+                lost = flow.get("lost_kinases", [])
+                lines.append(
+                    f"    {fr}→{to}: 유지={shared[:8]}, "
+                    f"신규활성={new[:8]}, 소실={lost[:8]}"
+                )
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+def _build_wave_kinase_profile_comparison(order_a: Order, order_b: Order) -> str:
+    """Compare wave kinase profiles: co-wave-based kinase tiers and receptors."""
+    lines = []
+
+    for label, order in [("A", order_a), ("B", order_b)]:
+        kad = order.kinase_analysis_data or {}
+        wkp = kad.get("wave_kinase_profile", [])
+        if not wkp:
+            lines.append(f"[실험 {label}] Wave Kinase Profile: 데이터 없음")
+            continue
+
+        lines.append(f"[실험 {label}] Wave Kinase Profile ({len(wkp)} waves):")
+        for wave in wkp:
+            wave_id = wave.get("wave_id", "")
+            wave_label = wave.get("wave_label", "")
+            peak_min = wave.get("peak_minutes", 0)
+            tier = wave.get("tier", "")
+            kinases = wave.get("kinases", [])
+            cascade_ctx = wave.get("cascade_context", "")
+            suggested_rec = wave.get("suggested_receptors", [])
+
+            kinase_names = [k.get("canonical", "") or k.get("kinase", "") for k in kinases[:8]]
+            rec_names = [r if isinstance(r, str) else r.get("name", "") for r in suggested_rec[:5]]
+
+            lines.append(
+                f"  Wave {wave_id} ({wave_label}, peak={peak_min}min, tier={tier}): "
+                f"kinases=[{', '.join(kinase_names)}]"
+            )
+            if rec_names:
+                lines.append(f"    suggested_receptors=[{', '.join(rec_names)}]")
+            if cascade_ctx:
+                lines.append(f"    cascade_context: {cascade_ctx[:150]}")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+def _build_signal_flow_comparison(order_a: Order, order_b: Order) -> str:
+    """Compare receptor → kinase → substrate signal flow."""
+    lines = []
+
+    for label, order in [("A", order_a), ("B", order_b)]:
+        rid = order.receptor_inference_data
+        if not rid:
+            lines.append(f"[실험 {label}] Signal Flow: 데이터 없음")
+            continue
+
+        receptors = rid.get("receptors", []) if isinstance(rid, dict) else rid
+        if not receptors:
+            lines.append(f"[실험 {label}] Signal Flow: receptor 없음")
+            continue
+
+        lines.append(f"[실험 {label}] Receptor → Kinase → Substrate ({len(receptors)}개 receptor):")
+        for rec in receptors[:15]:
+            if not isinstance(rec, dict):
+                continue
+            name = rec.get("name", "") or rec.get("receptor", "")
+            rec_class = rec.get("receptor_class", "")
+            via_kinases = rec.get("via_kinases", [])
+            downstream = rec.get("downstream_ptms", [])
+            pathway = rec.get("pathway", "") or rec.get("signaling_pathway", "")
+            ptm_count = rec.get("downstream_ptm_count", len(downstream))
+
+            lines.append(
+                f"  {name} ({rec_class}): {ptm_count} PTMs, "
+                f"via_kinases={via_kinases[:5]}, "
+                f"substrates={downstream[:6]}, "
+                f"pathway={pathway}"
+            )
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+def _build_kinase_substrate_comparison(order_a: Order, order_b: Order) -> str:
+    """Compare kinase module substrate compositions between two orders."""
+    lines = []
+
+    def _get_modules(order: Order) -> dict:
+        kad = order.kinase_analysis_data or {}
+        modules = kad.get("kinase_modules", [])
+        result = {}
+        for km in modules:
+            kinase = km.get("canonical", "") or km.get("kinase", "")
+            members = km.get("members", [])
+            sources = km.get("sources", [])
+            confirmed = km.get("confirmed", 0)
+            inferred = km.get("inferred", 0)
+            member_labels = [
+                f"{m.get('gene', '')}_{m.get('position', '')}" for m in members[:20]
+            ]
+            result[kinase] = {
+                "count": len(members),
+                "confirmed": confirmed,
+                "inferred": inferred,
+                "sources": sources,
+                "substrates": member_labels,
+            }
+        return result
+
+    mods_a = _get_modules(order_a)
+    mods_b = _get_modules(order_b)
+
+    shared_kinases = sorted(set(mods_a.keys()) & set(mods_b.keys()))
+    a_only = sorted(set(mods_a.keys()) - set(mods_b.keys()))
+    b_only = sorted(set(mods_b.keys()) - set(mods_a.keys()))
+
+    if shared_kinases:
+        lines.append(f"공통 Kinase Module 상세 비교 ({len(shared_kinases)}개):")
+        for k in shared_kinases[:20]:
+            ma = mods_a[k]
+            mb = mods_b[k]
+            subs_a = set(ma["substrates"])
+            subs_b = set(mb["substrates"])
+            shared_subs = subs_a & subs_b
+            a_only_subs = subs_a - subs_b
+            b_only_subs = subs_b - subs_a
+            lines.append(
+                f"  {k}: A={ma['count']}sub(conf={ma['confirmed']}) vs B={mb['count']}sub(conf={mb['confirmed']})"
+            )
+            if shared_subs:
+                lines.append(f"    공통 substrate: {', '.join(sorted(shared_subs)[:10])}")
+            if a_only_subs:
+                lines.append(f"    A 전용 substrate: {', '.join(sorted(a_only_subs)[:10])}")
+            if b_only_subs:
+                lines.append(f"    B 전용 substrate: {', '.join(sorted(b_only_subs)[:10])}")
+
+    if a_only:
+        lines.append(f"\nA 전용 Kinase Module ({len(a_only)}개):")
+        for k in a_only[:15]:
+            ma = mods_a[k]
+            lines.append(f"  {k}: {ma['count']}sub, sources={ma['sources']}, top={', '.join(ma['substrates'][:8])}")
+
+    if b_only:
+        lines.append(f"\nB 전용 Kinase Module ({len(b_only)}개):")
+        for k in b_only[:15]:
+            mb = mods_b[k]
+            lines.append(f"  {k}: {mb['count']}sub, sources={mb['sources']}, top={', '.join(mb['substrates'][:8])}")
+
+    return "\n".join(lines)
+
+
+def _build_effector_comparison(order_a: Order, order_b: Order) -> str:
+    """Compare non-PTM effector proteins between two orders."""
+    lines = []
+
+    for label, order in [("A", order_a), ("B", order_b)]:
+        kad = order.kinase_analysis_data or {}
+        effectors = kad.get("effector_proteins", [])
+        if not effectors:
+            lines.append(f"[실험 {label}] Effector Proteins: 없음")
+            continue
+
+        lines.append(f"[실험 {label}] Non-PTM Effector Proteins ({len(effectors)}개):")
+        for eff in effectors[:15]:
+            gene = eff.get("gene", "")
+            role = eff.get("role", "")
+            evidence = eff.get("evidence_strength", "")
+            score = eff.get("evidence_score", 0)
+            connected = eff.get("connected_substrates", [])
+            conn_names = [s.get("gene", "") for s in connected[:5]] if isinstance(connected, list) else []
+            lines.append(
+                f"  {gene}: role={role}, evidence={evidence}(score={score}), "
+                f"connected={conn_names}"
+            )
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+def _build_comovement_comparison(output_dir_a: Path, output_dir_b: Path, ptm_type: str) -> str:
+    """Compare temporal co-movement clusters between two orders."""
+    suffix = "_phospho" if ptm_type == "phosphorylation" else "_ubi"
+    lines = []
+
+    for label, output_dir in [("A", output_dir_a), ("B", output_dir_b)]:
+        path = output_dir / f"temporal_comovement{suffix}.json"
+        if not path.exists():
+            lines.append(f"[실험 {label}] Co-movement Clusters: 파일 없음")
+            continue
+
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if not data:
+                lines.append(f"[실험 {label}] Co-movement Clusters: 데이터 없음")
+                continue
+
+            clusters = data if isinstance(data, list) else data.get("clusters", [])
+            lines.append(f"[실험 {label}] Co-movement Clusters ({len(clusters)}개):")
+            for cl in clusters[:10]:
+                if isinstance(cl, dict):
+                    cl_id = cl.get("cluster_id", cl.get("id", "?"))
+                    peak = cl.get("peak_condition", cl.get("dominant_peak", ""))
+                    members = cl.get("members", cl.get("ptms", []))
+                    size = len(members) if isinstance(members, list) else cl.get("size", 0)
+                    member_names = []
+                    for m in (members[:8] if isinstance(members, list) else []):
+                        if isinstance(m, str):
+                            member_names.append(m)
+                        elif isinstance(m, dict):
+                            member_names.append(f"{m.get('gene', '')}_{m.get('position', '')}")
+                    lines.append(
+                        f"  Cluster {cl_id} (peak={peak}, size={size}): "
+                        f"{', '.join(member_names)}"
+                    )
+        except Exception:
+            lines.append(f"[실험 {label}] Co-movement Clusters: 로드 실패")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+def _build_report_summary_comparison(report_a: str, report_b: str) -> str:
+    """Extract key conclusions from each order's comprehensive report."""
+    lines = []
+
+    for label, report in [("A", report_a), ("B", report_b)]:
+        if not report:
+            lines.append(f"[실험 {label}] 개별 분석 보고서: 없음")
+            continue
+
+        # Extract abstract/conclusion sections (first 1500 chars as summary)
+        # Try to find abstract or executive summary
+        summary = ""
+        for marker in ["## Abstract", "## Executive Summary", "## 요약", "# Abstract"]:
+            idx = report.find(marker)
+            if idx >= 0:
+                end_idx = report.find("\n## ", idx + len(marker))
+                if end_idx < 0:
+                    end_idx = idx + 1500
+                summary = report[idx:end_idx].strip()
+                break
+
+        if not summary:
+            # Fallback: first 1200 chars
+            summary = report[:1200].strip()
+
+        if len(summary) > 1500:
+            summary = summary[:1500] + "..."
+
+        lines.append(f"[실험 {label}] 개별 분석 보고서 요약:")
+        lines.append(summary)
+        lines.append("")
+
+    return "\n".join(lines)
+
+
 _CHATML_TOKEN_RE = re.compile(
     r"<\|(?:im_start|im_end|endoftext|system|user|assistant)\|>",
     re.IGNORECASE,
@@ -516,14 +867,26 @@ def _build_comparison_prompt(
     report_a: str,
     report_b: str,
     user_instructions: str = "",
+    *,
+    order_a: Optional[Order] = None,
+    order_b: Optional[Order] = None,
+    output_dir_a: Optional[Path] = None,
+    output_dir_b: Optional[Path] = None,
 ) -> str:
     """Build the LLM prompt for comparative analysis from structured data.
 
-    Uses structured PTM time-series data directly instead of the raw report files
-    to give the LLM high-quality, unambiguous input.
+    Includes rich temporal/mechanistic context:
+    - Kinase Activity Heatmap (temporal scores, co-wave groups)
+    - Temporal Cascade (time-ordered kinase activation flow)
+    - Wave Kinase Profile (co-wave-based upstream regulator inference)
+    - Signal Flow (receptor → kinase → substrate cascade)
+    - Kinase substrate composition comparison
+    - Effector proteins comparison
+    - Co-movement clusters comparison
+    - Individual report summaries
     """
-    order_a = comparison_data["order_a"]
-    order_b = comparison_data["order_b"]
+    order_a_info = comparison_data["order_a"]
+    order_b_info = comparison_data["order_b"]
     stats = comparison_data["stats"]
     common_conds = stats.get("common_conditions", [])
 
@@ -563,18 +926,66 @@ def _build_comparison_prompt(
         else "일반적인 비교 분석 수행 (공통 경로, 물질 특이적 반응, temporal dynamics 비교)"
     )
 
+    # ── Build rich comparative context sections ────────────────────────────
+    rich_sections = []
+
+    if order_a and order_b:
+        # Kinase Activity Heatmap comparison (temporal scores per condition)
+        heatmap_ctx = _build_kinase_heatmap_comparison(order_a, order_b)
+        if heatmap_ctx.strip():
+            rich_sections.append(f"════ Kinase Activity Heatmap 비교 (시간대별 활성도) ════\n\n{heatmap_ctx}")
+
+        # Temporal Cascade comparison (time-ordered kinase activation)
+        cascade_ctx = _build_temporal_cascade_comparison(order_a, order_b)
+        if cascade_ctx.strip():
+            rich_sections.append(f"════ Temporal Cascade 비교 (시간 순서 kinase 활성화 흐름) ════\n\n{cascade_ctx}")
+
+        # Wave Kinase Profile comparison (co-wave upstream regulators)
+        wave_ctx = _build_wave_kinase_profile_comparison(order_a, order_b)
+        if wave_ctx.strip():
+            rich_sections.append(f"════ Wave Kinase Profile 비교 (Co-Wave 기반 Upstream Regulator) ════\n\n{wave_ctx}")
+
+        # Signal Flow comparison (receptor → kinase → substrate)
+        signal_ctx = _build_signal_flow_comparison(order_a, order_b)
+        if signal_ctx.strip():
+            rich_sections.append(f"════ Signal Flow 비교 (Receptor → Kinase → Substrate) ════\n\n{signal_ctx}")
+
+        # Kinase substrate composition comparison
+        substrate_ctx = _build_kinase_substrate_comparison(order_a, order_b)
+        if substrate_ctx.strip():
+            rich_sections.append(f"════ Kinase Substrate 구성 비교 ════\n\n{substrate_ctx}")
+
+        # Effector proteins comparison
+        effector_ctx = _build_effector_comparison(order_a, order_b)
+        if effector_ctx.strip():
+            rich_sections.append(f"════ Non-PTM Effector Proteins 비교 ════\n\n{effector_ctx}")
+
+    # Co-movement clusters comparison
+    if output_dir_a and output_dir_b and order_a:
+        ptm_type_str = order_a_info.get("ptm_type", "phosphorylation")
+        comove_ctx = _build_comovement_comparison(output_dir_a, output_dir_b, ptm_type_str)
+        if comove_ctx.strip():
+            rich_sections.append(f"════ Temporal Co-movement Clusters 비교 ════\n\n{comove_ctx}")
+
+    # Individual report summaries
+    report_summary_ctx = _build_report_summary_comparison(report_a, report_b)
+    if report_summary_ctx.strip():
+        rich_sections.append(f"════ 개별 분석 보고서 요약 ════\n\n{report_summary_ctx}")
+
+    rich_context_block = "\n\n".join(rich_sections)
+
     prompt = f"""당신은 PTM(번역 후 변형) 프로테오믹스 전문 선임 연구자입니다.
 두 PTM 시계열 실험의 비교 분석 리포트를 아래 제공된 정량적 데이터를 기반으로 한국어로 작성하세요.
 
 ════ 실험 정보 ════
 
-[실험 A] {order_a['project_name']}
-  - 종: {order_a['species']}, PTM 유형: {order_a['ptm_type']}
-  - 시간대(조건): {', '.join(order_a['conditions'])}
+[실험 A] {order_a_info['project_name']}
+  - 종: {order_a_info['species']}, PTM 유형: {order_a_info['ptm_type']}
+  - 시간대(조건): {', '.join(order_a_info['conditions'])}
 
-[실험 B] {order_b['project_name']}
-  - 종: {order_b['species']}, PTM 유형: {order_b['ptm_type']}
-  - 시간대(조건): {', '.join(order_b['conditions'])}
+[실험 B] {order_b_info['project_name']}
+  - 종: {order_b_info['species']}, PTM 유형: {order_b_info['ptm_type']}
+  - 시간대(조건): {', '.join(order_b_info['conditions'])}
 
 ════ 정량적 비교 요약 ════
 
@@ -603,32 +1014,47 @@ B 전용 Receptor: {', '.join(comparison_data['b_only_receptors'][:10]) or '없�
 
 {chr(10).join(b_only_lines) if b_only_lines else '없음'}
 
+{rich_context_block}
+
 ════ 분석 초점 ════
 
 {user_focus}
 
 ════ 작성 지시 ════
 
-위 데이터를 바탕으로 다음 6개 섹션의 비교 분석 리포트를 작성하세요.
-각 섹션당 200~400단어, 구체적인 유전자명·위치·수치 인용 필수.
+위 데이터를 바탕으로 다음 7개 섹션의 비교 분석 리포트를 작성하세요.
+각 섹션당 300~500단어, 구체적인 유전자명·위치·수치 인용 필수.
 
-## 1. 공통 Signaling Mechanism
-두 실험에서 공통으로 활성화된 신호전달 경로 및 kinase 서술
+## 1. Temporal Signaling Cascade 비교
+시간대별로 어떤 kinase가 활성화되는지 두 실험을 나란히 비교.
+Co-Wave Group 정보를 활용하여 동시에 활성화되는 kinase 클러스터를 식별.
+Cascade Flow(시간대 간 kinase 유지/신규/소실)를 비교하여 신호전달 흐름의 차이를 서술.
 
-## 2. 물질 특이적 반응
-각 실험에서만 나타나는 고유한 신호 이벤트 서술 및 작용기전 해석
+## 2. Co-Wave 기반 Upstream Regulator 비교
+Wave Kinase Profile에서 예측된 upstream regulator(receptor, kinase)를 비교.
+각 wave의 tier, peak timing, suggested receptor를 대조하여 상위 신호 입력의 차이를 해석.
 
-## 3. Temporal Dynamics 비교
-반응 타이밍 비교 (조기/후기, 일시적/지속적), 지연 반응 또는 용량 의존 패턴 식별
+## 3. 공통 Signaling Mechanism
+두 실험에서 공통으로 활성화된 신호전달 경로 및 kinase를 서술.
+공통 kinase의 substrate 구성 차이도 분석 (동일 kinase가 다른 substrate를 인산화하는 패턴).
 
-## 4. Kinase Activity 비교
-두 실험의 kinase 활성 차이 비교, 공통/고유 기질 인산화 패턴 해석
+## 4. 물질 특이적 반응 및 작용기전
+각 실험에서만 나타나는 고유한 신호 이벤트를 서술.
+Signal Flow (Receptor → Kinase → Substrate) 정보를 활용하여 작용기전을 설명.
+Effector protein 차이도 포함.
 
-## 5. Signaling Divergence 분기점
-공통 상위 신호에서 실험별로 어떻게 분기되는지 경로 매핑
+## 5. Kinase Activity 정량 비교
+두 실험의 kinase activity score를 시간대별로 직접 비교.
+coherence, direction, peak timing 차이를 해석.
+공통/고유 기질 인산화 패턴의 생물학적 의미를 설명.
 
-## 6. 치료적 함의
-공통/고유 경로 기반 약물 타겟 제안, 병용 또는 길항 가능성 논의
+## 6. Signaling Divergence 분기점
+공통 상위 신호에서 실험별로 어떻게 분기되는지 경로 매핑.
+Temporal co-movement cluster 차이를 활용하여 분기 시점과 원인을 식별.
+
+## 7. 종합 결론 및 치료적 함의
+두 실험의 세포신호전달 차이를 종합하여 작용기전의 핵심 차이를 명확히 설명.
+공통/고유 경로 기반 약물 타겟 제안, 병용 또는 길항 가능성 논의.
 
 주의: 제공된 데이터에 근거한 결론만 작성하고, 데이터가 없는 경우 추측임을 명시하세요.
 """
@@ -724,7 +1150,11 @@ async def stream_comparison_report(
     comparison = _build_comparison_data(order_a, order_b, vector_a, vector_b)
     report_a = _load_report_md(output_dir_a, order_a.ptm_type)
     report_b = _load_report_md(output_dir_b, order_b.ptm_type)
-    prompt = _build_comparison_prompt(comparison, report_a, report_b, body.user_instructions or "")
+    prompt = _build_comparison_prompt(
+        comparison, report_a, report_b, body.user_instructions or "",
+        order_a=order_a, order_b=order_b,
+        output_dir_a=output_dir_a, output_dir_b=output_dir_b,
+    )
 
     # Determine LLM settings
     llm_model = body.llm_model or (order_a.report_options or {}).get("llm_model") or os.getenv("LLM_MODEL", "gemma3:27b")
@@ -1122,6 +1552,39 @@ async def stream_comparison_chat(
         for p in sorted(comparison["b_only_ptms"], key=lambda x: abs(x["max_fc"]), reverse=True)[:15]
     )
 
+    # Build rich temporal/mechanistic context for chat
+    chat_rich_sections = []
+    if order_a and order_b:
+        _hm = _build_kinase_heatmap_comparison(order_a, order_b)
+        if _hm.strip():
+            chat_rich_sections.append(f"[KINASE ACTIVITY HEATMAP 비교]\n{_hm}")
+        _tc = _build_temporal_cascade_comparison(order_a, order_b)
+        if _tc.strip():
+            chat_rich_sections.append(f"[TEMPORAL CASCADE 비교]\n{_tc}")
+        _wk = _build_wave_kinase_profile_comparison(order_a, order_b)
+        if _wk.strip():
+            chat_rich_sections.append(f"[WAVE KINASE PROFILE 비교]\n{_wk}")
+        _sf = _build_signal_flow_comparison(order_a, order_b)
+        if _sf.strip():
+            chat_rich_sections.append(f"[SIGNAL FLOW 비교]\n{_sf}")
+        _ks = _build_kinase_substrate_comparison(order_a, order_b)
+        if _ks.strip():
+            chat_rich_sections.append(f"[KINASE SUBSTRATE 구성 비교]\n{_ks}")
+        _ef = _build_effector_comparison(order_a, order_b)
+        if _ef.strip():
+            chat_rich_sections.append(f"[EFFECTOR PROTEINS 비교]\n{_ef}")
+
+    ptm_type_for_chat = order_a_info.get("ptm_type", "phosphorylation")
+    _cm = _build_comovement_comparison(output_dir_a, output_dir_b, ptm_type_for_chat)
+    if _cm.strip():
+        chat_rich_sections.append(f"[CO-MOVEMENT CLUSTERS 비교]\n{_cm}")
+
+    _rpt = _build_report_summary_comparison(report_a, report_b)
+    if _rpt.strip():
+        chat_rich_sections.append(f"[개별 보고서 요약]\n{_rpt}")
+
+    chat_rich_block = "\n\n".join(chat_rich_sections)
+
     system_prompt = f"""당신은 PTM 프로테오믹스 전문 선임 연구자입니다. 두 실험 비교 결과에 대한 후속 질문에 답변합니다.
 
 중요 규칙: 아래 데이터에 근거한 답변만 하세요. 데이터에 없는 내용은 추측임을 명시하세요.
@@ -1151,6 +1614,8 @@ A 전용 PTM:
 
 B 전용 PTM:
 {b_only_table or '없음'}
+
+{chat_rich_block}
 
 답변 형식: 한국어, 영문 유전자명 사용, 구체적 수치 인용, 마크다운 형식."""
 
