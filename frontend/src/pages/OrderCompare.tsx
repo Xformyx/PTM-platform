@@ -114,6 +114,9 @@ export default function OrderCompare() {
   // User instructions
   const [userInstructions, setUserInstructions] = useState("");
 
+  // Report language
+  const [reportLanguage, setReportLanguage] = useState<"ko" | "en">("ko");
+
   // Report streaming
   const [report, setReport] = useState<string>("");
   const [reportSavedAt, setReportSavedAt] = useState<string | null>(null);
@@ -211,6 +214,7 @@ export default function OrderCompare() {
           llm_model: model || undefined,
           llm_provider: provider || undefined,
           user_instructions: userInstructions.trim() || undefined,
+          language: reportLanguage,
         }),
         signal: controller.signal,
       });
@@ -311,6 +315,7 @@ export default function OrderCompare() {
           messages: updatedMessages,
           llm_model: model || undefined,
           llm_provider: provider || undefined,
+          language: reportLanguage,
         }),
         signal: controller.signal,
       });
@@ -542,8 +547,8 @@ export default function OrderCompare() {
           <CardTitle className="text-sm font-medium">Analysis Settings</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          {/* Model Selector */}
-          <div className="flex items-center gap-4">
+          {/* Model Selector + Language */}
+          <div className="flex items-center gap-4 flex-wrap">
             <label className="text-sm font-medium text-muted-foreground whitespace-nowrap">LLM Model</label>
             <Select value={selectedModel} onValueChange={setSelectedModel}>
               <SelectTrigger className="w-[280px]">
@@ -560,6 +565,19 @@ export default function OrderCompare() {
                 ))}
               </SelectContent>
             </Select>
+
+            <div className="flex items-center gap-2 ml-auto">
+              <label className="text-sm font-medium text-muted-foreground whitespace-nowrap">Language</label>
+              <Select value={reportLanguage} onValueChange={(v: "ko" | "en") => setReportLanguage(v)}>
+                <SelectTrigger className="w-[120px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ko">한국어</SelectItem>
+                  <SelectItem value="en">English</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
 
           {/* User Instructions */}

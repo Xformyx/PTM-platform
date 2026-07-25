@@ -35,6 +35,7 @@ class CompareRequest(BaseModel):
     llm_model: Optional[str] = None
     llm_provider: Optional[str] = None
     user_instructions: Optional[str] = None  # User's comparison focus points
+    language: Optional[str] = "ko"  # "ko" or "en"
 
 
 class CompareChatRequest(BaseModel):
@@ -43,6 +44,7 @@ class CompareChatRequest(BaseModel):
     messages: list[dict]  # [{"role": "user"|"assistant", "content": "..."}]
     llm_model: Optional[str] = None
     llm_provider: Optional[str] = None
+    language: Optional[str] = "ko"  # "ko" or "en"
 
 
 class CompareSummary(BaseModel):
@@ -1064,6 +1066,7 @@ def _build_comparison_prompt(
     output_dir_b: Optional[Path] = None,
     vector_a: Optional[list[dict]] = None,
     vector_b: Optional[list[dict]] = None,
+    language: str = "ko",
 ) -> str:
     """Build the LLM prompt for comparative analysis from structured data.
 
@@ -1177,8 +1180,19 @@ def _build_comparison_prompt(
 
     rich_context_block = "\n\n".join(rich_sections)
 
-    prompt = f"""당신은 PTM(번역 후 변형) 프로테오믹스 전문 선임 연구자입니다.
-두 PTM 시계열 실험의 비교 분석 리포트를 아래 제공된 정량적 데이터를 기반으로 한국어로 작성하세요.
+    lang_instruction = (
+        "두 PTM 시계열 실험의 비교 분석 리포트를 아래 제공된 정량적 데이터를 기반으로 한국어로 작성하세요."
+        if language == "ko"
+        else "Write a comparative analysis report for two PTM time-series experiments based on the quantitative data provided below. Write entirely in English."
+    )
+    role_instruction = (
+        "당신은 PTM(번역 후 변형) 프로테오믹스 전문 선임 연구자입니다."
+        if language == "ko"
+        else "You are a senior researcher specializing in PTM (post-translational modification) proteomics."
+    )
+
+    prompt = f"""{role_instruction}
+{lang_instruction}
 
 ════ 실험 정보 ════
 
@@ -1321,6 +1335,7 @@ Wave Kinase Profile에서 예측된 upstream regulator를 비교하되:
 - 제공된 데이터에 근거한 결론만 작성하고, 데이터가 없는 경우 추측임을 명시하세요.
 - 각 substrate의 생물학적 기능 설명은 일반적으로 알려진 지식(예: AKT-mTOR pathway, MAPK cascade)을 활용하되, 인산화 데이터 자체는 제공된 수치만 사용하세요.
 - "~로 알려져 있다", "~를 시사한다", "~와 일치한다" 등의 표현을 사용하여 데이터 해석과 일반 지식을 구분하세요.
+{"" if language == "ko" else chr(10) + "IMPORTANT: Write the ENTIRE report in English. All section titles, descriptions, and analysis must be in English. Use scientific English appropriate for a peer-reviewed publication."}
 """
     return prompt
 
@@ -1419,12 +1434,21 @@ async def stream_comparison_report(
         order_a=order_a, order_b=order_b,
         output_dir_a=output_dir_a, output_dir_b=output_dir_b,
         vector_a=vector_a, vector_b=vector_b,
+        language=body.language or "ko",
     )
 
     # Determine LLM settings
     llm_model = body.llm_model or (order_a.report_options or {}).get("llm_model") or os.getenv("LLM_MODEL", "gemma3:27b")
     llm_provider = body.llm_provider or os.getenv("LLM_PROVIDER", "auto")
     ollama_url = settings.OLLAMA_URL
+
+    # Language and system message
+    report_language = body.language or "ko"
+    sys_msg = (
+        "You are a senior proteomics bioinformatician specializing in comparative PTM analysis. Answer in Korean."
+        if report_language == "ko"
+        else "You are a senior proteomics bioinformatician specializing in comparative PTM analysis. Answer in English."
+    )
 
     # Determine provider and endpoint
     openai_key = os.getenv("OPENAI_API_KEY", "")
@@ -1460,7 +1484,7 @@ async def stream_comparison_report(
                         json=_ollama_chat_payload(
                             llm_model,
                             [
-                                {"role": "system", "content": "You are a senior proteomics bioinformatician specializing in comparative PTM analysis."},
+                                {"role": "system", "content": sys_msg},
                                 {"role": "user", "content": prompt},
                             ],
                             temperature=0.6,
@@ -1515,7 +1539,7 @@ async def stream_comparison_report(
                         json={
                             "model": model,
                             "messages": [
-                                {"role": "system", "content": "You are a senior proteomics bioinformatician specializing in comparative PTM analysis."},
+                                {"role": "system", "content": sys_msg},
                                 {"role": "user", "content": prompt},
                             ],
                             "stream": True,
@@ -1925,9 +1949,21 @@ async def stream_comparison_chat(
 
     chat_rich_block = "\n\n".join(chat_rich_sections)
 
-    system_prompt = f"""당신은 PTM 프로테오믹스 전문 선임 연구자입니다. 두 실험 비교 결과에 대한 후속 질문에 답변합니다.
+    chat_lang = body.language or "ko"
+    chat_role = (
+        "당신은 PTM 프로테오믹스 전문 선임 연구자입니다. 두 실험 비교 결과에 대한 후속 질문에 답변합니다."
+        if chat_lang == "ko"
+        else "You are a senior PTM proteomics researcher. Answer follow-up questions about the comparative analysis results."
+    )
+    chat_rule = (
+        "중요 규칙: 아래 데이터에 근거한 답변만 하세요. 데이터에 없는 내용은 추측임을 명시하세요."
+        if chat_lang == "ko"
+        else "Important rule: Only answer based on the data below. If the data does not contain the information, explicitly state it is speculation."
+    )
 
-중요 규칙: 아래 데이터에 근거한 답변만 하세요. 데이터에 없는 내용은 추측임을 명시하세요.
+    system_prompt = f"""{chat_role}
+
+{chat_rule}
 
 [실험 A] {order_a_info['project_name']} ({order_a_info['species']}, {order_a_info['ptm_type']})
   조건: {', '.join(order_a_info['conditions'])}
@@ -1957,7 +1993,7 @@ B 전용 PTM:
 
 {chat_rich_block}
 
-답변 형식: 한국어, 영문 유전자명 사용, 구체적 수치 인용, 마크다운 형식."""
+답변 형식: {"한국어, 영문 유전자명 사용, 구체적 수치 인용, 마크다운 형식." if chat_lang == "ko" else "Write in English, use standard gene nomenclature, cite specific values, use markdown format."}"""
 
     # Build messages list for LLM
     llm_messages = [{"role": "system", "content": system_prompt}]
