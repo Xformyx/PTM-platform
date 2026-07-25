@@ -38,7 +38,7 @@
 
   // Typography
   set text(
-    font: ("Libertinus Serif", "Noto Serif CJK KR"),
+    font: ("Libertinus Serif", "Noto Serif CJK KR", "Noto Sans CJK KR", "Noto Sans KR"),
     size: 10pt,
     lang: "ko",
   )

@@ -136,9 +136,11 @@ def _convert_inline(text: str) -> str:
     # Inline code: `text` → `text` (same in Typst)
     # Links: [text](url) → #link("url")[text]
     text = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r'#link("\2")[\1]', text)
+    # Escape < and > to prevent Typst label/math interpretation
+    # Replace < with \< and > with \> but preserve existing Typst commands
+    text = text.replace("<", "\\<")
+    text = text.replace(">", "\\>")
     # Escape remaining # characters that are NOT part of Typst commands
-    # (i.e., not preceded by nothing or whitespace and followed by a Typst function name)
-    # Simple approach: escape standalone # that aren't already part of #link, #quote, #table, etc.
     text = re.sub(r"(?<!`)#(?!(?:link|quote|table|line|import|show|set|let|v|text|block|grid|align|counter|page|heading|raw|box|image|figure|par|strong|emph))", r"\\#", text)
     return text
 
@@ -237,9 +239,20 @@ def generate_report_pdf(
     typ_path.write_text(typst_document, encoding="utf-8")
 
     # Compile with typst
+    # Include system font paths to ensure CJK fonts are found
+    font_paths = [
+        "/usr/share/fonts",
+        "/usr/local/share/fonts",
+        str(TEMPLATE_DIR),  # for any bundled fonts
+    ]
+    typst_cmd = ["typst", "compile"]
+    for fp in font_paths:
+        typst_cmd.extend(["--font-path", fp])
+    typst_cmd.extend([str(typ_path), str(output_path)])
+
     try:
         result = subprocess.run(
-            ["typst", "compile", str(typ_path), str(output_path)],
+            typst_cmd,
             capture_output=True,
             text=True,
             timeout=60,
