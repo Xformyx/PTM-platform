@@ -68,25 +68,24 @@ def markdown_to_typst(markdown_text: str) -> str:
             in_table = False
             table_rows = []
 
-        # Headings
-        if line.startswith("## "):
-            # Remove numbering like "## 1. Title" → "= Title"
-            heading_text = re.sub(r"^##\s*\d+\.\s*", "", line)
-            if heading_text == line:
-                heading_text = line[3:]
-            result.append(f"= {_convert_inline(heading_text.strip())}")
-            result.append("")
-            continue
-        elif line.startswith("### "):
-            heading_text = re.sub(r"^###\s*\d+\.\d+\.?\s*", "", line)
-            if heading_text == line:
-                heading_text = line[4:]
-            result.append(f"== {_convert_inline(heading_text.strip())}")
-            result.append("")
-            continue
-        elif line.startswith("#### "):
-            heading_text = line[5:]
-            result.append(f"=== {_convert_inline(heading_text.strip())}")
+        # Headings — handle #, ##, ###, ####
+        heading_match = re.match(r"^(#{1,4})\s+(.*)$", line)
+        if heading_match:
+            level = len(heading_match.group(1))  # 1-4
+            heading_text = heading_match.group(2)
+            # Remove numbering like "1. Title" or "1.1. Title"
+            heading_text = re.sub(r"^\d+(\.\d+)*\.?\s*", "", heading_text)
+            # Typst heading: = (level 1), == (level 2), === (level 3)
+            # Map markdown # → =, ## → =, ### → ==, #### → ===
+            # Since our template uses heading numbering, map:
+            # # → = (section), ## → = (section), ### → == (subsection), #### → === (subsubsection)
+            if level <= 2:
+                typst_prefix = "="
+            elif level == 3:
+                typst_prefix = "=="
+            else:
+                typst_prefix = "==="
+            result.append(f"{typst_prefix} {_convert_inline(heading_text.strip())}")
             result.append("")
             continue
 
@@ -137,8 +136,10 @@ def _convert_inline(text: str) -> str:
     # Inline code: `text` → `text` (same in Typst)
     # Links: [text](url) → #link("url")[text]
     text = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r'#link("\2")[\1]', text)
-    # Subscript/superscript for scientific notation
-    # Gene names with positions like S473, Y705 are fine as-is
+    # Escape remaining # characters that are NOT part of Typst commands
+    # (i.e., not preceded by nothing or whitespace and followed by a Typst function name)
+    # Simple approach: escape standalone # that aren't already part of #link, #quote, #table, etc.
+    text = re.sub(r"(?<!`)#(?!(?:link|quote|table|line|import|show|set|let|v|text|block|grid|align|counter|page|heading|raw|box|image|figure|par|strong|emph))", r"\\#", text)
     return text
 
 
