@@ -460,6 +460,196 @@ def _build_report_summary_comparison(report_a: str, report_b: str) -> str:
     return "\n".join(lines)
 
 
+def _build_temporal_substrate_activity_comparison(
+    vector_a: list[dict], vector_b: list[dict],
+    conds_a: list[str], conds_b: list[str],
+    common_conds: list[str],
+    shared_ptms: list[dict],
+) -> str:
+    """Build temporal substrate activity comparison context.
+
+    Analyzes:
+    - Per-timepoint active substrate counts (|log2FC| > 0.5)
+    - Peak activation timing distribution
+    - Early vs Late responder ratios
+    - Shared substrates with temporal shift (different peak in A vs B)
+    """
+    FC_THRESHOLD = 0.5
+    lines = []
+
+    # --- 1. Per-timepoint active substrate counts ---
+    lines.append("[시간대별 활성 substrate 수 (|log2FC| > 0.5)]")
+    lines.append(f"{'Condition':<12} {'A_up':>5} {'A_down':>6} {'A_total':>7}  |  {'B_up':>5} {'B_down':>6} {'B_total':>7}")
+
+    a_per_cond: dict[str, dict] = {c: {"up": 0, "down": 0} for c in conds_a}
+    b_per_cond: dict[str, dict] = {c: {"up": 0, "down": 0} for c in conds_b}
+
+    _, a_map = _parse_vector_sites(vector_a)
+    _, b_map = _parse_vector_sites(vector_b)
+
+    for site in a_map.values():
+        for c in conds_a:
+            v = site["values"].get(c, 0.0)
+            if v > FC_THRESHOLD:
+                a_per_cond[c]["up"] += 1
+            elif v < -FC_THRESHOLD:
+                a_per_cond[c]["down"] += 1
+
+    for site in b_map.values():
+        for c in conds_b:
+            v = site["values"].get(c, 0.0)
+            if v > FC_THRESHOLD:
+                b_per_cond[c]["up"] += 1
+            elif v < -FC_THRESHOLD:
+                b_per_cond[c]["down"] += 1
+
+    # Display common conditions first, then unique
+    display_conds = common_conds[:] if common_conds else []
+    for c in conds_a:
+        if c not in display_conds:
+            display_conds.append(c)
+    for c in conds_b:
+        if c not in display_conds:
+            display_conds.append(c)
+
+    for c in display_conds[:12]:  # Limit to 12 timepoints
+        a_up = a_per_cond.get(c, {}).get("up", 0)
+        a_down = a_per_cond.get(c, {}).get("down", 0)
+        a_total = a_up + a_down
+        b_up = b_per_cond.get(c, {}).get("up", 0)
+        b_down = b_per_cond.get(c, {}).get("down", 0)
+        b_total = b_up + b_down
+        a_str = f"{a_up:>5} {a_down:>6} {a_total:>7}" if c in a_per_cond else f"{'—':>5} {'—':>6} {'—':>7}"
+        b_str = f"{b_up:>5} {b_down:>6} {b_total:>7}" if c in b_per_cond else f"{'—':>5} {'—':>6} {'—':>7}"
+        lines.append(f"{c:<12} {a_str}  |  {b_str}")
+
+    # --- 2. Peak activation timing distribution ---
+    lines.append("")
+    lines.append("[Peak Activation Timing 분포]")
+
+    def _get_peak_cond(site_values: dict, conditions: list[str]) -> str:
+        """Find the condition with max |FC|."""
+        if not conditions or not site_values:
+            return ""
+        best_c, best_v = "", 0.0
+        for c in conditions:
+            v = abs(site_values.get(c, 0.0))
+            if v > best_v:
+                best_v = v
+                best_c = c
+        return best_c
+
+    a_peak_dist: dict[str, int] = {c: 0 for c in conds_a}
+    b_peak_dist: dict[str, int] = {c: 0 for c in conds_b}
+
+    for site in a_map.values():
+        if site["max_abs_fc"] >= FC_THRESHOLD:
+            pc = _get_peak_cond(site["values"], conds_a)
+            if pc:
+                a_peak_dist[pc] = a_peak_dist.get(pc, 0) + 1
+
+    for site in b_map.values():
+        if site["max_abs_fc"] >= FC_THRESHOLD:
+            pc = _get_peak_cond(site["values"], conds_b)
+            if pc:
+                b_peak_dist[pc] = b_peak_dist.get(pc, 0) + 1
+
+    lines.append(f"{'Condition':<12} {'A_peak_count':>12} {'B_peak_count':>12}")
+    for c in display_conds[:12]:
+        a_cnt = a_peak_dist.get(c, 0)
+        b_cnt = b_peak_dist.get(c, 0)
+        if a_cnt > 0 or b_cnt > 0:
+            lines.append(f"{c:<12} {a_cnt:>12} {b_cnt:>12}")
+
+    # --- 3. Early vs Late responder ratio ---
+    lines.append("")
+    lines.append("[Early vs Late Responder 비율]")
+
+    def _classify_early_late(peak_dist: dict, conditions: list[str]) -> tuple[int, int, int]:
+        """Classify into early (first 1/3), mid, late (last 1/3)."""
+        n = len(conditions)
+        if n < 3:
+            return sum(peak_dist.values()), 0, 0
+        early_boundary = max(1, n // 3)
+        late_boundary = n - max(1, n // 3)
+        early = sum(peak_dist.get(c, 0) for c in conditions[:early_boundary])
+        mid = sum(peak_dist.get(c, 0) for c in conditions[early_boundary:late_boundary])
+        late = sum(peak_dist.get(c, 0) for c in conditions[late_boundary:])
+        return early, mid, late
+
+    a_early, a_mid, a_late = _classify_early_late(a_peak_dist, conds_a)
+    b_early, b_mid, b_late = _classify_early_late(b_peak_dist, conds_b)
+    a_total_resp = a_early + a_mid + a_late
+    b_total_resp = b_early + b_mid + b_late
+
+    lines.append(f"  실험 A: Early={a_early} ({a_early/max(a_total_resp,1)*100:.0f}%), "
+                 f"Mid={a_mid} ({a_mid/max(a_total_resp,1)*100:.0f}%), "
+                 f"Late={a_late} ({a_late/max(a_total_resp,1)*100:.0f}%) [총 {a_total_resp}개]")
+    lines.append(f"  실험 B: Early={b_early} ({b_early/max(b_total_resp,1)*100:.0f}%), "
+                 f"Mid={b_mid} ({b_mid/max(b_total_resp,1)*100:.0f}%), "
+                 f"Late={b_late} ({b_late/max(b_total_resp,1)*100:.0f}%) [총 {b_total_resp}개]")
+
+    if a_total_resp > 0 and b_total_resp > 0:
+        a_ratio = a_early / max(a_late, 1)
+        b_ratio = b_early / max(b_late, 1)
+        if a_ratio > 2 * b_ratio:
+            lines.append("  → 실험 A가 더 빠른 초기 반응 패턴을 보임")
+        elif b_ratio > 2 * a_ratio:
+            lines.append("  → 실험 B가 더 빠른 초기 반응 패턴을 보임")
+        elif abs(a_ratio - b_ratio) < 0.3:
+            lines.append("  → 두 실험의 temporal response 패턴이 유사함")
+
+    # --- 4. Shared PTMs with temporal shift ---
+    lines.append("")
+    lines.append("[Temporal Shift 분석 - 동일 substrate, 다른 peak timing]")
+
+    if common_conds and shared_ptms:
+        shifts = []
+        for ptm in shared_ptms:
+            a_prof = ptm.get("a_profile", {})
+            b_prof = ptm.get("b_profile", {})
+            if not a_prof or not b_prof:
+                continue
+            # Find peak condition for each
+            a_peak_c = max(common_conds, key=lambda c: abs(a_prof.get(c, 0.0)))
+            b_peak_c = max(common_conds, key=lambda c: abs(b_prof.get(c, 0.0)))
+            if a_peak_c != b_peak_c:
+                a_peak_v = a_prof.get(a_peak_c, 0.0)
+                b_peak_v = b_prof.get(b_peak_c, 0.0)
+                # Only include if both have meaningful signal
+                if abs(a_peak_v) >= FC_THRESHOLD and abs(b_peak_v) >= FC_THRESHOLD:
+                    shifts.append({
+                        "gene": ptm["gene"],
+                        "position": ptm["position"],
+                        "a_peak": a_peak_c,
+                        "a_fc": a_peak_v,
+                        "b_peak": b_peak_c,
+                        "b_fc": b_peak_v,
+                    })
+
+        # Sort by magnitude of shift (difference in condition index)
+        cond_idx = {c: i for i, c in enumerate(common_conds)}
+        shifts.sort(
+            key=lambda s: abs(cond_idx.get(s["a_peak"], 0) - cond_idx.get(s["b_peak"], 0)),
+            reverse=True,
+        )
+
+        if shifts:
+            lines.append(f"  총 {len(shifts)}개 substrate에서 temporal shift 감지")
+            lines.append(f"  {'Gene':<10} {'Position':<10} {'A_peak':<10} {'A_FC':>6} {'B_peak':<10} {'B_FC':>6}")
+            for s in shifts[:20]:  # Top 20
+                lines.append(
+                    f"  {s['gene']:<10} {s['position']:<10} {s['a_peak']:<10} "
+                    f"{s['a_fc']:>+.2f} {s['b_peak']:<10} {s['b_fc']:>+.2f}"
+                )
+        else:
+            lines.append("  Temporal shift 감지된 substrate 없음")
+    else:
+        lines.append("  공통 조건 또는 공통 PTM 데이터 부족")
+
+    return "\n".join(lines)
+
+
 _CHATML_TOKEN_RE = re.compile(
     r"<\|(?:im_start|im_end|endoftext|system|user|assistant)\|>",
     re.IGNORECASE,
@@ -872,6 +1062,8 @@ def _build_comparison_prompt(
     order_b: Optional[Order] = None,
     output_dir_a: Optional[Path] = None,
     output_dir_b: Optional[Path] = None,
+    vector_a: Optional[list[dict]] = None,
+    vector_b: Optional[list[dict]] = None,
 ) -> str:
     """Build the LLM prompt for comparative analysis from structured data.
 
@@ -967,6 +1159,17 @@ def _build_comparison_prompt(
         if comove_ctx.strip():
             rich_sections.append(f"════ Temporal Co-movement Clusters 비교 ════\n\n{comove_ctx}")
 
+    # Temporal Substrate Activity comparison
+    if vector_a and vector_b:
+        conds_a = comparison_data["order_a"].get("conditions", [])
+        conds_b = comparison_data["order_b"].get("conditions", [])
+        tsa_ctx = _build_temporal_substrate_activity_comparison(
+            vector_a, vector_b, conds_a, conds_b, common_conds,
+            comparison_data["shared_ptms"],
+        )
+        if tsa_ctx.strip():
+            rich_sections.append(f"════ Temporal Substrate Activity 비교 ════\n\n{tsa_ctx}")
+
     # Individual report summaries
     report_summary_ctx = _build_report_summary_comparison(report_a, report_b)
     if report_summary_ctx.strip():
@@ -1022,37 +1225,43 @@ B 전용 Receptor: {', '.join(comparison_data['b_only_receptors'][:10]) or '없�
 
 ════ 작성 지시 ════
 
-위 데이터를 바탕으로 다음 7개 섹션의 비교 분석 리포트를 작성하세요.
+위 데이터를 바탕으로 다음 8개 섹션의 비교 분석 리포트를 작성하세요.
 각 섹션당 300~500단어, 구체적인 유전자명·위치·수치 인용 필수.
 
-## 1. Temporal Signaling Cascade 비교
+## 1. Temporal Substrate Activity 비교
+시간대별로 활성화(|log2FC|>0.5)되는 substrate 수를 비교하여 반응 규모의 시간적 차이를 서술.
+Peak activation timing 분포를 비교하여 어느 시간대에 가장 많은 substrate가 반응하는지 분석.
+Early/Mid/Late responder 비율을 비교하여 두 실험의 temporal response 패턴 차이를 해석.
+Temporal shift가 큰 공통 substrate를 식별하여 동일 단백질이 다른 시간대에 인산화되는 현상을 설명.
+
+## 2. Temporal Signaling Cascade 비교
 시간대별로 어떤 kinase가 활성화되는지 두 실험을 나란히 비교.
 Co-Wave Group 정보를 활용하여 동시에 활성화되는 kinase 클러스터를 식별.
 Cascade Flow(시간대 간 kinase 유지/신규/소실)를 비교하여 신호전달 흐름의 차이를 서술.
 
-## 2. Co-Wave 기반 Upstream Regulator 비교
+## 3. Co-Wave 기반 Upstream Regulator 비교
 Wave Kinase Profile에서 예측된 upstream regulator(receptor, kinase)를 비교.
 각 wave의 tier, peak timing, suggested receptor를 대조하여 상위 신호 입력의 차이를 해석.
 
-## 3. 공통 Signaling Mechanism
+## 4. 공통 Signaling Mechanism
 두 실험에서 공통으로 활성화된 신호전달 경로 및 kinase를 서술.
 공통 kinase의 substrate 구성 차이도 분석 (동일 kinase가 다른 substrate를 인산화하는 패턴).
 
-## 4. 물질 특이적 반응 및 작용기전
+## 5. 물질 특이적 반응 및 작용기전
 각 실험에서만 나타나는 고유한 신호 이벤트를 서술.
 Signal Flow (Receptor → Kinase → Substrate) 정보를 활용하여 작용기전을 설명.
 Effector protein 차이도 포함.
 
-## 5. Kinase Activity 정량 비교
+## 6. Kinase Activity 정량 비교
 두 실험의 kinase activity score를 시간대별로 직접 비교.
 coherence, direction, peak timing 차이를 해석.
 공통/고유 기질 인산화 패턴의 생물학적 의미를 설명.
 
-## 6. Signaling Divergence 분기점
+## 7. Signaling Divergence 분기점
 공통 상위 신호에서 실험별로 어떻게 분기되는지 경로 매핑.
 Temporal co-movement cluster 차이를 활용하여 분기 시점과 원인을 식별.
 
-## 7. 종합 결론 및 치료적 함의
+## 8. 종합 결론 및 치료적 함의
 두 실험의 세포신호전달 차이를 종합하여 작용기전의 핵심 차이를 명확히 설명.
 공통/고유 경로 기반 약물 타겟 제안, 병용 또는 길항 가능성 논의.
 
@@ -1154,6 +1363,7 @@ async def stream_comparison_report(
         comparison, report_a, report_b, body.user_instructions or "",
         order_a=order_a, order_b=order_b,
         output_dir_a=output_dir_a, output_dir_b=output_dir_b,
+        vector_a=vector_a, vector_b=vector_b,
     )
 
     # Determine LLM settings
@@ -1488,6 +1698,69 @@ async def delete_comparison_report(
     return {"ok": True}
 
 
+@router.post("/export-pdf")
+async def export_comparison_pdf(
+    body: CompareRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Export a saved comparison report as a formatted PDF.
+
+    Retrieves the saved report text and converts it to a professional
+    PDF using the Typst template.
+    """
+    from app.models.comparison_report import ComparisonReport as CR
+    from app.services.pdf_report_generator import generate_report_pdf
+
+    user_id = user.id if user else None
+
+    # Get saved report
+    stmt = select(CR).where(
+        CR.order_id_a == body.order_id_a,
+        CR.order_id_b == body.order_id_b,
+        CR.user_id == user_id,
+    )
+    result = await db.execute(stmt)
+    record = result.scalar_one_or_none()
+
+    if not record or not record.report_text:
+        raise HTTPException(
+            status_code=404,
+            detail="No saved report found. Generate and save a report first."
+        )
+
+    # Get order metadata
+    order_a = await db.get(Order, body.order_id_a)
+    order_b = await db.get(Order, body.order_id_b)
+    if not order_a or not order_b:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    # Generate PDF
+    import tempfile
+    output_dir = Path(tempfile.mkdtemp())
+    try:
+        pdf_path = generate_report_pdf(
+            markdown_content=record.report_text,
+            experiment_a=order_a.project_name or order_a.order_code,
+            experiment_b=order_b.project_name or order_b.order_code,
+            species=order_a.species or "",
+            ptm_type=order_a.ptm_type or "phosphorylation",
+            output_path=output_dir / "comparative_report.pdf",
+        )
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=f"PDF generation failed: {e}")
+
+    # Return PDF as file response
+    from fastapi.responses import FileResponse
+    filename = f"comparative_{order_a.order_code}_vs_{order_b.order_code}.pdf"
+    return FileResponse(
+        path=str(pdf_path),
+        media_type="application/pdf",
+        filename=filename,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @router.post("/chat")
 async def stream_comparison_chat(
     body: CompareChatRequest,
@@ -1578,6 +1851,18 @@ async def stream_comparison_chat(
     _cm = _build_comovement_comparison(output_dir_a, output_dir_b, ptm_type_for_chat)
     if _cm.strip():
         chat_rich_sections.append(f"[CO-MOVEMENT CLUSTERS 비교]\n{_cm}")
+
+    # Temporal Substrate Activity for chat
+    if vector_a and vector_b:
+        _tsa = _build_temporal_substrate_activity_comparison(
+            vector_a, vector_b,
+            order_a_info.get("conditions", []),
+            order_b_info.get("conditions", []),
+            common_conds,
+            comparison["shared_ptms"],
+        )
+        if _tsa.strip():
+            chat_rich_sections.append(f"[TEMPORAL SUBSTRATE ACTIVITY 비교]\n{_tsa}")
 
     _rpt = _build_report_summary_comparison(report_a, report_b)
     if _rpt.strip():
