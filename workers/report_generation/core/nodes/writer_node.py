@@ -60,6 +60,58 @@ SECTION_PROMPT_BUDGET = {
 }
 MAX_PROMPT_CHARS = 200_000  # absolute safety cap
 
+# v9.40: Model-aware context window capacity (characters).
+# Gemini Pro/Flash support ~1M token context; Gemma 27B is limited to ~128K tokens.
+# These multipliers scale SECTION_PROMPT_BUDGET to match the model's actual capacity.
+_MODEL_BUDGET_MULTIPLIERS: dict[str, float] = {
+    # Gemini models — large context window, can handle much more data
+    "gemini-2.5-pro": 3.0,
+    "gemini-2.5-flash": 2.5,
+    "gemini-2.0-flash": 2.0,
+    "gemini-1.5-pro": 3.0,
+    "gemini-1.5-flash": 2.5,
+    "gemini-1.0-pro": 1.5,
+    # OpenAI models
+    "gpt-4.1": 2.5,
+    "gpt-4.1-mini": 1.5,
+    "gpt-4o": 2.5,
+    "gpt-4o-mini": 1.5,
+    # Ollama local models — limited context
+    "gemma3:27b": 1.0,
+    "gemma3:12b": 0.8,
+    "llama3.1:70b": 1.2,
+    "llama3.1:8b": 0.8,
+}
+
+
+def _get_budget_multiplier(provider: str, model: str) -> float:
+    """Return budget multiplier for the given provider/model combination.
+
+    Gemini Pro/Flash have ~1M token context windows and can handle 3x more
+    prompt data than local Gemma 27B (128K tokens). This allows all
+    supplementary blocks (temporal kinase, vector_plot_full, etc.) to be
+    included without truncation when using cloud models.
+    """
+    if not model:
+        return 1.0
+    model_lower = model.strip().lower()
+    # Exact match first
+    if model_lower in _MODEL_BUDGET_MULTIPLIERS:
+        return _MODEL_BUDGET_MULTIPLIERS[model_lower]
+    # Prefix match for versioned models
+    if provider == "gemini" or model_lower.startswith("gemini-"):
+        if "pro" in model_lower:
+            return 3.0
+        if "flash" in model_lower:
+            return 2.5
+        return 2.0
+    if provider == "openai" or model_lower.startswith("gpt-"):
+        if "mini" in model_lower:
+            return 1.5
+        return 2.5
+    # Default for unknown local models
+    return 1.0
+
 # Minimum word counts for generate_with_retry per section
 SECTION_MIN_WORDS = {
     "abstract": 200,
@@ -395,7 +447,15 @@ def run_section_writing(state: dict) -> dict:
 
         # v9.31: Budget-aware prompt enhancement
         # Build supplementary blocks with priority, respecting per-section budget
-        budget = SECTION_PROMPT_BUDGET.get(section_type, 60_000)
+        # v9.40: Scale budget by model capacity — Gemini Pro/Flash can handle 2.5-3x more data
+        _budget_base = SECTION_PROMPT_BUDGET.get(section_type, 60_000)
+        _budget_multiplier = _get_budget_multiplier(llm.provider, llm.model)
+        budget = int(_budget_base * _budget_multiplier)
+        if _budget_multiplier != 1.0:
+            logger.info(
+                f"[v9.40] {section_type}: budget scaled {_budget_base:,} × {_budget_multiplier} = {budget:,} chars "
+                f"(provider={llm.provider}, model={llm.model})"
+            )
         base_len = len(prompt)
 
         # v9.32: Priority-ordered supplementary blocks — temporal coordination, temporal kinase,
