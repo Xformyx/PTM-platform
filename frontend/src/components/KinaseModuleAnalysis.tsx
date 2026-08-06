@@ -5809,7 +5809,11 @@ function KinaseActivityHeatmapView({
                       // inactivation when all substrates are actually up-regulated.
                       const dnSignificant = Math.abs(dnVal) > 0 && (
                         upVal <= 0 ||
-                        Math.abs(dnVal) / Math.max(upVal, 0.001) >= 0.05
+                        // Compound condition: BOTH absolute threshold AND ratio must be met
+                        // - absolute: |down_sums| >= 20 (filters tiny TMM fractional artefacts)
+                        // - ratio: |down_sums| / up_sums >= 10% (filters proportionally small noise)
+                        // When both are true, it's a genuine mixed-direction signal worth showing
+                        (Math.abs(dnVal) >= 20 && Math.abs(dnVal) / Math.max(upVal, 0.001) >= 0.10)
                       );
                       const dnBarH = dnN > 0 && dnSignificant ? Math.min(1, Math.sqrt(Math.abs(dnN)) / maxSqrtDown) : 0;
                       const upAvg = upN > 0 ? upVal / upN : 0;
