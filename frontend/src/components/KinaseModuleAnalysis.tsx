@@ -2792,6 +2792,74 @@ const E3_FAMILY_COLORS: Record<string, { bg: string; text: string; border: strin
   unknown: { bg: "bg-gray-100 dark:bg-gray-800", text: "text-gray-500", border: "border-gray-300" },
 };
 
+// ── EffectorLayerSection: collapsible Non-PTM Effector Layer ──────────────
+function EffectorLayerSection({ effectorProteins }: { effectorProteins: EffectorProtein[] }) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div className="rounded-lg border border-teal-500/30 bg-teal-50/5 dark:bg-teal-900/10 p-3 space-y-2">
+      <div
+        className="flex items-center justify-between cursor-pointer select-none"
+        onClick={() => setExpanded(e => !e)}
+      >
+        <div className="text-xs font-semibold text-teal-600 dark:text-teal-400 flex items-center gap-1">
+          <ArrowRight className="h-3 w-3" /> Non-PTM Effector Layer
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] text-muted-foreground">
+            {effectorProteins.length} non-PTM proteins
+          </span>
+          <span className="text-[10px] text-teal-400">{expanded ? "▲ 접기" : "▼ 펼치기"}</span>
+        </div>
+      </div>
+      {expanded && (
+        <div className="space-y-2">
+          <div className="flex flex-wrap gap-1.5">
+            {effectorProteins.map(eff => {
+              const isUp = eff.peak_fc > 0;
+              const strength = eff.evidence_strength || "weak";
+              const strengthBorder = strength === "strong" ? "border-2" : strength === "moderate" ? "border" : strength === "expression_only" ? "border border-dotted" : "border border-dashed";
+              const dirIcon = eff.directionality === "concordant" ? "✓" : eff.directionality === "discordant" ? "✗" : eff.directionality === "mixed" ? "~" : "";
+              const lagStr = eff.time_lag_minutes != null ? `lag:${eff.time_lag_minutes > 0 ? "+" : ""}${eff.time_lag_minutes}m` : "";
+              return (
+                <span
+                  key={eff.gene}
+                  className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
+                    strength === "expression_only"
+                      ? (isUp
+                          ? `bg-sky-900/20 text-sky-400 ${strengthBorder} border-sky-500/50`
+                          : `bg-sky-900/20 text-sky-300 ${strengthBorder} border-sky-500/50`)
+                      : (isUp
+                          ? `bg-emerald-900/20 text-emerald-400 ${strengthBorder} border-emerald-500/50`
+                          : `bg-rose-900/20 text-rose-400 ${strengthBorder} border-rose-500/50`)
+                  }`}
+                  title={`${eff.gene} | FC: ${eff.peak_fc > 0 ? "+" : ""}${eff.peak_fc.toFixed(2)} @ ${eff.peak_condition}\nEvidence: ${strength} (score ${eff.evidence_score || 0})\nDirection: ${eff.directionality || "unknown"} (${eff.concordant_count || 0}✓ / ${eff.discordant_count || 0}✗)\nTime-lag: ${lagStr || "N/A"}\nSubstrates: ${eff.connected_substrates.map(s => s.gene).join(", ")}\nSources: ${eff.sources.join(", ")}`}
+                >
+                  {isUp ? "▲" : "▼"}
+                  {dirIcon && <span className={`mx-0.5 ${eff.directionality === "concordant" ? "text-emerald-300" : eff.directionality === "discordant" ? "text-rose-300" : "text-yellow-300"}`}>{dirIcon}</span>}
+                  {eff.gene} ({eff.peak_fc > 0 ? "+" : ""}{eff.peak_fc.toFixed(1)})
+                  {lagStr && <span className="ml-0.5 opacity-50 text-[8px]">{lagStr}</span>}
+                </span>
+              );
+            })}
+          </div>
+          <div className="flex items-center gap-3 text-[9px] text-muted-foreground">
+            <span>Evidence: <span className="border-2 border-muted-foreground/30 px-1 rounded">strong</span></span>
+            <span><span className="border border-muted-foreground/30 px-1 rounded">moderate</span></span>
+            <span><span className="border border-dashed border-muted-foreground/30 px-1 rounded">weak</span></span>
+            <span><span className="border border-dotted border-sky-500/50 px-1 rounded text-sky-400">expr. only</span></span>
+            <span className="ml-2">✓ concordant</span>
+            <span>✗ discordant</span>
+            <span>~ mixed</span>
+          </div>
+          <div className="text-[10px] text-muted-foreground">
+            Non-PTM proteins with significant protein abundance changes (|Log2FC| &gt; 0.3). PPI-connected proteins are scored by temporal concordance, directionality, and multi-substrate support. Expression-only proteins show abundance changes without known PPI links.
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function GlobalKinaseModulesPanel({
   result,
   loading,
@@ -2881,60 +2949,9 @@ function GlobalKinaseModulesPanel({
 
       {/* v9.34: Non-PTM Effector Summary */}
       {result.effector_proteins && result.effector_proteins.length > 0 && (
-        <div className="rounded-lg border border-teal-500/30 bg-teal-50/5 dark:bg-teal-900/10 p-3 space-y-2">
-          <div className="flex items-center justify-between">
-            <div className="text-xs font-semibold text-teal-600 dark:text-teal-400 flex items-center gap-1">
-              <ArrowRight className="h-3 w-3" /> Non-PTM Effector Layer
-            </div>
-            <span className="text-[10px] text-muted-foreground">
-              {result.effector_proteins.length} non-PTM proteins
-            </span>
-          </div>
-          <div className="flex flex-wrap gap-1.5">
-            {result.effector_proteins.map(eff => {
-              const isUp = eff.peak_fc > 0;
-              const strength = eff.evidence_strength || "weak";
-              const strengthBorder = strength === "strong" ? "border-2" : strength === "moderate" ? "border" : strength === "expression_only" ? "border border-dotted" : "border border-dashed";
-              const dirIcon = eff.directionality === "concordant" ? "✓" : eff.directionality === "discordant" ? "✗" : eff.directionality === "mixed" ? "~" : "";
-              const lagStr = eff.time_lag_minutes != null ? `lag:${eff.time_lag_minutes > 0 ? "+" : ""}${eff.time_lag_minutes}m` : "";
-              return (
-                <span
-                  key={eff.gene}
-                  className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
-                    strength === "expression_only"
-                      ? (isUp
-                          ? `bg-sky-900/20 text-sky-400 ${strengthBorder} border-sky-500/50`
-                          : `bg-sky-900/20 text-sky-300 ${strengthBorder} border-sky-500/50`)
-                      : (isUp
-                          ? `bg-emerald-900/20 text-emerald-400 ${strengthBorder} border-emerald-500/50`
-                          : `bg-rose-900/20 text-rose-400 ${strengthBorder} border-rose-500/50`)
-                  }`}
-                  title={`${eff.gene} | FC: ${eff.peak_fc > 0 ? "+" : ""}${eff.peak_fc.toFixed(2)} @ ${eff.peak_condition}\nEvidence: ${strength} (score ${eff.evidence_score || 0})\nDirection: ${eff.directionality || "unknown"} (${eff.concordant_count || 0}✓ / ${eff.discordant_count || 0}✗)\nTime-lag: ${lagStr || "N/A"}\nSubstrates: ${eff.connected_substrates.map(s => s.gene).join(", ")}\nSources: ${eff.sources.join(", ")}`}
-                >
-                  {isUp ? "▲" : "▼"}
-                  {dirIcon && <span className={`mx-0.5 ${eff.directionality === "concordant" ? "text-emerald-300" : eff.directionality === "discordant" ? "text-rose-300" : "text-yellow-300"}`}>{dirIcon}</span>}
-                  {eff.gene} ({eff.peak_fc > 0 ? "+" : ""}{eff.peak_fc.toFixed(1)})
-                  {lagStr && <span className="ml-0.5 opacity-50 text-[8px]">{lagStr}</span>}
-                </span>
-              );
-            })}
-
-          </div>
-          {/* Evidence strength legend */}
-          <div className="flex items-center gap-3 text-[9px] text-muted-foreground">
-            <span>Evidence: <span className="border-2 border-muted-foreground/30 px-1 rounded">strong</span></span>
-            <span><span className="border border-muted-foreground/30 px-1 rounded">moderate</span></span>
-            <span><span className="border border-dashed border-muted-foreground/30 px-1 rounded">weak</span></span>
-            <span><span className="border border-dotted border-sky-500/50 px-1 rounded text-sky-400">expr. only</span></span>
-            <span className="ml-2">✓ concordant</span>
-            <span>✗ discordant</span>
-            <span>~ mixed</span>
-          </div>
-          <div className="text-[10px] text-muted-foreground">
-            Non-PTM proteins with significant protein abundance changes (|Log2FC| &gt; 0.3). PPI-connected proteins are scored by temporal concordance, directionality, and multi-substrate support. Expression-only proteins show abundance changes without known PPI links.
-          </div>
-        </div>
+        <EffectorLayerSection effectorProteins={result.effector_proteins} />
       )}
+
 
       {/* Ubiquitylation: Chain Type Distribution */}
       {isUbi && (() => {
