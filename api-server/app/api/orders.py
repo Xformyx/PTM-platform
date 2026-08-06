@@ -5948,7 +5948,7 @@ async def global_kinase_modules(
             redistribute_kinase_assignments,
             build_wave_kinase_profile,
         )
-        treatment_ctx = order.treatment or ""
+        treatment_ctx = ((order.analysis_context or {}).get("treatment") or "")
         kinase_module_list = redistribute_kinase_assignments(
             kinase_module_list,
             cowave_modules_input or [],
@@ -6644,6 +6644,8 @@ async def kinase_activity_heatmap(
     """
     import hashlib
     from datetime import datetime as _dt
+
+    _log = logging.getLogger("kinase_activity_heatmap")
 
     result = await db.execute(select(Order).where(Order.id == order_id))
     order = result.scalar_one_or_none()
