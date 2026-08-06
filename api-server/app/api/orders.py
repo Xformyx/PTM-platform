@@ -7993,10 +7993,46 @@ async def kinase_activity_heatmap(
             canon = (ks_entry.get("parent_kinase") or ks_entry.get("kinase", "")).upper()
             tmm = tmm_scores.get(canon)
             if tmm:
-                ks_entry["tmm_weighted_up_sums"] = tmm["weighted_up_sums"]
-                ks_entry["tmm_weighted_down_sums"] = tmm["weighted_down_sums"]
-                ks_entry["tmm_weighted_up_counts"] = tmm["weighted_up_counts"]
-                ks_entry["tmm_weighted_down_counts"] = tmm["weighted_down_counts"]
+                # Option A: Preserve originals for reference
+                ks_entry["raw_up_sums"] = ks_entry.get("up_sums", {})
+                ks_entry["raw_down_sums"] = ks_entry.get("down_sums", {})
+                ks_entry["raw_up_counts"] = ks_entry.get("up_counts", {})
+                ks_entry["raw_down_counts"] = ks_entry.get("down_counts", {})
+
+                # Replace up/down sums with TMM-weighted values
+                w_up = {c: round(v, 3) for c, v in tmm["weighted_up_sums"].items()}
+                w_dn = {c: round(v, 3) for c, v in tmm["weighted_down_sums"].items()}
+                w_uc = {c: round(v, 3) for c, v in tmm["weighted_up_counts"].items()}
+                w_dc = {c: round(v, 3) for c, v in tmm["weighted_down_counts"].items()}
+
+                ks_entry["up_sums"] = w_up
+                ks_entry["down_sums"] = w_dn
+                ks_entry["up_counts"] = w_uc
+                ks_entry["down_counts"] = w_dc
+
+                # Update exclusive/shared sums to reflect TMM contribution ratios
+                ks_entry["exclusive_sums"] = {
+                    c: round(sum(
+                        ptm_timeseries.get(d["ptm_key"], {}).get(c, 0.0)
+                        for d in tmm["contribution_details"]
+                        if d["n_competing_kinases"] == 0
+                    ), 3)
+                    for c in conditions_sorted
+                }
+                ks_entry["shared_sums"] = {
+                    c: round(sum(
+                        ptm_timeseries.get(d["ptm_key"], {}).get(c, 0.0) * d["contribution_ratio"]
+                        for d in tmm["contribution_details"]
+                        if d["n_competing_kinases"] > 0
+                    ), 3)
+                    for c in conditions_sorted
+                }
+
+                # TMM metadata fields
+                ks_entry["tmm_weighted_up_sums"] = w_up
+                ks_entry["tmm_weighted_down_sums"] = w_dn
+                ks_entry["tmm_weighted_up_counts"] = w_uc
+                ks_entry["tmm_weighted_down_counts"] = w_dc
                 ks_entry["tmm_n_exclusive"] = tmm["n_exclusive"]
                 ks_entry["tmm_n_shared"] = tmm["n_shared"]
                 ks_entry["tmm_profile_type"] = tmm["profile_type"]
@@ -8007,7 +8043,21 @@ async def kinase_activity_heatmap(
                     reverse=True,
                 )[:5]
                 ks_entry["tmm_top_contributions"] = top5
-        _log.info(f"[TMM] Merged weighted scores for {len(tmm_scores)} kinases into heatmap results")
+
+                # Recompute peak_score and direction from TMM-adjusted sums
+                net_sums = {c: w_up.get(c, 0.0) + w_dn.get(c, 0.0) for c in conditions_sorted}
+                if any(abs(v) > 0 for v in net_sums.values()):
+                    new_peak_cond = max(net_sums, key=lambda c: abs(net_sums[c]))
+                    new_peak_score = round(net_sums[new_peak_cond], 4)
+                    ks_entry["peak_condition"] = new_peak_cond
+                    ks_entry["peak_score"] = new_peak_score
+                    ks_entry["direction"] = (
+                        "activation" if new_peak_score > 0.3
+                        else "inactivation" if new_peak_score < -0.3
+                        else "neutral"
+                    )
+
+        _log.info(f"[TMM] Merged weighted scores for {len(tmm_scores)} kinases (Option A: up/down_sums replaced)")
     except Exception as _tmm_err:
         import traceback as _tb
         _log.warning(f"[TMM] Deconvolution failed (non-fatal): {_tmm_err}\n{_tb.format_exc()}")
