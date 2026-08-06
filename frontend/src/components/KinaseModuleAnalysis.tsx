@@ -5804,7 +5804,14 @@ function KinaseActivityHeatmapView({
                       // Color intensity = avg |FC| per substrate (signal quality)
                       // Number = Sum (total signal)
                       const upBarH = upN > 0 ? Math.min(1, Math.sqrt(upN) / maxSqrtUp) : 0;
-                      const dnBarH = dnN > 0 ? Math.min(1, Math.sqrt(dnN) / maxSqrtDown) : 0;
+                      // Suppress blue bar if down signal is negligible vs up signal (< 5% ratio)
+                      // This prevents TMM fractional contribution artefacts from appearing as
+                      // inactivation when all substrates are actually up-regulated.
+                      const dnSignificant = Math.abs(dnVal) > 0 && (
+                        upVal <= 0 ||
+                        Math.abs(dnVal) / Math.max(upVal, 0.001) >= 0.05
+                      );
+                      const dnBarH = dnN > 0 && dnSignificant ? Math.min(1, Math.sqrt(Math.abs(dnN)) / maxSqrtDown) : 0;
                       const upAvg = upN > 0 ? upVal / upN : 0;
                       const dnAvg = dnN > 0 ? Math.abs(dnVal) / dnN : 0;
                       // Color: red/blue with intensity based on avg FC (normalized to max avg)
@@ -5846,7 +5853,7 @@ function KinaseActivityHeatmapView({
                             <div className="h-px bg-gray-500/70 w-full flex-shrink-0" />
                             {/* Down bar (bottom half): height=√count, color intensity=avg FC */}
                             <div className="flex-1 flex items-start justify-center relative overflow-hidden">
-                              {dnN > 0 && (
+                              {dnN > 0 && dnSignificant && (
                                 <div
                                   className="absolute top-0 w-full"
                                   style={{
@@ -5855,7 +5862,7 @@ function KinaseActivityHeatmapView({
                                   }}
                                 />
                               )}
-                              {dnN > 0 && dnBarH >= 0.08 && (
+                              {dnN > 0 && dnSignificant && dnBarH >= 0.08 && (
                                 <span className="relative z-10 text-[8px] text-white/90 leading-none">
                                   {dnVal.toFixed(1)}
                                 </span>
