@@ -23,6 +23,12 @@ This module implements Smart Signal Decomposition for PTM kinase assignment:
 import re
 import logging
 from typing import Optional
+import numpy as np
+try:
+    from scipy.optimize import nnls as _scipy_nnls
+    _HAS_SCIPY = True
+except ImportError:
+    _HAS_SCIPY = False
 
 _log = logging.getLogger("temporal_kinase_scoring")
 
@@ -936,3 +942,340 @@ def build_wave_kinase_profile(
         })
     
     return wave_profiles
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TEMPORAL MIXTURE MODELING — Option B (Data-driven Kinase Deconvolution)
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# Algorithm:
+#   1. For each kinase, collect its "exclusive" substrates (PTMs assigned to
+#      that kinase only) and compute their mean time-series → kinase profile k(t)
+#   2. For each "shared" PTM (assigned to 2+ kinases), solve:
+#         y(t) = Σ aᵢ · kᵢ(t) + ε    subject to aᵢ ≥ 0
+#      using Non-Negative Least Squares (NNLS).
+#   3. Normalize contributions: rᵢ = aᵢ / Σaᵢ  (contribution ratio 0–1)
+#   4. Weight kinase activity scores by contribution ratios instead of
+#      counting shared substrates equally.
+#
+# Fallback: if a kinase has fewer than MIN_EXCLUSIVE_FOR_PROFILE exclusive
+# substrates, fall back to a Gaussian profile centred at typical_peak_min.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+MIN_EXCLUSIVE_FOR_PROFILE = 3   # minimum exclusive substrates to build a data-driven profile
+_GAUSSIAN_SIGMA_LOG = 0.6       # log-space sigma for Gaussian fallback profile
+
+
+def _gaussian_kinase_profile(
+    conditions_sorted: list[str],
+    peak_min: float,
+    sigma: float = _GAUSSIAN_SIGMA_LOG,
+) -> np.ndarray:
+    """Gaussian (log-normal) fallback profile for a kinase.
+
+    Returns a 1-D numpy array of length len(conditions_sorted) with values in [0, 1].
+    """
+    times = np.array([parse_time_minutes(c) for c in conditions_sorted], dtype=float)
+    times = np.maximum(times, 0.1)  # avoid log(0)
+    log_t = np.log(times)
+    log_peak = np.log(max(peak_min, 0.1))
+    profile = np.exp(-0.5 * ((log_t - log_peak) / sigma) ** 2)
+    norm = profile.max()
+    return profile / norm if norm > 0 else profile
+
+
+def build_kinase_profiles_from_data(
+    kinase_modules: list[dict],
+    ptm_timeseries: dict[str, dict[str, float]],
+    ptm_to_kinases: dict[str, list[str]],
+    conditions_sorted: list[str],
+) -> dict[str, dict]:
+    """Build per-kinase temporal activity profiles from exclusive substrates.
+
+    For each kinase module, identify substrates that are assigned to that kinase
+    ONLY (exclusive substrates) and compute their mean time-series as the kinase's
+    empirical activity profile.
+
+    Falls back to a Gaussian profile centred at typical_peak_min when there are
+    fewer than MIN_EXCLUSIVE_FOR_PROFILE exclusive substrates.
+
+    Returns:
+        dict[canonical_name → {
+            "profile": np.ndarray,          # shape (n_conditions,), normalised to [0,1]
+            "profile_type": "data_driven" | "gaussian_fallback",
+            "n_exclusive": int,             # number of exclusive substrates used
+            "exclusive_keys": list[str],    # PTM keys used to build profile
+            "peak_condition": str,          # condition with highest profile value
+        }]
+    """
+    n_cond = len(conditions_sorted)
+    profiles: dict[str, dict] = {}
+
+    for km in kinase_modules:
+        canonical = km.get("canonical", "").upper()
+        if not canonical:
+            continue
+
+        # Collect all PTM keys in this kinase module
+        all_keys = [m.get("key", "") for m in km.get("members", []) if m.get("key")]
+
+        # Exclusive: assigned to this kinase only
+        exclusive_keys = [
+            pk for pk in all_keys
+            if len(ptm_to_kinases.get(pk, [])) <= 1
+        ]
+
+        if len(exclusive_keys) >= MIN_EXCLUSIVE_FOR_PROFILE:
+            # ── Data-driven profile ──────────────────────────────────────────
+            vectors = []
+            for pk in exclusive_keys:
+                ts = ptm_timeseries.get(pk, {})
+                if not ts:
+                    continue
+                row = np.array([ts.get(c, 0.0) for c in conditions_sorted], dtype=float)
+                # Use absolute value — we care about the temporal shape, not direction
+                vectors.append(np.abs(row))
+
+            if vectors:
+                mat = np.stack(vectors, axis=0)  # shape (n_exclusive, n_cond)
+                # Robust profile: median across exclusive substrates
+                profile = np.median(mat, axis=0)
+                norm = profile.max()
+                profile = profile / norm if norm > 0 else profile
+                peak_idx = int(np.argmax(profile))
+                profiles[canonical] = {
+                    "profile": profile,
+                    "profile_type": "data_driven",
+                    "n_exclusive": len(vectors),
+                    "exclusive_keys": exclusive_keys[:20],  # cap for storage
+                    "peak_condition": conditions_sorted[peak_idx],
+                }
+                _log.debug(
+                    f"[TMM] {canonical}: data-driven profile from {len(vectors)} "
+                    f"exclusive substrates, peak={conditions_sorted[peak_idx]}"
+                )
+                continue
+
+        # ── Gaussian fallback ────────────────────────────────────────────────
+        all_kinase_info = (
+            BASOPHILIC_KINASES.get(canonical)
+            or PRO_DIRECTED_KINASES.get(canonical)
+        )
+        if all_kinase_info:
+            min_t, max_t = all_kinase_info["typical_peak_min"]
+            peak_min = (min_t + max_t) / 2.0
+        else:
+            peak_min = 30.0  # generic default
+
+        profile = _gaussian_kinase_profile(conditions_sorted, peak_min)
+        peak_idx = int(np.argmax(profile))
+        profiles[canonical] = {
+            "profile": profile,
+            "profile_type": "gaussian_fallback",
+            "n_exclusive": len(exclusive_keys),
+            "exclusive_keys": exclusive_keys,
+            "peak_condition": conditions_sorted[peak_idx],
+        }
+        _log.debug(
+            f"[TMM] {canonical}: Gaussian fallback profile "
+            f"(peak_min={peak_min:.0f}, only {len(exclusive_keys)} exclusive substrates)"
+        )
+
+    return profiles
+
+
+def deconvolve_shared_ptm(
+    ptm_key: str,
+    candidate_kinases: list[str],
+    kinase_profiles: dict[str, dict],
+    ptm_timeseries: dict[str, dict[str, float]],
+    conditions_sorted: list[str],
+) -> dict[str, float]:
+    """Decompose a shared PTM's time-series into per-kinase contribution ratios.
+
+    Solves:  y(t) = Σ aᵢ · kᵢ(t)   s.t. aᵢ ≥ 0   (NNLS)
+
+    Returns:
+        dict[canonical_name → contribution_ratio]   values sum to 1.0.
+        Falls back to equal weights if NNLS fails or scipy is unavailable.
+    """
+    n_cond = len(conditions_sorted)
+    ts = ptm_timeseries.get(ptm_key, {})
+    if not ts:
+        equal = 1.0 / max(len(candidate_kinases), 1)
+        return {k: equal for k in candidate_kinases}
+
+    y = np.array([ts.get(c, 0.0) for c in conditions_sorted], dtype=float)
+
+    # Build design matrix A  (n_cond × n_kinases)
+    valid_kinases = []
+    cols = []
+    for canon in candidate_kinases:
+        prof_info = kinase_profiles.get(canon)
+        if prof_info is None:
+            # Build Gaussian fallback on the fly
+            all_kinase_info = (
+                BASOPHILIC_KINASES.get(canon)
+                or PRO_DIRECTED_KINASES.get(canon)
+            )
+            if all_kinase_info:
+                min_t, max_t = all_kinase_info["typical_peak_min"]
+                peak_min = (min_t + max_t) / 2.0
+            else:
+                peak_min = 30.0
+            col = _gaussian_kinase_profile(conditions_sorted, peak_min)
+        else:
+            col = prof_info["profile"]
+        valid_kinases.append(canon)
+        cols.append(col)
+
+    if not valid_kinases:
+        equal = 1.0 / max(len(candidate_kinases), 1)
+        return {k: equal for k in candidate_kinases}
+
+    A = np.column_stack(cols)  # shape (n_cond, n_kinases)
+
+    # Solve NNLS: min ||Ax - y||  s.t. x ≥ 0
+    if _HAS_SCIPY and n_cond >= 2:
+        try:
+            coeffs, residual = _scipy_nnls(A, y)
+        except Exception as e:
+            _log.warning(f"[TMM] NNLS failed for {ptm_key}: {e}. Using equal weights.")
+            coeffs = np.ones(len(valid_kinases))
+    else:
+        # Pure-numpy fallback: non-negative least squares via projected gradient
+        # Simple approach: use absolute dot product as proxy
+        coeffs = np.array([max(0.0, float(np.dot(A[:, i], y))) for i in range(len(valid_kinases))])
+
+    total = float(coeffs.sum())
+    if total < 1e-9:
+        # All coefficients near zero → equal distribution
+        equal = 1.0 / len(valid_kinases)
+        ratios = {k: equal for k in valid_kinases}
+    else:
+        ratios = {k: round(float(coeffs[i]) / total, 4) for i, k in enumerate(valid_kinases)}
+
+    # Add zero for any candidate kinase that was skipped
+    for k in candidate_kinases:
+        if k not in ratios:
+            ratios[k] = 0.0
+
+    _log.debug(
+        f"[TMM] {ptm_key} deconvolved: "
+        + ", ".join(f"{k}={v:.2f}" for k, v in sorted(ratios.items(), key=lambda x: -x[1]))
+    )
+    return ratios
+
+
+def compute_weighted_kinase_scores(
+    kinase_modules: list[dict],
+    ptm_timeseries: dict[str, dict[str, float]],
+    ptm_to_kinases: dict[str, list[str]],
+    conditions_sorted: list[str],
+    fc_threshold: float = 0.3,
+    q_threshold: float = 0.05,
+    ptm_qvalues: dict | None = None,
+) -> dict[str, dict]:
+    """Compute per-kinase per-condition activity scores with TMM-weighted contributions.
+
+    For exclusive substrates: contribution = 1.0 (unchanged from current logic).
+    For shared substrates: contribution = deconvolved ratio from NNLS.
+
+    Returns:
+        dict[canonical → {
+            "weighted_up_sums":   dict[condition → float],
+            "weighted_down_sums": dict[condition → float],
+            "weighted_up_counts": dict[condition → float],   # fractional counts
+            "weighted_down_counts": dict[condition → float],
+            "contribution_details": list[{ptm_key, contribution_ratio, profile_type}],
+            "n_exclusive": int,
+            "n_shared": int,
+        }]
+    """
+    if ptm_qvalues is None:
+        ptm_qvalues = {}
+
+    # Step 1: Build kinase profiles from exclusive substrates
+    kinase_profiles = build_kinase_profiles_from_data(
+        kinase_modules, ptm_timeseries, ptm_to_kinases, conditions_sorted
+    )
+
+    results: dict[str, dict] = {}
+
+    for km in kinase_modules:
+        canonical = km.get("canonical", "").upper()
+        if not canonical:
+            continue
+
+        all_keys = [m.get("key", "") for m in km.get("members", []) if m.get("key")]
+
+        w_up_sums = {c: 0.0 for c in conditions_sorted}
+        w_dn_sums = {c: 0.0 for c in conditions_sorted}
+        w_up_cnts = {c: 0.0 for c in conditions_sorted}
+        w_dn_cnts = {c: 0.0 for c in conditions_sorted}
+        contribution_details = []
+        n_exclusive = 0
+        n_shared = 0
+
+        for pk in all_keys:
+            ts = ptm_timeseries.get(pk, {})
+            if not ts:
+                continue
+
+            # Determine contribution ratio for this PTM
+            other_kinases = [k for k in ptm_to_kinases.get(pk, []) if k != canonical]
+            if not other_kinases:
+                # Exclusive substrate → full contribution
+                ratio = 1.0
+                profile_type = "exclusive"
+                n_exclusive += 1
+            else:
+                # Shared substrate → NNLS deconvolution
+                all_candidates = [canonical] + other_kinases
+                deconv = deconvolve_shared_ptm(
+                    pk, all_candidates, kinase_profiles, ptm_timeseries, conditions_sorted
+                )
+                ratio = deconv.get(canonical, 1.0 / len(all_candidates))
+                prof_info = kinase_profiles.get(canonical)
+                profile_type = prof_info["profile_type"] if prof_info else "gaussian_fallback"
+                n_shared += 1
+
+            contribution_details.append({
+                "ptm_key": pk,
+                "contribution_ratio": round(ratio, 4),
+                "profile_type": profile_type,
+                "n_competing_kinases": len(other_kinases),
+            })
+
+            # Accumulate weighted sums
+            for c in conditions_sorted:
+                fc = ts.get(c, 0.0)
+                q_val = ptm_qvalues.get(pk, {}).get(c)
+                passes = (q_val is not None and q_val < q_threshold) or (abs(fc) >= fc_threshold)
+                if not passes:
+                    continue
+                weighted_fc = fc * ratio
+                if weighted_fc > 0:
+                    w_up_sums[c] += weighted_fc
+                    w_up_cnts[c] += ratio
+                elif weighted_fc < 0:
+                    w_dn_sums[c] += weighted_fc
+                    w_dn_cnts[c] += ratio
+
+        results[canonical] = {
+            "weighted_up_sums": {c: round(v, 4) for c, v in w_up_sums.items()},
+            "weighted_down_sums": {c: round(v, 4) for c, v in w_dn_sums.items()},
+            "weighted_up_counts": {c: round(v, 3) for c, v in w_up_cnts.items()},
+            "weighted_down_counts": {c: round(v, 3) for c, v in w_dn_cnts.items()},
+            "contribution_details": contribution_details,
+            "n_exclusive": n_exclusive,
+            "n_shared": n_shared,
+            "profile_type": (kinase_profiles.get(canonical) or {}).get("profile_type", "gaussian_fallback"),
+            "n_profile_substrates": (kinase_profiles.get(canonical) or {}).get("n_exclusive", 0),
+        }
+
+    _log.info(
+        f"[TMM] Weighted scores computed for {len(results)} kinases "
+        f"({'scipy NNLS' if _HAS_SCIPY else 'numpy fallback'})"
+    )
+    return results

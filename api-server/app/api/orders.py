@@ -7958,6 +7958,58 @@ async def kinase_activity_heatmap(
                             ks_entry["translocation_flag"] = "potential_nuclear_translocation"
                             break
 
+    # ── TMM: Temporal Mixture Modeling — Option B (Data-driven Deconvolution) ──
+    # Compute contribution-weighted kinase scores using NNLS on exclusive substrate profiles.
+    tmm_scores: dict = {}
+    try:
+        from app.services.temporal_kinase_scoring import compute_weighted_kinase_scores
+        # Build members-based kinase_modules list for TMM
+        _tmm_modules = []
+        for km in kinase_modules:
+            _members = km.get("ptms", [])
+            _keys = [
+                f"{(p.get('gene','') if isinstance(p,dict) else p.split('_')[0]).upper()}_"
+                f"{(str(p.get('position','')) if isinstance(p,dict) else p.split('_',1)[1] if '_' in p else '').upper()}"
+                for p in _members
+            ]
+            _tmm_modules.append({
+                "canonical": km.get("kinase", "").upper(),
+                "kinase": km.get("kinase", ""),
+                "members": [{"key": k} for k in _keys if k != "_"],
+            })
+        tmm_scores = compute_weighted_kinase_scores(
+            kinase_modules=_tmm_modules,
+            ptm_timeseries=ptm_timeseries,
+            ptm_to_kinases=ptm_to_kinases,
+            conditions_sorted=conditions_sorted,
+            fc_threshold=FC_THRESHOLD,
+            q_threshold=Q_THRESHOLD,
+            ptm_qvalues=ptm_qvalues,
+        )
+        # Merge TMM scores back into kinase_scores_filtered entries
+        for ks_entry in kinase_scores_filtered:
+            canon = (ks_entry.get("parent_kinase") or ks_entry.get("kinase", "")).upper()
+            tmm = tmm_scores.get(canon)
+            if tmm:
+                ks_entry["tmm_weighted_up_sums"] = tmm["weighted_up_sums"]
+                ks_entry["tmm_weighted_down_sums"] = tmm["weighted_down_sums"]
+                ks_entry["tmm_weighted_up_counts"] = tmm["weighted_up_counts"]
+                ks_entry["tmm_weighted_down_counts"] = tmm["weighted_down_counts"]
+                ks_entry["tmm_n_exclusive"] = tmm["n_exclusive"]
+                ks_entry["tmm_n_shared"] = tmm["n_shared"]
+                ks_entry["tmm_profile_type"] = tmm["profile_type"]
+                # Top-5 contribution details for LLM context
+                top5 = sorted(
+                    tmm["contribution_details"],
+                    key=lambda x: x["contribution_ratio"],
+                    reverse=True,
+                )[:5]
+                ks_entry["tmm_top_contributions"] = top5
+        _log.info(f"[TMM] Merged weighted scores for {len(tmm_scores)} kinases into heatmap results")
+    except Exception as _tmm_err:
+        import traceback as _tb
+        _log.warning(f"[TMM] Deconvolution failed (non-fatal): {_tmm_err}\n{_tb.format_exc()}")
+
     # Save to DB
     result_data = {
         "kinase_scores": kinase_scores_filtered,
@@ -7966,7 +8018,7 @@ async def kinase_activity_heatmap(
         "cowave_groups": cowave_groups,
         "available_patterns": sorted(all_patterns),
         "translocation_candidates": translocation_candidates,
-        "scoring_method": "stratified_winsorized_mean_v11.3",
+        "scoring_method": "stratified_winsorized_mean_v11.3+tmm_deconvolution",
         "scoring_threshold": {"q_value": Q_THRESHOLD, "fc_abs": FC_THRESHOLD},
         "_cache_hash": cache_hash,
         "computed_at": _dt.utcnow().isoformat(),

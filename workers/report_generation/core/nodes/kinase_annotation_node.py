@@ -1799,12 +1799,48 @@ def _build_frontend_kinase_llm_context(frontend_kinase: dict, ptm_type: str, kin
                     )
                 self_ptm_str = f", self_ptm=[{'; '.join(sp_parts)}]"
 
+            # ── TMM: Temporal Mixture Modeling contribution info ──
+            tmm_n_excl = ks.get("tmm_n_exclusive", 0)
+            tmm_n_shared = ks.get("tmm_n_shared", 0)
+            tmm_profile_type = ks.get("tmm_profile_type", "")
+            tmm_top = ks.get("tmm_top_contributions", [])
+            tmm_str = ""
+            if tmm_n_excl + tmm_n_shared > 0:
+                tmm_str = f", TMM(excl={tmm_n_excl},shared={tmm_n_shared},profile={tmm_profile_type})"
+
+            # TMM weighted score (more accurate than raw sum for shared substrates)
+            tmm_w_up = ks.get("tmm_weighted_up_sums", {})
+            tmm_w_dn = ks.get("tmm_weighted_down_sums", {})
+            tmm_score_parts = []
+            for c in conditions[:6]:
+                wu = tmm_w_up.get(c, 0)
+                wd = tmm_w_dn.get(c, 0)
+                net = wu + wd
+                if abs(net) >= 0.01:
+                    tmm_score_parts.append(f"{c}:{net:+.2f}")
+            tmm_score_str = ", ".join(tmm_score_parts) if tmm_score_parts else ""
+
+            # Top shared substrate contributions
+            shared_contrib_str = ""
+            if tmm_top:
+                top_shared = [d for d in tmm_top if d.get("n_competing_kinases", 0) > 0]
+                if top_shared:
+                    contrib_parts = [
+                        f"{d['ptm_key']}({d['contribution_ratio']:.0%})"
+                        for d in top_shared[:3]
+                    ]
+                    shared_contrib_str = f"\n  TMM top shared contributions: {', '.join(contrib_parts)}"
+
             parts.append(
                 f"**{kinase_name}** [{cw_str}] — {sub_count} substrates, "
                 f"conf={confidence:.0%}, peak={peak_cond} ({peak_score:+.2f}), "
-                f"direction={direction}, coherence={coherence:.2f}{pattern_str}{nuc_str}{self_ptm_str}"
+                f"direction={direction}, coherence={coherence:.2f}{pattern_str}{nuc_str}{self_ptm_str}{tmm_str}"
             )
-            parts.append(f"  Temporal profile: [{score_str}]")
+            parts.append(f"  Temporal profile (raw): [{score_str}]")
+            if tmm_score_str:
+                parts.append(f"  TMM-weighted profile (contribution-adjusted): [{tmm_score_str}]")
+            if shared_contrib_str:
+                parts.append(shared_contrib_str)
             parts.append("")
 
     # ── Section F2: Temporal Pattern Summary ──
