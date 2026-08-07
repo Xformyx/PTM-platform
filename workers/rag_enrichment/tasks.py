@@ -1619,6 +1619,72 @@ def _compute_kinase_activity_heatmap(enriched_data: list, kinase_result: dict, p
         "all_kinase_scores": kinase_scores,  # unfiltered for debug
         "_cached": True,
     }
+    # ── TMM: Temporal Mixture Modeling (Option B) ────────────────────────────
+    # Apply contribution-weighted scoring to shared substrates so that
+    # kinases with overlapping substrate sets get data-driven credit allocation.
+    try:
+        from api.services.temporal_kinase_scoring import compute_weighted_kinase_scores  # type: ignore
+        # Build ptm_timeseries from enriched_data
+        ptm_timeseries: dict[str, dict[str, float]] = {}
+        for row in enriched_data:
+            gene = (row.get("gene") or row.get("Gene.Name") or "").upper()
+            pos = str(row.get("position") or row.get("PTM_Position") or "")
+            cond = row.get("condition") or row.get("Condition") or ""
+            fc = row.get("ptm_relative_log2fc") or row.get("PTM_Relative_Log2FC") or 0
+            if gene and pos and cond:
+                key = f"{gene}_{pos}"
+                if key not in ptm_timeseries:
+                    ptm_timeseries[key] = {}
+                try:
+                    ptm_timeseries[key][cond] = float(fc)
+                except (ValueError, TypeError):
+                    pass
+        # Build kinase_modules list for TMM
+        tmm_modules = []
+        for ks in kinase_scores_filtered:
+            if ks.get("is_sub_pattern"):
+                continue
+            members = [
+                {"key": f"{(s.get('gene','') or '').upper()}_{s.get('position','') or ''}"}
+                for s in ks.get("substrates", [])
+                if s.get("gene") and s.get("position")
+                and not f"{(s.get('gene','') or '').upper()}_{s.get('position','') or ''}".endswith("_")
+            ]
+            tmm_modules.append({
+                "canonical": ks.get("kinase", "").upper(),
+                "kinase": ks.get("kinase", ""),
+                "members": members,
+            })
+        if tmm_modules and ptm_timeseries:
+            tmm_scores = compute_weighted_kinase_scores(tmm_modules, ptm_timeseries, conditions)
+            for ks_entry in kinase_scores_filtered:
+                if ks_entry.get("is_sub_pattern"):
+                    continue
+                canon = (ks_entry.get("parent_kinase") or ks_entry.get("kinase", "")).upper()
+                tmm = tmm_scores.get(canon)
+                if tmm:
+                    ks_entry["raw_up_sums"] = dict(ks_entry.get("up_sums", {}))
+                    ks_entry["raw_down_sums"] = dict(ks_entry.get("down_sums", {}))
+                    w_up = {c: round(v, 3) for c, v in tmm["weighted_up_sums"].items()}
+                    w_dn = {c: round(v, 3) for c, v in tmm["weighted_down_sums"].items()}
+                    ks_entry["up_sums"] = w_up
+                    ks_entry["down_sums"] = w_dn
+                    ks_entry["up_counts"] = {c: round(v, 3) for c, v in tmm["weighted_up_counts"].items()}
+                    ks_entry["down_counts"] = {c: round(v, 3) for c, v in tmm["weighted_down_counts"].items()}
+                    ks_entry["tmm_n_exclusive"] = tmm.get("n_exclusive", 0)
+                    ks_entry["tmm_n_shared"] = tmm.get("n_shared", 0)
+                    ks_entry["tmm_profile_type"] = tmm.get("profile_type", "")
+                    ks_entry["tmm_top_contributions"] = tmm.get("top_contributions", [])
+                    net_sums = {c: w_up.get(c, 0) + w_dn.get(c, 0) for c in conditions}
+                    if net_sums:
+                        best_c = max(net_sums, key=lambda c: abs(net_sums[c]))
+                        ks_entry["peak_condition"] = best_c
+                        ks_entry["peak_score"] = round(net_sums[best_c], 3)
+                        total_net = sum(net_sums.values())
+                        ks_entry["direction"] = "up" if total_net > 0 else "down" if total_net < 0 else "neutral"
+            logger.info(f"[TMM-RAG] Applied TMM to {len(tmm_scores)} kinases in heatmap")
+    except Exception as _tmm_err:
+        logger.warning(f"[TMM-RAG] TMM integration skipped (non-fatal): {_tmm_err}")
 
 
 def _make_progress_cb(order_id, stage, step, base, span):

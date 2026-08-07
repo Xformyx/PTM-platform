@@ -843,11 +843,91 @@ async def user_chat_stream(
         if report_files:
             try:
                 full_report = report_files[0].read_text(encoding="utf-8", errors="replace")
-                # Take first 3000 chars as context
-                report_snippet = full_report[:3000]
-                context_parts.append(f"\nReport Summary (first 3000 chars):\n{report_snippet}")
+                # Take first 8000 chars as context (covers abstract + introduction + start of results)
+                report_snippet = full_report[:8000]
+                context_parts.append(f"\nComprehensive Report (first 8000 chars):\n{report_snippet}")
             except Exception:
                 pass
+
+    # Load kinase analysis data (top kinases + temporal cascade)
+    if order.kinase_analysis_data:
+        try:
+            kad = order.kinase_analysis_data if isinstance(order.kinase_analysis_data, dict) else {}
+            # Top kinases from kinase_modules
+            modules = kad.get("kinase_modules", [])
+            if modules:
+                top_kinases = sorted(modules, key=lambda m: m.get("total_count", 0), reverse=True)[:8]
+                kinase_lines = []
+                for km in top_kinases:
+                    k = km.get("kinase", "")
+                    n_conf = km.get("confirmed_count", 0)
+                    n_inf = km.get("inferred_count", 0)
+                    n_tot = km.get("total_count", 0)
+                    kinase_lines.append(f"  {k}: {n_tot} substrates ({n_conf} confirmed, {n_inf} inferred)")
+                context_parts.append(f"\nTop Predicted Kinases (from Global Kinase Module Analysis):\n" + "\n".join(kinase_lines))
+            # Temporal cascade from kinase_analysis_data
+            temporal_cascade = kad.get("temporal_cascade", {})
+            if temporal_cascade:
+                cascade_flow = temporal_cascade.get("cascade_flow", [])
+                if cascade_flow:
+                    flow_lines = []
+                    for step in cascade_flow[:6]:
+                        tp = step.get("timepoint", "")
+                        kinases = ", ".join(step.get("active_kinases", [])[:5])
+                        flow_lines.append(f"  {tp}: [{kinases}]")
+                    context_parts.append(f"\nTemporal Kinase Cascade:\n" + "\n".join(flow_lines))
+        except Exception:
+            pass
+
+    # Load kinase activity heatmap top kinases
+    if order.kinase_activity_heatmap:
+        try:
+            hmap = order.kinase_activity_heatmap if isinstance(order.kinase_activity_heatmap, dict) else {}
+            ks_list = hmap.get("kinase_scores", [])
+            conditions = hmap.get("conditions", [])
+            if ks_list and conditions:
+                top_ks = sorted(ks_list, key=lambda x: abs(x.get("peak_score", 0)), reverse=True)[:6]
+                hmap_lines = []
+                for ks in top_ks:
+                    k = ks.get("kinase", "")
+                    peak = ks.get("peak_score", 0)
+                    peak_c = ks.get("peak_condition", "")
+                    direction = ks.get("direction", "")
+                    n_sub = ks.get("substrate_count", 0)
+                    hmap_lines.append(f"  {k}: peak={peak:+.1f} @ {peak_c}, direction={direction}, substrates={n_sub}")
+                context_parts.append(f"\nKinase Activity Heatmap (top 6 by peak score):\n" + "\n".join(hmap_lines))
+        except Exception:
+            pass
+
+    # Load top PTMs from vector plot data
+    if output_dir.exists():
+        try:
+            import csv as _csv
+            ptm_suffix = "_phospho" if order.ptm_type == "phosphorylation" else "_ubi"
+            vp_path = output_dir / f"ptm_vector_data_normalized{ptm_suffix}.tsv"
+            if not vp_path.exists():
+                vp_path = output_dir / f"ptm_vector_data_with_motifs{ptm_suffix}.tsv"
+            if vp_path.exists():
+                rows = []
+                with open(vp_path, "r", encoding="utf-8") as _f:
+                    reader = _csv.DictReader(_f, delimiter="\t")
+                    for row in reader:
+                        try:
+                            fc = float(row.get("PTM_Relative_Log2FC", 0) or 0)
+                        except (ValueError, TypeError):
+                            fc = 0
+                        rows.append({
+                            "gene": row.get("Gene.Name", ""),
+                            "pos": row.get("PTM_Position", ""),
+                            "cond": row.get("Condition", ""),
+                            "fc": fc,
+                        })
+                # Top 20 by absolute FC
+                top_ptms = sorted(rows, key=lambda r: abs(r["fc"]), reverse=True)[:20]
+                ptm_lines = [f"  {r['gene']} {r['pos']} @ {r['cond']}: {r['fc']:+.2f}" for r in top_ptms]
+                context_parts.append(f"\nTop 20 PTMs by |Log2FC|:\n" + "\n".join(ptm_lines))
+        except Exception:
+            pass
 
     context_str = "\n".join(context_parts) if context_parts else "No analysis context available yet."
     system_prompt = MEKII_SYSTEM_PROMPT.format(context=context_str)

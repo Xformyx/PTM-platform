@@ -66,15 +66,15 @@ MAX_PROMPT_CHARS = 200_000  # absolute safety cap
 _MODEL_BUDGET_MULTIPLIERS: dict[str, float] = {
     # Gemini models — large context window, can handle much more data
     "gemini-2.5-pro": 3.0,
-    "gemini-2.5-flash": 2.5,
+    "gemini-2.5-flash": 3.0,
     "gemini-2.0-flash": 2.0,
     "gemini-1.5-pro": 3.0,
-    "gemini-1.5-flash": 2.5,
+    "gemini-1.5-flash": 3.0,
     "gemini-1.0-pro": 1.5,
     # OpenAI models
-    "gpt-4.1": 2.5,
+    "gpt-4.1": 3.0,
     "gpt-4.1-mini": 1.5,
-    "gpt-4o": 2.5,
+    "gpt-4o": 3.0,
     "gpt-4o-mini": 1.5,
     # Ollama local models — limited context
     "gemma3:27b": 1.0,
@@ -99,16 +99,16 @@ def _get_budget_multiplier(provider: str, model: str) -> float:
     if model_lower in _MODEL_BUDGET_MULTIPLIERS:
         return _MODEL_BUDGET_MULTIPLIERS[model_lower]
     # Prefix match for versioned models
-    if provider == "gemini" or model_lower.startswith("gemini-"):
-        if "pro" in model_lower:
+        if provider == "gemini" or model_lower.startswith("gemini-"):
+            if "pro" in model_lower:
+                return 3.0
+            if "flash" in model_lower:
+                return 3.0
+            return 2.0
+        if provider == "openai" or model_lower.startswith("gpt-"):
+            if "mini" in model_lower:
+                return 1.5
             return 3.0
-        if "flash" in model_lower:
-            return 2.5
-        return 2.0
-    if provider == "openai" or model_lower.startswith("gpt-"):
-        if "mini" in model_lower:
-            return 1.5
-        return 2.5
     # Default for unknown local models
     return 1.0
 
@@ -314,6 +314,7 @@ def run_section_writing(state: dict) -> dict:
 
     # v10.1: Build full vector plot context for LLM (all PTM + Non-PTM FC values)
     aux_vector_plot_full = ""
+    aux_vector_plot_compressed = ""
     if vector_plot_raw_data:
         vp_lines = [
             "=== FULL VECTOR PLOT DATA (All PTM sites + Non-PTM protein abundance) ===",
@@ -342,6 +343,46 @@ def run_section_writing(state: dict) -> dict:
         vp_lines.append("=== END FULL VECTOR PLOT DATA ===")
         aux_vector_plot_full = "\n".join(vp_lines)
         logger.info(f"[v10.1] Built full vector plot context: {len(vector_plot_raw_data)} rows, {len(aux_vector_plot_full):,} chars")
+
+        # v12.0: Also build a compressed version (top 200 sites + per-condition stats)
+        # Used as fallback when budget is insufficient for full data
+        import collections as _coll
+        sorted_vp_all = sorted(
+            vector_plot_raw_data,
+            key=lambda x: abs(float(x.get("ptm_relative_log2fc", 0) or 0)),
+            reverse=True
+        )
+        # Per-condition statistics
+        cond_stats: dict[str, list[float]] = _coll.defaultdict(list)
+        for row in vector_plot_raw_data:
+            fc = row.get("ptm_relative_log2fc", 0)
+            try:
+                cond_stats[row.get("condition", "")].append(float(fc or 0))
+            except (ValueError, TypeError):
+                pass
+        stat_lines = ["=== VECTOR PLOT COMPRESSED (top 200 PTMs + per-condition statistics) ===", ""]
+        stat_lines.append("Per-condition summary:")
+        for cond_name, fcs in sorted(cond_stats.items()):
+            up = sum(1 for f in fcs if f > 0.5)
+            dn = sum(1 for f in fcs if f < -0.5)
+            med = sorted(fcs)[len(fcs) // 2] if fcs else 0
+            stat_lines.append(f"  {cond_name}: n={len(fcs)}, up(>0.5)={up}, down(<-0.5)={dn}, median={med:+.2f}")
+        stat_lines.append("")
+        stat_lines.append("Top 200 PTMs by |Log2FC|:")
+        stat_lines.append("| Gene | Position | Condition | PTM_Relative_Log2FC | Protein_Log2FC |")
+        stat_lines.append("|------|----------|-----------|---------------------|----------------|")
+        for row in sorted_vp_all[:200]:
+            gene = row.get("gene", "")
+            pos = row.get("position", "")
+            cond = row.get("condition", "")
+            ptm_fc = row.get("ptm_relative_log2fc", "")
+            prot_fc = row.get("protein_log2fc", "")
+            ptm_fc_str = f"{float(ptm_fc):+.3f}" if ptm_fc not in (None, "", "NA") else "NA"
+            prot_fc_str = f"{float(prot_fc):+.3f}" if prot_fc not in (None, "", "NA") else "NA"
+            stat_lines.append(f"| {gene} | {pos} | {cond} | {ptm_fc_str} | {prot_fc_str} |")
+        stat_lines.append("=== END COMPRESSED VECTOR PLOT DATA ===")
+        aux_vector_plot_compressed = "\n".join(stat_lines)
+        logger.info(f"[v12.0] Built compressed vector plot context: 200 rows, {len(aux_vector_plot_compressed):,} chars")
 
     # Inject pipeline_statistics into experimental_context for Methods prompt
     if pipeline_statistics:
@@ -485,6 +526,8 @@ def run_section_writing(state: dict) -> dict:
             supplement_blocks.append(("ptm_data_summary", aux_ptm_data_summary))
             # Priority 4 (vector plot full data): complete quantitative reference
             supplement_blocks.append(("vector_plot_full", aux_vector_plot_full))
+            # v12.0: Compressed fallback — always included after full (budget permitting)
+            supplement_blocks.append(("vector_plot_compressed", aux_vector_plot_compressed))
             # Priority 4b (v10.7): Ubiquitin chain linkage empirical data
             if aux_linkage_context:
                 supplement_blocks.append(("ubi_linkage", aux_linkage_context))
@@ -510,6 +553,8 @@ def run_section_writing(state: dict) -> dict:
             supplement_blocks.append(("v98_structured_data", v98_structured_data))
             # Priority 3: vector plot full data
             supplement_blocks.append(("vector_plot_full", aux_vector_plot_full))
+            # v12.0: Compressed fallback for discussion section
+            supplement_blocks.append(("vector_plot_compressed", aux_vector_plot_compressed))
             # Priority 3b (v10.7): Ubiquitin chain linkage empirical data
             if aux_linkage_context:
                 supplement_blocks.append(("ubi_linkage", aux_linkage_context))
