@@ -5008,11 +5008,27 @@ function KinaseActivityHeatmapView({
     // Find substrate genes for this kinase from globalKinaseResult
     const kinaseUpper = kinase.toUpperCase();
     const genes: string[] = [];
-    for (const mod of globalKinaseResult.kinase_modules) {
-      if (mod.kinase.toUpperCase() === kinaseUpper || (mod.canonical || "").toUpperCase() === kinaseUpper) {
-        for (const m of mod.members) {
-          const g = m.gene.toUpperCase();
-          if (!genes.includes(g)) genes.push(g);
+    // Primary source: globalKinaseResult modules
+    if (globalKinaseResult) {
+      for (const mod of globalKinaseResult.kinase_modules) {
+        if (mod.kinase.toUpperCase() === kinaseUpper || (mod.canonical || "").toUpperCase() === kinaseUpper) {
+          for (const m of mod.members) {
+            const g = m.gene.toUpperCase();
+            if (!genes.includes(g)) genes.push(g);
+          }
+        }
+      }
+    }
+    // Fallback: extract genes from heatmapData kinase_scores substrates
+    if (genes.length === 0 && heatmapData) {
+      const ksEntry = heatmapData.kinase_scores?.find(
+        (ks: any) => (ks.kinase || "").toUpperCase() === kinaseUpper ||
+                     (ks.parent_kinase || "").toUpperCase() === kinaseUpper
+      );
+      if (ksEntry?.substrates) {
+        for (const sub of ksEntry.substrates) {
+          const g = (sub.gene || "").toUpperCase();
+          if (g && !genes.includes(g)) genes.push(g);
         }
       }
     }
