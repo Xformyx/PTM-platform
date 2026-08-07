@@ -1808,9 +1808,20 @@ def _build_frontend_kinase_llm_context(frontend_kinase: dict, ptm_type: str, kin
             if tmm_n_excl + tmm_n_shared > 0:
                 tmm_str = f", TMM(excl={tmm_n_excl},shared={tmm_n_shared},profile={tmm_profile_type})"
 
-            # TMM weighted score (more accurate than raw sum for shared substrates)
-            tmm_w_up = ks.get("tmm_weighted_up_sums", {})
-            tmm_w_dn = ks.get("tmm_weighted_down_sums", {})
+            # Raw (pre-TMM) profile — preserved in raw_up_sums/raw_down_sums after Option A replacement
+            # If TMM was applied, up_sums == tmm_weighted, so use raw_* for the "before" view
+            raw_up = ks.get("raw_up_sums") or ks.get("up_sums", {})
+            raw_dn = ks.get("raw_down_sums") or ks.get("down_sums", {})
+            raw_score_parts = []
+            for c in conditions[:6]:
+                net = raw_up.get(c, 0) + raw_dn.get(c, 0)
+                if abs(net) >= 0.01:
+                    raw_score_parts.append(f"{c}:{net:+.2f}")
+            raw_score_str = ", ".join(raw_score_parts) if raw_score_parts else ""
+
+            # TMM-weighted profile (current up_sums after Option A replacement)
+            tmm_w_up = ks.get("up_sums", {})
+            tmm_w_dn = ks.get("down_sums", {})
             tmm_score_parts = []
             for c in conditions[:6]:
                 wu = tmm_w_up.get(c, 0)
@@ -1819,6 +1830,9 @@ def _build_frontend_kinase_llm_context(frontend_kinase: dict, ptm_type: str, kin
                 if abs(net) >= 0.01:
                     tmm_score_parts.append(f"{c}:{net:+.2f}")
             tmm_score_str = ", ".join(tmm_score_parts) if tmm_score_parts else ""
+
+            # Only show TMM-weighted separately if it differs from raw (i.e., TMM was applied)
+            has_tmm = bool(ks.get("raw_up_sums")) and tmm_score_str != raw_score_str
 
             # Top shared substrate contributions
             shared_contrib_str = ""
@@ -1836,9 +1850,12 @@ def _build_frontend_kinase_llm_context(frontend_kinase: dict, ptm_type: str, kin
                 f"conf={confidence:.0%}, peak={peak_cond} ({peak_score:+.2f}), "
                 f"direction={direction}, coherence={coherence:.2f}{pattern_str}{nuc_str}{self_ptm_str}{tmm_str}"
             )
-            parts.append(f"  Temporal profile (raw): [{score_str}]")
-            if tmm_score_str:
-                parts.append(f"  TMM-weighted profile (contribution-adjusted): [{tmm_score_str}]")
+            parts.append(f"  Temporal profile (winsorized mean score): [{score_str}]")
+            if has_tmm:
+                parts.append(f"  Pre-TMM activity sum (raw, before deconvolution): [{raw_score_str}]")
+                parts.append(f"  TMM-weighted activity sum (contribution-adjusted): [{tmm_score_str}]")
+            else:
+                parts.append(f"  Activity sum: [{tmm_score_str or raw_score_str}]")
             if shared_contrib_str:
                 parts.append(shared_contrib_str)
             parts.append("")

@@ -7977,7 +7977,8 @@ async def kinase_activity_heatmap(
             _tmm_modules.append({
                 "canonical": km.get("kinase", "").upper(),
                 "kinase": km.get("kinase", ""),
-                "members": [{"key": k} for k in _keys if k != "_"],
+                # Guard: skip keys with trailing underscore (missing position)
+                "members": [{"key": k} for k in _keys if k and not k.endswith("_") and "_" in k],
             })
         tmm_scores = compute_weighted_kinase_scores(
             kinase_modules=_tmm_modules,
@@ -7989,7 +7990,12 @@ async def kinase_activity_heatmap(
             ptm_qvalues=ptm_qvalues,
         )
         # Merge TMM scores back into kinase_scores_filtered entries
+        # Option A: Replace up/down sums with TMM-weighted values
         for ks_entry in kinase_scores_filtered:
+            # Skip sub-pattern kinases: they represent cluster-level splits of the parent
+            # and should not receive the parent's full TMM scores
+            if ks_entry.get("is_sub_pattern"):
+                continue
             canon = (ks_entry.get("parent_kinase") or ks_entry.get("kinase", "")).upper()
             tmm = tmm_scores.get(canon)
             if tmm:
