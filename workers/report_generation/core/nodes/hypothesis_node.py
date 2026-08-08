@@ -133,18 +133,26 @@ def _build_multi_source_context(state: dict) -> dict:
     ctx["cowave_kinases"] = dict(cowave_kinases)
 
     # ── Source 3: Autophosphorylation ────────────────────────────────────────
+    # self_ptm is a list[dict] (sorted by |correlation_with_activity| desc)
+    # from kinase-activity-heatmap; tolerate legacy single-dict shape.
     auto_phospho = []
     for ks in kinase_scores:
         if ks.get("is_sub_pattern"):
             continue
         self_ptm = ks.get("self_ptm")
-        if self_ptm:
+        if not self_ptm:
+            continue
+        sites = self_ptm if isinstance(self_ptm, list) else [self_ptm]
+        for sp in sites:
+            if not isinstance(sp, dict):
+                continue
+            corr = sp.get("correlation_with_activity", sp.get("correlation", 0)) or 0
             auto_phospho.append({
                 "kinase": ks.get("kinase", ""),
-                "self_ptm_site": self_ptm.get("site", ""),
-                "self_ptm_corr": self_ptm.get("correlation", 0),
-                "self_ptm_type": "activation" if self_ptm.get("correlation", 0) > 0 else "inhibition",
-                "peak_condition": ks.get("peak_condition", ""),
+                "self_ptm_site": sp.get("site", ""),
+                "self_ptm_corr": corr,
+                "self_ptm_type": "activation" if corr > 0 else "inhibition",
+                "peak_condition": sp.get("peak_condition") or ks.get("peak_condition", ""),
             })
     ctx["autophosphorylation"] = auto_phospho
 

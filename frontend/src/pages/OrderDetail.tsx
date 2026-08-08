@@ -3793,7 +3793,11 @@ export default function OrderDetail() {
         await api.post(`/orders/${orderId}/cancel`);
         await new Promise((r) => setTimeout(r, 1500));
       }
-      await api.post(`/orders/${orderId}/start`);
+      if (pendingAction.type === "run-stage") {
+        await api.post(`/orders/${orderId}/run-stage`, { stage: pendingAction.stage });
+      } else {
+        await api.post(`/orders/${orderId}/start`);
+      }
       const [o, l] = await Promise.all([
         api.get<Order>(`/orders/${orderId}`),
         api.get<{ logs: OrderLog[] }>(`/orders/${orderId}/logs`),
@@ -3825,7 +3829,19 @@ export default function OrderDetail() {
     }
   };
 
-  const handleRunStage = (_stage: string) => openRerunModal({ type: "start" });
+  const handleRunStage = (stage: string) => openRerunModal({ type: "run-stage", stage });
+
+  const rerunConfirmLabel = (() => {
+    if (pendingAction?.type === "run-stage") {
+      const labels: Record<string, string> = {
+        preprocessing: "Confirm & Re-run Preprocessing",
+        rag_enrichment: "Confirm & Re-run RAG Enrichment (+ Report)",
+        report_generation: "Confirm & Re-run Report Generation",
+      };
+      return labels[pendingAction.stage] || "Confirm & Re-run Stage";
+    }
+    return "Confirm & Re-run from Beginning";
+  })();
 
   const handleStop = async () => {
     if (stopRequestRef.current) return;
@@ -4811,7 +4827,7 @@ export default function OrderDetail() {
                     onClick={() => handleRunStage("report_generation")}
                   >
                     <RotateCcw className="h-3.5 w-3.5" />
-                    Re-run from Beginning
+                    Re-run Report Generation
                   </Button>
                 </div>
               )}
@@ -4834,7 +4850,7 @@ export default function OrderDetail() {
                     onClick={() => handleRunStage("report_generation")}
                   >
                     <RotateCcw className="h-3.5 w-3.5" />
-                    Re-run from Beginning
+                    Re-run Report Generation
                   </Button>
                 )}
               </CardContent>
@@ -4974,7 +4990,7 @@ export default function OrderDetail() {
         llmModels={llmModels}
         defaultLlmModel={llmConfig?.default_model || ""}
         onConfirm={handleRerunConfirm}
-        confirmLabel="Confirm & Re-run from Beginning"
+        confirmLabel={rerunConfirmLabel}
       />
       <ShareOrderModal
         open={shareModalOpen}

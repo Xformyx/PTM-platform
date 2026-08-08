@@ -1092,10 +1092,10 @@ async def run_stage(
         raise HTTPException(status_code=404, detail="Order not found")
     await _require_write_access(order, user, db)
 
-    if order.status not in ("completed", "failed"):
+    if order.status not in ("completed", "failed", "cancelled"):
         raise HTTPException(
             status_code=400,
-            detail=f"Can only re-run stages for completed or failed orders (current: '{order.status}')",
+            detail=f"Can only re-run stages for completed, failed, or cancelled orders (current: '{order.status}')",
         )
 
     await _clear_order_locks(order_id)

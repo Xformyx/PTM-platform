@@ -322,51 +322,56 @@ def _verify_type_c_autophospho_timing(
         if not self_ptm or not module_peak:
             continue
 
-        site = self_ptm.get("site", "")
-        corr = self_ptm.get("correlation", 0)
-        key = f"{kinase}_{site}"
-        info = ptm_lookup.get(key)
+        # self_ptm is list[dict] from heatmap; tolerate legacy single-dict shape
+        sites = self_ptm if isinstance(self_ptm, list) else [self_ptm]
+        for sp in sites:
+            if not isinstance(sp, dict):
+                continue
+            site = sp.get("site", "")
+            corr = sp.get("correlation_with_activity", sp.get("correlation", 0)) or 0
+            key = f"{kinase}_{site}"
+            info = ptm_lookup.get(key)
 
-        if not info:
-            # Try without position
-            info = ptm_lookup.get(kinase)
+            if not info:
+                # Try without position
+                info = ptm_lookup.get(kinase)
 
-        if not info:
-            continue
+            if not info:
+                continue
 
-        actual_peak = info["peak_condition"]
-        timing_match = actual_peak == module_peak
-        corr_type = "activation" if corr > 0 else "inhibition"
+            actual_peak = info["peak_condition"]
+            timing_match = actual_peak == module_peak
+            corr_type = "activation" if corr > 0 else "inhibition"
 
-        result_label = (
-            "supported" if timing_match and abs(corr) >= 0.7
-            else "partially_supported" if timing_match or abs(corr) >= 0.5
-            else "refuted"
-        )
+            result_label = (
+                "supported" if timing_match and abs(corr) >= 0.7
+                else "partially_supported" if timing_match or abs(corr) >= 0.5
+                else "refuted"
+            )
 
-        statement = (
-            f"{kinase} autophosphorylation at {site} (r={corr:+.2f}, {corr_type}): "
-            f"self-PTM peaks at {actual_peak}, module peaks at {module_peak} → "
-            f"{'TIMING MATCH' if timing_match else 'TIMING MISMATCH'} — {result_label.upper()}"
-        )
+            statement = (
+                f"{kinase} autophosphorylation at {site} (r={corr:+.2f}, {corr_type}): "
+                f"self-PTM peaks at {actual_peak}, module peaks at {module_peak} → "
+                f"{'TIMING MATCH' if timing_match else 'TIMING MISMATCH'} — {result_label.upper()}"
+            )
 
-        findings.append({
-            "hypothesis_id": hyp.get("id", ""),
-            "verification_type": "C",
-            "kinase": kinase,
-            "site": site,
-            "result": result_label,
-            "evidence": {
-                "self_ptm_peak": actual_peak,
-                "module_peak": module_peak,
-                "timing_match": timing_match,
-                "correlation": round(corr, 3),
-                "correlation_type": corr_type,
-                "peak_fc": round(info["peak_fc"], 3),
-            },
-            "statement": statement,
-            "confidence": round(abs(corr) * (0.9 if timing_match else 0.4), 3),
-        })
+            findings.append({
+                "hypothesis_id": hyp.get("id", ""),
+                "verification_type": "C",
+                "kinase": kinase,
+                "site": site,
+                "result": result_label,
+                "evidence": {
+                    "self_ptm_peak": actual_peak,
+                    "module_peak": module_peak,
+                    "timing_match": timing_match,
+                    "correlation": round(corr, 3),
+                    "correlation_type": corr_type,
+                    "peak_fc": round(info["peak_fc"], 3),
+                },
+                "statement": statement,
+                "confidence": round(abs(corr) * (0.9 if timing_match else 0.4), 3),
+            })
 
     return findings
 
