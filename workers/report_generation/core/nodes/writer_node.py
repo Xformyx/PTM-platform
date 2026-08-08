@@ -399,6 +399,33 @@ def run_section_writing(state: dict) -> dict:
     aux_tf_inference_context, tf_inference_data = build_tf_activity_inference(
         network_results, timepoints, ptm_type=ptm_type, organism=organism
     )
+    # v12.0: Co-Scientist verified findings
+    report_type = state.get("report_type", "comprehensive")
+    verified_findings = state.get("verified_findings", []) or []
+    co_scientist_context = state.get("co_scientist_context", {}) or {}
+    aux_verified_findings_context = ""
+    if report_type == "co_scientist" and verified_findings:
+        lines = [
+            "=== DATA-VERIFIED FINDINGS (Co-Scientist Mode) ===",
+            "The following hypotheses have been verified directly against experimental data.",
+            "CRITICAL: Integrate these verified findings into the report as 'Data-Verified Findings'.",
+            "Use exact numbers (e.g., '21/28 substrates') and cite verification type.",
+            "",
+        ]
+        supported = [f for f in verified_findings if f.get("result") in ("supported", "partially_supported")]
+        for i, finding in enumerate(supported[:20], 1):
+            vtype = finding.get("verification_type", "")
+            kinase = finding.get("kinase", "") or finding.get("kinases", "")
+            result = finding.get("result", "")
+            stmt = finding.get("statement", "")
+            conf = finding.get("confidence", 0)
+            lines.append(f"{i}. [Type {vtype}] {kinase} — {result.upper()} (confidence={conf:.2f})")
+            lines.append(f"   {stmt}")
+            lines.append("")
+        lines.append("=== END DATA-VERIFIED FINDINGS ===")
+        aux_verified_findings_context = "\n".join(lines)
+        logger.info(f"[v12.0] Built verified findings context: {len(supported)} supported findings, {len(aux_verified_findings_context):,} chars")
+
     # v11.6: IP Overlay context for LLM (physical interaction evidence from immunoprecipitation)
     ip_overlay_data = state.get("ip_overlay_data", {}) or {}
     aux_ip_overlay_context = ""
@@ -456,7 +483,8 @@ def run_section_writing(state: dict) -> dict:
         f"temporal_kinase={len(temporal_kinase_cascade_llm_context):,}, "
         f"receptor={len(receptor_llm_context):,}, "
         f"ip_overlay={len(aux_ip_overlay_context):,}, "
-        f"tf_inference={len(aux_tf_inference_context):,}"
+        f"tf_inference={len(aux_tf_inference_context):,}, "
+        f"verified_findings={len(aux_verified_findings_context):,}"
     )
 
     # v10.8: Accumulate ChromaDB refs across all sections for unified References
@@ -503,6 +531,9 @@ def run_section_writing(state: dict) -> dict:
         # receptor, and non-PTM are now ESSENTIAL (Priority 1-2) for PTM activity profile interpretation.
         supplement_blocks = []
         if section_type == "results":
+            # v12.0: Co-Scientist verified findings — Priority 0 (highest, must be included first)
+            if aux_verified_findings_context:
+                supplement_blocks.append(("verified_findings", aux_verified_findings_context))
             # Priority 1 (ESSENTIAL — PTM activity profile core): temporal coordination + temporal kinase + receptor + non-PTM effector
             # v9.35: nonptm_temporal promoted to Priority 1 — effector proteins are integral
             # to the receptor→kinase→substrate→effector signal flow narrative.
@@ -537,6 +568,9 @@ def run_section_writing(state: dict) -> dict:
             supplement_blocks.append(("v98_writing_example", v98_writing_example))
 
         elif section_type == "discussion":
+            # v12.0: Co-Scientist verified findings — Priority 0 (highest for discussion)
+            if aux_verified_findings_context:
+                supplement_blocks.append(("verified_findings", aux_verified_findings_context))
             # Priority 1 (ESSENTIAL): temporal coordination + temporal kinase + receptor + non-PTM
             supplement_blocks.append(("comovement", comovement_llm_context))
             supplement_blocks.append(("temporal_kinase", temporal_kinase_cascade_llm_context))

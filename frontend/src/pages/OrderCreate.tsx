@@ -1216,13 +1216,22 @@ export default function OrderCreate() {
                       <SelectContent>
                         <SelectItem value="comprehensive">Standard Report</SelectItem>
                         <SelectItem value="extended">Extended (+ Drug Repositioning)</SelectItem>
+                        <SelectItem value="co_scientist">Co-Scientist (자율 분석)</SelectItem>
                       </SelectContent>
                     </Select>
                     <p className="text-[10px] text-muted-foreground">
                       {form.report_type === "extended"
                         ? "Drug target prioritization 및 repositioning 분석 포함"
+                        : form.report_type === "co_scientist"
+                        ? "AI 자율 분석: Temporal Cascade · Co-Wave · Autophosphorylation · TMM 통합 가설 생성 및 데이터 검증"
                         : "PTM 분석, 가설 검증, 네트워크 분석 기반 보고서"}
                     </p>
+                    {form.report_type === "co_scientist" && (
+                      <div className="rounded-md border border-blue-500/30 bg-blue-500/10 p-2 text-[10px] text-blue-300 space-y-1">
+                        <p className="font-semibold text-blue-200">🔬 Co-Scientist 자율 분석 모드</p>
+                        <p>AI가 4개 데이터 소스를 통합하여 가설을 자동 생성하고 실험 데이터로 직접 검증합니다. 검증된 가설은 레포트에 수치 포함 자동 삽입됩니다.</p>
+                      </div>
+                    )}
                   </div>
                   <div className="space-y-2">
                     <Label>PTM Selection Mode</Label>
@@ -1702,7 +1711,7 @@ export default function OrderCreate() {
                       {form.analysis_mode === "ptm_only" ? "PTM-Only" : form.analysis_mode === "cross_talk" ? "Cross-Talk" : "PTM + Network"}
                     </span>
                     <span className="text-muted-foreground">Report Type</span>
-                    <span className="font-medium">{form.report_type === "extended" ? "Extended" : "Standard"}</span>
+                    <span className="font-medium">{form.report_type === "extended" ? "Extended" : form.report_type === "co_scientist" ? "Co-Scientist" : "Standard"}</span>
                     <span className="text-muted-foreground">Samples</span>
                     <span className="font-medium">{samples.length} configured</span>
                     <span className="text-muted-foreground">Research Questions</span>

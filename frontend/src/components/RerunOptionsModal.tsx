@@ -440,9 +440,23 @@ export default function RerunOptionsModal({
                     <SelectContent>
                       <SelectItem value="comprehensive">Standard Report</SelectItem>
                       <SelectItem value="extended">Extended (+ Drug Repositioning)</SelectItem>
+                      <SelectItem value="co_scientist">Co-Scientist (자율 분석)</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
+                {reportType === "co_scientist" && (
+                  <div className="rounded-md border border-blue-500/30 bg-blue-500/10 p-2.5 text-[10px] text-blue-300 space-y-1">
+                    <p className="font-semibold text-blue-200">🔬 Co-Scientist 자율 분석 모드</p>
+                    <p>AI가 4개 데이터 소스를 통합하여 가설을 자동 생성하고 실험 데이터로 직접 검증합니다:</p>
+                    <ul className="list-disc list-inside space-y-0.5 text-blue-300/80">
+                      <li>Temporal Cascade — 시간대별 kinase 활성화 순서 분석</li>
+                      <li>Co-Wave Modules — 동시 활성화 substrate 공통점 분석</li>
+                      <li>Autophosphorylation — 자기인산화 = 활성화 마커 검증</li>
+                      <li>TMM Contribution — 데이터 기반 kinase-substrate 귀속</li>
+                    </ul>
+                    <p className="text-blue-200/70">검증된 가설은 레포트에 수치 포함 자동 삽입됩니다 (예: "21/28 substrates peak at 1h")</p>
+                  </div>
+                )}
                 <div className="space-y-1.5">
                   <Label className="text-xs">PTM Selection Mode</Label>
                   <Select value={ptmSelectionMode} onValueChange={(v) => setPtmSelectionMode(v as typeof ptmSelectionMode)}>

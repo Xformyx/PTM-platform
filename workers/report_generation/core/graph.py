@@ -133,6 +133,9 @@ class ReportState(TypedDict, total=False):
     ubiquitin_linkage_data: dict  # {detected, linkage_data, temporal_ratios, summary, chart_data}
     # v11.8: TF Activity Inference from non-PTM protein dynamics
     tf_inference_data: dict  # {inferred_tfs, cross_validated, novel_findings, summary}
+    # v12.0: Co-Scientist mode
+    co_scientist_context: dict   # multi-source context built by hypothesis_node
+    verified_findings: List[dict]  # data-verified findings from data_verification_node
 
     # Progress tracking
     progress_callback: Any
@@ -171,6 +174,12 @@ def validate_hypotheses(state: ReportState) -> dict:
     """Validate hypotheses against ChromaDB literature."""
     from .nodes.validation_node import run_validation
     return run_validation(state)
+
+
+def data_verification(state: ReportState) -> dict:
+    """Verify co-scientist hypotheses against experimental data (co_scientist mode only)."""
+    from .nodes.data_verification_node import run_data_verification
+    return run_data_verification(state)
 
 
 def network_analysis(state: ReportState) -> dict:
@@ -775,6 +784,15 @@ def _route_after_cascade(state: ReportState) -> str:
     return "generate_qa_report"
 
 
+def _route_after_validate(state: ReportState) -> str:
+    """Route after validate_hypotheses: co_scientist mode inserts data_verification."""
+    report_type = state.get("report_type", "comprehensive")
+    if report_type == "co_scientist":
+        logger.info("[GRAPH] Routing to data_verification (co_scientist mode)")
+        return "data_verification"
+    return "network_analysis"
+
+
 def build_report_graph() -> StateGraph:
     """Build the LangGraph StateGraph for report generation.
 
@@ -789,6 +807,8 @@ def build_report_graph() -> StateGraph:
       Cross-Talk (cross_talk):
         Same as standard but crosstalk_analysis inserted after cascade_mediator.
 
+    v12.0: Co-Scientist mode: data_verification inserted after validate_hypotheses.
+           co_scientist_context and verified_findings added to ReportState.
     v10.0: rq_refinement between kinase_annotation and write_sections.
            report_copilot between write_sections and cascade_mediator.
     v9.11: kinase_annotation between temporal_comovement and write_sections.
@@ -803,6 +823,7 @@ def build_report_graph() -> StateGraph:
     graph.add_node("research", research)
     graph.add_node("hypothesize", hypothesize)
     graph.add_node("validate_hypotheses", validate_hypotheses)
+    graph.add_node("data_verification", data_verification)
     graph.add_node("network_analysis", network_analysis)
     graph.add_node("temporal_comovement", temporal_comovement)
     graph.add_node("kinase_annotation", kinase_annotation)
@@ -821,7 +842,16 @@ def build_report_graph() -> StateGraph:
     graph.add_edge("generate_questions", "research")
     graph.add_edge("research", "hypothesize")
     graph.add_edge("hypothesize", "validate_hypotheses")
-    graph.add_edge("validate_hypotheses", "network_analysis")
+    # Conditional: co_scientist mode inserts data_verification after validate_hypotheses
+    graph.add_conditional_edges(
+        "validate_hypotheses",
+        _route_after_validate,
+        {
+            "data_verification": "data_verification",
+            "network_analysis": "network_analysis",
+        },
+    )
+    graph.add_edge("data_verification", "network_analysis")
     graph.add_edge("network_analysis", "temporal_comovement")
     graph.add_edge("temporal_comovement", "kinase_annotation")
     graph.add_edge("kinase_annotation", "rq_refinement")
