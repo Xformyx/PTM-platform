@@ -1519,6 +1519,11 @@ export default function OrderCreate() {
                     <MessageSquare className="h-4 w-4" /> Research Questions
                     <span className="text-xs text-muted-foreground font-normal">(optional)</span>
                   </Label>
+                  {form.report_type === "co_scientist" ? (
+                    <div className="rounded-md border border-blue-500/30 bg-blue-500/10 p-2.5 text-[11px] text-blue-300">
+                      🔬 <strong>Co-Scientist 모드</strong>에서는 AI가 데이터를 스스로 분석하여 연구 질문을 자동 생성합니다. 별도 입력이 필요하지 않습니다.
+                    </div>
+                  ) : (
                   <p className="text-xs text-muted-foreground">
                     특정 연구 질문을 직접 입력하면 해당 질문 중심으로 보고서가 생성됩니다.
                     입력하지 않으면 AI가 자동으로 질문을 생성합니다.
@@ -1564,6 +1569,7 @@ export default function OrderCreate() {
                       </Button>
                     </div>
                   </div>
+                  )}
                 </div>
 
                 {/* Analysis Options */}
@@ -1715,7 +1721,7 @@ export default function OrderCreate() {
                     <span className="text-muted-foreground">Samples</span>
                     <span className="font-medium">{samples.length} configured</span>
                     <span className="text-muted-foreground">Research Questions</span>
-                    <span className="font-medium">{researchQuestions.length > 0 ? `${researchQuestions.length} custom` : "AI auto-generate"}</span>
+                    <span className="font-medium">{form.report_type === "co_scientist" ? "AI 자율 생성 (Co-Scientist)" : researchQuestions.length > 0 ? `${researchQuestions.length} custom` : "AI auto-generate"}</span>
                     <span className="text-muted-foreground">Downsampling</span>
                     <span className="font-medium">
                       {analysisOptions.mode === "full" ? "None (Full)" : analysisOptions.mode.replace("_", " ").replace(/\b\w/g, c => c.toUpperCase())}

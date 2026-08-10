@@ -710,6 +710,11 @@ export default function RerunOptionsModal({
                 <Label className="text-xs flex items-center gap-1">
                   <MessageSquare className="h-3.5 w-3.5" /> Research Questions (optional)
                 </Label>
+                {reportType === "co_scientist" ? (
+                  <div className="rounded-md border border-blue-500/30 bg-blue-500/10 p-2 text-[10px] text-blue-300">
+                    🔬 <strong>Co-Scientist 모드</strong>: AI가 데이터를 자율 분석하여 연구 질문을 자동 생성합니다. 입력 불필요.
+                  </div>
+                ) : (
                 <div className="space-y-2">
                   {researchQuestions.map((q, i) => (
                     <div key={i} className="flex gap-2 group items-start">
@@ -765,6 +770,7 @@ export default function RerunOptionsModal({
                     </Button>
                   </div>
                 </div>
+                )}
               </div>
             </div>
 

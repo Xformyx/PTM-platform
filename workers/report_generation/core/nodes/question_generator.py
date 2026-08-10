@@ -154,11 +154,114 @@ Generate exactly {max_questions} questions as a JSON array. Each question object
 Return ONLY the JSON array, no additional text or explanation."""
 
 
+
+def _get_co_scientist_questions(state: dict) -> list:
+    """Generate data-driven research questions for co-scientist mode.
+    
+    Questions are derived from actual data patterns rather than user input:
+    - Temporal cascade: kinase activation order
+    - Co-wave modules: substrate co-activation groups
+    - Autophosphorylation: self-activation markers
+    - TMM: kinase-substrate attribution
+    """
+    questions = []
+    
+    # Extract data sources
+    kad = state.get("frontend_kinase_analysis") or state.get("global_kinase_modules") or {}
+    temporal_cascade = kad.get("temporal_cascade", {})
+    cascade_flow = temporal_cascade.get("cascade_flow", [])
+    
+    kah = state.get("kinase_activity_heatmap") or {}
+    kinase_scores = kah.get("kinase_scores", [])
+    cowave_groups = kah.get("cowave_groups", [])
+    
+    context = state.get("experimental_context", {})
+    tissue = context.get("tissue") or context.get("cell_type") or "the experimental system"
+    treatment = context.get("treatment") or "the treatment"
+    ptm_type = state.get("ptm_type", "phosphorylation")
+    
+    # Q1: Temporal cascade — what is the kinase activation order?
+    if cascade_flow:
+        timepoints = [step.get("timepoint", "") for step in cascade_flow]
+        questions.append(
+            f"What is the temporal order of kinase activation in {tissue} following {treatment}, "
+            f"and how does the signaling cascade progress across {', '.join(timepoints[:4])}?"
+        )
+    
+    # Q2: Top kinases — what are the dominant kinases and their substrates?
+    top_ks = sorted(
+        [ks for ks in kinase_scores if not ks.get("is_sub_pattern")],
+        key=lambda x: abs(x.get("peak_score", 0)), reverse=True
+    )[:3]
+    if top_ks:
+        k_names = ", ".join(ks.get("kinase", "") for ks in top_ks)
+        questions.append(
+            f"What are the biological roles of the top-activated kinases ({k_names}) "
+            f"and which specific substrates do they regulate in {tissue}?"
+        )
+    
+    # Q3: Co-wave modules — what do co-activated substrates have in common?
+    if cowave_groups:
+        questions.append(
+            f"What functional modules are revealed by co-wave analysis — "
+            f"do substrates activated simultaneously share common cellular pathways or compartments?"
+        )
+    
+    # Q4: Autophosphorylation — which kinases show self-activation loops?
+    auto_kinases = [
+        ks.get("kinase", "") for ks in kinase_scores
+        if not ks.get("is_sub_pattern") and ks.get("self_ptm")
+    ]
+    if auto_kinases:
+        questions.append(
+            f"Which kinases ({', '.join(auto_kinases[:3])}) exhibit autophosphorylation-based "
+            f"activation loops, and how does this amplify downstream {ptm_type} signaling?"
+        )
+    
+    # Q5: TMM — how are shared substrates attributed between kinases?
+    shared_kinases = [
+        ks for ks in kinase_scores
+        if not ks.get("is_sub_pattern") and ks.get("tmm_n_shared", 0) > 3
+    ]
+    if shared_kinases:
+        k_names2 = ", ".join(ks.get("kinase", "") for ks in shared_kinases[:3])
+        questions.append(
+            f"How do kinases ({k_names2}) cooperate through shared substrates, "
+            f"and what does the TMM contribution analysis reveal about their relative dominance?"
+        )
+    
+    # Q6: Biological significance — what does this signaling pattern mean?
+    bio_q = (context.get("biological_question") or "").strip()
+    if bio_q:
+        questions.append(bio_q)
+    else:
+        questions.append(
+            f"What is the overall biological significance of the observed {ptm_type} signaling pattern "
+            f"in {tissue} following {treatment}, and what are the key mechanistic insights?"
+        )
+    
+    # Fallback: ensure at least 3 questions
+    if len(questions) < 3:
+        questions.extend(_get_fallback_questions()[:3 - len(questions)])
+    
+    return questions
+
+
 def run_question_generation(state: dict) -> dict:
     """Generate AI research questions from comprehensive report and PTM data."""
     cb = state.get("progress_callback")
     if cb:
         cb(6, "Generating AI research questions")
+
+    # v12.0: Co-Scientist mode — auto-generate data-driven questions, skip user input
+    report_type = state.get("report_type", "comprehensive")
+    if report_type == "co_scientist":
+        co_questions = _get_co_scientist_questions(state)
+        logger.info(f"[Co-Scientist] Auto-generated {len(co_questions)} data-driven research questions")
+        if cb:
+            cb(8, f"[Co-Scientist] {len(co_questions)} data-driven questions generated")
+        return {"research_questions": co_questions}
+
 
     existing_questions = state.get("research_questions", [])
     if existing_questions:
