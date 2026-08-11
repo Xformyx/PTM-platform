@@ -4,9 +4,9 @@
 
 | 스크립트 | 용도 |
 |----------|------|
-| `dev-deploy.sh` | 개발 중 수정 반영 (빌드 + 재시작, 버전 변경 없음) |
+| `dev-deploy.sh` | 개발 중 수정 반영 (빌드 + 재시작, **버전 변경 없음**) |
 | `refresh-hash.sh` | push 후 hash만 갱신 (빌드 없음) |
-| `deploy.sh` | 공식 배포 (버전 증가 + 빌드 + 재시작) |
+| `deploy.sh` | 공식 배포 (필요 시 SemVer 증가 + 빌드 + 재시작) |
 | `up.sh` | 전체 서비스 기동 |
 
 ---
@@ -40,17 +40,21 @@ git push
 
 ---
 
-### 3. 버전 올리기 — 공식 배포
+### 3. 버전 올리기 — 큰 변화가 있을 때만
+
+플랫폼 버전은 **Major.Minor.Patch** (예: `2.1.1`)입니다.  
+일상적인 수정은 버전을 올리지 말고, 의미 있는 릴리스일 때만 올립니다.
 
 ```bash
-git add .
-git commit -m "메시지"
+# 버전 유지한 채 변경분 배포
 ./scripts/deploy.sh
-```
 
-- 마지막 deploy 이후 **변경된** 컴포넌트에 맞춰 버전(AAA.BBB.CCC.DDD) 증가
-- 해당 컴포넌트만 빌드 & 재시작
-- 전체 배포: `./scripts/deploy.sh --all`
+# SemVer 릴리스 (버전 변경 시 전체 이미지 재빌드)
+./scripts/deploy.sh --bump patch    # 2.1.1 → 2.1.2  (버그픽스)
+./scripts/deploy.sh --bump minor    # 2.1.1 → 2.2.0  (기능 추가)
+./scripts/deploy.sh --bump major    # 2.1.1 → 3.0.0  (호환 깨지는 큰 변화)
+./scripts/deploy.sh --set 2.1.1     # 정확한 버전으로 지정
+```
 
 ---
 
@@ -66,11 +70,17 @@ git commit -m "메시지"
 
 ## 버전 형식
 
-`Version : 1.1.1.1 (3fa4c71)`
+`Version : 2.1.1 (3fa4c71)`
 
-- **1.1.1.1**: api-server, mcp-server, frontend, workers 순 (내부 저장: 001.001.001.001, 표시 시 앞의 0 생략)
+| 자리 | 의미 | 올릴 때 |
+|------|------|---------|
+| **Major** | 호환이 깨지거나 플랫폼 급 큰 변화 | `--bump major` |
+| **Minor** | 기능 추가 (예: Co-Scientist 연동) | `--bump minor` |
+| **Patch** | 버그픽스·작은 개선 | `--bump patch` |
+
+- **이미지 태그**: 모든 컴포넌트가 동일 SemVer 사용 (예: `ptm-frontend:2.1.1`, `ptm-api-server:2.1.1`)
 - **(3fa4c71)**: 현재 표시 중인 git commit hash
-- **이미지 태그**: 각 컴포넌트는 자기 버전만 사용 (예: ptm-frontend:001, ptm-api-server:001)
+- `dev-deploy.sh`는 버전을 올리지 않습니다. 큰 변화가 있을 때만 `deploy.sh --bump/--set`을 사용하세요.
 
 ---
 

@@ -28,13 +28,13 @@ async def health_check() -> dict[str, str]:
 
 @router.get("/version")
 async def get_version() -> dict[str, str]:
-    """Return platform version (AAA.BBB.CCC.DDD), git hash, and commit date. Read from mounted files."""
-    v = "001.001.001.001"
+    """Return platform SemVer (Major.Minor.Patch), git hash, and commit date."""
+    v = "0.0.0"
     git_hash = ""
     git_date = ""
     try:
         with open("/app/VERSION", "r") as f:
-            v = f.read().strip() or "001.001.001.001"
+            v = f.read().strip() or "0.0.0"
     except FileNotFoundError:
         pass
     try:

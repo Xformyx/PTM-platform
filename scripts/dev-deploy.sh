@@ -182,17 +182,18 @@ else
   echo "  Current HEAD: $(git rev-parse --short HEAD 2>/dev/null || echo '?')"
 fi
 
-# VERSION 파일에서 현재 버전 읽기 (올리지 않음), per-component로 export
-_v=$(cat "$VERSION_FILE" 2>/dev/null | tr -d ' \n\r' || echo "001.001.001.001")
-IFS='.' read -r _a _b _c _d _ <<< "$_v"
-_a=$(printf "%03d" $((10#${_a//[^0-9]/:-0})))
-_b=$(printf "%03d" $((10#${_b//[^0-9]/:-0})))
-_c=$(printf "%03d" $((10#${_c//[^0-9]/:-0})))
-_d=$(printf "%03d" $((10#${_d//[^0-9]/:-0})))
-export VERSION_API="$_a"
-export VERSION_MCP="$_b"
-export VERSION_FRONTEND="$_c"
-export VERSION_WORKERS="$_d"
+# VERSION 파일에서 플랫폼 SemVer 읽기 (올리지 않음). 모든 이미지가 동일 태그 사용.
+_v=$(cat "$VERSION_FILE" 2>/dev/null | tr -d ' \n\r' || echo "0.0.0")
+IFS='.' read -r _major _minor _patch _ <<< "$_v"
+_major=$(printf "%d" $((10#${_major//[^0-9]/:-0})))
+_minor=$(printf "%d" $((10#${_minor//[^0-9]/:-0})))
+_patch=$(printf "%d" $((10#${_patch//[^0-9]/:-0})))
+_v="${_major}.${_minor}.${_patch}"
+export VERSION="$_v"
+export VERSION_API="$_v"
+export VERSION_MCP="$_v"
+export VERSION_FRONTEND="$_v"
+export VERSION_WORKERS="$_v"
 
 # GIT_HASH / GIT_DATE 를 빌드 전에 미리 기록 (docker bind mount가 파일을 필요로 함)
 git rev-parse --short HEAD > "$REPO_ROOT/GIT_HASH" 2>/dev/null || true
@@ -255,4 +256,4 @@ git rev-parse HEAD > "$LAST_DEV_COMMIT" 2>/dev/null || true
 git rev-parse --short HEAD > "$REPO_ROOT/GIT_HASH" 2>/dev/null || true
 # 빌드 시점의 commit 날짜/시각 기록 (Web UI 표시용)
 git log -1 --format="%ci" HEAD 2>/dev/null | sed 's/ +[0-9]*//' | tr -d '\n' > "$REPO_ROOT/GIT_DATE" || true
-echo "Done. (Version: $_a.$_b.$_c.$_d, Hash: $(cat "$REPO_ROOT/GIT_HASH"), Date: $(cat "$REPO_ROOT/GIT_DATE"))"
+echo "Done. (Version: $_v, Hash: $(cat "$REPO_ROOT/GIT_HASH"), Date: $(cat "$REPO_ROOT/GIT_DATE"))"

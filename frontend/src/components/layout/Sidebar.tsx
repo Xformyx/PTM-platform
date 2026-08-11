@@ -201,12 +201,14 @@ function ChangePasswordModal({ open, onClose }: { open: boolean; onClose: () => 
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
-/** Format version: strip leading zeros (001.001.001.001 → 1.1.1.1) */
+/** Format platform SemVer (Major.Minor.Patch). Legacy 4-part tags keep first 3 fields. */
 function formatVersionDisplay(raw: string): string {
-  return raw
+  const parts = raw
     .split(".")
-    .map((s) => String(parseInt(s, 10) || 0))
-    .join(".");
+    .map((s) => String(parseInt(s, 10) || 0));
+  if (parts.length >= 3) return parts.slice(0, 3).join(".");
+  while (parts.length < 3) parts.push("0");
+  return parts.join(".");
 }
 
 function VersionDisplay({ collapsed }: { collapsed?: boolean }) {
