@@ -78,6 +78,10 @@ def run_external_coscientist_context(state: dict) -> dict:
             f"max_hypotheses={max_hypotheses}"
         )
         packet = _get_json(packet_url, timeout)
+        # Soft-skip non-ready packets (e.g. no_eligible_hypotheses) without failing the report.
+        packet_status = str(packet.get("status") or "").lower()
+        if packet_status and packet_status != "ready":
+            return _skipped(f"Packet status is not ready: {packet.get('status')!r}", session_id, packet=packet)
         _validate_packet_contract(packet, session_id)
 
         verified_packet, verification = _verify_packet_against_platform_data(packet, state, max_hypotheses)
@@ -102,11 +106,16 @@ def run_external_coscientist_context(state: dict) -> dict:
             "co_scientist_packet_snapshot": snapshot_path,
         }
     except Exception as exc:  # External integration is always isolated from the core report.
-        logger.warning("[CoScientist] External packet skipped without blocking report generation: %s", exc)
+        status = "timed_out" if _is_timeout_error(exc) else "failed"
+        logger.warning(
+            "[CoScientist] External packet skipped without blocking report generation (%s): %s",
+            status,
+            exc,
+        )
         return {
             "co_scientist_session_id": session_id,
             "co_scientist_discussion_packet": None,
-            "co_scientist_status": "failed",
+            "co_scientist_status": status,
             "co_scientist_warning": _safe_error_message(exc),
             "co_scientist_integration_mode": mode,
         }
@@ -149,8 +158,16 @@ def build_external_coscientist_writer_context(state: dict) -> str:
     return "\n".join(lines)
 
 
-def build_external_coscientist_addendum(packet: dict) -> str:
-    """Create a provenance-preserving, non-causal report addendum from a ready packet."""
+def build_external_coscientist_addendum(
+    packet: dict,
+    citation_map: Dict[str, int] | None = None,
+) -> str:
+    """Create a provenance-preserving, non-causal report addendum from a ready packet.
+
+    When ``citation_map`` is provided (PMID/DOI/normalised-title → reference number),
+    re-resolved literature lines include stable inline citations such as ``[3][7]``
+    that match the final ``## References`` numbering.
+    """
     if not packet or not packet.get("selected_hypotheses"):
         return ""
 
@@ -169,6 +186,11 @@ def build_external_coscientist_addendum(packet: dict) -> str:
     ]
 
     for index, hypothesis in enumerate(packet.get("selected_hypotheses", [])[:2], 1):
+        lit_items = hypothesis.get("resolved_literature", [])
+        lit_text = _format_resolved_literature(lit_items)
+        cite_suffix = _format_citation_markers(lit_items, citation_map)
+        if cite_suffix:
+            lit_text = f"{lit_text} {cite_suffix}".strip()
         lines.extend(
             [
                 f"### Candidate {index}: {hypothesis.get('id', 'External hypothesis')}",
@@ -180,7 +202,7 @@ def build_external_coscientist_addendum(packet: dict) -> str:
                 f"- **Linked observed PTM sites:** {', '.join(hypothesis.get('supporting_ptm_sites', [])) or 'none'}",
                 f"- **Candidate signaling chain:** {hypothesis.get('signaling_chain', 'not specified')}",
                 f"- **Platform-reverified data support:** {_format_data_support(hypothesis.get('data_support', []))}",
-                f"- **Platform-reresolved supporting literature:** {_format_resolved_literature(hypothesis.get('resolved_literature', []))}",
+                f"- **Platform-reresolved supporting literature:** {lit_text}",
                 f"- **Counter-evidence / limitations:** {_format_limitations(hypothesis)}",
                 f"- **Testable prediction:** {hypothesis.get('testable_prediction', 'not specified')}",
                 "",
@@ -356,11 +378,21 @@ def _observed_ptm_site_ids(state: dict) -> set[str]:
 
 
 def _site_is_observed(site: str, observed: set[str]) -> bool:
+    """Exact PTM-site match after normalisation.
+
+    Accepts separator variants (``SRC-Y416``, ``SRC_Y416``, ``SRC:Y416``,
+    ``SRC Y416``) but does *not* accept a different residue on the same gene
+    (``SRC-Y999`` must not match when only ``SRC-Y416`` was observed).
+    """
     normalised = _normalise_site(site)
+    if not normalised:
+        return False
     if normalised in observed:
         return True
-    gene = normalised.split("-", 1)[0]
-    return any(item.startswith(f"{gene}-") for item in observed) if gene else False
+    # Gene-only candidate may match gene-only observed rows
+    if "-" not in normalised:
+        return normalised in observed
+    return False
 
 
 def _validated_data_support(data_support: Iterable[Any], matched_sites: List[str]) -> List[dict]:
@@ -399,6 +431,8 @@ def _validate_packet_contract(packet: dict, expected_session_id: str) -> None:
 
 
 def _get_json(url: str, timeout_seconds: int) -> dict:
+    import socket
+
     request = urllib.request.Request(url, headers={"Accept": "application/json"})
     try:
         with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
@@ -408,8 +442,13 @@ def _get_json(url: str, timeout_seconds: int) -> dict:
             return data if isinstance(data, dict) else {}
     except urllib.error.HTTPError as exc:
         raise RuntimeError(f"HTTP {exc.code} from Co-Scientist API") from exc
+    except (TimeoutError, socket.timeout) as exc:
+        raise TimeoutError("Co-Scientist API request timed out") from exc
     except urllib.error.URLError as exc:
-        raise RuntimeError(f"Co-Scientist API unavailable: {exc.reason}") from exc
+        reason = str(getattr(exc, "reason", exc) or exc)
+        if _is_timeout_error(exc) or "timed out" in reason.lower():
+            raise TimeoutError("Co-Scientist API request timed out") from exc
+        raise RuntimeError(f"Co-Scientist API unavailable: {reason}") from exc
 
 
 def _snapshot_packet(packet: dict, output_dir: str, session_id: str) -> str:
@@ -449,11 +488,42 @@ def _read_int_env(name: str, default: int) -> int:
 
 
 def _normalise_site(value: Any) -> str:
-    return re.sub(r"\s+", "", str(value or "").upper().replace("_", "-"))
+    """Normalise PTM site identifiers to ``GENE-RESIDUE`` form.
+
+    Handles common external/platform variants:
+    ``SRC-Y416``, ``SRC_Y416``, ``SRC:Y416``, ``SRC Y416``, ``src/y416``.
+    """
+    text = str(value or "").strip().upper()
+    if not text:
+        return ""
+    # Unify separators first (keep a single hyphen between gene and residue)
+    text = re.sub(r"[\s_:/]+", "-", text)
+    text = re.sub(r"-{2,}", "-", text).strip("-")
+    # Compact form without separator: SRCY416 / AKT1S473
+    if "-" not in text:
+        m = re.match(r"^([A-Z0-9]+)([STYC]\d+[A-Z]?)$", text)
+        if m:
+            text = f"{m.group(1)}-{m.group(2)}"
+    return text
 
 
 def _normalise_title(value: Any) -> str:
     return re.sub(r"[^a-z0-9]", "", str(value or "").lower())
+
+
+def _is_timeout_error(exc: Exception) -> bool:
+    if isinstance(exc, TimeoutError):
+        return True
+    try:
+        import socket
+
+        if isinstance(exc, socket.timeout):
+            return True
+    except Exception:
+        pass
+    msg = str(exc).lower()
+    reason = str(getattr(exc, "reason", "") or "").lower()
+    return "timed out" in msg or "timeout" in msg or "timed out" in reason or "timeout" in reason
 
 
 def _safe_error_message(exc: Exception) -> str:
@@ -480,6 +550,68 @@ def _format_resolved_literature(items: Iterable[Any]) -> str:
         identifier = item.get("pmid") or item.get("doi") or "PTM-platform RAG match"
         parts.append(f"{item.get('title', 'Untitled')} ({identifier})")
     return "; ".join(parts) or "No literature was re-resolved by PTM-platform"
+
+
+def build_citation_map(collected_refs: Iterable[Any]) -> Dict[str, int]:
+    """Map PMID / DOI / normalised title → 1-based reference index."""
+    citation_map: Dict[str, int] = {}
+    for idx, ref in enumerate(list(collected_refs or []), 1):
+        if not isinstance(ref, dict):
+            continue
+        for raw in (ref.get("pmid"), ref.get("doi"), _normalise_title(ref.get("title"))):
+            key = str(raw or "").strip().lower()
+            if key and key not in citation_map:
+                citation_map[key] = idx
+    return citation_map
+
+
+def _format_citation_markers(items: Iterable[Any], citation_map: Dict[str, int] | None) -> str:
+    if not citation_map:
+        return ""
+    numbers: list[int] = []
+    for item in list(items or [])[:5]:
+        if not isinstance(item, dict):
+            continue
+        for raw in (item.get("pmid"), item.get("doi"), _normalise_title(item.get("title"))):
+            key = str(raw or "").strip().lower()
+            if key and key in citation_map:
+                numbers.append(citation_map[key])
+                break
+    return "".join(f"[{n}]" for n in sorted(set(numbers)))
+
+
+def build_integration_telemetry(state: dict) -> dict:
+    """Compact status payload for Order UI / result_files / worker logs."""
+    packet = state.get("co_scientist_discussion_packet") or {}
+    quality = packet.get("quality_summary") or {}
+    return {
+        "status": state.get("co_scientist_status") or "disabled",
+        "warning": state.get("co_scientist_warning"),
+        "session_id": state.get("co_scientist_session_id"),
+        "mode": state.get("co_scientist_integration_mode")
+        or ((state.get("co_scientist_integration") or {}).get("mode")),
+        "snapshot": state.get("co_scientist_packet_snapshot"),
+        "eligible_hypotheses": len(packet.get("selected_hypotheses") or []),
+        "excluded_candidates": quality.get("platform_excluded_candidates")
+        or quality.get("excluded_candidates")
+        or [],
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def write_integration_telemetry(state: dict) -> str:
+    """Persist telemetry JSON next to the report for operator debugging."""
+    output_dir = state.get("output_dir") or ""
+    if not output_dir:
+        return ""
+    payload = build_integration_telemetry(state)
+    try:
+        path = Path(output_dir) / "coscientist_integration_status.json"
+        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+        return str(path)
+    except Exception as exc:
+        logger.warning("[CoScientist] Could not write integration telemetry: %s", exc)
+        return ""
 
 
 def _format_limitations(hypothesis: dict) -> str:

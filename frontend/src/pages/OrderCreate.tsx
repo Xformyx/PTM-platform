@@ -1722,7 +1722,7 @@ export default function OrderCreate() {
                       {form.analysis_mode === "ptm_only" ? "PTM-Only" : form.analysis_mode === "cross_talk" ? "Cross-Talk" : "PTM + Network"}
                     </span>
                     <span className="text-muted-foreground">Report Type</span>
-                    <span className="font-medium">{form.report_type === "extended" ? "Extended" : form.report_type === "co_scientist" ? "Co-Scientist" : "Standard"}</span>
+                    <span className="font-medium">{form.report_type === "extended" ? "Extended" : form.report_type === "co_scientist" ? "Data-Grounded Analysis" : "Standard"}</span>
                     <span className="text-muted-foreground">Samples</span>
                     <span className="font-medium">{samples.length} configured</span>
                     <span className="text-muted-foreground">Research Questions</span>

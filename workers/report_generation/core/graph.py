@@ -638,8 +638,29 @@ def format_citations(state: ReportState) -> dict:
                 logger.info(f"[FORMAT-CIT] v10.5: Pathway Diagram inserted as Figure {pathway_diagram_fig_num} (after Fig 3)")
 
     # The external packet Addendum is deterministic and clearly separated from
-    # Results/Discussion observations. It is supplied only after packet validation.
+    # Results/Discussion observations. Rebuild it here so re-resolved literature
+    # can use the same [N] numbering as the final ## References section.
     external_addendum = sections.get("co_scientist_addendum", "")
+    if state.get("co_scientist_status") == "ready" and state.get("co_scientist_integration_mode") == "addendum":
+        try:
+            from .nodes.external_coscientist_node import (
+                build_citation_map,
+                build_external_coscientist_addendum,
+            )
+            citation_map = build_citation_map(collected_refs)
+            rebuilt = build_external_coscientist_addendum(
+                state.get("co_scientist_discussion_packet") or {},
+                citation_map=citation_map,
+            )
+            if rebuilt:
+                external_addendum = rebuilt
+                sections["co_scientist_addendum"] = rebuilt
+                logger.info(
+                    "[FORMAT-CIT] Rebuilt Co-Scientist addendum with %d citation keys",
+                    len(citation_map),
+                )
+        except Exception as addendum_err:
+            logger.warning("[FORMAT-CIT] Could not rebuild Co-Scientist addendum citations: %s", addendum_err)
     if external_addendum:
         parts.append(external_addendum)
         logger.info(f"[FORMAT-CIT] Added external Co-Scientist addendum ({len(external_addendum)} chars)")

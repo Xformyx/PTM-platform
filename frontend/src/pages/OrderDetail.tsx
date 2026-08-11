@@ -4456,7 +4456,13 @@ export default function OrderDetail() {
                 />
                 <OverviewField
                   label="Report Type"
-                  value={(order.report_options as any)?.report_type === "extended" ? "Extended (+ Drug Repositioning)" : "Standard"}
+                  value={
+                    (order.report_options as any)?.report_type === "extended"
+                      ? "Extended (+ Drug Repositioning)"
+                      : (order.report_options as any)?.report_type === "co_scientist"
+                        ? "Data-Grounded Analysis"
+                        : "Standard"
+                  }
                 />
                 <OverviewField
                   label="RAG Literature Collections"
@@ -4638,11 +4644,24 @@ export default function OrderDetail() {
                   label="External Co-Scientist Discussion"
                   value={(() => {
                     const integration = (order.report_options as any)?.co_scientist_integration;
-                    if (!integration?.enabled || !integration?.session_id) return "Not included";
+                    const result = (order.result_files as any)?.co_scientist_integration_result;
+                    if (!integration?.enabled || !integration?.session_id) {
+                      if (result?.status && result.status !== "disabled") {
+                        return `Last run: ${result.status}${result.warning ? ` — ${result.warning}` : ""}`;
+                      }
+                      return "Not included";
+                    }
                     const label = integration.mode === "enhanced_discussion"
                       ? "Enhanced Discussion"
                       : "Hypothesis & Validation Addendum";
-                    return `${label} · session ${String(integration.session_id).slice(0, 12)}`;
+                    const selected = `${label} · session ${String(integration.session_id).slice(0, 12)}`;
+                    if (!result?.status) return selected;
+                    const detail = result.status === "ready"
+                      ? `ready (${result.eligible_hypotheses ?? 0} candidates)`
+                      : result.warning
+                        ? `${result.status} — ${result.warning}`
+                        : result.status;
+                    return `${selected} · ${detail}`;
                   })()}
                 />
                 <OverviewField

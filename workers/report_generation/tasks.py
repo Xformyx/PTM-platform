@@ -882,6 +882,28 @@ def run_report_generation(self, order_id: int, config: dict):
             result_data["llm_fallback_sections"] = fallback_sections
             result_data["llm_fallback_warning"] = fallback_warning
 
+        # Persist external Co-Scientist packet telemetry for Order UI / operators.
+        try:
+            from report_generation.core.nodes.external_coscientist_node import (
+                build_integration_telemetry,
+                write_integration_telemetry,
+            )
+            telemetry = build_integration_telemetry(final_state)
+            telemetry_path = write_integration_telemetry({**final_state, "output_dir": str(order_output)})
+            if telemetry_path:
+                telemetry["status_file"] = Path(telemetry_path).name
+            result_data["co_scientist_integration_result"] = telemetry
+            if telemetry.get("status") and telemetry["status"] not in {"disabled"}:
+                logger.info(
+                    "[Order %s] Co-Scientist integration status=%s warning=%s eligible=%s",
+                    order_id,
+                    telemetry.get("status"),
+                    telemetry.get("warning"),
+                    telemetry.get("eligible_hypotheses"),
+                )
+        except Exception as telemetry_err:
+            logger.warning("[Order %s] Could not persist Co-Scientist telemetry: %s", order_id, telemetry_err)
+
         # v9.35: If LLM effectively failed, mark as completed_with_warnings instead of completed
         completion_detail = f"Report generation complete ({elapsed}s)"
         if llm_failed:

@@ -78,6 +78,43 @@ class ExternalCoScientistNodeTests(unittest.TestCase):
         self.assertEqual(result["co_scientist_status"], "failed")
         self.assertIn("Unsupported packet schema", result["co_scientist_warning"])
 
+    def test_timeout_is_isolated_as_timed_out_status(self):
+        with patch.dict(os.environ, {"COSCIENTIST_ENABLED": "true"}), \
+             patch.object(node, "_get_json", side_effect=TimeoutError("Co-Scientist API request timed out")):
+            result = node.run_external_coscientist_context(self.state)
+        self.assertEqual(result["co_scientist_status"], "timed_out")
+        self.assertIn("timed out", result["co_scientist_warning"].lower())
+
+    def test_site_normalisation_accepts_separator_variants_but_not_wrong_residue(self):
+        observed = {node._normalise_site("SRC-Y416"), node._normalise_site("AKT1-S473")}
+        for variant in ("SRC-Y416", "SRC_Y416", "SRC:Y416", "SRC Y416", "src/y416", "SRCY416"):
+            self.assertTrue(node._site_is_observed(variant, observed), variant)
+        self.assertTrue(node._site_is_observed("AKT1 S473", observed))
+        # Different residue on same gene must not match
+        self.assertFalse(node._site_is_observed("SRC-Y999", observed))
+        self.assertFalse(node._site_is_observed("SRC:Y999", observed))
+
+    def test_addendum_includes_stable_inline_citations(self):
+        packet = _ready_packet()
+        packet["selected_hypotheses"][0]["resolved_literature"] = [
+            {"title": "SRC signaling in microglia", "pmid": "123456", "doi": ""}
+        ]
+        citation_map = node.build_citation_map(
+            [{"title": "SRC signaling in microglia", "pmid": "123456", "doi": ""}]
+        )
+        addendum = node.build_external_coscientist_addendum(packet, citation_map=citation_map)
+        self.assertIn("[1]", addendum)
+        self.assertIn("Hypothesis & Validation Addendum", addendum)
+
+    def test_non_ready_packet_is_skipped_not_failed(self):
+        packet = _ready_packet()
+        packet["status"] = "no_eligible_hypotheses"
+        with patch.dict(os.environ, {"COSCIENTIST_ENABLED": "true"}), \
+             patch.object(node, "_get_json", side_effect=[{"status": "completed"}, packet]):
+            result = node.run_external_coscientist_context(self.state)
+        self.assertEqual(result["co_scientist_status"], "skipped")
+        self.assertIn("not ready", result["co_scientist_warning"])
+
 
 if __name__ == "__main__":
     unittest.main()
