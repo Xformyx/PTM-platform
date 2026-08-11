@@ -42,6 +42,13 @@ class Settings(BaseSettings):
 
     # Co-Scientist (container name used as DNS hostname inside ptm-platform-network)
     COSCIENTIST_API_URL: str = "http://ptm-coscientist-api:8080"
+    # External Discussion Evidence Packet integration is opt-in and disabled by default.
+    COSCIENTIST_ENABLED: bool = False
+    COSCIENTIST_BASE_URL: str = "http://ptm-coscientist-api:8080"
+    COSCIENTIST_MAX_ITERATIONS: int = 3
+    COSCIENTIST_MAX_HYPOTHESES: int = 2
+    COSCIENTIST_POLL_INTERVAL_SECONDS: int = 5
+    COSCIENTIST_MAX_WAIT_SECONDS: int = 600
 
     # Cytoscape (Report network visualization)
     CYTOSCAPE_HOST: str = "host.docker.internal"

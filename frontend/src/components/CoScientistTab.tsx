@@ -221,6 +221,7 @@ export function CoScientistTab({ orderId, orderCode, orderStatus }: Props) {
 
   // Form
   const [goal, setGoal] = useState("");
+  const [researchMode, setResearchMode] = useState<"goal_led" | "data_guided" | "hybrid">("hybrid");
   const [maxIterations, setMaxIterations] = useState("3");
   const [selectedCollections, setSelectedCollections] = useState<string[]>([]);
   const [llmProvider, setLlmProvider] = useState("auto");
@@ -355,6 +356,7 @@ export function CoScientistTab({ orderId, orderCode, orderStatus }: Props) {
     try {
       const res = await api.post<{ session_id: string }>(`${BASE}/run`, {
         research_goal: goal,
+        research_mode: researchMode,
         max_iterations: parseInt(maxIterations),
         rag_collections: selectedCollections.length ? selectedCollections : null,
         llm_provider: llmProvider === "auto" ? "" : llmProvider,
@@ -675,11 +677,33 @@ export function CoScientistTab({ orderId, orderCode, orderStatus }: Props) {
             </p>
           </div>
 
+          {/* Research direction: goal stays primary; data-derived questions are optional seed context. */}
+          <div className="space-y-1.5">
+            <Label className="text-xs text-muted-foreground">Research Mode</Label>
+            <Select value={researchMode} onValueChange={(value) => setResearchMode(value as typeof researchMode)} disabled={running}>
+              <SelectTrigger className="h-9 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="goal_led" className="text-xs">Goal-led Research — 입력한 Research Goal 중심</SelectItem>
+                <SelectItem value="data_guided" className="text-xs">Data-guided Research — Data-Grounded Analysis seed 중심</SelectItem>
+                <SelectItem value="hybrid" className="text-xs">Hybrid Research — Research Goal + Data-Grounded seed</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-[10px] text-muted-foreground leading-tight">
+              {researchMode === "goal_led"
+                ? "사용자가 정의한 질문을 중심으로 독립적인 Co-Scientist 연구를 수행합니다."
+                : researchMode === "data_guided"
+                ? "시간대별 kinase, co-wave, TMM 및 receptor 요약을 연구 방향의 seed context로 사용합니다."
+                : "사용자 Research Goal을 주 목표로 유지하면서 Data-Grounded Analysis 요약을 보조 seed context로 제공합니다."}
+            </p>
+          </div>
+
           {/* Goal input */}
           <div className="space-y-1.5">
             <Label className="text-xs text-muted-foreground">Research Goal</Label>
             <Textarea
-              placeholder="e.g., Find novel therapeutic targets related to MAPK signaling in liver fibrosis"
+              placeholder={researchMode === "data_guided" ? "Optional: leave blank to let data-derived seed context guide the study" : "e.g., Find novel therapeutic targets related to MAPK signaling in liver fibrosis"}
               value={goal}
               onChange={(e) => setGoal(e.target.value)}
               rows={2}

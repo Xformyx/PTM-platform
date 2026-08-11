@@ -426,6 +426,21 @@ def run_section_writing(state: dict) -> dict:
         aux_verified_findings_context = "\n".join(lines)
         logger.info(f"[v12.0] Built verified findings context: {len(supported)} supported findings, {len(aux_verified_findings_context):,} chars")
 
+    # v12.1: External Co-Scientist candidates are intentionally distinct from
+    # internal data-verified findings. They can enhance Discussion only when a
+    # versioned packet passed platform-side PTM-site and literature verification.
+    external_coscientist_context = ""
+    external_coscientist_mode = state.get("co_scientist_integration_mode", "")
+    external_packet = state.get("co_scientist_discussion_packet") or {}
+    if state.get("co_scientist_status") == "ready" and external_coscientist_mode == "enhanced_discussion":
+        from report_generation.core.nodes.external_coscientist_node import build_external_coscientist_writer_context
+        external_coscientist_context = build_external_coscientist_writer_context(state)
+        logger.info(
+            "[v12.1] External Co-Scientist discussion context enabled: session=%s, candidates=%d",
+            state.get("co_scientist_session_id", "unknown"),
+            len(external_packet.get("selected_hypotheses", [])),
+        )
+
     # v11.6: IP Overlay context for LLM (physical interaction evidence from immunoprecipitation)
     ip_overlay_data = state.get("ip_overlay_data", {}) or {}
     aux_ip_overlay_context = ""
@@ -571,6 +586,10 @@ def run_section_writing(state: dict) -> dict:
             # v12.0: Co-Scientist verified findings — Priority 0 (highest for discussion)
             if aux_verified_findings_context:
                 supplement_blocks.append(("verified_findings", aux_verified_findings_context))
+            # v12.1: External evidence-gated candidates are interpretive only.
+            # They are excluded from Results and appear only for explicit enhanced discussion.
+            if external_coscientist_context:
+                supplement_blocks.append(("external_coscientist", external_coscientist_context))
             # Priority 1 (ESSENTIAL): temporal coordination + temporal kinase + receptor + non-PTM
             supplement_blocks.append(("comovement", comovement_llm_context))
             supplement_blocks.append(("temporal_kinase", temporal_kinase_cascade_llm_context))
@@ -780,6 +799,26 @@ def run_section_writing(state: dict) -> dict:
         )
 
     # v10.8: Deduplicate ChromaDB refs by title (same paper may appear in multiple sections)
+    # v12.1: The external packet may provide literature identifiers, but only the
+    # platform-reresolved subset is admitted to the final reference store.
+    if state.get("co_scientist_status") == "ready":
+        for external_hypothesis in external_packet.get("selected_hypotheses", []):
+            for reference in external_hypothesis.get("resolved_literature", []):
+                if not isinstance(reference, dict) or not reference.get("title"):
+                    continue
+                _all_section_chroma_refs.append(
+                    {
+                        "title": reference.get("title", "Untitled"),
+                        "authors": reference.get("authors", ""),
+                        "journal": reference.get("journal", reference.get("collection", "")),
+                        "year": str(reference.get("year", "")),
+                        "pub_date": str(reference.get("year", "")),
+                        "pmid": str(reference.get("pmid", "")),
+                        "doi": reference.get("doi", ""),
+                        "chromadb_ref": False,
+                    }
+                )
+
     seen_titles = set()
     unique_chroma_refs = []
     for ref in _all_section_chroma_refs:
@@ -793,6 +832,15 @@ def run_section_writing(state: dict) -> dict:
     # v10.8: Prepend ChromaDB refs to PubMed refs for unified numbering
     # ChromaDB refs are [1]~[N], PubMed refs are [N+1]~[N+M]
     unified_references = unique_chroma_refs + (all_references or [])
+
+    # Addendum mode does not alter the LLM-written core sections. Its content is
+    # deterministic, provenance-preserving, and appended after Conclusion.
+    if state.get("co_scientist_status") == "ready" and external_coscientist_mode == "addendum":
+        from report_generation.core.nodes.external_coscientist_node import build_external_coscientist_addendum
+        addendum = build_external_coscientist_addendum(external_packet)
+        if addendum:
+            sections["co_scientist_addendum"] = addendum
+            logger.info("[v12.1] External Co-Scientist addendum created (%d chars)", len(addendum))
 
     return {
         "sections": sections,

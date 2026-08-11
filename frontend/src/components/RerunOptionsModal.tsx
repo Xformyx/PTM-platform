@@ -116,6 +116,10 @@ export default function RerunOptionsModal({
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [researchQuestions, setResearchQuestions] = useState<string[]>([]);
   const [newQuestion, setNewQuestion] = useState("");
+  const [coScientistIntegrationMode, setCoScientistIntegrationMode] = useState<"disabled" | "addendum" | "enhanced_discussion">("disabled");
+  const [coScientistSessionId, setCoScientistSessionId] = useState("");
+  const [coScientistSessions, setCoScientistSessions] = useState<Array<{ session_id: string; status: string; created_at?: string; research_goal?: string }>>([]);
+  const [coScientistSessionsLoading, setCoScientistSessionsLoading] = useState(false);
 
   // RAG Collection Selection
   interface RagCollectionItem {
@@ -155,6 +159,22 @@ export default function RerunOptionsModal({
     }
   }, [open]);
 
+  // A researcher must explicitly choose a completed external session. Sessions
+  // are never auto-attached because a session can pursue a deliberately narrow goal.
+  useEffect(() => {
+    if (!open || !order) return;
+    setCoScientistSessionsLoading(true);
+    api.get<{ sessions?: Array<{ session_id: string; status: string; created_at?: string; research_goal?: string }> } | Array<{ session_id: string; status: string; created_at?: string; research_goal?: string }>>(
+      `/orders/${order.id}/coscientist/sessions`
+    )
+      .then((payload) => {
+        const sessions = Array.isArray(payload) ? payload : (payload.sessions || []);
+        setCoScientistSessions(sessions.filter((session) => session.status === "completed"));
+      })
+      .catch(() => setCoScientistSessions([]))
+      .finally(() => setCoScientistSessionsLoading(false));
+  }, [open, order?.id]);
+
   // Load existing order values whenever modal opens — preserve user's previous settings
   useEffect(() => {
     if (open && order) {
@@ -182,6 +202,14 @@ export default function RerunOptionsModal({
         modeVal === "ptm_nonptm_network" ? "ptm_nonptm_network" : "ptm_only"
       );
       setReportType(typeof ro.report_type === "string" ? ro.report_type : "comprehensive");
+      const coIntegration = (ro.co_scientist_integration || {}) as Record<string, unknown>;
+      const savedIntegrationMode = coIntegration.mode;
+      setCoScientistIntegrationMode(
+        coIntegration.enabled === true && (savedIntegrationMode === "addendum" || savedIntegrationMode === "enhanced_discussion")
+          ? savedIntegrationMode
+          : "disabled"
+      );
+      setCoScientistSessionId(typeof coIntegration.session_id === "string" ? coIntegration.session_id : "");
       const savedMode = ro.ptm_selection_mode as string;
       const validModes = ["top_n", "de_novo", "regulated", "de_novo_regulated", "minor", "all"];
       setPtmSelectionMode(validModes.includes(savedMode) ? savedMode as typeof ptmSelectionMode : "de_novo_regulated");
@@ -277,6 +305,9 @@ export default function RerunOptionsModal({
           output_format: baseReportOpts.output_format ?? "md",
           analysis_mode: analysisMode,
           research_questions: reportType === "co_scientist" ? [] : researchQuestions,
+          co_scientist_integration: coScientistIntegrationMode !== "disabled" && coScientistSessionId
+            ? { enabled: true, mode: coScientistIntegrationMode, session_id: coScientistSessionId, max_hypotheses: 2 }
+            : { enabled: false },
           ...(llmModel ? (() => {
             const colonIdx = llmModel.indexOf(":");
             const [p, m] = colonIdx >= 0 ? [llmModel.slice(0, colonIdx), llmModel.slice(colonIdx + 1)] : ["ollama", llmModel];
@@ -449,13 +480,13 @@ export default function RerunOptionsModal({
                     <SelectContent>
                       <SelectItem value="comprehensive">Standard Report</SelectItem>
                       <SelectItem value="extended">Extended (+ Drug Repositioning)</SelectItem>
-                      <SelectItem value="co_scientist">Co-Scientist (자율 분석)</SelectItem>
+                      <SelectItem value="co_scientist">Data-Grounded Analysis (데이터 기반 가설·검증)</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
                 {reportType === "co_scientist" && (
                   <div className="rounded-md border border-blue-500/30 bg-blue-500/10 p-2.5 text-[10px] text-blue-300 space-y-1">
-                    <p className="font-semibold text-blue-200">🔬 Co-Scientist 자율 분석 모드</p>
+                    <p className="font-semibold text-blue-200">🔬 Data-Grounded Analysis</p>
                     <p>AI가 4개 데이터 소스를 통합하여 가설을 자동 생성하고 실험 데이터로 직접 검증합니다:</p>
                     <ul className="list-disc list-inside space-y-0.5 text-blue-300/80">
                       <li>Temporal Cascade — 시간대별 kinase 활성화 순서 분석</li>
@@ -466,6 +497,42 @@ export default function RerunOptionsModal({
                     <p className="text-blue-200/70">검증된 가설은 레포트에 수치 포함 자동 삽입됩니다 (예: "21/28 substrates peak at 1h")</p>
                   </div>
                 )}
+                <div className="space-y-1.5 rounded-md border border-violet-500/25 bg-violet-500/5 p-2.5">
+                  <Label className="text-xs flex items-center gap-1"><FlaskConical className="h-3.5 w-3.5" /> External Co-Scientist Discussion</Label>
+                  <Select value={coScientistIntegrationMode} onValueChange={(value) => setCoScientistIntegrationMode(value as typeof coScientistIntegrationMode)}>
+                    <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="disabled" className="text-xs">Do not include external Co-Scientist</SelectItem>
+                      <SelectItem value="addendum" className="text-xs">Hypothesis &amp; Validation Addendum</SelectItem>
+                      <SelectItem value="enhanced_discussion" className="text-xs">Enhanced Discussion (opt-in)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {coScientistIntegrationMode !== "disabled" && (
+                    <>
+                      <Select value={coScientistSessionId || "__none__"} onValueChange={(value) => setCoScientistSessionId(value === "__none__" ? "" : value)}>
+                        <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Select completed session" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__none__" className="text-xs">No session selected</SelectItem>
+                          {coScientistSessions.map((session) => (
+                            <SelectItem key={session.session_id} value={session.session_id} className="text-xs">
+                              {session.session_id.slice(0, 10)} · {session.research_goal?.slice(0, 46) || "Untitled research"}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-[10px] text-muted-foreground leading-tight">
+                        {coScientistSessionsLoading
+                          ? "Loading completed Co-Scientist sessions…"
+                          : coScientistSessions.length
+                          ? "Only a selected completed session with a quality-gated Discussion Evidence Packet can be used."
+                          : "No completed session is available. Run external Co-Scientist from this order first."}
+                      </p>
+                    </>
+                  )}
+                  <p className="text-[10px] text-muted-foreground leading-tight">
+                    Addendum preserves external hypotheses separately. Enhanced Discussion uses at most two re-verified candidates with limitations; Results remain platform data only.
+                  </p>
+                </div>
                 <div className="space-y-1.5">
                   <Label className="text-xs">PTM Selection Mode</Label>
                   <Select value={ptmSelectionMode} onValueChange={(v) => setPtmSelectionMode(v as typeof ptmSelectionMode)}>

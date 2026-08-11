@@ -4635,6 +4635,17 @@ export default function OrderDetail() {
                   value={(order.report_options as any)?.llm_model || "Default"}
                 />
                 <OverviewField
+                  label="External Co-Scientist Discussion"
+                  value={(() => {
+                    const integration = (order.report_options as any)?.co_scientist_integration;
+                    if (!integration?.enabled || !integration?.session_id) return "Not included";
+                    const label = integration.mode === "enhanced_discussion"
+                      ? "Enhanced Discussion"
+                      : "Hypothesis & Validation Addendum";
+                    return `${label} · session ${String(integration.session_id).slice(0, 12)}`;
+                  })()}
+                />
+                <OverviewField
                   label="RAG Literature Collections"
                   value={
                     (() => {

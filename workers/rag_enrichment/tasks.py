@@ -2205,6 +2205,7 @@ def run_rag_enrichment(self, order_id: int, config: dict):
             "report_title": config.get("report_title", "PTM Comprehensive Analysis Report"),
             "report_type": config.get("report_type", "comprehensive"),
             "report_config": config.get("report_config", {}),
+            "co_scientist_integration": config.get("co_scientist_integration", {}),
             "analysis_mode": analysis_mode,
             "secondary_ptm_type": config.get("secondary_ptm_type"),
         }

@@ -1225,7 +1225,7 @@ export default function OrderCreate() {
                       <SelectContent>
                         <SelectItem value="comprehensive">Standard Report</SelectItem>
                         <SelectItem value="extended">Extended (+ Drug Repositioning)</SelectItem>
-                        <SelectItem value="co_scientist">Co-Scientist (자율 분석)</SelectItem>
+                        <SelectItem value="co_scientist">Data-Grounded Analysis (데이터 기반 가설·검증)</SelectItem>
                       </SelectContent>
                     </Select>
                     <p className="text-[10px] text-muted-foreground">
@@ -1237,7 +1237,7 @@ export default function OrderCreate() {
                     </p>
                     {form.report_type === "co_scientist" && (
                       <div className="rounded-md border border-blue-500/30 bg-blue-500/10 p-2 text-[10px] text-blue-300 space-y-1">
-                        <p className="font-semibold text-blue-200">🔬 Co-Scientist 자율 분석 모드</p>
+                        <p className="font-semibold text-blue-200">🔬 Data-Grounded Analysis</p>
                         <p>AI가 4개 데이터 소스를 통합하여 가설을 자동 생성하고 실험 데이터로 직접 검증합니다. 검증된 가설은 레포트에 수치 포함 자동 삽입됩니다.</p>
                       </div>
                     )}
@@ -1726,7 +1726,7 @@ export default function OrderCreate() {
                     <span className="text-muted-foreground">Samples</span>
                     <span className="font-medium">{samples.length} configured</span>
                     <span className="text-muted-foreground">Research Questions</span>
-                    <span className="font-medium">{form.report_type === "co_scientist" ? "AI 자율 생성 (Co-Scientist)" : researchQuestions.length > 0 ? `${researchQuestions.length} custom` : "AI auto-generate"}</span>
+                    <span className="font-medium">{form.report_type === "co_scientist" ? "Data-Grounded 자동 생성" : researchQuestions.length > 0 ? `${researchQuestions.length} custom` : "AI auto-generate"}</span>
                     <span className="text-muted-foreground">Downsampling</span>
                     <span className="font-medium">
                       {analysisOptions.mode === "full" ? "None (Full)" : analysisOptions.mode.replace("_", " ").replace(/\b\w/g, c => c.toUpperCase())}

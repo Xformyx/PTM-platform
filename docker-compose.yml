@@ -324,6 +324,11 @@ services:
       LLM_RATE_LIMIT_RETRIES: ${LLM_RATE_LIMIT_RETRIES:-5}
       ENABLE_RQ_REFINEMENT: ${ENABLE_RQ_REFINEMENT:-true}
       ENABLE_REPORT_COPILOT: ${ENABLE_REPORT_COPILOT:-true}
+      # v12.1: External Co-Scientist is optional; core reports never depend on it.
+      COSCIENTIST_ENABLED: ${COSCIENTIST_ENABLED:-false}
+      COSCIENTIST_BASE_URL: ${COSCIENTIST_BASE_URL:-http://ptm-coscientist-api:8080}
+      COSCIENTIST_MAX_HYPOTHESES: ${COSCIENTIST_MAX_HYPOTHESES:-2}
+      COSCIENTIST_REQUEST_TIMEOUT_SECONDS: ${COSCIENTIST_REQUEST_TIMEOUT_SECONDS:-20}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:

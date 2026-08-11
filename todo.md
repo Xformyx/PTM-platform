@@ -56,3 +56,12 @@ Backend: vector-plot (receptor inference)
 - [x] 최신 main 반영 후 Report Options의 Research Questions 조건부 렌더링 점검
 - [x] Co-Scientist 선택 시 질문 입력 숨김 및 빈 배열 전송 보장
 - [x] 수정 동작 검증 및 GitHub 반영
+
+## Data-Grounded Analysis 및 외부 Co-Scientist 보고서 연동
+- [x] CoScientist Discussion Evidence Packet v1.0 계약·최신 코드 점검
+- [x] 내부 Co-Scientist UI·문서·레포트 명칭을 Data-Grounded Analysis로 변경
+- [x] COSCIENTIST_ENABLED 기본 비활성 feature flag 및 안전한 API client 구현
+- [x] Discussion Evidence Packet 조회·스키마·품질 게이트·PTM site·문헌 식별자 검증 구현
+- [x] Addendum 모드와 선택형 Enhanced Discussion 모드 구현
+- [x] 외부 가설·반증 근거·한계·후속 실험의 provenance 및 레포트 통합 구현
+- [ ] 검증·GitHub 반영

@@ -137,6 +137,16 @@ class ReportState(TypedDict, total=False):
     co_scientist_context: dict   # multi-source context built by hypothesis_node
     verified_findings: List[dict]  # data-verified findings from data_verification_node
 
+    # v12.1: Optional external PTM-CoScientist Discussion Evidence Packet.
+    # These fields remain independent from internal hypothesis / validation state.
+    co_scientist_integration: dict
+    co_scientist_session_id: Optional[str]
+    co_scientist_discussion_packet: Optional[dict]
+    co_scientist_status: str  # disabled | ready | skipped | timed_out | failed
+    co_scientist_warning: Optional[str]
+    co_scientist_integration_mode: str  # addendum | enhanced_discussion
+    co_scientist_packet_snapshot: str
+
     # Progress tracking
     progress_callback: Any
     error: Optional[str]
@@ -210,6 +220,12 @@ def rq_refinement(state: ReportState) -> dict:
     """v10.0: Refine research questions using discovered signaling architecture."""
     from .nodes.rq_refinement_node import run_rq_refinement
     return run_rq_refinement(state)
+
+
+def external_coscientist_context(state: ReportState) -> dict:
+    """Load an opt-in external Discussion Evidence Packet without blocking the report."""
+    from .nodes.external_coscientist_node import run_external_coscientist_context
+    return run_external_coscientist_context(state)
 
 
 def report_copilot(state: ReportState) -> dict:
@@ -621,6 +637,13 @@ def format_citations(state: ReportState) -> dict:
                 parts.append(pathway_diagram_section)
                 logger.info(f"[FORMAT-CIT] v10.5: Pathway Diagram inserted as Figure {pathway_diagram_fig_num} (after Fig 3)")
 
+    # The external packet Addendum is deterministic and clearly separated from
+    # Results/Discussion observations. It is supplied only after packet validation.
+    external_addendum = sections.get("co_scientist_addendum", "")
+    if external_addendum:
+        parts.append(external_addendum)
+        logger.info(f"[FORMAT-CIT] Added external Co-Scientist addendum ({len(external_addendum)} chars)")
+
     all_text = "\n\n".join(parts)
 
     # -----------------------------------------------------------------------
@@ -800,7 +823,7 @@ def build_report_graph() -> StateGraph:
       Standard (ptm_only / ptm_nonptm_network):
         load_context → generate_questions → research → hypothesize
           → validate_hypotheses → network_analysis → temporal_comovement
-          → kinase_annotation → rq_refinement → write_sections
+          → kinase_annotation → rq_refinement → external_coscientist_context → write_sections
           → report_copilot → cascade_mediator → generate_qa_report
           → drug_repositioning → format_citations → edit_report
 
@@ -828,6 +851,7 @@ def build_report_graph() -> StateGraph:
     graph.add_node("temporal_comovement", temporal_comovement)
     graph.add_node("kinase_annotation", kinase_annotation)
     graph.add_node("rq_refinement", rq_refinement)
+    graph.add_node("external_coscientist_context", external_coscientist_context)
     graph.add_node("write_sections", write_sections)
     graph.add_node("report_copilot", report_copilot)
     graph.add_node("cascade_mediator", cascade_mediator)
@@ -855,7 +879,8 @@ def build_report_graph() -> StateGraph:
     graph.add_edge("network_analysis", "temporal_comovement")
     graph.add_edge("temporal_comovement", "kinase_annotation")
     graph.add_edge("kinase_annotation", "rq_refinement")
-    graph.add_edge("rq_refinement", "write_sections")
+    graph.add_edge("rq_refinement", "external_coscientist_context")
+    graph.add_edge("external_coscientist_context", "write_sections")
     graph.add_edge("write_sections", "report_copilot")
     graph.add_edge("report_copilot", "cascade_mediator")
 
