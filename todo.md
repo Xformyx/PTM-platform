@@ -55,4 +55,4 @@ Backend: vector-plot (receptor inference)
 ## Co-Scientist 모드 UI 정합성
 - [x] 최신 main 반영 후 Report Options의 Research Questions 조건부 렌더링 점검
 - [x] Co-Scientist 선택 시 질문 입력 숨김 및 빈 배열 전송 보장
-- [ ] 수정 동작 검증 및 GitHub 반영
+- [x] 수정 동작 검증 및 GitHub 반영
