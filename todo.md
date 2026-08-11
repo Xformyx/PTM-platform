@@ -64,4 +64,4 @@ Backend: vector-plot (receptor inference)
 - [x] Discussion Evidence Packet 조회·스키마·품질 게이트·PTM site·문헌 식별자 검증 구현
 - [x] Addendum 모드와 선택형 Enhanced Discussion 모드 구현
 - [x] 외부 가설·반증 근거·한계·후속 실험의 provenance 및 레포트 통합 구현
-- [ ] 검증·GitHub 반영
+- [x] 검증·GitHub 반영
