@@ -65,3 +65,7 @@ Backend: vector-plot (receptor inference)
 - [x] Addendum 모드와 선택형 Enhanced Discussion 모드 구현
 - [x] 외부 가설·반증 근거·한계·후속 실험의 provenance 및 레포트 통합 구현
 - [x] 검증·GitHub 반영
+
+## AI Agent Handoff 문서
+- [x] 오늘의 Data-Grounded Analysis 및 Co-Scientist 연동 변경사항 Markdown 정리
+- [x] 문서 검토 및 전달
