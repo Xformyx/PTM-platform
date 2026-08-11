@@ -4652,7 +4652,8 @@ export default function OrderDetail() {
             </Card>
           </div>
 
-          {/* Research Questions (read-only: Order 생성 시 설정한 값 표시) */}
+          {/* Research Questions are omitted for Co-Scientist reports, which generate questions autonomously. */}
+          {(order.report_options as any)?.report_type !== "co_scientist" && (
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-sm flex items-center gap-2">
@@ -4679,6 +4680,7 @@ export default function OrderDetail() {
               })()}
             </CardContent>
           </Card>
+          )}
 
           {/* Research Question Evolution (from rq_refinement pipeline node) */}
           {(() => {

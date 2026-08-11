@@ -269,14 +269,14 @@ export default function RerunOptionsModal({
         analysis_context: analysisContext,
         analysis_options: optsForApi,
         rag_collections: useAllCollections ? null : (selectedCollectionIds.length > 0 ? selectedCollectionIds : null),
-        report_options: {
+          report_options: {
           ...baseReportOpts,
           report_type: reportType,
           ptm_selection_mode: ptmSelectionMode,
           top_n_ptms: topNPtms,
           output_format: baseReportOpts.output_format ?? "md",
           analysis_mode: analysisMode,
-          research_questions: researchQuestions,
+          research_questions: reportType === "co_scientist" ? [] : researchQuestions,
           ...(llmModel ? (() => {
             const colonIdx = llmModel.indexOf(":");
             const [p, m] = colonIdx >= 0 ? [llmModel.slice(0, colonIdx), llmModel.slice(colonIdx + 1)] : ["ollama", llmModel];
@@ -435,7 +435,16 @@ export default function RerunOptionsModal({
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1.5">
                   <Label className="text-xs">Report Type</Label>
-                  <Select value={reportType} onValueChange={setReportType}>
+                  <Select
+                    value={reportType}
+                    onValueChange={(value) => {
+                      setReportType(value);
+                      if (value === "co_scientist") {
+                        setResearchQuestions([]);
+                        setNewQuestion("");
+                      }
+                    }}
+                  >
                     <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="comprehensive">Standard Report</SelectItem>
@@ -706,15 +715,11 @@ export default function RerunOptionsModal({
                 )}
               </div>
 
+              {reportType !== "co_scientist" && (
               <div className="space-y-1.5">
                 <Label className="text-xs flex items-center gap-1">
                   <MessageSquare className="h-3.5 w-3.5" /> Research Questions (optional)
                 </Label>
-                {reportType === "co_scientist" ? (
-                  <div className="rounded-md border border-blue-500/30 bg-blue-500/10 p-2 text-[10px] text-blue-300">
-                    🔬 <strong>Co-Scientist 모드</strong>: AI가 데이터를 자율 분석하여 연구 질문을 자동 생성합니다. 입력 불필요.
-                  </div>
-                ) : (
                 <div className="space-y-2">
                   {researchQuestions.map((q, i) => (
                     <div key={i} className="flex gap-2 group items-start">
@@ -770,8 +775,8 @@ export default function RerunOptionsModal({
                     </Button>
                   </div>
                 </div>
-                )}
               </div>
+              )}
             </div>
 
             {/* Advanced Report Settings */}

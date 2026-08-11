@@ -44,3 +44,15 @@ Backend: vector-plot (receptor inference)
 - 이들을 구분하려면 temporal context + known anchor 필요
 - _RECEPTOR_DOWNSTREAM_KINASES에 이미 receptor→kinase 매핑 있음
   → 역방향 활용: kinase set → 가능한 receptor set → wave timing으로 필터
+
+## Co-Scientist JSON 및 보고서 기여도 표기
+- [ ] 외부 Co-Scientist 모듈 호출 및 JSON 입력·출력 경로 점검
+- [ ] 현재 가설·검증 결과가 문장으로 변환되는 지점 점검
+- [ ] 보고서 내 Co-Scientist 기반 결과의 명시적 표기 방식 설계
+- [ ] 구조화된 provenance 메타데이터 및 보고서 표기 구현
+- [ ] Python/TypeScript 검증 및 GitHub 반영
+
+## Co-Scientist 모드 UI 정합성
+- [x] 최신 main 반영 후 Report Options의 Research Questions 조건부 렌더링 점검
+- [x] Co-Scientist 선택 시 질문 입력 숨김 및 빈 배열 전송 보장
+- [ ] 수정 동작 검증 및 GitHub 반영

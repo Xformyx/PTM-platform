@@ -527,7 +527,7 @@ export default function OrderCreate() {
     formData.append("report_options", JSON.stringify({
       report_type: form.report_type, ptm_selection_mode: form.ptm_selection_mode, top_n_ptms: form.top_n_ptms, output_format: "md",
       analysis_mode: form.analysis_mode,
-      research_questions: researchQuestions.length > 0 ? researchQuestions : [],
+      research_questions: form.report_type === "co_scientist" ? [] : (researchQuestions.length > 0 ? researchQuestions : []),
       ...(form.llm_model ? (() => {
         const colonIdx = form.llm_model.indexOf(":");
         const [p, m] = colonIdx >= 0 ? [form.llm_model.slice(0, colonIdx), form.llm_model.slice(colonIdx + 1)] : ["ollama", form.llm_model];
@@ -1211,7 +1211,16 @@ export default function OrderCreate() {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label>Report Type</Label>
-                    <Select value={form.report_type} onValueChange={(v) => setForm({ ...form, report_type: v })}>
+                    <Select
+                      value={form.report_type}
+                      onValueChange={(v) => {
+                        setForm({ ...form, report_type: v });
+                        if (v === "co_scientist") {
+                          setResearchQuestions([]);
+                          setNewQuestion("");
+                        }
+                      }}
+                    >
                       <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="comprehensive">Standard Report</SelectItem>
@@ -1513,17 +1522,13 @@ export default function OrderCreate() {
                   )}
                 </div>
 
-                {/* Research Questions */}
+                {/* Research Questions — Co-Scientist mode generates these autonomously */}
+                {form.report_type !== "co_scientist" && (
                 <div className="space-y-3">
                   <Label className="flex items-center gap-2">
                     <MessageSquare className="h-4 w-4" /> Research Questions
                     <span className="text-xs text-muted-foreground font-normal">(optional)</span>
                   </Label>
-                  {form.report_type === "co_scientist" ? (
-                    <div className="rounded-md border border-blue-500/30 bg-blue-500/10 p-2.5 text-[11px] text-blue-300">
-                      🔬 <strong>Co-Scientist 모드</strong>에서는 AI가 데이터를 스스로 분석하여 연구 질문을 자동 생성합니다. 별도 입력이 필요하지 않습니다.
-                    </div>
-                  ) : (
                   <p className="text-xs text-muted-foreground">
                     특정 연구 질문을 직접 입력하면 해당 질문 중심으로 보고서가 생성됩니다.
                     입력하지 않으면 AI가 자동으로 질문을 생성합니다.
@@ -1569,8 +1574,8 @@ export default function OrderCreate() {
                       </Button>
                     </div>
                   </div>
-                  )}
                 </div>
+                )}
 
                 {/* Analysis Options */}
                 <div className="space-y-2">
