@@ -625,6 +625,20 @@ class RAGEnrichmentPipeline:
         position = ptm.get("position") or ptm.get("PTM_Position", "Unknown")
         ptm_type = ptm.get("ptm_type") or ptm.get("PTM_Type", "Phosphorylation")
         species = (context or {}).get("organism") or (context or {}).get("species", "")
+        # A single order may intentionally use a mixed FASTA, for example a
+        # human receptor transgene in rat cells. FASTA-native provenance takes
+        # priority for this PTM's external annotations but never changes the
+        # order-level discovery species.
+        _fasta_taxon = str(ptm.get("FASTA_Taxonomy_ID") or "").split(";")[0].strip()
+        _fasta_organism = str(ptm.get("FASTA_Organism") or "").split(";")[0].strip()
+        if _fasta_taxon == "9606":
+            species = "human"
+        elif _fasta_taxon == "10116":
+            species = "rat"
+        elif _fasta_taxon == "10090":
+            species = "mouse"
+        elif _fasta_organism and _fasta_organism.lower() != "unknown":
+            species = _fasta_organism
         # Derive KEGG organism code and NCBI tax_id from species string
         _sp_lower = species.lower() if species else ""
         _kegg_org = (

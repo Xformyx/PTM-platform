@@ -74,6 +74,17 @@ class BiologicalEnricher:
             return pid.split("-")[0]
         return pid.strip()
 
+    @staticmethod
+    def _organism_config(taxon_value: object, default_taxon: str, default_kegg: str) -> tuple[str, str, str]:
+        """Resolve per-row FASTA taxon while retaining a safe order-level default."""
+        taxon = str(taxon_value or "").split(";")[0].strip() or str(default_taxon)
+        mapping = {
+            "9606": ("9606", "hsa", "Homo sapiens"),
+            "10116": ("10116", "rno", "Rattus norvegicus"),
+            "10090": ("10090", "mmu", "Mus musculus"),
+        }
+        return mapping.get(taxon, (str(default_taxon), str(default_kegg), "order_default"))
+
     # ------------------------------------------------------------------
     # Main enrichment
     # ------------------------------------------------------------------
@@ -110,6 +121,20 @@ class BiologicalEnricher:
 
         protein_col = self._find_protein_column(df)
         gene_col = self._find_gene_column(df)
+        taxon_col = "FASTA_Taxonomy_ID" if "FASTA_Taxonomy_ID" in df.columns else None
+
+        if taxon_col:
+            annotation_configs = df[taxon_col].map(
+                lambda value: self._organism_config(value, species_tax_id, kegg_organism)
+            )
+        else:
+            annotation_configs = pd.Series(
+                [self._organism_config(species_tax_id, species_tax_id, kegg_organism)] * len(df),
+                index=df.index,
+            )
+        df["Annotation_Species_Taxonomy_ID"] = annotation_configs.map(lambda value: value[0])
+        df["Annotation_KEGG_Organism"] = annotation_configs.map(lambda value: value[1])
+        df["Annotation_Organism"] = annotation_configs.map(lambda value: value[2])
 
         # ---- Phase 1: UniProt ----
         if protein_col:
@@ -169,8 +194,7 @@ class BiologicalEnricher:
         # ---- Phase 2: STRING-DB ----
         if gene_col:
             self._progress(0.40, "STRING-DB enrichment")
-            unique_genes = [g for g in df[gene_col].dropna().unique() if g != "Unknown"]
-            logger.info(f"STRING-DB: fetching {len(unique_genes)} genes via MCP")
+            total_genes = 0
 
             last_string = [0, 0]
             string_stop = [False]
@@ -200,29 +224,34 @@ class BiologicalEnricher:
 
             threading.Thread(target=string_heartbeat, daemon=True).start()
             try:
-                string_data = self.mcp.fetch_stringdb_parallel(
-                    unique_genes, species=species_tax_id, max_workers=4, progress_cb=string_progress,
-                )
+                for taxon, group in df.groupby("Annotation_Species_Taxonomy_ID", dropna=False):
+                    unique_genes = [g for g in group[gene_col].dropna().unique() if str(g).lower() != "unknown"]
+                    total_genes += len(unique_genes)
+                    if not unique_genes:
+                        continue
+                    string_data = self.mcp.fetch_stringdb_parallel(
+                        unique_genes, species=str(taxon), max_workers=4, progress_cb=string_progress,
+                    )
+                    for gene in unique_genes:
+                        info = string_data.get(gene, {})
+                        mask = (df[gene_col] == gene) & (df["Annotation_Species_Taxonomy_ID"] == taxon)
+                        interactions = info.get("interactions", [])
+                        partners = "; ".join(f"{i['partner']}({i['score']:.2f})" for i in interactions[:5])
+                        df.loc[mask, "STRING_Interactors"] = partners
+                        scores = [i.get("score", 0) for i in interactions[:5]]
+                        avg_score = f"{sum(scores) / len(scores):.2f}" if scores else ""
+                        df.loc[mask, "STRING_Interaction_Score"] = avg_score
             finally:
                 string_stop[0] = True
 
-            for gene in unique_genes:
-                info = string_data.get(gene, {})
-                mask = df[gene_col] == gene
-                interactions = info.get("interactions", [])
-                partners = "; ".join(f"{i['partner']}({i['score']:.2f})" for i in interactions[:5])
-                df.loc[mask, "STRING_Interactors"] = partners
-                scores = [i.get("score", 0) for i in interactions[:5]]
-                avg_score = f"{sum(scores) / len(scores):.2f}" if scores else ""
-                df.loc[mask, "STRING_Interaction_Score"] = avg_score
+            logger.info(f"STRING-DB: fetching {total_genes} gene/taxon annotation pairs via MCP")
 
             logger.info("STRING-DB enrichment complete")
 
         # ---- Phase 3: KEGG ----
         if gene_col:
             self._progress(0.70, "KEGG enrichment")
-            unique_genes = [g for g in df[gene_col].dropna().unique() if g != "Unknown"]
-            logger.info(f"KEGG: fetching {len(unique_genes)} genes via MCP")
+            total_genes = 0
 
             last_kegg = [0, 0]
             kegg_stop = [False]
@@ -252,18 +281,24 @@ class BiologicalEnricher:
 
             threading.Thread(target=kegg_heartbeat, daemon=True).start()
             try:
-                kegg_data = self.mcp.fetch_kegg_parallel(
-                    unique_genes, organism=kegg_organism, max_workers=4, progress_cb=kegg_progress,
-                )
+                for kegg_code, group in df.groupby("Annotation_KEGG_Organism", dropna=False):
+                    unique_genes = [g for g in group[gene_col].dropna().unique() if str(g).lower() != "unknown"]
+                    total_genes += len(unique_genes)
+                    if not unique_genes:
+                        continue
+                    kegg_data = self.mcp.fetch_kegg_parallel(
+                        unique_genes, organism=str(kegg_code), max_workers=4, progress_cb=kegg_progress,
+                    )
+                    for gene in unique_genes:
+                        info = kegg_data.get(gene, {})
+                        mask = (df[gene_col] == gene) & (df["Annotation_KEGG_Organism"] == kegg_code)
+                        pathways = info.get("pathways", [])
+                        pathway_str = "; ".join(f"{p['name']} ({p['id']})" for p in pathways[:5])
+                        df.loc[mask, "KEGG_Pathways"] = pathway_str
             finally:
                 kegg_stop[0] = True
 
-            for gene in unique_genes:
-                info = kegg_data.get(gene, {})
-                mask = df[gene_col] == gene
-                pathways = info.get("pathways", [])
-                pathway_str = "; ".join(f"{p['name']} ({p['id']})" for p in pathways[:5])
-                df.loc[mask, "KEGG_Pathways"] = pathway_str
+            logger.info(f"KEGG: fetching {total_genes} gene/organism annotation pairs via MCP")
 
             logger.info("KEGG enrichment complete")
 

@@ -82,6 +82,8 @@ class UnifiedProteinEnricher:
         self.fasta_dict: Dict[str, str] = {}
         self.protein_names: Dict[str, str] = {}
         self.gene_names: Dict[str, str] = {}
+        self.fasta_organisms: Dict[str, str] = {}
+        self.fasta_taxonomy_ids: Dict[str, str] = {}
         self.domain_cache: Dict[str, List[str]] = {}
         self.motif_cache: Dict[str, dict] = {}
 
@@ -100,6 +102,9 @@ class UnifiedProteinEnricher:
                     pname, gname = self._parse_fasta_header(record.description)
                     self.protein_names[uid] = pname
                     self.gene_names[uid] = gname
+                    organism, taxonomy_id = self._parse_fasta_organism(record.description)
+                    self.fasta_organisms[uid] = organism
+                    self.fasta_taxonomy_ids[uid] = taxonomy_id
             logger.info(f"FASTA loaded: {len(self.fasta_dict):,} proteins")
             return True
         except Exception as e:
@@ -132,6 +137,15 @@ class UnifiedProteinEnricher:
         return (protein_name.strip() or "Unknown protein"), (gene_name.strip() or "Unknown")
 
     @staticmethod
+    def _parse_fasta_organism(description: str) -> Tuple[str, str]:
+        """Extract FASTA-native organism provenance without assuming order species."""
+        organism_match = re.search(r"\bOS=(.+?)(?=\sOX=|\sGN=|\sPE=|\sSV=|$)", description)
+        taxon_match = re.search(r"\bOX=(\d+)", description)
+        organism = organism_match.group(1).strip() if organism_match else "Unknown"
+        taxonomy_id = taxon_match.group(1).strip() if taxon_match else ""
+        return organism, taxonomy_id
+
+    @staticmethod
     def clean_protein_id(protein_id: str) -> str:
         if not protein_id or not isinstance(protein_id, str):
             return ""
@@ -142,6 +156,28 @@ class UnifiedProteinEnricher:
         if ";" in protein_id:
             protein_id = protein_id.split(";")[0]
         return protein_id.strip()
+
+    @staticmethod
+    def _split_protein_ids(protein_group: str) -> List[str]:
+        """Split DIA-NN protein groups and normalize each accession for FASTA lookup."""
+        return [
+            UnifiedProteinEnricher.clean_protein_id(value)
+            for value in str(protein_group or "").split(";")
+            if UnifiedProteinEnricher.clean_protein_id(value)
+        ]
+
+    def _fasta_provenance(self, protein_group: str) -> Tuple[str, str, bool]:
+        """Return FASTA-native organism provenance for one DIA-NN protein group."""
+        ids = self._split_protein_ids(protein_group)
+        organisms = [self.fasta_organisms.get(pid, "Unknown") for pid in ids]
+        taxa = [self.fasta_taxonomy_ids.get(pid, "") for pid in ids]
+        known_organisms = sorted({value for value in organisms if value and value != "Unknown"})
+        known_taxa = sorted({value for value in taxa if value})
+        return (
+            "; ".join(known_organisms) if known_organisms else "Unknown",
+            "; ".join(known_taxa),
+            len(known_taxa) > 1,
+        )
 
     # ------------------------------------------------------------------
     # Cache
@@ -350,6 +386,15 @@ class UnifiedProteinEnricher:
 
     def enrich_unified_data(self, unified_df: pd.DataFrame) -> pd.DataFrame:
         """Enrich unified dataset with domain and motif annotations (v2 schema)."""
+        unified_df = unified_df.copy()
+
+        # Preserve per-protein FASTA provenance. A rat order can intentionally
+        # contain a human transgene such as INSR; such entries must survive as
+        # mixed-species proteins rather than being collapsed to Unknown.
+        provenance = unified_df["Protein.Group"].fillna("").map(self._fasta_provenance)
+        unified_df["FASTA_Organism"] = provenance.map(lambda value: value[0])
+        unified_df["FASTA_Taxonomy_ID"] = provenance.map(lambda value: value[1])
+        unified_df["FASTA_Mixed_Species_Group"] = provenance.map(lambda value: value[2])
         unique_proteins = unified_df["Protein.Group"].dropna().unique().tolist()
         logger.info(f"Enriching {len(unique_proteins)} unique proteins")
 

@@ -121,3 +121,9 @@ Backend: vector-plot (receptor inference)
 - [x] TMM contribution-weighted temporal cascade와 sparse-profile confidence 구현
 - [x] TMM-weighted kinase-pair directionality 및 report context 통합
 - [x] 회귀 테스트·문서화·GitHub 반영
+
+## Rat 배경 + Human INSR 혼합 FASTA 호환성
+- [x] 최신 main 반영 및 species·protein normalization·annotation 경로 점검
+- [x] Human INSR의 제외·unknown·ortholog 치환 위험 분석
+- [x] 혼합 종 allowlist 및 species-aware annotation 보완 구현
+- [x] 회귀 검증·GitHub 반영 및 입력 운영 가이드 보고
