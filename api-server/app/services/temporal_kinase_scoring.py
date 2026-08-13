@@ -1262,6 +1262,23 @@ def compute_weighted_kinase_scores(
                     w_dn_sums[c] += weighted_fc
                     w_dn_cnts[c] += ratio
 
+        _profile_type = (kinase_profiles.get(canonical) or {}).get("profile_type", "gaussian_fallback")
+        _n_profile_substrates = (kinase_profiles.get(canonical) or {}).get("n_exclusive", 0)
+        try:
+            from ptm_shared.tmm_multikinase_integration import build_tmm_evidence_profile
+            _tmm_evidence = build_tmm_evidence_profile({
+                "profile_type": _profile_type,
+                "n_exclusive": n_exclusive,
+                "n_shared": n_shared,
+            })
+        except Exception as _evidence_error:
+            _log.warning("[TMM] Could not build confidence metadata for %s: %s", canonical, _evidence_error)
+            _tmm_evidence = {
+                "profile_type": _profile_type,
+                "confidence_tier": "tmm_confidence_unavailable",
+                "confidence_flags": ["confidence_profile_generation_failed"],
+            }
+
         results[canonical] = {
             "weighted_up_sums": {c: round(v, 4) for c, v in w_up_sums.items()},
             "weighted_down_sums": {c: round(v, 4) for c, v in w_dn_sums.items()},
@@ -1270,8 +1287,9 @@ def compute_weighted_kinase_scores(
             "contribution_details": contribution_details,
             "n_exclusive": n_exclusive,
             "n_shared": n_shared,
-            "profile_type": (kinase_profiles.get(canonical) or {}).get("profile_type", "gaussian_fallback"),
-            "n_profile_substrates": (kinase_profiles.get(canonical) or {}).get("n_exclusive", 0),
+            "profile_type": _profile_type,
+            "n_profile_substrates": _n_profile_substrates,
+            "tmm_evidence": _tmm_evidence,
         }
 
     _log.info(

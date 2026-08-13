@@ -313,6 +313,23 @@ def run_kinase_annotation(state: dict) -> dict:
                 f"{global_km['summary']['total_inferred']} inferred"
             )
 
+        # v12.1: Preserve the legacy raw-overlap cascade while exposing a
+        # separate contribution-weighted cascade. Shared substrate membership
+        # must not be interpreted as full support for every candidate kinase.
+        _tmm_weighted_cascade = kinase_activity_heatmap.get("tmm_weighted_temporal_cascade") or {}
+        _tmm_pair_directionality = kinase_activity_heatmap.get("tmm_kinase_pair_directionality") or []
+        if _tmm_weighted_cascade:
+            global_km = dict(global_km)
+            _legacy_cascade = dict(global_km.get("temporal_cascade") or {})
+            _legacy_cascade["tmm_weighted"] = _tmm_weighted_cascade
+            _legacy_cascade["tmm_kinase_pair_directionality"] = _tmm_pair_directionality
+            global_km["temporal_cascade"] = _legacy_cascade
+            logger.info(
+                "[KINASE-ANNOTATION] Attached TMM-weighted cascade: %s timepoints, %s kinase-pair directionality records",
+                len(_tmm_weighted_cascade.get("timepoints") or []),
+                len(_tmm_pair_directionality),
+            )
+
         # Append Global Kinase Modules context to LLM context
         global_km_ctx = _build_frontend_kinase_llm_context(global_km, ptm_type, kinase_activity_heatmap)
         if global_km_ctx:
@@ -1660,6 +1677,47 @@ def _build_frontend_kinase_llm_context(frontend_kinase: dict, ptm_type: str, kin
             if lost_kinases:
                 parts.append(f"  Deactivated: {', '.join(lost_kinases[:5])}")
             parts.append("")
+
+    # ── Section D1: contribution-weighted cascade (supplementary) ─────────
+    tmm_weighted = temporal_cascade.get("tmm_weighted") or {}
+    if tmm_weighted.get("timepoints"):
+        parts.append(f"### D1. TMM-Weighted {regulator_label} Activity")
+        parts.append("")
+        parts.append(
+            "This section uses fractional shared-substrate contributions. It supplements raw module overlap "
+            "and represents condition-specific activity, not a causal cascade. `tmm_prior_assisted` entries "
+            "use expected-time fallback profiles and are not data-anchored evidence."
+        )
+        for tp_data in tmm_weighted.get("timepoints", []):
+            active = tp_data.get("active_kinases", [])
+            if not active:
+                continue
+            details = []
+            for kinase in active[:6]:
+                evidence = kinase.get("tmm_evidence", {})
+                details.append(
+                    f"{kinase.get('kinase', '')} ({kinase.get('tmm_weighted_activity', 0):+.2f}; "
+                    f"{evidence.get('confidence_tier', 'tmm_confidence_unavailable')})"
+                )
+            parts.append(f"- **{tp_data.get('timepoint', '')}:** {', '.join(details)}")
+        parts.append("")
+
+    pair_directionality = temporal_cascade.get("tmm_kinase_pair_directionality") or []
+    if pair_directionality:
+        parts.append(f"### D1.1. TMM-Weighted Kinase Profile Temporal Precedence")
+        parts.append("")
+        parts.append(
+            "These are observational kinase-profile relationships. They are not causal conclusions and "
+            "require independent biological support or post-analysis validation before stronger interpretation."
+        )
+        for relation in pair_directionality[:10]:
+            parts.append(
+                f"- {relation.get('source', '')} → {relation.get('target', '')}: "
+                f"{relation.get('directionality_tier', 'D0_unresolved')}, "
+                f"peak lag={relation.get('peak_lag_minutes')} min, "
+                f"causality={relation.get('causality_status', 'not_tested')}"
+            )
+        parts.append("")
 
     # ── Section D2: Co-Wave Module × Kinase Module Cross-Analysis ──
     cowave_cross = frontend_kinase.get("cowave_cross_analysis", {})

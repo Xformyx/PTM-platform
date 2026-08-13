@@ -94,3 +94,30 @@ Backend: vector-plot (receptor inference)
 - [x] 분석 완료 후 D2/D3 후보의 causal validation experiment recommendation 구현
 - [x] 사용자 업로드 perturbation 결과의 선택형 `perturbation_supported` 평가 구현
 - [x] 회귀 테스트·문서화·GitHub 반영
+
+## Temporal PTM 논문 비교 검토
+- [x] 첨부 논문 정밀 추출 및 핵심 방법론·결과 확인
+- [x] 현재 Temporal Wave·Directionality·Data-Grounded·Co-Scientist 구현과 대응 분석
+- [x] 차별점, 도입 우선순위 및 주의사항 보고
+
+## SnapKin 대비 TMM·Temporal Precedence 심층 분석
+- [x] SnapKin supervised attribution과 TMM·directionality 계약 재확인
+- [x] 공유 substrate·motif ambiguity·시간 정보 처리의 수학적 비교
+- [x] PTM-platform 고유 강점, 학술적 주장 경계 및 검증 우선순위 보고
+
+## Unbiased Discovery 및 AI 특이점 해석 평가
+- [x] SnapKin 학습 편향과 TMM·directionality 데이터 의존성 비교
+- [x] Unbiased discovery 관점의 장점·한계 및 보고 범위 평가
+- [x] AI 기반 특이점 탐지·해석의 이점·편향 위험·통제 원칙 정리
+
+## Co-Wave 다중 Kinase 해석 점검
+- [x] 최신 main 반영 및 co-wave·TMM·cascade·report 경로 점검
+- [x] 동일 Wave의 다중 kinase와 시간대 간 정보 결합 방식 분석
+- [x] 현재 동작·한계 및 해석 원칙 보고
+
+## TMM 기반 다중 Kinase 해석 일관성 강화
+- [x] 최신 main 반영 및 co-wave·cascade·TMM·directionality 통합 지점 점검
+- [x] TMM 후 kinase co-wave 재계산 및 raw/TMM provenance 저장
+- [x] TMM contribution-weighted temporal cascade와 sparse-profile confidence 구현
+- [x] TMM-weighted kinase-pair directionality 및 report context 통합
+- [x] 회귀 테스트·문서화·GitHub 반영

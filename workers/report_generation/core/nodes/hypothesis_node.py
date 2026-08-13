@@ -94,12 +94,13 @@ def _build_multi_source_context(state: dict) -> dict:
 
     # ── Source 1: Temporal Cascade ──────────────────────────────────────────
     kad = state.get("frontend_kinase_analysis") or state.get("global_kinase_modules") or {}
+    kah = state.get("kinase_activity_heatmap") or {}
     temporal_cascade = kad.get("temporal_cascade", {})
     cascade_flow = temporal_cascade.get("cascade_flow", [])
     ctx["temporal_cascade"] = cascade_flow  # [{timepoint, active_kinases, new_kinases, lost_kinases}]
+    ctx["tmm_weighted_temporal_cascade"] = temporal_cascade.get("tmm_weighted") or kah.get("tmm_weighted_temporal_cascade") or {}
 
     # ── Source 2: Co-Wave Modules ────────────────────────────────────────────
-    kah = state.get("kinase_activity_heatmap") or {}
     cowave_groups = kah.get("cowave_groups", [])
     kinase_scores = kah.get("kinase_scores", [])
     conditions = kah.get("conditions", [])
@@ -208,6 +209,14 @@ def _build_multi_source_context(state: dict) -> dict:
             })
     ctx["directionality_records"] = directed_records
 
+    # Observational precedence between contribution-weighted kinase profiles is
+    # separate from PTM→effector directionality and always has causality=not_tested.
+    ctx["tmm_kinase_pair_directionality"] = (
+        temporal_cascade.get("tmm_kinase_pair_directionality")
+        or kah.get("tmm_kinase_pair_directionality")
+        or []
+    )
+
     logger.info(
         f"[Co-Scientist] Built multi-source context: "
         f"cascade={len(cascade_flow)} steps, cowave={len(cowave_groups)} groups, "
@@ -283,6 +292,23 @@ def _generate_co_scientist_hypotheses(
             )
         sections.append("\n".join(lines))
 
+    # Section D1: contribution-weighted cascade
+    tmm_cascade = multi_ctx.get("tmm_weighted_temporal_cascade") or {}
+    if tmm_cascade.get("timepoints"):
+        lines = [
+            "=== TMM-WEIGHTED KINASE CASCADE (condition-specific; non-causal) ===",
+            "Raw co-wave membership and TMM-weighted activity are separate evidence layers.",
+        ]
+        for step in tmm_cascade.get("timepoints", [])[:10]:
+            active = step.get("active_kinases", [])
+            names = ", ".join(
+                f"{item.get('kinase')}({item.get('tmm_weighted_activity', 0):+.2f};"
+                f"{(item.get('tmm_evidence') or {}).get('confidence_tier', 'unknown')})"
+                for item in active[:6]
+            )
+            lines.append(f"  {step.get('timepoint')}: [{names}]")
+        sections.append("\n".join(lines))
+
     # Section E: Top PTMs
     top_ptms = multi_ctx.get("top_ptms", [])
     if top_ptms:
@@ -307,6 +333,21 @@ def _generate_co_scientist_hypotheses(
                 f"  {record['source']} → {record['target']}: direction={record['direction']}, "
                 f"tier={record['tier']}, onset_lag={record['onset_lag_minutes']} min, "
                 f"peak_lag={record['peak_lag_minutes']} min, causality={record['causality_status']}"
+            )
+        sections.append("\n".join(lines))
+
+    kinase_pair_directionality = multi_ctx.get("tmm_kinase_pair_directionality", [])
+    if kinase_pair_directionality:
+        lines = [
+            "=== TMM-WEIGHTED KINASE-PROFILE TEMPORAL PRECEDENCE ===",
+            "These are observational profile relationships only; do not infer direct kinase-to-kinase causality.",
+        ]
+        for relation in kinase_pair_directionality[:12]:
+            lines.append(
+                f"  {relation.get('source')} → {relation.get('target')}: "
+                f"tier={relation.get('directionality_tier')}, "
+                f"onset_lag={relation.get('onset_lag_minutes')} min, "
+                f"peak_lag={relation.get('peak_lag_minutes')} min"
             )
         sections.append("\n".join(lines))
 

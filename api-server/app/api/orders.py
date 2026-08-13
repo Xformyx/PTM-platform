@@ -7712,6 +7712,9 @@ async def kinase_activity_heatmap(
             ks_entry["cowave_group"] = kinase_to_group.get(ks_entry.get("parent_kinase", ""), -1)
         else:
             ks_entry["cowave_group"] = kinase_to_group.get(ks_entry["kinase"], -1)
+        # Preserve the pre-TMM grouping explicitly. The primary cowave_group is
+        # replaced with a contribution-weighted version after TMM succeeds.
+        ks_entry["raw_cowave_group"] = ks_entry["cowave_group"]
 
     # ── Activation / Inactivation classification (Sum-based) ──
     for ks_entry in kinase_scores:
@@ -8020,6 +8023,8 @@ async def kinase_activity_heatmap(
     # ── TMM: Temporal Mixture Modeling — Option B (Data-driven Deconvolution) ──
     # Compute contribution-weighted kinase scores using NNLS on exclusive substrate profiles.
     tmm_scores: dict = {}
+    raw_cowave_groups = list(cowave_groups)
+    tmm_weighted_cowave_groups: list[dict] = []
     try:
         from app.services.temporal_kinase_scoring import compute_weighted_kinase_scores
         # Build members-based kinase_modules list for TMM
@@ -8099,6 +8104,7 @@ async def kinase_activity_heatmap(
                 ks_entry["tmm_n_exclusive"] = tmm["n_exclusive"]
                 ks_entry["tmm_n_shared"] = tmm["n_shared"]
                 ks_entry["tmm_profile_type"] = tmm["profile_type"]
+                ks_entry["tmm_evidence"] = tmm.get("tmm_evidence", {})
                 # Top-5 contribution details for LLM context
                 top5 = sorted(
                     tmm["contribution_details"],
@@ -8121,9 +8127,50 @@ async def kinase_activity_heatmap(
                     )
 
         _log.info(f"[TMM] Merged weighted scores for {len(tmm_scores)} kinases (Option A: up/down_sums replaced)")
+
+        # v12.1: Raw co-wave groups were calculated before TMM. Recalculate
+        # groups from contribution-weighted temporal profiles and keep both
+        # versions so downstream users never confuse candidate overlap with
+        # condition-specific attribution.
+        from ptm_shared.tmm_multikinase_integration import build_kinase_cowave_groups
+        tmm_weighted_cowave_groups = build_kinase_cowave_groups(
+            kinase_scores,
+            conditions_sorted,
+            provenance="tmm_weighted",
+        )
+        if tmm_weighted_cowave_groups:
+            tmm_kinase_to_group: dict[str, int] = {}
+            for group in tmm_weighted_cowave_groups:
+                for kinase_name in group["kinases"]:
+                    tmm_kinase_to_group[kinase_name] = group["group_id"]
+            for ks_entry in kinase_scores:
+                parent_or_self = ks_entry.get("parent_kinase") if ks_entry.get("is_sub_pattern") else ks_entry.get("kinase")
+                ks_entry["tmm_cowave_group"] = tmm_kinase_to_group.get(parent_or_self or "", -1)
+                ks_entry["cowave_group"] = ks_entry["tmm_cowave_group"]
+            cowave_groups = tmm_weighted_cowave_groups
+
+        from ptm_shared.tmm_multikinase_integration import (
+            build_tmm_kinase_pair_directionality,
+            build_tmm_weighted_temporal_cascade,
+        )
+        tmm_weighted_temporal_cascade = build_tmm_weighted_temporal_cascade(
+            kinase_scores_filtered,
+            conditions_sorted,
+        )
+        tmm_kinase_pair_directionality = build_tmm_kinase_pair_directionality(
+            tmm_weighted_temporal_cascade,
+            conditions_sorted,
+        )
+        _log.info(
+            "[TMM] Co-wave provenance: raw_groups=%s, tmm_weighted_groups=%s",
+            len(raw_cowave_groups),
+            len(tmm_weighted_cowave_groups),
+        )
     except Exception as _tmm_err:
         import traceback as _tb
         _log.warning(f"[TMM] Deconvolution failed (non-fatal): {_tmm_err}\n{_tb.format_exc()}")
+        tmm_weighted_temporal_cascade = {}
+        tmm_kinase_pair_directionality = []
 
     # Save to DB
     result_data = {
@@ -8131,6 +8178,11 @@ async def kinase_activity_heatmap(
         "conditions": conditions_sorted,
         "peak_sync": peak_sync,
         "cowave_groups": cowave_groups,
+        "raw_cowave_groups": raw_cowave_groups,
+        "tmm_weighted_cowave_groups": tmm_weighted_cowave_groups,
+        "cowave_group_provenance": "tmm_weighted" if tmm_weighted_cowave_groups else "raw_pre_tmm",
+        "tmm_weighted_temporal_cascade": tmm_weighted_temporal_cascade,
+        "tmm_kinase_pair_directionality": tmm_kinase_pair_directionality,
         "available_patterns": sorted(all_patterns),
         "translocation_candidates": translocation_candidates,
         "scoring_method": "stratified_winsorized_mean_v11.3+tmm_deconvolution",
