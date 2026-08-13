@@ -6,7 +6,7 @@ import {
   ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   Legend, ReferenceLine, Cell, BarChart, Bar, LineChart, Line,
 } from "recharts";
-import { Activity, ArrowRight, Clock, Zap, Timer, RefreshCw, TrendingUp, TrendingDown, Dna, CheckCircle2, AlertCircle } from "lucide-react";
+import { Activity, ArrowRight, Clock, Zap, Timer, RefreshCw, TrendingUp, TrendingDown, Dna, CheckCircle2, AlertCircle, Upload } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -31,6 +31,13 @@ interface SelfTimeLag {
   time_lag_minutes: number;
   direction: string;
   cascade_type: string;
+  directionality_tier?: string;
+  causality_status?: string;
+  directionality?: {
+    onset_lag_minutes?: number | null;
+    peak_lag_minutes?: number | null;
+    evidence_profile?: { time_permutation_p_value?: number | null };
+  };
 }
 
 interface CascadeTimeLag {
@@ -44,6 +51,9 @@ interface CascadeTimeLag {
   effector_log2fc: number;
   time_lag_minutes: number;
   direction: string;
+  directionality_tier?: string;
+  causality_status?: string;
+  directionality?: SelfTimeLag['directionality'];
 }
 
 interface Summary {
@@ -51,11 +61,14 @@ interface Summary {
   responsive_effectors: number;
   pattern_counts: Record<string, number>;
   total_self_timelags: number;
-  causal_count: number;
-  feedback_count: number;
+  temporal_precedence_count?: number;
+  reverse_temporal_precedence_count?: number;
+  causal_count?: number;
+  feedback_count?: number;
   simultaneous_count: number;
   total_cascade_timelags: number;
-  forward_propagation_count: number;
+  cascade_temporal_precedence_count?: number;
+  forward_propagation_count?: number;
   immediate_count: number;
   rapid_relay_count: number;
   transcriptional_count: number;
@@ -103,6 +116,7 @@ interface SignalPropagationData {
 
 interface Props {
   data: SignalPropagationData;
+  orderId?: number;
 }
 
 // ─── Color mappings ───────────────────────────────────────────────────────────
@@ -124,10 +138,13 @@ const PATTERN_LABELS: Record<string, string> = {
 };
 
 const DIRECTION_COLORS: Record<string, string> = {
-  causal: '#22c55e',           // green-500
-  forward_propagation: '#22c55e',
-  feedback: '#f97316',         // orange-500
-  reverse_signaling: '#f97316',
+  source_precedes_target: '#0f766e',
+  target_precedes_source: '#f97316',
+  unresolved: '#9ca3af',
+  causal: '#22c55e', // legacy persisted orders only
+  forward_propagation: '#22c55e', // legacy persisted orders only
+  feedback: '#f97316', // legacy persisted orders only
+  reverse_signaling: '#f97316', // legacy persisted orders only
   simultaneous: '#3b82f6',     // blue-500
   co_activation: '#3b82f6',
   co_regulated: '#3b82f6',
@@ -143,8 +160,39 @@ const CASCADE_COLORS: Record<string, string> = {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function SignalPropagationTimeline({ data }: Props) {
+export default function SignalPropagationTimeline({ data, orderId }: Props) {
   const [activeTab, setActiveTab] = useState('overview');
+  const [perturbationFile, setPerturbationFile] = useState<File | null>(null);
+  const [interventionDescription, setInterventionDescription] = useState('');
+  const [uploadingPerturbation, setUploadingPerturbation] = useState(false);
+  const [perturbationMessage, setPerturbationMessage] = useState<string | null>(null);
+
+  const uploadPerturbationEvidence = async () => {
+    if (!orderId || !perturbationFile) return;
+    setUploadingPerturbation(true);
+    setPerturbationMessage(null);
+    try {
+      const formData = new FormData();
+      formData.append('file', perturbationFile);
+      formData.append('alpha', '0.05');
+      formData.append('intervention_description', interventionDescription);
+      const response = await fetch(`/api/orders/${orderId}/perturbation-evidence`, {
+        method: 'POST',
+        body: formData,
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.detail || 'Unable to evaluate perturbation evidence');
+      const summary = payload.evaluation?.summary ?? {};
+      setPerturbationMessage(
+        `Evaluated ${summary.uploaded_rows_evaluated ?? 0} relationship(s): ${summary.perturbation_supported ?? 0} perturbation-supported, ${summary.perturbation_not_supported ?? 0} not supported.`
+      );
+      setPerturbationFile(null);
+    } catch (error) {
+      setPerturbationMessage(error instanceof Error ? error.message : 'Unable to evaluate perturbation evidence');
+    } finally {
+      setUploadingPerturbation(false);
+    }
+  };
 
   const ptmLabel = data.mode === 'crosstalk'
     ? `${data.primary_ptm_type || 'Phos'} × ${data.secondary_ptm_type || 'Ub'}`
@@ -170,9 +218,11 @@ export default function SignalPropagationTimeline({ data }: Props) {
       name: `${tl.ptm_substrate}→${tl.effector}`,
       type: 'cascade' as const,
       direction: tl.direction,
-      cascade_type: tl.direction === 'forward_propagation' ? (tl.time_lag_minutes <= 5 ? 'immediate' : (tl.time_lag_minutes <= 20 ? 'rapid_relay' : 'transcriptional')) : tl.direction,
+      cascade_type: tl.direction === 'source_precedes_target' ? 'temporal_precedence' : tl.direction,
       ptm_log2fc: tl.ptm_log2fc,
       protein_log2fc: tl.effector_log2fc,
+      directionality_tier: tl.directionality_tier,
+      causality_status: tl.causality_status,
       idx: i + selfPoints.length,
     }));
 
@@ -245,7 +295,7 @@ export default function SignalPropagationTimeline({ data }: Props) {
           Signal Propagation Timeline
         </CardTitle>
         <CardDescription>
-          {ptmLabel} → Effector Protein 간 시간적 인과관계 분석 ({data.mode === 'crosstalk' ? 'Cross-Talk' : 'PTM-Only'} Mode)
+          {ptmLabel} → Effector Protein 간 시간적 선후관계 분석 ({data.mode === 'crosstalk' ? 'Cross-Talk' : 'PTM-Only'} Mode). 관찰형 time-course만으로 인과성을 주장하지 않습니다.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -256,18 +306,64 @@ export default function SignalPropagationTimeline({ data }: Props) {
             <p className="text-xs text-emerald-600">Responsive Effectors</p>
           </div>
           <div className="p-3 rounded-lg bg-green-50 border border-green-200 text-center">
-            <p className="text-2xl font-bold text-green-700">{data.summary?.causal_count ?? 0}</p>
-            <p className="text-xs text-green-600">Causal (PTM→Protein)</p>
+            <p className="text-2xl font-bold text-green-700">{data.summary?.temporal_precedence_count ?? data.summary?.causal_count ?? 0}</p>
+            <p className="text-xs text-green-600">PTM Precedes Protein</p>
           </div>
           <div className="p-3 rounded-lg bg-orange-50 border border-orange-200 text-center">
-            <p className="text-2xl font-bold text-orange-700">{data.summary?.feedback_count ?? 0}</p>
-            <p className="text-xs text-orange-600">Feedback Loops</p>
+            <p className="text-2xl font-bold text-orange-700">{data.summary?.reverse_temporal_precedence_count ?? data.summary?.feedback_count ?? 0}</p>
+            <p className="text-xs text-orange-600">Protein Precedes PTM</p>
           </div>
           <div className="p-3 rounded-lg bg-blue-50 border border-blue-200 text-center">
-            <p className="text-2xl font-bold text-blue-700">{data.summary?.forward_propagation_count ?? 0}</p>
-            <p className="text-xs text-blue-600">Signal Cascades</p>
+            <p className="text-2xl font-bold text-blue-700">{data.summary?.cascade_temporal_precedence_count ?? data.summary?.forward_propagation_count ?? 0}</p>
+            <p className="text-xs text-blue-600">PPI-linked Precedence</p>
           </div>
         </div>
+
+        {orderId && (
+          <div className="mb-6 rounded-lg border border-dashed border-slate-300 bg-slate-50/70 p-4">
+            <div className="flex flex-col gap-1 md:flex-row md:items-start md:justify-between">
+              <div>
+                <p className="text-sm font-semibold flex items-center gap-2"><Upload className="h-4 w-4 text-slate-600" /> Optional post-analysis perturbation evidence</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Upload only after unbiased discovery is complete. This does not change Wave discovery or directionality; it evaluates the uploaded condition against existing source-precedes-target candidates.
+                </p>
+              </div>
+              <Badge variant="outline" className="w-fit text-[10px]">Optional validation layer</Badge>
+            </div>
+            <div className="mt-3 grid gap-3 md:grid-cols-[1fr_1.5fr_auto] md:items-end">
+              <label className="grid gap-1 text-xs font-medium">
+                CSV/TSV evidence table
+                <input
+                  type="file"
+                  accept=".csv,.tsv,text/csv,text/tab-separated-values"
+                  className="block w-full text-xs"
+                  onChange={(event) => setPerturbationFile(event.target.files?.[0] ?? null)}
+                />
+              </label>
+              <label className="grid gap-1 text-xs font-medium">
+                Intervention description (optional)
+                <input
+                  value={interventionDescription}
+                  onChange={(event) => setInterventionDescription(event.target.value)}
+                  placeholder="e.g., independent follow-up condition"
+                  className="h-9 rounded-md border bg-background px-2 text-xs"
+                />
+              </label>
+              <button
+                type="button"
+                disabled={!perturbationFile || uploadingPerturbation}
+                onClick={uploadPerturbationEvidence}
+                className="h-9 rounded-md bg-slate-800 px-3 text-xs font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {uploadingPerturbation ? 'Evaluating…' : 'Upload & evaluate'}
+              </button>
+            </div>
+            <p className="mt-2 text-[11px] text-muted-foreground">
+              Required columns: <code>source</code>, <code>target</code>, <code>control_mean</code>, <code>perturbed_mean</code>, <code>expected_target_change</code> (<code>up</code>/<code>down</code>), <code>q_value</code>.
+            </p>
+            {perturbationMessage && <p className="mt-2 text-xs text-slate-700">{perturbationMessage}</p>}
+          </div>
+        )}
 
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList className="grid w-full grid-cols-5 mb-4">
@@ -328,7 +424,7 @@ export default function SignalPropagationTimeline({ data }: Props) {
               <div className="border rounded-lg p-4">
                 <h4 className="text-sm font-semibold mb-3 flex items-center gap-1.5">
                   <Clock className="h-4 w-4 text-purple-500" />
-                  Signal Propagation Mechanisms
+                  Temporal Lag Distribution
                 </h4>
                 {mechanismData.length > 0 ? (
                   <ResponsiveContainer width="100%" height={200}>
@@ -355,19 +451,19 @@ export default function SignalPropagationTimeline({ data }: Props) {
 
             {/* Legend */}
             <div className="mt-4 p-3 bg-muted/30 rounded-lg">
-              <p className="text-xs font-medium mb-2">Signal Propagation Mechanism Legend</p>
+              <p className="text-xs font-medium mb-2">Temporal Lag Interpretation</p>
               <div className="flex flex-wrap gap-3 text-xs">
                 <span className="flex items-center gap-1">
                   <span className="w-3 h-3 rounded-full" style={{ backgroundColor: '#ef4444' }} />
-                  Post-translational (≤5min): Direct PTM effect on protein stability
+                  Short lag (≤5min): temporal proximity only
                 </span>
                 <span className="flex items-center gap-1">
                   <span className="w-3 h-3 rounded-full" style={{ backgroundColor: '#f59e0b' }} />
-                  Rapid relay (5-20min): Signal-dependent protein turnover
+                  Intermediate lag (5-20min): candidate temporal relay
                 </span>
                 <span className="flex items-center gap-1">
                   <span className="w-3 h-3 rounded-full" style={{ backgroundColor: '#8b5cf6' }} />
-                  Transcriptional (&gt;20min): Gene expression reprogramming
+                  Long lag (&gt;20min): delayed response candidate
                 </span>
               </div>
             </div>
@@ -381,7 +477,7 @@ export default function SignalPropagationTimeline({ data }: Props) {
               </h4>
               <p className="text-xs text-muted-foreground mb-3">
                 X축: PTM 변화 최초 감지 시점 (min), Y축: PTM→Protein abundance 변화 시간 차이 (min).
-                양수 = 인과적 (PTM 선행), 음수 = 피드백 (Protein 선행)
+                양수 = PTM이 시간적으로 선행, 음수 = Protein abundance가 선행하며, 어느 경우도 단독으로 인과성을 뜻하지 않습니다.
               </p>
               {timeLagScatterData.length > 0 ? (
                 <ResponsiveContainer width="100%" height={350}>
@@ -418,6 +514,8 @@ export default function SignalPropagationTimeline({ data }: Props) {
                             <p>PTM at: {d.x} min (Log2FC: {d.ptm_log2fc?.toFixed(2)})</p>
                             <p>Time lag: {d.y} min</p>
                             <p>Direction: <span style={{ color: DIRECTION_COLORS[d.direction] || '#666' }}>{d.direction}</span></p>
+                            <p>Directionality tier: {d.directionality_tier || 'legacy / not evaluated'}</p>
+                            <p>Causality: {d.causality_status || 'not tested'}</p>
                           </div>
                         );
                       }}
@@ -426,8 +524,8 @@ export default function SignalPropagationTimeline({ data }: Props) {
                       verticalAlign="top"
                       content={() => (
                         <div className="flex gap-4 justify-center text-xs mb-2">
-                          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-green-500" /> Causal</span>
-                          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-orange-500" /> Feedback</span>
+                          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-teal-700" /> PTM precedes protein</span>
+                          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-orange-500" /> Protein precedes PTM</span>
                           <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-blue-500" /> Simultaneous</span>
                           <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full border border-gray-400" /> Self</span>
                           <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm border border-gray-400" /> Cascade</span>
@@ -455,7 +553,7 @@ export default function SignalPropagationTimeline({ data }: Props) {
             {data.self_timelags.length > 0 && (
               <div className="mt-4 border rounded-lg overflow-hidden">
                 <div className="p-3 bg-muted/30 border-b">
-                  <h4 className="text-sm font-semibold">PTM → Protein Abundance Time Lag Details</h4>
+                  <h4 className="text-sm font-semibold">PTM → Protein Abundance Temporal Precedence Details</h4>
                 </div>
                 <div className="overflow-x-auto max-h-[300px] overflow-y-auto">
                   <table className="w-full text-xs">
@@ -489,7 +587,8 @@ export default function SignalPropagationTimeline({ data }: Props) {
                               className="text-[10px] px-1.5"
                               style={{ borderColor: DIRECTION_COLORS[tl.direction] || '#9ca3af', color: DIRECTION_COLORS[tl.direction] || '#9ca3af' }}
                             >
-                              {tl.direction === 'causal' ? '→ Causal' : tl.direction === 'feedback' ? '← Feedback' : '⇄ Simultaneous'}
+                              {tl.direction === 'source_precedes_target' ? '→ PTM precedes' : tl.direction === 'target_precedes_source' ? '← Protein precedes' : tl.direction === 'simultaneous' ? '⇄ Simultaneous' : '• Unresolved'}
+                              {tl.directionality_tier ? ` (${tl.directionality_tier.split('_')[0]})` : ''}
                             </Badge>
                           </td>
                         </tr>

@@ -394,6 +394,84 @@ def run_section_writing(state: dict) -> dict:
     aux_timelag = build_ptm_protein_timelag_analysis(network_results, timepoints, ptm_type=ptm_type)
     aux_pathway_ctx = build_pathway_context_for_llm(parsed_ptms)
     aux_signal_prop = build_signal_propagation_json(network_results, timepoints, ptm_type=ptm_type)
+    # P1: Directionality is an observational evidence layer. It is supplied
+    # separately so Results and Discussion cannot translate a time lag into a
+    # causal claim.
+    aux_directionality_context = ""
+    directionality_lines = [
+        "=== OBSERVATIONAL TEMPORAL DIRECTIONALITY EVIDENCE ===",
+        "Directionality tiers are NOT causality tiers. All records below have causality_status=not_tested unless separately uploaded perturbation evidence says otherwise.",
+        "D0: unresolved; D1: temporal precedence; D2: reproducible directionality; D3: temporal precedence with biological support.",
+        "Use 'temporally precedes', 'is temporally consistent with', or 'candidate regulatory path'. Never use 'causes', 'drives', 'directly activates', or 'proves' for D0–D3 observational records.",
+        "",
+    ]
+    if isinstance(aux_signal_prop, dict):
+        records = (aux_signal_prop.get("self_timelags") or []) + (aux_signal_prop.get("cascade_timelags") or [])
+        for record in records[:20]:
+            relation = record.get("directionality") or {}
+            tier = record.get("directionality_tier") or relation.get("directionality_tier") or "legacy/not evaluated"
+            source = record.get("ptm_key") or record.get("ptm_substrate") or "unknown source"
+            target = record.get("effector") or f"{record.get('gene', 'unknown')} protein abundance"
+            directionality_lines.append(
+                f"- {source} → {target}: direction={record.get('direction', 'unresolved')}; tier={tier}; "
+                f"onset lag={relation.get('onset_lag_minutes', record.get('time_lag_minutes'))} min; "
+                f"peak lag={relation.get('peak_lag_minutes')} min; causality={record.get('causality_status', 'not_tested')}"
+            )
+    wave_contract = (comovement_analysis or {}).get("contract") if isinstance(comovement_analysis, dict) else {}
+    if isinstance(wave_contract, dict):
+        for relation in (wave_contract.get("directed_relationships") or [])[:12]:
+            directionality_lines.append(
+                f"- Wave {relation.get('source', {}).get('wave_id', relation.get('source', {}).get('key', '?'))} → "
+                f"{relation.get('target', {}).get('wave_id', relation.get('target', {}).get('key', '?'))}: "
+                f"direction={relation.get('direction')}; tier={relation.get('directionality_tier')}; "
+                f"onset lag={relation.get('onset_lag_minutes')} min; peak lag={relation.get('peak_lag_minutes')} min; causality=not_tested"
+            )
+    if len(directionality_lines) > 5:
+        directionality_lines.append("=== END OBSERVATIONAL TEMPORAL DIRECTIONALITY EVIDENCE ===")
+        aux_directionality_context = "\n".join(directionality_lines)
+    # P2/P3: Recommendations are generated after discovery from eligible D2/D3
+    # records. They do not feed back into the primary time-course analysis.
+    from ptm_shared.causal_validation import (
+        collect_directionality_relationships,
+        propose_causal_validation_experiments,
+    )
+    causal_validation_recommendations = propose_causal_validation_experiments(
+        collect_directionality_relationships(aux_signal_prop if isinstance(aux_signal_prop, dict) else {}),
+    )
+    perturbation_evidence = state.get("perturbation_evidence") or {}
+    aux_causal_validation_context = ""
+    if causal_validation_recommendations.get("recommendations"):
+        proposal_lines = [
+            "=== POST-ANALYSIS CAUSAL VALIDATION RECOMMENDATIONS ===",
+            "These are optional follow-up proposals selected after unbiased discovery. They are not discovery inputs and do not establish causality.",
+        ]
+        for proposal in causal_validation_recommendations["recommendations"]:
+            timing = proposal.get("observed_timing", {})
+            proposal_lines.append(
+                f"- {proposal['relationship_id']} ({proposal['directionality_tier']}): "
+                f"measure at {proposal['recommended_design']['time_windows_minutes']} min; "
+                f"observed onset lag={timing.get('onset_lag_minutes')} min; "
+                f"decision rule: {proposal['recommended_design']['decision_rule']}"
+            )
+        proposal_lines.append("Use conditional language and do not name a specific inhibitor, antibody, or outcome unless it is present in the uploaded data or ChromaDB context.")
+        proposal_lines.append("=== END POST-ANALYSIS CAUSAL VALIDATION RECOMMENDATIONS ===")
+        aux_causal_validation_context = "\n".join(proposal_lines)
+    aux_perturbation_evidence_context = ""
+    uploaded_evaluation = perturbation_evidence.get("evaluation") if isinstance(perturbation_evidence, dict) else None
+    if isinstance(uploaded_evaluation, dict) and uploaded_evaluation.get("evaluations"):
+        evidence_lines = [
+            "=== USER-UPLOADED POST-ANALYSIS PERTURBATION EVIDENCE ===",
+            "This evidence applies only to the uploaded experimental condition and does not change the original unbiased discovery analysis.",
+        ]
+        for evaluation in uploaded_evaluation.get("evaluations", [])[:10]:
+            evidence_lines.append(
+                f"- {evaluation.get('relationship_id')}: status={evaluation.get('causality_status')}; "
+                f"expected={evaluation.get('expected_target_change')}; observed_delta={evaluation.get('observed_delta')}; "
+                f"q={evaluation.get('q_value')}"
+            )
+        evidence_lines.append("Use 'perturbation-supported in the uploaded condition' only for status=perturbation_supported. Do not generalize beyond that condition.")
+        evidence_lines.append("=== END USER-UPLOADED POST-ANALYSIS PERTURBATION EVIDENCE ===")
+        aux_perturbation_evidence_context = "\n".join(evidence_lines)
     # v11.8: TF Activity Inference from non-PTM protein dynamics
     organism = context.get("organism", "")
     aux_tf_inference_context, tf_inference_data = build_tf_activity_inference(
@@ -549,6 +627,8 @@ def run_section_writing(state: dict) -> dict:
             # v12.0: Co-Scientist verified findings — Priority 0 (highest, must be included first)
             if aux_verified_findings_context:
                 supplement_blocks.append(("verified_findings", aux_verified_findings_context))
+            if aux_directionality_context:
+                supplement_blocks.append(("directionality", aux_directionality_context))
             # Priority 1 (ESSENTIAL — PTM activity profile core): temporal coordination + temporal kinase + receptor + non-PTM effector
             # v9.35: nonptm_temporal promoted to Priority 1 — effector proteins are integral
             # to the receptor→kinase→substrate→effector signal flow narrative.
@@ -586,6 +666,8 @@ def run_section_writing(state: dict) -> dict:
             # v12.0: Co-Scientist verified findings — Priority 0 (highest for discussion)
             if aux_verified_findings_context:
                 supplement_blocks.append(("verified_findings", aux_verified_findings_context))
+            if aux_directionality_context:
+                supplement_blocks.append(("directionality", aux_directionality_context))
             # v12.1: External evidence-gated candidates are interpretive only.
             # They are excluded from Results and appear only for explicit enhanced discussion.
             if external_coscientist_context:
@@ -616,6 +698,12 @@ def run_section_writing(state: dict) -> dict:
                 supplement_blocks.append(("figure_ctx", figure_gen.generate_figure_context_for_llm(section_type)))
         elif section_type == "introduction":
             supplement_blocks.append(("receptor_ctx", receptor_llm_context))
+
+        elif section_type == "suggestion":
+            if aux_causal_validation_context:
+                supplement_blocks.append(("causal_validation", aux_causal_validation_context))
+            if aux_perturbation_evidence_context:
+                supplement_blocks.append(("perturbation_evidence", aux_perturbation_evidence_context))
 
         elif section_type in ("conclusion", "abstract"):
             # v9.32: Conclusion/Abstract also need temporal coordination summary for comprehensive coverage
@@ -842,11 +930,46 @@ def run_section_writing(state: dict) -> dict:
             sections["co_scientist_addendum"] = addendum
             logger.info("[v12.1] External Co-Scientist addendum created (%d chars)", len(addendum))
 
+    if causal_validation_recommendations.get("recommendations"):
+        proposal_lines = [
+            "**Interpretation boundary.** These recommendations were generated after unbiased discovery from D2/D3 temporal directionality candidates. They are proposed follow-up tests, not causal conclusions.",
+            "",
+        ]
+        for proposal in causal_validation_recommendations["recommendations"]:
+            design = proposal["recommended_design"]
+            proposal_lines.extend([
+                f"### {proposal['relationship_id']} ({proposal['directionality_tier']})",
+                f"- **Observed temporal evidence:** onset lag {proposal['observed_timing'].get('onset_lag_minutes')} min; peak lag {proposal['observed_timing'].get('peak_lag_minutes')} min.",
+                f"- **Orthogonal measurement:** {design['primary_assay']}",
+                f"- **Optional validation design:** {design['optional_intervention']}",
+                f"- **Recommended time windows (min):** {design['time_windows_minutes']}",
+                f"- **Decision rule:** {design['decision_rule']}",
+                f"- **Controls:** {design['negative_controls']}",
+                "",
+            ])
+        sections["causal_validation_recommendations"] = "\n".join(proposal_lines)
+
+    if isinstance(uploaded_evaluation, dict) and uploaded_evaluation.get("evaluations"):
+        evidence_lines = [
+            "**Scope boundary.** The following intervention evidence applies only to the user-uploaded condition and does not modify the original discovery result.",
+            "",
+            "| Relationship | Evaluation status | Expected change | Observed delta | q value |",
+            "|---|---|---:|---:|---:|",
+        ]
+        for evaluation in uploaded_evaluation["evaluations"]:
+            evidence_lines.append(
+                f"| {evaluation.get('relationship_id')} | {evaluation.get('causality_status')} | "
+                f"{evaluation.get('expected_target_change')} | {evaluation.get('observed_delta')} | {evaluation.get('q_value')} |"
+            )
+        sections["perturbation_evidence"] = "\n".join(evidence_lines)
+
     return {
         "sections": sections,
         "collected_references": unified_references,
         "llm_fallback_sections": fallback_sections,
         "tf_inference_data": tf_inference_data if tf_inference_data else {},
+        "causal_validation_recommendations": causal_validation_recommendations,
+        "perturbation_evidence": perturbation_evidence,
     }
 
 
@@ -1673,19 +1796,17 @@ Conclusion Summary:
 Top PTM sites to validate:
 {top_ptms_str}
 
-For EACH of the top 5-8 PTM findings, suggest:
-1. **Western Blot Validation**: Specific antibodies for the {ptm_type_str} modification site. Use appropriate detection methods for {ptm_type_str} (e.g., site-specific antibodies, anti-{ptm_type_str} antibodies).
-2. **Functional Assay**: How to test the biological consequence of the {ptm_type_str} modification. Use assays appropriate for {ptm_type_str} (e.g., {get_vocabulary(ptm_type_str)['enzyme_substrate_term']} analysis, {get_vocabulary(ptm_type_str)['enzyme_writer_generic']} identification).
-3. **Pharmacological Intervention**: Specific inhibitors or activators to test the pathway (name actual drugs/compounds)
-4. **In Vivo Validation**: Animal model or clinical sample approaches
-5. **Time-Course Experiment**: Specific timepoints and conditions to validate temporal dynamics
+Use the supplied **POST-ANALYSIS CAUSAL VALIDATION RECOMMENDATIONS** as the priority list. These candidates were selected only after unbiased discovery analysis because they had D2/D3 temporal directionality evidence.
 
-Also include:
-- **High-Throughput Validation**: Suggest multiplexed approaches (e.g., SILAC, TMT labeling)
-- **Computational Follow-up**: Additional bioinformatics analyses (e.g., molecular dynamics, structural modeling)
-- **Clinical Translation**: Steps toward therapeutic application if applicable
+For EACH eligible candidate, provide:
+1. **Orthogonal measurement**: A targeted assay to verify the same time-resolved PTM/protein profile.
+2. **Optional follow-up intervention**: Describe a selective genetic or pharmacological perturbation only as a later validation experiment. State the required matched control and the prespecified downstream measurement.
+3. **Time-resolved decision rule**: Use the measured onset/peak windows supplied in the recommendation context; explain what result would support or fail to support the candidate.
+4. **Scope boundary**: Explain that this tests the candidate only in the specified experimental system and does not retroactively bias the discovery analysis.
 
-IMPORTANT: Be SPECIFIC — name actual antibodies, inhibitors, cell lines, and experimental conditions. Generic suggestions are not useful.
+If user-uploaded perturbation evidence is supplied, report it exactly as condition-scoped evidence. Use "perturbation-supported in the uploaded condition" only where the evaluator status explicitly says `perturbation_supported`.
+
+IMPORTANT: Do not invent a named inhibitor, antibody, cell line, or expected outcome. Name a concrete reagent or assay only when it is present in the supplied experiment context or ChromaDB evidence. Do not describe D0–D3 directionality as causal proof.
 {combined_lit}""", _chromadb_refs_for_section
 
     if section_type == "title":

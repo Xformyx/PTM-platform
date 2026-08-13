@@ -511,6 +511,9 @@ def run_report_generation(self, order_id: int, config: dict):
             "report_config": config.get("report_config", {}),
             # v12.1: opt-in external Discussion Evidence Packet integration.
             "co_scientist_integration": config.get("co_scientist_integration", {}),
+            # P3: Optional post-analysis intervention evidence. This is kept
+            # separate from the unbiased discovery time-course inputs.
+            "perturbation_evidence": config.get("perturbation_evidence", {}),
             "analysis_mode": analysis_mode,
             "progress_callback": _make_progress_cb(order_id),
             # v9.12/v9.35: Frontend kinase analysis results (auto-built if absent)

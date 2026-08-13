@@ -187,10 +187,32 @@ def _build_multi_source_context(state: dict) -> dict:
     sorted_vp = sorted(vp, key=lambda r: abs(float(r.get("ptm_relative_log2fc", 0) or 0)), reverse=True)
     ctx["top_ptms"] = sorted_vp[:30]
 
+    # ── Source 6: Observational directionality evidence ─────────────────────
+    # Directionality remains independent from the kinase cascade heuristics and
+    # is never promoted to causality without a later perturbation upload.
+    signal_propagation = state.get("signal_propagation_data") or {}
+    directed_records = []
+    if isinstance(signal_propagation, dict):
+        for record in (signal_propagation.get("self_timelags") or []) + (signal_propagation.get("cascade_timelags") or []):
+            relation = record.get("directionality") or {}
+            if not relation:
+                continue
+            directed_records.append({
+                "source": record.get("ptm_key") or record.get("ptm_substrate") or relation.get("source", {}).get("key", ""),
+                "target": record.get("effector") or f"{record.get('gene', '')} protein abundance",
+                "direction": relation.get("direction", record.get("direction", "unresolved")),
+                "tier": relation.get("directionality_tier", record.get("directionality_tier", "D0_unresolved")),
+                "onset_lag_minutes": relation.get("onset_lag_minutes"),
+                "peak_lag_minutes": relation.get("peak_lag_minutes"),
+                "causality_status": relation.get("causality_status", record.get("causality_status", "not_tested")),
+            })
+    ctx["directionality_records"] = directed_records
+
     logger.info(
         f"[Co-Scientist] Built multi-source context: "
         f"cascade={len(cascade_flow)} steps, cowave={len(cowave_groups)} groups, "
-        f"autophospho={len(auto_phospho)}, tmm={len(tmm_summary)}, top_ptms={len(ctx['top_ptms'])}"
+        f"autophospho={len(auto_phospho)}, tmm={len(tmm_summary)}, "
+        f"directionality={len(directed_records)}, top_ptms={len(ctx['top_ptms'])}"
     )
     return ctx
 
@@ -272,6 +294,22 @@ def _generate_co_scientist_hypotheses(
             )
         sections.append("\n".join(lines))
 
+    # Section F: Directionality evidence (observational only)
+    directionality_records = multi_ctx.get("directionality_records", [])
+    if directionality_records:
+        lines = [
+            "=== OBSERVATIONAL TEMPORAL DIRECTIONALITY ===",
+            "D0=unresolved; D1=temporal precedence; D2=reproducible directionality; D3=temporal + biological support.",
+            "These records have NOT been intervention-tested. They are not causal conclusions.",
+        ]
+        for record in directionality_records[:15]:
+            lines.append(
+                f"  {record['source']} → {record['target']}: direction={record['direction']}, "
+                f"tier={record['tier']}, onset_lag={record['onset_lag_minutes']} min, "
+                f"peak_lag={record['peak_lag_minutes']} min, causality={record['causality_status']}"
+            )
+        sections.append("\n".join(lines))
+
     # Experimental context
     tissue = exp_context.get("tissue") or exp_context.get("cell_type") or "cells"
     treatment = exp_context.get("treatment") or "the applied treatment"
@@ -279,7 +317,7 @@ def _generate_co_scientist_hypotheses(
 
     data_block = "\n\n".join(sections)
 
-    prompt = f"""You are an expert molecular biologist performing Co-Scientist analysis on PTM proteomics data.
+    prompt = f"""You are an expert molecular biologist performing Data-Grounded Analysis on PTM proteomics data.
 
 Experimental context:
 - Cell/Tissue: {tissue}
@@ -296,10 +334,11 @@ Based on ALL data sources above, generate 6-8 high-quality, data-grounded hypoth
 CRITICAL INSTRUCTIONS:
 1. TEMPORAL HYPOTHESES: For each major kinase, describe WHEN it activates and what substrates it targets at each timepoint. Explain the biological meaning of the timing.
 2. CO-WAVE HYPOTHESES: For each co-wave group, identify what the co-activated substrates have in common (cellular compartment, function, pathway). Propose the upstream regulator.
-3. AUTOPHOSPHORYLATION HYPOTHESES: For kinases with self-phosphorylation, explain whether this represents positive feedback (activation loop) or negative feedback (auto-inhibition).
+3. AUTOPHOSPHORYLATION HYPOTHESES: For kinases with self-phosphorylation, describe an activation or inhibition marker candidate. Do NOT call it a positive/negative feedback mechanism without intervention evidence.
 4. TMM CONTRIBUTION HYPOTHESES: For kinases with high exclusivity ratio, propose what makes their substrate specificity unique. For kinases with many shared substrates, propose cooperative signaling.
 5. SUBSTRATE-LEVEL SPECIFICITY: Name specific substrates (gene_position) and explain their biological roles.
 6. DATA-GROUNDED: Every hypothesis must cite specific numbers from the data (e.g., "21/28 substrates peak at 1h").
+7. DIRECTIONALITY BOUNDARY: D0–D3 directionality is observational. Use "temporally precedes", "is consistent with", or "candidate regulatory path". Never write "causes", "drives", "directly activates", "feedback loop", or "proves" unless separately supplied perturbation evidence explicitly supports it.
 
 Format each hypothesis as:
 HYPOTHESIS:
@@ -311,6 +350,7 @@ KEY_SUBSTRATES: [gene_position, gene_position, ...]
 COWAVE_GROUP: [G0/G1/G2/... or N/A]
 TESTABLE_PREDICTION: [specific experiment to validate]
 CONFIDENCE: [0.0-1.0]
+EVIDENCE_BOUNDARY: [observational directionality only | perturbation-supported only if supplied]
 """
 
     if llm.is_available():

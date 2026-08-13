@@ -83,3 +83,14 @@ Backend: vector-plot (receptor inference)
 - [x] 실제 perturbation dataset manifest 스키마 및 Wave vs Site benchmark harness 구현
 - [x] Time permutation·threshold sensitivity 회귀 테스트 및 문서화
 - [x] Python/TypeScript 검증, GitHub 반영
+
+## P1–P3 Evidence-Aware Directionality 및 선택적 Causal Validation
+- [x] 최신 main 반영 및 기존 causal·lag·graph·report·Co-Scientist 경로 점검
+- [x] DirectedTemporalRelationship 계약 및 causal 용어를 temporal precedence로 변경
+- [x] 실제 minute 기반 onset/peak lag 및 lag-aware similarity 구현
+- [x] Bootstrap·leave-one-timepoint·time permutation·threshold stability 구현
+- [x] D0–D3 directionality tier 및 Wave evidence profile 확장
+- [x] Graph·Report·Co-Scientist에 evidence-aware 표현 및 guardrail 통합
+- [x] 분석 완료 후 D2/D3 후보의 causal validation experiment recommendation 구현
+- [x] 사용자 업로드 perturbation 결과의 선택형 `perturbation_supported` 평가 구현
+- [x] 회귀 테스트·문서화·GitHub 반영

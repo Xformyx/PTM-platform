@@ -204,6 +204,21 @@ def _compile_report(
         lines.append(suggestion)
         lines.append("")
 
+    # P2/P3: These deterministic appendices remain separate from discovery
+    # Results/Discussion so a proposed or condition-scoped intervention cannot
+    # be mistaken for an observed causal conclusion.
+    causal_validation = sections.get("causal_validation_recommendations", "")
+    if causal_validation:
+        lines.append("## Post-Analysis Causal Validation Recommendations\n")
+        lines.append(causal_validation)
+        lines.append("")
+
+    perturbation_evidence = sections.get("perturbation_evidence", "")
+    if perturbation_evidence:
+        lines.append("## User-Uploaded Perturbation Evidence\n")
+        lines.append(perturbation_evidence)
+        lines.append("")
+
     # ── References ──
     if collected_references:
         lines.append("## References\n")

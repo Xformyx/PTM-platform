@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import csv
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -108,6 +109,25 @@ def _build_condition_map(sample_cfg: dict | list | None) -> dict:
             condition_map[fname] = "Unknown"
 
     return condition_map
+
+
+def _parse_perturbation_evidence_rows(raw_text: str, filename: str) -> list[dict]:
+    """Parse the documented normalized perturbation-evidence CSV/TSV contract."""
+    suffix = Path(filename or "").suffix.lower()
+    delimiter = "\t" if suffix == ".tsv" else ","
+    reader = csv.DictReader(raw_text.splitlines(), delimiter=delimiter)
+    required = {"source", "target", "control_mean", "perturbed_mean", "expected_target_change", "q_value"}
+    headers = set(reader.fieldnames or [])
+    missing = sorted(required - headers)
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Perturbation evidence requires columns: source, target, control_mean, "
+                "perturbed_mean, expected_target_change, q_value. Missing: " + ", ".join(missing)
+            ),
+        )
+    return [dict(row) for row in reader if any(str(value or "").strip() for value in row.values())]
 
 
 # ── List / Get ───────────────────────────────────────────────────────────────
@@ -8365,6 +8385,96 @@ async def substrate_go_localization(
 # ─────────────────────────────────────────────────────────────────────────────
 # IP Overlay: Save immunoprecipitation cross-reference data
 # ─────────────────────────────────────────────────────────────────────────────
+
+@router.post("/{order_id}/perturbation-evidence")
+async def upload_perturbation_evidence(
+    order_id: int,
+    file: UploadFile = File(...),
+    alpha: float = Form(0.05),
+    intervention_description: str = Form(""),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Store and evaluate optional *post-analysis* perturbation evidence.
+
+    The original time-course discovery data are never modified.  The uploaded
+    CSV/TSV must be normalized to source/target/control/perturbed/q-value rows
+    and is only evaluated against pre-existing source-precedes-target records.
+    """
+    from ptm_shared.causal_validation import (
+        collect_directionality_relationships,
+        evaluate_uploaded_perturbation_evidence,
+    )
+
+    if not 0 < alpha <= 0.5:
+        raise HTTPException(status_code=422, detail="alpha must be greater than 0 and no greater than 0.5")
+    filename = Path(file.filename or "perturbation_evidence.csv").name
+    if Path(filename).suffix.lower() not in {".csv", ".tsv"}:
+        raise HTTPException(status_code=422, detail="Only normalized CSV or TSV perturbation evidence files are accepted")
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=422, detail="Uploaded perturbation evidence file is empty")
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Perturbation evidence file exceeds the 10 MB limit")
+    try:
+        raw_text = content.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(status_code=422, detail="Perturbation evidence must be UTF-8 encoded CSV or TSV") from exc
+    rows = _parse_perturbation_evidence_rows(raw_text, filename)
+
+    result = await db.execute(select(Order).where(Order.id == order_id))
+    order = result.scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    await _require_write_access(order, user, db)
+
+    discovery_relationships = collect_directionality_relationships(order.signal_propagation_data or {})
+    if not discovery_relationships:
+        raise HTTPException(
+            status_code=409,
+            detail="No evaluated temporal-precedence relationships are available yet. Generate signal propagation data before uploading follow-up evidence.",
+        )
+    evaluation = evaluate_uploaded_perturbation_evidence(discovery_relationships, rows, alpha=alpha)
+    settings = get_settings()
+    evidence_dir = Path(settings.OUTPUT_DIR) / f"order_{order_id}" / "perturbation_evidence"
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+    saved_path = evidence_dir / f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}_{filename}"
+    saved_path.write_bytes(content)
+
+    report_options = dict(order.report_options or {})
+    report_options["perturbation_evidence"] = {
+        "schema_version": "perturbation_evidence.v1",
+        "source_file": str(saved_path),
+        "original_filename": filename,
+        "uploaded_at": datetime.now(timezone.utc).isoformat(),
+        "intervention_description": intervention_description.strip(),
+        "evaluation": evaluation,
+    }
+    order.report_options = report_options
+    await db.commit()
+    logger.info(
+        "[PERTURBATION-EVIDENCE] order=%s rows=%s supported=%s rejected=%s",
+        order_id,
+        evaluation["summary"]["uploaded_rows_evaluated"],
+        evaluation["summary"]["perturbation_supported"],
+        evaluation["summary"]["rejected_rows"],
+    )
+    return {"status": "ok", "order_id": order_id, "evaluation": evaluation}
+
+
+@router.get("/{order_id}/perturbation-evidence")
+async def get_perturbation_evidence(
+    order_id: int,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Return post-analysis perturbation evidence metadata without raw file content."""
+    result = await db.execute(select(Order).where(Order.id == order_id))
+    order = result.scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    await _check_order_access_async(order, user, db)
+    return (order.report_options or {}).get("perturbation_evidence") or {"status": "not_uploaded"}
 
 @router.post("/{order_id}/save-ip-overlay-data")
 async def save_ip_overlay_data(

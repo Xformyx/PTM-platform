@@ -10,8 +10,27 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from common.temporal_utils import tp_to_minutes
+from ptm_shared.directed_temporal_relationship import analyze_directed_temporal_relationship
 
 logger = logging.getLogger(__name__)
+
+
+def _directed_relationship(
+    source_key: str,
+    source_values: Dict[str, float],
+    target_key: str,
+    target_values: Dict[str, float],
+    timepoints: List[str],
+    *,
+    biological_support: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Return non-causal minute-based temporal evidence for a timeline relation."""
+    return analyze_directed_temporal_relationship(
+        {"key": source_key, "temporal_values": source_values},
+        {"key": target_key, "temporal_values": target_values},
+        timepoints,
+        biological_support=biological_support or {},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -575,6 +594,17 @@ def build_signal_propagation_json(
                     "site": site,
                 }
 
+    # Preserve each site while deriving a mean gene-level profile for the
+    # PPI-linked PTM→effector temporal comparisons below.
+    ptm_gene_values: Dict[str, Dict[str, List[float]]] = {}
+    for tp_data in ptm_temporal.values():
+        for tp, payload in tp_data.items():
+            ptm_gene_values.setdefault(payload["gene"], {}).setdefault(tp, []).append(payload["ptm_log2fc"])
+    ptm_gene_temporal = {
+        gene: {tp: sum(values) / len(values) for tp, values in by_timepoint.items() if values}
+        for gene, by_timepoint in ptm_gene_values.items()
+    }
+
     self_timelags = []
     for ptm_key, tp_data in ptm_temporal.items():
         sorted_tps = sorted(tp_data.keys(), key=tp_to_minutes)
@@ -589,16 +619,22 @@ def build_signal_propagation_json(
                 prot_first_tp = tp
                 break
         if ptm_first_tp and prot_first_tp:
-            lag = tp_to_minutes(prot_first_tp) - tp_to_minutes(ptm_first_tp)
-            if lag > 0:
-                cascade_type = "immediate" if lag <= 5 else ("rapid_relay" if lag <= 20 else "transcriptional")
-                direction = "causal"
-            elif lag < 0:
-                cascade_type = "feedback"
-                direction = "feedback"
-            else:
-                cascade_type = "co_regulated"
-                direction = "simultaneous"
+            relation = _directed_relationship(
+                ptm_key,
+                {tp: tp_data[tp]["ptm_log2fc"] for tp in sorted_tps},
+                f"{tp_data[sorted_tps[0]]['gene']} protein abundance",
+                {tp: tp_data[tp]["protein_log2fc"] for tp in sorted_tps},
+                sorted_tps,
+            )
+            lag = relation.get("onset_lag_minutes")
+            lag = lag if lag is not None else tp_to_minutes(prot_first_tp) - tp_to_minutes(ptm_first_tp)
+            direction = relation["direction"]
+            cascade_type = (
+                "temporal_precedence" if direction == "source_precedes_target"
+                else "reverse_temporal_precedence" if direction == "target_precedes_source"
+                else "co_regulated" if direction == "simultaneous"
+                else "unresolved"
+            )
             self_timelags.append(
                 {
                     "ptm_key": ptm_key,
@@ -613,6 +649,9 @@ def build_signal_propagation_json(
                     "time_lag_minutes": round(lag, 1),
                     "direction": direction,
                     "cascade_type": cascade_type,
+                    "directionality": relation,
+                    "directionality_tier": relation["directionality_tier"],
+                    "causality_status": "not_tested",
                 }
             )
     self_timelags.sort(key=lambda x: abs(x["time_lag_minutes"]), reverse=True)
@@ -657,13 +696,17 @@ def build_signal_propagation_json(
                 seen_edges.add(edge_key)
                 ptm_tp, ptm_val = ptm_first_change[source]
                 nonptm_tp, nonptm_val = nonptm_first_change[target]
-                lag = tp_to_minutes(nonptm_tp) - tp_to_minutes(ptm_tp)
-                if lag > 0:
-                    direction = "forward_propagation"
-                elif lag < 0:
-                    direction = "reverse_signaling"
-                else:
-                    direction = "co_activation"
+                relation = _directed_relationship(
+                    source,
+                    ptm_gene_temporal.get(source, {}),
+                    target,
+                    nonptm_temporal.get(target, {}),
+                    timepoints,
+                    biological_support={"ppi_consistent": True},
+                )
+                lag = relation.get("onset_lag_minutes")
+                lag = lag if lag is not None else tp_to_minutes(nonptm_tp) - tp_to_minutes(ptm_tp)
+                direction = relation["direction"]
                 cascade_timelags.append(
                     {
                         "ptm_substrate": source,
@@ -676,6 +719,9 @@ def build_signal_propagation_json(
                         "effector_log2fc": round(nonptm_val, 3),
                         "time_lag_minutes": round(lag, 1),
                         "direction": direction,
+                        "directionality": relation,
+                        "directionality_tier": relation["directionality_tier"],
+                        "causality_status": "not_tested",
                     }
                 )
     cascade_timelags.sort(key=lambda x: abs(x["time_lag_minutes"]), reverse=True)

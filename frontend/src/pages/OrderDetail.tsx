@@ -4963,7 +4963,7 @@ export default function OrderDetail() {
 
                   {/* Signal Propagation Timeline */}
                   {order.signal_propagation_data?.summary && (
-                    <SignalPropagationTimeline data={order.signal_propagation_data as any} />
+                    <SignalPropagationTimeline data={order.signal_propagation_data as any} orderId={order.id} />
                   )}
                 </>
               ) : (

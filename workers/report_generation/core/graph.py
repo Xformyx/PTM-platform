@@ -147,6 +147,11 @@ class ReportState(TypedDict, total=False):
     co_scientist_integration_mode: str  # addendum | enhanced_discussion
     co_scientist_packet_snapshot: str
 
+    # P2/P3: Discovery remains unbiased. These fields are populated only after
+    # temporal analysis for recommendation or user-uploaded follow-up review.
+    causal_validation_recommendations: dict
+    perturbation_evidence: dict
+
     # Progress tracking
     progress_callback: Any
     error: Optional[str]
