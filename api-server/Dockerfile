@@ -2,6 +2,8 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+ENV PYTHONPATH=/app:/opt
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     default-libmysqlclient-dev \
@@ -35,12 +37,13 @@ RUN curl -fsSL -o /tmp/typst.tar.xz https://github.com/typst/typst/releases/late
     && chmod +x /usr/local/bin/typst \
     && rm -rf /tmp/typst*
 
-COPY pyproject.toml .
+COPY api-server/pyproject.toml ./pyproject.toml
+COPY api-server/app ./app
 RUN pip install --no-cache-dir .
 
-COPY . .
+COPY ptm_shared /opt/ptm_shared
 
-COPY entrypoint.sh /entrypoint.sh
+COPY api-server/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 EXPOSE 8000

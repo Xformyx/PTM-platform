@@ -69,3 +69,17 @@ Backend: vector-plot (receptor inference)
 ## AI Agent Handoff 문서
 - [x] 오늘의 Data-Grounded Analysis 및 Co-Scientist 연동 변경사항 Markdown 정리
 - [x] 문서 검토 및 전달
+
+## Temporal PTM 연구 방향 검토
+- [x] 최신 main 반영 및 첨부 연구 방향 PDF 정밀 추출
+- [x] 현 Temporal PTM·Data-Grounded·Co-Scientist 구현과 제안 내용 대응 분석
+- [x] 적용 가능한 업그레이드의 우선순위 및 구현 범위 보고
+
+## P0 Canonical Temporal Wave 기반
+- [x] 최신 main 반영 및 기존 Report/API co-wave 입출력 계약 점검
+- [x] Canonical Temporal Wave Contract와 공용 분석 엔진 구현
+- [x] Report temporal_comovement 및 API receptor co-wave 경로 통합
+- [x] Wave formal definition, evidence profile, threshold provenance 구현
+- [x] 실제 perturbation dataset manifest 스키마 및 Wave vs Site benchmark harness 구현
+- [x] Time permutation·threshold sensitivity 회귀 테스트 및 문서화
+- [x] Python/TypeScript 검증, GitHub 반영

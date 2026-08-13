@@ -144,7 +144,9 @@ def run_temporal_comovement(state: dict) -> dict:
             }
 
         # Step 3-4: Cluster co-moving PTMs
-        clusters, singletons = _cluster_comoving_ptms(sig_matrix, sig_meta, timepoints, state=state)
+        clusters, singletons, wave_contract = _cluster_comoving_ptms(
+            sig_matrix, sig_meta, timepoints, state=state
+        )
 
         # Step 5: Annotate clusters with biological context
         # pathway_candidates is a dict {"candidates": [...], "gene_data": {...}}
@@ -182,6 +184,7 @@ def run_temporal_comovement(state: dict) -> dict:
 
         return {
             "comovement_analysis": {
+                "contract": wave_contract,
                 "clusters": clusters,
                 "singletons": singletons,
                 "summary": summary,
@@ -302,7 +305,7 @@ def _filter_significant_ptms(
 
 def _cluster_comoving_ptms(
     matrix: np.ndarray, meta: list, timepoints: list, state: Optional[dict] = None
-) -> Tuple[List[dict], List[dict]]:
+) -> Tuple[List[dict], List[dict], dict]:
     """Cluster PTMs by temporal correlation using hierarchical clustering.
 
     Returns:
@@ -311,7 +314,55 @@ def _cluster_comoving_ptms(
     """
     n = matrix.shape[0]
     if n < 2:
-        return [], [_build_singleton(meta[0], matrix[0], timepoints)]
+        return [], [_build_singleton(meta[0], matrix[0], timepoints)], {
+            "contract_version": "temporal_wave_contract.v1",
+            "quality_warnings": ["fewer_than_two_eligible_sites"],
+            "waves": [],
+        }
+
+    # P0: canonical engine is the single source of truth for report and API
+    # co-wave memberships. The legacy implementation below remains only as a
+    # non-fatal compatibility fallback if the shared engine cannot load.
+    try:
+        from ptm_shared.temporal_wave_engine import analyze_temporal_waves
+
+        series = {
+            item["key"]: {
+                timepoint: float(matrix[index, time_index])
+                for time_index, timepoint in enumerate(timepoints)
+            }
+            for index, item in enumerate(meta)
+        }
+        metadata = {item["key"]: dict(item) for item in meta}
+        supplied_config = dict((state or {}).get("temporal_wave_config") or {})
+        if "correlation_threshold" not in supplied_config:
+            try:
+                from common.singularity_orchestrator import get_adaptive_threshold, is_enabled
+                if is_enabled() and state:
+                    supplied_config["correlation_threshold"] = get_adaptive_threshold(
+                        state, default_threshold=CORRELATION_THRESHOLD
+                    )
+                    supplied_config["threshold_source"] = "adaptive_singularity"
+                else:
+                    supplied_config["correlation_threshold"] = CORRELATION_THRESHOLD
+                    supplied_config["threshold_source"] = "report_default"
+            except Exception:
+                supplied_config["correlation_threshold"] = CORRELATION_THRESHOLD
+                supplied_config["threshold_source"] = "report_default"
+        contract = analyze_temporal_waves(
+            series, timepoints, metadata=metadata, config=supplied_config
+        )
+        logger.info(
+            "[COMOVEMENT][CanonicalWave] %s waves, config=%s",
+            len(contract["waves"]),
+            contract["threshold_provenance"].get("config_sha256", "unknown")[:12],
+        )
+        return contract["waves"], contract["unassigned_sites"], contract
+    except Exception as canonical_error:
+        logger.warning(
+            "[COMOVEMENT][CanonicalWave] Falling back to legacy clustering: %s",
+            canonical_error,
+        )
 
     # Compute pairwise Pearson correlation
     # Normalize rows (zero-mean, unit-variance) for correlation
@@ -458,7 +509,11 @@ def _cluster_comoving_ptms(
     for i, c in enumerate(clusters):
         c["cluster_id"] = i + 1
 
-    return clusters, singletons
+    return clusters, singletons, {
+        "contract_version": "legacy_temporal_comovement_fallback.v0",
+        "quality_warnings": ["canonical_engine_unavailable"],
+        "waves": clusters,
+    }
 
 
 def _classify_cluster_pattern(profiles: list, timepoints: list) -> str:

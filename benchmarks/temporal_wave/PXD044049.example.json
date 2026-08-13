@@ -1,0 +1,32 @@
+{
+  "schema_version": "temporal_wave_benchmark_manifest.v1",
+  "dataset_id": "PXD044049_MCF10A_EGFR_MAPK",
+  "data_path": "PXD044049_mcf10a_timecourse_preprocessed.csv",
+  "source_url": "https://proteomecentral.proteomexchange.org/cgi/GetDataset?ID=PXD044049",
+  "source_doi": "10.1101/2023.08.03.551714",
+  "description": "MCF10A EGF time-course phosphoproteomics with kinase inhibitor perturbations. This example is disabled until the raw public dataset is downloaded and processed into the declared site-level CSV contract.",
+  "known_targets": ["MAP2K1", "MAP2K2", "PIK3CA", "RPS6KA1", "PTPN11"],
+  "expected_target_windows": {
+    "MAP2K1": {"min_minutes": 4, "max_minutes": 12},
+    "MAP2K2": {"min_minutes": 4, "max_minutes": 12}
+  },
+  "input_columns": {
+    "gene": "gene",
+    "site": "site",
+    "timepoint": "timepoint",
+    "log2fc": "ptm_relative_log2fc",
+    "candidate_kinases": "candidate_kinases",
+    "q_value": "q_value",
+    "activity_class": "activity_class"
+  },
+  "wave_config": {
+    "correlation_threshold": 0.7,
+    "threshold_source": "manifest_baseline",
+    "minimum_timepoints": 3,
+    "minimum_variance": 0.3,
+    "minimum_amplitude": 0.8,
+    "minimum_cluster_size": 2
+  },
+  "time_permutation": {"repetitions": 100, "seed": 20260813},
+  "threshold_sensitivity": {"correlation_thresholds": [0.6, 0.7, 0.8]}
+}

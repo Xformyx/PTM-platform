@@ -75,10 +75,10 @@ services:
 
   api-server:
     build:
-      context: ./api-server
-      dockerfile: Dockerfile
-      args:
-        VERSION: ${VERSION_API:-001}
+      context: .
+      dockerfile: api-server/Dockerfile
+    args:
+      VERSION: ${VERSION_API:-001}
     image: ptm-api-server:${VERSION_API:-001}
     container_name: ptm-api-server
     healthcheck:
@@ -91,11 +91,12 @@ services:
       - .env
     volumes:
       - ./VERSION:/app/VERSION:ro
-      - ./GIT_HASH:/app/GIT_HASH:ro
-      - ./GIT_DATE:/app/GIT_DATE:ro
-      - ./api-server/app:/app/app
-      - ./data:/app/data
-      - ./storage/reports:/app/storage/reports
+     - ./GIT_HASH:/app/GIT_HASH:ro
+     - ./GIT_DATE:/app/GIT_DATE:ro
+     - ./api-server/app:/app/app
+      - ./ptm_shared:/opt/ptm_shared:ro
+     - ./data:/app/data
+     - ./storage/reports:/app/storage/reports
       - ./storage/logs:/app/storage/logs
       - ./storage/file_share:/app/storage/file_share
       - ./storage/ptmquant:/app/storage/ptmquant
@@ -188,13 +189,14 @@ services:
       - .env
     volumes:
       - ./workers:/app
+      - ./ptm_shared:/opt/ptm_shared:ro
       - ./data:/app/data
       - ./storage/reports:/app/storage/reports
       - ./storage/logs:/app/storage/logs
     environment:
       TZ: Asia/Seoul
       PYTHONDONTWRITEBYTECODE: "1"
-      PYTHONPATH: /app
+      PYTHONPATH: /app:/opt
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/2
       REDIS_URL: redis://redis:6379/0
@@ -227,13 +229,14 @@ services:
       - .env
     volumes:
       - ./workers:/app
+      - ./ptm_shared:/opt/ptm_shared:ro
       - ./data:/app/data
       - ./storage/reports:/app/storage/reports
       - ./storage/logs:/app/storage/logs
     environment:
       TZ: Asia/Seoul
       PYTHONDONTWRITEBYTECODE: "1"
-      PYTHONPATH: /app
+      PYTHONPATH: /app:/opt
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/2
       REDIS_URL: redis://redis:6379/0
@@ -293,13 +296,14 @@ services:
       - .env
     volumes:
       - ./workers:/app
+      - ./ptm_shared:/opt/ptm_shared:ro
       - ./data:/app/data
       - ./storage/reports:/app/storage/reports
       - ./storage/logs:/app/storage/logs
     environment:
       TZ: Asia/Seoul
       PYTHONDONTWRITEBYTECODE: "1"
-      PYTHONPATH: /app
+      PYTHONPATH: /app:/opt
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/2
       REDIS_URL: redis://redis:6379/0
@@ -348,10 +352,11 @@ services:
       - .env
     volumes:
       - ./workers:/app
+      - ./ptm_shared:/opt/ptm_shared:ro
     environment:
       TZ: Asia/Seoul
       PYTHONDONTWRITEBYTECODE: "1"
-      PYTHONPATH: /app
+      PYTHONPATH: /app:/opt
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/2
       REDIS_URL: redis://redis:6379/0

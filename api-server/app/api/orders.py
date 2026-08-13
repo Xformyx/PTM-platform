@@ -2936,44 +2936,77 @@ async def get_vector_plot_data(
             ]
 
             if len(_full_ts_ptms) >= 5:
-                # ── Compute pairwise Pearson correlation ──
-                import math as _cw_math
-                _vectors: dict = {}  # ptm_label → list of FC values (ordered by time)
-                for lbl in _full_ts_ptms:
-                    _vectors[lbl] = [_ptm_time_matrix[lbl].get(c, 0.0) for c in _parseable]
+                # P0: use the shared Canonical Temporal Wave Contract rather
+                # than a second, API-only greedy Pearson clustering route.
+                # The receptor score below still consumes the same simple list
+                # of member labels, preserving its established scoring logic.
+                _canonical_wave_contract = None
+                try:
+                    from ptm_shared.temporal_wave_engine import analyze_temporal_waves
 
-                def _pearson(v1: list, v2: list) -> float:
-                    n = len(v1)
-                    if n < 3:
-                        return 0.0
-                    m1 = sum(v1) / n
-                    m2 = sum(v2) / n
-                    num = sum((a - m1) * (b - m2) for a, b in zip(v1, v2))
-                    d1 = _cw_math.sqrt(sum((a - m1) ** 2 for a in v1))
-                    d2 = _cw_math.sqrt(sum((b - m2) ** 2 for b in v2))
-                    if d1 == 0 or d2 == 0:
-                        return 0.0
-                    return num / (d1 * d2)
+                    _canonical_series = {
+                        lbl: {condition: _ptm_time_matrix[lbl].get(condition, 0.0) for condition in _parseable}
+                        for lbl in _full_ts_ptms
+                    }
+                    _canonical_metadata = {
+                        lbl: {
+                            "gene": lbl.rsplit(" ", 1)[0] if " " in lbl else lbl,
+                            "site": lbl.rsplit(" ", 1)[1] if " " in lbl else "",
+                        }
+                        for lbl in _full_ts_ptms
+                    }
+                    _canonical_wave_contract = analyze_temporal_waves(
+                        _canonical_series,
+                        _parseable,
+                        metadata=_canonical_metadata,
+                        config={
+                            "correlation_threshold": 0.70,
+                            "threshold_source": "api_receptor_default",
+                        },
+                    )
+                    _clusters = [wave["members"] for wave in _canonical_wave_contract["waves"]]
+                    if not _clusters:
+                        _clusters = [[label] for label in _full_ts_ptms]
+                    logging.getLogger("vector_plot").info(
+                        "Canonical Temporal Wave Contract: %s waves, config=%s",
+                        len(_canonical_wave_contract["waves"]),
+                        _canonical_wave_contract["threshold_provenance"]["config_sha256"][:12],
+                    )
+                except Exception as _canonical_wave_error:
+                    logging.getLogger("vector_plot").warning(
+                        "Canonical Temporal Wave engine unavailable; using legacy greedy fallback: %s",
+                        _canonical_wave_error,
+                    )
+                    import math as _cw_math
+                    _vectors: dict = {
+                        lbl: [_ptm_time_matrix[lbl].get(c, 0.0) for c in _parseable]
+                        for lbl in _full_ts_ptms
+                    }
 
-                # ── Simple greedy clustering (correlation threshold) ──
-                _CW_THRESHOLD = 0.7
-                _labels_list = list(_vectors.keys())
-                _assigned = [False] * len(_labels_list)
-                _clusters: list[list[str]] = []
+                    def _pearson(v1: list, v2: list) -> float:
+                        n = len(v1)
+                        if n < 3:
+                            return 0.0
+                        m1 = sum(v1) / n
+                        m2 = sum(v2) / n
+                        num = sum((a - m1) * (b - m2) for a, b in zip(v1, v2))
+                        d1 = _cw_math.sqrt(sum((a - m1) ** 2 for a in v1))
+                        d2 = _cw_math.sqrt(sum((b - m2) ** 2 for b in v2))
+                        return num / (d1 * d2) if d1 and d2 else 0.0
 
-                for i in range(len(_labels_list)):
-                    if _assigned[i]:
-                        continue
-                    cluster = [_labels_list[i]]
-                    _assigned[i] = True
-                    for j in range(i + 1, len(_labels_list)):
-                        if _assigned[j]:
+                    _labels_list = list(_vectors.keys())
+                    _assigned = [False] * len(_labels_list)
+                    _clusters = []
+                    for i in range(len(_labels_list)):
+                        if _assigned[i]:
                             continue
-                        corr = _pearson(_vectors[_labels_list[i]], _vectors[_labels_list[j]])
-                        if corr >= _CW_THRESHOLD:
-                            cluster.append(_labels_list[j])
-                            _assigned[j] = True
-                    _clusters.append(cluster)
+                        cluster = [_labels_list[i]]
+                        _assigned[i] = True
+                        for j in range(i + 1, len(_labels_list)):
+                            if not _assigned[j] and _pearson(_vectors[_labels_list[i]], _vectors[_labels_list[j]]) >= 0.70:
+                                cluster.append(_labels_list[j])
+                                _assigned[j] = True
+                        _clusters.append(cluster)
 
                 # ── Determine cluster-specific vs shared kinases ──
                 _cluster_kinases: list[set] = []  # per cluster
@@ -3074,7 +3107,9 @@ async def get_vector_plot_data(
                     "conditions_ordered": _parseable,
                     "num_clusters": len(_clusters),
                     "clusters": _cluster_patterns,
-                    "scoring_method": "cowave_divergence",
+                    "scoring_method": "canonical_temporal_wave_contract"
+                    if _canonical_wave_contract is not None else "cowave_divergence_legacy_fallback",
+                    "contract": _canonical_wave_contract,
                 }
 
                 logging.getLogger("vector_plot").info(
