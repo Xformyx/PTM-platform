@@ -1303,7 +1303,13 @@ type TopNVectorPlotRow = {
 // ── MultiSiteDivergencePanel ────────────────────────────────────────────────
 // Finds same-protein multi-site pairs across different wave modules and classifies
 // them into 3 biological patterns.
-type DivergencePattern = "signal_attenuation" | "sequential_regulation" | "multisite_coordination";
+type DivergencePattern =
+  | "signal_attenuation"
+  | "sequential_regulation"
+  | "multisite_coordination"
+  | "same_peak_coordination"
+  | "temporally_separated_same_direction"
+  | "temporally_separated_opposite_direction";
 
 interface SitePairEntry {
   gene: string;
@@ -1328,23 +1334,89 @@ const DIVERGENCE_META: Record<DivergencePattern, { label: string; color: string;
     color: "text-orange-700 dark:text-orange-400",
     bgColor: "bg-orange-50 dark:bg-orange-950/30",
     borderColor: "border-orange-300 dark:border-orange-700",
-    description: "Activating (early wave) + Inhibitory (late wave) → 신호 감쇠 메커니즘",
+          description: "초기·후기 반대 방향 site response 관찰; 신호 감쇠 메커니즘을 증명하지 않음",
   },
   sequential_regulation: {
     label: "Sequential Regulation",
     color: "text-blue-700 dark:text-blue-400",
     bgColor: "bg-blue-50 dark:bg-blue-950/30",
     borderColor: "border-blue-300 dark:border-blue-700",
-    description: "두 site가 서로 다른 wave → 두 독립 kinase가 순차 조절",
+          description: "두 site가 서로 다른 wave에서 반응; 독립 kinase의 순차 조절을 증명하지 않음",
   },
   multisite_coordination: {
     label: "Multisite Coordination",
     color: "text-emerald-700 dark:text-emerald-400",
     bgColor: "bg-emerald-50 dark:bg-emerald-950/30",
     borderColor: "border-emerald-300 dark:border-emerald-700",
-    description: "같은 wave에 속하는 여러 site → 한 kinase의 multisite phosphorylation",
+          description: "같은 wave의 여러 site peak 관찰; 단일 kinase의 multisite phosphorylation을 증명하지 않음",
+  },
+  same_peak_coordination: {
+    label: "Same-peak Site Coordination",
+    color: "text-emerald-700 dark:text-emerald-400",
+    bgColor: "bg-emerald-50 dark:bg-emerald-950/30",
+    borderColor: "border-emerald-300 dark:border-emerald-700",
+    description: "동일 timepoint의 site peak 관찰; 단일 kinase 또는 processivity를 증명하지 않음",
+  },
+  temporally_separated_same_direction: {
+    label: "Temporally Separated Same-direction Response",
+    color: "text-blue-700 dark:text-blue-400",
+    bgColor: "bg-blue-50 dark:bg-blue-950/30",
+    borderColor: "border-blue-300 dark:border-blue-700",
+    description: "서로 다른 timepoint의 같은 방향 site response 관찰; 독립 kinase를 증명하지 않음",
+  },
+  temporally_separated_opposite_direction: {
+    label: "Temporally Separated Opposite-direction Response",
+    color: "text-orange-700 dark:text-orange-400",
+    bgColor: "bg-orange-50 dark:bg-orange-950/30",
+    borderColor: "border-orange-300 dark:border-orange-700",
+    description: "서로 다른 timepoint의 반대 방향 site response 관찰; feedback 또는 activation/inhibition을 증명하지 않음",
   },
 };
+
+function canonicalDivergenceToEntry(pair: any): SitePairEntry | null {
+  const parseSite = (value: unknown) => {
+    const raw = String(value || "");
+    const [gene, ...rest] = raw.split(" ");
+    const position = rest.join(" ");
+    return { gene, position, label: raw };
+  };
+  const a = parseSite(pair?.siteA);
+  const b = parseSite(pair?.siteB);
+  if (!pair?.protein || !a.position || !b.position) return null;
+  const directionality = pair.directionality || {};
+  const peakLag = directionality.peak_lag_minutes;
+  return {
+    gene: String(pair.protein),
+    siteA: {
+      position: a.position,
+      label: a.label,
+      waveLabel: String(pair.directionality_tier || "D0_unresolved"),
+      peakCondition: String(pair.peak_condA || ""),
+      peakFC: Number(pair.fcA || 0),
+      isDeNovo: Boolean(pair.is_denovoA),
+      activityClass: pair.is_denovoA ? "de_novo" : "regulated",
+    },
+    siteB: {
+      position: b.position,
+      label: b.label,
+      waveLabel: String(pair.directionality_tier || "D0_unresolved"),
+      peakCondition: String(pair.peak_condB || ""),
+      peakFC: Number(pair.fcB || 0),
+      isDeNovo: Boolean(pair.is_denovoB),
+      activityClass: pair.is_denovoB ? "de_novo" : "regulated",
+    },
+    pattern: pair.pattern as DivergencePattern,
+    description: String(pair.interpretation_boundary || "Observed site-specific temporal pattern; no causal mechanism is established."),
+    confidenceTier: (pair.confidence_tier === "High" || pair.confidence_tier === "Medium") ? pair.confidence_tier : "Low",
+    pValue: typeof pair.fdr_q_value === "number" ? pair.fdr_q_value : null,
+    isSignificant: typeof pair.evidence_eligible_for_ai === "boolean" ? pair.evidence_eligible_for_ai : null,
+    lagMinutes: typeof peakLag === "number" ? peakLag : null,
+    lagFraction: Number(pair.temporal_lag || 0),
+    isMeaningfulLag: pair.directionality_tier !== "D0_unresolved",
+    effectSize: Number(pair.effect_size || 0),
+    resolutionWarning: pair.resolution_warning || null,
+  };
+}
 
 function computeMultiSiteDivergence(
   uniquePtms: Array<{ gene: string; position: string; label: string }>,
@@ -1417,17 +1489,17 @@ function computeMultiSiteDivergence(
 
         if (peakA.condIdx === peakB.condIdx) {
           pattern = "multisite_coordination";
-          description = `${gene} ${early.position} + ${late.position}이 동일 wave (peak: ${earlyPeak.peakCondition})에서 동시 활성화 → 한 kinase의 multisite phosphorylation`;
+          description = `${gene} ${early.position} + ${late.position}이 동일 timepoint (peak: ${earlyPeak.peakCondition})에서 peak를 보임 → same-peak site coordination 관찰`;
         } else if (earlyPeak.peakFC > 0 && latePeak.peakFC < 0) {
           pattern = "signal_attenuation";
-          description = `${gene} ${early.position} (early activating, +${earlyPeak.peakFC.toFixed(2)}) → ${late.position} (late inhibitory, ${latePeak.peakFC.toFixed(2)}) → 신호 감쇠 메커니즘`;
+          description = `${gene} ${early.position}과 ${late.position}에서 시간적으로 분리된 반대 방향 response 관찰; feedback 또는 attenuation을 증명하지 않음`;
         } else if (earlyPeak.peakFC < 0 && latePeak.peakFC > 0) {
           pattern = "signal_attenuation";
-          description = `${gene} ${early.position} (early inhibitory, ${earlyPeak.peakFC.toFixed(2)}) → ${late.position} (late activating, +${latePeak.peakFC.toFixed(2)}) → 억제 후 활성화 패턴`;
+          description = `${gene} ${early.position}과 ${late.position}에서 시간적으로 분리된 반대 방향 response 관찰; inhibition-to-activation mechanism을 증명하지 않음`;
         } else {
           pattern = "sequential_regulation";
           const dir = earlyPeak.peakFC > 0 && latePeak.peakFC > 0 ? "두 Activating site" : "두 Inhibitory site";
-          description = `${gene} ${early.position} (wave: ${earlyPeak.peakCondition}) → ${late.position} (wave: ${latePeak.peakCondition}) → ${dir}가 순차 조절`;
+          description = `${gene} ${early.position} (wave: ${earlyPeak.peakCondition})와 ${late.position} (wave: ${latePeak.peakCondition})의 시간적으로 분리된 ${dir} site response 관찰`;
         }
 
         // v12.1 #3: Lag computation
@@ -1522,7 +1594,14 @@ function computeMultiSiteDivergence(
     }
   });
 
-  const ORDER: Record<DivergencePattern, number> = { signal_attenuation: 0, sequential_regulation: 1, multisite_coordination: 2 };
+  const ORDER: Record<DivergencePattern, number> = {
+    signal_attenuation: 0,
+    sequential_regulation: 1,
+    multisite_coordination: 2,
+    temporally_separated_opposite_direction: 0,
+    temporally_separated_same_direction: 1,
+    same_peak_coordination: 2,
+  };
   const TIER_ORDER: Record<string, number> = { High: 0, Medium: 1, Low: 2 };
   results.sort((a, b) => {
     const patDiff = ORDER[a.pattern] - ORDER[b.pattern];
@@ -1586,6 +1665,7 @@ function MultiSiteDivergencePanel({
   conditions,
   ptmActivityClass,
   ptmPseudocountUsed,
+  canonicalPairs,
   onHighlightPtms,
 }: {
   uniquePtms: Array<{ gene: string; position: string; label: string }>;
@@ -1593,6 +1673,7 @@ function MultiSiteDivergencePanel({
   conditions: string[];
   ptmActivityClass: Map<string, "de_novo" | "regulated" | "minor">;
   ptmPseudocountUsed: Map<string, boolean>;
+  canonicalPairs?: any[];
   onHighlightPtms: (labels: string[]) => void;
 }) {
   const [collapsed, setCollapsed] = useState(false);
@@ -1600,9 +1681,14 @@ function MultiSiteDivergencePanel({
   const [hoveredGene, setHoveredGene] = useState<string | null>(null);
 
   const entries = useMemo(
-    () => computeMultiSiteDivergence(uniquePtms, vectorByPtm, conditions, ptmActivityClass, ptmPseudocountUsed),
+    () => {
+      const serverEntries = (canonicalPairs || []).map(canonicalDivergenceToEntry).filter((entry): entry is SitePairEntry => entry !== null);
+      return serverEntries.length > 0
+        ? serverEntries
+        : computeMultiSiteDivergence(uniquePtms, vectorByPtm, conditions, ptmActivityClass, ptmPseudocountUsed);
+    },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [uniquePtms.length, conditions.join(","), vectorByPtm.size, ptmActivityClass.size, ptmPseudocountUsed.size]
+    [uniquePtms.length, conditions.join(","), vectorByPtm.size, ptmActivityClass.size, ptmPseudocountUsed.size, canonicalPairs?.length]
   );
 
   if (entries.length === 0) return null;
@@ -1642,7 +1728,14 @@ function MultiSiteDivergencePanel({
     geneSites.set(gene, Array.from(siteMap.values()).sort((a, b) => a.peakCondIdx - b.peakCondIdx));
   });
 
-  const counts: Record<DivergencePattern, number> = { signal_attenuation: 0, sequential_regulation: 0, multisite_coordination: 0 };
+  const counts: Record<DivergencePattern, number> = {
+    signal_attenuation: 0,
+    sequential_regulation: 0,
+    multisite_coordination: 0,
+    temporally_separated_opposite_direction: 0,
+    temporally_separated_same_direction: 0,
+    same_peak_coordination: 0,
+  };
   entries.forEach((e) => { counts[e.pattern]++; });
 
   const filteredGenes = patternFilter === "all"
@@ -2024,7 +2117,7 @@ function MultiSiteDivergencePanel({
 // ── TopNTimeSeriesPlot ───────────────────────────────────────────────────────
 function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId: number; ptmType?: string }) {
   const isUbi = ptmType.toLowerCase().includes("ubiquityl") || ptmType.toLowerCase().includes("ubiquitin");
-  const [data, setData] = useState<{ vector_data: TopNVectorPlotRow[]; top_n_ptms: Array<{ gene: string; position: string; label: string; protein_class?: { role: string; confidence: string; tags: string[]; ubi_context?: string } }>; suggested_n?: number | null; top_n_setting?: number; source?: string; inferred_receptors?: Array<{ name: string; receptor_class: string; downstream_ptm_count: number; downstream_ptms: string[]; via_kinases?: string[]; pathway?: string; signaling_pathway?: string; source?: string }> } | null>(null);
+  const [data, setData] = useState<{ vector_data: TopNVectorPlotRow[]; top_n_ptms: Array<{ gene: string; position: string; label: string; protein_class?: { role: string; confidence: string; tags: string[]; ubi_context?: string } }>; suggested_n?: number | null; top_n_setting?: number; source?: string; inferred_receptors?: Array<{ name: string; receptor_class: string; downstream_ptm_count: number; downstream_ptms: string[]; via_kinases?: string[]; pathway?: string; signaling_pathway?: string; source?: string }>; divergence_pairs?: any[] } | null>(null);
   const [loading, setLoading] = useState(true);
   const [checked, setChecked] = useState<Record<string, boolean>>({});
   const [metric, setMetric] = useState<"relative" | "absolute">("relative");
@@ -2880,6 +2973,7 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
           conditions={conditions}
           ptmActivityClass={ptmActivityClass}
           ptmPseudocountUsed={ptmPseudocountUsed}
+          canonicalPairs={data.divergence_pairs || []}
           onHighlightPtms={(labels) => {
             setHighlightedModulePtmLabels((prev) => {
               const same = prev.size === labels.length && labels.every((l) => prev.has(l));

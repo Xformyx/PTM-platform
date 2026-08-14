@@ -127,3 +127,16 @@ Backend: vector-plot (receptor inference)
 - [x] Human INSR의 제외·unknown·ortholog 치환 위험 분석
 - [x] 혼합 종 allowlist 및 species-aware annotation 보완 구현
 - [x] 회귀 검증·GitHub 반영 및 입력 운영 가이드 보고
+
+## Multisite PTM Divergence 활용 Audit
+- [x] 최신 main 반영 및 divergence 생성·저장·API 경로 점검
+- [x] Kinase·Wave·directionality·Report·Data-Grounded 활용 경로 분석
+- [x] 학술적 의미, 해석 경계, 미활용 영역 및 개선 우선순위 보고
+
+## Canonical Multisite PTM Divergence 업그레이드
+- [x] 최신 main 반영 및 API·Report·Frontend divergence 구현과 공유 계약 점검
+- [x] D0·D1 Canonical observation-first divergence contract와 안전한 wording 구현
+- [x] D2 Site-pair directionality, replicate/FDR confidence 구현
+- [x] D3 TMM contribution divergence 구현
+- [x] D4 API·Report·Frontend·Data-Grounded·receptor scoring evidence gate 통합
+- [x] 회귀 테스트·문서화·GitHub 반영

@@ -73,6 +73,39 @@ def build_tmm_evidence_profile(tmm: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def build_tmm_site_contribution_matrix(
+    tmm_scores: Mapping[str, Mapping[str, Any]],
+) -> dict[str, dict[str, float]]:
+    """Transpose per-kinase TMM details into normalized per-site mixtures.
+
+    ``compute_weighted_kinase_scores`` emits contribution details grouped by
+    kinase. Multisite analysis needs the inverse view: each PTM site receives
+    its condition-specific fractional mixture across kinase candidates.
+    """
+    by_site: dict[str, dict[str, float]] = defaultdict(dict)
+    for kinase, score in (tmm_scores or {}).items():
+        canonical = str(kinase or "").upper()
+        if not canonical:
+            continue
+        for detail in score.get("contribution_details", []) or []:
+            if not isinstance(detail, Mapping):
+                continue
+            site = str(detail.get("ptm_key") or "").strip()
+            if site:
+                by_site[site][canonical] = max(0.0, _number(detail.get("contribution_ratio")))
+
+    normalised: dict[str, dict[str, float]] = {}
+    for site, contributions in by_site.items():
+        total = sum(contributions.values())
+        if total <= 0:
+            continue
+        row = {kinase: round(value / total, 6) for kinase, value in sorted(contributions.items())}
+        normalised[site] = row
+        if "_" in site:
+            normalised.setdefault(site.replace("_", " ", 1), row)
+    return normalised
+
+
 def build_kinase_cowave_groups(
     kinase_scores: Sequence[Mapping[str, Any]],
     conditions: Sequence[str],

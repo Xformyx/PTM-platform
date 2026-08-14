@@ -610,3 +610,18 @@ def build_ai_divergence_summary(
     )
 
     return "\n".join(lines)
+
+
+# v14.0: API and worker services now share the same observation-first
+# MultisiteDivergence contract.  Keep legacy class/helper definitions above for
+# serialized historical orders and imports, but route all newly computed pairs
+# through the canonical shared implementation.
+from ptm_shared.multisite_divergence import (  # noqa: E402
+    TemporalDivergencePair as CanonicalTemporalDivergencePair,
+    build_ai_divergence_summary as _canonical_build_ai_divergence_summary,
+    compute_divergence_pairs as _canonical_compute_divergence_pairs,
+)
+
+TemporalDivergencePair = CanonicalTemporalDivergencePair
+compute_divergence_pairs = _canonical_compute_divergence_pairs
+build_ai_divergence_summary = _canonical_build_ai_divergence_summary

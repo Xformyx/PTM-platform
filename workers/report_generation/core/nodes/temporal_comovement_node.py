@@ -172,6 +172,7 @@ def run_temporal_comovement(state: dict) -> dict:
             sig_matrix=sig_matrix,
             sig_meta=sig_meta,
             enriched_data=enriched_data,
+            tmm_site_contributions=(state.get("kinase_activity_heatmap") or {}).get("tmm_site_contribution_matrix", {}),
         )
 
         # Build summary
@@ -2097,6 +2098,7 @@ def _compute_multisite_divergence_for_report(
     ptm_type: str = "phosphorylation",
     enriched_data: Optional[list] = None,
     clusters: Optional[list] = None,
+    tmm_site_contributions: Optional[dict] = None,
 ) -> list:
     """Compute multi-site temporal divergence pairs for LLM report injection.
 
@@ -2114,6 +2116,84 @@ def _compute_multisite_divergence_for_report(
     """
     if sig_matrix is None or len(sig_meta) < 2 or len(timepoints) < 3:
         return []
+
+    # v14.0: Canonical observation-first contract shared with API and receptor
+    # inference. Keep the legacy result shape below for existing cross-reference
+    # renderers, but source all pair evidence from one implementation.
+    try:
+        from ptm_shared.multisite_divergence import compute_divergence_pairs
+
+        matrix: Dict[str, Dict[str, float]] = {}
+        activity: Dict[str, str] = {}
+        denovo: set[str] = set()
+        for index, meta in enumerate(sig_meta):
+            gene = str(meta.get("gene") or "").strip()
+            site = str(meta.get("site") or "").strip()
+            if not gene or not site or index >= len(sig_matrix):
+                continue
+            key = f"{gene} {site}"
+            matrix[key] = {
+                str(timepoint): float(sig_matrix[index][time_index])
+                for time_index, timepoint in enumerate(timepoints)
+                if time_index < len(sig_matrix[index])
+            }
+            activity[key] = str(meta.get("activity_class") or "minor")
+            if meta.get("control_pseudocount_used"):
+                denovo.add(key)
+
+        enriched_lookup: Dict[str, dict] = {}
+        for row in enriched_data or []:
+            gene = str(row.get("gene") or row.get("Gene.Name") or "").strip()
+            site = str(row.get("position") or row.get("PTM_Position") or "").strip()
+            if gene and site:
+                enriched_lookup[f"{gene} {site}"] = row
+        cluster_map: Dict[str, Any] = {}
+        for cluster in clusters or []:
+            for member in cluster.get("member_details", []) or []:
+                key = str(member.get("key") or "")
+                if "_" in key:
+                    cluster_map[key.replace("_", " ", 1)] = cluster.get("cluster_id")
+
+        canonical_pairs, _ = compute_divergence_pairs(
+            matrix,
+            [str(timepoint) for timepoint in timepoints],
+            activity,
+            denovo,
+            enriched_lookup,
+            cluster_map,
+            ptm_type,
+            tmm_site_contributions=tmm_site_contributions,
+        )
+        canonical_results = []
+        condition_index = {str(timepoint): index for index, timepoint in enumerate(timepoints)}
+        for pair in canonical_pairs:
+            site_a = pair.siteA.rsplit(" ", 1)[-1]
+            site_b = pair.siteB.rsplit(" ", 1)[-1]
+            key_a, key_b = pair.siteA.replace(" ", "_", 1), pair.siteB.replace(" ", "_", 1)
+            canonical_results.append({
+                "gene": pair.protein,
+                "siteA": {"site": site_a, "key": key_a, "peak_tp": pair.peak_condA, "peak_tp_idx": condition_index.get(str(pair.peak_condA), 0), "peak_fc": pair.fcA, "is_de_novo": pair.is_denovoA},
+                "siteB": {"site": site_b, "key": key_b, "peak_tp": pair.peak_condB, "peak_tp_idx": condition_index.get(str(pair.peak_condB), 0), "peak_fc": pair.fcB, "is_de_novo": pair.is_denovoB},
+                "pattern": pair.pattern,
+                "legacy_pattern": pair.legacy_pattern,
+                "description": pair.to_ai_sentence(),
+                "covered_by_cowave": pair.clusterA is not None and pair.clusterA == pair.clusterB,
+                "directionality": pair.directionality,
+                "directionality_tier": pair.directionality_tier,
+                "tmm_contribution_divergence": pair.tmm_contribution_divergence,
+                "effect_size": pair.effect_size,
+                "confidence_tier": pair.confidence_tier,
+                "fdr_q_value": pair.fdr_q_value,
+                "resolution_warning": pair.resolution_warning,
+                "evidence_eligible_for_ai": pair.evidence_eligible_for_ai,
+                "evidence_eligible_for_receptor": pair.evidence_eligible_for_receptor,
+                "evidence_gate_reasons": pair.evidence_gate_reasons,
+                "interpretation": "observation_first",
+                "disambiguation_confidence": "evidence_gated",
+            })
+        return canonical_results
+    except Exception as canonical_error:
+        logger.warning("Canonical multisite divergence failed; using legacy fallback: %s", canonical_error)
 
     n_timepoints = len(timepoints)
 
@@ -2364,6 +2444,7 @@ def _build_comovement_llm_context(
     sig_matrix: Optional[np.ndarray] = None,
     sig_meta: Optional[list] = None,
     enriched_data: Optional[list] = None,
+    tmm_site_contributions: Optional[dict] = None,
 ) -> str:
     """Build structured text for LLM injection into write_sections.
 
@@ -2627,6 +2708,7 @@ def _build_comovement_llm_context(
     divergence_pairs = _compute_multisite_divergence_for_report(
         sig_matrix, sig_meta or [], timepoints, ptm_type=ptm_type,
         enriched_data=enriched_data, clusters=clusters,
+        tmm_site_contributions=tmm_site_contributions,
     )
     if divergence_pairs:
         # Resolution warning (global, based on first pair)

@@ -188,6 +188,38 @@ def _build_multi_source_context(state: dict) -> dict:
     sorted_vp = sorted(vp, key=lambda r: abs(float(r.get("ptm_relative_log2fc", 0) or 0)), reverse=True)
     ctx["top_ptms"] = sorted_vp[:30]
 
+    # ── Source 5: Canonical multisite PTM divergence (evidence-gated) ───────
+    # Build this from the raw vector rows because hypothesis generation occurs
+    # before the report-side temporal-comovement node. Only pairs that passed
+    # the observation-first evidence gate are supplied to the LLM.
+    try:
+        from ptm_shared.multisite_divergence import compute_divergence_pairs
+        divergence_matrix: dict[str, dict[str, float]] = {}
+        divergence_activity: dict[str, str] = {}
+        divergence_denovo: set[str] = set()
+        for row in vp:
+            gene = str(row.get("gene") or row.get("Gene.Name") or "").strip()
+            position = str(row.get("position") or row.get("PTM_Position") or "").strip()
+            condition = str(row.get("condition") or row.get("Condition") or "").strip()
+            if not gene or not position or not condition:
+                continue
+            key = f"{gene} {position}"
+            divergence_matrix.setdefault(key, {})[condition] = float(row.get("ptm_relative_log2fc", 0) or 0)
+            divergence_activity[key] = str(row.get("activity_class") or row.get("Activity_Class") or "regulated")
+            if bool(row.get("control_pseudocount_used")):
+                divergence_denovo.add(key)
+        divergence_pairs, _ = compute_divergence_pairs(
+            divergence_matrix,
+            conditions or sorted({condition for values in divergence_matrix.values() for condition in values}),
+            divergence_activity,
+            divergence_denovo,
+            tmm_site_contributions=kah.get("tmm_site_contribution_matrix", {}),
+        )
+        ctx["multisite_divergence"] = [pair.to_dict() for pair in divergence_pairs if pair.evidence_eligible_for_ai][:12]
+    except Exception as divergence_error:
+        logger.warning("[Co-Scientist] Canonical multisite divergence unavailable: %s", divergence_error)
+        ctx["multisite_divergence"] = []
+
     # ── Source 6: Observational directionality evidence ─────────────────────
     # Directionality remains independent from the kinase cascade heuristics and
     # is never promoted to causality without a later perturbation upload.
@@ -221,7 +253,7 @@ def _build_multi_source_context(state: dict) -> dict:
         f"[Co-Scientist] Built multi-source context: "
         f"cascade={len(cascade_flow)} steps, cowave={len(cowave_groups)} groups, "
         f"autophospho={len(auto_phospho)}, tmm={len(tmm_summary)}, "
-        f"directionality={len(directed_records)}, top_ptms={len(ctx['top_ptms'])}"
+        f"directionality={len(directed_records)}, multisite={len(ctx['multisite_divergence'])}, top_ptms={len(ctx['top_ptms'])}"
     )
     return ctx
 
@@ -351,6 +383,23 @@ def _generate_co_scientist_hypotheses(
             )
         sections.append("\n".join(lines))
 
+    multisite = multi_ctx.get("multisite_divergence", [])
+    if multisite:
+        lines = [
+            "=== EVIDENCE-GATED MULTISITE PTM DIVERGENCE ===",
+            "These are observed site-specific temporal patterns. They do not establish a single kinase, feedback loop, functional activation/inhibition, or causality.",
+        ]
+        for pair in multisite[:12]:
+            site_a = str(pair.get("siteA", "")).rsplit(" ", 1)[-1]
+            site_b = str(pair.get("siteB", "")).rsplit(" ", 1)[-1]
+            tmm = pair.get("tmm_contribution_divergence") or {}
+            lines.append(
+                f"  {pair.get('protein')} {site_a}/{site_b}: pattern={pair.get('pattern')}, "
+                f"tier={pair.get('directionality_tier')}, FDR={pair.get('fdr_q_value')}, "
+                f"TMM={tmm.get('classification', 'unavailable')}"
+            )
+        sections.append("\n".join(lines))
+
     # Experimental context
     tissue = exp_context.get("tissue") or exp_context.get("cell_type") or "cells"
     treatment = exp_context.get("treatment") or "the applied treatment"
@@ -380,6 +429,7 @@ CRITICAL INSTRUCTIONS:
 5. SUBSTRATE-LEVEL SPECIFICITY: Name specific substrates (gene_position) and explain their biological roles.
 6. DATA-GROUNDED: Every hypothesis must cite specific numbers from the data (e.g., "21/28 substrates peak at 1h").
 7. DIRECTIONALITY BOUNDARY: D0–D3 directionality is observational. Use "temporally precedes", "is consistent with", or "candidate regulatory path". Never write "causes", "drives", "directly activates", "feedback loop", or "proves" unless separately supplied perturbation evidence explicitly supports it.
+8. MULTISITE BOUNDARY: Same-peak site coordination does not prove one kinase/processivity. Opposite-direction site responses do not prove activation, inhibition, or feedback. Use site-specific TMM mixture differences only as condition-specific attribution candidates.
 
 Format each hypothesis as:
 HYPOTHESIS:

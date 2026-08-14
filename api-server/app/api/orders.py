@@ -3234,14 +3234,14 @@ async def get_vector_plot_data(
                 enriched_lookup=_enriched_lookup,
                 ptm_cluster_map=_ptm_to_cluster,
                 ptm_type=ptm_type if 'ptm_type' in locals() else "phosphorylation",
+                tmm_site_contributions=(order.kinase_activity_heatmap or {}).get("tmm_site_contribution_matrix", {}),
             )
             # Store as dicts (include AI layer for each pair)
             _divergence_pairs = [p.to_dict() for p in _pair_objs]
             logging.getLogger("vector_plot").info(
                 f"MultiSiteDivergence: {len(_divergence_pairs)} pairs found "
-                f"(attenuation={sum(1 for p in _divergence_pairs if p['pattern']=='signal_attenuation')}, "
-                f"sequential={sum(1 for p in _divergence_pairs if p['pattern']=='sequential_regulation')}, "
-                f"coordination={sum(1 for p in _divergence_pairs if p['pattern']=='multisite_coordination')})"
+                f"(AI-eligible={sum(1 for p in _divergence_pairs if p.get('evidence_eligible_for_ai'))}, "
+                f"receptor-eligible={sum(1 for p in _divergence_pairs if p.get('evidence_eligible_for_receptor'))})"
             )
 
         # Signal weight and FC cap per class (with divergence-based de_novo boost)
@@ -3275,7 +3275,9 @@ async def get_vector_plot_data(
             _ri["unique_regulated_count"] = _unique_regulated_count
 
         # ══════════════════════════════════════════════════════════════════════
-        # v12.0: Temporal Cascade Score per Receptor (from MultiSiteDivergence)
+        # v14.0: Evidence-gated multisite score per receptor.  Only
+        # reproducible, context-supported site-pair observations contribute;
+        # no pair is interpreted as feedback, a cascade, or a causal mechanism.
         # ══════════════════════════════════════════════════════════════════════
         # For each receptor, check if its downstream PTMs are involved in divergence pairs.
         # If so, compute a temporal_cascade_score that reflects:
@@ -3288,25 +3290,23 @@ async def get_vector_plot_data(
             _via_kinases = _ri.get("via_kinases", [])
             _cascade_score = 0.0
             _motif_validations = 0
-            _feedback_loops = 0
-            _cascade_steps = 0
+            _feedback_loops = 0  # retained for backward-compatible API fields; always observationally zero
+            _cascade_steps = 0   # retained for backward-compatible API fields; always observationally zero
             _pathway_coherence = 0
 
             for _dp in _divergence_pairs:
-                _sA = _dp["siteA"]
-                _sB = _dp["siteB"]
+                if not _dp.get("evidence_eligible_for_receptor"):
+                    continue
+                _sA = str(_dp.get("siteA") or "")
+                _sB = str(_dp.get("siteB") or "")
                 # Check if at least one site in this pair is downstream of this receptor
                 _has_A = _sA in _ds_ptms
                 _has_B = _sB in _ds_ptms
                 if not (_has_A or _has_B):
                     continue
-                # v12.1 #4: Low confidence tier pairs do not contribute to scoring
-                if _dp.get("confidence_tier") == "Low":
-                    continue
-                # v12.1 #6: Non-significant pairs (p>0.05) get halved contribution
-                _sig_multiplier = 0.5 if (_dp.get("is_significant") is False) else 1.0
 
-                # (1) Motif validation: check if receptor's kinases match site motifs
+                # (1) Context agreement: receptor via-kinases overlap the two
+                # site candidate lists. This is a plausibility score only.
                 _via_lower = {k.lower() for k in _via_kinases}
                 for _ks_k in (_dp.get("ks_kinasesA", []) if _has_A else []):
                     if isinstance(_ks_k, str) and _ks_k.lower() in _via_lower:
@@ -3315,29 +3315,18 @@ async def get_vector_plot_data(
                     if isinstance(_ks_k, str) and _ks_k.lower() in _via_lower:
                         _motif_validations += 1
 
-                # (2) Feedback detection
-                if _dp["pattern"] == "signal_attenuation" and _has_A and _has_B:
-                    _feedback_loops += 1
-                    _cascade_score += 0.15 * _sig_multiplier
-                elif _dp["pattern"] == "signal_attenuation" and (_has_A or _has_B):
-                    _cascade_score += 0.08 * _sig_multiplier
-
-                # (3) Cascade depth
-                if _dp["pattern"] == "sequential_regulation":
-                    _cascade_steps += 1
-                    _lag_bonus = min(_dp["temporal_lag"] * 0.03, 0.12)
-                    _cascade_score += (0.10 + _lag_bonus) * _sig_multiplier
-
-                # (4) Pathway coherence
+                # (2) Shared pathway context is supporting evidence, not a
+                # mechanistic conclusion.
                 if _dp.get("shared_pathways"):
                     _pathway_coherence += 1
-                    _cascade_score += 0.05 * _sig_multiplier
+                    _cascade_score += 0.05
 
-                # (5) Multisite coordination: receptor's kinase phosphorylates multiple sites simultaneously
-                if _dp["pattern"] == "multisite_coordination" and _has_A and _has_B:
-                    _cascade_score += 0.12 * _sig_multiplier
+                # (3) A divergent TMM mixture is condition-specific support
+                # for a site-pair difference; it does not determine direction.
+                if (_dp.get("tmm_contribution_divergence") or {}).get("classification") == "divergent_kinase_mixture":
+                    _cascade_score += 0.05
 
-            # Motif validation bonus (independent of divergence pattern)
+            # Context agreement bonus (independent of divergence pattern)
             if _motif_validations > 0:
                 _cascade_score += min(_motif_validations * 0.08, 0.24)
 
@@ -8051,6 +8040,8 @@ async def kinase_activity_heatmap(
             q_threshold=Q_THRESHOLD,
             ptm_qvalues=ptm_qvalues,
         )
+        from ptm_shared.tmm_multikinase_integration import build_tmm_site_contribution_matrix
+        tmm_site_contribution_matrix = build_tmm_site_contribution_matrix(tmm_scores)
         # Merge TMM scores back into kinase_scores_filtered entries
         # Option A: Replace up/down sums with TMM-weighted values
         for ks_entry in kinase_scores_filtered:
@@ -8183,6 +8174,7 @@ async def kinase_activity_heatmap(
         "cowave_group_provenance": "tmm_weighted" if tmm_weighted_cowave_groups else "raw_pre_tmm",
         "tmm_weighted_temporal_cascade": tmm_weighted_temporal_cascade,
         "tmm_kinase_pair_directionality": tmm_kinase_pair_directionality,
+        "tmm_site_contribution_matrix": tmm_site_contribution_matrix if 'tmm_site_contribution_matrix' in locals() else {},
         "available_patterns": sorted(all_patterns),
         "translocation_candidates": translocation_candidates,
         "scoring_method": "stratified_winsorized_mean_v11.3+tmm_deconvolution",
