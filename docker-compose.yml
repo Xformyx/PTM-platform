@@ -77,8 +77,8 @@ services:
     build:
       context: .
       dockerfile: api-server/Dockerfile
-    args:
-      VERSION: ${VERSION_API:-001}
+      args:
+        VERSION: ${VERSION_API:-001}
     image: ptm-api-server:${VERSION_API:-001}
     container_name: ptm-api-server
     healthcheck:
@@ -91,12 +91,12 @@ services:
       - .env
     volumes:
       - ./VERSION:/app/VERSION:ro
-     - ./GIT_HASH:/app/GIT_HASH:ro
-     - ./GIT_DATE:/app/GIT_DATE:ro
-     - ./api-server/app:/app/app
+      - ./GIT_HASH:/app/GIT_HASH:ro
+      - ./GIT_DATE:/app/GIT_DATE:ro
+      - ./api-server/app:/app/app
       - ./ptm_shared:/opt/ptm_shared:ro
-     - ./data:/app/data
-     - ./storage/reports:/app/storage/reports
+      - ./data:/app/data
+      - ./storage/reports:/app/storage/reports
       - ./storage/logs:/app/storage/logs
       - ./storage/file_share:/app/storage/file_share
       - ./storage/ptmquant:/app/storage/ptmquant
@@ -178,8 +178,8 @@ services:
 
   celery-worker-preprocessing:
     build:
-      context: ./workers
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: workers/Dockerfile
       args:
         VERSION: ${VERSION_WORKERS:-001}
     image: ptm-workers:${VERSION_WORKERS:-001}
@@ -218,8 +218,8 @@ services:
 
   celery-worker-rag:
     build:
-      context: ./workers
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: workers/Dockerfile
       args:
         VERSION: ${VERSION_WORKERS:-001}
     image: ptm-workers:${VERSION_WORKERS:-001}
@@ -285,8 +285,8 @@ services:
 
   celery-worker-report:
     build:
-      context: ./workers
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: workers/Dockerfile
       args:
         VERSION: ${VERSION_WORKERS:-001}
     image: ptm-workers:${VERSION_WORKERS:-001}
