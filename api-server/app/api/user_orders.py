@@ -692,7 +692,10 @@ async def _create_order_from_user_impl(
 
     ptm_mode = "phospho" if ptm_type == "phosphorylation" else "ubi"
     from ptm_shared.species_registry import resolve_species_context
-    species_context = resolve_species_context(species)
+    try:
+        species_context = resolve_species_context(species)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     # Gather ChromaDB collections for RAG retrieval (use all active)
     coll_result = await db.execute(

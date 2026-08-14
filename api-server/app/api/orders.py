@@ -60,6 +60,15 @@ def _resolve_fasta(reference_dir: str, species: str) -> str | None:
     return None
 
 
+def _require_species_context(species: str | None):
+    """Resolve a registered species label or return an actionable API error."""
+    from ptm_shared.species_registry import resolve_species_context
+    try:
+        return resolve_species_context(species)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 def _validate_order_code(code: str) -> None:
     """Validate order code for safe use as directory name."""
     import re
@@ -869,8 +878,7 @@ async def start_order(
 
     ptm_mode = "phospho" if order.ptm_type == "phosphorylation" else "ubi"
 
-    from ptm_shared.species_registry import resolve_species_context
-    species_context = resolve_species_context(order.species)
+    species_context = _require_species_context(order.species)
 
     # Gather ChromaDB collections for RAG retrieval
     # If user selected specific collections, use only those; otherwise use all active
@@ -1184,8 +1192,7 @@ async def run_stage(
     celery_app.conf.broker_url = os.getenv("CELERY_BROKER_URL", "redis://redis:6379/1")
     celery_app.conf.result_backend = os.getenv("CELERY_RESULT_BACKEND", "redis://redis:6379/2")
 
-    from ptm_shared.species_registry import resolve_species_context
-    species_context = resolve_species_context(order.species)
+    species_context = _require_species_context(order.species)
 
     sample_cfg = order.sample_config or {}
     single_time_point = sample_cfg.get("single_time_point", False)
