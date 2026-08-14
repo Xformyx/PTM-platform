@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { Link, useNavigate } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
-import { PlusCircle, ClipboardList, Play, ChevronDown, ChevronUp, ChevronsUpDown, AlertCircle, Trash2, Square, Share2, Loader2, GitCompareArrows } from "lucide-react";
+import { PlusCircle, ClipboardList, Play, ChevronDown, ChevronUp, ChevronsUpDown, AlertCircle, Trash2, Square, Share2, Loader2, GitCompareArrows, StretchHorizontal, UnfoldHorizontal } from "lucide-react";
 import { api } from "@/lib/api";
 import type { Order } from "@/lib/types";
 import { Card, CardContent } from "@/components/ui/card";
@@ -65,6 +65,26 @@ const statusBadgeVariant = (s: string): { variant: "success" | "destructive" | "
 type StatusFilter = "all" | "registered" | "running" | "completed" | "failed";
 type SortField = "created_at" | "completed_at";
 type SortDir = "asc" | "desc";
+type TableLayoutMode = "fit" | "expand";
+
+const ORDER_LIST_LAYOUT_KEY = "ptm-order-list-layout-mode";
+
+function loadTableLayoutMode(): TableLayoutMode {
+  try {
+    const raw = localStorage.getItem(ORDER_LIST_LAYOUT_KEY);
+    return raw === "expand" ? "expand" : "fit";
+  } catch {
+    return "fit";
+  }
+}
+
+function saveTableLayoutMode(mode: TableLayoutMode) {
+  try {
+    localStorage.setItem(ORDER_LIST_LAYOUT_KEY, mode);
+  } catch {
+    /* ignore */
+  }
+}
 
 function SortIcon({ field, sort }: { field: SortField; sort: { field: SortField; dir: SortDir } | null }) {
   if (!sort || sort.field !== field) return <ChevronsUpDown className="h-3 w-3 ml-1 opacity-40" />;
@@ -157,6 +177,8 @@ export default function OrderList() {
   const stopRequestRef = useRef(false);
   const [startingOrderId, setStartingOrderId] = useState<number | null>(null);
   const [compareSelection, setCompareSelection] = useState<number[]>([]);
+  const [tableLayout, setTableLayout] = useState<TableLayoutMode>(() => loadTableLayoutMode());
+  const isExpandLayout = tableLayout === "expand";
 
   const [colWidths, setColWidths] = useState<number[]>(() => loadOrderListColWidths());
   const colWidthsRef = useRef<number[]>(colWidths);
@@ -405,83 +427,133 @@ export default function OrderList() {
         </div>
       </div>
 
-      {/* Filter Badges */}
-      <div className="flex gap-2">
-        {filters.map((f) => (
-          <Badge
-            key={f}
-            variant={filter === f ? "default" : "outline"}
-            className="cursor-pointer capitalize"
-            onClick={() => setFilter(f)}
+      {/* Filter Badges + layout mode */}
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex gap-2">
+          {filters.map((f) => (
+            <Badge
+              key={f}
+              variant={filter === f ? "default" : "outline"}
+              className="cursor-pointer capitalize"
+              onClick={() => setFilter(f)}
+            >
+              {f}
+            </Badge>
+          ))}
+        </div>
+        <div
+          className="inline-flex items-center rounded-md border bg-background p-0.5"
+          role="group"
+          aria-label="Table column layout"
+        >
+          <Button
+            type="button"
+            size="sm"
+            variant={tableLayout === "fit" ? "secondary" : "ghost"}
+            className="h-7 px-2.5 text-xs gap-1.5"
+            title="Fit columns to window (truncate long text)"
+            onClick={() => {
+              setTableLayout("fit");
+              saveTableLayoutMode("fit");
+            }}
           >
-            {f}
-          </Badge>
-        ))}
+            <StretchHorizontal className="h-3.5 w-3.5" />
+            Fit
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant={tableLayout === "expand" ? "secondary" : "ghost"}
+            className="h-7 px-2.5 text-xs gap-1.5"
+            title="Show full column text with horizontal scroll"
+            onClick={() => {
+              setTableLayout("expand");
+              saveTableLayoutMode("expand");
+            }}
+          >
+            <UnfoldHorizontal className="h-3.5 w-3.5" />
+            Full
+          </Button>
+        </div>
       </div>
 
       {/* Table */}
       <Card>
         <CardContent className="p-0 overflow-x-auto">
           {filtered.length > 0 ? (
-            <Table ref={tableRef} className="w-full table-fixed min-w-[1200px]">
-              <colgroup>
-                <col style={{ width: "36px" }} />
-                {colWidths.map((pct, i) => (
-                  <col key={i} style={{ width: `${pct}%` }} />
-                ))}
-              </colgroup>
+            <Table
+              ref={tableRef}
+              className={cn(
+                "w-full",
+                isExpandLayout ? "table-auto min-w-max" : "table-fixed min-w-[1200px]"
+              )}
+            >
+              {!isExpandLayout && (
+                <colgroup>
+                  <col style={{ width: "36px" }} />
+                  {colWidths.map((pct, i) => (
+                    <col key={i} style={{ width: `${pct}%` }} />
+                  ))}
+                </colgroup>
+              )}
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-8 px-2">
                     <span className="sr-only">Compare</span>
                   </TableHead>
-                  <TableHead className="relative">
+                  <TableHead className={cn("relative", isExpandLayout && "whitespace-nowrap")}>
                     Order ID
-                    <ColResizeHandle colIndex={0} onStart={startColResize} />
+                    {!isExpandLayout && <ColResizeHandle colIndex={0} onStart={startColResize} />}
                   </TableHead>
-                  <TableHead className="relative">
+                  <TableHead className={cn("relative", isExpandLayout && "whitespace-nowrap")}>
                     Project
-                    <ColResizeHandle colIndex={1} onStart={startColResize} />
+                    {!isExpandLayout && <ColResizeHandle colIndex={1} onStart={startColResize} />}
                   </TableHead>
-                  <TableHead className="relative">
+                  <TableHead className={cn("relative", isExpandLayout && "whitespace-nowrap")}>
                     PTM Type
-                    <ColResizeHandle colIndex={2} onStart={startColResize} />
+                    {!isExpandLayout && <ColResizeHandle colIndex={2} onStart={startColResize} />}
                   </TableHead>
-                  <TableHead className="relative">
+                  <TableHead className={cn("relative", isExpandLayout && "whitespace-nowrap")}>
                     Species
-                    <ColResizeHandle colIndex={3} onStart={startColResize} />
+                    {!isExpandLayout && <ColResizeHandle colIndex={3} onStart={startColResize} />}
                   </TableHead>
-                  <TableHead className="relative">
+                  <TableHead className={cn("relative", isExpandLayout && "whitespace-nowrap")}>
                     Status
-                    <ColResizeHandle colIndex={4} onStart={startColResize} />
+                    {!isExpandLayout && <ColResizeHandle colIndex={4} onStart={startColResize} />}
                   </TableHead>
-                  <TableHead className="relative">
+                  <TableHead className={cn("relative", isExpandLayout && "whitespace-nowrap")}>
                     Progress
-                    <ColResizeHandle colIndex={5} onStart={startColResize} />
+                    {!isExpandLayout && <ColResizeHandle colIndex={5} onStart={startColResize} />}
                   </TableHead>
-                  <TableHead className="relative">
+                  <TableHead className={cn("relative", isExpandLayout && "whitespace-nowrap")}>
                     Elapsed
-                    <ColResizeHandle colIndex={6} onStart={startColResize} />
+                    {!isExpandLayout && <ColResizeHandle colIndex={6} onStart={startColResize} />}
                   </TableHead>
                   <TableHead
-                    className="relative cursor-pointer select-none hover:bg-muted/50"
+                    className={cn(
+                      "relative cursor-pointer select-none hover:bg-muted/50",
+                      isExpandLayout && "whitespace-nowrap"
+                    )}
                     onClick={() => handleSort("created_at")}
                   >
                     <div className="flex items-center pr-1">
                       Created <SortIcon field="created_at" sort={sort} />
                     </div>
-                    <ColResizeHandle colIndex={7} onStart={startColResize} />
+                    {!isExpandLayout && <ColResizeHandle colIndex={7} onStart={startColResize} />}
                   </TableHead>
                   <TableHead
-                    className="relative cursor-pointer select-none hover:bg-muted/50"
+                    className={cn(
+                      "relative cursor-pointer select-none hover:bg-muted/50",
+                      isExpandLayout && "whitespace-nowrap"
+                    )}
                     onClick={() => handleSort("completed_at")}
                   >
                     <div className="flex items-center pr-1">
                       Updated <SortIcon field="completed_at" sort={sort} />
                     </div>
-                    <ColResizeHandle colIndex={8} onStart={startColResize} />
+                    {!isExpandLayout && <ColResizeHandle colIndex={8} onStart={startColResize} />}
                   </TableHead>
-                  <TableHead className="pr-5">Action</TableHead>
+                  <TableHead className={cn("pr-5", isExpandLayout && "whitespace-nowrap")}>Action</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -507,7 +579,10 @@ export default function OrderList() {
                         }}
                       />
                     </TableCell>
-                    <TableCell className="truncate" title={order.order_code}>
+                    <TableCell
+                      className={cn(isExpandLayout ? "whitespace-nowrap" : "truncate")}
+                      title={isExpandLayout ? undefined : order.order_code}
+                    >
                       <Link
                         to={`/admin/orders/${order.id}`}
                         className="font-mono text-primary hover:underline font-medium"
@@ -516,9 +591,12 @@ export default function OrderList() {
                         {order.order_code}
                       </Link>
                     </TableCell>
-                    <TableCell className="truncate" title={order.project_name}>
-                      <div className="flex items-center gap-1.5 min-w-0">
-                        <span className="truncate">{order.project_name}</span>
+                    <TableCell
+                      className={cn(isExpandLayout ? "whitespace-nowrap" : "truncate")}
+                      title={isExpandLayout ? undefined : order.project_name}
+                    >
+                      <div className={cn("flex items-center gap-1.5", !isExpandLayout && "min-w-0")}>
+                        <span className={cn(!isExpandLayout && "truncate")}>{order.project_name}</span>
                         {order.is_shared && (
                           <Badge
                             variant="outline"
@@ -529,8 +607,12 @@ export default function OrderList() {
                         )}
                       </div>
                     </TableCell>
-                    <TableCell className="capitalize truncate">{order.ptm_type}</TableCell>
-                    <TableCell className="capitalize truncate">{order.species}</TableCell>
+                    <TableCell className={cn("capitalize", isExpandLayout ? "whitespace-nowrap" : "truncate")}>
+                      {order.ptm_type}
+                    </TableCell>
+                    <TableCell className={cn("capitalize", isExpandLayout ? "whitespace-nowrap" : "truncate")}>
+                      {order.species}
+                    </TableCell>
                     <TableCell>
                       {(() => {
                         const isHalted = order.stage_detail?.startsWith("Halted:");
