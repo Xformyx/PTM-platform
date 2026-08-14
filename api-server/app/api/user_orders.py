@@ -528,7 +528,12 @@ async def _create_order_from_user_impl(
     # Resolve FASTA from reference dir if not uploaded
     if not fasta_path:
         organism = config_data.get("organism", "mouse")
-        species_dir = Path(settings.REFERENCE_DIR) / organism.lower()
+        from ptm_shared.species_registry import resolve_species_context
+        try:
+            species_context = resolve_species_context(organism)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        species_dir = Path(settings.REFERENCE_DIR) / species_context.reference_subdir
         if species_dir.is_dir():
             for fa in species_dir.glob("*.fasta"):
                 fasta_path = str(fa)
@@ -686,9 +691,8 @@ async def _create_order_from_user_impl(
         condition_map = _build_condition_map(sample_config)
 
     ptm_mode = "phospho" if ptm_type == "phosphorylation" else "ubi"
-    species_map = {"mouse": "10090", "human": "9606", "rat": "10116"}
-    kegg_map = {"mouse": "mmu", "human": "hsa", "rat": "rno"}
-    species_lower = (species or "mouse").lower()
+    from ptm_shared.species_registry import resolve_species_context
+    species_context = resolve_species_context(species)
 
     # Gather ChromaDB collections for RAG retrieval (use all active)
     coll_result = await db.execute(
@@ -711,8 +715,11 @@ async def _create_order_from_user_impl(
         "ptm_mode": ptm_mode,
         "condition_map": condition_map if condition_map else None,
         "single_time_point": sample_cfg.get("single_time_point", False),
-        "species_tax_id": species_map.get(species_lower, "10090"),
-        "kegg_organism": kegg_map.get(species_lower, "mmu"),
+        "species_tax_id": species_context.taxonomy_id,
+        "kegg_organism": species_context.kegg_organism,
+        "species": species_context.analysis_species,
+        "species_label": species_context.label,
+        "custom_reference": species_context.custom_reference,
         "analysis_options": order.analysis_options,
         "chromadb_collections": active_collections,
         "llm_provider": report_opts.get("llm_provider", "ollama"),

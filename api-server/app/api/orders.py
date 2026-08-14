@@ -43,10 +43,15 @@ async def _clear_order_locks(order_id: int) -> int:
 
 
 def _resolve_fasta(reference_dir: str, species: str) -> str | None:
-    """Find the first .fasta/.fa file under reference_dir/<species>/."""
+    """Find the first FASTA under the species label's registered reference directory."""
     from pathlib import Path
+    from ptm_shared.species_registry import resolve_species_context
 
-    species_dir = Path(reference_dir) / species.lower()
+    try:
+        context = resolve_species_context(species)
+    except ValueError:
+        return None
+    species_dir = Path(reference_dir) / context.reference_subdir
     if not species_dir.is_dir():
         return None
     for f in sorted(species_dir.iterdir()):
@@ -864,9 +869,8 @@ async def start_order(
 
     ptm_mode = "phospho" if order.ptm_type == "phosphorylation" else "ubi"
 
-    species_map = {"mouse": "10090", "human": "9606", "rat": "10116"}
-    kegg_map = {"mouse": "mmu", "human": "hsa", "rat": "rno"}
-    species_lower = (order.species or "mouse").lower()
+    from ptm_shared.species_registry import resolve_species_context
+    species_context = resolve_species_context(order.species)
 
     # Gather ChromaDB collections for RAG retrieval
     # If user selected specific collections, use only those; otherwise use all active
@@ -905,8 +909,11 @@ async def start_order(
         "ptm_mode": ptm_mode,
         "condition_map": condition_map if condition_map else None,
         "single_time_point": sample_cfg.get("single_time_point", False),
-        "species_tax_id": species_map.get(species_lower, "10090"),
-        "kegg_organism": kegg_map.get(species_lower, "mmu"),
+        "species_tax_id": species_context.taxonomy_id,
+        "kegg_organism": species_context.kegg_organism,
+        "species": species_context.analysis_species,
+        "species_label": species_context.label,
+        "custom_reference": species_context.custom_reference,
         "analysis_options": order.analysis_options,
         "chromadb_collections": active_collections,
         "llm_provider": report_opts.get("llm_provider", "ollama"),
@@ -1177,9 +1184,8 @@ async def run_stage(
     celery_app.conf.broker_url = os.getenv("CELERY_BROKER_URL", "redis://redis:6379/1")
     celery_app.conf.result_backend = os.getenv("CELERY_RESULT_BACKEND", "redis://redis:6379/2")
 
-    species_map = {"mouse": "10090", "human": "9606", "rat": "10116"}
-    kegg_map = {"mouse": "mmu", "human": "hsa", "rat": "rno"}
-    species_lower = (order.species or "mouse").lower()
+    from ptm_shared.species_registry import resolve_species_context
+    species_context = resolve_species_context(order.species)
 
     sample_cfg = order.sample_config or {}
     single_time_point = sample_cfg.get("single_time_point", False)
@@ -1199,8 +1205,11 @@ async def run_stage(
             "ptm_mode": ptm_mode,
             "condition_map": condition_map if condition_map else None,
             "single_time_point": single_time_point,
-            "species_tax_id": species_map.get(species_lower, "10090"),
-            "kegg_organism": kegg_map.get(species_lower, "mmu"),
+            "species_tax_id": species_context.taxonomy_id,
+            "kegg_organism": species_context.kegg_organism,
+            "species": species_context.analysis_species,
+            "species_label": species_context.label,
+            "custom_reference": species_context.custom_reference,
             "analysis_options": order.analysis_options,
             "experimental_context": {**(order.analysis_context or {}), "ptm_type": order.ptm_type},
             "top_n_ptms": (order.report_options or {}).get("top_n_ptms", 50),

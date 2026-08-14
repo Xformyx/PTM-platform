@@ -674,6 +674,7 @@ export default function OrderCreate() {
                         <SelectItem value="mouse">Mouse</SelectItem>
                         <SelectItem value="human">Human</SelectItem>
                         <SelectItem value="rat">Rat</SelectItem>
+                        <SelectItem value="rat_hir">Rat_hir (Rat + human INSR)</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -692,6 +693,11 @@ export default function OrderCreate() {
                   <p className="text-xs text-muted-foreground mt-1">
                     Automatically resolved from <code className="text-xs bg-muted px-1 rounded">data/reference/{form.species}/</code>
                   </p>
+                  {form.species === "rat_hir" && (
+                    <p className="text-xs text-amber-700 dark:text-amber-300 mt-2">
+                      Custom rat reference: retain the human INSR entry with its accession, <code>GN=INSR</code>, and <code>OX=9606</code>. Rat remains the order-level annotation species.
+                    </p>
+                  )}
                 </div>
 
                 {sampleColumns.length > 0 && (

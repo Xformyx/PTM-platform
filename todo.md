@@ -140,3 +140,9 @@ Backend: vector-plot (receptor inference)
 - [x] D3 TMM contribution divergence 구현
 - [x] D4 API·Report·Frontend·Data-Grounded·receptor scoring evidence gate 통합
 - [x] 회귀 테스트·문서화·GitHub 반영
+
+## Rat_hir Species Registry 호환성
+- [x] 최신 main 반영 및 custom species alias·FASTA 선택·annotation 경로 점검
+- [x] Rat_hir의 rat-base alias·custom FASTA registry 및 human INSR provenance 정의
+- [x] Species validation·UI·FASTA selection·rat annotation routing 보완 구현
+- [x] 회귀 검증·GitHub 반영 및 Rat_hir 입력 가이드 보고
