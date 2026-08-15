@@ -39,7 +39,10 @@ function fmtDate(iso: string | null | undefined): string {
 function fmtElapsed(order: Order): string {
   const start = order.started_at ? new Date(order.started_at).getTime() : null;
   if (!start) return "—";
-  const end = (order.status === "completed" || order.status === "failed" || order.status === "cancelled") && order.completed_at
+  const terminal = order.status === "completed" || order.status === "failed" || order.status === "cancelled";
+  // Cancelled/failed used to omit completed_at — without an end time, do not keep counting to now.
+  if (terminal && !order.completed_at) return "—";
+  const end = terminal && order.completed_at
     ? new Date(order.completed_at).getTime()
     : Date.now();
   const ms = Math.max(0, end - start);

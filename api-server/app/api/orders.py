@@ -1362,6 +1362,10 @@ async def cancel_order(
         )
 
     order.status = "cancelled"
+    # Stop the elapsed-time clock (UI uses completed_at for cancelled/failed/completed).
+    order.completed_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    if not order.stage_detail or not str(order.stage_detail).startswith("Cancelled"):
+        order.stage_detail = "Cancelled by user"
     await db.commit()
 
     await _clear_order_locks(order_id)
