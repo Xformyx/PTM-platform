@@ -5,7 +5,7 @@
 
 ## 결론
 
-조사 범위에서 **분 단위의 촘촘한 생물학적 timepoint, DIA, Orbitrap Astral, 전역 phosphoproteome, 공개 raw 및 처리 데이터**를 동시에 충족하는 공개 데이터셋은 확인하지 못했다. 시간축 자체가 충분한 자료는 존재하지만 대부분 비-Astral·비-DIA이며, Astral DIA phosphoproteomics 자료는 단일 stimulation endpoint 또는 기술·atlas 중심 설계였다.
+조사 범위에서 **분 단위의 촘촘한 생물학적 timepoint, DIA, Orbitrap Astral, enrichment 기반 전역 phosphoproteome, 공개 raw 및 처리 데이터**를 동시에 충족하는 공개 데이터셋은 확인하지 못했다. 시간축 자체가 충분한 자료는 존재하지만 대부분 비-Astral·비-DIA이며, Astral DIA phosphoproteomics 자료는 단일 stimulation endpoint 또는 기술·atlas 중심 설계였다.
 
 따라서 **human INSR을 발현한 rat 배경의 직접 설계 insulin signaling time-course를 TMM의 primary benchmark로 사용**하는 판단이 타당하다. 공개 자료는 primary truth set을 대체하는 용도가 아니라, 시간적 일반화·알려진 pathway chronology·DIA 기술 재현성을 각각 독립적으로 점검하는 **secondary reference**로 사용하는 것이 가장 설득력 있다.
 
@@ -65,13 +65,13 @@ Otobe et al.의 mouse circadian atlas는 Astral 기반 time-resolved 자료로�
 
 | 층 | 데이터 | 검증 질문 | 허용되는 주장 |
 |---|---|---|---|
-| **Primary method benchmark** | 직접 생성한 rat_hir insulin time-course, Orbitrap Astral DIA | Shared site contribution, TMM uncertainty, wave stability, site-only 대비 개선, time permutation 붕괴 | 관찰 조건에서의 **condition-specific explanatory contribution** 및 temporal-precedence-supported 관계 |
+| **Primary method benchmark** | 직접 생성한 rat_hir insulin time-course, **unenriched** Orbitrap Astral DIA | 검출된 modified precursor의 shared-site contribution, TMM uncertainty, wave stability, site-only 대비 개선, time permutation 붕괴 | 관찰 조건에서의 **condition-specific explanatory contribution** 및 temporal-precedence-supported 관계 |
 | **Secondary biological generalization** | PXD043599, PXD001792 | 알려진 insulin chronology, early/intermediate/late wave, cross-species robustness | 외부 insulin biology와의 temporal consistency |
 | **Secondary technical/validation reference** | MSV000093613, PXD014525, PXD061981 | Astral DIA quality, site localization/coverage, perturbation response, long-period temporal robustness | technical reproducibility와 applicability |
 
 ## 직접 설계 insulin Astral DIA benchmark의 권장 최소 설계
 
-현재 목표인 **조건 특이적 kinase 기여도 분해**를 검증하려면, primary cohort는 inhibitor 없이 time-course 자체로 설계하는 것이 적절하다. inhibitor 또는 knockdown은 primary analysis 결과에서 D2/D3 priority를 획득한 가설에만 후속 validation으로 제안한다.
+현재 목표인 **조건 특이적 kinase 기여도 분해**를 검증하려면, primary cohort는 inhibitor 없이 time-course 자체로 설계하는 것이 적절하다. PTM-platform은 enrichment가 없는 DIA-NN precursor/protein-group matrix에서 검출된 modified peptide를 단백질량으로 보정해 사용하므로, 이 benchmark의 관찰 단위는 전역 phosphoproteome이 아니라 **검출 가능한 modified-precursor relative signal**이다. inhibitor 또는 knockdown은 primary analysis 결과에서 D2/D3 priority를 획득한 가설에만 후속 validation으로 제안한다.
 
 | 항목 | 권장안 | 이유 |
 |---|---|---|
@@ -80,8 +80,8 @@ Otobe et al.의 mouse circadian atlas는 Astral 기반 time-resolved 자료로�
 | biological replicate | timepoint당 최소 3 independent biological replicates | bootstrap CI·leave-one-timepoint-out·contribution stability 평가에 필요 |
 | 기술 QC | pooled QC를 batch 시작·중간·종료 및 약 8–10 injection마다 배치 | Astral DIA drift와 batch-related wave artifact 탐지 |
 | controls | baseline 0분 + vehicle time controls를 최소 early·late 구간에 배치 | culture-time effect와 insulin-specific change의 분리 |
-| 보조 측정 | matched total proteome 및 주요 canonical site의 targeted/Western orthogonal check | phosphosite abundance와 total protein change를 구분하고 benchmark anchor 확보 |
-| 필수 전달물 | site-level matrix, localization/FDR, precursor/protein mapping, intensity·missingness, explicit `time_minutes`, replicate·batch metadata | canonical wave, TMM provenance, directionality bootstrap의 재현 가능한 입력 계약 |
+| 보조 측정 | 동일 DIA run의 protein-group matrix 및 주요 canonical site의 targeted/Western orthogonal check | modified-precursor signal을 protein abundance로 보정하고 benchmark anchor 확보 |
+| 필수 전달물 | modified-precursor matrix, precursor/protein mapping, PTM localization/FDR metadata, intensity·missingness, explicit `time_minutes`, replicate·batch metadata | canonical wave, TMM provenance, directionality bootstrap의 재현 가능한 입력 계약 |
 
 ### 사전 등록할 temporal anchors
 
@@ -98,7 +98,7 @@ Otobe et al.의 mouse circadian atlas는 Astral 기반 time-resolved 자료로�
 
 ## 최종 권고
 
-직접 설계한 insulin Astral DIA dataset은 단지 공개 데이터의 빈자리를 채우는 대안이 아니다. **TMM의 central claim을 가장 잘 검증할 수 있는 의도적으로 설계된 benchmark**다. 공개 자료가 제공하지 못하는 동일 모델·동일 장비·동일 data-acquisition 조건에서, 충분한 minute-scale timepoints와 replicate를 확보하기 때문이다.
+직접 설계한 insulin Astral DIA dataset은 단지 공개 데이터의 빈자리를 채우는 대안이 아니다. **TMM의 central claim을 가장 잘 검증할 수 있는 의도적으로 설계된 benchmark**다. 공개 자료가 제공하지 못하는 동일 모델·동일 장비·동일 data-acquisition 조건에서, 충분한 minute-scale timepoints와 replicate를 확보하기 때문이다. 단, 논문과 보고서에서는 enrichment phosphoproteomics와 동등한 coverage 또는 occupancy를 주장하지 않고, 검출된 modified-precursor relative signal의 temporal attribution으로 범위를 한정해야 한다.
 
 논문화 시에는 다음의 균형이 적절하다. primary insulin dataset에서 TMM이 shared substrate를 기존 site-only/motif-only attribution보다 더 안정적이고 설명 가능하게 분해함을 보이고, time-order permutation 및 threshold sensitivity로 시간 정보의 필요성을 보인다. 그 다음 PXD043599·PXD001792에서 biology-generalization을, MSV000093613·PXD014525·PXD061981에서 Astral/DIA 및 external-technical applicability를 보조적으로 제시한다. 이 구성은 **“Astral에서 잘 동작한다”**와 **“insulin signaling의 시간 정보를 해석한다”**를 혼동하지 않고 둘 모두를 검증하게 한다.
 

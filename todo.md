@@ -151,3 +151,8 @@ Backend: vector-plot (receptor inference)
 - [x] 공개 time-course DIA 및 Orbitrap Astral phosphoproteomics 후보 탐색
 - [x] 시간 해상도·장비·processed data 접근성·benchmark 적합성 검증
 - [x] 직접 설계 insulin signaling time-course와 공개 자료의 보완 전략 보고
+
+## 비-enrichment 입력과 PTM Activity·TMM 해석 범위 정합성 감사
+- [x] 입력 data matrix·정량 열·PTM site provenance의 실제 의미 점검
+- [x] PTM activity·TMM·kinase annotation의 관찰값과 추론값 경계 감사
+- [x] 방법론 용어·benchmark 설계·필요 코드/문서 정정 권고
