@@ -146,3 +146,8 @@ Backend: vector-plot (receptor inference)
 - [x] Rat_hir의 rat-base alias·custom FASTA registry 및 human INSR provenance 정의
 - [x] Species validation·UI·FASTA selection·rat annotation routing 보완 구현
 - [x] 회귀 검증·GitHub 반영 및 Rat_hir 입력 가이드 보고
+
+## TMM Benchmark용 공개 DIA·Astral Time-course 자료 조사
+- [x] 공개 time-course DIA 및 Orbitrap Astral phosphoproteomics 후보 탐색
+- [x] 시간 해상도·장비·processed data 접근성·benchmark 적합성 검증
+- [x] 직접 설계 insulin signaling time-course와 공개 자료의 보완 전략 보고
