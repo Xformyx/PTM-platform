@@ -166,3 +166,8 @@ Backend: vector-plot (receptor inference)
 - [x] P1: dual-track vector output·API metadata·occupancy 표시 계약 구현
 - [x] P2: track별 co-wave/TMM·concordance/discrepancy evidence 구현
 - [x] 기존 Track 2 호환성·Python 회귀 테스트·문서화·GitHub 반영
+
+## Dual-Track PTM Quantification 논문 Methods 초안
+- [x] 구현 계약과 관찰·추론 경계 재검증
+- [x] 논문용 Methods 섹션 초안 작성 및 참고문헌 정리
+- [x] 실험별로 채워야 할 파라미터·제한 사항 안내
