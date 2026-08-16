@@ -80,6 +80,31 @@ charge state·transition이 여럿이면, 동일 form 내에서 validated precur
 
 `dual_track_concordant`는 두 track의 correlation, peak-lag tolerance, contribution-rank concordance, completeness를 만족할 때만 생성한다. `O1` calibrated occupancy와 Track 2가 같은 kinase candidate를 지지하면 TMM conclusion의 설명력을 높일 수 있으나, 이는 직접 kinase activity 또는 direct phosphorylation 증명이 아니다.
 
+### 결측치 처리 계약: observed-only를 기본으로 한다
+
+paired occupancy에서 M 또는 U 중 하나가 검출되지 않은 timepoint는 분자 또는 분모가 없는 값이다. 이를 0으로 바꾸거나 기본 경로에서 선형 보간하면, 실제로 관찰하지 못한 occupancy peak·valley·lag를 인위적으로 생성할 수 있다. 따라서 Track 1의 default policy는 **observed-only**이며, 결측치는 `NaN`과 reason code로 보존한다.
+
+| 상황 | Default policy | Co-wave/TMM 처리 | Provenance |
+|---|---|---|---|
+| M/U 모두 최소 replicate 수 충족 | observed occupancy 계산 | 분석에 포함 | `observed` |
+| M 또는 U가 부족 | occupancy = missing | 0으로 대체하지 않음 | `missing_modified` / `missing_unmodified` / `insufficient_replicates` |
+| 관측 timepoint가 너무 적음 | pair의 Track 1 time-series를 drop | Track 2만 유지 | `dropped_insufficient_observations` |
+| 내부의 단일 short gap | default 분석에는 drop; optional sensitivity run에서만 linear interpolation | primary evidence에 사용 금지 | `imputed_linear_sensitivity_only` |
+| edge gap 또는 2개 이상 연속 gap | 보간 금지 | Track 1 drop, Track 2 유지 | `dropped_gap_too_long` |
+
+#### 분석 적격성 규칙
+
+| 대상 | 최소 요건 | 미충족 시 |
+|---|---|---|
+| Occupancy co-wave membership | 전체 ordered timepoint 중 **최소 70%**가 observed이고, 최소 4개 observed timepoint 및 peak 전후 각각 1개 이상 observed | occupancy wave 제외; Track 2 wave는 계속 실행 |
+| Occupancy-specific kinase profile | 위 coverage 요건을 만족하는 O1/O2 exclusive substrate가 최소 3개 | `occupancy_profile_insufficient`로 기록하고 relative-track profile만 사용 |
+| Occupancy TMM shared-site fit | 유효 observed timepoint 수가 `max(4, candidate kinase 수 + 1)` 이상이며, 내부 결측 gap이 1개 timepoint 이하 | occupancy TMM을 수행하지 않고 Track 2 TMM만 보고 |
+| Linear interpolation sensitivity run | 보간 대상이 내부 단일 gap이고 양쪽 adjacent point가 observed이며, observed occupancy가 [0, 1] 범위 | 별도 sensitivity result만 생성; primary score/kinase ranking 변경 금지 |
+
+선형 보간이 sensitivity 결과에서도 원래의 observed-only conclusion과 다른 co-wave membership, peak window 또는 top kinase rank를 만들면 `imputation_sensitive` flag를 부여한다. 이 경우 dual-track concordance를 승격하지 않으며, report에는 observed-only 결과만 주된 근거로 사용한다.
+
+현재 `ptm_timeseries` 경로는 존재하지 않는 condition 값에 대해 일부 분석 함수가 `0.0`을 default로 읽는 구조다. Track 1 도입 시에는 실제 zero intensity, missing precursor, insufficient replicate를 명시적으로 분리해야 하며, occupancy path에는 NaN-aware filtering을 먼저 적용한 뒤 적격한 complete/near-complete vector만 co-wave 및 NNLS에 전달해야 한다.
+
 ### Version 2: multi-view TMM은 별도 검증 후
 
 향후에는 occupancy-logit trajectory와 protein-normalized relative trajectory를 measurement variance로 표준화한 multi-view objective로 공동 적합할 수 있다. 그러나 이 단계는 synthetic pair benchmark, real heavy-standard subset, missingness stress test에서 Version 1보다 안정적임이 검증된 뒤에만 도입한다.
@@ -103,6 +128,7 @@ charge state·transition이 여럿이면, 동일 form 내에서 validated precur
 | Pair completeness audit | per-timepoint M/U detection, intensity, CV, q-value, localization provenance를 표로 출력 |
 | Dual-track concordance | O1/O2 subset에서 occupancy와 Track 2의 sign/peak/rank agreement를 보고; 불일치를 숨기지 않음 |
 | Calibration subset | heavy peptide pair, response-factor measurement 또는 phosphatase control이 있는 small targeted set에서 O1 validity 평가 |
+| Missingness stress test | 실제 complete pair vector에 단일/연속/edge gap을 주입하여 observed-only, drop, sensitivity interpolation의 peak·wave·kinase rank 안정성 비교 |
 
 ## 구현 순서와 승인 지점
 

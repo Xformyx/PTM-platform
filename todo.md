@@ -161,4 +161,5 @@ Backend: vector-plot (receptor inference)
 - [x] PR matrix 내 modified/unmodified counterpart peptide 매칭 가능성·식별자·missingness 감사
 - [x] occupancy 및 protein-normalized track의 계산 계약·quality gate·provenance 설계
 - [x] co-wave·TMM·report에서 track별 사용·병합·우선순위 규칙 설계
+- [x] paired occupancy 결측치의 observed-only·drop·sensitivity-only imputation 계약 추가
 - [ ] backward-compatible 구현 범위·회귀 테스트·사용자 승인 필요 항목 보고
