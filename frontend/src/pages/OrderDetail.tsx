@@ -929,6 +929,14 @@ type VectorRow = {
   protein_log2fc: number;
   ptm_relative_log2fc: number;
   ptm_absolute_log2fc: number;
+  quantification_track?: string;
+  occupancy_fraction?: number | null;
+  occupancy_percent?: number | null;
+  occupancy_delta_pp?: number | null;
+  occupancy_logit_delta?: number | null;
+  occupancy_calibration_type?: string;
+  pair_quality_tier?: string;
+  pair_missingness?: number | null;
   control_pseudocount_used?: boolean;
   p_value?: number | null;
   q_value?: number | null;
@@ -937,7 +945,7 @@ type VectorRow = {
 function ScatterPlotsInteractive({ orderId }: { orderId: number }) {
   const [data, setData] = useState<{ vector_data: VectorRow[] } | null>(null);
   const [loading, setLoading] = useState(true);
-  const [metric, setMetric] = useState<"relative" | "absolute">("relative");
+  const [metric, setMetric] = useState<"relative" | "absolute" | "occupancy">("relative");
   const [zoom, setZoom] = useState(1); // 1 = auto, zoom in = narrower range
 
   useEffect(() => {
@@ -972,20 +980,47 @@ function ScatterPlotsInteractive({ orderId }: { orderId: number }) {
     new Set(data.vector_data.map((r) => r.condition).filter((c) => c && c !== "Control"))
   ).sort((a, b) => parseTimeOrder(a) - parseTimeOrder(b));
 
-  const yKey = metric === "relative" ? "ptm_relative_log2fc" : "ptm_absolute_log2fc";
+  const yKey = metric === "relative"
+    ? "ptm_relative_log2fc"
+    : metric === "absolute"
+      ? "ptm_absolute_log2fc"
+      : "occupancy_logit_delta";
+  const occupancyAvailable = data.vector_data.some((row) => (
+    row.pair_quality_tier === "O1" || row.pair_quality_tier === "O2"
+  ) && row.occupancy_logit_delta != null);
+  const metricLabel = metric === "relative"
+    ? "PTM Relative"
+    : metric === "absolute"
+      ? "PTM Absolute"
+      : "Paired Occupancy (apparent)";
 
   const chartsByCond = conditions.map((cond) => {
-    const rows = data.vector_data.filter((r) => r.condition === cond);
+    const rows = data.vector_data.filter((r) => (
+      r.condition === cond
+      && (metric !== "occupancy" || (
+        (r.pair_quality_tier === "O1" || r.pair_quality_tier === "O2")
+        && r.occupancy_logit_delta != null
+      ))
+    ));
     const points = rows.map((r) => ({
       x: r.protein_log2fc ?? 0,
       y: (r[yKey as keyof VectorRow] as number) ?? 0,
       name: `${r.gene} ${r.position}`.trim() || `${r.gene}${r.position}`,
+      pairTier: r.pair_quality_tier || "O0",
+      calibration: r.occupancy_calibration_type || "none",
+      occupancyPercent: r.occupancy_percent,
     }));
     return { condition: cond, points };
   });
 
-  const allX = data.vector_data.map((r) => r.protein_log2fc ?? 0);
-  const allY = data.vector_data.map((r) => (r[yKey as keyof VectorRow] as number) ?? 0);
+  const metricRows = metric === "occupancy"
+    ? data.vector_data.filter((row) => (
+      (row.pair_quality_tier === "O1" || row.pair_quality_tier === "O2")
+      && row.occupancy_logit_delta != null
+    ))
+    : data.vector_data;
+  const allX = metricRows.map((r) => r.protein_log2fc ?? 0);
+  const allY = metricRows.map((r) => (r[yKey as keyof VectorRow] as number) ?? 0);
   const xMin = Math.min(...allX);
   const xMax = Math.max(...allX);
   const yMin = Math.min(...allY);
@@ -1013,7 +1048,20 @@ function ScatterPlotsInteractive({ orderId }: { orderId: number }) {
           >
             PTM Absolute
           </Button>
+          <Button
+            variant={metric === "occupancy" ? "default" : "outline"}
+            size="sm"
+            disabled={!occupancyAvailable}
+            onClick={() => setMetric("occupancy")}
+          >
+            Paired Occupancy
+          </Button>
         </div>
+        {metric === "occupancy" && (
+          <p className="w-full text-xs text-muted-foreground">
+            Observed-only paired modified/unmodified peptide signal. O2 values are apparent occupancy fractions and are not calibrated physical occupancy.
+          </p>
+        )}
         <div className="flex items-center gap-1">
           <Button variant="outline" size="sm" onClick={() => setZoom((z) => Math.min(4, z + 0.5))}>
             <ZoomIn className="h-3.5 w-3.5" /> Zoom In
@@ -1031,7 +1079,7 @@ function ScatterPlotsInteractive({ orderId }: { orderId: number }) {
             <CardHeader className="py-2 px-4">
               <CardTitle className="text-sm flex items-center gap-2">
                 <span className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: SCATTER_PALETTE[idx % SCATTER_PALETTE.length] }} />
-                {condition} ({metric === "relative" ? "PTM Relative" : "PTM Absolute"})
+                {condition} ({metricLabel})
               </CardTitle>
             </CardHeader>
             <CardContent className="p-2">
@@ -1049,7 +1097,7 @@ function ScatterPlotsInteractive({ orderId }: { orderId: number }) {
                     <YAxis
                       type="number"
                       dataKey="y"
-                      name={metric === "relative" ? "PTM Relative Log2FC" : "PTM Absolute Log2FC"}
+                      name={metric === "occupancy" ? "Occupancy logit delta" : metric === "relative" ? "PTM Relative Log2FC" : "PTM Absolute Log2FC"}
                       domain={yDomain}
                       tick={{ fontSize: 10 }}
                     />

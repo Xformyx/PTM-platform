@@ -2035,6 +2035,14 @@ async def get_vector_plot_data(
                         q_val = float(q_val_raw) if q_val_raw and q_val_raw.strip().lower() not in ("", "nan") else None
                     except (ValueError, TypeError):
                         q_val = None
+
+                    def _optional_vector_float(column: str):
+                        raw = row.get(column, "")
+                        try:
+                            return float(raw) if raw and str(raw).strip().lower() not in ("", "nan") else None
+                        except (ValueError, TypeError):
+                            return None
+
                     vector_data.append({
                         "gene": gene,
                         "position": str(pos),
@@ -2045,6 +2053,18 @@ async def get_vector_plot_data(
                         "control_pseudocount_used": pc_used,
                         "p_value": p_val,
                         "q_value": q_val,
+                        "quantification_track": row.get("Quantification_Track", "protein_normalized_relative_ptm"),
+                        "paired_peptide_key": row.get("Paired_Peptide_Key", ""),
+                        "paired_form_level": row.get("Paired_Form_Level", ""),
+                        "occupancy_fraction": _optional_vector_float("Occupancy_Fraction"),
+                        "occupancy_percent": _optional_vector_float("Occupancy_Percent"),
+                        "occupancy_delta_pp": _optional_vector_float("Occupancy_Delta_PP"),
+                        "occupancy_logit_delta": _optional_vector_float("Occupancy_Logit_Delta"),
+                        "occupancy_calibration_type": row.get("Occupancy_Calibration_Type", "none"),
+                        "pair_quality_tier": row.get("Pair_Quality_Tier", "O0"),
+                        "pair_missingness": _optional_vector_float("Pair_Missingness"),
+                        "occupancy_p_value": _optional_vector_float("Occupancy_P_Value"),
+                        "occupancy_q_value": _optional_vector_float("Occupancy_Q_Value"),
                     })
             break
 
@@ -6742,6 +6762,7 @@ async def kinase_activity_heatmap(
 
     # Load vector data (time-series)
     from app.config import get_settings
+    import numpy as np
     settings = get_settings()
     output_dir = Path(settings.OUTPUT_DIR) / order.order_code
     file_suffix = "_phospho" if order.ptm_type == "phosphorylation" else "_ubi"
@@ -6759,6 +6780,8 @@ async def kinase_activity_heatmap(
                     cond = row.get("Condition", "")
                     rel_fc = row.get("PTM_Relative_Log2FC", "")
                     q_val_raw = row.get("q_value", "")
+                    occupancy_logit_raw = row.get("Occupancy_Logit_Delta", "")
+                    occupancy_q_raw = row.get("Occupancy_Q_Value", "")
                     try:
                         rel_fc = float(rel_fc) if rel_fc else 0.0
                     except ValueError:
@@ -6767,9 +6790,21 @@ async def kinase_activity_heatmap(
                         q_val = float(q_val_raw) if q_val_raw and q_val_raw.strip().lower() not in ("", "nan") else None
                     except (ValueError, TypeError):
                         q_val = None
+                    try:
+                        occupancy_logit = float(occupancy_logit_raw) if occupancy_logit_raw and occupancy_logit_raw.strip().lower() not in ("", "nan") else None
+                    except (ValueError, TypeError):
+                        occupancy_logit = None
+                    try:
+                        occupancy_q = float(occupancy_q_raw) if occupancy_q_raw and occupancy_q_raw.strip().lower() not in ("", "nan") else None
+                    except (ValueError, TypeError):
+                        occupancy_q = None
                     vector_data.append({
                         "gene": gene, "position": str(pos),
                         "condition": cond, "log2fc": rel_fc, "q_value": q_val,
+                        "occupancy_logit_delta": occupancy_logit,
+                        "occupancy_q_value": occupancy_q,
+                        "pair_quality_tier": row.get("Pair_Quality_Tier", "O0"),
+                        "occupancy_calibration_type": row.get("Occupancy_Calibration_Type", "none"),
                     })
             break
 
@@ -6779,6 +6814,11 @@ async def kinase_activity_heatmap(
     # Build PTM key → condition → log2fc map
     ptm_timeseries: dict[str, dict[str, float]] = {}
     ptm_qvalues: dict[str, dict[str, float | None]] = {}
+    # Track 1 intentionally keeps missing values absent.  Its parallel wave/TMM
+    # path below only accepts complete observed-only vectors and never turns a
+    # missing modified/unmodified counterpart into zero.
+    occupancy_timeseries: dict[str, dict[str, float]] = {}
+    occupancy_qvalues: dict[str, dict[str, float | None]] = {}
     all_conditions: set[str] = set()
     for row in vector_data:
         key = f"{row['gene'].upper()}_{row['position'].upper()}"
@@ -6796,6 +6836,14 @@ async def kinase_activity_heatmap(
         # v11.2: Store raw Log2FC (no cap). Winsorization applied per-kinase during scoring.
         ptm_timeseries[key][cond] = _raw_fc
         ptm_qvalues[key][cond] = row["q_value"]
+        _occupancy = row.get("occupancy_logit_delta")
+        if (
+            row.get("pair_quality_tier") in {"O1", "O2"}
+            and _occupancy is not None
+            and np.isfinite(_occupancy)
+        ):
+            occupancy_timeseries.setdefault(key, {})[cond] = float(_occupancy)
+            occupancy_qvalues.setdefault(key, {})[cond] = row.get("occupancy_q_value")
 
     # Sort conditions by actual time value (unit-aware: sec/min/hr/day)
     import re
@@ -6823,6 +6871,22 @@ async def kinase_activity_heatmap(
         # Non-time string → sort last
         return float('inf')
     conditions_sorted = sorted(all_conditions, key=_cond_sort_key)
+    occupancy_complete_timeseries = {
+        key: values for key, values in occupancy_timeseries.items()
+        if all(condition in values and np.isfinite(values[condition]) for condition in conditions_sorted)
+    }
+    occupancy_complete_qvalues = {
+        key: occupancy_qvalues.get(key, {}) for key in occupancy_complete_timeseries
+    }
+    occupancy_track_provenance = {
+        "track": "apparent_paired_occupancy",
+        "missing_policy": "observed_only_complete_vector_for_primary_analysis",
+        "input_sites": len(occupancy_timeseries),
+        "eligible_complete_sites": len(occupancy_complete_timeseries),
+        "excluded_incomplete_sites": len(occupancy_timeseries) - len(occupancy_complete_timeseries),
+        "timepoints": conditions_sorted,
+        "calibration_policy": "O1=calibrated_absolute_occupancy;O2=apparent_paired_occupancy",
+    }
 
     # ── Build PTM → kinase reverse map (for exclusive/shared classification) ──
     ptm_to_kinases: dict[str, list[str]] = {}  # ptm_key -> [kinase_names]
@@ -8032,6 +8096,13 @@ async def kinase_activity_heatmap(
     # ── TMM: Temporal Mixture Modeling — Option B (Data-driven Deconvolution) ──
     # Compute contribution-weighted kinase scores using NNLS on exclusive substrate profiles.
     tmm_scores: dict = {}
+    occupancy_tmm_scores: dict = {}
+    occupancy_wave_contract: dict = {
+        "status": "not_run",
+        "reason": "no_complete_observed_only_occupancy_vectors",
+        "provenance": occupancy_track_provenance,
+    }
+    dual_track_kinase_evidence: dict = {}
     raw_cowave_groups = list(cowave_groups)
     tmm_weighted_cowave_groups: list[dict] = []
     try:
@@ -8060,6 +8131,85 @@ async def kinase_activity_heatmap(
             q_threshold=Q_THRESHOLD,
             ptm_qvalues=ptm_qvalues,
         )
+        if len(occupancy_complete_timeseries) >= 2 and len(conditions_sorted) >= 3:
+            from ptm_shared.temporal_wave_engine import analyze_temporal_waves
+            _occupancy_metadata = {
+                key: {
+                    "gene": key.rsplit("_", 1)[0],
+                    "site": key.rsplit("_", 1)[1] if "_" in key else "",
+                    "quantification_track": "apparent_paired_occupancy",
+                }
+                for key in occupancy_complete_timeseries
+            }
+            occupancy_wave_contract = analyze_temporal_waves(
+                occupancy_complete_timeseries,
+                conditions_sorted,
+                metadata=_occupancy_metadata,
+                config={
+                    "correlation_threshold": 0.70,
+                    "threshold_source": "dual_track_occupancy_observed_only",
+                },
+            )
+            occupancy_wave_contract["analysis_scope"] = "paired_occupancy_logit_delta_observed_only"
+            occupancy_wave_contract["track_provenance"] = occupancy_track_provenance
+            occupancy_tmm_scores = compute_weighted_kinase_scores(
+                kinase_modules=_tmm_modules,
+                ptm_timeseries=occupancy_complete_timeseries,
+                ptm_to_kinases=ptm_to_kinases,
+                conditions_sorted=conditions_sorted,
+                fc_threshold=0.0,
+                q_threshold=Q_THRESHOLD,
+                ptm_qvalues=occupancy_complete_qvalues,
+            )
+
+        def _track_peak(score: dict) -> tuple[str | None, float]:
+            if not score:
+                return None, 0.0
+            net = {
+                condition: score.get("weighted_up_sums", {}).get(condition, 0.0)
+                + score.get("weighted_down_sums", {}).get(condition, 0.0)
+                for condition in conditions_sorted
+            }
+            if not net or not any(abs(value) > 0 for value in net.values()):
+                return None, 0.0
+            peak = max(net, key=lambda condition: abs(net[condition]))
+            return peak, float(net[peak])
+
+        for canonical, relative_score in tmm_scores.items():
+            occupancy_score = occupancy_tmm_scores.get(canonical)
+            relative_peak, relative_value = _track_peak(relative_score)
+            occupancy_peak, occupancy_value = _track_peak(occupancy_score or {})
+            relative_top = {
+                item["ptm_key"] for item in sorted(
+                    relative_score.get("contribution_details", []),
+                    key=lambda item: item.get("contribution_ratio", 0.0), reverse=True,
+                )[:3]
+            }
+            occupancy_top = {
+                item["ptm_key"] for item in sorted(
+                    (occupancy_score or {}).get("contribution_details", []),
+                    key=lambda item: item.get("contribution_ratio", 0.0), reverse=True,
+                )[:3]
+            }
+            if not occupancy_score or occupancy_peak is None:
+                status = "track2_only_insufficient_occupancy_evidence"
+                peak_concordant = None
+                direction_concordant = None
+            else:
+                peak_concordant = abs(conditions_sorted.index(relative_peak) - conditions_sorted.index(occupancy_peak)) <= 1 if relative_peak else False
+                direction_concordant = (relative_value == 0 or occupancy_value == 0 or (relative_value > 0) == (occupancy_value > 0))
+                status = "dual_track_concordant" if peak_concordant and direction_concordant and relative_top & occupancy_top else "track_discordance"
+            dual_track_kinase_evidence[canonical] = {
+                "status": status,
+                "relative_peak_condition": relative_peak,
+                "occupancy_peak_condition": occupancy_peak,
+                "peak_window_concordant": peak_concordant,
+                "direction_concordant": direction_concordant,
+                "top_contribution_overlap": sorted(relative_top & occupancy_top),
+                "relative_top_contributions": sorted(relative_top),
+                "occupancy_top_contributions": sorted(occupancy_top),
+                "occupancy_tmm_evidence": (occupancy_score or {}).get("tmm_evidence", {}),
+            }
         from ptm_shared.tmm_multikinase_integration import build_tmm_site_contribution_matrix
         tmm_site_contribution_matrix = build_tmm_site_contribution_matrix(tmm_scores)
         # Merge TMM scores back into kinase_scores_filtered entries
@@ -8123,6 +8273,9 @@ async def kinase_activity_heatmap(
                     reverse=True,
                 )[:5]
                 ks_entry["tmm_top_contributions"] = top5
+                ks_entry["dual_track_evidence"] = dual_track_kinase_evidence.get(canon, {
+                    "status": "track2_only_insufficient_occupancy_evidence",
+                })
 
                 # Recompute peak_score and direction from TMM-adjusted sums
                 net_sums = {c: w_up.get(c, 0.0) + w_dn.get(c, 0.0) for c in conditions_sorted}
@@ -8195,6 +8348,10 @@ async def kinase_activity_heatmap(
         "tmm_weighted_temporal_cascade": tmm_weighted_temporal_cascade,
         "tmm_kinase_pair_directionality": tmm_kinase_pair_directionality,
         "tmm_site_contribution_matrix": tmm_site_contribution_matrix if 'tmm_site_contribution_matrix' in locals() else {},
+        "occupancy_track_provenance": occupancy_track_provenance,
+        "occupancy_wave_contract": occupancy_wave_contract,
+        "occupancy_tmm_scores": occupancy_tmm_scores,
+        "dual_track_kinase_evidence": dual_track_kinase_evidence,
         "available_patterns": sorted(all_patterns),
         "translocation_candidates": translocation_candidates,
         "scoring_method": "stratified_winsorized_mean_v11.3+tmm_deconvolution",

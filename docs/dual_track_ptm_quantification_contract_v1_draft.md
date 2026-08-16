@@ -1,7 +1,7 @@
 # Dual-Track PTM Quantification Contract v1 — Draft
 
 작성일: 2026-08-16 (GMT+9)
-상태: **설계 초안 — core quantification 변경 전 사용자 승인 필요**
+상태: **P0–P2 구현 완료 — calibrated occupancy와 ranking policy(P3)는 보류**
 
 ## 목적
 
@@ -13,6 +13,17 @@ PTM-platform의 unenriched Astral DIA 설계는 total proteome의 non-PTM abunda
 | **Track 2: protein-normalized relative PTM** | counterpart pair가 없거나 occupancy quality gate를 통과하지 못한 모든 검출 modified precursor | `modified precursor / protein-group abundance`의 baseline 대비 log2FC | coverage 보존, co-wave, TMM, candidate kinase-associated program 및 non-PTM effector와의 temporal integration |
 
 두 track은 경쟁 관계가 아니다. Track 1은 높은 특이성이나 제한된 coverage를, Track 2는 더 넓은 coverage와 protein-abundance correction을 제공한다. 기존 Track 2 경로는 삭제하거나 대체하지 않는다.
+
+## 구현 상태와 코드 경로
+
+| 단계 | 구현 상태 | 코드 경로 | 현재 동작 |
+|---|---|---|---|
+| P0 | 완료 | `workers/preprocessing/core/ptm_quantification.py` | target UniMod이 정확히 한 개인 modified peptide form과 unmodified counterpart를 peptide backbone·protein group 기준으로 매칭하고, charge-state precursor를 form 단위로 aggregate한 audit TSV를 생성 |
+| P1 | 완료 | `ptm_quantification.py`, `api-server/app/api/orders.py`, `frontend/src/pages/OrderDetail.tsx` | 기존 Track 2 열을 유지한 채 O2 apparent occupancy, logit delta, missingness, pair key 및 calibration provenance를 vector/API/UI에 추가 |
+| P2 | 완료 | `api-server/app/api/orders.py` | observed-only complete occupancy vector만 별도 canonical wave·TMM에 전달하고, relative Track 2와의 peak/direction/top-contribution concordance 또는 discrepancy를 기록 |
+| P3 | 보류 | 해당 없음 | heavy pair, response-factor 또는 phosphatase calibration subset 검증 후 ranking/report priority policy로 별도 결정 |
+
+현재 P0는 `paired_peptide_occupancy_audit_phospho.tsv` 또는 PTM mode에 따른 동등한 suffix 파일을 생성한다. P1은 calibration metadata가 제공되지 않은 현 단계에서 O2 `apparent_paired_occupancy`만 생성한다. O1 `calibrated_absolute_occupancy` 입력과 score 반영은 P3 이전에는 활성화하지 않는다.
 
 ## 중요한 용어 경계
 
@@ -34,7 +45,7 @@ I_modified / (I_modified + I_unmodified)
 
 ## Pair matching 계약
 
-현재 `PTMQuantificationAnalyzer`는 `Modified.Sequence`의 UniMod 표기를 통해 modified precursor를 찾고, PG matrix로 나눈 Track 2 값을 생성한다. counterpart peptide matching은 아직 구현되어 있지 않다. 새 matcher는 아래 조건을 모두 provenance로 기록해야 한다.
+현재 `PTMQuantificationAnalyzer`는 `Modified.Sequence`의 UniMod 표기를 통해 modified precursor를 찾고, PG matrix로 나눈 Track 2 값을 생성한다. P0 구현은 unmodified counterpart를 별도로 찾아 peptide-form occupancy audit을 생성한다. 현재 matcher는 동일 `Protein.Group`과 clean peptide backbone, target UniMod 1개, non-target variable modification 부재를 보수적으로 요구한다.
 
 | Gate | 필수 조건 | 실패 시 처리 |
 |---|---|---|
@@ -96,7 +107,7 @@ paired occupancy에서 M 또는 U 중 하나가 검출되지 않은 timepoint는
 
 | 대상 | 최소 요건 | 미충족 시 |
 |---|---|---|
-| Occupancy co-wave membership | 전체 ordered timepoint 중 **최소 70%**가 observed이고, 최소 4개 observed timepoint 및 peak 전후 각각 1개 이상 observed | occupancy wave 제외; Track 2 wave는 계속 실행 |
+| Occupancy co-wave membership | 계약상 전체 ordered timepoint 중 **최소 70%**가 observed이고, 최소 4개 observed timepoint 및 peak 전후 각각 1개 이상 observed. **현재 P2 primary implementation은 canonical engine의 zero-fill을 피하기 위해 complete observed vector만 허용** | occupancy wave 제외; Track 2 wave는 계속 실행 |
 | Occupancy-specific kinase profile | 위 coverage 요건을 만족하는 O1/O2 exclusive substrate가 최소 3개 | `occupancy_profile_insufficient`로 기록하고 relative-track profile만 사용 |
 | Occupancy TMM shared-site fit | 유효 observed timepoint 수가 `max(4, candidate kinase 수 + 1)` 이상이며, 내부 결측 gap이 1개 timepoint 이하 | occupancy TMM을 수행하지 않고 Track 2 TMM만 보고 |
 | Linear interpolation sensitivity run | 보간 대상이 내부 단일 gap이고 양쪽 adjacent point가 observed이며, observed occupancy가 [0, 1] 범위 | 별도 sensitivity result만 생성; primary score/kinase ranking 변경 금지 |
@@ -132,9 +143,9 @@ paired occupancy에서 M 또는 U 중 하나가 검출되지 않은 timepoint는
 
 ## 구현 순서와 승인 지점
 
-1. **P0 — provenance-only pairing audit:** PR matrix에서 pair candidate와 quality table을 출력하고, 기존 Track 2·co-wave·TMM에는 영향을 주지 않는다.
-2. **P1 — Track 1 output:** apparent/calibrated occupancy field와 confidence tier를 vector output·API·frontend에 노출한다. 분석 ranking은 변경하지 않는다.
-3. **P2 — dual-track evidence layer:** co-wave/TMM을 track별로 실행하고 concordance/discrepancy만 보고한다. 기존 relative TMM score를 대체하지 않는다.
+1. **P0 — provenance-only pairing audit:** 구현됨. PR matrix에서 pair candidate와 quality table을 출력하며 기존 Track 2·co-wave·TMM에는 영향을 주지 않는다.
+2. **P1 — Track 1 output:** 구현됨. apparent occupancy field와 O2 confidence tier를 vector output·API·frontend에 노출한다. 분석 ranking은 변경하지 않는다.
+3. **P2 — dual-track evidence layer:** 구현됨. complete observed occupancy vector에서 track별 co-wave/TMM을 실행하고 concordance/discrepancy만 보고한다. 기존 relative TMM score를 대체하지 않는다.
 4. **P3 — optional decision policy:** real insulin dataset과 calibration subset에서 검증 후에만, O1 evidence를 TMM/report priority에 반영한다.
 
 P0–P2는 기존 기능을 보존하는 additive 변경이지만, P3는 kinase ranking과 report priority에 영향을 줄 수 있는 핵심 scoring 정책 변경이다. 따라서 P3 전에는 사용자 승인이 필요하다.

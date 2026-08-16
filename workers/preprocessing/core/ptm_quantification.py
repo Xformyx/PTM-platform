@@ -10,6 +10,7 @@ Changes from original:
 """
 
 import logging
+import math
 import os
 import re
 from pathlib import Path
@@ -25,6 +26,13 @@ from .config import FIXED_MODIFICATIONS, PTM_MODES, VARIABLE_MODIFICATIONS
 from .enhanced_motif_analyzer_v2 import EnhancedMotifAnalyzerV2
 
 logger = logging.getLogger(__name__)
+
+# Dual-track PTM quantification defaults.  Track 1 is deliberately conservative:
+# without response-factor calibration it emits apparent paired occupancy, never
+# physical absolute occupancy.  Track 2 remains the existing relative PTM path.
+PAIR_MIN_REPLICATES = 2
+PAIR_MIN_OBSERVED_TIMEPOINTS = 4
+PAIR_MIN_COMPLETENESS = 0.70
 
 
 class PTMQuantificationAnalyzer:
@@ -111,6 +119,9 @@ class PTMQuantificationAnalyzer:
             if relative_quant_df.empty:
                 return False
 
+            self._progress(0.40, "Paired modified/unmodified audit")
+            paired_occupancy_df, pair_audit_df = self.calculate_paired_occupancy(ptm_precursors)
+
             self._progress(0.50, "Condition comparisons")
             ptm_comparisons = self.calculate_condition_comparisons(relative_quant_df)
             if ptm_comparisons.empty:
@@ -122,14 +133,16 @@ class PTMQuantificationAnalyzer:
                 return False
 
             self._progress(0.75, "PTM vector data")
-            ptm_vector_df = self.create_ptm_vector_data(ptm_comparisons, ptm_protein_changes)
+            ptm_vector_df = self.create_ptm_vector_data(
+                ptm_comparisons, ptm_protein_changes, paired_occupancy_df
+            )
             if ptm_vector_df.empty:
                 return False
 
             self._progress(0.85, "Saving results")
             self.save_results(
                 relative_quant_df, ptm_comparisons,
-                all_protein_changes, ptm_protein_changes, ptm_vector_df,
+                all_protein_changes, ptm_protein_changes, ptm_vector_df, pair_audit_df,
             )
 
             self._progress(0.95, "Quantification complete")
@@ -438,6 +451,180 @@ class PTMQuantificationAnalyzer:
                 return name
         return "Unknown"
 
+    @staticmethod
+    def _clean_peptide_backbone(modified_sequence: str) -> str:
+        """Return an uppercase peptide backbone without UniMod annotations."""
+        if pd.isna(modified_sequence):
+            return ""
+        return re.sub(r"\(UniMod:\d+\)", "", str(modified_sequence)).strip().upper()
+
+    def _target_modification_count(self, modified_sequence: str) -> int:
+        return len(re.findall(rf"\(UniMod:{re.escape(str(self.ptm_mode_config['unimod_id']))}\)", str(modified_sequence)))
+
+    def _is_unmodified_target_counterpart(self, modified_sequence: str) -> bool:
+        """Return True only for a safe counterpart without target/variable PTMs.
+
+        Fixed modifications such as carbamidomethylation are tolerated because they
+        are shared preparation chemistry, while other variable modifications are
+        excluded rather than silently mixed into a paired occupancy denominator.
+        """
+        unimod_ids = re.findall(r"\(UniMod:(\d+)\)", str(modified_sequence))
+        return all(uid in FIXED_MODIFICATIONS for uid in unimod_ids)
+
+    def calculate_paired_occupancy(self, ptm_precursors: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
+        """Build Track 1 paired modified/unmodified peptide evidence.
+
+        The returned occupancy is an *apparent paired occupancy* based on MS
+        intensity fraction.  It is not absolute physical occupancy because the
+        modified and unmodified peptide response factors are not calibrated here.
+        Missing modified or unmodified signals remain missing; they are never
+        converted to zero.
+        """
+        target_uid = str(self.ptm_mode_config["unimod_id"])
+        unmodified_index: Dict[Tuple[str, str], List[pd.Series]] = {}
+        for _, row in self.pr_matrix_normalized.iterrows():
+            sequence = row.get("Modified.Sequence", "")
+            if not self._is_unmodified_target_counterpart(sequence):
+                continue
+            backbone = self._clean_peptide_backbone(sequence)
+            protein_group = str(row.get("Protein.Group", ""))
+            if backbone and protein_group:
+                unmodified_index.setdefault((protein_group, backbone), []).append(row)
+
+        records: List[Dict[str, object]] = []
+        audits: List[Dict[str, object]] = []
+        expected_conditions = sorted(set(self.condition_map.get(sample, "Unknown") for sample in self.sample_columns))
+        processed_forms: Set[Tuple[str, str]] = set()
+        for _, modified_row in ptm_precursors.iterrows():
+            modified_sequence = modified_row.get("Modified.Sequence", "")
+            protein_group = str(modified_row.get("Protein.Group", ""))
+            form_key = (protein_group, str(modified_sequence))
+            if form_key in processed_forms:
+                continue
+            processed_forms.add(form_key)
+            modified_form_rows = ptm_precursors[
+                (ptm_precursors["Protein.Group"].astype(str) == protein_group)
+                & (ptm_precursors["Modified.Sequence"].astype(str) == str(modified_sequence))
+            ]
+            modified_precursor_ids = ";".join(sorted(
+                str(value) for value in modified_form_rows["Precursor.Id"].dropna().unique()
+            ))
+            if self._target_modification_count(modified_sequence) != 1:
+                audits.append({
+                    "Protein.Group": protein_group,
+                    "Modified_Precursor_Ids": modified_precursor_ids,
+                    "Modified.Sequence": modified_sequence,
+                    "Pair_Status": "excluded_multiform_or_multiple_target_modifications",
+                    "Pair_Quality_Tier": "O0",
+                })
+                continue
+            backbone = self._clean_peptide_backbone(modified_sequence)
+            counterparts = unmodified_index.get((protein_group, backbone), [])
+            if not counterparts:
+                audits.append({
+                    "Protein.Group": protein_group,
+                    "Modified_Precursor_Ids": modified_precursor_ids,
+                    "Modified.Sequence": modified_sequence,
+                    "Peptide_Backbone": backbone,
+                    "Pair_Status": "missing_unmodified_counterpart",
+                    "Pair_Quality_Tier": "O0",
+                })
+                continue
+
+            pair_key = f"{protein_group}|{backbone}|{modified_sequence}"
+            condition_values: Dict[str, List[float]] = {}
+            missing_reasons: Dict[str, str] = {}
+            for sample in self.sample_columns:
+                condition = self.condition_map.get(sample, "Unknown")
+                modified_values = [
+                    float(row.get(sample))
+                    for _, row in modified_form_rows.iterrows()
+                    if pd.notna(row.get(sample)) and row.get(sample) > 0
+                ]
+                modified_intensity = sum(modified_values) if modified_values else None
+                counterpart_values = [
+                    float(counterpart.get(sample))
+                    for counterpart in counterparts
+                    if pd.notna(counterpart.get(sample)) and counterpart.get(sample) > 0
+                ]
+                unmodified_intensity = sum(counterpart_values) if counterpart_values else None
+                if modified_intensity is None or unmodified_intensity is None:
+                    missing_reasons.setdefault(condition, "missing_modified" if modified_intensity is None else "missing_unmodified")
+                    continue
+                denominator = modified_intensity + unmodified_intensity
+                if denominator <= 0:
+                    missing_reasons.setdefault(condition, "invalid_pair_denominator")
+                    continue
+                condition_values.setdefault(condition, []).append(modified_intensity / denominator)
+
+            observed_conditions = [condition for condition, values in condition_values.items() if len(values) >= PAIR_MIN_REPLICATES]
+            expected_count = max(len(expected_conditions), 1)
+            completeness = len(observed_conditions) / expected_count
+            qualified = len(observed_conditions) >= PAIR_MIN_OBSERVED_TIMEPOINTS and completeness >= PAIR_MIN_COMPLETENESS
+            tier = "O2" if qualified else "O0"
+            status = "qualified_apparent_paired_occupancy" if qualified else "insufficient_pair_completeness"
+            audits.append({
+                "Protein.Group": protein_group,
+                "Modified_Precursor_Ids": modified_precursor_ids,
+                "Modified.Sequence": modified_sequence,
+                "Peptide_Backbone": backbone,
+                "Paired_Peptide_Key": pair_key,
+                "Unmodified_Precursor_Ids": ";".join(str(row.get("Precursor.Id", "")) for row in counterparts),
+                "Pair_Status": status,
+                "Pair_Quality_Tier": tier,
+                "Expected_Timepoints": expected_count,
+                "Observed_Timepoints": len(observed_conditions),
+                "Pair_Missingness": round(1.0 - completeness, 6),
+                "Missing_Reason_By_Condition": ";".join(f"{key}:{value}" for key, value in sorted(missing_reasons.items())),
+                "Occupancy_Calibration_Type": "none",
+            })
+            if not qualified or "Control" not in condition_values or len(condition_values["Control"]) < PAIR_MIN_REPLICATES:
+                continue
+            control_mean = float(np.mean(condition_values["Control"]))
+            control_logit = math.log(np.clip(control_mean, 1e-6, 1 - 1e-6) / (1 - np.clip(control_mean, 1e-6, 1 - 1e-6)))
+            for condition in observed_conditions:
+                if condition == "Control":
+                    continue
+                values = condition_values[condition]
+                occupancy_mean = float(np.mean(values))
+                occupancy_logit = math.log(np.clip(occupancy_mean, 1e-6, 1 - 1e-6) / (1 - np.clip(occupancy_mean, 1e-6, 1 - 1e-6)))
+                p_value = np.nan
+                if len(values) >= PAIR_MIN_REPLICATES and len(condition_values["Control"]) >= PAIR_MIN_REPLICATES:
+                    try:
+                        _, p_value = stats.ttest_ind(values, condition_values["Control"], equal_var=False, nan_policy="omit")
+                    except Exception:
+                        p_value = np.nan
+                records.append({
+                    "Protein.Group": protein_group,
+                    "Precursor.Id": modified_precursor_ids,
+                    "Modified.Sequence": modified_sequence,
+                    "Condition": condition,
+                    "Quantification_Track": "apparent_paired_occupancy",
+                    "Paired_Peptide_Key": pair_key,
+                    "Paired_Form_Level": "peptide_form",
+                    "Occupancy_Fraction": occupancy_mean,
+                    "Occupancy_Percent": occupancy_mean * 100.0,
+                    "Occupancy_Control_Fraction": control_mean,
+                    "Occupancy_Delta_PP": (occupancy_mean - control_mean) * 100.0,
+                    "Occupancy_Logit_Delta": occupancy_logit - control_logit,
+                    "Occupancy_Calibration_Type": "none",
+                    "Pair_Quality_Tier": tier,
+                    "Pair_Missingness": 1.0 - completeness,
+                    "Occupancy_P_Value": p_value,
+                    "Occupancy_N": len(values),
+                    "Occupancy_Control_N": len(condition_values["Control"]),
+                })
+        occupancy_df = pd.DataFrame(records)
+        audit_df = pd.DataFrame(audits)
+        if not occupancy_df.empty:
+            valid_mask = occupancy_df["Occupancy_P_Value"].notna()
+            occupancy_df["Occupancy_Q_Value"] = np.nan
+            if valid_mask.any():
+                _, q_values, _, _ = multipletests(occupancy_df.loc[valid_mask, "Occupancy_P_Value"], alpha=0.05, method="fdr_bh")
+                occupancy_df.loc[valid_mask, "Occupancy_Q_Value"] = q_values
+        logger.info("Paired occupancy audit: qualified=%s, audits=%s", len(occupancy_df), len(audit_df))
+        return occupancy_df, audit_df
+
     def _extract_ptm_position(self, protein_id: str, modified_sequence: str, ptm_type: str = None) -> str:
         try:
             if ptm_type is None:
@@ -684,9 +871,22 @@ class PTMQuantificationAnalyzer:
     # PTM vector data
     # ------------------------------------------------------------------
 
-    def create_ptm_vector_data(self, ptm_comparisons: pd.DataFrame, ptm_protein_changes: pd.DataFrame) -> pd.DataFrame:
+    def create_ptm_vector_data(
+        self,
+        ptm_comparisons: pd.DataFrame,
+        ptm_protein_changes: pd.DataFrame,
+        paired_occupancy_df: Optional[pd.DataFrame] = None,
+    ) -> pd.DataFrame:
         try:
             vector_data = []
+            occupancy_lookup: Dict[Tuple[str, str, str], Dict[str, object]] = {}
+            if paired_occupancy_df is not None and not paired_occupancy_df.empty:
+                for _, occupancy_row in paired_occupancy_df.iterrows():
+                    occupancy_lookup[(
+                        str(occupancy_row.get("Protein.Group", "")),
+                        str(occupancy_row.get("Modified.Sequence", "")),
+                        str(occupancy_row.get("Condition", "")),
+                    )] = occupancy_row.to_dict()
             treatments = self.treatment_conditions or [
                 c for c in ptm_comparisons["Condition"].unique() if c != "Control"
             ]
@@ -703,6 +903,9 @@ class PTMQuantificationAnalyzer:
                     continue
 
                 pc = pchange.iloc[0]
+                occupancy = occupancy_lookup.get((
+                    str(protein_group), str(ptm_row["Modified.Sequence"]), str(condition)
+                ), {})
                 cmeans: Dict[str, float] = {
                     "Control_Mean_PTM_Relative": ptm_row["Control_Mean"],
                     "Control_Mean_Protein": pc["Control_Mean"],
@@ -738,6 +941,23 @@ class PTMQuantificationAnalyzer:
                     "Control_Pseudocount_Used": ptm_row.get("Control_Pseudocount_Used", False),
                     "p_value": ptm_row.get("p_value", np.nan),
                     "q_value": ptm_row.get("q_value", np.nan),
+                    # Track 1 fields are additive.  Existing Track 2 consumers can
+                    # continue to use PTM_Relative_Log2FC unchanged.
+                    "Quantification_Track": occupancy.get("Quantification_Track", "protein_normalized_relative_ptm"),
+                    "Paired_Peptide_Key": occupancy.get("Paired_Peptide_Key", ""),
+                    "Paired_Form_Level": occupancy.get("Paired_Form_Level", ""),
+                    "Occupancy_Fraction": occupancy.get("Occupancy_Fraction", np.nan),
+                    "Occupancy_Percent": occupancy.get("Occupancy_Percent", np.nan),
+                    "Occupancy_Control_Fraction": occupancy.get("Occupancy_Control_Fraction", np.nan),
+                    "Occupancy_Delta_PP": occupancy.get("Occupancy_Delta_PP", np.nan),
+                    "Occupancy_Logit_Delta": occupancy.get("Occupancy_Logit_Delta", np.nan),
+                    "Occupancy_Calibration_Type": occupancy.get("Occupancy_Calibration_Type", "none"),
+                    "Pair_Quality_Tier": occupancy.get("Pair_Quality_Tier", "O0"),
+                    "Pair_Missingness": occupancy.get("Pair_Missingness", np.nan),
+                    "Occupancy_P_Value": occupancy.get("Occupancy_P_Value", np.nan),
+                    "Occupancy_Q_Value": occupancy.get("Occupancy_Q_Value", np.nan),
+                    "Occupancy_N": occupancy.get("Occupancy_N", np.nan),
+                    "Occupancy_Control_N": occupancy.get("Occupancy_Control_N", np.nan),
                     **cmeans,
                 })
 
@@ -761,6 +981,7 @@ class PTMQuantificationAnalyzer:
         all_protein_changes: pd.DataFrame,
         ptm_protein_changes: pd.DataFrame,
         ptm_vector_df: pd.DataFrame,
+        pair_audit_df: Optional[pd.DataFrame] = None,
     ):
         sfx = self.file_suffix
 
@@ -791,6 +1012,11 @@ class PTMQuantificationAnalyzer:
 
             if self.motif_analyzer:
                 self._perform_enhanced_motif_analysis(ptm_vector_df)
+
+        if pair_audit_df is not None:
+            p = self.output_dir / f"paired_peptide_occupancy_audit{sfx}.tsv"
+            pair_audit_df.to_csv(p, sep="\t", index=False)
+            logger.info(f"Saved paired occupancy audit: {p.name}")
 
         self._save_analysis_summary(relative_quant_df, ptm_comparisons, all_protein_changes, ptm_vector_df)
 

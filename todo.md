@@ -162,4 +162,7 @@ Backend: vector-plot (receptor inference)
 - [x] occupancy 및 protein-normalized track의 계산 계약·quality gate·provenance 설계
 - [x] co-wave·TMM·report에서 track별 사용·병합·우선순위 규칙 설계
 - [x] paired occupancy 결측치의 observed-only·drop·sensitivity-only imputation 계약 추가
-- [ ] backward-compatible 구현 범위·회귀 테스트·사용자 승인 필요 항목 보고
+- [x] P0: modified/unmodified pair audit·quality tier·missingness provenance 구현
+- [x] P1: dual-track vector output·API metadata·occupancy 표시 계약 구현
+- [x] P2: track별 co-wave/TMM·concordance/discrepancy evidence 구현
+- [x] 기존 Track 2 호환성·Python 회귀 테스트·문서화·GitHub 반영
