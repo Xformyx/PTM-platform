@@ -246,9 +246,33 @@ export default function OrderCreate() {
   const [files, setFiles] = useState<{
     pr_matrix: File | null; pg_matrix: File | null; config_file: File | null;
   }>({ pr_matrix: null, pg_matrix: null, config_file: null });
+  const [referenceStatus, setReferenceStatus] = useState<{
+    ready: boolean;
+    custom_reference: boolean;
+    fasta_filename: string | null;
+    message: string;
+  } | null>(null);
   const [secondaryFiles, setSecondaryFiles] = useState<{
     pr_matrix: File | null; pg_matrix: File | null;
   }>({ pr_matrix: null, pg_matrix: null });
+
+  useEffect(() => {
+    let cancelled = false;
+    setReferenceStatus(null);
+    api.get<{
+      ready: boolean;
+      custom_reference: boolean;
+      fasta_filename: string | null;
+      message: string;
+    }>(`/orders/reference-status?species=${encodeURIComponent(form.species)}`)
+      .then((status) => {
+        if (!cancelled) setReferenceStatus(status);
+      })
+      .catch(() => {
+        if (!cancelled) setReferenceStatus(null);
+      });
+    return () => { cancelled = true; };
+  }, [form.species]);
 
   // Step 1: Sample Config
   const [sampleColumns, setSampleColumns] = useState<string[]>([]);
@@ -482,6 +506,10 @@ export default function OrderCreate() {
       setError("Sample configuration is required. Go back to Step 2 and configure samples.");
       return;
     }
+    if (form.species === "rat_hir" && referenceStatus?.ready === false) {
+      setError(referenceStatus.message);
+      return;
+    }
 
     setLoading(true);
     setError("");
@@ -694,9 +722,22 @@ export default function OrderCreate() {
                     Automatically resolved from <code className="text-xs bg-muted px-1 rounded">data/reference/{form.species}/</code>
                   </p>
                   {form.species === "rat_hir" && (
-                    <p className="text-xs text-amber-700 dark:text-amber-300 mt-2">
-                      Custom rat reference: retain the human INSR entry with its accession, <code>GN=INSR</code>, and <code>OX=9606</code>. Rat remains the order-level annotation species.
-                    </p>
+                    <>
+                      <p className="text-xs text-amber-700 dark:text-amber-300 mt-2">
+                        Custom rat reference: retain the human INSR entry with its accession, <code>GN=INSR</code>, and <code>OX=9606</code>. Rat remains the order-level annotation species.
+                      </p>
+                      {referenceStatus?.ready === false && (
+                        <Alert variant="destructive" className="mt-3 py-2">
+                          <AlertCircle className="h-4 w-4" />
+                          <AlertDescription className="text-xs">{referenceStatus.message}</AlertDescription>
+                        </Alert>
+                      )}
+                      {referenceStatus?.ready === true && (
+                        <p className="text-xs text-emerald-700 dark:text-emerald-300 mt-2">
+                          Custom reference ready: <code>{referenceStatus.fasta_filename}</code>
+                        </p>
+                      )}
+                    </>
                   )}
                 </div>
 

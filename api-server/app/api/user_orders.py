@@ -489,6 +489,24 @@ async def _create_order_from_user_impl(
         # Append timestamp to make unique
         order_code = f"{order_code[:50]}_{datetime.now(timezone.utc).strftime('%H%M%S')}"
 
+    # Resolve the registered reference before writing any uploaded files. A
+    # custom Rat_hir reference must not silently fall back to the standard rat
+    # FASTA because the human INSR entry is part of the reference contract.
+    organism = config_data.get("organism", "mouse")
+    from ptm_shared.species_registry import resolve_species_context
+    try:
+        species_context = resolve_species_context(organism)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    uploaded_fasta = any(file_type == "fasta" for file_type in file_types)
+    from ptm_shared.reference_fasta import missing_reference_detail, resolve_reference_fasta
+    resolved_reference_fasta = None
+    if not uploaded_fasta:
+        resolved_reference_fasta = resolve_reference_fasta(settings.REFERENCE_DIR, species_context.label)
+    if not uploaded_fasta and not resolved_reference_fasta:
+        raise HTTPException(status_code=422, detail=missing_reference_detail(settings.REFERENCE_DIR, species_context))
+
     # Create input directory
     input_dir = Path(settings.INPUT_DIR) / order_code
     input_dir.mkdir(parents=True, exist_ok=True)
@@ -496,7 +514,7 @@ async def _create_order_from_user_impl(
     # Save uploaded files
     pr_path = None
     pg_path = None
-    fasta_path = None
+    fasta_path = resolved_reference_fasta
     reference_pdfs = []
 
     for f, ft in zip(files, file_types):
@@ -527,21 +545,7 @@ async def _create_order_from_user_impl(
 
     # Resolve FASTA from reference dir if not uploaded
     if not fasta_path:
-        organism = config_data.get("organism", "mouse")
-        from ptm_shared.species_registry import resolve_species_context
-        try:
-            species_context = resolve_species_context(organism)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
-        species_dir = Path(settings.REFERENCE_DIR) / species_context.reference_subdir
-        if species_dir.is_dir():
-            for fa in species_dir.glob("*.fasta"):
-                fasta_path = str(fa)
-                break
-            if not fasta_path:
-                for fa in species_dir.glob("*.fa"):
-                    fasta_path = str(fa)
-                    break
+        fasta_path = resolve_reference_fasta(settings.REFERENCE_DIR, species_context.label)
 
     if not fasta_path:
         raise HTTPException(status_code=400, detail="No FASTA file provided or found in reference directory")
@@ -691,11 +695,7 @@ async def _create_order_from_user_impl(
         condition_map = _build_condition_map(sample_config)
 
     ptm_mode = "phospho" if ptm_type == "phosphorylation" else "ubi"
-    from ptm_shared.species_registry import resolve_species_context
-    try:
-        species_context = resolve_species_context(species)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    # species_context was resolved during the preflight reference check above.
 
     # Gather ChromaDB collections for RAG retrieval (use all active)
     coll_result = await db.execute(

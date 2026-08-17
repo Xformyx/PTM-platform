@@ -44,20 +44,8 @@ async def _clear_order_locks(order_id: int) -> int:
 
 def _resolve_fasta(reference_dir: str, species: str) -> str | None:
     """Find the first FASTA under the species label's registered reference directory."""
-    from pathlib import Path
-    from ptm_shared.species_registry import resolve_species_context
-
-    try:
-        context = resolve_species_context(species)
-    except ValueError:
-        return None
-    species_dir = Path(reference_dir) / context.reference_subdir
-    if not species_dir.is_dir():
-        return None
-    for f in sorted(species_dir.iterdir()):
-        if f.suffix in (".fasta", ".fa") and f.is_file():
-            return str(f)
-    return None
+    from ptm_shared.reference_fasta import resolve_reference_fasta
+    return resolve_reference_fasta(reference_dir, species)
 
 
 def _require_species_context(species: str | None):
@@ -67,6 +55,36 @@ def _require_species_context(species: str | None):
         return resolve_species_context(species)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def _missing_reference_detail(reference_dir: str, species_context) -> str:
+    """Return an actionable custom-reference error without exposing a fallback species."""
+    from ptm_shared.reference_fasta import missing_reference_detail
+    return missing_reference_detail(reference_dir, species_context)
+
+
+@router.get("/reference-status")
+async def get_reference_status(
+    species: str = Query(..., min_length=1),
+    user=Depends(get_current_user),
+):
+    """Report whether the registered reference required for an order is available."""
+    settings = get_settings()
+    species_context = _require_species_context(species)
+    fasta_path = _resolve_fasta(settings.REFERENCE_DIR, species_context.label)
+    return {
+        "species": species_context.label,
+        "analysis_species": species_context.analysis_species,
+        "custom_reference": species_context.custom_reference,
+        "reference_subdir": species_context.reference_subdir,
+        "ready": bool(fasta_path),
+        "fasta_filename": Path(fasta_path).name if fasta_path else None,
+        "message": (
+            f"Reference FASTA ready: {Path(fasta_path).name}"
+            if fasta_path
+            else _missing_reference_detail(settings.REFERENCE_DIR, species_context)
+        ),
+    }
 
 
 def _validate_order_code(code: str) -> None:
@@ -602,6 +620,18 @@ async def create_order(
                 detail=f"Order '{order_code}' already has data in outputs. Choose a different name.",
             )
 
+        # Validate the registered species and reference before creating an order
+        # directory or writing uploaded files. Rat_hir intentionally cannot fall
+        # back to the standard rat reference because its custom human INSR entry
+        # is part of the reproducible reference contract.
+        species_context = _require_species_context(species)
+        fasta_path = _resolve_fasta(settings.REFERENCE_DIR, species_context.label)
+        if not fasta_path:
+            raise HTTPException(
+                status_code=422,
+                detail=_missing_reference_detail(settings.REFERENCE_DIR, species_context),
+            )
+
         order_dir = input_dir
         order_dir.mkdir(parents=True, exist_ok=True)
 
@@ -623,13 +653,6 @@ async def create_order(
             secondary_pr_path = await save_upload(secondary_pr_matrix, "secondary")
         if secondary_pg_matrix and secondary_pg_matrix.filename:
             secondary_pg_path = await save_upload(secondary_pg_matrix, "secondary")
-
-        fasta_path = _resolve_fasta(settings.REFERENCE_DIR, species)
-        if not fasta_path:
-            raise HTTPException(
-                status_code=400,
-                detail=f"No reference FASTA found for species '{species}' in {settings.REFERENCE_DIR}/{species}",
-            )
 
         # Sample config — prefer the JSON field from frontend; fall back to xlsx parsing
         sample_config_data = _safe_json_loads(sample_config, {})

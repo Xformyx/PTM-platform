@@ -192,3 +192,8 @@ Backend: vector-plot (receptor inference)
 - [x] 현재 RAG Enrichment의 ChromaDB retrieval·MCP·LLM 호출 경로 점검
 - [x] PubMedBERT embedding과 Qwen 14B의 역할·품질·운영 제약 비교
 - [x] RAG Enrichment의 retrieval·reranking·생성 모델 권장 정책 작성
+
+## Rat_hir Order Creation 실패 점검
+- [x] Rat_hir frontend payload·API validation·서버 로그의 실패 지점 확인
+- [x] custom reference alias·FASTA 조건·order schema 정합성 수정
+- [x] Rat_hir/Rat order creation 회귀 테스트 및 운영 전제 문서화
