@@ -171,3 +171,8 @@ Backend: vector-plot (receptor inference)
 - [x] 구현 계약과 관찰·추론 경계 재검증
 - [x] 논문용 Methods 섹션 초안 작성 및 참고문헌 정리
 - [x] 실험별로 채워야 할 파라미터·제한 사항 안내
+
+## RAG Collection Biomedical Embedding Model 지원성 감사
+- [x] 현재 embedding provider·collection metadata·retrieval 경로 점검
+- [x] BioBERT·PubMedBERT embedding 적합성·차원·운영 제약 검증
+- [x] collection 재색인·model registry·fallback 도입 설계 및 권고 작성
