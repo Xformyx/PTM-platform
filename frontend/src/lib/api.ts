@@ -84,11 +84,23 @@ export const api = {
   delete: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
 
   upload: async <T>(path: string, formData: FormData): Promise<T> => {
-    const res = await fetch(`${API_BASE}${path}`, {
-      method: 'POST',
-      headers: { ...getAuthHeader() },
-      body: formData,
-    });
+    let res: Response;
+    try {
+      res = await fetch(`${API_BASE}${path}`, {
+        method: 'POST',
+        headers: { ...getAuthHeader() },
+        body: formData,
+      });
+    } catch {
+      throw new Error(
+        'Upload failed (network). Copy PR/PG to local disk, hard-refresh, and retry. Species/reference is not the cause.',
+      );
+    }
+    if (res.status === 401) {
+      localStorage.removeItem(TOKEN_KEY);
+      window.location.href = '/login';
+      throw new Error('Unauthorized');
+    }
     if (!res.ok) {
       const raw = await res.json().catch(() => null);
       throw new Error(formatApiDetail(raw, res.status, res.statusText));
