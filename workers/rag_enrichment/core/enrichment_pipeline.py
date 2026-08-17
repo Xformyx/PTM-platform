@@ -475,10 +475,25 @@ class RAGEnrichmentPipeline:
                     pw_parts.append(f"STR-Indir:{si_c}")
                 pw_summary = ", ".join(pw_parts) if pw_parts else "no pathways"
                 art_count = enr.get("search_summary", {}).get("total_articles", 0)
+                route_name = (
+                    enr.get("evidence_gap_decision", {}).get("route")
+                    or enr.get("search_summary", {}).get("evidence_route")
+                    or "legacy"
+                )
                 cached = " [gene-cached]" if self._gene_cache.has(f"{gene}__kegg") else ""
+                if route_name == DB_ONLY:
+                    progress_detail = (
+                        f"{gene} {pos}: [db_only] structured DB, {pw_total} pathways, "
+                        f"PubMed skipped ({done}/{total})"
+                    )
+                else:
+                    progress_detail = (
+                        f"{gene} {pos}: [{route_name}] {art_count} selected articles, "
+                        f"{pw_total} pathways ({done}/{total})"
+                    )
                 self._progress(
                     done / total,
-                    f"{gene} {pos}: {art_count} articles, {pw_total} pathways ({done}/{total})"
+                    progress_detail
                 )
             except Exception as e:
                 logger.error(f"Enrichment FAILED for {gene}/{pos}: {e}", exc_info=True)

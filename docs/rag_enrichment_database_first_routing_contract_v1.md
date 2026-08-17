@@ -5,7 +5,7 @@
 
 ## 목적
 
-RAG Enrichment는 structured database와 literature를 같은 종류의 근거로 취급하지 않는다. UniProt, iPTMnet, KEGG/Reactome 및 optional interaction context는 canonical/curated evidence packet을 만들고, PubMed와 Qwen은 이 packet이 채우지 못하는 exact-site, treatment/context, contradiction 또는 strong-claim evidence gap에서만 호출한다.
+RAG Enrichment는 structured database와 literature를 같은 종류의 근거로 취급하지 않는다. UniProt, iPTMnet, KEGG/Reactome 및 optional interaction context는 canonical/curated evidence packet을 만들고, PubMed와 Qwen은 이 packet이 채우지 못하는 **high-priority exact-site, explicit literature-validation, reference complication 또는 strong-claim** evidence gap에서만 호출한다. Order-level treatment, cell type 또는 biological question은 대부분의 row에 공통으로 존재하므로, 그 자체로 PubMed escalation의 trigger가 되지 않는다.
 
 ```text
 Raw temporal/PTM evidence
@@ -23,11 +23,13 @@ evidence-gap decision
 
 | Route | Default condition | External literature work | Qwen/full text behavior |
 |---|---|---|---|
-| `db_only` | curated exact-site evidence가 있고 low-priority observed signal이며 별도 context gap이 없음 | PubMed 검색 없음 | Qwen literature tasks 없음; report는 “문헌을 찾지 못함”이 아니라 database-first decision을 표시 |
-| `abstract_targeted` | exact site가 curated DB에 없고 high signal/context/reference complication이 있거나, curated site라도 high-signal context claim이 필요 | exact site/PTM query, `RAG_MAX_ARTICLES` budget 사용 | 기존 source-grounded abstract/kinase/functional analysis 유지; selected article set만 입력 |
+| `db_only` | curated/uncurated 여부와 무관하게 low-priority observed signal이고 explicit literature request·reference complication이 없음 | PubMed 검색 없음 | Qwen literature tasks 없음; report는 “문헌을 찾지 못함”이 아니라 database-first decision을 표시 |
+| `abstract_targeted` | uncurated exact site **and high signal**, explicit literature request, receptor/transgene/mixed-reference complication, 또는 curated site의 high-signal context claim | exact site/PTM query, `RAG_MAX_ARTICLES` budget 사용 | 기존 source-grounded abstract/kinase/functional analysis 유지; selected article set만 입력 |
 | `fulltext_escalated` | `requires_fulltext=true`, `fulltext_escalated=true`, 또는 `evidence_route_override=fulltext_escalated` | targeted article 결과 재사용 | PMC full text는 top article 1개만 분석 |
 
 `evidence_route_override` 값은 `db_only`, `abstract_targeted`, `fulltext_escalated`만 허용한다. 이 override는 threshold를 변경하는 전역 설정이 아니라 특정 PTM에 대한 명시적 audit/request provenance다.
+
+새 progress message도 route를 명시한다. `db_only` row는 `[db_only] structured DB, … pathways, PubMed skipped`로, escalation row는 `[abstract_targeted] … selected articles` 또는 `[fulltext_escalated] … selected articles`로 표시한다. 따라서 article count는 전체 PTM의 기본 작업량이 아니라 **route를 통과한 high-priority row의 실제 selected literature count**를 뜻한다.
 
 ## Structured database packet
 
@@ -74,7 +76,7 @@ partial PMID subset reuse는 route-specific LLM interpretation에서 사용하�
 
 | Test | Coverage |
 |---|---|
-| `test_evidence_routing.py` | curated low-priority `db_only`, uncurated high-signal `abstract_targeted`, low-priority uncurated `db_only`, explicit full-text escalation, structured packet provenance |
+| `test_evidence_routing.py` | curated low-priority `db_only`, uncurated high-signal `abstract_targeted`, order-level context가 있어도 uncurated low-priority `db_only`, explicit literature/full-text escalation, structured packet provenance |
 | Python compilation | evidence routing, enrichment pipeline, PTM validator syntax |
 | Existing temporal contracts | canonical wave와 TMM regression tests로 기존 core analysis가 변경되지 않았는지 확인 |
 

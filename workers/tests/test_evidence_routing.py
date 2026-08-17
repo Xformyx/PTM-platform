@@ -62,6 +62,32 @@ def test_uncurated_low_priority_site_stays_database_only_without_context():
     assert decision["route"] == DB_ONLY
 
 
+def test_uncurated_low_priority_site_stays_database_only_with_order_context():
+    decision = decide_evidence_route(
+        ptm={},
+        classification={"significance": "Low"},
+        structured_packet=_packet(exact_site_known=False),
+        context={
+            "treatment": "insulin",
+            "cell_type": "rat cell line",
+            "biological_question": "temporal signaling response",
+        },
+    )
+    assert decision["route"] == DB_ONLY
+    assert decision["literature_required"] is False
+
+
+def test_explicit_literature_request_escalates_uncurated_low_priority_site():
+    decision = decide_evidence_route(
+        ptm={"requires_literature_validation": True},
+        classification={"significance": "Low"},
+        structured_packet=_packet(exact_site_known=False),
+        context={"treatment": "insulin"},
+    )
+    assert decision["route"] == ABSTRACT_TARGETED
+    assert "explicit_literature_request" in decision["reason_codes"]
+
+
 def test_fulltext_requires_explicit_escalation():
     decision = decide_evidence_route(
         ptm={"requires_fulltext": True},

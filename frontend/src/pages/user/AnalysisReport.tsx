@@ -499,7 +499,17 @@ function friendlyMessage(stage: string, detail: string): string {
       const match = detail.match(/All (\d+) PTMs/);
       return match ? `${match[1]}개 PTM 분석 대기열 등록 — 순차 처리 중` : "PTM 분석 대기열 등록 완료";
     }
-    // Per-PTM progress: "GENE POS: N articles, M pathways (done/total)"
+    // Per-PTM database-first progress
+    const dbOnlyMatch = detail.match(/^([\w.-]+)\s+\w+\d+:\s*\[db_only\]\s*structured DB,\s*(\d+)\s*pathways,\s*PubMed skipped\s*\((\d+)\/(\d+)\)/i);
+    if (dbOnlyMatch) {
+      return `${dbOnlyMatch[1]} 분석 중 — 구조화 DB 경로 ${dbOnlyMatch[2]}개 확인, 논문 검색 생략 (${dbOnlyMatch[3]}/${dbOnlyMatch[4]})`;
+    }
+    const targetedMatch = detail.match(/^([\w.-]+)\s+\w+\d+:\s*\[(abstract_targeted|fulltext_escalated)\]\s*(\d+)\s*selected articles,\s*(\d+)\s*pathways\s*\((\d+)\/(\d+)\)/i);
+    if (targetedMatch) {
+      const routeLabel = targetedMatch[2].toLowerCase() === "fulltext_escalated" ? "논문 본문 검토" : "필요 문헌 검토";
+      return `${targetedMatch[1]} 분석 중 — ${routeLabel} ${targetedMatch[3]}편, 경로 ${targetedMatch[4]}개 (${targetedMatch[5]}/${targetedMatch[6]})`;
+    }
+    // Legacy per-PTM progress: "GENE POS: N articles, M pathways (done/total)"
     const ptmMatch = detail.match(/^(\w+)\s+\w+\d+:\s*(\d+)\s*articles?,\s*(\d+)\s*pathways?\s*\((\d+)\/(\d+)\)/);
     if (ptmMatch) {
       return `${ptmMatch[1]} 분석 중 — 논문 ${ptmMatch[2]}편, 경로 ${ptmMatch[3]}개 발견 (${ptmMatch[4]}/${ptmMatch[5]})`;

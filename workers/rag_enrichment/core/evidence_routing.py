@@ -105,6 +105,11 @@ def decide_evidence_route(
         context.get(key)
         for key in ("treatment", "cell_type", "tissue", "biological_question", "special_conditions")
     )
+    explicit_literature_request = bool(
+        ptm.get("requires_literature")
+        or ptm.get("requires_literature_validation")
+        or ptm.get("literature_escalated")
+    )
 
     if not exact_site_known:
         reasons.append("exact_site_not_curated")
@@ -118,15 +123,23 @@ def decide_evidence_route(
     if not pathway_context.get("kegg_pathway_count") and not pathway_context.get("reactome_signaling_count"):
         reasons.append("limited_curated_pathway_context")
 
-    # An uncurated site alone is not enough: otherwise every low-priority
-    # discovery row recreates the previous PubMed-first fan-out. Literature is
-    # reserved for an evidence gap combined with high observed signal, explicit
-    # context, or a transgene/receptor reference complication.
+    # An uncurated site or order-level experiment context alone is not enough:
+    # a dense time-course order normally provides a treatment/context for every
+    # row. Using that global context as a trigger would recreate the old
+    # PubMed-first fan-out. Literature is reserved for a high observed signal,
+    # explicit per-site request, or transgene/receptor reference complication.
     evidence_gap_needs_context = not exact_site_known and (
-        significance == "high" or has_context or special_reference_context
+        significance == "high" or explicit_literature_request or special_reference_context
     )
     high_context_claim = exact_site_known and significance == "high" and has_context
-    if evidence_gap_needs_context or high_context_claim or special_reference_context:
+    if (
+        evidence_gap_needs_context
+        or high_context_claim
+        or special_reference_context
+        or explicit_literature_request
+    ):
+        if explicit_literature_request:
+            reasons.append("explicit_literature_request")
         return {
             "route": ABSTRACT_TARGETED,
             "reason_codes": reasons,

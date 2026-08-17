@@ -218,3 +218,8 @@ Backend: vector-plot (receptor inference)
 - [x] structured database-first packet과 db_only·abstract_targeted·fulltext_escalated decision contract 구현
 - [x] PubMed·validation·cross-site search 중복 제거와 route provenance·cache 재사용 구현
 - [x] Qwen evidence synthesis·report 호환성·회귀 테스트·GitHub main 반영
+
+## RAG Enrichment DB-First 순서 및 Progress 표시 정합성 점검
+- [x] 최신 runtime/worker가 DB packet 완료 후에만 literature route를 판정하는지 확인
+- [x] `articles` progress count가 route별 실제 PubMed 검색 여부를 정확히 반영하도록 수정
+- [x] DB-first execution order와 db_only·abstract_targeted progress 회귀 검증
