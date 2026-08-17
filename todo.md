@@ -182,3 +182,13 @@ Backend: vector-plot (receptor inference)
 - [x] shared embedding registry·explicit query embedding·dimension guard 구현
 - [x] RAG API·frontend PubMedBERT selector·collection metadata와 reindex protection 구현
 - [x] 회귀 테스트·문서화·GitHub main 반영
+
+## RAG Management PubMedBERT Selector 노출 점검
+- [ ] 실행 중인 frontend bundle과 source의 selector option 포함 여부 확인
+- [ ] 최신 frontend rebuild·restart 및 cache 무효화
+- [ ] RAG Management selector 노출과 새 collection 생성 흐름 확인
+
+## RAG Enrichment Retrieval·Qwen 생성 역할 감사
+- [x] 현재 RAG Enrichment의 ChromaDB retrieval·MCP·LLM 호출 경로 점검
+- [x] PubMedBERT embedding과 Qwen 14B의 역할·품질·운영 제약 비교
+- [x] RAG Enrichment의 retrieval·reranking·생성 모델 권장 정책 작성
