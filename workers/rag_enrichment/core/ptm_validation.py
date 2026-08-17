@@ -314,6 +314,10 @@ class PTMValidator:
         experimental_context: Optional[dict] = None,
         # Legacy parameter name support
         site: str = "",
+        preloaded_articles: Optional[List[dict]] = None,
+        preloaded_iptmnet_data: Optional[dict] = None,
+        preloaded_uniprot_data: Optional[dict] = None,
+        allow_context_literature_search: bool = True,
     ) -> PTMValidationResult:
         """
         Validate a PTM site against iPTMnet and UniProt.
@@ -345,9 +349,10 @@ class PTMValidator:
                 f"non-biological entities. Results have been filtered for biological context."
             )
 
-        # 2. iPTMnet query — uses MCPClient.query_iptmnet()
+        # 2. iPTMnet query — selected structured packet may already contain
+        # the exact-site lookup, avoiding a duplicate MCP call.
         try:
-            iptmnet_data = self.mcp.query_iptmnet(
+            iptmnet_data = preloaded_iptmnet_data or self.mcp.query_iptmnet(
                 gene=gene, position=position, organism=self.iptmnet_organism,
             )
             sites_found = iptmnet_data.get("sites_found", 0)
@@ -372,9 +377,10 @@ class PTMValidator:
         except Exception as e:
             logger.warning(f"iPTMnet query failed for {gene} {position}: {e}")
 
-        # 3. UniProt PTM sites — uses MCPClient.query_uniprot()
+        # 3. UniProt PTM sites — selected structured packet may already contain
+        # a matching protein record.
         try:
-            uniprot_data = self.mcp.query_uniprot(gene)
+            uniprot_data = preloaded_uniprot_data or self.mcp.query_uniprot(gene)
 
             go_bp = uniprot_data.get("go_terms_bp", [])
             go_mf = uniprot_data.get("go_terms_mf", [])
@@ -413,8 +419,12 @@ class PTMValidator:
         except Exception as e:
             logger.warning(f"Cross-site search failed for {gene} {position}: {e}")
 
-        # 5. **v4.0** Context-aware PubMed search for additional evidence
-        if experimental_context:
+        # 5. Context-aware PubMed evidence. Database-first routing passes the
+        # selected Phase A article set here and disables new broad searches.
+        if preloaded_articles:
+            result.pubmed_context_articles = list(preloaded_articles)[:10]
+            result.evidence_sources.append("PubMed(selected)")
+        elif experimental_context and allow_context_literature_search:
             try:
                 ctx_articles, ctx_score = self._context_aware_pubmed_search(
                     gene, position, ptm_type, experimental_context,

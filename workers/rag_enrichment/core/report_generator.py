@@ -975,12 +975,27 @@ class ComprehensiveReportGenerator:
     def _generate_literature_evidence(self, enr: dict) -> str:
         findings = enr.get("recent_findings", [])
         if not findings:
-            # Still show classification-based interpretation even without literature
             classification = enr.get("classification", {})
             class_level = classification.get("level", "unknown")
             significance = classification.get("significance", "Low")
+            decision = enr.get("evidence_gap_decision", {})
+            route = decision.get("route") or enr.get("search_summary", {}).get("evidence_route")
+            reasons = decision.get("reason_codes", [])
+            if route == "db_only":
+                reason_text = ", ".join(reasons) if reasons else "curated database evidence was sufficient"
+                return (
+                    "### Evidence Routing\n\n"
+                    "Literature retrieval was **not escalated** for this site because the "
+                    f"structured database-first packet was sufficient (`{reason_text}`).\n\n"
+                    "**Classification**: "
+                    f"{class_level} (Significance: {significance})\n\n"
+                    "This interpretation is grounded in quantitative PTM/protein abundance "
+                    "evidence and curated database provenance; it does not claim that no "
+                    "relevant literature exists.\n"
+                )
+            # A targeted retrieval route may still return no suitable articles.
             return ("### Literature Evidence\n\n"
-                    f"No relevant literature found in PubMed for this specific PTM site.\n\n"
+                    f"No selected literature evidence was returned for this specific PTM site.\n\n"
                     f"**Classification**: {class_level} (Significance: {significance})\n\n"
                     f"This classification is based on quantitative PTM and protein abundance changes. "
                     f"Further manual literature search may reveal additional context.\n")

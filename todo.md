@@ -212,3 +212,9 @@ Backend: vector-plot (receptor inference)
 - [x] PubMed/MCP·structured database·LLM 호출 경로와 캐시·rate-limit 정책 점검
 - [x] 정보 유형별 근거 중복·고유성·비용·근거 품질 비교
 - [x] database-first routing·article budget·LLM escalation·fallback 정책 권고 작성
+
+## RAG Enrichment Database-First Evidence Routing 구현
+- [x] 최신 main 동기화 및 enrichment·validation·cache·report 소비 contract 재검증
+- [x] structured database-first packet과 db_only·abstract_targeted·fulltext_escalated decision contract 구현
+- [x] PubMed·validation·cross-site search 중복 제거와 route provenance·cache 재사용 구현
+- [x] Qwen evidence synthesis·report 호환성·회귀 테스트·GitHub main 반영

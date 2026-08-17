@@ -20,6 +20,8 @@ v9.29.0 — Parallel Enrichment:
   - Thread-safe progress tracking
 """
 
+import hashlib
+import json
 import logging
 import math
 import os
@@ -29,7 +31,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable, Dict, List, Optional
 
-from common.phase_b_cache import get_cached, get_cached_best_match, set_cached
+from common.phase_b_cache import get_cached, set_cached
 
 
 from common.llm_client import LLMClient
@@ -57,6 +59,13 @@ PROTEIN_CHANGE = 0.5  # Protein change threshold (|Log2FC| > 0.5 = >1.4x fold ch
 # Parallelization Config
 # ---------------------------------------------------------------------------
 import os as _os
+from .evidence_routing import (
+    ABSTRACT_TARGETED,
+    DB_ONLY,
+    FULLTEXT_ESCALATED,
+    build_structured_database_packet,
+    decide_evidence_route,
+)
 # Level 1: Max concurrent MCP calls within a single PTM enrichment
 MCP_WORKERS = int(_os.getenv("RAG_MCP_WORKERS", "6"))
 # Level 2: Max concurrent PTM enrichments.
@@ -121,6 +130,24 @@ def _format_phase_b_exc(e: BaseException, max_len: int = 220) -> str:
             f"(lighter model, or increase timeout in enrichment_pipeline)"
         )[:max_len]
     return name[:max_len]
+
+
+def _phase_b_context_signature(context: Optional[dict], ptm: dict) -> str:
+    """Hash fields that can change a literature-derived interpretation."""
+    context = context or {}
+    payload = {
+        "organism": context.get("organism") or context.get("species"),
+        "treatment": context.get("treatment"),
+        "cell_type": context.get("cell_type"),
+        "tissue": context.get("tissue"),
+        "biological_question": context.get("biological_question"),
+        "special_conditions": context.get("special_conditions"),
+        "ptm_relative_log2fc": ptm.get("PTM_Relative_Log2FC", ptm.get("ptm_relative_log2fc")),
+        "protein_log2fc": ptm.get("Protein_Log2FC", ptm.get("protein_log2fc")),
+        "trajectory": ptm.get("temporal_profile") or ptm.get("timecourse_values"),
+    }
+    serialized = json.dumps(payload, sort_keys=True, ensure_ascii=True, default=str)
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()[:12]
 
 
 class _GeneCache:
@@ -610,13 +637,14 @@ class RAGEnrichmentPipeline:
         Execution is split into 3 dependency-aware phases:
 
         Phase A (parallel, no dependencies):
-            PubMed, KEGG, STRING-DB, UniProt, HPA, GTEx, BioGRID, Reactome
+            iPTMnet, KEGG, STRING-DB, UniProt, HPA, GTEx, BioGRID, Reactome
             → Gene-level results (KEGG, STRING, UniProt, HPA, GTEx, BioGRID, Reactome)
               are cached so multi-site genes only query once.
 
-        Phase B (parallel, depends on PubMed articles from Phase A):
-            Regulation extraction, Abstract analysis, Kinase prediction, Fulltext analysis, PTM validation
-            → Also depends on KEGG for functional_impact (pathway names)
+        Phase B (route-dependent):
+            A structured database packet determines db_only, abstract_targeted,
+            or fulltext_escalated. PubMed and LLM analysis run only for selected
+            literature routes; validation reuses the selected article set.
 
         Phase C (conditional, depends on KEGG from Phase A):
             STRING indirect (only when KEGG pathways < 3)
@@ -659,18 +687,12 @@ class RAGEnrichmentPipeline:
         # ══════════════════════════════════════════════════════════════
         phase_a_results = {}
 
-        def _pubmed():
+        def _iptmnet():
             try:
-                result = self.mcp.search_pubmed(
-                    gene=gene, position=position, ptm_type=ptm_type,
-                    context_keywords=context_keywords, max_results=self.max_articles,
-                )
-                articles = result.get("articles", [])
-                logger.info(f"PubMed search for {gene} {position}: {len(articles)} articles found")
-                return {"search_result": result, "articles": articles}
+                return self.mcp.query_iptmnet(gene=gene, position=position, organism=species)
             except Exception as e:
-                logger.warning(f"PubMed search failed for {gene} {position}: {e}")
-                return {"search_result": {}, "articles": []}
+                logger.warning(f"iPTMnet query failed for {gene} {position}: {e}")
+                return {}
 
         def _kegg():
             cache_key = f"{gene}__kegg__{_kegg_org}"
@@ -814,7 +836,7 @@ class RAGEnrichmentPipeline:
 
         # Execute Phase A in parallel
         phase_a_tasks = {
-            "pubmed": _pubmed,
+            "iptmnet": _iptmnet,
             "kegg": _kegg,
             "stringdb": _stringdb,
             "uniprot": _uniprot,
@@ -824,7 +846,7 @@ class RAGEnrichmentPipeline:
             "reactome": _reactome,
         }
 
-        self._phase_event(gene, position, "A", "running", "PubMed/KEGG/STRING/UniProt/HPA/GTEx/BioGRID/Reactome")
+        self._phase_event(gene, position, "A", "running", "iPTMnet/KEGG/STRING/UniProt/HPA/GTEx/BioGRID/Reactome")
         _phase_a_errors = []
         with ThreadPoolExecutor(max_workers=MCP_WORKERS, thread_name_prefix=f"mcp_{gene[:8]}") as pool:
             futures_a = {name: pool.submit(fn) for name, fn in phase_a_tasks.items()}
@@ -842,9 +864,9 @@ class RAGEnrichmentPipeline:
         )
 
         # Unpack Phase A results
-        pubmed_r = phase_a_results.get("pubmed", {})
-        search_result = pubmed_r.get("search_result", {})
-        articles = pubmed_r.get("articles", [])
+        iptmnet_data = phase_a_results.get("iptmnet", {})
+        search_result = {}
+        articles = []
 
         kegg_r = phase_a_results.get("kegg", {})
         kegg_info = kegg_r.get("kegg_info", {})
@@ -870,6 +892,50 @@ class RAGEnrichmentPipeline:
         reactome_data = reactome_r.get("reactome_data", {})
 
         # ══════════════════════════════════════════════════════════════
+        # EVIDENCE ROUTING: structured database-first packet
+        # ══════════════════════════════════════════════════════════════
+        ptm_log2fc_for_route = ptm.get("PTM_Relative_Log2FC", ptm.get("ptm_relative_log2fc", 0))
+        protein_log2fc_for_route = ptm.get("Protein_Log2FC", ptm.get("protein_log2fc", 0))
+        route_classification = self._classify_ptm_8cat(
+            ptm_log2fc_for_route or 0, protein_log2fc_for_route or 0,
+        )
+        structured_packet = build_structured_database_packet(
+            gene=gene,
+            position=position,
+            species=species,
+            iptmnet_data=iptmnet_data,
+            uniprot_info=uniprot_info,
+            kegg_pathways=kegg_pathways,
+            reactome_data=reactome_data,
+            interactions=interactions,
+        )
+        evidence_route = decide_evidence_route(
+            ptm=ptm,
+            classification=route_classification,
+            structured_packet=structured_packet,
+            context=context,
+        )
+        route_name = evidence_route["route"]
+
+        # PubMed is an escalation layer, never a Phase A default. Start with
+        # exact-site query and let the MCP server preserve its own retrieval
+        # provenance/rate-limit behavior.
+        if evidence_route["literature_required"]:
+            try:
+                search_result = self.mcp.search_pubmed(
+                    gene=gene, position=position, ptm_type=ptm_type,
+                    context_keywords=context_keywords, max_results=self.max_articles,
+                )
+                articles = search_result.get("articles", [])
+                logger.info(
+                    f"[evidence-route:{route_name}] PubMed {gene} {position}: "
+                    f"{len(articles)} selected articles"
+                )
+            except Exception as e:
+                logger.warning(f"PubMed escalation failed for {gene} {position}: {e}")
+                search_result, articles = {}, []
+
+        # ══════════════════════════════════════════════════════════════
         # PHASE B: PubMed-dependent tasks (parallel)
         # ══════════════════════════════════════════════════════════════
         regulation = {"upstream_regulators": [], "downstream_targets": [], "kinase_substrate": [], "regulation_evidence": [], "diseases": []}
@@ -890,8 +956,8 @@ class RAGEnrichmentPipeline:
                 return {"upstream_regulators": [], "downstream_targets": [], "kinase_substrate": [], "regulation_evidence": [], "diseases": []}
         phase_b_tasks["regulation"] = _regulation
 
-        # LLM-based abstract analysis
-        if self.enable_llm and articles:
+        # LLM-based abstract analysis only after a literature escalation.
+        if self.enable_llm and articles and route_name != DB_ONLY:
             def _abstract():
                 try:
                     def _on_article(done: int, total: int):
@@ -934,7 +1000,7 @@ class RAGEnrichmentPipeline:
             phase_b_tasks["abstract"] = _abstract
 
         # LLM-based kinase prediction
-        if self.enable_llm and self.enable_kinase:
+        if self.enable_llm and self.enable_kinase and articles and route_name != DB_ONLY:
             def _kinase():
                 try:
                     return self.kinase_predictor.predict(
@@ -951,7 +1017,7 @@ class RAGEnrichmentPipeline:
             phase_b_tasks["kinase"] = _kinase
 
         # LLM-based functional impact (depends on KEGG pathways from Phase A)
-        if self.enable_llm and self.enable_functional:
+        if self.enable_llm and self.enable_functional and articles and route_name != DB_ONLY:
             def _functional():
                 try:
                     pathway_names = [p.get("name", p) if isinstance(p, dict) else p for p in kegg_pathways]
@@ -974,12 +1040,12 @@ class RAGEnrichmentPipeline:
             phase_b_tasks["functional"] = _functional
 
         # Full-text analysis via PMC
-        if self.enable_fulltext:
+        if self.enable_fulltext and route_name == FULLTEXT_ESCALATED and articles:
             def _fulltext():
                 try:
                     return self._run_fulltext_analysis(
                         gene=gene, position=position, ptm_type=ptm_type,
-                        articles=articles,
+                        articles=articles[:1],
                     )
                 except Exception as e:
                     logger.warning(f"Full-text analysis failed for {gene}: {e}")
@@ -993,6 +1059,10 @@ class RAGEnrichmentPipeline:
                     raw_result = self.ptm_validator.validate(
                         gene=gene, position=position, ptm_type=ptm_type,
                         experimental_context=context,
+                        preloaded_articles=articles,
+                        preloaded_iptmnet_data=iptmnet_data,
+                        preloaded_uniprot_data=uniprot_info,
+                        allow_context_literature_search=False,
                     )
                     return _asdict(raw_result) if hasattr(raw_result, '__dataclass_fields__') else raw_result
                 except Exception as e:
@@ -1012,17 +1082,18 @@ class RAGEnrichmentPipeline:
             ptm["rag_enrichment"] = self._empty_enrichment(ptm_log2fc_raw or 0, protein_log2fc_raw or 0)
             return ptm
 
-        # ① 영구 캐시 확인: 정확한 PMID 조합 → 없으면 subset 폴백 (논문 수 변경 시 재활용)
+        # Route-specific evidence interpretations are reused only for the
+        # exact article packet and experimental-context signature. Reusing a
+        # partial PMID set can hide newly retrieved contradictory evidence.
         self._phase_event(gene, position, "B", "running", f"{len(articles)} articles")
         phase_b_results = {}
         pmids = [a.get("pmid", "") for a in articles]
         tasks_to_run: dict = {}
         cache_hit_count = 0
+        context_cache_key = _phase_b_context_signature(context, ptm)
         for name, fn in phase_b_tasks.items():
-            cached = get_cached(gene, position, ptm_type, name, pmids)
-            if cached is None:
-                # 정확한 매치 없음 → subset 매칭 시도 (논문 수가 바뀐 경우 재활용)
-                cached = get_cached_best_match(gene, position, ptm_type, name, pmids)
+            cache_task_name = f"{name}__{route_name}__ctx_{context_cache_key}"
+            cached = get_cached(gene, position, ptm_type, cache_task_name, pmids)
             if cached is not None and isinstance(cached, dict):
                 phase_b_results[name] = cached
                 cache_hit_count += 1
@@ -1030,7 +1101,7 @@ class RAGEnrichmentPipeline:
             else:
                 if cached is not None:
                     logger.warning(f"Phase B cache for {gene}/{name} has non-dict type ({type(cached).__name__}), discarding")
-                tasks_to_run[name] = fn
+                tasks_to_run[name] = (fn, cache_task_name)
 
         _phase_b_errors: list = []
         if tasks_to_run:
@@ -1051,12 +1122,12 @@ class RAGEnrichmentPipeline:
 
             failed_tasks: dict = {}
             with ThreadPoolExecutor(max_workers=min(len(tasks_to_run), MCP_WORKERS), thread_name_prefix=f"llm_{gene[:8]}") as pool:
-                futures_b = {name: pool.submit(fn) for name, fn in tasks_to_run.items()}
+                futures_b = {name: pool.submit(fn) for name, (fn, _) in tasks_to_run.items()}
                 for name, future in futures_b.items():
                     try:
                         result = _to_dict(future.result(timeout=self.phase_b_timeout))
                         phase_b_results[name] = result
-                        set_cached(gene, position, ptm_type, name, pmids, result)
+                        set_cached(gene, position, ptm_type, tasks_to_run[name][1], pmids, result)
                     except Exception as e:
                         logger.error(f"Phase B task '{name}' failed for {gene}: {e}")
                         failed_tasks[name] = tasks_to_run[name]
@@ -1067,12 +1138,12 @@ class RAGEnrichmentPipeline:
                 self._alog(
                     f"[LLM·Phase B] {gene} {position} — retrying [{retry_names}] (serial, timeout={self.phase_b_timeout})"
                 )
-            for name, fn in failed_tasks.items():
+            for name, (fn, cache_task_name) in failed_tasks.items():
                 try:
                     with ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"retry_{gene[:8]}") as retry_pool:
                         result = _to_dict(retry_pool.submit(fn).result(timeout=self.phase_b_timeout))
                     phase_b_results[name] = result
-                    set_cached(gene, position, ptm_type, name, pmids, result)
+                    set_cached(gene, position, ptm_type, cache_task_name, pmids, result)
                     self._alog(f"[LLM·Phase B] {gene} {position} — {name}: retry OK")
                 except Exception as e:
                     logger.error(f"Phase B task '{name}' retry failed for {gene}: {e}")
@@ -1169,7 +1240,11 @@ class RAGEnrichmentPipeline:
             "search_summary": {
                 "total_articles": search_result.get("total_found", 0),
                 "tiers_used": search_result.get("search_tiers_used", {}),
+                "evidence_route": route_name,
+                "route_reason_codes": evidence_route.get("reason_codes", []),
             },
+            "structured_database_packet": structured_packet,
+            "evidence_gap_decision": evidence_route,
             "articles": articles,  # Full article data for report generation
             "recent_findings": [
                 {
@@ -1238,7 +1313,7 @@ class RAGEnrichmentPipeline:
         gtex_ok = bool(gtex_data and gtex_data.get("expressions"))
         logger.info(
             f"Enrichment for {gene} {position}: "
-            f"articles={len(articles)}, "
+            f"route={route_name}, articles={len(articles)}, "
             f"pathways={len(kegg_pathways)}, "
             f"interactions={len(interactions)}, "
             f"hpa={'yes' if hpa_ok else 'no'} (source={hpa_data.get('source', 'none') if hpa_data else 'none'}), "
@@ -1416,7 +1491,9 @@ class RAGEnrichmentPipeline:
         logger.debug(f"_empty_enrichment called with ptm_log2fc={ptm_log2fc!r}, protein_log2fc={protein_log2fc!r}")
         classification = RAGEnrichmentPipeline._classify_ptm_8cat(ptm_log2fc, protein_log2fc)
         return {
-            "search_summary": {"total_articles": 0},
+            "search_summary": {"total_articles": 0, "evidence_route": "db_only"},
+            "structured_database_packet": {},
+            "evidence_gap_decision": {"route": "db_only", "reason_codes": ["empty_input"]},
             "articles": [],
             "recent_findings": [],
             "regulation": {
