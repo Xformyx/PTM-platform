@@ -278,18 +278,20 @@ class DocumentIndexer:
     def embedding_model(self):
         if self._embedding_model is None:
             try:
+                from ptm_shared.embedding_registry import resolve_embedding_spec
                 from sentence_transformers import SentenceTransformer
 
                 # Auto-detect CUDA; fall back to CPU gracefully
                 device = _get_embedding_device()
+                spec = resolve_embedding_spec(self.embedding_model_name)
                 self._embedding_model = SentenceTransformer(
-                    self.embedding_model_name, device=device
+                    spec.hf_model_id, device=device
                 )
                 logger.info(
-                    f"Loaded embedding model: {self.embedding_model_name} (device={device})"
+                    f"Loaded embedding model: {spec.key} (device={device})"
                 )
-            except ImportError:
-                logger.error("sentence-transformers not installed")
+            except (ImportError, ValueError) as exc:
+                logger.error(f"Embedding model unavailable: {exc}")
         return self._embedding_model
 
     def index_document(
@@ -345,7 +347,23 @@ class DocumentIndexer:
         if self.embedding_model is None:
             return {"status": "error", "message": "Embedding model not available", "chunk_count": 0}
 
-        embeddings = self.embedding_model.encode(enhanced_texts, show_progress_bar=False)
+        from ptm_shared.embedding_registry import resolve_embedding_spec
+
+        spec = resolve_embedding_spec(self.embedding_model_name)
+        embeddings = self.embedding_model.encode(
+            enhanced_texts,
+            show_progress_bar=False,
+            normalize_embeddings=spec.normalize_embeddings,
+        )
+        if len(embeddings[0]) != spec.dimension:
+            return {
+                "status": "error",
+                "message": (
+                    f"Embedding dimension mismatch for {spec.key}: "
+                    f"expected {spec.dimension}, got {len(embeddings[0])}"
+                ),
+                "chunk_count": 0,
+            }
 
         if progress_callback:
             progress_callback(70, "Storing in ChromaDB")
@@ -362,7 +380,32 @@ class DocumentIndexer:
         # 6. Store in ChromaDB
         try:
             collection_name = sanitize_collection_name(collection_name)
-            collection = self.chromadb_client.get_or_create_collection(name=collection_name)
+            collection = self.chromadb_client.get_or_create_collection(
+                name=collection_name,
+                metadata=spec.chromadb_metadata(),
+            )
+            existing_metadata = collection.metadata or {}
+            existing_key = existing_metadata.get("ptm_embedding_model_key")
+            if existing_key and existing_key != spec.key:
+                return {
+                    "status": "error",
+                    "message": (
+                        f"Embedding contract mismatch: collection uses '{existing_key}', "
+                        f"index request uses '{spec.key}'. Clone and reindex instead."
+                    ),
+                    "chunk_count": 0,
+                }
+            if not existing_key and collection.count() > 0 and spec.key != "all-MiniLM-L6-v2":
+                return {
+                    "status": "error",
+                    "message": (
+                        "Legacy collection has no embedding metadata. Create a new collection "
+                        "and reindex before using a non-default embedding model."
+                    ),
+                    "chunk_count": 0,
+                }
+            if not existing_key and collection.count() == 0:
+                collection.modify(metadata=spec.chromadb_metadata())
 
             ids = []
             documents = []
@@ -379,6 +422,9 @@ class DocumentIndexer:
                 chunk_meta["section_title"] = chunk.get("section_title", "")
                 chunk_meta["chunk_index"] = chunk.get("section_chunk_index", i)
                 chunk_meta["chunking_method"] = chunk.get("chunking_method", "")
+                chunk_meta["embedding_model_key"] = spec.key
+                chunk_meta["embedding_dimension"] = spec.dimension
+                chunk_meta["embedding_normalized"] = spec.normalize_embeddings
 
                 ids.append(chunk_id)
                 documents.append(chunk["text"])
@@ -404,6 +450,8 @@ class DocumentIndexer:
                 "chunk_count": len(chunks),
                 "collection": collection_name,
                 "title": doc["title"],
+                "embedding_model": spec.key,
+                "embedding_dimension": spec.dimension,
             }
 
         except Exception as e:

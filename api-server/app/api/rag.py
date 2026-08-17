@@ -11,6 +11,7 @@ from app.core.database import get_db
 from app.dependencies import get_current_user
 from app.models.rag_collection import RagCollection, RagDocument
 from app.utils.sanitize import sanitize_collection_name
+from ptm_shared.embedding_registry import resolve_embedding_spec, supported_embedding_models
 
 router = APIRouter(prefix="/rag", tags=["rag"])
 logger = logging.getLogger("ptm-platform.rag")
@@ -74,6 +75,7 @@ async def list_collections(
                 "tier": c.tier,
                 "chromadb_name": c.chromadb_name,
                 "embedding_model": c.embedding_model,
+                "embedding_model_info": resolve_embedding_spec(c.embedding_model).public_dict(),
                 "chunk_strategy": c.chunk_strategy,
                 "chunk_size": c.chunk_size,
                 "document_count": c.document_count,
@@ -86,12 +88,23 @@ async def list_collections(
     }
 
 
+@router.get("/embedding-models")
+async def list_embedding_models(user=Depends(get_current_user)):
+    """Expose supported, immutable collection embedding contracts to the UI."""
+    return {"models": supported_embedding_models()}
+
+
 @router.post("/collections")
 async def create_collection(
     body: CollectionCreate,
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
+    try:
+        embedding_spec = resolve_embedding_spec(body.embedding_model)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     chromadb_name = sanitize_collection_name(
         f"ptm_{body.tier}_{body.name.lower().replace(' ', '_')}"
     )
@@ -112,7 +125,7 @@ async def create_collection(
             description=body.description,
             tier=body.tier,
             chromadb_name=chromadb_name,
-            embedding_model=body.embedding_model,
+            embedding_model=embedding_spec.key,
             chunk_strategy=body.chunk_strategy,
             chunk_size=body.chunk_size,
         )
@@ -128,7 +141,13 @@ async def create_collection(
         )
 
     logger.info(f"RAG collection created: {body.name} (tier={body.tier})")
-    return {"id": collection.id, "chromadb_name": chromadb_name, "message": "Collection created"}
+    return {
+        "id": collection.id,
+        "chromadb_name": chromadb_name,
+        "embedding_model": embedding_spec.public_dict(),
+        "reindex_required_on_model_change": True,
+        "message": "Collection created",
+    }
 
 
 @router.get("/collections/{collection_id}")
@@ -158,6 +177,7 @@ async def get_collection(
         "tier": c.tier,
         "chromadb_name": c.chromadb_name,
         "embedding_model": c.embedding_model,
+        "embedding_model_info": resolve_embedding_spec(c.embedding_model).public_dict(),
         "chunk_strategy": c.chunk_strategy,
         "chunk_size": c.chunk_size,
         "document_count": c.document_count,

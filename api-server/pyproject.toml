@@ -27,6 +27,7 @@ dependencies = [
     "pynvml>=11.0.0",
     "docker>=7.0.0",
     "python-pptx>=1.0.0",
+    "sentence-transformers>=3.0.0",
 ]
 
 [project.optional-dependencies]

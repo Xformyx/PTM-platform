@@ -176,3 +176,9 @@ Backend: vector-plot (receptor inference)
 - [x] 현재 embedding provider·collection metadata·retrieval 경로 점검
 - [x] BioBERT·PubMedBERT embedding 적합성·차원·운영 제약 검증
 - [x] collection 재색인·model registry·fallback 도입 설계 및 권고 작성
+
+## RAG Collection PubMedBERT Embedding 지원 구현
+- [x] 최신 main 동기화 및 기존 index/query embedding 계약 재검증
+- [x] shared embedding registry·explicit query embedding·dimension guard 구현
+- [x] RAG API·frontend PubMedBERT selector·collection metadata와 reindex protection 구현
+- [x] 회귀 테스트·문서화·GitHub main 반영

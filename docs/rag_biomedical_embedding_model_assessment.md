@@ -1,13 +1,13 @@
 # RAG Collection의 BioBERT·PubMedBERT Embedding 지원성 평가 및 도입 설계
 
 작성일: 2026-08-17 (GMT+9)
-상태: **도입 설계 — 실제 collection 재색인 및 retrieval 변경 전 사용자 승인 필요**
+상태: **PubMedBERT contract 구현 완료 — 기존 collection의 재색인 및 retrieval benchmark는 운영 단계에서 수행 필요**
 
 ## 결론
 
 RAG Collection에서 PubMedBERT 또는 BioBERT 계열 embedding model을 사용할 수 있다. 현재 worker는 database의 `rag_collections.embedding_model` 값을 `SentenceTransformer(...)`에 그대로 전달하므로, sentence-transformers 형식의 biomedical model은 **문서 색인 단계에서 이미 로드 가능**하다.
 
-그러나 현재 구현은 biomedical embedding collection을 안전하게 검색할 수 있는 완성된 구조는 아니다. document indexer는 명시적으로 embedding vector를 ChromaDB에 저장하지만, report/chat retrieval은 `collection.query(query_texts=[...])`로 query embedding을 ChromaDB 기본 embedding function에 위임한다. 따라서 index vector와 query vector가 서로 다른 model 또는 dimension으로 생성될 수 있다. 예를 들어 기존 `all-MiniLM-L6-v2`는 384차원인 반면, 아래 권장 biomedical sentence-transformer 후보들은 768차원이다. 이 경우 query 단계에서 dimension mismatch가 발생하거나, embedding model이 우연히 같은 차원이더라도 서로 다른 vector space를 비교하는 오류가 생긴다.
+초기 구현은 biomedical embedding collection을 안전하게 검색할 수 있는 완성된 구조가 아니었다. document indexer는 명시적으로 embedding vector를 ChromaDB에 저장했지만, report/chat retrieval은 `collection.query(query_texts=[...])`로 query embedding을 ChromaDB 기본 embedding function에 위임했다. 따라서 index vector와 query vector가 서로 다른 model 또는 dimension으로 생성될 수 있었다. PubMedBERT 지원 구현에서는 이 경로를 교체해 index와 query 모두 collection embedding contract를 사용하도록 했다.
 
 > 따라서 model 이름을 collection row에 저장하는 것만으로는 충분하지 않다. **문서와 query에 동일한 model·pooling·normalization을 적용하고, model 변경 시 새 Chroma collection으로 재색인**해야 한다.
 
@@ -15,12 +15,13 @@ RAG Collection에서 PubMedBERT 또는 BioBERT 계열 embedding model을 사용�
 
 | 경로 | 현재 동작 | 의미 |
 |---|---|---|
-| `api-server/app/api/rag.py` | collection 생성 시 `embedding_model` string을 DB에 저장 | backend input model selection은 현재도 가능 |
+| `ptm_shared/embedding_registry.py` | allow-listed model key·Hugging Face ID·dimension·normalization·Chroma space를 정의 | index/query 동일 vector space의 single source of truth |
+| `api-server/app/api/rag.py` | 지원 model validation·metadata 제공·PubMedBERT collection 생성 허용 | arbitrary model loading을 차단하고 UI에 contract를 노출 |
 | `workers/rag_enrichment/document_tasks.py` | DB model name을 `DocumentIndexer`에 전달 | collection별 model 값이 ingestion worker에 도달 |
-| `workers/common/document_indexer.py` | `SentenceTransformer(model_name).encode()`로 chunk embedding을 생성한 뒤 ChromaDB `upsert(..., embeddings=...)` 수행 | sentence-transformers biomedical model을 직접 색인 가능 |
-| `workers/report_generation/core/rag_retriever.py` | `query_texts`만 전달하고 query embedding을 Chroma default에 위임 | collection별 biomedical embedding과의 정합성이 보장되지 않음 |
-| `api-server/app/api/chat.py` | 동일하게 `query_texts` 기반 Chroma search 수행 | chat RAG에도 같은 mismatch 위험 존재 |
-| `frontend/src/pages/RagManagement.tsx` | UI 선택지는 `all-MiniLM-L6-v2`, `all-mpnet-base-v2` 두 개 | biomedical model의 생성·변경·reindex UX가 없음 |
+| `workers/common/document_indexer.py` | registry model로 normalized chunk embedding을 생성하고 Chroma metadata contract와 함께 저장 | PubMedBERT 768D/cosine index 생성 및 index-time mismatch 차단 |
+| `workers/report_generation/core/rag_retriever.py` | collection metadata를 검사하고 same-model `query_embeddings` 전달 | report RAG의 index/query symmetry 확보 |
+| `api-server/app/api/chat.py` | same-model `query_embeddings` 전달 | chat RAG에도 동일 contract 적용 |
+| `frontend/src/pages/RagManagement.tsx` | PubMedBERT selector, 768D/cosine 표시, new collection/reindex 안내 | 기존 collection model overwrite를 피하는 UX |
 
 ## raw BioBERT/PubMedBERT와 sentence-transformer 파생 model의 구분
 
@@ -38,7 +39,7 @@ RAG Collection에서 PubMedBERT 또는 BioBERT 계열 embedding model을 사용�
 
 ## 권장 architecture: shared embedding registry + explicit query vectors
 
-새 shared module, 예를 들어 `workers/common/embedding_registry.py`를 추가하고 API와 report worker가 공통 registry contract를 쓰도록 한다.
+공유 `ptm_shared/embedding_registry.py`를 추가해 API와 worker가 공통 registry contract를 사용하도록 구현했다.
 
 | Registry field | 예시 | 역할 |
 |---|---|---|
@@ -57,7 +58,7 @@ document chunk → model.encode(chunk, normalize_embeddings=True) → ChromaDB e
 query text    → same model.encode(query, normalize_embeddings=True) → ChromaDB query_embeddings
 ```
 
-즉, `query_texts`에만 의존하지 않고 report retriever와 chat endpoint가 `query_embeddings=[...]`를 전달해야 한다. Chroma collection metadata와 MySQL record에는 `embedding_model_key`, `embedding_model_id`, `embedding_dimension`, `normalization`, `index_schema_version`을 기록한다. 검색 시 이 metadata와 registry expected value가 다르면 query를 중단하고 명시적 `embedding_contract_mismatch` 오류를 반환한다.
+즉, `query_texts`에만 의존하지 않고 report retriever와 chat endpoint가 `query_embeddings=[...]`를 전달한다. Chroma collection metadata에는 model key, Hugging Face model ID, embedding dimension, normalization, distance space와 contract version을 기록한다. 검색 시 metadata dimension 또는 normalization이 registry expected value와 다르면 retrieval을 중단하고 해당 collection을 skip한다. 새로운 model은 existing collection을 덮어쓰지 않으며, model 변경은 새 collection 생성과 원본 document 재색인을 요구한다.
 
 ## 안전한 reindex 및 migration 정책
 
@@ -90,10 +91,10 @@ model의 의생명 사전학습 여부만으로 platform retrieval이 개선된�
 
 ## 구현 우선순위
 
-1. **P0: embedding registry 및 explicit query embedding** — index/query model symmetry, dimension guard, normalized vector policy를 구현한다.
-2. **P1: collection schema·UI** — supported model selector, license badge, embedding metadata, clone-and-reindex UX를 추가한다.
-3. **P2: migration tool** — backup, clone, batch reindex, query benchmark, active/fallback switch를 구현한다.
-4. **P3: model evaluation** — default MiniLM, `pubmedbert_embeddings_v1`, 필요 시 BioBERT/PubMedBERT retrieval variant를 같은 gold query set에서 비교한다.
+1. **P0: embedding registry 및 explicit query embedding** — 구현됨. index/query model symmetry, dimension guard, normalized vector policy를 적용했다.
+2. **P1: collection schema·UI** — 구현됨. supported model selector와 collection contract metadata를 추가했으며, existing collection의 model overwrite를 허용하지 않는다.
+3. **P2: migration tool** — 향후 작업. backup, clone, batch reindex, query benchmark, active/fallback switch를 자동화한다.
+4. **P3: model evaluation** — 향후 작업. default MiniLM과 PubMedBERT를 동일 gold query set에서 비교한다.
 
 현재 가장 안전한 제품 결정은 **`NeuML/pubmedbert-base-embeddings`를 PubMedBERT 기반 supported biomedical default 후보로 추가하고**, raw BioBERT/PubMedBERT는 UI에서 직접 입력하는 option이 아니라 experimental custom model 또는 model registry 확장 대상으로 제한하는 것이다.
 

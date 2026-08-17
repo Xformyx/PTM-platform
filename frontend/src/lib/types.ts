@@ -72,6 +72,16 @@ export interface RagCollection {
   tier: string;
   chromadb_name: string;
   embedding_model: string;
+  embedding_model_info?: {
+    key: string;
+    hf_model_id: string;
+    dimension: number;
+    normalize_embeddings: boolean;
+    label: string;
+    license_class: string;
+    status: string;
+    max_sequence_length?: number | null;
+  };
   chunk_strategy: string;
   chunk_size: number;
   document_count: number;

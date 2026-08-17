@@ -184,6 +184,11 @@ export default function RagManagement() {
                   <div className="mt-2 text-xs text-muted-foreground">
                     Embedding: <span className="font-mono">{c.embedding_model}</span>
                   </div>
+                  {c.embedding_model_info && (
+                    <p className="mt-1 text-[11px] text-muted-foreground">
+                      {c.embedding_model_info.dimension}D · {c.embedding_model_info.normalize_embeddings ? "cosine-normalized" : "legacy L2"}
+                    </p>
+                  )}
                 </CardContent>
               </Card>
             </StaggerItem>
@@ -258,8 +263,16 @@ export default function RagManagement() {
                   <SelectContent>
                     <SelectItem value="all-MiniLM-L6-v2">all-MiniLM-L6-v2</SelectItem>
                     <SelectItem value="all-mpnet-base-v2">all-mpnet-base-v2</SelectItem>
+                    <SelectItem value="NeuML/pubmedbert-base-embeddings">
+                      PubMedBERT embeddings (biomedical literature)
+                    </SelectItem>
                   </SelectContent>
                 </Select>
+                {form.embedding_model === "NeuML/pubmedbert-base-embeddings" && (
+                  <p className="text-[11px] leading-4 text-muted-foreground">
+                    New 768D biomedical collection. Existing collections cannot switch models; create a new collection and reindex its source documents.
+                  </p>
+                )}
               </div>
             </div>
 

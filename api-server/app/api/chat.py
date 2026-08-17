@@ -35,6 +35,7 @@ from app.models.chat_message import ChatMessage as ChatMessageDB  # DB model (re
 from app.models.order import Order
 from app.models.rag_collection import RagCollection
 from app.api.orders import _check_order_access_async, _require_write_access
+from ptm_shared.embedding_registry import collection_embedding_spec, encode_texts
 
 router = APIRouter(prefix="/orders", tags=["chat"])
 logger = logging.getLogger("ptm-platform.chat")
@@ -518,8 +519,10 @@ async def _query_chromadb_collections(
                 continue
             try:
                 coll = client.get_collection(name=coll_name)
+                spec = collection_embedding_spec(coll)
+                query_embedding = encode_texts([query_text], spec.key)[0]
                 res = coll.query(
-                    query_texts=[query_text],
+                    query_embeddings=[query_embedding],
                     n_results=n_results,
                     include=["documents", "metadatas", "distances"],
                 )

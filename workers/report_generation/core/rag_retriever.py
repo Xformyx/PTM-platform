@@ -10,6 +10,8 @@ import os
 import threading
 from typing import Dict, List, Optional, Tuple
 
+from ptm_shared.embedding_registry import collection_embedding_spec, encode_texts
+
 logger = logging.getLogger(__name__)
 
 CHROMADB_URL = os.getenv("CHROMADB_URL", "http://chromadb:8000")
@@ -106,8 +108,11 @@ class RAGRetriever:
                 if coll is None:
                     continue
 
+                spec = collection_embedding_spec(coll)
+                query_embedding = encode_texts([query_text], spec.key)[0]
+
                 results = coll.query(
-                    query_texts=[query_text],
+                    query_embeddings=[query_embedding],
                     n_results=n_results,
                     include=["documents", "metadatas", "distances"],
                 )
@@ -131,7 +136,10 @@ class RAGRetriever:
                         })
 
             except Exception as e:
-                logger.warning(f"ChromaDB query failed for collection '{coll_name}': {e}")
+                logger.warning(
+                    f"ChromaDB query failed for collection '{coll_name}' "
+                    f"(embedding contract enforced): {e}"
+                )
 
         # v84: Infer source_type from collection name and metadata
         for r in all_results:
