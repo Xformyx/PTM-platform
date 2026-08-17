@@ -197,3 +197,8 @@ Backend: vector-plot (receptor inference)
 - [x] Rat_hir frontend payload·API validation·서버 로그의 실패 지점 확인
 - [x] custom reference alias·FASTA 조건·order schema 정합성 수정
 - [x] Rat_hir/Rat order creation 회귀 테스트 및 운영 전제 문서화
+
+## Temporal PTM Representation Learning 도입 평가
+- [x] 현재 temporal PTM·co-wave·TMM contract와 학습 입력 후보 점검
+- [x] representation learning 모델 계열·기대 효과·과적합 및 해석 위험 비교
+- [x] TMM·co-wave 결합 architecture·benchmark·도입 우선순위 권고 작성
