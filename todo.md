@@ -202,3 +202,8 @@ Backend: vector-plot (receptor inference)
 - [x] 현재 temporal PTM·co-wave·TMM contract와 학습 입력 후보 점검
 - [x] representation learning 모델 계열·기대 효과·과적합 및 해석 위험 비교
 - [x] TMM·co-wave 결합 architecture·benchmark·도입 우선순위 권고 작성
+
+## 첨부 Representation Learning 제안 통합 검토
+- [x] 첨부 문서의 model architecture·learning objective·data contract 추출
+- [x] 현재 co-wave·TMM·directionality·dual-track contract와 정합성·위험 비교
+- [x] 채택·수정·보류 항목과 benchmark gate를 포함한 통합 권고 작성
