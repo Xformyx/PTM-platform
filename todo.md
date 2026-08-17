@@ -207,3 +207,8 @@ Backend: vector-plot (receptor inference)
 - [x] 첨부 문서의 model architecture·learning objective·data contract 추출
 - [x] 현재 co-wave·TMM·directionality·dual-track contract와 정합성·위험 비교
 - [x] 채택·수정·보류 항목과 benchmark gate를 포함한 통합 권고 작성
+
+## RAG Enrichment PubMed·Structured DB Evidence 효율 감사
+- [x] PubMed/MCP·structured database·LLM 호출 경로와 캐시·rate-limit 정책 점검
+- [x] 정보 유형별 근거 중복·고유성·비용·근거 품질 비교
+- [x] database-first routing·article budget·LLM escalation·fallback 정책 권고 작성
