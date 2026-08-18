@@ -126,6 +126,48 @@ def test_structured_packet_preserves_exact_site_provenance():
     assert packet["pathway_context"]["kegg_pathway_count"] == 2
 
 
+def test_cross_species_human_support_does_not_replace_direct_rat_site_status():
+    packet = build_structured_database_packet(
+        gene="Irs1",
+        position="S522",
+        species="rat",
+        iptmnet_data={"sites_found": 0, "query_status": "empty", "novelty": {"status": "NOVEL"}},
+        uniprot_info={},
+        kegg_pathways=[],
+        reactome_data={},
+        interactions=[],
+        cross_species_iptmnet={
+            "provenance": "inferred_cross_species",
+            "query_status": "hit",
+            "human_gene": "IRS1",
+            "human_site": "S522",
+            "residue_conserved": True,
+        },
+        biogrid_data={"interactions": [], "query_status": "empty"},
+    )
+    assert packet["iptmnet"]["exact_site_known"] is False
+    assert packet["iptmnet"]["direct_query_status"] == "empty"
+    assert packet["iptmnet"]["cross_species_evidence"]["provenance"] == "inferred_cross_species"
+    assert packet["interaction_context"]["biogrid"]["provenance"] == "direct_species"
+
+
+def test_source_error_is_not_misrepresented_as_an_empty_direct_rat_result():
+    packet = build_structured_database_packet(
+        gene="Irs1",
+        position="S522",
+        species="rat",
+        iptmnet_data={"sites_found": 0, "query_status": "error", "error": "service unavailable"},
+        uniprot_info={},
+        kegg_pathways=[],
+        reactome_data={},
+        interactions=[],
+        biogrid_data={"interactions": [], "error": "BIOGRID_API_KEY not configured"},
+    )
+    assert packet["iptmnet"]["direct_query_status"] == "error"
+    assert packet["iptmnet"]["exact_site_known"] is False
+    assert packet["interaction_context"]["biogrid"]["query_status"] == "error"
+
+
 def test_phase_a_source_summary_distinguishes_cache_skip_empty_and_error():
     summary = build_phase_a_source_summary({
         "iptmnet": {"sites_found": 1, "_phase_a_state": "done"},

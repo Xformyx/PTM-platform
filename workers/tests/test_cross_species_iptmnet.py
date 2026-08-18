@@ -1,0 +1,76 @@
+"""Regression tests for direct-rat-first conserved human site evidence."""
+
+import importlib.util
+from pathlib import Path
+
+
+_MODULE_PATH = (
+    Path(__file__).resolve().parents[2]
+    / "mcp-server" / "app" / "tools" / "iptmnet.py"
+)
+_SPEC = importlib.util.spec_from_file_location("iptmnet_tool", _MODULE_PATH)
+assert _SPEC is not None and _SPEC.loader is not None
+_MODULE = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(_MODULE)
+
+map_conserved_human_site = _MODULE.map_conserved_human_site
+canonical_organism = _MODULE._canonical_iptmnet_organism
+parse_sites_from_html = _MODULE._parse_sites_from_html
+
+
+def test_pipeline_lowercase_species_uses_the_canonical_iptmnet_organism_key():
+    assert canonical_organism("rat") == "Rat"
+    assert canonical_organism("Rattus norvegicus") == "Rat"
+    assert canonical_organism("human") == "Human"
+
+
+def test_direct_site_parser_does_not_match_a_different_position_with_shared_digits():
+    html = """
+    <table><tr><th>Site</th><th>Type</th><th>Source</th><th>PMID</th></tr>
+    <tr><td>S1522</td><td>Phosphorylation</td><td>SourceA</td><td><a>1</a></td></tr>
+    <tr><td>S522</td><td>Phosphorylation</td><td>SourceB</td><td><a>2</a></td></tr>
+    </table>
+    """
+    sites = parse_sites_from_html(html, "S522")
+    assert [site.site for site in sites] == ["S522"]
+
+
+def _homology(*, rat_alignment: str, human_alignment: str) -> dict:
+    return {
+        "data": [{
+            "homologies": [{
+                "type": "ortholog_one2one",
+                "source": {"align_seq": rat_alignment},
+                "target": {
+                    "species": "homo_sapiens",
+                    "align_seq": human_alignment,
+                    "id": "ENSG000001", "protein_id": "ENSP000001",
+                },
+            }],
+        }],
+    }
+
+
+def test_one_to_one_alignment_maps_only_a_conserved_residue():
+    result = map_conserved_human_site(
+        _homology(rat_alignment="MASTK", human_alignment="MASTK"), "S3"
+    )
+    assert result["status"] == "aligned_conserved"
+    assert result["human_site"] == "S3"
+    assert result["orthology_type"] == "ortholog_one2one"
+
+
+def test_alignment_rejects_a_changed_residue_even_when_coordinate_matches():
+    result = map_conserved_human_site(
+        _homology(rat_alignment="MASTK", human_alignment="MAATK"), "S3"
+    )
+    assert result["status"] == "unavailable_or_unaligned"
+    assert result["reason_code"] == "residue_not_conserved"
+
+
+def test_alignment_rejects_a_human_gap_at_the_observed_rat_site():
+    result = map_conserved_human_site(
+        _homology(rat_alignment="MASTK", human_alignment="MA-TK"), "S3"
+    )
+    assert result["status"] == "unavailable_or_unaligned"
+    assert result["reason_code"] == "human_alignment_gap"

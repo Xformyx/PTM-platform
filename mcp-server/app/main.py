@@ -13,7 +13,7 @@ from .tools import (
     list_cached_articles, get_cached_article, delete_cached_article,
     clear_all_cached_articles, get_cache_stats,
     # v2: External API clients (ported from ptm-rag-backend)
-    query_iptmnet,
+    query_iptmnet, query_human_ortholog_iptmnet,
     fetch_fulltext_by_pmid, fetch_fulltext_batch,
     query_hpa, query_gtex, query_biogrid,
     query_kea3,
@@ -280,6 +280,19 @@ async def tool_iptmnet_get(
     organism: str = Query("Mouse", description="Organism name"),
 ):
     return await query_iptmnet(
+        gene=gene, position=position,
+        organism=organism, redis=app.state.redis,
+    )
+
+
+@app.get("/tools/iptmnet/ortholog/{gene}")
+async def tool_iptmnet_human_ortholog(
+    gene: str,
+    position: str = Query("", description="Rat PTM position e.g. S79"),
+    organism: str = Query("Rat", description="Source organism name"),
+):
+    """Human iPTMnet support only when a rat residue aligns in a one-to-one ortholog."""
+    return await query_human_ortholog_iptmnet(
         gene=gene, position=position,
         organism=organism, redis=app.state.redis,
     )

@@ -722,9 +722,10 @@ class RAGEnrichmentPipeline:
 
         def _iptmnet():
             try:
+                iptmnet_data = self.mcp.query_iptmnet(gene=gene, position=position, organism=species)
                 return _source_result(
-                    self.mcp.query_iptmnet(gene=gene, position=position, organism=species),
-                    "done",
+                    iptmnet_data,
+                    "error" if iptmnet_data.get("error") or iptmnet_data.get("query_status") == "error" else "done",
                 )
             except Exception as e:
                 logger.warning(f"iPTMnet query failed for {gene} {position}: {e}")
@@ -842,7 +843,7 @@ class RAGEnrichmentPipeline:
                 biogrid_data = self.mcp.query_biogrid(gene, organism=_tax_id)
                 result = {"biogrid_data": biogrid_data}
                 self._gene_cache.set(cache_key, result)
-                return _source_result(result, "done")
+                return _source_result(result, "error" if biogrid_data.get("error") else "done")
             except Exception as e:
                 logger.warning(f"BioGRID query failed for {gene}: {e}")
                 result = {"biogrid_data": {}}
@@ -938,6 +939,46 @@ class RAGEnrichmentPipeline:
         route_classification = self._classify_ptm_8cat(
             ptm_log2fc_for_route or 0, protein_log2fc_for_route or 0,
         )
+        direct_site_count = int(iptmnet_data.get("sites_found") or 0)
+        direct_iptmnet_error = bool(iptmnet_data.get("error")) or iptmnet_data.get("query_status") == "error"
+        selection_mode = str(ptm.get("rag_selection_mode") or "").strip().lower()
+        cross_species_iptmnet = {
+            "provenance": "not_applicable",
+            "query_status": "not_attempted",
+            "reason_code": "direct_species_is_not_rat",
+        }
+        if _tax_id == 10116:
+            if direct_iptmnet_error:
+                cross_species_iptmnet = {
+                    "provenance": "source_error",
+                    "query_status": "error",
+                    "reason_code": "direct_rat_iptmnet_unavailable",
+                }
+            elif direct_site_count > 0:
+                cross_species_iptmnet = {
+                    "provenance": "direct_rat",
+                    "query_status": "not_needed",
+                    "reason_code": "direct_rat_site_curated",
+                }
+            elif selection_mode not in {"all", "minor"}:
+                # A human lookup is expensive and inferential. It is limited to
+                # selected discovery/regulation trajectories, never the broad
+                # All PTMs or Minor annotation universe, and cached per site.
+                ortholog_cache_key = f"{gene}__{position}__rat_human_ortholog_iptmnet"
+                cached_ortholog = self._gene_cache.get(ortholog_cache_key)
+                if cached_ortholog is not None:
+                    cross_species_iptmnet = {**cached_ortholog, "cache_hit": True}
+                else:
+                    cross_species_iptmnet = self.mcp.query_iptmnet_human_ortholog(
+                        gene=gene, position=position, organism="Rat",
+                    )
+                    self._gene_cache.set(ortholog_cache_key, cross_species_iptmnet)
+            else:
+                cross_species_iptmnet = {
+                    "provenance": "not_requested",
+                    "query_status": "not_attempted",
+                    "reason_code": "direct_rat_empty_broad_annotation_mode",
+                }
         structured_packet = build_structured_database_packet(
             gene=gene,
             position=position,
@@ -947,6 +988,8 @@ class RAGEnrichmentPipeline:
             kegg_pathways=kegg_pathways,
             reactome_data=reactome_data,
             interactions=interactions,
+            cross_species_iptmnet=cross_species_iptmnet,
+            biogrid_data=biogrid_data,
         )
         evidence_route = decide_evidence_route(
             ptm=ptm,
@@ -1284,6 +1327,7 @@ class RAGEnrichmentPipeline:
             },
             "structured_database_packet": structured_packet,
             "structured_database_source_summary": phase_a_source_summary,
+            "cross_species_evidence": cross_species_iptmnet,
             "evidence_gap_decision": evidence_route,
             "articles": articles,  # Full article data for report generation
             "recent_findings": [

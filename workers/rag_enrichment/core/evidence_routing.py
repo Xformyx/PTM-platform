@@ -20,6 +20,16 @@ def _as_list(value: Any) -> list:
     return value if isinstance(value, list) else []
 
 
+def _query_status(payload: Dict[str, Any], count: int) -> str:
+    """Normalize source transport state independently from a zero returned count."""
+    explicit = str(payload.get("query_status") or "").strip().lower()
+    if explicit in {"hit", "empty", "error"}:
+        return explicit
+    if payload.get("error"):
+        return "error"
+    return "hit" if count > 0 else "empty"
+
+
 def build_phase_a_source_summary(
     phase_a_results: Dict[str, Any],
 ) -> list[Dict[str, Any]]:
@@ -100,6 +110,8 @@ def build_structured_database_packet(
     kegg_pathways: Iterable[Any] | None,
     reactome_data: Dict[str, Any] | None,
     interactions: Iterable[Any] | None,
+    cross_species_iptmnet: Dict[str, Any] | None = None,
+    biogrid_data: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     """Create a compact, provenance-first structured evidence packet."""
     iptmnet_data = iptmnet_data or {}
@@ -109,10 +121,20 @@ def build_structured_database_packet(
     interaction_list = _as_list(interactions)
     novelty = iptmnet_data.get("novelty") or {}
     sites_found = int(iptmnet_data.get("sites_found") or 0)
-    exact_site_known = sites_found > 0 and str(novelty.get("status", "")).upper() != "NOVEL"
+    direct_query_status = _query_status(iptmnet_data, sites_found)
+    exact_site_known = (
+        direct_query_status == "hit"
+        and sites_found > 0
+        and str(novelty.get("status", "")).upper() != "NOVEL"
+    )
+    cross_species_iptmnet = cross_species_iptmnet or {}
+    biogrid_data = biogrid_data or {}
+    biogrid_interactions = _as_list(biogrid_data.get("interactions"))
+    biogrid_count = len(biogrid_interactions) or int(biogrid_data.get("interaction_count") or biogrid_data.get("total_count") or 0)
+    biogrid_status = _query_status(biogrid_data, biogrid_count)
 
     return {
-        "packet_version": "database_first_v1",
+        "packet_version": "database_first_v2",
         "gene": gene,
         "position": position,
         "species": species,
@@ -120,7 +142,11 @@ def build_structured_database_packet(
             "sites_found": sites_found,
             "novelty_status": novelty.get("status", ""),
             "pmids": _as_list(novelty.get("pmids"))[:5],
+            "direct_query_status": direct_query_status,
             "exact_site_known": exact_site_known,
+            # Cross-species support remains additive.  It must not turn an
+            # uncurated rat site into a direct curated rat observation.
+            "cross_species_evidence": cross_species_iptmnet,
         },
         "uniprot": {
             "available": bool(uniprot_info),
@@ -131,7 +157,15 @@ def build_structured_database_packet(
             "kegg_pathway_count": len(pathways),
             "reactome_signaling_count": int(reactome_data.get("signaling_count") or 0),
         },
-        "interaction_context": {"string_interaction_count": len(interaction_list)},
+        "interaction_context": {
+            "string_interaction_count": len(interaction_list),
+            "biogrid": {
+                "query_status": biogrid_status,
+                "interaction_count": biogrid_count,
+                "species": species,
+                "provenance": "direct_species",
+            },
+        },
     }
 
 

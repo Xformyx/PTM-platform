@@ -235,6 +235,27 @@ class MCPClient:
             return {
                 "gene": gene, "position": position, "organism": organism,
                 "novelty": None, "sites_found": 0, "ptm_sites": [],
+                "query_status": "error", "error": str(e),
+            }
+
+    def query_iptmnet_human_ortholog(
+        self, gene: str, position: str, organism: str = "Rat",
+    ) -> dict:
+        """Fetch additive human evidence only for an Ensembl-aligned rat residue."""
+        try:
+            response = self.session.get(
+                f"{self.base_url}/tools/iptmnet/ortholog/{gene}",
+                params={"position": position, "organism": organism},
+                timeout=self.timeout * 2,
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.warning(f"MCP iPTMnet human ortholog failed for {gene} {position}: {e}")
+            return {
+                "provenance": "source_error", "query_status": "error",
+                "rat_gene": gene, "rat_site": position,
+                "reason_code": "ortholog_query_unavailable", "error": str(e),
             }
 
     # ------------------------------------------------------------------

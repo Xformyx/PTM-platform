@@ -7,7 +7,7 @@ from .pubmed import (
     list_cached_articles, get_cached_article, delete_cached_article,
     clear_all_cached_articles, get_cache_stats,
 )
-from .iptmnet import query_iptmnet
+from .iptmnet import query_iptmnet, query_human_ortholog_iptmnet
 from .pmc import fetch_fulltext_by_pmid, fetch_fulltext_batch
 from .expression import query_hpa, query_gtex, query_biogrid
 from .kea3 import query_kea3
@@ -22,7 +22,7 @@ __all__ = [
     "list_cached_articles", "get_cached_article", "delete_cached_article",
     "clear_all_cached_articles", "get_cache_stats",
     # v2: External API clients (ported from ptm-rag-backend)
-    "query_iptmnet",
+    "query_iptmnet", "query_human_ortholog_iptmnet",
     "fetch_fulltext_by_pmid", "fetch_fulltext_batch",
     "query_hpa", "query_gtex", "query_biogrid",
     "query_kea3",

@@ -239,3 +239,9 @@ Backend: vector-plot (receptor inference)
 - [x] Worker source-summary provenance와 route 결과 조립 구현
 - [x] Admin/User progress 및 Phase modal의 source별 summary UI 구현
 - [x] 회귀 테스트·frontend type 검증·GitHub main 반영
+
+## Rat Direct Evidence + Human Ortholog Conserved-site 보조 Evidence 설계
+- [x] BioGRID rat organism query·direct interaction coverage·오류/빈 결과 provenance 점검
+- [x] iPTMnet exact rat hit 우선, aligned human ortholog conserved-site 보조 evidence contract 설계
+- [x] direct·cross-species evidence 분리 표시·routing·report wording 검증 기준 정의
+- [x] direct rat hit 보존·unique one-to-one aligned human conserved-site fallback·BioGRID interaction provenance 구현 및 회귀 검증
