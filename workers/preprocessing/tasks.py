@@ -392,6 +392,47 @@ def run_preprocessing(self, order_id: int, config: dict):
                 except Exception as vec_err:
                     logger.warning(f"[Order {order_id}] PTM vector report failed (non-fatal): {vec_err}")
 
+        # ================================================================
+        # Step 1c: Learned temporal PTM representation (L3/L4) — parallel layer
+        # ================================================================
+        # Additive only: the L1 PTM vector, canonical co-waves, TMM coefficients,
+        # and kinase ranking are untouched by this step.
+        if os.getenv("PTM_REPRESENTATION_LEARNING_ENABLED", "1") == "1":
+            representation_output = f"ptm_representation_embeddings{file_suffix}.tsv"
+            representation_manifest = f"ptm_representation_benchmark{file_suffix}.json"
+            if _has_output(order_output, representation_output, representation_manifest):
+                logger.info(f"[Order {order_id}] Step 1c skipped — representation artifacts already exist")
+            else:
+                vector_file = order_output / quant_output
+                if vector_file.exists() and vector_file.stat().st_size > 0:
+                    try:
+                        publish_progress(order_id, "preprocessing", "representation_learning", "started", 56, "Learning temporal PTM representation")
+                        _emit_prep_phase(order_id, "representation_learning", "running", "Learning temporal PTM representation", 56)
+                        from preprocessing.core.ptm_representation_learning import PTMRepresentationLearningAnalyzer
+
+                        representation_cb = _make_progress_callback(
+                            order_id, "preprocessing", "representation_learning", 56, 4
+                        )
+                        representation_analyzer = PTMRepresentationLearningAnalyzer(
+                            output_dir=str(order_output),
+                            file_suffix=file_suffix,
+                            config={
+                                "run_ablation": os.getenv("PTM_REPRESENTATION_ABLATION_ENABLED", "1") == "1",
+                            },
+                            progress_callback=representation_cb,
+                        )
+                        representation_result = representation_analyzer.run(vector_file)
+                        publish_progress(
+                            order_id, "preprocessing", "representation_learning", "completed", 60,
+                            f"Temporal PTM representation: {representation_result.get('status')}",
+                        )
+                        _emit_prep_phase(
+                            order_id, "representation_learning", "done",
+                            f"Temporal PTM representation: {representation_result.get('status')}", 60,
+                        )
+                    except Exception as repr_err:
+                        logger.warning(f"[Order {order_id}] Representation learning failed (non-fatal): {repr_err}")
+
         # ── Ubiquitin Linkage Analysis (ubi mode only) ────────────────────
         if ptm_mode == "ubi":
             try:

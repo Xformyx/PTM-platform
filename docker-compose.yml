@@ -212,6 +212,9 @@ services:
       INPUT_DIR: /app/data/inputs
       OUTPUT_DIR: /app/data/outputs
       WEBHOOK_URL: ${WEBHOOK_URL:-}
+      # Step 1c: L3/L4 learned temporal PTM representation (additive artifacts only).
+      PTM_REPRESENTATION_LEARNING_ENABLED: ${PTM_REPRESENTATION_LEARNING_ENABLED:-1}
+      PTM_REPRESENTATION_ABLATION_ENABLED: ${PTM_REPRESENTATION_ABLATION_ENABLED:-1}
     networks:
       - ptm-network
     depends_on:

@@ -3,6 +3,7 @@
 작성일: 2026-08-17 (GMT+9)
 검토 대상: `PTM_Vector_Representation_Learning_Full.pdf`
 상태: **통합 설계 권고 — production kinase ranking 변경 전 benchmark 필요**
+구현: 이 권고의 R0/R1/R1.5는 `ptm_shared/representation/`에 구현되어 있다. 층 명명, 입력 계약, additive 필드, A–E ablation, 6개 도입 gate의 실제 구현과 Insulin 데이터셋 실측 결과는 [`ptm_representation_learning_contract_v1.md`](./ptm_representation_learning_contract_v1.md)를 참조한다.
 
 ## 종합 판단
 
