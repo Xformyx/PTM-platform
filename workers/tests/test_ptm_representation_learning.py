@@ -19,6 +19,7 @@ import pytest
 
 from ptm_shared.representation import (
     ADOPTION_GATES,
+    PRIMARY_ARM_PREFERENCE,
     PRIMARY_SCORE_INPUTS_LOCKED,
     build_additive_fields,
     build_multiview_input,
@@ -33,6 +34,7 @@ from ptm_shared.representation import (
     resolve_layer,
     resolve_variant,
     run_ablation,
+    select_primary_variant,
     validate_multiview_input,
 )
 
@@ -435,8 +437,8 @@ def _passing_metrics() -> dict:
     return {
         "B": {"variant_id": "B", "learned": False, "raw_evidence_concordance": 0.55,
               "uses_prior_features": False, "n_sites": 24, "embedding_dim": 30},
-        "E": {
-            "variant_id": "E",
+        "D": {
+            "variant_id": "D",
             "learned": True,
             "n_sites": 24,
             "embedding_dim": 8,
@@ -452,6 +454,21 @@ def _passing_metrics() -> dict:
             },
         },
     }
+
+
+def test_primary_arm_is_the_temporal_learned_arm():
+    # The held-out timepoint probe is the only leak-free comparison available,
+    # and D is the arm that beats the handcrafted baseline under it.
+    assert PRIMARY_ARM_PREFERENCE[0] == "D"
+    assert select_primary_variant(["D", "E"]) == "D"
+    assert select_primary_variant(["E", "D"]) == "D"
+
+
+def test_primary_arm_falls_back_when_the_preferred_arm_did_not_fit():
+    # A skipped or failed D must not silently leave the gates without a subject.
+    assert select_primary_variant(["E"]) == "E"
+    assert select_primary_variant([]) == "D"
+    assert select_primary_variant(["B"]) == "B"
 
 
 def test_gates_block_production_influence_without_external_generalization():
@@ -475,7 +492,7 @@ def test_gates_allow_influence_only_when_every_gate_passes():
 
 def test_time_validity_fails_when_permuted_order_is_not_worse():
     metrics = _passing_metrics()
-    metrics["E"]["time_permutation"] = {"permuted_heldout_reconstruction_error": 0.29}
+    metrics["D"]["time_permutation"] = {"permuted_heldout_reconstruction_error": 0.29}
     verdict = evaluate_adoption_gates(
         metrics,
         external_evaluations=[{"dataset": "holdout", "improves_baseline": True}],
@@ -486,7 +503,7 @@ def test_time_validity_fails_when_permuted_order_is_not_worse():
 
 def test_missingness_gate_fails_when_embedding_encodes_induced_coverage():
     metrics = _passing_metrics()
-    metrics["E"]["artificial_masking_probe"]["induced_missingness_r2"] = 0.85
+    metrics["D"]["artificial_masking_probe"]["induced_missingness_r2"] = 0.85
     verdict = evaluate_adoption_gates(
         metrics,
         external_evaluations=[{"dataset": "holdout", "improves_baseline": True}],
@@ -497,7 +514,7 @@ def test_missingness_gate_fails_when_embedding_encodes_induced_coverage():
 
 def test_missingness_gate_fails_when_masking_destroys_the_temporal_pattern():
     metrics = _passing_metrics()
-    metrics["E"]["artificial_masking_probe"]["pattern_retention_ari"] = 0.02
+    metrics["D"]["artificial_masking_probe"]["pattern_retention_ari"] = 0.02
     verdict = evaluate_adoption_gates(
         metrics,
         external_evaluations=[{"dataset": "holdout", "improves_baseline": True}],
@@ -535,6 +552,9 @@ def test_ablation_runs_all_arms_and_reports_a_gate_verdict():
     assert result["adoption_gates"]["production_influence_allowed"] is False
     assert result["variants"]["E"]["time_permutation"] is not None
     assert result["variants"]["A"]["time_permutation"] is None
+    # E stays in the table as the multi-view arm, but D is what the gates judge.
+    assert result["adoption_gates"]["primary_variant"] == "D"
+    assert result["primary_arm_preference"] == ["D", "E"]
     # Everything computable from one cohort is actually computed; only
     # cross-dataset generalization needs an external dataset.
     gates = result["adoption_gates"]["gates"]

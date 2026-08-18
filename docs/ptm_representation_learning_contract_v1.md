@@ -146,6 +146,9 @@ TMM 계수를 latent similarity로 바꾸지 않는다. `PRIMARY_SCORE_INPUTS_LO
 
 ## 8. Insulin 데이터셋 R1 실측 (2026-08-17)
 
+> 이 절은 primary arm이 E였던 시점의 기록이다. arm 간 순위와 gate 판정은 8-bis(공정한 프로브)와
+> 8-ter(primary 전환)가 대체한다. 아래 표의 arm별 원시 수치는 그대로 유효하다.
+
 `Insulin_Signaling_Phosphoproteomics_HIRc-B`, 2,744 eligible site/form × 6 timepoint, 약 35초.
 
 | Arm | raw concordance | held-out error | masking retention ARI | induced missingness R² |
@@ -224,6 +227,54 @@ R0 baseline 내부뿐이다.
 테스트: `workers/tests/test_representation_fair_probe.py` (13개). 러너:
 `scripts/run_representation_fair_probe.py` → `ptm_representation_fair_probe{suffix}.json`.
 
+## 8-ter. primary arm 전환 (E → D) 과 gate 재판정 (2026-08-18)
+
+### 무엇을 바꿨는가
+
+gate가 판정하는 primary arm이 `benchmark.py` 안에 `"E" if "E" in learned_arms else ...` 로 인라인
+박혀 있었다. 이것을 `layers.py`의 선언으로 끌어냈다.
+
+```python
+PRIMARY_ARM_PREFERENCE: Tuple[str, ...] = ("D", "E")
+```
+
+`select_primary_variant()`가 실제로 적합된 학습 arm 중에서 이 순서대로 고르고, ablation 산출물이
+`primary_arm_preference`를 함께 기록한다. E는 ablation 표에서 그대로 보고되며, 판정 대상만 아니다.
+
+**순서를 데이터로 정하지 않고 사전 등록하는 이유**가 중요하다. "이 데이터셋에서 이긴 arm을 primary로
+쓴다"고 하면 gate를 평가하는 데이터로 gate의 피험자를 고르는 셈이어서, arm 하나만 우연히 통과해도
+전체가 통과한 것처럼 보인다. 순서는 8-bis의 누출 없는 프로브 결과에 근거해 코드에 고정하고, 그
+근거를 주석과 이 문서에 남긴다. D가 적합되지 않으면 E로, 둘 다 없으면 남은 학습 arm으로 내려간다
+(`test_primary_arm_falls_back_when_the_preferred_arm_did_not_fit`).
+
+### 재판정 결과 (`Insulin_Signaling_Phosphoproteomics_HIRc-B`, 2,744 site × 6 timepoint, 47초)
+
+| gate | primary = E (이전) | primary = D (현재) |
+|---|---|---|
+| `time_validity` | 실패 (margin −0.0016) | **통과 (margin +0.0533)** |
+| `missingness_validity` | 실패 (induced R² 0.273 > 0.25, ARI 0.974) | 실패 (ARI 0.035 < 0.2, induced R² 0.462) |
+| `raw_evidence_concordance` | 통과 (0.520) | 통과 (0.564) |
+| `generalization` | 미평가 | 미평가 |
+| `no_prior_leakage` | 통과 | 통과 |
+| `interpretability` | 통과 | 통과 |
+| 합계 | 3 / 6 | **4 / 6** |
+| `production_influence_allowed` | False | False |
+
+### 읽는 법
+
+1. **`time_validity`가 뒤집힌 것이 핵심이다.** 같은 순열 검정에서 E는 margin −0.0016으로 시간 순서를
+   전혀 쓰지 않았고, D는 +0.0533으로 쓴다. 8-bis의 프로브(D만 baseline 초과, p = 0.0001)와 완전히
+   독립적인 지표가 같은 결론을 냈다. 서로 다른 두 검정이 일치한다는 점이 arm 전환의 근거다.
+2. **`missingness_validity`의 실패 이유가 바뀌었다.** E는 마스킹 하에서 군집이 유지됐지만(ARI 0.974)
+   그 안정성은 protein context와 Track 1이라는 **비시간적 부수 정보**에서 온 것이고, 그래서 예측력이
+   없었다. D는 그 정보가 없으니 군집이 거의 무작위로 붕괴한다(ARI 0.035). 즉 이전의 3/6은 "더 나쁜
+   arm이 더 좋아 보이던" 상태였고, 지금의 4/6은 남은 병목이 무엇인지 정확히 가리킨다.
+3. **남은 병목은 missingness 얽힘 하나다.** D의 induced missingness R² 0.462(상한 0.25), 자연
+   missingness R² 0.849. 다만 handcrafted baseline B가 0.885라는 점을 같이 봐야 한다. **현재 production
+   L1 vector 자체가 coverage와 강하게 얽혀 있고**, 학습 arm이 그보다 나쁘지는 않다.
+4. `production_influence_allowed`는 여전히 False다. arm을 바꿔 gate 통과 수가 늘었어도 production
+   영향은 열리지 않는다 — 이것이 gate 설계의 의도대로 동작한 것이다.
+
 ## 9. 산출물 · 운용
 
 preprocessing **Step 1c** (`workers/preprocessing/tasks.py`, Step 1b 직후, progress 56–60%). 실패해도 non-fatal이며 파이프라인을 막지 않는다.
@@ -259,21 +310,25 @@ python -m pytest workers/tests/test_ptm_representation_learning.py -v
 | R0 | terminology + PCA/NMF/FPCA baseline | **완료** |
 | R1 | mask-aware self-supervised encoder | **완료** |
 | R1.5 | A–E ablation + gate 판정 | **완료** (단일 cohort; cross-dataset 미평가) |
-| R1.6 | 편향 없는 held-out 시점 프로브로 arm 순위 | **완료** — D가 baseline 초과(p=0.0001), primary 지정(E) 재검토 필요 |
+| R1.6 | 편향 없는 held-out 시점 프로브로 arm 순위 | **완료** — D가 baseline 초과(p=0.0001) |
+| R1.7 | primary arm 사전 등록(D) + gate 재판정 | **완료** — 4/6 통과, `time_validity` 통과로 전환 |
 | R2 | additive `representation_supported`/`representation_discordant` 필드 | **계산·기록 완료**, co-wave/TMM provenance 주입은 미연결 |
 | R3 | bounded confidence modifier | 미착수 (gate 통과 + 사용자 승인 필요) |
 | R4 | typed graph representation | 보류 (multi-condition corpus 필요) |
 
 ## 11. 다음 단계
 
-1. **primary arm 재결정.** 8-bis에 따라 D가 예측력 유일 승자이고 E는 robustness 유일 승자다. 둘을
-   합쳐 "temporal 예측력 + 마스킹 robustness"를 동시에 갖는 arm을 만들거나, primary를 D로 바꾸고
-   coverage 누출을 별도 penalty로 억제해야 한다. 현재 gate 판정은 E 기준이므로 재실행이 필요하다.
+1. **`missingness_validity` — 남은 유일한 계산 가능 병목.** D는 군집 안정성(ARI 0.035)과 coverage
+   독립성(induced R² 0.462)에서 동시에 미달이다. E가 이 gate에서 나아 보였던 것은 비시간적 부수
+   정보 덕이었으므로 "E로 되돌린다"는 해법이 아니다. 목적함수에 **coverage 예측 가능성에 대한 penalty**
+   (임베딩에서 관측 마스크를 맞히지 못하게 하는 항)를 넣는 것이 방향이다.
 2. 외부 held-out dataset을 `run_ablation(external_evaluations=...)`로 투입해 `generalization` gate 평가.
-   프로브도 같은 dataset에서 inductive 모드로 재확인.
-3. `time_validity` margin 확보. 현 목적함수(가려진 개별 entry 복원)는 시간 순서를 요구하지 않으므로
-   순열 검정을 구조적으로 통과할 수 없다. 다음 시점 예측처럼 **순서 의존적 항**을 목적함수에 넣는
-   것이 근본 해법이다.
-4. 프로브 이득이 downstream으로 전달되는지 확인. R² +0.027이 kinase 귀속 정확도로 이어지는지는
+   프로브도 같은 dataset에서 inductive 모드로 재확인. 이것과 1번이 통과하면 6/6이 된다.
+3. 프로브 이득이 downstream으로 전달되는지 확인. R² +0.027이 kinase 귀속 정확도로 이어지는지는
    별도 평가 과제다.
-5. gate 통과 후에만 R2 단계로: co-wave/TMM 결과에 secondary provenance로 부착.
+4. gate 통과 후에만 R2 단계로: co-wave/TMM 결과에 secondary provenance로 부착.
+
+앞선 판본에서 "현 목적함수는 시간 순서를 요구하지 않으므로 `time_validity`를 구조적으로 통과할 수
+없다"고 적었으나, 그 관찰은 E에만 해당했다. 같은 목적함수의 temporal-only arm D는 margin +0.0533으로
+통과한다. 순서 의존적 항을 새로 넣을 필요는 없고, 부수 view가 시간 신호를 밀어내지 않게 하는 것이
+실제 문제였다.

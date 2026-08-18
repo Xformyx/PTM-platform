@@ -61,6 +61,7 @@ from ptm_shared.representation.layers import (
     LAYER_L3,
     LAYER_L4,
     LAYERS,
+    PRIMARY_ARM_PREFERENCE,
     PRIMARY_SCORE_INPUTS_LOCKED,
     VARIANTS,
     RepresentationLayer,
@@ -69,6 +70,7 @@ from ptm_shared.representation.layers import (
     preserved_baseline_layer,
     resolve_layer,
     resolve_variant,
+    select_primary_variant,
     variant_order,
 )
 from ptm_shared.representation.metrics import (
@@ -94,6 +96,7 @@ __all__ = [
     "LAYER_L3",
     "LAYER_L4",
     "MultiViewTemporalInput",
+    "PRIMARY_ARM_PREFERENCE",
     "PRIMARY_SCORE_INPUTS_LOCKED",
     "ProbeFold",
     "RepresentationLayer",
@@ -126,6 +129,7 @@ __all__ = [
     "run_ablation",
     "run_heldout_timepoint_probe",
     "run_r0_baselines",
+    "select_primary_variant",
     "smooth_trajectories",
     "summarize_arms",
     "top_k_neighbors",

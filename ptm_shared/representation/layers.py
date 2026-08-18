@@ -15,7 +15,7 @@ evidence, TMM contribution, and Track 1/Track 2 status.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Mapping, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 
 CONTRACT_VERSION = "ptm_representation_contract.v1"
@@ -332,6 +332,27 @@ PRIMARY_SCORE_INPUTS_LOCKED: Tuple[str, ...] = (
     "kinase_ranking",
 )
 
+#: Which learned arm the adoption gates judge, in order of preference.
+#: D precedes E because the held-out timepoint probe is the only comparison
+#: without a path for the hidden value to leak back through protein context or
+#: Track 1, and under it D beats baseline B while E does not.  E remains in the
+#: ablation table as the multi-view arm; it is reported, just not gated.
+PRIMARY_ARM_PREFERENCE: Tuple[str, ...] = ("D", "E")
+
+
+def select_primary_variant(candidates: Sequence[str]) -> str:
+    """Pick the gated primary arm among the learned arms that actually fitted.
+
+    The preference is pre-registered instead of read off the current dataset, so
+    a gate cannot be passed by promoting whichever arm happens to win here.
+    """
+    available = {str(key).strip().upper() for key in candidates if str(key).strip()}
+    for key in PRIMARY_ARM_PREFERENCE:
+        if key in available:
+            return key
+    remaining = sorted(available)
+    return remaining[0] if remaining else PRIMARY_ARM_PREFERENCE[0]
+
 
 def describe_contract() -> Dict[str, Any]:
     """Machine-readable contract summary for manifests and Methods sections."""
@@ -364,6 +385,7 @@ def describe_contract() -> Dict[str, Any]:
         ],
         "additive_fields": dict(ADDITIVE_FIELDS),
         "adoption_gates": list(ADOPTION_GATES),
+        "primary_arm_preference": list(PRIMARY_ARM_PREFERENCE),
         "primary_score_inputs_locked": list(PRIMARY_SCORE_INPUTS_LOCKED),
         "preserved_baseline": preserved_baseline_layer().method_id,
     }

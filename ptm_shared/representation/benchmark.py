@@ -28,9 +28,11 @@ from ptm_shared.representation.feature_contract import MultiViewTemporalInput
 from ptm_shared.representation.layers import (
     ADOPTION_GATES,
     CONTRACT_VERSION,
+    PRIMARY_ARM_PREFERENCE,
     PRIMARY_SCORE_INPUTS_LOCKED,
     RepresentationVariant,
     resolve_variant,
+    select_primary_variant,
     variant_order,
 )
 from ptm_shared.representation.metrics import (
@@ -529,7 +531,7 @@ def evaluate_variant(
 def evaluate_adoption_gates(
     variant_metrics: Mapping[str, Mapping[str, Any]],
     *,
-    primary_variant: str = "E",
+    primary_variant: str = PRIMARY_ARM_PREFERENCE[0],
     baseline_variant: str = "B",
     external_evaluations: Optional[Sequence[Mapping[str, Any]]] = None,
     config: Optional[Mapping[str, Any]] = None,
@@ -769,7 +771,7 @@ def run_ablation(
             }
 
     learned_arms = [key for key, entry in metrics.items() if entry.get("learned") and entry.get("status") == "evaluated"]
-    primary_variant = "E" if "E" in learned_arms else (learned_arms[0] if learned_arms else "D")
+    primary_variant = select_primary_variant(learned_arms)
     gates = evaluate_adoption_gates(
         metrics,
         primary_variant=primary_variant,
@@ -787,5 +789,6 @@ def run_ablation(
         "variants": metrics,
         "r0_baselines": baseline_metrics,
         "adoption_gates": gates,
+        "primary_arm_preference": list(PRIMARY_ARM_PREFERENCE),
         "primary_score_inputs_locked": list(PRIMARY_SCORE_INPUTS_LOCKED),
     }
