@@ -86,6 +86,15 @@ def _canonical_iptmnet_organism(organism: str) -> str:
         return "Mouse"
     return value or "Mouse"
 
+
+def _ensembl_native_species(organism: str) -> str:
+    """Return the Ensembl source-species alias eligible for human fallback."""
+    canonical = _canonical_iptmnet_organism(organism)
+    return {
+        "Rat": "rattus_norvegicus",
+        "Mouse": "mus_musculus",
+    }.get(canonical, "")
+
 # Amino acid name mapping
 AA_MAP: Dict[str, List[str]] = {
     "S": ["Ser", "serine"], "T": ["Thr", "threonine"], "Y": ["Tyr", "tyrosine"],
@@ -499,7 +508,7 @@ async def query_human_ortholog_iptmnet(
     organism: str = "Rat",
     redis=None,
 ) -> dict:
-    """Return human iPTMnet evidence only for an aligned conserved rat residue.
+    """Return human support only for an aligned conserved native rodent residue.
 
     This endpoint is deliberately additive.  It does not query or replace the
     direct rat record, and a result with no human hit remains an evidence gap.
@@ -509,21 +518,22 @@ async def query_human_ortholog_iptmnet(
         "query_status": "not_attempted",
         "source_species": organism,
         "target_species": "Human",
-        "rat_gene": gene,
-        "rat_site": position,
+        "native_gene": gene,
+        "native_site": position,
         "human_gene": "",
         "human_site": "",
         "residue_conserved": False,
         "orthology_type": "",
         "alignment_source": "Ensembl Compara",
         "human_iptmnet": None,
-        "reason_code": "not_rat_source_species",
+        "reason_code": "native_species_not_supported_for_fallback",
         "error": None,
     }
-    if "rat" not in str(organism or "").lower() and "rattus" not in str(organism or "").lower():
+    native_ensembl_species = _ensembl_native_species(organism)
+    if not native_ensembl_species:
         return result
 
-    cache_key = f"iptmnet:human_ortholog:{gene}:{position}:{organism}"
+    cache_key = f"iptmnet:human_ortholog:{native_ensembl_species}:{gene}:{position}"
     if redis:
         try:
             import json as _json
@@ -536,7 +546,7 @@ async def query_human_ortholog_iptmnet(
     async with aiohttp.ClientSession() as session:
         homology = await _fetch_ensembl_json(
             session,
-            f"/homology/symbol/rattus_norvegicus/{gene}",
+            f"/homology/symbol/{native_ensembl_species}/{gene}",
             {
                 "target_species": "homo_sapiens",
                 "type": "orthologues",

@@ -254,7 +254,7 @@ class MCPClient:
             logger.warning(f"MCP iPTMnet human ortholog failed for {gene} {position}: {e}")
             return {
                 "provenance": "source_error", "query_status": "error",
-                "rat_gene": gene, "rat_site": position,
+                "native_gene": gene, "native_site": position,
                 "reason_code": "ortholog_query_unavailable", "error": str(e),
             }
 

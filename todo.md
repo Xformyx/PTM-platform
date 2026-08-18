@@ -245,3 +245,7 @@ Backend: vector-plot (receptor inference)
 - [x] iPTMnet exact rat hit 우선, aligned human ortholog conserved-site 보조 evidence contract 설계
 - [x] direct·cross-species evidence 분리 표시·routing·report wording 검증 기준 정의
 - [x] direct rat hit 보존·unique one-to-one aligned human conserved-site fallback·BioGRID interaction provenance 구현 및 회귀 검증
+
+## Mouse/Rat 공통 Native-species Ortholog Evidence
+- [x] direct mouse/rat hit 보존, species-aware one-to-one aligned human fallback 일반화
+- [x] human transgene 제외·native_species provenance·mouse regression 검증 및 GitHub 반영

@@ -15,6 +15,7 @@ _SPEC.loader.exec_module(_MODULE)
 
 map_conserved_human_site = _MODULE.map_conserved_human_site
 canonical_organism = _MODULE._canonical_iptmnet_organism
+ensembl_native_species = _MODULE._ensembl_native_species
 parse_sites_from_html = _MODULE._parse_sites_from_html
 
 
@@ -22,6 +23,9 @@ def test_pipeline_lowercase_species_uses_the_canonical_iptmnet_organism_key():
     assert canonical_organism("rat") == "Rat"
     assert canonical_organism("Rattus norvegicus") == "Rat"
     assert canonical_organism("human") == "Human"
+    assert ensembl_native_species("mouse") == "mus_musculus"
+    assert ensembl_native_species("rat") == "rattus_norvegicus"
+    assert ensembl_native_species("human") == ""
 
 
 def test_direct_site_parser_does_not_match_a_different_position_with_shared_digits():

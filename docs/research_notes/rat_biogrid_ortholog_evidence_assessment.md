@@ -43,23 +43,42 @@ Ensembl REST provides rat-to-human orthology lookups by stable ID or symbol, can
 
 ## Proposed enrichment contract
 
+The implementation applies this contract to native rat and mouse proteins. The
+native organism is always derived from per-protein FASTA taxonomy provenance;
+therefore a human transgene such as Rat_hir human INSR remains a direct human
+query and never enters rodent-to-human fallback.
+
 ### Direct rat evidence remains authoritative
 
-For every rat PTM, the worker must run the current direct rat iPTMnet and BioGRID queries first. A returned direct rat iPTMnet exact-site hit is final for the site-validation layer; the worker must not query human merely to replace or augment a successful direct rat record. A returned direct rat BioGRID interaction list remains direct interaction context, not a PTM-site assertion.
+For every native rat or mouse PTM, the worker must run the current direct
+native-species iPTMnet and BioGRID queries first. A returned direct iPTMnet
+exact-site hit is final for the site-validation layer; the worker must not query
+human merely to replace or augment a successful native-species record. A direct
+BioGRID interaction list remains interaction context, not a PTM-site assertion.
 
 ### Human conserved-site fallback is narrow and additive
 
-The fallback may run only if the direct rat iPTMnet query completes successfully with zero exact-site hits. It should use the FASTA-native rat accession when available, resolve a unique Ensembl rat-to-human one-to-one ortholog, obtain an aligned protein representation, map the observed rat residue to a human aligned position, and require the same residue letter at both positions. Only then may the worker query human iPTMnet with the mapped human gene/accession and residue position.
+The fallback may run only if the direct rat or mouse iPTMnet query completes
+successfully with zero exact-site hits. It should use the FASTA-native source
+organism, resolve a unique Ensembl one-to-one human ortholog, obtain an aligned
+protein representation, map the observed native residue to a human aligned
+position, and require the same residue letter at both positions. Only then may
+the worker query human iPTMnet with the mapped human gene/accession and residue
+position.
 
-The fallback must never run for a human PTM such as the Rat_hir human INSR transgene, which is already a direct human query. It must also be skipped when the ortholog is one-to-many/many-to-many, when the observed residue maps to a gap or a different amino acid, when the protein is unresolved, or when the alignment source is unavailable.
+The fallback must never run for a human PTM such as the Rat_hir human INSR
+transgene, which is already a direct human query. It must also be skipped when
+the ortholog is one-to-many/many-to-many, when the observed residue maps to a
+gap or a different amino acid, when the protein is unresolved, or when the
+alignment source is unavailable.
 
 ### Suggested packet schema
 
 ```json
 {
   "iptmnet_evidence": {
-    "provenance": "direct_rat | inferred_cross_species | unavailable_or_unaligned | source_error",
-    "direct_rat": {"query_status": "hit | empty | error", "sites_found": 0},
+    "provenance": "direct_native_species | inferred_cross_species | unavailable_or_unaligned | source_error",
+    "direct_native_species": {"query_status": "hit | empty | error", "sites_found": 0},
     "human_conserved_site": {
       "eligible": false,
       "orthology_type": "ortholog_one2one",
@@ -80,11 +99,23 @@ The fallback must never run for a human PTM such as the Rat_hir human INSR trans
 
 ### BioGRID handling
 
-BioGRID should continue to query the rat taxon (10116) directly. Since BioGRID provides protein/genetic interaction context rather than residue-level PTM validation, an empty rat result cannot be repaired by a human iPTMnet hit. If a rat-to-human conserved-site mapping has independently passed the iPTMnet gates, a separate optional human BioGRID query could later provide `cross_species_interaction_context`; it must be labeled as human ortholog interaction context and must not enter the direct rat interaction count or the site-validation score.
+BioGRID should continue to query the native organism directly: rat taxon 10116
+or mouse taxon 10090. Since BioGRID provides protein/genetic interaction
+context rather than residue-level PTM validation, an empty native-species result
+cannot be repaired by a human iPTMnet hit. If a native-to-human conserved-site
+mapping has independently passed the iPTMnet gates, a separate optional human
+BioGRID query could later provide `cross_species_interaction_context`; it must
+be labeled as human ortholog interaction context and must not enter the direct
+native interaction count or the site-validation score.
 
 ### Routing and wording requirements
 
-`inferred_cross_species` must neither set `direct_site_curated=true` nor make a causal claim. It can be reported as: "No direct rat curated record was returned; the aligned human ortholog carries curated evidence at the conserved residue." The evidence-gap router may retain the direct-rat gap while reducing the priority of redundant broad literature retrieval; high-priority synthesis must retain the provenance label.
+`inferred_cross_species` must neither set `direct_site_curated=true` nor make a
+causal claim. It can be reported as: "No direct native-species curated record
+was returned; the aligned human ortholog carries curated evidence at the
+conserved residue." The evidence-gap router may retain the direct native-species
+gap while reducing the priority of redundant broad literature retrieval;
+high-priority synthesis must retain the provenance label.
 
 ### Operational requirements
 

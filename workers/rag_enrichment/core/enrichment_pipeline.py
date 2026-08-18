@@ -947,37 +947,41 @@ class RAGEnrichmentPipeline:
             "query_status": "not_attempted",
             "reason_code": "direct_species_is_not_rat",
         }
-        if _tax_id == 10116:
+        if _tax_id in {10116, 10090}:
+            native_species = "rat" if _tax_id == 10116 else "mouse"
             if direct_iptmnet_error:
                 cross_species_iptmnet = {
                     "provenance": "source_error",
                     "query_status": "error",
-                    "reason_code": "direct_rat_iptmnet_unavailable",
+                    "reason_code": "direct_native_iptmnet_unavailable",
+                    "native_species": native_species,
                 }
             elif direct_site_count > 0:
                 cross_species_iptmnet = {
-                    "provenance": "direct_rat",
+                    "provenance": "direct_native_species",
                     "query_status": "not_needed",
-                    "reason_code": "direct_rat_site_curated",
+                    "reason_code": "direct_native_site_curated",
+                    "native_species": native_species,
                 }
             elif selection_mode not in {"all", "minor"}:
                 # A human lookup is expensive and inferential. It is limited to
                 # selected discovery/regulation trajectories, never the broad
                 # All PTMs or Minor annotation universe, and cached per site.
-                ortholog_cache_key = f"{gene}__{position}__rat_human_ortholog_iptmnet"
+                ortholog_cache_key = f"{gene}__{position}__{native_species}_human_ortholog_iptmnet"
                 cached_ortholog = self._gene_cache.get(ortholog_cache_key)
                 if cached_ortholog is not None:
                     cross_species_iptmnet = {**cached_ortholog, "cache_hit": True}
                 else:
                     cross_species_iptmnet = self.mcp.query_iptmnet_human_ortholog(
-                        gene=gene, position=position, organism="Rat",
+                        gene=gene, position=position, organism=native_species,
                     )
                     self._gene_cache.set(ortholog_cache_key, cross_species_iptmnet)
             else:
                 cross_species_iptmnet = {
                     "provenance": "not_requested",
                     "query_status": "not_attempted",
-                    "reason_code": "direct_rat_empty_broad_annotation_mode",
+                    "reason_code": "direct_native_empty_broad_annotation_mode",
+                    "native_species": native_species,
                 }
         structured_packet = build_structured_database_packet(
             gene=gene,
