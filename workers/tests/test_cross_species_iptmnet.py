@@ -19,6 +19,7 @@ canonical_organism = _MODULE._canonical_iptmnet_organism
 ensembl_native_species = _MODULE._ensembl_native_species
 parse_sites_from_html = _MODULE._parse_sites_from_html
 query_iptmnet = _MODULE.query_iptmnet
+extract_entry_urls = _MODULE._extract_iptmnet_entry_urls
 
 
 def test_pipeline_lowercase_species_uses_the_canonical_iptmnet_organism_key():
@@ -39,6 +40,36 @@ def test_direct_site_parser_does_not_match_a_different_position_with_shared_digi
     """
     sites = parse_sites_from_html(html, "S522")
     assert [site.site for site in sites] == ["S522"]
+
+
+def test_header_aware_parser_handles_live_checkbox_leading_iptmnet_rows():
+    html = """
+    <table class="iptm-entry-table"><thead><tr>
+      <th>Icon</th><th>Site</th><th>PTM Type</th><th>PTM Enzyme</th>
+      <th>Score</th><th>Source</th><th>PMID</th>
+    </tr></thead><tbody><tr class="mod-Phosphorylation">
+      <td><input type="checkbox" /></td><td>S522</td><td>Phosphorylation</td>
+      <td><a href="/protein/P31749">AKT1</a></td><td>3</td>
+      <td><a>PhosphoSitePlus</a><a>UniProt</a></td><td><a>12345678</a></td>
+    </tr></tbody></table>
+    """
+    sites = parse_sites_from_html(html, "S522")
+    assert len(sites) == 1
+    assert sites[0].site == "S522"
+    assert sites[0].ptm_type == "Phosphorylation"
+    assert sites[0].enzyme_name == "AKT1"
+    assert sites[0].sources == ["PhosphoSitePlus", "UniProt"]
+    assert sites[0].pmids == ["12345678"]
+
+
+def test_gene_search_entry_urls_preserve_the_live_iptmnet_path_once():
+    html = """
+    <a href="/iptmnet/entry/P35570/">Rat IRS1</a>
+    <a href="/iptmnet/entry/P35570/">duplicate</a>
+    """
+    assert extract_entry_urls(html) == [
+        "https://research.bioinformatics.udel.edu/iptmnet/entry/P35570/"
+    ]
 
 
 def _homology(*, rat_alignment: str, human_alignment: str) -> dict:
@@ -110,5 +141,5 @@ def test_unavailable_iptmnet_is_not_cached_as_an_empty_or_novel_result():
     assert result["query_status"] == "error"
     assert result["novelty"]["status"] == "UNKNOWN"
     assert "direct_entry_timeout" in result["failure_reasons"]
-    assert "gene_search_timeout" in result["failure_reasons"]
+    assert "gene_search_search_form_timeout" in result["failure_reasons"]
     assert redis.set_calls == []

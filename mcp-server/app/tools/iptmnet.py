@@ -12,6 +12,7 @@ import asyncio
 import logging
 import re
 from typing import Dict, List, Optional
+from urllib.parse import urljoin
 
 import aiohttp
 from bs4 import BeautifulSoup
@@ -325,8 +326,79 @@ async def _fetch_iptmnet_page(
     return None, failure_reason or "response_unavailable"
 
 
+def _extract_iptmnet_entry_urls(html: str) -> List[str]:
+    """Return unique absolute entry URLs from a current iPTMnet search page."""
+    soup = BeautifulSoup(html, "html.parser")
+    urls: List[str] = []
+    for link in soup.find_all("a", href=re.compile(r"/entry/")):
+        href = str(link.get("href") or "")
+        absolute_url = urljoin(f"{IPTMNET_BASE}/", href)
+        if absolute_url not in urls:
+            urls.append(absolute_url)
+    return urls
+
+
+async def _search_iptmnet_by_gene(
+    session: aiohttp.ClientSession, gene: str,
+) -> tuple[Optional[str], Optional[str]]:
+    """Submit iPTMnet's CSRF-protected current gene-search form.
+
+    The prior GET `/search?...` endpoint is no longer served by iPTMnet.  The
+    public site now requires a bootstrap GET for the CSRF token followed by a
+    form POST to `/handle/`; aiohttp retains the response cookies in session.
+    """
+    landing_html, landing_failure = await _fetch_iptmnet_page(
+        session, f"{IPTMNET_BASE}/"
+    )
+    if not landing_html:
+        return None, f"search_form_{landing_failure or 'unavailable'}"
+
+    landing_soup = BeautifulSoup(landing_html, "html.parser")
+    csrf_input = landing_soup.find("input", attrs={"name": "csrfmiddlewaretoken"})
+    csrf_token = str(csrf_input.get("value") or "") if csrf_input else ""
+    if not csrf_token:
+        return None, "search_form_csrf_missing"
+
+    failure_reason: Optional[str] = None
+    for attempt in range(IPTMNET_MAX_RETRIES):
+        try:
+            async with session.post(
+                f"{IPTMNET_BASE}/handle/",
+                data={
+                    "csrfmiddlewaretoken": csrf_token,
+                    "searchCriteria": "name",
+                    "searchQuery": gene,
+                },
+                headers={
+                    "Referer": f"{IPTMNET_BASE}/",
+                    "User-Agent": "PTM-Platform/1.0 (+structured-PTM-evidence)",
+                },
+                timeout=aiohttp.ClientTimeout(total=IPTMNET_HTTP_TIMEOUT_SECONDS),
+            ) as response:
+                if response.status == 200:
+                    return await response.text(), None
+                failure_reason = f"search_post_http_{response.status}"
+                if response.status not in IPTMNET_RETRYABLE_HTTP_STATUS:
+                    return None, failure_reason
+        except asyncio.TimeoutError:
+            failure_reason = "search_post_timeout"
+        except aiohttp.ClientError:
+            failure_reason = "search_post_network_error"
+        except Exception:
+            failure_reason = "search_post_unexpected_client_error"
+
+        if attempt < IPTMNET_MAX_RETRIES - 1:
+            await asyncio.sleep(2 ** attempt)
+    return None, failure_reason or "search_post_unavailable"
+
+
 def _parse_sites_from_html(html: str, target_position: str) -> List[IPTMnetSite]:
-    """Parse iPTMnet HTML table to find matching PTM sites."""
+    """Parse iPTMnet PTM entry tables to find matching PTM sites.
+
+    iPTMnet's live entry pages prefix each row with a checkbox column.  Column
+    positions must therefore be resolved from table headers rather than assumed
+    from an older site-first table layout.
+    """
     soup = BeautifulSoup(html, "html.parser")
     sites: List[IPTMnetSite] = []
 
@@ -342,30 +414,62 @@ def _parse_sites_from_html(html: str, target_position: str) -> List[IPTMnetSite]
     residue_pattern = rf"(?:{target_aa}|{aa_names})\s*-?\s*{target_num}(?!\d)"
     site_pattern = re.compile(residue_pattern, re.IGNORECASE)
 
+    def header_index(headers: List[str], *aliases: str) -> Optional[int]:
+        aliases_lower = {alias.lower() for alias in aliases}
+        for index, header in enumerate(headers):
+            normalized = " ".join(header.lower().split())
+            if normalized in aliases_lower:
+                return index
+        return None
+
     for table in tables:
-        rows = table.find_all("tr")
-        for row in rows[1:]:  # skip header
-            cols = row.find_all("td")
-            if len(cols) < 4:
+        header_cells = table.select("thead tr th")
+        if not header_cells:
+            first_row = table.find("tr")
+            header_cells = first_row.find_all("th", recursive=False) if first_row else []
+        headers = [cell.get_text(" ", strip=True) for cell in header_cells]
+        site_index = header_index(headers, "site", "sites")
+        ptm_type_index = header_index(headers, "ptm type", "type")
+        source_index = header_index(headers, "source", "sources")
+        pmid_index = header_index(headers, "pmid", "pmids")
+        enzyme_index = header_index(headers, "ptm enzyme", "enzyme")
+        if site_index is None or ptm_type_index is None or source_index is None:
+            continue
+
+        rows = table.select("tbody tr") or table.find_all("tr")
+        for row in rows:
+            cols = row.find_all("td", recursive=False)
+            if len(cols) <= max(site_index, ptm_type_index, source_index):
                 continue
 
-            site_text = cols[0].get_text(strip=True)
+            site_text = cols[site_index].get_text(" ", strip=True)
             if not site_pattern.search(site_text):
                 continue
 
-            ptm_type = cols[1].get_text(strip=True) if len(cols) > 1 else ""
-            source_text = cols[2].get_text(strip=True) if len(cols) > 2 else ""
-            sources = [s.strip() for s in source_text.split(",") if s.strip()]
+            ptm_type = cols[ptm_type_index].get_text(" ", strip=True)
+            source_cell = cols[source_index]
+            sources = list(dict.fromkeys(
+                link.get_text(" ", strip=True)
+                for link in source_cell.find_all("a")
+                if link.get_text(" ", strip=True)
+            ))
+            if not sources:
+                source_text = source_cell.get_text(" ", strip=True)
+                sources = [source_text] if source_text else []
 
-            pmid_links = cols[3].find_all("a") if len(cols) > 3 else []
+            pmid_links = (
+                cols[pmid_index].find_all("a")
+                if pmid_index is not None and len(cols) > pmid_index
+                else []
+            )
             pmids = [a.get_text(strip=True) for a in pmid_links if a.get_text(strip=True).isdigit()]
 
             enzyme_id, enzyme_name = "", ""
-            if len(cols) > 4:
-                enzyme_link = cols[4].find("a")
+            if enzyme_index is not None and len(cols) > enzyme_index:
+                enzyme_link = cols[enzyme_index].find("a")
                 if enzyme_link:
                     enzyme_id = enzyme_link.get("href", "").split("/")[-1]
-                    enzyme_name = enzyme_link.get_text(strip=True)
+                    enzyme_name = enzyme_link.get_text(" ", strip=True)
 
             sites.append(IPTMnetSite(
                 site=site_text, ptm_type=ptm_type, sources=sources,
@@ -498,15 +602,11 @@ async def query_iptmnet(
             elif failure_reason:
                 request_failures.append(f"direct_entry_{failure_reason}")
 
-        # Strategy 2: Search by gene name
-        search_url = f"{IPTMNET_BASE}/search?search_term={gene}&organism={organism}"
-        html, failure_reason = await _fetch_iptmnet_page(session, search_url)
+        # Strategy 2: Current iPTMnet CSRF-protected gene search.
+        html, failure_reason = await _search_iptmnet_by_gene(session, gene)
         if html:
             fetched_any_page = True
-            soup = BeautifulSoup(html, "html.parser")
-            entry_links = soup.find_all("a", href=re.compile(r"/entry/"))
-            for link in entry_links[:3]:
-                entry_url = f"{IPTMNET_BASE}{link['href']}"
+            for entry_url in _extract_iptmnet_entry_urls(html)[:3]:
                 entry_html, entry_failure_reason = await _fetch_iptmnet_page(session, entry_url)
                 if entry_html:
                     fetched_any_page = True
