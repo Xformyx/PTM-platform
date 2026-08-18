@@ -16,6 +16,78 @@ from typing import Dict, List, Optional, Tuple
 logger = logging.getLogger(__name__)
 
 
+def collapse_ptm_rows_for_enrichment(
+    ptm_rows: List[dict],
+    single_time_point: bool = False,
+) -> List[dict]:
+    """Create one trajectory-preserving RAG work item per selected gene/site.
+
+    The normalized vector TSV has one row per condition/timepoint.  RAG
+    enrichment is site-level work: querying the same structured databases and
+    literature once for every condition row is both redundant and obscures the
+    PTM Selection Mode universe.  This helper keeps the row with the largest
+    absolute relative PTM change as the representative while retaining every
+    selected condition in ``condition_data`` and ``trajectory``.
+    """
+    if not ptm_rows:
+        return []
+
+    groups: Dict[Tuple[str, str], List[dict]] = {}
+    for ptm in ptm_rows:
+        gene = ptm.get("gene") or ptm.get("Gene.Name", "?")
+        pos = ptm.get("position") or ptm.get("PTM_Position", "?")
+        groups.setdefault((str(gene), str(pos)), []).append(ptm)
+
+    collapsed: List[dict] = []
+    for entries in groups.values():
+        primary = dict(_select_primary(entries))
+        condition_data = []
+        for entry in entries:
+            condition_data.append({
+                "condition": entry.get("Condition") or entry.get("condition", ""),
+                "ptm_relative_log2fc": _safe_float(
+                    entry.get("PTM_Relative_Log2FC")
+                    if entry.get("PTM_Relative_Log2FC") is not None
+                    else entry.get("ptm_relative_log2fc")
+                ),
+                "protein_log2fc": _safe_float(
+                    entry.get("Protein_Log2FC")
+                    if entry.get("Protein_Log2FC") is not None
+                    else entry.get("protein_log2fc")
+                ),
+                "ptm_absolute_log2fc": _safe_float(
+                    entry.get("PTM_Absolute_Log2FC")
+                    if entry.get("PTM_Absolute_Log2FC") is not None
+                    else entry.get("ptm_absolute_log2fc")
+                ),
+                "q_value": entry.get("q_value"),
+                "control_pseudocount_used": entry.get("Control_Pseudocount_Used"),
+            })
+
+        primary["condition_data"] = condition_data
+        primary["rag_source_row_count"] = len(entries)
+        primary["trajectory"] = (
+            _build_trajectory_from_conditions(condition_data)
+            if not single_time_point
+            else {"timepoints": [], "trend": "unknown"}
+        )
+        collapsed.append(primary)
+
+    collapsed.sort(
+        key=lambda ptm: abs(_safe_float(
+            ptm.get("PTM_Relative_Log2FC")
+            if ptm.get("PTM_Relative_Log2FC") is not None
+            else ptm.get("ptm_relative_log2fc")
+        )),
+        reverse=True,
+    )
+    logger.info(
+        "RAG input collapse: %s selected condition rows -> %s unique PTM sites",
+        len(ptm_rows), len(collapsed),
+    )
+    return collapsed
+
+
 def merge_multi_condition_ptms(enriched_ptms: List[dict], single_time_point: bool = False) -> List[dict]:
     """
     Merge enriched PTM entries that share the same gene+position.
@@ -47,6 +119,15 @@ def merge_multi_condition_ptms(enriched_ptms: List[dict], single_time_point: boo
         if len(entries) == 1:
             # Single condition — just add condition_data wrapper
             entry = entries[0]
+            # A pre-enrichment collapse already carries every selected condition
+            # and a trajectory. Preserve it rather than replacing it with only
+            # the representative row during the post-enrichment report merge.
+            if entry.get("condition_data"):
+                trajectory = entry.get("trajectory")
+                if trajectory and trajectory.get("timepoints"):
+                    entry.setdefault("rag_enrichment", {})["trajectory"] = trajectory
+                merged.append(entry)
+                continue
             cond = entry.get("Condition") or entry.get("condition", "")
             ptm_fc = _safe_float(entry.get("PTM_Relative_Log2FC") or entry.get("ptm_relative_log2fc"))
             prot_fc = _safe_float(entry.get("Protein_Log2FC") or entry.get("protein_log2fc"))

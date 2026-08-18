@@ -110,6 +110,11 @@ def decide_evidence_route(
         or ptm.get("requires_literature_validation")
         or ptm.get("literature_escalated")
     )
+    selection_mode = str(ptm.get("rag_selection_mode") or "").strip().lower()
+    broad_annotation_mode = selection_mode in {"all", "minor"}
+
+    if broad_annotation_mode:
+        reasons.append("broad_annotation_mode_database_first")
 
     if not exact_site_known:
         reasons.append("exact_site_not_curated")
@@ -129,9 +134,16 @@ def decide_evidence_route(
     # PubMed-first fan-out. Literature is reserved for a high observed signal,
     # explicit per-site request, or transgene/receptor reference complication.
     evidence_gap_needs_context = not exact_site_known and (
-        significance == "high" or explicit_literature_request or special_reference_context
+        (significance == "high" and not broad_annotation_mode)
+        or explicit_literature_request
+        or special_reference_context
     )
-    high_context_claim = exact_site_known and significance == "high" and has_context
+    high_context_claim = (
+        exact_site_known
+        and significance == "high"
+        and has_context
+        and not broad_annotation_mode
+    )
     if (
         evidence_gap_needs_context
         or high_context_claim
@@ -149,7 +161,7 @@ def decide_evidence_route(
 
     return {
         "route": DB_ONLY,
-        "reason_codes": ["curated_site_and_context_sufficient"],
+        "reason_codes": reasons or ["curated_site_and_context_sufficient"],
         "structured_packet_complete": True,
         "literature_required": False,
     }

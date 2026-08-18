@@ -88,6 +88,27 @@ def test_explicit_literature_request_escalates_uncurated_low_priority_site():
     assert "explicit_literature_request" in decision["reason_codes"]
 
 
+def test_all_ptms_mode_keeps_uncurated_high_signal_site_database_first():
+    decision = decide_evidence_route(
+        ptm={"rag_selection_mode": "all"},
+        classification={"significance": "High"},
+        structured_packet=_packet(exact_site_known=False),
+        context={"treatment": "insulin"},
+    )
+    assert decision["route"] == DB_ONLY
+    assert "broad_annotation_mode_database_first" in decision["reason_codes"]
+
+
+def test_all_ptms_mode_allows_explicit_literature_escalation():
+    decision = decide_evidence_route(
+        ptm={"rag_selection_mode": "all", "requires_literature_validation": True},
+        classification={"significance": "High"},
+        structured_packet=_packet(exact_site_known=False),
+        context={"treatment": "insulin"},
+    )
+    assert decision["route"] == ABSTRACT_TARGETED
+
+
 def test_fulltext_requires_explicit_escalation():
     decision = decide_evidence_route(
         ptm={"requires_fulltext": True},

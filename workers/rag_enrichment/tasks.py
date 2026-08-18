@@ -1944,9 +1944,24 @@ def run_rag_enrichment(self, order_id: int, config: dict):
         else:
             n_unique = len(df)
 
-        ptm_data = df.to_dict("records")
+        # Collapse all selected condition rows into one site/form work item
+        # before calling remote databases.  The selection mode therefore
+        # controls the real RAG input universe rather than merely the report
+        # display, while condition_data/trajectory preserve dense time-course
+        # evidence for downstream interpretation.
+        from rag_enrichment.core.ptm_merger import collapse_ptm_rows_for_enrichment
+
+        selected_row_count = len(df)
+        ptm_data = collapse_ptm_rows_for_enrichment(
+            df.to_dict("records"),
+            single_time_point=single_time_point,
+        )
+        for ptm in ptm_data:
+            ptm["rag_selection_mode"] = ptm_selection_mode
+        n_unique = len(ptm_data)
         publish_progress(order_id, "rag_enrichment", "load_data", "completed", 10,
-                        f"[{n_unique} PTMs selected, {len(ptm_data)} rows] mode='{ptm_selection_mode}' → enrichment 시작")
+                        f"[{n_unique} unique PTMs selected from {selected_row_count} condition rows] "
+                        f"mode='{ptm_selection_mode}' → DB-first enrichment 시작")
 
         # ================================================================
         # Step 2: RAG Enrichment — PubMed + pattern matching (10% – 70%)
@@ -2119,7 +2134,12 @@ def run_rag_enrichment(self, order_id: int, config: dict):
                     sec_df = sec_df.drop(columns=["_abs_fc", "_key"])
                     logger.info(f"[Order {order_id}] Secondary: selected {len(sec_selected)} unique PTMs")
 
-                sec_ptm_data = sec_df.to_dict("records")
+                sec_ptm_data = collapse_ptm_rows_for_enrichment(
+                    sec_df.to_dict("records"),
+                    single_time_point=single_time_point,
+                )
+                for ptm in sec_ptm_data:
+                    ptm["rag_selection_mode"] = "secondary_top_n"
 
                 # Enrich secondary PTMs
                 sec_enrich_cb = _make_progress_cb(order_id, "rag_enrichment", "secondary_enrichment", 90, 3)

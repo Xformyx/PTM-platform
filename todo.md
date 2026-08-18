@@ -223,3 +223,8 @@ Backend: vector-plot (receptor inference)
 - [x] 최신 runtime/worker가 DB packet 완료 후에만 literature route를 판정하는지 확인
 - [x] `articles` progress count가 route별 실제 PubMed 검색 여부를 정확히 반영하도록 수정
 - [x] DB-first execution order와 db_only·abstract_targeted progress 회귀 검증
+
+## PTM Selection Mode 기반 RAG Enrichment Input Filtering
+- [x] De novo+Regulated·All PTMs selection mode의 frontend payload·API·worker 전달 경로 점검
+- [x] mode별 RAG input universe·gene/site deduplication·DB/PubMed budget 정책 설계
+- [x] mode-aware filtering·progress provenance·회귀 테스트 구현
