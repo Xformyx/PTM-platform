@@ -265,3 +265,11 @@ Backend: vector-plot (receptor inference)
 - [x] live iPTMnet entry table의 checkbox-leading column schema에 맞춘 header-aware parser 수정 및 multi-species re-query
 - [x] obsolete GET gene-search fallback을 iPTMnet CSRF POST form path로 교체하고 non-mapped rat site query 재검증
 - [x] parser schema repair 이전에 저장된 false-empty result를 우회하도록 iPTMnet success cache version 분리
+- [x] gene search에 `selectOrg` taxon filter 배선 — 무필터 검색은 rat `Akt1`에 사람 P31749를 먼저 돌려주어
+      사람 증거가 rat site 증거로 보고됐음 (rat P47196 / human P35568 vs rat P35570 분리 확인)
+- [x] entry page organism 검증 추가 — 다른 종 entry는 NOVEL이 아니라 UNKNOWN + failure_reason으로 처리
+- [x] 헤더 미인식(`entry_schema_unrecognized`) 감지 — table은 있고 컬럼명만 바뀐 경우도 이전과 동일하게
+      조용히 NOVEL로 보고되던 구멍을 막음
+- [x] entry URL fragment(`#asSub`/`#asEnz`/`#efip`) 제거 — 상위 3개 슬롯이 한 단백질로 소진되던 문제
+- [x] association table(`Interactant`/`Association type`)을 substrate PTM 증거와 분리
+- [x] cache version v3으로 상향 (파싱 의미 변경) + 회귀 테스트 16개 통과 + live HTTP 경로 재검증
