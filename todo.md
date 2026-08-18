@@ -249,3 +249,8 @@ Backend: vector-plot (receptor inference)
 ## Mouse/Rat 공통 Native-species Ortholog Evidence
 - [x] direct mouse/rat hit 보존, species-aware one-to-one aligned human fallback 일반화
 - [x] human transgene 제외·native_species provenance·mouse regression 검증 및 GitHub 반영
+
+## BioGRID Runtime Error 진단
+- [x] MCP server의 BioGRID API key 주입·HTTP response·timeout·source event error 원인 확인
+- [x] MCP compose environment에 BIOGRID_API_KEY propagation 추가
+- [ ] 유효한 BIOGRID_API_KEY로 MCP server 재생성 후 direct rat/mouse query runtime 검증

@@ -169,6 +169,9 @@ services:
       NCBI_API_KEY: ${NCBI_API_KEY:-}
       NCBI_TOOL: ${NCBI_TOOL:-PTM-Platform}
       STRINGDB_API_KEY: ${STRINGDB_API_KEY:-}
+      # BioGRID direct interaction context; value is resolved from the host
+      # environment/.env at compose startup and never stored in this file.
+      BIOGRID_API_KEY: ${BIOGRID_API_KEY:-}
     networks:
       - ptm-network
     depends_on:
