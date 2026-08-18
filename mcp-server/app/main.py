@@ -4,7 +4,8 @@ from contextlib import asynccontextmanager
 from typing import Optional
 
 import redis.asyncio as aioredis
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from .tools import (
@@ -30,6 +31,11 @@ logger = logging.getLogger("ptm-mcp-server")
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/3")
 
+# Optional shared-secret API key.  Set MCP_API_KEY in the environment to
+# enable authentication.  When the variable is empty / unset the server
+# operates without auth (safe for fully isolated internal networks).
+MCP_API_KEY: str | None = os.getenv("MCP_API_KEY") or None
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -46,6 +52,20 @@ app = FastAPI(
     version="0.3.0",
     lifespan=lifespan,
 )
+
+
+@app.middleware("http")
+async def api_key_middleware(request: Request, call_next):
+    """Enforce X-Api-Key header when MCP_API_KEY is configured.
+
+    Health check is always allowed so Docker health probes keep working.
+    When MCP_API_KEY is not set the server is open (trusted internal network).
+    """
+    if MCP_API_KEY and request.url.path not in ("/health", "/"):
+        provided = request.headers.get("X-Api-Key", "")
+        if provided != MCP_API_KEY:
+            return JSONResponse(status_code=401, content={"detail": "Invalid or missing X-Api-Key"})
+    return await call_next(request)
 
 
 # ---------------------------------------------------------------------------

@@ -1,7 +1,9 @@
 FROM node:20-alpine AS builder
 WORKDIR /app
-COPY package.json ./
-RUN npm install
+# Copy lockfile alongside package.json so npm ci can produce a reproducible install.
+# npm ci is faster than npm install and fails if package-lock.json is out of sync.
+COPY package.json package-lock.json ./
+RUN npm ci
 COPY . .
 RUN npm run build
 

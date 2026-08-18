@@ -15,6 +15,7 @@ import requests
 logger = logging.getLogger(__name__)
 
 MCP_BASE_URL = os.getenv("MCP_SERVER_URL", "http://mcp-server:8001")
+MCP_API_KEY = os.getenv("MCP_API_KEY") or None
 
 ProgressCallback = Optional[Callable[[int, int, str], None]]
 
@@ -33,9 +34,29 @@ class MCPClient:
         s = getattr(self._local, "session", None)
         if s is None:
             s = requests.Session()
+            if MCP_API_KEY:
+                s.headers.update({"X-Api-Key": MCP_API_KEY})
             s.headers.update({"Content-Type": "application/json"})
             self._local.session = s
         return s
+
+    def _get(self, url: str, *, timeout: float = None, **kwargs) -> requests.Response:
+        """GET with one automatic retry on transient connection/timeout errors."""
+        t = timeout if timeout is not None else self.timeout
+        try:
+            return self.session.get(url, timeout=t, **kwargs)
+        except (requests.ConnectionError, requests.Timeout) as first_err:
+            logger.debug(f"MCP GET transient error, retrying once: {type(first_err).__name__} — {url}")
+            return self.session.get(url, timeout=t, **kwargs)  # let second failure propagate
+
+    def _post(self, url: str, *, timeout: float = None, **kwargs) -> requests.Response:
+        """POST with one automatic retry on transient connection/timeout errors."""
+        t = timeout if timeout is not None else self.timeout
+        try:
+            return self.session.post(url, timeout=t, **kwargs)
+        except (requests.ConnectionError, requests.Timeout) as first_err:
+            logger.debug(f"MCP POST transient error, retrying once: {type(first_err).__name__} — {url}")
+            return self.session.post(url, timeout=t, **kwargs)
 
     def health_check(self) -> bool:
         try:
@@ -98,10 +119,7 @@ class MCPClient:
 
     def query_uniprot(self, protein_id: str) -> dict:
         try:
-            r = self.session.get(
-                f"{self.base_url}/tools/uniprot/{protein_id}",
-                timeout=self.timeout,
-            )
+            r = self._get(f"{self.base_url}/tools/uniprot/{protein_id}")
             r.raise_for_status()
             return r.json()
         except Exception as e:
@@ -113,7 +131,7 @@ class MCPClient:
         # 90s per batch to avoid long hangs; fallback to individual queries on timeout
         batch_timeout = min(self.timeout * 2, 90)
         try:
-            r = self.session.post(
+            r = self._post(
                 f"{self.base_url}/tools/uniprot/batch",
                 json={"protein_ids": protein_ids},
                 timeout=batch_timeout,
@@ -130,11 +148,7 @@ class MCPClient:
 
     def query_kegg(self, gene_name: str, organism: str = "mmu") -> dict:
         try:
-            r = self.session.get(
-                f"{self.base_url}/tools/kegg/{gene_name}",
-                params={"organism": organism},
-                timeout=self.timeout,
-            )
+            r = self._get(f"{self.base_url}/tools/kegg/{gene_name}", params={"organism": organism})
             r.raise_for_status()
             return r.json()
         except Exception as e:
@@ -160,11 +174,7 @@ class MCPClient:
 
     def query_stringdb(self, gene_name: str, species: str = "10090") -> dict:
         try:
-            r = self.session.get(
-                f"{self.base_url}/tools/stringdb/{gene_name}",
-                params={"species": species},
-                timeout=self.timeout,
-            )
+            r = self._get(f"{self.base_url}/tools/stringdb/{gene_name}", params={"species": species})
             r.raise_for_status()
             return r.json()
         except Exception as e:
@@ -191,10 +201,7 @@ class MCPClient:
 
     def query_interpro(self, protein_id: str) -> dict:
         try:
-            r = self.session.get(
-                f"{self.base_url}/tools/interpro/{protein_id}",
-                timeout=self.timeout,
-            )
+            r = self._get(f"{self.base_url}/tools/interpro/{protein_id}")
             r.raise_for_status()
             return r.json()
         except Exception as e:

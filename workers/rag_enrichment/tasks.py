@@ -22,7 +22,7 @@ from celery_app import app
 from common.db_update import get_order_status, update_order_status
 from common.notifications import notify_order_status
 from common.mcp_client import MCPClient
-from common.progress import publish_analysis_log, publish_progress
+from common.progress import publish_analysis_log, publish_progress, save_celery_task_id
 from common.temporal_utils import condition_sort_key
 from common.webhook import send_step_webhook
 
@@ -2253,12 +2253,13 @@ def run_rag_enrichment(self, order_id: int, config: dict):
 
         _status_before_chain = get_order_status(order_id)
         if config.get("chain_to_next", True) and _status_before_chain == "rag_enrichment":
-            app.send_task(
+            report_task = app.send_task(
                 "report_generation.tasks.run_report_generation",
                 args=[order_id, report_config],
                 queue="report_generation",
             )
-            logger.info(f"[Order {order_id}] Chained to report generation")
+            save_celery_task_id(order_id, report_task.id)
+            logger.info(f"[Order {order_id}] Chained to report generation (task_id={report_task.id})")
         else:
             logger.info(
                 f"[Order {order_id}] RAG complete — skipping chain "

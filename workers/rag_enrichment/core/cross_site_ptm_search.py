@@ -23,6 +23,11 @@ import httpx
 logger = logging.getLogger(__name__)
 
 MCP_URL = os.getenv("MCP_SERVER_URL", "http://mcp-server:8100")
+MCP_API_KEY = os.getenv("MCP_API_KEY") or None
+
+
+def _mcp_headers() -> dict:
+    return {"X-Api-Key": MCP_API_KEY} if MCP_API_KEY else {}
 
 
 @dataclass
@@ -222,7 +227,7 @@ class CrossSitePTMSearcher:
     ) -> List[PTMEvidence]:
         """Search PubMed for PTM evidence via MCP /tools/pubmed/search."""
         try:
-            async with httpx.AsyncClient(timeout=30) as client:
+            async with httpx.AsyncClient(timeout=30, headers=_mcp_headers()) as client:
                 resp = await client.post(
                     f"{self.mcp_url}/tools/pubmed/search",
                     json={
@@ -276,7 +281,7 @@ class CrossSitePTMSearcher:
         """Search PMC full-text for detailed PTM evidence via MCP /tools/pmc/fulltext."""
         try:
             # First, search PubMed to get PMIDs, then fetch full-text
-            async with httpx.AsyncClient(timeout=30) as client:
+            async with httpx.AsyncClient(timeout=30, headers=_mcp_headers()) as client:
                 # Step 1: Get PMIDs from PubMed
                 resp = await client.post(
                     f"{self.mcp_url}/tools/pubmed/search",
@@ -349,7 +354,7 @@ class CrossSitePTMSearcher:
     ) -> List[PTMEvidence]:
         """Search iPTMnet for known PTM annotations via MCP /tools/iptmnet."""
         try:
-            async with httpx.AsyncClient(timeout=30) as client:
+            async with httpx.AsyncClient(timeout=30, headers=_mcp_headers()) as client:
                 resp = await client.get(
                     f"{self.mcp_url}/tools/iptmnet/{protein}",
                     params={"position": site, "organism": self.organism},

@@ -65,7 +65,10 @@ KNOWN_UNIPROT_AC: Dict[str, Dict[str, str]] = {
         "Cdkn2a": "Q9Z1B9", "CDKN2A": "Q9Z1B9",   # p16
         "Hif1a": "Q9Z2A9", "HIF1A": "Q9Z2A9",
         "Nfkb1": "Q63100", "NFKB1": "Q63100",
-        "Rela": "Q63318", "RELA": "Q63318",
+        # RELA (NF-κB p65) was erroneously mapped to Q63318 which is CDKN1A/p21.
+        # The correct rat RELA AC is Q00653; removed from shortcut table so the
+        # entry falls back to the live UniProt search and avoids cross-gene oops.
+        "Rela": "Q00653", "RELA": "Q00653",   # NF-κB p65 (rat)
         "Mapk14": "Q9Z1B5", "MAPK14": "Q9Z1B5",   # p38 MAPK
         "Mapk8": "Q9WTU6", "MAPK8": "Q9WTU6",     # JNK1
     },

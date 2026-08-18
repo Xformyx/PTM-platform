@@ -14,6 +14,11 @@ settings = get_settings()
 MCP_URL = settings.MCP_SERVER_URL
 
 
+def _mcp_headers() -> dict[str, str]:
+    key = settings.MCP_API_KEY
+    return {"X-Api-Key": key} if key else {}
+
+
 @router.get("/articles")
 async def list_articles(
     cursor: int = Query(0, ge=0),
@@ -23,7 +28,7 @@ async def list_articles(
 ):
     """List cached PubMed articles with optional search."""
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=30, headers=_mcp_headers()) as client:
             resp = await client.get(
                 f"{MCP_URL}/cache/articles",
                 params={"cursor": cursor, "count": count, "search": search, "sort_by": sort_by},
@@ -39,7 +44,7 @@ async def list_articles(
 async def article_stats():
     """Get article cache statistics."""
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=30, headers=_mcp_headers()) as client:
             resp = await client.get(f"{MCP_URL}/cache/articles/stats")
             resp.raise_for_status()
             return resp.json()
@@ -52,7 +57,7 @@ async def article_stats():
 async def get_article(pmid: str):
     """Get a single cached article by PMID."""
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=30, headers=_mcp_headers()) as client:
             resp = await client.get(f"{MCP_URL}/cache/articles/{pmid}")
             if resp.status_code == 404:
                 raise HTTPException(status_code=404, detail=f"Article {pmid} not found")
@@ -69,7 +74,7 @@ async def get_article(pmid: str):
 async def delete_article(pmid: str):
     """Delete a single cached article."""
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=30, headers=_mcp_headers()) as client:
             resp = await client.delete(f"{MCP_URL}/cache/articles/{pmid}")
             resp.raise_for_status()
             return resp.json()
@@ -82,7 +87,7 @@ async def delete_article(pmid: str):
 async def clear_all_articles():
     """Clear all cached articles."""
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=30, headers=_mcp_headers()) as client:
             resp = await client.delete(f"{MCP_URL}/cache/articles")
             resp.raise_for_status()
             return resp.json()

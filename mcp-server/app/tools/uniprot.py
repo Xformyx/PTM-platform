@@ -28,7 +28,15 @@ async def query_uniprot(
 
     if redis:
         import json
-        await redis.set(cache_key, json.dumps(result))  # permanent cache
+        # Empty results (404 or transient network error) get a short TTL so
+        # temporary outages don't permanently mask a real protein entry.
+        is_empty = (
+            not result.get("function_summary")
+            and not result.get("subcellular_location")
+            and not result.get("go_terms_bp")
+        )
+        ttl = 3_600 if is_empty else 7 * 24 * 3_600  # 1 h vs 7 d
+        await redis.set(cache_key, json.dumps(result), ex=ttl)
 
     return result
 

@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import Settings, get_settings
 from app.core.database import get_db
 from app.core.redis import get_redis
-from app.dependencies import get_current_user, require_role
+from app.dependencies import get_current_user, require_role, require_sse_role
 
 router = APIRouter(tags=["health"])
 logger = logging.getLogger("ptm-platform.health")
@@ -617,11 +617,12 @@ async def container_logs_stream(
     request: Request,
     container_id: str,
     tail: int = 100,
-    _current_user=Depends(require_role("admin")),
+    _current_user=Depends(require_sse_role("admin")),
 ):
     """
     Stream container logs via SSE (tail -f style).
     Sends initial tail, then appends new lines as they arrive.
+    EventSource cannot send headers, so auth uses get_sse_user (?token= or Bearer).
     """
     allowed = {c["id"] for c in CONTAINER_OPTIONS}
     if container_id not in allowed:

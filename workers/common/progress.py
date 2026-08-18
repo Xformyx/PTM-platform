@@ -28,6 +28,25 @@ def get_redis_client():
     return _redis_client
 
 
+# Same key the API cancel endpoint reads (api-server/app/api/orders.py).
+_CELERY_TASK_KEY = "celery_task:{order_id}"
+_CELERY_TASK_TTL = 7 * 24 * 3600
+
+
+def save_celery_task_id(order_id: int, task_id: str) -> None:
+    """Record the active Celery task so API cancel can revoke chained stages."""
+    if not task_id:
+        return
+    try:
+        get_redis_client().set(
+            _CELERY_TASK_KEY.format(order_id=order_id),
+            task_id,
+            ex=_CELERY_TASK_TTL,
+        )
+    except Exception as exc:
+        logger.warning(f"Failed to persist celery task id for order {order_id}: {exc}")
+
+
 def publish_progress(
     order_id: int,
     stage: str,

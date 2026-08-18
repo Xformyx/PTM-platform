@@ -22,7 +22,7 @@ from celery_app import app
 from common.db_update import get_order_status, update_order_status
 from common.notifications import notify_order_status
 from common.mcp_client import MCPClient
-from common.progress import publish_analysis_log, publish_progress
+from common.progress import publish_analysis_log, publish_progress, save_celery_task_id
 from common.webhook import send_step_webhook
 
 logger = logging.getLogger("ptm-workers.preprocessing")
@@ -40,11 +40,35 @@ def _make_progress_callback(order_id: int, stage: str, step: str, base_pct: floa
 
 
 def _has_output(output_dir: Path, *filenames: str) -> bool:
-    """Check if all expected output files exist and are non-empty."""
+    """Check that all expected outputs exist, are non-empty, and contain real data.
+
+    TSV/CSV: must have at least one data row beyond the header line.
+            (Reads only the first 4 KB — fast even for large files.)
+    JSON:   must parse successfully and not be an empty dict/list.
+            An empty container means the writing step failed mid-way.
+    """
     for fn in filenames:
         f = output_dir / fn
         if not f.exists() or f.stat().st_size == 0:
             return False
+        suffix = f.suffix.lower()
+        if suffix in (".tsv", ".csv"):
+            try:
+                with f.open("rb") as fh:
+                    chunk = fh.read(4096)
+                # Need header line + at least one data line → ≥ 2 newlines
+                if chunk.count(b"\n") < 2:
+                    return False
+            except OSError:
+                return False
+        elif suffix == ".json":
+            try:
+                import json as _json
+                parsed = _json.loads(f.read_text(encoding="utf-8", errors="replace"))
+                if isinstance(parsed, (dict, list)) and not parsed:
+                    return False
+            except (ValueError, OSError):
+                return False
     return True
 
 
@@ -481,11 +505,23 @@ def run_preprocessing(self, order_id: int, config: dict):
                     progress_callback=enrichment_cb,
                 )
                 enricher.run_unified_enrichment(ptm_vector_file, all_protein_file)
+                if _has_output(order_output, enriched_output):
+                    enrichment_detail = "Domain/motif enrichment complete"
+                else:
+                    logger.warning(
+                        f"[Order {order_id}] Unified enrichment ran but output file not created — "
+                        f"downstream bio-enrichment will be skipped"
+                    )
+                    enrichment_detail = "Domain/motif enrichment ran but output not found"
             else:
-                logger.warning(f"[Order {order_id}] Skipping unified enrichment — missing input files")
+                logger.warning(
+                    f"[Order {order_id}] Skipping unified enrichment — missing input: "
+                    f"ptm_vector={os.path.exists(ptm_vector_file)}, all_protein={os.path.exists(all_protein_file)}"
+                )
+                enrichment_detail = "Domain/motif enrichment skipped (missing input files)"
 
-            publish_progress(order_id, "preprocessing", "unified_enrichment", "completed", 70, "Domain/motif enrichment complete")
-            _emit_prep_phase(order_id, "unified_enrichment", "done", "Domain/motif enrichment complete", 70)
+            publish_progress(order_id, "preprocessing", "unified_enrichment", "completed", 70, enrichment_detail)
+            _emit_prep_phase(order_id, "unified_enrichment", "done", enrichment_detail, 70)
 
 
         # ================================================================
@@ -595,51 +631,22 @@ def run_preprocessing(self, order_id: int, config: dict):
             logger.warning(f"[Order {order_id}] Final Output statistics collection failed (non-fatal): {stats_err}")
 
         # ================================================================
-        # Step 4: Finalization (90% – 100%)
-        # ================================================================
-        publish_progress(order_id, "preprocessing", "finalization", "started", 90, "Finalizing results")
-        _emit_prep_phase(order_id, "finalization", "running", "Finalizing results", 90)
-
-        output_files = [f.name for f in order_output.iterdir() if f.is_file() and f.suffix in (".tsv", ".txt", ".png", ".json")]
-        elapsed = round(time.time() - start_time, 1)
-
-        publish_progress(
-            order_id, "preprocessing", "finalization", "completed", 100,
-            f"Preprocessing complete ({elapsed}s, {len(output_files)} files)",
-            metadata={"output_files": output_files, "elapsed_seconds": elapsed},
-        )
-        _emit_prep_phase(order_id, "finalization", "done", f"Complete ({elapsed}s, {len(output_files)} files)", 100)
-
-        logger.info(f"[Order {order_id}] Preprocessing completed in {elapsed}s — {len(output_files)} output files")
-
-        if "mcp" in dir():
-            mcp.close()
-
-        if not config.get("chain_to_next", True) or get_order_status(order_id) == "cancelled":
-            logger.info(f"[Order {order_id}] Preprocessing complete (no chain — re-run only or cancelled)")
-            if get_order_status(order_id) != "cancelled":
-                update_order_status(order_id, "completed", current_stage="preprocessing", progress_pct=100)
-                notify_order_status(order_id, "completed")
-            return {
-                "order_id": order_id,
-                "status": "completed",
-                "elapsed_seconds": elapsed,
-                "output_dir": str(order_output),
-                "output_files": output_files,
-            }
-
-        # ================================================================
         # Step 5: Secondary PTM Preprocessing (Cross-Talk mode only)
         # ================================================================
+        # Placed BEFORE finalization so that:
+        #   (a) Progress never goes backwards (was 100% → 92% → 98% → ...).
+        #   (b) chain_to_next=False re-runs also process secondary data.
         analysis_mode = config.get("analysis_mode", "ptm_only")
         secondary_pr_path = config.get("secondary_pr_matrix_path")
         secondary_pg_path = config.get("secondary_pg_matrix_path")
         secondary_output_dir = None
+        secondary_ran = False
 
         if analysis_mode == "cross_talk" and secondary_pr_path and secondary_pg_path:
             if os.path.exists(secondary_pr_path) and os.path.exists(secondary_pg_path):
                 logger.info(f"[Order {order_id}] Cross-Talk mode: processing secondary PTM dataset")
-                publish_progress(order_id, "preprocessing", "secondary_preprocessing", "started", 92, "Processing secondary PTM dataset")
+                publish_progress(order_id, "preprocessing", "secondary_preprocessing", "started", 90, "Processing secondary PTM dataset")
+                secondary_ran = True
 
                 # Determine secondary PTM mode from report_options or config
                 report_opts = config.get("report_options") or {}
@@ -679,7 +686,7 @@ def run_preprocessing(self, order_id: int, config: dict):
                     from preprocessing.core.ptm_quantification import PTMQuantificationAnalyzer
 
                     secondary_quant_cb = _make_progress_callback(
-                        order_id, "preprocessing", "secondary_preprocessing", 92, 3
+                        order_id, "preprocessing", "secondary_preprocessing", 90, 3
                     )
                     secondary_analyzer = PTMQuantificationAnalyzer(
                         fasta_path=fasta_path,
@@ -731,7 +738,7 @@ def run_preprocessing(self, order_id: int, config: dict):
                             if "mcp" not in dir():
                                 mcp = MCPClient()
                             secondary_bio_cb = _make_progress_callback(
-                                order_id, "preprocessing", "secondary_preprocessing", 95, 3
+                                order_id, "preprocessing", "secondary_preprocessing", 93, 3
                             )
                             secondary_df = pd.read_csv(secondary_enriched_file, sep="\t", low_memory=False)
                             secondary_bio_enricher = BiologicalEnricher(
@@ -747,7 +754,7 @@ def run_preprocessing(self, order_id: int, config: dict):
                             logger.info(f"[Order {order_id}] Secondary biological enrichment saved: {secondary_bio_out.name}")
 
                 publish_progress(
-                    order_id, "preprocessing", "secondary_preprocessing", "completed", 98,
+                    order_id, "preprocessing", "secondary_preprocessing", "completed", 96,
                     "Secondary PTM preprocessing complete"
                 )
             else:
@@ -755,6 +762,42 @@ def run_preprocessing(self, order_id: int, config: dict):
                     f"[Order {order_id}] Cross-Talk mode: secondary files not found "
                     f"(PR={secondary_pr_path}, PG={secondary_pg_path})"
                 )
+
+        # ================================================================
+        # Step 4: Finalization (→ 100%)
+        # ================================================================
+        # Start from 96% when secondary ran, 90% for the standard path.
+        finalization_start = 96 if secondary_ran else 90
+        publish_progress(order_id, "preprocessing", "finalization", "started", finalization_start, "Finalizing results")
+        _emit_prep_phase(order_id, "finalization", "running", "Finalizing results", finalization_start)
+
+        output_files = [f.name for f in order_output.iterdir() if f.is_file() and f.suffix in (".tsv", ".txt", ".png", ".json")]
+        elapsed = round(time.time() - start_time, 1)
+
+        publish_progress(
+            order_id, "preprocessing", "finalization", "completed", 100,
+            f"Preprocessing complete ({elapsed}s, {len(output_files)} files)",
+            metadata={"output_files": output_files, "elapsed_seconds": elapsed},
+        )
+        _emit_prep_phase(order_id, "finalization", "done", f"Complete ({elapsed}s, {len(output_files)} files)", 100)
+
+        logger.info(f"[Order {order_id}] Preprocessing completed in {elapsed}s — {len(output_files)} output files")
+
+        if "mcp" in dir():
+            mcp.close()
+
+        if not config.get("chain_to_next", True) or get_order_status(order_id) == "cancelled":
+            logger.info(f"[Order {order_id}] Preprocessing complete (no chain — re-run only or cancelled)")
+            if get_order_status(order_id) != "cancelled":
+                update_order_status(order_id, "completed", current_stage="preprocessing", progress_pct=100)
+                notify_order_status(order_id, "completed")
+            return {
+                "order_id": order_id,
+                "status": "completed",
+                "elapsed_seconds": elapsed,
+                "output_dir": str(order_output),
+                "output_files": output_files,
+            }
 
         # Chain to Stage 2: RAG Enrichment
         if get_order_status(order_id) == "cancelled":
@@ -795,12 +838,13 @@ def run_preprocessing(self, order_id: int, config: dict):
             "secondary_pr_matrix_path": secondary_pr_path,
             "secondary_pg_matrix_path": secondary_pg_path,
         }
-        app.send_task(
+        rag_task = app.send_task(
             "rag_enrichment.tasks.run_rag_enrichment",
             args=[order_id, rag_config],
             queue="rag_enrichment",
         )
-        logger.info(f"[Order {order_id}] Chained to RAG enrichment")
+        save_celery_task_id(order_id, rag_task.id)
+        logger.info(f"[Order {order_id}] Chained to RAG enrichment (task_id={rag_task.id})")
 
         return {
             "order_id": order_id,

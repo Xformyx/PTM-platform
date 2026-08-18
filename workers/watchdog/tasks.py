@@ -213,8 +213,10 @@ def _restart_stage(order_id: int, stage: str):
 
         update_order_status(order_id, stage, current_stage=stage, stage_detail="Watchdog auto-restart")
 
-        current_app.send_task(task_name, args=[order_id, config])
-        logger.info(f"[Watchdog] Dispatched {task_name} for order {order_id}")
+        restart_task = current_app.send_task(task_name, args=[order_id, config])
+        from common.progress import save_celery_task_id
+        save_celery_task_id(order_id, restart_task.id)
+        logger.info(f"[Watchdog] Dispatched {task_name} for order {order_id} (task_id={restart_task.id})")
 
     except Exception as e:
         logger.error(f"[Watchdog] Failed to restart order {order_id}: {e}")

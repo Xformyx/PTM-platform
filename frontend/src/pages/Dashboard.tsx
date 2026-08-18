@@ -93,7 +93,10 @@ export default function Dashboard() {
   useEffect(() => {
     Promise.all([
       api.get<HealthStatus>("/health/detailed").catch(() => null),
-      api.get<OrderSummary>("/orders?page_size=5").catch(() => null),
+      // Fetch up to 500 orders so that KPI status counts reflect the full history,
+      // not just the last 5. The `total` field from the API is used for the
+      // "Total Orders" card so it remains accurate regardless of page_size.
+      api.get<OrderSummary>("/orders?page_size=500").catch(() => null),
     ]).then(([h, o]) => {
       setHealth(h);
       setOrders(o);
@@ -102,9 +105,10 @@ export default function Dashboard() {
   }, []);
 
   const allOrders = orders?.orders ?? [];
+  const RUNNING_STATUSES = new Set(["running", "preprocessing", "rag_enrichment", "report_generation", "queued", "registered"]);
   const counts = {
     total: orders?.total ?? 0,
-    running: allOrders.filter((o) => o.status === "running" || o.status === "preprocessing" || o.status === "rag_enrichment" || o.status === "report_generation").length,
+    running: allOrders.filter((o) => RUNNING_STATUSES.has(o.status)).length,
     completed: allOrders.filter((o) => o.status === "completed").length,
     failed: allOrders.filter((o) => o.status === "failed").length,
   };

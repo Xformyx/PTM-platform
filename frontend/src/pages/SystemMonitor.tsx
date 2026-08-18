@@ -136,7 +136,10 @@ export default function SystemMonitor() {
 
     // Determine base URL for SSE (same origin, under /api/)
     const baseUrl = window.location.origin;
-    const sseUrl = `${baseUrl}/api/health/container-logs/${containerId}/stream?tail=200`;
+    const token = localStorage.getItem("ptm-token");
+    const sseUrl = `${baseUrl}/api/health/container-logs/${containerId}/stream?tail=200${
+      token ? `&token=${encodeURIComponent(token)}` : ""
+    }`;
 
     const es = new EventSource(sseUrl);
     eventSourceRef.current = es;

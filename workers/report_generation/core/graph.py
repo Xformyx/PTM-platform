@@ -2,9 +2,12 @@
 LangGraph StateGraph for PTM Report Generation.
 
 Replaces the custom multi-agent orchestrator with a structured state graph.
-Flow (v7.0):
-  load_context → research → hypothesize → validate_hypotheses
-    → network_analysis → write_sections → cascade_mediator → edit_report
+Flow (19 nodes):
+  load_context → generate_questions → research → hypothesize → validate_hypotheses
+    → data_verification → network_analysis → temporal_comovement → kinase_annotation
+    → rq_refinement → external_coscientist_context → write_sections → report_copilot
+    → cascade_mediator → [crosstalk_analysis →] generate_qa_report → drug_repositioning
+    → format_citations → edit_report
 
 Each node reads/writes to a shared TypedDict state.
 """

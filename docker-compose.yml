@@ -61,6 +61,12 @@ services:
       CHROMA_SERVER_HTTP_PORT: "8000"
       ALLOW_RESET: "true"
       IS_PERSISTENT: "TRUE"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v2/heartbeat"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
     networks:
       - ptm-network
     restart: unless-stopped
@@ -104,6 +110,10 @@ services:
       # job mounts this into the ptmquant container so AlphaPeptDeep
       # prediction runs at most once per (species, FASTA, PTM set) tuple.
       - ./storage/predicted_lib_cache:/app/storage/predicted_lib_cache
+      # SECURITY NOTE: Mounting the Docker socket grants the api-server full
+      # Docker daemon access (equivalent to root on the host).  This is required
+      # for the container restart/log UI features.  Remove this line when those
+      # features are not needed or if the host is externally reachable.
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
       APP_ENV: ${APP_ENV:-development}
@@ -116,6 +126,7 @@ services:
       CHROMADB_URL: http://chromadb:8000
       OLLAMA_URL: http://host.docker.internal:11434
       MCP_SERVER_URL: http://mcp-server:8001
+      MCP_API_KEY: ${MCP_API_KEY:-}
       COSCIENTIST_API_URL: http://ptm-coscientist-api:8080
       CYTOSCAPE_HOST: host.docker.internal
       CYTOSCAPE_PORT: ${CYTOSCAPE_PORT:-1234}
@@ -174,6 +185,8 @@ services:
       # Read at import time by app/tools/expression.py, so changing it needs
       # `docker compose up -d mcp-server`, not a plain restart.
       BIOGRID_API_KEY: ${BIOGRID_API_KEY:-}
+      # Optional shared-secret API key.  When set, workers must send X-Api-Key.
+      MCP_API_KEY: ${MCP_API_KEY:-}
     networks:
       - ptm-network
     depends_on:
@@ -207,6 +220,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       DATABASE_URL: mysql+asyncmy://${MYSQL_USER:-ptm_user}:${MYSQL_PASSWORD:-ptm_password_change_me}@mysql:3306/${MYSQL_DATABASE:-ptm_platform}?charset=utf8mb4
       MCP_SERVER_URL: http://mcp-server:8001
+      MCP_API_KEY: ${MCP_API_KEY:-}
       OLLAMA_URL: http://host.docker.internal:11434
       CHROMADB_URL: http://chromadb:8000
       INPUT_DIR: /app/data/inputs
@@ -250,6 +264,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       DATABASE_URL: mysql+asyncmy://${MYSQL_USER:-ptm_user}:${MYSQL_PASSWORD:-ptm_password_change_me}@mysql:3306/${MYSQL_DATABASE:-ptm_platform}?charset=utf8mb4
       MCP_SERVER_URL: http://mcp-server:8001
+      MCP_API_KEY: ${MCP_API_KEY:-}
       CHROMADB_URL: http://chromadb:8000
       OUTPUT_DIR: /app/data/outputs
       OLLAMA_URL: http://host.docker.internal:11434
@@ -317,6 +332,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       DATABASE_URL: mysql+asyncmy://${MYSQL_USER:-ptm_user}:${MYSQL_PASSWORD:-ptm_password_change_me}@mysql:3306/${MYSQL_DATABASE:-ptm_platform}?charset=utf8mb4
       MCP_SERVER_URL: http://mcp-server:8001
+      MCP_API_KEY: ${MCP_API_KEY:-}
       OLLAMA_URL: http://host.docker.internal:11434
       CHROMADB_URL: http://chromadb:8000
       OUTPUT_DIR: /app/data/outputs
@@ -405,7 +421,7 @@ services:
       - ptm-network
     depends_on:
       chromadb:
-        condition: service_started
+        condition: service_healthy
     restart: unless-stopped
 
   # ─── Gateway & Frontend ────────────────────────────────────────────────────

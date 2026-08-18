@@ -39,6 +39,7 @@ class Settings(BaseSettings):
 
     # MCP Server
     MCP_SERVER_URL: str = "http://localhost:8001"
+    MCP_API_KEY: str = ""
 
     # Co-Scientist (container name used as DNS hostname inside ptm-platform-network)
     COSCIENTIST_API_URL: str = "http://ptm-coscientist-api:8080"

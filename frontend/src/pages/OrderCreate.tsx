@@ -750,7 +750,7 @@ export default function OrderCreate() {
                 )}
 
                 <div className="flex justify-end">
-                  <Button onClick={() => goTo(1)} disabled={!form.project_name || !files.pr_matrix}>
+                  <Button onClick={() => goTo(1)} disabled={!form.project_name || !files.pr_matrix || !files.pg_matrix}>
                     Next <ArrowRight className="ml-2 h-4 w-4" />
                   </Button>
                 </div>

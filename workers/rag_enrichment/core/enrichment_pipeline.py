@@ -1207,16 +1207,41 @@ class RAGEnrichmentPipeline:
                 return obj
 
             failed_tasks: dict = {}
-            with ThreadPoolExecutor(max_workers=min(len(tasks_to_run), MCP_WORKERS), thread_name_prefix=f"llm_{gene[:8]}") as pool:
+            # Do not use `with ThreadPoolExecutor`: its __exit__ calls
+            # shutdown(wait=True), which would wait out leftover LLM calls
+            # after as_completed times out and then retry them anyway.
+            pool = ThreadPoolExecutor(
+                max_workers=min(len(tasks_to_run), MCP_WORKERS),
+                thread_name_prefix=f"llm_{gene[:8]}",
+            )
+            try:
                 futures_b = {name: pool.submit(fn) for name, (fn, _) in tasks_to_run.items()}
-                for name, future in futures_b.items():
-                    try:
-                        result = _to_dict(future.result(timeout=self.phase_b_timeout))
-                        phase_b_results[name] = result
-                        set_cached(gene, position, ptm_type, tasks_to_run[name][1], pmids, result)
-                    except Exception as e:
-                        logger.error(f"Phase B task '{name}' failed for {gene}: {e}")
-                        failed_tasks[name] = tasks_to_run[name]
+                future_to_name = {v: k for k, v in futures_b.items()}
+                # Use as_completed so fast tasks are collected immediately; the total
+                # timeout caps the *entire* Phase B batch, not each future individually.
+                # Previously futures were awaited in dict-insertion order, causing
+                # up to phase_b_timeout × N cumulative delay when one task was slow.
+                try:
+                    for future in as_completed(futures_b.values(), timeout=self.phase_b_timeout):
+                        name = future_to_name[future]
+                        try:
+                            result = _to_dict(future.result())
+                            phase_b_results[name] = result
+                            set_cached(gene, position, ptm_type, tasks_to_run[name][1], pmids, result)
+                        except Exception as e:
+                            logger.error(f"Phase B task '{name}' failed for {gene}: {e}")
+                            failed_tasks[name] = tasks_to_run[name]
+                except TimeoutError:
+                    # Overall batch timed out — mark any uncollected tasks as failed
+                    for name, future in futures_b.items():
+                        if name not in phase_b_results and name not in failed_tasks:
+                            logger.error(
+                                f"Phase B task '{name}' exceeded total timeout "
+                                f"({self.phase_b_timeout}s) for {gene}"
+                            )
+                            failed_tasks[name] = tasks_to_run[name]
+            finally:
+                pool.shutdown(wait=False, cancel_futures=True)
 
             # ③ 실패한 태스크 직렬 재시도 (LLM 부하 감소 후 재시도)
             if failed_tasks:

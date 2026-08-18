@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends
 from sse_starlette.sse import EventSourceResponse
 
 from app.core.redis import get_redis
-from app.dependencies import get_current_user
+from app.dependencies import get_sse_user
 
 router = APIRouter(prefix="/events", tags=["events"])
 logger = logging.getLogger("ptm-platform.events")
@@ -18,7 +18,7 @@ PTMQUANT_CHANNEL_PREFIX = "ptmquant:progress:"
 @router.get("/orders/{order_id}")
 async def order_progress_stream(
     order_id: int,
-    user=Depends(get_current_user),
+    user=Depends(get_sse_user),
 ):
     async def event_generator():
         redis = await get_redis()
@@ -61,7 +61,7 @@ async def order_progress_stream(
 @router.get("/ptmquant/{job_id}")
 async def ptmquant_progress_stream(
     job_id: str,
-    user=Depends(get_current_user),
+    user=Depends(get_sse_user),
 ):
     async def event_generator():
         redis = await get_redis()

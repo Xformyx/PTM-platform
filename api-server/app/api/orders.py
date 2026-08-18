@@ -28,6 +28,22 @@ _STAGE_LOCK_KEYS = [
     "report_gen_lock:{order_id}",
 ]
 
+# Redis key pattern for tracking the active Celery task per order (TTL 7 days).
+_CELERY_TASK_KEY = "celery_task:{order_id}"
+
+
+async def _save_celery_task_id(order_id: int, task_id: str) -> None:
+    """Persist the active Celery task ID so cancel can revoke it."""
+    r = await get_redis()
+    await r.set(_CELERY_TASK_KEY.format(order_id=order_id), task_id, ex=7 * 24 * 3600)
+
+
+async def _get_celery_task_id(order_id: int) -> str | None:
+    """Return the most recently stored Celery task ID for this order, or None."""
+    r = await get_redis()
+    val = await r.get(_CELERY_TASK_KEY.format(order_id=order_id))
+    return val if isinstance(val, str) else (val.decode() if val else None)
+
 
 async def _clear_order_locks(order_id: int) -> int:
     """Remove all Redis stage-execution locks for the given order."""
@@ -638,7 +654,13 @@ async def create_order(
         async def save_upload(upload: UploadFile, subdir: str = "") -> str:
             target_dir = order_dir / subdir if subdir else order_dir
             target_dir.mkdir(parents=True, exist_ok=True)
-            file_path = target_dir / upload.filename
+            # Strip directory components and replace unsafe characters to prevent
+            # path traversal (e.g. a filename like "../../etc/passwd").
+            import re as _re
+            safe_name = _re.sub(r"[^\w.\-]", "_", Path(upload.filename or "file").name)
+            if not safe_name or safe_name.startswith("."):
+                safe_name = "upload_" + safe_name.lstrip(".")
+            file_path = target_dir / safe_name
             content = await upload.read()
             file_path.write_bytes(content)
             return str(file_path)
@@ -979,6 +1001,7 @@ async def start_order(
         queue="preprocessing",
     )
 
+    await _save_celery_task_id(order.id, task.id)
     logger.info(f"Order {order.order_code} dispatched — task_id={task.id}")
 
     db_log = OrderLog(
@@ -1341,6 +1364,7 @@ async def run_stage(
             queue="report_generation",
         )
 
+    await _save_celery_task_id(order.id, task.id)
     logger.info(f"Order {order.order_code} stage '{body.stage}' dispatched — task_id={task.id}, collections={active_collections}")
 
     db_log = OrderLog(
@@ -1392,6 +1416,18 @@ async def cancel_order(
     await db.commit()
 
     await _clear_order_locks(order_id)
+
+    # Revoke the active Celery task so the worker actually stops.
+    task_id = await _get_celery_task_id(order_id)
+    if task_id:
+        try:
+            from celery import Celery as _Celery
+            _capp = _Celery("ptm_workers")
+            _capp.conf.broker_url = os.getenv("CELERY_BROKER_URL", "redis://redis:6379/1")
+            _capp.control.revoke(task_id, terminate=True, signal="SIGTERM")
+            logger.info(f"Order {order.order_code} Celery task {task_id} revoked")
+        except Exception as exc:
+            logger.warning(f"Order {order.order_code} — could not revoke task {task_id}: {exc}")
 
     logger.info(f"Order {order.order_code} cancelled (stopped)")
 

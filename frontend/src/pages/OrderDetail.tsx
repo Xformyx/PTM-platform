@@ -3561,6 +3561,7 @@ export default function OrderDetail() {
   const PREP_STEPS: { key: string; label: string }[] = [
     { key: "ptm_quantification", label: "PTM Quantification" },
     { key: "vector_report", label: "Vector Report" },
+    { key: "representation_learning", label: "Representation Learning (1c)" },
     { key: "unified_enrichment", label: "Domain/Motif Enrichment" },
     { key: "biological_enrichment", label: "Biological Enrichment" },
     { key: "finalization", label: "Finalization" },
