@@ -20,6 +20,76 @@ def _as_list(value: Any) -> list:
     return value if isinstance(value, list) else []
 
 
+def build_phase_a_source_summary(
+    phase_a_results: Dict[str, Any],
+) -> list[Dict[str, Any]]:
+    """Return UI-safe provenance for every structured database source in Phase A.
+
+    ``_phase_a_state`` is supplied by the caller so cache hits, species skips and
+    failures remain distinguishable from a successful query with no records.
+    """
+    config = (
+        ("iptmnet", "iPTMnet", "sites_found", "sites"),
+        ("uniprot", "UniProt", "uniprot_info", "records"),
+        ("kegg", "KEGG", "kegg_pathways", "pathways"),
+        ("reactome", "Reactome", "reactome_data", "pathways"),
+        ("stringdb", "STRING", "interactions", "interactions"),
+        ("biogrid", "BioGRID", "biogrid_data", "interactions"),
+        ("hpa", "HPA", "hpa_data", "records"),
+        ("gtex", "GTEx", "gtex_data", "records"),
+    )
+    summary: list[Dict[str, Any]] = []
+    for key, label, field, unit in config:
+        result = phase_a_results.get(key) or {}
+        state = str(result.get("_phase_a_state") or "done")
+        value = result.get(field)
+        if key == "iptmnet":
+            count = int(value or 0)
+        elif key == "reactome":
+            count = int((value or {}).get("total_count") or 0) if isinstance(value, dict) else 0
+        elif key == "biogrid":
+            if isinstance(value, dict):
+                count = len(_as_list(value.get("interactions"))) or int(value.get("total_count") or 0)
+            else:
+                count = len(_as_list(value))
+        elif isinstance(value, list):
+            count = len(value)
+        else:
+            count = 1 if value else 0
+        status = state
+        if status == "done" and count == 0:
+            status = "empty"
+        summary.append({
+            "key": key,
+            "label": label,
+            "status": status,  # done | cache_hit | empty | skip | error
+            "count": count,
+            "unit": unit,
+        })
+    return summary
+
+
+def format_phase_a_source_summary(summary: Iterable[Dict[str, Any]]) -> str:
+    """Create a compact legacy-progress suffix while structured metadata remains canonical."""
+    tokens: list[str] = []
+    for source in summary:
+        label = str(source.get("label") or source.get("key") or "DB")
+        status = str(source.get("status") or "")
+        count = int(source.get("count") or 0)
+        if status == "skip":
+            token = f"{label}:skip"
+        elif status == "cache_hit":
+            token = f"{label}:{count}↻"
+        elif status == "error":
+            token = f"{label}:error"
+        elif status == "empty":
+            token = f"{label}:0"
+        else:
+            token = f"{label}:{count}"
+        tokens.append(token)
+    return "; ".join(tokens)
+
+
 def build_structured_database_packet(
     *,
     gene: str,

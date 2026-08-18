@@ -3464,19 +3464,23 @@ export default function OrderDetail() {
 
   // Build per-PTM phase status from SSE events + DB logs (for stopped/completed orders)
   type PhaseStatus = "pending" | "running" | "done" | "skip" | "error";
+  type StructuredSourceSummary = {
+    key: string; label: string; status: string; count: number; unit: string;
+  };
   type PtmPhaseRow = {
     gene: string; position: string;
     A: PhaseStatus; B: PhaseStatus; C: PhaseStatus; D: PhaseStatus;
     articleProgress: string; // "done/total" e.g. "5/15", or "" if unknown
     cachedCount: number;
     errorDetail: string;
+    sourceSummary: StructuredSourceSummary[];
   };
   const { ptmPhaseMap, ptmTotal } = useMemo(() => {
     const map = new Map<string, PtmPhaseRow>();
     let total: number | null = null;
 
     const blank = (gene: string, position: string): PtmPhaseRow =>
-      ({ gene, position, A: "pending", B: "pending", C: "pending", D: "pending", articleProgress: "", cachedCount: 0, errorDetail: "" });
+      ({ gene, position, A: "pending", B: "pending", C: "pending", D: "pending", articleProgress: "", cachedCount: 0, errorDetail: "", sourceSummary: [] });
 
     const applyMeta = (meta: Record<string, unknown>) => {
       if (meta?.type === "ptm_list") {
@@ -3498,6 +3502,17 @@ export default function OrderDetail() {
       }
 
       const existing = map.get(key) ?? blank(gene, position);
+      const sourceSummary = phase === "A" && Array.isArray(meta.source_summary)
+        ? meta.source_summary
+            .filter((item): item is Record<string, unknown> => !!item && typeof item === "object")
+            .map(item => ({
+              key: String(item.key ?? ""),
+              label: String(item.label ?? item.key ?? "DB"),
+              status: String(item.status ?? "done"),
+              count: Number(item.count ?? 0) || 0,
+              unit: String(item.unit ?? "records"),
+            }))
+        : existing.sourceSummary;
 
       // Article progress:
       // - "3/15 articles" from per-article LLM callbacks
@@ -3526,8 +3541,9 @@ export default function OrderDetail() {
         ...existing,
         [phase]: status,
         articleProgress: newArticleProgress,
-        cachedCount: newCachedCount,
-        errorDetail: phase === "B" && status === "error" && detail ? detail : existing.errorDetail,
+            cachedCount: newCachedCount,
+            errorDetail: phase === "B" && status === "error" && detail ? detail : existing.errorDetail,
+            sourceSummary,
       });
     };
     // DB logs first (historical), then SSE events override (real-time)
@@ -4311,22 +4327,39 @@ export default function OrderDetail() {
                           {(["A", "B", "C", "D"] as const).map(ph => (
                             <TableCell key={ph} className="text-center">{phaseIcon(row[ph])}</TableCell>
                           ))}
-                          <TableCell className="text-[10px] text-muted-foreground max-w-[200px]">
-                            {row.errorDetail
-                              ? <span className="text-destructive" title={row.errorDetail}>⚠ {row.errorDetail}</span>
-                              : row.articleProgress
-                              ? (() => {
-                                  const [d, t] = row.articleProgress.split("/").map(Number);
-                                  const isDone = row.B === "done";
-                                  const cached = row.cachedCount > 0 ? `, ${row.cachedCount} cached` : "";
-                                  return (
-                                    <span className={isDone ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"}>
-                                      {isDone ? "✓ " : ""}{d}/{t} articles{cached}
-                                    </span>
-                                  );
-                                })()
-                              : <span className="text-muted-foreground/40">—</span>
-                            }
+                          <TableCell className="text-[10px] text-muted-foreground max-w-[280px]">
+                            <div className="space-y-1">
+                              {row.errorDetail && <span className="block text-destructive" title={row.errorDetail}>⚠ {row.errorDetail}</span>}
+                              {row.articleProgress && (() => {
+                                const [d, t] = row.articleProgress.split("/").map(Number);
+                                const isDone = row.B === "done";
+                                const cached = row.cachedCount > 0 ? `, ${row.cachedCount} cached` : "";
+                                return (
+                                  <span className={isDone ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"}>
+                                    {isDone ? "✓ " : ""}{d}/{t} articles{cached}
+                                  </span>
+                                );
+                              })()}
+                              {row.sourceSummary.length > 0 && <div className="flex flex-wrap gap-1">
+                                {row.sourceSummary.map(source => {
+                                  const tone = source.status === "error"
+                                    ? "text-destructive border-destructive/40"
+                                    : source.status === "skip"
+                                    ? "text-muted-foreground/60 border-border"
+                                    : source.status === "cache_hit"
+                                    ? "text-sky-600 dark:text-sky-400 border-sky-500/40"
+                                    : source.status === "empty"
+                                    ? "text-muted-foreground border-border"
+                                    : "text-emerald-600 dark:text-emerald-400 border-emerald-500/40";
+                                  const value = source.status === "skip" ? "skip"
+                                    : source.status === "cache_hit" ? `${source.count} cached`
+                                    : source.status === "error" ? "error"
+                                    : `${source.count} ${source.unit}`;
+                                  return <span key={source.key} className={`border rounded px-1 py-0.5 ${tone}`} title={`${source.label}: ${source.status}`}>{source.label} {value}</span>;
+                                })}
+                              </div>}
+                              {!row.errorDetail && !row.articleProgress && row.sourceSummary.length === 0 && <span className="text-muted-foreground/40">—</span>}
+                            </div>
                           </TableCell>
                         </TableRow>
                       );

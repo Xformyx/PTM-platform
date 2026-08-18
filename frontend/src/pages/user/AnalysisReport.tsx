@@ -500,14 +500,16 @@ function friendlyMessage(stage: string, detail: string): string {
       return match ? `${match[1]}개 PTM 분석 대기열 등록 — 순차 처리 중` : "PTM 분석 대기열 등록 완료";
     }
     // Per-PTM database-first progress
+    const sourceMatch = detail.match(/\[sources:\s*([^\]]+)\]\s*$/i);
+    const sourceSummary = sourceMatch ? ` · ${sourceMatch[1]}` : "";
     const dbOnlyMatch = detail.match(/^([\w.-]+)\s+\w+\d+:\s*\[db_only\]\s*structured DB,\s*(\d+)\s*pathways,\s*PubMed skipped\s*\((\d+)\/(\d+)\)/i);
     if (dbOnlyMatch) {
-      return `${dbOnlyMatch[1]} 분석 중 — 구조화 DB 경로 ${dbOnlyMatch[2]}개 확인, 논문 검색 생략 (${dbOnlyMatch[3]}/${dbOnlyMatch[4]})`;
+      return `${dbOnlyMatch[1]} 분석 중 — 구조화 DB 경로 ${dbOnlyMatch[2]}개 확인, 논문 검색 생략 (${dbOnlyMatch[3]}/${dbOnlyMatch[4]})${sourceSummary}`;
     }
     const targetedMatch = detail.match(/^([\w.-]+)\s+\w+\d+:\s*\[(abstract_targeted|fulltext_escalated)\]\s*(\d+)\s*selected articles,\s*(\d+)\s*pathways\s*\((\d+)\/(\d+)\)/i);
     if (targetedMatch) {
       const routeLabel = targetedMatch[2].toLowerCase() === "fulltext_escalated" ? "논문 본문 검토" : "필요 문헌 검토";
-      return `${targetedMatch[1]} 분석 중 — ${routeLabel} ${targetedMatch[3]}편, 경로 ${targetedMatch[4]}개 (${targetedMatch[5]}/${targetedMatch[6]})`;
+      return `${targetedMatch[1]} 분석 중 — ${routeLabel} ${targetedMatch[3]}편, 경로 ${targetedMatch[4]}개 (${targetedMatch[5]}/${targetedMatch[6]})${sourceSummary}`;
     }
     // Legacy per-PTM progress: "GENE POS: N articles, M pathways (done/total)"
     const ptmMatch = detail.match(/^(\w+)\s+\w+\d+:\s*(\d+)\s*articles?,\s*(\d+)\s*pathways?\s*\((\d+)\/(\d+)\)/);

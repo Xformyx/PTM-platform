@@ -228,3 +228,14 @@ Backend: vector-plot (receptor inference)
 - [x] De novo+Regulated·All PTMs selection mode의 frontend payload·API·worker 전달 경로 점검
 - [x] mode별 RAG input universe·gene/site deduplication·DB/PubMed budget 정책 설계
 - [x] mode-aware filtering·progress provenance·회귀 테스트 구현
+
+## RAG Enrichment Structured Database Source 실행·표시 감사
+- [x] UniProt·STRING·KEGG·iPTMnet·Reactome·BioGRID의 worker 호출·cache·packet 저장 경로 점검
+- [x] source별 progress event·API payload·frontend 표시 시점 점검
+- [x] source별 호출·저장·표시 차이와 개선 권고 정리
+
+## RAG Enrichment Structured DB Source Summary UI
+- [x] Phase A source별 done·cache-hit·empty·skip·error 및 result count event contract 구현
+- [x] Worker source-summary provenance와 route 결과 조립 구현
+- [x] Admin/User progress 및 Phase modal의 source별 summary UI 구현
+- [x] 회귀 테스트·frontend type 검증·GitHub main 반영

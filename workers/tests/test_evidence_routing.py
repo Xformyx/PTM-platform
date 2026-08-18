@@ -11,6 +11,7 @@ ABSTRACT_TARGETED = _MODULE.ABSTRACT_TARGETED
 DB_ONLY = _MODULE.DB_ONLY
 FULLTEXT_ESCALATED = _MODULE.FULLTEXT_ESCALATED
 build_structured_database_packet = _MODULE.build_structured_database_packet
+build_phase_a_source_summary = _MODULE.build_phase_a_source_summary
 decide_evidence_route = _MODULE.decide_evidence_route
 
 
@@ -123,3 +124,22 @@ def test_structured_packet_preserves_exact_site_provenance():
     packet = _packet(exact_site_known=True, pathways=2)
     assert packet["iptmnet"]["exact_site_known"] is True
     assert packet["pathway_context"]["kegg_pathway_count"] == 2
+
+
+def test_phase_a_source_summary_distinguishes_cache_skip_empty_and_error():
+    summary = build_phase_a_source_summary({
+        "iptmnet": {"sites_found": 1, "_phase_a_state": "done"},
+        "uniprot": {"uniprot_info": {}, "_phase_a_state": "skip"},
+        "kegg": {"kegg_pathways": [{"name": "insulin"}], "_phase_a_state": "cache_hit"},
+        "reactome": {"reactome_data": {"total_count": 2}, "_phase_a_state": "done"},
+        "stringdb": {"interactions": [], "_phase_a_state": "done"},
+        "biogrid": {"biogrid_data": {}, "_phase_a_state": "error"},
+        "hpa": {"hpa_data": {}, "_phase_a_state": "skip"},
+        "gtex": {"gtex_data": {}, "_phase_a_state": "skip"},
+    })
+    by_key = {row["key"]: row for row in summary}
+    assert by_key["iptmnet"]["status"] == "done"
+    assert by_key["kegg"]["status"] == "cache_hit"
+    assert by_key["stringdb"]["status"] == "empty"
+    assert by_key["uniprot"]["status"] == "skip"
+    assert by_key["biogrid"]["status"] == "error"

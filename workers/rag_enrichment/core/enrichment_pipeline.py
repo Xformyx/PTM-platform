@@ -63,8 +63,10 @@ from .evidence_routing import (
     ABSTRACT_TARGETED,
     DB_ONLY,
     FULLTEXT_ESCALATED,
+    build_phase_a_source_summary,
     build_structured_database_packet,
     decide_evidence_route,
+    format_phase_a_source_summary,
 )
 # Level 1: Max concurrent MCP calls within a single PTM enrichment
 MCP_WORKERS = int(_os.getenv("RAG_MCP_WORKERS", "6"))
@@ -328,18 +330,29 @@ class RAGEnrichmentPipeline:
         except Exception:
             pass
 
-    def _phase_event(self, gene: str, position: str, phase: str, status: str, detail: str = "") -> None:
+    def _phase_event(
+        self,
+        gene: str,
+        position: str,
+        phase: str,
+        status: str,
+        detail: str = "",
+        source_summary: Optional[list[dict]] = None,
+    ) -> None:
         """Emit a structured PTM-phase progress event consumed by the frontend phase-status modal."""
+        metadata = {
+            "type": "ptm_phase",
+            "gene": gene,
+            "position": position,
+            "phase": phase,
+            "status": status,  # running | done | skip | error
+            "detail": detail,
+        }
+        if source_summary is not None:
+            metadata["source_summary"] = source_summary
         self._alog(
             f"[phase:{phase}] {gene} {position} → {status}",
-            metadata={
-                "type": "ptm_phase",
-                "gene": gene,
-                "position": position,
-                "phase": phase,
-                "status": status,  # running | done | skip | error
-                "detail": detail,
-            },
+            metadata=metadata,
             persist=True,
         )
 
@@ -480,16 +493,17 @@ class RAGEnrichmentPipeline:
                     or enr.get("search_summary", {}).get("evidence_route")
                     or "legacy"
                 )
-                cached = " [gene-cached]" if self._gene_cache.has(f"{gene}__kegg") else ""
+                source_summary = enr.get("structured_database_source_summary") or []
+                source_suffix = format_phase_a_source_summary(source_summary)
                 if route_name == DB_ONLY:
                     progress_detail = (
                         f"{gene} {pos}: [db_only] structured DB, {pw_total} pathways, "
-                        f"PubMed skipped ({done}/{total})"
+                        f"PubMed skipped ({done}/{total}) [sources: {source_suffix}]"
                     )
                 else:
                     progress_detail = (
                         f"{gene} {pos}: [{route_name}] {art_count} selected articles, "
-                        f"{pw_total} pathways ({done}/{total})"
+                        f"{pw_total} pathways ({done}/{total}) [sources: {source_suffix}]"
                     )
                 self._progress(
                     done / total,
@@ -702,19 +716,26 @@ class RAGEnrichmentPipeline:
         # ══════════════════════════════════════════════════════════════
         phase_a_results = {}
 
+        def _source_result(payload: dict, state: str) -> dict:
+            """Keep source execution provenance out of the cached domain payload."""
+            return {**payload, "_phase_a_state": state}
+
         def _iptmnet():
             try:
-                return self.mcp.query_iptmnet(gene=gene, position=position, organism=species)
+                return _source_result(
+                    self.mcp.query_iptmnet(gene=gene, position=position, organism=species),
+                    "done",
+                )
             except Exception as e:
                 logger.warning(f"iPTMnet query failed for {gene} {position}: {e}")
-                return {}
+                return _source_result({}, "error")
 
         def _kegg():
             cache_key = f"{gene}__kegg__{_kegg_org}"
             cached = self._gene_cache.get(cache_key)
             if cached is not None:
                 logger.debug(f"[CACHE HIT] KEGG for {gene}")
-                return cached
+                return _source_result(cached, "cache_hit")
             try:
                 kegg_info = self.mcp.query_kegg(gene, organism=_kegg_org)
                 kegg_pathways = kegg_info.get("pathways", [])
@@ -722,19 +743,19 @@ class RAGEnrichmentPipeline:
                 logger.info(f"[Layer1-KEGG] {gene}: {len(kegg_pathways)} pathways → {kegg_pw_names}")
                 result = {"kegg_info": kegg_info, "kegg_pathways": kegg_pathways}
                 self._gene_cache.set(cache_key, result)
-                return result
+                return _source_result(result, "done")
             except Exception as e:
                 logger.warning(f"KEGG query failed for {gene}: {e}")
                 result = {"kegg_info": {}, "kegg_pathways": []}
                 self._gene_cache.set(cache_key, result)
-                return result
+                return _source_result(result, "error")
 
         def _stringdb():
             cache_key = f"{gene}__stringdb__{species}"
             cached = self._gene_cache.get(cache_key)
             if cached is not None:
                 logger.debug(f"[CACHE HIT] STRING-DB for {gene}")
-                return cached
+                return _source_result(cached, "cache_hit")
             try:
                 string_info = self.mcp.query_stringdb(gene, species=species)
                 interactions = string_info.get("interactions", [])
@@ -742,98 +763,98 @@ class RAGEnrichmentPipeline:
                 logger.info(f"[STRING-DB] {gene}: {len(interactions)} interactions → {top_partners}")
                 result = {"string_info": string_info, "interactions": interactions}
                 self._gene_cache.set(cache_key, result)
-                return result
+                return _source_result(result, "done")
             except Exception as e:
                 logger.warning(f"STRING-DB query failed for {gene}: {e}")
                 result = {"string_info": {}, "interactions": []}
                 self._gene_cache.set(cache_key, result)
-                return result
+                return _source_result(result, "error")
 
         def _uniprot():
             if not protein_id:
-                return {"uniprot_info": {}}
+                return _source_result({"uniprot_info": {}}, "skip")
             cache_key = f"{protein_id}__uniprot"
             cached = self._gene_cache.get(cache_key)
             if cached is not None:
                 logger.debug(f"[CACHE HIT] UniProt for {protein_id}")
-                return cached
+                return _source_result(cached, "cache_hit")
             try:
                 uniprot_info = self.mcp.query_uniprot(protein_id)
                 logger.info(f"[UniProt] {gene} ({protein_id}): {'found' if uniprot_info else 'empty'}")
                 result = {"uniprot_info": uniprot_info}
                 self._gene_cache.set(cache_key, result)
-                return result
+                return _source_result(result, "done")
             except Exception as e:
                 logger.warning(f"UniProt query failed for {protein_id}: {e}")
                 result = {"uniprot_info": {}}
                 self._gene_cache.set(cache_key, result)
-                return result
+                return _source_result(result, "error")
 
         def _hpa():
             # HPA (Human Protein Atlas) is human-only; skip for non-human species
             if not _is_human:
                 logger.debug(f"[SKIP] HPA for {gene}: non-human species ({species})")
-                return {"hpa_data": {}}
+                return _source_result({"hpa_data": {}}, "skip")
             cache_key = f"{gene}__hpa"
             cached = self._gene_cache.get(cache_key)
             if cached is not None:
                 logger.debug(f"[CACHE HIT] HPA for {gene}")
-                return cached
+                return _source_result(cached, "cache_hit")
             try:
                 hpa_data = self._query_hpa_local_first(gene)
                 result = {"hpa_data": hpa_data}
                 self._gene_cache.set(cache_key, result)
-                return result
+                return _source_result(result, "done")
             except Exception as e:
                 logger.warning(f"HPA query failed for {gene}: {e}")
                 result = {"hpa_data": {}}
                 self._gene_cache.set(cache_key, result)
-                return result
+                return _source_result(result, "error")
 
         def _gtex():
             # GTEx is human-only; skip for non-human species
             if not _is_human:
                 logger.debug(f"[SKIP] GTEx for {gene}: non-human species ({species})")
-                return {"gtex_data": {}}
+                return _source_result({"gtex_data": {}}, "skip")
             cache_key = f"{gene}__gtex"
             cached = self._gene_cache.get(cache_key)
             if cached is not None:
                 logger.debug(f"[CACHE HIT] GTEx for {gene}")
-                return cached
+                return _source_result(cached, "cache_hit")
             try:
                 gtex_data = self._query_gtex_local_first(gene)
                 result = {"gtex_data": gtex_data}
                 self._gene_cache.set(cache_key, result)
-                return result
+                return _source_result(result, "done")
             except Exception as e:
                 logger.warning(f"GTEx query failed for {gene}: {e}")
                 result = {"gtex_data": {}}
                 self._gene_cache.set(cache_key, result)
-                return result
+                return _source_result(result, "error")
 
         def _biogrid():
             cache_key = f"{gene}__biogrid__{_tax_id}"
             cached = self._gene_cache.get(cache_key)
             if cached is not None:
                 logger.debug(f"[CACHE HIT] BioGRID for {gene}")
-                return cached
+                return _source_result(cached, "cache_hit")
             try:
                 biogrid_data = self.mcp.query_biogrid(gene, organism=_tax_id)
                 result = {"biogrid_data": biogrid_data}
                 self._gene_cache.set(cache_key, result)
-                return result
+                return _source_result(result, "done")
             except Exception as e:
                 logger.warning(f"BioGRID query failed for {gene}: {e}")
                 result = {"biogrid_data": {}}
                 self._gene_cache.set(cache_key, result)
-                return result
+                return _source_result(result, "error")
 
         def _reactome():
             cache_key = f"{gene}__reactome"
             cached = self._gene_cache.get(cache_key)
             if cached is not None:
                 logger.debug(f"[CACHE HIT] Reactome for {gene}")
-                return cached
+                return _source_result(cached, "cache_hit")
             try:
                 reactome_data = self.mcp.query_reactome(gene)
                 reactome_count = reactome_data.get("total_count", 0)
@@ -842,12 +863,12 @@ class RAGEnrichmentPipeline:
                 logger.info(f"[Layer1-Reactome] {gene}: {reactome_count} total, {signaling_count} signaling → {reactome_pw_names}")
                 result = {"reactome_data": reactome_data}
                 self._gene_cache.set(cache_key, result)
-                return result
+                return _source_result(result, "done")
             except Exception as e:
                 logger.warning(f"Reactome query failed for {gene}: {e}")
                 result = {"reactome_data": {}}
                 self._gene_cache.set(cache_key, result)
-                return result
+                return _source_result(result, "error")
 
         # Execute Phase A in parallel
         phase_a_tasks = {
@@ -870,12 +891,15 @@ class RAGEnrichmentPipeline:
                     phase_a_results[name] = future.result(timeout=self.phase_a_timeout)
                 except Exception as e:
                     logger.error(f"Phase A task '{name}' failed for {gene}: {e}")
-                    phase_a_results[name] = {}
+                    phase_a_results[name] = _source_result({}, "error")
                     _phase_a_errors.append(name)
+        phase_a_source_summary = build_phase_a_source_summary(phase_a_results)
+        _source_errors = [source["key"] for source in phase_a_source_summary if source["status"] == "error"]
         self._phase_event(
             gene, position, "A",
-            "error" if _phase_a_errors else "done",
-            f"failed: {','.join(_phase_a_errors)}" if _phase_a_errors else "",
+            "error" if _source_errors else "done",
+            f"failed: {','.join(_source_errors)}" if _source_errors else "",
+            source_summary=phase_a_source_summary,
         )
 
         # Unpack Phase A results
@@ -1259,6 +1283,7 @@ class RAGEnrichmentPipeline:
                 "route_reason_codes": evidence_route.get("reason_codes", []),
             },
             "structured_database_packet": structured_packet,
+            "structured_database_source_summary": phase_a_source_summary,
             "evidence_gap_decision": evidence_route,
             "articles": articles,  # Full article data for report generation
             "recent_findings": [
