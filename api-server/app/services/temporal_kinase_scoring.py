@@ -1084,6 +1084,73 @@ def build_kinase_profiles_from_data(
     return profiles
 
 
+def _build_kinase_design(
+    candidate_kinases: list[str],
+    kinase_profiles: dict[str, dict],
+    conditions_sorted: list[str],
+) -> tuple[np.ndarray, list[str]]:
+    """Assemble the NNLS design matrix: one temporal profile column per candidate.
+
+    Kinases without a registered profile fall back to a Gaussian centred on the
+    literature peak time, or on a generic 30-minute peak when even that is
+    unknown.  Shared by the deconvolution and by its identifiability diagnostics
+    so the two can never describe different matrices.
+    """
+    valid_kinases: list[str] = []
+    cols: list[np.ndarray] = []
+    for canon in candidate_kinases:
+        prof_info = kinase_profiles.get(canon)
+        if prof_info is None:
+            all_kinase_info = (
+                BASOPHILIC_KINASES.get(canon)
+                or PRO_DIRECTED_KINASES.get(canon)
+            )
+            if all_kinase_info:
+                min_t, max_t = all_kinase_info["typical_peak_min"]
+                peak_min = (min_t + max_t) / 2.0
+            else:
+                peak_min = 30.0
+            col = _gaussian_kinase_profile(conditions_sorted, peak_min)
+        else:
+            col = prof_info["profile"]
+        valid_kinases.append(canon)
+        cols.append(np.asarray(col, dtype=float))
+
+    if not cols:
+        return np.zeros((len(conditions_sorted), 0), dtype=float), valid_kinases
+    return np.column_stack(cols), valid_kinases
+
+
+def attribute_shared_ptm(
+    ptm_key: str,
+    candidate_kinases: list[str],
+    kinase_profiles: dict[str, dict],
+    ptm_timeseries: dict[str, dict[str, float]],
+    conditions_sorted: list[str],
+):
+    """Report a shared site's attribution at the resolution the data supports.
+
+    Candidates whose temporal profiles point the same direction are merged before
+    fitting, because only their summed share is determined by the data; the split
+    between them is chosen by the solver.  Sites that no non-negative combination
+    explains are marked unsupported instead of receiving equal weights.
+
+    Diagnostic only.  Contribution ratios, weighted sums, and kinase ranking come
+    from ``deconvolve_shared_ptm`` and are not affected by this function.
+    """
+    from ptm_shared.tmm_identifiability import ambiguity_aware_attribution
+
+    # Sorted so that the grouping does not depend on which kinase asked.
+    ordered = sorted({k for k in candidate_kinases if k})
+    design, names = _build_kinase_design(ordered, kinase_profiles, conditions_sorted)
+    if design.shape[1] == 0:
+        return None
+
+    ts = ptm_timeseries.get(ptm_key, {})
+    y = np.array([ts.get(c, 0.0) for c in conditions_sorted], dtype=float)
+    return ambiguity_aware_attribution(ptm_key, y, design, names, n_bootstrap=0)
+
+
 def deconvolve_shared_ptm(
     ptm_key: str,
     candidate_kinases: list[str],
@@ -1107,33 +1174,11 @@ def deconvolve_shared_ptm(
 
     y = np.array([ts.get(c, 0.0) for c in conditions_sorted], dtype=float)
 
-    # Build design matrix A  (n_cond × n_kinases)
-    valid_kinases = []
-    cols = []
-    for canon in candidate_kinases:
-        prof_info = kinase_profiles.get(canon)
-        if prof_info is None:
-            # Build Gaussian fallback on the fly
-            all_kinase_info = (
-                BASOPHILIC_KINASES.get(canon)
-                or PRO_DIRECTED_KINASES.get(canon)
-            )
-            if all_kinase_info:
-                min_t, max_t = all_kinase_info["typical_peak_min"]
-                peak_min = (min_t + max_t) / 2.0
-            else:
-                peak_min = 30.0
-            col = _gaussian_kinase_profile(conditions_sorted, peak_min)
-        else:
-            col = prof_info["profile"]
-        valid_kinases.append(canon)
-        cols.append(col)
+    A, valid_kinases = _build_kinase_design(candidate_kinases, kinase_profiles, conditions_sorted)
 
     if not valid_kinases:
         equal = 1.0 / max(len(candidate_kinases), 1)
         return {k: equal for k in candidate_kinases}
-
-    A = np.column_stack(cols)  # shape (n_cond, n_kinases)
 
     # Solve NNLS: min ||Ax - y||  s.t. x ≥ 0
     if _HAS_SCIPY and n_cond >= 2:
@@ -1181,15 +1226,23 @@ def compute_weighted_kinase_scores(
     For exclusive substrates: contribution = 1.0 (unchanged from current logic).
     For shared substrates: contribution = deconvolved ratio from NNLS.
 
+    Each shared substrate also carries an additive ``resolution`` label saying
+    whether its attribution is separable from the competing kinases, is only
+    estimable as a group share, or is unsupported by the data.  These labels are
+    annotations: they never alter the weighted sums or the contribution ratios.
+
     Returns:
         dict[canonical → {
             "weighted_up_sums":   dict[condition → float],
             "weighted_down_sums": dict[condition → float],
             "weighted_up_counts": dict[condition → float],   # fractional counts
             "weighted_down_counts": dict[condition → float],
-            "contribution_details": list[{ptm_key, contribution_ratio, profile_type}],
+            "contribution_details": list[{ptm_key, contribution_ratio, profile_type,
+                                          resolution, group_ratio?,
+                                          ambiguity_group_members?}],
             "n_exclusive": int,
             "n_shared": int,
+            "tmm_identifiability": {n_resolved, n_unresolved_shared, n_unsupported},
         }]
     """
     if ptm_qvalues is None:
@@ -1201,6 +1254,8 @@ def compute_weighted_kinase_scores(
     )
 
     results: dict[str, dict] = {}
+    # One attribution per site, reused across every kinase competing for it.
+    attribution_cache: dict[str, object] = {}
 
     for km in kinase_modules:
         canonical = km.get("canonical", "").upper()
@@ -1216,6 +1271,9 @@ def compute_weighted_kinase_scores(
         contribution_details = []
         n_exclusive = 0
         n_shared = 0
+        n_resolved = 0
+        n_unresolved_shared = 0
+        n_unsupported = 0
 
         for pk in all_keys:
             ts = ptm_timeseries.get(pk, {})
@@ -1240,12 +1298,58 @@ def compute_weighted_kinase_scores(
                 profile_type = prof_info["profile_type"] if prof_info else "gaussian_fallback"
                 n_shared += 1
 
-            contribution_details.append({
+            detail = {
                 "ptm_key": pk,
                 "contribution_ratio": round(ratio, 4),
                 "profile_type": profile_type,
                 "n_competing_kinases": len(other_kinases),
-            })
+            }
+
+            if not other_kinases:
+                detail["resolution"] = "exclusive"
+            else:
+                if pk not in attribution_cache:
+                    try:
+                        attribution_cache[pk] = attribute_shared_ptm(
+                            pk,
+                            ptm_to_kinases.get(pk, []),
+                            kinase_profiles,
+                            ptm_timeseries,
+                            conditions_sorted,
+                        )
+                    except Exception as _attribution_error:
+                        _log.warning(
+                            "[TMM] Identifiability annotation failed for %s: %s",
+                            pk,
+                            _attribution_error,
+                        )
+                        attribution_cache[pk] = None
+                attribution = attribution_cache[pk]
+                entry = (
+                    attribution.per_kinase.get(canonical)
+                    if attribution is not None
+                    else None
+                )
+                if attribution is None or entry is None:
+                    detail["resolution"] = "unannotated"
+                elif not entry.get("attribution_supported"):
+                    detail["resolution"] = "unsupported"
+                    detail["unsupported_reason"] = (
+                        attribution.unsupported_reason or entry.get("reason")
+                    )
+                    n_unsupported += 1
+                elif entry.get("ambiguous"):
+                    # The group share is estimable; the split inside it is not.
+                    detail["resolution"] = "unresolved_shared"
+                    detail["group_ratio"] = round(float(entry["group_ratio"]), 4)
+                    detail["ambiguity_group_members"] = entry["group_members"]
+                    n_unresolved_shared += 1
+                else:
+                    detail["resolution"] = "resolved"
+                    detail["group_ratio"] = round(float(entry["group_ratio"]), 4)
+                    n_resolved += 1
+
+            contribution_details.append(detail)
 
             # Accumulate weighted sums
             for c in conditions_sorted:
@@ -1290,6 +1394,14 @@ def compute_weighted_kinase_scores(
             "profile_type": _profile_type,
             "n_profile_substrates": _n_profile_substrates,
             "tmm_evidence": _tmm_evidence,
+            # Additive: how much of this kinase's shared evidence is actually
+            # separable from its competitors.  Does not feed the scores above.
+            "tmm_identifiability": {
+                "contract": "tmm_identifiability.v1",
+                "n_resolved": n_resolved,
+                "n_unresolved_shared": n_unresolved_shared,
+                "n_unsupported": n_unsupported,
+            },
         }
 
     _log.info(
