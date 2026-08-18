@@ -21,6 +21,10 @@ parse_sites_from_html = _MODULE._parse_sites_from_html
 query_iptmnet = _MODULE.query_iptmnet
 extract_entry_urls = _MODULE._extract_iptmnet_entry_urls
 cache_schema_version = _MODULE.IPTMNET_CACHE_SCHEMA_VERSION
+entry_schema_status = _MODULE._entry_schema_status
+entry_organism = _MODULE._entry_organism
+search_by_gene = _MODULE._search_iptmnet_by_gene
+organism_taxon_ids = _MODULE.IPTMNET_ORGANISM_TAXON_IDS
 
 
 def test_pipeline_lowercase_species_uses_the_canonical_iptmnet_organism_key():
@@ -74,7 +78,149 @@ def test_gene_search_entry_urls_preserve_the_live_iptmnet_path_once():
 
 
 def test_live_entry_schema_uses_a_versioned_success_cache_namespace():
-    assert cache_schema_version == "v2"
+    assert cache_schema_version == "v3"
+
+
+def test_entry_urls_drop_in_page_fragments_so_top_hits_are_distinct_proteins():
+    # Every live search hit links to its entry four times via anchors, which
+    # would otherwise consume all three entry slots with one protein.
+    html = """
+    <a href="/iptmnet/entry/P31749/">AKT1</a>
+    <a href="/iptmnet/entry/P31749/#asSub">as substrate</a>
+    <a href="/iptmnet/entry/P31749/#asEnz">as enzyme</a>
+    <a href="/iptmnet/entry/P47196/">Akt1 rat</a>
+    """
+    assert extract_entry_urls(html) == [
+        "https://research.bioinformatics.udel.edu/iptmnet/entry/P31749/",
+        "https://research.bioinformatics.udel.edu/iptmnet/entry/P47196/",
+    ]
+
+
+_RENAMED_HEADER_ENTRY = """
+<table><thead><tr>
+  <th></th><th>Residue</th><th>Modification</th><th>Evidence</th><th>PMID</th>
+</tr></thead><tbody><tr>
+  <td><input type="checkbox" /></td><td>S473</td><td>Phosphorylation</td>
+  <td><a>PhosphoSitePlus</a></td><td><a>12345678</a></td>
+</tr></tbody></table>
+"""
+
+
+def test_renamed_entry_headers_are_reported_as_a_schema_failure():
+    # The bug this guards against: tables still present, columns renamed, so the
+    # parser silently found nothing and the site was published as NOVEL.
+    assert parse_sites_from_html(_RENAMED_HEADER_ENTRY, "S473") == []
+    assert entry_schema_status(_RENAMED_HEADER_ENTRY) == "unrecognized"
+    assert entry_schema_status("<html><body>no tables</body></html>") == "no_tables"
+
+
+def test_recognized_entry_headers_are_not_flagged_as_a_schema_failure():
+    recognized = (
+        _RENAMED_HEADER_ENTRY
+        .replace("Residue", "Site")
+        .replace("Modification", "PTM Type")
+        .replace("Evidence", "Source")
+    )
+    assert entry_schema_status(recognized) == "ok"
+    assert [site.site for site in parse_sites_from_html(recognized, "S473")] == ["S473"]
+
+
+def test_association_table_is_not_merged_into_substrate_site_evidence():
+    # This table shares Site/PTM type/Source headers but describes a PTM-
+    # dependent association, not curated evidence for the site itself.
+    html = """
+    <table><thead><tr>
+      <th></th><th>PTM type</th><th>Substrate</th><th>Site</th>
+      <th>Interactant</th><th>Association type</th><th>Source</th><th>PMID</th>
+    </tr></thead><tbody><tr>
+      <td><input type="checkbox" /></td><td>Phosphorylation</td><td>AKT1</td>
+      <td>S473</td><td>PDPK1</td><td>increases</td><td><a>IntAct</a></td>
+      <td><a>999</a></td>
+    </tr></tbody></table>
+    """
+    assert parse_sites_from_html(html, "S473") == []
+    assert entry_schema_status(html) == "unrecognized"
+
+
+def test_entry_organism_is_read_from_the_live_entry_header():
+    assert entry_organism("<p>Organism Homo sapiens (Human) PRO ID</p>") == "Human"
+    assert entry_organism("<p>Organism Rattus norvegicus (Rat)</p>") == "Rat"
+    assert entry_organism("<p>no organism declared</p>") is None
+
+
+def test_gene_search_restricts_the_hit_list_to_the_requested_taxon():
+    assert organism_taxon_ids["Rat"] == "10116"
+    assert organism_taxon_ids["Mouse"] == "10090"
+    assert organism_taxon_ids["Human"] == "9606"
+
+    submitted: dict = {}
+
+    class FakeResponse:
+        status = 200
+
+        async def text(self):
+            return "<html></html>"
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_exc):
+            return False
+
+    class FakeSession:
+        def post(self, url, **kwargs):
+            submitted["url"] = url
+            submitted["data"] = kwargs.get("data")
+            return FakeResponse()
+
+    async def landing(_session, _url):
+        return '<input name="csrfmiddlewaretoken" value="tok" />', None
+
+    original_fetch = _MODULE._fetch_iptmnet_page
+    _MODULE._fetch_iptmnet_page = landing
+    try:
+        html, failure = asyncio.run(search_by_gene(FakeSession(), "Akt1", "rat"))
+    finally:
+        _MODULE._fetch_iptmnet_page = original_fetch
+
+    assert failure is None and html == "<html></html>"
+    assert ("selectOrg", "10116") in submitted["data"]
+    assert ("searchQuery", "Akt1") in submitted["data"]
+
+
+def test_another_species_entry_is_not_accepted_as_evidence_for_this_species():
+    # Unfiltered, iPTMnet returns human P31749 first for "Akt1"; its sites must
+    # never be reported as rat evidence.
+    human_entry = """
+    <p>Organism Homo sapiens (Human)</p>
+    <table><thead><tr><th></th><th>Site</th><th>PTM Type</th><th>Source</th>
+    <th>PMID</th></tr></thead><tbody><tr><td><input type="checkbox" /></td>
+    <td>S473</td><td>Phosphorylation</td><td><a>PhosphoSitePlus</a></td>
+    <td><a>12345678</a></td></tr></tbody></table>
+    """
+
+    async def search(_session, _gene, _organism=""):
+        return '<a href="/iptmnet/entry/P31749/">AKT1</a>', None
+
+    async def fetch(_session, _url):
+        return human_entry, None
+
+    original_search = _MODULE._search_iptmnet_by_gene
+    original_fetch = _MODULE._fetch_iptmnet_page
+    original_ac = _MODULE.KNOWN_UNIPROT_AC
+    _MODULE._search_iptmnet_by_gene = search
+    _MODULE._fetch_iptmnet_page = fetch
+    _MODULE.KNOWN_UNIPROT_AC = {"Rat": {}}
+    try:
+        result = asyncio.run(query_iptmnet("Akt1", "S473", "rat", redis=None))
+    finally:
+        _MODULE._search_iptmnet_by_gene = original_search
+        _MODULE._fetch_iptmnet_page = original_fetch
+        _MODULE.KNOWN_UNIPROT_AC = original_ac
+
+    assert result["sites_found"] == 0
+    assert result["novelty"]["status"] == "UNKNOWN"
+    assert "search_entry_organism_human" in result["failure_reasons"]
 
 
 def _homology(*, rat_alignment: str, human_alignment: str) -> dict:

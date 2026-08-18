@@ -12,7 +12,7 @@ import asyncio
 import logging
 import re
 from typing import Dict, List, Optional
-from urllib.parse import urljoin
+from urllib.parse import urldefrag, urljoin
 
 import aiohttp
 from bs4 import BeautifulSoup
@@ -79,7 +79,24 @@ IPTMNET_SUCCESS_CACHE_TTL_SECONDS = 7 * 24 * 60 * 60
 IPTMNET_RETRYABLE_HTTP_STATUS = {429, 500, 502, 503, 504}
 # Bump whenever the entry/search parser changes semantic interpretation.  This
 # prevents an older parser's false-empty result from masking a repaired lookup.
-IPTMNET_CACHE_SCHEMA_VERSION = "v2"
+IPTMNET_CACHE_SCHEMA_VERSION = "v3"
+
+# iPTMnet's search form restricts results by NCBI taxonomy id through its
+# `selectOrg` checkboxes.  Without one the first hit for a rodent gene symbol is
+# the human ortholog: an unfiltered "Akt1" search returns P31749 (human) first,
+# while selectOrg=10116 returns P47196 (rat).
+IPTMNET_ORGANISM_TAXON_IDS: Dict[str, str] = {
+    "Human": "9606",
+    "Mouse": "10090",
+    "Rat": "10116",
+}
+
+# Entry pages state the source organism as "Organism Homo sapiens (Human)".
+IPTMNET_ORGANISM_SCIENTIFIC_NAMES: Dict[str, str] = {
+    "Human": "homo sapiens",
+    "Mouse": "mus musculus",
+    "Rat": "rattus norvegicus",
+}
 
 
 def _canonical_iptmnet_organism(organism: str) -> str:
@@ -330,26 +347,45 @@ async def _fetch_iptmnet_page(
 
 
 def _extract_iptmnet_entry_urls(html: str) -> List[str]:
-    """Return unique absolute entry URLs from a current iPTMnet search page."""
+    """Return unique absolute entry URLs from a current iPTMnet search page.
+
+    Each search hit links to the same entry several times through in-page
+    anchors (`#asSub`, `#asEnz`, `#efip`).  Fragments are dropped so that taking
+    the first few URLs walks distinct proteins instead of re-fetching one.
+    """
     soup = BeautifulSoup(html, "html.parser")
     urls: List[str] = []
     for link in soup.find_all("a", href=re.compile(r"/entry/")):
         href = str(link.get("href") or "")
-        absolute_url = urljoin(f"{IPTMNET_BASE}/", href)
+        absolute_url = urldefrag(urljoin(f"{IPTMNET_BASE}/", href)).url
         if absolute_url not in urls:
             urls.append(absolute_url)
     return urls
 
 
+def _entry_organism(html: str) -> Optional[str]:
+    """Return the canonical organism declared by an iPTMnet entry page."""
+    text = " ".join(BeautifulSoup(html, "html.parser").get_text(" ", strip=True).lower().split())
+    for canonical, scientific_name in IPTMNET_ORGANISM_SCIENTIFIC_NAMES.items():
+        if scientific_name in text:
+            return canonical
+    return None
+
+
 async def _search_iptmnet_by_gene(
-    session: aiohttp.ClientSession, gene: str,
+    session: aiohttp.ClientSession, gene: str, organism: str = "",
 ) -> tuple[Optional[str], Optional[str]]:
     """Submit iPTMnet's CSRF-protected current gene-search form.
 
     The prior GET `/search?...` endpoint is no longer served by iPTMnet.  The
     public site now requires a bootstrap GET for the CSRF token followed by a
     form POST to `/handle/`; aiohttp retains the response cookies in session.
+
+    ``organism`` restricts the hit list to one taxon.  Omitting it makes a rodent
+    gene symbol resolve to the human ortholog, which would attribute human
+    evidence to a rat or mouse site.
     """
+    taxon_id = IPTMNET_ORGANISM_TAXON_IDS.get(_canonical_iptmnet_organism(organism)) if organism else None
     landing_html, landing_failure = await _fetch_iptmnet_page(
         session, f"{IPTMNET_BASE}/"
     )
@@ -362,16 +398,21 @@ async def _search_iptmnet_by_gene(
     if not csrf_token:
         return None, "search_form_csrf_missing"
 
+    form_fields: List[tuple[str, str]] = [
+        ("csrfmiddlewaretoken", csrf_token),
+        ("searchCriteria", "name"),
+        ("searchQuery", gene),
+        ("searchRole", "role-enzORsub"),
+    ]
+    if taxon_id:
+        form_fields.append(("selectOrg", taxon_id))
+
     failure_reason: Optional[str] = None
     for attempt in range(IPTMNET_MAX_RETRIES):
         try:
             async with session.post(
                 f"{IPTMNET_BASE}/handle/",
-                data={
-                    "csrfmiddlewaretoken": csrf_token,
-                    "searchCriteria": "name",
-                    "searchQuery": gene,
-                },
+                data=form_fields,
                 headers={
                     "Referer": f"{IPTMNET_BASE}/",
                     "User-Agent": "PTM-Platform/1.0 (+structured-PTM-evidence)",
@@ -393,6 +434,63 @@ async def _search_iptmnet_by_gene(
         if attempt < IPTMNET_MAX_RETRIES - 1:
             await asyncio.sleep(2 ** attempt)
     return None, failure_reason or "search_post_unavailable"
+
+
+def _header_index(headers: List[str], *aliases: str) -> Optional[int]:
+    aliases_lower = {alias.lower() for alias in aliases}
+    for index, header in enumerate(headers):
+        normalized = " ".join(header.lower().split())
+        if normalized in aliases_lower:
+            return index
+    return None
+
+
+def _resolve_ptm_table_columns(table) -> Optional[Dict[str, Optional[int]]]:
+    """Resolve substrate-PTM column positions, or None if this is another table.
+
+    An entry page also carries proteoform, enzyme-substrate, PRO, association,
+    interaction, and variant tables.  Only the substrate PTM tables carry site,
+    PTM type, and source together; the association table additionally carries
+    `Interactant`/`Association type` and reports a different relationship, so it
+    is excluded rather than merged into the site evidence.
+    """
+    header_cells = table.select("thead tr th")
+    if not header_cells:
+        first_row = table.find("tr")
+        header_cells = first_row.find_all("th", recursive=False) if first_row else []
+    headers = [cell.get_text(" ", strip=True) for cell in header_cells]
+    if _header_index(headers, "interactant") is not None or _header_index(headers, "association type") is not None:
+        return None
+
+    site_index = _header_index(headers, "site", "sites")
+    ptm_type_index = _header_index(headers, "ptm type", "type")
+    source_index = _header_index(headers, "source", "sources")
+    if site_index is None or ptm_type_index is None or source_index is None:
+        return None
+    return {
+        "site": site_index,
+        "ptm_type": ptm_type_index,
+        "source": source_index,
+        "pmid": _header_index(headers, "pmid", "pmids"),
+        "enzyme": _header_index(headers, "ptm enzyme", "enzyme"),
+    }
+
+
+def _entry_schema_status(html: str) -> str:
+    """Classify whether an entry page still exposes a parseable PTM table.
+
+    Returns ``"ok"``, ``"no_tables"``, or ``"unrecognized"``.  The third case is
+    the one that previously went unnoticed: a layout change kept the tables but
+    moved or renamed the columns, so parsing yielded zero sites and the site was
+    reported NOVEL.  Callers must treat it as a source failure, not as evidence
+    of absence.
+    """
+    tables = BeautifulSoup(html, "html.parser").find_all("table")
+    if not tables:
+        return "no_tables"
+    if any(_resolve_ptm_table_columns(table) for table in tables):
+        return "ok"
+    return "unrecognized"
 
 
 def _parse_sites_from_html(html: str, target_position: str) -> List[IPTMnetSite]:
@@ -417,27 +515,15 @@ def _parse_sites_from_html(html: str, target_position: str) -> List[IPTMnetSite]
     residue_pattern = rf"(?:{target_aa}|{aa_names})\s*-?\s*{target_num}(?!\d)"
     site_pattern = re.compile(residue_pattern, re.IGNORECASE)
 
-    def header_index(headers: List[str], *aliases: str) -> Optional[int]:
-        aliases_lower = {alias.lower() for alias in aliases}
-        for index, header in enumerate(headers):
-            normalized = " ".join(header.lower().split())
-            if normalized in aliases_lower:
-                return index
-        return None
-
     for table in tables:
-        header_cells = table.select("thead tr th")
-        if not header_cells:
-            first_row = table.find("tr")
-            header_cells = first_row.find_all("th", recursive=False) if first_row else []
-        headers = [cell.get_text(" ", strip=True) for cell in header_cells]
-        site_index = header_index(headers, "site", "sites")
-        ptm_type_index = header_index(headers, "ptm type", "type")
-        source_index = header_index(headers, "source", "sources")
-        pmid_index = header_index(headers, "pmid", "pmids")
-        enzyme_index = header_index(headers, "ptm enzyme", "enzyme")
-        if site_index is None or ptm_type_index is None or source_index is None:
+        columns = _resolve_ptm_table_columns(table)
+        if columns is None:
             continue
+        site_index = columns["site"]
+        ptm_type_index = columns["ptm_type"]
+        source_index = columns["source"]
+        pmid_index = columns["pmid"]
+        enzyme_index = columns["enzyme"]
 
         rows = table.select("tbody tr") or table.find_all("tr")
         for row in rows:
@@ -581,40 +667,57 @@ async def query_iptmnet(
         if uniprot_ac:
             url = f"{IPTMNET_BASE}/entry/{uniprot_ac}"
             html, failure_reason = await _fetch_iptmnet_page(session, url)
-            if html:
+            if not html:
+                if failure_reason:
+                    request_failures.append(f"direct_entry_{failure_reason}")
+            else:
                 fetched_any_page = True
-                if not BeautifulSoup(html, "html.parser").find_all("table"):
-                    parse_failures.append("entry_schema_missing")
-                sites = _parse_sites_from_html(html, position)
-                if sites:
-                    novelty = _assess_novelty(sites)
-                    result["novelty"] = novelty.to_dict()
-                    result["sites_found"] = len(sites)
-                    result["query_status"] = "hit"
+                schema_status = _entry_schema_status(html)
+                if schema_status != "ok":
+                    parse_failures.append(f"direct_entry_schema_{schema_status}")
+                entry_organism = _entry_organism(html)
+                if entry_organism and entry_organism != organism:
+                    # The curated AC table disagrees with iPTMnet; another
+                    # species' sites must not answer this query.
+                    parse_failures.append(f"direct_entry_organism_{entry_organism.lower()}")
+                else:
+                    sites = _parse_sites_from_html(html, position)
+                    if sites:
+                        novelty = _assess_novelty(sites)
+                        result["novelty"] = novelty.to_dict()
+                        result["sites_found"] = len(sites)
+                        result["query_status"] = "hit"
 
-                    if redis:
-                        try:
-                            import json as _json
-                            await redis.set(
-                                cache_key, _json.dumps(result),
-                                ex=IPTMNET_SUCCESS_CACHE_TTL_SECONDS,
-                            )
-                        except Exception:
-                            pass
-                    return result
-            elif failure_reason:
-                request_failures.append(f"direct_entry_{failure_reason}")
+                        if redis:
+                            try:
+                                import json as _json
+                                await redis.set(
+                                    cache_key, _json.dumps(result),
+                                    ex=IPTMNET_SUCCESS_CACHE_TTL_SECONDS,
+                                )
+                            except Exception:
+                                pass
+                        return result
 
-        # Strategy 2: Current iPTMnet CSRF-protected gene search.
-        html, failure_reason = await _search_iptmnet_by_gene(session, gene)
+        # Strategy 2: Current iPTMnet CSRF-protected gene search, restricted to
+        # the requested taxon so a rodent symbol cannot resolve to the human
+        # ortholog and lend it human evidence.
+        html, failure_reason = await _search_iptmnet_by_gene(session, gene, organism)
+        if not IPTMNET_ORGANISM_TAXON_IDS.get(organism):
+            request_failures.append(f"gene_search_unfiltered_organism_{organism.lower()}")
         if html:
             fetched_any_page = True
             for entry_url in _extract_iptmnet_entry_urls(html)[:3]:
                 entry_html, entry_failure_reason = await _fetch_iptmnet_page(session, entry_url)
                 if entry_html:
                     fetched_any_page = True
-                    if not BeautifulSoup(entry_html, "html.parser").find_all("table"):
-                        parse_failures.append("entry_schema_missing")
+                    schema_status = _entry_schema_status(entry_html)
+                    if schema_status != "ok":
+                        parse_failures.append(f"search_entry_schema_{schema_status}")
+                    entry_organism = _entry_organism(entry_html)
+                    if entry_organism and entry_organism != organism:
+                        parse_failures.append(f"search_entry_organism_{entry_organism.lower()}")
+                        continue
                     sites = _parse_sites_from_html(entry_html, position)
                     if sites:
                         novelty = _assess_novelty(sites)
