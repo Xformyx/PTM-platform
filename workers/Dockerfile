@@ -18,7 +18,7 @@ COPY workers/pyproject.toml ./
 COPY ptm_shared /opt/ptm_shared
 RUN python3 -c "\
 import tomllib, subprocess, sys; \
-deps = tomllib.loads(open('pyproject.toml','rb').read())['project']['dependencies']; \
+deps = tomllib.load(open('pyproject.toml','rb'))['project']['dependencies']; \
 subprocess.check_call([sys.executable, '-m', 'pip', 'install', '--no-cache-dir'] + deps)"
 
 # ── Layer: Source code ───────────────────────────────────────────────────────
