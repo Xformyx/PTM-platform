@@ -20,6 +20,7 @@ ensembl_native_species = _MODULE._ensembl_native_species
 parse_sites_from_html = _MODULE._parse_sites_from_html
 query_iptmnet = _MODULE.query_iptmnet
 extract_entry_urls = _MODULE._extract_iptmnet_entry_urls
+cache_schema_version = _MODULE.IPTMNET_CACHE_SCHEMA_VERSION
 
 
 def test_pipeline_lowercase_species_uses_the_canonical_iptmnet_organism_key():
@@ -70,6 +71,10 @@ def test_gene_search_entry_urls_preserve_the_live_iptmnet_path_once():
     assert extract_entry_urls(html) == [
         "https://research.bioinformatics.udel.edu/iptmnet/entry/P35570/"
     ]
+
+
+def test_live_entry_schema_uses_a_versioned_success_cache_namespace():
+    assert cache_schema_version == "v2"
 
 
 def _homology(*, rat_alignment: str, human_alignment: str) -> dict:

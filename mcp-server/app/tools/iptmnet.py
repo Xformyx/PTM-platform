@@ -77,6 +77,9 @@ IPTMNET_HTTP_TIMEOUT_SECONDS = 20
 IPTMNET_MAX_RETRIES = 3
 IPTMNET_SUCCESS_CACHE_TTL_SECONDS = 7 * 24 * 60 * 60
 IPTMNET_RETRYABLE_HTTP_STATUS = {429, 500, 502, 503, 504}
+# Bump whenever the entry/search parser changes semantic interpretation.  This
+# prevents an older parser's false-empty result from masking a repaired lookup.
+IPTMNET_CACHE_SCHEMA_VERSION = "v2"
 
 
 def _canonical_iptmnet_organism(organism: str) -> str:
@@ -538,7 +541,7 @@ async def query_iptmnet(
     Returns dict with keys: gene, position, novelty, sites_found, error.
     """
     organism = _canonical_iptmnet_organism(organism)
-    cache_key = f"iptmnet:{gene}:{position}:{organism}"
+    cache_key = f"iptmnet:{IPTMNET_CACHE_SCHEMA_VERSION}:{gene}:{position}:{organism}"
     if redis:
         try:
             import json as _json

@@ -264,3 +264,4 @@ Backend: vector-plot (receptor inference)
 - [x] live iPTMnet direct mouse·rat·human query를 현재 client 경로로 실행하여 hit·empty·error provenance 확인
 - [x] live iPTMnet entry table의 checkbox-leading column schema에 맞춘 header-aware parser 수정 및 multi-species re-query
 - [x] obsolete GET gene-search fallback을 iPTMnet CSRF POST form path로 교체하고 non-mapped rat site query 재검증
+- [x] parser schema repair 이전에 저장된 false-empty result를 우회하도록 iPTMnet success cache version 분리
