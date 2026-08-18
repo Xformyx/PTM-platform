@@ -254,7 +254,9 @@ async def query_biogrid(
                             "pubmed_id": interaction.get("PUBMED_ID", ""),
                         })
 
-                    result["interactions"] = interactions  # No limit — return all available
+                    # Already capped by the `max` request parameter above, so a
+                    # count equal to that cap means "at least", not "exactly".
+                    result["interactions"] = interactions
                     result["interaction_count"] = len(interactions)
 
     except Exception as e:

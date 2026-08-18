@@ -171,6 +171,8 @@ services:
       STRINGDB_API_KEY: ${STRINGDB_API_KEY:-}
       # BioGRID direct interaction context; value is resolved from the host
       # environment/.env at compose startup and never stored in this file.
+      # Read at import time by app/tools/expression.py, so changing it needs
+      # `docker compose up -d mcp-server`, not a plain restart.
       BIOGRID_API_KEY: ${BIOGRID_API_KEY:-}
     networks:
       - ptm-network
