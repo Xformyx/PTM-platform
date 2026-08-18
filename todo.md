@@ -257,3 +257,7 @@ Backend: vector-plot (receptor inference)
       (human TP53 100건, mouse Akt1 99건, rat Akt1 23건·Mapk1 100건, worker MCP 경로 포함 `error=None`)
 - [x] `.env.example`에 BIOGRID_API_KEY 항목 추가 (compose만 배선되어 있어 설정 가능성이 드러나지 않던 문제)
 - [ ] BioGRID `max: 100` 상한 검토 — hub 단백질은 실제 연결 수가 잘려 "100 = 이상"으로 읽어야 함
+
+## iPTMnet Public Lookup Resilience
+- [x] iPTMnet timeout·HTTP error·HTML parse failure·cache fallback의 현재 처리 경로 점검
+- [x] bounded retry/backoff·stale cache provenance·failure reason observability 보완 및 회귀 검증

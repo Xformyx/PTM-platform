@@ -72,6 +72,10 @@ KNOWN_UNIPROT_AC: Dict[str, Dict[str, str]] = {
 
 IPTMNET_BASE = "https://research.bioinformatics.udel.edu/iptmnet"
 ENSEMBL_REST_BASE = "https://rest.ensembl.org"
+IPTMNET_HTTP_TIMEOUT_SECONDS = 20
+IPTMNET_MAX_RETRIES = 3
+IPTMNET_SUCCESS_CACHE_TTL_SECONDS = 7 * 24 * 60 * 60
+IPTMNET_RETRYABLE_HTTP_STATUS = {429, 500, 502, 503, 504}
 
 
 def _canonical_iptmnet_organism(organism: str) -> str:
@@ -287,18 +291,38 @@ async def _fetch_ensembl_json(
 # Core scraping logic
 # ---------------------------------------------------------------------------
 
-async def _fetch_iptmnet_page(session: aiohttp.ClientSession, url: str) -> Optional[str]:
-    """Fetch a page from iPTMnet with timeout and retry."""
-    for attempt in range(3):
+async def _fetch_iptmnet_page(
+    session: aiohttp.ClientSession, url: str,
+) -> tuple[Optional[str], Optional[str]]:
+    """Fetch one iPTMnet page with bounded retries and a machine-readable reason.
+
+    A direct PTM record is never inferred from a failed public-web request.  The
+    caller receives both the response body and an explicit failure category so
+    it can distinguish a real empty lookup from an unavailable source.
+    """
+    failure_reason: Optional[str] = None
+    for attempt in range(IPTMNET_MAX_RETRIES):
         try:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
-                if resp.status != 200:
-                    return None
-                return await resp.text()
+            async with session.get(
+                url,
+                headers={"User-Agent": "PTM-Platform/1.0 (+structured-PTM-evidence)"},
+                timeout=aiohttp.ClientTimeout(total=IPTMNET_HTTP_TIMEOUT_SECONDS),
+            ) as resp:
+                if resp.status == 200:
+                    return await resp.text(), None
+                failure_reason = f"http_{resp.status}"
+                if resp.status not in IPTMNET_RETRYABLE_HTTP_STATUS:
+                    return None, failure_reason
+        except asyncio.TimeoutError:
+            failure_reason = "timeout"
+        except aiohttp.ClientError:
+            failure_reason = "network_error"
         except Exception:
-            if attempt < 2:
+            failure_reason = "unexpected_client_error"
+
+        if attempt < IPTMNET_MAX_RETRIES - 1:
                 await asyncio.sleep(2 ** attempt)
-    return None
+    return None, failure_reason or "response_unavailable"
 
 
 def _parse_sites_from_html(html: str, target_position: str) -> List[IPTMnetSite]:
@@ -416,7 +440,13 @@ async def query_iptmnet(
             import json as _json
             cached = await redis.get(cache_key)
             if cached:
-                return _json.loads(cached)
+                cached_payload = _json.loads(cached)
+                if cached_payload.get("query_status") in {"hit", "empty"}:
+                    cached_payload["cache_status"] = "success_cache_hit"
+                    return cached_payload
+                # Older worker versions could store source failures permanently.
+                # Delete them so a transient outage never becomes a false site gap.
+                await redis.delete(cache_key)
         except Exception:
             pass
 
@@ -432,16 +462,22 @@ async def query_iptmnet(
         "sites_found": 0,
         "query_status": "",
         "error": None,
+        "failure_reasons": [],
+        "cache_status": "live_query",
     }
     fetched_any_page = False
+    parse_failures: List[str] = []
+    request_failures: List[str] = []
 
     async with aiohttp.ClientSession() as session:
         # Strategy 1: Direct UniProt AC lookup
         if uniprot_ac:
             url = f"{IPTMNET_BASE}/entry/{uniprot_ac}"
-            html = await _fetch_iptmnet_page(session, url)
+            html, failure_reason = await _fetch_iptmnet_page(session, url)
             if html:
                 fetched_any_page = True
+                if not BeautifulSoup(html, "html.parser").find_all("table"):
+                    parse_failures.append("entry_schema_missing")
                 sites = _parse_sites_from_html(html, position)
                 if sites:
                     novelty = _assess_novelty(sites)
@@ -452,23 +488,30 @@ async def query_iptmnet(
                     if redis:
                         try:
                             import json as _json
-                            await redis.set(cache_key, _json.dumps(result))  # permanent cache
+                            await redis.set(
+                                cache_key, _json.dumps(result),
+                                ex=IPTMNET_SUCCESS_CACHE_TTL_SECONDS,
+                            )
                         except Exception:
                             pass
                     return result
+            elif failure_reason:
+                request_failures.append(f"direct_entry_{failure_reason}")
 
         # Strategy 2: Search by gene name
         search_url = f"{IPTMNET_BASE}/search?search_term={gene}&organism={organism}"
-        html = await _fetch_iptmnet_page(session, search_url)
+        html, failure_reason = await _fetch_iptmnet_page(session, search_url)
         if html:
             fetched_any_page = True
             soup = BeautifulSoup(html, "html.parser")
             entry_links = soup.find_all("a", href=re.compile(r"/entry/"))
             for link in entry_links[:3]:
                 entry_url = f"{IPTMNET_BASE}{link['href']}"
-                entry_html = await _fetch_iptmnet_page(session, entry_url)
+                entry_html, entry_failure_reason = await _fetch_iptmnet_page(session, entry_url)
                 if entry_html:
                     fetched_any_page = True
+                    if not BeautifulSoup(entry_html, "html.parser").find_all("table"):
+                        parse_failures.append("entry_schema_missing")
                     sites = _parse_sites_from_html(entry_html, position)
                     if sites:
                         novelty = _assess_novelty(sites)
@@ -476,9 +519,15 @@ async def query_iptmnet(
                         result["sites_found"] = len(sites)
                         result["query_status"] = "hit"
                         break
+                elif entry_failure_reason:
+                    request_failures.append(f"search_entry_{entry_failure_reason}")
+        elif failure_reason:
+            request_failures.append(f"gene_search_{failure_reason}")
 
         if result["novelty"] is None:
-            if fetched_any_page:
+            failure_reasons = list(dict.fromkeys(request_failures + parse_failures))
+            result["failure_reasons"] = failure_reasons
+            if fetched_any_page and not parse_failures:
                 result["novelty"] = PTMNoveltyResult(
                     status="NOVEL", score=0, source_count=0,
                     sources=[], pmid_count=0, pmids=[],
@@ -490,12 +539,15 @@ async def query_iptmnet(
                     sources=[], pmid_count=0, pmids=[],
                 ).to_dict()
                 result["query_status"] = "error"
-                result["error"] = "iPTMnet response unavailable"
+                result["error"] = "iPTMnet response unavailable or unparseable"
 
-    if redis:
+    if redis and result["query_status"] in {"hit", "empty"}:
         try:
             import json as _json
-            await redis.set(cache_key, _json.dumps(result))  # permanent cache
+            await redis.set(
+                cache_key, _json.dumps(result),
+                ex=IPTMNET_SUCCESS_CACHE_TTL_SECONDS,
+            )
         except Exception:
             pass
 

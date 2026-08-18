@@ -1,5 +1,6 @@
 """Regression tests for direct-rat-first conserved human site evidence."""
 
+import asyncio
 import importlib.util
 from pathlib import Path
 
@@ -17,6 +18,7 @@ map_conserved_human_site = _MODULE.map_conserved_human_site
 canonical_organism = _MODULE._canonical_iptmnet_organism
 ensembl_native_species = _MODULE._ensembl_native_species
 parse_sites_from_html = _MODULE._parse_sites_from_html
+query_iptmnet = _MODULE.query_iptmnet
 
 
 def test_pipeline_lowercase_species_uses_the_canonical_iptmnet_organism_key():
@@ -78,3 +80,35 @@ def test_alignment_rejects_a_human_gap_at_the_observed_rat_site():
     )
     assert result["status"] == "unavailable_or_unaligned"
     assert result["reason_code"] == "human_alignment_gap"
+
+
+def test_unavailable_iptmnet_is_not_cached_as_an_empty_or_novel_result():
+    class FakeRedis:
+        def __init__(self):
+            self.set_calls = []
+
+        async def get(self, _key):
+            return None
+
+        async def set(self, *args, **kwargs):
+            self.set_calls.append((args, kwargs))
+
+        async def delete(self, _key):
+            return 1
+
+    async def unavailable_fetch(_session, _url):
+        return None, "timeout"
+
+    original_fetch = _MODULE._fetch_iptmnet_page
+    _MODULE._fetch_iptmnet_page = unavailable_fetch
+    try:
+        redis = FakeRedis()
+        result = asyncio.run(query_iptmnet("Mapk1", "S522", "Mouse", redis=redis))
+    finally:
+        _MODULE._fetch_iptmnet_page = original_fetch
+
+    assert result["query_status"] == "error"
+    assert result["novelty"]["status"] == "UNKNOWN"
+    assert "direct_entry_timeout" in result["failure_reasons"]
+    assert "gene_search_timeout" in result["failure_reasons"]
+    assert redis.set_calls == []
