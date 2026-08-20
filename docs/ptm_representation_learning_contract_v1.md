@@ -332,3 +332,157 @@ python -m pytest workers/tests/test_ptm_representation_learning.py -v
 없다"고 적었으나, 그 관찰은 E에만 해당했다. 같은 목적함수의 temporal-only arm D는 margin +0.0533으로
 통과한다. 순서 의존적 항을 새로 넣을 필요는 없고, 부수 view가 시간 신호를 밀어내지 않게 하는 것이
 실제 문제였다.
+
+## 12. Core A/B 편입 (2026-08-20)
+
+### 12.1 배경과 결정
+
+Core A/B 알고리즘 명세를 별도 트랙으로 검토하면서 독립적인 평가 골격(`F00`~`F11` factorial, Go/No-Go,
+`P−2 frozen contract`)을 설계했다. 그 과정에서 **이 계약과 거의 같은 기계를 병렬로 만들고 있었다는
+것**이 확인되었다.
+
+| | 이 계약 | Core A/B 트랙 |
+|---|---|---|
+| 표현 층 명명 | L1~L4 | A0~A4 |
+| 비교 arm | A~E ablation | F00~F11 factorial |
+| 단계 | R0~R4 | P−2 / P−1 / Stage 0·1 |
+| 채택 판정 | 6-gate + `production_influence_allowed` | Go/No-Go 규칙 |
+| 사전등록 | `PRIMARY_ARM_PREFERENCE` 코드 고정 | τ_min, `N_floor` 사전 확정 |
+
+또한 두 트랙의 태도가 모순이었다. 이 계약은 §5에서 `PRIMARY_SCORE_INPUTS_LOCKED`로 학습 표현이
+kinase ranking에 영향을 주는 것을 **금지**하고 gate 6개 통과를 조건으로 걸었다(현재 4/6). 반면 Core A/B의
+`F10-A4` arm은 그 문이 열린 것을 전제로 설계를 쌓았다.
+
+**결정: 이 계약의 어휘와 gate 체계를 기준으로 삼고, Core A/B 요소를 그 안에 편입한다.**
+논문 기여 주장 수준은 **표현 학습 자체**이며, kinase 귀속으로의 전달은 조건부 확장으로 강등한다.
+
+### 12.2 Core A 요소 매핑
+
+| Core A 요소 | 이 계약에서의 위치 | 처리 |
+|---|---|---|
+| A1 residual (protein 정규화) | §3 `PTM_Relative_Log2FC`가 이미 protein-normalized | **기존 구현에 흡수.** 신규 작업 없음. Core A/B 검토에서 headline 주장이 이미 철회됨 (MAD 0.06 log2) |
+| A2 eligibility weight `e_i` | §3 `qvalue_policy = quality_weight_and_eligibility_mask_not_feature` | **기존 정책에 흡수** |
+| A3 `O_ij` comparability mask | **신규.** 이 계약에 대응물 없음 | §12.3 참조 — `missingness_validity` 병목의 후보 기제로 편입 |
+| A4 temporal wave prototype `p_iw` | L4 / canonical co-wave membership | arm D 내부의 아키텍처 선택지로 편입. 별도 표현 층으로 두지 않음 |
+| U-confirmatory 등 feature universe 4분할 | §8 "eligible site/form"의 세분화 | **특성화 자료로 편입** (§12.4) |
+
+### 12.3 A3 (`O_ij`)의 재배치 — 남은 병목과의 연결
+
+Core A/B 트랙에서 `O_ij`는 "wave 오배정을 막는 correctness guard"로 규정되었고, HIRc-B 실측에서
+전역 footprint가 작다는 것이 확인되었다(replicate≥1에서 non-comparable pair 2.51%, replicate≥2에서 9.07%).
+동시에 그 edge가 **소수 저관측 feature에 집중**되어 있었다.
+
+```
+비교 불가 degree 와 관측 timepoint 수의 상관: −0.764 (rep≥1) / −0.869 (rep≥2)
+상위 1% feature(24개)가 non-comparable edge 종단의 39.5% 차지
+상위 5% feature 평균 관측 4.12/6 vs 나머지 5.96/6
+```
+
+**이 성질이 `missingness_validity` 병목과 정확히 같은 축이다.** §11.1이 지적한 문제는 임베딩이 temporal
+pattern 대신 coverage를 인코딩한다는 것이고(arm D의 induced missingness R² 0.462, 상한 0.25), `O_ij`는
+관측량이 부족한 쌍을 비교 대상에서 제외하는 장치다. 따라서 `O_ij`를 독립 알고리즘 기여로 두지 않고
+**`missingness_validity` 대응 후보 기제**로 재배치한다.
+
+```text
+A3_AS_MISSINGNESS_MECHANISM
+  기존 §11.1 방향  = 목적함수에 coverage 예측 가능성 penalty 추가
+  추가 후보        = O_ij 기반 pairwise comparability 제약
+                     (공유 관측 timepoint T_min 미달 쌍을 이웃 계산에서 제외)
+  판정 기준        = 두 기제 각각, 그리고 병용 시 induced missingness R² 와 ARI
+  주의             = 어느 쪽도 arm 순위를 바꾸는 데 쓰지 않는다.
+                     PRIMARY_ARM_PREFERENCE 는 §8-ter 근거로 고정된 상태를 유지한다.
+  A3 평가 층       = pair 수준 false-merge rate, feature-clustered bootstrap,
+                     replicate ≥ 2 계층만 사용 (n_eff = 432)
+                     replicate ≥ 1 계층은 n_eff = 125 로 검정력 미달 → 사용 금지
+```
+
+Kish 실효 cluster 수와 필요 표본은 Core A/B 트랙에서 산출된 값을 그대로 쓴다. 불일치율 10%를 검출하려면
+289, 20%면 145가 필요하므로 replicate≥2 계층만 판정에 사용할 수 있다.
+
+### 12.4 HIRc-B 특성화 자료 (재사용)
+
+Core A/B 트랙의 실측을 이 계약의 데이터셋 특성화로 편입한다. **HIRc-B 로컬 값이며 외부 데이터셋에
+복사하면 안 된다.**
+
+| universe | feature 수 | 기준 |
+|---|---:|---|
+| paired control replicate ≥ 2 | 2,420 | 확증 분석 가능 |
+| paired control 정확히 1 | 302 | sensitivity 전용 |
+| paired control 0 | 313 | 탐색 전용 |
+
+§8의 "2,744 eligible site/form"과 위 분할의 관계를 기록해 두면, `missingness_validity` 실패가 특정
+universe에 집중되는지 확인할 수 있다. **이것이 §12.3 판정의 층화 근거가 된다.**
+
+### 12.5 Core B 및 kinase 계층 — 조건부 확장으로 강등
+
+Core B(KSA scorer, 5-gate 선택적 의사결정)와 `Δ_representation`(표현 개선이 kinase 귀속으로 전달되는지)는
+**이 계약의 기여 주장에서 제외**한다. §5의 `PRIMARY_SCORE_INPUTS_LOCKED`가 이미 그 경계를 정의하고
+있으므로 새로운 후퇴가 아니고, 기존 lock을 준수하는 것이다.
+
+이 결정의 실질적 효과는 다음과 같다. Core A/B 트랙에서 식별된 blocker 대부분이 **임계 경로에서
+빠진다.**
+
+| blocker | 성격 | 이 계약에서의 상태 |
+|---|---|---|
+| A. KSA library 부재 | 데이터 | **임계 경로 밖.** kinase 계층 전용 |
+| B. PXD014525 접근성 | 데이터 | **임계 경로 밖.** Tier-2 kinase 검증 전용 |
+| C. PXD043599 protein 정량 | 데이터 | **유효, 단 축소.** §12.6 |
+| D. A4 transmission 측정 불가 | 구조 | **임계 경로 밖.** 조건부 확장의 전제 |
+| E. prior가 설계행렬 구성 | 설계 | **임계 경로 밖.** NNLS scorer 전용 |
+| F. LLM 예측 kinase 유입 | 오염 | **임계 경로 밖.** 단 §12.7 참조 |
+
+IA-07(설계행렬 전달성 감사, τ)도 임계 경로에서 빠진다. τ는 `Δ_representation`이 측정 가능한지 판정하는
+장치였고, 그 endpoint를 주장하지 않으므로 지금 필요하지 않다. **조건부 확장을 검토하는 시점의 선행
+조건으로 보류한다.**
+
+상세 분석은 `docs/core_ab_p2_frozen_contract_v1.md`(kinase 계층 지연 확장 명세)와
+`~/Downloads/Core_A_B_설계행렬_LLM오염_문제진단_20260820.md`에 보존한다.
+
+### 12.6 `generalization` gate — 요구사항 축소
+
+primary arm이 D(temporal-only)로 전환되었으므로(§8-ter) 외부 데이터셋 요구가 완화된다.
+
+```text
+arm D 가 필요한 것 = Track 2 temporal trajectory 뿐
+  → protein context branch, Track 1 occupancy 미필요
+  → 단, Track 2 자체가 protein-normalized 신호이므로
+    matched protein 정량은 여전히 필요하다 (§3)
+
+matched protein 정량이 없는 데이터셋의 경우
+  → UNNORMALIZED_PHOSPHO_ADAPTER_V1 적용
+  → 결론을 "방향 일치" 수준으로 제한, 효과크기 비교 금지
+  → 판정 시점을 데이터 확인 직후로 사전 확정
+```
+
+따라서 BLOCKER-C는 유효하지만 범위가 좁아졌다. multi-view branch용 데이터는 필요하지 않고 Track 2
+정규화에 필요한 만큼만 확인하면 된다.
+
+### 12.7 잔여 오염 점검 (`no_prior_leakage`와의 연결)
+
+Core A/B 트랙에서 확인된 LLM 오염 경로는 kinase 계층에 있으므로 임계 경로 밖이다. 다만 이 계약의
+`no_prior_leakage` gate와 성질이 같으므로 두 항목을 기록해 둔다.
+
+- `LLMKinasePredictor`(RAG enrichment) → `kinase_annotation_node` Source 1 → `candidate_kinases` →
+  NNLS 설계행렬 열. 이 계약의 표현 층은 이 경로를 거치지 않으므로 현재 영향 없음
+- `workers/common/kinase_weight_manager.py`의 문헌 기반 가중은 **미확인.** kinase 계층 재개 시 선행 실사
+
+이 계약 쪽에서는 §3의 `motif` 처리(기본 off, ablation 전용)와 arm C가 이미 prior dominance를 검증하는
+장치이므로 추가 조치가 필요하지 않다.
+
+### 12.8 편입 후 로드맵
+
+임계 경로에 blocker가 없다.
+
+| 순위 | 작업 | 대응 gate | 선행 조건 |
+|---|---|---|---|
+| 1 | 목적함수에 coverage 예측 penalty 추가 | `missingness_validity` | 없음 |
+| 2 | `O_ij` pairwise comparability 제약 구현·비교 (§12.3) | `missingness_validity` | 없음 |
+| 3 | universe 층화 진단 (§12.4) | `missingness_validity` 원인 규명 | 없음 |
+| 4 | 외부 phospho time-course 확보 및 inductive 재확인 | `generalization` | 데이터 접근 |
+| 5 | 6/6 도달 시 R2 co-wave/TMM provenance 주입 | — | 1~4 완료 |
+| — | kinase 계층 조건부 확장 (IA-07 → Core B) | — | 5 완료 + 사용자 승인 |
+
+1~3번은 같은 gate를 겨냥하며 상호 배타가 아니다. 세 가지를 각각 그리고 병용해서 측정하고, 어느 조합이
+`induced missingness R²`를 상한 이하로 내리면서 ARI를 유지하는지 본다.
+
+**`production_influence_allowed`는 6/6 이전에 열리지 않는다.** 이 원칙은 편입으로 변경되지 않는다.
