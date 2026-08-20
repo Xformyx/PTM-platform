@@ -19,8 +19,9 @@ Input (from state):
     - enriched_ptm_data: List[dict]
 
 Output (to state):
-    - research_questions: List[str]         (refined RQ2 — overwrites original)
-    - original_research_questions: List[str] (preserved RQ0 for tracking)
+    - research_questions: List[str]          (verbatim user RQ0; remains the report contract)
+    - refined_research_questions: List[str]  (optional RQ2 architecture lens)
+    - original_research_questions: List[str] (preserved RQ0 for provenance)
     - rq_refinement_metadata: dict          (full LLM response + diagnostics)
 """
 
@@ -331,7 +332,11 @@ def run_rq_refinement(state: dict) -> dict:
         cb(69, f"Research questions refined ({len(refined_questions)} questions)")
 
     return {
-        "research_questions": refined_questions,
+        # User-entered questions are a coverage contract for the final report.
+        # Refinement informs interpretation but must not silently replace or
+        # compress the original list (for example, 10 user questions → 5 RQ2).
+        "research_questions": original_questions,
+        "refined_research_questions": refined_questions,
         "original_research_questions": original_questions,
         "rq_refinement_metadata": {
             "skipped": False,

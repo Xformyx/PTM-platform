@@ -425,11 +425,12 @@ def format_citations(state: ReportState) -> dict:
         f"*Generated: {_dt.now().strftime('%Y-%m-%d %H:%M')}*\n",
     ]
 
-    section_order = ["abstract", "introduction", "results", "discussion", "conclusion"]
+    section_order = ["abstract", "introduction", "results", "research_question_answers", "discussion", "conclusion"]
     section_headings = {
         "abstract": "## Abstract",
         "introduction": "## Introduction",
         "results": "## Results",
+        "research_question_answers": "## Research Question Answers",
         "discussion": "## Discussion",
         "conclusion": "## Conclusion",
     }

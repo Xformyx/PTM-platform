@@ -32,12 +32,13 @@ from report_generation.core.figure_context import FigureInformationGenerator
 
 logger = logging.getLogger(__name__)
 
-SECTION_ORDER = ["introduction", "results", "discussion", "conclusion", "methods", "suggestion", "abstract", "title"]
+SECTION_ORDER = ["introduction", "results", "research_question_answers", "discussion", "conclusion", "methods", "suggestion", "abstract", "title"]
 
 SECTION_MAX_TOKENS = {
     "abstract": 6144,
     "introduction": 12288,
     "results": 16384,
+    "research_question_answers": 16384,
     "discussion": 16384,
     "conclusion": 8192,
     "methods": 8192,
@@ -52,6 +53,7 @@ SECTION_PROMPT_BUDGET = {
     "abstract": 40_000,
     "introduction": 60_000,
     "results": 120_000,
+    "research_question_answers": 90_000,
     "discussion": 100_000,
     "conclusion": 50_000,
     "methods": 30_000,
@@ -117,6 +119,7 @@ SECTION_MIN_WORDS = {
     "abstract": 200,
     "introduction": 800,
     "results": 1200,
+    "research_question_answers": 250,
     "discussion": 1000,
     "conclusion": 300,
     "methods": 400,
@@ -185,7 +188,10 @@ def run_section_writing(state: dict) -> dict:
     network_analysis = state.get("network_analysis", {})
     parsed_ptms = state.get("parsed_ptms", [])
     context = state.get("experimental_context", {})
-    questions = state.get("research_questions", [])
+    # RQ0 is the user-visible report contract. RQ2 is an optional internal
+    # refinement lens and must never replace or shrink user-entered questions.
+    questions = list(state.get("original_research_questions") or state.get("research_questions") or [])
+    refined_questions = list(state.get("refined_research_questions") or [])
     comprehensive_summary = state.get("comprehensive_summary", "")
 
     all_references = _collect_all_references(parsed_ptms)
@@ -585,11 +591,12 @@ def run_section_writing(state: dict) -> dict:
     _chroma_refs_lock = __import__('threading').Lock()
 
     # ── Per-section writer (extracted for parallel execution) ──
-    def _write_one(section_type, snap_prev):
+    def _write_one(section_type, snap_prev, section_questions=None):
+        active_questions = list(section_questions if section_questions is not None else questions)
         # v10.8: _build_section_prompt now returns (prompt_str, chromadb_refs_list)
         result = _build_section_prompt(
             section_type, research_results, validated_hypotheses,
-            network_analysis, parsed_ptms, context, questions,
+            network_analysis, parsed_ptms, context, active_questions,
             snap_prev, retriever, comprehensive_summary,
             all_references, ptm_detail_count=ptm_detail_count,
             chromadb_results=chromadb_results,
@@ -661,6 +668,19 @@ def run_section_writing(state: dict) -> dict:
             if figure_gen.has_figures():
                 supplement_blocks.append(("figure_ctx", figure_gen.generate_figure_context_for_llm(section_type)))
             supplement_blocks.append(("v98_writing_example", v98_writing_example))
+
+        elif section_type == "research_question_answers":
+            # This independent section deliberately uses only a bounded question
+            # batch. It prevents a long Results narrative from consuming the
+            # output budget before all user Research Questions are answered.
+            if aux_directionality_context:
+                supplement_blocks.append(("directionality", aux_directionality_context))
+            supplement_blocks.append(("comovement", comovement_llm_context))
+            supplement_blocks.append(("temporal_kinase", temporal_kinase_cascade_llm_context))
+            supplement_blocks.append(("receptor_ctx", receptor_llm_context))
+            supplement_blocks.append(("nonptm_temporal", aux_nonptm_temporal))
+            supplement_blocks.append(("v98_structured_data", v98_structured_data))
+            supplement_blocks.append(("vector_plot_compressed", aux_vector_plot_compressed))
 
         elif section_type == "discussion":
             # v12.0: Co-Scientist verified findings — Priority 0 (highest for discussion)
@@ -787,7 +807,10 @@ def run_section_writing(state: dict) -> dict:
             )
             if cb:
                 cb(70, f"WARNING: LLM failed for {section_type} — using fallback text")
-            content = _fallback_section(section_type, research_results, validated_hypotheses, parsed_ptms)
+            content = _fallback_section(
+                section_type, research_results, validated_hypotheses, parsed_ptms,
+                questions=active_questions,
+            )
 
         # Strip self-generated section headings from LLM output
         # LLM sometimes adds its own ## headings (e.g., "## Results Discussion")
@@ -861,9 +884,27 @@ def run_section_writing(state: dict) -> dict:
     prev_sections[st] = content
     logger.info(f"[writer] Phase 1.5 done: discussion ({len(content):,} chars)")
 
+    # ── Phase 1.75: answer every user Research Question in bounded batches ──
+    # A question batch has its own token budget so a ten-question report cannot
+    # silently stop after the first few answers when Results is lengthy.
+    if questions:
+        question_batches = [questions[i:i + 2] for i in range(0, len(questions), 2)]
+        answer_parts = []
+        logger.info("[writer] Generating explicit answers for %d user RQs in %d batch(es)", len(questions), len(question_batches))
+        for batch_index, question_batch in enumerate(question_batches, 1):
+            if cb:
+                cb(77, f"Answering research questions batch {batch_index}/{len(question_batches)}")
+            _, answer_content = _write_one(
+                "research_question_answers", dict(prev_sections), question_batch
+            )
+            answer_parts.append(answer_content)
+        sections["research_question_answers"] = "\n\n".join(answer_parts)
+        prev_sections["research_question_answers"] = sections["research_question_answers"]
+        logger.info("[writer] Research Question Answers done: %d chars", len(sections["research_question_answers"]))
+
     # ── Phase 2: remaining dependent sections (sequential) ──
     # conclusion needs discussion, suggestion needs conclusion, abstract needs all, title needs abstract
-    phase2_sections = [s for s in SECTION_ORDER if s not in phase1_set and s != "discussion"]
+    phase2_sections = [s for s in SECTION_ORDER if s not in phase1_set and s not in {"discussion", "research_question_answers"}]
     logger.info(f"[writer] Phase 2: writing {phase2_sections} sequentially")
     for i, section_type in enumerate(phase2_sections):
         if cb:
@@ -1489,12 +1530,11 @@ Each major subsection should correspond to a key analytical output (figure or da
 - Quantify: exact Log2FC values at each timepoint for key sites
 - Highlight any unexpected patterns (e.g., a known activation site showing inhibition)
 
-### Part 5: Research Question Integration
-- For EACH research question, provide a dedicated subsection (### heading) that integrates
-  findings from Parts 1-4 above:
-  (1) Direct Answer framed through PTM activity profile activation
-  (2) Evidence Summary: which figures/data support this answer
-  (3) Testable Prediction based on the observed signaling cascade
+### Part 5: Research Question Signposting
+- Relate the findings in Parts 1-4 to the submitted Research Questions where relevant.
+- Do NOT spend the remaining Results budget generating a complete answer for every question.
+  A separate, mandatory **Research Question Answers** section will provide one bounded,
+  explicit answer for every submitted question after Results.
 
 IMPORTANT: Be thorough and detailed. Discuss each significant PTM site individually.
 Include quantitative data (Log2FC values). Cite the provided references to support your findings.
@@ -1522,6 +1562,32 @@ Do NOT omit figure references. Every analytical claim about pathway enrichment, 
 signaling cascades, or PTM dynamics MUST be anchored to its corresponding figure.
 === END FIGURE REFERENCE RULES ===
 {combined_lit}""", _chromadb_refs_for_section
+
+    elif section_type == "research_question_answers":
+        return f"""Write a dedicated **Research Question Answers** section for this PTM analysis report.
+{analysis_context_block}
+{single_tp_directive}
+
+The user entered the following Research Questions. They are a binding coverage contract.
+You MUST answer every question shown below exactly once, preserving its Q number and verbatim wording.
+
+{questions_str}
+
+For EACH question, use this exact structure:
+### Q[number]: [verbatim question]
+**Answer status:** Answered from current data | Partially answered from current data | Not answerable from current data
+**Direct answer:** A concise answer limited to the observed PTM, protein-abundance, temporal, and pathway data.
+**Experimental evidence:** Name relevant PTM, protein, time-course, pathway, or figure evidence. Use quantitative values only when supplied.
+**Interpretation boundary:** State what the current observational dataset cannot establish. Do not infer unmeasured cytokine secretion, exosome cargo, neuronal tau phosphorylation, ROS concentration, or causal regulation.
+**Next discriminating measurement:** Give one concrete measurement that would resolve the remaining uncertainty.
+
+If a question asks about biology not directly measured by this dataset, mark it **Not answerable from current data** rather than fabricating an answer. Distinguish temporal precedence from causality. Do not describe predicted kinase activity as direct kinase activation or direct phosphorylation proof.
+
+PTM Data Summary:
+{ptm_summary}
+
+{lit_context}
+{pubmed_context}""", _chromadb_refs_for_section
 
     elif section_type == "discussion":
         ptm_type_str = context.get("ptm_type", "phosphorylation")
@@ -2075,7 +2141,10 @@ def _hypothesis_summary_text(hypotheses: list) -> str:
     return "\n".join(lines)
 
 
-def _fallback_section(section_type: str, research_results: list, hypotheses: list, ptms: list) -> str:
+def _fallback_section(
+    section_type: str, research_results: list, hypotheses: list, ptms: list,
+    questions: list | None = None,
+) -> str:
     """Generate a basic section without LLM."""
     if section_type == "abstract":
         return f"This study analyzed {len(ptms)} post-translational modification sites. " \
@@ -2086,6 +2155,19 @@ def _fallback_section(section_type: str, research_results: list, hypotheses: lis
         lines = [f"A total of {len(ptms)} PTM sites were analyzed."]
         for r in research_results:
             lines.append(f"\n### {r['question']}\n{r.get('relevant_ptm_count', 0)} relevant PTMs were identified.")
+        return "\n".join(lines)
+    elif section_type == "research_question_answers":
+        lines = []
+        for index, question in enumerate(questions or [], 1):
+            lines.extend([
+                f"### Q{index}: {question}",
+                "**Answer status:** Not answerable from current data",
+                "**Direct answer:** The dedicated language-model answer was unavailable; this report does not infer an answer from incomplete evidence.",
+                "**Experimental evidence:** Not evaluated in the fallback path.",
+                "**Interpretation boundary:** No biological or causal conclusion can be made from this fallback notice.",
+                "**Next discriminating measurement:** Re-run report generation with an available model to evaluate this question against the experimental data.",
+                "",
+            ])
         return "\n".join(lines)
     elif section_type == "discussion":
         return "The PTM analysis revealed significant regulatory changes."

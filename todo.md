@@ -273,3 +273,8 @@ Backend: vector-plot (receptor inference)
 - [x] entry URL fragment(`#asSub`/`#asEnz`/`#efip`) 제거 — 상위 3개 슬롯이 한 단백질로 소진되던 문제
 - [x] association table(`Interactant`/`Association type`)을 substrate PTM 증거와 분리
 - [x] cache version v3으로 상향 (파싱 의미 변경) + 회귀 테스트 16개 통과 + live HTTP 경로 재검증
+
+## Research Question-driven Report Coverage
+- [x] 첨부 report의 10개 사용자 입력 Research Questions와 실제 section·prompt·evidence 연결 경로 점검
+- [x] question별 answer status·evidence source·unanswered limitation을 포함하는 report planning contract 설계
+- [x] writer·PDF/report template에 question coverage matrix와 질문별 Results/Discussion rendering 구현·검증
