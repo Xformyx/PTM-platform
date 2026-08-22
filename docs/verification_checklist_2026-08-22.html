@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>신규 구현 기능 테스트 체크리스트 · 2026-08-22</title>
+  <style>
+    :root {
+      --bg: #f7f6f2;
+      --surface: #ffffff;
+      --ink: #1c1917;
+      --muted: #57534e;
+      --faint: #78716c;
+      --line: #e7e5e4;
+      --tint: #f5f5f4;
+      --accent: #4338ca;
+      --emerald-bg: #d1fae5;
+      --emerald-ink: #065f46;
+      --violet-bg: #ede9fe;
+      --violet-ink: #4c1d95;
+      --amber-bg: #fef3c7;
+      --amber-ink: #92400e;
+      --sky-bg: #e0f2fe;
+      --sky-ink: #0c4a6e;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--ink);
+      font-family: "Pretendard", "Apple SD Gothic Neo", "Noto Sans KR", -apple-system, BlinkMacSystemFont, sans-serif;
+      line-height: 1.5;
+      font-size: 14px;
+    }
+
+    .page {
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 40px 32px 64px;
+    }
+
+    .kicker {
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--faint);
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+
+    h1 {
+      font-size: 26px;
+      line-height: 1.25;
+      margin: 0 0 8px;
+    }
+
+    .lede {
+      color: var(--muted);
+      margin: 0 0 28px;
+    }
+
+    h2 {
+      font-size: 16px;
+      margin: 0 0 12px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    th, td {
+      text-align: left;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+    }
+
+    th {
+      font-size: 11px;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      color: var(--faint);
+      background: var(--tint);
+    }
+
+    tr:last-child td { border-bottom: none; }
+
+    .step {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 22px;
+      height: 22px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .step-1 { background: var(--emerald-bg); color: var(--emerald-ink); }
+    .step-2 { background: var(--violet-bg); color: var(--violet-ink); }
+    .step-3 { background: var(--amber-bg); color: var(--amber-ink); }
+    .step-4 { background: var(--sky-bg); color: var(--sky-ink); }
+
+    .section {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      margin: 16px 0 0;
+      overflow: hidden;
+      break-inside: avoid;
+    }
+
+    .section-head {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .badge {
+      flex: 0 0 auto;
+      padding: 3px 10px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    .badge-instant { background: var(--emerald-bg); color: var(--emerald-ink); }
+    .badge-report { background: var(--violet-bg); color: var(--violet-ink); }
+    .badge-rag { background: var(--amber-bg); color: var(--amber-ink); }
+    .badge-new { background: var(--sky-bg); color: var(--sky-ink); }
+
+    .section-title { font-weight: 700; }
+    .section-sub { font-size: 12px; color: var(--faint); margin-top: 1px; }
+
+    .items { padding: 12px; display: grid; gap: 8px; }
+
+    .item {
+      display: grid;
+      grid-template-columns: 18px 1fr;
+      gap: 10px;
+      padding: 10px 12px;
+      background: var(--tint);
+      border-radius: 6px;
+    }
+
+    .box {
+      width: 16px;
+      height: 16px;
+      border: 1.5px solid #a8a29e;
+      border-radius: 4px;
+      margin-top: 2px;
+    }
+
+    .check { font-weight: 700; }
+    .path {
+      margin-top: 3px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+      color: var(--accent);
+    }
+    .detail { margin-top: 4px; color: var(--muted); font-size: 13px; }
+
+    .note {
+      margin-top: 24px;
+      padding: 12px 14px;
+      border: 1px solid #c7d2fe;
+      background: #eef2ff;
+      border-radius: 8px;
+      color: #312e81;
+      font-size: 13px;
+    }
+
+    .foot {
+      margin-top: 24px;
+      padding-top: 14px;
+      border-top: 1px solid var(--line);
+      display: flex;
+      justify-content: space-between;
+      color: var(--faint);
+      font-size: 12px;
+    }
+
+    @media print {
+      body { background: #fff; }
+      .page { padding: 0; max-width: none; }
+      .section, table { break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="kicker">PTM Analysis Platform · 2026-08-22</div>
+    <h1>신규 구현 기능 테스트 체크리스트</h1>
+    <p class="lede">P1 Temporal Dynamics · GUARD_GROUP_SHARE 기본값 · P0 감사 필드 · Heatmap Writer 통합 · Atlas API</p>
+
+    <h2>확인 우선순위</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>순서</th>
+          <th>확인 방법</th>
+          <th>확인 항목</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="step step-1">1</span></td>
+          <td>기존 오더 열기만</td>
+          <td>P1 패턴 뱃지 · 툴팁 · Atlas API</td>
+        </tr>
+        <tr>
+          <td><span class="step step-2">2</span></td>
+          <td>Report Generation 재실행</td>
+          <td>리포트 P1 섹션</td>
+        </tr>
+        <tr>
+          <td><span class="step step-3">3</span></td>
+          <td>RAG Enrichment 재실행</td>
+          <td>Heatmap sub-pattern · guard_policy</td>
+        </tr>
+        <tr>
+          <td><span class="step step-4">4</span></td>
+          <td>새 오더 — 전체 파이프라인</td>
+          <td>P0 경고 · 전체 통합</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2 style="margin-top:28px">항목별 상세 체크리스트</h2>
+
+    <section class="section">
+      <div class="section-head">
+        <span class="badge badge-instant">즉시</span>
+        <div>
+          <div class="section-title">재분석 없이 즉시 확인</div>
+          <div class="section-sub">enriched 완료 오더를 열기만 해도 확인 가능</div>
+        </div>
+      </div>
+      <div class="items">
+        <div class="item">
+          <div class="box"></div>
+          <div>
+            <div class="check">P1 패턴 뱃지</div>
+            <div class="path">시계열 차트 탭 → PTM 범례 아이템 옆</div>
+            <div class="detail">인디고색 뱃지에 'sustained act...' 형태 P1 라벨 표시</div>
+          </div>
+        </div>
+        <div class="item">
+          <div class="box"></div>
+          <div>
+            <div class="check">P1 툴팁 서브패턴 분포</div>
+            <div class="path">트렌드 필터 버튼 hover (예: Sustained Activation)</div>
+            <div class="detail">"P1 patterns: sustained_activation: 5, monotonic_rise: 2" 형식으로 표시</div>
+          </div>
+        </div>
+        <div class="item">
+          <div class="box"></div>
+          <div>
+            <div class="check">색상 점 hover 툴팁</div>
+            <div class="path">범례 아이템의 ● 색상 점 hover</div>
+            <div class="detail">"Sustained Activation · P1: sustained_activation" 형식</div>
+          </div>
+        </div>
+        <div class="item">
+          <div class="box"></div>
+          <div>
+            <div class="check">Substrate Temporal Atlas API</div>
+            <div class="path">GET /api/orders/{order_id}/substrate-temporal</div>
+            <div class="detail">n_sites, pattern_distribution, sites[].primary_pattern 필드 존재 여부 확인</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <span class="badge badge-report">Report</span>
+        <div>
+          <div class="section-title">Report Generation 재실행</div>
+          <div class="section-sub">오더 상세 → Report Generation 재실행 버튼</div>
+        </div>
+      </div>
+      <div class="items">
+        <div class="item">
+          <div class="box"></div>
+          <div>
+            <div class="check">리포트 P1 패턴 분포 섹션 존재</div>
+            <div class="path">outputs/{order_code}/*.md → 텍스트 검색</div>
+            <div class="detail">"## SUBSTRATE TEMPORAL DYNAMICS SUMMARY (P1 Contract v1)" 섹션 존재 여부</div>
+          </div>
+        </div>
+        <div class="item">
+          <div class="box"></div>
+          <div>
+            <div class="check">섹션 내용 검증</div>
+            <div class="path">동 섹션 내부</div>
+            <div class="detail">Sites classified / Quality-passed sites / Pattern distribution (top 5) 포함 여부</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <span class="badge badge-rag">RAG</span>
+        <div>
+          <div class="section-title">RAG Enrichment 재실행</div>
+          <div class="section-sub">오더 상세 → RAG Enrichment 재실행 버튼</div>
+        </div>
+      </div>
+      <div class="items">
+        <div class="item">
+          <div class="box"></div>
+          <div>
+            <div class="check">Heatmap sub-pattern 통합 확인</div>
+            <div class="path">재실행 후 Kinase Activity Heatmap 데이터</div>
+            <div class="detail">_c1, _c2 접미어 키네이스(sub-pattern) 항목이 표시되는지 확인 (pipeline-worker 오더 기준)</div>
+          </div>
+        </div>
+        <div class="item">
+          <div class="box"></div>
+          <div>
+            <div class="check">GUARD_GROUP_SHARE 기본값</div>
+            <div class="path">DevTools Network → /kinase-activity-heatmap 응답 JSON</div>
+            <div class="detail">contribution_ratio 일부 null, guard_policy: "group_share" 확인</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <span class="badge badge-new">신규</span>
+        <div>
+          <div class="section-title">새 오더 — 전체 파이프라인</div>
+          <div class="section-sub">새 오더 생성 → Preprocessing → RAG → Report Generation 순서 실행</div>
+        </div>
+      </div>
+      <div class="items">
+        <div class="item">
+          <div class="box"></div>
+          <div>
+            <div class="check">P1 뱃지 (RAG enrichment 완료 후)</div>
+            <div class="path">RAG 완료 후 오더 상세 시계열 차트</div>
+            <div class="detail">enriched 데이터 기반으로 P1 뱃지가 즉시 표시되는지 확인</div>
+          </div>
+        </div>
+        <div class="item">
+          <div class="box"></div>
+          <div>
+            <div class="check">P0 시간순서 경고 필드</div>
+            <div class="path">GET /api/orders/{new_id}/substrate-temporal → 각 site 오브젝트</div>
+            <div class="detail">정상 데이터: time_ordering_warning: false, duplicate_timepoint_warning: false</div>
+          </div>
+        </div>
+        <div class="item">
+          <div class="box"></div>
+          <div>
+            <div class="check">전체 파이프라인 통합</div>
+            <div class="path">Report 파일 + Heatmap + Atlas API</div>
+            <div class="detail">P1 섹션 + sub-pattern heatmap + GUARD_GROUP_SHARE 일괄 적용 여부 확인</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="note">
+      이 파일은 외부 브라우저용 독립 HTML입니다. Chrome/Safari에서 연 뒤 Cmd+P → PDF로 저장하면 됩니다.
+    </div>
+
+    <div class="foot">
+      <span>docs/implementation_log.md 2026-08-22 참조</span>
+      <span>빌드 완료 후 순서대로 체크</span>
+    </div>
+  </div>
+</body>
+</html>

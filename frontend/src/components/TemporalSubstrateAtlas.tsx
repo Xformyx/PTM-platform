@@ -95,6 +95,7 @@ export function TemporalSubstrateAtlas({ orderId, active }: { orderId: number; a
   const [qualityFilter, setQualityFilter] = useState("eligible");
   const [selectedKey, setSelectedKey] = useState("");
   const [yMode, setYMode] = useState("auto");
+  const [reloadToken, setReloadToken] = useState(0);
 
   useEffect(() => {
     if (!active || !orderId) return;
@@ -105,7 +106,7 @@ export function TemporalSubstrateAtlas({ orderId, active }: { orderId: number; a
       .catch((err: unknown) => { if (!cancelled) setError(err instanceof Error ? err.message : "Atlas data could not be loaded."); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [active, orderId]);
+  }, [active, orderId, reloadToken]);
 
   const sites = data?.sites || [];
   const visibleSites = useMemo(() => sites.filter((site) =>
@@ -134,7 +135,7 @@ export function TemporalSubstrateAtlas({ orderId, active }: { orderId: number; a
   ];
 
   if (loading) return <div className="space-y-4"><Skeleton className="h-28 w-full" /><Skeleton className="h-[420px] w-full" /></div>;
-  if (error) return <Card><CardContent className="flex flex-col items-center gap-3 py-12"><AlertTriangle className="h-8 w-8 text-destructive" /><p className="text-sm text-muted-foreground">{error}</p><Button variant="outline" size="sm" onClick={() => setData(null)}>Open the tab again to retry</Button></CardContent></Card>;
+  if (error) return <Card><CardContent className="flex flex-col items-center gap-3 py-12"><AlertTriangle className="h-8 w-8 text-destructive" /><p className="text-sm text-muted-foreground">{error}</p><Button variant="outline" size="sm" onClick={() => setReloadToken((token) => token + 1)}>Retry</Button></CardContent></Card>;
   if (!data || data.status === "no_enriched_data" || sites.length === 0) return <Card><CardContent className="flex flex-col items-center gap-3 py-14 text-center"><Layers3 className="h-10 w-10 text-muted-foreground/50" /><div><p className="font-medium">Temporal Atlas is not available yet</p><p className="mt-1 max-w-md text-sm text-muted-foreground">Run preprocessing with enriched PTM trajectories, then return here. The Atlas never substitutes missing trajectories with inferred patterns.</p></div></CardContent></Card>;
 
   return <div className="space-y-5">

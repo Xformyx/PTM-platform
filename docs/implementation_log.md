@@ -1672,3 +1672,17 @@
   - P0 경고는 입력 데이터 형식 문제를 표시하며 생물학적 해석 불가.
   - atlas API는 계산된 패턴의 분포 통계이며 kinase 귀속 결론을 지지하지 않는다.
 - **결정성:** P0 + atlas — 결정론적 (seed 없음, run_loto=False).
+
+### [2026-08-22] Temporal Atlas 500 — `DATA_DIR` NameError 정정
+
+- **분류:** 정정
+- **대상:** `api-server/app/api/orders.py` (`substrate_temporal_atlas`)
+- **구현 대상 설계:** Substrate-level Temporal Dynamics Deepening Plan v1 §7 (P4 atlas API)
+- **사전등록 상태:** 해당 없음 (경로 해석 버그. 측정량·임계를 바꾸지 않음)
+- **내용:** `/orders/{id}/substrate-temporal` 이 정의되지 않은 `DATA_DIR` 를 참조해
+  `NameError` → HTTP 500 을 냈다. 다른 오더 엔드포인트와 동일하게
+  `Path(os.getenv("OUTPUT_DIR", "/app/data/outputs")) / order.order_code` 로 맞췄다.
+- **논문에서의 용도:** 사용 안 함 (플랫폼 경로 수정)
+- **해석 한계:** 이 수정은 엔드포인트가 파일을 찾지 못해 죽던 것을 고친다.
+  패턴 분류·atlas 적격 판정을 바꾸지 않는다.
+- **결정성:** 해당 없음

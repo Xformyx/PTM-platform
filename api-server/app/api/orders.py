@@ -8883,7 +8883,7 @@ async def substrate_temporal_atlas(
         raise HTTPException(status_code=404, detail="Order not found")
     _check_order_access(order, user)  # read-only: owner/admin only (no write required)
 
-    output_dir = Path(DATA_DIR) / "outputs" / order.order_code
+    output_dir = Path(os.getenv("OUTPUT_DIR", "/app/data/outputs")) / order.order_code
     file_suffix = f"_{order.ptm_type}" if order.ptm_type and order.ptm_type != "phosphorylation" else ""
     enriched_path = output_dir / f"enriched_ptm_data{file_suffix}.json"
 
