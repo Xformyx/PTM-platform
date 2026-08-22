@@ -315,6 +315,11 @@ Backend: vector-plot (receptor inference)
 - [x] Atlas API loading/error/empty states와 TypeScript 검증
 - [ ] authenticated Order Detail에서 Atlas visual/end-to-end review 및 GitHub main 반영
 
+## Temporal Atlas Existing-order 500 Recovery
+- [ ] `/substrate-temporal` 500 stack trace와 실패 order의 persisted artifact compatibility 원인 확인
+- [x] legacy order safe fallback·response serialization guard·endpoint regression 구현
+- [ ] 최신 API server 재시작 후 실패 order에서 `/substrate-temporal` runtime recovery 확인 및 GitHub 반영
+
 ## P3b Dynamic Transitions and Atlas Evidence-to-Report
 - [x] windowed persistence·split·merge·recruitment·exit·independent activation engine 및 stability gate 구현
 - [x] per-site/per-window/group transition evidence를 Atlas narrative와 integrated report writer에 전달

@@ -8912,7 +8912,19 @@ async def substrate_temporal_atlas(
     cfg = SiteKineticConfig(run_loto=True, run_threshold_sensitivity=True)
 
     with open(enriched_path, "r", encoding="utf-8") as f:
-        enriched = _json.load(f)
+        enriched_payload = _json.load(f)
+    from ptm_shared.atlas_compat import atlas_form_trajectories, atlas_records, json_safe
+    enriched = atlas_records(enriched_payload)
+    compatibility_warnings: list[dict] = []
+    if not enriched:
+        return {
+            "sites": [],
+            "status": "no_compatible_enriched_records",
+            "compatibility_warnings": [{
+                "code": "no_mapping_records",
+                "message": "The enriched PTM artifact has no compatible record list for the Atlas.",
+            }],
+        }
 
     sites = []
     transition_profiles: dict[str, object] = {}
@@ -8932,13 +8944,14 @@ async def substrate_temporal_atlas(
         pos = representative.get("position") or representative.get("PTM_Position", "")
         forms_by_key: dict[str, dict] = {}
         for ptm in source_records:
-            source_forms = ptm.get("site_form_trajectories") or []
+            source_forms = atlas_form_trajectories(ptm)
             if not source_forms:
-                identity = form_identity(ptm)
-                source_forms = [{
-                    **identity,
-                    "trajectory": ptm.get("trajectory") or {},
-                }]
+                compatibility_warnings.append({
+                    "code": "form_trajectory_unavailable",
+                    "site_key": site_key,
+                    "message": "A legacy PTM record had no compatible form trajectory and was excluded from Atlas kinetics.",
+                })
+                continue
             for source_form in source_forms:
                 form_key = str(source_form.get("site_form_key") or form_identity(ptm)["site_form_key"])
                 existing = forms_by_key.get(form_key)
@@ -9000,7 +9013,16 @@ async def substrate_temporal_atlas(
         if not form_records:
             continue
 
-        site_aggregation = aggregate_site_form_trajectories(list(forms_by_key.values()))
+        try:
+            site_aggregation = aggregate_site_form_trajectories(list(forms_by_key.values()))
+        except (AttributeError, TypeError, ValueError) as aggregation_error:
+            compatibility_warnings.append({
+                "code": "site_form_aggregation_failed",
+                "site_key": site_key,
+                "message": "Form aggregation failed for a legacy trajectory and this site was excluded.",
+                "error_type": type(aggregation_error).__name__,
+            })
+            continue
         aggregate_tps = site_aggregation.get("timepoints") or []
         labels = [tp.get("timeLabel", "") for tp in aggregate_tps]
         values = [tp.get("ptmLog2FC") for tp in aggregate_tps]
@@ -9054,12 +9076,20 @@ async def substrate_temporal_atlas(
     from collections import Counter as _Counter
     pattern_counts = dict(_Counter(s["primary_pattern"] for s in sites))
     eligible_count = sum(1 for s in sites if s["atlas_eligible"])
-    context_by_site = build_atlas_context_evidence(
-        sites,
-        kinase_activity_heatmap=order.kinase_activity_heatmap,
-        signal_propagation_data=order.signal_propagation_data,
-        substrate_go_localization=order.substrate_go_localization,
-    )
+    try:
+        context_by_site = build_atlas_context_evidence(
+            sites,
+            kinase_activity_heatmap=order.kinase_activity_heatmap,
+            signal_propagation_data=order.signal_propagation_data,
+            substrate_go_localization=order.substrate_go_localization,
+        )
+    except (AttributeError, TypeError, ValueError) as context_error:
+        compatibility_warnings.append({
+            "code": "persisted_context_unavailable",
+            "message": "Legacy persisted context could not be joined; site kinetics remain available.",
+            "error_type": type(context_error).__name__,
+        })
+        context_by_site = {}
     for site in sites:
         site["context_evidence"] = context_by_site.get(site["site_key"], {
             "contract_version": "atlas_context_evidence.v1",
@@ -9103,10 +9133,23 @@ async def substrate_temporal_atlas(
                 "contract_version": "time_varying_comovement.v1",
             }
 
-    shared_claim_ledger = build_atlas_claim_ledger_from_site_views(
-        sites,
-        transition_map=transition_map,
-    )
+    try:
+        shared_claim_ledger = build_atlas_claim_ledger_from_site_views(
+            sites,
+            transition_map=transition_map,
+        )
+    except (AttributeError, TypeError, ValueError) as ledger_error:
+        compatibility_warnings.append({
+            "code": "claim_ledger_unavailable",
+            "message": "Atlas claims could not be built from legacy nested payloads; kinetics remain available.",
+            "error_type": type(ledger_error).__name__,
+        })
+        shared_claim_ledger = {
+            "contract_version": "atlas_claim_ledger.v1",
+            "site_claims": [],
+            "transition_claims": [],
+            "summary": {"n_site_claims": 0, "n_atlas_eligible_site_claims": 0, "n_transition_claims": 0},
+        }
     claim_id_by_site = {
         claim["site"].get("site_key"): claim["claim_id"]
         for claim in shared_claim_ledger.get("site_claims", [])
@@ -9114,7 +9157,7 @@ async def substrate_temporal_atlas(
     for site in sites:
         site["claim_id"] = claim_id_by_site.get(site["site_key"])
 
-    return {
+    return json_safe({
         "order_id": order_id,
         "n_sites": len(sites),
         "n_atlas_eligible_sites": eligible_count,
@@ -9124,4 +9167,5 @@ async def substrate_temporal_atlas(
         "sites": sites,
         "contract_version": CONTRACT_VERSION,
         "status": "ok",
-    }
+        "compatibility_warnings": compatibility_warnings[:100],
+    })
