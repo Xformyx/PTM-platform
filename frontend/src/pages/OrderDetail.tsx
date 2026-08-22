@@ -1,4 +1,8 @@
 import { useEffect, useRef, useState, useMemo } from "react";
+/**
+ * Design: evidence-first analysis workspace. New Atlas views use an asymmetric
+ * overview → transition → site evidence drill-down without causal visual language.
+ */
 import { flushSync } from "react-dom";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
@@ -42,6 +46,7 @@ import { OrderArticlesTab } from "@/components/OrderArticlesTab";
 import { CoScientistTab } from "@/components/CoScientistTab";
 import KinaseModuleAnalysis from "@/components/KinaseModuleAnalysis";
 import ChatPanel from "@/components/ChatPanel";
+import { TemporalSubstrateAtlas } from "@/components/TemporalSubstrateAtlas";
 import {
   LineChart,
   Line,
@@ -4664,6 +4669,10 @@ export default function OrderDetail() {
               <ChartScatter className="h-3.5 w-3.5 mr-1.5" />
               Vector Plot
             </TabsTrigger>
+            <TabsTrigger value="temporal-atlas">
+              <TrendingUp className="h-3.5 w-3.5 mr-1.5" />
+              Temporal Atlas
+            </TabsTrigger>
             {(order.report_options as any)?.analysis_mode === "cross_talk" && (
               <TabsTrigger value="cross-talk">
                 <GitMerge className="h-3.5 w-3.5 mr-1.5" />
@@ -5168,6 +5177,10 @@ export default function OrderDetail() {
               />
             </div>
           </div>
+        </TabsContent>
+
+        <TabsContent value="temporal-atlas" className="mt-4">
+          <TemporalSubstrateAtlas orderId={order.id} active={activeTab === "temporal-atlas"} />
         </TabsContent>
 
         {(order.report_options as any)?.analysis_mode === "cross_talk" && (

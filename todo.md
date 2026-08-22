@@ -307,7 +307,13 @@ Backend: vector-plot (receptor inference)
 - [x] Atlas API/report에 LOTO·threshold sensitivity·q-value coverage·실제 observed count를 노출하고 quality-based narrative eligibility 적용
 - [x] site_form_key를 보존하고 명시적 site aggregation contract를 도입하여 first-record form/charge collapse 방지
 - [x] P0 ordering/duplicate warning이 있는 trajectory를 atlas_eligible=false 또는 needs_input_audit로 표시
-- [ ] Atlas frontend UI에 quality·form provenance·claim/transition map을 시각화
+- [x] Atlas frontend UI에 quality·form provenance·claim/transition map을 시각화
+
+## Temporal Substrate Dynamics Atlas Frontend
+- [x] Order Detail Atlas tab에 pattern/time-window overview와 quality summary 구현
+- [x] observed transition map, site/form drawer, kinase/TMM·self-PTM·nuclear·non-PTM context panel 구현
+- [x] Atlas API loading/error/empty states와 TypeScript 검증
+- [ ] authenticated Order Detail에서 Atlas visual/end-to-end review 및 GitHub main 반영
 
 ## P3b Dynamic Transitions and Atlas Evidence-to-Report
 - [x] windowed persistence·split·merge·recruitment·exit·independent activation engine 및 stability gate 구현
