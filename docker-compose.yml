@@ -100,6 +100,9 @@ services:
       - ./GIT_HASH:/app/GIT_HASH:ro
       - ./GIT_DATE:/app/GIT_DATE:ro
       - ./api-server/app:/app/app
+      # Read-only so the research regression suite can run against the image that
+      # actually serves production code, without letting the container write tests.
+      - ./api-server/tests:/app/tests:ro
       - ./ptm_shared:/opt/ptm_shared:ro
       - ./data:/app/data
       - ./storage/reports:/app/storage/reports

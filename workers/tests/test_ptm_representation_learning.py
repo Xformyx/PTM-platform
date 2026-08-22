@@ -19,6 +19,10 @@ import pytest
 
 from ptm_shared.representation import (
     ADOPTION_GATES,
+    FROZEN_GATE_SETTINGS,
+    GATE_INDUCED_MASK_SEED_SET,
+    GATE_JUDGEMENT_THRESHOLDS,
+    GATE_PROBE_PARAMETERS,
     PRIMARY_ARM_PREFERENCE,
     PRIMARY_SCORE_INPUTS_LOCKED,
     build_additive_fields,
@@ -27,6 +31,7 @@ from ptm_shared.representation import (
     describe_contract,
     evaluate_adoption_gates,
     fit_masked_temporal_encoder,
+    gate_settings_digest,
     handcrafted_representation,
     mask_aware_nmf,
     mask_aware_pca,
@@ -37,6 +42,7 @@ from ptm_shared.representation import (
     select_primary_variant,
     validate_multiview_input,
 )
+from ptm_shared.representation.benchmark import DEFAULT_BENCHMARK_CONFIG
 
 try:  # container layout puts the worker packages at the import root
     from preprocessing.core.ptm_representation_learning import PTMRepresentationLearningAnalyzer
@@ -520,6 +526,148 @@ def test_missingness_gate_fails_when_masking_destroys_the_temporal_pattern():
         external_evaluations=[{"dataset": "holdout", "improves_baseline": True}],
     )
     assert verdict["gates"]["missingness_validity"]["passed"] is False
+
+
+# ---------------------------------------------------------------------------
+# Frozen gate settings (design v2 §8.2)
+# ---------------------------------------------------------------------------
+
+
+def test_gate_judgement_thresholds_hold_their_declared_values():
+    # docs/integrated_research_design_v2.md §8.2 declared these on 2026-08-20.
+    # Changing a value here invalidates every gate verdict already reported.
+    assert dict(GATE_JUDGEMENT_THRESHOLDS) == {
+        "time_validity_margin": 0.01,
+        "missingness_r2_max": 0.25,
+        "raw_concordance_min": 0.50,
+        "missingness_pattern_ari_min": 0.20,
+    }
+
+
+def test_gate_probe_parameters_hold_their_declared_values():
+    # docs/c2_prereg_v1.md §1.1.  These do not appear in a judgement inequality
+    # but they determine the quantity being judged, so they are frozen too.
+    assert dict(GATE_PROBE_PARAMETERS) == {
+        "artificial_mask_fraction": 0.15,
+        "cluster_distance_threshold": 0.30,
+        "minimum_cluster_size": 2,
+        "seed": 0,
+    }
+
+
+def test_induced_mask_seed_set_holds_its_declared_values():
+    # docs/c2_prereg_v1.md §1.3.  The gate verdict is the median over these five,
+    # so a single lucky seed is not a verdict.
+    assert GATE_INDUCED_MASK_SEED_SET == (0, 1, 2, 3, 4)
+
+
+def test_frozen_gate_settings_digest_is_stable():
+    # Pins the digest so a supplement table can be traced back to this exact
+    # threshold set.  Recomputing the constant instead of asserting it would
+    # defeat the purpose.
+    assert gate_settings_digest() == (
+        "0e3eda884ef0a888d40e8429d6bb4375dce1250223e13bbb834153616bb4a0e0"
+    )
+
+
+def test_a_preregistered_seed_is_not_a_deviation():
+    # The multi-seed protocol must not read as a pre-registration breach.
+    for seed in GATE_INDUCED_MASK_SEED_SET:
+        verdict = evaluate_adoption_gates(_passing_metrics(), config={"seed": seed})
+        conformance = verdict["frozen_gate_settings"]
+        assert conformance["conformant"] is True, seed
+        assert conformance["induced_mask_seed_used"] == seed
+
+
+def test_a_seed_outside_the_declared_set_blocks_production():
+    # Otherwise the gate could be passed by searching seeds.
+    verdict = evaluate_adoption_gates(
+        _passing_metrics(),
+        external_evaluations=[{"dataset": "holdout", "improves_baseline": True}],
+        config={"seed": 17},
+    )
+    assert verdict["all_gates_passed"] is True
+    assert verdict["production_influence_allowed"] is False
+    deviation = verdict["frozen_gate_settings"]["deviations"][0]
+    assert deviation["setting"] == "seed"
+    assert deviation["direction"] == "outside_declared_set"
+
+
+def test_benchmark_defaults_do_not_redeclare_the_frozen_settings():
+    # A second literal copy is how the two drift apart silently.
+    for key, declared in FROZEN_GATE_SETTINGS.items():
+        assert DEFAULT_BENCHMARK_CONFIG[key] == declared
+
+
+def test_default_run_is_conformant_and_records_the_digest():
+    verdict = evaluate_adoption_gates(_passing_metrics())
+    conformance = verdict["frozen_gate_settings"]
+    assert conformance["conformant"] is True
+    assert conformance["deviations"] == []
+    assert verdict["threshold_override_is_exploratory"] is False
+    assert verdict["frozen_gate_settings_digest"] == gate_settings_digest()
+
+
+def test_relaxed_threshold_cannot_open_production_even_at_six_of_six():
+    # The point of §8.2: passing by moving the bar must not count.
+    metrics = _passing_metrics()
+    metrics["D"]["artificial_masking_probe"]["induced_missingness_r2"] = 0.28
+    verdict = evaluate_adoption_gates(
+        metrics,
+        external_evaluations=[{"dataset": "holdout", "improves_baseline": True}],
+        config={"missingness_r2_max": 0.30},
+    )
+    assert verdict["gates"]["missingness_validity"]["passed"] is True
+    assert verdict["all_gates_passed"] is True
+    assert verdict["production_influence_allowed"] is False
+    assert verdict["threshold_override_is_exploratory"] is True
+    deviation = verdict["frozen_gate_settings"]["deviations"][0]
+    assert deviation["setting"] == "missingness_r2_max"
+    assert deviation["declared"] == 0.25
+    assert deviation["used"] == 0.30
+    assert deviation["direction"] == "relaxed"
+    assert deviation["group"] == "judgement_threshold"
+
+
+def test_tightened_threshold_also_blocks_production():
+    # Reporting a stricter-threshold result as the declared-threshold result is
+    # equally a pre-registration deviation, so direction is recorded not judged.
+    verdict = evaluate_adoption_gates(
+        _passing_metrics(),
+        external_evaluations=[{"dataset": "holdout", "improves_baseline": True}],
+        config={"raw_concordance_min": 0.70},
+    )
+    assert verdict["all_gates_passed"] is True
+    assert verdict["production_influence_allowed"] is False
+    assert verdict["frozen_gate_settings"]["deviations"][0]["direction"] == "tightened"
+
+
+def test_probe_parameter_override_blocks_production_without_touching_a_threshold():
+    # Lowering the mask fraction shrinks the induced target's variance, making
+    # the gate easier while every judgement inequality stays put.
+    verdict = evaluate_adoption_gates(
+        _passing_metrics(),
+        external_evaluations=[{"dataset": "holdout", "improves_baseline": True}],
+        config={"artificial_mask_fraction": 0.05},
+    )
+    assert verdict["all_gates_passed"] is True
+    assert verdict["production_influence_allowed"] is False
+    deviation = verdict["frozen_gate_settings"]["deviations"][0]
+    assert deviation["setting"] == "artificial_mask_fraction"
+    assert deviation["group"] == "probe_parameter"
+
+
+def test_contract_summary_publishes_the_frozen_gate_settings():
+    contract = describe_contract()
+    assert contract["frozen_gate_settings"] == dict(sorted(FROZEN_GATE_SETTINGS.items()))
+    assert contract["frozen_gate_settings_digest"] == gate_settings_digest()
+
+
+def test_frozen_gate_settings_are_immutable_mappings():
+    with pytest.raises(TypeError):
+        GATE_JUDGEMENT_THRESHOLDS["missingness_r2_max"] = 0.9  # type: ignore[index]
+    with pytest.raises(TypeError):
+        FROZEN_GATE_SETTINGS["artificial_mask_fraction"] = 0.9  # type: ignore[index]
 
 
 def test_artificial_masking_hides_entries_without_destroying_sites():

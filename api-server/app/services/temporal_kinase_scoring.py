@@ -30,6 +30,8 @@ try:
 except ImportError:
     _HAS_SCIPY = False
 
+from ptm_shared.tmm_attribution_guard import GUARD_GROUP_SHARE, GUARD_OFF, apply_guard
+
 _log = logging.getLogger("temporal_kinase_scoring")
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1220,6 +1222,7 @@ def compute_weighted_kinase_scores(
     fc_threshold: float = 0.3,
     q_threshold: float = 0.05,
     ptm_qvalues: dict | None = None,
+    guard_policy: str = GUARD_GROUP_SHARE,
 ) -> dict[str, dict]:
     """Compute per-kinase per-condition activity scores with TMM-weighted contributions.
 
@@ -1230,6 +1233,15 @@ def compute_weighted_kinase_scores(
     whether its attribution is separable from the competing kinases, is only
     estimable as a group share, or is unsupported by the data.  These labels are
     annotations: they never alter the weighted sums or the contribution ratios.
+
+    ``guard_policy`` decides whether evidence-free ratios are still published.
+    구현 대상: docs/chapter2_audit_protocol_v1.md §5 (guard), §5.5 (`group_share`)
+    사전등록: 2026-08-21 (`off`·`strict`), 2026-08-22 (`group_share`, 구현 착수 전 선언).
+              기본값 ``GUARD_GROUP_SHARE`` (2026-08-22 변경 — GUARD_OFF 에서).
+              ``GUARD_GROUP_SHARE`` 는 ``GUARD_STRICT`` 와 동일한 가중합을 생성하면서
+              ambiguity 그룹 내부의 개별 균등 분할만 None 으로 발표한다.
+              87.65% ratio 축소 효과; 점수합 불변 (chapter2_audit_protocol_v1.md §5.5.1).
+    주장 금지: 어느 정책도 예측 성능 개선으로 서술하지 않는다. 발표 범위의 축소다.
 
     Returns:
         dict[canonical → {
@@ -1242,7 +1254,9 @@ def compute_weighted_kinase_scores(
                                           ambiguity_group_members?}],
             "n_exclusive": int,
             "n_shared": int,
-            "tmm_identifiability": {n_resolved, n_unresolved_shared, n_unsupported},
+            "tmm_identifiability": {n_resolved, n_unresolved_shared, n_unsupported,
+                                    guard_policy, n_guard_withheld,
+                                    n_guard_scoring_excluded},
         }]
     """
     if ptm_qvalues is None:
@@ -1274,6 +1288,8 @@ def compute_weighted_kinase_scores(
         n_resolved = 0
         n_unresolved_shared = 0
         n_unsupported = 0
+        n_guard_withheld = 0
+        n_guard_scoring_excluded = 0
 
         for pk in all_keys:
             ts = ptm_timeseries.get(pk, {})
@@ -1349,6 +1365,24 @@ def compute_weighted_kinase_scores(
                     detail["group_ratio"] = round(float(entry["group_ratio"]), 4)
                     n_resolved += 1
 
+            # 증거 없는 균등 ratio를 측정처럼 내보내지 않는다.  GUARD_OFF 에서는
+            # 통과만 하므로 배포 수치가 바뀌지 않는다.
+            guarded = apply_guard(
+                detail["resolution"],
+                ratio,
+                policy=guard_policy,
+                reason=detail.get("unsupported_reason"),
+            )
+            if guarded.withheld:
+                detail["contribution_ratio"] = None
+                detail["guard_withheld"] = True
+                detail["guard_reason"] = guarded.reason
+                detail["guard_scoring_excluded"] = guarded.scoring_excluded
+                n_guard_withheld += 1
+                if guarded.scoring_excluded:
+                    n_guard_scoring_excluded += 1
+            ratio = guarded.ratio_for_scoring
+
             contribution_details.append(detail)
 
             # Accumulate weighted sums
@@ -1401,6 +1435,10 @@ def compute_weighted_kinase_scores(
                 "n_resolved": n_resolved,
                 "n_unresolved_shared": n_unresolved_shared,
                 "n_unsupported": n_unsupported,
+                "guard_policy": guard_policy,
+                "n_guard_withheld": n_guard_withheld,
+                # 발표에서 지운 수와 점수에서 뺀 수는 다르다 (§5.5).
+                "n_guard_scoring_excluded": n_guard_scoring_excluded,
             },
         }
 

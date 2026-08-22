@@ -14,7 +14,10 @@ evidence, TMM contribution, and Track 1/Track 2 status.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 
@@ -340,6 +343,173 @@ PRIMARY_SCORE_INPUTS_LOCKED: Tuple[str, ...] = (
 PRIMARY_ARM_PREFERENCE: Tuple[str, ...] = ("D", "E")
 
 
+GATE_JUDGEMENT_THRESHOLDS: Mapping[str, float] = MappingProxyType(
+    {
+        "time_validity_margin": 0.01,
+        "missingness_r2_max": 0.25,
+        "raw_concordance_min": 0.50,
+        "missingness_pattern_ari_min": 0.20,
+    }
+)
+"""도입 gate 판정 부등식에 직접 들어가는 값. **운영 판정값이며 조정 대상이 아니다.**
+
+구현 대상: docs/integrated_research_design_v2.md §8.2 · §8.2.1
+사전등록: §8.2 에서 2026-08-20 선언, §8.2.1 에서 2026-08-22 선언 위치를 이 모듈로 통합.
+          `c2_prereg_v1.md` §1.1 이 같은 값을 「동결된 설정값」으로 기록한다.
+해석 한계: 이 값들은 **채택 판정 임계**이며 통계적 유의수준이 아니다. 통과가 표현의 타당성을
+          증명하지 않고, 실패가 표현의 무용을 증명하지 않는다.
+주장 금지: 임계를 조정해 통과한 결과를 "gate 통과"로 서술하는 것. §8.2.2 가 그 경로를 막는다.
+측정 후 변경 금지 — 변경하면 이미 보고된 gate 판정이 전부 무효가 된다.
+"""
+
+GATE_PROBE_PARAMETERS: Mapping[str, Any] = MappingProxyType(
+    {
+        "artificial_mask_fraction": 0.15,
+        "cluster_distance_threshold": 0.30,
+        "minimum_cluster_size": 2,
+        "seed": 0,
+    }
+)
+"""판정값은 아니지만 **판정 대상 수치를 만드는** 값. 함께 동결한다.
+
+구현 대상: docs/integrated_research_design_v2.md §8.2.1
+사전등록: `c2_prereg_v1.md` §1.1 에서 2026-08-21 「동결된 설정값」으로 기록. 여기서 인용한다.
+해석 한계: 이 값을 바꾸면 임계를 건드리지 않고도 gate 난이도가 바뀐다 —
+          `artificial_mask_fraction` 을 낮추면 induced 표적의 분산이 줄어 통과가 쉬워진다.
+          판정 부등식만 잠그는 것이 반쪽 조치인 이유다.
+주장 금지: 다른 probe 설정에서 나온 gate 판정을 선언 설정의 판정으로 보고하는 것.
+예외: `seed` 는 등호가 아니라 `GATE_INDUCED_MASK_SEED_SET` 소속으로 검사한다. 이유는 그 상수의
+      docstring 에 있다.
+"""
+
+GATE_INDUCED_MASK_SEED_SET: Tuple[int, ...] = (0, 1, 2, 3, 4)
+"""induced mask 추출에 허용된 seed 집합. `seed` 만 등호 검사에서 제외되는 이유.
+
+구현 대상: docs/integrated_research_design_v2.md §8.2.1 (seed 예외)
+사전등록: `c2_prereg_v1.md` §1.3 `INDUCED_MASK_SEED_SET_V1` 로 2026-08-21 선언. gate 판정은
+          단일 seed 가 아니라 5 seed 의 중앙값과 5 중 4 통과를 함께 본다.
+해석 한계: 이 집합에 속한 seed 로 돌린 실행은 **사전등록된 다중 seed 프로토콜의 한 반복**이며
+          이탈이 아니다. 집합 밖의 seed 는 이탈이다 — seed 탐색으로 통과하는 경로를 막는다.
+주장 금지: 집합 안에서 가장 유리한 seed 하나를 골라 gate 판정으로 보고하는 것. 판정은 중앙값이다.
+"""
+
+FROZEN_GATE_SETTINGS: Mapping[str, Any] = MappingProxyType(
+    {**GATE_JUDGEMENT_THRESHOLDS, **GATE_PROBE_PARAMETERS}
+)
+"""두 묶음의 합집합. conformance 검사와 digest 의 대상이다."""
+
+#: 완화 방향이 어느 쪽인지. 기록 전용이며 판정에는 쓰지 않는다 (§8.2.2).
+#: "lower_is_stricter" = 값이 작을수록 엄격 → 올리면 완화.
+GATE_THRESHOLD_STRICTNESS: Mapping[str, str] = MappingProxyType(
+    {
+        "time_validity_margin": "higher_is_stricter",
+        "missingness_r2_max": "lower_is_stricter",
+        "raw_concordance_min": "higher_is_stricter",
+        "missingness_pattern_ari_min": "higher_is_stricter",
+        "artificial_mask_fraction": "higher_is_stricter",
+    }
+)
+
+
+def gate_settings_digest() -> str:
+    """동결 gate 설정의 sha256. 판정 출력과 contract 요약에 함께 기록한다.
+
+    구현 대상: docs/integrated_research_design_v2.md §8.2.2 마지막 문단
+    해석 한계: digest 는 **선언값**의 지문이다. 실사용값이 같은지는 `gate_settings_conformance`
+              가 따로 판단한다. digest 만 보고 "이 수치는 선언 임계에서 나왔다"고 결론내지 않는다.
+    """
+    payload = json.dumps(
+        {
+            **dict(sorted(FROZEN_GATE_SETTINGS.items())),
+            "induced_mask_seed_set": list(GATE_INDUCED_MASK_SEED_SET),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def gate_settings_conformance(effective: Mapping[str, Any]) -> Dict[str, Any]:
+    """실사용 설정이 동결 선언과 일치하는지 판단한다.
+
+    구현 대상: docs/integrated_research_design_v2.md §8.2.2 `GATE_THRESHOLD_CONFORMANCE_V1`
+    사전등록: 2026-08-22 확정. 이탈 시 `production_influence_allowed` 를 False 로 강제하는 것이
+              이 함수의 존재 이유다. 표시만으로는 §8.2 의 목적이 달성되지 않는다.
+    해석 한계: **방향(완화/강화)은 기록만 하고 판정에 쓰지 않는다.** 강화된 임계로 통과한 결과를
+              선언 임계의 결과로 보고하는 것도 사전등록 이탈이기 때문이다.
+    주장 금지: `conformant = False` 인 실행의 수치를 "gate 판정"으로 서술하는 것. 그 실행은
+              민감도 분석이며 production 을 열 자격이 없다.
+    """
+    deviations: List[Dict[str, Any]] = []
+    seed_used = effective.get("seed")
+    for key, declared in sorted(FROZEN_GATE_SETTINGS.items()):
+        if key not in effective:
+            continue
+        used = effective[key]
+        if key == "seed":
+            # Pre-registered as a set, not a value (c2_prereg_v1.md §1.3).
+            if int(used) in GATE_INDUCED_MASK_SEED_SET:
+                continue
+            deviations.append(
+                {
+                    "setting": "seed",
+                    "declared": list(GATE_INDUCED_MASK_SEED_SET),
+                    "used": int(used),
+                    "direction": "outside_declared_set",
+                    "group": "probe_parameter",
+                }
+            )
+            continue
+        if isinstance(declared, bool) or isinstance(used, bool):
+            same = bool(declared) == bool(used)
+        elif isinstance(declared, (int, float)) and isinstance(used, (int, float)):
+            same = abs(float(declared) - float(used)) <= 1e-12
+        else:
+            same = declared == used
+        if same:
+            continue
+        direction = "unknown"
+        strictness = GATE_THRESHOLD_STRICTNESS.get(key)
+        if strictness and isinstance(declared, (int, float)) and isinstance(used, (int, float)):
+            looser = (
+                float(used) < float(declared)
+                if strictness == "higher_is_stricter"
+                else float(used) > float(declared)
+            )
+            direction = "relaxed" if looser else "tightened"
+        deviations.append(
+            {
+                "setting": key,
+                "declared": declared,
+                "used": used,
+                "direction": direction,
+                "group": (
+                    "judgement_threshold"
+                    if key in GATE_JUDGEMENT_THRESHOLDS
+                    else "probe_parameter"
+                ),
+            }
+        )
+
+    return {
+        "conformant": not deviations,
+        "declared_digest": gate_settings_digest(),
+        "declared": dict(sorted(FROZEN_GATE_SETTINGS.items())),
+        "declared_induced_mask_seed_set": list(GATE_INDUCED_MASK_SEED_SET),
+        "induced_mask_seed_used": seed_used,
+        "deviations": deviations,
+        "n_deviations": len(deviations),
+        "declaration_sites": [
+            "docs/integrated_research_design_v2.md §8.2 · §8.2.1 · §8.2.2",
+            "docs/c2_prereg_v1.md §1.1",
+        ],
+        "effect_of_deviation": (
+            "production_influence_allowed is forced False and the run is marked "
+            "exploratory; the numbers are still produced (§8.2.2)"
+        ),
+    }
+
+
 def select_primary_variant(candidates: Sequence[str]) -> str:
     """Pick the gated primary arm among the learned arms that actually fitted.
 
@@ -387,5 +557,8 @@ def describe_contract() -> Dict[str, Any]:
         "adoption_gates": list(ADOPTION_GATES),
         "primary_arm_preference": list(PRIMARY_ARM_PREFERENCE),
         "primary_score_inputs_locked": list(PRIMARY_SCORE_INPUTS_LOCKED),
+        "frozen_gate_settings": dict(sorted(FROZEN_GATE_SETTINGS.items())),
+        "frozen_gate_induced_mask_seed_set": list(GATE_INDUCED_MASK_SEED_SET),
+        "frozen_gate_settings_digest": gate_settings_digest(),
         "preserved_baseline": preserved_baseline_layer().method_id,
     }

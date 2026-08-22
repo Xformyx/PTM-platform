@@ -22,6 +22,8 @@ import numpy as np
 from scipy.cluster.hierarchy import fcluster, linkage
 from scipy.spatial.distance import squareform
 
+from ptm_shared.substrate_temporal_dynamics import describe_member_dynamics, summarise_member_pattern_distribution
+
 
 CONTRACT_VERSION = "temporal_wave_contract.v1"
 ENGINE_VERSION = "1.0.0"
@@ -156,6 +158,11 @@ def _member_detail(
 ) -> Dict[str, Any]:
     meta = dict(metadata.get(site_key, {}))
     peak_idx = int(np.argmax(np.abs(values)))
+    float_values: List[Optional[float]] = [float(v) for v in values]
+    q_per_tp: Optional[List[Optional[float]]] = None
+    if "q_values_per_tp" in meta:
+        q_per_tp = meta["q_values_per_tp"]
+    site_dynamics = describe_member_dynamics(list(timepoints), float_values, q_values=q_per_tp)
     return {
         "key": site_key,
         "gene": meta.get("gene", site_key.split("(")[0].split(" ")[0]),
@@ -168,6 +175,7 @@ def _member_detail(
         "q_value": meta.get("q_value"),
         "control_pseudocount_used": bool(meta.get("control_pseudocount_used", False)),
         "candidate_kinases": list(meta.get("candidate_kinases", [])),
+        "site_dynamics": site_dynamics,
     }
 
 
@@ -220,6 +228,8 @@ def _build_wave(
         "interpretation_boundary": "Structural co-movement evidence only; not causal evidence.",
     }
     wave_id = f"TW-{wave_index:02d}"
+    member_dynamics_list = [d.get("site_dynamics") for d in details if d.get("site_dynamics")]
+    member_pattern_summary = summarise_member_pattern_distribution(member_dynamics_list)
     return {
         "wave_id": wave_id,
         "cluster_id": wave_index,
@@ -227,6 +237,7 @@ def _build_wave(
         "member_count": len(details),
         "member_details": details,
         "pattern": _classify_pattern(profiles),
+        "member_pattern_summary": member_pattern_summary,
         "peak_timepoint": timepoints[peak_index],
         "peak_index": peak_index,
         "mean_profile": {tp: round(float(mean_profile[index]), 6) for index, tp in enumerate(timepoints)},

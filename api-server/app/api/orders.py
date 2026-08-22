@@ -1704,6 +1704,43 @@ _GO_RECEPTOR_CC_TERMS = {
 }
 
 
+def _compute_p1_pattern(ptm: dict) -> str | None:
+    """Return the P1 primary_pattern label for a PTM's trajectory, or None.
+
+    Reads trajectory.timepoints[].ptmLog2FC, calls compute_site_kinetic_profile
+    with lightweight settings (run_loto=False, run_threshold_sensitivity=False).
+    Returns None on import error, insufficient data, or any computation failure.
+    """
+    try:
+        from ptm_shared.substrate_temporal_dynamics import (
+            SiteKineticConfig,
+            compute_site_kinetic_profile,
+        )
+    except ImportError:
+        return None
+
+    traj = ptm.get("trajectory") or {}
+    tps = traj.get("timepoints") or []
+    if len(tps) < 3:
+        return None
+
+    labels = [tp.get("timeLabel", "") for tp in tps]
+    values = [
+        tp.get("ptmLog2FC") if tp.get("ptmLog2FC") is not None
+        else tp.get("ptm_relative_log2fc")
+        for tp in tps
+    ]
+    if all(v is None for v in values):
+        return None
+
+    try:
+        cfg = SiteKineticConfig(run_loto=False, run_threshold_sensitivity=False)
+        profile = compute_site_kinetic_profile(labels, values, config=cfg)
+        return profile.primary_pattern
+    except Exception:
+        return None
+
+
 def _predict_protein_class(ptm: dict, ptm_type: str) -> dict:
     """Predict protein class from enriched UniProt/GO data.
 
@@ -2146,11 +2183,14 @@ async def get_vector_plot_data(
                 seen.add(key)
                 # v9.17: Predict protein class from enriched UniProt/GO data
                 protein_class = _predict_protein_class(ptm, ptm_type_str)
+                # P1: Canonical temporal pattern label (substrate_temporal_dynamics v1)
+                p1_pattern = _compute_p1_pattern(ptm)
                 top_n_ptms.append({
                     "gene": str(gene),
                     "position": str(pos),
                     "label": f"{gene} {pos}".strip() or f"{gene}{pos}",
                     "protein_class": protein_class,
+                    "p1_pattern": p1_pattern,
                 })
     elif vector_data:
         # Fallback: derive Top N from TSV (available right after preprocessing)
@@ -8814,4 +8854,110 @@ async def save_ip_overlay_data(
         "order_id": order_id,
         "bait": bait,
         "prey_count": len(prey_proteins),
+    }
+
+
+# ── Substrate Temporal Atlas ─────────────────────────────────────────────────
+
+@router.get("/{order_id}/substrate-temporal")
+async def substrate_temporal_atlas(
+    order_id: int,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Return per-site P1 kinetic profiles for all enriched PTMs in an order.
+
+    Computes ``compute_site_kinetic_profile`` (P1 contract) for each site in
+    the enriched_ptm_data output file and returns a compact list suitable for
+    frontend atlas / small-multiples views.
+
+    구현 대상: Substrate-level Temporal Dynamics Deepening Plan v1 §7 (P4 atlas API)
+    해석 한계: pattern label은 궤적 형태 기술이며 kinase 귀속이 아니다.
+    """
+    import json as _json
+
+    result = await db.execute(select(Order).where(Order.id == order_id))
+    order = result.scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    _check_order_access(order, user)  # read-only: owner/admin only (no write required)
+
+    output_dir = Path(DATA_DIR) / "outputs" / order.order_code
+    file_suffix = f"_{order.ptm_type}" if order.ptm_type and order.ptm_type != "phosphorylation" else ""
+    enriched_path = output_dir / f"enriched_ptm_data{file_suffix}.json"
+
+    if not enriched_path.exists():
+        return {"sites": [], "status": "no_enriched_data"}
+
+    try:
+        from ptm_shared.substrate_temporal_dynamics import SiteKineticConfig, compute_site_kinetic_profile
+    except ImportError:
+        return {"sites": [], "status": "module_unavailable"}
+
+    cfg = SiteKineticConfig(run_loto=False, run_threshold_sensitivity=False)
+
+    with open(enriched_path, "r", encoding="utf-8") as f:
+        enriched = _json.load(f)
+
+    sites = []
+    seen: set = set()
+    for ptm in enriched:
+        gene = ptm.get("gene") or ptm.get("Gene.Name", "")
+        pos = ptm.get("position") or ptm.get("PTM_Position", "")
+        site_key = f"{gene}_{pos}"
+        if site_key in seen or not (gene or pos):
+            continue
+        seen.add(site_key)
+
+        traj = ptm.get("trajectory") or {}
+        tps = traj.get("timepoints") or []
+        if len(tps) < 3:
+            continue
+
+        labels = [tp.get("timeLabel", "") for tp in tps]
+        values = [
+            tp.get("ptmLog2FC") if tp.get("ptmLog2FC") is not None
+            else tp.get("ptm_relative_log2fc")
+            for tp in tps
+        ]
+        if all(v is None for v in values):
+            continue
+
+        try:
+            profile = compute_site_kinetic_profile(labels, values, config=cfg)
+        except Exception:
+            continue
+
+        sites.append({
+            "site_key": site_key,
+            "gene": gene,
+            "position": pos,
+            "primary_pattern": profile.primary_pattern,
+            "pattern_modifiers": profile.pattern_modifiers,
+            "quality_gate_passed": profile.quality_gate_passed,
+            "amplitude": profile.amplitude,
+            "peak_minutes": profile.peak_minutes,
+            "onset_minutes": profile.onset_minutes,
+            "auc_signed": profile.auc_signed,
+            "auc_absolute": profile.auc_absolute,
+            "return_to_baseline": profile.return_to_baseline,
+            "missingness_warning": profile.missingness_warning,
+            "time_ordering_warning": profile.time_ordering_warning,
+            "duplicate_timepoint_warning": profile.duplicate_timepoint_warning,
+            "observed_timepoints": len(tps),
+            "timepoint_labels": labels,
+            "values": [v for v in values],
+        })
+
+    # Pattern distribution summary
+    from collections import Counter as _Counter
+    pattern_counts = dict(_Counter(s["primary_pattern"] for s in sites))
+
+    return {
+        "order_id": order_id,
+        "n_sites": len(sites),
+        "pattern_distribution": pattern_counts,
+        "sites": sites,
+        "contract_version": "substrate_temporal_dynamics.v1",
+        "status": "ok",
     }

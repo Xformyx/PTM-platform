@@ -1,0 +1,40 @@
+{
+ "n_orders": 6,
+ "n_sites": 1160,
+ "verdicts": {
+  "non_identifiable": 598,
+  "equal_weight_fallback": 537,
+  "weakly_identifiable": 17,
+  "identifiable": 8
+ },
+ "verdict_fractions": {
+  "non_identifiable": 0.5155172413793103,
+  "equal_weight_fallback": 0.46293103448275863,
+  "weakly_identifiable": 0.014655172413793103,
+  "identifiable": 0.006896551724137931
+ },
+ "structurally_underdetermined_rate": 0.9525862068965517,
+ "rank_one_design_rate": 0.5422413793103448,
+ "explains_nothing_rate": 0.5508620689655173,
+ "top1_in_ambiguity_set_rate": 0.8991379310344828,
+ "top1_from_prior_rate": 0.9413793103448276,
+ "equal_weight_fallback_rate": 0.46293103448275863,
+ "attribution": {
+  "n_sites": 1160,
+  "per_kinase_ratios_published": 7216,
+  "estimable_group_shares": 891,
+  "quantity_reduction": 0.8765243902439024,
+  "n_supported": 623,
+  "unsupported_rate": 0.46293103448275863,
+  "reduced_verdicts": {
+   "weakly_identifiable": 264,
+   "non_identifiable": 190,
+   "identifiable": 169
+  },
+  "reduced_verdict_fractions": {
+   "weakly_identifiable": 0.42375601926163725,
+   "non_identifiable": 0.30497592295345105,
+   "identifiable": 0.2712680577849117
+  }
+ }
+}

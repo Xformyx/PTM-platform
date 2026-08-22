@@ -1,0 +1,2085 @@
+{
+ "schema": "TMM_AUDIT_FIXTURE_V1",
+ "order_id": 48,
+ "order_code": "Cu-Amyloid_fibril-microglia-phosphorylation",
+ "status": "completed",
+ "ptm_type": "phosphorylation",
+ "conditions": [
+  "0.5",
+  "1h",
+  "3h",
+  "6h",
+  "24h"
+ ],
+ "n_timepoints": 5,
+ "n_kinases": 30,
+ "n_kinase_profiles": 30,
+ "profile_types": {
+  "gaussian_fallback": 28,
+  "data_driven": 2
+ },
+ "n_sites_in_modules": 71,
+ "n_shared_sites": 49,
+ "site_list_truncated": false,
+ "n_kinases_with_truncated_substrate_list": 0,
+ "production_ratio_max_deviation": 4.920501633742802e-05,
+ "assumptions": {
+  "relative_noise": 0.1,
+  "n_bootstrap": 32,
+  "seed": 0
+ },
+ "columns": [
+  [
+   1.5072537564877146e-10,
+   1.0,
+   0.022559572368080795,
+   0.0003675095796563841,
+   1.7796181502861405e-09
+  ],
+  [
+   0.006486221921286258,
+   1.0,
+   0.0003995390043613351,
+   5.108014361824442e-07,
+   1.5234230532662064e-14
+  ],
+  [
+   1.9550709852423244e-07,
+   1.0,
+   0.004354907706972966,
+   2.5131064425846233e-05,
+   1.5270642144385315e-11
+  ],
+  [
+   1.5504389751702774e-32,
+   0.000306348645230054,
+   0.11991294818553372,
+   0.923669352036287,
+   1.0
+  ],
+  [
+   1.9403880441513568e-11,
+   1.0,
+   0.03611041126204743,
+   0.0007915350960172988,
+   6.93950061714276e-09
+  ],
+  [
+   0.002896370333581444,
+   1.0,
+   0.00048073664299178536,
+   6.907074244844972e-07,
+   2.6016596439882614e-14
+  ],
+  [
+   0.779883290595857,
+   0.4855516658885014,
+   1.0,
+   0.44092567012935036,
+   0.5945328982989256
+  ]
+ ],
+ "sites": [
+  {
+   "site_index": 0,
+   "site_key": "ACO1_S746",
+   "candidates": [
+    "CSNK1",
+    "CSNK2",
+    "ERK1/2",
+    "CSNK1D (CASEIN KINASE 1 DELTA)",
+    "CAMK2",
+    "NEK6",
+    "NEK2",
+    "SRC",
+    "SRC FAMILY KINASES (SFKS)"
+   ],
+   "column_ids": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ],
+   "prior_flags": [
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true
+   ],
+   "target": [
+    15.890359150157387,
+    17.02988603720437,
+    17.198843083402544,
+    16.975176268812287,
+    15.672520235865319
+   ],
+   "observed_mask": [
+    true,
+    true,
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "site_index": 1,
+   "site_key": "APC_T1377",
+   "candidates": [
+    "CSNK1",
+    "CSNK2"
+   ],
+   "column_ids": [
+    0,
+    0
+   ],
+   "prior_flags": [
+    true,
+    true
+   ],
+   "target": [
+    0.0,
+    0.0,
+    24.118685097718416,
+    0.0,
+    18.553909191688888
+   ],
+   "observed_mask": [
+    false,
+    false,
+    true,
+    false,
+    true
+   ]
+  },
+  {
+   "site_index": 2,
+   "site_key": "ARFGEF2_S227",
+   "candidates": [
+    "PKC",
+    "CDK5",
+    "MAPK8",
+    "CDKL5",
+    "CDK2",
+    "CDK1"
+   ],
+   "column_ids": [
+    1,
+    0,
+    2,
+    0,
+    3,
+    3
+   ],
+   "prior_flags": [
+    true,
+    true,
+    true,
+    true,
+    true,
+    true
+   ],
+   "target": [
+    21.187426683580927,
+    21.264544065674077,
+    21.55836298634584,
+    21.33499577008176,
+    21.78076963734342
+   ],
+   "observed_mask": [
+    true,
+    true,
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "site_index": 3,
+   "site_key": "BANP_T279",
+   "candidates": [
+    "CSNK2",
+    "ERK1/2"
+   ],
+   "column_ids": [
+    0,
+    0
+   ],
+   "prior_flags": [
+    true,
+    true
+   ],
+   "target": [
+    0.0,
+    18.456452940829234,
+    19.37144338204688,
+    0.0,
+    17.286035075420518
+   ],
+   "observed_mask": [
+    false,
+    true,
+    true,
+    false,
+    true
+   ]
+  },
+  {
+   "site_index": 4,
+   "site_key": "CAD_S1938",
+   "candidates": [
+    "PKC",
+    "CDK5",
+    "MAPK8",
+    "CDKL5",
+    "CDK2",
+    "CDK1",
+    "MTOR",
+    "PRKAA1",
+    "PLK1",
+    "PKC (PROTEIN KINASE C)",
+    "AKT1"
+   ],
+   "column_ids": [
+    1,
+    0,
+    2,
+    0,
+    3,
+    3,
+    4,
+    2,
+    0,
+    0,
+    2
+   ],
+   "prior_flags": [
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true
+   ],
+   "target": [
+    0.29117904306221376,
+    0.14571253148158297,
+    0.039515923399536114,
+    -0.17497383293234944,
+    -0.026048547933773057
+   ],
+   "observed_mask": [
+    true,
+    true,
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "site_index": 5,
+   "site_key": "CHD4_S1535",
+   "candidates": [
+    "ATR",
+    "ATM",
+    "GSK3B",
+    "ERK1/2",
+    "CDK5",
+    "MAPK8",
+    "CDKL5",
+    "CDK2",
+    "CDK1",
+    "CAMK2"
+   ],
+   "column_ids": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    2,
+    0,
+    3,
+    3,
+    0
+   ],
+   "prior_flags": [
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true
+   ],
+   "target": [
+    4.412822980782288,
+    3.8551551730860263,
+    0.0,
+    -0.45680471592942334,
+    0.0
+   ],
+   "observed_mask": [
+    true,
+    true,
+    false,
+    true,
+    false
+   ]
+  },
+  {
+   "site_index": 6,
+   "site_key": "CIC_S642",
+   "candidates": [
+    "PKC",
+    "CDK5",
+    "MAPK8",
+    "CDKL5",
+    "CDK2",
+    "CDK1",
+    "SRC",
+    "SRC FAMILY KINASES (SFKS)"
+   ],
+   "column_ids": [
+    1,
+    0,
+    2,
+    0,
+    3,
+    3,
+    0,
+    0
+   ],
+   "prior_flags": [
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true
+   ],
+   "target": [
+    19.991758564631006,
+    20.173114472867464,
+    19.96601843025726,
+    0.0,
+    20.48998979635169
+   ],
+   "observed_mask": [
+    true,
+    true,
+    true,
+    false,
+    true
+   ]
+  },
+  {
+   "site_index": 7,
+   "site_key": "CPN1_S212",
+   "candidates": [
+    "ATR",
+    "ATM",
+    "GSK3B",
+    "PKC (PROTEIN KINASE C)",
+    "AKT1"
+   ],
+   "column_ids": [
+    0,
+    0,
+    0,
+    0,
+    2
+   ],
+   "prior_flags": [
+    true,
+    true,
+    true,
+    true,
+    true
+   ],
+   "target": [
+    0.0,
+    27.182392129535593,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "observed_mask": [
+    false,
+    true,
+    false,
+    false,
+    false
+   ]
+  },
+  {
+   "site_index": 8,
+   "site_key": "CYB5B_Y90",
+   "candidates": [
+    "EGFR",
+    "JAK2",
+    "SRC",
+    "SRC FAMILY KINASES (SFKS)"
+   ],
+   "column_ids": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "prior_flags": [
+    true,
+    true,
+    true,
+    true
+   ],
+   "target": [
+    14.132730266752262,
+    14.775856081048445,
+    14.46607976716852,
+    0.0,
+    0.0
+   ],
+   "observed_mask": [
+    true,
+    true,
+    true,
+    false,
+    false
+   ]
+  },
+  {
+   "site_index": 9,
+   "site_key": "DACT3_S219",
+   "candidates": [
+    "PKC",
+    "CDK5",
+    "MAPK8",
+    "CDKL5",
+    "CDK2",
+    "CDK1"
+   ],
+   "column_ids": [
+    1,
+    0,
+    2,
+    0,
+    3,
+    3
+   ],
+   "prior_flags": [
+    true,
+    true,
+    true,
+    true,
+    true,
+    true
+   ],
+   "target": [
+    0.0,
+    20.32301902988535,
+    20.3156260623148,
+    20.74443215555399,
+    20.996523115527584
+   ],
+   "observed_mask": [
+    false,
+    true,
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "site_index": 10,
+   "site_key": "DCP1A_S507",
+   "candidates": [
+    "CDK5",
+    "MAPK8",
+    "CDKL5",
+    "CDK2",
+    "CDK1"
+   ],
+   "column_ids": [
+    0,
+    2,
+    0,
+    3,
+    3
+   ],
+   "prior_flags": [
+    true,
+    true,
+    true,
+    true,
+    true
+   ],
+   "target": [
+    0.3864199778906366,
+    0.5874438441951175,
+    0.005828378430321342,
+    0.0,
+    5.115200566124771
+   ],
+   "observed_mask": [
+    true,
+    true,
+    true,
+    false,
+    true
+   ]
+  },
+  {
+   "site_index": 11,
+   "site_key": "DENND6A_S324",
+   "candidates": [
+    "ATR",
+    "ATM"
+   ],
+   "column_ids": [
+    0,
+    0
+   ],
+   "prior_flags": [
+    true,
+    true
+   ],
+   "target": [
+    0.0,
+    24.53462722392233,
+    24.408538604875282,
+    24.296301461220242,
+    24.081787249140405
+   ],
+   "observed_mask": [
+    false,
+    true,
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "site_index": 12,
+   "site_key": "DOCK2_S1705",
+   "candidates": [
+    "PLK1",
+    "PKC (PROTEIN KINASE C)",
+    "AKT1"
+   ],
+   "column_ids": [
+    0,
+    0,
+    2
+   ],
+   "prior_flags": [
+    true,
+    true,
+    true
+   ],
+   "target": [
+    14.375763950979655,
+    14.168258618256495,
+    13.953707390015076,
+    14.448107725844208,
+    14.25947078070723
+   ],
+   "observed_mask": [
+    true,
+    true,
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "site_index": 13,
+   "site_key": "EIF1B_T17",
+   "candidates": [
+    "CSNK2",
+    "NEK6",
+    "NEK2",
+    "MTORC1",
+    "JAK2",
+    "SRC",
+    "SRC FAMILY KINASES (SFKS)"
+   ],
+   "column_ids": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ],
+   "prior_flags": [
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true
+   ],
+   "target": [
+    0.0,
+    15.310644223290286,
+    15.763519389794187,
+    0.0,
+    0.0
+   ],
+   "observed_mask": [
+    false,
+    true,
+    true,
+    false,
+    false
+   ]
+  },
+  {
+   "site_index": 14,
+   "site_key": "KIF5C_S934",
+   "candidates": [
+    "CSNK1",
+    "CSNK2",
+    "CSNK1D (CASEIN KINASE 1 DELTA)"
+   ],
+   "column_ids": [
+    0,
+    0,
+    0
+   ],
+   "prior_flags": [
+    true,
+    true,
+    true
+   ],
+   "target": [
+    0.0,
+    20.764263470548528,
+    21.079466708315692,
+    20.629555738768634,
+    20.97206675829574
+   ],
+   "observed_mask": [
+    false,
+    true,
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "site_index": 15,
+   "site_key": "LMNA_S390",
+   "candidates": [
+    "ATR",
+    "ATM",
+    "CSNK1",
+    "CSNK1D (CASEIN KINASE 1 DELTA)",
+    "CDK5",
+    "MAPK8",
+    "CDKL5",
+    "CDK2",
+    "CDK1"
+   ],
+   "column_ids": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    2,
+    0,
+    3,
+    3
+   ],
+   "prior_flags": [
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true
+   ],
+   "target": [
+    -0.059114375700080955,
+    -0.1307342403504283,
+    -0.050675497708385274,
+    -0.03141083735778005,
+    -0.024189769990962184
+   ],
+   "observed_mask": [
+    true,
+    true,
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "site_index": 16,
+   "site_key": "MCM2_S28",
+   "candidates": [
+    "ATR",
+    "CDK5",
+    "MAPK8",
+    "CDKL5",
+    "CDK2",
+    "CDK1",
+    "NEK6",
+    "NEK2"
+   ],
+   "column_ids": [
+    0,
+    0,
+    2,
+    0,
+    3,
+    3,
+    0,
+    0
+   ],
+   "prior_flags": [
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true
+   ],
+   "target": [
+    -1.2437032395086265,
+    0.0475936366453653,
+    -1.2050702338222654,
+    -1.9525529833916455,
+    -3.9379288296888557
+   ],
+   "observed_mask": [
+    true,
+    true,
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "site_index": 17,
+   "site_key": "NCAM1_S1006",
+   "candidates": [
+    "GSK3B",
+    "PKC (PROTEIN KINASE C)",
+    "SRC FAMILY KINASES (SFKS)"
+   ],
+   "column_ids": [
+    0,
+    0,
+    0
+   ],
+   "prior_flags": [
+    true,
+    true,
+    true
+   ],
+   "target": [
+    0.0,
+    15.328040821546937,
+    14.58707710992526,
+    0.0,
+    0.0
+   ],
+   "observed_mask": [
+    false,
+    true,
+    true,
+    false,
+    false
+   ]
+  },
+  {
+   "site_index": 18,
+   "site_key": "NPM1_Y269",
+   "candidates": [
+    "CSNK2",
+    "SRC FAMILY KINASES (SFKS)"
+   ],
+   "column_ids": [
+    0,
+    0
+   ],
+   "prior_flags": [
+    true,
+    true
+   ],
+   "target": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    16.654902196422267
+   ],
+   "observed_mask": [
+    false,
+    false,
+    false,
+    false,
+    true
+   ]
+  },
+  {
+   "site_index": 19,
+   "site_key": "PIK3R5_S429",
+   "candidates": [
+    "ATR",
+    "ATM",
+    "AKT1"
+   ],
+   "column_ids": [
+    0,
+    0,
+    2
+   ],
+   "prior_flags": [
+    true,
+    true,
+    true
+   ],
+   "target": [
+    24.08225935230054,
+    24.688565583780715,
+    24.51620584743031,
+    24.162732627969778,
+    24.067512847721158
+   ],
+   "observed_mask": [
+    true,
+    true,
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "site_index": 20,
+   "site_key": "PLEKHH3_S760",
+   "candidates": [
+    "CSNK1",
+    "CSNK2",
+    "CSNK1D (CASEIN KINASE 1 DELTA)"
+   ],
+   "column_ids": [
+    0,
+    0,
+    0
+   ],
+   "prior_flags": [
+    true,
+    true,
+    true
+   ],
+   "target": [
+    0.0,
+    25.296180358255825,
+    25.57694582790695,
+    25.09567955002751,
+    25.358889026226176
+   ],
+   "observed_mask": [
+    false,
+    true,
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "site_index": 21,
+   "site_key": "PLXNB2_S338",
+   "candidates": [
+    "CSNK1",
+    "ERK1/2",
+    "CSNK1D (CASEIN KINASE 1 DELTA)",
+    "PRKACA"
+   ],
+   "column_ids": [
+    0,
+    0,
+    0,
+    5
+   ],
+   "prior_flags": [
+    true,
+    true,
+    true,
+    true
+   ],
+   "target": [
+    0.0,
+    15.129959551544625,
+    15.39473437209261,
+    0.0,
+    0.0
+   ],
+   "observed_mask": [
+    false,
+    true,
+    true,
+    false,
+    false
+   ]
+  },
+  {
+   "site_index": 22,
+   "site_key": "PPP1R7_S183",
+   "candidates": [
+    "PRKACA",
+    "CAMK2",
+    "NEK6",
+    "NEK2"
+   ],
+   "column_ids": [
+    5,
+    0,
+    0,
+    0
+   ],
+   "prior_flags": [
+    true,
+    true,
+    true,
+    true
+   ],
+   "target": [
+    0.0,
+    17.253971625550353,
+    17.53628424697671,
+    17.383340030008807,
+    17.51491717868674
+   ],
+   "observed_mask": [
+    false,
+    true,
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "site_index": 23,
+   "site_key": "RAB7A_S72",
+   "candidates": [
+    "PKC",
+    "CDK5",
+    "MAPK8",
+    "CDKL5",
+    "CDK2",
+    "CDK1",
+    "MTOR",
+    "PRKAA1",
+    "PLK1",
+    "PKC (PROTEIN KINASE C)",
+    "AKT1"
+   ],
+   "column_ids": [
+    1,
+    0,
+    2,
+    0,
+    3,
+    3,
+    4,
+    2,
+    0,
+    0,
+    2
+   ],
+   "prior_flags": [
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true
+   ],
+   "target": [
+    14.180680231809554,
+    14.463300614686554,
+    14.679960118941995,
+    14.449466961691314,
+    14.787500599007988
+   ],
+   "observed_mask": [
+    true,
+    true,
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "site_index": 24,
+   "site_key": "RAB9A_S179",
+   "candidates": [
+    "MTOR",
+    "PRKAA1"
+   ],
+   "column_ids": [
+    4,
+    2
+   ],
+   "prior_flags": [
+    true,
+    true
+   ],
+   "target": [
+    17.189823700114896,
+    0.0,
+    16.92251366889714,
+    17.121504026966548,
+    17.19102594344389
+   ],
+   "observed_mask": [
+    true,
+    false,
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "site_index": 25,
+   "site_key": "RIPOR1_S22",
+   "candidates": [
+    "CSNK2",
+    "ERK1/2",
+    "NEK6",
+    "NEK2",
+    "MTORC1"
+   ],
+   "column_ids": [
+    0,
+    0,
+    0,
+    0,
+    0
+   ],
+   "prior_flags": [
+    true,
+    true,
+    true,
+    true,
+    true
+   ],
+   "target": [
+    0.0,
+    0.0,
+    16.721321670563835,
+    16.361880868718597,
+    0.0
+   ],
+   "observed_mask": [
+    false,
+    false,
+    true,
+    true,
+    false
+   ]
+  },
+  {
+   "site_index": 26,
+   "site_key": "RUVBL2_T333",
+   "candidates": [
+    "CDK5",
+    "MAPK8",
+    "CDKL5",
+    "CDK2",
+    "CDK1",
+    "MTOR",
+    "PRKAA1",
+    "AKT1"
+   ],
+   "column_ids": [
+    0,
+    2,
+    0,
+    3,
+    3,
+    4,
+    2,
+    2
+   ],
+   "prior_flags": [
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true
+   ],
+   "target": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    17.797536064234535
+   ],
+   "observed_mask": [
+    false,
+    false,
+    false,
+    false,
+    true
+   ]
+  },
+  {
+   "site_index": 27,
+   "site_key": "SCFD1_S298",
+   "candidates": [
+    "CDK5",
+    "MAPK8",
+    "CDKL5",
+    "CDK2",
+    "CDK1",
+    "MTOR"
+   ],
+   "column_ids": [
+    0,
+    2,
+    0,
+    3,
+    3,
+    4
+   ],
+   "prior_flags": [
+    true,
+    true,
+    true,
+    true,
+    true,
+    true
+   ],
+   "target": [
+    13.84303878505965,
+    14.143139644169509,
+    0.0,
+    14.054389457663746,
+    17.954019182498616
+   ],
+   "observed_mask": [
+    true,
+    true,
+    false,
+    true,
+    true
+   ]
+  },
+  {
+   "site_index": 28,
+   "site_key": "SETD1A_S480",
+   "candidates": [
+    "CSNK1",
+    "CSNK2",
+    "ERK1/2",
+    "CSNK1D (CASEIN KINASE 1 DELTA)",
+    "PRKACA"
+   ],
+   "column_ids": [
+    0,
+    0,
+    0,
+    0,
+    5
+   ],
+   "prior_flags": [
+    true,
+    true,
+    true,
+    true,
+    true
+   ],
+   "target": [
+    0.0,
+    21.151238785692115,
+    21.6232268133813,
+    21.312253055239704,
+    21.41736872842758
+   ],
+   "observed_mask": [
+    false,
+    true,
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "site_index": 29,
+   "site_key": "SMARCC1_S309",
+   "candidates": [
+    "CSNK2",
+    "CDK5",
+    "MAPK8",
+    "CDKL5",
+    "CDK2",
+    "CDK1"
+   ],
+   "column_ids": [
+    0,
+    0,
+    2,
+    0,
+    3,
+    3
+   ],
+   "prior_flags": [
+    true,
+    true,
+    true,
+    true,
+    true,
+    true
+   ],
+   "target": [
+    0.3474669947852036,
+    -0.017937609093574343,
+    0.6359716161717395,
+    0.0,
+    -1.3004667107074135
+   ],
+   "observed_mask": [
+    true,
+    true,
+    true,
+    false,
+    true
+   ]
+  },
+  {
+   "site_index": 30,
+   "site_key": "SMCR8_S488",
+   "candidates": [
+    "ATR",
+    "ATM",
+    "GSK3B"
+   ],
+   "column_ids": [
+    0,
+    0,
+    0
+   ],
+   "prior_flags": [
+    true,
+    true,
+    true
+   ],
+   "target": [
+    3.958354627905007,
+    7.164166947303767,
+    4.7858146385149825,
+    5.299154333430509,
+    5.483446325971777
+   ],
+   "observed_mask": [
+    true,
+    true,
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "site_index": 31,
+   "site_key": "SNX17_S421",
+   "candidates": [
+    "CSNK1",
+    "CSNK1D (CASEIN KINASE 1 DELTA)",
+    "NEK6",
+    "NEK2"
+   ],
+   "column_ids": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "prior_flags": [
+    true,
+    true,
+    true,
+    true
+   ],
+   "target": [
+    0.0,
+    14.909377090047759,
+    15.374616033393417,
+    0.0,
+    14.517708586895315
+   ],
+   "observed_mask": [
+    false,
+    true,
+    true,
+    false,
+    true
+   ]
+  },
+  {
+   "site_index": 32,
+   "site_key": "SRC_S17",
+   "candidates": [
+    "CDK5",
+    "MAPK8",
+    "CDKL5",
+    "CDK2",
+    "CDK1"
+   ],
+   "column_ids": [
+    0,
+    2,
+    0,
+    3,
+    3
+   ],
+   "prior_flags": [
+    true,
+    true,
+    true,
+    true,
+    true
+   ],
+   "target": [
+    0.10755326469943799,
+    0.07468288276709259,
+    -0.2173688526235387,
+    -0.19778560587213587,
+    -0.05643582207607012
+   ],
+   "observed_mask": [
+    true,
+    true,
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "site_index": 33,
+   "site_key": "SRRM1_S220",
+   "candidates": [
+    "CSNK2",
+    "CDK5",
+    "MAPK8",
+    "CDKL5",
+    "CDK2",
+    "CDK1",
+    "PLK1"
+   ],
+   "column_ids": [
+    0,
+    0,
+    2,
+    0,
+    3,
+    3,
+    0
+   ],
+   "prior_flags": [
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true
+   ],
+   "target": [
+    0.9699930567873242,
+    0.15790641608662034,
+    1.8278866645772025,
+    1.9330143998454072,
+    0.29174771071067834
+   ],
+   "observed_mask": [
+    true,
+    true,
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "site_index": 34,
+   "site_key": "SRRM1_S565",
+   "candidates": [
+    "CDK5",
+    "MAPK8",
+    "CDKL5",
+    "CDK2",
+    "CDK1"
+   ],
+   "column_ids": [
+    0,
+    2,
+    0,
+    3,
+    3
+   ],
+   "prior_flags": [
+    true,
+    true,
+    true,
+    true,
+    true
+   ],
+   "target": [
+    -1.4510997046572267,
+    -0.1160511417027798,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "observed_mask": [
+    true,
+    true,
+    false,
+    false,
+    false
+   ]
+  },
+  {
+   "site_index": 35,
+   "site_key": "SRRM2_S1161",
+   "candidates": [
+    "ATR",
+    "ATM",
+    "CSNK2",
+    "CDK5",
+    "MAPK8",
+    "CDKL5",
+    "CDK2",
+    "CDK1",
+    "NEK6",
+    "NEK2"
+   ],
+   "column_ids": [
+    0,
+    0,
+    0,
+    0,
+    2,
+    0,
+    3,
+    3,
+    0,
+    0
+   ],
+   "prior_flags": [
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true
+   ],
+   "target": [
+    0.12551277701833835,
+    0.012883541460581335,
+    0.12569947422097247,
+    0.02617652123052109,
+    0.3195680449709412
+   ],
+   "observed_mask": [
+    true,
+    true,
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "site_index": 36,
+   "site_key": "SRRM2_S2031",
+   "candidates": [
+    "CDK5",
+    "MAPK8",
+    "CDKL5",
+    "CDK2",
+    "CDK1",
+    "NEK6",
+    "NEK2",
+    "PRKAA1",
+    "TAOK2"
+   ],
+   "column_ids": [
+    0,
+    2,
+    0,
+    3,
+    3,
+    0,
+    0,
+    2,
+    0
+   ],
+   "prior_flags": [
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true
+   ],
+   "target": [
+    2.2535435318439387,
+    2.2129438666435512,
+    0.2733574565426467,
+    2.5894504094567927,
+    1.227777660206295
+   ],
+   "observed_mask": [
+    true,
+    true,
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "site_index": 37,
+   "site_key": "SRRM2_S2306",
+   "candidates": [
+    "ATR",
+    "ATM",
+    "CSNK1",
+    "CSNK1D (CASEIN KINASE 1 DELTA)",
+    "CDK5",
+    "MAPK8",
+    "CDKL5",
+    "CDK2",
+    "CDK1",
+    "PRKAA1",
+    "TAOK2"
+   ],
+   "column_ids": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    2,
+    0,
+    3,
+    3,
+    2,
+    0
+   ],
+   "prior_flags": [
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true
+   ],
+   "target": [
+    20.905040103743435,
+    20.43372513060197,
+    20.055246818003955,
+    20.26377363345649,
+    20.015805621802713
+   ],
+   "observed_mask": [
+    true,
+    true,
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "site_index": 38,
+   "site_key": "SRRM2_T1159",
+   "candidates": [
+    "ATR",
+    "ATM",
+    "CSNK2",
+    "CDK5",
+    "MAPK8",
+    "CDKL5",
+    "CDK2",
+    "CDK1",
+    "NEK6",
+    "NEK2",
+    "PRKAA1",
+    "TAOK2"
+   ],
+   "column_ids": [
+    0,
+    0,
+    0,
+    0,
+    2,
+    0,
+    3,
+    3,
+    0,
+    0,
+    2,
+    0
+   ],
+   "prior_flags": [
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true
+   ],
+   "target": [
+    15.733519199059431,
+    15.676234107056795,
+    16.09511494118073,
+    15.933421209776569,
+    16.16195545468185
+   ],
+   "observed_mask": [
+    true,
+    true,
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "site_index": 39,
+   "site_key": "SRRM2_T2308",
+   "candidates": [
+    "ATR",
+    "ATM",
+    "CSNK1",
+    "CSNK1D (CASEIN KINASE 1 DELTA)",
+    "CDK5",
+    "MAPK8",
+    "CDKL5",
+    "CDK2",
+    "CDK1"
+   ],
+   "column_ids": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    2,
+    0,
+    3,
+    3
+   ],
+   "prior_flags": [
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true
+   ],
+   "target": [
+    -0.13717538281573224,
+    -0.6615618051359325,
+    -0.785330382492882,
+    -0.661841680943886,
+    -0.9265229225692126
+   ],
+   "observed_mask": [
+    true,
+    true,
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "site_index": 40,
+   "site_key": "STK11IP_T480",
+   "candidates": [
+    "CSNK1",
+    "CSNK2",
+    "CSNK1D (CASEIN KINASE 1 DELTA)",
+    "MTORC1"
+   ],
+   "column_ids": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "prior_flags": [
+    true,
+    true,
+    true,
+    true
+   ],
+   "target": [
+    16.962412257768058,
+    17.054874891015405,
+    17.709282402287972,
+    16.2663461196937,
+    16.779656718265432
+   ],
+   "observed_mask": [
+    true,
+    true,
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "site_index": 41,
+   "site_key": "SYNJ1_S1089",
+   "candidates": [
+    "GSK3B",
+    "PKC (PROTEIN KINASE C)",
+    "DYRK1A"
+   ],
+   "column_ids": [
+    0,
+    0,
+    6
+   ],
+   "prior_flags": [
+    true,
+    true,
+    false
+   ],
+   "target": [
+    0.0,
+    16.78255623554037,
+    16.516835192706846,
+    0.0,
+    16.559782027719915
+   ],
+   "observed_mask": [
+    false,
+    true,
+    true,
+    false,
+    true
+   ]
+  },
+  {
+   "site_index": 42,
+   "site_key": "TUBB3_S335",
+   "candidates": [
+    "SRC",
+    "AKT1"
+   ],
+   "column_ids": [
+    0,
+    2
+   ],
+   "prior_flags": [
+    true,
+    true
+   ],
+   "target": [
+    16.221295786735915,
+    15.883773582807132,
+    15.925771004550077,
+    15.750804775836862,
+    15.797415379691625
+   ],
+   "observed_mask": [
+    true,
+    true,
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "site_index": 43,
+   "site_key": "VDAC1_S104",
+   "candidates": [
+    "CSNK1",
+    "CSNK2",
+    "CSNK1D (CASEIN KINASE 1 DELTA)",
+    "CAMK2",
+    "MTORC1"
+   ],
+   "column_ids": [
+    0,
+    0,
+    0,
+    0,
+    0
+   ],
+   "prior_flags": [
+    true,
+    true,
+    true,
+    true,
+    true
+   ],
+   "target": [
+    13.54032795367027,
+    13.283330906194989,
+    13.650205741191723,
+    13.03396073508916,
+    13.326243768220806
+   ],
+   "observed_mask": [
+    true,
+    true,
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "site_index": 44,
+   "site_key": "WDR1_S198",
+   "candidates": [
+    "CDK5",
+    "MAPK8",
+    "CDKL5",
+    "CDK2",
+    "CDK1"
+   ],
+   "column_ids": [
+    0,
+    2,
+    0,
+    3,
+    3
+   ],
+   "prior_flags": [
+    true,
+    true,
+    true,
+    true,
+    true
+   ],
+   "target": [
+    0.025315145633134004,
+    0.34913251596993955,
+    0.02304313094481876,
+    0.3147284116604916,
+    0.30342159062402385
+   ],
+   "observed_mask": [
+    true,
+    true,
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "site_index": 45,
+   "site_key": "YBX3_Y96",
+   "candidates": [
+    "CSNK2",
+    "ERK1/2",
+    "CAMK2",
+    "JAK2"
+   ],
+   "column_ids": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "prior_flags": [
+    true,
+    true,
+    true,
+    true
+   ],
+   "target": [
+    0.0,
+    0.0,
+    16.45853643065805,
+    0.0,
+    0.0
+   ],
+   "observed_mask": [
+    false,
+    false,
+    true,
+    false,
+    false
+   ]
+  },
+  {
+   "site_index": 46,
+   "site_key": "YKT6_S114",
+   "candidates": [
+    "CSNK1",
+    "CSNK2",
+    "CSNK1D (CASEIN KINASE 1 DELTA)",
+    "CAMK2",
+    "JAK2"
+   ],
+   "column_ids": [
+    0,
+    0,
+    0,
+    0,
+    0
+   ],
+   "prior_flags": [
+    true,
+    true,
+    true,
+    true,
+    true
+   ],
+   "target": [
+    0.0,
+    15.136311321174297,
+    15.413945430594342,
+    15.340060018745627,
+    14.95620791645709
+   ],
+   "observed_mask": [
+    false,
+    true,
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "site_index": 47,
+   "site_key": "ZFP318_S2212",
+   "candidates": [
+    "CSNK1",
+    "CSNK2",
+    "ERK1/2",
+    "CSNK1D (CASEIN KINASE 1 DELTA)",
+    "CAMK2"
+   ],
+   "column_ids": [
+    0,
+    0,
+    0,
+    0,
+    0
+   ],
+   "prior_flags": [
+    true,
+    true,
+    true,
+    true,
+    true
+   ],
+   "target": [
+    0.0,
+    0.0,
+    20.016212468074126,
+    0.0,
+    0.0
+   ],
+   "observed_mask": [
+    false,
+    false,
+    true,
+    false,
+    false
+   ]
+  },
+  {
+   "site_index": 48,
+   "site_key": "ZFP516_S920",
+   "candidates": [
+    "CDK5",
+    "MAPK8",
+    "CDKL5",
+    "CDK2",
+    "CDK1"
+   ],
+   "column_ids": [
+    0,
+    2,
+    0,
+    3,
+    3
+   ],
+   "prior_flags": [
+    true,
+    true,
+    true,
+    true,
+    true
+   ],
+   "target": [
+    0.0,
+    29.88487291111268,
+    28.597176623749252,
+    0.0,
+    29.96063970637387
+   ],
+   "observed_mask": [
+    false,
+    true,
+    true,
+    false,
+    true
+   ]
+  }
+ ]
+}

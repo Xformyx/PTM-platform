@@ -1,0 +1,24 @@
+{
+ "reference": "/app/data/outputs/_diagnostics/tmm_identifiability/_pooled_summary.json",
+ "n_mismatches": 18,
+ "mismatches": [
+  "n_sites: replay=1160 published=1310",
+  "structurally_underdetermined_rate: replay=0.9525862068965517 published=0.9435114503816794",
+  "rank_one_design_rate: replay=0.5422413793103448 published=0.5435114503816794",
+  "explains_nothing_rate: replay=0.5508620689655173 published=0.5450381679389313",
+  "top1_in_ambiguity_set_rate: replay=0.8991379310344828 published=0.8900763358778626",
+  "top1_from_prior_rate: replay=0.9413793103448276 published=0.9251908396946565",
+  "equal_weight_fallback_rate: replay=0.46293103448275863 published=0.4618320610687023",
+  "verdicts.equal_weight_fallback: replay=537 published=605",
+  "verdicts.non_identifiable: replay=598 published=671",
+  "verdicts.identifiable: replay=8 published=15",
+  "verdicts.weakly_identifiable: replay=17 published=19",
+  "attribution.n_sites: replay=1160 published=1310",
+  "attribution.per_kinase_ratios_published: replay=7216 published=7893",
+  "attribution.estimable_group_shares: replay=891 published=1012",
+  "attribution.n_supported: replay=623 published=705",
+  "attribution.reduced_verdicts.non_identifiable: replay=190 published=212",
+  "attribution.reduced_verdicts.identifiable: replay=169 published=191",
+  "attribution.reduced_verdicts.weakly_identifiable: replay=264 published=302"
+ ]
+}

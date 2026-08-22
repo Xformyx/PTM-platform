@@ -16,6 +16,16 @@ Design constraints inherited from the integration review:
   gap-aware smoothness penalty, so a shuffled time order is not equivalent.
 * Self-supervision is masked reconstruction: entries hidden from the input must
   still be predicted, and a disjoint held-out set is never trained on.
+
+Two optional method terms hook into the latent gradient and are **off by default**,
+so every published arm number and gate value is the term-free fit:
+
+* the C2 coverage adversary (`docs/c2_prereg_v1.md` §3), whose gradient is
+  *subtracted* because it is adversarial, and
+* the C3 comparability constraint (`docs/c3_prereg_v1.md` §6.2·§6.3), whose gradient
+  is *added* because the encoder minimises it.
+
+Enabling either is a method change and must be requested explicitly.
 """
 
 from __future__ import annotations
@@ -27,6 +37,22 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 import numpy as np
 
+from ptm_shared.representation.comparability import comparability_matrix
+from ptm_shared.representation.comparability_constraint import (
+    CONSTRAINT_NEIGHBORS,
+    CONSTRAINT_TEMPERATURE,
+    MODE_CONSTRAINED,
+    ComparabilityContrastive,
+)
+from ptm_shared.representation.coverage_adversary import (
+    ADVERSARY_HIDDEN_DIM,
+    ADVERSARY_MODE_BEST_RESPONSE,
+    ADVERSARY_RFF_DIM,
+    ADVERSARY_SEED,
+    CoverageAdversary,
+    assess_convergence,
+    coverage_target,
+)
 from ptm_shared.representation.feature_contract import MultiViewTemporalInput
 from ptm_shared.representation.layers import CONTRACT_VERSION, LAYER_L4
 
@@ -49,6 +75,27 @@ DEFAULT_ENCODER_CONFIG: Dict[str, Any] = {
     "use_protein_context": True,
     "use_track1": True,
     "standardize_inputs": True,
+    # C2 coverage adversary (docs/c2_prereg_v1.md §3).  Disabled by default so that
+    # every existing arm, gate number, and regression test keeps its published value:
+    # enabling it is a method change and must be requested explicitly.
+    "use_coverage_adversary": False,
+    "adversary_lambda": 0.0,
+    "adversary_hidden_dim": ADVERSARY_HIDDEN_DIM,
+    "adversary_rff_dim": ADVERSARY_RFF_DIM,
+    "adversary_seed": ADVERSARY_SEED,
+    "adversary_mode": ADVERSARY_MODE_BEST_RESPONSE,
+    # C3 비교가능성 제약 대조 항 (docs/c3_prereg_v1.md §6.2·§6.3).  adversary 와 같은 이유로
+    # 기본값이 꺼짐이다 — 켜는 것은 방법 변경이고 명시적으로 요청되어야 한다. 꺼진 상태에서
+    # 기존 arm·gate 수치·회귀 테스트는 전부 값을 유지한다.
+    "use_comparability_constraint": False,
+    "comparability_lambda": 0.0,
+    "comparability_mode": MODE_CONSTRAINED,
+    "comparability_neighbors": CONSTRAINT_NEIGHBORS,
+    "comparability_temperature": CONSTRAINT_TEMPERATURE,
+    # `O` 를 만드는 관측 마스크. None 이면 target.observed 를 쓴다.  E9 는 rep≥2 계층 마스크를
+    # 넘긴다 (docs/c3_prereg_v1.md §3.1 경로 (a)).
+    "comparability_mask": None,
+    "comparability_t_min": 4,
 }
 
 
@@ -72,6 +119,22 @@ def _merged_config(config: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
     merged["use_protein_context"] = bool(merged["use_protein_context"])
     merged["use_track1"] = bool(merged["use_track1"])
     merged["standardize_inputs"] = bool(merged["standardize_inputs"])
+    merged["use_coverage_adversary"] = bool(merged["use_coverage_adversary"])
+    # λ 는 음수를 허용하지 않는다. 음수는 인코더가 결측률을 **더 잘** 인코딩하도록 학습시키는
+    # 것이고, 그것은 §3.1 이 정의한 방법이 아니다 (격자 §7.1 은 0 이상 8 점).
+    merged["adversary_lambda"] = max(0.0, float(merged["adversary_lambda"]))
+    merged["adversary_hidden_dim"] = max(1, int(merged["adversary_hidden_dim"]))
+    merged["adversary_rff_dim"] = max(2, int(merged["adversary_rff_dim"]))
+    merged["adversary_seed"] = int(merged["adversary_seed"])
+    merged["adversary_mode"] = str(merged["adversary_mode"])
+    merged["use_comparability_constraint"] = bool(merged["use_comparability_constraint"])
+    # λ 는 음수를 허용하지 않는다. 음수는 관측상 가까운 쌍을 **밀어내도록** 학습시키는 것이고,
+    # §6.3 이 정의한 항이 아니다.
+    merged["comparability_lambda"] = max(0.0, float(merged["comparability_lambda"]))
+    merged["comparability_mode"] = str(merged["comparability_mode"])
+    merged["comparability_neighbors"] = max(1, int(merged["comparability_neighbors"]))
+    merged["comparability_temperature"] = max(1e-6, float(merged["comparability_temperature"]))
+    merged["comparability_t_min"] = max(1, int(merged["comparability_t_min"]))
     return merged
 
 
@@ -204,13 +267,25 @@ def fit_masked_temporal_encoder(
     view_names, view_values, view_masks = _view_stack(multiview, effective)
     n_views = len(view_names)
 
+    # The comparability mask is an array, so it cannot go into the config digest as a
+    # value: ``default=str`` would truncate it and two different masks could hash the
+    # same.  Record its own digest instead, which is what a methods section can cite.
+    recorded_config = dict(effective)
+    supplied_mask = recorded_config.pop("comparability_mask", None)
+    if supplied_mask is not None:
+        recorded_config["comparability_mask_sha256"] = hashlib.sha256(
+            np.ascontiguousarray(np.asarray(supplied_mask, dtype=bool)).tobytes()
+        ).hexdigest()
+
     provenance: Dict[str, Any] = {
         "contract_version": CONTRACT_VERSION,
         "layer": LAYER_L4,
         "encoder_version": ENCODER_VERSION,
-        "config": effective,
+        "config": recorded_config,
         "config_sha256": hashlib.sha256(
-            json.dumps(effective, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+            json.dumps(
+                recorded_config, sort_keys=True, separators=(",", ":"), default=str
+            ).encode("utf-8")
         ).hexdigest(),
         "views": view_names,
         "primary_target": multiview.target.name,
@@ -323,6 +398,43 @@ def fit_masked_temporal_encoder(
     learning_rate = effective["learning_rate"]
     step = 0
 
+    # Coverage adversary (docs/c2_prereg_v1.md §3).  The target is read only from the
+    # observation matrix of the input this call was given, so the benchmark's `induced`
+    # array never reaches the training path -- see §3.1 and the test that enforces it.
+    adversary: Optional[CoverageAdversary] = None
+    adversary_lambda = effective["adversary_lambda"]
+    if effective["use_coverage_adversary"]:
+        adversary = CoverageAdversary(
+            latent_dim,
+            coverage_target(multiview.target.observed),
+            seed=effective["adversary_seed"],
+            hidden_dim=effective["adversary_hidden_dim"],
+            rff_dim=effective["adversary_rff_dim"],
+            learning_rate=learning_rate,
+            mode=effective["adversary_mode"],
+        )
+
+    # Comparability constraint (docs/c3_prereg_v1.md §6.2·§6.3).  Positives come from the
+    # observed trajectory distance, never from the embedding, so the term cannot reinforce
+    # whatever geometry the encoder happens to start with.
+    constraint: Optional[ComparabilityContrastive] = None
+    comparability_lambda = effective["comparability_lambda"]
+    if effective["use_comparability_constraint"]:
+        stratum_mask = supplied_mask
+        if stratum_mask is None:
+            stratum_mask = multiview.target.observed
+        comparable = None
+        if effective["comparability_mode"] == MODE_CONSTRAINED:
+            comparable = comparability_matrix(stratum_mask, effective["comparability_t_min"])
+        constraint = ComparabilityContrastive(
+            multiview.target.values,
+            multiview.target.observed,
+            comparability=comparable,
+            mode=effective["comparability_mode"],
+            n_positives=effective["comparability_neighbors"],
+            temperature=effective["comparability_temperature"],
+        )
+
     for epoch in range(effective["epochs"]):
         # Mask-aware self-supervision: hide a random subset of visible Track 2
         # entries from the input while still requiring their reconstruction.
@@ -367,6 +479,30 @@ def fit_masked_temporal_encoder(
         grad_W3 = latent.T @ grad_pre3
         grad_b3 = grad_pre3.sum(axis=0)
         grad_latent = grad_pre3 @ params["W3"].T
+
+        # Gradient reversal: the adversary descends its own loss while the encoder
+        # ascends it.  At λ = 0 the added term is exactly zero, so a λ = 0 run is
+        # bit-identical to an adversary-free run -- that is the §7.1 control.
+        adversary_loss: Optional[float] = None
+        adversary_detail: Dict[str, float] = {}
+        if adversary is not None:
+            adversary_loss, adversary_detail, adversary_grad, adversary_gradients = (
+                adversary.loss_and_latent_gradient(latent)
+            )
+            grad_latent = grad_latent - adversary_lambda * adversary_grad
+            adversary.apply_update(adversary_gradients)
+
+        # The constraint term is minimised, so its gradient is added.  The adversary's is
+        # subtracted because only the adversary uses gradient reversal.  At λ = 0 the added
+        # term is exactly zero, which is the §6.2 baseline-0 control.
+        constraint_loss: Optional[float] = None
+        constraint_detail: Dict[str, float] = {}
+        if constraint is not None:
+            constraint_loss, constraint_detail, constraint_grad = (
+                constraint.loss_and_latent_gradient(latent)
+            )
+            grad_latent = grad_latent + comparability_lambda * constraint_grad
+
         grad_W2 = hidden1.T @ grad_latent
         grad_b2 = grad_latent.sum(axis=0)
         grad_hidden1 = grad_latent @ params["W2"].T
@@ -394,13 +530,17 @@ def fit_masked_temporal_encoder(
             params[key] -= learning_rate * corrected1 / (np.sqrt(corrected2) + 1e-8)
 
         if epoch % 10 == 0 or epoch == effective["epochs"] - 1:
-            history.append(
-                {
-                    "epoch": int(epoch),
-                    "reconstruction_loss": round(float(recon_loss), 8),
-                    "smoothness_loss": round(float(smooth_loss), 8),
-                }
-            )
+            entry = {
+                "epoch": int(epoch),
+                "reconstruction_loss": round(float(recon_loss), 8),
+                "smoothness_loss": round(float(smooth_loss), 8),
+            }
+            if adversary_loss is not None:
+                entry["adversary_loss"] = round(float(adversary_loss), 8)
+                entry.update(adversary_detail)
+            if constraint_loss is not None:
+                entry.update(constraint_detail)
+            history.append(entry)
 
     design = _standardize(
         _build_design_matrix(
@@ -457,6 +597,19 @@ def fit_masked_temporal_encoder(
             "self_supervision": "masked_reconstruction_with_disjoint_holdout",
         }
     )
+    if adversary is not None:
+        provenance["coverage_adversary"] = {
+            **adversary.provenance(),
+            "lambda": adversary_lambda,
+            "convergence": assess_convergence(history),
+        }
+    if constraint is not None:
+        provenance["comparability_constraint"] = {
+            **constraint.provenance(),
+            "lambda": comparability_lambda,
+            "t_min": effective["comparability_t_min"],
+            "mask_source": "supplied_stratum" if supplied_mask is not None else "target_observed",
+        }
 
     return EncoderResult(
         embedding=latent,

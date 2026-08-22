@@ -1,0 +1,74 @@
+{
+ "schema": "TMM_AUDIT_FIXTURE_V1",
+ "frozen_at": "2026-08-21",
+ "source": "live MySQL orders + data/outputs TSV (neither is version controlled)",
+ "audit_published_at": "2026-08-18",
+ "assumptions": {
+  "relative_noise": 0.1,
+  "n_bootstrap": 32,
+  "seed": 0,
+  "max_sites": 4000
+ },
+ "determinism": {
+  "numpy": "2.4.6",
+  "nnls_path": "scipy.optimize.nnls",
+  "dtype": "float64",
+  "scipy": "1.17.1"
+ },
+ "orders": [
+  {
+   "order_id": 28,
+   "order_code": "Irisin_TimeCourse_Phospho_qwen3.5_27b",
+   "file": "order_028_Irisin_TimeCourse_Phospho_qwen3.5_27b.json",
+   "sha256": "6935b02a452ff9c67324c041c81300047dcf5a785939b5135e157e8e081b6fa9",
+   "n_sites": 52,
+   "n_distinct_columns": 10,
+   "production_ratio_max_deviation": 3.6021234469996166e-05
+  },
+  {
+   "order_id": 33,
+   "order_code": "Korea_timecouse_drugrepositioning",
+   "file": "order_033_Korea_timecouse_drugrepositioning.json",
+   "sha256": "b8f2aab766403edc38c18010bfcdfb6875188d2173d44a40fac50da6acd592ea",
+   "n_sites": 42,
+   "n_distinct_columns": 8,
+   "production_ratio_max_deviation": 4.8940483871495744e-05
+  },
+  {
+   "order_id": 36,
+   "order_code": "KRIBB_SCS_Phosphorylation",
+   "file": "order_036_KRIBB_SCS_Phosphorylation.json",
+   "sha256": "656f20679da4a73205606297b637e063b685547dfa96846eda68c4d787f1e850",
+   "n_sites": 907,
+   "n_distinct_columns": 9,
+   "production_ratio_max_deviation": 4.961349380694369e-05
+  },
+  {
+   "order_id": 45,
+   "order_code": "Microgravity_Muscle_Atrophy_Phosphoproteomics",
+   "file": "order_045_Microgravity_Muscle_Atrophy_Phosphoproteomics.json",
+   "sha256": "06cab44838762c0c1bc738744b25f31a2db2d34489ee42988e8cbb53334c6235",
+   "n_sites": 24,
+   "n_distinct_columns": 6,
+   "production_ratio_max_deviation": 4.96693859722841e-05
+  },
+  {
+   "order_id": 47,
+   "order_code": "WithoutCu-AmyloidFibril-microglia-phosphorylation-1",
+   "file": "order_047_WithoutCu-AmyloidFibril-microglia-phosphorylation-1.json",
+   "sha256": "c538402f9113dcdc54997ee9ce653f5b71201679d04d95f35f6effb480785131",
+   "n_sites": 86,
+   "n_distinct_columns": 4,
+   "production_ratio_max_deviation": 0.0
+  },
+  {
+   "order_id": 48,
+   "order_code": "Cu-Amyloid_fibril-microglia-phosphorylation",
+   "file": "order_048_Cu-Amyloid_fibril-microglia-phosphorylation.json",
+   "sha256": "7dfbb5f81f1b54e1a3f8ea6254494c14ebd071ca84458e68fc699bcc383a6636",
+   "n_sites": 49,
+   "n_distinct_columns": 7,
+   "production_ratio_max_deviation": 4.920501633742802e-05
+  }
+ ]
+}

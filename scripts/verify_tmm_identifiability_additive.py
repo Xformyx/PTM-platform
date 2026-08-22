@@ -32,8 +32,24 @@ NEW_DETAIL_KEYS = {
     "group_ratio",
     "ambiguity_group_members",
     "unsupported_reason",
+    # 아래 셋은 guard 정책이 켜진 실행에서만 나타난다.  기본값 `off` 로 비교할 때는
+    # 등장하지 않으므로 이 허용 목록이 검증을 약화시키지 않는다.
+    # docs/chapter2_audit_protocol_v1.md §5 (2026-08-21), §5.5 (2026-08-22).
+    "guard_withheld",
+    "guard_reason",
+    "guard_scoring_excluded",
 }
 NEW_KINASE_KEYS = {"tmm_identifiability"}
+NEW_NESTED_KEYS = {
+    # tmm_identifiability 안에 나중에 추가된 키.  값이 아니라 존재만 허용한다.
+    # docs/chapter2_audit_protocol_v1.md §5 에서 2026-08-21 선언
+    # (`n_guard_scoring_excluded` 는 §5.5 에서 2026-08-22 선언).
+    "tmm_identifiability": {
+        "guard_policy",
+        "n_guard_withheld",
+        "n_guard_scoring_excluded",
+    },
+}
 BASELINE_SNAPSHOT = "/tmp/baseline_tks.py"
 
 
@@ -136,8 +152,23 @@ def compare(baseline: Mapping[str, Any], current: Mapping[str, Any]) -> List[str
         for key in before:
             if key == "contribution_details":
                 continue
-            if before[key] != after.get(key):
-                problems.append(f"{canonical}.{key}: {before[key]!r} -> {after.get(key)!r}")
+            old_value, new_value = before[key], after.get(key)
+            if isinstance(old_value, Mapping) and isinstance(new_value, Mapping):
+                # 중첩 dict 는 키별로 비교한다.  통째로 비교하면 선언된 키 추가가
+                # 값 변경처럼 보여서 additive 검증이 거짓 실패한다.
+                allowed = NEW_NESTED_KEYS.get(key, set())
+                unexpected = (set(new_value) - set(old_value)) - allowed
+                if unexpected:
+                    problems.append(f"{canonical}.{key}: unexpected new keys {sorted(unexpected)}")
+                for nested in old_value:
+                    if old_value[nested] != new_value.get(nested):
+                        problems.append(
+                            f"{canonical}.{key}.{nested}:"
+                            f" {old_value[nested]!r} -> {new_value.get(nested)!r}"
+                        )
+                continue
+            if old_value != new_value:
+                problems.append(f"{canonical}.{key}: {old_value!r} -> {new_value!r}")
         before_details = before.get("contribution_details") or []
         after_details = after.get("contribution_details") or []
         if len(before_details) != len(after_details):

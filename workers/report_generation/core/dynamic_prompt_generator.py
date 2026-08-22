@@ -843,6 +843,89 @@ def build_ptm_data_summary(parsed_ptms: List[dict], ptm_type: str = "phosphoryla
     return "\n".join(lines)
 
 
+def build_substrate_dynamics_summary(
+    parsed_ptms: List[dict],
+    *,
+    max_sites: int = 500,
+) -> str:
+    """Build substrate-level temporal dynamics summary using the P1 contract.
+
+    Extracts the trajectory from each PTM entry, classifies each site using
+    ``compute_site_kinetic_profile``, and returns a concise Markdown block
+    describing the population-level pattern distribution.
+
+    구현 대상: Substrate-level Temporal Dynamics Deepening Plan v1 §4 (P1), P4 report integration.
+    해석 한계: pattern label은 궤적 형태 기술이며 kinase 귀속이나 인과관계가 아니다.
+    """
+    if not parsed_ptms:
+        return ""
+
+    try:
+        from ptm_shared.substrate_temporal_dynamics import (
+            SiteKineticConfig,
+            compute_site_kinetic_profile,
+        )
+    except ImportError:
+        return ""
+
+    cfg = SiteKineticConfig(run_loto=False, run_threshold_sensitivity=False)
+
+    pattern_counts: Counter = Counter()
+    amplitudes: List[float] = []
+    n_missingness_warning = 0
+    n_processed = 0
+
+    for ptm in parsed_ptms[:max_sites]:
+        traj = ptm.get("trajectory") or {}
+        tps_raw = traj.get("timepoints") or []
+        if len(tps_raw) < 3:
+            continue
+
+        labels = [tp.get("timeLabel", "") for tp in tps_raw]
+        values = [
+            tp.get("ptmLog2FC") if tp.get("ptmLog2FC") is not None
+            else tp.get("ptm_relative_log2fc")
+            for tp in tps_raw
+        ]
+        if all(v is None for v in values):
+            continue
+
+        try:
+            profile = compute_site_kinetic_profile(labels, values, config=cfg)
+        except Exception:
+            continue
+
+        pattern_counts[profile.primary_pattern] += 1
+        if profile.amplitude is not None:
+            amplitudes.append(profile.amplitude)
+        if profile.missingness_warning:
+            n_missingness_warning += 1
+        n_processed += 1
+
+    if n_processed == 0:
+        return ""
+
+    top_patterns = pattern_counts.most_common(5)
+    mean_amp = sum(amplitudes) / len(amplitudes) if amplitudes else None
+    n_quality = sum(v for k, v in pattern_counts.items() if k != "flat_or_low_evidence")
+
+    lines = [
+        "## SUBSTRATE TEMPORAL DYNAMICS SUMMARY (P1 Contract v1)",
+        f"- **Sites classified**: {n_processed}",
+        f"- **Quality-passed sites**: {n_quality} ({n_quality / n_processed * 100:.1f}%)",
+        f"- **Mean peak amplitude (|Log2FC|)**: {mean_amp:.2f}" if mean_amp else "",
+        f"- **Missingness warnings**: {n_missingness_warning}",
+        "",
+        "**Pattern distribution (top 5):**",
+    ]
+    for pattern, count in top_patterns:
+        pct = count / n_processed * 100
+        lines.append(f"  - `{pattern}`: {count} ({pct:.1f}%)")
+    lines.append("")
+
+    return "\n".join(line for line in lines if line is not None)
+
+
 def build_nonptm_temporal_analysis(
     network_results: dict, timepoints: list, ptm_type: str = "phosphorylation"
 ) -> str:

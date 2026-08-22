@@ -1,0 +1,633 @@
+{
+  "audited_order_crossref": {
+    "fixture_dir": "workers/tests/fixtures/tmm_audit_v1",
+    "n_distinct_units_spanned": 5,
+    "n_orders": 6,
+    "orders": [
+      {
+        "directory": "Irisin_TimeCourse_Phospho_qwen3.5_27b",
+        "directory_in_scope": true,
+        "order_id": 28,
+        "unit": 7
+      },
+      {
+        "directory": "Korea_timecouse_drugrepositioning",
+        "directory_in_scope": true,
+        "order_id": 33,
+        "unit": 9
+      },
+      {
+        "directory": "KRIBB_SCS_Phosphorylation",
+        "directory_in_scope": true,
+        "order_id": 36,
+        "unit": 8
+      },
+      {
+        "directory": "Microgravity_Muscle_Atrophy_Phosphoproteomics",
+        "directory_in_scope": true,
+        "order_id": 45,
+        "unit": 9
+      },
+      {
+        "directory": "WithoutCu-AmyloidFibril-microglia-phosphorylation-1",
+        "directory_in_scope": true,
+        "order_id": 47,
+        "unit": 11
+      },
+      {
+        "directory": "Cu-Amyloid_fibril-microglia-phosphorylation",
+        "directory_in_scope": true,
+        "order_id": 48,
+        "unit": 2
+      }
+    ],
+    "units_spanned": [
+      2,
+      7,
+      8,
+      9,
+      11
+    ]
+  },
+  "components": [
+    {
+      "acquisition_prefixes": [
+        "C:\\Users\\admin\\Desktop\\BIOEN\\DIA_mzML"
+      ],
+      "identical_run_sets": true,
+      "members": [
+        "BIOEN_phosphorylation",
+        "BioEN",
+        "BioEn_1"
+      ],
+      "n_directories": 3,
+      "n_raw_runs_union": 6,
+      "primary_matrix_byte_identical": true,
+      "relation": "byte_identical_rerun",
+      "run_set_sizes": {
+        "BIOEN_phosphorylation": 6,
+        "BioEN": 6,
+        "BioEn_1": 6
+      }
+    },
+    {
+      "acquisition_prefixes": [
+        "D:\\20260630_Amyloid_beta_Fibril_Cu"
+      ],
+      "identical_run_sets": true,
+      "members": [
+        "Cu-Amyloid_fibril-microglia-phosphorylation"
+      ],
+      "n_directories": 1,
+      "n_raw_runs_union": 18,
+      "primary_matrix_byte_identical": true,
+      "relation": "single_directory",
+      "run_set_sizes": {
+        "Cu-Amyloid_fibril-microglia-phosphorylation": 18
+      }
+    },
+    {
+      "acquisition_prefixes": [
+        "C:\\Users\\admin\\Desktop\\KAIST_Hanmi_260406\\Soleus_primary"
+      ],
+      "identical_run_sets": true,
+      "members": [
+        "HM_Serum_free_phosphorylation"
+      ],
+      "n_directories": 1,
+      "n_raw_runs_union": 12,
+      "primary_matrix_byte_identical": true,
+      "relation": "single_directory",
+      "run_set_sizes": {
+        "HM_Serum_free_phosphorylation": 12
+      }
+    },
+    {
+      "acquisition_prefixes": [
+        "C:\\Users\\admin\\Desktop\\KAIST_Hanmi_260406\\Soleus_primary"
+      ],
+      "identical_run_sets": true,
+      "members": [
+        "HM_palmitate_phosphorylation"
+      ],
+      "n_directories": 1,
+      "n_raw_runs_union": 12,
+      "primary_matrix_byte_identical": true,
+      "relation": "single_directory",
+      "run_set_sizes": {
+        "HM_palmitate_phosphorylation": 12
+      }
+    },
+    {
+      "acquisition_prefixes": [
+        "C:\\Users\\admin\\Desktop\\KAIST_Hanmi_260406\\Soleus_primary"
+      ],
+      "identical_run_sets": true,
+      "members": [
+        "HM_serum_phosphorylation"
+      ],
+      "n_directories": 1,
+      "n_raw_runs_union": 12,
+      "primary_matrix_byte_identical": true,
+      "relation": "single_directory",
+      "run_set_sizes": {
+        "HM_serum_phosphorylation": 12
+      }
+    },
+    {
+      "acquisition_prefixes": [
+        "D:\\20260814_Rat_Insulin"
+      ],
+      "identical_run_sets": true,
+      "members": [
+        "Insulin_Signaling_Phosphoproteomics_HIRc-B"
+      ],
+      "n_directories": 1,
+      "n_raw_runs_union": 21,
+      "primary_matrix_byte_identical": true,
+      "relation": "single_directory",
+      "run_set_sizes": {
+        "Insulin_Signaling_Phosphoproteomics_HIRc-B": 21
+      }
+    },
+    {
+      "acquisition_prefixes": [
+        "C:\\Users\\admin\\Desktop\\KAIST_Sion_irisin"
+      ],
+      "identical_run_sets": true,
+      "members": [
+        "Irisin_TimeCourse_Phospho",
+        "Irisin_TimeCourse_Phospho_qwen3.5_27b",
+        "Irisin_Ubiquitylation_Report",
+        "Irisin_Ubiquitylation_Report_1",
+        "PTM-2026-0001"
+      ],
+      "n_directories": 5,
+      "n_raw_runs_union": 29,
+      "primary_matrix_byte_identical": false,
+      "relation": "same_acquisition_reprocessed",
+      "run_set_sizes": {
+        "Irisin_TimeCourse_Phospho": 29,
+        "Irisin_TimeCourse_Phospho_qwen3.5_27b": 29,
+        "Irisin_Ubiquitylation_Report": 29,
+        "Irisin_Ubiquitylation_Report_1": 29,
+        "PTM-2026-0001": 29
+      }
+    },
+    {
+      "acquisition_prefixes": [
+        "C:\\Users\\admin\\Desktop\\KRIBB_HSC"
+      ],
+      "identical_run_sets": true,
+      "members": [
+        "KRIBB_HSC_ubiquitylation",
+        "KRIBB_SCS_Phosphorylation"
+      ],
+      "n_directories": 2,
+      "n_raw_runs_union": 15,
+      "primary_matrix_byte_identical": false,
+      "relation": "same_acquisition_reprocessed",
+      "run_set_sizes": {
+        "KRIBB_HSC_ubiquitylation": 15,
+        "KRIBB_SCS_Phosphorylation": 15
+      }
+    },
+    {
+      "acquisition_prefixes": [
+        "C:\\Users\\admin\\Desktop\\Kim HyunSu_MicroGravidy_Time_Course"
+      ],
+      "identical_run_sets": true,
+      "members": [
+        "Korea_Ubiquitylation_Timecourse",
+        "Korea_timecouse_drugrepositioning",
+        "Microgravity_Muscle_Atrophy_Phosphoproteomics"
+      ],
+      "n_directories": 3,
+      "n_raw_runs_union": 12,
+      "primary_matrix_byte_identical": false,
+      "relation": "same_acquisition_reprocessed",
+      "run_set_sizes": {
+        "Korea_Ubiquitylation_Timecourse": 12,
+        "Korea_timecouse_drugrepositioning": 12,
+        "Microgravity_Muscle_Atrophy_Phosphoproteomics": 12
+      }
+    },
+    {
+      "acquisition_prefixes": [
+        "C:\\Users\\admin\\Desktop\\UNIVERSE_Lee_YoungHo"
+      ],
+      "identical_run_sets": true,
+      "members": [
+        "Universe_AF"
+      ],
+      "n_directories": 1,
+      "n_raw_runs_union": 9,
+      "primary_matrix_byte_identical": true,
+      "relation": "single_directory",
+      "run_set_sizes": {
+        "Universe_AF": 9
+      }
+    },
+    {
+      "acquisition_prefixes": [
+        "D:\\20260630_Amyloid_beta_Fibril_Cu"
+      ],
+      "identical_run_sets": true,
+      "members": [
+        "WithoutCu-AmyloidFibril-microglia-phosphorylation-1"
+      ],
+      "n_directories": 1,
+      "n_raw_runs_union": 18,
+      "primary_matrix_byte_identical": true,
+      "relation": "single_directory",
+      "run_set_sizes": {
+        "WithoutCu-AmyloidFibril-microglia-phosphorylation-1": 18
+      }
+    }
+  ],
+  "inputs_dir": "data/inputs",
+  "integrity": {
+    "directories_with_duplicate_run_columns": [],
+    "directories_with_multiple_precursor_matrices": {},
+    "pg_run_set_mismatch": [],
+    "run_column_anomalies": {}
+  },
+  "n_directories_in_scope": 20,
+  "n_directories_scanned": 21,
+  "n_distinct_experimental_units": 11,
+  "n_distinct_raw_runs": 164,
+  "n_raw_runs_summed_over_directories": 331,
+  "out_of_scope": [
+    {
+      "directory": "rag",
+      "reason": "no_quantitative_matrix"
+    }
+  ],
+  "per_directory": [
+    {
+      "acquisition_prefixes": [
+        "C:\\Users\\admin\\Desktop\\BIOEN\\DIA_mzML"
+      ],
+      "directory": "BIOEN_phosphorylation",
+      "matrix_files": [
+        "report.pg_matrix.tsv",
+        "report.pr_matrix.tsv"
+      ],
+      "n_runs": 6,
+      "primary_matrix": "report.pr_matrix.tsv",
+      "sha256": {
+        "report.pg_matrix.tsv": "ec74cb1a30294a2e1a977c15e2a5600bc9aa698e106da4ff652ea501d5434252",
+        "report.pr_matrix.tsv": "919acac76b3c9270564ead0bb4b156cd1d519475b2aaef18899856aa132d51d1"
+      }
+    },
+    {
+      "acquisition_prefixes": [
+        "C:\\Users\\admin\\Desktop\\BIOEN\\DIA_mzML"
+      ],
+      "directory": "BioEN",
+      "matrix_files": [
+        "report.pg_matrix.tsv",
+        "report.pr_matrix.tsv"
+      ],
+      "n_runs": 6,
+      "primary_matrix": "report.pr_matrix.tsv",
+      "sha256": {
+        "report.pg_matrix.tsv": "ec74cb1a30294a2e1a977c15e2a5600bc9aa698e106da4ff652ea501d5434252",
+        "report.pr_matrix.tsv": "919acac76b3c9270564ead0bb4b156cd1d519475b2aaef18899856aa132d51d1"
+      }
+    },
+    {
+      "acquisition_prefixes": [
+        "C:\\Users\\admin\\Desktop\\BIOEN\\DIA_mzML"
+      ],
+      "directory": "BioEn_1",
+      "matrix_files": [
+        "report.pg_matrix.tsv",
+        "report.pr_matrix.tsv"
+      ],
+      "n_runs": 6,
+      "primary_matrix": "report.pr_matrix.tsv",
+      "sha256": {
+        "report.pg_matrix.tsv": "ec74cb1a30294a2e1a977c15e2a5600bc9aa698e106da4ff652ea501d5434252",
+        "report.pr_matrix.tsv": "919acac76b3c9270564ead0bb4b156cd1d519475b2aaef18899856aa132d51d1"
+      }
+    },
+    {
+      "acquisition_prefixes": [
+        "D:\\20260630_Amyloid_beta_Fibril_Cu"
+      ],
+      "directory": "Cu-Amyloid_fibril-microglia-phosphorylation",
+      "matrix_files": [
+        "report.pg_matrix.tsv",
+        "report.pr_matrix.tsv"
+      ],
+      "n_runs": 18,
+      "primary_matrix": "report.pr_matrix.tsv",
+      "sha256": {
+        "report.pg_matrix.tsv": "0b07bb1476f9877dacf33c83ab77170e926ee9c16e53d6fd7b20bb7bd1337822",
+        "report.pr_matrix.tsv": "eb4f768678dbddd956b2ce37fc6d05612557feabed5e4780d310794e7ca0f581"
+      }
+    },
+    {
+      "acquisition_prefixes": [
+        "C:\\Users\\admin\\Desktop\\KAIST_Hanmi_260406\\Soleus_primary"
+      ],
+      "directory": "HM_Serum_free_phosphorylation",
+      "matrix_files": [
+        "report.pg_matrix.tsv",
+        "report.pr_matrix.tsv"
+      ],
+      "n_runs": 12,
+      "primary_matrix": "report.pr_matrix.tsv",
+      "sha256": {
+        "report.pg_matrix.tsv": "c35116aad34229ca514d77bd8fa8a5a9396d6b95f188890279e8cfb776954501",
+        "report.pr_matrix.tsv": "34147c4fe0d78bb77017506830676f5f633781814bb5e71ef3fe522d31fd60b6"
+      }
+    },
+    {
+      "acquisition_prefixes": [
+        "C:\\Users\\admin\\Desktop\\KAIST_Hanmi_260406\\Soleus_primary"
+      ],
+      "directory": "HM_palmitate_phosphorylation",
+      "matrix_files": [
+        "report.pg_matrix.tsv",
+        "report.pr_matrix.tsv"
+      ],
+      "n_runs": 12,
+      "primary_matrix": "report.pr_matrix.tsv",
+      "sha256": {
+        "report.pg_matrix.tsv": "ca38404f41f8b87f88351961dcb018d80125fa0188958f513547d4e126a639bb",
+        "report.pr_matrix.tsv": "40449bff1ec811138d290062c9d535a2d5d3c320fac923dd1a9bd01646a28a86"
+      }
+    },
+    {
+      "acquisition_prefixes": [
+        "C:\\Users\\admin\\Desktop\\KAIST_Hanmi_260406\\Soleus_primary"
+      ],
+      "directory": "HM_serum_phosphorylation",
+      "matrix_files": [
+        "report.pg_matrix.tsv",
+        "report.pr_matrix.tsv"
+      ],
+      "n_runs": 12,
+      "primary_matrix": "report.pr_matrix.tsv",
+      "sha256": {
+        "report.pg_matrix.tsv": "9b6f2de59c441bcf274433d4273c1c542bba1b4eef2d1e14a28457f95064922e",
+        "report.pr_matrix.tsv": "30a180b1493ed2aee1a603a7970f3207aa991764e0ce6a952acf65c0911a02fd"
+      }
+    },
+    {
+      "acquisition_prefixes": [
+        "D:\\20260814_Rat_Insulin"
+      ],
+      "directory": "Insulin_Signaling_Phosphoproteomics_HIRc-B",
+      "matrix_files": [
+        "report.pg_matrix.tsv",
+        "report.pr_matrix.tsv"
+      ],
+      "n_runs": 21,
+      "primary_matrix": "report.pr_matrix.tsv",
+      "sha256": {
+        "report.pg_matrix.tsv": "57c874a46f57608a64a779c4ef8ddecd07273cc0603aa228b8fbd662cbfca745",
+        "report.pr_matrix.tsv": "7160e863ddaf5236d22c5dc95fd3b066355341e8b2b130f11ef12e5a46a52ba4"
+      }
+    },
+    {
+      "acquisition_prefixes": [
+        "C:\\Users\\admin\\Desktop\\KAIST_Sion_irisin"
+      ],
+      "directory": "Irisin_TimeCourse_Phospho",
+      "matrix_files": [
+        "report.pg_matrix.tsv",
+        "report.pr_matrix.tsv"
+      ],
+      "n_runs": 29,
+      "primary_matrix": "report.pr_matrix.tsv",
+      "sha256": {
+        "report.pg_matrix.tsv": "9a155839031908fa9bcfb2e0d4ab8e7ef1322625a43cda6ab01eb41442310927",
+        "report.pr_matrix.tsv": "c9389fd2b3e912ff55db9189ceb9c7c6336b838cadde1d5972c0e6d3bfc3afd8"
+      }
+    },
+    {
+      "acquisition_prefixes": [
+        "C:\\Users\\admin\\Desktop\\KAIST_Sion_irisin"
+      ],
+      "directory": "Irisin_TimeCourse_Phospho_qwen3.5_27b",
+      "matrix_files": [
+        "report.pg_matrix.tsv",
+        "report.pr_matrix.tsv"
+      ],
+      "n_runs": 29,
+      "primary_matrix": "report.pr_matrix.tsv",
+      "sha256": {
+        "report.pg_matrix.tsv": "9a155839031908fa9bcfb2e0d4ab8e7ef1322625a43cda6ab01eb41442310927",
+        "report.pr_matrix.tsv": "c9389fd2b3e912ff55db9189ceb9c7c6336b838cadde1d5972c0e6d3bfc3afd8"
+      }
+    },
+    {
+      "acquisition_prefixes": [
+        "C:\\Users\\admin\\Desktop\\KAIST_Sion_irisin"
+      ],
+      "directory": "Irisin_Ubiquitylation_Report",
+      "matrix_files": [
+        "report.pg_matrix.tsv",
+        "report.pr_matrix.tsv"
+      ],
+      "n_runs": 29,
+      "primary_matrix": "report.pr_matrix.tsv",
+      "sha256": {
+        "report.pg_matrix.tsv": "bf142805e17b932445c02126c8c88499b00e9993d0795d4b5da6ad690132cb78",
+        "report.pr_matrix.tsv": "cd6e896497bf4aaca0edbb441ee39204e4c3285d189947801a4f4d13e3f53a7b"
+      }
+    },
+    {
+      "acquisition_prefixes": [
+        "C:\\Users\\admin\\Desktop\\KAIST_Sion_irisin"
+      ],
+      "directory": "Irisin_Ubiquitylation_Report_1",
+      "matrix_files": [
+        "report.pg_matrix.tsv",
+        "report.pr_matrix.tsv"
+      ],
+      "n_runs": 29,
+      "primary_matrix": "report.pr_matrix.tsv",
+      "sha256": {
+        "report.pg_matrix.tsv": "bf142805e17b932445c02126c8c88499b00e9993d0795d4b5da6ad690132cb78",
+        "report.pr_matrix.tsv": "cd6e896497bf4aaca0edbb441ee39204e4c3285d189947801a4f4d13e3f53a7b"
+      }
+    },
+    {
+      "acquisition_prefixes": [
+        "C:\\Users\\admin\\Desktop\\KRIBB_HSC"
+      ],
+      "directory": "KRIBB_HSC_ubiquitylation",
+      "matrix_files": [
+        "report.pg_matrix.tsv",
+        "report.pr_matrix.tsv"
+      ],
+      "n_runs": 15,
+      "primary_matrix": "report.pr_matrix.tsv",
+      "sha256": {
+        "report.pg_matrix.tsv": "f00b7c1f9bcc3a986e6eee73e443e71155b9f51b0d18ba10e585833f603d499a",
+        "report.pr_matrix.tsv": "01b502327febe761b99e6b80c4c77273c993ee659b2f9227680c9ea02881e5d0"
+      }
+    },
+    {
+      "acquisition_prefixes": [
+        "C:\\Users\\admin\\Desktop\\KRIBB_HSC"
+      ],
+      "directory": "KRIBB_SCS_Phosphorylation",
+      "matrix_files": [
+        "report.pg_matrix.tsv",
+        "report.pr_matrix.tsv"
+      ],
+      "n_runs": 15,
+      "primary_matrix": "report.pr_matrix.tsv",
+      "sha256": {
+        "report.pg_matrix.tsv": "88158034d57a0ca60dfb5a5ab5bdd235213623417c8fadd2b1b2e4c68c290d28",
+        "report.pr_matrix.tsv": "8939374984e637cfd25d46af844e12ae7a044edc370ccbae9a35645d523f3a76"
+      }
+    },
+    {
+      "acquisition_prefixes": [
+        "C:\\Users\\admin\\Desktop\\Kim HyunSu_MicroGravidy_Time_Course"
+      ],
+      "directory": "Korea_Ubiquitylation_Timecourse",
+      "matrix_files": [
+        "report.pg_matrix.tsv",
+        "report.pr_matrix.tsv"
+      ],
+      "n_runs": 12,
+      "primary_matrix": "report.pr_matrix.tsv",
+      "sha256": {
+        "report.pg_matrix.tsv": "2cc05f34bb9b0e4152d68ef18c282515bf17f483ef8e91f3534082fafb944da7",
+        "report.pr_matrix.tsv": "38e59f33e3fe5f3b6beea750e87153d61c739d87d47f80ea1a701fca0569ff99"
+      }
+    },
+    {
+      "acquisition_prefixes": [
+        "C:\\Users\\admin\\Desktop\\Kim HyunSu_MicroGravidy_Time_Course"
+      ],
+      "directory": "Korea_timecouse_drugrepositioning",
+      "matrix_files": [
+        "report.pg_matrix.tsv",
+        "report.pr_matrix.tsv"
+      ],
+      "n_runs": 12,
+      "primary_matrix": "report.pr_matrix.tsv",
+      "sha256": {
+        "report.pg_matrix.tsv": "8c6395dccdfea18f86d77c1a5811d36f1cd85cf60b933f6708a3a11b20e48866",
+        "report.pr_matrix.tsv": "6444a4c79e0f7bbd87f0412ad92ce13b7235ef44c66d4b8e82471b81ab4eb33e"
+      }
+    },
+    {
+      "acquisition_prefixes": [
+        "C:\\Users\\admin\\Desktop\\Kim HyunSu_MicroGravidy_Time_Course"
+      ],
+      "directory": "Microgravity_Muscle_Atrophy_Phosphoproteomics",
+      "matrix_files": [
+        "report.pg_matrix_phospho.tsv",
+        "report.pr_matrix_phospho.tsv"
+      ],
+      "n_runs": 12,
+      "primary_matrix": "report.pr_matrix_phospho.tsv",
+      "sha256": {
+        "report.pg_matrix_phospho.tsv": "8c6395dccdfea18f86d77c1a5811d36f1cd85cf60b933f6708a3a11b20e48866",
+        "report.pr_matrix_phospho.tsv": "6444a4c79e0f7bbd87f0412ad92ce13b7235ef44c66d4b8e82471b81ab4eb33e"
+      }
+    },
+    {
+      "acquisition_prefixes": [
+        "C:\\Users\\admin\\Desktop\\KAIST_Sion_irisin"
+      ],
+      "directory": "PTM-2026-0001",
+      "matrix_files": [
+        "report.pg_matrix.tsv",
+        "report.pr_matrix.tsv"
+      ],
+      "n_runs": 29,
+      "primary_matrix": "report.pr_matrix.tsv",
+      "sha256": {
+        "report.pg_matrix.tsv": "9a155839031908fa9bcfb2e0d4ab8e7ef1322625a43cda6ab01eb41442310927",
+        "report.pr_matrix.tsv": "c9389fd2b3e912ff55db9189ceb9c7c6336b838cadde1d5972c0e6d3bfc3afd8"
+      }
+    },
+    {
+      "acquisition_prefixes": [
+        "C:\\Users\\admin\\Desktop\\UNIVERSE_Lee_YoungHo"
+      ],
+      "directory": "Universe_AF",
+      "matrix_files": [
+        "report.pg_matrix.tsv",
+        "report.pr_matrix.tsv"
+      ],
+      "n_runs": 9,
+      "primary_matrix": "report.pr_matrix.tsv",
+      "sha256": {
+        "report.pg_matrix.tsv": "6e09c4453df8ad427b5d636a0f7347fa2be1b47db360fbd0c1be6fe946701776",
+        "report.pr_matrix.tsv": "b1a070b44c21a0a8d478a3a325b256ee721da0f4bddb1d56dcc354748ce11a0e"
+      }
+    },
+    {
+      "acquisition_prefixes": [
+        "D:\\20260630_Amyloid_beta_Fibril_Cu"
+      ],
+      "directory": "WithoutCu-AmyloidFibril-microglia-phosphorylation-1",
+      "matrix_files": [
+        "report.pg_matrix.tsv",
+        "report.pr_matrix.tsv"
+      ],
+      "n_runs": 18,
+      "primary_matrix": "report.pr_matrix.tsv",
+      "sha256": {
+        "report.pg_matrix.tsv": "a03981dbbc728a42604e332b03f02066456307db2c97ff51ac099051927c229e",
+        "report.pr_matrix.tsv": "85785240d781dc6bbc7ef11dad10fc52d637f34824add56a2d9da76e9575d371"
+      }
+    }
+  ],
+  "rule_declared": "2026-08-22 (측정 착수 전)",
+  "rule_source": "docs/integrated_research_design_v2.md §11.1.1",
+  "sensitivity_acquisition_prefix": {
+    "components": [
+      [
+        "BIOEN_phosphorylation",
+        "BioEN",
+        "BioEn_1"
+      ],
+      [
+        "Cu-Amyloid_fibril-microglia-phosphorylation",
+        "WithoutCu-AmyloidFibril-microglia-phosphorylation-1"
+      ],
+      [
+        "HM_Serum_free_phosphorylation",
+        "HM_palmitate_phosphorylation",
+        "HM_serum_phosphorylation"
+      ],
+      [
+        "Insulin_Signaling_Phosphoproteomics_HIRc-B"
+      ],
+      [
+        "Irisin_TimeCourse_Phospho",
+        "Irisin_TimeCourse_Phospho_qwen3.5_27b",
+        "Irisin_Ubiquitylation_Report",
+        "Irisin_Ubiquitylation_Report_1",
+        "PTM-2026-0001"
+      ],
+      [
+        "KRIBB_HSC_ubiquitylation",
+        "KRIBB_SCS_Phosphorylation"
+      ],
+      [
+        "Korea_Ubiquitylation_Timecourse",
+        "Korea_timecouse_drugrepositioning",
+        "Microgravity_Muscle_Atrophy_Phosphoproteomics"
+      ],
+      [
+        "Universe_AF"
+      ]
+    ],
+    "is_declared_rule": false,
+    "n_units_by_acquisition_prefix": 8
+  },
+  "unit_definition": "raw MS acquisition; directories sharing >=1 raw run path are one unit"
+}

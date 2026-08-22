@@ -28,9 +28,12 @@ from ptm_shared.representation.feature_contract import MultiViewTemporalInput
 from ptm_shared.representation.layers import (
     ADOPTION_GATES,
     CONTRACT_VERSION,
+    FROZEN_GATE_SETTINGS,
     PRIMARY_ARM_PREFERENCE,
     PRIMARY_SCORE_INPUTS_LOCKED,
     RepresentationVariant,
+    gate_settings_conformance,
+    gate_settings_digest,
     resolve_variant,
     select_primary_variant,
     variant_order,
@@ -45,22 +48,16 @@ from ptm_shared.representation.metrics import (
 
 DEFAULT_BENCHMARK_CONFIG: Dict[str, Any] = {
     "neighbors": 10,
-    "cluster_distance_threshold": 0.30,
-    "minimum_cluster_size": 2,
     "bootstrap_rounds": 10,
     "bootstrap_site_fraction": 0.80,
     "leave_one_out": True,
     "leave_one_out_epoch_scale": 0.25,
     "baseline_components": 4,
-    "seed": 0,
-    # Gate thresholds.
-    "time_validity_margin": 0.01,
-    "missingness_r2_max": 0.25,
-    "raw_concordance_min": 0.50,
     "minimum_sites": 8,
-    # Missingness-validity gate: artificial masking probe.
-    "artificial_mask_fraction": 0.15,
-    "missingness_pattern_ari_min": 0.20,
+    # Gate judgement thresholds and probe parameters are not literals here.  They
+    # are declared once in layers.py so a test can lock them and so an override
+    # cannot quietly redefine what "passing" means (design v2 §8.2.1).
+    **dict(FROZEN_GATE_SETTINGS),
 }
 
 
@@ -182,6 +179,28 @@ def cluster_purity(predicted: Sequence[int], reference: Sequence[Optional[str]])
     total = sum(len(items) for items in grouped.values())
     dominant = sum(max(items.count(label) for label in set(items)) for items in grouped.values())
     return round(dominant / total, 6) if total else None
+
+
+def _encode_reference_labels(reference: Sequence[Optional[str]]) -> List[int]:
+    """Encode reference labels as integers without the per-process hash salt.
+
+    구현 대상: docs/c2_prereg_v1.md §12 결정성. 2026-08-22 결함 수정.
+    사전등록: 결정성 복구. ARI 은 라벨 재명명에 불변이므로 **측정량은 바뀌지 않는다.**
+    해석 한계: 이전 구현의 ``hash(label)`` 은 salt 가 실행마다 달라졌으나 ARI 불변성 덕에
+      값은 같았다. 다만 salt 충돌이 두 라벨을 병합할 경우에만 값이 달라질 수 있었고,
+      이 수정은 그 잔여 경로를 제거한다.
+    주장 금지: 이 수정으로 과거 ARI 수치가 정정된다고 서술하지 않는다. 동일하다.
+    """
+    order: Dict[str, int] = {}
+    encoded: List[int] = []
+    for label in reference:
+        if label is None:
+            encoded.append(-1)
+            continue
+        if label not in order:
+            order[label] = len(order)
+        encoded.append(order[label])
+    return encoded
 
 
 def _missingness_r2(embedding: np.ndarray, missingness: np.ndarray) -> Optional[float]:
@@ -447,7 +466,7 @@ def evaluate_variant(
         "known_grouping_adjusted_rand_index": (
             adjusted_rand_index(
                 labels,
-                [hash(label) if label is not None else -1 for label in reference_by_row],
+                _encode_reference_labels(reference_by_row),
             )
             if any(label is not None for label in reference_by_row)
             else None
@@ -540,6 +559,14 @@ def evaluate_adoption_gates(
 
     Returns ``production_influence_allowed=False`` unless all gates pass, so a
     prototype cannot silently start affecting kinase ranking.
+
+    구현 대상: docs/integrated_research_design_v2.md §8.2.2
+    사전등록: 임계·probe 설정 이탈 시 production 을 강제 차단하는 규칙은 2026-08-22 확정.
+              gate 임계 자체는 §8.2 에서 2026-08-20 선언.
+    해석 한계: `all_gates_passed` 와 `production_influence_allowed` 는 다른 양이다. 전자는 6개
+              부등식의 논리곱이고, 후자는 여기에 **선언 임계를 썼는지**를 곱한 값이다.
+              `threshold_override_is_exploratory=True` 인 실행의 수치는 민감도 분석 결과다.
+    주장 금지: 이탈 실행의 수치를 "gate 통과"로 서술하는 것.
     """
     effective = _merged_config(config)
     primary = dict(variant_metrics.get(primary_variant) or {})
@@ -557,7 +584,11 @@ def evaluate_adoption_gates(
         }
     else:
         margin = float(permuted_error) - float(observed_error)
-        gates["time_validity"] = {
+        # seed_noise_lower_bound: 재현 가능 하한.  구현 대상: integrated_research_design_v2.md §8.2.2.
+        # 이 값이 required_margin 이상이면 마진 판정이 잡음 크기에 묻혀 무의미해진다.
+        # 값은 run_ablation() 상류에서 ε = 0.10·‖y‖_F 로 추정하여 metrics 에 실어 전달한다.
+        seed_noise_lb = primary.get("seed_noise_lower_bound")
+        tv_entry: dict = {
             "passed": bool(margin >= float(effective["time_validity_margin"])),
             "status": "evaluated",
             "observed_heldout_error": observed_error,
@@ -565,6 +596,12 @@ def evaluate_adoption_gates(
             "margin": round(margin, 6),
             "required_margin": effective["time_validity_margin"],
         }
+        if seed_noise_lb is not None:
+            tv_entry["seed_noise_lower_bound"] = round(float(seed_noise_lb), 6)
+            tv_entry["margin_exceeds_noise_floor"] = bool(
+                margin >= float(seed_noise_lb)
+            )
+        gates["time_validity"] = tv_entry
 
     # The gate is the artificial-masking probe: under induced masking the
     # representation must keep reflecting the temporal pattern (ARI retention)
@@ -664,6 +701,10 @@ def evaluate_adoption_gates(
 
     passed = {name: bool(gates.get(name, {}).get("passed")) for name in ADOPTION_GATES}
     baseline_concordance = baseline.get("raw_evidence_concordance")
+    # A run that moved a gate threshold or a probe parameter cannot open
+    # production, even at 6/6.  Otherwise the success criterion is adjustable and
+    # "passing" means nothing (design v2 §8.2.2).
+    conformance = gate_settings_conformance(effective)
     return {
         "contract_version": CONTRACT_VERSION,
         "primary_variant": primary_variant,
@@ -672,7 +713,13 @@ def evaluate_adoption_gates(
         "gates_passed": passed,
         "n_gates_passed": int(sum(passed.values())),
         "n_gates_total": len(ADOPTION_GATES),
-        "production_influence_allowed": bool(all(passed.values())),
+        "all_gates_passed": bool(all(passed.values())),
+        "frozen_gate_settings": conformance,
+        "frozen_gate_settings_digest": gate_settings_digest(),
+        "threshold_override_is_exploratory": not conformance["conformant"],
+        "production_influence_allowed": bool(
+            all(passed.values()) and conformance["conformant"]
+        ),
         "stage": "R1.5_benchmark",
         "baseline_raw_evidence_concordance": baseline_concordance,
         "primary_raw_evidence_concordance": concordance,
@@ -769,6 +816,18 @@ def run_ablation(
                 "missingness_r2": _missingness_r2(result.embedding, multiview.missingness_rate()),
                 "provenance": result.provenance,
             }
+
+    # Inject seed_noise_lower_bound into all evaluated arm metrics.
+    # Definition: ε = 0.10 · mean_site_rms(target)  (same unit as heldout_reconstruction_error).
+    # 구현 대상: integrated_research_design_v2.md §8.2.2 재현 가능 하한 기재 요건.
+    # 사전등록: 계수 0.10 은 2026-08-22 확정. 계산 결과 열람 전.
+    # 해석 한계: 이 값은 측정 잡음의 추정치이지 모델 성능의 하한이 아니다.
+    _target_vals = multiview.target.values  # shape (n_sites, n_timepoints)
+    _site_rms = float(np.mean(np.sqrt(np.mean(np.square(_target_vals), axis=1))))
+    _seed_noise_lb = round(0.10 * _site_rms, 6)
+    for _arm_key, _arm_entry in metrics.items():
+        if _arm_entry.get("status") == "evaluated":
+            _arm_entry["seed_noise_lower_bound"] = _seed_noise_lb
 
     learned_arms = [key for key, entry in metrics.items() if entry.get("learned") and entry.get("status") == "evaluated"]
     primary_variant = select_primary_variant(learned_arms)

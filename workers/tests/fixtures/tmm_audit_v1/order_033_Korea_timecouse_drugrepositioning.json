@@ -1,0 +1,1474 @@
+{
+ "schema": "TMM_AUDIT_FIXTURE_V1",
+ "order_id": 33,
+ "order_code": "Korea_timecouse_drugrepositioning",
+ "status": "cancelled",
+ "ptm_type": "phosphorylation",
+ "conditions": [
+  "24h",
+  "3h",
+  "6h"
+ ],
+ "n_timepoints": 3,
+ "n_kinases": 32,
+ "n_kinase_profiles": 32,
+ "profile_types": {
+  "gaussian_fallback": 28,
+  "data_driven": 4
+ },
+ "n_sites_in_modules": 74,
+ "n_shared_sites": 42,
+ "site_list_truncated": false,
+ "n_kinases_with_truncated_substrate_list": 0,
+ "production_ratio_max_deviation": 4.8940483871495744e-05,
+ "assumptions": {
+  "relative_noise": 0.1,
+  "n_bootstrap": 32,
+  "seed": 0
+ },
+ "columns": [
+  [
+   1.9217451074660778e-07,
+   1.0,
+   0.021919858244572633
+  ],
+  [
+   7.888527855271299e-08,
+   1.0,
+   0.016290627041156507
+  ],
+  [
+   3.5065363428791738e-09,
+   1.0,
+   0.005770745585631359
+  ],
+  [
+   1.0,
+   0.34414152313040297,
+   0.0
+  ],
+  [
+   0.11946465753045299,
+   0.826968753436027,
+   1.0
+  ],
+  [
+   3.812952018793272e-11,
+   1.0,
+   0.001278477021283473
+  ],
+  [
+   1.0,
+   0.11991294818553372,
+   0.923669352036287
+  ],
+  [
+   0.5252499839545608,
+   0.7339455869204354,
+   1.0
+  ]
+ ],
+ "sites": [
+  {
+   "site_index": 0,
+   "site_key": "ACSL4_S52",
+   "candidates": [
+    "MTOR",
+    "CSNK2",
+    "AKT1",
+    "CAMK2"
+   ],
+   "column_ids": [
+    0,
+    1,
+    2,
+    1
+   ],
+   "prior_flags": [
+    true,
+    true,
+    true,
+    true
+   ],
+   "target": [
+    0.0,
+    0.0,
+    15.326032981526671
+   ],
+   "observed_mask": [
+    false,
+    false,
+    true
+   ]
+  },
+  {
+   "site_index": 1,
+   "site_key": "ANXA6_T381",
+   "candidates": [
+    "ERK1/2",
+    "PKC\u0391"
+   ],
+   "column_ids": [
+    3,
+    1
+   ],
+   "prior_flags": [
+    false,
+    true
+   ],
+   "target": [
+    -0.24800565476727068,
+    3.9220471860266443e-05,
+    -0.17547391286760888
+   ],
+   "observed_mask": [
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "site_index": 2,
+   "site_key": "ATXN2L_S687",
+   "candidates": [
+    "MTOR",
+    "AKT1",
+    "CSNK1",
+    "GSK3B"
+   ],
+   "column_ids": [
+    0,
+    2,
+    1,
+    1
+   ],
+   "prior_flags": [
+    true,
+    true,
+    true,
+    true
+   ],
+   "target": [
+    0.0,
+    13.211987691118626,
+    13.196346626211028
+   ],
+   "observed_mask": [
+    false,
+    true,
+    true
+   ]
+  },
+  {
+   "site_index": 3,
+   "site_key": "CAD_S1859",
+   "candidates": [
+    "PKC\u0395 (PRKCE)",
+    "PRKACA",
+    "AURKA",
+    "ATR",
+    "ATM",
+    "AKT1/2",
+    "PLK1",
+    "PKC",
+    "PKC\u0391"
+   ],
+   "column_ids": [
+    1,
+    4,
+    1,
+    1,
+    1,
+    1,
+    1,
+    5,
+    1
+   ],
+   "prior_flags": [
+    true,
+    false,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true
+   ],
+   "target": [
+    -1.0697139148301342,
+    0.21989936649854316,
+    0.000910737194915191
+   ],
+   "observed_mask": [
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "site_index": 4,
+   "site_key": "CDK7_T170",
+   "candidates": [
+    "PKC\u0395 (PRKCE)",
+    "PKC",
+    "PKC\u0391"
+   ],
+   "column_ids": [
+    1,
+    5,
+    1
+   ],
+   "prior_flags": [
+    true,
+    true,
+    true
+   ],
+   "target": [
+    0.0,
+    -0.14816718039443488,
+    0.0
+   ],
+   "observed_mask": [
+    false,
+    true,
+    false
+   ]
+  },
+  {
+   "site_index": 5,
+   "site_key": "CTNNA1_T658",
+   "candidates": [
+    "AURKB",
+    "AURKA"
+   ],
+   "column_ids": [
+    1,
+    1
+   ],
+   "prior_flags": [
+    true,
+    true
+   ],
+   "target": [
+    -0.4700469284365741,
+    -0.5963009331664887,
+    -1.0116045637471676
+   ],
+   "observed_mask": [
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "site_index": 6,
+   "site_key": "CTNNB1_S552",
+   "candidates": [
+    "PRKDC",
+    "AURKB",
+    "AURKA"
+   ],
+   "column_ids": [
+    1,
+    1,
+    1
+   ],
+   "prior_flags": [
+    true,
+    true,
+    true
+   ],
+   "target": [
+    -2.9180983081300758,
+    0.46967681720378746,
+    0.995817921495366
+   ],
+   "observed_mask": [
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "site_index": 7,
+   "site_key": "CTNND1_S268",
+   "candidates": [
+    "CSNK2",
+    "AKT1",
+    "PKC\u0395 (PRKCE)"
+   ],
+   "column_ids": [
+    1,
+    2,
+    1
+   ],
+   "prior_flags": [
+    true,
+    true,
+    true
+   ],
+   "target": [
+    14.425120365719165,
+    14.703538227643444,
+    14.887220478412996
+   ],
+   "observed_mask": [
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "site_index": 8,
+   "site_key": "DOCK7_S1422",
+   "candidates": [
+    "ATR",
+    "ATM",
+    "ERK1/2"
+   ],
+   "column_ids": [
+    1,
+    1,
+    3
+   ],
+   "prior_flags": [
+    true,
+    true,
+    false
+   ],
+   "target": [
+    -1.106444195842294,
+    0.0,
+    -0.582015653280702
+   ],
+   "observed_mask": [
+    true,
+    false,
+    true
+   ]
+  },
+  {
+   "site_index": 9,
+   "site_key": "DOCK7_S864",
+   "candidates": [
+    "CDK5",
+    "CDK2",
+    "CDK1",
+    "CDK",
+    "GSK3B",
+    "MYOSIN LIGHT CHAIN KINASE (MLCK)"
+   ],
+   "column_ids": [
+    1,
+    6,
+    6,
+    6,
+    1,
+    1
+   ],
+   "prior_flags": [
+    true,
+    true,
+    true,
+    true,
+    true,
+    true
+   ],
+   "target": [
+    16.304383989531914,
+    0.0,
+    15.378729301967883
+   ],
+   "observed_mask": [
+    true,
+    false,
+    true
+   ]
+  },
+  {
+   "site_index": 10,
+   "site_key": "EEF1D_S133",
+   "candidates": [
+    "CYCLIN-DEPENDENT KINASE 1 (CDK1)",
+    "ATR",
+    "ATM"
+   ],
+   "column_ids": [
+    1,
+    1,
+    1
+   ],
+   "prior_flags": [
+    true,
+    true,
+    true
+   ],
+   "target": [
+    -1.2279367734078515,
+    0.21716302770653662,
+    0.783158412274937
+   ],
+   "observed_mask": [
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "site_index": 11,
+   "site_key": "EIF3G_T38",
+   "candidates": [
+    "NEK2",
+    "NEK6",
+    "CDK5",
+    "CDK2",
+    "CDK1",
+    "CDK",
+    "MTOR",
+    "CSNK2",
+    "AKT1",
+    "CSNK1",
+    "GSK3B"
+   ],
+   "column_ids": [
+    1,
+    1,
+    1,
+    6,
+    6,
+    6,
+    0,
+    1,
+    2,
+    1,
+    1
+   ],
+   "prior_flags": [
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true
+   ],
+   "target": [
+    16.233211214275727,
+    16.245201422852308,
+    16.4525384065586
+   ],
+   "observed_mask": [
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "site_index": 12,
+   "site_key": "EIF4B_S422",
+   "candidates": [
+    "ATR",
+    "ATM",
+    "JAK/STAT"
+   ],
+   "column_ids": [
+    1,
+    1,
+    7
+   ],
+   "prior_flags": [
+    true,
+    true,
+    false
+   ],
+   "target": [
+    -1.2407546269523553,
+    0.1414590631870473,
+    -0.18938551802650028
+   ],
+   "observed_mask": [
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "site_index": 13,
+   "site_key": "FARP1_T24",
+   "candidates": [
+    "CSNK2",
+    "PRKAA1",
+    "CSNK1",
+    "MAP4K4"
+   ],
+   "column_ids": [
+    1,
+    2,
+    1,
+    1
+   ],
+   "prior_flags": [
+    true,
+    true,
+    true,
+    true
+   ],
+   "target": [
+    17.307526808614107,
+    17.738151184973113,
+    18.158069543627352
+   ],
+   "observed_mask": [
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "site_index": 14,
+   "site_key": "FLNC_S1252",
+   "candidates": [
+    "PKC\u0395 (PRKCE)",
+    "PRKACA",
+    "AURKA",
+    "ATR",
+    "ATM",
+    "AKT1/2",
+    "PLK1",
+    "PKC",
+    "PKC\u0391"
+   ],
+   "column_ids": [
+    1,
+    4,
+    1,
+    1,
+    1,
+    1,
+    1,
+    5,
+    1
+   ],
+   "prior_flags": [
+    true,
+    false,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true
+   ],
+   "target": [
+    -0.5232976982180976,
+    -0.0740427258794986,
+    0.07919612124921584
+   ],
+   "observed_mask": [
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "site_index": 15,
+   "site_key": "FNBP1L_S488",
+   "candidates": [
+    "ATR",
+    "ATM"
+   ],
+   "column_ids": [
+    1,
+    1
+   ],
+   "prior_flags": [
+    true,
+    true
+   ],
+   "target": [
+    -0.426010620609878,
+    0.001748900223640416,
+    -0.026359725750594542
+   ],
+   "observed_mask": [
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "site_index": 16,
+   "site_key": "IRF2BP1_S453",
+   "candidates": [
+    "ATR",
+    "ATM"
+   ],
+   "column_ids": [
+    1,
+    1
+   ],
+   "prior_flags": [
+    true,
+    true
+   ],
+   "target": [
+    -1.258718691500295,
+    -0.35383323445368303,
+    -0.33175610596287863
+   ],
+   "observed_mask": [
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "site_index": 17,
+   "site_key": "ITPR3_S1832",
+   "candidates": [
+    "CAMK2",
+    "PRKACA"
+   ],
+   "column_ids": [
+    1,
+    4
+   ],
+   "prior_flags": [
+    true,
+    false
+   ],
+   "target": [
+    -0.3263260008514943,
+    0.011330470414356392,
+    -0.13518318733269713
+   ],
+   "observed_mask": [
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "site_index": 18,
+   "site_key": "ITPR3_S934",
+   "candidates": [
+    "AURKB",
+    "AURKA"
+   ],
+   "column_ids": [
+    1,
+    1
+   ],
+   "prior_flags": [
+    true,
+    true
+   ],
+   "target": [
+    0.48204294331111786,
+    0.3716849128165832,
+    1.8910218435141668
+   ],
+   "observed_mask": [
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "site_index": 19,
+   "site_key": "LARP1_T1047",
+   "candidates": [
+    "ATR",
+    "ATM"
+   ],
+   "column_ids": [
+    1,
+    1
+   ],
+   "prior_flags": [
+    true,
+    true
+   ],
+   "target": [
+    -1.1718429785630438,
+    0.6761178161688518,
+    0.11993032382290202
+   ],
+   "observed_mask": [
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "site_index": 20,
+   "site_key": "LMNA_S22",
+   "candidates": [
+    "CDK5",
+    "CDK2",
+    "CDK1",
+    "CDK",
+    "MTOR",
+    "AKT1",
+    "CSNK1",
+    "GSK3B"
+   ],
+   "column_ids": [
+    1,
+    6,
+    6,
+    6,
+    0,
+    2,
+    1,
+    1
+   ],
+   "prior_flags": [
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true
+   ],
+   "target": [
+    -1.1876227177167427,
+    0.13230784041091861,
+    1.6449816202439855
+   ],
+   "observed_mask": [
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "site_index": 21,
+   "site_key": "LMNA_S390",
+   "candidates": [
+    "AKT1",
+    "ERK1/2"
+   ],
+   "column_ids": [
+    2,
+    3
+   ],
+   "prior_flags": [
+    true,
+    false
+   ],
+   "target": [
+    -0.03050653510416125,
+    0.007790969974803091,
+    -0.15338027001069526
+   ],
+   "observed_mask": [
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "site_index": 22,
+   "site_key": "MAP1B_S1497",
+   "candidates": [
+    "ATR",
+    "ATM"
+   ],
+   "column_ids": [
+    1,
+    1
+   ],
+   "prior_flags": [
+    true,
+    true
+   ],
+   "target": [
+    -1.2518074184116663,
+    -0.05905793196540559,
+    -0.385067268403296
+   ],
+   "observed_mask": [
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "site_index": 23,
+   "site_key": "NES_S1837",
+   "candidates": [
+    "ATR",
+    "ATM"
+   ],
+   "column_ids": [
+    1,
+    1
+   ],
+   "prior_flags": [
+    true,
+    true
+   ],
+   "target": [
+    -0.5367421629644176,
+    -0.05961017562565565,
+    0.13381118634666292
+   ],
+   "observed_mask": [
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "site_index": 24,
+   "site_key": "PDLIM4_S111",
+   "candidates": [
+    "PRKACA",
+    "PRKDC"
+   ],
+   "column_ids": [
+    4,
+    1
+   ],
+   "prior_flags": [
+    false,
+    true
+   ],
+   "target": [
+    2.3973005579460236,
+    1.6481839253611577,
+    2.1147287044571925
+   ],
+   "observed_mask": [
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "site_index": 25,
+   "site_key": "PDLIM4_S119",
+   "candidates": [
+    "PRKACA",
+    "AURKB",
+    "AURKA"
+   ],
+   "column_ids": [
+    4,
+    1,
+    1
+   ],
+   "prior_flags": [
+    false,
+    true,
+    true
+   ],
+   "target": [
+    0.12433058235523532,
+    0.36680218109390483,
+    0.454038554914298
+   ],
+   "observed_mask": [
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "site_index": 26,
+   "site_key": "PGRMC1_Y180",
+   "candidates": [
+    "CAMK2",
+    "PLK1"
+   ],
+   "column_ids": [
+    1,
+    1
+   ],
+   "prior_flags": [
+    true,
+    true
+   ],
+   "target": [
+    -0.40898459827463085,
+    0.12679426946273123,
+    -0.0028062216894219846
+   ],
+   "observed_mask": [
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "site_index": 27,
+   "site_key": "PRKACB_T196",
+   "candidates": [
+    "CDK5",
+    "CDK2",
+    "CDK1",
+    "CDK",
+    "PRKAA1",
+    "AKT1",
+    "GSK3B"
+   ],
+   "column_ids": [
+    1,
+    6,
+    6,
+    6,
+    2,
+    2,
+    1
+   ],
+   "prior_flags": [
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true
+   ],
+   "target": [
+    14.626731824657293,
+    13.96869290499711,
+    0.0
+   ],
+   "observed_mask": [
+    true,
+    true,
+    false
+   ]
+  },
+  {
+   "site_index": 28,
+   "site_key": "PRKACB_T198",
+   "candidates": [
+    "CDK5",
+    "CDK2",
+    "CDK1",
+    "CDK",
+    "CSNK2",
+    "PRKAA1",
+    "GSK3B"
+   ],
+   "column_ids": [
+    1,
+    6,
+    6,
+    6,
+    1,
+    2,
+    1
+   ],
+   "prior_flags": [
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true
+   ],
+   "target": [
+    14.75769797835144,
+    14.465925226413345,
+    15.557220107264213
+   ],
+   "observed_mask": [
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "site_index": 29,
+   "site_key": "RRAS2_S186",
+   "candidates": [
+    "CSNK2",
+    "AKT1"
+   ],
+   "column_ids": [
+    1,
+    2
+   ],
+   "prior_flags": [
+    true,
+    true
+   ],
+   "target": [
+    0.0,
+    13.316944728210252,
+    12.781706346561016
+   ],
+   "observed_mask": [
+    false,
+    true,
+    true
+   ]
+  },
+  {
+   "site_index": 30,
+   "site_key": "RTN4_S167",
+   "candidates": [
+    "CSNK2",
+    "PRKAA1",
+    "PRKACA"
+   ],
+   "column_ids": [
+    1,
+    2,
+    4
+   ],
+   "prior_flags": [
+    true,
+    true,
+    false
+   ],
+   "target": [
+    12.5826065000514,
+    12.360584730983158,
+    12.627236689076293
+   ],
+   "observed_mask": [
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "site_index": 31,
+   "site_key": "SNTB2_S75",
+   "candidates": [
+    "CAMK2",
+    "PKC"
+   ],
+   "column_ids": [
+    1,
+    5
+   ],
+   "prior_flags": [
+    true,
+    true
+   ],
+   "target": [
+    -0.018955960843552912,
+    0.23776916156108896,
+    0.29913269426661315
+   ],
+   "observed_mask": [
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "site_index": 32,
+   "site_key": "SQSTM1_S266",
+   "candidates": [
+    "CDK5",
+    "CDK2",
+    "CDK1",
+    "CDK",
+    "CSNK1",
+    "CYCLIN-DEPENDENT KINASE 1 (CDK1)"
+   ],
+   "column_ids": [
+    1,
+    6,
+    6,
+    6,
+    1,
+    1
+   ],
+   "prior_flags": [
+    true,
+    true,
+    true,
+    true,
+    true,
+    true
+   ],
+   "target": [
+    15.108965614927607,
+    0.0,
+    0.0
+   ],
+   "observed_mask": [
+    true,
+    false,
+    false
+   ]
+  },
+  {
+   "site_index": 33,
+   "site_key": "SRRM1_S220",
+   "candidates": [
+    "CDK5",
+    "CDK2",
+    "CDK1",
+    "CDK",
+    "MTOR",
+    "CSNK2",
+    "AKT1",
+    "PLK1"
+   ],
+   "column_ids": [
+    1,
+    6,
+    6,
+    6,
+    0,
+    1,
+    2,
+    1
+   ],
+   "prior_flags": [
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true
+   ],
+   "target": [
+    -0.04304958346252136,
+    -0.037588536979908806,
+    -1.088792932602289
+   ],
+   "observed_mask": [
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "site_index": 34,
+   "site_key": "SRRM1_S714",
+   "candidates": [
+    "CDK5",
+    "CDK2",
+    "CDK1",
+    "CDK",
+    "MTOR",
+    "PRKAA1"
+   ],
+   "column_ids": [
+    1,
+    6,
+    6,
+    6,
+    0,
+    2
+   ],
+   "prior_flags": [
+    true,
+    true,
+    true,
+    true,
+    true,
+    true
+   ],
+   "target": [
+    -0.20102730870863736,
+    0.12052191979248449,
+    -2.445588463875493
+   ],
+   "observed_mask": [
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "site_index": 35,
+   "site_key": "SRRM2_S1360",
+   "candidates": [
+    "NEK2",
+    "NEK6",
+    "CDK5",
+    "CDK2",
+    "CDK1",
+    "CDK",
+    "MTOR",
+    "PRKAA1"
+   ],
+   "column_ids": [
+    1,
+    1,
+    1,
+    6,
+    6,
+    6,
+    0,
+    2
+   ],
+   "prior_flags": [
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true
+   ],
+   "target": [
+    -0.45040388288136035,
+    -0.19872663392551188,
+    0.0
+   ],
+   "observed_mask": [
+    true,
+    true,
+    false
+   ]
+  },
+  {
+   "site_index": 36,
+   "site_key": "SRRM2_S2351",
+   "candidates": [
+    "PRKAA1",
+    "AKT1"
+   ],
+   "column_ids": [
+    2,
+    2
+   ],
+   "prior_flags": [
+    true,
+    true
+   ],
+   "target": [
+    -0.21844585465802474,
+    0.09834818611914695,
+    0.0
+   ],
+   "observed_mask": [
+    true,
+    true,
+    false
+   ]
+  },
+  {
+   "site_index": 37,
+   "site_key": "SRRM2_S2365",
+   "candidates": [
+    "CDK5",
+    "CDK2",
+    "CDK1",
+    "CDK",
+    "MTOR",
+    "PRKAA1",
+    "CSNK1",
+    "PRKDC",
+    "ATR",
+    "ATM"
+   ],
+   "column_ids": [
+    1,
+    6,
+    6,
+    6,
+    0,
+    2,
+    1,
+    1,
+    1,
+    1
+   ],
+   "prior_flags": [
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true
+   ],
+   "target": [
+    0.5207343463290095,
+    0.29541567314830025,
+    0.0
+   ],
+   "observed_mask": [
+    true,
+    true,
+    false
+   ]
+  },
+  {
+   "site_index": 38,
+   "site_key": "SRSF6_S303",
+   "candidates": [
+    "CDK5",
+    "CDK2",
+    "CDK1",
+    "CDK",
+    "MTOR",
+    "AKT1"
+   ],
+   "column_ids": [
+    1,
+    6,
+    6,
+    6,
+    0,
+    2
+   ],
+   "prior_flags": [
+    true,
+    true,
+    true,
+    true,
+    true,
+    true
+   ],
+   "target": [
+    -0.4967206940947961,
+    -0.3379049647352318,
+    -0.6247958178403017
+   ],
+   "observed_mask": [
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "site_index": 39,
+   "site_key": "TMPO_T159",
+   "candidates": [
+    "NEK2",
+    "NEK6",
+    "CDK5",
+    "CDK2",
+    "CDK1",
+    "CDK",
+    "MTOR",
+    "CSNK2",
+    "AKT1",
+    "CSNK1"
+   ],
+   "column_ids": [
+    1,
+    1,
+    1,
+    6,
+    6,
+    6,
+    0,
+    1,
+    2,
+    1
+   ],
+   "prior_flags": [
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true
+   ],
+   "target": [
+    15.643086572894065,
+    15.00656144017457,
+    16.163996642364324
+   ],
+   "observed_mask": [
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "site_index": 40,
+   "site_key": "TNS1_S1468",
+   "candidates": [
+    "CDK5",
+    "CDK2",
+    "CDK1",
+    "CDK",
+    "MTOR",
+    "CSNK2",
+    "AKT1"
+   ],
+   "column_ids": [
+    1,
+    6,
+    6,
+    6,
+    0,
+    1,
+    2
+   ],
+   "prior_flags": [
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true
+   ],
+   "target": [
+    14.341222293121193,
+    14.852664631269045,
+    14.250868093324948
+   ],
+   "observed_mask": [
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "site_index": 41,
+   "site_key": "YBX3_S328",
+   "candidates": [
+    "ATR",
+    "ATM",
+    "ERK1/2"
+   ],
+   "column_ids": [
+    1,
+    1,
+    3
+   ],
+   "prior_flags": [
+    true,
+    true,
+    false
+   ],
+   "target": [
+    -0.6824093076358361,
+    -0.0212202829010649,
+    -0.37731025168067295
+   ],
+   "observed_mask": [
+    true,
+    true,
+    true
+   ]
+  }
+ ]
+}

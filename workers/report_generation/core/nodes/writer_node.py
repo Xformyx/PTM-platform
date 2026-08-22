@@ -21,6 +21,7 @@ from report_generation.core.dynamic_prompt_generator import (
     build_dynamic_writing_example,
     build_structured_protein_data_for_llm,
     build_ptm_data_summary,
+    build_substrate_dynamics_summary,
     build_nonptm_temporal_analysis,
     build_ptm_protein_timelag_analysis,
     build_pathway_context_for_llm,
@@ -396,6 +397,8 @@ def run_section_writing(state: dict) -> dict:
 
     # v9.31: Pre-build auxiliary blocks once (reuse across sections)
     aux_ptm_data_summary = build_ptm_data_summary(parsed_ptms, ptm_type=ptm_type)
+    # P1: Site-level kinetic pattern distribution (Substrate-level Temporal Dynamics)
+    aux_substrate_dynamics = build_substrate_dynamics_summary(parsed_ptms)
     aux_nonptm_temporal = build_nonptm_temporal_analysis(network_results, timepoints, ptm_type=ptm_type)
     aux_timelag = build_ptm_protein_timelag_analysis(network_results, timepoints, ptm_type=ptm_type)
     aux_pathway_ctx = build_pathway_context_for_llm(parsed_ptms)
@@ -575,6 +578,7 @@ def run_section_writing(state: dict) -> dict:
 
     logger.info(
         f"[v9.31] Aux block sizes: ptm_data={len(aux_ptm_data_summary):,}, "
+        f"substrate_dynamics={len(aux_substrate_dynamics):,}, "
         f"nonptm_temporal={len(aux_nonptm_temporal):,}, timelag={len(aux_timelag):,}, "
         f"pathway_ctx={len(aux_pathway_ctx):,}, signal_prop={len(aux_signal_prop):,}, "
         f"v98_directive={len(v98_directive):,}, v98_structured={len(v98_structured_data):,}, "
@@ -657,6 +661,9 @@ def run_section_writing(state: dict) -> dict:
             supplement_blocks.append(("signal_prop", aux_signal_prop))
             supplement_blocks.append(("timelag", aux_timelag))
             supplement_blocks.append(("ptm_data_summary", aux_ptm_data_summary))
+            # P1: Substrate-level temporal dynamics pattern distribution
+            if aux_substrate_dynamics:
+                supplement_blocks.append(("substrate_dynamics", aux_substrate_dynamics))
             # Priority 4 (vector plot full data): complete quantitative reference
             supplement_blocks.append(("vector_plot_full", aux_vector_plot_full))
             # v12.0: Compressed fallback — always included after full (budget permitting)

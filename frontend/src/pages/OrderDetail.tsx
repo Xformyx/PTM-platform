@@ -1293,6 +1293,37 @@ function classifyTrend(values: number[]): TrendCategory {
   return "other";
 }
 
+/**
+ * Maps P1 primary_pattern labels (ptm_shared/substrate_temporal_dynamics.py)
+ * to the frontend TrendCategory display vocabulary.
+ *
+ * The P1 taxonomy uses 15 labels; these collapse into the 8 display categories.
+ * When a wave member provides site_dynamics.primary_pattern, prefer this adapter
+ * over the heuristic classifyTrend() function.
+ */
+const P1_PATTERN_TO_TREND: Record<string, TrendCategory> = {
+  flat_or_low_evidence:        "other",
+  monotonic_rise:              "increasing",
+  monotonic_decline:           "decreasing",
+  sustained_activation:        "sustained_activation",
+  sustained_suppression:       "sustained_inhibition",
+  early_single_pulse:          "transient_burst",
+  delayed_single_pulse:        "transient_burst",
+  early_suppression_pulse:     "transient_burst",
+  delayed_suppression_pulse:   "transient_burst",
+  biphasic_switch:             "biphasic",
+  oscillatory_supported:       "volatile",
+  multi_peak:                  "volatile",
+  complex_unclassified:        "volatile",
+  data_quality_gate_failed:    "other",
+  insufficient_data:           "other",
+};
+
+function p1PatternToTrend(pattern: string | undefined | null): TrendCategory | null {
+  if (!pattern) return null;
+  return P1_PATTERN_TO_TREND[pattern] ?? null;
+}
+
 // ── v9.17: RoleBadge — protein class badge for Top N legend ─────────────────
 const ROLE_COLORS: Record<string, { bg: string; text: string; border: string }> = {
   RTK:                { bg: "bg-rose-500/15",    text: "text-rose-400",    border: "border-rose-500/30" },
@@ -2293,10 +2324,20 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
     new Set(data.vector_data.map((r) => r.condition).filter(Boolean))
   ).sort((a, b) => parseTimeOrder(a) - parseTimeOrder(b));
 
-  // Classify each PTM trend
+  // Build P1 pattern lookup from top_n_ptms (p1_pattern field, when server provides it)
+  const p1PatternMap = new Map<string, string>();
+  data.top_n_ptms.forEach((p) => {
+    const pat = (p as any).p1_pattern as string | undefined;
+    if (pat) p1PatternMap.set(`${p.gene}_${p.position}`, pat);
+  });
+
+  // Classify each PTM trend — prefer P1 server pattern when available
   const ptmTrends = new Map<string, TrendCategory>();
   uniquePtms.forEach((p) => {
     const key = `${p.gene}_${p.position}`;
+    // P1 adapter: use server-side canonical pattern when present
+    const p1Trend = p1PatternToTrend(p1PatternMap.get(key));
+    if (p1Trend !== null) { ptmTrends.set(key, p1Trend); return; }
     const arr = vectorByPtm.get(key);
     if (!arr) { ptmTrends.set(key, "other"); return; }
     const sorted = conditions.map((c) => arr.find((r) => r.condition === c)?.value ?? 0);
@@ -2462,6 +2503,20 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
     trendCounts[t] = (trendCounts[t] || 0) + 1;
   });
 
+  // P1: sub-pattern breakdown per TrendCategory (only when server provides p1_pattern)
+  const p1SubCounts: Record<TrendCategory, Record<string, number>> = {} as any;
+  const p1HasAny = p1PatternMap.size > 0;
+  if (p1HasAny) {
+    uniquePtms.forEach((p) => {
+      const key = `${p.gene}_${p.position}`;
+      const cat = ptmTrends.get(key) || "other";
+      const pat = p1PatternMap.get(key);
+      if (!pat) return;
+      if (!p1SubCounts[cat as TrendCategory]) p1SubCounts[cat as TrendCategory] = {};
+      p1SubCounts[cat as TrendCategory][pat] = (p1SubCounts[cat as TrendCategory][pat] || 0) + 1;
+    });
+  }
+
   // v9.23: Count per activity class
   const activityCounts: Record<string, number> = { all: uniquePtms.length, de_novo: 0, regulated: 0, minor: 0 };
   uniquePtms.forEach((p) => {
@@ -2520,19 +2575,28 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
           >
             All ({trendCounts["all"] || 0})
           </Button>
-          {(Object.keys(TREND_META) as TrendCategory[]).map((cat) => (
-            <Button
-              key={cat}
-              variant={trendFilter === cat ? "default" : "outline"}
-              size="sm"
-              className="text-xs h-7 px-2"
-              style={trendFilter === cat ? { backgroundColor: TREND_META[cat].color, borderColor: TREND_META[cat].color } : {}}
-              onClick={() => setTrendFilter(cat)}
-              title={TREND_META[cat].description}
-            >
-              {TREND_META[cat].label} ({trendCounts[cat] || 0})
-            </Button>
-          ))}
+          {(Object.keys(TREND_META) as TrendCategory[]).map((cat) => {
+            const sub = p1SubCounts[cat];
+            const subDesc = sub
+              ? "\n\nP1 patterns:\n" + Object.entries(sub)
+                  .sort((a, b) => b[1] - a[1])
+                  .map(([k, v]) => `  ${k.replace(/_/g, " ")}: ${v}`)
+                  .join("\n")
+              : "";
+            return (
+              <Button
+                key={cat}
+                variant={trendFilter === cat ? "default" : "outline"}
+                size="sm"
+                className="text-xs h-7 px-2"
+                style={trendFilter === cat ? { backgroundColor: TREND_META[cat].color, borderColor: TREND_META[cat].color } : {}}
+                onClick={() => setTrendFilter(cat)}
+                title={`${TREND_META[cat].description}${subDesc}`}
+              >
+                {TREND_META[cat].label} ({trendCounts[cat] || 0})
+              </Button>
+            );
+          })}
         </div>
         <Separator orientation="vertical" className="h-6" />
         {/* v9.23: Activity filter (De novo / Regulated / Minor) */}
@@ -2782,6 +2846,14 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
               const trend = ptmTrends.get(key) || "other";
               const actCls = ptmActivityClass.get(key) || "minor";
               const pc = p.protein_class;
+              // P1: server-side canonical pattern label (from substrate_temporal_dynamics.v1)
+              const p1Pat = p1PatternMap.get(key);
+              const dotTitle = p1Pat
+                ? `${TREND_META[trend].label} · P1: ${p1Pat}\n${TREND_META[trend].description}`
+                : `${TREND_META[trend].label}: ${TREND_META[trend].description}`;
+              const labelTitle = pc
+                ? `${p.label} — ${pc.role}${pc.ubi_context ? ` (${pc.ubi_context})` : ''} [${pc.confidence}] | ${actCls}${p1Pat ? ` | P1: ${p1Pat}` : ''}`
+                : `${p.label} (${TREND_META[trend].label})${p1Pat ? ` · P1: ${p1Pat}` : ''} | ${actCls}`;
               return (
                 <label
                   key={key}
@@ -2796,12 +2868,21 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
                   <span
                     className="w-2.5 h-2.5 rounded-full flex-shrink-0 border"
                     style={{ backgroundColor: colorMap.get(p.label) || "#6b7280", borderColor: TREND_META[trend].color }}
-                    title={`${TREND_META[trend].label}: ${TREND_META[trend].description}`}
+                    title={dotTitle}
                   />
                   {/* v9.23: activity class indicator */}
                   {actCls === "de_novo" && <span className="text-[8px] flex-shrink-0" style={{ color: "#E65100" }} title="De novo (not detected in control, imputed)">★</span>}
                   {actCls === "regulated" && <span className="text-[8px] flex-shrink-0" style={{ color: "#1565C0" }} title="Regulated (q<0.05, |Log2FC|≥1.0)">●</span>}
-                  <span className="truncate flex-1 min-w-0" title={pc ? `${p.label} \u2014 ${pc.role}${pc.ubi_context ? ` (${pc.ubi_context})` : ''} [${pc.confidence}] | ${actCls}` : `${p.label} (${TREND_META[trend].label}) | ${actCls}`}>
+                  {/* P1 pattern indicator — visible only when server provides canonical label */}
+                  {p1Pat && (
+                    <span
+                      className="text-[8px] px-1 py-0 rounded font-mono flex-shrink-0 bg-indigo-500/15 text-indigo-300 border border-indigo-500/30"
+                      title={`P1 canonical pattern: ${p1Pat}`}
+                    >
+                      {p1Pat.replace(/_/g, " ").replace(/^(.{0,16}).*$/, "$1")}
+                    </span>
+                  )}
+                  <span className="truncate flex-1 min-w-0" title={labelTitle}>
                     {p.label}
                   </span>
                   {pc && pc.role !== "Other" && (

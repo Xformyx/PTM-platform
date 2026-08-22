@@ -29,6 +29,13 @@ Reported per arm: out-of-sample R^2 over folds, a permutation null obtained by
 shuffling the probe target, and paired differences against a chosen baseline arm
 with a sign-flip test.  A win is only claimed when it survives both.
 
+Determinism: the probe split RNG is seeded from ``(config seed, hidden timepoint,
+arm, encoder seed, split index)``.  Until 2026-08-22 the arm component was
+``hash(arm)``, which the interpreter salts per process, so **probe numbers produced
+before that date are not comparable across runs** — the paired comparison inside a
+single run is unaffected because both arms shared that run's splits.  See
+``_arm_seed_component``.
+
 The setup is transductive: every arm builds its representation from all sites,
 including the sites the probe is later scored on, and only the hidden *values*
 are withheld.  That is the same condition for all arms and so does not bias the
@@ -40,6 +47,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+from zlib import crc32
 
 import numpy as np
 
@@ -63,6 +71,24 @@ DEFAULT_CONFIG: Dict[str, Any] = {
 }
 
 _EPSILON = 1e-12
+
+
+def _arm_seed_component(arm: str) -> int:
+    """Map an arm name to a split-seed component that survives process restarts.
+
+    구현 대상: docs/c2_prereg_v1.md §12 결정성. 2026-08-22 결함 수정.
+    사전등록: 결함 발견 시점이 C2 판정 후이므로 이 수정은 **탐색적이 아니라 결정성 복구**다.
+      측정량의 정의는 바뀌지 않으며 분할 배정만 실행 간 고정된다.
+    해석 한계: 이 수정 이전에 산출된 프로브 수치는 실행마다 다른 분할에서 나온 값이므로
+      **수정 이후 수치와 절대값으로 비교할 수 없다.** 수정 전 단일 실행 내부의 짝지은
+      비교(같은 분할을 공유)는 여전히 유효하다.
+    주장 금지: 이 수정으로 과거 공표값이 재현된다고 서술하지 않는다. 재현되지 않는다.
+
+    ``hash(str)`` is salted per interpreter unless ``PYTHONHASHSEED`` is set, and the
+    canonical container does not set it, so the previous ``hash(arm) % 9973`` drew a
+    different probe split on every run.  ``crc32`` is a fixed function of the bytes.
+    """
+    return crc32(arm.encode("utf-8")) % 9973
 
 
 def _merged_config(config: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
@@ -261,6 +287,16 @@ def run_heldout_timepoint_probe(
     probe splits reuse that fit.  Non-learned arms are deterministic, so they are
     fit once per hidden timepoint and evaluated over the same probe splits, which
     keeps the paired comparison aligned fold for fold.
+
+    구현 대상: docs/ptm_representation_learning_contract_v1.md §R1.6 공정 프로브
+    사전등록: seed 파생 규칙 명시화는 2026-08-22. **정본 경로의 수치는 바뀌지 않는다** —
+      `encoder_config["seed"] = 0` 이고 `config["seed"] = 0` 인 기존 실행에서 두 규칙이
+      같은 집합 {0,1,2,3,4} 를 내기 때문이다. 두 값이 다를 때만 달라진다.
+    해석 한계: seed 를 평균하는 것은 초기화 잡음이 짝지은 관측 수를 부풀리지 않게 하는
+      장치이며, 인코더가 seed 에 대해 식별된다는 뜻이 아니다. arm D 의 군집 기하는
+      seed 에 대해 식별되지 않는다 (docs/c3_prereg_v1.md §12.6.1). 프로브가 그와
+      양립하는 것은 프로브가 열공간에만 의존하기 때문이다.
+    주장 금지: seed 평균이 기하 불안정을 해결한다고 서술하지 않는다. 우회할 뿐이다.
     """
     effective = _merged_config(config)
     arms = [str(arm) for arm in effective["arms"]]
@@ -276,6 +312,11 @@ def run_heldout_timepoint_probe(
     truth = np.nan_to_num(multiview.target.values, nan=0.0)
     folds: List[ProbeFold] = []
     skipped: Dict[str, str] = {}
+    # Derive the seed sweep from the encoder's own seed so the set stays contiguous.
+    # Deriving it from ``effective["seed"]`` instead would mix two seed families
+    # whenever the caller's encoder seed differs from the probe seed, leaving the
+    # recorded seed set impossible to state in a methods section.
+    encoder_base_seed = int((encoder_config or {}).get("seed", effective["seed"]))
 
     for timepoint_index in range(n_timepoints):
         masked, evaluable = _hide_timepoint(multiview, timepoint_index)
@@ -295,7 +336,7 @@ def run_heldout_timepoint_probe(
             for encoder_seed in seeds:
                 if learned and encoder_seed > 0:
                     seeded = dict(encoder_config or {})
-                    seeded["seed"] = int(effective["seed"]) + encoder_seed
+                    seeded["seed"] = encoder_base_seed + encoder_seed
                     fit = fit_variant(masked, arm, encoder_config=seeded, config=effective)
                 else:
                     fit = probe_arm
@@ -306,7 +347,7 @@ def run_heldout_timepoint_probe(
                         (
                             int(effective["seed"]),
                             timepoint_index,
-                            hash(arm) % 9973,
+                            _arm_seed_component(arm),
                             encoder_seed,
                             probe_split,
                         )
@@ -354,6 +395,10 @@ def run_heldout_timepoint_probe(
             key: (list(value) if isinstance(value, tuple) else value)
             for key, value in effective.items()
         },
+        # Recorded so the methods section can state the seed set rather than infer it.
+        "encoder_seed_set": [
+            encoder_base_seed + offset for offset in range(int(effective["n_encoder_seeds"]))
+        ],
         "per_arm": summarize_arms(folds),
         "comparisons": compare_to_baseline(folds, baseline_arm=str(effective["baseline_arm"])),
         "skipped_arms": skipped,

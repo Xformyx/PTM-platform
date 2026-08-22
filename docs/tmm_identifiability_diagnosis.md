@@ -1,5 +1,14 @@
 # TMM 식별가능성 진단 (v1)
 
+> **이 문서의 수치는 2026-08-18 산출분이며 초과되었다.** 오더 48의
+> `orders.kinase_activity_heatmap`이 2026-08-20 재실행으로 덮어써져(kinase 87→29,
+> 공유 site 199→49) **이 표는 복구 불가능하다.** 권위 있는 수치는 동결 fixture에서
+> 재생되는 `docs/chapter2_audit_protocol_v1.md` §3.4이며, 결론은 유지되거나 강해진다
+> (identifiable 1.15%→0.69%, top-1 prior 유래 92.52%→94.14%).
+>
+> 이 문서는 `detect`·`characterize` 단계의 방법과 원인 분석 기록으로 유효하다.
+> `reproduce`·`guard`·`regression-test`는 `docs/chapter2_audit_protocol_v1.md`에 있다.
+
 ## 질문
 
 플랫폼은 shared PTM site의 시계열을 후보 kinase들로 분해해 "contribution ratio"를 보고한다.
@@ -35,8 +44,9 @@ prior, 미측정 시점에 대한 동일한 0 대입을 사용한다. 재구성�
 `ε`는 숨은 상수가 아니라 기록되는 가정이다. 아래 결과는 `ε = 0.10·||y||`이며, 부트스트랩 32회로
 top-1 안정성을 함께 측정했다. 위 1번의 구조적 결론은 `ε`와 무관하다.
 
-계약 테스트는 `workers/tests/test_tmm_identifiability.py` (16개). 식별 가능한 합성 혼합, collinear
+계약 테스트는 `workers/tests/test_tmm_identifiability.py` (24개). 식별 가능한 합성 혼합, collinear
 혼합, 시점보다 후보가 많은 경우, 음수 시계열, 0 대입으로 top-1이 뒤집히는 경우를 각각 고정한다.
+감사 재현과 guard를 고정하는 테스트는 `workers/tests/test_tmm_audit_protocol.py` (14개)에 있다.
 
 ## 결과
 
@@ -224,7 +234,12 @@ Chapter 1의 전제는 실체가 있다. 예상보다 강한 형태로 있다. �
 
 즉시 가능한 공학적 개선도 함께 나온다. 동일한 profile 컬럼을 공유하는 후보들 사이에서는 분해를
 시도하지 않고 묶어서 ambiguity set으로 보고하는 것, 그리고 모든 계수가 0으로 붕괴할 때 균등 ratio를
-측정처럼 보고하지 않는 것이다. 다만 production 반영은 실행 중인 분석이 끝난 뒤에 한다.
+측정처럼 보고하지 않는 것이다.
+
+후자는 2026-08-21에 `ptm_shared/tmm_attribution_guard.py`의 정책 계층으로 구현되었다.
+**기본값은 `off`이며 배포 수치를 바꾸지 않는다**(오더 36·48·47·28에서 기존 필드 불일치 0건).
+`strict`를 켜면 발표되는 개별 kinase 기여의 47.99%가 보류되고 kinase 163개 중 74개가 공유
+증거의 과반을 잃는다. 정량은 `docs/chapter2_audit_protocol_v1.md` §5.3.
 
 ## 재현
 
@@ -235,5 +250,16 @@ docker exec -i ptm-api-server env PYTHONPATH=/app:/opt python - \
 ```
 
 산출물은 `data/outputs/_diagnostics/tmm_identifiability/`에 오더별 JSON과 `_pooled_summary.json`으로
-기록된다. 테스트는 `docker exec ptm-worker-preprocessing sh -c 'cd /app && python -m pytest
-tests/test_tmm_identifiability.py -q'`.
+기록된다. **이 경로는 gitignore 대상이므로 아카이브가 아니다** — 동결 fixture는
+`workers/tests/fixtures/tmm_audit_v1/`이다.
+
+테스트는 다음으로 돌린다.
+
+```bash
+docker exec -w /app ptm-worker-preprocessing \
+  env PYTHONPATH=/app:/opt python -m pytest tests/test_tmm_identifiability.py -q
+```
+
+2026-08-22부터 `workers/Dockerfile`이 dev extra(`pytest`)를 함께 설치하므로 위 명령은 새로
+빌드한 컨테이너에서 임시 설치 없이 동작한다. 그 전까지는 매번 임시 설치가 필요했고 컨테이너
+재생성 시 사라졌다. 경위와 왜 이것이 연구 사안인지는 `docs/chapter2_audit_protocol_v1.md` §6.1.

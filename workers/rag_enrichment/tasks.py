@@ -1477,6 +1477,73 @@ def _compute_kinase_activity_heatmap(enriched_data: list, kinase_result: dict, p
             "substrates": substrates_list,
         })
 
+        # ── Sub-pattern entries for non-dominant, different-time clusters ──
+        # Mirrors the API endpoint writer logic (orders.py kinase_activity_heatmap).
+        # Only generates entries for clusters whose peak differs from the dominant peak
+        # and that have meaningful size and signal.
+        if len(clusters) >= 2:
+            for cl in clusters:
+                if cl.get("is_dominant"):
+                    continue
+                cl_size = cl.get("size", 0)
+                if cl_size < 2:
+                    continue
+                sub_peak_cond = cl.get("peak_condition", "")
+                sub_peak_score = cl.get("peak_score", 0.0)
+                if not sub_peak_cond or sub_peak_cond == peak_cond:
+                    continue  # same-time clusters go into same_time_clusters, not sub-patterns
+                if abs(sub_peak_score) < 0.3:
+                    continue
+                # Positional category
+                cond_idx = conditions.index(sub_peak_cond) if sub_peak_cond in conditions else 0
+                if cond_idx <= len(conditions) // 3:
+                    sub_label_category = "early_response"
+                elif cond_idx >= len(conditions) * 2 // 3:
+                    sub_label_category = "late_response"
+                else:
+                    sub_label_category = "mid_response"
+                sub_scores = _score_members(cl.get("member_keys", []), conditions)
+                kinase_scores.append({
+                    "kinase": f"{kinase_name}_c{cl['cluster_id']}",
+                    "parent_kinase": kinase_name,
+                    "is_sub_pattern": True,
+                    "sub_pattern_label": sub_peak_cond,
+                    "sub_pattern_category": sub_label_category,
+                    "scores": sub_scores,
+                    "substrate_count": cl_size,
+                    "total_substrates": len(members),
+                    "confidence": confidence * 0.7,
+                    "peak_condition": sub_peak_cond,
+                    "peak_score": round(float(sub_peak_score), 4),
+                    "coherence": cl.get("coherence", 0.0),
+                    "direction": "activation" if sub_peak_score > 0.3 else (
+                        "inactivation" if sub_peak_score < -0.3 else "neutral"
+                    ),
+                    "n_clusters": 1,
+                    "cluster_details": [cl],
+                    "same_time_clusters": [],
+                    "nuclear_evidence": {},
+                    "self_ptm": None,
+                    "substrates": [
+                        {
+                            "ptm_key": f"{gp[0]}_{gp[1]}",
+                            "gene": gp[0],
+                            "site": gp[1],
+                            "peak_fc": round(float(max(
+                                (ptm_values.get((gp[0], gp[1], c), 0.0) for c in conditions),
+                                key=abs, default=0.0
+                            )), 3),
+                            "temporal": {c: round(ptm_values.get((gp[0], gp[1], c), 0.0), 3) for c in conditions},
+                            "peak_condition": max(
+                                conditions,
+                                key=lambda c, _g=gp[0], _s=gp[1]: abs(ptm_values.get((_g, _s, c), 0.0))
+                            ) if conditions else "",
+                            "cluster": f"sub_{cl['cluster_id']}",
+                        }
+                        for gp in cl.get("member_keys", [])
+                    ],
+                })
+
     # ── Peak Synchronization: find kinases that peak at the same condition ──
     peak_groups = {}  # condition -> list of kinase names
     for ks in kinase_scores:
