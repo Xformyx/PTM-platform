@@ -399,7 +399,13 @@ def run_section_writing(state: dict) -> dict:
     # v9.31: Pre-build auxiliary blocks once (reuse across sections)
     aux_ptm_data_summary = build_ptm_data_summary(parsed_ptms, ptm_type=ptm_type)
     # P1: Site-level kinetic pattern distribution (Substrate-level Temporal Dynamics)
-    aux_substrate_dynamics = build_substrate_dynamics_summary(parsed_ptms)
+    from ptm_shared.temporal_contract import resolve_temporal_contract
+    _temporal = resolve_temporal_contract(state)
+    aux_substrate_dynamics = (
+        build_substrate_dynamics_summary(parsed_ptms)
+        if _temporal.inject_p1_report_context
+        else ""
+    )
     aux_nonptm_temporal = build_nonptm_temporal_analysis(network_results, timepoints, ptm_type=ptm_type)
     aux_timelag = build_ptm_protein_timelag_analysis(network_results, timepoints, ptm_type=ptm_type)
     aux_pathway_ctx = build_pathway_context_for_llm(parsed_ptms)

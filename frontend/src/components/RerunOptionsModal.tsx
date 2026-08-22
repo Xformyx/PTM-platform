@@ -12,8 +12,8 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { api } from "@/lib/api";
 import AnalysisOptionsModal from "./AnalysisOptionsModal";
-import type { AnalysisOptions } from "@/lib/types";
-import { DEFAULT_ANALYSIS_OPTIONS } from "@/lib/types";
+import type { AnalysisOptions, TemporalContract } from "@/lib/types";
+import { DEFAULT_ANALYSIS_OPTIONS, DEFAULT_TEMPORAL_CONTRACT, resolveTemporalContract } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { CLOUD_PROVIDER_SENTINEL, CLOUD_MODEL_PRESETS, type CloudProvider } from "@/lib/llm-models";
 
@@ -103,6 +103,7 @@ export default function RerunOptionsModal({
 }: Props) {
   const [analysisContext, setAnalysisContext] = useState<Record<string, string>>(DEFAULT_CONTEXT);
   const [analysisMode, setAnalysisMode] = useState<"ptm_only" | "ptm_nonptm_network">("ptm_only");
+  const [temporalContract, setTemporalContract] = useState<TemporalContract>(DEFAULT_TEMPORAL_CONTRACT);
   const [analysisOptions, setAnalysisOptions] = useState<AnalysisOptions>({ ...DEFAULT_ANALYSIS_OPTIONS });
   const [analysisModalOpen, setAnalysisModalOpen] = useState(false);
   const [reportType, setReportType] = useState("comprehensive");
@@ -201,6 +202,7 @@ export default function RerunOptionsModal({
       setAnalysisMode(
         modeVal === "ptm_nonptm_network" ? "ptm_nonptm_network" : "ptm_only"
       );
+      setTemporalContract(resolveTemporalContract(ro.temporal_contract));
       setReportType(typeof ro.report_type === "string" ? ro.report_type : "comprehensive");
       const coIntegration = (ro.co_scientist_integration || {}) as Record<string, unknown>;
       const savedIntegrationMode = coIntegration.mode;
@@ -304,6 +306,7 @@ export default function RerunOptionsModal({
           top_n_ptms: topNPtms,
           output_format: baseReportOpts.output_format ?? "md",
           analysis_mode: analysisMode,
+          temporal_contract: temporalContract,
           research_questions: reportType === "co_scientist" ? [] : researchQuestions,
           co_scientist_integration: coScientistIntegrationMode !== "disabled" && coScientistSessionId
             ? { enabled: true, mode: coScientistIntegrationMode, session_id: coScientistSessionId, max_hypotheses: 2 }
@@ -404,6 +407,37 @@ export default function RerunOptionsModal({
                   </div>
                   <p className="text-[10px] text-muted-foreground">KEA3, STRING-DB, network</p>
                 </button>
+              </div>
+              <div className="space-y-2">
+                <Label className="text-xs">Temporal Contract</Label>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setTemporalContract("dynamics_v1")}
+                    className={cn(
+                      "flex flex-col items-start gap-1.5 rounded-lg border-2 p-3 text-left transition-all",
+                      temporalContract === "dynamics_v1"
+                        ? "border-primary bg-primary/5"
+                        : "border-muted hover:border-muted-foreground/30",
+                    )}
+                  >
+                    <span className="font-medium text-xs">Dynamics v1</span>
+                    <p className="text-[10px] text-muted-foreground">group_share, sub-patterns, P1/Atlas</p>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTemporalContract("legacy")}
+                    className={cn(
+                      "flex flex-col items-start gap-1.5 rounded-lg border-2 p-3 text-left transition-all",
+                      temporalContract === "legacy"
+                        ? "border-primary bg-primary/5"
+                        : "border-muted hover:border-muted-foreground/30",
+                    )}
+                  >
+                    <span className="font-medium text-xs">Legacy</span>
+                    <p className="text-[10px] text-muted-foreground">pre-2026-08 heatmap and report path</p>
+                  </button>
+                </div>
               </div>
               <div className="grid gap-2">
                 <Label className="text-xs">Cell Type</Label>

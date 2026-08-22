@@ -641,7 +641,12 @@ def _auto_run_global_analysis(order_id: int, enriched_data: list, config: dict, 
         }
 
         # Build activity heatmap
-        heatmap_data = _compute_kinase_activity_heatmap(enriched_data, kinase_result, ptm_type)
+        heatmap_data = _compute_kinase_activity_heatmap(
+            enriched_data,
+            kinase_result,
+            ptm_type,
+            temporal_source=config,
+        )
 
         # Persist to DB
         from common.db_engine import get_engine as _get_engine
@@ -802,7 +807,12 @@ def _compute_nuclear_evidence(substrate_genes: list) -> dict:
     }
 
 
-def _compute_kinase_activity_heatmap(enriched_data: list, kinase_result: dict, ptm_type: str) -> dict:
+def _compute_kinase_activity_heatmap(
+    enriched_data: list,
+    kinase_result: dict,
+    ptm_type: str,
+    temporal_source: dict | None = None,
+) -> dict:
     """Compute per-kinase per-condition weighted activity scores from enriched PTM data.
 
     v11.0: Substrate Temporal Clustering
@@ -816,6 +826,9 @@ def _compute_kinase_activity_heatmap(enriched_data: list, kinase_result: dict, p
       5. Preserve all cluster details for frontend drill-down
     """
     import numpy as np
+    from ptm_shared.temporal_contract import resolve_temporal_contract
+
+    temporal = resolve_temporal_contract(temporal_source)
 
     # ── Pure-numpy K-Means (no sklearn dependency) ──
     def _numpy_kmeans(data: np.ndarray, k: int, n_init: int = 10,
@@ -1481,7 +1494,8 @@ def _compute_kinase_activity_heatmap(enriched_data: list, kinase_result: dict, p
         # Mirrors the API endpoint writer logic (orders.py kinase_activity_heatmap).
         # Only generates entries for clusters whose peak differs from the dominant peak
         # and that have meaningful size and signal.
-        if len(clusters) >= 2:
+        # `legacy` contract keeps the pre-2026-08 heatmap (no _c1/_c2 rows).
+        if temporal.emit_heatmap_sub_patterns and len(clusters) >= 2:
             for cl in clusters:
                 if cl.get("is_dominant"):
                     continue
@@ -1684,6 +1698,8 @@ def _compute_kinase_activity_heatmap(enriched_data: list, kinase_result: dict, p
         "peak_sync": peak_sync,
         "cowave_groups": cowave_groups,
         "all_kinase_scores": kinase_scores,  # unfiltered for debug
+        "temporal_contract": temporal.name,
+        "guard_policy": temporal.guard_policy,
         "_cached": True,
     }
     # ── TMM: Temporal Mixture Modeling (Option B) ────────────────────────────
@@ -2295,6 +2311,7 @@ def run_rag_enrichment(self, order_id: int, config: dict):
             "co_scientist_integration": config.get("co_scientist_integration", {}),
             "analysis_mode": analysis_mode,
             "secondary_ptm_type": config.get("secondary_ptm_type"),
+            "temporal_contract": config.get("temporal_contract"),
         }
         # Cross-Talk: add secondary paths to report_config
         if analysis_mode == "cross_talk":

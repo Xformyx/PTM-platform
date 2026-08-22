@@ -22,6 +22,7 @@ import { AutoResizeTextarea } from "@/components/ui/auto-resize-textarea";
 import { api } from "@/lib/api";
 import { useOrderProgress } from "@/hooks/useSSE";
 import type { Order, OrderLog, ProgressEvent } from "@/lib/types";
+import { resolveTemporalContract, temporalContractLabel } from "@/lib/types";
 import { AnalysisStatisticsTab } from "@/components/AnalysisStatisticsTab";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -4669,10 +4670,12 @@ export default function OrderDetail() {
               <ChartScatter className="h-3.5 w-3.5 mr-1.5" />
               Vector Plot
             </TabsTrigger>
+            {resolveTemporalContract((order.report_options as { temporal_contract?: string } | undefined)?.temporal_contract) === "dynamics_v1" && (
             <TabsTrigger value="temporal-atlas">
               <TrendingUp className="h-3.5 w-3.5 mr-1.5" />
               Temporal Atlas
             </TabsTrigger>
+            )}
             {(order.report_options as any)?.analysis_mode === "cross_talk" && (
               <TabsTrigger value="cross-talk">
                 <GitMerge className="h-3.5 w-3.5 mr-1.5" />
@@ -4897,6 +4900,10 @@ export default function OrderDetail() {
                     };
                     return labels[mode] ?? (mode ? mode : "De novo + Regulated");
                   })()}
+                />
+                <OverviewField
+                  label="Temporal Contract"
+                  value={temporalContractLabel((order.report_options as { temporal_contract?: string } | undefined)?.temporal_contract)}
                 />
                 <OverviewField
                   label="LLM Model (RAG Enrichment)"
@@ -5179,9 +5186,11 @@ export default function OrderDetail() {
           </div>
         </TabsContent>
 
+        {resolveTemporalContract((order.report_options as { temporal_contract?: string } | undefined)?.temporal_contract) === "dynamics_v1" && (
         <TabsContent value="temporal-atlas" className="mt-4">
           <TemporalSubstrateAtlas orderId={order.id} active={activeTab === "temporal-atlas"} />
         </TabsContent>
+        )}
 
         {(order.report_options as any)?.analysis_mode === "cross_talk" && (
           <TabsContent value="cross-talk" className="mt-4">

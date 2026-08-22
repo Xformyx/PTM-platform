@@ -521,6 +521,7 @@ def run_report_generation(self, order_id: int, config: dict):
             # separate from the unbiased discovery time-course inputs.
             "perturbation_evidence": config.get("perturbation_evidence", {}),
             "analysis_mode": analysis_mode,
+            "temporal_contract": config.get("temporal_contract", "dynamics_v1"),
             "progress_callback": _make_progress_cb(order_id),
             # v9.12/v9.35: Frontend kinase analysis results (auto-built if absent)
             "frontend_kinase_analysis": kinase_analysis_data,

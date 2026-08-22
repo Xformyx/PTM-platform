@@ -10,6 +10,13 @@ logger = logging.getLogger(__name__)
 
 
 def run_atlas_claim_ledger(state: dict) -> dict:
+    from ptm_shared.temporal_contract import resolve_temporal_contract
+    if not resolve_temporal_contract(state).run_atlas_report:
+        logger.info("[atlas-ledger] skipped (temporal_contract=legacy)")
+        return {
+            "atlas_claim_ledger": {},
+            "atlas_claim_ledger_llm_context": "",
+        }
     ledger = build_atlas_claim_ledger(
         state.get("enriched_ptm_data") or [],
         kinase_activity_heatmap=state.get("kinase_activity_heatmap") or state.get("frontend_kinase_analysis"),

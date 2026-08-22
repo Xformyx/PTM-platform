@@ -1686,3 +1686,35 @@
 - **해석 한계:** 이 수정은 엔드포인트가 파일을 찾지 못해 죽던 것을 고친다.
   패턴 분류·atlas 적격 판정을 바꾸지 않는다.
 - **결정성:** 해당 없음
+
+### [2026-08-22] Temporal contract A/B (`legacy` / `current`)
+
+- **분류:** 사전등록 + 구현
+- **대상:** `docs/substrate_temporal_dynamics_deepening_plan_v1.md` §8,
+  `ptm_shared/temporal_contract.py`, RAG heatmap, API heatmap/vector-plot/atlas,
+  report graph/writer, Order Create / Rerun / Duplicate UI
+- **구현 대상 설계:** §8 (2026-08-22, 구현 착수 전 선언)
+- **사전등록 상태:** 결과 열람 전 확정. 새 임계 없음. 경로 선택 스위치.
+- **내용:**
+  - `report_options.temporal_contract`: `current`(기본, 키 누락 포함) |
+    `legacy`.
+  - `legacy`: `GUARD_OFF`, heatmap `_c1/_c2` 없음, P1/Atlas를 리포트·탭에
+    넣지 않음.
+  - `current`: 2026-08 기본 경로 (`group_share`, sub-pattern, P1, Atlas).
+  - 비교는 Duplicate Order 후 한쪽만 `legacy` 로 두고 Compare 페이지를 쓴다.
+- **논문에서의 용도:** methods (어느 오더가 어느 경로인지 기록)
+- **해석 한계:** 스위치는 경로 선택이다. current 가 kinase 귀속을 개선했다는
+  뜻이 아니다.
+- **결정성:** 해당 없음
+
+### [2026-08-22] Temporal contract 표시명 — Current → Dynamics v1
+
+- **분류:** 정정
+- **대상:** `ptm_shared/temporal_contract.py`, UI 라벨, `docs/substrate_temporal_dynamics_deepening_plan_v1.md` §8
+- **구현 대상 설계:** 동 §8 (이름만 고정. 경로 효과는 그대로)
+- **사전등록 상태:** 해당 없음 (표시/저장 이름. 측정량을 바꾸지 않음)
+- **내용:** 상대 시각 이름 `current` 를 **Dynamics v1** (`dynamics_v1`) 으로 바꿨다.
+  이미 저장된 `current` 는 alias 로 같은 경로다. `legacy` 는 그대로다.
+- **논문에서의 용도:** methods 표기 (`Dynamics v1` vs `Legacy`)
+- **해석 한계:** 이름 변경은 경로를 바꾸지 않는다.
+- **결정성:** 해당 없음

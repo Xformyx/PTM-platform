@@ -833,6 +833,7 @@ def run_preprocessing(self, order_id: int, config: dict):
             "report_config": config.get("report_config", {}),
             "co_scientist_integration": config.get("co_scientist_integration", {}),
             "analysis_mode": config.get("analysis_mode", "ptm_only"),
+            "temporal_contract": config.get("temporal_contract"),
             "secondary_output_dir": str(secondary_output_dir) if secondary_output_dir else None,
             "secondary_ptm_type": config.get("secondary_ptm_type", ""),
             "secondary_pr_matrix_path": secondary_pr_path,

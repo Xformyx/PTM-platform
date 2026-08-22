@@ -98,6 +98,9 @@ def render_atlas_report(ledger: Mapping[str, Any], *, order_id: int | None = Non
 
 
 def run_atlas_report_generation(state: dict) -> dict:
+    from ptm_shared.temporal_contract import resolve_temporal_contract
+    if not resolve_temporal_contract(state).run_atlas_report:
+        return {"atlas_report_path": "", "atlas_report_markdown": ""}
     ledger = state.get("atlas_claim_ledger") or {}
     output_dir = state.get("output_dir")
     if not output_dir:

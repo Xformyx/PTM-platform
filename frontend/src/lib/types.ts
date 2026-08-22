@@ -126,6 +126,18 @@ export const DEFAULT_ANALYSIS_OPTIONS: AnalysisOptions = {
   proteinCount: 1000,
 };
 
+export type TemporalContract = 'legacy' | 'dynamics_v1';
+
+export const DEFAULT_TEMPORAL_CONTRACT: TemporalContract = 'dynamics_v1';
+
+export function resolveTemporalContract(value: unknown): TemporalContract {
+  return value === 'legacy' ? 'legacy' : 'dynamics_v1';
+}
+
+export function temporalContractLabel(value: unknown): string {
+  return resolveTemporalContract(value) === 'legacy' ? 'Legacy' : 'Dynamics v1';
+}
+
 export interface ProgressEvent {
   order_id: number;
   stage: string;

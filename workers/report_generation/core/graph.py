@@ -160,6 +160,9 @@ class ReportState(TypedDict, total=False):
     causal_validation_recommendations: dict
     perturbation_evidence: dict
 
+    # P4 A/B: `legacy` skips Atlas/P1 report context. Missing key is `current`.
+    temporal_contract: str
+
     # Progress tracking
     progress_callback: Any
     error: Optional[str]
@@ -863,6 +866,15 @@ def _route_after_validate(state: ReportState) -> str:
     return "network_analysis"
 
 
+def _route_after_kinase_annotation(state: ReportState) -> str:
+    """`legacy` skips Atlas ledger/report so the integrated prose matches the old path."""
+    from ptm_shared.temporal_contract import resolve_temporal_contract
+    if resolve_temporal_contract(state).run_atlas_report:
+        return "atlas_claim_ledger"
+    logger.info("[GRAPH] Skipping Atlas nodes (temporal_contract=legacy)")
+    return "rq_refinement"
+
+
 def build_report_graph() -> StateGraph:
     """Build the LangGraph StateGraph for report generation.
 
@@ -927,7 +939,14 @@ def build_report_graph() -> StateGraph:
     graph.add_edge("data_verification", "network_analysis")
     graph.add_edge("network_analysis", "temporal_comovement")
     graph.add_edge("temporal_comovement", "kinase_annotation")
-    graph.add_edge("kinase_annotation", "atlas_claim_ledger")
+    graph.add_conditional_edges(
+        "kinase_annotation",
+        _route_after_kinase_annotation,
+        {
+            "atlas_claim_ledger": "atlas_claim_ledger",
+            "rq_refinement": "rq_refinement",
+        },
+    )
     graph.add_edge("atlas_claim_ledger", "generate_atlas_report")
     graph.add_edge("generate_atlas_report", "rq_refinement")
     graph.add_edge("rq_refinement", "external_coscientist_context")

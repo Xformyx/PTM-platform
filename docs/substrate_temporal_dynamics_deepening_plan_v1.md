@@ -144,6 +144,24 @@ same site/form
 | P4 | UI dynamics atlas + report integration | spaghetti plot 대체가 아닌 drill-down 보완 |
 | P5 | insulin benchmark + frozen thresholds | production labels의 evidence gate |
 
+## 8. Temporal contract A/B (`legacy` / `dynamics_v1`)
+
+비교를 위해 오더가 한 경로만 고른다. 한 오더 안에 두 산출을 동시에 두지 않는다.
+
+선언 시점: 2026-08-22. 구현 착수 전. 새 임계를 도입하지 않는다.
+표시 이름: **Dynamics v1** (`dynamics_v1`). 첫 구현의 저장값 `current` 는 같은 경로의 alias 다.
+
+`report_options.temporal_contract`:
+
+- `dynamics_v1` (기본, 키 누락과 alias `current` 도 여기): `GUARD_GROUP_SHARE`, heatmap sub-pattern, P1 리포트 컨텍스트, Atlas ledger/리포트/탭
+- `legacy`: `GUARD_OFF`, sub-pattern 없음, P1/Atlas를 리포트와 UI에 넣지 않음
+
+### 8.1 규칙
+
+1. 명시적 오타(`lagacy` 등)는 조용히 Dynamics v1 로 떨어지지 않고 거절한다.
+2. 비교는 Duplicate Order 후 한쪽만 `legacy` 로 두고 Compare 페이지를 쓴다. 같은 오더 재실행은 산출을 덮는다.
+3. 이 스위치는 경로 선택이다. Dynamics v1 이 kinase 귀속을 개선했다는 뜻이 아니다.
+
 ## 9. 외부 방법론 근거
 
 연속 시간 trajectory를 사용하면 independent categorical timepoint 비교보다 시간점 사이의 의존성, transient response와 permanent change를 명시적으로 다룰 수 있다. 다만 본 플랫폼은 count-model을 그대로 이식하지 않고, protein-normalized quantitative PTM Track 2와 불규칙 minute time encoding에 맞춘 descriptive feature contract를 사용한다.[1]

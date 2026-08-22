@@ -981,6 +981,7 @@ async def start_order(
         "report_config": report_opts.get("report_config", {}),
         "co_scientist_integration": report_opts.get("co_scientist_integration", {}),
         "analysis_mode": report_opts.get("analysis_mode", "ptm_only"),
+        "temporal_contract": report_opts.get("temporal_contract", "dynamics_v1"),
         "top_n_ptms": report_opts.get("top_n_ptms", 50),
         "ptm_selection_mode": report_opts.get("ptm_selection_mode", "top_n"),
         "experimental_context": {**(order.analysis_context if isinstance(order.analysis_context, dict) else {}), "ptm_type": order.ptm_type},
@@ -1275,6 +1276,7 @@ async def run_stage(
             "rag_llm_model": (order.report_options or {}).get("rag_llm_model"),
             "rag_llm_provider": (order.report_options or {}).get("rag_llm_provider"),
             "report_title": (order.report_options or {}).get("report_title", "PTM Comprehensive Analysis Report"),
+            "temporal_contract": (order.report_options or {}).get("temporal_contract", "dynamics_v1"),
             "chain_to_next": True,
         }
         task = celery_app.send_task(
@@ -1301,6 +1303,7 @@ async def run_stage(
             "rag_llm_model": (order.report_options or {}).get("rag_llm_model"),
             "rag_llm_provider": (order.report_options or {}).get("rag_llm_provider"),
             "report_title": (order.report_options or {}).get("report_title", "PTM Comprehensive Analysis Report"),
+            "temporal_contract": (order.report_options or {}).get("temporal_contract", "dynamics_v1"),
             "chain_to_next": True,
         }
         task = celery_app.send_task(
@@ -1357,6 +1360,7 @@ async def run_stage(
             # v9.33: Pass PTM selection settings so kinase module analysis matches frontend
             "top_n_ptms": (order.report_options or {}).get("top_n_ptms", 50),
             "ptm_selection_mode": (order.report_options or {}).get("ptm_selection_mode", "top_n"),
+            "temporal_contract": report_opts.get("temporal_contract", "dynamics_v1"),
         }
         task = celery_app.send_task(
             "report_generation.tasks.run_report_generation",
@@ -2172,6 +2176,8 @@ async def get_vector_plot_data(
 
     if enriched_path.exists():
         import json as _json
+        from ptm_shared.temporal_contract import resolve_temporal_contract as _resolve_tc
+        show_p1_ui = _resolve_tc(order.report_options or {}).show_p1_ui
         with open(enriched_path, "r", encoding="utf-8") as f:
             enriched = _json.load(f)
         seen = set()
@@ -2183,8 +2189,8 @@ async def get_vector_plot_data(
                 seen.add(key)
                 # v9.17: Predict protein class from enriched UniProt/GO data
                 protein_class = _predict_protein_class(ptm, ptm_type_str)
-                # P1: Canonical temporal pattern label (substrate_temporal_dynamics v1)
-                p1_pattern = _compute_p1_pattern(ptm)
+                # P1 omitted under `legacy` so the timeseries UI matches the old path.
+                p1_pattern = _compute_p1_pattern(ptm) if show_p1_ui else None
                 top_n_ptms.append({
                     "gene": str(gene),
                     "position": str(pos),
@@ -6840,23 +6846,24 @@ async def kinase_activity_heatmap(
 
     kinase_modules = body.get("kinase_modules", [])
     force_refresh = body.get("force_refresh", False)
+    from ptm_shared.temporal_contract import resolve_temporal_contract, same_temporal_arm
+    temporal = resolve_temporal_contract(order.report_options or {})
 
     # Cache key
     km_keys = sorted([m.get("kinase", "") for m in kinase_modules])
-    hash_input = f"{order_id}|{len(kinase_modules)}|{'|'.join(km_keys[:30])}"
+    hash_input = f"{order_id}|{len(kinase_modules)}|{'|'.join(km_keys[:30])}|{temporal.name}"
     cache_hash = hashlib.md5(hash_input.encode()).hexdigest()[:12]
 
     # Check cache — v11.3 Pure Renderer pattern:
     # Priority 1: If pipeline already computed & stored results (same hash), serve directly.
     # Priority 2: If force_refresh, recompute from scratch.
+    # A cached heatmap from the other temporal_contract is not reusable.
     if not force_refresh and order.kinase_activity_heatmap:
         cached = order.kinase_activity_heatmap
-        if cached.get("_cache_hash") == cache_hash:
-            return {**cached, "_cached": True}
-        # Even if hash differs (kinase modules changed), still serve stale cache
-        # with a flag so frontend knows it's outdated but usable.
-        # Only recompute below if force_refresh or no cache at all.
-        if not force_refresh:
+        cached_contract = cached.get("temporal_contract", "dynamics_v1")
+        if same_temporal_arm(cached_contract, temporal.name):
+            if cached.get("_cache_hash") == cache_hash:
+                return {**cached, "_cached": True}
             return {**cached, "_cached": True, "_stale": True}
 
     # Load vector data (time-series)
@@ -7726,7 +7733,8 @@ async def kinase_activity_heatmap(
         # ── v11.3 Multi-pattern: Emit non-dominant clusters as sub-pattern entries ──
         # This allows the frontend to display multiple temporal phases per kinase
         # (e.g., CDK1 early cytoplasmic targets vs CDK1 late nuclear targets)
-        if len(clusters) >= 2:
+        # `legacy` contract keeps the pre-2026-08 heatmap (no _c1/_c2 rows).
+        if temporal.emit_heatmap_sub_patterns and len(clusters) >= 2:
             for cl in clusters:
                 if cl["is_dominant"]:
                     continue
@@ -8229,6 +8237,7 @@ async def kinase_activity_heatmap(
             fc_threshold=FC_THRESHOLD,
             q_threshold=Q_THRESHOLD,
             ptm_qvalues=ptm_qvalues,
+            guard_policy=temporal.guard_policy,
         )
         if len(occupancy_complete_timeseries) >= 2 and len(conditions_sorted) >= 3:
             from ptm_shared.temporal_wave_engine import analyze_temporal_waves
@@ -8259,6 +8268,7 @@ async def kinase_activity_heatmap(
                 fc_threshold=0.0,
                 q_threshold=Q_THRESHOLD,
                 ptm_qvalues=occupancy_complete_qvalues,
+                guard_policy=temporal.guard_policy,
             )
 
         def _track_peak(score: dict) -> tuple[str | None, float]:
@@ -8455,6 +8465,8 @@ async def kinase_activity_heatmap(
         "translocation_candidates": translocation_candidates,
         "scoring_method": "stratified_winsorized_mean_v11.3+tmm_deconvolution",
         "scoring_threshold": {"q_value": Q_THRESHOLD, "fc_abs": FC_THRESHOLD},
+        "temporal_contract": temporal.name,
+        "guard_policy": temporal.guard_policy,
         "_cache_hash": cache_hash,
         "computed_at": _dt.utcnow().isoformat(),
     }
@@ -8882,6 +8894,14 @@ async def substrate_temporal_atlas(
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
     _check_order_access(order, user)  # read-only: owner/admin only (no write required)
+
+    from ptm_shared.temporal_contract import resolve_temporal_contract
+    if not resolve_temporal_contract(order.report_options or {}).run_atlas_report:
+        return {
+            "sites": [],
+            "status": "disabled_by_contract",
+            "temporal_contract": "legacy",
+        }
 
     output_dir = Path(os.getenv("OUTPUT_DIR", "/app/data/outputs")) / order.order_code
     file_suffix = f"_{order.ptm_type}" if order.ptm_type and order.ptm_type != "phosphorylation" else ""

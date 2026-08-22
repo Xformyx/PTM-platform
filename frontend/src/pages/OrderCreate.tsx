@@ -4,8 +4,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Check, Upload, AlertCircle, ArrowLeft, ArrowRight, Loader2,
   FileSpreadsheet, Regex, Trash2, SlidersHorizontal, Brain,
-  Plus, X, MessageSquare, Network, FlaskConical, BookOpen,
-  ChevronDown, ChevronUp, Settings2, RotateCcw, GitMerge, Copy,
+  Plus, X, MessageSquare, Network,   FlaskConical, BookOpen,
+  ChevronDown, ChevronUp, Settings2, RotateCcw, GitMerge, Copy, GitCompare,
   Database, CheckSquare, Square,
 } from "lucide-react";
 import { api } from "@/lib/api";
@@ -27,8 +27,8 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
-import type { AnalysisOptions } from "@/lib/types";
-import { DEFAULT_ANALYSIS_OPTIONS } from "@/lib/types";
+import type { AnalysisOptions, TemporalContract } from "@/lib/types";
+import { DEFAULT_ANALYSIS_OPTIONS, DEFAULT_TEMPORAL_CONTRACT, temporalContractLabel } from "@/lib/types";
 import AnalysisOptionsModal from "@/components/AnalysisOptionsModal";
 import { CLOUD_MODEL_PRESETS, type CloudProvider } from "@/lib/llm-models";
 
@@ -200,6 +200,7 @@ export default function OrderCreate() {
     cell_type: "", treatment: "", time_points: "", biological_question: "", special_conditions: "",
     report_type: "comprehensive", ptm_selection_mode: "de_novo_regulated" as "top_n" | "de_novo" | "regulated" | "de_novo_regulated" | "minor" | "all", top_n_ptms: 50, llm_model: "", rag_enrichment_llm_model: "",
     analysis_mode: "ptm_only" as "ptm_only" | "ptm_nonptm_network" | "cross_talk",
+    temporal_contract: DEFAULT_TEMPORAL_CONTRACT as TemporalContract,
     secondary_ptm_type: "ubiquitylation",
   });
   const [researchQuestions, setResearchQuestions] = useState<string[]>([]);
@@ -555,6 +556,7 @@ export default function OrderCreate() {
     formData.append("report_options", JSON.stringify({
       report_type: form.report_type, ptm_selection_mode: form.ptm_selection_mode, top_n_ptms: form.top_n_ptms, output_format: "md",
       analysis_mode: form.analysis_mode,
+      temporal_contract: form.temporal_contract,
       research_questions: form.report_type === "co_scientist" ? [] : (researchQuestions.length > 0 ? researchQuestions : []),
       ...(form.llm_model ? (() => {
         const colonIdx = form.llm_model.indexOf(":");
@@ -1009,6 +1011,51 @@ export default function OrderCreate() {
                         <Badge variant="secondary" className="text-[9px]">Sequential Gating</Badge>
                         <Badge variant="secondary" className="text-[9px]">TIME LAG</Badge>
                       </div>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <Label className="text-sm font-semibold">Temporal Contract</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Same input, two analysis paths. Duplicate an order and flip this to compare reports and heatmaps.
+                  </p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setForm({ ...form, temporal_contract: "dynamics_v1" })}
+                      className={cn(
+                        "flex flex-col items-start gap-2 rounded-lg border-2 p-4 text-left transition-all",
+                        form.temporal_contract === "dynamics_v1"
+                          ? "border-primary bg-primary/5"
+                          : "border-muted hover:border-muted-foreground/30",
+                      )}
+                    >
+                      <div className="flex items-center gap-2">
+                        <GitCompare className={cn("h-5 w-5", form.temporal_contract === "dynamics_v1" ? "text-primary" : "text-muted-foreground")} />
+                        <span className="font-medium text-sm">Dynamics v1</span>
+                      </div>
+                      <p className="text-xs text-muted-foreground leading-relaxed">
+                        Site-level temporal dynamics: group_share guard, heatmap sub-patterns, P1 report context, Temporal Atlas.
+                      </p>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setForm({ ...form, temporal_contract: "legacy" })}
+                      className={cn(
+                        "flex flex-col items-start gap-2 rounded-lg border-2 p-4 text-left transition-all",
+                        form.temporal_contract === "legacy"
+                          ? "border-primary bg-primary/5"
+                          : "border-muted hover:border-muted-foreground/30",
+                      )}
+                    >
+                      <div className="flex items-center gap-2">
+                        <RotateCcw className={cn("h-5 w-5", form.temporal_contract === "legacy" ? "text-primary" : "text-muted-foreground")} />
+                        <span className="font-medium text-sm">Legacy</span>
+                      </div>
+                      <p className="text-xs text-muted-foreground leading-relaxed">
+                        Pre-2026-08 path: guard off, no sub-patterns, no P1/Atlas in the report or UI.
+                      </p>
                     </button>
                   </div>
                 </div>
@@ -1768,6 +1815,8 @@ export default function OrderCreate() {
                     <span className="font-medium">
                       {form.analysis_mode === "ptm_only" ? "PTM-Only" : form.analysis_mode === "cross_talk" ? "Cross-Talk" : "PTM + Network"}
                     </span>
+                    <span className="text-muted-foreground">Temporal Contract</span>
+                    <span className="font-medium">{temporalContractLabel(form.temporal_contract)}</span>
                     <span className="text-muted-foreground">Report Type</span>
                     <span className="font-medium">{form.report_type === "extended" ? "Extended" : form.report_type === "co_scientist" ? "Data-Grounded Analysis" : "Standard"}</span>
                     <span className="text-muted-foreground">Samples</span>
