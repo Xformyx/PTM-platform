@@ -278,3 +278,48 @@ Backend: vector-plot (receptor inference)
 - [x] 첨부 report의 10개 사용자 입력 Research Questions와 실제 section·prompt·evidence 연결 경로 점검
 - [x] question별 answer status·evidence source·unanswered limitation을 포함하는 report planning contract 설계
 - [x] writer·PDF/report template에 question coverage matrix와 질문별 Results/Discussion rendering 구현·검증
+
+## Substrate-level Temporal Dynamics Deepening
+- [ ] 최신 temporal/co-wave substrate pattern code와 transient burst 단일 분류의 적용 범위 점검
+- [ ] onset·peak·duration·rebound·반복성·조건 특이성 기반 substrate pattern taxonomy와 confidence guardrail 설계
+- [ ] substrate dynamics를 co-wave·TMM·condition comparison·report에 연결하는 phased implementation 및 insulin benchmark 계획 수립
+
+## Temporal Cascade Report Architecture
+- [x] 통합 report의 핵심 cascade narrative와 별도 substrate dynamics atlas report의 역할·공유 data contract 정의
+- [x] 시간 window·condition·co-wave transition·kinase context 기반의 cascade story generation과 interpretation boundary 설계
+- [x] Atlas에 substrate pattern·autophosphorylation·nuclear PTM·upstream kinase/TMM·후속 non-PTM dynamics evidence layer 추가
+- [x] Atlas와 통합 report의 shared claim ledger·section-level evidence reference·wording consistency gate 구현
+
+## Atlas Temporal Cascade Narrative Guardrails
+- [x] 사용자 제시 시간창별 insulin cascade narrative의 observed data·literature support·hypothesis claim 분해
+- [ ] novelty wording·citation verification·site-specific directness·causality boundary를 포함한 Atlas narrative template 정의
+
+## Time-varying Substrate Co-movement Transitions
+- [x] windowed co-movement persistence·split·merge·recruitment·independent activation metrics와 stability guardrail 정의
+- [x] Atlas transition map과 시간창별 substrate divergence narrative를 co-wave·TMM·autophosphorylation·non-PTM evidence에 연결
+
+## Post-upgrade Temporal Dynamics Review
+- [x] 최신 main의 substrate dynamics·transition·Atlas/report 변경 범위와 기존 계획 정합성 검토
+- [x] syntax/test·provenance·causality guardrail·regression risk를 점검하고 후속 조치 정리
+
+## P1.1 Atlas Quality Promotion and Form-aware Provenance
+- [x] oscillatory_supported 승격에 LOTO stability·threshold-insensitivity·missingness gate를 의무화하고 미충족 시 multi_peak_candidate로 강등
+- [x] Atlas API/report에 LOTO·threshold sensitivity·q-value coverage·실제 observed count를 노출하고 quality-based narrative eligibility 적용
+- [x] site_form_key를 보존하고 명시적 site aggregation contract를 도입하여 first-record form/charge collapse 방지
+- [x] P0 ordering/duplicate warning이 있는 trajectory를 atlas_eligible=false 또는 needs_input_audit로 표시
+- [ ] Atlas frontend UI에 quality·form provenance·claim/transition map을 시각화
+
+## P3b Dynamic Transitions and Atlas Evidence-to-Report
+- [x] windowed persistence·split·merge·recruitment·exit·independent activation engine 및 stability gate 구현
+- [x] per-site/per-window/group transition evidence를 Atlas narrative와 integrated report writer에 전달
+
+## Approved Atlas Implementation Sequence
+- [x] Phase 1: P1.1 quality promotion과 P0 Atlas eligibility gate 구현·검증
+- [x] Phase 2: form-aware substrate provenance와 explicit site aggregation contract 구현·검증
+- [x] Phase 3: P3b dynamic co-movement transition engine 구현·검증
+- [x] Phase 4: autophosphorylation·nuclear PTM·TMM·non-PTM context evidence join 구현·검증
+- [x] Phase 5: Atlas–integrated report shared claim ledger와 writer integration 구현·end-to-end 검증
+
+## Verification Checklist Follow-up Review
+- [x] verification checklist의 완료·부분 완료·미구현 항목을 Temporal Dynamics/Atlas 최신 코드와 대조
+- [x] checklist 기반 temporal stability·form provenance·transition·Atlas/report 보완 과제의 우선순위 확정

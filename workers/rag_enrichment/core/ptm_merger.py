@@ -13,6 +13,11 @@ import logging
 import math
 from typing import Dict, List, Optional, Tuple
 
+from ptm_shared.site_form_provenance import (
+    aggregate_site_form_trajectories,
+    form_identity,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -66,8 +71,12 @@ def collapse_ptm_rows_for_enrichment(
 
         primary["condition_data"] = condition_data
         primary["rag_source_row_count"] = len(entries)
+        form_trajectories = _build_site_form_trajectories(entries, single_time_point)
+        primary["site_form_trajectories"] = form_trajectories
+        site_aggregate = aggregate_site_form_trajectories(form_trajectories)
+        primary["site_aggregation"] = site_aggregate
         primary["trajectory"] = (
-            _build_trajectory_from_conditions(condition_data)
+            _build_trajectory_from_timepoints(site_aggregate["timepoints"])
             if not single_time_point
             else {"timepoints": [], "trend": "unknown"}
         )
@@ -244,6 +253,45 @@ def _select_primary(entries: List[dict]) -> dict:
     return best
 
 
+def _build_site_form_trajectories(entries: List[dict], single_time_point: bool) -> List[dict]:
+    """Preserve each modified sequence/charge trajectory before site aggregation."""
+    grouped: Dict[str, List[dict]] = {}
+    identities: Dict[str, dict] = {}
+    for entry in entries:
+        identity = form_identity(entry)
+        key = identity["site_form_key"]
+        grouped.setdefault(key, []).append(entry)
+        identities[key] = identity
+
+    forms: List[dict] = []
+    for key in sorted(grouped):
+        condition_data = []
+        for entry in grouped[key]:
+            condition_data.append({
+                "condition": entry.get("Condition") or entry.get("condition", ""),
+                "ptm_relative_log2fc": _safe_float(
+                    entry.get("PTM_Relative_Log2FC")
+                    if entry.get("PTM_Relative_Log2FC") is not None
+                    else entry.get("ptm_relative_log2fc")
+                ),
+                "protein_log2fc": _safe_float(
+                    entry.get("Protein_Log2FC")
+                    if entry.get("Protein_Log2FC") is not None
+                    else entry.get("protein_log2fc")
+                ),
+                "q_value": entry.get("q_value"),
+            })
+        forms.append({
+            **identities[key],
+            "trajectory": (
+                _build_trajectory_from_conditions(condition_data)
+                if not single_time_point
+                else {"timepoints": [], "trend": "unknown"}
+            ),
+        })
+    return forms
+
+
 def _build_trajectory_from_conditions(condition_data: List[dict]) -> dict:
     """Build trajectory data from multi-condition entries.
 
@@ -267,8 +315,17 @@ def _build_trajectory_from_conditions(condition_data: List[dict]) -> dict:
             "timeLabel": cond,
             "ptmLog2FC": ptm_fc,
             "proteinLog2FC": prot_fc,
+            "q_value": cd.get("q_value"),
             "classification": cls_label,
         })
+
+    return _build_trajectory_from_timepoints(timepoints)
+
+
+def _build_trajectory_from_timepoints(timepoints: List[dict]) -> dict:
+    """Attach the legacy trend label to a pre-sorted set of aggregated points."""
+    if len(timepoints) < 2:
+        return {"timepoints": list(timepoints), "trend": "unknown"}
 
     # Determine trend
     first_fc = timepoints[0]["ptmLog2FC"]
@@ -287,7 +344,7 @@ def _build_trajectory_from_conditions(condition_data: List[dict]) -> dict:
     else:
         trend = "stable"
 
-    return {"timepoints": timepoints, "trend": trend}
+    return {"timepoints": list(timepoints), "trend": trend}
 
 
 def _extract_time_value(label: str) -> float:

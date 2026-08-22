@@ -1,6 +1,6 @@
 """Regression tests for ptm_shared/substrate_temporal_dynamics.py.
 
-Contract locked: substrate_temporal_dynamics.v1  (2026-08-22)
+Contract locked: substrate_temporal_dynamics.v1.1  (2026-08-22)
 Pre-registration status: Platform engineering module.
 These tests lock the taxonomy logic and numerical thresholds so that
 inadvertent changes to gate constants or classification precedence are
@@ -148,7 +148,7 @@ class TestFeatureComputation:
 
     def test_contract_version_is_frozen(self):
         p = compute_site_kinetic_profile(TP6, [0.1] * 6, config=SiteKineticConfig(run_loto=False, run_threshold_sensitivity=False))
-        assert p.contract_version == CONTRACT_VERSION == "substrate_temporal_dynamics.v1"
+        assert p.contract_version == CONTRACT_VERSION == "substrate_temporal_dynamics.v1.1"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -426,13 +426,39 @@ class TestFrozenThresholds:
         # Must be >= 6 so that standard 6-TP experiments rarely produce oscillatory_supported
         assert _OSC_MIN_OBSERVED >= 6
 
-    def test_oscillatory_triggered_only_for_perfect_alternation(self):
-        # A perfectly alternating trajectory with 4 interior extrema and CV=0
-        # legitimately meets all oscillatory_supported criteria.
+    def test_shape_only_oscillation_is_downgraded_without_stability(self):
+        # Shape detection alone can nominate oscillation, but a profile without
+        # LOTO/threshold evidence must remain an exploratory multi-peak candidate.
         cfg = SiteKineticConfig(run_loto=False, run_threshold_sensitivity=False)
         vals = [2.0, -1.5, 2.0, -1.5, 2.0, -1.5]
         p = compute_site_kinetic_profile(TP6, vals, config=cfg)
+        assert p.candidate_pattern == PATTERN_OSCILLATORY
+        assert p.primary_pattern == PATTERN_MULTI_PEAK
+        assert "oscillation_loto_unstable" in p.pattern_modifiers
+        assert p.atlas_eligible is False
+
+    def test_oscillation_promotes_only_when_stability_gates_pass(self, monkeypatch):
+        import ptm_shared.substrate_temporal_dynamics as dynamics
+
+        monkeypatch.setattr(dynamics, "_run_loto", lambda *args, **kwargs: 1.0)
+        monkeypatch.setattr(dynamics, "_check_threshold_sensitivity", lambda *args, **kwargs: False)
+        vals = [2.0, -1.5, 2.0, -1.5, 2.0, -1.5]
+        p = compute_site_kinetic_profile(TP6, vals, config=SiteKineticConfig())
+        assert p.candidate_pattern == PATTERN_OSCILLATORY
         assert p.primary_pattern == PATTERN_OSCILLATORY
+        assert p.atlas_eligible is True
+        assert "oscillation_quality_promoted" in p.pattern_modifiers
+
+    def test_input_audit_warning_blocks_atlas_eligibility(self):
+        labels = ["0min", "10min", "5min", "20min", "30min", "40min"]
+        p = compute_site_kinetic_profile(
+            labels,
+            [0.0, 1.0, 2.0, 1.5, 0.5, 0.1],
+            config=SiteKineticConfig(run_loto=False, run_threshold_sensitivity=False),
+        )
+        assert p.time_ordering_warning is True
+        assert p.atlas_eligible is False
+        assert "needs_input_audit_time_ordering" in p.atlas_eligibility_reasons
 
     def test_oscillatory_not_triggered_for_irregular_sign_pattern(self):
         # Irregular amplitude and interval — fewer than 4 interior extrema

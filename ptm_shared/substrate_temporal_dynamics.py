@@ -44,7 +44,7 @@ import numpy as np
 from ptm_shared.directed_temporal_relationship import timepoint_to_minutes
 
 
-CONTRACT_VERSION = "substrate_temporal_dynamics.v1"
+CONTRACT_VERSION = "substrate_temporal_dynamics.v1.1"
 
 # ── Taxonomy labels ──────────────────────────────────────────────────────────
 # Frozen with CONTRACT_VERSION.  Do not reorder; consumers may branch on these.
@@ -98,6 +98,7 @@ _OSC_MIN_OBSERVED: int = 6       # oscillatory_supported: minimum observed timep
 _OSC_MIN_EXTREMA: int = 4        # oscillatory_supported: ≥2 cycles = ≥4 extrema
 _OSC_INTERVAL_CV_MAX: float = 0.30  # max CV of inter-peak intervals
 _MISSINGNESS_WARNING_RATIO: float = 0.34  # > 1/3 missing → flag
+_OSC_MIN_LOTO_STABILITY: float = 0.80  # promotion gate, not a discovery threshold
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
@@ -121,6 +122,7 @@ class SiteKineticConfig:
     run_loto: bool = True
     run_threshold_sensitivity: bool = True
     threshold_sensitivity_multipliers: Tuple[float, ...] = (0.5, 2.0)
+    oscillatory_min_loto_stability: float = _OSC_MIN_LOTO_STABILITY
 
     @classmethod
     def default(cls) -> "SiteKineticConfig":
@@ -171,6 +173,7 @@ class SiteKineticProfile:
 
     # ── Pattern taxonomy ──────────────────────────────────────────────────
     primary_pattern: str               # one of TAXONOMY_LABELS
+    candidate_pattern: str             # raw taxonomy before P1.1 promotion/downgrade
     pattern_modifiers: List[str]       # auxiliary flags
     quality_gate_passed: bool
 
@@ -184,6 +187,11 @@ class SiteKineticProfile:
     # 이 필드들은 X축 데이터 품질 경고이며 패턴 판정에 영향을 주지 않는다.
     time_ordering_warning: bool   # True if parsed minutes are not non-decreasing
     duplicate_timepoint_warning: bool  # True if two labels parse to the same minute
+
+    # ── Atlas narrative eligibility (P1.1) ─────────────────────────────────
+    # This gate controls interpretive Atlas/report use, not raw-data display.
+    atlas_eligible: bool
+    atlas_eligibility_reasons: List[str]
 
     # ── Provenance ────────────────────────────────────────────────────────
     onset_threshold_fc_used: float
@@ -593,12 +601,102 @@ def _check_threshold_sensitivity(
             early_peak_ratio=config.early_peak_ratio,
             run_loto=False,
             run_threshold_sensitivity=False,
+            oscillatory_min_loto_stability=config.oscillatory_min_loto_stability,
         )
         f = _extract_features(obs_minutes, obs_values, alt_config)
         pattern, _ = _classify_taxonomy(obs_minutes, obs_values, f, alt_config)
         if pattern != primary_pattern:
             return True
     return False
+
+
+def _promote_pattern_for_quality(
+    candidate_pattern: str,
+    modifiers: List[str],
+    *,
+    loto_stability: Optional[float],
+    threshold_sensitive: bool,
+    missingness_warning: bool,
+    config: SiteKineticConfig,
+) -> Tuple[str, List[str]]:
+    """Promote complex candidate patterns only when P1.1 stability gates pass.
+
+    ``oscillatory_supported`` is intentionally stricter than shape detection:
+    shape can nominate an oscillatory candidate, but the final canonical label
+    requires a stable leave-one-timepoint-out result, threshold robustness, and
+    acceptable missingness.  Failed candidates retain their observation as a
+    ``multi_peak_candidate`` with explicit provenance rather than disappearing.
+    """
+    promoted = list(modifiers)
+    if candidate_pattern != PATTERN_OSCILLATORY:
+        return candidate_pattern, promoted
+
+    failure_reasons: List[str] = []
+    if loto_stability is None or loto_stability < config.oscillatory_min_loto_stability:
+        failure_reasons.append("oscillation_loto_unstable")
+    if threshold_sensitive:
+        failure_reasons.append("oscillation_threshold_sensitive")
+    if missingness_warning:
+        failure_reasons.append("oscillation_missingness_warning")
+
+    if not failure_reasons:
+        promoted.append("oscillation_quality_promoted")
+        return PATTERN_OSCILLATORY, promoted
+
+    promoted.extend(failure_reasons)
+    promoted.append("downgraded_from_oscillatory_supported")
+    return PATTERN_MULTI_PEAK, promoted
+
+
+def _derive_atlas_eligibility(
+    *,
+    quality_gate_passed: bool,
+    missingness_warning: bool,
+    time_ordering_warning: bool,
+    duplicate_timepoint_warning: bool,
+    pattern: str,
+    loto_stability: Optional[float],
+    threshold_sensitive: bool,
+    qvalue_coverage: Optional[float],
+    config: SiteKineticConfig,
+) -> Tuple[bool, List[str]]:
+    """Return whether a profile may support Atlas biological narrative.
+
+    q-value coverage is always surfaced as provenance but is not a mandatory
+    gate because many enriched trajectory payloads do not carry per-timepoint
+    q-values.  A missing q-value therefore cannot silently remove a site from
+    exploratory display; it remains an explicit narrative limitation instead.
+    """
+    reasons: List[str] = []
+    if not quality_gate_passed:
+        reasons.append("low_signal_or_insufficient_observed_timepoints")
+    if time_ordering_warning:
+        reasons.append("needs_input_audit_time_ordering")
+    if duplicate_timepoint_warning:
+        reasons.append("needs_input_audit_duplicate_timepoint")
+    if missingness_warning:
+        reasons.append("missingness_warning")
+    if qvalue_coverage is None:
+        reasons.append("qvalue_coverage_unavailable")
+
+    # Complex labels are only narration-ready when their stability evidence is
+    # available and consistent.  ``multi_peak_candidate`` remains inspectable
+    # in the Atlas but is not released to mechanistic cascade prose.
+    if pattern in (PATTERN_OSCILLATORY, PATTERN_MULTI_PEAK):
+        if loto_stability is None or loto_stability < config.oscillatory_min_loto_stability:
+            reasons.append("complex_pattern_loto_unstable")
+        if threshold_sensitive:
+            reasons.append("complex_pattern_threshold_sensitive")
+
+    blocking_prefixes = (
+        "low_signal",
+        "needs_input_audit",
+        "missingness_warning",
+        "complex_pattern_loto_unstable",
+        "complex_pattern_threshold_sensitive",
+    )
+    eligible = not any(reason.startswith(blocking_prefixes) for reason in reasons)
+    return eligible, reasons
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -664,20 +762,40 @@ def compute_site_kinetic_profile(
             qvalue_coverage = sum(1 for q in paired_q if q < 0.05) / len(paired_q)
 
     f = _extract_features(obs_minutes, obs_values, config)
-    primary_pattern, modifiers = _classify_taxonomy(obs_minutes, obs_values, f, config)
-    quality_gate_passed = primary_pattern != PATTERN_FLAT
+    candidate_pattern, modifiers = _classify_taxonomy(obs_minutes, obs_values, f, config)
+    quality_gate_passed = candidate_pattern != PATTERN_FLAT
 
     # LOTO stability
     loto_stability: Optional[float] = None
     if config.run_loto and quality_gate_passed:
-        loto_stability = _run_loto(timepoint_labels, values, q_values, primary_pattern, config)
+        loto_stability = _run_loto(timepoint_labels, values, q_values, candidate_pattern, config)
 
     # Threshold sensitivity
     threshold_sensitivity_flag = False
     if config.run_threshold_sensitivity and quality_gate_passed and obs_minutes:
         threshold_sensitivity_flag = _check_threshold_sensitivity(
-            obs_minutes, obs_values, primary_pattern, config
+            obs_minutes, obs_values, candidate_pattern, config
         )
+
+    primary_pattern, modifiers = _promote_pattern_for_quality(
+        candidate_pattern,
+        modifiers,
+        loto_stability=loto_stability,
+        threshold_sensitive=threshold_sensitivity_flag,
+        missingness_warning=missingness_warning,
+        config=config,
+    )
+    atlas_eligible, atlas_eligibility_reasons = _derive_atlas_eligibility(
+        quality_gate_passed=quality_gate_passed,
+        missingness_warning=missingness_warning,
+        time_ordering_warning=time_ordering_warning,
+        duplicate_timepoint_warning=duplicate_timepoint_warning,
+        pattern=primary_pattern,
+        loto_stability=loto_stability,
+        threshold_sensitive=threshold_sensitivity_flag,
+        qvalue_coverage=qvalue_coverage,
+        config=config,
+    )
 
     return SiteKineticProfile(
         amplitude=f.get("amplitude"),
@@ -706,6 +824,7 @@ def compute_site_kinetic_profile(
         peak_separation_minutes=f.get("sep_minutes"),
         monotonicity_score=f.get("monotone"),
         primary_pattern=primary_pattern,
+        candidate_pattern=candidate_pattern,
         pattern_modifiers=modifiers,
         quality_gate_passed=quality_gate_passed,
         loto_pattern_stability=loto_stability,
@@ -713,6 +832,8 @@ def compute_site_kinetic_profile(
         missingness_warning=missingness_warning,
         time_ordering_warning=time_ordering_warning,
         duplicate_timepoint_warning=duplicate_timepoint_warning,
+        atlas_eligible=atlas_eligible,
+        atlas_eligibility_reasons=atlas_eligibility_reasons,
         onset_threshold_fc_used=config.onset_threshold_fc,
         observed_minutes=list(obs_minutes),
         contract_version=CONTRACT_VERSION,
@@ -736,6 +857,7 @@ def describe_member_dynamics(
     )
     return {
         "primary_pattern": profile.primary_pattern,
+        "candidate_pattern": profile.candidate_pattern,
         "pattern_modifiers": profile.pattern_modifiers,
         "quality_gate_passed": profile.quality_gate_passed,
         "amplitude": profile.amplitude,
@@ -749,6 +871,10 @@ def describe_member_dynamics(
         "loto_pattern_stability": profile.loto_pattern_stability,
         "threshold_sensitivity_flag": profile.threshold_sensitivity_flag,
         "missingness_warning": profile.missingness_warning,
+        "time_ordering_warning": profile.time_ordering_warning,
+        "duplicate_timepoint_warning": profile.duplicate_timepoint_warning,
+        "atlas_eligible": profile.atlas_eligible,
+        "atlas_eligibility_reasons": profile.atlas_eligibility_reasons,
         "site_kinetic_contract": CONTRACT_VERSION,
     }
 

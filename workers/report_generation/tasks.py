@@ -401,6 +401,8 @@ def run_report_generation(self, order_id: int, config: dict):
         signal_propagation_from_db = {}
         # v11.6: IP overlay data (physical interaction evidence)
         ip_overlay_from_db = {}
+        # Atlas context: optional GO cellular-component annotations.
+        substrate_go_localization_from_db = {}
         # v10.1: Load vector_plot_raw_data (full TSV) for LLM access
         vector_plot_raw_data = []
         ptm_type_for_suffix = (config.get("experimental_context") or {}).get("ptm_type", "phosphorylation")
@@ -461,7 +463,8 @@ def run_report_generation(self, order_id: int, config: dict):
                 _row = _conn.execute(
                     _text(
                         "SELECT receptor_inference_data, kinase_activity_heatmap, "
-                        "signal_propagation_data, ip_overlay_data FROM orders WHERE id = :oid"
+                        "signal_propagation_data, ip_overlay_data, substrate_go_localization "
+                        "FROM orders WHERE id = :oid"
                     ),
                     {"oid": order_id},
                 ).fetchone()
@@ -480,6 +483,9 @@ def run_report_generation(self, order_id: int, config: dict):
                 if _row[3]:
                     ip_overlay_from_db = _row[3] if isinstance(_row[3], dict) else _json.loads(_row[3])
                     logger.info(f"[Order {order_id}] Loaded IP overlay data from DB (bait: {ip_overlay_from_db.get('bait', {}).get('gene', 'unknown')})")
+                if _row[4]:
+                    substrate_go_localization_from_db = _row[4] if isinstance(_row[4], dict) else _json.loads(_row[4])
+                    logger.info(f"[Order {order_id}] Loaded GO localization data from DB")
         except Exception as _rec_err:
             logger.warning(f"[Order {order_id}] Could not load analysis data from DB: {_rec_err}")
 
@@ -527,6 +533,7 @@ def run_report_generation(self, order_id: int, config: dict):
             "kinase_activity_heatmap": kinase_activity_heatmap_from_db or config.get("kinase_activity_heatmap", {}),
             # v9.44: Signal propagation data for report generation
             "signal_propagation_data": signal_propagation_from_db,
+            "substrate_go_localization": substrate_go_localization_from_db,
             # v10.1: Vector plot raw data (full TSV) for LLM comprehensive access
             "vector_plot_raw_data": vector_plot_raw_data,
             # v10.1: Pipeline statistics for Methods section

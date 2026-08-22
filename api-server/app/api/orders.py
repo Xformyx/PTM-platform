@@ -8867,9 +8867,10 @@ async def substrate_temporal_atlas(
 ):
     """Return per-site P1 kinetic profiles for all enriched PTMs in an order.
 
-    Computes ``compute_site_kinetic_profile`` (P1 contract) for each site in
-    the enriched_ptm_data output file and returns a compact list suitable for
-    frontend atlas / small-multiples views.
+    Computes ``compute_site_kinetic_profile`` (P1.1 contract) for each site in
+    the enriched_ptm_data output file and returns a quality-aware list suitable
+    for frontend atlas / small-multiples views.  Atlas narrative consumers must
+    respect ``atlas_eligible`` and its explicit eligibility reasons.
 
     구현 대상: Substrate-level Temporal Dynamics Deepening Plan v1 §7 (P4 atlas API)
     해석 한계: pattern label은 궤적 형태 기술이며 kinase 귀속이 아니다.
@@ -8890,41 +8891,128 @@ async def substrate_temporal_atlas(
         return {"sites": [], "status": "no_enriched_data"}
 
     try:
-        from ptm_shared.substrate_temporal_dynamics import SiteKineticConfig, compute_site_kinetic_profile
+        from ptm_shared.substrate_temporal_dynamics import (
+            CONTRACT_VERSION,
+            SiteKineticConfig,
+            compute_site_kinetic_profile,
+        )
+        from ptm_shared.site_form_provenance import (
+            aggregate_site_form_trajectories,
+            form_identity,
+        )
+        from ptm_shared.time_varying_comovement import compute_time_varying_comovement
+        from ptm_shared.atlas_context import build_atlas_context_evidence
+        from ptm_shared.atlas_claim_ledger import build_atlas_claim_ledger_from_site_views
     except ImportError:
         return {"sites": [], "status": "module_unavailable"}
 
-    cfg = SiteKineticConfig(run_loto=False, run_threshold_sensitivity=False)
+    # Atlas interpretation needs the stability evidence that lightweight
+    # vector-plot labels intentionally omit.  P1.1 promotion/downgrade is
+    # therefore evaluated here rather than inferred in the frontend.
+    cfg = SiteKineticConfig(run_loto=True, run_threshold_sensitivity=True)
 
     with open(enriched_path, "r", encoding="utf-8") as f:
         enriched = _json.load(f)
 
     sites = []
-    seen: set = set()
+    transition_profiles: dict[str, object] = {}
+    transition_trajectories: dict[tuple[str, ...], dict[str, list]] = {}
+    grouped_sites: dict[str, list[dict]] = {}
     for ptm in enriched:
         gene = ptm.get("gene") or ptm.get("Gene.Name", "")
         pos = ptm.get("position") or ptm.get("PTM_Position", "")
         site_key = f"{gene}_{pos}"
-        if site_key in seen or not (gene or pos):
+        if not (gene or pos):
             continue
-        seen.add(site_key)
+        grouped_sites.setdefault(site_key, []).append(ptm)
 
-        traj = ptm.get("trajectory") or {}
-        tps = traj.get("timepoints") or []
-        if len(tps) < 3:
+    for site_key, source_records in grouped_sites.items():
+        representative = source_records[0]
+        gene = representative.get("gene") or representative.get("Gene.Name", "")
+        pos = representative.get("position") or representative.get("PTM_Position", "")
+        forms_by_key: dict[str, dict] = {}
+        for ptm in source_records:
+            source_forms = ptm.get("site_form_trajectories") or []
+            if not source_forms:
+                identity = form_identity(ptm)
+                source_forms = [{
+                    **identity,
+                    "trajectory": ptm.get("trajectory") or {},
+                }]
+            for source_form in source_forms:
+                form_key = str(source_form.get("site_form_key") or form_identity(ptm)["site_form_key"])
+                existing = forms_by_key.get(form_key)
+                if existing is None:
+                    forms_by_key[form_key] = dict(source_form)
+                else:
+                    existing_traj = existing.setdefault("trajectory", {"timepoints": []})
+                    existing_traj.setdefault("timepoints", []).extend(
+                        (source_form.get("trajectory") or {}).get("timepoints") or []
+                    )
+
+        form_records = []
+        for form in forms_by_key.values():
+            traj = form.get("trajectory") or {}
+            tps = traj.get("timepoints") or []
+            if len(tps) < 3:
+                continue
+            labels = [tp.get("timeLabel", "") for tp in tps]
+            values = [
+                tp.get("ptmLog2FC") if tp.get("ptmLog2FC") is not None
+                else tp.get("ptm_relative_log2fc")
+                for tp in tps
+            ]
+            q_values = [
+                tp.get("qValue", tp.get("q_value", tp.get("qvalue")))
+                for tp in tps
+            ]
+            if all(v is None for v in values):
+                continue
+            try:
+                profile = compute_site_kinetic_profile(
+                    labels,
+                    values,
+                    q_values=q_values,
+                    config=cfg,
+                )
+            except Exception:
+                continue
+            form_records.append({
+                "site_form_key": form.get("site_form_key"),
+                "modified_sequence": form.get("modified_sequence"),
+                "precursor_charge": form.get("precursor_charge"),
+                "precursor_id": form.get("precursor_id"),
+                "form_identity_status": form.get("form_identity_status"),
+                "primary_pattern": profile.primary_pattern,
+                "candidate_pattern": profile.candidate_pattern,
+                "pattern_modifiers": profile.pattern_modifiers,
+                "atlas_eligible": profile.atlas_eligible,
+                "atlas_eligibility_reasons": profile.atlas_eligibility_reasons,
+                "loto_pattern_stability": profile.loto_pattern_stability,
+                "threshold_sensitivity_flag": profile.threshold_sensitivity_flag,
+                "qvalue_coverage": profile.qvalue_coverage,
+                "observed_timepoints": profile.observed_timepoints_count,
+                "missing_timepoints": profile.missing_timepoints_count,
+                "timepoint_labels": labels,
+                "values": values,
+            })
+
+        if not form_records:
             continue
 
-        labels = [tp.get("timeLabel", "") for tp in tps]
-        values = [
-            tp.get("ptmLog2FC") if tp.get("ptmLog2FC") is not None
-            else tp.get("ptm_relative_log2fc")
-            for tp in tps
-        ]
-        if all(v is None for v in values):
+        site_aggregation = aggregate_site_form_trajectories(list(forms_by_key.values()))
+        aggregate_tps = site_aggregation.get("timepoints") or []
+        labels = [tp.get("timeLabel", "") for tp in aggregate_tps]
+        values = [tp.get("ptmLog2FC") for tp in aggregate_tps]
+        if len(labels) < 3 or all(v is None for v in values):
             continue
 
         try:
-            profile = compute_site_kinetic_profile(labels, values, config=cfg)
+            profile = compute_site_kinetic_profile(
+                labels,
+                values,
+                config=cfg,
+            )
         except Exception:
             continue
 
@@ -8932,32 +9020,108 @@ async def substrate_temporal_atlas(
             "site_key": site_key,
             "gene": gene,
             "position": pos,
+            "site_aggregation": site_aggregation,
+            "site_form_count": len(form_records),
+            "form_profiles": form_records,
             "primary_pattern": profile.primary_pattern,
+            "candidate_pattern": profile.candidate_pattern,
             "pattern_modifiers": profile.pattern_modifiers,
             "quality_gate_passed": profile.quality_gate_passed,
+            "atlas_eligible": profile.atlas_eligible,
+            "atlas_eligibility_reasons": profile.atlas_eligibility_reasons,
             "amplitude": profile.amplitude,
             "peak_minutes": profile.peak_minutes,
             "onset_minutes": profile.onset_minutes,
             "auc_signed": profile.auc_signed,
             "auc_absolute": profile.auc_absolute,
             "return_to_baseline": profile.return_to_baseline,
+            "loto_pattern_stability": profile.loto_pattern_stability,
+            "threshold_sensitivity_flag": profile.threshold_sensitivity_flag,
+            "qvalue_coverage": profile.qvalue_coverage,
             "missingness_warning": profile.missingness_warning,
             "time_ordering_warning": profile.time_ordering_warning,
             "duplicate_timepoint_warning": profile.duplicate_timepoint_warning,
-            "observed_timepoints": len(tps),
+            "observed_timepoints": profile.observed_timepoints_count,
+            "missing_timepoints": profile.missing_timepoints_count,
             "timepoint_labels": labels,
             "values": [v for v in values],
         })
+        label_signature = tuple(labels)
+        transition_profiles[site_key] = profile
+        transition_trajectories.setdefault(label_signature, {})[site_key] = list(values)
 
     # Pattern distribution summary
     from collections import Counter as _Counter
     pattern_counts = dict(_Counter(s["primary_pattern"] for s in sites))
+    eligible_count = sum(1 for s in sites if s["atlas_eligible"])
+    context_by_site = build_atlas_context_evidence(
+        sites,
+        kinase_activity_heatmap=order.kinase_activity_heatmap,
+        signal_propagation_data=order.signal_propagation_data,
+        substrate_go_localization=order.substrate_go_localization,
+    )
+    for site in sites:
+        site["context_evidence"] = context_by_site.get(site["site_key"], {
+            "contract_version": "atlas_context_evidence.v1",
+            "kinase_context": [],
+            "self_ptm_candidates": [],
+            "nuclear_context": {"evidence_type": "unavailable"},
+            "non_ptm_follow_through": [],
+        })
+    transition_map = {
+        "status": "unavailable",
+        "reason": "no_label_consistent_atlas_cohort",
+        "contract_version": "time_varying_comovement.v1",
+    }
+    if transition_trajectories:
+        cohort_labels, cohort_trajectories = max(
+            transition_trajectories.items(),
+            key=lambda item: len(item[1]),
+        )
+        cohort_profiles = {
+            site_key: transition_profiles[site_key]
+            for site_key in cohort_trajectories
+        }
+        if len(cohort_trajectories) >= 2:
+            transition_map = {
+                "status": "ok",
+                "cohort_timepoint_labels": list(cohort_labels),
+                "cohort_site_count": len(cohort_trajectories),
+                "observed_transition_semantics": "membership transitions, not causal arrows",
+                **compute_time_varying_comovement(
+                    list(cohort_labels),
+                    cohort_trajectories,
+                    profiles=cohort_profiles,
+                ).to_dict(),
+            }
+        else:
+            transition_map = {
+                "status": "unavailable",
+                "reason": "fewer_than_two_sites_in_largest_label_consistent_cohort",
+                "cohort_timepoint_labels": list(cohort_labels),
+                "cohort_site_count": len(cohort_trajectories),
+                "contract_version": "time_varying_comovement.v1",
+            }
+
+    shared_claim_ledger = build_atlas_claim_ledger_from_site_views(
+        sites,
+        transition_map=transition_map,
+    )
+    claim_id_by_site = {
+        claim["site"].get("site_key"): claim["claim_id"]
+        for claim in shared_claim_ledger.get("site_claims", [])
+    }
+    for site in sites:
+        site["claim_id"] = claim_id_by_site.get(site["site_key"])
 
     return {
         "order_id": order_id,
         "n_sites": len(sites),
+        "n_atlas_eligible_sites": eligible_count,
         "pattern_distribution": pattern_counts,
+        "transition_map": transition_map,
+        "claim_ledger": shared_claim_ledger,
         "sites": sites,
-        "contract_version": "substrate_temporal_dynamics.v1",
+        "contract_version": CONTRACT_VERSION,
         "status": "ok",
     }

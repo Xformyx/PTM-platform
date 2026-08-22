@@ -122,6 +122,11 @@ class ReportState(TypedDict, total=False):
     # v9.48: Kinase Activity Heatmap (CW Groups, per-condition scores, peak sync)
     kinase_activity_heatmap: dict  # {kinase_scores, conditions, peak_sync, cowave_groups}
     signal_propagation_data: dict  # signal propagation analysis from frontend
+    substrate_go_localization: dict  # GO cellular-component annotations for Atlas evidence
+    atlas_claim_ledger: dict  # shared observational claims for Atlas and integrated report
+    atlas_claim_ledger_llm_context: str  # bounded writer context derived from the shared ledger
+    atlas_report_path: str  # deterministic standalone Atlas rendered from the shared ledger
+    atlas_report_markdown: str
 
     # v10.0: RQ Refinement + Report Co-pilot
     original_research_questions: List[str]  # preserved user RQ0 before refinement
@@ -222,6 +227,18 @@ def kinase_annotation(state: ReportState) -> dict:
     """v9.11: Multi-source kinase annotation + temporal cascade for co-wave clusters."""
     from .nodes.kinase_annotation_node import run_kinase_annotation
     return run_kinase_annotation(state)
+
+
+def atlas_claim_ledger(state: ReportState) -> dict:
+    """Build shared quality-gated temporal claims before any report prose is written."""
+    from .nodes.atlas_claim_ledger_node import run_atlas_claim_ledger
+    return run_atlas_claim_ledger(state)
+
+
+def generate_atlas_report(state: ReportState) -> dict:
+    """Render the detailed Atlas from the same claims supplied to integrated prose."""
+    from .nodes.atlas_report_node import run_atlas_report_generation
+    return run_atlas_report_generation(state)
 
 
 def rq_refinement(state: ReportState) -> dict:
@@ -880,6 +897,8 @@ def build_report_graph() -> StateGraph:
     graph.add_node("network_analysis", network_analysis)
     graph.add_node("temporal_comovement", temporal_comovement)
     graph.add_node("kinase_annotation", kinase_annotation)
+    graph.add_node("atlas_claim_ledger", atlas_claim_ledger)
+    graph.add_node("generate_atlas_report", generate_atlas_report)
     graph.add_node("rq_refinement", rq_refinement)
     graph.add_node("external_coscientist_context", external_coscientist_context)
     graph.add_node("write_sections", write_sections)
@@ -908,7 +927,9 @@ def build_report_graph() -> StateGraph:
     graph.add_edge("data_verification", "network_analysis")
     graph.add_edge("network_analysis", "temporal_comovement")
     graph.add_edge("temporal_comovement", "kinase_annotation")
-    graph.add_edge("kinase_annotation", "rq_refinement")
+    graph.add_edge("kinase_annotation", "atlas_claim_ledger")
+    graph.add_edge("atlas_claim_ledger", "generate_atlas_report")
+    graph.add_edge("generate_atlas_report", "rq_refinement")
     graph.add_edge("rq_refinement", "external_coscientist_context")
     graph.add_edge("external_coscientist_context", "write_sections")
     graph.add_edge("write_sections", "report_copilot")

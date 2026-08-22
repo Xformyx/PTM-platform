@@ -204,6 +204,7 @@ def run_section_writing(state: dict) -> dict:
     comovement_figures = state.get("comovement_figures", [])
     comovement_llm_context = state.get("comovement_llm_context", "")
     temporal_kinase_cascade_llm_context = state.get("temporal_kinase_cascade_llm_context", "")
+    atlas_claim_ledger_llm_context = state.get("atlas_claim_ledger_llm_context", "")
 
     # v9.20: Build inferred receptor context for LLM
     inferred_receptors = state.get("inferred_receptors", []) or []
@@ -664,6 +665,8 @@ def run_section_writing(state: dict) -> dict:
             # P1: Substrate-level temporal dynamics pattern distribution
             if aux_substrate_dynamics:
                 supplement_blocks.append(("substrate_dynamics", aux_substrate_dynamics))
+            if atlas_claim_ledger_llm_context:
+                supplement_blocks.append(("atlas_claim_ledger", atlas_claim_ledger_llm_context))
             # Priority 4 (vector plot full data): complete quantitative reference
             supplement_blocks.append(("vector_plot_full", aux_vector_plot_full))
             # v12.0: Compressed fallback — always included after full (budget permitting)
@@ -688,6 +691,8 @@ def run_section_writing(state: dict) -> dict:
             supplement_blocks.append(("nonptm_temporal", aux_nonptm_temporal))
             supplement_blocks.append(("v98_structured_data", v98_structured_data))
             supplement_blocks.append(("vector_plot_compressed", aux_vector_plot_compressed))
+            if atlas_claim_ledger_llm_context:
+                supplement_blocks.append(("atlas_claim_ledger", atlas_claim_ledger_llm_context))
 
         elif section_type == "discussion":
             # v12.0: Co-Scientist verified findings — Priority 0 (highest for discussion)
@@ -723,6 +728,8 @@ def run_section_writing(state: dict) -> dict:
             # Priority 4: figure context
             if figure_gen.has_figures():
                 supplement_blocks.append(("figure_ctx", figure_gen.generate_figure_context_for_llm(section_type)))
+            if atlas_claim_ledger_llm_context:
+                supplement_blocks.append(("atlas_claim_ledger", atlas_claim_ledger_llm_context))
         elif section_type == "introduction":
             supplement_blocks.append(("receptor_ctx", receptor_llm_context))
 
