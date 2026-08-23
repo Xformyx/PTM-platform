@@ -1443,19 +1443,38 @@ IMPORTANT: Write a thorough, detailed introduction. The ChromaDB collection refe
         fig1_pw_results = ""
         fig1_pw_list = network.get("fig1_pathway_names", []) if network else []
         if fig1_pw_list:
-            pw_numbered = "\n".join(f"  {i}. {pw}" for i, pw in enumerate(fig1_pw_list[:20], 1))
+            expansion_rows = ((network or {}).get("pathway_expansion") or {}).get("summaries") or []
+            by_name = {r.get("pathway"): r for r in expansion_rows if isinstance(r, dict)}
+            numbered = []
+            for i, pw in enumerate(fig1_pw_list[:20], 1):
+                rec = by_name.get(pw) or {}
+                extra = ""
+                if rec.get("peak_nes") is not None:
+                    extra = f"  NES={rec['peak_nes']:.2f}"
+                    if rec.get("peak_q") is not None:
+                        extra += f" q={rec['peak_q']:.3f}"
+                    extra += (
+                        f" n={rec.get('n_direct', '?')} term={rec.get('term', '')} "
+                        f"prot={rec.get('protein_support', 0):.2f} "
+                        f"net={rec.get('network_support', 0):.2f}"
+                    )
+                numbered.append(f"  {i}. {pw}{extra}")
+            pw_numbered = "\n".join(numbered)
             fig1_pw_results = (
-                f"\n\n**FIGURE 1 — 3-LAYER PATHWAY ENRICHMENT RESULTS (KEGG + Reactome + STRING Indirect):**\n"
-                f"The following signaling pathways were identified through multi-source enrichment analysis "
-                f"and are displayed in Figure 1 (Canonical Pathway Distribution), ranked by cumulative |Log2FC| score:\n"
+                f"\n\n**FIGURE 1 — DIRECT PTM PATHWAY ENRICHMENT (NES, not Σ|Log2FC|):**\n"
+                f"The following pathways are shown in Figure 1, ranked by signed Direct NES "
+                f"(KEGG/Reactome membership of quantified sites; de novo excluded from the NES universe). "
+                f"Protein support and STRING 1-hop are independent annotations, not rank:\n"
                 f"{pw_numbered}\n\n"
                 f"CRITICAL INSTRUCTIONS FOR RESULTS SECTION:\n"
-                f"1. You MUST explicitly discuss the TOP 5 pathways from this list by name in the Results section.\n"
-                f"2. For each top pathway, explain which PTM proteins contribute to it and their functional significance.\n"
-                f"3. Reference 'Figure 1' when discussing pathway enrichment patterns.\n"
-                f"4. Do NOT claim a pathway is 'enriched in our analysis' if it is not in this list.\n"
-                f"5. If a pathway like 'PI3K-Akt signaling' or 'MAPK signaling' appears in this list, "
-                f"it MUST be prominently discussed as a key finding.\n"
+                f"1. Discuss the TOP 5 pathways from this list by name and cite Figure 1.\n"
+                f"2. For each, report Direct NES / FDR / n_direct and the stated term "
+                f"(activated, inhibited, modulated, or network-associated). "
+                f"Do not upgrade 'modulated' to 'activated'.\n"
+                f"3. Do NOT claim a pathway is enriched if it is not in this list.\n"
+                f"4. Do NOT treat insulin/MAPK/PI3K as privileged just because they are canonical. "
+                f"Discuss them only if they appear here and the term/evidence supports it.\n"
+                f"5. STRING/network support is not discovery of a pathway.\n"
             )
 
         entity_label = "E3 Ligase" if ptm_type_label.lower().strip() in ("ubiquitylation", "ubiquitination") else "Kinase"
@@ -1467,14 +1486,16 @@ IMPORTANT: Write a thorough, detailed introduction. The ChromaDB collection refe
 {treatment_emphasis}
 {fig1_pw_results}
 
-=== PTM ACTIVITY PROFILE INTERPRETATION FRAMEWORK (CORE METHODOLOGY) ===
-This report uses the **PTM activity profile** approach: interpreting proteomics data through the lens of
-PTM-modified protein activation states. The key principle is that PTM changes (e.g., phosphorylation
-Log2FC) serve as activity indicators showing the direction and magnitude of signaling pathway activation.
+=== PTM EVIDENCE INTERPRETATION FRAMEWORK ===
+Site-level PTM Log2FC is a signed abundance change at a measured site. It is not protein
+activation or kinase activity unless a functional-sign annotation exists for that site.
+Pathway terms come from Figure 1 (activated / inhibited / modulated / network-associated)
+and require annotated sites plus direction consistency. Phosphorylation increase is not
+activation by default.
 
-You MUST interpret ALL findings through this framework:
-1. **Activation-centric interpretation**: PTM Log2FC values indicate activation (+) or inhibition (-)
-   of the modified protein. Use these as primary evidence for signaling pathway activity.
+You MUST interpret findings through this framework:
+1. **Evidence, not activation by default**: Use PTM Log2FC as site abundance evidence.
+   Apply functional sign only when the site is annotated. Otherwise say "modulated".
 2. **Receptor → {entity_label} → Substrate → Non-PTM cascade**: Trace the signal flow from upstream
    receptors through {entity_label_lower}s to their substrates, and finally to non-PTM effector proteins.
    Describe HOW the signal propagates through each layer at each timepoint.
@@ -1547,7 +1568,7 @@ Each major subsection should correspond to a key analytical output (figure or da
 ### Part 4: Key PTM Site Dynamics (Figure 4 — Context PTM Heatmap)
 - For the most important PTM sites discussed in Parts 1-3, describe their temporal profiles in detail
 - Group sites by functional category ({entity_label_lower} substrates, transcription factors, cytoskeletal, metabolic)
-- Quantify: exact Log2FC values at each timepoint for key sites
+- Quantify: exact Log2FC values at each timepoint for regulated sites. For de novo sites use detection repeats + LOD-relative induction ≥X.X (Conventional Log2FC=NA)
 - Highlight any unexpected patterns (e.g., a known activation site showing inhibition)
 
 ### Part 5: Research Question Signposting
@@ -1557,7 +1578,7 @@ Each major subsection should correspond to a key analytical output (figure or da
   explicit answer for every submitted question after Results.
 
 IMPORTANT: Be thorough and detailed. Discuss each significant PTM site individually.
-Include quantitative data (Log2FC values). Cite the provided references to support your findings.
+Include quantitative data (Log2FC for regulated sites; detection + LOD-relative ≥ for de novo). Cite the provided references to support your findings.
 This is the most important section of the report.
 - You MUST explicitly name the treatment/stimulus ({treatment}) when describing PTM responses.
   Never use generic terms like 'the treatment'.
@@ -1623,22 +1644,26 @@ PTM Data Summary:
         fig1_pw_names = network.get("fig1_pathway_names", []) if network else []
         if fig1_pw_names:
             # Use actual pathway names from Figure 1 (3-Layer: KEGG + Reactome + STRING Indirect)
-            cs_lines = ["\n## CELL SIGNALING COMMONALITY ANALYSIS (from Figure 1 — 3-Layer Pathway Enrichment)"]
-            cs_lines.append("The following signaling pathways were identified through multi-source enrichment ")
-            cs_lines.append("(KEGG + Reactome + STRING Indirect) and displayed in Figure 1, ")
-            cs_lines.append("ranked by cumulative |Log2FC| score:")
+            cs_lines = ["\n## CELL SIGNALING COMMONALITY ANALYSIS (from Figure 1 — Direct NES)"]
+            cs_lines.append("The following signaling pathways are displayed in Figure 1, ")
+            cs_lines.append("ranked by signed Direct NES (not cumulative |Log2FC|):")
+            expansion_rows = ((network or {}).get("pathway_expansion") or {}).get("summaries") or []
+            by_name = {r.get("pathway"): r for r in expansion_rows if isinstance(r, dict)}
             for i, pw_name in enumerate(fig1_pw_names[:15], 1):
-                cs_lines.append(f"  {i}. **{pw_name}**")
+                rec = by_name.get(pw_name) or {}
+                extra = ""
+                if rec.get("peak_nes") is not None:
+                    extra = f" (NES={rec['peak_nes']:.2f}, term={rec.get('term', '')})"
+                cs_lines.append(f"  {i}. **{pw_name}**{extra}")
             cs_lines.append("")
             cs_lines.append("CRITICAL INSTRUCTIONS FOR DISCUSSION:")
-            cs_lines.append("1. You MUST dedicate a subsection to 'Signaling Pathway Convergence' that discusses ")
-            cs_lines.append("   how the top pathways from Figure 1 are interconnected.")
-            cs_lines.append("2. For canonical signaling pathways (e.g., PI3K-Akt, MAPK, mTOR, Focal adhesion), ")
-            cs_lines.append("   explain their biological significance in the context of this experiment.")
-            cs_lines.append("3. Discuss how the PTM proteins in this study converge on these pathways ")
-            cs_lines.append("   to produce coordinated cellular responses.")
-            cs_lines.append("4. If you discuss pathways NOT in Figure 1, explicitly note they are from literature.")
-            cs_lines.append("5. Reference 'Figure 1' when discussing pathway enrichment findings.")
+            cs_lines.append("1. Dedicate a subsection to how the top Figure 1 pathways relate, ")
+            cs_lines.append("   using their terms (activated/inhibited/modulated/network-associated).")
+            cs_lines.append("2. Do not privilege PI3K-Akt, MAPK, or mTOR unless they are in this list ")
+            cs_lines.append("   and the Direct NES/term supports discussing them.")
+            cs_lines.append("3. STRING/network support is independent annotation, not pathway discovery.")
+            cs_lines.append("4. If you discuss pathways NOT in Figure 1, say they are from literature.")
+            cs_lines.append("5. Reference Figure 1 when discussing pathway enrichment. NES is not activation.")
             cs_lines.append("")
             cell_signaling_block = "\n".join(cs_lines)
         elif ptms:
@@ -2072,29 +2097,30 @@ def _format_pubmed_references(all_refs: list, section_type: str, ptms: list, sta
 
 
 def _ptm_summary_text(ptms: list, detail_count: int = 30) -> str:
-    # Detect extreme Log2FC values and build warning
-    extreme_ptms = []
-    for p in ptms:
-        fc = abs(p.get("ptm_relative_log2fc", 0))
-        if fc > 15:
-            extreme_ptms.append(f"{p['gene']}-{p['position']} (Log2FC={p['ptm_relative_log2fc']:.1f})")
+    from ptm_shared.de_novo_representation import format_denovo_prompt_line
+
+    denovo_ptms = [
+        p for p in ptms
+        if p.get("activity_class") == "de_novo" or p.get("conventional_log2fc_na") or p.get("control_pseudocount_used")
+    ]
 
     lines = []
-    if extreme_ptms:
+    if denovo_ptms:
         lines.append(
-            f"\n**IMPORTANT NOTE ON EXTREME LOG2FC VALUES:**\n"
-            f"The following PTM sites show Log2FC > 15: {', '.join(extreme_ptms[:10])}\n"
-            f"These extreme values likely represent binary ON/OFF events (absent→present or present→absent) "
-            f"rather than proportional fold-changes. When discussing these PTMs, describe them as "
-            f"'binary activation/deactivation events' or 'switch-like responses' rather than implying "
-            f"a >30,000-fold change in abundance. This is a common artifact of mass spectrometry-based "
-            f"quantification where a peptide is detected in one condition but not in the control.\n"
+            "\n**DE NOVO PTM DISPLAY RULE (mandatory):**\n"
+            "Control missingness is below the detection limit, not intensity 0. "
+            "For every de novo site, Conventional Log2FC is NA. "
+            "Cite detection repeats, treatment normalized abundance, and LOD-relative "
+            "induction with a ≥ sign only. Do not write Log2FC=29 or a >30,000-fold change.\n"
         )
 
     for i, p in enumerate(ptms):
-        fc_val = p['ptm_relative_log2fc']
-        fc_note = " [BINARY EVENT]" if abs(fc_val) > 15 else ""
-        line = f"  {p['gene']}-{p['position']} ({p['ptm_type']}): PTM_FC={fc_val:.3f}, Prot_FC={p.get('protein_log2fc', 0):.3f}{fc_note}"
+        is_denovo = p.get("activity_class") == "de_novo" or p.get("conventional_log2fc_na") or p.get("control_pseudocount_used")
+        if is_denovo:
+            line = format_denovo_prompt_line(p)
+        else:
+            fc_val = p['ptm_relative_log2fc']
+            line = f"  {p['gene']}-{p['position']} ({p['ptm_type']}): PTM_FC={fc_val:.3f}, Prot_FC={p.get('protein_log2fc', 0):.3f}"
         enr = p.get("rag_enrichment", {})
         if i < detail_count and enr:
             if enr.get("function_summary"):

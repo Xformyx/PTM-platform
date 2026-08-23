@@ -800,10 +800,17 @@ class PTMQuantificationAnalyzer:
 
             n_tested = valid_mask.sum()
             n_sig = (df["q_value"] < 0.05).sum() if "q_value" in df.columns else 0
+            from ptm_shared.de_novo_representation import attach_de_novo_fields
+
+            df = attach_de_novo_fields(
+                df, relative_quant_df, condition_map=self.condition_map,
+            )
+            n_denovo = int(df["Conventional_Log2FC_NA"].sum()) if "Conventional_Log2FC_NA" in df.columns else 0
             logger.info(
                 f"Condition comparisons: {len(df)} records, "
                 f"t-test performed: {n_tested}, "
-                f"significant (q<0.05): {n_sig}"
+                f"significant (q<0.05): {n_sig}, "
+                f"de_novo_rows={n_denovo}"
             )
             return df
         return pd.DataFrame()
@@ -941,6 +948,26 @@ class PTMQuantificationAnalyzer:
                     "Control_Pseudocount_Used": ptm_row.get("Control_Pseudocount_Used", False),
                     "p_value": ptm_row.get("p_value", np.nan),
                     "q_value": ptm_row.get("q_value", np.nan),
+                    "Detection_Control": ptm_row.get("Detection_Control", ""),
+                    "Detection_Treatment": ptm_row.get("Detection_Treatment", ""),
+                    "Detection_Pattern": ptm_row.get("Detection_Pattern", ""),
+                    "DeNovo_Confidence": ptm_row.get("DeNovo_Confidence", ""),
+                    "LOD_Intensity": ptm_row.get("LOD_Intensity", np.nan),
+                    "LOD_Percentile": ptm_row.get("LOD_Percentile", np.nan),
+                    "LOD_Relative_Log2": ptm_row.get("LOD_Relative_Log2", np.nan),
+                    "Peak_Condition": ptm_row.get("Peak_Condition", ""),
+                    "Peak_Is_Provisional": ptm_row.get("Peak_Is_Provisional", False),
+                    "Peak_Normalized_Log2_Intensity": ptm_row.get("Peak_Normalized_Log2_Intensity", np.nan),
+                    "Peak_Protein_Normalized_Abundance": ptm_row.get("Peak_Protein_Normalized_Abundance", np.nan),
+                    "Onset_Condition": ptm_row.get("Onset_Condition", ""),
+                    "Reliable_Onset_Condition": ptm_row.get("Reliable_Onset_Condition", ""),
+                    "Shared_Peptide": ptm_row.get("Shared_Peptide", False),
+                    "Conventional_Log2FC_NA": ptm_row.get("Conventional_Log2FC_NA", False),
+                    "Ranking_Score": ptm_row.get("Ranking_Score", np.nan),
+                    "Normalized_Log2_Intensity": ptm_row.get("Normalized_Log2_Intensity", np.nan),
+                    "Treatment_CV": ptm_row.get("Treatment_CV", np.nan),
+                    "Detection_N": ptm_row.get("Detection_N", np.nan),
+                    "Detection_Expected": ptm_row.get("Detection_Expected", np.nan),
                     # Track 1 fields are additive.  Existing Track 2 consumers can
                     # continue to use PTM_Relative_Log2FC unchanged.
                     "Quantification_Track": occupancy.get("Quantification_Track", "protein_normalized_relative_ptm"),

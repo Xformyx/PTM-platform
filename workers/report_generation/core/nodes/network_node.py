@@ -14,7 +14,7 @@ v6.0 — Add Signaling Cascade Diagram (Figure 2):
   - Proteins placed by UniProt subcellular_location + GO Cellular Component + heuristic fallback
   - Color-coded by activation state (PTM Red/Blue, Non-PTM Green/Purple, Kinase Orange)
   - Signal flow arrows connect proteins in canonical pathway progression order
-  - Focuses on top 5 pathways from Figure 1 (highest cumulative |Log2FC| scores)
+  - Focuses on top 5 pathways from Figure 1 (signed Direct NES)
   - Inserted as Figure 2 in generate_network_figure_section (between pathway graph and Cytoscape)
 
 v5.6 — Cumulative Weighted Score for Pathway Distribution (Figure 1):
@@ -1745,7 +1745,7 @@ def _generate_legends(
 
 
 # ---------------------------------------------------------------------------
-# v7.0: Build pathway candidates for cascade_mediator_node
+# Figure 1 + cascade candidates: Direct NES (contract v1)
 # ---------------------------------------------------------------------------
 
 def _build_pathway_candidates(
@@ -1753,717 +1753,37 @@ def _build_pathway_candidates(
     enriched_data: list,
     network_data: dict,
     output_dir: str,
+    expansion=None,
 ) -> dict:
-    """Build scored pathway candidate list for the cascade mediator.
-    
-    This extracts the same pathway scoring logic that was previously inside
-    signaling_cascade.py, but returns structured candidate data instead of
-    generating a diagram. The mediator will use this to match against
-    LLM-written text.
-    
-    Returns:
-        Dict with:
-            - candidates: List of dicts, each with:
-                - name: Pathway name
-                - composite_score: Multi-factor score
-                - genes: List of gene names in the pathway
-                - gene_count: Number of genes
-                - fc_score: Cumulative |FC|
-                - diversity: Compartment diversity (0-4)
-                - template: Matched template key or None
-            - gene_data: Dict of gene_name -> {fc, type, site}
-    """
-    import math
-    from collections import defaultdict
-
-    # Build gene enrichment lookup
-    gene_enrichment: Dict[str, dict] = {}
-    for ptm_data in enriched_data:
-        gene = (ptm_data.get("gene") or ptm_data.get("Gene.Name", "")).strip().upper()
-        if gene:
-            gene_enrichment[gene] = ptm_data
-
-    # Build gene info from network nodes
-    gene_info: Dict[str, dict] = {}
-    raw_nodes = network_data.get("nodes", {})
-    if isinstance(raw_nodes, dict):
-        node_list = list(raw_nodes.values()) if raw_nodes else []
-    else:
-        node_list = raw_nodes or []
-    for node in node_list:
-        if not isinstance(node, dict):
-            continue
-        gene = (node.get("gene") or node.get("id", "")).strip().upper()
-        node_type = node.get("type", "Non-PTM")
-        fc = node.get("ptm_log2fc", 0.0) or node.get("value", 0.0) or 0.0
-        protein_fc = node.get("protein_log2fc", 0.0) or 0.0
-        site = node.get("site", "")
-        if gene not in gene_info or abs(fc) > abs(gene_info[gene].get("fc", 0)):
-            gene_info[gene] = {
-                "fc": fc,
-                "protein_log2fc": protein_fc,
-                "type": node_type,
-                "site": site,
-                "gene": node.get("gene", gene),
-            }
-
-    # Collect pathway -> genes mapping
-    def _pw_name_inner(p):
-        return (p.get("name", str(p)) if isinstance(p, dict) else str(p)).strip()
-
-    pathway_genes: Dict[str, set] = defaultdict(set)
-    for ptm_data in enriched_data:
-        gene = (ptm_data.get("gene") or ptm_data.get("Gene.Name", "")).strip().upper()
-        if not gene:
-            continue
-        enr = ptm_data.get("rag_enrichment", {})
-        for pw in enr.get("pathways", []):
-            pw_n = _pw_name_inner(pw)
-            if pw_n:
-                pathway_genes[pw_n].add(gene)
-
-    # Add Non-PTM proteins from network edges
-    edges = network_data.get("edges", [])
-    ptm_genes_set = {g for g, info in gene_info.items() if info["type"] == "PTM"}
-    ptm_pathways_map: Dict[str, set] = defaultdict(set)
-    for pw_name_key, genes in pathway_genes.items():
-        for g in genes:
-            ptm_pathways_map[g].add(pw_name_key)
-    for edge in edges:
-        src = edge.get("source", "").strip().upper()
-        tgt = edge.get("target", "").strip().upper()
-        src_gene = src.split("-")[0] if "-" in src else src
-        tgt_gene = tgt.split("-")[0] if "-" in tgt else tgt
-        if src_gene in ptm_pathways_map and tgt_gene not in ptm_genes_set:
-            for pw in ptm_pathways_map[src_gene]:
-                pathway_genes[pw].add(tgt_gene)
-        if tgt_gene in ptm_pathways_map and src_gene not in ptm_genes_set:
-            for pw in ptm_pathways_map[tgt_gene]:
-                pathway_genes[pw].add(src_gene)
-
-    # Import template matching from signaling_cascade
-    try:
-        try:
-            from .signaling_cascade import (
-                _match_pathway_to_template, _classify_compartment,
-                PATHWAY_SIGNAL_ORDER, COMPARTMENT_KEYWORDS,
-            )
-        except ImportError:
-            try:
-                from report_generation.core.nodes.signaling_cascade import (
-                    _match_pathway_to_template, _classify_compartment,
-                    PATHWAY_SIGNAL_ORDER, COMPARTMENT_KEYWORDS,
-                )
-            except ImportError:
-                from signaling_cascade import (
-                    _match_pathway_to_template, _classify_compartment,
-                    PATHWAY_SIGNAL_ORDER, COMPARTMENT_KEYWORDS,
-                )
-    except ImportError:
-        logger.warning("[NET-NODE] Cannot import signaling_cascade helpers — using simple scoring")
-        # Fallback: simple scoring without template matching
-        candidates = []
-        for pw_name_key, genes in pathway_genes.items():
-            if len(genes) < 2:
-                continue
-            fc_score = sum(abs(gene_info.get(g, {}).get("fc", 0)) for g in genes)
-            candidates.append({
-                "name": pw_name_key,
-                "composite_score": fc_score,
-                "genes": sorted(genes),
-                "gene_count": len(genes),
-                "fc_score": fc_score,
-                "diversity": 0,
-                "template": None,
-            })
-        candidates.sort(key=lambda c: -c["composite_score"])
-        return {"candidates": candidates, "gene_data": gene_info}
-
-    # Pre-compute compartment assignments
-    _temp_compartments: Dict[str, str] = {}
-    for pw_genes in pathway_genes.values():
-        for g in pw_genes:
-            if g not in _temp_compartments:
-                enr_data = gene_enrichment.get(g, {})
-                enr = enr_data.get("rag_enrichment", {})
-                loc = enr.get("localization", [])
-                go_cc = enr.get("go_terms", {}).get("cellular_component", [])
-                _temp_compartments[g] = _classify_compartment(g, loc, go_cc)
-
-    # Pre-compute edge connectivity
-    edge_gene_pairs: set = set()
-    for edge in edges:
-        src = edge.get("source", "").strip().upper().split("-")[0]
-        tgt = edge.get("target", "").strip().upper().split("-")[0]
-        if src and tgt:
-            edge_gene_pairs.add((src, tgt))
-            edge_gene_pairs.add((tgt, src))
-
-    # Multi-factor scoring (same as signaling_cascade.py v6.2)
-    candidates = []
-    for pw_name_key, genes in pathway_genes.items():
-        if len(genes) < 2:
-            continue
-
-        fc_score = sum(abs(gene_info.get(g, {}).get("fc", 0)) for g in genes)
-        compartments_in_pw = set(_temp_compartments.get(g, "cytoplasm") for g in genes)
-        diversity_score = len(compartments_in_pw)
-
-        template_key = _match_pathway_to_template(pw_name_key)
-        template_score = 1.0 if template_key else 0.0
-        if template_key and template_key in PATHWAY_SIGNAL_ORDER:
-            template_genes = set(g.upper() for g in PATHWAY_SIGNAL_ORDER[template_key])
-            overlap = len(genes & template_genes)
-            template_score += min(overlap / max(len(template_genes), 1), 1.0)
-
-        count_score = math.log2(max(len(genes), 1))
-
-        intra_edges = 0
-        gene_list = list(genes)
-        for i, g1 in enumerate(gene_list):
-            for g2 in gene_list[i+1:]:
-                if (g1, g2) in edge_gene_pairs:
-                    intra_edges += 1
-        connectivity_score = math.log2(max(intra_edges, 1))
-
-        composite = (
-            0.35 * fc_score +
-            0.20 * (diversity_score / 4.0) * fc_score +
-            0.20 * template_score * fc_score +
-            0.10 * count_score * (fc_score / max(len(genes), 1)) +
-            0.15 * connectivity_score * (fc_score / max(len(genes), 1))
-        )
-
-        candidates.append({
-            "name": pw_name_key,
-            "composite_score": composite,
-            "genes": sorted(genes),
-            "gene_count": len(genes),
-            "fc_score": fc_score,
-            "diversity": diversity_score,
-            "template": template_key,
-            "intra_edges": intra_edges,
-        })
-
-    candidates.sort(key=lambda c: -c["composite_score"])
-    logger.info(
-        f"[NET-NODE] Built {len(candidates)} pathway candidates "
-        f"(top: {candidates[0]['name'] if candidates else 'none'})"
+    """Direct NES 순위의 pathway 후보. template은 배치 메타데이터만."""
+    from .pathway_figure import build_pathway_candidates
+    return build_pathway_candidates(
+        parsed_ptms,
+        enriched_data,
+        network_data,
+        output_dir,
+        expansion=expansion,
+        load_unified=_load_unified_protein_fc,
     )
-    return {"candidates": candidates, "gene_data": gene_info}
 
-
-# ---------------------------------------------------------------------------
-# Canonical Pathway Distribution Bar Graph (replaces Figure 1)
-# ---------------------------------------------------------------------------
 
 def _generate_pathway_distribution_graph(
     parsed_ptms: list,
     enriched_data: list,
     network_data: dict,
     output_dir: str,
-) -> Tuple[Optional[str], List[str]]:
-    """Generate a horizontal bar graph showing canonical pathway distribution
-    for **activated** PTM and Non-PTM proteins only.
-
-    v5.1 changes:
-    - Only activated proteins are included (PTM: Log2FC > 0, Non-PTM: Protein_Log2FC > 0)
-    - Non-PTM proteins get pathway assignments via:
-      a) KEGG edges in network_data (shared pathway with PTM partner)
-      b) Inheriting pathways from their PTM interaction partners
-
-    Returns (path_to_PNG, list_of_pathway_names_shown_in_figure).
-    v8.9.1: Now returns pathway names for LLM context synchronization.
-    """
-    try:
-        import matplotlib
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-        import matplotlib.ticker as ticker
-        import numpy as np
-    except ImportError:
-        logger.warning("matplotlib not available — skipping pathway distribution graph")
-        return None
-
-    # ---- Step 1: Identify activated PTM genes and their pathways ----
-    # Note: parsed_ptms uses 'ptm_relative_log2fc' (from context_loader),
-    # while enriched_data (raw JSON) uses 'PTM_Relative_Log2FC' or 'ptm_relative_log2fc'.
-    # For multi-condition data, condition_data may contain per-timepoint Log2FC values.
-    ptm_genes = set()  # ALL PTM genes (for Non-PTM identification)
-    activated_ptm_genes = set()  # Only activated PTM genes
-    inhibited_ptm_genes = set()  # v8.1: Track inhibited PTM genes (Log2FC < 0)
-    # First pass: from parsed_ptms (has normalized field names)
-    for ptm in parsed_ptms:
-        gene = (ptm.get("gene") or ptm.get("Gene.Name", "")).strip().upper()
-        if not gene:
-            continue
-        ptm_genes.add(gene)
-        log2fc = 0.0
-        try:
-            # parsed_ptms field: ptm_relative_log2fc (set by context_loader)
-            log2fc = float(ptm.get("ptm_relative_log2fc") or ptm.get("PTM_Relative_Log2FC", 0))
-        except (ValueError, TypeError):
-            pass
-        # Also check condition_data for multi-timepoint: use max absolute value
-        if log2fc == 0.0:
-            for cd in ptm.get("condition_data", []):
-                try:
-                    cd_fc = float(cd.get("ptm_relative_log2fc") or cd.get("PTM_Relative_Log2FC") or cd.get("PTM_Log2FC") or cd.get("Log2FC", 0))
-                    if abs(cd_fc) > abs(log2fc):
-                        log2fc = cd_fc
-                except (ValueError, TypeError):
-                    pass
-        if log2fc > 0:
-            activated_ptm_genes.add(gene)
-        elif log2fc < 0:
-            inhibited_ptm_genes.add(gene)
-    # Second pass: from enriched_data (raw JSON, may have different field names)
-    for ed in enriched_data:
-        gene = (ed.get("gene") or ed.get("Gene.Name", "")).strip().upper()
-        if not gene or gene in activated_ptm_genes or gene in inhibited_ptm_genes:
-            continue
-        ptm_genes.add(gene)
-        log2fc = 0.0
-        try:
-            log2fc = float(ed.get("PTM_Relative_Log2FC") or ed.get("ptm_relative_log2fc", 0))
-        except (ValueError, TypeError):
-            pass
-        if log2fc > 0:
-            activated_ptm_genes.add(gene)
-        elif log2fc < 0:
-            inhibited_ptm_genes.add(gene)
-    logger.info(f"[NET-NODE] Pathway graph Step1: total PTM genes={len(ptm_genes)}, activated={len(activated_ptm_genes)}, inhibited={len(inhibited_ptm_genes)}")
-
-    # ---- Step 2: Build gene -> Protein_Log2FC lookup for Non-PTM filtering ----
-    gene_protein_fc: Dict[str, float] = {}
-    for ptm in parsed_ptms:
-        gene = (ptm.get("gene") or ptm.get("Gene.Name", "")).strip().upper()
-        if not gene:
-            continue
-        try:
-            pfc = float(ptm.get("protein_log2fc") or ptm.get("Protein_Log2FC", 0))
-        except (ValueError, TypeError):
-            pfc = 0.0
-        gene_protein_fc[gene] = pfc
-    for ed in enriched_data:
-        gene = (ed.get("gene") or ed.get("Gene.Name", "")).strip().upper()
-        if not gene:
-            continue
-        try:
-            pfc = float(ed.get("protein_log2fc") or ed.get("Protein_Log2FC", 0))
-        except (ValueError, TypeError):
-            pfc = 0.0
-        if gene not in gene_protein_fc or pfc != 0.0:
-            gene_protein_fc[gene] = pfc
-
-    # ---- Step 3: Collect activated AND inhibited PTM gene -> pathways ----
-    def _pw_name(p):
-        """Extract and normalise pathway name.
-
-        v8.9.2 improvements:
-        - Strip species suffix (e.g. " - Mus musculus (house mouse)")
-        - Normalise to title-case so that "PI3K-Akt" and "PI3K-AKT" map to
-          the same key, preventing duplicate entries in Figure 1.
-        - Guard against missing 'name' key (returns empty string instead of
-          ugly dict repr).
-        """
-        raw = (p.get("name", "") if isinstance(p, dict) else str(p)).strip()
-        # Strip species suffix that KEGG sometimes includes
-        if " - " in raw:
-            raw = raw.split(" - ")[0].strip()
-        # Normalise case: keep first letter of each word capitalised,
-        # but preserve well-known abbreviations by only lowering then title-casing
-        # when the name is ALL-CAPS (rare edge case).
-        # For mixed-case names like "PI3K-Akt signaling pathway" we keep as-is;
-        # for "PI3K-AKT SIGNALING PATHWAY" we title-case.
-        if raw and raw == raw.upper():
-            raw = raw.title()
-        return raw
-
-    # v8.9.4: Helper to classify pathway category from KEGG data
-    def _pw_category(p) -> str:
-        """Return pathway category: 'disease', 'signaling', 'metabolism', or 'other'.
-        Uses the 'category' field added by kegg.py v8.9.4, or falls back to
-        KEGG ID prefix analysis, or keyword-based heuristic."""
-        if isinstance(p, dict):
-            cat = p.get("category", "")
-            if cat:
-                return cat
-            # Fallback: parse KEGG ID
-            pid = p.get("id", "")
-            num_part = "".join(c for c in pid if c.isdigit())
-            if num_part.startswith("05"):
-                return "disease"
-            elif num_part.startswith("04"):
-                return "signaling"
-            elif num_part.startswith(("01", "00")):
-                return "metabolism"
-        # Keyword-based heuristic for legacy data without category/id
-        name_lower = (_pw_name(p)).lower()
-        _DISEASE_KEYWORDS = (
-            "infection", "virus", "viral", "cancer", "carcinogenesis",
-            "lupus", "amoebiasis", "leishmaniasis", "tuberculosis",
-            "hepatitis", "influenza", "measles", "pertussis",
-            "shigellosis", "salmonella", "pathogenic", "disease",
-            "diabetes", "cardiomyopathy", "alzheimer", "parkinson",
-            "huntington", "prion", "asthma", "glioma", "melanoma",
-            "leukemia", "lymphoma",
-        )
-        if any(kw in name_lower for kw in _DISEASE_KEYWORDS):
-            return "disease"
-        return "other"
-
-    # v8.1: pathway_name -> {"activated_ptm": set, "inhibited_ptm": set, "non_ptm": set}
-    pathway_proteins: Dict[str, Dict[str, set]] = defaultdict(
-        lambda: {"activated_ptm": set(), "inhibited_ptm": set(), "non_ptm": set()}
+    expansion=None,
+):
+    """Figure 1: signed Direct NES. Σ|Log2FC|로 돌아가지 않는다."""
+    from .pathway_figure import generate_pathway_distribution_graph
+    return generate_pathway_distribution_graph(
+        parsed_ptms,
+        enriched_data,
+        network_data,
+        output_dir,
+        expansion=expansion,
+        load_unified=_load_unified_protein_fc,
     )
-    # v8.9.4: Track disease pathways separately
-    disease_pathway_names: set = set()
-
-    # gene -> set of pathway names (for activated PTM genes — used for Non-PTM inheritance)
-    activated_ptm_pathways: Dict[str, set] = defaultdict(set)
-
-    for ptm_data in enriched_data:
-        gene = (ptm_data.get("gene") or ptm_data.get("Gene.Name", "")).strip().upper()
-        is_activated = gene in activated_ptm_genes
-        is_inhibited = gene in inhibited_ptm_genes
-        if not is_activated and not is_inhibited:
-            continue
-        enr = ptm_data.get("rag_enrichment", {})
-
-        # --- Layer 1a: KEGG pathways (original) ---
-        pathways = enr.get("pathways", [])
-        for pw in pathways:
-            pw_name = _pw_name(pw)
-            if not pw_name:
-                continue
-            # v8.9.4: Track disease pathways
-            if _pw_category(pw) == "disease":
-                disease_pathway_names.add(pw_name)
-            if is_activated:
-                pathway_proteins[pw_name]["activated_ptm"].add(gene)
-                activated_ptm_pathways[gene].add(pw_name)
-            else:
-                pathway_proteins[pw_name]["inhibited_ptm"].add(gene)
-
-        # --- Layer 1b: Reactome pathways (v8.9.5) ---
-        reactome_data = enr.get("reactome", {})
-        for rpw in reactome_data.get("signaling_pathways", []):
-            rpw_name = rpw.get("name", "").strip() if isinstance(rpw, dict) else str(rpw).strip()
-            if not rpw_name:
-                continue
-            # Reactome signaling pathways are pre-filtered, no disease filtering needed
-            if is_activated:
-                pathway_proteins[rpw_name]["activated_ptm"].add(gene)
-                activated_ptm_pathways[gene].add(rpw_name)
-            else:
-                pathway_proteins[rpw_name]["inhibited_ptm"].add(gene)
-
-        # --- Layer 3: STRING indirect pathway inference (v8.9.5) ---
-        # For genes with few/no KEGG pathways, STRING indirect provides
-        # signaling context from interaction partners' pathways.
-        string_indirect = enr.get("string_indirect", {})
-        for sipw in string_indirect.get("signaling_pathways", []):
-            sipw_name = sipw.get("name", "").strip() if isinstance(sipw, dict) else str(sipw).strip()
-            if not sipw_name:
-                continue
-            # STRING indirect pathways are inferred, mark with lower weight
-            # by only adding if gene has <3 direct pathways
-            direct_pw_count = len(activated_ptm_pathways.get(gene, set())) if is_activated else 0
-            if direct_pw_count < 3:
-                if _pw_category({"name": sipw_name}) == "disease":
-                    disease_pathway_names.add(sipw_name)
-                    continue
-                if is_activated:
-                    pathway_proteins[sipw_name]["activated_ptm"].add(gene)
-                    activated_ptm_pathways[gene].add(sipw_name)
-                else:
-                    pathway_proteins[sipw_name]["inhibited_ptm"].add(gene)
-
-    logger.info(
-        f"[NET-NODE] Pathway graph Step3 (3-Layer): "
-        f"total pathways collected={len(pathway_proteins)}, "
-        f"disease pathways filtered={len(disease_pathway_names)}"
-    )
-
-    # ---- Step 4: Collect ALL connected Non-PTM proteins from network_data ----
-    # Note: Non-PTM proteins don't have their own Protein_Log2FC (they are interaction
-    # partners, not in the original PTM dataset). We include ALL connected Non-PTM
-    # proteins regardless of FC value, since their presence in the network already
-    # indicates biological relevance through interaction with PTM proteins.
-    non_ptm_nodes_in_network = set()
-    nodes = network_data.get("nodes", [])
-    for node in nodes:
-        if node.get("type") == "Non-PTM":
-            node_gene = node.get("gene", node.get("id", "")).strip().upper()
-            if node_gene:
-                non_ptm_nodes_in_network.add(node_gene)
-
-    logger.info(
-        f"[NET-NODE] Pathway graph: activated PTM genes={len(activated_ptm_genes)}, "
-        f"connected Non-PTM genes={len(non_ptm_nodes_in_network)}"
-    )
-
-    # ---- Step 5: Assign pathways to Non-PTM proteins ----
-    edges = network_data.get("edges", [])
-    kegg_assigned = set()   # track Non-PTM genes assigned via KEGG edges
-    string_assigned = set() # track Non-PTM genes assigned via STRING/BioGRID inheritance
-
-    # Method A: From KEGG edges in network_data
-    # (KEGG edges are typically PTM↔PTM, but check anyway)
-    for edge in edges:
-        if edge.get("evidence_type") != "KEGG":
-            continue
-        edge_pathways = edge.get("pathways", [])
-        if not edge_pathways:
-            continue
-        src = edge.get("source", "").strip().upper()
-        tgt = edge.get("target", "").strip().upper()
-        # Extract gene name from node ID (e.g., "GENE-S123" -> "GENE")
-        src_gene = src.split("-")[0] if "-" in src else src
-        tgt_gene = tgt.split("-")[0] if "-" in tgt else tgt
-        for pw in edge_pathways:
-            pw_name = _pw_name(pw) if isinstance(pw, dict) else str(pw).strip()
-            if not pw_name:
-                continue
-            if src_gene in non_ptm_nodes_in_network:
-                pathway_proteins[pw_name]["non_ptm"].add(src_gene)
-                kegg_assigned.add(src_gene)
-            if tgt_gene in non_ptm_nodes_in_network:
-                pathway_proteins[pw_name]["non_ptm"].add(tgt_gene)
-                kegg_assigned.add(tgt_gene)
-
-    # Method B: Inherit pathways from PTM interaction partners via STRING/BioGRID edges
-    # This is the primary mechanism: if a Non-PTM protein interacts with an activated
-    # PTM protein that has KEGG pathways, the Non-PTM inherits those pathways.
-    for edge in edges:
-        ev_type = edge.get("evidence_type", "")
-        if ev_type not in ("STRING", "BioGRID"):
-            continue
-        src = edge.get("source", "").strip().upper()
-        tgt = edge.get("target", "").strip().upper()
-        src_gene = src.split("-")[0] if "-" in src else src
-        tgt_gene = tgt.split("-")[0] if "-" in tgt else tgt
-
-        # If one end is activated PTM (with pathways) and the other is Non-PTM,
-        # assign the PTM's pathways to the Non-PTM
-        if src_gene in activated_ptm_pathways and tgt_gene in non_ptm_nodes_in_network:
-            for pw_name in activated_ptm_pathways[src_gene]:
-                pathway_proteins[pw_name]["non_ptm"].add(tgt_gene)
-            string_assigned.add(tgt_gene)
-        if tgt_gene in activated_ptm_pathways and src_gene in non_ptm_nodes_in_network:
-            for pw_name in activated_ptm_pathways[tgt_gene]:
-                pathway_proteins[pw_name]["non_ptm"].add(src_gene)
-            string_assigned.add(src_gene)
-
-    # Method C: For Non-PTM proteins not yet assigned, check if they interact with
-    # ANY PTM protein (not just activated ones) that has pathway data.
-    # This broadens coverage for Non-PTM proteins.
-    all_ptm_pathways: Dict[str, set] = defaultdict(set)
-    for ptm_data in enriched_data:
-        gene = (ptm_data.get("gene") or ptm_data.get("Gene.Name", "")).strip().upper()
-        if not gene:
-            continue
-        enr = ptm_data.get("rag_enrichment", {})
-        pathways = enr.get("pathways", [])
-        for pw in pathways:
-            pw_name = _pw_name(pw)
-            if pw_name:
-                all_ptm_pathways[gene].add(pw_name)
-
-    for edge in edges:
-        ev_type = edge.get("evidence_type", "")
-        if ev_type not in ("STRING", "BioGRID"):
-            continue
-        src = edge.get("source", "").strip().upper()
-        tgt = edge.get("target", "").strip().upper()
-        src_gene = src.split("-")[0] if "-" in src else src
-        tgt_gene = tgt.split("-")[0] if "-" in tgt else tgt
-
-        if src_gene in all_ptm_pathways and tgt_gene in non_ptm_nodes_in_network:
-            if tgt_gene not in string_assigned and tgt_gene not in kegg_assigned:
-                for pw_name in all_ptm_pathways[src_gene]:
-                    pathway_proteins[pw_name]["non_ptm"].add(tgt_gene)
-                string_assigned.add(tgt_gene)
-        if tgt_gene in all_ptm_pathways and src_gene in non_ptm_nodes_in_network:
-            if src_gene not in string_assigned and src_gene not in kegg_assigned:
-                for pw_name in all_ptm_pathways[tgt_gene]:
-                    pathway_proteins[pw_name]["non_ptm"].add(src_gene)
-                string_assigned.add(src_gene)
-
-    total_assigned = kegg_assigned | string_assigned
-    logger.info(
-        f"[NET-NODE] Pathway assignment: KEGG-assigned={len(kegg_assigned)}, "
-        f"STRING/BioGRID-inherited={len(string_assigned)}, "
-        f"total Non-PTM with pathways={len(total_assigned)} / {len(non_ptm_nodes_in_network)}"
-    )
-
-    if not pathway_proteins:
-        logger.warning("No pathway data found — skipping pathway distribution graph")
-        return None, []
-
-    # ---- Step 5.5: Build gene -> |Protein_Log2FC| lookup for weighting ----
-    # Load from unified TSV (covers ALL proteins including Non-PTM)
-    gene_fc_weight: Dict[str, float] = {}
-    if output_dir:
-        unified_fc = _load_unified_protein_fc(output_dir)
-        for g, pfc in unified_fc.items():
-            gene_fc_weight[g] = abs(pfc)
-    # Override/supplement with PTM-specific data (ptm_relative_log2fc for PTM genes)
-    for ptm in parsed_ptms:
-        gene = (ptm.get("gene") or ptm.get("Gene.Name", "")).strip().upper()
-        if not gene:
-            continue
-        try:
-            fc = abs(float(ptm.get("ptm_relative_log2fc") or ptm.get("PTM_Relative_Log2FC", 0)))
-        except (ValueError, TypeError):
-            fc = 0.0
-        if gene not in gene_fc_weight or fc > gene_fc_weight[gene]:
-            gene_fc_weight[gene] = fc
-    logger.info(f"[NET-NODE] Pathway graph Step5.5: FC weights available for {len(gene_fc_weight)} genes")
-
-    # ---- Step 6: Compute cumulative weighted scores and sort ----
-    # v8.9.4: Filter out disease pathways (KEGG 05xxx) from Fig 1 display.
-    # These pathways (e.g. "Epstein-Barr virus infection", "MicroRNAs in cancer")
-    # appear because KEGG maps cytoskeletal/signaling genes to disease mechanisms,
-    # but they are misleading in experimental contexts unrelated to those diseases.
-    # Disease pathways are excluded from the main figure but logged for reference.
-    if disease_pathway_names:
-        logger.info(
-            f"[NET-NODE] v8.9.4: Filtering {len(disease_pathway_names)} disease pathways "
-            f"from Fig 1: {sorted(disease_pathway_names)}"
-        )
-
-    pw_data = []
-    for pw_name, groups in pathway_proteins.items():
-        # v8.9.4: Skip disease pathways in Fig 1
-        if pw_name in disease_pathway_names:
-            continue
-        act_genes = groups["activated_ptm"]
-        inh_genes = groups["inhibited_ptm"]
-        non_genes = groups["non_ptm"]
-        act_count = len(act_genes)
-        inh_count = len(inh_genes)
-        non_count = len(non_genes)
-        # Cumulative |Log2FC| score: sum of absolute FC for each gene in pathway
-        act_score = sum(gene_fc_weight.get(g, 0.0) for g in act_genes)
-        inh_score = sum(gene_fc_weight.get(g, 0.0) for g in inh_genes)
-        non_score = sum(gene_fc_weight.get(g, 0.0) for g in non_genes)
-        total_score = act_score + inh_score + non_score
-        if act_count + inh_count + non_count > 0:
-            pw_data.append({
-                "pathway": pw_name,
-                "act_score": round(act_score, 2),
-                "inh_score": round(inh_score, 2),
-                "non_ptm_score": round(non_score, 2),
-                "total_score": round(total_score, 2),
-                "act_count": act_count,
-                "inh_count": inh_count,
-                "non_ptm_count": non_count,
-            })
-
-    if not pw_data:
-        logger.warning("No pathway proteins found — skipping pathway distribution graph")
-        return None, []
-
-    # Sort by total cumulative score descending, take top 25
-    pw_data.sort(key=lambda x: -x["total_score"])
-    pw_data = pw_data[:25]
-    pw_data.reverse()  # Reverse for horizontal bar (bottom = highest)
-
-    # ---- Step 7: Generate the 3-bar weighted bar graph ----
-    fig, ax = plt.subplots(figsize=(18, max(7, len(pw_data) * 0.55)))
-
-    pathways_list = [d["pathway"] for d in pw_data]
-    act_scores = [d["act_score"] for d in pw_data]
-    inh_scores = [d["inh_score"] for d in pw_data]
-    non_scores = [d["non_ptm_score"] for d in pw_data]
-    y_pos = np.arange(len(pathways_list))
-    bar_height = 0.25  # Thinner bars for 3 groups
-
-    # Colors: Activated PTM = coral/red, Inhibited PTM = blue, Non-PTM = teal/green
-    bars_act = ax.barh(y_pos + bar_height, act_scores, bar_height,
-                       label="Activated PTM (Log2FC > 0)", color="#E74C3C", alpha=0.85,
-                       edgecolor="white", linewidth=0.5)
-    bars_inh = ax.barh(y_pos, inh_scores, bar_height,
-                       label="Inhibited PTM (Log2FC < 0)", color="#3498DB", alpha=0.85,
-                       edgecolor="white", linewidth=0.5)
-    bars_non = ax.barh(y_pos - bar_height, non_scores, bar_height,
-                       label="Non-PTM Interactor Proteins", color="#2ECC71", alpha=0.85,
-                       edgecolor="white", linewidth=0.5)
-
-    # Truncate long pathway names — generous limit for wider figure
-    display_names = []
-    max_label_len = 75
-    for name in pathways_list:
-        if len(name) > max_label_len:
-            display_names.append(name[:max_label_len - 3] + "...")
-        else:
-            display_names.append(name)
-
-    # Adaptive font size: shrink if many pathways or long names
-    longest = max((len(n) for n in display_names), default=30)
-    ytick_fontsize = 8 if longest > 55 else 9
-
-    ax.set_yticks(y_pos)
-    ax.set_yticklabels(display_names, fontsize=ytick_fontsize)
-    ax.set_xlabel("Cumulative |Log2FC| Score", fontsize=11, fontweight="bold")
-    ax.set_title(
-        "Canonical Pathway Distribution of Activated PTM and Non-PTM Interactor Proteins\n"
-        "(3-Layer Enrichment: KEGG + Reactome + STRING Indirect | Weighted by |Protein_Log2FC|)",
-        fontsize=13, fontweight="bold", pad=15,
-    )
-    ax.legend(loc="lower right", fontsize=9, framealpha=0.9)
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
-    ax.grid(axis="x", alpha=0.3, linestyle="--")
-
-    # Add score + count labels on bars: "score (n=count)"
-    all_scores = act_scores + inh_scores + non_scores
-    max_width = max(all_scores) if all_scores else 1.0
-    label_offset = max_width * 0.01 + 0.1
-    for bar, d in zip(bars_act, pw_data):
-        width = bar.get_width()
-        if width > 0 or d["act_count"] > 0:
-            label_text = f"{width:.1f} (n={d['act_count']})"
-            ax.text(max(width, 0) + label_offset, bar.get_y() + bar.get_height() / 2,
-                    label_text, va="center", fontsize=7, color="#C0392B", fontweight="medium")
-    for bar, d in zip(bars_inh, pw_data):
-        width = bar.get_width()
-        if width > 0 or d["inh_count"] > 0:
-            label_text = f"{width:.1f} (n={d['inh_count']})"
-            ax.text(max(width, 0) + label_offset, bar.get_y() + bar.get_height() / 2,
-                    label_text, va="center", fontsize=7, color="#2980B9", fontweight="medium")
-    for bar, d in zip(bars_non, pw_data):
-        width = bar.get_width()
-        if width > 0 or d["non_ptm_count"] > 0:
-            label_text = f"{width:.1f} (n={d['non_ptm_count']})"
-            ax.text(max(width, 0) + label_offset, bar.get_y() + bar.get_height() / 2,
-                    label_text, va="center", fontsize=7, color="#27AE60", fontweight="medium")
-
-    plt.tight_layout()
-
-    output_path = Path(output_dir) / "pathway_distribution.png"
-    fig.savefig(str(output_path), dpi=200, bbox_inches="tight", facecolor="white")
-    plt.close(fig)
-
-    total_act_score = sum(d["act_score"] for d in pw_data)
-    total_inh_score = sum(d["inh_score"] for d in pw_data)
-    total_non_score = sum(d["non_ptm_score"] for d in pw_data)
-    total_act_n = sum(d["act_count"] for d in pw_data)
-    total_inh_n = sum(d["inh_count"] for d in pw_data)
-    total_non_n = sum(d["non_ptm_count"] for d in pw_data)
-    logger.info(
-        f"[NET-NODE] Pathway distribution graph saved: {output_path} "
-        f"({len(pw_data)} pathways, Activated PTM: score={total_act_score:.1f} n={total_act_n}, "
-        f"Inhibited PTM: score={total_inh_score:.1f} n={total_inh_n}, "
-        f"Non-PTM: score={total_non_score:.1f} n={total_non_n})"
-    )
-    # v8.9.1: Collect pathway names shown in figure (sorted by total_score descending)
-    # pw_data is currently reversed (bottom=highest), so re-reverse for descending order
-    fig1_pathway_names = [d["pathway"] for d in reversed(pw_data)]
-    logger.info(f"[NET-NODE] Fig 1 pathway names ({len(fig1_pathway_names)}): {fig1_pathway_names[:10]}")
-    return str(output_path), fig1_pathway_names
 
 
 # ---------------------------------------------------------------------------
@@ -2498,7 +1818,8 @@ def run_network_analysis(state: dict) -> dict:
                 "cascade_diagram_path": None,
                 "cascade_diagram_paths": {},
                 "cascade_pathway_names": {},
-                "fig1_pathway_names": [],  # v8.9.1
+                "fig1_pathway_names": [],
+                "pathway_expansion": None,
                 "ptm_count": 0,
                 "timepoint_results": {},
                 "timepoints": [],
@@ -2573,23 +1894,34 @@ def _run_network_analysis_inner(state: dict) -> dict:
     if cb:
         cb(63, "Generating pathway distribution graph")
 
-    # v5.1: Generate Canonical Pathway Distribution Bar Graph (activated only)
+    # Direct NES Figure 1 + candidates. Σ|Log2FC| fallback 없음.
     pathway_graph_path = None
-    fig1_pathway_names = []  # v8.9.1: pathway names shown in Fig 1
+    fig1_pathway_names = []
+    pathway_expansion_payload = None
+    expansion = None
     try:
-        pathway_graph_path, fig1_pathway_names = _generate_pathway_distribution_graph(
-            parsed_ptms, enriched_data, network_data, output_dir
+        from .pathway_figure import run_pathway_expansion
+        expansion = run_pathway_expansion(
+            parsed_ptms,
+            enriched_data,
+            network_data,
+            output_dir,
+            _load_unified_protein_fc,
         )
+        pathway_expansion_payload = expansion.to_payload()
+        pathway_graph_path, fig1_pathway_names, _payload = _generate_pathway_distribution_graph(
+            parsed_ptms, enriched_data, network_data, output_dir, expansion=expansion
+        )
+        if _payload:
+            pathway_expansion_payload = _payload
     except Exception as pw_err:
-        logger.error(f"[NET-NODE] Pathway distribution graph failed: {pw_err}", exc_info=True)
+        logger.error(f"[NET-NODE] Pathway NES graph failed: {pw_err}", exc_info=True)
         pathway_graph_path = None
         fig1_pathway_names = []
+        expansion = None
 
-    # v7.0: Build pathway_candidates for cascade_mediator_node
-    # Instead of generating cascade diagrams here, we export all scored pathway
-    # candidates so the mediator can select pathways based on LLM-written text.
     pathway_candidates = _build_pathway_candidates(
-        parsed_ptms, enriched_data, network_data, output_dir
+        parsed_ptms, enriched_data, network_data, output_dir, expansion=expansion
     )
     logger.info(
         f"[NET-NODE] Pathway candidates built: "
@@ -2619,7 +1951,8 @@ def _run_network_analysis_inner(state: dict) -> dict:
             "cascade_diagram_path": cascade_diagram_path,
             "cascade_diagram_paths": cascade_diagram_paths,
             "cascade_pathway_names": cascade_pathway_names,
-            "fig1_pathway_names": fig1_pathway_names,  # v8.9.1
+            "fig1_pathway_names": fig1_pathway_names,
+            "pathway_expansion": pathway_expansion_payload,
             "ptm_count": len(parsed_ptms),
             "timepoint_results": timepoint_results,
             "timepoints": timepoints,
@@ -3467,19 +2800,25 @@ def generate_network_figure_section(
         pw_path_obj = Path(pathway_graph_path)
         if pw_path_obj.exists() and pw_path_obj.stat().st_size > 1000:
             pw_img_ref = pw_path_obj.name
-            main_section += f"### Figure {figure_num}. Canonical Pathway Distribution of Activated PTM and Non-PTM Interactor Proteins (Weighted by |Protein_Log2FC|)\n\n"
-            main_section += f"![Canonical Pathway Distribution]({pw_img_ref})\n\n"
             main_section += (
-                f"**Figure Legend:** This bar graph illustrates the cumulative |Protein_Log2FC| score "
-                f"of **activated** PTM proteins (red, Log2FC > 0) and Non-PTM interactor proteins (green) "
-                f"across canonical signaling pathways identified via KEGG pathway analysis. "
-                f"The X-axis represents the cumulative |Log2FC| score (\u03a3|Protein_Log2FC|), which weights "
-                f"each protein by its fold-change magnitude rather than counting proteins equally. "
-                f"Bar labels show the score followed by protein count in parentheses (n=count). "
-                f"Non-PTM proteins are assigned to pathways through interaction-based pathway inheritance "
-                f"from their PTM partners (STRING/BioGRID edges). "
-                f"Pathways are ranked by total cumulative score, highlighting pathways with the "
-                f"strongest combined expression changes.\n\n"
+                f"### Figure {figure_num}. Time-resolved Direct PTM Pathway Enrichment "
+                f"with Independent Protein and Network Support\n\n"
+            )
+            main_section += f"![Direct PTM Pathway Enrichment]({pw_img_ref})\n\n"
+            main_section += (
+                "**Figure Legend:** Bars show signed Direct NES at the peak timepoint "
+                "for proteins annotated to the pathway (KEGG/Reactome membership). "
+                "De novo sites (control undetected) are excluded from the NES universe "
+                "and appear only as counts (dn=support/high-confidence). "
+                "Protein support is the mean |total-protein Log2FC| of those same direct "
+                "members. Network support is degree-normalized STRING/BioGRID 1-hop and "
+                "is not a Direct hit. Coherence is the geometric mean of observed "
+                "coverage, connectedness, temporal order, and direction consistency; "
+                "missing components are omitted, not filled with 1. "
+                "Terms (activated/inhibited/modulated/network-associated) require "
+                "annotated functional sites and are not a ranking prior. "
+                "NES is enrichment of the evidence ranking, not pathway activation "
+                "or kinase activity.\n\n"
             )
             main_section += "---\n\n"
             figure_num += 1

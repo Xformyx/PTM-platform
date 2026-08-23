@@ -1355,12 +1355,12 @@ export default function OrderCreate() {
                       </SelectContent>
                     </Select>
                     <p className="text-[10px] text-muted-foreground">
-                      {form.ptm_selection_mode === "de_novo_regulated" && "De novo (no control) + Statistically regulated (q < 0.05, |FC| ≥ 1.0) PTMs"}
-                      {form.ptm_selection_mode === "de_novo" && "Only PTMs with no control condition (pseudocount imputed)"}
+                      {form.ptm_selection_mode === "de_novo_regulated" && "Regulated (q < 0.05, |FC| ≥ 1.0) + de novo with High/Moderate detection confidence. Low/Ambiguous de novo are excluded. De novo rank uses LOD-relative induction, not pseudo-Log2FC."}
+                      {form.ptm_selection_mode === "de_novo" && "Only PTMs with no control detection (below LOD). Displayed as detection + LOD-relative ≥, not Log2FC."}
                       {form.ptm_selection_mode === "regulated" && "Only statistically significant PTMs (q < 0.05, |Log2FC| ≥ 1.0)"}
                       {form.ptm_selection_mode === "minor" && "PTMs that are neither de novo nor statistically regulated"}
                       {form.ptm_selection_mode === "all" && "All detected PTMs — may increase analysis time significantly"}
-                      {form.ptm_selection_mode === "top_n" && `Top ${form.top_n_ptms} PTMs ranked by max |Log2FC|`}
+                      {form.ptm_selection_mode === "top_n" && `Top ${form.top_n_ptms} PTMs ranked by contract score (quantified |Log2FC|; de novo = capped LOD-relative)`}
                     </p>
                     {form.ptm_selection_mode === "top_n" && (
                       <div className="flex items-center gap-2 mt-2">

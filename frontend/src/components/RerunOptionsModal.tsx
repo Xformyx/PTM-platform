@@ -577,16 +577,16 @@ export default function RerunOptionsModal({
                       <SelectItem value="regulated">Regulated only</SelectItem>
                       <SelectItem value="minor">Minor only</SelectItem>
                       <SelectItem value="all">All PTMs</SelectItem>
-                      <SelectItem value="top_n">Top N by |FC| (legacy)</SelectItem>
+                      <SelectItem value="top_n">Top N by ranking score</SelectItem>
                     </SelectContent>
                   </Select>
                   <p className="text-[10px] text-muted-foreground">
-                    {ptmSelectionMode === "de_novo_regulated" && "De novo ∪ Regulated (q < 0.05, |FC| ≥ 1.0)"}
-                    {ptmSelectionMode === "de_novo" && "No-control PTMs only"}
+                    {ptmSelectionMode === "de_novo_regulated" && "Regulated ∪ High/Moderate de novo. LOD-relative rank, not pseudo-Log2FC."}
+                    {ptmSelectionMode === "de_novo" && "No-control PTMs only (Log2FC=NA)"}
                     {ptmSelectionMode === "regulated" && "Statistically significant PTMs only"}
                     {ptmSelectionMode === "minor" && "Neither de novo nor regulated"}
                     {ptmSelectionMode === "all" && "All PTMs — may increase analysis time"}
-                    {ptmSelectionMode === "top_n" && `Top ${topNPtms} by max |Log2FC|`}
+                    {ptmSelectionMode === "top_n" && `Top ${topNPtms} by ranking score`}
                   </p>
                   {ptmSelectionMode === "top_n" && (
                     <div className="flex items-center gap-2 mt-1.5">

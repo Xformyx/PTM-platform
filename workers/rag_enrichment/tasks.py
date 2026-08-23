@@ -882,9 +882,12 @@ def _compute_kinase_activity_heatmap(
 
     # Extract conditions from enriched data
     conditions = set()
-    ptm_values = {}  # key: (gene, position, condition) -> log2fc
+    ptm_values = {}  # key: (gene, position, condition) -> signed score quantity
     ptm_qvalues = {}  # key: (gene, position, condition) -> q_value
     ptm_de_novo = set()  # (gene, position) that are de_novo
+    ptm_denovo_conf = {}  # (gene, position) -> confidence
+
+    from ptm_shared.de_novo_representation import heatmap_denovo_value, heatmap_denovo_weight
 
     for item in enriched_data:
         gene = (item.get("Gene.Name") or item.get("gene", "")).strip().upper()
@@ -892,7 +895,9 @@ def _compute_kinase_activity_heatmap(
         cond = item.get("Condition") or item.get("condition", "")
         log2fc = item.get("PTM_Relative_Log2FC") or item.get("ptm_relative_log2fc") or item.get("Log2FC") or item.get("log2fc")
         q_val = item.get("Q_Value") or item.get("q_value")
-        is_pseudo = item.get("Control_Pseudocount_Used", False)
+        is_pseudo = item.get("Control_Pseudocount_Used") or item.get("control_pseudocount_used") or item.get("Conventional_Log2FC_NA")
+        lod_rel = item.get("LOD_Relative_Log2") or item.get("lod_relative_log2")
+        confidence = item.get("DeNovo_Confidence") or item.get("denovo_confidence") or "moderate"
 
         if not gene or not pos or not cond:
             continue
@@ -901,14 +906,21 @@ def _compute_kinase_activity_heatmap(
             raw_fc = float(log2fc) if log2fc is not None else 0.0
         except (ValueError, TypeError):
             raw_fc = 0.0
-        # v11.2: Store raw Log2FC (no cap). Winsorization applied per-kinase during scoring.
-        ptm_values[(gene, pos, cond)] = raw_fc
+        try:
+            lod_val = float(lod_rel) if lod_rel is not None and str(lod_rel).strip().lower() not in ("", "nan") else None
+        except (ValueError, TypeError):
+            lod_val = None
+        if is_pseudo:
+            # Contract §8: de novo uses capped LOD-relative induction, never pseudo-Log2FC.
+            ptm_values[(gene, pos, cond)] = heatmap_denovo_value(lod_val)
+            ptm_de_novo.add((gene, pos))
+            ptm_denovo_conf[(gene, pos)] = str(confidence or "moderate").strip().lower()
+        else:
+            ptm_values[(gene, pos, cond)] = raw_fc
         try:
             ptm_qvalues[(gene, pos, cond)] = float(q_val) if q_val is not None else 1.0
         except (ValueError, TypeError):
             ptm_qvalues[(gene, pos, cond)] = 1.0
-        if is_pseudo:
-            ptm_de_novo.add((gene, pos))
 
     conditions = sorted(conditions, key=condition_sort_key)
     if not conditions:
@@ -916,11 +928,12 @@ def _compute_kinase_activity_heatmap(
 
     n_conditions = len(conditions)
 
-    # Activity class weights
+    # Activity class weights. De novo no longer receives a 1.5 boost.
+    # docs/de_novo_representation_contract_v1.md §8
     def _get_weight(gene, pos, cond):
         key = (gene, pos)
         if key in ptm_de_novo:
-            return 1.5  # de_novo
+            return heatmap_denovo_weight(ptm_denovo_conf.get(key, "moderate"))
         q = ptm_qvalues.get((gene, pos, cond), 1.0)
         fc = abs(ptm_values.get((gene, pos, cond), 0))
         if q < 0.05 and fc >= 1.0:
@@ -1849,6 +1862,36 @@ def run_rag_enrichment(self, order_id: int, config: dict):
         df = pd.read_csv(vector_file, sep="\t", low_memory=False)
         logger.info(f"[Order {order_id}] Loaded {len(df)} PTM entries from {vector_file.name}")
 
+        from ptm_shared.de_novo_representation import (
+            attach_de_novo_fields,
+            apply_legacy_denovo_ranking,
+        )
+
+        if "Ranking_Score" not in df.columns:
+            site_level = preprocessing_dir / f"site_level_relative_quantification_normalized{file_suffix}.tsv"
+            if site_level.exists():
+                relative_df = pd.read_csv(site_level, sep="\t", low_memory=False)
+                id_cols = (
+                    ["Protein.Group", "Precursor.Id"]
+                    if "Precursor.Id" in df.columns
+                    else ["Protein.Group", "Modified.Sequence"]
+                )
+                if all(c in df.columns for c in id_cols) and all(c in relative_df.columns for c in id_cols):
+                    df = attach_de_novo_fields(df, relative_df, id_cols=id_cols)
+                    logger.info(
+                        f"[Order {order_id}] Attached de novo representation from {site_level.name}"
+                    )
+            if "Ranking_Score" not in df.columns:
+                fc_name = "PTM_Relative_Log2FC" if "PTM_Relative_Log2FC" in df.columns else "ptm_relative_log2fc"
+                pc_name = "Control_Pseudocount_Used" if "Control_Pseudocount_Used" in df.columns else "control_pseudocount_used"
+                if fc_name in df.columns:
+                    df["Ranking_Score"] = apply_legacy_denovo_ranking(df, fc_col=fc_name, denovo_col=pc_name)
+                    df["Conventional_Log2FC_NA"] = df[pc_name].fillna(False).astype(bool) if pc_name in df.columns else False
+                    logger.info(
+                        f"[Order {order_id}] Applied legacy de novo ranking fallback "
+                        f"(no |pseudo-Log2FC|)"
+                    )
+
         # Select PTMs based on ptm_selection_mode.
         # Modes: top_n | de_novo | regulated | de_novo_regulated | minor | all
         # Legacy classification mode also supported via use_classification_selection flag.
@@ -1907,10 +1950,15 @@ def run_rag_enrichment(self, order_id: int, config: dict):
             pc_col = "Control_Pseudocount_Used" if "Control_Pseudocount_Used" in df.columns else None
             q_col  = "q_value" if "q_value" in df.columns else None
 
-            # Per-PTM aggregates
+            # Per-PTM aggregates. Ranking uses contract score, not |pseudo-Log2FC|.
+            # docs/de_novo_representation_contract_v1.md §8
+            rank_col = "Ranking_Score" if "Ranking_Score" in df.columns else "_abs_fc"
             key_max_fc = df.groupby("_key")["_abs_fc"].max()
+            key_rank = df.groupby("_key")[rank_col].max()
             key_denovo = df.groupby("_key")[pc_col].any() if pc_col else None
             key_min_q  = df.groupby("_key")[q_col].min() if q_col else None
+            conf_col = "DeNovo_Confidence" if "DeNovo_Confidence" in df.columns else None
+            key_conf = df.groupby("_key")[conf_col].first() if conf_col else None
 
             # Classify every unique PTM key
             denovo_keys: set = set()
@@ -1968,7 +2016,14 @@ def run_rag_enrichment(self, order_id: int, config: dict):
                     f"{len(minor_keys)} minor PTMs."
                 )
 
-            # Apply selection based on mode
+            # Apply selection based on mode.
+            # docs/de_novo_representation_contract_v1.md §8
+            from ptm_shared.de_novo_representation import narrative_eligible_denovo
+
+            eligible_denovo = {
+                k for k in denovo_keys
+                if key_conf is None or narrative_eligible_denovo(key_conf.get(k, "moderate"))
+            }
             mode = ptm_selection_mode
             if mode == "all":
                 selected_keys = set(key_max_fc.index.tolist())
@@ -1980,28 +2035,24 @@ def run_rag_enrichment(self, order_id: int, config: dict):
                 selected_keys = regulated_keys
                 fill_keys = set()
             elif mode == "de_novo_regulated":
-                selected_keys = denovo_keys | regulated_keys
+                selected_keys = eligible_denovo | regulated_keys
                 fill_keys = set()
             elif mode == "minor":
                 selected_keys = minor_keys
                 fill_keys = set()
             else:
-                # Default: 'top_n' — De novo + Regulated guaranteed, fill remainder
-                priority_keys = denovo_keys | regulated_keys
-                remaining_slots = max(0, top_n - len(priority_keys))
-                remaining_sorted = key_max_fc.drop(index=list(priority_keys), errors="ignore") \
-                                             .sort_values(ascending=False)
-                fill_keys = set(remaining_sorted.head(remaining_slots).index.tolist())
-                selected_keys = priority_keys | fill_keys
+                # top_n: rank by contract score. Do not auto-include every de novo.
+                selected_keys = set(key_rank.sort_values(ascending=False).head(top_n).index.tolist())
+                fill_keys = selected_keys
 
-            # Fallback: if mode-based selection yields nothing, fall back to top_n
+            # Fallback: if mode-based selection yields nothing, fall back to ranking_score
             if not selected_keys:
                 logger.warning(
                     f"[Order {order_id}] ptm_selection_mode='{mode}' yielded 0 PTMs "
                     f"(q_value data available: {q_col is not None}). "
-                    f"Falling back to top_{top_n} by |FC|."
+                    f"Falling back to top_{top_n} by ranking_score."
                 )
-                fill_keys = set(key_max_fc.sort_values(ascending=False).head(top_n).index.tolist())
+                fill_keys = set(key_rank.sort_values(ascending=False).head(top_n).index.tolist())
                 selected_keys = fill_keys
 
             # Keep all rows (all conditions) for the selected gene+position pairs
@@ -2014,9 +2065,10 @@ def run_rag_enrichment(self, order_id: int, config: dict):
                 f"[Order {order_id}] [RAG-SELECT] "
                 f"mode='{mode}' | "
                 f"전체 unique PTM={_total_unique} | "
-                f"De novo={len(denovo_keys)}, Regulated={len(regulated_keys)}, Minor={len(minor_keys)} | "
+                f"De novo={len(denovo_keys)} (narrative-eligible={len(eligible_denovo)}), "
+                f"Regulated={len(regulated_keys)}, Minor={len(minor_keys)} | "
                 f"선택됨={n_unique} unique PTMs ({len(df)} rows, {len(conditions)} conditions) | "
-                f"top_n_setting={top_n} (mode!=top_n 이면 무시됨)"
+                f"rank=Ranking_Score (pseudo-Log2FC excluded)"
             )
         elif fc_col in df.columns:
             # Fallback: no Condition column — simple top-N by abs FC

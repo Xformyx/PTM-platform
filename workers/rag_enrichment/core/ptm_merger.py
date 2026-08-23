@@ -67,10 +67,37 @@ def collapse_ptm_rows_for_enrichment(
                 ),
                 "q_value": entry.get("q_value"),
                 "control_pseudocount_used": entry.get("Control_Pseudocount_Used"),
+                "denovo_confidence": entry.get("DeNovo_Confidence") or entry.get("denovo_confidence"),
+                "detection_control": entry.get("Detection_Control") or entry.get("detection_control"),
+                "detection_treatment": entry.get("Detection_Treatment") or entry.get("detection_treatment"),
+                "detection_pattern": entry.get("Detection_Pattern") or entry.get("detection_pattern"),
+                "lod_relative_log2": _safe_float(entry.get("LOD_Relative_Log2") or entry.get("lod_relative_log2")),
+                "normalized_log2_intensity": _safe_float(
+                    entry.get("Normalized_Log2_Intensity") or entry.get("normalized_log2_intensity")
+                ),
+                "conventional_log2fc_na": entry.get("Conventional_Log2FC_NA") or entry.get("conventional_log2fc_na"),
+                "ranking_score": _safe_float(entry.get("Ranking_Score") or entry.get("ranking_score")),
+                "peak_condition": entry.get("Peak_Condition") or entry.get("peak_condition"),
+                "onset_condition": entry.get("Onset_Condition") or entry.get("onset_condition"),
+                "reliable_onset_condition": entry.get("Reliable_Onset_Condition") or entry.get("reliable_onset_condition"),
+                "shared_peptide": entry.get("Shared_Peptide") or entry.get("shared_peptide"),
+                "detection_n": entry.get("Detection_N") or entry.get("detection_n"),
+                "detection_expected": entry.get("Detection_Expected") or entry.get("detection_expected"),
             })
 
         primary["condition_data"] = condition_data
         primary["rag_source_row_count"] = len(entries)
+        first_cd = condition_data[0] if condition_data else {}
+        primary.setdefault("denovo_confidence", first_cd.get("denovo_confidence") or primary.get("DeNovo_Confidence"))
+        primary.setdefault("detection_control", first_cd.get("detection_control") or primary.get("Detection_Control"))
+        primary.setdefault("detection_pattern", first_cd.get("detection_pattern") or primary.get("Detection_Pattern"))
+        primary.setdefault("lod_relative_log2", first_cd.get("lod_relative_log2") or primary.get("LOD_Relative_Log2"))
+        primary.setdefault("conventional_log2fc_na", first_cd.get("conventional_log2fc_na") or primary.get("Conventional_Log2FC_NA"))
+        primary.setdefault("ranking_score", first_cd.get("ranking_score") or primary.get("Ranking_Score"))
+        primary.setdefault("peak_condition", first_cd.get("peak_condition") or primary.get("Peak_Condition"))
+        primary.setdefault("onset_condition", first_cd.get("onset_condition") or primary.get("Onset_Condition"))
+        primary.setdefault("reliable_onset_condition", first_cd.get("reliable_onset_condition") or primary.get("Reliable_Onset_Condition"))
+        primary.setdefault("shared_peptide", first_cd.get("shared_peptide") or primary.get("Shared_Peptide"))
         form_trajectories = _build_site_form_trajectories(entries, single_time_point)
         primary["site_form_trajectories"] = form_trajectories
         site_aggregate = aggregate_site_form_trajectories(form_trajectories)
@@ -82,14 +109,7 @@ def collapse_ptm_rows_for_enrichment(
         )
         collapsed.append(primary)
 
-    collapsed.sort(
-        key=lambda ptm: abs(_safe_float(
-            ptm.get("PTM_Relative_Log2FC")
-            if ptm.get("PTM_Relative_Log2FC") is not None
-            else ptm.get("ptm_relative_log2fc")
-        )),
-        reverse=True,
-    )
+    collapsed.sort(key=_ranking_sort_key, reverse=True)
     logger.info(
         "RAG input collapse: %s selected condition rows -> %s unique PTM sites",
         len(ptm_rows), len(collapsed),
@@ -225,14 +245,7 @@ def merge_multi_condition_ptms(enriched_ptms: List[dict], single_time_point: boo
 
             merged.append(primary)
 
-    # Sort by max |PTM_Relative_Log2FC| descending
-    def _sort_key(ptm):
-        conds = ptm.get("condition_data", [])
-        if conds:
-            return max(abs(c.get("ptm_relative_log2fc", 0)) for c in conds)
-        return abs(_safe_float(ptm.get("PTM_Relative_Log2FC") or ptm.get("ptm_relative_log2fc")))
-
-    merged.sort(key=_sort_key, reverse=True)
+    merged.sort(key=_ranking_sort_key, reverse=True)
 
     logger.info(
         f"PTM merger: {len(enriched_ptms)} rows → {len(merged)} unique PTMs "
@@ -241,16 +254,49 @@ def merge_multi_condition_ptms(enriched_ptms: List[dict], single_time_point: boo
     return merged
 
 
+def _ranking_sort_key(ptm: dict) -> float:
+    """Sort by contract ranking_score. De novo does not use |pseudo-Log2FC|."""
+    score = _safe_float(ptm.get("Ranking_Score") if ptm.get("Ranking_Score") is not None else ptm.get("ranking_score"))
+    if score:
+        return score
+    conds = ptm.get("condition_data") or []
+    cond_scores = [
+        _safe_float(c.get("ranking_score"))
+        for c in conds
+        if _safe_float(c.get("ranking_score"))
+    ]
+    if cond_scores:
+        return max(cond_scores)
+    is_denovo = bool(
+        ptm.get("Conventional_Log2FC_NA")
+        or ptm.get("conventional_log2fc_na")
+        or ptm.get("Control_Pseudocount_Used")
+        or ptm.get("control_pseudocount_used")
+    )
+    if is_denovo:
+        return 0.0
+    if conds:
+        return max(abs(_safe_float(c.get("ptm_relative_log2fc"))) for c in conds)
+    return abs(_safe_float(ptm.get("PTM_Relative_Log2FC") or ptm.get("ptm_relative_log2fc")))
+
+
 def _select_primary(entries: List[dict]) -> dict:
-    """Select the entry with the highest |PTM_Relative_Log2FC| as primary."""
-    best = entries[0]
-    best_fc = abs(_safe_float(best.get("PTM_Relative_Log2FC") or best.get("ptm_relative_log2fc")))
-    for entry in entries[1:]:
-        fc = abs(_safe_float(entry.get("PTM_Relative_Log2FC") or entry.get("ptm_relative_log2fc")))
-        if fc > best_fc:
-            best = entry
-            best_fc = fc
-    return best
+    """Select the representative condition row by contract ranking, not |pseudo-Log2FC|.
+
+    구현 대상: docs/de_novo_representation_contract_v1.md §7–§8
+    사전등록: 2026-08-23. 탐색적.
+    해석 한계: primary는 RAG 대표 행이다. 생물학적 peak가 아닐 수 있다.
+    주장 금지: 이 선택을 정확한 fold-change 최댓값으로 서술하지 않는다.
+    """
+    peak_wanted = None
+    for entry in entries:
+        peak_wanted = entry.get("Peak_Condition") or entry.get("peak_condition") or peak_wanted
+    if peak_wanted:
+        for entry in entries:
+            cond = entry.get("Condition") or entry.get("condition", "")
+            if str(cond) == str(peak_wanted):
+                return entry
+    return max(entries, key=_ranking_sort_key)
 
 
 def _build_site_form_trajectories(entries: List[dict], single_time_point: bool) -> List[dict]:
@@ -280,6 +326,10 @@ def _build_site_form_trajectories(entries: List[dict], single_time_point: bool) 
                     else entry.get("protein_log2fc")
                 ),
                 "q_value": entry.get("q_value"),
+                "control_pseudocount_used": entry.get("Control_Pseudocount_Used") or entry.get("control_pseudocount_used"),
+                "conventional_log2fc_na": entry.get("Conventional_Log2FC_NA") or entry.get("conventional_log2fc_na"),
+                "lod_relative_log2": _safe_float(entry.get("LOD_Relative_Log2") or entry.get("lod_relative_log2")),
+                "detection_treatment": entry.get("Detection_Treatment") or entry.get("detection_treatment"),
             })
         forms.append({
             **identities[key],
@@ -307,7 +357,9 @@ def _build_trajectory_from_conditions(condition_data: List[dict]) -> dict:
     timepoints = []
     for cd in sorted_conds:
         cond = cd.get("condition", "")
-        ptm_fc = cd.get("ptm_relative_log2fc", 0)
+        is_denovo = bool(cd.get("conventional_log2fc_na") or cd.get("control_pseudocount_used"))
+        lod_rel = _safe_float(cd.get("lod_relative_log2"))
+        ptm_fc = lod_rel if is_denovo else cd.get("ptm_relative_log2fc", 0)
         prot_fc = cd.get("protein_log2fc", 0)
         cls = cd.get("classification", {})
         cls_label = cls.get("short_label", cls.get("level", ""))
@@ -317,6 +369,9 @@ def _build_trajectory_from_conditions(condition_data: List[dict]) -> dict:
             "proteinLog2FC": prot_fc,
             "q_value": cd.get("q_value"),
             "classification": cls_label,
+            "lodRelativeLog2": lod_rel if is_denovo else None,
+            "conventionalLog2FCNA": is_denovo,
+            "detection": cd.get("detection_treatment"),
         })
 
     return _build_trajectory_from_timepoints(timepoints)

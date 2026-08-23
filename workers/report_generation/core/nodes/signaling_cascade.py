@@ -19,9 +19,9 @@ v6.5 — Content alignment + readability improvements:
 
 v6.2 — Context-aware multi-factor pathway selection:
   - Replaces simple cumulative |FC| TOP5 with multi-factor scoring
-  - Factors: FC magnitude, compartment diversity, template match, protein count, network connectivity
-  - Pathways that span multiple compartments and match known signal templates are prioritized
-  - Produces more biologically informative cascade diagrams
+  - Factors: FC magnitude, compartment diversity, protein count, network connectivity
+  - Template match (PATHWAY_SIGNAL_ORDER) is layout only, not a score prior
+  - Production Figure 1 rank is Direct NES; this composite is cascade fallback only
 
 v6.0 — Compartmentalized Signaling Cascade Diagram:
   - Draws a schematic cell cross-section with compartments:
@@ -35,7 +35,7 @@ v6.0 — Compartmentalized Signaling Cascade Diagram:
     Non-PTM: Green (up) / Purple (down) gradient
     Kinase: Orange gradient
   - Signal flow arrows connect proteins in pathway progression order
-  - Focuses on top N pathways from Figure 1 (highest cumulative |Log2FC| scores)
+  - Focuses on top N pathways from Figure 1 (signed Direct NES)
   - Node shape: Circle (PTM/Non-PTM), Diamond (Kinase)
   - Node size proportional to |Log2FC|
 
@@ -305,7 +305,8 @@ def generate_signaling_cascade_diagram(
     - Color-coded by activation state (PTM Red/Blue, Non-PTM Green/Purple)
     - Signal flow arrows connecting proteins in pathway order
     
-    Focuses on top N pathways from Figure 1 (highest cumulative |Log2FC| scores).
+    Focuses on top N pathways. Production rank is Direct NES from Figure 1;
+    PATHWAY_SIGNAL_ORDER is arrow layout only.
     
     Args:
         parsed_ptms: List of parsed PTM data
@@ -470,19 +471,12 @@ def generate_signaling_cascade_diagram(
         compartments_in_pw = set(_temp_compartments.get(g, "cytoplasm") for g in genes)
         diversity_score = len(compartments_in_pw)  # max 4
 
-        # Factor 3: Template match — does this pathway match a known signal template?
+        # Template is layout order only. Not a production score prior.
+        # docs/graph_aware_pathway_expansion_contract_v1.md §9
         template_key = _match_pathway_to_template(pw_name)
-        template_score = 1.0 if template_key else 0.0
-        # Bonus: how many of the pathway's genes appear in the template?
-        if template_key and template_key in PATHWAY_SIGNAL_ORDER:
-            template_genes = set(g.upper() for g in PATHWAY_SIGNAL_ORDER[template_key])
-            overlap = len(genes & template_genes)
-            template_score += min(overlap / max(len(template_genes), 1), 1.0)
 
-        # Factor 4: Protein count (log-scaled to avoid domination by huge pathways)
         count_score = math.log2(max(len(genes), 1))
 
-        # Factor 5: Network connectivity — edges between genes in this pathway
         intra_edges = 0
         gene_list = list(genes)
         for i, g1 in enumerate(gene_list):
@@ -491,13 +485,11 @@ def generate_signaling_cascade_diagram(
                     intra_edges += 1
         connectivity_score = math.log2(max(intra_edges, 1))
 
-        # Composite score with weights
         composite = (
             0.35 * fc_score +
-            0.20 * (diversity_score / 4.0) * fc_score +  # Scale diversity relative to FC
-            0.20 * template_score * fc_score +            # Scale template match relative to FC
-            0.10 * count_score * (fc_score / max(len(genes), 1)) +  # Avg FC * log(count)
-            0.15 * connectivity_score * (fc_score / max(len(genes), 1))  # Avg FC * log(edges)
+            0.20 * (diversity_score / 4.0) * fc_score +
+            0.10 * count_score * (fc_score / max(len(genes), 1)) +
+            0.15 * connectivity_score * (fc_score / max(len(genes), 1))
         )
 
         pathway_scores.append((pw_name, composite, genes, {

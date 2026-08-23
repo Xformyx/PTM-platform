@@ -1382,7 +1382,30 @@ type TopNVectorPlotRow = {
   ptm_relative_log2fc: number;
   ptm_absolute_log2fc: number;
   control_pseudocount_used?: boolean;
+  conventional_log2fc_na?: boolean;
+  denovo_confidence?: string;
+  detection_control?: string;
+  detection_treatment?: string;
+  detection_pattern?: string;
+  lod_relative_log2?: number | null;
+  normalized_log2_intensity?: number | null;
+  peak_condition?: string;
+  onset_condition?: string;
+  reliable_onset_condition?: string;
+  ranking_score?: number | null;
+  detection_n?: number | null;
+  detection_expected?: number | null;
+  shared_peptide?: boolean;
   q_value?: number | null;
+};
+
+type VectorPlotPoint = {
+  condition: string;
+  value: number;
+  axis?: "log2fc" | "lod_relative" | "log2_intensity";
+  detection?: string;
+  detectionN?: number | null;
+  lodRelative?: number | null;
 };
 
 // ── MultiSiteDivergencePanel ────────────────────────────────────────────────
@@ -1505,7 +1528,7 @@ function canonicalDivergenceToEntry(pair: any): SitePairEntry | null {
 
 function computeMultiSiteDivergence(
   uniquePtms: Array<{ gene: string; position: string; label: string }>,
-  vectorByPtm: Map<string, Array<{ condition: string; value: number }>>,
+  vectorByPtm: Map<string, VectorPlotPoint[]>,
   conditions: string[],
   ptmActivityClass: Map<string, "de_novo" | "regulated" | "minor">,
   ptmPseudocountUsed: Map<string, boolean>,
@@ -1754,7 +1777,7 @@ function MultiSiteDivergencePanel({
   onHighlightPtms,
 }: {
   uniquePtms: Array<{ gene: string; position: string; label: string }>;
-  vectorByPtm: Map<string, Array<{ condition: string; value: number }>>;
+  vectorByPtm: Map<string, VectorPlotPoint[]>;
   conditions: string[];
   ptmActivityClass: Map<string, "de_novo" | "regulated" | "minor">;
   ptmPseudocountUsed: Map<string, boolean>;
@@ -2202,7 +2225,22 @@ function MultiSiteDivergencePanel({
 // ── TopNTimeSeriesPlot ───────────────────────────────────────────────────────
 function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId: number; ptmType?: string }) {
   const isUbi = ptmType.toLowerCase().includes("ubiquityl") || ptmType.toLowerCase().includes("ubiquitin");
-  const [data, setData] = useState<{ vector_data: TopNVectorPlotRow[]; top_n_ptms: Array<{ gene: string; position: string; label: string; protein_class?: { role: string; confidence: string; tags: string[]; ubi_context?: string } }>; suggested_n?: number | null; top_n_setting?: number; source?: string; inferred_receptors?: Array<{ name: string; receptor_class: string; downstream_ptm_count: number; downstream_ptms: string[]; via_kinases?: string[]; pathway?: string; signaling_pathway?: string; source?: string }>; divergence_pairs?: any[] } | null>(null);
+  type TopNPtmMeta = {
+    gene: string;
+    position: string;
+    label: string;
+    protein_class?: { role: string; confidence: string; tags: string[]; ubi_context?: string };
+    denovo_confidence?: string;
+    detection_control?: string;
+    detection_pattern?: string;
+    lod_relative_log2?: number | null;
+    peak_condition?: string;
+    onset_condition?: string;
+    reliable_onset_condition?: string;
+    conventional_log2fc_na?: boolean;
+    shared_peptide?: boolean;
+  };
+  const [data, setData] = useState<{ vector_data: TopNVectorPlotRow[]; top_n_ptms: TopNPtmMeta[]; suggested_n?: number | null; top_n_setting?: number; source?: string; inferred_receptors?: Array<{ name: string; receptor_class: string; downstream_ptm_count: number; downstream_ptms: string[]; via_kinases?: string[]; pathway?: string; signaling_pathway?: string; source?: string }>; divergence_pairs?: any[] } | null>(null);
   const [loading, setLoading] = useState(true);
   const [checked, setChecked] = useState<Record<string, boolean>>({});
   const [metric, setMetric] = useState<"relative" | "absolute">("relative");
@@ -2230,7 +2268,7 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
   const fetchVectorPlotData = (forceRefresh = false) => {
     const params = forceRefresh ? "?force_refresh=true" : "";
     return api
-      .get<{ vector_data: unknown[]; top_n_ptms: Array<{ gene: string; position: string; label: string; protein_class?: { role: string; confidence: string; tags: string[]; ubi_context?: string } }>; suggested_n?: number | null; top_n_setting?: number; source?: string; inferred_receptors?: Array<{ name: string; receptor_class: string; downstream_ptm_count: number; downstream_ptms: string[]; via_kinases?: string[]; pathway?: string; signaling_pathway?: string; source?: string }> }>(`/orders/${orderId}/vector-plot-data${params}`);
+      .get<{ vector_data: unknown[]; top_n_ptms: TopNPtmMeta[]; suggested_n?: number | null; top_n_setting?: number; source?: string; inferred_receptors?: Array<{ name: string; receptor_class: string; downstream_ptm_count: number; downstream_ptms: string[]; via_kinases?: string[]; pathway?: string; signaling_pathway?: string; source?: string }> }>(`/orders/${orderId}/vector-plot-data${params}`);
   };
 
   const refreshReceptorInference = async () => {
@@ -2306,7 +2344,14 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
   });
 
   const topNSet = new Set(uniquePtms.map((p) => `${p.gene}_${p.position}`));
-  const vectorByPtm = new Map<string, Array<{ condition: string; value: number }>>();
+  const vectorByPtm = new Map<string, Array<{
+    condition: string;
+    value: number;
+    axis: "log2fc" | "lod_relative" | "log2_intensity";
+    detection?: string;
+    detectionN?: number | null;
+    lodRelative?: number | null;
+  }>>();
   // Track which PTMs had control pseudocount imputation (de novo flag from preprocessing)
   const ptmPseudocountUsed = new Map<string, boolean>();
   // v9.25: Track minimum q_value per PTM across conditions
@@ -2316,9 +2361,31 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
     const key = `${row.gene}_${row.position}`;
     if (!topNSet.has(key)) return;
     if (!vectorByPtm.has(key)) vectorByPtm.set(key, []);
-    vectorByPtm.get(key)!.push({ condition: row.condition, value: row[valueKey as keyof typeof row] as number });
+    const isDenovo = Boolean(row.conventional_log2fc_na || row.control_pseudocount_used);
+    let value = row[valueKey as keyof typeof row] as number;
+    let axis: "log2fc" | "lod_relative" | "log2_intensity" = "log2fc";
+    if (isDenovo) {
+      if (activityFilter === "de_novo" && row.normalized_log2_intensity != null) {
+        value = row.normalized_log2_intensity;
+        axis = "log2_intensity";
+      } else if (row.lod_relative_log2 != null) {
+        value = row.lod_relative_log2;
+        axis = "lod_relative";
+      } else {
+        value = 0;
+        axis = "lod_relative";
+      }
+    }
+    vectorByPtm.get(key)!.push({
+      condition: row.condition,
+      value,
+      axis,
+      detection: row.detection_treatment || undefined,
+      detectionN: row.detection_n,
+      lodRelative: row.lod_relative_log2,
+    });
     // If any condition row for this PTM has control_pseudocount_used=true, mark it
-    if (row.control_pseudocount_used) ptmPseudocountUsed.set(key, true);
+    if (row.control_pseudocount_used || row.conventional_log2fc_na) ptmPseudocountUsed.set(key, true);
     // Track minimum q_value across conditions for this PTM
     if (row.q_value != null && !isNaN(row.q_value)) {
       const prev = ptmMinQValue.get(key);
@@ -2710,6 +2777,14 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
                 fontSize={12}
                 domain={[yDomainMin, yDomainMax]}
                 tickCount={Math.max(8, Math.round((yDomainMax - yDomainMin) / 2))}
+                label={{
+                  value: activityFilter === "de_novo"
+                    ? "Normalized log2 intensity (de novo)"
+                    : "Log2FC (quantified) / LOD-relative ≥ (de novo)",
+                  angle: -90,
+                  position: "insideLeft",
+                  style: { fontSize: 10, fill: "hsl(var(--muted-foreground))" },
+                }}
               />
               <Tooltip
                 content={({ active, payload, label }) => {
@@ -2730,9 +2805,39 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
                       boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
                     }}>
                       <p style={{ margin: 0, fontWeight: 600, marginBottom: 4 }}>Time: {label}</p>
-                      <p style={{ margin: 0, color: typeof ptmColor === "string" ? ptmColor : undefined }}>
-                        {target.name}: {typeof target.value === "number" ? target.value.toFixed(3) : target.value}
-                      </p>
+                      {(() => {
+                        const meta = uniquePtms.find((p) => p.label === target.name);
+                        const key = meta ? `${meta.gene}_${meta.position}` : "";
+                        const row = key ? vectorByPtm.get(key)?.find((r) => r.condition === label) : undefined;
+                        const isDenovo = key ? ptmActivityClass.get(key) === "de_novo" : false;
+                        const conf = (meta as { denovo_confidence?: string } | undefined)?.denovo_confidence
+                          || (isDenovo ? "moderate" : "");
+                        if (isDenovo) {
+                          const lod = row?.lodRelative;
+                          return (
+                            <>
+                              <p style={{ margin: 0, color: typeof ptmColor === "string" ? ptmColor : undefined }}>
+                                {target.name}
+                              </p>
+                              <p style={{ margin: "4px 0 0", fontSize: 12 }}>
+                                Class: De novo{conf ? ` — ${conf}` : ""}
+                              </p>
+                              <p style={{ margin: 0, fontSize: 12 }}>
+                                Detection: {row?.detection || meta && (meta as { detection_pattern?: string }).detection_pattern || "n/a"}
+                              </p>
+                              <p style={{ margin: 0, fontSize: 12 }}>
+                                LOD-relative: {lod != null ? `≥${lod.toFixed(1)} log2` : "unavailable"}
+                              </p>
+                              <p style={{ margin: 0, fontSize: 12 }}>Conventional Log2FC: NA</p>
+                            </>
+                          );
+                        }
+                        return (
+                          <p style={{ margin: 0, color: typeof ptmColor === "string" ? ptmColor : undefined }}>
+                            {target.name}: {typeof target.value === "number" ? target.value.toFixed(3) : target.value}
+                          </p>
+                        );
+                      })()}
                     </div>
                   );
                 }}
@@ -2770,7 +2875,21 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
                         stroke={lineColor}
                         strokeWidth={baseWidth}
                         strokeDasharray={style.strokeDasharray}
-                        dot={{ r: dotR, fill: lineColor }}
+                        dot={(dotProps: { cx?: number; cy?: number; payload?: Record<string, unknown> }) => {
+                          const key = `${filteredPtms.find((p) => p.label === label)?.gene}_${filteredPtms.find((p) => p.label === label)?.position}`;
+                          const detN = vectorByPtm.get(key)?.find((r) => r.condition === dotProps.payload?.condition)?.detectionN;
+                          const r = detN != null ? 2 + Number(detN) : dotR;
+                          return (
+                            <circle
+                              cx={dotProps.cx}
+                              cy={dotProps.cy}
+                              r={r}
+                              fill={lineColor}
+                              stroke={ac === "de_novo" ? "#7c2d12" : lineColor}
+                              strokeWidth={ac === "de_novo" ? 1.5 : 1}
+                            />
+                          );
+                        }}
                         activeDot={{
                           r: 7,
                           fill: lineColor,
@@ -2787,6 +2906,39 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
               )}
             </LineChart>
           </ResponsiveContainer>
+          {hoveredPtm && (() => {
+            const meta = uniquePtms.find((p) => p.label === hoveredPtm) as TopNPtmMeta | undefined;
+            const key = meta ? `${meta.gene}_${meta.position}` : "";
+            if (!meta || ptmActivityClass.get(key) !== "de_novo") return null;
+            const pattern = meta.detection_pattern || vectorByPtm.get(key)?.map((r) => r.detection).filter(Boolean).join(" → ");
+            if (!pattern) return null;
+            return (
+              <div className="mt-1 flex items-center gap-2 text-[10px] text-muted-foreground">
+                <span className="font-medium text-orange-700 dark:text-orange-300">Detection</span>
+                <span>Control {meta.detection_control || "0/n"}</span>
+                <span className="flex gap-0.5 flex-wrap">
+                  {pattern.split(" → ").map((cell, i) => {
+                    const [d, e] = cell.split("/").map(Number);
+                    const ratio = e > 0 ? d / e : 0;
+                    return (
+                      <span
+                        key={`${cell}-${i}`}
+                        className="px-1 rounded border"
+                        style={{
+                          backgroundColor: ratio >= 1 ? "#c2410c" : ratio >= 0.66 ? "#fb923c" : ratio > 0 ? "#fed7aa" : "transparent",
+                          color: ratio >= 0.66 ? "white" : undefined,
+                        }}
+                        title={cell}
+                      >
+                        {cell}
+                      </span>
+                    );
+                  })}
+                </span>
+                <span>Log2FC=NA</span>
+              </div>
+            );
+          })()}
         </div>
 
         {/* Right sidebar — PTM checklist with Select All / Deselect All */}
@@ -2877,7 +3029,29 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
                     title={dotTitle}
                   />
                   {/* v9.23: activity class indicator */}
-                  {actCls === "de_novo" && <span className="text-[8px] flex-shrink-0" style={{ color: "#E65100" }} title="De novo (not detected in control, imputed)">★</span>}
+                  {actCls === "de_novo" && (
+                    <span
+                      className="text-[8px] flex-shrink-0"
+                      style={{ color: "#E65100" }}
+                      title={
+                        (p as TopNPtmMeta).detection_pattern
+                          ? `De novo ${(p as TopNPtmMeta).denovo_confidence || ""} · Control ${(p as TopNPtmMeta).detection_control || "0/n"} · ${(p as TopNPtmMeta).detection_pattern} · Log2FC=NA`
+                          : "De novo (control below LOD). Conventional Log2FC=NA"
+                      }
+                    >
+                      ★
+                    </span>
+                  )}
+                  {actCls === "de_novo" && (p as TopNPtmMeta).denovo_confidence && (
+                    <span className="text-[8px] px-1 rounded border border-orange-700/40 text-orange-700 dark:text-orange-300 flex-shrink-0">
+                      {(p as TopNPtmMeta).denovo_confidence}
+                    </span>
+                  )}
+                  {actCls === "de_novo" && (p as TopNPtmMeta).detection_pattern && (
+                    <span className="text-[8px] text-muted-foreground truncate max-w-[88px]" title={(p as TopNPtmMeta).detection_pattern}>
+                      {(p as TopNPtmMeta).detection_pattern}
+                    </span>
+                  )}
                   {actCls === "regulated" && <span className="text-[8px] flex-shrink-0" style={{ color: "#1565C0" }} title="Regulated (q<0.05, |Log2FC|≥1.0)">●</span>}
                   {/* P1 pattern indicator — visible only when server provides canonical label */}
                   {p1Pat && (
@@ -4896,7 +5070,7 @@ export default function OrderDetail() {
                       regulated: "Regulated only",
                       minor: "Minor only",
                       all: "All PTMs",
-                      top_n: `Top ${(order.report_options as any)?.top_n_ptms ?? 50} by |FC|`,
+                      top_n: `Top ${(order.report_options as any)?.top_n_ptms ?? 50} by ranking score`,
                     };
                     return labels[mode] ?? (mode ? mode : "De novo + Regulated");
                   })()}

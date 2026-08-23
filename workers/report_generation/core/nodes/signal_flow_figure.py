@@ -998,15 +998,28 @@ def generate_context_aware_ptm_heatmap(
         fc = row.get("ptm_relative_log2fc") or row.get("log2fc") or row.get("Log2FC")
         if not gene or not condition:
             continue
+        is_denovo = bool(
+            row.get("conventional_log2fc_na")
+            or row.get("control_pseudocount_used")
+            or row.get("Control_Pseudocount_Used")
+        )
+        lod_rel = row.get("lod_relative_log2") or row.get("LOD_Relative_Log2")
         try:
             fc_val = float(fc) if fc is not None else 0.0
         except (ValueError, TypeError):
             fc_val = 0.0
+        try:
+            lod_val = float(lod_rel) if lod_rel not in (None, "", "nan") else None
+        except (TypeError, ValueError):
+            lod_val = None
+        plot_val = lod_val if is_denovo and lod_val is not None else (0.0 if is_denovo else fc_val)
 
         key = (gene.upper(), position)
         if key not in site_data:
             site_data[key] = {}
-        site_data[key][condition] = fc_val
+        site_data[key][condition] = plot_val
+        if is_denovo:
+            site_data[key]["_denovo"] = True
         all_genes.add(gene.upper())
 
     if not site_data:
@@ -1030,15 +1043,19 @@ def generate_context_aware_ptm_heatmap(
     for (gene, pos), fc_dict in site_data.items():
         if gene in mentioned_genes:
             # Check if any condition has non-zero FC
-            if any(abs(v) > 0.01 for v in fc_dict.values()):
+            if any(abs(v) > 0.01 for k, v in fc_dict.items() if k != "_denovo" and isinstance(v, (int, float))):
                 matched_sites.append((gene, pos, fc_dict))
 
     if not matched_sites:
         logger.info(f"[CTX-HEATMAP] No PTM sites matched from {len(mentioned_genes)} mentioned genes — skipping")
         return None
 
-    # Sort by max absolute FC (most significant first)
-    matched_sites.sort(key=lambda x: max(abs(v) for v in x[2].values()), reverse=True)
+    # Sort by max absolute display value. De novo already uses LOD-relative, not pseudo-FC.
+    def _site_sort_value(item):
+        values = [v for k, v in item[2].items() if k != "_denovo" and isinstance(v, (int, float))]
+        return max((abs(v) for v in values), default=0.0)
+
+    matched_sites.sort(key=_site_sort_value, reverse=True)
     matched_sites = matched_sites[:max_sites]
 
     logger.info(f"[CTX-HEATMAP] Matched {len(matched_sites)} PTM sites from {len(mentioned_genes)} mentioned genes")
@@ -1049,11 +1066,16 @@ def generate_context_aware_ptm_heatmap(
     matrix = np.zeros((n_sites, n_conds))
     site_labels = []
 
+    denovo_rows = []
     for i, (gene, pos, fc_dict) in enumerate(matched_sites):
+        is_denovo = bool(fc_dict.get("_denovo"))
         label = f"{gene} {pos}" if pos else gene
+        if is_denovo:
+            label = f"★ {label}"
         site_labels.append(label)
+        denovo_rows.append(is_denovo)
         for j, c in enumerate(conditions):
-            matrix[i, j] = fc_dict.get(c, 0.0)
+            matrix[i, j] = float(fc_dict.get(c, 0.0) or 0.0)
 
     # ── Step 3: Simple hierarchical clustering of rows ──
     try:
@@ -1080,15 +1102,27 @@ def generate_context_aware_ptm_heatmap(
     colors_div = ["#1e3a5f", "#3b82f6", "#93c5fd", "#ffffff", "#fca5a5", "#ef4444", "#7f1d1d"]
     cmap_div = LinearSegmentedColormap.from_list("ptm_fc", colors_div)
 
-    max_abs = max(abs(matrix.min()), abs(matrix.max()), 0.5)
+    quantified = matrix.copy()
+    for i, is_denovo in enumerate(denovo_rows):
+        if is_denovo:
+            quantified[i, :] = np.nan
+    finite = quantified[np.isfinite(quantified)]
+    max_abs = max(abs(float(finite.min())) if finite.size else 0.5,
+                  abs(float(finite.max())) if finite.size else 0.5,
+                  0.5)
     norm = TwoSlopeNorm(vmin=-max_abs, vcenter=0, vmax=max_abs)
 
     im = ax.imshow(matrix, cmap=cmap_div, norm=norm, aspect="auto", interpolation="nearest")
 
-    # Cell annotations
+    # Cell annotations. De novo uses ≥ LOD-relative, not conventional Log2FC.
     for i in range(n_sites):
         for j in range(n_conds):
             val = matrix[i, j]
+            if denovo_rows[i]:
+                if abs(val) >= 0.3:
+                    ax.text(j, i, f"≥{val:.1f}", ha="center", va="center",
+                            fontsize=6, color="#7c2d12", fontweight="bold")
+                continue
             if abs(val) >= 0.3:
                 text_color = "white" if abs(val) > max_abs * 0.55 else "#333333"
                 ax.text(j, i, f"{val:+.1f}", ha="center", va="center",
@@ -1108,7 +1142,8 @@ def generate_context_aware_ptm_heatmap(
 
     mod_label = "Ubiquitylation" if ptm_type.lower().strip() in ("ubiquitylation", "ubiquitination") else "Phosphorylation"
     ax.set_title(
-        f"Key {mod_label} Sites Discussed in This Report (Log₂FC)",
+        f"Key {mod_label} Sites Discussed in This Report "
+        f"(Log₂FC; ★ de novo = LOD-relative ≥)",
         fontsize=11, fontweight="bold", color="#1f2937", pad=12,
     )
     ax.set_xlabel("Condition / Timepoint", fontsize=9, color="#4b5563")
@@ -1123,7 +1158,8 @@ def generate_context_aware_ptm_heatmap(
     fig.text(
         0.5, 0.005,
         f"Heatmap of {n_sites} PTM sites referenced in the report text. "
-        f"Red = up-regulated; Blue = down-regulated. Rows clustered by temporal similarity.",
+        f"Red/blue = quantified Log₂FC. ★ de novo cells are LOD-relative lower bounds, not fold-change. "
+        f"Colormap scale excludes de novo.",
         fontsize=7, color="#6b7280", ha="center", va="bottom", style="italic",
     )
 

@@ -2143,6 +2143,11 @@ async def get_vector_plot_data(
                         except (ValueError, TypeError):
                             return None
 
+                    def _optional_text(column: str):
+                        raw = row.get(column, "")
+                        return str(raw).strip() if raw and str(raw).strip().lower() not in ("", "nan", "none") else ""
+
+                    conventional_na = str(row.get("Conventional_Log2FC_NA", "")).strip().lower() in ("true", "1", "yes") or pc_used
                     vector_data.append({
                         "gene": gene,
                         "position": str(pos),
@@ -2151,6 +2156,21 @@ async def get_vector_plot_data(
                         "ptm_relative_log2fc": rel_fc,
                         "ptm_absolute_log2fc": abs_fc,
                         "control_pseudocount_used": pc_used,
+                        "conventional_log2fc_na": conventional_na,
+                        "denovo_confidence": _optional_text("DeNovo_Confidence"),
+                        "detection_control": _optional_text("Detection_Control"),
+                        "detection_treatment": _optional_text("Detection_Treatment"),
+                        "detection_pattern": _optional_text("Detection_Pattern"),
+                        "lod_relative_log2": _optional_vector_float("LOD_Relative_Log2"),
+                        "lod_intensity": _optional_vector_float("LOD_Intensity"),
+                        "normalized_log2_intensity": _optional_vector_float("Normalized_Log2_Intensity"),
+                        "peak_condition": _optional_text("Peak_Condition"),
+                        "onset_condition": _optional_text("Onset_Condition"),
+                        "reliable_onset_condition": _optional_text("Reliable_Onset_Condition"),
+                        "ranking_score": _optional_vector_float("Ranking_Score"),
+                        "detection_n": _optional_vector_float("Detection_N"),
+                        "detection_expected": _optional_vector_float("Detection_Expected"),
+                        "shared_peptide": str(row.get("Shared_Peptide", "")).strip().lower() in ("true", "1", "yes"),
                         "p_value": p_val,
                         "q_value": q_val,
                         "quantification_track": row.get("Quantification_Track", "protein_normalized_relative_ptm"),
@@ -2197,6 +2217,20 @@ async def get_vector_plot_data(
                     "label": f"{gene} {pos}".strip() or f"{gene}{pos}",
                     "protein_class": protein_class,
                     "p1_pattern": p1_pattern,
+                    "denovo_confidence": ptm.get("denovo_confidence") or ptm.get("DeNovo_Confidence") or "",
+                    "detection_control": ptm.get("detection_control") or ptm.get("Detection_Control") or "",
+                    "detection_pattern": ptm.get("detection_pattern") or ptm.get("Detection_Pattern") or "",
+                    "lod_relative_log2": ptm.get("lod_relative_log2") or ptm.get("LOD_Relative_Log2"),
+                    "peak_condition": ptm.get("peak_condition") or ptm.get("Peak_Condition") or "",
+                    "onset_condition": ptm.get("onset_condition") or ptm.get("Onset_Condition") or "",
+                    "reliable_onset_condition": ptm.get("reliable_onset_condition") or ptm.get("Reliable_Onset_Condition") or "",
+                    "conventional_log2fc_na": bool(
+                        ptm.get("conventional_log2fc_na")
+                        or ptm.get("Conventional_Log2FC_NA")
+                        or ptm.get("control_pseudocount_used")
+                        or ptm.get("Control_Pseudocount_Used")
+                    ),
+                    "shared_peptide": bool(ptm.get("shared_peptide") or ptm.get("Shared_Peptide")),
                 })
     elif vector_data:
         # Fallback: derive Top N from TSV (available right after preprocessing)
@@ -2206,7 +2240,11 @@ async def get_vector_plot_data(
         for cond in conditions:
             cond_rows = sorted(
                 [r for r in vector_data if r["condition"] == cond],
-                key=lambda r: abs(r["ptm_relative_log2fc"]),
+                key=lambda r: (
+                    r.get("ranking_score")
+                    if r.get("ranking_score") is not None
+                    else (0.0 if r.get("conventional_log2fc_na") else abs(r["ptm_relative_log2fc"]))
+                ),
                 reverse=True,
             )
             for r in cond_rows[:top_n_setting]:

@@ -165,6 +165,20 @@ def _parse_enriched_ptms(enriched_data: list) -> list:
             "control_pseudocount_used": control_pseudocount_used,
             "q_value": q_value_float,
             "activity_class": activity_class,
+            "denovo_confidence": ptm.get("denovo_confidence") or ptm.get("DeNovo_Confidence") or "",
+            "detection_control": ptm.get("detection_control") or ptm.get("Detection_Control") or "",
+            "detection_pattern": ptm.get("detection_pattern") or ptm.get("Detection_Pattern") or "",
+            "lod_relative_log2": _safe_float(ptm.get("lod_relative_log2") or ptm.get("LOD_Relative_Log2")),
+            "conventional_log2fc_na": bool(
+                ptm.get("conventional_log2fc_na")
+                or ptm.get("Conventional_Log2FC_NA")
+                or control_pseudocount_used
+            ),
+            "peak_condition": ptm.get("peak_condition") or ptm.get("Peak_Condition") or "",
+            "onset_condition": ptm.get("onset_condition") or ptm.get("Onset_Condition") or "",
+            "reliable_onset_condition": ptm.get("reliable_onset_condition") or ptm.get("Reliable_Onset_Condition") or "",
+            "ranking_score": _safe_float(ptm.get("ranking_score") or ptm.get("Ranking_Score")),
+            "shared_peptide": bool(ptm.get("shared_peptide") or ptm.get("Shared_Peptide")),
         })
     return parsed
 

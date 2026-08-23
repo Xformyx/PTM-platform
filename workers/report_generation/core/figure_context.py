@@ -529,28 +529,26 @@ class FigureInformationGenerator:
         # Provide the exact pathway names shown in Figure 1 so LLM can maintain
         # consistency between text and figure.
         if self.fig1_pathway_names:
-            lines.append("**FIGURE 1 PATHWAY LIST (KEGG Analysis Results):**")
+            lines.append("**FIGURE 1 PATHWAY LIST (Direct NES):**")
             lines.append(
-                "The following pathways are shown in Figure 1 (Canonical Pathway Distribution), "
-                "ranked by cumulative |Log2FC| score:"
+                "The following pathways are shown in Figure 1 "
+                "(Time-resolved Direct PTM Pathway Enrichment), "
+                "ranked by signed Direct NES. Protein and network support are annotations, "
+                "not rank:"
             )
             for i, pw_name in enumerate(self.fig1_pathway_names, 1):
                 lines.append(f"  {i}. {pw_name}")
             lines.append("")
             lines.append(
                 "**PATHWAY CONSISTENCY RULE (CRITICAL):**\n"
-                "- When discussing signaling pathways in the text, you MUST primarily reference "
-                "the pathways listed above (from Figure 1 KEGG analysis).\n"
-                "- If you mention a pathway that IS in Figure 1, reference it naturally: "
-                "'As shown in Figure 1, the [pathway name] was among the most enriched...'\n"
-                "- If you mention a pathway that is NOT in Figure 1 but is supported by "
-                "ChromaDB literature or PubMed references, you MUST explicitly qualify it: "
-                "'Although not among the top KEGG-enriched pathways in Figure 1, published "
-                "literature suggests that [pathway name] may also be involved...'\n"
-                "- Do NOT describe a pathway as 'enriched' or 'identified in our analysis' "
-                "if it does not appear in Figure 1.\n"
-                "- Prioritize discussing pathways that ARE in Figure 1 before mentioning "
-                "literature-derived pathways."
+                "- When discussing signaling pathways in the text, primarily reference "
+                "the pathways listed above (Figure 1 Direct NES).\n"
+                "- If you mention a pathway that IS in Figure 1, cite it as Direct NES "
+                "enrichment, not as pathway activation unless the term is 'activated'.\n"
+                "- If you mention a pathway that is NOT in Figure 1, say it is from literature.\n"
+                "- Do NOT describe a pathway as 'enriched in our analysis' if it is not "
+                "in Figure 1. STRING support is not discovery.\n"
+                "- Do not privilege PI3K-Akt or MAPK because they are canonical."
             )
             lines.append("")
 

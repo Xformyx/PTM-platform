@@ -1733,3 +1733,72 @@
 - **해석 한계:** 이 수정은 존재하는 궤적 파일을 찾지 못하던 것을 고친다.
   패턴 분류·atlas 적격 판정을 바꾸지 않는다.
 - **결정성:** 해당 없음
+
+### [2026-08-23] De novo 표시를 LOD-relative + 검출 반복으로 교체
+
+- **분류:** 설계 + 구현
+- **대상:** `docs/de_novo_representation_contract_v1.md` (신규),
+  `ptm_shared/de_novo_representation.py`,
+  `workers/preprocessing/core/ptm_quantification.py`,
+  `workers/rag_enrichment/tasks.py`,
+  `workers/rag_enrichment/core/ptm_merger.py`,
+  `workers/report_generation/core/nodes/writer_node.py`,
+  `workers/report_generation/core/dynamic_prompt_generator.py`,
+  `workers/report_generation/core/nodes/signal_flow_figure.py`,
+  `workers/report_generation/core/nodes/context_loader.py`,
+  `api-server/app/api/orders.py`,
+  `frontend/src/pages/OrderDetail.tsx`,
+  `frontend/src/pages/OrderCreate.tsx`
+- **구현 대상 설계:** `docs/de_novo_representation_contract_v1.md` §3–§10
+- **사전등록 상태:** 결과 열람 후 (탐색적, primary 금지). 기존 오더의
+  pseudo-Log2FC 산출을 본 뒤에 표시·순위 규칙을 고정했다.
+- **내용:** Control 결측을 0이 아니라 검출한계 미만으로 두고, de novo의
+  Conventional Log2FC를 NA로 표시한다. LOD는 control run 검출 intensity의
+  5th percentile median. 양적 표현은 검출 반복 수, 처리군 normalized
+  abundance, LOD-relative lower-bound(`≥`)다. Dynamics v1 자체는 유지하고,
+  PTM priority에서 |pseudo-Log2FC|를 제거했다. `top_n`은 contract
+  `ranking_score`로 N개를 고르고, `de_novo_regulated`는 High/Moderate만
+  기본 서술 우주에 넣는다. Kinase heatmap de novo 가중 1.5와 raw FC는
+  폐기했다.
+- **논문에서의 용도:** methods (de novo 결측·LOD·표시), limitation
+  (정확한 FC를 주장하지 않음)
+- **해석 한계:** LOD-relative는 정확한 fold change가 아니다. 재현성 등급과
+  ranking_score는 서술 우주 선택용이며 kinase 귀속 또는 생물학적 중요도가
+  아니다. 기존 오더는 전처리 재실행 전에는 site-level TSV fallback 또는
+  고정 1.5×w(confidence)를 쓴다.
+- **결정성:** dtype float64, NumPy percentile default, log2=np.log2, seed 없음.
+  상수 `LOD_PERCENTILE=5.0`, `LOD_INDUCTION_RANK_CAP=4.0` 은 계약 §3·§8.
+
+### [2026-08-23] Figure 1을 Direct NES + 독립 Protein/Network 열로 교체
+
+- **분류:** 설계 + 구현
+- **대상:** `docs/graph_aware_pathway_expansion_contract_v1.md` (신규),
+  `ptm_shared/pathway_expansion.py`,
+  `workers/report_generation/core/nodes/pathway_figure.py`,
+  `workers/report_generation/core/nodes/network_node.py`,
+  `workers/report_generation/core/nodes/signaling_cascade.py`,
+  `workers/report_generation/core/nodes/writer_node.py`,
+  `workers/report_generation/core/figure_context.py`
+- **구현 대상 설계:** `docs/graph_aware_pathway_expansion_contract_v1.md` §2–§10
+- **사전등록 상태:** 결과 열람 후 (탐색적, primary 금지). Insulin Dynamic V1
+  Figure 1의 `Σ|Log2FC|` 편향을 본 뒤에 규칙을 고정했다.
+- **내용:** Pathway 1차 순위를 직접 소속 정량 단백질의 시점별 weighted NES +
+  BH-FDR로 바꾼다. Protein support와 STRING/BioGRID 1-hop은 같은 축에 합치지
+  않는 보조 열이다. De novo(control 미검출)는 Direct universe에서 제외하고
+  개수만 남긴다(방법 A). 단백질당 site는 `|E|` 최대 하나. 기능 부호 표는
+  용어(activated/inhibited/modulated/network-associated)에만 쓴다.
+  `PATHWAY_SIGNAL_ORDER` / template overlap은 cascade 화살표 배치에만 남기고
+  점수에서 제거했다. Writer는 Σ|Log2FC| 순위와 “PI3K-Akt MUST be discussed”
+  지시를 쓰지 않는다. 합성 `0.75 NES + 0.15 coherence + 0.10 network`는
+  계산하지 않는다.
+- **논문에서의 용도:** methods (Direct NES, 방법 A, protein cap), limitation
+  (탐색적 가중, NES≠activation)
+- **해석 한계:** Direct NES는 소속 정량 단백질의 enrichment다. pathway
+  activation, kinase 활성, 인과가 아니다. STRING support로 pathway를
+  발견했다고 쓰지 않는다. Insulin/MAPK canonical hit로 개선을 주장하지 않는다.
+- **결정성:** dtype float64, `N_PERM=500`, seed `PERM_SEED + 1000*t + p`
+  (`PERM_SEED=20260823`), BH 단조성 보정. 상수 `L_SHARED=0.50`,
+  `L_UNVERIFIED=0.30`, `S_SIG=1.0`, `S_MISSING=0.70`, `S_NS=0.50`,
+  `GSEA_WEIGHT_P=1`, `MIN_DIRECT_GENES=2`, `MIN_UNIVERSE=15`,
+  `STRING_CONF_MIN=0.70`, `NETWORK_ALPHA=0.15`,
+  `DIRECTION_CONSISTENCY_MIN=0.75` 는 계약 §3–§8.

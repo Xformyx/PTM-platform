@@ -177,6 +177,8 @@ def classify_ptm_patterns(ptms: List[dict], threshold: float = 0.5) -> Dict[str,
     patterns = {"1A": [], "1B": [], "2A": [], "2B": [], "3A": [], "3B": []}
 
     for ptm in ptms:
+        if ptm.get("conventional_log2fc_na") or ptm.get("control_pseudocount_used") or ptm.get("activity_class") == "de_novo":
+            continue
         ptm_fc = float(ptm.get("ptm_relative_log2fc", 0))
         prot_fc = float(ptm.get("protein_log2fc", 0))
 
@@ -300,7 +302,7 @@ class DynamicPromptGenerator:
             key=lambda x: float(x.get("ptm_relative_log2fc", 0)),
         )[:n]
 
-        lines = ["**Top Activated PTMs (Pattern 1A):**"]
+        lines = ["**Top Activated PTMs (Pattern 1A, quantified only):**"]
         for ptm in top_activated[:10]:
             fc = float(ptm.get("ptm_relative_log2fc", 0))
             fold = 2 ** fc
@@ -815,23 +817,49 @@ def build_ptm_data_summary(parsed_ptms: List[dict], ptm_type: str = "phosphoryla
         return ""
 
     total = len(parsed_ptms)
-    up = sum(1 for p in parsed_ptms if float(p.get("ptm_relative_log2fc", 0)) > 0)
-    down = total - up
 
-    # Top 5 by absolute FC
-    sorted_ptms = sorted(parsed_ptms, key=lambda x: abs(float(x.get("ptm_relative_log2fc", 0))), reverse=True)
+    def _is_denovo(p):
+        return bool(
+            p.get("conventional_log2fc_na")
+            or p.get("control_pseudocount_used")
+            or p.get("activity_class") == "de_novo"
+        )
+
+    quantified = [p for p in parsed_ptms if not _is_denovo(p)]
+    up = sum(1 for p in quantified if float(p.get("ptm_relative_log2fc", 0) or 0) > 0)
+    down = sum(1 for p in quantified if float(p.get("ptm_relative_log2fc", 0) or 0) < 0)
+    denovo_n = total - len(quantified)
+
+    from ptm_shared.de_novo_representation import format_denovo_prompt_line
+
+    def _rank(p):
+        score = p.get("ranking_score")
+        if score not in (None, ""):
+            try:
+                return abs(float(score))
+            except (TypeError, ValueError):
+                pass
+        if p.get("conventional_log2fc_na") or p.get("control_pseudocount_used") or p.get("activity_class") == "de_novo":
+            return 0.0
+        return abs(float(p.get("ptm_relative_log2fc", 0) or 0))
+
+    sorted_ptms = sorted(parsed_ptms, key=_rank, reverse=True)
 
     lines = [
         "## PTM DATA SUMMARY",
         f"- **Total {ptm_type} sites**: {total}",
-        f"- **Upregulated**: {up} ({up/total*100:.1f}%)" if total > 0 else "",
-        f"- **Downregulated**: {down} ({down/total*100:.1f}%)" if total > 0 else "",
+        f"- **Upregulated (quantified)**: {up} ({up/total*100:.1f}%)" if total > 0 else "",
+        f"- **Downregulated (quantified)**: {down} ({down/total*100:.1f}%)" if total > 0 else "",
+        f"- **De novo (Log2FC=NA)**: {denovo_n}",
         "",
-        "**Top 5 Most Changed PTMs:**",
+        "**Top 5 ranked PTMs (de novo uses LOD-relative rank, not pseudo-Log2FC):**",
     ]
     for i, p in enumerate(sorted_ptms[:5], 1):
         gene = p.get("gene", "?")
         pos = p.get("position", "?")
+        if p.get("conventional_log2fc_na") or p.get("control_pseudocount_used") or p.get("activity_class") == "de_novo":
+            lines.append(f"  {i}. {format_denovo_prompt_line(p).strip()}")
+            continue
         ptm_fc = float(p.get("ptm_relative_log2fc", 0))
         prot_fc = float(p.get("protein_log2fc", 0))
         direction = "UP" if ptm_fc > 0 else "DOWN"
