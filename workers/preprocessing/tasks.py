@@ -235,6 +235,30 @@ def run_preprocessing(self, order_id: int, config: dict):
             if not os.path.exists(path):
                 raise FileNotFoundError(f"{label} not found: {path}")
 
+        from preprocessing.core.quick_analysis import (
+            is_quick_analysis,
+            subset_diann_matrices_for_quick_analysis,
+        )
+
+        if is_quick_analysis(config.get("analysis_options")):
+            publish_progress(
+                order_id, "preprocessing", "ptm_quantification", "started", 1,
+                "Quick Analysis: subsetting PR/PG (same formulas, smaller input)",
+            )
+            _emit_prep_phase(
+                order_id, "ptm_quantification", "running",
+                "Quick Analysis subset (exploratory; not comparable to Full)", 1,
+            )
+            pr_path, pg_path, quick_manifest = subset_diann_matrices_for_quick_analysis(
+                pr_path, pg_path, order_output, ptm_mode,
+                analysis_options=config.get("analysis_options"),
+            )
+            logger.info(
+                f"[Order {order_id}] Quick Analysis PR "
+                f"{quick_manifest['pr_rows_before']:,}→{quick_manifest['pr_rows_after']:,}, "
+                f"PG {quick_manifest['pg_rows_before']:,}→{quick_manifest['pg_rows_after']:,}"
+            )
+
         file_suffix = "_phospho" if ptm_mode == "phospho" else "_ubi"
 
         # ================================================================
@@ -695,6 +719,20 @@ def run_preprocessing(self, order_id: int, config: dict):
                         condition_map=secondary_condition_map,
                         progress_callback=secondary_quant_cb,
                     )
+                    if is_quick_analysis(config.get("analysis_options")):
+                        secondary_pr_path, secondary_pg_path, sec_quick = (
+                            subset_diann_matrices_for_quick_analysis(
+                                secondary_pr_path,
+                                secondary_pg_path,
+                                secondary_output_dir,
+                                secondary_ptm_mode,
+                                analysis_options=config.get("analysis_options"),
+                            )
+                        )
+                        logger.info(
+                            f"[Order {order_id}] Quick Analysis secondary PR "
+                            f"{sec_quick['pr_rows_before']:,}→{sec_quick['pr_rows_after']:,}"
+                        )
                     secondary_success = secondary_analyzer.run_analysis(secondary_pr_path, secondary_pg_path)
                     if not secondary_success:
                         logger.warning(f"[Order {order_id}] Secondary PTM quantification failed — continuing without")

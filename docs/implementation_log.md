@@ -1802,3 +1802,54 @@
   `GSEA_WEIGHT_P=1`, `MIN_DIRECT_GENES=2`, `MIN_UNIVERSE=15`,
   `STRING_CONF_MIN=0.70`, `NETWORK_ALPHA=0.15`,
   `DIRECTION_CONSISTENCY_MIN=0.75` 는 계약 §3–§8.
+
+### [2026-08-23] KSTAR·RoKAI related-work 비교 메모
+
+- **분류:** 설계
+- **대상:** `docs/2026-08-23_kstar_rokai_comparison.pdf`
+- **구현 대상 설계:** 신규 — 외부 논문 위치 확인. 측정값·임계 변경 없음
+- **사전등록 상태:** 해당 없음
+- **내용:** Crowl et al. 2022 (KSTAR)과 Yılmaz et al. 2021 (RoKAI)을
+  production heatmap·TMM·KEA3·Wave·C0–C3와 층별로 대조한 메모를 PDF로 고정.
+  새 점수·임계를 도입하지 않는다.
+- **논문에서의 용도:** related work / limitation (주장 범위 점검)
+- **해석 한계:** 이 문서는 두 알고리즘보다 정확하다는 증거가 아니다.
+  heatmap을 activity로 부르거나 TMM을 IKAP의 시계열 개선으로 쓰지 않는다.
+- **결정성:** 해당 없음 (문헌 대조, 수치 재계산 없음)
+
+### [2026-08-23] Quick Analysis mode (PR/PG 입력 서브셋)
+
+- **분류:** 구현
+- **대상:** `docs/quick_analysis_contract_v1.md`,
+  `workers/preprocessing/core/quick_analysis.py`,
+  `workers/preprocessing/tasks.py`,
+  `frontend/src/pages/OrderCreate.tsx`
+- **구현 대상 설계:** `docs/quick_analysis_contract_v1.md` §4–§7
+- **사전등록 상태:** 결과 열람 후가 아님. 상수 선언 후 구현. 탐색적, primary 금지
+- **내용:** 오더 생성 `analysis_options.quick_analysis=true` 이면 정량 전에
+  대상 PTM precursor를 최대 400개로 줄인다. 시점 열·unmodified pair·대응 PG는
+  유지. `PTMQuantificationAnalyzer` 산식은 그대로다.
+- **논문에서의 용도:** 사용 안 함 (개발 반복용). limitation에 exploratory로만 언급 가능
+- **해석 한계:** sample-median 정규화 인자가 Full과 다르다. Quick Log2FC·Wave·TMM을
+  Full 또는 primary 수치로 쓰지 않는다.
+- **결정성:** `QUICK_MAX_PTM_PRECURSORS=400`, `QUICK_PER_PROTEIN_CAP=4`,
+  `QUICK_MIN_DETECTION_FRAC=0.50`. 정렬 `(-detection_frac, Protein.Group, Precursor.Id)`,
+  mergesort. UniMod phospho=21, ubi=121.
+
+### [2026-08-23] Custom Quick Analysis 입력 규칙 오버라이드
+
+- **분류:** 구현
+- **대상:** `docs/quick_analysis_contract_v1.md` §4.1,
+  `workers/preprocessing/core/quick_analysis.py`,
+  `frontend/src/components/QuickAnalysisOptions.tsx`
+- **구현 대상 설계:** `docs/quick_analysis_contract_v1.md` §4.1 (선언 후 구현)
+- **사전등록 상태:** 결과 열람 전 선언. 탐색적, primary 금지
+- **내용:** Quick On일 때 사용자가 예산·단백질 cap·검출률·unmodified pair·
+  non-PTM PG 추가를 바꿀 수 있다. 기본값은 §4와 같다. 범위 밖은 clamp.
+  non-PTM은 PG 행만 추가하고 그 단백질의 unmodified precursor 전체를 넣지 않는다.
+  시점 열은 오버라이드 금지. 정량 산식은 그대로다.
+- **논문에서의 용도:** 사용 안 함 (개발 반복용)
+- **해석 한계:** Custom 값이 더 좋은 kinase 추정이나 Full 대비 정확도를 만들지 않는다.
+  설정마다 median 정규화 인자가 달라져 Quick끼리도 비교하지 않는다.
+- **결정성:** clamp 범위 max PTM [10, 5000], cap [0, 50], detection [0, 1],
+  non-PTM PG [0, 5000]. 기본 400 / 4 / 0.50 / pairs on / non-PTM off.

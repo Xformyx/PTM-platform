@@ -600,6 +600,14 @@ export default function OrderList() {
                     >
                       <div className={cn("flex items-center gap-1.5", !isExpandLayout && "min-w-0")}>
                         <span className={cn(!isExpandLayout && "truncate")}>{order.project_name}</span>
+                        {(order.quick_analysis || Boolean((order.analysis_options as { quick_analysis?: unknown } | undefined)?.quick_analysis)) && (
+                          <Badge
+                            variant="outline"
+                            className="shrink-0 text-[10px] h-4 px-1.5 border-amber-400 text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30"
+                          >
+                            Quick
+                          </Badge>
+                        )}
                         {order.is_shared && (
                           <Badge
                             variant="outline"

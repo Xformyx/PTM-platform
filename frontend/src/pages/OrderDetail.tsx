@@ -22,7 +22,7 @@ import { AutoResizeTextarea } from "@/components/ui/auto-resize-textarea";
 import { api } from "@/lib/api";
 import { useOrderProgress } from "@/hooks/useSSE";
 import type { Order, OrderLog, ProgressEvent } from "@/lib/types";
-import { resolveTemporalContract, temporalContractLabel } from "@/lib/types";
+import { formatQuickAnalysisSummary, resolveTemporalContract, temporalContractLabel } from "@/lib/types";
 import { AnalysisStatisticsTab } from "@/components/AnalysisStatisticsTab";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -4351,6 +4351,11 @@ export default function OrderDetail() {
           <div>
             <div className="flex items-center gap-3">
               <h1 className="text-2xl font-bold tracking-tight">{order.order_code}</h1>
+              {Boolean((order.analysis_options as { quick_analysis?: unknown } | undefined)?.quick_analysis) && (
+                <Badge variant="outline" className="border-amber-400 text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30">
+                  Quick · Exploratory
+                </Badge>
+              )}
               {(() => {
                 const isHalted = order.stage_detail?.startsWith("Halted:");
                 if (isHalted) {
@@ -5020,6 +5025,14 @@ export default function OrderDetail() {
                 <CardTitle className="text-sm">Analysis Options (Protein Selection)</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
+                <OverviewField
+                  label="Quick Analysis"
+                  value={
+                    formatQuickAnalysisSummary(order.analysis_options) === "Off"
+                      ? "Off"
+                      : `${formatQuickAnalysisSummary(order.analysis_options)} — same formulas, not comparable to Full`
+                  }
+                />
                 <OverviewField
                   label="Mode"
                   value={

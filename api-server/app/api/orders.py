@@ -270,6 +270,7 @@ async def list_orders(
             "run_by": row.run_by_name,
             "is_shared": share_map[oid] is not None,
             "share_access": share_map[oid],
+            "quick_analysis": bool((o.analysis_options or {}).get("quick_analysis")),
         })
 
     return {

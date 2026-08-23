@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Check, Upload, AlertCircle, ArrowLeft, ArrowRight, Loader2,
   FileSpreadsheet, Regex, Trash2, SlidersHorizontal, Brain,
-  Plus, X, MessageSquare, Network,   FlaskConical, BookOpen,
+  Plus, X, MessageSquare, Network,   FlaskConical, BookOpen, Zap,
   ChevronDown, ChevronUp, Settings2, RotateCcw, GitMerge, Copy, GitCompare,
   Database, CheckSquare, Square,
 } from "lucide-react";
@@ -28,8 +28,9 @@ import {
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import type { AnalysisOptions, TemporalContract } from "@/lib/types";
-import { DEFAULT_ANALYSIS_OPTIONS, DEFAULT_TEMPORAL_CONTRACT, temporalContractLabel } from "@/lib/types";
+import { DEFAULT_ANALYSIS_OPTIONS, DEFAULT_TEMPORAL_CONTRACT, clampQuickSettings, formatQuickAnalysisSummary, pickQuickSettings, temporalContractLabel } from "@/lib/types";
 import AnalysisOptionsModal from "@/components/AnalysisOptionsModal";
+import QuickAnalysisCustomFields from "@/components/QuickAnalysisOptions";
 import { CLOUD_MODEL_PRESETS, type CloudProvider } from "@/lib/llm-models";
 
 const STEPS = ["Project & Files", "Sample Config", "Analysis Focus", "Report Options"];
@@ -579,7 +580,11 @@ export default function OrderCreate() {
       report_config: reportConfigNested,
     }));
     const { proteinListFile, ...analysisOptsForJson } = analysisOptions;
-    formData.append("analysis_options", JSON.stringify(analysisOptsForJson));
+    formData.append("analysis_options", JSON.stringify({
+      ...analysisOptsForJson,
+      quick_analysis: Boolean(analysisOptions.quick_analysis),
+      ...clampQuickSettings(pickQuickSettings(analysisOptions)),
+    }));
     // RAG collection selection (null = all active)
     if (!useAllCollections && selectedCollectionIds.length > 0) {
       formData.append("rag_collections", JSON.stringify(selectedCollectionIds));
@@ -1302,6 +1307,55 @@ export default function OrderCreate() {
                 initial="enter" animate="center" exit="exit"
                 transition={{ duration: 0.25, ease: "easeInOut" }} className="space-y-5"
               >
+                <div
+                  className={cn(
+                    "w-full rounded-lg border text-left transition-colors",
+                    analysisOptions.quick_analysis
+                      ? "border-amber-400 bg-amber-50 dark:bg-amber-950/30"
+                      : "hover:bg-muted/40",
+                  )}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setAnalysisOptions({
+                      ...analysisOptions,
+                      quick_analysis: !analysisOptions.quick_analysis,
+                    })}
+                    className="w-full p-4 text-left"
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className={cn(
+                        "mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md",
+                        analysisOptions.quick_analysis
+                          ? "bg-amber-200 text-amber-900 dark:bg-amber-900 dark:text-amber-100"
+                          : "bg-muted text-muted-foreground",
+                      )}>
+                        <Zap className="h-4 w-4" />
+                      </div>
+                      <div className="min-w-0 flex-1 space-y-1">
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-medium">Quick Analysis</p>
+                          <Badge variant="outline" className="text-[10px] h-5">
+                            {analysisOptions.quick_analysis ? "On · Custom / Exploratory" : "Off · Full input"}
+                          </Badge>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          PR/PG에서 대상 PTM precursor만 남기고 같은 정량·Wave·TMM 경로를 돌립니다.
+                          기본값은 400 / 단백질당 4 / 검출률 0.50 입니다. 아래 숫자와 체크로 Custom 할 수 있습니다.
+                          시점·replicate 열은 유지합니다. Quick 수치는 Full과 비교하거나 논문 primary로 쓰지 마세요.
+                        </p>
+                      </div>
+                    </div>
+                  </button>
+                  {analysisOptions.quick_analysis && (
+                    <div className="border-t border-amber-300/60 px-4 pb-4">
+                      <QuickAnalysisCustomFields
+                        value={analysisOptions}
+                        onChange={setAnalysisOptions}
+                      />
+                    </div>
+                  )}
+                </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label>Report Type</Label>
@@ -1823,6 +1877,8 @@ export default function OrderCreate() {
                     <span className="font-medium">{samples.length} configured</span>
                     <span className="text-muted-foreground">Research Questions</span>
                     <span className="font-medium">{form.report_type === "co_scientist" ? "Data-Grounded 자동 생성" : researchQuestions.length > 0 ? `${researchQuestions.length} custom` : "AI auto-generate"}</span>
+                    <span className="text-muted-foreground">Quick Analysis</span>
+                    <span className="font-medium">{formatQuickAnalysisSummary(analysisOptions)}</span>
                     <span className="text-muted-foreground">Downsampling</span>
                     <span className="font-medium">
                       {analysisOptions.mode === "full" ? "None (Full)" : analysisOptions.mode.replace("_", " ").replace(/\b\w/g, c => c.toUpperCase())}

@@ -7,13 +7,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { AutoResizeTextarea } from "@/components/ui/auto-resize-textarea";
-import { Brain, BookOpen, FlaskConical, MessageSquare, Network, Plus, SlidersHorizontal, X, ChevronDown, ChevronUp, Settings2, RotateCcw, Database, CheckSquare, Square, Loader2 } from "lucide-react";
+import { Brain, BookOpen, FlaskConical, MessageSquare, Network, Plus, SlidersHorizontal, X, ChevronDown, ChevronUp, Settings2, RotateCcw, Database, CheckSquare, Square, Loader2, Zap } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { api } from "@/lib/api";
 import AnalysisOptionsModal from "./AnalysisOptionsModal";
 import type { AnalysisOptions, TemporalContract } from "@/lib/types";
-import { DEFAULT_ANALYSIS_OPTIONS, DEFAULT_TEMPORAL_CONTRACT, resolveTemporalContract } from "@/lib/types";
+import { DEFAULT_ANALYSIS_OPTIONS, DEFAULT_TEMPORAL_CONTRACT, clampQuickSettings, pickQuickSettings, resolveTemporalContract } from "@/lib/types";
+import QuickAnalysisCustomFields from "./QuickAnalysisOptions";
 import { cn } from "@/lib/utils";
 import { CLOUD_PROVIDER_SENTINEL, CLOUD_MODEL_PRESETS, type CloudProvider } from "@/lib/llm-models";
 
@@ -244,6 +245,8 @@ export default function RerunOptionsModal({
         log2fcThreshold: n(ao.log2fcThreshold ?? ao.log2fc_threshold, 0.5),
         proteinCount: n(ao.proteinCount ?? ao.protein_count, 1000),
         proteinListPath: typeof ao.protein_list_path === "string" ? ao.protein_list_path : undefined,
+        quick_analysis: Boolean(ao.quick_analysis),
+        ...pickQuickSettings(ao),
       });
       // Load existing report_config
       const rc = ro.report_config as Record<string, unknown> | undefined;
@@ -275,6 +278,8 @@ export default function RerunOptionsModal({
         topN: analysisOptions.topN,
         log2fcThreshold: analysisOptions.log2fcThreshold,
         proteinCount: analysisOptions.proteinCount,
+        quick_analysis: Boolean(analysisOptions.quick_analysis),
+        ...clampQuickSettings(pickQuickSettings(analysisOptions)),
       };
       if (order.analysis_options?.protein_list_path) {
         optsForApi.protein_list_path = order.analysis_options.protein_list_path;
@@ -374,6 +379,44 @@ export default function RerunOptionsModal({
               <h4 className="text-sm font-semibold flex items-center gap-2">
                 <FlaskConical className="h-4 w-4" /> Analysis Focus
               </h4>
+              <div
+                className={cn(
+                  "w-full rounded-lg border text-left transition-colors",
+                  analysisOptions.quick_analysis
+                    ? "border-amber-400 bg-amber-50 dark:bg-amber-950/30"
+                    : "hover:bg-muted/40",
+                )}
+              >
+                <button
+                  type="button"
+                  onClick={() => setAnalysisOptions({
+                    ...analysisOptions,
+                    quick_analysis: !analysisOptions.quick_analysis,
+                  })}
+                  className="w-full p-3 text-left"
+                >
+                  <div className="flex items-start gap-2">
+                    <Zap className={cn("h-4 w-4 mt-0.5", analysisOptions.quick_analysis ? "text-amber-700" : "text-muted-foreground")} />
+                    <div>
+                      <p className="text-xs font-medium">
+                        Quick Analysis {analysisOptions.quick_analysis ? "(On · Custom / Exploratory)" : "(Off)"}
+                      </p>
+                      <p className="text-[10px] text-muted-foreground">
+                        Subset PR/PG before quantification. Same formulas. Not comparable to Full.
+                      </p>
+                    </div>
+                  </div>
+                </button>
+                {analysisOptions.quick_analysis && (
+                  <div className="border-t border-amber-300/60 px-3 pb-3">
+                    <QuickAnalysisCustomFields
+                      value={analysisOptions}
+                      onChange={setAnalysisOptions}
+                      compact
+                    />
+                  </div>
+                )}
+              </div>
               <div className="grid grid-cols-2 gap-3">
                 <button
                   type="button"
