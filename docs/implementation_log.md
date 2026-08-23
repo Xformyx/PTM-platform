@@ -1718,3 +1718,18 @@
 - **논문에서의 용도:** methods 표기 (`Dynamics v1` vs `Legacy`)
 - **해석 한계:** 이름 변경은 경로를 바꾸지 않는다.
 - **결정성:** 해당 없음
+
+### [2026-08-23] Temporal Atlas 빈 화면 — enriched 파일 suffix 정정
+
+- **분류:** 정정
+- **대상:** `api-server/app/api/orders.py` (`substrate_temporal_atlas`)
+- **구현 대상 설계:** Substrate-level Temporal Dynamics Deepening Plan v1 §7 (P4 atlas API)
+- **사전등록 상태:** 해당 없음 (경로 해석 버그. 측정량·임계를 바꾸지 않음)
+- **내용:** phosphorylation 오더에서 Atlas 가 `enriched_ptm_data.json` 을 찾아
+  `no_enriched_data` 를 반환했다. RAG 산출물은 `enriched_ptm_data_phospho.json`
+  이다. 다른 오더 엔드포인트와 같이 `_phospho` / `_ubi` suffix 를 쓰고,
+  그래도 없으면 `enriched_ptm_data*.json` glob fallback 을 쓴다.
+- **논문에서의 용도:** 사용 안 함 (플랫폼 경로 수정)
+- **해석 한계:** 이 수정은 존재하는 궤적 파일을 찾지 못하던 것을 고친다.
+  패턴 분류·atlas 적격 판정을 바꾸지 않는다.
+- **결정성:** 해당 없음

@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Temporal Atlas 항목 설명 · Insulin_Signaling_Dynamic_V1</title>
+  <style>
+    :root {
+      --bg: #f7f6f2;
+      --surface: #ffffff;
+      --ink: #1c1917;
+      --muted: #57534e;
+      --faint: #78716c;
+      --line: #e7e5e4;
+      --tint: #f5f5f4;
+      --accent: #4338ca;
+      --emerald-bg: #d1fae5;
+      --emerald-ink: #065f46;
+      --amber-bg: #fef3c7;
+      --amber-ink: #92400e;
+      --sky-bg: #e0f2fe;
+      --sky-ink: #0c4a6e;
+      --rose-bg: #ffe4e6;
+      --rose-ink: #9f1239;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--ink);
+      font-family: "Pretendard", "Apple SD Gothic Neo", "Noto Sans KR", -apple-system, BlinkMacSystemFont, sans-serif;
+      line-height: 1.55;
+      font-size: 14px;
+    }
+
+    .page {
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 40px 32px 64px;
+    }
+
+    .kicker {
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--faint);
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+
+    h1 {
+      font-size: 24px;
+      line-height: 1.3;
+      margin: 0 0 8px;
+    }
+
+    .lede {
+      color: var(--muted);
+      margin: 0 0 20px;
+    }
+
+    .stat-row {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin: 0 0 28px;
+    }
+
+    .stat {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px 14px;
+    }
+
+    .stat .label {
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--faint);
+      font-weight: 700;
+    }
+
+    .stat .value {
+      font-size: 20px;
+      font-weight: 700;
+      margin-top: 4px;
+    }
+
+    .stat .hint {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+
+    h2 {
+      font-size: 16px;
+      margin: 28px 0 10px;
+    }
+
+    h3 {
+      font-size: 14px;
+      margin: 16px 0 8px;
+    }
+
+    p { margin: 0 0 10px; }
+
+    ul, ol { margin: 0 0 12px; padding-left: 20px; }
+    li { margin: 0 0 4px; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      margin: 0 0 14px;
+    }
+
+    th, td {
+      text-align: left;
+      padding: 9px 12px;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+    }
+
+    th {
+      font-size: 11px;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      color: var(--faint);
+      background: var(--tint);
+    }
+
+    tr:last-child td { border-bottom: none; }
+
+    .section {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      margin: 14px 0 0;
+      overflow: hidden;
+      break-inside: avoid;
+    }
+
+    .section-head {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .badge {
+      flex: 0 0 auto;
+      padding: 3px 10px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    .badge-1 { background: var(--emerald-bg); color: var(--emerald-ink); }
+    .badge-2 { background: #ede9fe; color: #4c1d95; }
+    .badge-3 { background: var(--amber-bg); color: var(--amber-ink); }
+    .badge-4 { background: var(--sky-bg); color: var(--sky-ink); }
+    .badge-5 { background: var(--rose-bg); color: var(--rose-ink); }
+    .badge-6 { background: #e2e8f0; color: #334155; }
+
+    .section-title { font-weight: 700; }
+    .section-sub { font-size: 12px; color: var(--faint); margin-top: 1px; }
+
+    .body { padding: 14px 16px 16px; }
+
+    .note {
+      background: var(--tint);
+      border-left: 3px solid var(--accent);
+      padding: 10px 12px;
+      font-size: 13px;
+      color: var(--muted);
+      margin: 10px 0 0;
+    }
+
+    code, .mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+    }
+
+    .flow {
+      background: var(--tint);
+      border-radius: 8px;
+      padding: 12px 14px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+      white-space: pre;
+      overflow-x: auto;
+      margin: 0 0 12px;
+    }
+
+    .footer {
+      margin-top: 32px;
+      font-size: 12px;
+      color: var(--faint);
+    }
+
+    @media print {
+      body { background: #fff; }
+      .page { padding: 0; max-width: none; }
+      .section { break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="kicker">PTM Analysis Platform · Dynamics v1</div>
+    <h1>Temporal Atlas 항목 설명과 최종 Report 반영</h1>
+    <p class="lede">
+      오더 <span class="mono">Insulin_Signaling_Dynamic_V1</span>의 Temporal Atlas 화면을
+      패널별로 설명하고, 같은 내용이 최종 Report에 어떻게 들어갔는지 정리한다.
+      패턴 이름은 측정된 곡선의 형태이지, kinase 배정이나 인과 화살표가 아니다.
+    </p>
+
+    <div class="stat-row">
+      <div class="stat">
+        <div class="label">Site claims</div>
+        <div class="value">544</div>
+        <div class="hint">atlas_claim_ledger.json</div>
+      </div>
+      <div class="stat">
+        <div class="label">Atlas-eligible</div>
+        <div class="value">394</div>
+        <div class="hint">P1.1 품질 문 통과</div>
+      </div>
+      <div class="stat">
+        <div class="label">Needs audit</div>
+        <div class="value">150</div>
+        <div class="hint">고신뢰 서술에 넣지 않음</div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-head">
+        <span class="badge badge-1">1</span>
+        <div>
+          <div class="section-title">Pattern &amp; quality overview</div>
+          <div class="section-sub">사이트별 시간 곡선의 집단 요약. 칩을 누르면 Site explorer가 그 패턴만 남긴다.</div>
+        </div>
+      </div>
+      <div class="body">
+        <table>
+          <thead>
+            <tr><th>패턴</th><th>의미</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Sustained activation / suppression</td><td>onset 이후 같은 방향으로 오래 유지</td></tr>
+            <tr><td>Early / delayed single pulse</td><td>봉우리 1개 후 회복. early는 초반, delayed는 늦은 봉우리</td></tr>
+            <tr><td>Transient suppression</td><td>한 번의 뚜렷한 하락 후 회복</td></tr>
+            <tr><td>Monotonic rise / decline</td><td>거의 한 방향으로만 움직임</td></tr>
+            <tr><td>Rebound / biphasic</td><td>부호가 바뀌거나 봉우리 뒤 반대 방향 회복</td></tr>
+            <tr><td>Multi-peak candidate</td><td>봉우리가 2개 이상. 주기성으로 쓰지 않음</td></tr>
+            <tr><td>Oscillatory supported</td><td>주기 패턴. 시간점이 적으면 거의 안 나옴</td></tr>
+          </tbody>
+        </table>
+        <ul>
+          <li><strong>Eligible (394)</strong> — P1.1 품질 문을 통과해 고신뢰 해석에 쓸 수 있는 사이트.</li>
+          <li><strong>Needs audit (150)</strong> — 시간점 부족, 시간 순서 문제, missingness 등으로 문을 못 넘김. 화면에는 남을 수 있지만 고신뢰 서술에 넣지 않음.</li>
+          <li><strong>Form-aware (113)</strong> — 같은 사이트에 서로 다른 modified peptide form이 2개 이상. 검정 실선은 form 중앙값 집계.</li>
+          <li><strong>Quality rule: P1.1 gate</strong> — LOTO(시간점 하나씩 빼고 패턴이 유지되는지)와 threshold-sensitivity를 같이 본다.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-head">
+        <span class="badge badge-2">2</span>
+        <div>
+          <div class="section-title">Interpretation boundary</div>
+          <div class="section-sub">이 박스의 문장을 그대로 지키는 것이 Atlas의 사용 규칙이다.</div>
+        </div>
+      </div>
+      <div class="body">
+        <ul>
+          <li>Eligible 궤적만 고신뢰 해석에 넣는다.</li>
+          <li>시간 순서, 중복 시간점, 결측, LOTO, threshold-sensitivity는 숨기지 않는다.</li>
+          <li><strong>Kinase/TMM, self-PTM, nuclear, non-PTM 패널은 맥락 증거</strong>이다. 그 사이트를 그 kinase가 직접 인산화했다는 증명이 아니다.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-head">
+        <span class="badge badge-3">3</span>
+        <div>
+          <div class="section-title">Observed transition map</div>
+          <div class="section-sub">같은 시간축 사이트들이 어느 구간에서 같이 활성으로 묶였다가 유지·갈라지는지</div>
+        </div>
+      </div>
+      <div class="body">
+        <p>
+          화면의 <strong>Persistence</strong> (<span class="mono">Acadvl_S287 → Acly_S455</span> 등)는
+          “이 두 사이트가 1→5→15분 창에서 같이 활성 멤버로 남았다”는 뜻이다.
+          A가 B를 조절한다거나, 중간에 kinase가 바뀌었다는 뜻이 아니다.
+        </p>
+        <p>이 오더는 live API에서 pair transition이 매우 많다. 화면은 그중 앞부분만 보여 준다.</p>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-head">
+        <span class="badge badge-4">4</span>
+        <div>
+          <div class="section-title">Quality-gated site explorer</div>
+          <div class="section-sub">기본 필터는 Eligible only. 카드를 누르면 아래 상세가 바뀐다.</div>
+        </div>
+      </div>
+      <div class="body">
+        <table>
+          <thead>
+            <tr><th>카드 항목</th><th>의미</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>유전자 + 잔기</td><td>예: <span class="mono">Cflar T231</span></td></tr>
+            <tr><td>패턴 뱃지</td><td>위에서 말한 궤적 형태</td></tr>
+            <tr><td>Atlas eligible</td><td>문 통과 + LOTO ≥ 0.8</td></tr>
+            <tr><td>Exploratory</td><td>문은 통과했지만 LOTO &lt; 0.8이거나 threshold-sensitive. <span class="mono">Cflar T231</span>이 여기 (LOTO 0.50)</td></tr>
+            <tr><td>Needs audit</td><td>문 미통과</td></tr>
+            <tr><td>onset / peak / form 수</td><td>처음 반응이 잡힌 분, 최대 |Log2FC| 분, form 개수</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-head">
+        <span class="badge badge-5">5</span>
+        <div>
+          <div class="section-title">선택한 사이트 — Cflar T231</div>
+          <div class="section-sub">Claim ID: atlas.site.Cflar_T231.sustained_activation.1.0</div>
+        </div>
+      </div>
+      <div class="body">
+        <ul>
+          <li><strong>그래프</strong> — 검정 실선은 site aggregate(form 중앙값). 점선은 form별 궤적. Y축은 데이터 범위 또는 대칭 ±.</li>
+          <li><strong>Claim ID</strong> — UI·원장·단독 Atlas 문서가 같은 ID를 쓴다.</li>
+          <li><strong>Onset 1 min / Peak 1 min</strong> — 반응이 1분에 잡히고, 관측된 점 중 최대도 1분.</li>
+          <li><strong>LOTO 0.50</strong> — 시간점 하나를 빼면 패턴이 절반의 시행에서만 유지된다. 그래서 Exploratory.</li>
+          <li><strong>Q coverage not available</strong> — 시간점별 q-value가 궤적에 없어서, 통계 커버리지는 품질 문으로 쓰지 않고 “없음”으로만 남긴다.</li>
+          <li><strong>observed = 4</strong> — 이 사이트는 6개 시간점 전부가 아니라 4개로 패턴을 계산했다.</li>
+        </ul>
+        <div class="note">
+          <span class="mono">sustained_activation</span>은 “1분부터 높게 유지된다”는 형태 라벨이다.
+          CFLAR가 세포사멸을 조절한다는 기능 결론이 아니다. LOTO가 낮아서 이 라벨은 잠정이다.
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-head">
+        <span class="badge badge-6">6</span>
+        <div>
+          <div class="section-title">Context evidence</div>
+          <div class="section-sub">측정 궤적 옆에 이미 저장된 주석만 붙인다. 비어 있으면 추론으로 채우지 않는다.</div>
+        </div>
+      </div>
+      <div class="body">
+        <ul>
+          <li><strong>Form provenance</strong> — 실제 펩타이드. 여기선 <span class="mono">PVKT(UniMod:21)SIQESGIFLPPHINEESYRMQSK</span> 한 form.</li>
+          <li><strong>Kinase / self-PTM</strong> — heatmap·self-PTM 후보가 원장에 있으면 표시. <span class="mono">Cflar T231</span>은 없음.</li>
+          <li><strong>Nuclear / non-PTM follow-through</strong> — GO 핵 위치, 이후 단백질량 변화. 여기도 없음.</li>
+        </ul>
+        <div class="note">
+          이 패널은 맥락이지 직접 조절·전파·위치 이동의 증명이 아니다.
+        </div>
+      </div>
+    </div>
+
+    <h2>최종 Report에는 어떻게 들어갔나</h2>
+    <p>Dynamics v1에서는 Report 그래프가 Atlas를 두 갈래로 쓴다.</p>
+    <div class="flow">kinase_annotation
+        ↓
+atlas_claim_ledger  →  atlas_claim_ledger.json
+        ↓
+generate_atlas_report  →  temporal_substrate_dynamics_atlas.md
+        ↓
+write_sections  →  통합 리포트에 ledger 요약을 LLM 맥락으로 주입</div>
+
+    <div class="section">
+      <div class="section-head">
+        <span class="badge badge-1">A</span>
+        <div>
+          <div class="section-title">단독 Atlas 문서 — 1:1 반영</div>
+          <div class="section-sub">data/outputs/Insulin_Signaling_Dynamic_V1/temporal_substrate_dynamics_atlas.md</div>
+        </div>
+      </div>
+      <div class="body">
+        <p>화면과 같은 원장이다.</p>
+        <ul>
+          <li>Coverage: site 544 / eligible 394</li>
+          <li><span class="mono">Cflar T231</span>을 같은 claim ID, <span class="mono">sustained_activation</span>, onset/peak 1 min, LOTO 0.50로 적음</li>
+          <li>qualifying 사이트마다 패턴·타이밍·form·품질·해석 경계를 나열</li>
+          <li>Needs audit 사이트는 맨 아래 “Excluded from Narrative”로 이유만 적음</li>
+        </ul>
+        <div class="note">
+          Transition claim은 이 문서에 0건이다. UI의 Persistence 목록은 live API의
+          <span class="mono">pair_transitions</span>이고, 원장이 claim으로 옮기는 키는
+          <span class="mono">transitions</span>라서 단독 문서·LLM 주입에는 그 엣지가 들어가지 않았다.
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-head">
+        <span class="badge badge-2">B</span>
+        <div>
+          <div class="section-title">통합 리포트 — 선별 주입</div>
+          <div class="section-sub">Insulin_Signaling_Dynamic_V1_report_260823_1342.md · 분류표는 그대로 붙지 않음</div>
+        </div>
+      </div>
+      <div class="body">
+        <p>
+          Writer가 Results / Research Questions / Discussion에 넣는 것은
+          <strong>eligible 사이트 진폭 상위 20개</strong>의 짧은 원장 요약이다.
+          <span class="mono">Cflar T231</span>은 진폭이 커서 그 목록에 들어간다.
+        </p>
+        <h3>본문이 가져온 것</h3>
+        <ul>
+          <li>Cflar T231을 1분 immediate-early / Cluster 6의 대표 사이트로 반복 인용 (Introduction, Results, Discussion, RQ, Conclusion)</li>
+          <li>표에 1–30분 Log2FC ≈ 31.8, 60·180분은 0.00으로 표시</li>
+          <li>Rab4a Y61, Irs1 S522, Limd2 S30 등 Atlas 상위 사이트도 같은 방식으로 등장</li>
+        </ul>
+        <h3>본문이 가져오지 않은 것</h3>
+        <ul>
+          <li>Pattern &amp; quality 칩의 분포 (Sustained 248, Multi-peak 149 등)</li>
+          <li>P1 라벨 자체 (<span class="mono">sustained_activation</span>이라는 단어는 본문에 없음)</li>
+          <li>LOTO / Exploratory / Form-aware / Q coverage</li>
+          <li>Transition map의 Persistence 엣지</li>
+          <li>설계서에 있던 독립 절 제목 “Substrate Temporal Dynamics Atlas”</li>
+        </ul>
+        <p>
+          대신 본문은 기존 Co-wave 클러스터(Cluster 6 → 5 → 2 → 1…)와 kinase 예측(AKT1, ERK1/2)으로 시간을 말한다.
+          Atlas의 site-level 패턴 분류와는 다른 층이다.
+        </p>
+        <div class="note">
+          그래서 Cflar T231은 리포트에 분명히 나오지만, 서술은 Atlas의 “sustained, Exploratory, LOTO 0.50”이 아니라
+          “1분 봉우리의 switch-like / binary induction, Cluster 6”이다.
+          클러스터 쪽 서술(1분 후 감소)이 그래프의 초반 하락과는 더 가깝고, Atlas 라벨은 LOTO가 낮아 잠정이다.
+          Kinase 문장(“Cluster 6의 primary driver는 AKT1/ERK1/2”)은 Atlas Context가 아니라 별도 kinase annotation에서 온 것이다.
+          Atlas 패널이 비어 있는 것과 모순이 아니다. Atlas는 그 연결을 승격하지 않는다.
+        </div>
+      </div>
+    </div>
+
+    <h2>한 줄 요약</h2>
+    <p>
+      Atlas 탭은 544개 사이트의 궤적·품질·(화면상) 공변동 전이고, 최종 서술 리포트는 그중
+      <strong>진폭 큰 사이트 몇 개를 클러스터 이야기의 예시로 쓴 것</strong>이다.
+      패턴 분포와 transition map은 통합 리포트 본문에 절 단위로 붙지 않았다.
+      그 전체 목록이 필요하면 <span class="mono">temporal_substrate_dynamics_atlas.md</span>가 화면과 같은 원장이다.
+    </p>
+
+    <p class="footer">
+      원장: <span class="mono">docs/implementation_log.md</span>의 Atlas 경로 기록과 별개.
+      이 문서는 2026-08-23 Temporal Atlas 화면 해설이다. 측정량·임계를 바꾸지 않는다.
+    </p>
+  </div>
+</body>
+</html>

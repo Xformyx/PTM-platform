@@ -8904,8 +8904,19 @@ async def substrate_temporal_atlas(
         }
 
     output_dir = Path(os.getenv("OUTPUT_DIR", "/app/data/outputs")) / order.order_code
-    file_suffix = f"_{order.ptm_type}" if order.ptm_type and order.ptm_type != "phosphorylation" else ""
+    # RAG writes enriched_ptm_data_phospho.json / _ubi.json (same convention as
+    # vector-plot, articles, and report-generation). An empty suffix looks for
+    # enriched_ptm_data.json and falsely reports no_enriched_data.
+    file_suffix = "_phospho" if order.ptm_type == "phosphorylation" else "_ubi"
     enriched_path = output_dir / f"enriched_ptm_data{file_suffix}.json"
+    if not enriched_path.exists():
+        _cand = sorted(
+            output_dir.glob("enriched_ptm_data*.json"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        if _cand:
+            enriched_path = _cand[0]
 
     if not enriched_path.exists():
         return {"sites": [], "status": "no_enriched_data"}
