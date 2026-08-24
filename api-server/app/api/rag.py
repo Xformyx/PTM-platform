@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.dependencies import get_current_user
+from app.dependencies import get_current_user, require_role
 from app.models.rag_collection import RagCollection, RagDocument
 from app.utils.sanitize import sanitize_collection_name
 from ptm_shared.embedding_registry import resolve_embedding_spec, supported_embedding_models
@@ -98,7 +98,7 @@ async def list_embedding_models(user=Depends(get_current_user)):
 async def create_collection(
     body: CollectionCreate,
     db: AsyncSession = Depends(get_db),
-    user=Depends(get_current_user),
+    user=Depends(require_role("admin")),
 ):
     try:
         embedding_spec = resolve_embedding_spec(body.embedding_model)
@@ -204,7 +204,7 @@ async def update_collection(
     collection_id: int,
     body: CollectionUpdate,
     db: AsyncSession = Depends(get_db),
-    user=Depends(get_current_user),
+    user=Depends(require_role("admin")),
 ):
     result = await db.execute(
         select(RagCollection).where(RagCollection.id == collection_id)
@@ -231,7 +231,7 @@ async def update_collection(
 async def delete_collection(
     collection_id: int,
     db: AsyncSession = Depends(get_db),
-    user=Depends(get_current_user),
+    user=Depends(require_role("admin")),
 ):
     result = await db.execute(
         select(RagCollection).where(RagCollection.id == collection_id)
@@ -269,7 +269,7 @@ async def upload_document(
     collection_id: int,
     files: List[UploadFile] = File(...),
     db: AsyncSession = Depends(get_db),
-    user=Depends(get_current_user),
+    user=Depends(require_role("admin")),
 ):
     """Upload one or more documents and dispatch indexing tasks."""
     result = await db.execute(
@@ -346,7 +346,7 @@ async def delete_document(
     collection_id: int,
     document_id: int,
     db: AsyncSession = Depends(get_db),
-    user=Depends(get_current_user),
+    user=Depends(require_role("admin")),
 ):
     """Delete a document from the collection and remove its chunks from ChromaDB."""
     result = await db.execute(
@@ -415,7 +415,7 @@ async def reindex_document(
     collection_id: int,
     document_id: int,
     db: AsyncSession = Depends(get_db),
-    user=Depends(get_current_user),
+    user=Depends(require_role("admin")),
 ):
     """Re-index a failed or existing document."""
     result = await db.execute(

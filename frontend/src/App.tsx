@@ -41,6 +41,9 @@ function ProtectedRoutes() {
   if (mustChangePassword) {
     return <ForcePasswordChange />;
   }
+  if (user.role !== "admin") {
+    return <Navigate to="/app" replace />;
+  }
   return <Layout />;
 }
 

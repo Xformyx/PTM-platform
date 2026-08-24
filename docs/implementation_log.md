@@ -1853,3 +1853,39 @@
   설정마다 median 정규화 인자가 달라져 Quick끼리도 비교하지 않는다.
 - **결정성:** clamp 범위 max PTM [10, 5000], cap [0, 50], detection [0, 1],
   non-PTM PG [0, 5000]. 기본 400 / 4 / 0.50 / pairs on / non-PTM off.
+
+### [2026-08-24] Report run-stage가 queued에서 skip 되던 상태 게이트 수정
+
+- **분류:** 정정
+- **대상:** `api-server/app/api/orders.py` (`POST /orders/{id}/run-stage`),
+  `workers/report_generation/tasks.py` (`run_report_generation`)
+- **구현 대상 설계:** 해당 없음 (파이프라인 실행 게이트, 측정 상수 아님)
+- **사전등록 상태:** 해당 없음
+- **내용:** report 단독 재실행 시 API가 `status=queued`로 커밋한 뒤 워커가
+  `queued`를 stale로 보고 skip 하던 불일치를 고쳤다. report stage는
+  `report_generation`으로 두고, 워커 허용 집합에 그 값을 추가한다.
+  `queued`는 계속 거부한다 (이전 run의 stale task 보호).
+- **논문에서의 용도:** 사용 안 함
+- **해석 한계:** 리포트 내용·정량 수치·kinase 판정을 바꾸지 않는다.
+  실행 시작 조건만 맞춘다.
+- **결정성:** 해당 없음
+
+### [2026-08-24] Cancel 후 재시작 시 stale 워커 차단
+
+- **분류:** 정정
+- **대상:** `workers/common/run_control.py`, `workers/common/progress.py`,
+  `workers/common/db_update.py`, `workers/preprocessing/tasks.py`,
+  `workers/rag_enrichment/tasks.py`, `workers/report_generation/tasks.py`,
+  `api-server/app/api/orders.py`, `api-server/app/api/user_orders.py`,
+  `frontend/src/pages/OrderDetail.tsx`
+- **구현 대상 설계:** 해당 없음 (파이프라인 실행 게이트, 측정 상수 아님)
+- **사전등록 상태:** 해당 없음
+- **내용:** cancel이 체인 전체 Celery task id를 revoke 하도록 바꿨다.
+  start/run-stage마다 Redis `order_run_gen`을 올리고, 이전 워커는
+  generation이 다르면 상태/로그를 쓰지 않고 중단한다.
+  Re-run UI는 고정 1.5초 대기 대신 cancel 상태를 폴링한다.
+- **논문에서의 용도:** 사용 안 함
+- **해석 한계:** 워커 프로세스의 즉시 종료를 보장하지 않는다.
+  산출 수치를 바꾸지 않는다.
+- **결정성:** 해당 없음
+

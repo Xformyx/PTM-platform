@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
+import { openEventSource } from "@/lib/sse";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -861,17 +862,24 @@ function JobDetail({
   // SSE for active jobs
   useEffect(() => {
     if (!isActive) return;
-    const token = localStorage.getItem("ptm-token") || "";
-    const es = new EventSource(`/api/events/ptmquant/${job.job_id}?token=${token}`);
-    es.addEventListener("progress", (e) => {
-      try {
-        const d = JSON.parse(e.data);
-        if (d.message) setLog(prev => [...prev, d.message]);
-        if (d.file_status) setFileStatus(d.file_status);
-        if (d.type === "done" || d.type === "error") { onRefresh(job.job_id); es.close(); }
-      } catch { /* ignore */ }
-    });
-    return () => { es.close(); };
+    let es: EventSource | null = null;
+    let cancelled = false;
+    openEventSource(`/api/events/ptmquant/${job.job_id}`).then((opened) => {
+      if (cancelled) {
+        opened.close();
+        return;
+      }
+      es = opened;
+      es.addEventListener("progress", (e) => {
+        try {
+          const d = JSON.parse(e.data);
+          if (d.message) setLog(prev => [...prev, d.message]);
+          if (d.file_status) setFileStatus(d.file_status);
+          if (d.type === "done" || d.type === "error") { onRefresh(job.job_id); es?.close(); }
+        } catch { /* ignore */ }
+      });
+    }).catch(() => { /* ticket/SSE unavailable */ });
+    return () => { cancelled = true; es?.close(); };
   }, [isActive, job.job_id, onRefresh]);
 
   // Load output files (done or failed — might have partial results)

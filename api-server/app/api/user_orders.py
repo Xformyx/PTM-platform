@@ -26,7 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
 from app.core.database import AsyncSessionLocal, get_db
-from app.dependencies import get_current_user
+from app.dependencies import assert_not_viewer, get_current_user
 from app.models.chat_message import ChatMessage as ChatMessageDB
 from app.models.order import Order, OrderLog
 from app.models.rag_collection import RagCollection
@@ -45,6 +45,28 @@ METADATA_COLUMNS = frozenset([
     "First.Protein.Description", "Proteotypic", "Stripped.Sequence",
     "Modified.Sequence", "Precursor.Charge", "Precursor.Id",
 ])
+
+
+def _safe_upload_filename(filename: str | None) -> str:
+    """Strip directories and unsafe characters from an upload filename.
+
+    Same rule as admin ``create_order`` ``save_upload`` in orders.py.
+    A name like ``../../other_order/secret.tsv`` becomes ``secret.tsv``.
+    """
+    safe_name = re.sub(r"[^\w.\-]", "_", Path(filename or "file").name)
+    if not safe_name or safe_name.startswith("."):
+        safe_name = "upload_" + safe_name.lstrip(".")
+    return safe_name
+
+
+def _write_under_dir(target_dir: Path, filename: str | None, content: bytes) -> Path:
+    """Write *content* under *target_dir* only. Raises 400 if the path escapes."""
+    target_dir = target_dir.resolve()
+    file_path = (target_dir / _safe_upload_filename(filename)).resolve()
+    if not file_path.is_relative_to(target_dir):
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    file_path.write_bytes(content)
+    return file_path
 
 
 def _read_tsv_sample_columns(tsv_path: str) -> list[str]:
@@ -205,7 +227,8 @@ You MUST respond with ONLY a valid JSON object (no markdown, no explanation outs
 
 Rules:
 - Infer PTM type from file names, description, or modifications detected
-- Infer organism from FASTA file name or description
+- Infer organism from the experiment description, or from a FASTA file name if one was uploaded
+- FASTA upload is optional. If none is uploaded, the platform uses its registered reference FASTA for the inferred organism (mouse, human, or rat)
 - Infer conditions and replicates from file naming patterns
 - If TSV search result files are provided (pr_matrix, pg_matrix), note them as pre-processed data
 - If description mentions specific treatments, time points, or cell types, use them for conditions
@@ -226,6 +249,7 @@ async def infer_config(
     user=Depends(get_current_user),
 ):
     """Use LLM to infer analysis configuration from uploaded files and description."""
+    assert_not_viewer(user)
     import tempfile
 
     # Build context for LLM
@@ -242,10 +266,14 @@ async def infer_config(
                 # Save temporarily to read headers
                 content_bytes = await f.read()
                 await f.seek(0)  # Reset for later use
-                tmp_path = Path(tempfile.gettempdir()) / f"infer_{f.filename}"
-                tmp_path.write_bytes(content_bytes)
-                tsv_sample_columns = _read_tsv_sample_columns(str(tmp_path))
-                tmp_path.unlink(missing_ok=True)
+                # Do not join the client filename into the temp path.
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".tsv") as tmp:
+                    tmp.write(content_bytes)
+                    tmp_path = Path(tmp.name)
+                try:
+                    tsv_sample_columns = _read_tsv_sample_columns(str(tmp_path))
+                finally:
+                    tmp_path.unlink(missing_ok=True)
                 logger.info(f"Read {len(tsv_sample_columns)} sample columns from {f.filename}")
 
     # Parse research questions
@@ -370,6 +398,7 @@ async def correct_config(
     user=Depends(get_current_user),
 ):
     """Use LLM to apply natural language corrections to inferred config."""
+    assert_not_viewer(user)
     ollama_url = settings.OLLAMA_URL
     model = settings.DEFAULT_LLM_MODEL
 
@@ -444,6 +473,7 @@ async def create_order_from_user(
     Accepts the AI-inferred (and possibly corrected) config + uploaded files.
     Creates an Order in the DB and saves files to the input directory.
     """
+    assert_not_viewer(user)
     try:
         return await _create_order_from_user_impl(
             files=files, file_types=file_types, config=config,
@@ -507,6 +537,18 @@ async def _create_order_from_user_impl(
     if not uploaded_fasta and not resolved_reference_fasta:
         raise HTTPException(status_code=422, detail=missing_reference_detail(settings.REFERENCE_DIR, species_context))
 
+    search_names = [f.filename or "" for f, ft in zip(files, file_types) if ft == "search_result"]
+    if len(search_names) < 2:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "PR matrix와 PG matrix가 필요합니다 "
+                "(예: report.pr_matrix.tsv, report.pg_matrix.tsv). "
+                "mzML만으로는 전처리를 시작할 수 없습니다. "
+                "검색 결과 TSV를 함께 올려 주세요."
+            ),
+        )
+
     # Create input directory
     input_dir = Path(settings.INPUT_DIR) / order_code
     input_dir.mkdir(parents=True, exist_ok=True)
@@ -518,9 +560,9 @@ async def _create_order_from_user_impl(
     reference_pdfs = []
 
     for f, ft in zip(files, file_types):
-        file_path = input_dir / f.filename
+        original_name = f.filename or "file"
         content = await f.read()
-        file_path.write_bytes(content)
+        file_path = _write_under_dir(input_dir, original_name, content)
 
         if ft == "raw_data":
             # mzML files — stored in input dir
@@ -528,8 +570,8 @@ async def _create_order_from_user_impl(
         elif ft == "fasta":
             fasta_path = str(file_path)
         elif ft == "search_result":
-            # TSV files — detect pr vs pg
-            fname_lower = f.filename.lower()
+            # TSV files — detect pr vs pg (use original name so labels survive sanitization)
+            fname_lower = original_name.lower()
             if "pr" in fname_lower or "precursor" in fname_lower:
                 pr_path = str(file_path)
             elif "pg" in fname_lower or "protein" in fname_lower:
@@ -550,17 +592,19 @@ async def _create_order_from_user_impl(
     if not fasta_path:
         raise HTTPException(status_code=400, detail="No FASTA file provided or found in reference directory")
 
-    # If no pr/pg matrix provided, they'll be generated by PTMQuant from mzML
-    if not pr_path:
-        pr_path = str(input_dir / "pending_preprocessing.tsv")
-        Path(pr_path).touch()
-    if not pg_path:
-        pg_path = str(input_dir / "pending_preprocessing_pg.tsv")
-        Path(pg_path).touch()
+    if not pr_path or not pg_path:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "PR matrix와 PG matrix를 모두 인식하지 못했습니다. "
+                "파일명에 pr/precursor와 pg/protein이 들어가거나, "
+                "검색 결과 TSV를 두 개 올려 주세요."
+            ),
+        )
 
     # Build sample_config from ACTUAL TSV columns (same as Admin mode)
     # Read real sample columns from PR matrix and auto-parse with regex
-    tsv_columns = _read_tsv_sample_columns(pr_path) if pr_path and "pending_preprocessing" not in pr_path else []
+    tsv_columns = _read_tsv_sample_columns(pr_path) if pr_path else []
     contrasts_for_parse = config_data.get("contrasts", [])
 
     if tsv_columns:
@@ -683,7 +727,7 @@ async def _create_order_from_user_impl(
 
     # Build condition_map from ACTUAL TSV headers (same as Admin mode)
     # Uses deterministic regex parsing - no LLM involved
-    sample_columns = _read_tsv_sample_columns(pr_path) if pr_path and "pending_preprocessing" not in pr_path else []
+    sample_columns = _read_tsv_sample_columns(pr_path) if pr_path else []
     contrasts = config_data.get("contrasts", [])
 
     if sample_columns:
@@ -744,6 +788,10 @@ async def _create_order_from_user_impl(
         "secondary_condition_map": _build_condition_map(getattr(order, 'secondary_sample_config', None)) if getattr(order, 'secondary_sample_config', None) else None,
     }
 
+    from app.api.orders import _bump_run_generation, _clear_celery_task_ids, _save_celery_task_id
+    await _clear_celery_task_ids(order.id)
+    task_config["run_generation"] = await _bump_run_generation(order.id)
+
     # Dispatch Celery task
     from celery import Celery as CeleryClass
     celery_app = CeleryClass("ptm_workers")
@@ -755,6 +803,7 @@ async def _create_order_from_user_impl(
         args=[order.id, task_config],
         queue="preprocessing",
     )
+    await _save_celery_task_id(order.id, task.id)
     logger.info(f"Order {order_code} auto-dispatched — task_id={task.id}")
 
     # Log the dispatch
@@ -807,6 +856,7 @@ async def user_chat_stream(
     user=Depends(get_current_user),
 ):
     """SSE streaming chat endpoint for Mekii AI in User UI."""
+    assert_not_viewer(user)
     # Verify order exists and user has access
     result = await db.execute(select(Order).where(Order.id == order_id))
     order = result.scalar_one_or_none()
@@ -1085,6 +1135,7 @@ async def clear_user_chat_history(
     user=Depends(get_current_user),
 ):
     """Clear chat history for an order."""
+    assert_not_viewer(user)
     result = await db.execute(select(Order).where(Order.id == order_id))
     order = result.scalar_one_or_none()
     if not order:

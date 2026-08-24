@@ -54,6 +54,7 @@ async def get_version() -> dict[str, str]:
 async def detailed_health(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
+    _user=Depends(get_current_user),
 ) -> dict[str, Any]:
     checks: dict[str, Any] = {}
 
@@ -181,6 +182,7 @@ async def cloud_llm_health(
 async def system_architecture(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
+    _user=Depends(require_role("admin")),
 ) -> dict:
     """
     Returns system architecture with connectivity status for each node.
@@ -463,7 +465,7 @@ CONTAINER_OPTIONS = [
 
 
 @router.get("/health/containers")
-async def list_containers() -> dict:
+async def list_containers(_user=Depends(require_role("admin"))) -> dict:
     """List PTM containers available for log viewing."""
     return {"containers": CONTAINER_OPTIONS}
 
@@ -483,7 +485,7 @@ def _find_container(client, expected_id: str):
 
 
 @router.get("/health/container-status")
-async def container_status() -> dict:
+async def container_status(_user=Depends(require_role("admin"))) -> dict:
     """Return status of all PTM containers (running, exited, etc.)."""
     result = []
     try:
@@ -569,7 +571,11 @@ async def container_restart(
 
 
 @router.get("/health/container-logs/{container_id}")
-async def container_logs(container_id: str, tail: int = 500) -> dict:
+async def container_logs(
+    container_id: str,
+    tail: int = 500,
+    _user=Depends(require_role("admin")),
+) -> dict:
     """
     Fetch recent logs from a Docker container.
     Requires Docker socket mounted at /var/run/docker.sock.
@@ -622,7 +628,7 @@ async def container_logs_stream(
     """
     Stream container logs via SSE (tail -f style).
     Sends initial tail, then appends new lines as they arrive.
-    EventSource cannot send headers, so auth uses get_sse_user (?token= or Bearer).
+    EventSource cannot send headers, so auth uses get_sse_user (?ticket= preferred, or Bearer / deprecated ?token=).
     """
     allowed = {c["id"] for c in CONTAINER_OPTIONS}
     if container_id not in allowed:

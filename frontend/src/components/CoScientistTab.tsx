@@ -76,6 +76,21 @@ interface HealthResponse {
   };
 }
 
+interface EvidenceItem {
+  source?: string;
+  text?: string;
+  title?: string;
+  excerpt?: string;
+}
+
+function evidenceTitle(ev: EvidenceItem): string {
+  return ev.title || ev.source || "Unknown";
+}
+
+function evidenceExcerpt(ev: EvidenceItem): string {
+  return ev.excerpt || ev.text || "";
+}
+
 interface Hypothesis {
   id: string;
   condition: string;
@@ -87,8 +102,8 @@ interface Hypothesis {
   status: string;
   signaling_chain: string;
   supporting_ptms: string[];
-  evidence_for: { source: string; text: string }[];
-  evidence_against: { source: string; text: string }[];
+  evidence_for: EvidenceItem[];
+  evidence_against: EvidenceItem[];
   testable_prediction: string;
 }
 
@@ -251,6 +266,14 @@ export function CoScientistTab({ orderId, orderCode, orderStatus }: Props) {
   // Experiment designs
   const [designsLoading, setDesignsLoading] = useState(false);
 
+  // Scientific reasoning / lab-in-the-loop
+  const [reasoning, setReasoning] = useState<any>(null);
+  const [labHypothesisId, setLabHypothesisId] = useState("");
+  const [labOutcome, setLabOutcome] = useState("supports");
+  const [labSummary, setLabSummary] = useState("");
+  const [labPending, setLabPending] = useState(false);
+  const [labResultCount, setLabResultCount] = useState(0);
+
   // Expanded row
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
@@ -346,6 +369,15 @@ export function CoScientistTab({ orderId, orderCode, orderStatus }: Props) {
     return () => clearInterval(pollRef.current!);
   }, [sessionId, running, BASE]);
 
+  useEffect(() => {
+    if (!sessionId || running) return;
+    if (session?.status !== "completed" && session?.status !== "cancelled") return;
+    api
+      .get(`${BASE}/session/${sessionId}/scientific-reasoning`)
+      .then(setReasoning)
+      .catch(() => setReasoning(null));
+  }, [sessionId, running, session?.status, BASE]);
+
   // ─── Handlers ────────────────────────────────────────────────────────────
 
   async function handleRun() {
@@ -353,6 +385,8 @@ export function CoScientistTab({ orderId, orderCode, orderStatus }: Props) {
     setSession(null);
     setRunning(true);
     setFeedbackCount(0);
+    setLabResultCount(0);
+    setReasoning(null);
     try {
       const res = await api.post<{ session_id: string }>(`${BASE}/run`, {
         research_goal: goal,
@@ -421,6 +455,27 @@ export function CoScientistTab({ orderId, orderCode, orderStatus }: Props) {
       setRunError(e.message);
     } finally {
       setDesignsLoading(false);
+    }
+  }
+
+  async function handleLabResult() {
+    const hypothesisId = labHypothesisId || session?.top_hypotheses[0]?.id;
+    if (!sessionId || !hypothesisId) return;
+    setLabPending(true);
+    try {
+      await api.post(`${BASE}/session/${sessionId}/lab-results`, {
+        hypothesis_id: hypothesisId,
+        outcome: labOutcome,
+        result_summary: labSummary,
+      });
+      setLabSummary("");
+      setLabResultCount((n) => n + 1);
+      const next = await api.get(`${BASE}/session/${sessionId}/scientific-reasoning`);
+      setReasoning(next);
+    } catch (e: any) {
+      setRunError(e.message);
+    } finally {
+      setLabPending(false);
     }
   }
 
@@ -1024,9 +1079,11 @@ export function CoScientistTab({ orderId, orderCode, orderStatus }: Props) {
                                           <BookOpen className="h-3 w-3 mt-0.5 shrink-0" />
                                           <span>
                                             <span className="font-medium text-foreground">
-                                              {ev.source}
-                                            </span>{" "}
-                                            — {ev.text.slice(0, 120)}…
+                                              {evidenceTitle(ev)}
+                                            </span>
+                                            {evidenceExcerpt(ev)
+                                              ? ` — ${evidenceExcerpt(ev).slice(0, 120)}…`
+                                              : ""}
                                           </span>
                                         </li>
                                       ))}
@@ -1102,6 +1159,70 @@ export function CoScientistTab({ orderId, orderCode, orderStatus }: Props) {
                     ))}
                   </TableBody>
                 </Table>
+              </CardContent>
+            </Card>
+          )}
+
+          {(reasoning || session.top_hypotheses.length > 0) && (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-md bg-emerald-500/10">
+                    <BookOpen className="h-3.5 w-3.5 text-emerald-500" />
+                  </div>
+                  Scientific Reasoning & Lab Results
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3 text-xs">
+                {reasoning?.meta_review?.executive_summary && (
+                  <p className="text-muted-foreground">{reasoning.meta_review.executive_summary}</p>
+                )}
+                {reasoning?.evidence_graph?.summary && (
+                  <p className="text-muted-foreground">
+                    Graph: {reasoning.evidence_graph.summary.node_count ?? 0} nodes ·{" "}
+                    {reasoning.evidence_graph.summary.edge_count ?? 0} edges
+                    {reasoning.lab_results?.length
+                      ? ` · ${reasoning.lab_results.length} lab result(s)`
+                      : ""}
+                  </p>
+                )}
+                <div className="grid gap-2 sm:grid-cols-[1fr_140px_1fr_auto]">
+                  <Select
+                    value={labHypothesisId || session.top_hypotheses[0]?.id || ""}
+                    onValueChange={setLabHypothesisId}
+                  >
+                    <SelectTrigger className="h-8 text-xs">
+                      <SelectValue placeholder="Hypothesis" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {session.top_hypotheses.map((h) => (
+                        <SelectItem key={h.id} value={h.id} className="text-xs">
+                          {h.id} · {h.prediction.slice(0, 40)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Select value={labOutcome} onValueChange={setLabOutcome}>
+                    <SelectTrigger className="h-8 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="supports" className="text-xs">Supports</SelectItem>
+                      <SelectItem value="contradicts" className="text-xs">Contradicts</SelectItem>
+                      <SelectItem value="inconclusive" className="text-xs">Inconclusive</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Textarea
+                    value={labSummary}
+                    onChange={(e) => setLabSummary(e.target.value)}
+                    placeholder="Observed assay result…"
+                    rows={1}
+                    className="text-xs resize-none min-h-8"
+                  />
+                  <Button size="sm" onClick={handleLabResult} disabled={labPending || !labSummary.trim()}>
+                    {labPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Record"}
+                  </Button>
+                </div>
               </CardContent>
             </Card>
           )}
@@ -1228,7 +1349,7 @@ export function CoScientistTab({ orderId, orderCode, orderStatus }: Props) {
                 size="sm"
                 className="w-full"
                 onClick={handleRerun}
-                disabled={running || feedbackCount === 0}
+                disabled={running || (feedbackCount === 0 && labResultCount === 0)}
               >
                 <RefreshCw className="h-3.5 w-3.5 mr-2" />
                 Re-run with feedback ({feedbackCount})

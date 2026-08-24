@@ -3,9 +3,10 @@
 import logging
 
 import httpx
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.config import get_settings
+from app.dependencies import get_current_user, require_role
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["articles"])
@@ -25,6 +26,7 @@ async def list_articles(
     count: int = Query(50, ge=1, le=200),
     search: str = Query(""),
     sort_by: str = Query("cached_at"),
+    _user=Depends(get_current_user),
 ):
     """List cached PubMed articles with optional search."""
     try:
@@ -41,7 +43,7 @@ async def list_articles(
 
 
 @router.get("/articles/stats")
-async def article_stats():
+async def article_stats(_user=Depends(get_current_user)):
     """Get article cache statistics."""
     try:
         async with httpx.AsyncClient(timeout=30, headers=_mcp_headers()) as client:
@@ -54,7 +56,7 @@ async def article_stats():
 
 
 @router.get("/articles/{pmid}")
-async def get_article(pmid: str):
+async def get_article(pmid: str, _user=Depends(get_current_user)):
     """Get a single cached article by PMID."""
     try:
         async with httpx.AsyncClient(timeout=30, headers=_mcp_headers()) as client:
@@ -71,7 +73,7 @@ async def get_article(pmid: str):
 
 
 @router.delete("/articles/{pmid}")
-async def delete_article(pmid: str):
+async def delete_article(pmid: str, _user=Depends(require_role("admin"))):
     """Delete a single cached article."""
     try:
         async with httpx.AsyncClient(timeout=30, headers=_mcp_headers()) as client:
@@ -84,7 +86,7 @@ async def delete_article(pmid: str):
 
 
 @router.delete("/articles")
-async def clear_all_articles():
+async def clear_all_articles(_user=Depends(require_role("admin"))):
     """Clear all cached articles."""
     try:
         async with httpx.AsyncClient(timeout=30, headers=_mcp_headers()) as client:

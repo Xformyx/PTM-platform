@@ -204,9 +204,11 @@ def _restart_stage(order_id: int, stage: str):
             logger.error(f"[Watchdog] Unknown stage '{stage}' for restart")
             return
 
+        from common.run_control import get_run_generation
         config = {
             "order_code": order_code,
             "restart_by_watchdog": True,
+            "run_generation": get_run_generation(order_id),
             **result_files,
             **analysis_opts,
         }

@@ -27,11 +27,24 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.core.database import get_db
 from app.core.redis import get_redis
-from app.dependencies import get_current_user
+from app.dependencies import get_current_user, require_role
 from app.models.ptmquant_job import PTMQuantJob
 
 router = APIRouter(prefix="/ptmquant", tags=["ptmquant"])
 logger = logging.getLogger("ptm-platform.ptmquant")
+
+
+def can_access_ptmquant_job(job: PTMQuantJob, user) -> bool:
+    """Admin may see every job; others only their own."""
+    if getattr(user, "role", None) == "admin":
+        return True
+    uid = getattr(user, "id", None)
+    return uid not in (None, 0) and job.user_id is not None and job.user_id == uid
+
+
+def require_ptmquant_job_access(job: PTMQuantJob, user) -> None:
+    if not can_access_ptmquant_job(job, user):
+        raise HTTPException(status_code=403, detail="Not authorized to access this job")
 
 settings = get_settings()
 
@@ -1045,7 +1058,7 @@ class JobResponse(BaseModel):
 # ──────────────────────────────────────────────────────────────────────────────
 
 @router.get("/memory-info")
-async def get_memory_info(_=Depends(get_current_user)):
+async def get_memory_info(_=Depends(require_role("admin"))):
     """Return host system total RAM and Docker daemon memory limit (in GB)."""
     host_total_gb: Optional[int] = None
     docker_limit_gb: Optional[int] = None
@@ -1068,25 +1081,25 @@ async def get_memory_info(_=Depends(get_current_user)):
 
 
 @router.get("/passes")
-async def list_passes(_=Depends(get_current_user)):
+async def list_passes(_=Depends(require_role("admin"))):
     """Return available PTM analysis pass types."""
     return AVAILABLE_PASSES
 
 
 @router.get("/enzymes")
-async def list_enzymes(_=Depends(get_current_user)):
+async def list_enzymes(_=Depends(require_role("admin"))):
     """Return supported proteolytic enzymes (v0.5.2)."""
     return AVAILABLE_ENZYMES
 
 
 @router.get("/instruments")
-async def list_instruments(_=Depends(get_current_user)):
+async def list_instruments(_=Depends(require_role("admin"))):
     """Return supported Orbitrap instrument presets (v0.5.2)."""
     return AVAILABLE_INSTRUMENTS
 
 
 @router.get("/files")
-async def list_files(path: str = "", _=Depends(get_current_user)):
+async def list_files(path: str = "", _=Depends(require_role("admin"))):
     """Browse .mzML files and subdirectories in file_share at the given relative path.
     Also returns FASTA references (always from data/reference/).
     """
@@ -1162,7 +1175,7 @@ async def list_files(path: str = "", _=Depends(get_current_user)):
 async def create_job(
     req: CreateJobRequest,
     db: AsyncSession = Depends(get_db),
-    user=Depends(get_current_user),
+    user=Depends(require_role("admin")),
 ):
     """Create and start a PTMQuant conversion job."""
     share = Path(settings.FILE_SHARE_DIR)
@@ -1328,11 +1341,12 @@ async def create_job(
 @router.get("/jobs")
 async def list_jobs(
     db: AsyncSession = Depends(get_db),
-    _=Depends(get_current_user),
+    user=Depends(get_current_user),
 ):
-    result = await db.execute(
-        select(PTMQuantJob).order_by(PTMQuantJob.created_at.desc()).limit(100)
-    )
+    query = select(PTMQuantJob).order_by(PTMQuantJob.created_at.desc()).limit(100)
+    if getattr(user, "role", None) != "admin":
+        query = query.where(PTMQuantJob.user_id == user.id)
+    result = await db.execute(query)
     jobs = result.scalars().all()
     return [JobResponse.from_orm(j) for j in jobs]
 
@@ -1341,12 +1355,13 @@ async def list_jobs(
 async def get_job(
     job_id: str,
     db: AsyncSession = Depends(get_db),
-    _=Depends(get_current_user),
+    user=Depends(get_current_user),
 ):
     result = await db.execute(select(PTMQuantJob).where(PTMQuantJob.job_id == job_id))
     job = result.scalar_one_or_none()
     if not job:
         raise HTTPException(404, detail="Job not found")
+    require_ptmquant_job_access(job, user)
     return JobResponse.from_orm(job)
 
 
@@ -1354,12 +1369,13 @@ async def get_job(
 async def get_job_log(
     job_id: str,
     db: AsyncSession = Depends(get_db),
-    _=Depends(get_current_user),
+    user=Depends(get_current_user),
 ):
     result = await db.execute(select(PTMQuantJob).where(PTMQuantJob.job_id == job_id))
     job = result.scalar_one_or_none()
     if not job:
         raise HTTPException(404, detail="Job not found")
+    require_ptmquant_job_access(job, user)
     return PlainTextResponse(job.log or "")
 
 
@@ -1367,13 +1383,14 @@ async def get_job_log(
 async def cancel_job(
     job_id: str,
     db: AsyncSession = Depends(get_db),
-    _=Depends(get_current_user),
+    user=Depends(get_current_user),
 ):
     """Kill the running Docker container and mark job as cancelled."""
     result = await db.execute(select(PTMQuantJob).where(PTMQuantJob.job_id == job_id))
     job = result.scalar_one_or_none()
     if not job:
         raise HTTPException(404, detail="Job not found")
+    require_ptmquant_job_access(job, user)
     if job.status not in ("pending", "running"):
         raise HTTPException(400, detail=f"Job is not active (status: {job.status})")
 
@@ -1411,13 +1428,14 @@ async def cancel_job(
 async def retry_job(
     job_id: str,
     db: AsyncSession = Depends(get_db),
-    _=Depends(get_current_user),
+    user=Depends(get_current_user),
 ):
     """Reset a finished job (failed, cancelled, or done) and re-run it with the same settings."""
     result = await db.execute(select(PTMQuantJob).where(PTMQuantJob.job_id == job_id))
     job = result.scalar_one_or_none()
     if not job:
         raise HTTPException(404, detail="Job not found")
+    require_ptmquant_job_access(job, user)
     if job.status not in ("failed", "cancelled", "done"):
         raise HTTPException(
             400,
@@ -1445,12 +1463,13 @@ async def retry_job(
 async def delete_job(
     job_id: str,
     db: AsyncSession = Depends(get_db),
-    _=Depends(get_current_user),
+    user=Depends(get_current_user),
 ):
     result = await db.execute(select(PTMQuantJob).where(PTMQuantJob.job_id == job_id))
     job = result.scalar_one_or_none()
     if not job:
         raise HTTPException(404, detail="Job not found")
+    require_ptmquant_job_access(job, user)
 
     job_dir = Path(settings.PTMQUANT_DIR) / job_id
     if job_dir.exists():
@@ -1464,12 +1483,13 @@ async def delete_job(
 async def list_job_files(
     job_id: str,
     db: AsyncSession = Depends(get_db),
-    _=Depends(get_current_user),
+    user=Depends(get_current_user),
 ):
     result = await db.execute(select(PTMQuantJob).where(PTMQuantJob.job_id == job_id))
     job = result.scalar_one_or_none()
     if not job:
         raise HTTPException(404, detail="Job not found")
+    require_ptmquant_job_access(job, user)
 
     if not job.output_subdir:
         return []
@@ -1505,12 +1525,13 @@ async def download_job_file(
     job_id: str,
     filename: str,
     db: AsyncSession = Depends(get_db),
-    _=Depends(get_current_user),
+    user=Depends(get_current_user),
 ):
     result = await db.execute(select(PTMQuantJob).where(PTMQuantJob.job_id == job_id))
     job = result.scalar_one_or_none()
     if not job or not job.output_subdir:
         raise HTTPException(404, detail="Job not found")
+    require_ptmquant_job_access(job, user)
 
     file_path = Path(settings.FILE_SHARE_DIR) / job.output_subdir / filename
     if not file_path.exists() or not file_path.is_file():
@@ -1536,13 +1557,14 @@ async def preview_job_file(
     filename: str,
     lines: int = 100,
     db: AsyncSession = Depends(get_db),
-    _=Depends(get_current_user),
+    user=Depends(get_current_user),
 ):
     """Return first N lines of a TSV/text file for preview."""
     result = await db.execute(select(PTMQuantJob).where(PTMQuantJob.job_id == job_id))
     job = result.scalar_one_or_none()
     if not job or not job.output_subdir:
         raise HTTPException(404, detail="Job not found")
+    require_ptmquant_job_access(job, user)
 
     file_path = Path(settings.FILE_SHARE_DIR) / job.output_subdir / filename
     if not file_path.exists() or not file_path.is_file():

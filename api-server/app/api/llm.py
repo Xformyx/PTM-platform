@@ -11,7 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
 from app.core.database import get_db
-from app.dependencies import get_current_user
+from app.core.security import decrypt_secret, encrypt_secret
+from app.dependencies import get_current_user, require_role
 from app.models.llm_model import LlmModel
 
 router = APIRouter(prefix="/llm", tags=["llm"])
@@ -70,14 +71,14 @@ async def list_models(
 async def create_model(
     body: LlmModelCreate,
     db: AsyncSession = Depends(get_db),
-    user=Depends(get_current_user),
+    user=Depends(require_role("admin")),
 ):
     model = LlmModel(
         name=body.name,
         provider=body.provider,
         model_id=body.model_id,
         endpoint_url=body.endpoint_url,
-        api_key_encrypted=body.api_key,
+        api_key_encrypted=encrypt_secret(body.api_key),
         purpose=body.purpose,
         default_temp=body.default_temp,
         max_tokens=body.max_tokens,
@@ -94,7 +95,7 @@ async def update_model(
     model_id: int,
     body: LlmModelUpdate,
     db: AsyncSession = Depends(get_db),
-    user=Depends(get_current_user),
+    user=Depends(require_role("admin")),
 ):
     result = await db.execute(select(LlmModel).where(LlmModel.id == model_id))
     model = result.scalar_one_or_none()
@@ -103,7 +104,7 @@ async def update_model(
 
     for field, value in body.model_dump(exclude_unset=True).items():
         if field == "api_key":
-            model.api_key_encrypted = value
+            model.api_key_encrypted = encrypt_secret(value) if value else None
         else:
             setattr(model, field, value)
 
@@ -115,7 +116,7 @@ async def update_model(
 async def delete_model(
     model_id: int,
     db: AsyncSession = Depends(get_db),
-    user=Depends(get_current_user),
+    user=Depends(require_role("admin")),
 ):
     result = await db.execute(select(LlmModel).where(LlmModel.id == model_id))
     model = result.scalar_one_or_none()
@@ -131,7 +132,7 @@ async def delete_model(
 async def sync_ollama_models(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    user=Depends(get_current_user),
+    user=Depends(require_role("admin")),
 ):
     try:
         async with httpx.AsyncClient(timeout=10) as client:
@@ -169,7 +170,7 @@ async def test_model(
     model_id: int,
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    user=Depends(get_current_user),
+    user=Depends(require_role("admin")),
 ):
     result = await db.execute(select(LlmModel).where(LlmModel.id == model_id))
     model = result.scalar_one_or_none()
@@ -192,7 +193,7 @@ async def test_model(
     # Cloud LLM test: use DB-stored API key first, fallback to .env
     if model.provider in ("gemini", "openai"):
         import os
-        api_key = model.api_key_encrypted or (
+        api_key = decrypt_secret(model.api_key_encrypted) or (
             settings.GEMINI_API_KEY if model.provider == "gemini"
             else (settings.OPENAI_API_KEY or os.getenv("OPENAI_API_KEY", ""))
         )
@@ -250,7 +251,7 @@ class OllamaPullRequest(BaseModel):
 async def pull_ollama_model(
     body: OllamaPullRequest,
     settings: Settings = Depends(get_settings),
-    user=Depends(get_current_user),
+    user=Depends(require_role("admin")),
 ):
     """Stream Ollama model pull progress as SSE."""
 
@@ -298,7 +299,7 @@ async def delete_ollama_model(
     body: OllamaDeleteRequest,
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    user=Depends(get_current_user),
+    user=Depends(require_role("admin")),
 ):
     """Delete a model from Ollama and remove from DB."""
     try:

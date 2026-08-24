@@ -3717,6 +3717,7 @@ export default function OrderDetail() {
   } | null>(null);
   const [pptxLlm, setPptxLlm] = useState("");
   const stopRequestRef = useRef(false);
+  const startRequestRef = useRef(false);
   const lastLogIdRef = useRef(0);
 
   const isRunning = !!order && !["completed", "failed", "registered", "cancelled"].includes(order.status);
@@ -4206,12 +4207,19 @@ export default function OrderDetail() {
     rag_collections?: number[] | null;
   }) => {
     if (!pendingAction) return;
+    if (startRequestRef.current) return;
+    startRequestRef.current = true;
     try {
       await api.patch(`/orders/${orderId}`, opts);
       const runningStatuses = ["queued", "preprocessing", "rag_enrichment", "report_generation"];
       if (order && runningStatuses.includes(order.status)) {
         await api.post(`/orders/${orderId}/cancel`);
-        await new Promise((r) => setTimeout(r, 1500));
+        const deadline = Date.now() + 10000;
+        while (Date.now() < deadline) {
+          const s = await api.get<{ status: string }>(`/orders/${orderId}/status`);
+          if (s.status === "cancelled") break;
+          await new Promise((r) => setTimeout(r, 300));
+        }
       }
       if (pendingAction.type === "run-stage") {
         await api.post(`/orders/${orderId}/run-stage`, { stage: pendingAction.stage });
@@ -4228,11 +4236,15 @@ export default function OrderDetail() {
     } catch (err: any) {
       alert(err.message || "Failed to run");
       throw err;
+    } finally {
+      startRequestRef.current = false;
     }
   };
 
   const handleStart = async () => {
+    if (startRequestRef.current) return;
     if (order?.status === "registered") {
+      startRequestRef.current = true;
       try {
         await api.post(`/orders/${orderId}/start`);
         const [o, l] = await Promise.all([
@@ -4243,6 +4255,8 @@ export default function OrderDetail() {
         setLogs(l.logs);
       } catch (err: any) {
         alert(err.message || "Failed to start");
+      } finally {
+        startRequestRef.current = false;
       }
     } else {
       openRerunModal({ type: "start" });

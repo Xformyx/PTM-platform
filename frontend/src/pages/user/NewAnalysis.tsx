@@ -2,11 +2,11 @@
  * NewAnalysis — Simplified analysis request for general users.
  * 
  * Flow:
- * Step 1: Upload files (pr_matrix, pg_matrix, FASTA) + describe experiment
+ * Step 1: Upload files (pr_matrix, pg_matrix; FASTA optional) + describe experiment
  * Step 2: AI auto-infers sample config → user confirms (Yes/No)
  * Step 3: Analysis starts
  */
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -76,6 +76,12 @@ export default function NewAnalysis() {
   const [correctionText, setCorrectionText] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pdfInputRef = useRef<HTMLInputElement>(null);
+  const [referenceStatus, setReferenceStatus] = useState<{
+    ready: boolean;
+    fasta_filename: string | null;
+    message: string;
+  } | null>(null);
+  const [referenceLoading, setReferenceLoading] = useState(false);
 
   // ── File handling ──────────────────────────────────────────────────────
   const detectFileType = (filename: string): UploadedFile["type"] => {
@@ -115,8 +121,41 @@ export default function NewAnalysis() {
 
   const hasRawData = files.some((f) => f.type === "raw_data");
   const hasFasta = files.some((f) => f.type === "fasta");
-  const hasSearchResult = files.some((f) => f.type === "search_result");
-  const canProceed = (hasRawData || hasSearchResult) && hasFasta && description.trim().length > 0;
+  const searchResults = files.filter((f) => f.type === "search_result");
+  const hasPr = searchResults.some((f) => /(?:^|[._-])pr(?:[._-]|$)|precursor/i.test(f.name));
+  const hasPg = searchResults.some((f) => /(?:^|[._-])pg(?:[._-]|$)|protein/i.test(f.name));
+  const hasBothMatrices = (hasPr && hasPg) || searchResults.length >= 2;
+  const canProceed = hasBothMatrices && description.trim().length > 0;
+  const uploadedFastaName = files.find((f) => f.type === "fasta")?.name ?? null;
+
+  useEffect(() => {
+    if (step !== "confirm" || hasFasta || !inferredConfig?.organism) {
+      setReferenceStatus(null);
+      setReferenceLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setReferenceLoading(true);
+    setReferenceStatus(null);
+    api
+      .get<{ ready: boolean; fasta_filename: string | null; message: string }>(
+        `/orders/reference-status?species=${encodeURIComponent(inferredConfig.organism)}`,
+      )
+      .then((status) => {
+        if (!cancelled) setReferenceStatus(status);
+      })
+      .catch(() => {
+        if (!cancelled) setReferenceStatus(null);
+      })
+      .finally(() => {
+        if (!cancelled) setReferenceLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [step, hasFasta, inferredConfig?.organism]);
+
+  const platformFastaBlocked = !hasFasta && (referenceLoading || referenceStatus?.ready === false);
 
   // ── AI Inference ───────────────────────────────────────────────────────
   const handleInfer = async () => {
@@ -198,7 +237,11 @@ export default function NewAnalysis() {
         body: formData,
       });
 
-      if (!result.ok) throw new Error("Failed to create analysis");
+      if (!result.ok) {
+        const raw = await result.json().catch(() => null);
+        const detail = raw && typeof raw === "object" ? (raw as { detail?: unknown }).detail : null;
+        throw new Error(typeof detail === "string" && detail.trim() ? detail : "Failed to create analysis");
+      }
       const { order_id } = await result.json();
       navigate(`/app/${order_id}`);
     } catch (err: any) {
@@ -214,7 +257,7 @@ export default function NewAnalysis() {
       <div className="mb-8">
         <h1 className="text-2xl font-bold tracking-tight">New Analysis</h1>
         <p className="text-muted-foreground mt-1">
-          mzML 파일을 업로드하고 실험을 설명해주세요. Mekii가 자동으로 처리합니다.
+          검색 결과(PR/PG matrix)를 업로드하고 실험을 설명해주세요. Mekii가 자동으로 처리합니다.
         </p>
       </div>
 
@@ -263,13 +306,13 @@ export default function NewAnalysis() {
             <CardContent className="space-y-4">
               {/* Required files info */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                <div className={`p-3 rounded-lg border-2 border-dashed ${hasRawData ? "border-green-300 bg-green-50 dark:bg-green-900/10" : "border-muted"}`}>
+                <div className={`p-3 rounded-lg border-2 border-dashed ${hasBothMatrices ? "border-green-300 bg-green-50 dark:bg-green-900/10" : "border-muted"}`}>
                   <div className="flex items-center gap-2 mb-1">
-                    <FileText className="h-4 w-4 text-primary" />
-                    <span className="text-sm font-medium">질량분석 데이터</span>
-                    {hasRawData && <Check className="h-3 w-3 text-green-600" />}
+                    <Database className="h-4 w-4 text-primary" />
+                    <span className="text-sm font-medium">Search Result <span className="text-destructive">*</span></span>
+                    {hasBothMatrices && <Check className="h-3 w-3 text-green-600" />}
                   </div>
-                  <p className="text-xs text-muted-foreground">.mzML 파일 (Thermo Orbitrap Tribrid급 이상, DIA 모드 권장)</p>
+                  <p className="text-xs text-muted-foreground">report.pr_matrix.tsv 와 report.pg_matrix.tsv (둘 다 필요)</p>
                 </div>
                 <div className={`p-3 rounded-lg border-2 border-dashed ${hasFasta ? "border-green-300 bg-green-50 dark:bg-green-900/10" : "border-muted"}`}>
                   <div className="flex items-center gap-2 mb-1">
@@ -277,22 +320,23 @@ export default function NewAnalysis() {
                     <span className="text-sm font-medium">protein.fasta</span>
                     {hasFasta && <Check className="h-3 w-3 text-green-600" />}
                   </div>
-                  <p className="text-xs text-muted-foreground">Protein FASTA DB (데이터 검색에 사용할 FASTA)</p>
+                  <p className="text-xs text-muted-foreground">
+                    선택. 없으면 실험 설명에서 추정한 종(mouse/human/rat)의 플랫폼 reference FASTA를 사용합니다.
+                  </p>
                 </div>
-                <div className={`p-3 rounded-lg border-2 border-dashed ${hasSearchResult ? "border-green-300 bg-green-50 dark:bg-green-900/10" : "border-muted"}`}>
+                <div className={`p-3 rounded-lg border-2 border-dashed ${hasRawData ? "border-green-300 bg-green-50 dark:bg-green-900/10" : "border-muted"}`}>
                   <div className="flex items-center gap-2 mb-1">
-                    <Database className="h-4 w-4 text-primary" />
-                    <span className="text-sm font-medium">Search Result</span>
-                    {hasSearchResult && <Check className="h-3 w-3 text-green-600" />}
+                    <FileText className="h-4 w-4 text-primary" />
+                    <span className="text-sm font-medium">질량분석 데이터</span>
+                    {hasRawData && <Check className="h-3 w-3 text-green-600" />}
                   </div>
-                  <p className="text-xs text-muted-foreground">report.pr_matrix.tsv / report.pg_matrix.tsv</p>
+                  <p className="text-xs text-muted-foreground">.mzML (선택, 참고용). 전처리는 PR/PG matrix로 시작합니다.</p>
                 </div>
               </div>
 
-              {/* Processing info */}
               <div className="p-3 rounded-lg bg-primary/5 border border-primary/20">
                 <p className="text-xs text-primary">
-                  💡 업로드된 mzML 파일은 Mekii의 자체 개발 search engine이 자동으로 PTM 정량 분석을 시작합니다.
+                  전처리는 DIA-NN 검색 결과(PR/PG matrix)가 있어야 시작할 수 있습니다. mzML만 올리면 빈 matrix로 분석이 돌아가지 않습니다.
                 </p>
               </div>
 
@@ -524,6 +568,21 @@ export default function NewAnalysis() {
                 <div>
                   <Label className="text-xs text-muted-foreground">Organism</Label>
                   <p className="font-medium">{inferredConfig.organism}</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {hasFasta
+                      ? `Using uploaded FASTA: ${uploadedFastaName}`
+                      : referenceLoading
+                        ? "Checking platform reference FASTA…"
+                        : referenceStatus?.ready
+                          ? `Using platform reference: ${referenceStatus.fasta_filename}`
+                          : "FASTA not uploaded — will use the platform reference for this organism."}
+                  </p>
+                  {!hasFasta && referenceStatus?.ready === false && (
+                    <Alert variant="destructive" className="mt-2 py-2">
+                      <AlertCircle className="h-4 w-4" />
+                      <AlertDescription className="text-xs">{referenceStatus.message}</AlertDescription>
+                    </Alert>
+                  )}
                 </div>
                 <div>
                   <Label className="text-xs text-muted-foreground">Detected Modifications</Label>
@@ -648,7 +707,7 @@ export default function NewAnalysis() {
               <Button
                 size="lg"
                 onClick={handleSubmit}
-                disabled={submitting}
+                disabled={submitting || platformFastaBlocked}
                 className="gap-2"
               >
                 {submitting ? (

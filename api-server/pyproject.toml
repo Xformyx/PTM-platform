@@ -13,6 +13,7 @@ dependencies = [
     "pydantic-settings>=2.0.0",
     "python-multipart>=0.0.9",
     "python-jose[cryptography]>=3.3.0",
+    "cryptography>=42.0.0",
     "passlib[bcrypt]>=1.7.4",
     "celery[redis]>=5.4.0",
     "redis>=5.0.0",

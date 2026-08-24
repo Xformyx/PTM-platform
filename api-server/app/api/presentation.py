@@ -16,11 +16,14 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.orders import _check_order_access_async
+from app.api.orders import _check_order_access_async, _require_write_access
 from app.config import Settings, get_settings
 from app.core.database import get_db
+from app.core.redis import get_redis
 from app.dependencies import get_current_user
 from app.models.order import Order
+
+_PPTX_TASK_TTL = 24 * 3600
 
 router = APIRouter(prefix="/orders", tags=["presentation"])
 logger = logging.getLogger("ptm-platform.presentation")
@@ -71,9 +74,7 @@ async def generate_pptx(
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
 
-    err = await _check_order_access_async(order, user, db)
-    if err:
-        raise HTTPException(status_code=403, detail=err)
+    await _require_write_access(order, user, db)
 
     if body.llm_provider not in ("gemini", "openai", "ollama"):
         raise HTTPException(
@@ -96,6 +97,9 @@ async def generate_pptx(
         args=[order_id, body.llm_provider, body.llm_model or ""],
         queue="report_generation",
     )
+    redis = await get_redis()
+    await redis.set(f"pptx_task:{order_id}:{task.id}", "1", ex=_PPTX_TASK_TTL)
+
     logger.info(
         "[PPTX] queued order=%s task_id=%s provider=%s",
         order.order_code,
@@ -123,9 +127,13 @@ async def generate_pptx_status(
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
 
-    err = await _check_order_access_async(order, user, db)
-    if err:
-        raise HTTPException(status_code=403, detail=err)
+    # Raises 403 if no access. A share level string is success, not an error.
+    await _check_order_access_async(order, user, db)
+
+    redis = await get_redis()
+    bound = await redis.get(f"pptx_task:{order_id}:{task_id}")
+    if not bound:
+        raise HTTPException(status_code=404, detail="PPTX task not found for this order")
 
     celery_app = _celery_app()
     ar = AsyncResult(task_id, app=celery_app)

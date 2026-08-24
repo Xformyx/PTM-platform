@@ -6,6 +6,7 @@ import threading
 import redis
 
 from common.db_update import get_order_status, insert_order_log, update_order_progress
+from common.run_control import bound_run_is_stale, save_celery_task_id  # noqa: F401
 
 logger = logging.getLogger("ptm-workers.progress")
 
@@ -28,25 +29,6 @@ def get_redis_client():
     return _redis_client
 
 
-# Same key the API cancel endpoint reads (api-server/app/api/orders.py).
-_CELERY_TASK_KEY = "celery_task:{order_id}"
-_CELERY_TASK_TTL = 7 * 24 * 3600
-
-
-def save_celery_task_id(order_id: int, task_id: str) -> None:
-    """Record the active Celery task so API cancel can revoke chained stages."""
-    if not task_id:
-        return
-    try:
-        get_redis_client().set(
-            _CELERY_TASK_KEY.format(order_id=order_id),
-            task_id,
-            ex=_CELERY_TASK_TTL,
-        )
-    except Exception as exc:
-        logger.warning(f"Failed to persist celery task id for order {order_id}: {exc}")
-
-
 def publish_progress(
     order_id: int,
     stage: str,
@@ -56,7 +38,7 @@ def publish_progress(
     message: str = "",
     metadata: dict = None,
 ):
-    if get_order_status(order_id) == "cancelled":
+    if get_order_status(order_id) == "cancelled" or bound_run_is_stale():
         return
 
     payload = {
@@ -109,7 +91,7 @@ def publish_analysis_log(
     By default does NOT write to order_logs (DB) to avoid log bloat.
     Set persist=True for milestone events that should survive a page reload.
     """
-    if get_order_status(order_id) == "cancelled":
+    if get_order_status(order_id) == "cancelled" or bound_run_is_stale():
         return
 
     if persist:

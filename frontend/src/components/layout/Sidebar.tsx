@@ -25,6 +25,10 @@ import {
   ChevronRight,
   Microscope,
   GitCompareArrows,
+  Copy,
+  Check,
+  FileText,
+  ScrollText,
   type LucideIcon,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -68,6 +72,8 @@ const mainNav: NavItem[] = [
   { path: "/admin/rag", label: "RAG Collections", icon: Library },
   { path: "/admin/llm", label: "LLM Models", icon: Brain },
   { path: "/admin/articles", label: "Article Cache", icon: BookOpen },
+  { path: "/admin/reports", label: "Reports", icon: FileText },
+  { path: "/admin/logs", label: "Logs", icon: ScrollText },
 ];
 
 function NavItemLink({ item, collapsed = false }: { item: NavItem; collapsed?: boolean }) {
@@ -260,18 +266,42 @@ function VersionDisplay({ collapsed }: { collapsed?: boolean }) {
   );
 }
 
+function TempPasswordBox({ password }: { password: string }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(password);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* ignore */
+    }
+  };
+  return (
+    <div className="rounded-md border bg-muted/50 px-3 py-2 space-y-1.5">
+      <p className="text-[11px] text-muted-foreground">Temporary password — copy now, it will not be shown again</p>
+      <div className="flex items-center gap-2">
+        <code className="flex-1 font-mono text-sm font-semibold break-all">{password}</code>
+        <Button type="button" variant="outline" size="sm" className="h-7 shrink-0" onClick={copy}>
+          {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function CreateUserModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [role, setRole] = useState<"admin" | "analyst">("analyst");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [success, setSuccess] = useState(false);
+  const [tempPassword, setTempPassword] = useState("");
 
   const emailValid = email === "" || EMAIL_RE.test(email);
 
   const reset = () => {
-    setEmail(""); setName(""); setRole("analyst"); setError(""); setSuccess(false);
+    setEmail(""); setName(""); setRole("analyst"); setError(""); setTempPassword("");
   };
   const handleClose = () => { reset(); onClose(); };
 
@@ -284,9 +314,8 @@ function CreateUserModal({ open, onClose }: { open: boolean; onClose: () => void
     }
     setLoading(true);
     try {
-      await api.post("/auth/users", { email, name, role });
-      setSuccess(true);
-      setTimeout(handleClose, 1800);
+      const created = await api.post<{ temporary_password: string }>("/auth/users", { email, name, role });
+      setTempPassword(created.temporary_password);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Failed to create user");
     } finally {
@@ -303,17 +332,17 @@ function CreateUserModal({ open, onClose }: { open: boolean; onClose: () => void
             Create User
           </DialogTitle>
           <DialogDescription>
-            New user will receive the temporary password{" "}
-            <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs font-semibold">
-              ptm1234
-            </code>{" "}
-            and must change it on first login.
+            A random temporary password is generated on the server. The user must change it on first login.
           </DialogDescription>
         </DialogHeader>
-        {success ? (
-          <p className="text-sm text-green-600 dark:text-green-400 py-4 text-center">
-            User created successfully!
-          </p>
+        {tempPassword ? (
+          <div className="space-y-3 pt-1">
+            <p className="text-sm text-green-600 dark:text-green-400">User created. Give them this password:</p>
+            <TempPasswordBox password={tempPassword} />
+            <Button type="button" variant="outline" className="w-full" onClick={handleClose}>
+              Done
+            </Button>
+          </div>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-3 pt-1">
             <div className="space-y-1.5">
@@ -428,8 +457,20 @@ function ManageUsersModal({ open, onClose }: { open: boolean; onClose: () => voi
     setResetting(u.id);
     setMessage(null);
     try {
-      await api.patch(`/auth/users/${u.id}`, { password: "ptm1234" });
-      setMessage({ id: u.id, text: "Reset to ptm1234", ok: true });
+      const res = await api.patch<{ temporary_password?: string; must_change_password: boolean }>(
+        `/auth/users/${u.id}`,
+        { reset_password: true },
+      );
+      setUsers((prev) =>
+        prev.map((p) => (p.id === u.id ? { ...p, must_change_password: res.must_change_password } : p)),
+      );
+      setMessage({
+        id: u.id,
+        text: res.temporary_password
+          ? `Temporary password: ${res.temporary_password}`
+          : "Password reset",
+        ok: true,
+      });
     } catch (err: unknown) {
       setMessage({ id: u.id, text: err instanceof Error ? err.message : "Failed", ok: false });
     } finally {
@@ -468,9 +509,7 @@ function ManageUsersModal({ open, onClose }: { open: boolean; onClose: () => voi
             Manage Users
           </DialogTitle>
           <DialogDescription>
-            Reset any user's password to the temporary password{" "}
-            <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs font-semibold">ptm1234</code>.
-            The user must change it on next login.
+            Reset Password generates a new random temporary password and shows it once. The user must change it on next login.
           </DialogDescription>
         </DialogHeader>
 

@@ -1809,6 +1809,13 @@ def run_rag_enrichment(self, order_id: int, config: dict):
           'all'              : all PTMs (no limit)
       - top_n_ptms: int                 (default 50 — used only when mode is 'top_n')
     """
+    from common.run_control import RunSuperseded, bind_run_generation, bound_run_is_stale, is_stale_generation
+
+    bind_run_generation(order_id, config.get("run_generation"))
+    if is_stale_generation(order_id, config.get("run_generation")):
+        logger.info(f"[Order {order_id}] RAG enrichment skipped — stale run_generation")
+        return {"order_id": order_id, "status": "skipped", "reason": "stale_generation"}
+
     start_time = time.time()
     order_code = config.get("order_code") or str(order_id)
     order_output = Path(OUTPUT_DIR) / order_code
@@ -2142,9 +2149,9 @@ def run_rag_enrichment(self, order_id: int, config: dict):
         def _cancellation_poller():
             while not cancel_event.is_set():
                 try:
-                    if get_order_status(order_id) == "cancelled":
+                    if get_order_status(order_id) == "cancelled" or bound_run_is_stale():
                         cancel_event.set()
-                        logger.info(f"[Order {order_id}] cancellation detected — signalling pipeline to stop")
+                        logger.info(f"[Order {order_id}] cancellation/stale run detected — signalling pipeline to stop")
                         break
                 except Exception:
                     pass
@@ -2364,6 +2371,7 @@ def run_rag_enrichment(self, order_id: int, config: dict):
             "analysis_mode": analysis_mode,
             "secondary_ptm_type": config.get("secondary_ptm_type"),
             "temporal_contract": config.get("temporal_contract"),
+            "run_generation": config.get("run_generation"),
         }
         # Cross-Talk: add secondary paths to report_config
         if analysis_mode == "cross_talk":
@@ -2412,6 +2420,9 @@ def run_rag_enrichment(self, order_id: int, config: dict):
             "next_stage": "report_generation",
         }
 
+    except RunSuperseded:
+        logger.info(f"[Order {order_id}] RAG enrichment stopped — run superseded")
+        return {"order_id": order_id, "status": "skipped", "reason": "superseded"}
     except Exception as e:
         elapsed = round(time.time() - start_time, 1)
         error_msg = f"RAG enrichment failed: {str(e)}"

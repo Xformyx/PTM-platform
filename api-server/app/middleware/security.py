@@ -43,7 +43,7 @@ from typing import Deque
 import httpx
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
-from starlette.responses import Response
+from starlette.responses import JSONResponse, Response
 
 logger = logging.getLogger("ptm-security")
 
@@ -54,7 +54,12 @@ SECURITY_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 # Rate-limit window: more than RATE_LIMIT_COUNT requests in RATE_LIMIT_WINDOW seconds
 RATE_LIMIT_WINDOW = 60   # seconds
-RATE_LIMIT_COUNT  = 60   # requests per window (more than 1/sec is suspicious)
+RATE_LIMIT_COUNT = 300   # SPA polling + page loads; login has a separate lockout
+
+# Health, SSE, and status polls are exempt so a live order page is not 429'd.
+_RATE_EXEMPT = re.compile(
+    r"^/api/(health(/|$)|version$|events/)|/api/orders/\d+/status$"
+)
 
 # Failed-login threshold: 5 failures in 5 minutes → log as brute-force
 LOGIN_FAIL_WINDOW  = 300  # seconds
@@ -172,14 +177,32 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         path = request.url.path
         now  = time.time()
 
+        is_login = (request.method == "POST" and "/auth/login" in path)
+
+        # Login lockout: too many recent failures → reject before hitting the handler
+        if is_login:
+            fails = _login_fails[ip]
+            while fails and fails[0] < now - LOGIN_FAIL_WINDOW:
+                fails.popleft()
+            if len(fails) >= LOGIN_FAIL_THRESH:
+                asyncio.create_task(_log_event("brute_force", ip, request, 429))
+                return JSONResponse(
+                    {"detail": "Too many failed login attempts. Try again later."},
+                    status_code=429,
+                )
+
         # ── 1. Rate limiting ──────────────────────────────────────────────────
-        times = _request_times[ip]
-        times.append(now)
-        # Remove entries outside the window
-        while times and times[0] < now - RATE_LIMIT_WINDOW:
-            times.popleft()
-        if len(times) > RATE_LIMIT_COUNT:
-            asyncio.create_task(_log_event("rate_limit", ip, request, 429))
+        if not _RATE_EXEMPT.search(path):
+            times = _request_times[ip]
+            times.append(now)
+            while times and times[0] < now - RATE_LIMIT_WINDOW:
+                times.popleft()
+            if len(times) > RATE_LIMIT_COUNT:
+                asyncio.create_task(_log_event("rate_limit", ip, request, 429))
+                return JSONResponse(
+                    {"detail": "Too many requests"},
+                    status_code=429,
+                )
 
         # ── 2. Attack path scan ───────────────────────────────────────────────
         if ATTACK_PATHS.search(path):

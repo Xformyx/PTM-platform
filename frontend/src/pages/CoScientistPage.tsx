@@ -77,6 +77,21 @@ interface OrderMeta {
   created_at: string | null;
 }
 
+interface EvidenceItem {
+  source?: string;
+  text?: string;
+  title?: string;
+  excerpt?: string;
+}
+
+function evidenceTitle(ev: EvidenceItem): string {
+  return ev.title || ev.source || "Unknown";
+}
+
+function evidenceExcerpt(ev: EvidenceItem): string {
+  return ev.excerpt || ev.text || "";
+}
+
 interface Hypothesis {
   id: string;
   condition: string;
@@ -88,8 +103,8 @@ interface Hypothesis {
   status: string;
   signaling_chain: string;
   supporting_ptms: string[];
-  evidence_for: { source: string; text: string }[];
-  evidence_against: { source: string; text: string }[];
+  evidence_for: EvidenceItem[];
+  evidence_against: EvidenceItem[];
   testable_prediction: string;
 }
 
@@ -219,6 +234,12 @@ export default function CoScientistPage() {
 
   // Experiments
   const [designsLoading, setDesignsLoading] = useState(false);
+  const [reasoning, setReasoning] = useState<any>(null);
+  const [labHypothesisId, setLabHypothesisId] = useState("");
+  const [labOutcome, setLabOutcome] = useState("supports");
+  const [labSummary, setLabSummary] = useState("");
+  const [labPending, setLabPending] = useState(false);
+  const [labResultCount, setLabResultCount] = useState(0);
 
   // Expanded hypothesis row
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -264,6 +285,15 @@ export default function CoScientistPage() {
     return () => clearInterval(pollRef.current!);
   }, [sessionId, running]);
 
+  useEffect(() => {
+    if (!sessionId || running) return;
+    if (session?.status !== "completed" && session?.status !== "cancelled") return;
+    api
+      .get(`/coscientist/session/${sessionId}/scientific-reasoning`)
+      .then(setReasoning)
+      .catch(() => setReasoning(null));
+  }, [sessionId, running, session?.status]);
+
   // ─── Derived state ────────────────────────────────────────────────────────
   const filteredOrders = useMemo(() => {
     let list = orders;
@@ -286,6 +316,9 @@ export default function CoScientistPage() {
   );
 
   const isCompleted = session?.status === "completed";
+  const hasResults =
+    (isCompleted || session?.status === "cancelled") &&
+    (session?.top_hypotheses?.length ?? 0) > 0;
   const isSessionError = session?.status?.startsWith("error");
 
   // ─── Handlers ────────────────────────────────────────────────────────────
@@ -303,6 +336,8 @@ export default function CoScientistPage() {
     setSession(null);
     setRunning(true);
     setFeedbackCount(0);
+    setLabResultCount(0);
+    setReasoning(null);
     try {
       const res = await api.post<{ session_id: string }>("/coscientist/run", {
         order_codes: [...selectedCodes],
@@ -395,6 +430,26 @@ export default function CoScientistPage() {
       setRunError(e.message);
     } finally {
       setDesignsLoading(false);
+    }
+  }
+
+  async function handleLabResult() {
+    const hypothesisId = labHypothesisId || session?.top_hypotheses[0]?.id;
+    if (!sessionId || !hypothesisId) return;
+    setLabPending(true);
+    try {
+      await api.post(`/coscientist/session/${sessionId}/lab-results`, {
+        hypothesis_id: hypothesisId,
+        outcome: labOutcome,
+        result_summary: labSummary,
+      });
+      setLabSummary("");
+      setLabResultCount((n) => n + 1);
+      setReasoning(await api.get(`/coscientist/session/${sessionId}/scientific-reasoning`));
+    } catch (e: any) {
+      setRunError(e.message);
+    } finally {
+      setLabPending(false);
     }
   }
 
@@ -901,7 +956,7 @@ export default function CoScientistPage() {
                 <Button
                   variant="outline" size="sm" className="w-full"
                   onClick={handleRerun}
-                  disabled={running || feedbackCount === 0}
+                  disabled={running || (feedbackCount === 0 && labResultCount === 0)}
                 >
                   <RefreshCw className="h-3.5 w-3.5 mr-2" />
                   Re-run with feedback ({feedbackCount})
@@ -913,7 +968,7 @@ export default function CoScientistPage() {
       </div>
 
       {/* ── Results: hypotheses + experiment designs ─────────────────────── */}
-      {!running && session && isCompleted && (
+      {!running && session && hasResults && (
         <div id="cs-results" className="space-y-4">
           {/* Summary */}
           <div className="flex items-center justify-between">
@@ -1042,8 +1097,10 @@ export default function CoScientistPage() {
                                         <li key={i} className="flex items-start gap-1.5 text-muted-foreground">
                                           <BookOpen className="h-3 w-3 mt-0.5 shrink-0" />
                                           <span>
-                                            <span className="font-medium text-foreground">{ev.source}</span>
-                                            {" — "}{ev.text.slice(0, 120)}…
+                                            <span className="font-medium text-foreground">{evidenceTitle(ev)}</span>
+                                            {evidenceExcerpt(ev)
+                                              ? ` — ${evidenceExcerpt(ev).slice(0, 120)}…`
+                                              : ""}
                                           </span>
                                         </li>
                                       ))}
@@ -1120,6 +1177,70 @@ export default function CoScientistPage() {
                     ))}
                   </TableBody>
                 </Table>
+              </CardContent>
+            </Card>
+          )}
+
+          {(reasoning || session.top_hypotheses.length > 0) && (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-md bg-emerald-500/10">
+                    <BookOpen className="h-3.5 w-3.5 text-emerald-500" />
+                  </div>
+                  Scientific Reasoning & Lab Results
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3 text-xs">
+                {reasoning?.meta_review?.executive_summary && (
+                  <p className="text-muted-foreground">{reasoning.meta_review.executive_summary}</p>
+                )}
+                {reasoning?.evidence_graph?.summary && (
+                  <p className="text-muted-foreground">
+                    Graph: {reasoning.evidence_graph.summary.node_count ?? 0} nodes ·{" "}
+                    {reasoning.evidence_graph.summary.edge_count ?? 0} edges
+                    {reasoning.lab_results?.length
+                      ? ` · ${reasoning.lab_results.length} lab result(s)`
+                      : ""}
+                  </p>
+                )}
+                <div className="grid gap-2 sm:grid-cols-[1fr_140px_1fr_auto]">
+                  <Select
+                    value={labHypothesisId || session.top_hypotheses[0]?.id || ""}
+                    onValueChange={setLabHypothesisId}
+                  >
+                    <SelectTrigger className="h-8 text-xs">
+                      <SelectValue placeholder="Hypothesis" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {session.top_hypotheses.map((h) => (
+                        <SelectItem key={h.id} value={h.id} className="text-xs">
+                          {h.id} · {h.prediction.slice(0, 40)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Select value={labOutcome} onValueChange={setLabOutcome}>
+                    <SelectTrigger className="h-8 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="supports" className="text-xs">Supports</SelectItem>
+                      <SelectItem value="contradicts" className="text-xs">Contradicts</SelectItem>
+                      <SelectItem value="inconclusive" className="text-xs">Inconclusive</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Textarea
+                    value={labSummary}
+                    onChange={(e) => setLabSummary(e.target.value)}
+                    placeholder="Observed assay result…"
+                    rows={1}
+                    className="text-xs resize-none min-h-8"
+                  />
+                  <Button size="sm" onClick={handleLabResult} disabled={labPending || !labSummary.trim()}>
+                    {labPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Record"}
+                  </Button>
+                </div>
               </CardContent>
             </Card>
           )}

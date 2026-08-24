@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import type { ProgressEvent } from '@/lib/types';
+import { openEventSource } from '@/lib/sse';
 
 export function useOrderProgress(orderId: number | null) {
   const [progress, setProgress] = useState<ProgressEvent | null>(null);
@@ -7,47 +8,54 @@ export function useOrderProgress(orderId: number | null) {
   const [connected, setConnected] = useState(false);
   const eventSourceRef = useRef<EventSource | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelledRef = useRef(false);
 
   const connect = useCallback(() => {
     if (!orderId) return;
+    cancelledRef.current = false;
 
-    // EventSource cannot send custom headers, so pass the JWT as a query param.
-    // The server's get_sse_user dependency accepts both Bearer header and ?token=.
-    const token = localStorage.getItem('ptm-token');
-    const url = `/api/events/orders/${orderId}${token ? `?token=${encodeURIComponent(token)}` : ''}`;
-    const es = new EventSource(url);
-    eventSourceRef.current = es;
+    openEventSource(`/api/events/orders/${orderId}`)
+      .then((es) => {
+        if (cancelledRef.current) {
+          es.close();
+          return;
+        }
+        eventSourceRef.current = es;
+        es.onopen = () => setConnected(true);
 
-    es.onopen = () => setConnected(true);
-
-    es.addEventListener('progress', (event) => {
-      try {
-        const data: ProgressEvent = {
-          ...JSON.parse(event.data),
-          _ts: Date.now(),
-        };
-        setProgress(data);
-        setEvents((prev) => {
-          const next = [...prev, data];
-          return next.length > 500 ? next.slice(-500) : next;
+        es.addEventListener('progress', (event) => {
+          try {
+            const data: ProgressEvent = {
+              ...JSON.parse(event.data),
+              _ts: Date.now(),
+            };
+            setProgress(data);
+            setEvents((prev) => {
+              const next = [...prev, data];
+              return next.length > 500 ? next.slice(-500) : next;
+            });
+          } catch {
+            // ignore parse errors
+          }
         });
-      } catch {
-        // ignore parse errors
-      }
-    });
 
-    es.onerror = () => {
-      setConnected(false);
-      es.close();
-      // Store the timer so it can be cleared if the component unmounts before
-      // the reconnect fires, preventing zombie EventSource connections.
-      reconnectTimerRef.current = setTimeout(connect, 3000);
-    };
+        es.onerror = () => {
+          setConnected(false);
+          es.close();
+          reconnectTimerRef.current = setTimeout(connect, 3000);
+        };
+      })
+      .catch(() => {
+        if (!cancelledRef.current) {
+          reconnectTimerRef.current = setTimeout(connect, 3000);
+        }
+      });
   }, [orderId]);
 
   useEffect(() => {
     connect();
     return () => {
+      cancelledRef.current = true;
       if (reconnectTimerRef.current !== null) {
         clearTimeout(reconnectTimerRef.current);
         reconnectTimerRef.current = null;
@@ -57,6 +65,7 @@ export function useOrderProgress(orderId: number | null) {
   }, [connect]);
 
   const disconnect = useCallback(() => {
+    cancelledRef.current = true;
     if (reconnectTimerRef.current !== null) {
       clearTimeout(reconnectTimerRef.current);
       reconnectTimerRef.current = null;

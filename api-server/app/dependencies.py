@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
 from app.core.database import get_db
+from app.core.redis import get_redis
 from app.core.security import decode_access_token
 from app.models.user import User
 
@@ -67,15 +68,16 @@ async def _resolve_user_from_token(
 
 async def get_sse_user(
     request: Request,
-    token: Optional[str] = Query(None, description="JWT for EventSource (cannot send headers)"),
+    ticket: Optional[str] = Query(None, description="Short-lived SSE ticket from POST /events/ticket"),
+    token: Optional[str] = Query(None, description="Deprecated JWT query param; prefer ticket"),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> User | InternalUser:
     """Auth dependency for SSE endpoints.
 
-    The browser EventSource API does not support custom headers, so we accept
-    the JWT both as the standard ``Authorization: Bearer`` header **and** as a
-    ``?token=`` query parameter.  The header takes precedence when present.
+    EventSource cannot send headers. Prefer a short-lived ``ticket`` from
+    POST /api/events/ticket so the long-lived JWT is not copied into URLs.
+    Bearer header still wins when present.
     """
     if not settings.AUTH_ENABLED:
         return InternalUser()
@@ -84,17 +86,36 @@ async def get_sse_user(
     if auth_header and auth_header.startswith("Bearer "):
         return await _resolve_user_from_token(auth_header.removeprefix("Bearer "), db)
 
+    if ticket:
+        redis = await get_redis()
+        raw_id = await redis.get(f"sse_ticket:{ticket}")
+        if not raw_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or expired SSE ticket",
+            )
+        if str(raw_id) == "0":
+            return InternalUser()
+        result = await db.execute(select(User).where(User.id == int(raw_id)))
+        user = result.scalar_one_or_none()
+        if user is None or not user.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User not found or inactive",
+            )
+        return user
+
     if token:
         return await _resolve_user_from_token(token, db)
 
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Missing authorization (provide Authorization header or ?token= query param)",
+        detail="Missing authorization (provide Authorization header or ?ticket=)",
     )
 
 
 def require_sse_role(*roles: str):
-    """Like require_role, but for EventSource endpoints (header or ?token=)."""
+    """Like require_role, but for EventSource endpoints (header, ?ticket=, or deprecated ?token=)."""
     async def checker(user=Depends(get_sse_user)):
         if user.role not in roles:
             raise HTTPException(
@@ -116,3 +137,12 @@ def require_role(*roles: str):
         return user
 
     return checker
+
+
+def assert_not_viewer(user) -> None:
+    """Reject viewer accounts on write paths."""
+    if getattr(user, "role", None) == "viewer":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Viewer role is read-only",
+        )

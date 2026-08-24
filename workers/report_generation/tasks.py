@@ -314,6 +314,13 @@ def run_report_generation(self, order_id: int, config: dict):
       - llm_model: str                (default from env)
       - report_title: str
     """
+    from common.run_control import RunSuperseded, bind_run_generation, is_stale_generation
+
+    bind_run_generation(order_id, config.get("run_generation"))
+    if is_stale_generation(order_id, config.get("run_generation")):
+        logger.info(f"[Order {order_id}] Report generation skipped — stale run_generation")
+        return {"order_id": order_id, "status": "skipped", "reason": "stale_generation"}
+
     lock_key = f"report_gen_lock:{order_id}"
     lock_client = _redis.from_url(_REDIS_URL, decode_responses=True)
     acquired = lock_client.set(lock_key, "1", nx=True, ex=14400)  # 4-hour TTL
@@ -326,10 +333,14 @@ def run_report_generation(self, order_id: int, config: dict):
 
     _current_status = get_order_status(order_id)
     # Allow report generation only from valid predecessor states.
-    # "rag_enrichment" = normal chain from RAG; "completed"/"failed" = explicit run-stage re-run.
-    # Any other status (cancelled, queued, preprocessing, None) means this task is stale from
-    # a previous run and must NOT overwrite the current pipeline state.
-    _allowed_start_statuses = {"rag_enrichment", "completed", "failed"}
+    # "rag_enrichment" = normal chain from RAG.
+    # "completed"/"failed" = explicit re-run before the API flips status.
+    # "report_generation" = POST /orders/{id}/run-stage sets this before dispatch
+    # so the UI shows in-progress; do NOT treat it as stale.
+    # "queued" is intentionally excluded — that is the preprocessing/RAG dispatch
+    # marker and also the leftover status of a cancelled/restarted pipeline.
+    # cancelled / preprocessing / None = stale task; must not overwrite state.
+    _allowed_start_statuses = {"rag_enrichment", "completed", "failed", "report_generation"}
     if _current_status not in _allowed_start_statuses:
         try:
             lock_client.delete(lock_key)
@@ -949,6 +960,9 @@ def run_report_generation(self, order_id: int, config: dict):
             "output_files": output_file_names,
         }
 
+    except RunSuperseded:
+        logger.info(f"[Order {order_id}] Report generation stopped — run superseded")
+        return {"order_id": order_id, "status": "skipped", "reason": "superseded"}
     except Exception as e:
         elapsed = round(time.time() - start_time, 1)
         error_msg = f"Report generation failed: {str(e)}"

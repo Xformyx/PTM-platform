@@ -40,6 +40,12 @@ def update_order_status(
     stage_detail: str | None = None,
 ):
     try:
+        try:
+            from common.run_control import bound_run_is_stale
+            if bound_run_is_stale():
+                return
+        except Exception:
+            pass
         existing = get_order_status(order_id)
         if existing == "cancelled":
             # User stopped the job — do not let pipeline workers overwrite status/stage.

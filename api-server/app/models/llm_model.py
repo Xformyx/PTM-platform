@@ -20,7 +20,7 @@ class LlmModel(Base):
     model_id: Mapped[str] = mapped_column(String(255), nullable=False)
     endpoint_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     api_key_encrypted: Mapped[Optional[str]] = mapped_column(
-        String(500), nullable=True
+        String(1024), nullable=True
     )
     purpose: Mapped[str] = mapped_column(
         Enum("analysis", "synthesis", "qa", "general", name="llm_purpose"),

@@ -98,6 +98,7 @@ class UpdateUserRequest(BaseModel):
     role: str | None = None
     is_active: bool | None = None
     password: str | None = None
+    reset_password: bool | None = None
 
 
 @router.post("/login")
@@ -269,7 +270,12 @@ async def update_user(
         target.role = body.role
     if body.is_active is not None:
         target.is_active = body.is_active
-    if body.password is not None:
+    generated_password: str | None = None
+    if body.reset_password:
+        generated_password = _generate_temp_password()
+        target.password_hash = hash_password(generated_password)
+        target.must_change_password = True
+    elif body.password is not None:
         if len(body.password) < 6:
             raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
         target.password_hash = hash_password(body.password)
@@ -277,7 +283,7 @@ async def update_user(
 
     await db.commit()
     await db.refresh(target)
-    return {
+    payload = {
         "id": target.id,
         "email": target.email,
         "name": target.name,
@@ -285,6 +291,9 @@ async def update_user(
         "is_active": target.is_active,
         "must_change_password": target.must_change_password,
     }
+    if generated_password:
+        payload["temporary_password"] = generated_password
+    return payload
 
 
 @router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)

@@ -9,14 +9,14 @@ from typing import Optional
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, UploadFile, File, Form, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from sqlalchemy import select, text, func as sqlfunc
+from sqlalchemy import select, text, func as sqlfunc, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.core.database import get_db
 from app.core.redis import get_redis
 from app.core.webhook import send_order_webhook
-from app.dependencies import get_current_user
+from app.dependencies import assert_not_viewer, get_current_user
 from app.models.order import Order, OrderLog, OrderShare
 from app.models.rag_collection import RagCollection
 from app.models.user import User
@@ -28,14 +28,21 @@ _STAGE_LOCK_KEYS = [
     "report_gen_lock:{order_id}",
 ]
 
-# Redis key pattern for tracking the active Celery task per order (TTL 7 days).
+# Shared with workers/common/run_control.py (same Redis DB as REDIS_URL).
 _CELERY_TASK_KEY = "celery_task:{order_id}"
+_CELERY_TASKS_SET = "celery_tasks:{order_id}"
+_RUN_GEN_KEY = "order_run_gen:{order_id}"
+_CELERY_TASK_TTL = 7 * 24 * 3600
 
 
 async def _save_celery_task_id(order_id: int, task_id: str) -> None:
-    """Persist the active Celery task ID so cancel can revoke it."""
+    """Persist latest + SET of Celery task IDs so cancel can revoke the chain."""
     r = await get_redis()
-    await r.set(_CELERY_TASK_KEY.format(order_id=order_id), task_id, ex=7 * 24 * 3600)
+    pipe = r.pipeline()
+    pipe.set(_CELERY_TASK_KEY.format(order_id=order_id), task_id, ex=_CELERY_TASK_TTL)
+    pipe.sadd(_CELERY_TASKS_SET.format(order_id=order_id), task_id)
+    pipe.expire(_CELERY_TASKS_SET.format(order_id=order_id), _CELERY_TASK_TTL)
+    await pipe.execute()
 
 
 async def _get_celery_task_id(order_id: int) -> str | None:
@@ -43,6 +50,34 @@ async def _get_celery_task_id(order_id: int) -> str | None:
     r = await get_redis()
     val = await r.get(_CELERY_TASK_KEY.format(order_id=order_id))
     return val if isinstance(val, str) else (val.decode() if val else None)
+
+
+async def _get_celery_task_ids(order_id: int) -> list[str]:
+    r = await get_redis()
+    members = await r.smembers(_CELERY_TASKS_SET.format(order_id=order_id))
+    ids = []
+    for item in members or []:
+        ids.append(item if isinstance(item, str) else item.decode())
+    latest = await _get_celery_task_id(order_id)
+    if latest and latest not in ids:
+        ids.append(latest)
+    return ids
+
+
+async def _clear_celery_task_ids(order_id: int) -> None:
+    r = await get_redis()
+    await r.delete(
+        _CELERY_TASK_KEY.format(order_id=order_id),
+        _CELERY_TASKS_SET.format(order_id=order_id),
+    )
+
+
+async def _bump_run_generation(order_id: int) -> int:
+    """Increment the per-order run token. Stale workers compare against this."""
+    r = await get_redis()
+    val = await r.incr(_RUN_GEN_KEY.format(order_id=order_id))
+    await r.expire(_RUN_GEN_KEY.format(order_id=order_id), _CELERY_TASK_TTL)
+    return int(val)
 
 
 async def _clear_order_locks(order_id: int) -> int:
@@ -281,6 +316,123 @@ async def list_orders(
     }
 
 
+_REPORT_GLOBS = ("comprehensive_report*.md", "*_report_*.md", "*.pptx", "*.pdf")
+
+
+def _accessible_order_clause(user):
+    """SQL filter: admin sees all; others see owned + shared orders."""
+    from sqlalchemy import or_
+
+    if getattr(user, "role", "admin") == "admin":
+        return None
+    uid = user.id
+    return or_(Order.user_id == uid, OrderShare.shared_with_user_id == uid)
+
+
+@router.get("/reports")
+async def list_generated_reports(
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+    settings=Depends(get_settings),
+):
+    """List generated report files across orders the caller can access."""
+    from sqlalchemy import or_
+
+    query = select(Order).order_by(Order.completed_at.desc().nullslast(), Order.id.desc())
+    access = _accessible_order_clause(user)
+    if access is not None:
+        query = (
+            query.outerjoin(
+                OrderShare,
+                (OrderShare.order_id == Order.id) & (OrderShare.shared_with_user_id == user.id),
+            )
+            .where(or_(Order.user_id == user.id, OrderShare.shared_with_user_id == user.id))
+        )
+    query = query.where(Order.status.in_(("completed", "failed", "cancelled"))).limit(200)
+    result = await db.execute(query)
+    orders = result.scalars().unique().all()
+
+    reports = []
+    output_root = Path(settings.OUTPUT_DIR)
+    for order in orders:
+        output_dir = output_root / (order.order_code or str(order.id))
+        if not output_dir.is_dir():
+            continue
+        seen: set[str] = set()
+        for pattern in _REPORT_GLOBS:
+            for path in output_dir.glob(pattern):
+                if not path.is_file() or path.name in seen:
+                    continue
+                seen.add(path.name)
+                stat = path.stat()
+                ext = path.suffix.lower().lstrip(".")
+                kind = "pptx" if ext == "pptx" else "pdf" if ext == "pdf" else "markdown"
+                reports.append({
+                    "order_id": order.id,
+                    "order_code": order.order_code,
+                    "project_name": order.project_name,
+                    "ptm_type": order.ptm_type,
+                    "status": order.status,
+                    "filename": path.name,
+                    "kind": kind,
+                    "size_bytes": stat.st_size,
+                    "modified_at": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+                    "completed_at": order.completed_at.isoformat() + "Z" if order.completed_at else None,
+                })
+
+    reports.sort(key=lambda r: r["modified_at"] or "", reverse=True)
+    return {"reports": reports, "total": len(reports)}
+
+
+@router.get("/pipeline-logs")
+async def list_pipeline_logs(
+    stage: Optional[str] = None,
+    limit: int = 200,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Recent pipeline logs across orders the caller can access."""
+    from sqlalchemy import or_
+
+    limit = max(1, min(limit, 500))
+    query = (
+        select(OrderLog, Order.order_code, Order.project_name, Order.id)
+        .join(Order, Order.id == OrderLog.order_id)
+        .order_by(OrderLog.created_at.desc())
+        .limit(limit)
+    )
+    if getattr(user, "role", "admin") != "admin":
+        query = (
+            query.outerjoin(
+                OrderShare,
+                (OrderShare.order_id == Order.id) & (OrderShare.shared_with_user_id == user.id),
+            )
+            .where(or_(Order.user_id == user.id, OrderShare.shared_with_user_id == user.id))
+        )
+    if stage:
+        query = query.where(OrderLog.stage == stage)
+
+    result = await db.execute(query)
+    rows = result.all()
+    return {
+        "logs": [
+            {
+                "id": log.id,
+                "order_id": oid,
+                "order_code": order_code,
+                "project_name": project_name,
+                "stage": log.stage,
+                "step": log.step,
+                "status": log.status,
+                "progress_pct": float(log.progress_pct) if log.progress_pct is not None else None,
+                "message": log.message,
+                "created_at": log.created_at.isoformat() + "Z" if log.created_at else None,
+            }
+            for log, order_code, project_name, oid in rows
+        ]
+    }
+
+
 async def _get_share_access(order_id: int, user_id: int, db: AsyncSession) -> Optional[str]:
     """Return the share access level for a user on an order, or None if not shared."""
     result = await db.execute(
@@ -307,9 +459,89 @@ async def _check_order_access_async(order, user, db: AsyncSession) -> Optional[s
 
 async def _require_write_access(order, user, db: AsyncSession) -> None:
     """Allow only owner/admin/full_access shared users to perform write operations."""
+    assert_not_viewer(user)
     share_access = await _check_order_access_async(order, user, db)
     if share_access == "read_only":
         raise HTTPException(status_code=403, detail="This order is shared as read-only. Write operations are not permitted.")
+
+
+async def _resolve_order_chromadb_collections(order, db: AsyncSession) -> list[str]:
+    """Return active ChromaDB names for this order's RAG selection.
+
+    If the order stored collection IDs, only those (still-active) collections
+    are used. An empty/missing selection keeps the previous start-order
+    fallback: every active collection.
+    """
+    selected = order.rag_collections
+    if selected and isinstance(selected, list) and len(selected) > 0:
+        coll_result = await db.execute(
+            select(RagCollection.chromadb_name).where(
+                RagCollection.id.in_(selected),
+                RagCollection.is_active == True,
+            )
+        )
+        names = [r[0] for r in coll_result.fetchall()]
+        logger.info(
+            "Order %s: using %s selected RAG collections",
+            order.order_code,
+            len(names),
+        )
+        return names
+
+    coll_result = await db.execute(
+        select(RagCollection.chromadb_name).where(RagCollection.is_active == True)
+    )
+    names = [r[0] for r in coll_result.fetchall()]
+    logger.info(
+        "Order %s: using all %s active RAG collections",
+        order.order_code,
+        len(names),
+    )
+    return names
+
+
+_START_ALLOWED = ("registered", "failed", "completed", "cancelled")
+_RUN_STAGE_ALLOWED = ("completed", "failed", "cancelled")
+
+
+async def _claim_order_dispatch(
+    db: AsyncSession,
+    order_id: int,
+    *,
+    allowed_statuses: tuple[str, ...],
+    new_status: str,
+    current_stage: str,
+    user_id: int | None = None,
+    set_started: bool = False,
+) -> bool:
+    """Atomically move an order into a dispatch state.
+
+    Two concurrent start/run-stage requests both pass a Python status check;
+    only the first UPDATE that still matches *allowed_statuses* wins.
+    Returns False if another request already claimed the order.
+    """
+    values: dict = {
+        "status": new_status,
+        "current_stage": current_stage,
+        "progress_pct": 0,
+        "error_message": None,
+    }
+    if set_started:
+        values["completed_at"] = None
+        values["started_at"] = datetime.utcnow()
+        values["run_by_user_id"] = user_id
+    result = await db.execute(
+        update(Order)
+        .where(Order.id == order_id, Order.status.in_(allowed_statuses))
+        .values(**values)
+        .execution_options(synchronize_session=False)
+    )
+    await db.commit()
+    claimed = (result.rowcount or 0) > 0
+    if not claimed:
+        return False
+    await _clear_celery_task_ids(order_id)
+    return True
 
 
 def _check_order_access(order, user):
@@ -388,6 +620,7 @@ async def share_order(
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
     _check_order_access(order, user)
+    assert_not_viewer(user)
 
     # Verify target user exists and is non-admin
     target = await db.execute(select(User).where(User.id == body.user_id))
@@ -399,7 +632,7 @@ async def share_order(
     if target_user.id == order.user_id:
         raise HTTPException(status_code=400, detail="Cannot share with the order owner")
 
-    # Upsert share
+    # Insert only — unique (order_id, shared_with_user_id)
     existing = await db.execute(
         select(OrderShare).where(
             OrderShare.order_id == order_id,
@@ -408,14 +641,12 @@ async def share_order(
     )
     share = existing.scalar_one_or_none()
     if share:
-        share.access_level = body.access_level
-    else:
-        share = OrderShare(
-            order_id=order_id,
-            shared_with_user_id=body.user_id,
-            access_level=body.access_level,
-        )
-        db.add(share)
+        raise HTTPException(status_code=409, detail="Already shared with this user")
+    db.add(OrderShare(
+        order_id=order_id,
+        shared_with_user_id=body.user_id,
+        access_level=body.access_level,
+    ))
     await db.commit()
     return {"status": "ok", "user_id": body.user_id, "access_level": body.access_level}
 
@@ -883,15 +1114,33 @@ async def start_order(
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
     await _require_write_access(order, user, db)
-    if order.status not in ("registered", "failed", "completed", "cancelled"):
+    if order.status not in _START_ALLOWED:
         raise HTTPException(
             status_code=400, detail=f"Cannot start order in '{order.status}' status"
         )
 
+    prev_status = order.status
+    claimed = await _claim_order_dispatch(
+        db,
+        order.id,
+        allowed_statuses=_START_ALLOWED,
+        new_status="queued",
+        current_stage="preprocessing",
+        user_id=user.id if getattr(user, "id", 0) != 0 else None,
+        set_started=True,
+    )
+    if not claimed:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This order is already starting or running",
+        )
+    run_generation = await _bump_run_generation(order.id)
+    await db.refresh(order)
+
     await _clear_order_locks(order_id)
 
     # For completed or cancelled orders, clear output dir so full pipeline runs from scratch
-    if order.status in ("completed", "cancelled"):
+    if prev_status in ("completed", "cancelled"):
         output_dir = os.getenv("OUTPUT_DIR", "/app/data/outputs")
         order_output = Path(output_dir) / order.order_code
         if order_output.exists():
@@ -910,14 +1159,6 @@ async def start_order(
         await db.execute(text("DELETE FROM webhook_sent_log WHERE order_id = :oid"), {"oid": order.id})
     except Exception:
         pass
-
-    order.status = "queued"
-    order.current_stage = "preprocessing"
-    order.progress_pct = 0
-    order.started_at = datetime.utcnow()
-    order.completed_at = None
-    order.error_message = None
-    order.run_by_user_id = user.id if getattr(user, "id", 0) != 0 else None
     await db.commit()
 
     condition_map = _build_condition_map(order.sample_config)
@@ -926,29 +1167,7 @@ async def start_order(
 
     species_context = _require_species_context(order.species)
 
-    # Gather ChromaDB collections for RAG retrieval
-    # If user selected specific collections, use only those; otherwise use all active
-    selected_collection_ids = None
-    if order.rag_collections and isinstance(order.rag_collections, list) and len(order.rag_collections) > 0:
-        selected_collection_ids = order.rag_collections
-
-    if selected_collection_ids:
-        # User selected specific collections — resolve their chromadb_names
-        coll_result = await db.execute(
-            select(RagCollection.chromadb_name).where(
-                RagCollection.id.in_(selected_collection_ids),
-                RagCollection.is_active == True,
-            )
-        )
-        active_collections = [r[0] for r in coll_result.fetchall()]
-        logger.info(f"Order {order.order_code}: using {len(active_collections)} selected RAG collections")
-    else:
-        # No selection — use all active collections (backward compatible)
-        coll_result = await db.execute(
-            select(RagCollection.chromadb_name).where(RagCollection.is_active == True)
-        )
-        active_collections = [r[0] for r in coll_result.fetchall()]
-        logger.info(f"Order {order.order_code}: using all {len(active_collections)} active RAG collections")
+    active_collections = await _resolve_order_chromadb_collections(order, db)
 
     sample_cfg = order.sample_config or {}
     report_opts = order.report_options or {}
@@ -989,6 +1208,7 @@ async def start_order(
         "secondary_ptm_type": order.secondary_ptm_type,
         "secondary_sample_config": order.secondary_sample_config,
         "secondary_condition_map": _build_condition_map(order.secondary_sample_config) if order.secondary_sample_config else None,
+        "run_generation": run_generation,
     }
 
     from celery import Celery as CeleryClass
@@ -1176,13 +1396,11 @@ async def run_stage(
         raise HTTPException(status_code=404, detail="Order not found")
     await _require_write_access(order, user, db)
 
-    if order.status not in ("completed", "failed", "cancelled"):
+    if order.status not in _RUN_STAGE_ALLOWED:
         raise HTTPException(
             status_code=400,
             detail=f"Can only re-run stages for completed, failed, or cancelled orders (current: '{order.status}')",
         )
-
-    await _clear_order_locks(order_id)
 
     output_dir = os.getenv("OUTPUT_DIR", "/app/data/outputs")
     order_output = Path(output_dir) / order.order_code
@@ -1193,14 +1411,28 @@ async def run_stage(
             detail=f"Output directory not found for {order.order_code}. Run full analysis first.",
         )
 
+    new_status = "report_generation" if body.stage == "report_generation" else "queued"
+    claimed = await _claim_order_dispatch(
+        db,
+        order.id,
+        allowed_statuses=_RUN_STAGE_ALLOWED,
+        new_status=new_status,
+        current_stage=body.stage,
+    )
+    if not claimed:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This order is already starting or running",
+        )
+    run_generation = await _bump_run_generation(order.id)
+    await db.refresh(order)
+
+    await _clear_order_locks(order_id)
+
     ptm_mode = "phospho" if order.ptm_type == "phosphorylation" else "ubi"
     file_suffix = "_phospho" if ptm_mode == "phospho" else "_ubi"
 
-    # Gather active ChromaDB collection names
-    coll_result = await db.execute(
-        select(RagCollection.chromadb_name).where(RagCollection.is_active == True)
-    )
-    active_collections = [r[0] for r in coll_result.fetchall()]
+    active_collections = await _resolve_order_chromadb_collections(order, db)
 
     # Truncate logs + webhook records for stages that will be re-run
     stage_order = ["preprocessing", "rag_enrichment", "report_generation"]
@@ -1221,11 +1453,6 @@ async def run_stage(
         )
     except Exception:
         pass
-
-    order.status = "queued"
-    order.current_stage = body.stage
-    order.progress_pct = 0
-    order.error_message = None
 
     # v9.44: Invalidate kinase analysis cache when re-running from preprocessing
     if body.stage == "preprocessing":
@@ -1279,6 +1506,7 @@ async def run_stage(
             "report_title": (order.report_options or {}).get("report_title", "PTM Comprehensive Analysis Report"),
             "temporal_contract": (order.report_options or {}).get("temporal_contract", "dynamics_v1"),
             "chain_to_next": True,
+            "run_generation": run_generation,
         }
         task = celery_app.send_task(
             "preprocessing.tasks.run_preprocessing",
@@ -1306,6 +1534,7 @@ async def run_stage(
             "report_title": (order.report_options or {}).get("report_title", "PTM Comprehensive Analysis Report"),
             "temporal_contract": (order.report_options or {}).get("temporal_contract", "dynamics_v1"),
             "chain_to_next": True,
+            "run_generation": run_generation,
         }
         task = celery_app.send_task(
             "rag_enrichment.tasks.run_rag_enrichment",
@@ -1362,6 +1591,7 @@ async def run_stage(
             "top_n_ptms": (order.report_options or {}).get("top_n_ptms", 50),
             "ptm_selection_mode": (order.report_options or {}).get("ptm_selection_mode", "top_n"),
             "temporal_contract": report_opts.get("temporal_contract", "dynamics_v1"),
+            "run_generation": run_generation,
         }
         task = celery_app.send_task(
             "report_generation.tasks.run_report_generation",
@@ -1422,17 +1652,19 @@ async def cancel_order(
 
     await _clear_order_locks(order_id)
 
-    # Revoke the active Celery task so the worker actually stops.
-    task_id = await _get_celery_task_id(order_id)
-    if task_id:
+    # Revoke every known Celery task in the chain (preprocessing → RAG → report).
+    task_ids = await _get_celery_task_ids(order_id)
+    if task_ids:
         try:
             from celery import Celery as _Celery
             _capp = _Celery("ptm_workers")
             _capp.conf.broker_url = os.getenv("CELERY_BROKER_URL", "redis://redis:6379/1")
-            _capp.control.revoke(task_id, terminate=True, signal="SIGTERM")
-            logger.info(f"Order {order.order_code} Celery task {task_id} revoked")
+            for task_id in task_ids:
+                _capp.control.revoke(task_id, terminate=True, signal="SIGTERM")
+            logger.info(f"Order {order.order_code} Celery tasks revoked: {task_ids}")
         except Exception as exc:
-            logger.warning(f"Order {order.order_code} — could not revoke task {task_id}: {exc}")
+            logger.warning(f"Order {order.order_code} — could not revoke tasks {task_ids}: {exc}")
+        await _clear_celery_task_ids(order_id)
 
     logger.info(f"Order {order.order_code} cancelled (stopped)")
 
@@ -1465,7 +1697,12 @@ async def delete_order(
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    await _require_write_access(order, user, db)
+    assert_not_viewer(user)
+    if getattr(user, "role", None) != "admin" and order.user_id != getattr(user, "id", None):
+        raise HTTPException(
+            status_code=403,
+            detail="Only the order owner or an admin can delete this order",
+        )
 
     if order.status not in ("registered", "completed", "failed", "cancelled"):
         raise HTTPException(
@@ -1503,15 +1740,18 @@ async def get_order_status(
     user=Depends(get_current_user),
 ):
     """Lightweight polling endpoint — returns only status-relevant fields."""
+    from types import SimpleNamespace
+
     result = await db.execute(
         select(
             Order.id, Order.status, Order.current_stage, Order.progress_pct,
-            Order.stage_detail, Order.error_message,
+            Order.stage_detail, Order.error_message, Order.user_id,
         ).where(Order.id == order_id)
     )
     row = result.one_or_none()
     if not row:
         raise HTTPException(status_code=404, detail="Order not found")
+    await _check_order_access_async(SimpleNamespace(id=row[0], user_id=row[6]), user, db)
     status = row[1]
     current_stage = row[2]
 

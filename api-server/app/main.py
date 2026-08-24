@@ -124,6 +124,18 @@ async def _run_migrations(conn) -> None:
         conn, "ptmquant_jobs", "user_id",
         "user_id INT NULL, ADD CONSTRAINT fk_ptmquant_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL"
     )
+    try:
+        await conn.execute(text(
+            "ALTER TABLE llm_models MODIFY COLUMN api_key_encrypted VARCHAR(1024) NULL"
+        ))
+    except Exception:
+        pass
+    try:
+        await conn.execute(text(
+            "ALTER TABLE order_shares ADD UNIQUE INDEX uq_order_share (order_id, shared_with_user_id)"
+        ))
+    except Exception:
+        pass
     # ptmquant_jobs: enzyme / instrument / AlphaPeptDeep flags (v0.5.2)
     await _add_column_if_missing(
         conn, "ptmquant_jobs", "enzyme",

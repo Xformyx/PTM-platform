@@ -30,7 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
 from app.core.database import AsyncSessionLocal, get_db
-from app.dependencies import get_current_user
+from app.dependencies import assert_not_viewer, get_current_user
 from app.models.chat_message import ChatMessage as ChatMessageDB  # DB model (renamed to avoid clash)
 from app.models.order import Order
 from app.models.rag_collection import RagCollection
@@ -705,7 +705,13 @@ async def chat_with_analysis(
     user=Depends(get_current_user),
 ):
     """Stream AI chat responses based on order analysis context."""
-    # Save user message to DB
+    assert_not_viewer(user)
+    result = await db.execute(select(Order).where(Order.id == order_id))
+    order = result.scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    await _check_order_access_async(order, user, db)
+
     user_msg = ChatMessageDB(
         order_id=order_id,
         user_id=user.id,
@@ -719,13 +725,7 @@ async def chat_with_analysis(
     )
     db.add(user_msg)
     await db.commit()
-
-    # Load order
-    result = await db.execute(select(Order).where(Order.id == order_id))
-    order = result.scalar_one_or_none()
-    if not order:
-        raise HTTPException(status_code=404, detail="Order not found")
-    await _check_order_access_async(order, user, db)
+    await db.refresh(order)
 
     # Resolve RAG collection names from IDs
     rag_collection_names: List[str] = []
@@ -1047,6 +1047,7 @@ async def clear_chat_history(
     user=Depends(get_current_user),
 ):
     """Clear all chat history for this order (current user only)."""
+    assert_not_viewer(user)
     from sqlalchemy import delete
 
     order_result = await db.execute(select(Order).where(Order.id == order_id))

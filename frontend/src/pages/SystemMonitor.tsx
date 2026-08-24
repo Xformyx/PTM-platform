@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { RefreshCw, AlertCircle, CheckCircle2, HelpCircle, Server, Database, Cpu, Network, Terminal, ChevronDown, ChevronUp, Circle, RotateCcw, Loader2, Eye } from "lucide-react";
 import { api } from "@/lib/api";
+import { openEventSource } from "@/lib/sse";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -65,6 +66,7 @@ export default function SystemMonitor() {
   const logsContainerRef = useRef<HTMLDivElement>(null);
   const logsEndRef = useRef<HTMLDivElement>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
+  const streamGenRef = useRef(0);
   const autoScrollRef = useRef(true);
 
   // Context menu
@@ -118,6 +120,7 @@ export default function SystemMonitor() {
 
   // ── SSE Log Streaming ────────────────────────────────────────
   const closeStream = useCallback(() => {
+    streamGenRef.current += 1;
     if (eventSourceRef.current) {
       eventSourceRef.current.close();
       eventSourceRef.current = null;
@@ -129,54 +132,59 @@ export default function SystemMonitor() {
     closeStream();
     if (!containerId) return;
 
+    const gen = streamGenRef.current;
     setLogsLoading(true);
     setLogsError(null);
     setLogLines([]);
     autoScrollRef.current = true;
 
-    // Determine base URL for SSE (same origin, under /api/)
-    const baseUrl = window.location.origin;
-    const token = localStorage.getItem("ptm-token");
-    const sseUrl = `${baseUrl}/api/health/container-logs/${containerId}/stream?tail=200${
-      token ? `&token=${encodeURIComponent(token)}` : ""
-    }`;
+    const path = `/api/health/container-logs/${containerId}/stream?tail=200`;
+    openEventSource(path)
+      .then((es) => {
+        if (gen !== streamGenRef.current) {
+          es.close();
+          return;
+        }
+        eventSourceRef.current = es;
 
-    const es = new EventSource(sseUrl);
-    eventSourceRef.current = es;
-
-    es.addEventListener("log", (event: MessageEvent) => {
-      const line = event.data;
-      if (line !== undefined && line !== null) {
-        setLogLines((prev) => {
-          const next = [...prev, line];
-          // Trim to MAX_LOG_LINES to prevent memory bloat
-          return next.length > MAX_LOG_LINES ? next.slice(-MAX_LOG_LINES) : next;
+        es.addEventListener("log", (event: MessageEvent) => {
+          const line = event.data;
+          if (line !== undefined && line !== null) {
+            setLogLines((prev) => {
+              const next = [...prev, line];
+              return next.length > MAX_LOG_LINES ? next.slice(-MAX_LOG_LINES) : next;
+            });
+          }
+          setLogsLoading(false);
+          setStreaming(true);
         });
-      }
-      // First log event means loading is done
-      setLogsLoading(false);
-      setStreaming(true);
-    });
 
-    es.addEventListener("ping", () => {
-      // Keep-alive, just mark as connected
-      setLogsLoading(false);
-      setStreaming(true);
-    });
+        es.addEventListener("ping", () => {
+          setLogsLoading(false);
+          setStreaming(true);
+        });
 
-    es.onerror = () => {
-      // EventSource auto-reconnects on error, but if it closes we mark it
-      if (es.readyState === EventSource.CLOSED) {
+        es.onerror = () => {
+          es.close();
+          if (eventSourceRef.current === es) {
+            eventSourceRef.current = null;
+          }
+          setStreaming(false);
+          setLogsError("Log stream disconnected. Click Reconnect to retry.");
+          setLogsLoading(false);
+        };
+
+        es.onopen = () => {
+          setLogsLoading(false);
+          setStreaming(true);
+        };
+      })
+      .catch(() => {
+        if (gen !== streamGenRef.current) return;
+        setLogsLoading(false);
         setStreaming(false);
-        setLogsError("Log stream disconnected. Click Reconnect to retry.");
-      }
-      setLogsLoading(false);
-    };
-
-    es.onopen = () => {
-      setLogsLoading(false);
-      setStreaming(true);
-    };
+        setLogsError("Failed to start log stream. Click Reconnect to retry.");
+      });
   }, [closeStream]);
 
   // Start/stop stream when selected container changes

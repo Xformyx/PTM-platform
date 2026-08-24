@@ -94,7 +94,12 @@ export function ShareOrderModal({ open, onOpenChange, orderId, orderCode }: Prop
       setSelectedUserId("");
       await fetchData();
     } catch (e: any) {
-      setError(e.message || "Failed to share order");
+      const msg = String(e?.message || "");
+      if (msg.toLowerCase().includes("already shared")) {
+        setError("이미 이 사용자와 공유되어 있습니다");
+      } else {
+        setError(msg || "공유에 실패했습니다");
+      }
     } finally {
       setSubmitting(false);
     }

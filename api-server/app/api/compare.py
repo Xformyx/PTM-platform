@@ -84,6 +84,22 @@ async def _check_order_access(order: Order, user, db: AsyncSession):
         raise HTTPException(status_code=403, detail="Access denied")
 
 
+async def _require_compare_orders(
+    order_id_a: int, order_id_b: int, user, db: AsyncSession, *, write: bool = False
+) -> None:
+    """Load both orders and require the caller can access each."""
+    from app.dependencies import assert_not_viewer
+
+    if write:
+        assert_not_viewer(user)
+    for oid in (order_id_a, order_id_b):
+        result = await db.execute(select(Order).where(Order.id == oid))
+        order = result.scalar_one_or_none()
+        if not order:
+            raise HTTPException(status_code=404, detail=f"Order {oid} not found")
+        await _check_order_access(order, user, db)
+
+
 def _load_vector_data(output_dir: Path, ptm_type: str) -> list[dict]:
     """Load the ptm_vector_data TSV for an order."""
     import csv
@@ -1413,8 +1429,7 @@ async def stream_comparison_report(
     if not order_a or not order_b:
         raise HTTPException(status_code=404, detail="One or both orders not found")
 
-    await _check_order_access(order_a, user, db)
-    await _check_order_access(order_b, user, db)
+    await _require_compare_orders(body.order_id_a, body.order_id_b, user, db, write=True)
 
     if order_a.status != "completed" or order_b.status != "completed":
         raise HTTPException(status_code=400, detail="Both orders must be completed")
@@ -1617,6 +1632,7 @@ async def save_comparison_report(
 ):
     """Save (upsert) a comparison report for a given order pair and user."""
     from app.models.comparison_report import ComparisonReport as CR
+    await _require_compare_orders(body.order_id_a, body.order_id_b, user, db, write=True)
     user_id = user.id if user else None
 
     stmt = select(CR).where(
@@ -1669,6 +1685,9 @@ async def save_comparison_chat_only(
     order_id_a: int = body.get("order_id_a")
     order_id_b: int = body.get("order_id_b")
     chat_messages: list = body.get("chat_messages", [])
+    if not order_id_a or not order_id_b:
+        raise HTTPException(status_code=400, detail="order_id_a and order_id_b are required")
+    await _require_compare_orders(int(order_id_a), int(order_id_b), user, db, write=True)
     user_id = user.id if user else None
 
     stmt = select(CR).where(
@@ -1695,6 +1714,7 @@ async def get_saved_report(
 ):
     """Retrieve a previously saved comparison report for the given order pair."""
     from app.models.comparison_report import ComparisonReport as CR
+    await _require_compare_orders(a, b, user, db)
     user_id = user.id if user else None
 
     stmt = select(CR).where(
@@ -1775,6 +1795,8 @@ async def delete_comparison_report(
     user=Depends(get_current_user),
 ):
     """Delete a saved comparison report (only the owner can delete)."""
+    from app.dependencies import assert_not_viewer
+    assert_not_viewer(user)
     from app.models.comparison_report import ComparisonReport as CR
     user_id = user.id if user else None
 
@@ -1804,6 +1826,7 @@ async def export_comparison_pdf(
     from app.models.comparison_report import ComparisonReport as CR
     from app.services.pdf_report_generator import generate_report_pdf
 
+    await _require_compare_orders(body.order_id_a, body.order_id_b, user, db, write=True)
     user_id = user.id if user else None
 
     # Get saved report
@@ -1872,8 +1895,7 @@ async def stream_comparison_chat(
     if not order_a or not order_b:
         raise HTTPException(status_code=404, detail="One or both orders not found")
 
-    await _check_order_access(order_a, user, db)
-    await _check_order_access(order_b, user, db)
+    await _require_compare_orders(body.order_id_a, body.order_id_b, user, db, write=True)
 
     if order_a.status != "completed" or order_b.status != "completed":
         raise HTTPException(status_code=400, detail="Both orders must be completed")

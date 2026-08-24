@@ -34,6 +34,8 @@ OUTPUT_DIR = os.getenv("OUTPUT_DIR", "/data/outputs")
 def _make_progress_callback(order_id: int, stage: str, step: str, base_pct: float, range_pct: float):
     """Create a progress callback that maps [0,1] to [base_pct, base_pct+range_pct]."""
     def cb(fraction: float, message: str):
+        from common.run_control import abort_if_superseded
+        abort_if_superseded(order_id)
         pct = base_pct + fraction * range_pct
         publish_progress(order_id, stage, step, "running", round(pct, 1), message)
     return cb
@@ -181,6 +183,13 @@ def run_preprocessing(self, order_id: int, config: dict):
       - species_tax_id: str   (default '10090')
       - kegg_organism: str    (default 'mmu')
     """
+    from common.run_control import RunSuperseded, abort_if_superseded, bind_run_generation, is_stale_generation
+
+    bind_run_generation(order_id, config.get("run_generation"))
+    if is_stale_generation(order_id, config.get("run_generation")):
+        logger.info(f"[Order {order_id}] Preprocessing skipped — stale run_generation")
+        return {"order_id": order_id, "status": "skipped", "reason": "stale_generation"}
+
     start_time = time.time()
     order_code = config.get("order_code", f"order-{order_id}")
     order_output = Path(OUTPUT_DIR) / order_code
@@ -260,6 +269,8 @@ def run_preprocessing(self, order_id: int, config: dict):
             )
 
         file_suffix = "_phospho" if ptm_mode == "phospho" else "_ubi"
+
+        abort_if_superseded(order_id)
 
         # ================================================================
         # Step 1: PTM Quantification (0% – 50%)
@@ -876,6 +887,7 @@ def run_preprocessing(self, order_id: int, config: dict):
             "secondary_ptm_type": config.get("secondary_ptm_type", ""),
             "secondary_pr_matrix_path": secondary_pr_path,
             "secondary_pg_matrix_path": secondary_pg_path,
+            "run_generation": config.get("run_generation"),
         }
         rag_task = app.send_task(
             "rag_enrichment.tasks.run_rag_enrichment",
@@ -894,6 +906,9 @@ def run_preprocessing(self, order_id: int, config: dict):
             "next_stage": "rag_enrichment",
         }
 
+    except RunSuperseded:
+        logger.info(f"[Order {order_id}] Preprocessing stopped — run superseded")
+        return {"order_id": order_id, "status": "skipped", "reason": "superseded"}
     except Exception as e:
         elapsed = round(time.time() - start_time, 1)
         error_msg = f"Preprocessing failed: {str(e)}"
