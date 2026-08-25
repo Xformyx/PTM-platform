@@ -389,4 +389,4 @@ Backend: vector-plot (receptor inference)
 - [x] insulin workbook을 `insulin_signaling_v1` dataset manifest와 locked reference bundle로 변환
 - [x] sequence-aware anchor matcher, Tier 1/2 component scorer, provenance/result bundle writer 구현
 - [x] production contract (`tmm_full_temporal`)·blind policy·input/truth hash를 immutable result metadata로 저장
-- [ ] fixture 기반 unit test, source-boundary test, syntax/test validation, GitHub main commit/push 수행
+- [x] fixture 기반 unit test, source-boundary test, syntax/test validation, GitHub main commit/push 수행
