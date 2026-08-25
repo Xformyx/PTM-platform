@@ -1938,3 +1938,31 @@
 - **해석 한계:** 이미 끝난 0층 산출물은 지우지 않는다.
 - **결정성:** 해당 없음
 
+### [2026-08-26] Blind TMM을 HTTP 밖으로 옮겨 524 timeout 제거
+
+- **분류:** 정정
+- **대상:** `api-server/app/api/benchmarks.py`,
+  `frontend/src/components/BenchmarkEvaluationPanel.tsx`
+- **구현 대상 설계:** 해당 없음 (실행 게이트)
+- **사전등록 상태:** 해당 없음
+- **내용:** `Run TMM + locked score`가 요청 안에서 전체 TMM을 기다려 Cloudflare 524가
+  나던 경로를, 즉시 accept 후 BackgroundTask로 바꿨다. 산출 식은 동일하다.
+- **논문에서의 용도:** 사용 안 함
+- **해석 한계:** TMM 수치·locked score 정의를 바꾸지 않는다.
+- **결정성:** 해당 없음
+
+### [2026-08-26] Blind TMM 재시도가 화면에 반영되게 수정
+
+- **분류:** 정정
+- **대상:** `api-server/app/api/benchmarks.py`,
+  `api-server/app/services/benchmark_run_lifecycle.py`,
+  `frontend/src/components/BenchmarkEvaluationPanel.tsx`
+- **구현 대상 설계:** 해당 없음 (실행 게이트)
+- **사전등록 상태:** 해당 없음
+- **내용:** `temporal_analysis` leftover를 다시 눌러도 status가 같아서 SQLAlchemy가
+  UPDATE를 생략하고 UI가 그대로였다. accept 시각을 provenance에 쓰고,
+  TMM은 BackgroundTask 대신 event-loop task로 시작한다.
+- **논문에서의 용도:** 사용 안 함
+- **해석 한계:** TMM 산출 식과 locked score 정의를 바꾸지 않는다.
+- **결정성:** 해당 없음
+

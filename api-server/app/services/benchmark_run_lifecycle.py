@@ -7,7 +7,15 @@ not chain into RAG/LLM, and must keep the source Benchmark tab in sync.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
+
+TMM_ACCEPT_STALE_AFTER_SEC = 3 * 60 * 60
+"""Seconds after tmm_accepted_at_utc without an artifact before the UI treats TMM as interrupted.
+
+docs/implementation_log.md [2026-08-26] Blind TMM 재시도가 화면에서 무반응으로 보이던 실행 게이트.
+측정 상수가 아니다. 이 값으로 점수나 TMM 산출을 바꾸지 않는다.
+"""
 
 
 CHILD_PIPELINE_STATUSES = frozenset(
@@ -79,6 +87,36 @@ def overlay_run_status(
     if child_status == "completed" and run_status in {"failed", "registered", "cancelled"}:
         return "preprocessing", None
     return run_status, run_error
+
+
+def tmm_job_state(
+    run_status: str,
+    provenance: dict[str, Any] | None,
+    artifact_path: str | None,
+) -> str | None:
+    """Classify a temporal_analysis row as live or leftover.
+
+    A 524/restart leftover has status temporal_analysis and no accept stamp.
+    Retry writes tmm_accepted_at_utc so the Benchmark tab can change immediately.
+    """
+
+    if run_status != "temporal_analysis":
+        return None
+    if artifact_path:
+        return "running"
+    accepted = (provenance or {}).get("tmm_accepted_at_utc")
+    if not accepted:
+        return "interrupted"
+    try:
+        stamp = datetime.fromisoformat(str(accepted).replace("Z", "+00:00"))
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=timezone.utc)
+    except ValueError:
+        return "interrupted"
+    age = (datetime.now(timezone.utc) - stamp).total_seconds()
+    if age > TMM_ACCEPT_STALE_AFTER_SEC:
+        return "interrupted"
+    return "running"
 
 
 def run_phase(run_status: str, child_status: str | None) -> str:

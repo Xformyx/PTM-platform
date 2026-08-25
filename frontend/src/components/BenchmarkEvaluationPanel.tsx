@@ -22,11 +22,13 @@ type BenchmarkRun = {
   dataset_id: string;
   status: string;
   phase?: string;
+  tmm_job?: "running" | "interrupted" | null;
   production_contract: { id?: string; temporal_contract?: string };
   blind_context: { cell_context?: { lineage_class?: string } };
   score_summary?: Record<string, unknown> | null;
   error_message?: string | null;
   created_at?: string | null;
+  updated_at?: string | null;
   child_order?: {
     id: number;
     order_code: string;
@@ -64,7 +66,18 @@ function isLive(run: BenchmarkRun): boolean {
 }
 
 function isReadyForTmm(run: BenchmarkRun): boolean {
-  return run.phase === "ready_for_tmm" || run.child_order?.status === "completed" && run.status === "preprocessing";
+  return run.phase === "ready_for_tmm" || (run.child_order?.status === "completed" && run.status === "preprocessing");
+}
+
+function isStaleTmm(run: BenchmarkRun): boolean {
+  if (run.tmm_job === "running") return false;
+  if (run.tmm_job === "interrupted") return true;
+  return run.child_order?.status === "completed"
+    && (run.status === "temporal_analysis" || run.phase === "temporal_analysis");
+}
+
+function canStartTmm(run: BenchmarkRun): boolean {
+  return isReadyForTmm(run) || isStaleTmm(run);
 }
 
 function isLeftover(run: BenchmarkRun): boolean {
@@ -81,6 +94,8 @@ function runTone(run: BenchmarkRun): string {
 function runLabel(run: BenchmarkRun): string {
   if (isReadyForTmm(run)) return "ready for TMM";
   if (isLeftover(run)) return "abandoned";
+  if (isStaleTmm(run)) return "TMM interrupted";
+  if (run.status === "temporal_analysis" || run.phase === "temporal_analysis") return "TMM running";
   if (run.phase === "snapshot_running") return (run.child_order?.status || run.status).replace(/_/g, " ");
   return run.status.replace(/_/g, " ");
 }
@@ -112,6 +127,7 @@ function RunCard({
   onRetry: () => void;
 }) {
   const ready = isReadyForTmm(run);
+  const staleTmm = isStaleTmm(run);
   return (
     <div className={`border rounded-lg p-4 space-y-3 ${leftover ? "bg-muted/30" : ""}`}>
       <div className="flex flex-wrap justify-between items-start gap-2">
@@ -125,8 +141,8 @@ function RunCard({
             {run.child_order ? ` · snapshot ${run.child_order.status.replace(/_/g, " ")}` : ""}
           </p>
         </div>
-        {ready && !readOnly && (
-          <Button size="sm" variant="outline" disabled={submitting} onClick={onTemporal} className="gap-1"><FlaskConical className="h-3.5 w-3.5" /> Run TMM + locked score</Button>
+        {canStartTmm(run) && !readOnly && (
+          <Button type="button" size="sm" variant="outline" disabled={submitting} onClick={onTemporal} className="gap-1"><FlaskConical className="h-3.5 w-3.5" /> {staleTmm ? "Retry TMM + locked score" : "Run TMM + locked score"}</Button>
         )}
         {run.status === "failed" && !ready && !leftover && !readOnly && (
           <Button size="sm" variant="outline" disabled={submitting} onClick={onRetry} className="gap-1"><RefreshCw className="h-3.5 w-3.5" /> Retry preprocessing</Button>
@@ -137,6 +153,12 @@ function RunCard({
         <p className="text-xs text-amber-700">This leftover snapshot is still finishing an Order-list restart ({run.child_order.status.replace(/_/g, " ")}). Locked scoring uses 0층 outputs only.</p>
       )}
       {ready && <p className="text-xs text-emerald-700">0층 snapshot is ready. This is the run to score — do not start another blind benchmark.</p>}
+      {staleTmm && (
+        <p className="text-xs text-amber-700">The last TMM accept did not finish. Click Retry TMM + locked score — do not start another blind benchmark.</p>
+      )}
+      {run.tmm_job === "running" && (
+        <p className="text-xs text-sky-700">TMM is running on the API server. Kinase modules and the temporal heatmap take several minutes. This page refreshes automatically.</p>
+      )}
       {run.status === "completed" && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
           {scoreMetrics.length ? scoreMetrics.map(([key, value]) => <div key={key} className="rounded bg-muted/60 px-3 py-2"><p className="text-[10px] uppercase text-muted-foreground">{metricLabel(key)}</p><p className="font-mono text-sm font-semibold">{formattedMetric(value)}</p></div>) : <p className="text-sm text-muted-foreground">Score bundle completed. Detailed figures and source data are available in the result bundle.</p>}
@@ -155,6 +177,7 @@ export function BenchmarkEvaluationPanel({ orderId, readOnly }: { orderId: numbe
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const refresh = async () => {
     try {
@@ -250,11 +273,19 @@ export function BenchmarkEvaluationPanel({ orderId, readOnly }: { orderId: numbe
   const runTemporalAndScore = async (runId: number) => {
     setSubmitting(true);
     setMessage(null);
+    setNotice(null);
     try {
-      await api.post(`/benchmarks/runs/${runId}/run-temporal-analysis`);
+      await api.post(`/benchmarks/runs/${runId}/run-temporal-analysis`, {});
+      setNotice("TMM was accepted and started. The badge should change to TMM running. Wait here — do not start another benchmark.");
       await refresh();
     } catch (error: any) {
-      setMessage(error?.message || "Blind preprocessing may still be running. Try again after it completes.");
+      const text = String(error?.message || "");
+      if (/\b524\b/.test(text) || /timeout/i.test(text)) {
+        setMessage("The gateway timed out. TMM is a long job — Refresh in a minute. If the badge says TMM running, wait; do not start another benchmark.");
+      } else {
+        setMessage(text || "Blind preprocessing may still be running. Try again after it completes.");
+      }
+      await refresh();
     } finally {
       setSubmitting(false);
     }
@@ -284,6 +315,7 @@ export function BenchmarkEvaluationPanel({ orderId, readOnly }: { orderId: numbe
         </CardContent>
       </Card>
 
+      {notice && <Alert><CheckCircle2 className="h-4 w-4" /><AlertTitle>TMM started</AlertTitle><AlertDescription>{notice}</AlertDescription></Alert>}
       {message && <Alert variant="destructive"><AlertCircle className="h-4 w-4" /><AlertTitle>Benchmark action needs attention</AlertTitle><AlertDescription>{message}</AlertDescription></Alert>}
 
       <Card>

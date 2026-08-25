@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from app.services.benchmark_run_lifecycle import (
     apply_blind_child_task_config,
     is_benchmark_child,
@@ -5,6 +7,7 @@ from app.services.benchmark_run_lifecycle import (
     overlay_run_status,
     run_phase,
     should_reuse_existing_run,
+    tmm_job_state,
 )
 
 
@@ -39,6 +42,22 @@ def test_live_child_keeps_benchmark_tab_in_progress() -> None:
     assert run_phase("failed", "completed") == "ready_for_tmm"
     assert run_phase("failed", "cancelled") == "abandoned"
     assert run_phase("preprocessing", "rag_enrichment") == "abandoned"
+
+
+def test_tmm_job_state_distinguishes_stale_accept_from_live() -> None:
+    assert tmm_job_state("preprocessing", None, None) is None
+    assert tmm_job_state("temporal_analysis", None, None) == "interrupted"
+    assert tmm_job_state("temporal_analysis", {}, None) == "interrupted"
+    assert tmm_job_state("temporal_analysis", {"tmm_accepted_at_utc": "not-a-time"}, None) == "interrupted"
+    assert tmm_job_state("temporal_analysis", None, "/tmp/artifact.json") == "running"
+    assert (
+        tmm_job_state(
+            "temporal_analysis",
+            {"tmm_accepted_at_utc": datetime.now(timezone.utc).isoformat()},
+            None,
+        )
+        == "running"
+    )
 
 
 def test_child_start_cannot_chain_to_rag() -> None:
