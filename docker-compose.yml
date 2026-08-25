@@ -241,6 +241,40 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # Offline-only locked scorer. This is the sole runtime that receives
+  # benchmark references; API and ordinary workers never mount this directory.
+  benchmark-runner:
+    build:
+      context: .
+      dockerfile: benchmarking/Dockerfile
+    image: ptm-benchmark-runner:${VERSION_BENCHMARK:-001}
+    container_name: ptm-benchmark-runner
+    command: celery -A benchmarking.celery_app worker -Q benchmark -c ${BENCHMARK_CONCURRENCY:-1} -n benchmark@%h -l info
+    env_file:
+      - .env
+    volumes:
+      - ./benchmarking:/app/benchmarking:ro
+      - ./benchmarks:/opt/benchmarks:ro
+      - ./data:/app/data:ro
+      - ./storage/benchmarks:/app/storage/benchmarks
+    environment:
+      TZ: Asia/Seoul
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONPATH: /app:/opt
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      DATABASE_URL: mysql+asyncmy://${MYSQL_USER:-ptm_user}:${MYSQL_PASSWORD:-ptm_password_change_me}@mysql:3306/${MYSQL_DATABASE:-ptm_platform}?charset=utf8mb4
+      BENCHMARK_REFERENCE_DIR: /opt/benchmarks
+      BENCHMARK_RESULT_DIR: /app/storage/benchmarks
+    networks:
+      - ptm-network
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
   celery-worker-rag:
     build:
       context: .

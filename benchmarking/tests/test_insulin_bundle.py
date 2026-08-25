@@ -23,4 +23,11 @@ def test_insulin_bundle_is_hash_locked_and_contains_scoreable_tier_1_2_anchors()
     assert manifest.blind_policy["truth_available_to_scorer_only"] is True
     assert manifest.production_contract["representation_learning_in_primary_score"] is False
     assert scoreable
-    assert all(row.get("Anchor_ID") and row.get("Gene") and row.get("Rat_site") for row in scoreable)
+    assert all(row.get("Anchor_ID") and row.get("Gene") for row in scoreable)
+    directly_mapped = [row for row in scoreable if row.get("Rat_site")]
+    unresolved_orthologs = [row for row in scoreable if not row.get("Rat_site")]
+    assert directly_mapped
+    # The workbook deliberately retains conditional human/ortholog rows. They
+    # are not denominator-positive until a sequence+isoform+species mapping
+    # produces a concrete observed site in the offline scorer.
+    assert unresolved_orthologs

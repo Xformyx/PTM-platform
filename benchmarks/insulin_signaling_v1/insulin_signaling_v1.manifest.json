@@ -9,7 +9,7 @@
   "dataset_id": "insulin_signaling_v1",
   "display_name": "Insulin signaling phospho-kinase benchmark v1",
   "locked_truth_bundle": "locked_truth/insulin_signaling_v1.truth.json",
-  "locked_truth_sha256": "5bd3592177c30d7f886aa259358bcca82aa088763d1b55296f6e4562d509c4da",
+  "locked_truth_sha256": "f86b0d7c5b49a857945c8ce45a0cd7048eaa418fdb9650a5793c9315f64461c9",
   "production_contract": {
     "id": "tmm_full_temporal.v1",
     "kinase_scoring_method": "tmm_full_temporal",

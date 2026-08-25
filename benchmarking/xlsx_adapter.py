@@ -32,6 +32,15 @@ _HEADER_TOKENS = {
     "Benchmark_Rules": "Rule_ID",
 }
 
+# The analyst-owned Anchor Reference permits an empty Rat_site cell for a
+# human-reference-only anchor.  Excel can serialise that internal empty cell by
+# omitting it from a ragged row, which would otherwise shift every later field
+# one column to the left.  Keep this schema rule declarative and sheet-scoped;
+# no row IDs or biological facts are hard-coded here.
+_OPTIONAL_RAGGED_HEADERS = {
+    "Anchor_Reference": ("Rat_site",),
+}
+
 
 def build_insulin_locked_reference(
     workbook_path: str | Path,
@@ -56,6 +65,7 @@ def build_insulin_locked_reference(
         sheet: _worksheet_records(
             workbook[sheet].iter_rows(values_only=True),
             header_token=_HEADER_TOKENS[sheet],
+            optional_ragged_headers=_OPTIONAL_RAGGED_HEADERS.get(sheet, ()),
         )
         for sheet in INSULIN_REQUIRED_SHEETS
     }
@@ -118,7 +128,10 @@ def build_insulin_locked_reference(
 
 
 def _worksheet_records(
-    rows: Iterable[tuple[Any, ...]], *, header_token: str
+    rows: Iterable[tuple[Any, ...]],
+    *,
+    header_token: str,
+    optional_ragged_headers: tuple[str, ...] = (),
 ) -> list[dict[str, Any]]:
     materialized = list(rows)
     header_index = next(
@@ -139,13 +152,66 @@ def _worksheet_records(
     for row in materialized[header_index + 1 :]:
         if not any(value not in (None, "") for value in row):
             continue
+        normalized_row = _restore_optional_ragged_cells(
+            row,
+            normalized_headers,
+            optional_ragged_headers,
+        )
         record = {
             header: _json_value(value)
-            for header, value in zip(normalized_headers, row)
+            for header, value in zip(normalized_headers, normalized_row)
             if header
         }
         records.append(record)
     return records
+
+
+def _restore_optional_ragged_cells(
+    row: tuple[Any, ...],
+    headers: list[str],
+    optional_ragged_headers: tuple[str, ...],
+) -> tuple[Any, ...]:
+    """Restore omitted internal optional cells without inventing data.
+
+    A row may be shorter than its header only because a declared optional
+    header was omitted.  Insert ``None`` at the matching schema position.  If
+    the deficit cannot be fully explained, leave the row untouched rather than
+    guessing where a biological value belongs.
+    """
+
+    values = tuple(row)
+    if not optional_ragged_headers:
+        return values
+
+    optional_positions = [
+        headers.index(header)
+        for header in optional_ragged_headers
+        if header in headers
+    ]
+    if not optional_positions:
+        return values
+
+    if _row_alignment_is_valid(values, headers):
+        return values
+
+    restored = list(values)
+    for position in sorted(optional_positions):
+        restored.insert(position, None)
+    while len(restored) > len(headers) and restored[-1] in (None, ""):
+        restored.pop()
+    candidate = tuple(restored)
+    return candidate if _row_alignment_is_valid(candidate, headers) else values
+
+
+def _row_alignment_is_valid(values: tuple[Any, ...], headers: list[str]) -> bool:
+    """Validate only declared structural signals, never biological values."""
+
+    if len(values) != len(headers):
+        return False
+    if "Evidence_tier" not in headers:
+        return True
+    value = values[headers.index("Evidence_tier")]
+    return str(value or "").strip().startswith("Tier ")
 
 
 def _json_value(value: Any) -> Any:

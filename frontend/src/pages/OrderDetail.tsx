@@ -48,6 +48,7 @@ import { CoScientistTab } from "@/components/CoScientistTab";
 import KinaseModuleAnalysis from "@/components/KinaseModuleAnalysis";
 import ChatPanel from "@/components/ChatPanel";
 import { TemporalSubstrateAtlas } from "@/components/TemporalSubstrateAtlas";
+import { BenchmarkEvaluationPanel } from "@/components/BenchmarkEvaluationPanel";
 import {
   LineChart,
   Line,
@@ -4443,6 +4444,11 @@ export default function OrderDetail() {
               <RotateCcw className="h-4 w-4" /> Re-run from Beginning
             </Button>
           )}
+          {!isReadOnlyShared && ["completed", "cancelled"].includes(order.status) && (
+            <Button variant="outline" onClick={() => setActiveTab("benchmark")} className="gap-2">
+              <FlaskConical className="h-4 w-4" /> Benchmark Evaluation
+            </Button>
+          )}
         </div>
       </div>
 
@@ -4848,7 +4854,7 @@ export default function OrderDetail() {
       )}
 
       {/* Tabs: Overview / Analysis Statistics / Vector Plot / Results */}
-      <Tabs defaultValue="overview" onValueChange={(v) => setActiveTab(v)}>
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
         <div className="flex items-center justify-between gap-2">
           <TabsList className="flex-wrap h-auto gap-1">
             <TabsTrigger value="overview">
@@ -4887,12 +4893,20 @@ export default function OrderDetail() {
               <FlaskConical className="h-3.5 w-3.5 mr-1.5" />
               Co-Scientist
             </TabsTrigger>
+            <TabsTrigger value="benchmark">
+              <FlaskConical className="h-3.5 w-3.5 mr-1.5" />
+              Benchmark
+            </TabsTrigger>
           </TabsList>
           <Button variant="outline" size="sm" className="shrink-0" onClick={() => setDuplicateModalOpen(true)}>
             <CopyPlus className="h-3.5 w-3.5 mr-1.5" />
             Order Duplicate
           </Button>
         </div>
+
+        <TabsContent value="benchmark" className="space-y-4 mt-4">
+          <BenchmarkEvaluationPanel orderId={orderId} readOnly={isReadOnlyShared} />
+        </TabsContent>
 
         <TabsContent value="overview" className="space-y-4 mt-4">
           {/* Project & Sample Info */}

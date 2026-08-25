@@ -38,3 +38,38 @@ def test_adapter_builds_manifest_and_locked_truth(tmp_path: Path) -> None:
     assert truth["anchors"][0]["Anchor_ID"] == "A001"
     assert manifest.production_contract["id"] == "tmm_full_temporal.v1"
     assert json.loads(manifest_path.read_text())["blind_policy"]["truth_available_to_scorer_only"] is True
+
+
+def test_adapter_restores_declared_optional_anchor_cell_without_shifting_fields(tmp_path: Path) -> None:
+    source = tmp_path / "insulin-ragged.xlsx"
+    workbook = Workbook()
+    workbook.remove(workbook.active)
+    rows = {
+        "Anchor_Reference": [
+            ["Anchor_ID", "Gene", "Human_site", "Rat_site", "Mapping_status", "Evidence_tier", "Benchmark_truth_use"],
+            ["A001", "INSR", "Y960", "IRS docking motif", "Tier 2", "Positive truth if measurable"],
+        ],
+        "Kinase_Reference": [["Kinase_or_complex"], ["INSR"]],
+        "Temporal_Layers": [["Window_ID"], ["W01"]],
+        "Ambiguous_Sites": [["Site_or_pattern"], ["Y960"]],
+        "Scoring_Template": [["Anchor_ID"], ["A001"]],
+        "Benchmark_Rules": [["Rule_ID"], ["R01"]],
+    }
+    for name in INSULIN_REQUIRED_SHEETS:
+        sheet = workbook.create_sheet(name)
+        sheet.append([f"{name} title row"])
+        for row in rows[name]:
+            sheet.append(row)
+    # Reproduce the source workbook's ragged-row encoding: an empty internal
+    # Rat_site cell is represented as a shifted value plus a trailing blank.
+    anchor_sheet = workbook["Anchor_Reference"]
+    anchor_sheet.cell(row=3, column=7).value = None
+    workbook.save(source)
+
+    manifest_path, _ = build_insulin_locked_reference(source, tmp_path / "dataset")
+    truth = load_locked_truth_bundle(BenchmarkManifest.load(manifest_path))
+    anchor = truth["anchors"][0]
+    assert anchor["Rat_site"] is None
+    assert anchor["Mapping_status"] == "IRS docking motif"
+    assert anchor["Evidence_tier"] == "Tier 2"
+    assert anchor["Benchmark_truth_use"] == "Positive truth if measurable"

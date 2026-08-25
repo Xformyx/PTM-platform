@@ -1,4 +1,5 @@
 from app.models.chat_message import ChatMessage
+from app.models.benchmark_run import BenchmarkRun
 from app.models.comparison_report import ComparisonReport
 from app.models.llm_model import LlmModel
 from app.models.login_attempt import LoginAttempt
@@ -12,6 +13,7 @@ from app.models.user import User
 
 __all__ = [
     "User",
+    "BenchmarkRun",
     "LoginAttempt",
     "Notification",
     "Order",

@@ -390,3 +390,17 @@ Backend: vector-plot (receptor inference)
 - [x] sequence-aware anchor matcher, Tier 1/2 component scorer, provenance/result bundle writer 구현
 - [x] production contract (`tmm_full_temporal`)·blind policy·input/truth hash를 immutable result metadata로 저장
 - [x] fixture 기반 unit test, source-boundary test, syntax/test validation, GitHub main commit/push 수행
+
+## GitHub Credential Security Follow-up
+- [x] 대화에 노출된 GitHub PAT를 GitHub 보안 설정에서 revoke
+- [x] 브라우저 기반 GitHub 로그인 및 저장소 write 접근 재연결
+- [x] 새 PAT를 저장·대화 전송하지 않는 인증 운영 원칙 확인
+
+## Order-Integrated Blind BenchmarkRun Implementation
+- [x] 최신 GitHub main 기준 Order·worker·artifact·frontend 통합 지점 재확인
+- [x] BenchmarkRun persistence, status lifecycle, permission, immutable source-order snapshot API 구현
+- [x] server-side BlindContextBuilder와 lineage-only cell context sanitizer 구현
+- [x] 0층+1층 `tmm_full_temporal` artifact adapter와 generic site observation export 구현
+- [x] offline locked scorer job, provenance/result bundle, truth-reveal audit 구현
+- [x] Order Detail preflight·strict primary launch·status·score/figure results UI 구현
+- [ ] API/worker/frontend/benchmark boundary 회귀 테스트, syntax validation, GitHub main push 수행
