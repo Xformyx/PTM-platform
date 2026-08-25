@@ -125,6 +125,21 @@ export function BenchmarkEvaluationPanel({ orderId, readOnly }: { orderId: numbe
       await refresh();
     } catch (error: any) {
       setMessage(error?.message || "Could not create the blind benchmark run.");
+      await refresh();
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const retryStart = async (runId: number) => {
+    setSubmitting(true);
+    setMessage(null);
+    try {
+      await api.post(`/benchmarks/runs/${runId}/start`);
+      await refresh();
+    } catch (error: any) {
+      setMessage(error?.message || "Could not restart the blind benchmark run.");
+      await refresh();
     } finally {
       setSubmitting(false);
     }
@@ -188,6 +203,9 @@ export function BenchmarkEvaluationPanel({ orderId, readOnly }: { orderId: numbe
                     </div>
                     {run.status === "preprocessing" && !readOnly && (
                       <Button size="sm" variant="outline" disabled={submitting} onClick={() => void runTemporalAndScore(run.id)} className="gap-1"><FlaskConical className="h-3.5 w-3.5" /> Run TMM + locked score</Button>
+                    )}
+                    {run.status === "failed" && !readOnly && (
+                      <Button size="sm" variant="outline" disabled={submitting} onClick={() => void retryStart(run.id)} className="gap-1"><RefreshCw className="h-3.5 w-3.5" /> Retry preprocessing</Button>
                     )}
                   </div>
                   {ACTIVE.has(run.status) && <Progress value={run.status === "preprocessing" ? 35 : run.status === "temporal_analysis" ? 65 : 80} className="h-1.5" />}

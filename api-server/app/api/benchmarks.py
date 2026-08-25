@@ -11,6 +11,7 @@ import asyncio
 import json
 import os
 import secrets
+import shutil
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -192,10 +193,23 @@ async def start_benchmark_run(
     if not run:
         raise HTTPException(status_code=404, detail="BenchmarkRun not found")
     source = await _source_order_or_404(run.source_order_id, user, db)
-    if run.status != "registered":
+
+    child = None
+    if run.benchmark_order_id:
+        child_result = await db.execute(select(Order).where(Order.id == run.benchmark_order_id))
+        child = child_result.scalar_one_or_none()
+
+    restartable = run.status == "registered" or (
+        run.status in {"preprocessing", "failed"}
+        and (child is None or child.status in {"failed", "queued", "cancelled"})
+    )
+    if not restartable:
         raise HTTPException(status_code=409, detail=f"BenchmarkRun cannot start from status {run.status}")
+
     settings = get_settings()
     snapshot_dir = Path(settings.INPUT_DIR) / "benchmark_runs" / run.run_code
+    if snapshot_dir.exists():
+        shutil.rmtree(snapshot_dir)
     try:
         snapshot = await asyncio.to_thread(
             create_sanitized_snapshot,
@@ -206,21 +220,21 @@ async def start_benchmark_run(
     except (OSError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=f"Could not create blind snapshot: {exc}") from exc
 
-    child = Order(
-        order_code=f"bm_{run.run_code.lower()}",
-        user_id=source.user_id,
-        run_by_user_id=getattr(user, "id", None),
-        project_name="Blind benchmark analysis",
-        status="queued",
-        ptm_type=source.ptm_type,
-        species=source.species,
-        organism_code=source.organism_code,
-        sample_config=snapshot.sample_config,
-        pr_matrix_path=snapshot.pr_matrix_path,
-        pg_matrix_path=snapshot.pg_matrix_path,
-        fasta_path=snapshot.fasta_path,
-        config_xlsx_path=None,
-        analysis_context={
+    child_fields = {
+        "order_code": f"bm_{run.run_code.lower()}",
+        "user_id": source.user_id,
+        "run_by_user_id": getattr(user, "id", None),
+        "project_name": "Blind benchmark analysis",
+        "status": "queued",
+        "ptm_type": source.ptm_type,
+        "species": source.species,
+        "organism_code": source.organism_code,
+        "sample_config": snapshot.sample_config,
+        "pr_matrix_path": snapshot.pr_matrix_path,
+        "pg_matrix_path": snapshot.pg_matrix_path,
+        "fasta_path": snapshot.fasta_path,
+        "config_xlsx_path": None,
+        "analysis_context": {
             "cell_type": run.blind_context["cell_context"]["lineage_class"],
             "treatment": run.blind_context["treatment_label"],
             "time_points": [],
@@ -228,14 +242,28 @@ async def start_benchmark_run(
             "special_conditions": "",
             "benchmark_blind_mode": True,
         },
-        analysis_options={"benchmark_blind_mode": True},
-        report_options={"temporal_contract": run.production_contract["temporal_contract"]},
-        rag_collections=None,
-    )
-    db.add(child)
-    await db.flush()
+        "analysis_options": {"benchmark_blind_mode": True},
+        "report_options": {"temporal_contract": run.production_contract["temporal_contract"]},
+        "rag_collections": None,
+        "error_message": None,
+        "stage_detail": None,
+        "progress_pct": 0,
+        "current_stage": None,
+    }
+    if child is None:
+        child = Order(**child_fields)
+        db.add(child)
+        await db.flush()
+    else:
+        for key, value in child_fields.items():
+            if key == "order_code":
+                continue
+            setattr(child, key, value)
+        await db.flush()
+
     run.benchmark_order_id = child.id
     run.status = "preprocessing"
+    run.error_message = None
     run.provenance = {
         **(run.provenance or {}),
         "blind_snapshot_input_sha256": snapshot.input_sha256,
@@ -244,6 +272,8 @@ async def start_benchmark_run(
         "llm_used": False,
     }
     await db.commit()
+    await db.refresh(run)
+    await db.refresh(child)
 
     species_context = _require_species_context(child.species)
     task_config = {
@@ -260,7 +290,11 @@ async def start_benchmark_run(
         "species_label": species_context.label,
         "custom_reference": species_context.custom_reference,
         "analysis_options": {"benchmark_blind_mode": True},
-        "experimental_context": {**run.blind_context, "organism": species_context.analysis_species, "ptm_type": source.ptm_type},
+        "experimental_context": {
+            **run.blind_context,
+            "organism": species_context.analysis_species,
+            "ptm_type": source.ptm_type,
+        },
         "research_questions": [],
         "chromadb_collections": [],
         "chain_to_next": False,
@@ -301,13 +335,15 @@ async def run_benchmark_temporal_analysis(
     child = child_result.scalar_one_or_none()
     if not child or child.status != "completed":
         raise HTTPException(status_code=409, detail="Blind preprocessing must complete before temporal analysis")
-    if run.status not in {"preprocessing", "temporal_analysis"}:
+    if run.status not in {"preprocessing", "temporal_analysis", "failed"}:
         raise HTTPException(status_code=409, detail=f"BenchmarkRun cannot run temporal analysis from {run.status}")
 
     settings = get_settings()
     output_dir = Path(settings.OUTPUT_DIR) / child.order_code
     run.status = "temporal_analysis"
+    run.error_message = None
     await db.commit()
+    await db.refresh(run)
     try:
         temporal_request = build_temporal_request(output_dir=output_dir, ptm_type=child.ptm_type)
         service_user = _ServiceUser(user)
@@ -351,12 +387,14 @@ async def run_benchmark_temporal_analysis(
         run.status = "failed"
         run.error_message = f"Blind temporal analysis failed: {exc}"[:2000]
         await db.commit()
+        await db.refresh(run)
         raise HTTPException(status_code=500, detail=run.error_message) from exc
 
     run.artifact_path = str(artifact_path)
     run.status = "scoring_queued"
     run.provenance = {**(run.provenance or {}), "tmm_full_temporal_completed": True}
     await db.commit()
+    await db.refresh(run)
     from celery import Celery
 
     celery_app = Celery("ptm_benchmark_runner")

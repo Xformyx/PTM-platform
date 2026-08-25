@@ -124,6 +124,30 @@ def update_order_status(
         logger.warning(f"[Order {order_id}] Failed to update DB status: {e}")
 
 
+def update_benchmark_run_status(
+    run_id: int,
+    status: str,
+    error_message: str | None = None,
+):
+    """Sync blind BenchmarkRun status when its child Order pipeline changes."""
+    try:
+        engine = _get_engine()
+        sets = ["status = :status", "updated_at = NOW()"]
+        params: dict = {"run_id": run_id, "status": status}
+        if error_message is not None:
+            sets.append("error_message = :error_message")
+            params["error_message"] = error_message[:2000]
+        if status == "failed":
+            sets.append("completed_at = NOW()")
+        sql = text(f"UPDATE benchmark_runs SET {', '.join(sets)} WHERE id = :run_id")
+        with engine.connect() as conn:
+            conn.execute(sql, params)
+            conn.commit()
+        logger.info(f"[BenchmarkRun {run_id}] DB status → {status}")
+    except Exception as e:
+        logger.warning(f"[BenchmarkRun {run_id}] Failed to update status: {e}")
+
+
 def update_order_progress(
     order_id: int,
     progress_pct: float,

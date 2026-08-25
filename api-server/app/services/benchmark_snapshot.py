@@ -45,7 +45,9 @@ def create_sanitized_snapshot(
         original = str(sample.get("file_name") or sample.get("File_Name") or "").strip()
         if not original:
             raise ValueError("source sample configuration contains an empty file name")
-        alias = f"S{index:03d}"
+        # Keep a .mzML suffix so PTMQuantificationAnalyzer.load_data() still
+        # recognizes sample columns (it filters columns ending in ".mzML").
+        alias = f"S{index:03d}.mzML"
         aliases[original] = alias
         group = str(sample.get("group") or sample.get("Group") or "").strip().lower()
         raw_condition = str(sample.get("condition") or sample.get("Condition") or "").strip()

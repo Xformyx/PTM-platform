@@ -281,6 +281,24 @@ class PTMQuantificationAnalyzer:
             logger.info(f"PG Matrix loaded: {len(self.pg_matrix):,} protein groups")
 
             self.sample_columns = [col for col in self.pr_matrix.columns if col.endswith(".mzML")]
+            # Blind-benchmark snapshots may alias headers as S001.mzML; if a
+            # caller already passed condition_map keys that exist as columns,
+            # prefer those when no .mzML columns were detected.
+            if (
+                not self.sample_columns
+                and self.external_condition_map
+                and self.condition_map
+            ):
+                mapped = [
+                    col for col in self.pr_matrix.columns
+                    if col in self.condition_map
+                ]
+                if mapped:
+                    self.sample_columns = mapped
+                    logger.info(
+                        "Samples resolved from condition_map keys "
+                        f"(no .mzML headers): {len(self.sample_columns)}"
+                    )
             logger.info(f"Samples: {len(self.sample_columns)}")
 
             self._build_diann_gene_map()

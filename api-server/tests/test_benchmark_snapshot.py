@@ -28,5 +28,6 @@ def test_snapshot_replaces_source_sample_headers_and_hides_context(tmp_path: Pat
     snapshot = create_sanitized_snapshot(source_order=order, blind_context={}, destination_dir=tmp_path / "snapshot")
     text = Path(snapshot.pr_matrix_path).read_text(encoding="utf-8")
     assert "insulin" not in text.lower()
-    assert "S001" in text and "S002" in text and "S003" in text
-    assert snapshot.condition_map == {"S001": "Control", "S002": "5min", "S003": "15min"}
+    assert "S001.mzML" in text and "S002.mzML" in text and "S003.mzML" in text
+    assert snapshot.condition_map == {"S001.mzML": "Control", "S002.mzML": "5min", "S003.mzML": "15min"}
+    assert all(name.endswith(".mzML") for name in snapshot.condition_map)
