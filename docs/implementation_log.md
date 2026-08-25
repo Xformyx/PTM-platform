@@ -1909,3 +1909,18 @@
   문헌 해석 캐시를 쓰지 않는다.
 - **결정성:** 해당 없음
 
+### [2026-08-25] Benchmark 탭에서 leftover run과 TMM 대기 상태를 구분
+
+- **분류:** 구현
+- **대상:** `api-server/app/services/benchmark_run_lifecycle.py`,
+  `frontend/src/components/BenchmarkEvaluationPanel.tsx`
+- **구현 대상 설계:** 해당 없음 (실행 UI, 측정 상수 아님)
+- **사전등록 상태:** 해당 없음
+- **내용:** Order list에서 숨긴 자식 Order는 남아 있고, Benchmark 탭은
+  BenchmarkRun 이력을 보여 준다. 완료된 스냅샷은 `ready for TMM`으로 표시하고,
+  취소·실패 leftover는 Previous attempts로 접는다. TMM 버튼은 자식이
+  completed일 때만 켠다.
+- **논문에서의 용도:** 사용 안 함
+- **해석 한계:** 이전 시도 행을 삭제하지 않는다. 점수나 전처리 수치를 바꾸지 않는다.
+- **결정성:** 해당 없음
+

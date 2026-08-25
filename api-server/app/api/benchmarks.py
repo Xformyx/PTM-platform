@@ -42,6 +42,7 @@ from app.services.benchmark_blind_context import (
 from app.services.benchmark_run_lifecycle import (
     is_run_in_progress,
     overlay_run_status,
+    run_phase,
     should_reuse_existing_run,
 )
 from app.services.benchmark_snapshot import create_sanitized_snapshot
@@ -76,6 +77,7 @@ def _serialize(run: BenchmarkRun, child: Order | None = None) -> dict:
         "benchmark_order_id": run.benchmark_order_id,
         "dataset_id": run.dataset_id,
         "status": status,
+        "phase": run_phase(run.status, getattr(child, "status", None)),
         "production_contract": run.production_contract,
         "blind_policy": run.blind_policy,
         "blind_context": run.blind_context,

@@ -21,6 +21,7 @@ type BenchmarkRun = {
   benchmark_order_id?: number | null;
   dataset_id: string;
   status: string;
+  phase?: string;
   production_contract: { id?: string; temporal_contract?: string };
   blind_context: { cell_context?: { lineage_class?: string } };
   score_summary?: Record<string, unknown> | null;
@@ -58,14 +59,30 @@ const ACTIVE = new Set(["registered", "snapshot_pending", "preprocessing", "temp
 const CHILD_ACTIVE = new Set(["queued", "preprocessing", "rag_enrichment", "report_generation"]);
 
 function isLive(run: BenchmarkRun): boolean {
-  return ACTIVE.has(run.status) || Boolean(run.child_order && CHILD_ACTIVE.has(run.child_order.status));
+  return Boolean(run.child_order && CHILD_ACTIVE.has(run.child_order.status))
+    || ["temporal_analysis", "scoring_queued", "scoring"].includes(run.status);
 }
 
-function runTone(status: string): string {
-  if (status === "completed") return "bg-emerald-100 text-emerald-700 border-emerald-200";
-  if (status === "failed") return "bg-red-100 text-red-700 border-red-200";
-  if (ACTIVE.has(status)) return "bg-sky-100 text-sky-700 border-sky-200";
+function isReadyForTmm(run: BenchmarkRun): boolean {
+  return run.phase === "ready_for_tmm" || run.child_order?.status === "completed" && run.status === "preprocessing";
+}
+
+function isLeftover(run: BenchmarkRun): boolean {
+  return run.phase === "abandoned" || run.status === "cancelled" || (run.status === "failed" && run.child_order?.status === "cancelled");
+}
+
+function runTone(run: BenchmarkRun): string {
+  if (run.status === "completed" || isReadyForTmm(run)) return "bg-emerald-100 text-emerald-700 border-emerald-200";
+  if (run.status === "failed" || run.status === "cancelled" || isLeftover(run)) return "bg-red-100 text-red-700 border-red-200";
+  if (isLive(run) || ACTIVE.has(run.status)) return "bg-sky-100 text-sky-700 border-sky-200";
   return "bg-muted text-muted-foreground";
+}
+
+function runLabel(run: BenchmarkRun): string {
+  if (isReadyForTmm(run)) return "ready for TMM";
+  if (isLeftover(run)) return "abandoned";
+  if (run.phase === "snapshot_running") return (run.child_order?.status || run.status).replace(/_/g, " ");
+  return run.status.replace(/_/g, " ");
 }
 
 function metricLabel(key: string): string {
@@ -75,6 +92,59 @@ function metricLabel(key: string): string {
 function formattedMetric(value: unknown): string {
   if (typeof value !== "number" || !Number.isFinite(value)) return "—";
   return value >= 0 && value <= 1 ? `${(value * 100).toFixed(1)}%` : value.toFixed(3);
+}
+
+function RunCard({
+  run,
+  readOnly,
+  submitting,
+  leftover,
+  scoreMetrics,
+  onTemporal,
+  onRetry,
+}: {
+  run: BenchmarkRun;
+  readOnly: boolean;
+  submitting: boolean;
+  leftover?: boolean;
+  scoreMetrics: [string, unknown][];
+  onTemporal: () => void;
+  onRetry: () => void;
+}) {
+  const ready = isReadyForTmm(run);
+  return (
+    <div className={`border rounded-lg p-4 space-y-3 ${leftover ? "bg-muted/30" : ""}`}>
+      <div className="flex flex-wrap justify-between items-start gap-2">
+        <div>
+          <div className="flex items-center gap-2">
+            <span className="font-mono text-sm font-medium">{run.run_code}</span>
+            <Badge variant="outline" className={runTone(run)}>{runLabel(run)}</Badge>
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {run.dataset_id} · {run.production_contract?.id || "tmm_full_temporal"} · lineage: {LINEAGE_LABELS[run.blind_context?.cell_context?.lineage_class || ""] || "controlled"}
+            {run.child_order ? ` · snapshot ${run.child_order.status.replace(/_/g, " ")}` : ""}
+          </p>
+        </div>
+        {ready && !readOnly && (
+          <Button size="sm" variant="outline" disabled={submitting} onClick={onTemporal} className="gap-1"><FlaskConical className="h-3.5 w-3.5" /> Run TMM + locked score</Button>
+        )}
+        {run.status === "failed" && !ready && !leftover && !readOnly && (
+          <Button size="sm" variant="outline" disabled={submitting} onClick={onRetry} className="gap-1"><RefreshCw className="h-3.5 w-3.5" /> Retry preprocessing</Button>
+        )}
+      </div>
+      {isLive(run) && <Progress value={run.child_order?.progress_pct || 35} className="h-1.5" />}
+      {run.phase === "snapshot_running" && run.child_order && CHILD_ACTIVE.has(run.child_order.status) && run.child_order.status !== "preprocessing" && run.child_order.status !== "queued" && (
+        <p className="text-xs text-amber-700">This leftover snapshot is still finishing an Order-list restart ({run.child_order.status.replace(/_/g, " ")}). Locked scoring uses 0층 outputs only.</p>
+      )}
+      {ready && <p className="text-xs text-emerald-700">0층 snapshot is ready. This is the run to score — do not start another blind benchmark.</p>}
+      {run.status === "completed" && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+          {scoreMetrics.length ? scoreMetrics.map(([key, value]) => <div key={key} className="rounded bg-muted/60 px-3 py-2"><p className="text-[10px] uppercase text-muted-foreground">{metricLabel(key)}</p><p className="font-mono text-sm font-semibold">{formattedMetric(value)}</p></div>) : <p className="text-sm text-muted-foreground">Score bundle completed. Detailed figures and source data are available in the result bundle.</p>}
+        </div>
+      )}
+      {run.error_message && !ready && <p className="text-xs text-destructive">{run.error_message}</p>}
+    </div>
+  );
 }
 
 export function BenchmarkEvaluationPanel({ orderId, readOnly }: { orderId: number; readOnly: boolean }) {
@@ -105,6 +175,8 @@ export function BenchmarkEvaluationPanel({ orderId, readOnly }: { orderId: numbe
   }, [runs]);
 
   const latest = runs[0];
+  const currentRuns = useMemo(() => runs.filter((run) => !isLeftover(run)), [runs]);
+  const leftoverRuns = useMemo(() => runs.filter(isLeftover), [runs]);
   const scoreMetrics = useMemo(() => {
     if (!latest?.score_summary || typeof latest.score_summary !== "object") return [];
     return Object.entries(latest.score_summary).filter(([, value]) => typeof value === "number");
@@ -136,7 +208,13 @@ export function BenchmarkEvaluationPanel({ orderId, readOnly }: { orderId: numbe
         await refresh();
         return;
       }
-      let runId = latest && latest.status === "failed" ? latest.id : null;
+      if (latest && isReadyForTmm(latest)) {
+        setDialogOpen(false);
+        setMessage("A 0층 snapshot is already ready. Use Run TMM + locked score on that run.");
+        await refresh();
+        return;
+      }
+      let runId = latest && latest.status === "failed" && !isLeftover(latest) ? latest.id : null;
       if (runId == null) {
         const run = await api.post<BenchmarkRun>(`/benchmarks/source-orders/${orderId}/runs`, {
           dataset_id: "insulin_signaling_v1",
@@ -210,7 +288,7 @@ export function BenchmarkEvaluationPanel({ orderId, readOnly }: { orderId: numbe
 
       <Card>
         <CardHeader className="flex-row items-center justify-between pb-3">
-          <div><CardTitle className="text-sm">Benchmark Runs</CardTitle><CardDescription>Immutable source snapshot and offline locked-scoring status.</CardDescription></div>
+          <div><CardTitle className="text-sm">Benchmark Runs</CardTitle><CardDescription>Each Start created a history row. Child snapshot Orders stay hidden from the Order list.</CardDescription></div>
           <Button variant="ghost" size="sm" onClick={() => void refresh()} className="gap-1"><RefreshCw className="h-3.5 w-3.5" /> Refresh</Button>
         </CardHeader>
         <CardContent>
@@ -218,32 +296,36 @@ export function BenchmarkEvaluationPanel({ orderId, readOnly }: { orderId: numbe
             <p className="py-6 text-sm text-muted-foreground">No blind benchmark run has been registered for this Order.</p>
           ) : (
             <div className="space-y-3">
-              {runs.map((run) => (
-                <div key={run.id} className="border rounded-lg p-4 space-y-3">
-                  <div className="flex flex-wrap justify-between items-start gap-2">
-                    <div>
-                      <div className="flex items-center gap-2"><span className="font-mono text-sm font-medium">{run.run_code}</span><Badge variant="outline" className={runTone(run.status)}>{run.status.replace(/_/g, " ")}</Badge></div>
-                      <p className="mt-1 text-xs text-muted-foreground">{run.dataset_id} · {run.production_contract?.id || "tmm_full_temporal"} · lineage: {LINEAGE_LABELS[run.blind_context?.cell_context?.lineage_class || ""] || "controlled"}{run.child_order ? ` · snapshot ${run.child_order.status.replace(/_/g, " ")}` : ""}</p>
-                    </div>
-                    {run.status === "preprocessing" && !readOnly && (
-                      <Button size="sm" variant="outline" disabled={submitting} onClick={() => void runTemporalAndScore(run.id)} className="gap-1"><FlaskConical className="h-3.5 w-3.5" /> Run TMM + locked score</Button>
-                    )}
-                    {run.status === "failed" && !readOnly && (
-                      <Button size="sm" variant="outline" disabled={submitting} onClick={() => void retryStart(run.id)} className="gap-1"><RefreshCw className="h-3.5 w-3.5" /> Retry preprocessing</Button>
-                    )}
-                  </div>
-                  {isLive(run) && <Progress value={run.child_order?.progress_pct || (run.status === "preprocessing" ? 35 : run.status === "temporal_analysis" ? 65 : 80)} className="h-1.5" />}
-                  {run.child_order && CHILD_ACTIVE.has(run.child_order.status) && run.child_order.status !== "preprocessing" && run.child_order.status !== "queued" && (
-                    <p className="text-xs text-amber-700">This snapshot was restarted from the Order list and is running {run.child_order.status.replace(/_/g, " ")}. Blind scoring uses 0층 preprocessing only — retry from this tab next time.</p>
-                  )}
-                  {run.status === "completed" && (
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                      {scoreMetrics.length ? scoreMetrics.map(([key, value]) => <div key={key} className="rounded bg-muted/60 px-3 py-2"><p className="text-[10px] uppercase text-muted-foreground">{metricLabel(key)}</p><p className="font-mono text-sm font-semibold">{formattedMetric(value)}</p></div>) : <p className="text-sm text-muted-foreground">Score bundle completed. Detailed figures and source data are available in the result bundle.</p>}
-                    </div>
-                  )}
-                  {run.error_message && <p className="text-xs text-destructive">{run.error_message}</p>}
-                </div>
+              {currentRuns.map((run) => (
+                <RunCard
+                  key={run.id}
+                  run={run}
+                  readOnly={readOnly}
+                  submitting={submitting}
+                  scoreMetrics={scoreMetrics}
+                  onTemporal={() => void runTemporalAndScore(run.id)}
+                  onRetry={() => void retryStart(run.id)}
+                />
               ))}
+              {leftoverRuns.length > 0 && (
+                <details className="rounded-lg border border-dashed px-4 py-3">
+                  <summary className="cursor-pointer text-sm text-muted-foreground">Previous attempts ({leftoverRuns.length}) — cancelled or failed leftovers</summary>
+                  <div className="mt-3 space-y-3">
+                    {leftoverRuns.map((run) => (
+                      <RunCard
+                        key={run.id}
+                        run={run}
+                        readOnly={readOnly}
+                        submitting={submitting}
+                        scoreMetrics={scoreMetrics}
+                        leftover
+                        onTemporal={() => void runTemporalAndScore(run.id)}
+                        onRetry={() => void retryStart(run.id)}
+                      />
+                    ))}
+                  </div>
+                </details>
+              )}
             </div>
           )}
         </CardContent>

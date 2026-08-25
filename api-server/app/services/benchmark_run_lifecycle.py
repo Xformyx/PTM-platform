@@ -67,9 +67,28 @@ def overlay_run_status(
         return "preprocessing", None
     if child_status == "failed":
         return "failed", child_error or run_error
-    if child_status == "completed" and run_status == "failed":
+    if child_status == "cancelled":
+        return "cancelled", "Blind snapshot was cancelled. This leftover run is not the active score path."
+    if child_status == "completed" and run_status in {"failed", "registered", "cancelled"}:
         return "preprocessing", None
     return run_status, run_error
+
+
+def run_phase(run_status: str, child_status: str | None) -> str:
+    """UI phase for a stored run. History rows stay; only one is usually actionable."""
+
+    status, _ = overlay_run_status(run_status, child_status, None, None)
+    if status in {"completed", "scoring", "scoring_queued", "temporal_analysis"}:
+        return status
+    if child_status == "completed":
+        return "ready_for_tmm"
+    if child_status in CHILD_PIPELINE_STATUSES:
+        return "snapshot_running"
+    if status == "cancelled" or child_status == "cancelled":
+        return "abandoned"
+    if status == "failed":
+        return "failed"
+    return status
 
 
 def apply_blind_child_task_config(task_config: dict[str, Any], benchmark_run_id: int) -> dict[str, Any]:

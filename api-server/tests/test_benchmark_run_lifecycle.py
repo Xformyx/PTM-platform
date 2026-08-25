@@ -3,6 +3,7 @@ from app.services.benchmark_run_lifecycle import (
     is_benchmark_child,
     is_run_in_progress,
     overlay_run_status,
+    run_phase,
     should_reuse_existing_run,
 )
 
@@ -31,8 +32,12 @@ def test_live_child_keeps_benchmark_tab_in_progress() -> None:
     assert overlay_run_status("failed", "rag_enrichment", None, "old") == ("preprocessing", None)
     assert overlay_run_status("failed", "completed", None, "old") == ("preprocessing", None)
     assert overlay_run_status("failed", "failed", "child boom", "old") == ("failed", "child boom")
+    assert overlay_run_status("failed", "cancelled", None, "old")[0] == "cancelled"
     assert overlay_run_status("scoring", "completed", None, None) == ("scoring", None)
     assert is_run_in_progress("failed", "rag_enrichment")
+    assert run_phase("failed", "completed") == "ready_for_tmm"
+    assert run_phase("failed", "cancelled") == "abandoned"
+    assert run_phase("preprocessing", "rag_enrichment") == "snapshot_running"
 
 
 def test_child_start_cannot_chain_to_rag() -> None:
