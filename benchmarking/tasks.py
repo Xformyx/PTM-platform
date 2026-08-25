@@ -11,6 +11,7 @@ from celery import shared_task
 from sqlalchemy import create_engine, text
 
 from .contracts import BenchmarkManifest
+from .figure2_source import build_figure2_source
 from .locked_scorer import LockedBenchmarkScorer
 from .result_bundle import write_score_bundle
 
@@ -39,10 +40,11 @@ def score_benchmark_run(self, benchmark_run_id: int) -> dict:
         artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
         result = LockedBenchmarkScorer(manifest).score(artifact)
         bundle = write_score_bundle(
+            result_root / f"benchmark_run_{benchmark_run_id}",
             result,
-            output_dir=result_root / f"benchmark_run_{benchmark_run_id}",
             analysis_artifact_path=artifact_path,
         )
+        summary = {**result["metrics"], "figure2": build_figure2_source(result)}
         with engine.begin() as conn:
             conn.execute(
                 text(
@@ -51,8 +53,8 @@ def score_benchmark_run(self, benchmark_run_id: int) -> dict:
                 ),
                 {
                     "id": benchmark_run_id,
-                    "result_path": str(bundle["result_json"]),
-                    "summary": json.dumps(result["metrics"]),
+                    "result_path": str(bundle["score_json"]),
+                    "summary": json.dumps(summary),
                     "scored_at": datetime.now(timezone.utc).isoformat(),
                 },
             )

@@ -6,6 +6,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { AlertCircle, CheckCircle2, FlaskConical, Loader2, LockKeyhole, Play, RefreshCw, ShieldCheck } from "lucide-react";
 import { api } from "@/lib/api";
+import { BenchmarkFigure2, type Figure2Source } from "@/components/BenchmarkFigure2";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -26,6 +27,7 @@ type BenchmarkRun = {
   production_contract: { id?: string; temporal_contract?: string };
   blind_context: { cell_context?: { lineage_class?: string } };
   score_summary?: Record<string, unknown> | null;
+  figure2?: Figure2Source | null;
   error_message?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
@@ -109,6 +111,12 @@ function formattedMetric(value: unknown): string {
   return value >= 0 && value <= 1 ? `${(value * 100).toFixed(1)}%` : value.toFixed(3);
 }
 
+function figure2FromRun(run: BenchmarkRun): Figure2Source | null {
+  if (run.figure2 && typeof run.figure2 === "object") return run.figure2;
+  const nested = run.score_summary?.figure2;
+  return nested && typeof nested === "object" ? nested as Figure2Source : null;
+}
+
 function RunCard({
   run,
   readOnly,
@@ -160,8 +168,11 @@ function RunCard({
         <p className="text-xs text-sky-700">TMM is running on the API server. Kinase modules and the temporal heatmap take several minutes. This page refreshes automatically.</p>
       )}
       {run.status === "completed" && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-          {scoreMetrics.length ? scoreMetrics.map(([key, value]) => <div key={key} className="rounded bg-muted/60 px-3 py-2"><p className="text-[10px] uppercase text-muted-foreground">{metricLabel(key)}</p><p className="font-mono text-sm font-semibold">{formattedMetric(value)}</p></div>) : <p className="text-sm text-muted-foreground">Score bundle completed. Detailed figures and source data are available in the result bundle.</p>}
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+            {scoreMetrics.length ? scoreMetrics.map(([key, value]) => <div key={key} className="rounded bg-muted/60 px-3 py-2"><p className="text-[10px] uppercase text-muted-foreground">{metricLabel(key)}</p><p className="font-mono text-sm font-semibold">{formattedMetric(value)}</p></div>) : <p className="text-sm text-muted-foreground">Score bundle completed. Detailed figures and source data are available in the result bundle.</p>}
+          </div>
+          {figure2FromRun(run) && <BenchmarkFigure2 figure2={figure2FromRun(run)!} />}
         </div>
       )}
       {run.error_message && !ready && <p className="text-xs text-destructive">{run.error_message}</p>}

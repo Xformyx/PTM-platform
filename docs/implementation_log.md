@@ -1966,3 +1966,19 @@
 - **해석 한계:** TMM 산출 식과 locked score 정의를 바꾸지 않는다.
 - **결정성:** 해당 없음
 
+### [2026-08-26] Figure 2 source table과 Benchmark 탭 표시
+
+- **분류:** 구현
+- **대상:** `benchmarking/figure2_source.py`, `benchmarking/result_bundle.py`,
+  `benchmarking/tasks.py`, `api-server/app/api/benchmarks.py`,
+  `frontend/src/components/BenchmarkFigure2.tsx`,
+  `frontend/src/components/BenchmarkEvaluationPanel.tsx`
+- **구현 대상 설계:** `docs/insulin_blind_benchmark_manuscript_output_spec_v1_ko.md` §2 Figure 2, §4
+- **사전등록 상태:** 해당 없음 (표시 재배열, primary 점수 변경 아님)
+- **내용:** locked score의 metrics/anchor_results를 Figure 2 source TSV와
+  화면 패널(2A–2D)로 재배열한다. branch 비율은 표시용 unweighted count다.
+- **논문에서의 용도:** methods 표시 / source-data 초안. 결과는 score 완료 후에만 채움
+- **해석 한계:** bootstrap CI, partial window, kinase rank, TMM contribution,
+  inhibitor contrast를 만들지 않는다. 이 그림으로 attribution 정확도를 주장하지 않는다.
+- **결정성:** 해당 없음
+

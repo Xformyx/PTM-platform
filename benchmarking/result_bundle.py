@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from .contracts import sha256_file
+from .figure2_source import build_figure2_source, write_figure2_tsvs
 
 
 def write_score_bundle(
@@ -23,6 +24,8 @@ def write_score_bundle(
     destination.mkdir(parents=True, exist_ok=True)
     artifact_path = Path(analysis_artifact_path)
     enriched = dict(result)
+    if "figure2" not in enriched:
+        enriched["figure2"] = build_figure2_source(result)
     provenance = dict(enriched.get("provenance") or {})
     provenance.update(
         {
@@ -42,4 +45,5 @@ def write_score_bundle(
         writer = csv.DictWriter(handle, fieldnames=headers, delimiter="\t", extrasaction="ignore")
         writer.writeheader()
         writer.writerows(rows)
-    return {"score_json": str(score_path), "anchor_tsv": str(tsv_path)}
+    figure_paths = write_figure2_tsvs(destination, enriched["figure2"])
+    return {"score_json": str(score_path), "anchor_tsv": str(tsv_path), **figure_paths}

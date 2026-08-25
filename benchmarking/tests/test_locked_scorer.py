@@ -128,3 +128,7 @@ def test_score_bundle_writes_auditable_json_and_anchor_tsv(tmp_path: Path) -> No
     paths = write_score_bundle(tmp_path / "bundle", scorer.score(json.loads(artifact.read_text())), analysis_artifact_path=artifact)
     assert Path(paths["score_json"]).is_file()
     assert Path(paths["anchor_tsv"]).is_file()
+    assert Path(paths["metrics_summary"]).is_file()
+    written = json.loads(Path(paths["score_json"]).read_text(encoding="utf-8"))
+    assert written["metrics"]["detectable_anchor_recall"] is None or "detectable_anchor_recall" in written["metrics"]
+    assert written["figure2"]["primary_score_unchanged"] is True

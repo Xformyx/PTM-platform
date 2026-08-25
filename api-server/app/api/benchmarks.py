@@ -93,6 +93,7 @@ def _serialize(run: BenchmarkRun, child: Order | None = None) -> dict:
         "blind_context": run.blind_context,
         "source_snapshot": run.source_snapshot,
         "score_summary": run.score_summary,
+        "figure2": (run.score_summary or {}).get("figure2") if isinstance(run.score_summary, dict) else None,
         "error_message": error_message,
         "created_at": run.created_at.isoformat() if run.created_at else None,
         "updated_at": run.updated_at.isoformat() if run.updated_at else None,
