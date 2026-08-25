@@ -403,4 +403,4 @@ Backend: vector-plot (receptor inference)
 - [x] 0층+1층 `tmm_full_temporal` artifact adapter와 generic site observation export 구현
 - [x] offline locked scorer job, provenance/result bundle, truth-reveal audit 구현
 - [x] Order Detail preflight·strict primary launch·status·score/figure results UI 구현
-- [ ] API/worker/frontend/benchmark boundary 회귀 테스트, syntax validation, GitHub main push 수행
+- [x] API/worker/frontend/benchmark boundary 회귀 테스트, syntax validation, GitHub main push 수행
