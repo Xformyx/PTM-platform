@@ -1,0 +1,44 @@
+{
+  "blind_policy": {
+    "cell_context_policy": "lineage_only",
+    "rag_policy": "disabled_for_strict_primary",
+    "research_question_hidden_from_analysis_runtime": true,
+    "stimulus_hidden_from_analysis_runtime": true,
+    "truth_available_to_scorer_only": true
+  },
+  "dataset_id": "insulin_signaling_v1",
+  "display_name": "Insulin signaling phospho-kinase benchmark v1",
+  "locked_truth_bundle": "locked_truth/insulin_signaling_v1.truth.json",
+  "locked_truth_sha256": "5bd3592177c30d7f886aa259358bcca82aa088763d1b55296f6e4562d509c4da",
+  "production_contract": {
+    "id": "tmm_full_temporal.v1",
+    "kinase_scoring_method": "tmm_full_temporal",
+    "layers": [
+      "product_pipeline.v0",
+      "temporal_science.v1"
+    ],
+    "representation_learning_in_primary_score": false,
+    "temporal_contract": "dynamics_v1",
+    "tmm_guard_policy": "group_share"
+  },
+  "schema_version": "ptm_locked_benchmark_manifest.v1",
+  "score_config": {
+    "component_weights": {
+      "chain_completeness": 0.1,
+      "detectable_anchor_recall": 0.25,
+      "direction_accuracy": 0.2,
+      "peak_window_accuracy": 0.2,
+      "regulated_anchor_recall": 0.25
+    },
+    "evidence_tier_weights": {
+      "Tier 1": 2,
+      "Tier 2": 1
+    },
+    "novel_tier_policy": "Tier 3/4 and de_novo are discovery-only; never score canonical accuracy",
+    "site_mapping_requirement": "sequence_isoform_species"
+  },
+  "source_reference": {
+    "kind": "analyst_provided_workbook",
+    "workbook_sha256": "a2cb7d6ab1167983198f80627ca412cdde78530cdfe0ecd9dbc6849f073ab484"
+  }
+}

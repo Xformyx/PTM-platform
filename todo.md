@@ -334,3 +334,59 @@ Backend: vector-plot (receptor inference)
 ## Verification Checklist Follow-up Review
 - [x] verification checklist의 완료·부분 완료·미구현 항목을 Temporal Dynamics/Atlas 최신 코드와 대조
 - [x] checklist 기반 temporal stability·form provenance·transition·Atlas/report 보완 과제의 우선순위 확정
+
+## Insulin Blind Benchmark — Manuscript Output Package
+- [ ] 논문 주장 단위와 benchmark 정량 지표의 claim-to-metric matrix 정의
+- [ ] Primary·Supplementary figure, 표, 원자료 파일의 논문용 구성 확정
+- [ ] Anchor bootstrap·replicate resampling·time permutation·branch macro-average의 통계 표기 계약 정의
+- [ ] SVG/PDF/PNG figure와 TSV/JSON 원자료를 포함하는 versioned benchmark result bundle 설계
+- [ ] Locked truth·discovery·scoring·perturbation validation 결과의 물리적·논리적 분리 구현
+
+## Insulin Blind Benchmark — Order 연계 사용 흐름
+- [ ] 기존 Order 생성·전처리·분석·Report 흐름을 보존하는 benchmark run 진입점과 권한 모델 설계
+- [ ] 완료된 분석 Order를 immutable benchmark input으로 선택하고, generic blind context·manifest·locked scorer를 적용하는 UX 정의
+- [ ] Order 결과와 benchmark score/figure/result bundle의 링크·재실행·truth reveal audit 규칙 정의
+
+## Insulin Blind Benchmark — Current Order Blindness Audit
+- [ ] Order의 treatment·cell type·biological question·special condition·RAG collection이 worker·LLM·report에 전달되는 실제 경로 감사
+- [ ] Benchmark run에서 stimulus·question·dataset-identifying context를 차단하거나 generic 값으로 대체하는 server-side context builder 설계
+- [ ] Blind discovery·locked scoring·truth reveal을 분리하고, 원래 Order의 입력·report·rerun을 변경하지 않는 audit log 및 UI 정책 정의
+
+## Insulin Blind Benchmark — Order Detail Entry UX
+- [ ] 완료된 time-course Order Detail의 Benchmark Evaluation 버튼·eligibility preflight·권한 정책 설계
+- [ ] source Order의 민감 문맥을 표시하지 않고 generic context만 생성하는 locked primary benchmark modal 설계
+- [ ] strict primary·literature-assisted secondary·perturbation validation을 별도 run type으로 노출하는 결과·재실행 UX 정의
+
+## Insulin Blind Benchmark — Cell Context Policy
+- [ ] cell lineage/class와 식별성 높은 cell-line·transgene·disease model 명칭을 분리하는 benchmark context schema 정의
+- [ ] strict primary에서 lineage-level context만 보존하고, dataset-identifying alias를 차단하는 server-side sanitizer 설계
+- [ ] cell context 보존·완전 마스킹·literature-assisted 세 조건을 구분해 성능과 specificity를 보고하는 policy 정의
+
+## Insulin Blind Benchmark — Iterative Development and Generalization
+- [ ] benchmark 결과 기반 개선 요구를 error taxonomy와 preregistered change request로 기록하는 version ledger 설계
+- [ ] development subset·frozen internal test·external held-out stimulus/dataset을 분리하는 anti-overfitting protocol 정의
+- [ ] version별 paired bootstrap·branch safety·negative-control·permutation 결과를 비교하고 최종 freeze를 선언하는 release gate 설계
+
+## Insulin Blind Benchmark — Optimized Model and Inhibitor Validation
+- [ ] insulin benchmark 최적화 score를 development-performance로 명확히 고정하고 final model freeze를 선언하는 release policy 정의
+- [ ] 동일 time-course vehicle·insulin·inhibitor·insulin+inhibitor contrast의 sample·normalization·replicate contract 정의
+- [ ] TMM contribution·target Wave·kinase rank·directionality·branch selectivity를 포함한 perturbation validation endpoint와 논문 figure 설계
+
+## Insulin Blind Benchmark — High-sensitivity Discovery Track
+- [ ] Tier 1/2 canonical score와 novel·Tier 3/4·deep-coverage PTM discovery 결과를 분리 보존하는 dual-track result contract 정의
+- [ ] novel PTM의 sequence/localization·replicate·temporal reproducibility·protein-normalization·multi-evidence 품질 등급과 validation queue 설계
+- [ ] discovery yield·time-resolved novelty atlas·kinase/TMM/wave linkage·supplementary source-data를 포함하는 논문용 visualization bundle 정의
+
+## Pre-Benchmark PTM-platform Three-Layer Code Audit
+- [x] 0층 원래 Order 전처리→RAG→Report pipeline의 task dispatch·artifact·kinase score/report 영향 범위 확인
+- [x] 1층 Temporal Wave·TMM·directionality·dual-track·Atlas의 Order 결과·frontend·report 실제 연결과 feature gate 감사
+- [x] 2층 Representation Learning C0–C3·gate·tau·pre-registration stack의 runtime isolation, persisted artifact, Order/kinase score/report 부작용 감사
+- [x] benchmark가 평가할 production analysis contract와 제외할 experimental validation contract를 문서·test·manifest 수준에서 확정
+
+## Benchmark Framework Implementation — P0/P1
+- [x] generic `benchmarking` package와 versioned manifest/contract schema 구현
+- [x] analysis runtime에서 import할 수 없는 locked-truth adapter·scorer boundary 구현
+- [x] insulin workbook을 `insulin_signaling_v1` dataset manifest와 locked reference bundle로 변환
+- [x] sequence-aware anchor matcher, Tier 1/2 component scorer, provenance/result bundle writer 구현
+- [x] production contract (`tmm_full_temporal`)·blind policy·input/truth hash를 immutable result metadata로 저장
+- [ ] fixture 기반 unit test, source-boundary test, syntax/test validation, GitHub main commit/push 수행

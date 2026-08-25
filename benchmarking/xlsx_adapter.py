@@ -1,0 +1,161 @@
+"""Build a locked benchmark bundle from an analyst-owned Excel reference.
+
+This module is a build-time adapter.  The generated truth JSON is consumed by
+``LockedBenchmarkScorer`` only after blind analysis output has been archived.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from pathlib import Path
+from typing import Any, Iterable
+
+from .contracts import MANIFEST_SCHEMA_VERSION, TRUTH_SCHEMA_VERSION, sha256_file
+
+
+INSULIN_REQUIRED_SHEETS = (
+    "Anchor_Reference",
+    "Kinase_Reference",
+    "Temporal_Layers",
+    "Ambiguous_Sites",
+    "Scoring_Template",
+    "Benchmark_Rules",
+)
+
+_HEADER_TOKENS = {
+    "Anchor_Reference": "Anchor_ID",
+    "Kinase_Reference": "Kinase_or_complex",
+    "Temporal_Layers": "Window_ID",
+    "Ambiguous_Sites": "Site_or_pattern",
+    "Scoring_Template": "Anchor_ID",
+    "Benchmark_Rules": "Rule_ID",
+}
+
+
+def build_insulin_locked_reference(
+    workbook_path: str | Path,
+    output_dir: str | Path,
+    *,
+    dataset_id: str = "insulin_signaling_v1",
+) -> tuple[Path, Path]:
+    """Convert the provided insulin workbook to a versioned truth/manifest pair."""
+
+    from openpyxl import load_workbook
+
+    source = Path(workbook_path).resolve()
+    destination = Path(output_dir).resolve()
+    locked_dir = destination / "locked_truth"
+    locked_dir.mkdir(parents=True, exist_ok=True)
+    workbook = load_workbook(source, data_only=True, read_only=True)
+    missing = [sheet for sheet in INSULIN_REQUIRED_SHEETS if sheet not in workbook.sheetnames]
+    if missing:
+        raise ValueError("insulin workbook is missing sheets: " + ", ".join(missing))
+
+    sheets = {
+        sheet: _worksheet_records(
+            workbook[sheet].iter_rows(values_only=True),
+            header_token=_HEADER_TOKENS[sheet],
+        )
+        for sheet in INSULIN_REQUIRED_SHEETS
+    }
+    anchors = sheets["Anchor_Reference"]
+    truth = {
+        "schema_version": TRUTH_SCHEMA_VERSION,
+        "dataset_id": dataset_id,
+        "source_workbook_name": source.name,
+        "source_workbook_sha256": sha256_file(source),
+        "anchors": anchors,
+        "kinase_reference": sheets["Kinase_Reference"],
+        "temporal_layers": sheets["Temporal_Layers"],
+        "ambiguous_sites": sheets["Ambiguous_Sites"],
+        "scoring_template": sheets["Scoring_Template"],
+        "benchmark_rules": sheets["Benchmark_Rules"],
+    }
+    truth_path = locked_dir / f"{dataset_id}.truth.json"
+    _write_json(truth_path, truth)
+    manifest = {
+        "schema_version": MANIFEST_SCHEMA_VERSION,
+        "dataset_id": dataset_id,
+        "display_name": "Insulin signaling phospho-kinase benchmark v1",
+        "locked_truth_bundle": str(Path("locked_truth") / truth_path.name),
+        "locked_truth_sha256": sha256_file(truth_path),
+        "source_reference": {
+            "kind": "analyst_provided_workbook",
+            "workbook_sha256": truth["source_workbook_sha256"],
+        },
+        "production_contract": {
+            "id": "tmm_full_temporal.v1",
+            "layers": ["product_pipeline.v0", "temporal_science.v1"],
+            "temporal_contract": "dynamics_v1",
+            "kinase_scoring_method": "tmm_full_temporal",
+            "tmm_guard_policy": "group_share",
+            "representation_learning_in_primary_score": False,
+        },
+        "blind_policy": {
+            "stimulus_hidden_from_analysis_runtime": True,
+            "research_question_hidden_from_analysis_runtime": True,
+            "truth_available_to_scorer_only": True,
+            "rag_policy": "disabled_for_strict_primary",
+            "cell_context_policy": "lineage_only",
+        },
+        "score_config": {
+            "evidence_tier_weights": {"Tier 1": 2, "Tier 2": 1},
+            "component_weights": {
+                "detectable_anchor_recall": 0.25,
+                "regulated_anchor_recall": 0.25,
+                "direction_accuracy": 0.20,
+                "peak_window_accuracy": 0.20,
+                "chain_completeness": 0.10,
+            },
+            "novel_tier_policy": "Tier 3/4 and de_novo are discovery-only; never score canonical accuracy",
+            "site_mapping_requirement": "sequence_isoform_species",
+        },
+    }
+    manifest_path = destination / f"{dataset_id}.manifest.json"
+    _write_json(manifest_path, manifest)
+    return manifest_path, truth_path
+
+
+def _worksheet_records(
+    rows: Iterable[tuple[Any, ...]], *, header_token: str
+) -> list[dict[str, Any]]:
+    materialized = list(rows)
+    header_index = next(
+        (
+            index
+            for index, row in enumerate(materialized)
+            if header_token in {str(value or "").strip() for value in row}
+        ),
+        None,
+    )
+    if header_index is None:
+        raise ValueError(f"could not locate {header_token!r} header in workbook sheet")
+    headers = materialized[header_index]
+    if not any(headers):
+        return []
+    normalized_headers = [str(value or "").strip() for value in headers]
+    records: list[dict[str, Any]] = []
+    for row in materialized[header_index + 1 :]:
+        if not any(value not in (None, "") for value in row):
+            continue
+        record = {
+            header: _json_value(value)
+            for header, value in zip(normalized_headers, row)
+            if header
+        }
+        records.append(record)
+    return records
+
+
+def _json_value(value: Any) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, (str, int, float, bool)):
+        return value
+    return str(value)
+
+
+def _write_json(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")

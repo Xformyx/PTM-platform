@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "PTM Locked Benchmark Manifest v1",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "dataset_id",
+    "locked_truth_bundle",
+    "locked_truth_sha256",
+    "production_contract",
+    "blind_policy",
+    "score_config"
+  ],
+  "properties": {
+    "schema_version": {"const": "ptm_locked_benchmark_manifest.v1"},
+    "dataset_id": {"type": "string", "minLength": 1},
+    "locked_truth_bundle": {"type": "string", "minLength": 1},
+    "locked_truth_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "production_contract": {"type": "object"},
+    "blind_policy": {"type": "object"},
+    "score_config": {"type": "object"}
+  },
+  "additionalProperties": true
+}
