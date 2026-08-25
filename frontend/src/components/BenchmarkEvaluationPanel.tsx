@@ -4,7 +4,7 @@
  * research questions, RAG and locked truth are intentionally not rendered.
  */
 import { useEffect, useMemo, useState } from "react";
-import { AlertCircle, CheckCircle2, FlaskConical, Loader2, LockKeyhole, Play, RefreshCw, ShieldCheck } from "lucide-react";
+import { AlertCircle, CheckCircle2, Download, FlaskConical, Loader2, LockKeyhole, Play, RefreshCw, ShieldCheck } from "lucide-react";
 import { api } from "@/lib/api";
 import { BenchmarkFigure2, type Figure2Source } from "@/components/BenchmarkFigure2";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -28,6 +28,7 @@ type BenchmarkRun = {
   blind_context: { cell_context?: { lineage_class?: string } };
   score_summary?: Record<string, unknown> | null;
   figure2?: Figure2Source | null;
+  bundle_files?: string[];
   error_message?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
@@ -125,6 +126,7 @@ function RunCard({
   scoreMetrics,
   onTemporal,
   onRetry,
+  onDownload,
 }: {
   run: BenchmarkRun;
   readOnly: boolean;
@@ -133,6 +135,7 @@ function RunCard({
   scoreMetrics: [string, unknown][];
   onTemporal: () => void;
   onRetry: () => void;
+  onDownload: (path: string) => void;
 }) {
   const ready = isReadyForTmm(run);
   const staleTmm = isStaleTmm(run);
@@ -173,6 +176,21 @@ function RunCard({
             {scoreMetrics.length ? scoreMetrics.map(([key, value]) => <div key={key} className="rounded bg-muted/60 px-3 py-2"><p className="text-[10px] uppercase text-muted-foreground">{metricLabel(key)}</p><p className="font-mono text-sm font-semibold">{formattedMetric(value)}</p></div>) : <p className="text-sm text-muted-foreground">Score bundle completed. Detailed figures and source data are available in the result bundle.</p>}
           </div>
           {figure2FromRun(run) && <BenchmarkFigure2 figure2={figure2FromRun(run)!} />}
+          <div className="rounded border bg-muted/30 p-3 space-y-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p className="text-sm font-medium">Paper figures and source data</p>
+                <p className="text-xs text-muted-foreground">This strict-primary run emits Figure 1–4 only. Figure 5 and later require an inhibitor/perturbation set and are intentionally excluded.</p>
+              </div>
+              {(run.bundle_files || []).includes("benchmark_source_data.zip") && <Button size="sm" variant="outline" onClick={() => onDownload("benchmark_source_data.zip")}><Download className="mr-1 h-3.5 w-3.5" />Source data ZIP</Button>}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {[1, 2, 3, 4].map((number) => {
+                const file = `figures/Fig${number}.svg`;
+                return (run.bundle_files || []).includes(file) ? <Button key={file} size="sm" variant="secondary" onClick={() => onDownload(file)}><Download className="mr-1 h-3.5 w-3.5" />Figure {number} SVG</Button> : null;
+              })}
+            </div>
+          </div>
         </div>
       )}
       {run.error_message && !ready && <p className="text-xs text-destructive">{run.error_message}</p>}
@@ -302,6 +320,16 @@ export function BenchmarkEvaluationPanel({ orderId, readOnly }: { orderId: numbe
     }
   };
 
+  const downloadBundle = async (runId: number, path: string) => {
+    setMessage(null);
+    try {
+      const filename = path.split("/").pop() || "benchmark_bundle_file";
+      await api.downloadFile(`/benchmarks/runs/${runId}/bundle/${path}`, filename);
+    } catch (error: any) {
+      setMessage(error?.message || "Could not download benchmark output.");
+    }
+  };
+
   return (
     <div className="space-y-4">
       <Card className="border-sky-200/70 dark:border-sky-900/70">
@@ -348,6 +376,7 @@ export function BenchmarkEvaluationPanel({ orderId, readOnly }: { orderId: numbe
                   scoreMetrics={scoreMetrics}
                   onTemporal={() => void runTemporalAndScore(run.id)}
                   onRetry={() => void retryStart(run.id)}
+                  onDownload={(path) => void downloadBundle(run.id, path)}
                 />
               ))}
               {leftoverRuns.length > 0 && (
@@ -364,6 +393,7 @@ export function BenchmarkEvaluationPanel({ orderId, readOnly }: { orderId: numbe
                         leftover
                         onTemporal={() => void runTemporalAndScore(run.id)}
                         onRetry={() => void retryStart(run.id)}
+                        onDownload={(path) => void downloadBundle(run.id, path)}
                       />
                     ))}
                   </div>

@@ -25,7 +25,7 @@ def score_benchmark_run(self, benchmark_run_id: int) -> dict:
     engine = create_engine(_sync_database_url(), future=True)
     with engine.begin() as conn:
         row = conn.execute(
-            text("SELECT dataset_id, artifact_path FROM benchmark_runs WHERE id = :id"),
+            text("SELECT dataset_id, artifact_path, source_snapshot, blind_context, production_contract FROM benchmark_runs WHERE id = :id"),
             {"id": benchmark_run_id},
         ).mappings().first()
         if not row:
@@ -39,12 +39,23 @@ def score_benchmark_run(self, benchmark_run_id: int) -> dict:
         manifest = BenchmarkManifest.load(manifest_path)
         artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
         result = LockedBenchmarkScorer(manifest).score(artifact)
+        run_metadata = {
+            "source_snapshot": _as_mapping(row.get("source_snapshot")),
+            "blind_context": _as_mapping(row.get("blind_context")),
+            "production_contract": _as_mapping(row.get("production_contract")),
+        }
         bundle = write_score_bundle(
             result_root / f"benchmark_run_{benchmark_run_id}",
             result,
             analysis_artifact_path=artifact_path,
+            run_metadata=run_metadata,
         )
-        summary = {**result["metrics"], "figure2": build_figure2_source(result)}
+        summary = {
+            **result["metrics"],
+            "figure2": build_figure2_source(result),
+            "publication_bundle": "publication_bundle.json",
+            "figure_scope": "Fig1-Fig4_only",
+        }
         with engine.begin() as conn:
             conn.execute(
                 text(
@@ -58,7 +69,7 @@ def score_benchmark_run(self, benchmark_run_id: int) -> dict:
                     "scored_at": datetime.now(timezone.utc).isoformat(),
                 },
             )
-        return {"benchmark_run_id": benchmark_run_id, "status": "completed", "result_path": str(bundle["result_json"])}
+        return {"benchmark_run_id": benchmark_run_id, "status": "completed", "result_path": str(bundle["score_json"])}
     except Exception as exc:
         with engine.begin() as conn:
             conn.execute(
@@ -66,3 +77,15 @@ def score_benchmark_run(self, benchmark_run_id: int) -> dict:
                 {"id": benchmark_run_id, "error": str(exc)[:2000]},
             )
         raise
+
+
+def _as_mapping(value: object) -> dict:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, dict) else {}
+        except json.JSONDecodeError:
+            return {}
+    return {}

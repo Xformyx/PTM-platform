@@ -414,3 +414,18 @@ Backend: vector-plot (receptor inference)
 - [x] API preflight가 사용하는 manifest lookup 경로와 `BENCHMARK_REFERENCE_DIR` 설정 확인
 - [x] API server와 offline benchmark-runner의 insulin reference read-only mount를 공통 contract로 수정
 - [x] manifest preflight regression·Compose mount validation·GitHub main 반영 및 재배포 절차 확인
+
+## Start Blind Benchmark HTTP 500 진단
+- [ ] 운영 API의 benchmark preflight·registration 500 traceback 및 request payload 확인
+- [ ] manifest loading·Order access·BenchmarkRun persistence 예외를 안전한 API 오류로 수정
+- [ ] preflight·run registration 회귀 테스트와 GitHub main 반영 후 운영 재실행 확인
+
+## Latest-main Synchronization Before Follow-up Review
+- [x] local benchmark worktree의 미반영 500-diagnosis 기록을 보존하고 upstream main과 차이 확인
+- [x] GitHub `main` 최신 revision으로 안전하게 rebase/sync
+- [x] 최신 commit·clean/retained worktree 상태를 확인하고 후속 질의 준비 완료
+
+## Benchmark Figure 1–4 and Data-sheet Bundle Scope
+- [x] latest benchmark code의 Figure 1–4 generator, artifact, result bundle, download API/UI 경로 감사
+- [x] inhibitor dependency가 있는 Figure 5 이상을 current strict-primary run에서 제외하는 result contract 확정
+- [x] Figure 1–4와 별도 source-data sheet의 저장 경로·파일명·provenance 및 UI 노출 규칙 검증

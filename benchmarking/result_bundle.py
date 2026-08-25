@@ -10,6 +10,7 @@ from typing import Any, Mapping
 
 from .contracts import sha256_file
 from .figure2_source import build_figure2_source, write_figure2_tsvs
+from .publication_bundle import build_publication_sources, write_publication_bundle
 
 
 def write_score_bundle(
@@ -17,6 +18,7 @@ def write_score_bundle(
     result: Mapping[str, Any],
     *,
     analysis_artifact_path: str | Path,
+    run_metadata: Mapping[str, Any] | None = None,
 ) -> dict[str, str]:
     """Persist score JSON, anchor-level TSV, and content-hash provenance."""
 
@@ -46,4 +48,15 @@ def write_score_bundle(
         writer.writeheader()
         writer.writerows(rows)
     figure_paths = write_figure2_tsvs(destination, enriched["figure2"])
-    return {"score_json": str(score_path), "anchor_tsv": str(tsv_path), **figure_paths}
+    artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+    publication = build_publication_sources(enriched, artifact, run_metadata)
+    publication_paths = write_publication_bundle(destination, publication)
+    publication_path = destination / "publication_bundle.json"
+    publication_path.write_text(json.dumps(publication, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return {
+        "score_json": str(score_path),
+        "anchor_tsv": str(tsv_path),
+        "publication_json": str(publication_path),
+        **figure_paths,
+        **publication_paths,
+    }

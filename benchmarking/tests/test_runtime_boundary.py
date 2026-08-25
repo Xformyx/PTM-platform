@@ -43,3 +43,9 @@ def test_dedicated_benchmark_runner_is_the_only_service_with_locked_truth_mount(
     assert "benchmark-runner:" in compose
     assert compose.count("./benchmarks:/opt/benchmarks:ro") == 1
     assert "dockerfile: benchmarking/Dockerfile" in compose
+
+
+def test_api_receives_completed_outputs_but_not_locked_benchmark_reference() -> None:
+    compose = (REPO_ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+    assert "./storage/benchmarks:/app/storage/benchmarks:ro" in compose
+    assert compose.count("./benchmarks:/opt/benchmarks:ro") == 1

@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -94,6 +95,7 @@ def _serialize(run: BenchmarkRun, child: Order | None = None) -> dict:
         "source_snapshot": run.source_snapshot,
         "score_summary": run.score_summary,
         "figure2": (run.score_summary or {}).get("figure2") if isinstance(run.score_summary, dict) else None,
+        "bundle_files": _bundle_files(run.result_path),
         "error_message": error_message,
         "created_at": run.created_at.isoformat() if run.created_at else None,
         "updated_at": run.updated_at.isoformat() if run.updated_at else None,
@@ -110,11 +112,53 @@ def _serialize(run: BenchmarkRun, child: Order | None = None) -> dict:
     return payload
 
 
+def _benchmark_result_root() -> Path:
+    return Path(os.getenv("BENCHMARK_RESULT_DIR", "/app/storage/benchmarks")).resolve()
+
+
+def _bundle_files(result_path: str | None) -> list[str]:
+    if not result_path:
+        return []
+    bundle_root = Path(result_path).resolve().parent
+    allowed_root = _benchmark_result_root()
+    if not bundle_root.is_relative_to(allowed_root) or not bundle_root.is_dir():
+        return []
+    return sorted(
+        str(path.relative_to(bundle_root))
+        for path in bundle_root.rglob("*")
+        if path.is_file() and path.suffix.lower() in {".svg", ".tsv", ".json", ".zip"}
+    )
+
+
 async def _child_for_run(run: BenchmarkRun, db: AsyncSession) -> Order | None:
     if not run.benchmark_order_id:
         return None
     result = await db.execute(select(Order).where(Order.id == run.benchmark_order_id))
     return result.scalar_one_or_none()
+
+
+@router.get("/runs/{run_id}/bundle/{relative_path:path}")
+async def download_benchmark_bundle_file(
+    run_id: int,
+    relative_path: str,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    result = await db.execute(select(BenchmarkRun).where(BenchmarkRun.id == run_id))
+    run = result.scalar_one_or_none()
+    if not run:
+        raise HTTPException(status_code=404, detail="BenchmarkRun not found")
+    await _source_order_or_404(run.source_order_id, user, db)
+    if not run.result_path:
+        raise HTTPException(status_code=409, detail="Benchmark result bundle is not available yet")
+    bundle_root = Path(run.result_path).resolve().parent
+    allowed_root = _benchmark_result_root()
+    target = (bundle_root / relative_path).resolve()
+    if not bundle_root.is_relative_to(allowed_root) or not target.is_relative_to(bundle_root):
+        raise HTTPException(status_code=400, detail="Invalid benchmark bundle path")
+    if not target.is_file() or target.suffix.lower() not in {".svg", ".tsv", ".json", ".zip"}:
+        raise HTTPException(status_code=404, detail="Benchmark bundle file not found")
+    return FileResponse(target, filename=target.name)
 
 
 async def _persist_overlay(run: BenchmarkRun, child: Order | None, db: AsyncSession) -> BenchmarkRun:

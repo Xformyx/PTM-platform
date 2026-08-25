@@ -106,6 +106,7 @@ services:
       - ./ptm_shared:/opt/ptm_shared:ro
       - ./data:/app/data
       - ./storage/reports:/app/storage/reports
+      - ./storage/benchmarks:/app/storage/benchmarks:ro
       - ./storage/logs:/app/storage/logs
       - ./storage/file_share:/app/storage/file_share
       - ./storage/ptmquant:/app/storage/ptmquant
