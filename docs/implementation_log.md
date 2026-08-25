@@ -1889,3 +1889,23 @@
   산출 수치를 바꾸지 않는다.
 - **결정성:** 해당 없음
 
+### [2026-08-25] Blind benchmark 자식 Order를 목록·RAG에서 분리
+
+- **분류:** 구현
+- **대상:** `api-server/app/services/benchmark_run_lifecycle.py`,
+  `api-server/app/api/benchmarks.py`, `api-server/app/api/orders.py`,
+  `workers/common/db_update.py`, `workers/preprocessing/tasks.py`,
+  `frontend/src/components/BenchmarkEvaluationPanel.tsx`,
+  `frontend/src/pages/OrderDetail.tsx`
+- **구현 대상 설계:** `docs/insulin_blind_benchmark_manuscript_output_spec_v1_ko.md`
+  Figure 1 — analysis input와 RAG/LLM/report 분리
+- **사전등록 상태:** 해당 없음 (실행 게이트, 측정 상수 아님)
+- **내용:** Start Blind Benchmark가 실패 run을 재사용하도록 바꿨다.
+  자식 snapshot Order는 Order list에서 숨기고, 일반 Re-analysis가 RAG/LLM으로
+  체인되지 않게 막는다. 자식 Order 상태는 원본 Order Benchmark 탭에 overlay한다.
+- **논문에서의 용도:** 사용 안 함 (blindness 유지용 실행 게이트)
+- **해석 한계:** 이미 시작된 자식 RAG 작업을 소급 취소하지 않는다.
+  Phase B 캐시 키는 바꾸지 않는다. 블라인드 자식은 원본 Insulin Order의
+  문헌 해석 캐시를 쓰지 않는다.
+- **결정성:** 해당 없음
+

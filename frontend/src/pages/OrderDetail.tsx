@@ -4354,6 +4354,12 @@ export default function OrderDetail() {
   const currentStageIdx = STAGES.findIndex((s) => s.key === order.current_stage);
   const showProgress = isRunning || ["completed", "failed"].includes(order.status);
   const showTerminal = logs.length > 0 || events.length > 0;
+  const isBenchmarkChild = Boolean(
+    (order.analysis_options as { benchmark_blind_mode?: unknown } | undefined)?.benchmark_blind_mode
+  );
+  const sourceOrderId = Number(
+    (order.analysis_options as { source_order_id?: unknown } | undefined)?.source_order_id
+  ) || null;
 
   return (
     <div className="space-y-6">
@@ -4429,28 +4435,44 @@ export default function OrderDetail() {
               {stopInProgress ? "Stopping…" : "Stop"}
             </Button>
           )}
-          {order.status === "registered" && !isReadOnlyShared && (
+          {order.status === "registered" && !isReadOnlyShared && !isBenchmarkChild && (
             <Button onClick={handleStart} className="gap-2">
               <Play className="h-4 w-4" /> Start Analysis
             </Button>
           )}
-          {order.status === "failed" && !isReadOnlyShared && (
+          {order.status === "failed" && !isReadOnlyShared && !isBenchmarkChild && (
             <Button variant="outline" onClick={handleStart} className="gap-2">
               <RotateCcw className="h-4 w-4" /> Retry Analysis
             </Button>
           )}
-          {["completed", "cancelled"].includes(order.status) && !isReadOnlyShared && (
+          {["completed", "cancelled"].includes(order.status) && !isReadOnlyShared && !isBenchmarkChild && (
             <Button variant="outline" onClick={handleStart} className="gap-2">
               <RotateCcw className="h-4 w-4" /> Re-run from Beginning
             </Button>
           )}
-          {!isReadOnlyShared && ["completed", "cancelled"].includes(order.status) && (
+          {!isReadOnlyShared && !isBenchmarkChild && ["completed", "cancelled"].includes(order.status) && (
             <Button variant="outline" onClick={() => setActiveTab("benchmark")} className="gap-2">
               <FlaskConical className="h-4 w-4" /> Benchmark Evaluation
             </Button>
           )}
+          {isBenchmarkChild && sourceOrderId && (
+            <Button variant="outline" onClick={() => navigate(`/admin/orders/${sourceOrderId}`)} className="gap-2">
+              <FlaskConical className="h-4 w-4" /> Source Benchmark tab
+            </Button>
+          )}
         </div>
       </div>
+
+      {isBenchmarkChild && (
+        <Alert>
+          <FlaskConical className="h-4 w-4" />
+          <AlertTitle>Blind benchmark snapshot</AlertTitle>
+          <AlertDescription>
+            This Order is a sanitized 0층 snapshot. It is hidden from the Order list and must not run RAG or report generation.
+            Retry preprocessing and locked scoring from the source Order Benchmark tab.
+          </AlertDescription>
+        </Alert>
+      )}
 
       {/* Stage Stepper */}
       <Card>
@@ -4464,7 +4486,8 @@ export default function OrderDetail() {
               const canRerun =
                 !isRunning &&
                 order.status !== "registered" &&
-                !isReadOnlyShared;
+                !isReadOnlyShared &&
+                !isBenchmarkChild;
 
               return (
                 <div key={stage.key} className="flex flex-1 items-center">
@@ -4893,10 +4916,12 @@ export default function OrderDetail() {
               <FlaskConical className="h-3.5 w-3.5 mr-1.5" />
               Co-Scientist
             </TabsTrigger>
+            {!isBenchmarkChild && (
             <TabsTrigger value="benchmark">
               <FlaskConical className="h-3.5 w-3.5 mr-1.5" />
               Benchmark
             </TabsTrigger>
+            )}
           </TabsList>
           <Button variant="outline" size="sm" className="shrink-0" onClick={() => setDuplicateModalOpen(true)}>
             <CopyPlus className="h-3.5 w-3.5 mr-1.5" />
@@ -4904,9 +4929,11 @@ export default function OrderDetail() {
           </Button>
         </div>
 
+        {!isBenchmarkChild && (
         <TabsContent value="benchmark" className="space-y-4 mt-4">
           <BenchmarkEvaluationPanel orderId={orderId} readOnly={isReadOnlyShared} />
         </TabsContent>
+        )}
 
         <TabsContent value="overview" className="space-y-4 mt-4">
           {/* Project & Sample Info */}
@@ -5340,6 +5367,7 @@ export default function OrderDetail() {
                       {pptxGenerating ? "Generating PPTX…" : "Generate PPTX"}
                     </Button>
                   </div>
+                  {!isBenchmarkChild && (
                   <Button
                     variant="outline"
                     size="sm"
@@ -5349,6 +5377,7 @@ export default function OrderDetail() {
                     <RotateCcw className="h-3.5 w-3.5" />
                     Re-run Report Generation
                   </Button>
+                  )}
                 </div>
               )}
               <ResultFiles orderId={order.id} resultFiles={order.result_files as any} onDeleted={handleRefresh} />
@@ -5362,7 +5391,7 @@ export default function OrderDetail() {
                     ? "Report files available for download"
                     : "Results will appear here after analysis completes"}
                 </p>
-                {!isRunning && order.status !== "registered" && !isReadOnlyShared && (
+                {!isRunning && order.status !== "registered" && !isReadOnlyShared && !isBenchmarkChild && (
                   <Button
                     variant="outline"
                     size="sm"

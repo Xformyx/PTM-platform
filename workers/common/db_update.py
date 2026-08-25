@@ -124,6 +124,26 @@ def update_order_status(
         logger.warning(f"[Order {order_id}] Failed to update DB status: {e}")
 
 
+def resolve_benchmark_run_id(order_id: int, config: dict | None = None) -> int | None:
+    """Find the BenchmarkRun for a child Order even if task_config omitted the id."""
+    if isinstance(config, dict) and config.get("benchmark_run_id"):
+        try:
+            return int(config["benchmark_run_id"])
+        except (TypeError, ValueError):
+            pass
+    try:
+        engine = _get_engine()
+        with engine.connect() as conn:
+            row = conn.execute(
+                text("SELECT id FROM benchmark_runs WHERE benchmark_order_id = :oid LIMIT 1"),
+                {"oid": order_id},
+            ).fetchone()
+        return int(row[0]) if row else None
+    except Exception as e:
+        logger.warning(f"[Order {order_id}] Could not resolve BenchmarkRun: {e}")
+        return None
+
+
 def update_benchmark_run_status(
     run_id: int,
     status: str,
@@ -136,7 +156,7 @@ def update_benchmark_run_status(
         params: dict = {"run_id": run_id, "status": status}
         if error_message is not None:
             sets.append("error_message = :error_message")
-            params["error_message"] = error_message[:2000]
+            params["error_message"] = error_message[:2000] if error_message else None
         if status == "failed":
             sets.append("completed_at = NOW()")
         sql = text(f"UPDATE benchmark_runs SET {', '.join(sets)} WHERE id = :run_id")

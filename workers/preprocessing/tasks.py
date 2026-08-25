@@ -840,6 +840,13 @@ def run_preprocessing(self, order_id: int, config: dict):
             if get_order_status(order_id) != "cancelled":
                 update_order_status(order_id, "completed", current_stage="preprocessing", progress_pct=100)
                 notify_order_status(order_id, "completed")
+                try:
+                    from common.db_update import resolve_benchmark_run_id, update_benchmark_run_status
+                    bench_id = resolve_benchmark_run_id(order_id, config if isinstance(config, dict) else None)
+                    if bench_id:
+                        update_benchmark_run_status(bench_id, "preprocessing", error_message="")
+                except Exception as bench_err:
+                    logger.warning(f"[Order {order_id}] Could not sync BenchmarkRun after success: {bench_err}")
             return {
                 "order_id": order_id,
                 "status": "completed",
@@ -914,19 +921,21 @@ def run_preprocessing(self, order_id: int, config: dict):
         error_msg = f"Preprocessing failed: {str(e)}"
         logger.error(f"[Order {order_id}] {error_msg}", exc_info=True)
         update_order_status(order_id, "failed", error_message=error_msg)
-        benchmark_run_id = config.get("benchmark_run_id") if isinstance(config, dict) else None
-        if benchmark_run_id:
-            try:
-                from common.db_update import update_benchmark_run_status
+        try:
+            from common.db_update import resolve_benchmark_run_id, update_benchmark_run_status
+            benchmark_run_id = resolve_benchmark_run_id(
+                order_id, config if isinstance(config, dict) else None
+            )
+            if benchmark_run_id:
                 update_benchmark_run_status(
-                    int(benchmark_run_id),
+                    benchmark_run_id,
                     "failed",
                     error_message=error_msg,
                 )
-            except Exception as bench_err:
-                logger.warning(
-                    f"[Order {order_id}] Could not sync BenchmarkRun {benchmark_run_id}: {bench_err}"
-                )
+        except Exception as bench_err:
+            logger.warning(
+                f"[Order {order_id}] Could not sync BenchmarkRun: {bench_err}"
+            )
         notify_order_status(order_id, "failed", error_msg)
         publish_progress(
             order_id, "preprocessing", "error", "failed", -1, error_msg,

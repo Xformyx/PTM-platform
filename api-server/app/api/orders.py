@@ -17,9 +17,11 @@ from app.core.database import get_db
 from app.core.redis import get_redis
 from app.core.webhook import send_order_webhook
 from app.dependencies import assert_not_viewer, get_current_user
+from app.models.benchmark_run import BenchmarkRun
 from app.models.order import Order, OrderLog, OrderShare
 from app.models.rag_collection import RagCollection
 from app.models.user import User
+from app.services.benchmark_run_lifecycle import apply_blind_child_task_config, is_benchmark_child
 
 router = APIRouter(prefix="/orders", tags=["orders"])
 logger = logging.getLogger("ptm-platform.orders")
@@ -248,6 +250,13 @@ async def list_orders(
         )
     if status_filter:
         id_query = id_query.where(Order.status == status_filter)
+    benchmark_child_ids = select(BenchmarkRun.benchmark_order_id).where(
+        BenchmarkRun.benchmark_order_id.is_not(None)
+    )
+    id_query = id_query.where(
+        ~Order.id.in_(benchmark_child_ids),
+        ~Order.order_code.like("bm_bmr-%"),
+    )
 
     count_result = await db.execute(
         select(sqlfunc.count()).select_from(id_query.subquery())
@@ -348,7 +357,12 @@ async def list_generated_reports(
             )
             .where(or_(Order.user_id == user.id, OrderShare.shared_with_user_id == user.id))
         )
-    query = query.where(Order.status.in_(("completed", "failed", "cancelled"))).limit(200)
+    query = query.where(Order.status.in_(("completed", "failed", "cancelled")))
+    query = query.where(
+        ~Order.id.in_(select(BenchmarkRun.benchmark_order_id).where(BenchmarkRun.benchmark_order_id.is_not(None))),
+        ~Order.order_code.like("bm_bmr-%"),
+    )
+    query = query.limit(200)
     result = await db.execute(query)
     orders = result.scalars().unique().all()
 
@@ -1210,6 +1224,16 @@ async def start_order(
         "secondary_condition_map": _build_condition_map(order.secondary_sample_config) if order.secondary_sample_config else None,
         "run_generation": run_generation,
     }
+    if is_benchmark_child(order):
+        bench_result = await db.execute(
+            select(BenchmarkRun).where(BenchmarkRun.benchmark_order_id == order.id)
+        )
+        bench_run = bench_result.scalar_one_or_none()
+        if bench_run:
+            apply_blind_child_task_config(task_config, bench_run.id)
+            bench_run.status = "preprocessing"
+            bench_run.error_message = None
+            await db.commit()
 
     from celery import Celery as CeleryClass
 
@@ -1401,6 +1425,11 @@ async def run_stage(
             status_code=400,
             detail=f"Can only re-run stages for completed, failed, or cancelled orders (current: '{order.status}')",
         )
+    if is_benchmark_child(order) and body.stage != "preprocessing":
+        raise HTTPException(
+            status_code=400,
+            detail="Blind benchmark snapshots run 0층 preprocessing only. Retry from the source Order Benchmark tab.",
+        )
 
     output_dir = os.getenv("OUTPUT_DIR", "/app/data/outputs")
     order_output = Path(output_dir) / order.order_code
@@ -1508,6 +1537,16 @@ async def run_stage(
             "chain_to_next": True,
             "run_generation": run_generation,
         }
+        if is_benchmark_child(order):
+            bench_result = await db.execute(
+                select(BenchmarkRun).where(BenchmarkRun.benchmark_order_id == order.id)
+            )
+            bench_run = bench_result.scalar_one_or_none()
+            if bench_run:
+                apply_blind_child_task_config(task_config, bench_run.id)
+                bench_run.status = "preprocessing"
+                bench_run.error_message = None
+                await db.commit()
         task = celery_app.send_task(
             "preprocessing.tasks.run_preprocessing",
             args=[order.id, task_config],

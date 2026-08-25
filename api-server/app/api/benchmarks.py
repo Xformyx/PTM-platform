@@ -39,6 +39,11 @@ from app.services.benchmark_blind_context import (
     source_snapshot,
     validate_benchmark_eligibility,
 )
+from app.services.benchmark_run_lifecycle import (
+    is_run_in_progress,
+    overlay_run_status,
+    should_reuse_existing_run,
+)
 from app.services.benchmark_snapshot import create_sanitized_snapshot
 
 router = APIRouter(prefix="/benchmarks", tags=["benchmarks"])
@@ -57,23 +62,62 @@ class _ServiceUser:
         self.role = getattr(source_user, "role", "admin")
 
 
-def _serialize(run: BenchmarkRun) -> dict:
-    return {
+def _serialize(run: BenchmarkRun, child: Order | None = None) -> dict:
+    status, error_message = overlay_run_status(
+        run.status,
+        getattr(child, "status", None),
+        getattr(child, "error_message", None),
+        run.error_message,
+    )
+    payload = {
         "id": run.id,
         "run_code": run.run_code,
         "source_order_id": run.source_order_id,
         "benchmark_order_id": run.benchmark_order_id,
         "dataset_id": run.dataset_id,
-        "status": run.status,
+        "status": status,
         "production_contract": run.production_contract,
         "blind_policy": run.blind_policy,
         "blind_context": run.blind_context,
         "source_snapshot": run.source_snapshot,
         "score_summary": run.score_summary,
-        "error_message": run.error_message,
+        "error_message": error_message,
         "created_at": run.created_at.isoformat() if run.created_at else None,
         "updated_at": run.updated_at.isoformat() if run.updated_at else None,
     }
+    if child is not None:
+        payload["child_order"] = {
+            "id": child.id,
+            "order_code": child.order_code,
+            "status": child.status,
+            "progress_pct": float(child.progress_pct or 0),
+            "current_stage": child.current_stage,
+            "error_message": child.error_message,
+        }
+    return payload
+
+
+async def _child_for_run(run: BenchmarkRun, db: AsyncSession) -> Order | None:
+    if not run.benchmark_order_id:
+        return None
+    result = await db.execute(select(Order).where(Order.id == run.benchmark_order_id))
+    return result.scalar_one_or_none()
+
+
+async def _persist_overlay(run: BenchmarkRun, child: Order | None, db: AsyncSession) -> BenchmarkRun:
+    status, error_message = overlay_run_status(
+        run.status,
+        getattr(child, "status", None),
+        getattr(child, "error_message", None),
+        run.error_message,
+    )
+    if status == run.status and error_message == run.error_message:
+        return run
+    run.status = status
+    run.error_message = error_message
+    await db.commit()
+    await db.refresh(run)
+    return run
 
 
 async def _source_order_or_404(order_id: int, user, db: AsyncSession) -> Order:
@@ -131,6 +175,23 @@ async def register_benchmark_run(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    existing_rows = await db.execute(
+        select(BenchmarkRun)
+        .where(
+            BenchmarkRun.source_order_id == order.id,
+            BenchmarkRun.dataset_id == body.dataset_id,
+        )
+        .order_by(BenchmarkRun.created_at.desc())
+    )
+    for existing in existing_rows.scalars().all():
+        child = await _child_for_run(existing, db)
+        child_status = child.status if child else None
+        if should_reuse_existing_run(existing.status, child_status) or is_run_in_progress(
+            existing.status, child_status
+        ):
+            existing = await _persist_overlay(existing, child, db)
+            return _serialize(existing, child)
+
     run = BenchmarkRun(
         run_code=f"BMR-{secrets.token_hex(8).upper()}",
         source_order_id=order.id,
@@ -162,7 +223,12 @@ async def list_benchmark_runs(
         .where(BenchmarkRun.source_order_id == order_id)
         .order_by(BenchmarkRun.created_at.desc())
     )
-    return {"runs": [_serialize(run) for run in rows.scalars().all()]}
+    runs = []
+    for run in rows.scalars().all():
+        child = await _child_for_run(run, db)
+        run = await _persist_overlay(run, child, db)
+        runs.append(_serialize(run, child))
+    return {"runs": runs}
 
 
 @router.get("/runs/{run_id}")
@@ -176,7 +242,9 @@ async def get_benchmark_run(
     if not run:
         raise HTTPException(status_code=404, detail="BenchmarkRun not found")
     await _source_order_or_404(run.source_order_id, user, db)
-    return _serialize(run)
+    child = await _child_for_run(run, db)
+    run = await _persist_overlay(run, child, db)
+    return _serialize(run, child)
 
 
 @router.post("/runs/{run_id}/start")
@@ -242,7 +310,11 @@ async def start_benchmark_run(
             "special_conditions": "",
             "benchmark_blind_mode": True,
         },
-        "analysis_options": {"benchmark_blind_mode": True},
+        "analysis_options": {
+            "benchmark_blind_mode": True,
+            "source_order_id": source.id,
+            "benchmark_run_id": run.id,
+        },
         "report_options": {"temporal_contract": run.production_contract["temporal_contract"]},
         "rag_collections": None,
         "error_message": None,
@@ -312,7 +384,7 @@ async def start_benchmark_run(
         queue="preprocessing",
     )
     await _save_celery_task_id(child.id, task.id)
-    return {**_serialize(run), "preprocessing_task_id": task.id}
+    return {**_serialize(run, child), "preprocessing_task_id": task.id}
 
 
 @router.post("/runs/{run_id}/run-temporal-analysis")
@@ -401,4 +473,4 @@ async def run_benchmark_temporal_analysis(
     celery_app.conf.broker_url = os.getenv("CELERY_BROKER_URL", "redis://redis:6379/1")
     celery_app.conf.result_backend = os.getenv("CELERY_RESULT_BACKEND", "redis://redis:6379/2")
     task = celery_app.send_task("benchmarking.tasks.score_benchmark_run", args=[run.id], queue="benchmark")
-    return {**_serialize(run), "scoring_task_id": task.id}
+    return {**_serialize(run, child), "scoring_task_id": task.id}

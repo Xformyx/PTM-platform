@@ -26,6 +26,14 @@ type BenchmarkRun = {
   score_summary?: Record<string, unknown> | null;
   error_message?: string | null;
   created_at?: string | null;
+  child_order?: {
+    id: number;
+    order_code: string;
+    status: string;
+    progress_pct: number;
+    current_stage?: string | null;
+    error_message?: string | null;
+  } | null;
 };
 
 type Preflight = {
@@ -47,6 +55,11 @@ const LINEAGE_LABELS: Record<string, string> = {
 };
 
 const ACTIVE = new Set(["registered", "snapshot_pending", "preprocessing", "temporal_analysis", "scoring_queued", "scoring"]);
+const CHILD_ACTIVE = new Set(["queued", "preprocessing", "rag_enrichment", "report_generation"]);
+
+function isLive(run: BenchmarkRun): boolean {
+  return ACTIVE.has(run.status) || Boolean(run.child_order && CHILD_ACTIVE.has(run.child_order.status));
+}
 
 function runTone(status: string): string {
   if (status === "completed") return "bg-emerald-100 text-emerald-700 border-emerald-200";
@@ -86,7 +99,7 @@ export function BenchmarkEvaluationPanel({ orderId, readOnly }: { orderId: numbe
 
   useEffect(() => { void refresh(); }, [orderId]);
   useEffect(() => {
-    if (!runs.some((run) => ACTIVE.has(run.status))) return;
+    if (!runs.some(isLive)) return;
     const timer = window.setInterval(() => void refresh(), 5000);
     return () => window.clearInterval(timer);
   }, [runs]);
@@ -116,11 +129,22 @@ export function BenchmarkEvaluationPanel({ orderId, readOnly }: { orderId: numbe
     setSubmitting(true);
     setMessage(null);
     try {
-      const run = await api.post<BenchmarkRun>(`/benchmarks/source-orders/${orderId}/runs`, {
-        dataset_id: "insulin_signaling_v1",
-        lineage_class: lineage,
-      });
-      await api.post(`/benchmarks/runs/${run.id}/start`);
+      const latest = runs[0];
+      if (latest && isLive(latest)) {
+        setDialogOpen(false);
+        setMessage("A blind benchmark run is already in progress for this Order.");
+        await refresh();
+        return;
+      }
+      let runId = latest && latest.status === "failed" ? latest.id : null;
+      if (runId == null) {
+        const run = await api.post<BenchmarkRun>(`/benchmarks/source-orders/${orderId}/runs`, {
+          dataset_id: "insulin_signaling_v1",
+          lineage_class: lineage,
+        });
+        runId = run.id;
+      }
+      await api.post(`/benchmarks/runs/${runId}/start`);
       setDialogOpen(false);
       await refresh();
     } catch (error: any) {
@@ -199,7 +223,7 @@ export function BenchmarkEvaluationPanel({ orderId, readOnly }: { orderId: numbe
                   <div className="flex flex-wrap justify-between items-start gap-2">
                     <div>
                       <div className="flex items-center gap-2"><span className="font-mono text-sm font-medium">{run.run_code}</span><Badge variant="outline" className={runTone(run.status)}>{run.status.replace(/_/g, " ")}</Badge></div>
-                      <p className="mt-1 text-xs text-muted-foreground">{run.dataset_id} · {run.production_contract?.id || "tmm_full_temporal"} · lineage: {LINEAGE_LABELS[run.blind_context?.cell_context?.lineage_class || ""] || "controlled"}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">{run.dataset_id} · {run.production_contract?.id || "tmm_full_temporal"} · lineage: {LINEAGE_LABELS[run.blind_context?.cell_context?.lineage_class || ""] || "controlled"}{run.child_order ? ` · snapshot ${run.child_order.status.replace(/_/g, " ")}` : ""}</p>
                     </div>
                     {run.status === "preprocessing" && !readOnly && (
                       <Button size="sm" variant="outline" disabled={submitting} onClick={() => void runTemporalAndScore(run.id)} className="gap-1"><FlaskConical className="h-3.5 w-3.5" /> Run TMM + locked score</Button>
@@ -208,7 +232,10 @@ export function BenchmarkEvaluationPanel({ orderId, readOnly }: { orderId: numbe
                       <Button size="sm" variant="outline" disabled={submitting} onClick={() => void retryStart(run.id)} className="gap-1"><RefreshCw className="h-3.5 w-3.5" /> Retry preprocessing</Button>
                     )}
                   </div>
-                  {ACTIVE.has(run.status) && <Progress value={run.status === "preprocessing" ? 35 : run.status === "temporal_analysis" ? 65 : 80} className="h-1.5" />}
+                  {isLive(run) && <Progress value={run.child_order?.progress_pct || (run.status === "preprocessing" ? 35 : run.status === "temporal_analysis" ? 65 : 80)} className="h-1.5" />}
+                  {run.child_order && CHILD_ACTIVE.has(run.child_order.status) && run.child_order.status !== "preprocessing" && run.child_order.status !== "queued" && (
+                    <p className="text-xs text-amber-700">This snapshot was restarted from the Order list and is running {run.child_order.status.replace(/_/g, " ")}. Blind scoring uses 0층 preprocessing only — retry from this tab next time.</p>
+                  )}
                   {run.status === "completed" && (
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                       {scoreMetrics.length ? scoreMetrics.map(([key, value]) => <div key={key} className="rounded bg-muted/60 px-3 py-2"><p className="text-[10px] uppercase text-muted-foreground">{metricLabel(key)}</p><p className="font-mono text-sm font-semibold">{formattedMetric(value)}</p></div>) : <p className="text-sm text-muted-foreground">Score bundle completed. Detailed figures and source data are available in the result bundle.</p>}
