@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -23,20 +24,34 @@ LINEAGE_CLASSES = (
 )
 
 
-def manifest_path_for(dataset_id: str, repository_root: Path) -> Path:
+def manifest_path_for(dataset_id: str, public_manifest_root: Path) -> Path:
+    """Resolve the API-visible contract without opening scorer-only truth files."""
+
     if not dataset_id.replace("_", "").replace("-", "").isalnum():
         raise ValueError("dataset_id may contain only letters, digits, hyphens, and underscores")
-    path = repository_root / "benchmarks" / dataset_id / f"{dataset_id}.manifest.json"
+    path = public_manifest_root / f"{dataset_id}.manifest.json"
     if not path.is_file():
         raise ValueError(f"benchmark manifest is not available: {dataset_id}")
     return path
 
 
-def load_public_manifest(dataset_id: str, repository_root: Path) -> dict[str, Any]:
-    path = manifest_path_for(dataset_id, repository_root)
+def public_manifest_root() -> Path:
+    configured = os.getenv("BENCHMARK_PUBLIC_MANIFEST_DIR")
+    if configured:
+        return Path(configured).resolve()
+    return Path(__file__).resolve().parents[1] / "benchmark_manifests"
+
+
+def load_public_manifest(dataset_id: str, manifest_root: Path | None = None) -> dict[str, Any]:
+    path = manifest_path_for(dataset_id, manifest_root or public_manifest_root())
     raw = json.loads(path.read_text(encoding="utf-8"))
     if raw.get("dataset_id") != dataset_id:
         raise ValueError("benchmark manifest dataset_id does not match its path")
+    if raw.get("visibility") != "api_preflight_contract_only":
+        raise ValueError("benchmark manifest is not an API-visible preflight contract")
+    forbidden = {"locked_truth_bundle", "locked_truth_sha256", "score_config", "source_reference"}
+    if forbidden.intersection(raw):
+        raise ValueError("API-visible benchmark manifest may not contain locked scoring metadata")
     if raw.get("blind_policy", {}).get("rag_policy") != "disabled_for_strict_primary":
         raise ValueError("strict primary benchmark requires disabled RAG")
     if raw.get("production_contract", {}).get("representation_learning_in_primary_score") is not False:

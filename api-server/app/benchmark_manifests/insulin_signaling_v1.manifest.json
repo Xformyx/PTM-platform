@@ -1,0 +1,24 @@
+{
+  "schema_version": "ptm_benchmark_public_manifest.v1",
+  "visibility": "api_preflight_contract_only",
+  "dataset_id": "insulin_signaling_v1",
+  "display_name": "Insulin signaling phospho-kinase benchmark v1",
+  "blind_policy": {
+    "cell_context_policy": "lineage_only",
+    "rag_policy": "disabled_for_strict_primary",
+    "research_question_hidden_from_analysis_runtime": true,
+    "stimulus_hidden_from_analysis_runtime": true,
+    "truth_available_to_scorer_only": true
+  },
+  "production_contract": {
+    "id": "tmm_full_temporal.v1",
+    "kinase_scoring_method": "tmm_full_temporal",
+    "layers": [
+      "product_pipeline.v0",
+      "temporal_science.v1"
+    ],
+    "representation_learning_in_primary_score": false,
+    "temporal_contract": "dynamics_v1",
+    "tmm_guard_policy": "group_share"
+  }
+}

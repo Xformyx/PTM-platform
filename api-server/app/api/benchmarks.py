@@ -41,7 +41,6 @@ from app.services.benchmark_blind_context import (
 from app.services.benchmark_snapshot import create_sanitized_snapshot
 
 router = APIRouter(prefix="/benchmarks", tags=["benchmarks"])
-_REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 
 
 class BenchmarkRunCreate(BaseModel):
@@ -99,7 +98,7 @@ async def benchmark_preflight(
 ):
     order = await _source_order_or_404(order_id, user, db)
     try:
-        manifest = load_public_manifest(dataset_id, _REPOSITORY_ROOT)
+        manifest = load_public_manifest(dataset_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     issues = validate_benchmark_eligibility(order, manifest=manifest)
@@ -123,7 +122,7 @@ async def register_benchmark_run(
     assert_not_viewer(user)
     order = await _source_order_or_404(order_id, user, db)
     try:
-        manifest = load_public_manifest(body.dataset_id, _REPOSITORY_ROOT)
+        manifest = load_public_manifest(body.dataset_id)
         issues = validate_benchmark_eligibility(order, manifest=manifest)
         if issues:
             raise ValueError("; ".join(issues))

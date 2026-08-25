@@ -404,3 +404,13 @@ Backend: vector-plot (receptor inference)
 - [x] offline locked scorer job, provenance/result bundle, truth-reveal audit 구현
 - [x] Order Detail preflight·strict primary launch·status·score/figure results UI 구현
 - [x] API/worker/frontend/benchmark boundary 회귀 테스트, syntax validation, GitHub main push 수행
+
+## Benchmark Evaluation 탭 표시 진단
+- [x] latest frontend source의 Benchmark tab import·trigger·content 렌더링 조건 확인
+- [x] 실행 중인 frontend image/bundle 및 Docker Compose frontend service가 `68b0086` 이후 build인지 확인
+- [x] Order 상태·shared view·tab layout에 따른 숨김 조건 수정 및 실제 화면 검증
+
+## Insulin Manifest Runtime Path Repair
+- [x] API preflight가 사용하는 manifest lookup 경로와 `BENCHMARK_REFERENCE_DIR` 설정 확인
+- [x] API server와 offline benchmark-runner의 insulin reference read-only mount를 공통 contract로 수정
+- [ ] manifest preflight regression·Compose mount validation·GitHub main 반영 및 재배포 절차 확인

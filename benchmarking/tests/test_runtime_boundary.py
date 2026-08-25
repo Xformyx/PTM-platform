@@ -23,6 +23,15 @@ def test_locked_truth_is_not_inside_production_packages() -> None:
     assert forbidden == []
 
 
+def test_api_public_manifest_cannot_embed_locked_scoring_metadata() -> None:
+    public_root = REPO_ROOT / "api-server" / "app" / "benchmark_manifests"
+    for manifest in public_root.glob("*.manifest.json"):
+        text = manifest.read_text(encoding="utf-8")
+        assert "locked_truth_bundle" not in text
+        assert "locked_truth_sha256" not in text
+        assert '"score_config"' not in text
+
+
 def test_api_and_ordinary_worker_images_do_not_copy_or_mount_benchmarking() -> None:
     dockerfiles = [REPO_ROOT / "api-server" / "Dockerfile", REPO_ROOT / "workers" / "Dockerfile"]
     combined = "\n".join(path.read_text(encoding="utf-8") for path in dockerfiles)
