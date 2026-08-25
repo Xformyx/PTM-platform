@@ -413,4 +413,4 @@ Backend: vector-plot (receptor inference)
 ## Insulin Manifest Runtime Path Repair
 - [x] API preflight가 사용하는 manifest lookup 경로와 `BENCHMARK_REFERENCE_DIR` 설정 확인
 - [x] API server와 offline benchmark-runner의 insulin reference read-only mount를 공통 contract로 수정
-- [ ] manifest preflight regression·Compose mount validation·GitHub main 반영 및 재배포 절차 확인
+- [x] manifest preflight regression·Compose mount validation·GitHub main 반영 및 재배포 절차 확인
