@@ -56,7 +56,7 @@ const LINEAGE_LABELS: Record<string, string> = {
 };
 
 const ACTIVE = new Set(["registered", "snapshot_pending", "preprocessing", "temporal_analysis", "scoring_queued", "scoring"]);
-const CHILD_ACTIVE = new Set(["queued", "preprocessing", "rag_enrichment", "report_generation"]);
+const CHILD_ACTIVE = new Set(["queued", "preprocessing"]);
 
 function isLive(run: BenchmarkRun): boolean {
   return Boolean(run.child_order && CHILD_ACTIVE.has(run.child_order.status))

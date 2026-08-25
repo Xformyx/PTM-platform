@@ -13,6 +13,11 @@ from typing import Any
 CHILD_PIPELINE_STATUSES = frozenset(
     {"queued", "preprocessing", "rag_enrichment", "report_generation"}
 )
+OFFICIAL_CHILD_LIVE_STATUSES = frozenset({"queued", "preprocessing"})
+OFF_CONTRACT_CHILD_STATUSES = frozenset({"rag_enrichment", "report_generation"})
+OFF_CONTRACT_CHILD_MESSAGE = (
+    "Off-contract RAG/report leftover. Locked scoring uses 0층 outputs only."
+)
 REUSABLE_RUN_STATUSES = frozenset({"registered", "failed"})
 IN_FLIGHT_RUN_STATUSES = frozenset(
     {"snapshot_pending", "preprocessing", "temporal_analysis", "scoring_queued", "scoring"}
@@ -41,9 +46,9 @@ def should_reuse_existing_run(run_status: str, child_status: str | None) -> bool
 
 
 def is_run_in_progress(run_status: str, child_status: str | None) -> bool:
-    if run_status in IN_FLIGHT_RUN_STATUSES:
+    if run_status in IN_FLIGHT_RUN_STATUSES and child_status not in OFF_CONTRACT_CHILD_STATUSES:
         return True
-    if child_status in CHILD_PIPELINE_STATUSES:
+    if child_status in OFFICIAL_CHILD_LIVE_STATUSES:
         return True
     return False
 
@@ -63,7 +68,9 @@ def overlay_run_status(
 
     if run_status in SCORED_RUN_STATUSES:
         return run_status, run_error
-    if child_status in CHILD_PIPELINE_STATUSES:
+    if child_status in OFF_CONTRACT_CHILD_STATUSES:
+        return "cancelled", OFF_CONTRACT_CHILD_MESSAGE
+    if child_status in OFFICIAL_CHILD_LIVE_STATUSES:
         return "preprocessing", None
     if child_status == "failed":
         return "failed", child_error or run_error
@@ -82,7 +89,9 @@ def run_phase(run_status: str, child_status: str | None) -> str:
         return status
     if child_status == "completed":
         return "ready_for_tmm"
-    if child_status in CHILD_PIPELINE_STATUSES:
+    if child_status in OFF_CONTRACT_CHILD_STATUSES:
+        return "abandoned"
+    if child_status in OFFICIAL_CHILD_LIVE_STATUSES:
         return "snapshot_running"
     if status == "cancelled" or child_status == "cancelled":
         return "abandoned"

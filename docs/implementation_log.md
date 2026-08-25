@@ -1924,3 +1924,17 @@
 - **해석 한계:** 이전 시도 행을 삭제하지 않는다. 점수나 전처리 수치를 바꾸지 않는다.
 - **결정성:** 해당 없음
 
+### [2026-08-25] Off-contract RAG leftover를 abandoned로 고정
+
+- **분류:** 정정
+- **대상:** `api-server/app/services/benchmark_run_lifecycle.py`,
+  `api-server/app/api/benchmarks.py`, `workers/watchdog/tasks.py`
+- **구현 대상 설계:** 해당 없음 (실행 게이트)
+- **사전등록 상태:** 해당 없음
+- **내용:** 블라인드 자식이 rag_enrichment/report_generation에 있으면
+  진행 중이 아니라 leftover로 보고 취소한다. 워커 재시작으로 남은 stale
+  RAG는 탭에서 돌고 있는 것처럼 보이지 않는다.
+- **논문에서의 용도:** 사용 안 함
+- **해석 한계:** 이미 끝난 0층 산출물은 지우지 않는다.
+- **결정성:** 해당 없음
+

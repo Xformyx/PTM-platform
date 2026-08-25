@@ -258,6 +258,16 @@ def check_stalled_orders(self):
         for order in active_orders:
             order_id = order["id"]
             _cur_pct[order_id] = order.get("progress_pct", 0.0)
+            if str(order.get("order_code") or "").startswith("bm_bmr-") and order["status"] in {
+                "rag_enrichment",
+                "report_generation",
+            }:
+                update_order_status(
+                    order_id,
+                    "cancelled",
+                    stage_detail="Cancelled: blind snapshot must not run RAG or report generation.",
+                )
+                continue
 
             if _is_in_cooldown(order["watchdog_alerted_at"]):
                 continue

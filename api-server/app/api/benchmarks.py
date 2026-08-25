@@ -40,6 +40,7 @@ from app.services.benchmark_blind_context import (
     validate_benchmark_eligibility,
 )
 from app.services.benchmark_run_lifecycle import (
+    OFF_CONTRACT_CHILD_STATUSES,
     is_run_in_progress,
     overlay_run_status,
     run_phase,
@@ -107,18 +108,30 @@ async def _child_for_run(run: BenchmarkRun, db: AsyncSession) -> Order | None:
 
 
 async def _persist_overlay(run: BenchmarkRun, child: Order | None, db: AsyncSession) -> BenchmarkRun:
+    dirty = False
+    child_status = getattr(child, "status", None)
+    if child is not None and child_status in OFF_CONTRACT_CHILD_STATUSES:
+        child.status = "cancelled"
+        child.stage_detail = "Cancelled: blind snapshot must not run RAG or report generation."
+        child.error_message = None
+        child_status = "cancelled"
+        dirty = True
     status, error_message = overlay_run_status(
         run.status,
-        getattr(child, "status", None),
+        child_status,
         getattr(child, "error_message", None),
         run.error_message,
     )
-    if status == run.status and error_message == run.error_message:
+    if status != run.status or error_message != run.error_message:
+        run.status = status
+        run.error_message = error_message
+        dirty = True
+    if not dirty:
         return run
-    run.status = status
-    run.error_message = error_message
     await db.commit()
     await db.refresh(run)
+    if child is not None:
+        await db.refresh(child)
     return run
 
 

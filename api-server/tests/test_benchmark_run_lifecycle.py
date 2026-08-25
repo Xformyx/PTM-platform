@@ -29,15 +29,16 @@ def test_failed_and_orphaned_preprocessing_runs_are_reused() -> None:
 
 def test_live_child_keeps_benchmark_tab_in_progress() -> None:
     assert overlay_run_status("failed", "preprocessing", None, "old") == ("preprocessing", None)
-    assert overlay_run_status("failed", "rag_enrichment", None, "old") == ("preprocessing", None)
+    assert overlay_run_status("failed", "rag_enrichment", None, "old")[0] == "cancelled"
     assert overlay_run_status("failed", "completed", None, "old") == ("preprocessing", None)
     assert overlay_run_status("failed", "failed", "child boom", "old") == ("failed", "child boom")
     assert overlay_run_status("failed", "cancelled", None, "old")[0] == "cancelled"
     assert overlay_run_status("scoring", "completed", None, None) == ("scoring", None)
-    assert is_run_in_progress("failed", "rag_enrichment")
+    assert not is_run_in_progress("failed", "rag_enrichment")
+    assert is_run_in_progress("preprocessing", "preprocessing")
     assert run_phase("failed", "completed") == "ready_for_tmm"
     assert run_phase("failed", "cancelled") == "abandoned"
-    assert run_phase("preprocessing", "rag_enrichment") == "snapshot_running"
+    assert run_phase("preprocessing", "rag_enrichment") == "abandoned"
 
 
 def test_child_start_cannot_chain_to_rag() -> None:
