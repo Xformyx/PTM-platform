@@ -297,7 +297,10 @@ def _figure4_svg(figure: Mapping[str, Any]) -> str:
         by_time.setdefault(str(row.get("timepoint") or "unknown"), []).append(str(row.get("kinase") or row.get("canonical") or ""))
     timepoints = list(by_time.items())
     boxes = "".join(
-        f'<rect x="{58 + index * 230}" y="145" width="190" height="110" rx="10" fill="#ecfeff" stroke="#0891b2"/><text x="{153 + index * 230}" y="172" text-anchor="middle" font-family="Arial" font-size="15" font-weight="600" fill="#0f172a">{html.escape(timepoint)}</text><text x="{153 + index * 230}" y="205" text-anchor="middle" font-family="Arial" font-size="13" fill="#334155">{html.escape(', '.join(items[:3]) or "no active kinase")}</text>'
+        f'<rect x="{58 + index * 230}" y="145" width="190" height="110" rx="10" fill="#ecfeff" stroke="#0891b2"/>'
+        f'<text x="{153 + index * 230}" y="172" text-anchor="middle" font-family="Arial" font-size="15" font-weight="600" fill="#0f172a">{html.escape(timepoint)}</text>'
+        f'<text x="{153 + index * 230}" y="205" text-anchor="middle" font-family="Arial" font-size="13" fill="#334155">'
+        f'{html.escape(", ".join(items[:3]) or "no active kinase")}</text>'
         for index, (timepoint, items) in enumerate(timepoints[:5])
     )
     directional = list(figure.get("directionality") or [])
