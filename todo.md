@@ -467,6 +467,12 @@ Backend: vector-plot (receptor inference)
 - [x] 논문용 Methods·Results·ablation·claim boundary·후속 inhibitor validation 전략 작성
 - [x] 서버 이전용 code/config/hash/verification 명령 패키지 작성 및 GitHub main 반영 준비
 
+## Post-optimization Insulin Benchmark Improvement Review
+- [x] optimized raw artifact의 profile provenance·candidate multiplicity·guard outcome·directionality·chain completeness 병목 정량화
+- [x] preprocessing·Wave·TMM candidate graph·profile estimation·directionality·locked scorer seam별 추가 개발 가능성 감사
+- [x] 개선 후보별 예상 효과·과적합 위험·구현 난이도·논문 기여도와 필수 validation 정의
+- [x] 서버 승격 전 P0/P1/P2 개발 우선순위와 중단 기준을 포함한 권고안 작성
+
 ## Latest-main Synchronization Before Follow-up Review
 - [x] local benchmark worktree의 미반영 500-diagnosis 기록을 보존하고 upstream main과 차이 확인
 - [x] GitHub `main` 최신 revision으로 안전하게 rebase/sync
