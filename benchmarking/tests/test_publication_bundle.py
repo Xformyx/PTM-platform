@@ -43,3 +43,17 @@ def test_strict_primary_publication_bundle_emits_only_figures_1_to_4(tmp_path) -
     assert not (tmp_path / "figures" / "Fig5.svg").exists()
     assert (tmp_path / "benchmark_source_data.zip").is_file()
     assert "source_data_zip" in written
+    assert "DejaVu Sans" in (tmp_path / "figures" / "Fig3.svg").read_text(encoding="utf-8")
+
+
+def test_publication_bundle_labels_missing_tmm_and_cascade_data_explicitly(tmp_path) -> None:
+    publication = build_publication_sources(
+        {"metrics": {}, "metric_numerators": {}, "metric_denominators": {}, "anchor_results": []},
+        {"site_availability": [], "temporal_wave_contract": {}, "tmm_full_temporal": {}, "provenance": {}},
+        {},
+    )
+    write_publication_bundle(tmp_path, publication)
+    fig3 = (tmp_path / "figures" / "Fig3.svg").read_text(encoding="utf-8")
+    fig4 = (tmp_path / "figures" / "Fig4.svg").read_text(encoding="utf-8")
+    assert "No eligible TMM kinase profile" in fig3
+    assert "No eligible contribution-weighted cascade" in fig4

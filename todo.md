@@ -445,6 +445,11 @@ Backend: vector-plot (receptor inference)
 - [x] TMM worker heartbeat stage·stage progress·locked scorer 상태를 BenchmarkRun API payload에 추가
 - [x] snapshot/TMM/scoring/checkpoint를 분리한 단계별 UI와 완료 판정·Figure 1–4 ready 표시 구현
 
+## Benchmark Figure Publication Rendering Repair
+- [x] Figure 1–4 SVG의 Korean glyph fallback·font-family 및 source-data-to-panel 렌더링 경로 감사
+- [x] English scientific typography와 explicit unavailable-data panel을 Figure 1–4 renderer에 구현
+- [x] regenerated Figure 1–4 SVG와 source-data bundle을 visual/syntax regression으로 검증
+
 ## Latest-main Synchronization Before Follow-up Review
 - [x] local benchmark worktree의 미반영 500-diagnosis 기록을 보존하고 upstream main과 차이 확인
 - [x] GitHub `main` 최신 revision으로 안전하게 rebase/sync
