@@ -493,6 +493,12 @@ Backend: vector-plot (receptor inference)
 - [x] 플랫폼 전체 Wave·TMM·non-PTM effector·RAG·LLM 병용 시 생성되는 추가 데이터 가치와 leakage-safe 평가 계층 정의
 - [x] kinase direct evidence·timing·cross-layer mechanism benchmark를 강화하는 P0/P1/P2 재설계와 검증 기준 작성
 
+## Benchmark v1 + Additive v2 Integration Plan
+- [x] v1 strict-blind·canonical scoring·TMM·uncertainty·discovery·publication·worker 운영 계약 중 보존할 자산 목록화
+- [x] v1 유지·v2 additive 확장·교체 금지 항목을 compatibility matrix로 정의
+- [x] 기존 primary score와 Figure 1–4를 깨지 않는 versioned artifact·score·source-data 통합 구조 설계
+- [x] shadow run·noninferiority gate·rollback을 포함한 점진적 구현 및 서버 승격 계획 작성
+
 ## Latest-main Synchronization Before Follow-up Review
 - [x] local benchmark worktree의 미반영 500-diagnosis 기록을 보존하고 upstream main과 차이 확인
 - [x] GitHub `main` 최신 revision으로 안전하게 rebase/sync
