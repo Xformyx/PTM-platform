@@ -44,6 +44,7 @@ APP_STACK_SERVICES=(
   celery-worker-rag
   celery-worker-report
   benchmark-tmm-runner
+  benchmark-runner
   gateway
 )
 
@@ -69,6 +70,7 @@ _component_for_path() {
     mcp-server/*)     echo "mcp-server" ;;
     frontend/*)       echo "frontend" ;;
     workers/*)        echo "workers" ;;
+    benchmarking/*)   echo "benchmarking" ;;
     gateway/*)        echo "gateway" ;;
     docker-compose.yml|docker-compose.override.yml|docker-compose.gpu.yml)
       echo "compose-file" ;;
