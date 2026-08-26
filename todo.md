@@ -487,6 +487,12 @@ Backend: vector-plot (receptor inference)
 - [x] frozen full run 후 offline locked scorer 실행, Figure 1–4/source data/Methods/Results 재생성
 - [x] Python·regression·blind-boundary 검증, GitHub main 반영과 서버 handoff package 작성 준비
 
+## Enrichment-free Temporal Mechanism Benchmark Competitiveness Review
+- [x] current benchmark가 PTM·non-PTM protein time-course, cross-layer cascade, falsifiable mechanism hypothesis를 실제 평가하는 범위 감사
+- [x] final frozen-v2 artifact와 runner-only secondary score에서 data-anchored kinase coverage·timing accuracy 0의 정확한 원인 분해
+- [x] 플랫폼 전체 Wave·TMM·non-PTM effector·RAG·LLM 병용 시 생성되는 추가 데이터 가치와 leakage-safe 평가 계층 정의
+- [x] kinase direct evidence·timing·cross-layer mechanism benchmark를 강화하는 P0/P1/P2 재설계와 검증 기준 작성
+
 ## Latest-main Synchronization Before Follow-up Review
 - [x] local benchmark worktree의 미반영 500-diagnosis 기록을 보존하고 upstream main과 차이 확인
 - [x] GitHub `main` 최신 revision으로 안전하게 rebase/sync
