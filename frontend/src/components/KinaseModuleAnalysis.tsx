@@ -4648,8 +4648,34 @@ interface KinaseHeatmapData {
   }[];
   scoring_method?: string;
   scoring_threshold?: { q_value: number; fc_abs: number };
+  temporal_ptm_protein_analysis?: TemporalPtmProteinAnalysisSummary;
   _cached: boolean;
   _cache_hash?: string;
+}
+
+interface TemporalPtmProteinAnalysisSummary {
+  schema_version?: string;
+  full_artifact_available?: boolean;
+  artifact_path?: string | null;
+  protein_trajectory_count?: number;
+  ptm_protein_pair_count?: number;
+  cross_layer_edge_count?: number;
+  temporally_eligible_edge_count?: number;
+  mechanism_chain_count?: number;
+  evidence_supported_mechanism_count?: number;
+  kinase_timing_status?: string | null;
+  causality_status?: "not_tested";
+  interpretation_boundary?: string;
+  top_cross_layer_edges?: Array<{
+    edge_id?: string;
+    source_wave_id?: string | number;
+    target_gene?: string;
+    direction?: string;
+    onset_lag_minutes?: number | null;
+    peak_lag_minutes?: number | null;
+    eligible_for_mechanism_chain?: boolean;
+    causality_status?: "not_tested";
+  }>;
 }
 
 // ── Cascade Timeline View ──────────────────────────────────────────────────
@@ -4958,6 +4984,7 @@ function KinaseActivityHeatmapView({
   const [sortByCondition, setSortByCondition] = useState<string | null>(null);
   const [patternFilter, setPatternFilter] = useState<string | null>(null);
   const [showSubPatterns, setShowSubPatterns] = useState(false);
+  const [showCrossLayerEvidence, setShowCrossLayerEvidence] = useState(false);
   // v11.3: Expandable substrate list state
   const [expandedSubstrates, setExpandedSubstrates] = useState<Set<string>>(new Set());
   // v11.3: GO Localization dashboard state
@@ -5407,6 +5434,77 @@ function KinaseActivityHeatmapView({
           </Button>
         </div>
       </div>
+
+      {heatmapData.temporal_ptm_protein_analysis && (
+        <div className="border border-teal-300/70 dark:border-teal-800 rounded-lg bg-teal-50/50 dark:bg-teal-950/20">
+          <button
+            type="button"
+            onClick={() => setShowCrossLayerEvidence((visible) => !visible)}
+            className="w-full flex items-center justify-between gap-3 px-3 py-2 text-left"
+            aria-expanded={showCrossLayerEvidence}
+          >
+            <span className="flex items-center gap-2 text-xs font-medium text-teal-800 dark:text-teal-200">
+              <ArrowRight className="h-3.5 w-3.5" />
+              Shared PTM–Protein Temporal Evidence
+              <span className="font-normal text-teal-700/80 dark:text-teal-300/80">
+                — same engine as strict-blind benchmark, observational only
+              </span>
+            </span>
+            <span className="text-[10px] text-teal-700 dark:text-teal-300">
+              {showCrossLayerEvidence ? "Hide" : "Show"}
+            </span>
+          </button>
+          {showCrossLayerEvidence && (() => {
+            const evidence = heatmapData.temporal_ptm_protein_analysis!;
+            const rows = evidence.top_cross_layer_edges || [];
+            return (
+              <div className="border-t border-teal-200/80 dark:border-teal-900 px-3 py-2 space-y-2">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-1 text-[10px] text-teal-900 dark:text-teal-100">
+                  <span>Protein trajectories: <b>{evidence.protein_trajectory_count || 0}</b></span>
+                  <span>PTM–protein pairs: <b>{evidence.ptm_protein_pair_count || 0}</b></span>
+                  <span>Cross-layer edges: <b>{evidence.cross_layer_edge_count || 0}</b></span>
+                  <span>Temporal eligible: <b>{evidence.temporally_eligible_edge_count || 0}</b></span>
+                  <span>Mechanism candidates: <b>{evidence.mechanism_chain_count || 0}</b></span>
+                  <span>Evidence-supported: <b>{evidence.evidence_supported_mechanism_count || 0}</b></span>
+                  <span>Kinase timing: <b>{evidence.kinase_timing_status || "not_available"}</b></span>
+                  <span>Causality: <b>not tested</b></span>
+                </div>
+                {rows.length > 0 ? (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-[10px]">
+                      <thead className="text-muted-foreground">
+                        <tr className="border-b border-teal-200/70 dark:border-teal-900">
+                          <th className="text-left py-1 pr-2">Wave</th>
+                          <th className="text-left py-1 pr-2">Protein</th>
+                          <th className="text-left py-1 pr-2">Temporal direction</th>
+                          <th className="text-right py-1 pr-2">Peak lag (min)</th>
+                          <th className="text-left py-1">Interpretation</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rows.map((edge, index) => (
+                          <tr key={edge.edge_id || `${edge.source_wave_id}-${edge.target_gene}-${index}`} className="border-b border-teal-100/70 dark:border-teal-950">
+                            <td className="py-1 pr-2">{edge.source_wave_id ?? "—"}</td>
+                            <td className="py-1 pr-2 font-medium">{edge.target_gene || "—"}</td>
+                            <td className="py-1 pr-2">{edge.direction || "unknown"}</td>
+                            <td className="py-1 pr-2 text-right">{edge.peak_lag_minutes ?? "—"}</td>
+                            <td className="py-1">{edge.eligible_for_mechanism_chain ? "falsifiable temporal candidate" : "observational candidate"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <p className="text-[10px] text-muted-foreground">No retained cross-layer edge is available for this order.</p>
+                )}
+                <p className="text-[10px] text-muted-foreground">
+                  {evidence.interpretation_boundary || "Temporal precedence is observational; this panel does not assert causal mechanism."}
+                </p>
+              </div>
+            );
+          })()}
+        </div>
+      )}
 
       {/* Heatmap View */}
       {viewMode === "heatmap" && (

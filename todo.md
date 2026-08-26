@@ -516,6 +516,14 @@ Backend: vector-plot (receptor inference)
 - [x] 논문용 Methods·Results·ablation·claim boundary·source data·visual QC 문서 작성
 - [x] Python/TypeScript·blind-boundary·worker·publication regression, GitHub main push, target-server handoff package 작성
 
+## Unified Production + Benchmark Temporal PTM–Protein Analysis
+- [x] 일반 Order·benchmark runner의 PTM–protein temporal analysis 경로와 result contract 차이 감사
+- [x] 공용 cross-layer configuration·provenance·evidence packet contract 설계 및 benchmark blind-score boundary 명시
+- [x] 일반 Order 분석이 공용 PTM–protein sidecar engine을 실행하도록 integration 구현
+- [x] Report·Data-Grounded Analysis·RAG/LLM에 공용 cross-layer evidence packet 전달
+- [x] 일반 Order와 benchmark shadow replay의 공용-engine parity·v1 noninferiority·blind-boundary regression 검증
+- [x] Python/TypeScript 검증, GitHub main 반영 및 운영 적용 가이드 보고
+
 ## Latest-main Synchronization Before Follow-up Review
 - [x] local benchmark worktree의 미반영 500-diagnosis 기록을 보존하고 upstream main과 차이 확인
 - [x] GitHub `main` 최신 revision으로 안전하게 rebase/sync

@@ -373,7 +373,7 @@ def _build_kinase_substrate_comparison(order_a: Order, order_b: Order) -> str:
 
 
 def _build_effector_comparison(order_a: Order, order_b: Order) -> str:
-    """Compare non-PTM effector proteins between two orders."""
+    """Compare non-PTM effectors and the shared PTM–protein temporal contract."""
     lines = []
 
     for label, order in [("A", order_a), ("B", order_b)]:
@@ -395,6 +395,30 @@ def _build_effector_comparison(order_a: Order, order_b: Order) -> str:
                 f"  {gene}: role={role}, evidence={evidence}(score={score}), "
                 f"connected={conn_names}"
             )
+        cross_layer = kad.get("temporal_ptm_protein_analysis") or {}
+        if isinstance(cross_layer, dict) and cross_layer:
+            lines.append(
+                "  Shared PTM–protein temporal evidence: "
+                f"trajectories={cross_layer.get('protein_trajectory_count', 0)}, "
+                f"pairs={cross_layer.get('ptm_protein_pair_count', 0)}, "
+                f"edges={cross_layer.get('cross_layer_edge_count', 0)}, "
+                f"temporally_eligible={cross_layer.get('temporally_eligible_edge_count', 0)}, "
+                f"timing={cross_layer.get('kinase_timing_status', 'not_available')}"
+            )
+            for edge in (cross_layer.get("top_cross_layer_edges") or [])[:6]:
+                if not isinstance(edge, dict):
+                    continue
+                lines.append(
+                    "    observational candidate: Wave {wave} → {target}; direction={direction}; "
+                    "peak_lag_min={lag}; temporally_eligible={eligible}; causality=not_tested".format(
+                        wave=edge.get("source_wave_id", "unknown"),
+                        target=edge.get("target_gene", "unknown"),
+                        direction=edge.get("direction", "unknown"),
+                        lag=edge.get("peak_lag_minutes"),
+                        eligible=edge.get("eligible_for_mechanism_chain", False),
+                    )
+                )
+            lines.append("  Interpretation boundary: temporal precedence is observational and does not establish causal mechanism.")
         lines.append("")
 
     return "\n".join(lines)

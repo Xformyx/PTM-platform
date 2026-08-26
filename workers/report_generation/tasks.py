@@ -409,6 +409,7 @@ def run_report_generation(self, order_id: int, config: dict):
         inferred_receptors_from_db = []
         # v9.44: Load kinase_activity_heatmap + signal_propagation_data from DB
         kinase_activity_heatmap_from_db = {}
+        temporal_ptm_protein_analysis_from_db = {}
         signal_propagation_from_db = {}
         # v11.6: IP overlay data (physical interaction evidence)
         ip_overlay_from_db = {}
@@ -474,7 +475,7 @@ def run_report_generation(self, order_id: int, config: dict):
                 _row = _conn.execute(
                     _text(
                         "SELECT receptor_inference_data, kinase_activity_heatmap, "
-                        "signal_propagation_data, ip_overlay_data, substrate_go_localization "
+                        "signal_propagation_data, ip_overlay_data, substrate_go_localization, kinase_analysis_data "
                         "FROM orders WHERE id = :oid"
                     ),
                     {"oid": order_id},
@@ -497,6 +498,19 @@ def run_report_generation(self, order_id: int, config: dict):
                 if _row[4]:
                     substrate_go_localization_from_db = _row[4] if isinstance(_row[4], dict) else _json.loads(_row[4])
                     logger.info(f"[Order {order_id}] Loaded GO localization data from DB")
+                if _row[5]:
+                    _kad = _row[5] if isinstance(_row[5], dict) else _json.loads(_row[5])
+                    temporal_ptm_protein_analysis_from_db = _kad.get("temporal_ptm_protein_analysis") or {}
+            if not temporal_ptm_protein_analysis_from_db:
+                temporal_ptm_protein_analysis_from_db = (
+                    kinase_activity_heatmap_from_db.get("temporal_ptm_protein_analysis") or {}
+                )
+            if temporal_ptm_protein_analysis_from_db:
+                kinase_analysis_data["temporal_ptm_protein_analysis"] = temporal_ptm_protein_analysis_from_db
+                logger.info(
+                    f"[Order {order_id}] Loaded shared PTM–protein temporal evidence "
+                    f"({temporal_ptm_protein_analysis_from_db.get('cross_layer_edge_count', 0)} edges)"
+                )
         except Exception as _rec_err:
             logger.warning(f"[Order {order_id}] Could not load analysis data from DB: {_rec_err}")
 
@@ -536,6 +550,7 @@ def run_report_generation(self, order_id: int, config: dict):
             "progress_callback": _make_progress_cb(order_id),
             # v9.12/v9.35: Frontend kinase analysis results (auto-built if absent)
             "frontend_kinase_analysis": kinase_analysis_data,
+            "temporal_ptm_protein_analysis": temporal_ptm_protein_analysis_from_db,
             # v9.20: Inferred upstream receptors from vector-plot-data analysis
             "inferred_receptors": inferred_receptors_from_db,
             # v9.33: PTM selection settings (synced with frontend kinase module analysis)

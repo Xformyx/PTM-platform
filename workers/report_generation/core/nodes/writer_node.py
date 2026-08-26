@@ -278,6 +278,43 @@ def run_section_writing(state: dict) -> dict:
     # v10.1: Load vector_plot_raw_data and pipeline_statistics from state
     vector_plot_raw_data = state.get("vector_plot_raw_data", []) or []
     pipeline_statistics = state.get("pipeline_statistics", {}) or {}
+    temporal_ptm_protein_analysis = state.get("temporal_ptm_protein_analysis", {}) or {}
+    aux_cross_layer_temporal = ""
+    if isinstance(temporal_ptm_protein_analysis, dict) and temporal_ptm_protein_analysis:
+        cross_layer_lines = [
+            "=== SHARED PTM–PROTEIN TEMPORAL EVIDENCE (OBSERVATIONAL) ===",
+            "This packet is produced by the same temporal PTM–protein engine used in ordinary production analysis and strict-blind benchmarking.",
+            "It summarizes measured PTM and condition-level protein trajectories. Do NOT describe temporal precedence as causality.",
+            "",
+            "Counts: protein trajectories={protein}; same-gene PTM–protein pairs={pairs}; cross-layer edges={edges}; temporally eligible edges={eligible}; mechanism candidates={chains}; evidence-supported mechanisms={supported}; kinase timing={timing}.".format(
+                protein=temporal_ptm_protein_analysis.get("protein_trajectory_count", 0),
+                pairs=temporal_ptm_protein_analysis.get("ptm_protein_pair_count", 0),
+                edges=temporal_ptm_protein_analysis.get("cross_layer_edge_count", 0),
+                eligible=temporal_ptm_protein_analysis.get("temporally_eligible_edge_count", 0),
+                chains=temporal_ptm_protein_analysis.get("mechanism_chain_count", 0),
+                supported=temporal_ptm_protein_analysis.get("evidence_supported_mechanism_count", 0),
+                timing=temporal_ptm_protein_analysis.get("kinase_timing_status", "not_available"),
+            ),
+        ]
+        for edge in temporal_ptm_protein_analysis.get("top_cross_layer_edges", [])[:12]:
+            if not isinstance(edge, dict):
+                continue
+            cross_layer_lines.append(
+                "- Observational candidate: Wave {wave} → {target}; direction={direction}; onset_lag_min={onset}; "
+                "peak_lag_min={peak}; temporally_eligible={eligible}; causality=not_tested.".format(
+                    wave=edge.get("source_wave_id", "unknown"),
+                    target=edge.get("target_gene", "unknown"),
+                    direction=edge.get("direction", "unknown"),
+                    onset=edge.get("onset_lag_minutes"),
+                    peak=edge.get("peak_lag_minutes"),
+                    eligible=edge.get("eligible_for_mechanism_chain", False),
+                )
+            )
+        cross_layer_lines.extend([
+            "Use these rows to distinguish temporal evidence from a causal claim, state counterexamples or alternative explanations, and propose a perturbation/orthogonal validation only as a future test.",
+            "=== END SHARED PTM–PROTEIN TEMPORAL EVIDENCE ===",
+        ])
+        aux_cross_layer_temporal = "\n".join(cross_layer_lines)
 
     # v10.7: Load ubiquitin linkage analysis data
     ubiquitin_linkage_data = state.get("ubiquitin_linkage_data", {}) or {}
@@ -660,6 +697,8 @@ def run_section_writing(state: dict) -> dict:
             # v11.8: TF Activity Inference (Priority 1 — cross-validates PTM→TF→target narrative)
             if aux_tf_inference_context:
                 supplement_blocks.append(("tf_inference", aux_tf_inference_context))
+            if aux_cross_layer_temporal:
+                supplement_blocks.append(("cross_layer_temporal", aux_cross_layer_temporal))
             # Priority 2 (important): v98 + structured data
             supplement_blocks.append(("v98_directive", v98_directive))
             supplement_blocks.append(("v98_structured_data", v98_structured_data))
@@ -697,6 +736,8 @@ def run_section_writing(state: dict) -> dict:
             supplement_blocks.append(("nonptm_temporal", aux_nonptm_temporal))
             supplement_blocks.append(("v98_structured_data", v98_structured_data))
             supplement_blocks.append(("vector_plot_compressed", aux_vector_plot_compressed))
+            if aux_cross_layer_temporal:
+                supplement_blocks.append(("cross_layer_temporal", aux_cross_layer_temporal))
             if atlas_claim_ledger_llm_context:
                 supplement_blocks.append(("atlas_claim_ledger", atlas_claim_ledger_llm_context))
 
@@ -721,6 +762,8 @@ def run_section_writing(state: dict) -> dict:
             # v11.8: TF Activity Inference (Priority 1 — cross-validates PTM→TF→target narrative)
             if aux_tf_inference_context:
                 supplement_blocks.append(("tf_inference", aux_tf_inference_context))
+            if aux_cross_layer_temporal:
+                supplement_blocks.append(("cross_layer_temporal", aux_cross_layer_temporal))
             # Priority 2: v98 directive + structured data
             supplement_blocks.append(("v98_directive", v98_directive))
             supplement_blocks.append(("v98_structured_data", v98_structured_data))
@@ -749,6 +792,8 @@ def run_section_writing(state: dict) -> dict:
             # v9.32: Conclusion/Abstract also need temporal coordination summary for comprehensive coverage
             supplement_blocks.append(("comovement", comovement_llm_context))
             supplement_blocks.append(("temporal_kinase", temporal_kinase_cascade_llm_context))
+            if aux_cross_layer_temporal:
+                supplement_blocks.append(("cross_layer_temporal", aux_cross_layer_temporal))
 
         # v9.31: Add blocks respecting budget
         current_len = base_len

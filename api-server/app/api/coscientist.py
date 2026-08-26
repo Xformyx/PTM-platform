@@ -176,6 +176,27 @@ def _build_data_grounded_seed(order: Order) -> str:
         cowaves = list(cowaves.values())
     if isinstance(cowaves, list) and cowaves:
         lines.append(f"Co-wave groups available for functional comparison: {len(cowaves)}")
+    cross_layer = (
+        kinase.get("temporal_ptm_protein_analysis")
+        or heatmap.get("temporal_ptm_protein_analysis")
+        or {}
+    )
+    if isinstance(cross_layer, dict) and cross_layer:
+        lines.append(
+            "Shared PTM–protein temporal evidence: "
+            f"{cross_layer.get('cross_layer_edge_count', 0)} cross-layer edges; "
+            f"{cross_layer.get('temporally_eligible_edge_count', 0)} temporally eligible; "
+            f"kinase timing={cross_layer.get('kinase_timing_status', 'not_available')}; "
+            "all relationships are observational, not causal."
+        )
+        for edge in cross_layer.get("top_cross_layer_edges", [])[:6]:
+            if not isinstance(edge, dict):
+                continue
+            lines.append(
+                f"- Observational candidate: Wave {edge.get('source_wave_id')} → {edge.get('target_gene')} "
+                f"(direction={edge.get('direction')}, peak_lag_min={edge.get('peak_lag_minutes')}, "
+                f"temporally_eligible={edge.get('eligible_for_mechanism_chain')}, causality=not_tested)"
+            )
     receptor_rows = receptors.get("receptors", receptors) if isinstance(receptors, dict) else receptors
     if isinstance(receptor_rows, list) and receptor_rows:
         names = [str(row.get("name") or row.get("gene") or "") for row in receptor_rows[:6] if isinstance(row, dict)]

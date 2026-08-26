@@ -8,18 +8,14 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from ptm_shared.directed_temporal_relationship import analyze_directed_temporal_relationship
+from ptm_shared.temporal_optimization_config import CONTRACT_VERSION, CROSS_LAYER_CONFIG, WAVE_CONFIG
 
 
 SIDECAR_SCHEMA_VERSION = "enrichment_free_temporal_mechanism.v2.sidecar"
-DEFAULT_CROSS_LAYER_CONFIG = {
-    "minimum_absolute_change": 0.30,
-    "minimum_lag_aware_similarity": 0.40,
-    "minimum_loto_stability": 0.60,
-    "maximum_candidates_per_wave": 200,
-    "permutation_iterations": 0,
-    "bootstrap_iterations": 0,
-    "random_seed": 20260827,
-}
+# One numeric configuration is used by ordinary orders and strict-blind
+# benchmark replays.  The runner-only truth/scoring boundary is separate from
+# this shared analysis contract.
+DEFAULT_CROSS_LAYER_CONFIG = dict(CROSS_LAYER_CONFIG)
 
 
 def _minutes(label: str) -> float:
@@ -509,6 +505,7 @@ def build_v2_sidecar(
     )
     return {
         "schema_version": SIDECAR_SCHEMA_VERSION,
+        "temporal_wave_contract": dict(wave_contract or {}),
         "protein_time_series": protein_time_series,
         "ptm_protein_pairs": ptm_protein_pairs,
         "kinase_direct_evidence": [
@@ -535,4 +532,153 @@ def build_v2_sidecar(
             ),
             "causality_boundary": "temporal_order_is_observational_and_not_causal",
         },
+    }
+
+
+def build_production_site_observations(
+    ptm_timeseries: Mapping[str, Mapping[str, Any]],
+    conditions: Iterable[str],
+) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
+    """Normalize ordinary-order PTM vectors into the shared sidecar input.
+
+    Missing values are retained as missing in site observations and excluded
+    only from canonical Wave fitting, never converted to zero.
+    """
+
+    ordered_conditions = [str(value) for value in conditions]
+    observations: list[dict[str, Any]] = []
+    complete_vectors: dict[str, dict[str, Any]] = {}
+    for raw_key, raw_values in sorted(ptm_timeseries.items()):
+        key = str(raw_key or "").strip().upper()
+        if "_" not in key:
+            continue
+        gene, site = key.rsplit("_", 1)
+        values = {
+            condition: parsed
+            for condition in ordered_conditions
+            if (parsed := _optional_float(dict(raw_values or {}).get(condition))) is not None
+        }
+        if not values:
+            continue
+        peak_timepoint = max(values, key=lambda label: abs(values[label]))
+        peak_value = values[peak_timepoint]
+        observations.append(
+            {
+                "site_key": key,
+                "gene": gene,
+                "site": site,
+                "temporal_values": values,
+                "peak_timepoint": peak_timepoint,
+                "peak_minutes": _minutes(peak_timepoint),
+                "peak_log2fc": peak_value,
+                "phosphorylation_direction": "up" if peak_value > 0 else "down" if peak_value < 0 else "neutral",
+                "observed_timepoint_count": len(values),
+                "missing_timepoints": [condition for condition in ordered_conditions if condition not in values],
+                "quantification_track": "protein_normalized_relative_log2fc",
+            }
+        )
+        if len(values) == len(ordered_conditions):
+            complete_vectors[key] = values
+    return observations, complete_vectors
+
+
+def build_production_temporal_ptm_protein_analysis(
+    *,
+    output_dir: Path,
+    ptm_type: str,
+    ptm_timeseries: Mapping[str, Mapping[str, Any]],
+    conditions: Iterable[str],
+    tmm_result: Mapping[str, Any],
+    cross_layer_config: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build the exact v2 sidecar contract for a normal production order.
+
+    Benchmark replay passes its archived Wave contract into :func:`build_v2_sidecar`.
+    Production derives that contract from the same canonical Wave engine and
+    frozen numeric configuration; only runner-only truth/scoring remains
+    benchmark-specific.
+    """
+
+    from ptm_shared.temporal_wave_engine import analyze_temporal_waves
+
+    ordered_conditions = [str(value) for value in conditions]
+    observations, complete_vectors = build_production_site_observations(
+        ptm_timeseries,
+        ordered_conditions,
+    )
+    metadata = {
+        row["site_key"]: {
+            "gene": row["gene"],
+            "site": row["site"],
+            "quantification_track": row["quantification_track"],
+        }
+        for row in observations
+        if row["site_key"] in complete_vectors
+    }
+    wave_contract = analyze_temporal_waves(
+        complete_vectors,
+        ordered_conditions,
+        metadata=metadata,
+        config={**dict(WAVE_CONFIG), "threshold_source": CONTRACT_VERSION},
+    )
+    wave_contract["analysis_scope"] = "production_observed_only_complete_ptm_vectors"
+    sidecar = build_v2_sidecar(
+        output_dir=output_dir,
+        ptm_type=ptm_type,
+        site_observations=observations,
+        wave_contract=wave_contract,
+        tmm_result=tmm_result,
+        cross_layer_config=cross_layer_config,
+    )
+    sidecar["provenance"]["analysis_mode"] = "production"
+    sidecar["provenance"]["shared_engine_contract"] = "unified_temporal_ptm_protein.v1"
+    sidecar["provenance"]["complete_wave_site_count"] = len(complete_vectors)
+    return sidecar
+
+
+def summarize_temporal_ptm_protein_analysis(
+    sidecar: Mapping[str, Any],
+    *,
+    artifact_path: str | None = None,
+    max_examples: int = 20,
+) -> dict[str, Any]:
+    """Return a DB/API-context-safe projection of the shared full sidecar."""
+
+    edges = list(sidecar.get("cross_layer_edges") or [])
+    chains = list(sidecar.get("mechanism_chains") or [])
+    packets = list(sidecar.get("hypothesis_evidence_packets") or [])
+    eligible_edges = [row for row in edges if row.get("eligible_for_mechanism_chain")]
+    ordered_edges = sorted(
+        eligible_edges or edges,
+        key=lambda row: abs(float((row.get("lag_aware_similarity") or {}).get("best_similarity") or 0.0)),
+        reverse=True,
+    )
+    return {
+        "schema_version": sidecar.get("schema_version"),
+        "shared_engine_contract": (sidecar.get("provenance") or {}).get("shared_engine_contract"),
+        "artifact_path": artifact_path,
+        "full_artifact_available": bool(artifact_path),
+        "protein_trajectory_count": len(sidecar.get("protein_time_series") or []),
+        "ptm_protein_pair_count": len(sidecar.get("ptm_protein_pairs") or []),
+        "cross_layer_edge_count": len(edges),
+        "temporally_eligible_edge_count": len(eligible_edges),
+        "mechanism_chain_count": len(chains),
+        "evidence_supported_mechanism_count": sum(
+            row.get("mechanism_status") == "evidence_supported_mechanism_candidate" for row in chains
+        ),
+        "kinase_timing_status": ((sidecar.get("provenance") or {}).get("kinase_timing") or {}).get("data_anchored_timing_status"),
+        "causality_status": "not_tested",
+        "interpretation_boundary": "Temporal precedence and mechanism packets are observational, falsifiable candidates; they are not causal claims.",
+        "top_cross_layer_edges": [
+            {
+                key: row.get(key)
+                for key in (
+                    "edge_id", "source_wave_id", "target_gene", "direction", "onset_lag_minutes",
+                    "peak_lag_minutes", "eligible_for_mechanism_chain", "causality_status",
+                )
+            }
+            for row in ordered_edges[:max_examples]
+        ],
+        "hypothesis_evidence_packets": packets[:max_examples],
+        "provenance": dict(sidecar.get("provenance") or {}),
     }

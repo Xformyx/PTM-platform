@@ -91,7 +91,8 @@ class Order(Base):
     # {mode, ptm_type, timepoints, nonptm_effectors, self_timelags, cascade_timelags, summary}
     signal_propagation_data: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     # Kinase Analysis data (JSON) — saved from Global Kinase Modules frontend analysis
-    # {kinase_modules, temporal_cascade, cowave_cross_analysis, summary, saved_at}
+    # {kinase_modules, temporal_cascade, cowave_cross_analysis, summary,
+    #  temporal_ptm_protein_analysis (shared v2 compact sidecar projection), saved_at}
     kinase_analysis_data: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     # Receptor Inference data (JSON) — saved from vector-plot-data endpoint
     # [{name, receptor_class, downstream_ptm_count, downstream_ptms, via_kinases, source, ...}]

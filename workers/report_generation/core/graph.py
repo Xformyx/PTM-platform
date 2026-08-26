@@ -73,6 +73,7 @@ class ReportState(TypedDict, total=False):
     # v9.13: Global Kinase Modules (kinase-centric, all PTMs)
     global_kinase_modules: dict             # kinase_modules, temporal_cascade, summary (auto-built in pipeline)
     frontend_kinase_analysis: dict          # pre-computed result from DB (optional, skips recomputation)
+    temporal_ptm_protein_analysis: dict     # shared production/benchmark temporal sidecar summary; observational only
 
     # v9.14: Ubiquitylation Analysis Suite (auto-built when ptm_type == 'ubiquitylation')
     ubi_chain_classifications: dict         # Module 1: per-site chain type classification

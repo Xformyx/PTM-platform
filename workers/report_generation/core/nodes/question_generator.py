@@ -206,6 +206,21 @@ def _get_co_scientist_questions(state: dict) -> list:
             f"What functional modules are revealed by co-wave analysis — "
             f"do substrates activated simultaneously share common cellular pathways or compartments?"
         )
+
+    # Shared production/benchmark temporal sidecar: formulate a falsifiable
+    # cross-layer question without promoting temporal precedence to causality.
+    cross_layer = state.get("temporal_ptm_protein_analysis") or kad.get("temporal_ptm_protein_analysis") or {}
+    top_edges = cross_layer.get("top_cross_layer_edges", []) if isinstance(cross_layer, dict) else []
+    if top_edges and isinstance(top_edges[0], dict):
+        edge = top_edges[0]
+        questions.append(
+            "Does the observed PTM Wave {wave} preceding protein abundance change in {target} "
+            "remain supported after orthogonal validation, and which alternative explanations constrain "
+            "this observational temporal candidate?".format(
+                wave=edge.get("source_wave_id", "unknown"),
+                target=edge.get("target_gene", "unknown"),
+            )
+        )
     
     # Q4: Autophosphorylation — which kinases show self-activation loops?
     auto_kinases = [

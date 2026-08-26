@@ -297,6 +297,35 @@ def _build_kinase_analysis_context(order: Order) -> str:
                 f"connected_substrates={conn_names}"
             )
 
+    cross_layer = kad.get("temporal_ptm_protein_analysis", {})
+    if cross_layer:
+        lines.append("\nShared PTM–protein temporal evidence (observational):")
+        lines.append(
+            "- trajectories={protein}, PTM–protein pairs={pairs}, cross-layer edges={edges}, "
+            "temporally eligible={eligible}, mechanism candidates={chains}, timing={timing}".format(
+                protein=cross_layer.get("protein_trajectory_count", 0),
+                pairs=cross_layer.get("ptm_protein_pair_count", 0),
+                edges=cross_layer.get("cross_layer_edge_count", 0),
+                eligible=cross_layer.get("temporally_eligible_edge_count", 0),
+                chains=cross_layer.get("mechanism_chain_count", 0),
+                timing=cross_layer.get("kinase_timing_status", "not_available"),
+            )
+        )
+        for edge in cross_layer.get("top_cross_layer_edges", [])[:8]:
+            if not isinstance(edge, dict):
+                continue
+            lines.append(
+                "- Wave {wave} → {target}: direction={direction}, peak_lag_min={lag}, "
+                "temporally_eligible={eligible}, causality=not_tested".format(
+                    wave=edge.get("source_wave_id", "unknown"),
+                    target=edge.get("target_gene", "unknown"),
+                    direction=edge.get("direction", "unknown"),
+                    lag=edge.get("peak_lag_minutes"),
+                    eligible=edge.get("eligible_for_mechanism_chain", False),
+                )
+            )
+        lines.append("- Interpretation: temporal precedence is observational and each mechanism packet remains falsifiable, not causal.")
+
     text = "\n".join(lines)
     if len(text) > MAX_KINASE_CHARS:
         text = text[:MAX_KINASE_CHARS] + "\n... [truncated]"

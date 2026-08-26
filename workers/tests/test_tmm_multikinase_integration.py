@@ -46,7 +46,8 @@ def test_sparse_and_fallback_profiles_are_explicitly_prior_assisted():
 
 def test_weighted_cascade_keeps_fractional_activity_separate_from_raw_membership():
     cascade = build_tmm_weighted_temporal_cascade(_scores(), CONDITIONS)
-    assert cascade["score_provenance"] == "tmm_weighted"
+    assert cascade["score_provenance"] == "tmm_weighted_sum"
+    assert cascade["activity_metric"] == "weighted_sum"
     assert cascade["timepoints"][1]["active_kinases"][0]["kinase"] == "AKT1"
     assert cascade["timepoints"][3]["active_kinases"][0]["kinase"] == "S6K"
     assert cascade["timepoints"][3]["active_kinases"][0]["tmm_evidence"]["confidence_tier"] == "tmm_prior_assisted"

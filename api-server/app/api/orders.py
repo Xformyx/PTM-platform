@@ -7409,7 +7409,7 @@ async def kinase_activity_heatmap(
     # Cache key
     km_keys = sorted([m.get("kinase", "") for m in kinase_modules])
     tmm_config_key = json.dumps(effective_tmm_config, sort_keys=True, separators=(",", ":"))
-    hash_input = f"{order_id}|{len(kinase_modules)}|{'|'.join(km_keys[:30])}|{temporal.name}|{tmm_config_key}"
+    hash_input = f"{order_id}|{len(kinase_modules)}|{'|'.join(km_keys[:30])}|{temporal.name}|{tmm_config_key}|unified_temporal_ptm_protein.v1"
     cache_hash = hashlib.md5(hash_input.encode()).hexdigest()[:12]
 
     # Check cache — v11.3 Pure Renderer pattern:
@@ -9094,10 +9094,85 @@ async def kinase_activity_heatmap(
         "_cache_hash": cache_hash,
         "computed_at": _dt.utcnow().isoformat(),
     }
+    # Build the same PTM–protein temporal sidecar used by strict-blind
+    # benchmark artifacts.  Persist the complete object as a result file to
+    # avoid inflating the order JSON column; retain a compact, provenance-rich
+    # projection in the cached heatmap response and downstream AI context.
+    try:
+        from ptm_shared.enrichment_free_temporal_sidecar import (
+            build_production_temporal_ptm_protein_analysis,
+            summarize_temporal_ptm_protein_analysis,
+        )
+
+        unified_sidecar = build_production_temporal_ptm_protein_analysis(
+            output_dir=output_dir,
+            ptm_type=order.ptm_type,
+            ptm_timeseries=ptm_timeseries,
+            conditions=conditions_sorted,
+            tmm_result=result_data,
+        )
+        unified_path = output_dir / "temporal_ptm_protein_analysis_v2.json"
+        unified_path.write_text(
+            json.dumps(unified_sidecar, ensure_ascii=False, sort_keys=True),
+            encoding="utf-8",
+        )
+        result_data["temporal_ptm_protein_analysis"] = summarize_temporal_ptm_protein_analysis(
+            unified_sidecar,
+            artifact_path=unified_path.name,
+        )
+    except Exception as _unified_sidecar_error:
+        _log.warning(
+            "[TMM] Shared temporal PTM–protein analysis failed (non-fatal): %s",
+            _unified_sidecar_error,
+            exc_info=True,
+        )
+        result_data["temporal_ptm_protein_analysis"] = {
+            "schema_version": "enrichment_free_temporal_mechanism.v2.sidecar",
+            "full_artifact_available": False,
+            "status": "unavailable",
+            "reason": "shared_temporal_ptm_protein_analysis_failed",
+            "causality_status": "not_tested",
+        }
+    # Keep the compact shared-contract projection alongside the established
+    # kinase-analysis payload so compare/chat/Data-Grounded Analysis see the
+    # same result contract as ordinary heatmap consumers.
+    kinase_analysis_data = dict(order.kinase_analysis_data or {})
+    kinase_analysis_data["temporal_ptm_protein_analysis"] = dict(
+        result_data["temporal_ptm_protein_analysis"]
+    )
+    order.kinase_analysis_data = kinase_analysis_data
     order.kinase_activity_heatmap = result_data
     await db.commit()
 
     return {**result_data, "_cached": False}
+
+
+@router.get("/{order_id}/temporal-ptm-protein-analysis")
+async def get_temporal_ptm_protein_analysis(
+    order_id: int,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Return the full shared PTM–protein temporal analysis artifact for an order.
+
+    This is an ordinary production result, not a benchmark score or a locked
+    truth artifact.  It uses the same sidecar schema as strict-blind benchmark
+    analysis; benchmark truth remains isolated in the runner-only scorer.
+    """
+
+    result = await db.execute(select(Order).where(Order.id == order_id))
+    order = result.scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    await _require_write_access(order, user, db)
+    settings = get_settings()
+    path = Path(settings.OUTPUT_DIR) / order.order_code / "temporal_ptm_protein_analysis_v2.json"
+    if not path.is_file():
+        raise HTTPException(
+            status_code=404,
+            detail="Temporal PTM–protein analysis is unavailable. Recompute kinase activity after preprocessing.",
+        )
+    return FileResponse(path, media_type="application/json", filename=path.name)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

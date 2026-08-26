@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 from ptm_shared.enrichment_free_temporal_sidecar import (
+    DEFAULT_CROSS_LAYER_CONFIG,
     build_cross_layer_edges,
     build_kinase_timing_predictions,
     build_mechanism_evidence,
+    build_production_temporal_ptm_protein_analysis,
     build_ptm_protein_pairs,
+    summarize_temporal_ptm_protein_analysis,
 )
+from ptm_shared.temporal_optimization_config import CROSS_LAYER_CONFIG
 
 from app.services.benchmark_artifact import attach_v2_extensions
 
@@ -137,3 +141,40 @@ def test_mechanism_chain_keeps_temporal_candidate_boundary() -> None:
     assert chains[0]["causality_status"] == "not_tested"
     assert counterevidence[0]["status"] == "insufficient_evidence"
     assert packets[0]["literature_status"] == "not_requested_in_numeric_benchmark"
+
+
+def test_production_order_uses_shared_v2_sidecar_contract_without_truth(tmp_path) -> None:
+    protein_source = tmp_path / "all_protein_level_changes_normalized_phospho.tsv"
+    protein_source.write_text(
+        "Gene.Name\tCondition\tLog2FC\tProtein.Group\tProtein.Name\tHas_PTM\n"
+        "EFFECTOR1\t1min\t0.0\tP1\tEffector 1\tfalse\n"
+        "EFFECTOR1\t5min\t0.2\tP1\tEffector 1\tfalse\n"
+        "EFFECTOR1\t15min\t1.8\tP1\tEffector 1\tfalse\n",
+        encoding="utf-8",
+    )
+    timepoints = ["1min", "5min", "15min"]
+    ptm_timeseries = {
+        "G1_S1": {"1min": 2.0, "5min": 1.5, "15min": 0.3},
+        "G2_S2": {"1min": 1.9, "5min": 1.4, "15min": 0.2},
+        "G3_S3": {"1min": 2.1, "5min": 1.6, "15min": 0.4},
+        "G4_S4": {"1min": 2.0, "5min": 1.3, "15min": 0.2},
+    }
+    sidecar = build_production_temporal_ptm_protein_analysis(
+        output_dir=tmp_path,
+        ptm_type="phosphorylation",
+        ptm_timeseries=ptm_timeseries,
+        conditions=timepoints,
+        tmm_result={"conditions": timepoints, "kinase_scores": [], "relative_site_contribution_matrix": {}},
+    )
+    summary = summarize_temporal_ptm_protein_analysis(sidecar, artifact_path="temporal_ptm_protein_analysis_v2.json")
+
+    assert DEFAULT_CROSS_LAYER_CONFIG == CROSS_LAYER_CONFIG
+    assert sidecar["schema_version"].endswith("v2.sidecar")
+    assert sidecar["provenance"]["analysis_mode"] == "production"
+    assert sidecar["provenance"]["shared_engine_contract"] == "unified_temporal_ptm_protein.v1"
+    assert sidecar["temporal_wave_contract"]["analysis_scope"] == "production_observed_only_complete_ptm_vectors"
+    assert sidecar["provenance"]["benchmark_truth_used"] is False
+    assert all(row["causality_status"] == "not_tested" for row in sidecar["ptm_protein_pairs"])
+    assert summary["full_artifact_available"] is True
+    assert summary["artifact_path"] == "temporal_ptm_protein_analysis_v2.json"
+    assert "primary_score" not in summary
