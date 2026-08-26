@@ -25,3 +25,10 @@ def test_durable_tmm_executor_records_phase_heartbeats_and_short_stale_recovery(
     assert "tmm_heartbeat_utc" in executor
     assert "computing_tmm_heatmap" in executor
     assert "TMM_ACCEPT_STALE_AFTER_SEC = 30 * 60" in lifecycle
+
+
+def test_benchmark_api_exposes_qualitative_execution_stage_not_inferred_tmm_percentage() -> None:
+    route_source = (REPO_ROOT / "api-server/app/api/benchmarks.py").read_text(encoding="utf-8")
+    assert '"execution": _execution_status(run, child)' in route_source
+    assert "computing_tmm_heatmap" in route_source
+    assert "scientifically meaningful percentage" in route_source

@@ -13,7 +13,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 type BenchmarkRun = {
@@ -24,6 +23,15 @@ type BenchmarkRun = {
   status: string;
   phase?: string;
   tmm_job?: "running" | "interrupted" | null;
+  execution?: {
+    stage?: string;
+    label?: string;
+    detail?: string;
+    heartbeat_at_utc?: string | null;
+    step_index?: number;
+    step_count?: number;
+    snapshot_progress_pct?: number;
+  };
   production_contract: { id?: string; temporal_contract?: string };
   blind_context: { cell_context?: { lineage_class?: string } };
   score_summary?: Record<string, unknown> | null;
@@ -118,6 +126,14 @@ function figure2FromRun(run: BenchmarkRun): Figure2Source | null {
   return nested && typeof nested === "object" ? nested as Figure2Source : null;
 }
 
+const EXECUTION_STEPS = ["Blind snapshot", "TMM full temporal", "Locked scoring", "Figures + data"];
+
+function heartbeatText(value?: string | null): string | null {
+  if (!value) return null;
+  const timestamp = new Date(value);
+  return Number.isNaN(timestamp.getTime()) ? null : timestamp.toLocaleTimeString();
+}
+
 function RunCard({
   run,
   readOnly,
@@ -139,6 +155,8 @@ function RunCard({
 }) {
   const ready = isReadyForTmm(run);
   const staleTmm = isStaleTmm(run);
+  const execution = run.execution;
+  const currentStep = execution?.step_index ?? 0;
   return (
     <div className={`border rounded-lg p-4 space-y-3 ${leftover ? "bg-muted/30" : ""}`}>
       <div className="flex flex-wrap justify-between items-start gap-2">
@@ -159,7 +177,24 @@ function RunCard({
           <Button size="sm" variant="outline" disabled={submitting} onClick={onRetry} className="gap-1"><RefreshCw className="h-3.5 w-3.5" /> Retry preprocessing</Button>
         )}
       </div>
-      {isLive(run) && <Progress value={run.child_order?.progress_pct || 35} className="h-1.5" />}
+      {isLive(run) && (
+        <div className="rounded-md border bg-muted/20 px-3 py-2 space-y-2" aria-live="polite">
+          <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+            <span className="font-medium text-sky-700 dark:text-sky-300">{execution?.label || "Benchmark stage in progress"}</span>
+            {heartbeatText(execution?.heartbeat_at_utc) && <span className="text-muted-foreground">Worker heartbeat {heartbeatText(execution?.heartbeat_at_utc)}</span>}
+          </div>
+          <p className="text-xs text-muted-foreground">{execution?.detail || "Status updates are derived from the durable worker state."}</p>
+          <div className="grid grid-cols-2 gap-1 sm:grid-cols-4">
+            {EXECUTION_STEPS.map((label, index) => {
+              const step = index + 1;
+              const active = step === currentStep;
+              const complete = step < currentStep || run.status === "completed";
+              return <div key={label} className={`rounded px-2 py-1 text-[10px] ${complete ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-200" : active ? "bg-sky-100 text-sky-800 dark:bg-sky-950/60 dark:text-sky-200" : "bg-muted text-muted-foreground"}`}>{complete ? "✓ " : active ? "• " : "○ "}{label}</div>;
+            })}
+          </div>
+          {execution?.stage === "snapshot" && typeof execution.snapshot_progress_pct === "number" && <p className="text-[10px] text-muted-foreground">Snapshot preprocessing: {execution.snapshot_progress_pct.toFixed(0)}%</p>}
+        </div>
+      )}
       {run.phase === "snapshot_running" && run.child_order && CHILD_ACTIVE.has(run.child_order.status) && run.child_order.status !== "preprocessing" && run.child_order.status !== "queued" && (
         <p className="text-xs text-amber-700">This leftover snapshot is still finishing an Order-list restart ({run.child_order.status.replace(/_/g, " ")}). Locked scoring uses 0층 outputs only.</p>
       )}
@@ -168,7 +203,7 @@ function RunCard({
         <p className="text-xs text-amber-700">The last TMM accept did not finish. Click Retry TMM + locked score — do not start another blind benchmark.</p>
       )}
       {run.tmm_job === "running" && (
-        <p className="text-xs text-sky-700">TMM is running on the durable benchmark worker. The latest worker heartbeat controls stale-task recovery; this page polls status automatically.</p>
+        <p className="text-xs text-sky-700">TMM is running on the durable benchmark worker. The stage tracker is qualitative: it does not imply that a solver call is percentage-complete.</p>
       )}
       {run.status === "completed" && (
         <div className="space-y-3">

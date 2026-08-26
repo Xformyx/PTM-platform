@@ -440,6 +440,11 @@ Backend: vector-plot (receptor inference)
 - [x] API restart·CORS/network failure·frontend/API/worker revision mismatch를 운영 상태와 코드로 분리
 - [ ] polling backoff·last-known status 유지·deployment revision 표시를 추가하고 재배포 검증
 
+## Benchmark Stage-aware Progress UI
+- [x] completed child snapshot의 100% progress가 TMM 진행률로 재사용되는 현재 status payload·UI 경로 감사
+- [x] TMM worker heartbeat stage·stage progress·locked scorer 상태를 BenchmarkRun API payload에 추가
+- [x] snapshot/TMM/scoring/checkpoint를 분리한 단계별 UI와 완료 판정·Figure 1–4 ready 표시 구현
+
 ## Latest-main Synchronization Before Follow-up Review
 - [x] local benchmark worktree의 미반영 500-diagnosis 기록을 보존하고 upstream main과 차이 확인
 - [x] GitHub `main` 최신 revision으로 안전하게 rebase/sync

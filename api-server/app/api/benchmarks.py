@@ -71,6 +71,7 @@ def _serialize(run: BenchmarkRun, child: Order | None = None) -> dict:
         "status": status,
         "phase": run_phase(run.status, getattr(child, "status", None)),
         "tmm_job": tmm_job_state(run.status, run.provenance, run.artifact_path),
+        "execution": _execution_status(run, child),
         "production_contract": run.production_contract,
         "blind_policy": run.blind_policy,
         "blind_context": run.blind_context,
@@ -92,6 +93,85 @@ def _serialize(run: BenchmarkRun, child: Order | None = None) -> dict:
             "error_message": child.error_message,
         }
     return payload
+
+
+def _execution_status(run: BenchmarkRun, child: Order | None) -> dict:
+    """Return a truth-free, qualitative stage contract for the Benchmark UI.
+
+    The TMM worker cannot report a scientifically meaningful percentage inside
+    an individual solver call.  A fixed stage tracker is therefore safer than
+    presenting the already-completed snapshot's 100% as TMM progress.
+    """
+
+    provenance = run.provenance if isinstance(run.provenance, dict) else {}
+    worker_stage = provenance.get("tmm_worker_stage")
+    heartbeat = provenance.get("tmm_heartbeat_utc")
+    if run.status == "completed":
+        return {
+            "stage": "completed",
+            "label": "Figure 1–4 and source-data bundle completed",
+            "detail": "Locked scoring has completed.",
+            "heartbeat_at_utc": heartbeat,
+            "step_index": 4,
+            "step_count": 4,
+        }
+    if run.status in {"scoring_queued", "scoring"}:
+        return {
+            "stage": "locked_scoring",
+            "label": "Running offline locked scoring",
+            "detail": "Truth is available only to the isolated benchmark scorer.",
+            "heartbeat_at_utc": heartbeat,
+            "step_index": 3,
+            "step_count": 4,
+        }
+    if run.status == "temporal_analysis":
+        labels = {
+            "building_temporal_request": ("Preparing canonical temporal Wave input", "Building truth-free temporal site trajectories."),
+            "computing_global_kinase_modules": ("Computing production kinase modules", "Running the production full-kinase module contract."),
+            "computing_tmm_heatmap": ("Computing TMM full temporal attribution", "Estimating multi-kinase contributions and temporal heatmap."),
+            "writing_truth_free_artifact": ("Archiving truth-free analysis artifact", "Persisting the 0층+1층 artifact before locked scoring."),
+            "queueing_locked_score": ("Queueing offline locked scoring", "TMM is complete; the isolated scorer will start next."),
+        }
+        label, detail = labels.get(
+            str(worker_stage),
+            ("Waiting for durable TMM worker", "The task is queued; no scientific progress percentage is inferred."),
+        )
+        return {
+            "stage": str(worker_stage or "queued_for_tmm"),
+            "label": label,
+            "detail": detail,
+            "heartbeat_at_utc": heartbeat,
+            "step_index": 2,
+            "step_count": 4,
+        }
+    child_status = getattr(child, "status", None)
+    if child_status in {"queued", "preprocessing"}:
+        return {
+            "stage": "snapshot",
+            "label": "Creating blind 0층 snapshot",
+            "detail": "Only the sanitized child Order reports a quantitative preprocessing percentage.",
+            "heartbeat_at_utc": None,
+            "step_index": 1,
+            "step_count": 4,
+            "snapshot_progress_pct": float(getattr(child, "progress_pct", 0) or 0),
+        }
+    if child_status == "completed":
+        return {
+            "stage": "ready_for_tmm",
+            "label": "Blind snapshot completed; TMM not yet started",
+            "detail": "The next step is TMM full temporal attribution.",
+            "heartbeat_at_utc": None,
+            "step_index": 1,
+            "step_count": 4,
+        }
+    return {
+        "stage": "registered",
+        "label": "Benchmark run registered",
+        "detail": "Waiting for the strict-primary snapshot to start.",
+        "heartbeat_at_utc": None,
+        "step_index": 0,
+        "step_count": 4,
+    }
 
 
 def _benchmark_result_root() -> Path:
