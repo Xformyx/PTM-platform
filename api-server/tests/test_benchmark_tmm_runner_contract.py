@@ -17,3 +17,11 @@ def test_compose_declares_durable_truth_free_tmm_runner() -> None:
     assert "-Q benchmark_tmm" in compose
     tmm_block = compose.split("  benchmark-tmm-runner:", 1)[1].split("  celery-worker-rag:", 1)[0]
     assert "./benchmarks:/opt/benchmarks:ro" not in tmm_block
+
+
+def test_durable_tmm_executor_records_phase_heartbeats_and_short_stale_recovery() -> None:
+    executor = (REPO_ROOT / "api-server/app/services/benchmark_tmm_executor.py").read_text(encoding="utf-8")
+    lifecycle = (REPO_ROOT / "api-server/app/services/benchmark_run_lifecycle.py").read_text(encoding="utf-8")
+    assert "tmm_heartbeat_utc" in executor
+    assert "computing_tmm_heatmap" in executor
+    assert "TMM_ACCEPT_STALE_AFTER_SEC = 30 * 60" in lifecycle

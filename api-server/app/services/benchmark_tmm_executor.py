@@ -11,6 +11,7 @@ import asyncio
 import json
 import logging
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 
 from celery import Celery
@@ -56,6 +57,19 @@ def enqueue_locked_score(run_id: int) -> str:
     return task.id
 
 
+async def _record_tmm_heartbeat(db, run: BenchmarkRun, stage: str) -> None:
+    """Persist worker liveness so a stranded queue task becomes retryable promptly."""
+
+    provenance = dict(run.provenance or {})
+    provenance["tmm_worker_stage"] = stage
+    provenance["tmm_heartbeat_utc"] = datetime.now(timezone.utc).isoformat()
+    if "tmm_worker_started_at_utc" not in provenance:
+        provenance["tmm_worker_started_at_utc"] = provenance["tmm_heartbeat_utc"]
+    run.provenance = provenance
+    flag_modified(run, "provenance")
+    await db.commit()
+
+
 async def execute_benchmark_tmm(run_id: int, user_id: int | None) -> dict[str, object]:
     """Persist a full-TMM artifact, or persist a terminal error for this run."""
 
@@ -80,9 +94,11 @@ async def execute_benchmark_tmm(run_id: int, user_id: int | None) -> dict[str, o
         settings = get_settings()
         output_dir = Path(settings.OUTPUT_DIR) / child.order_code
         try:
+            await _record_tmm_heartbeat(db, run, "building_temporal_request")
             temporal_request = await asyncio.to_thread(
                 build_temporal_request, output_dir=output_dir, ptm_type=child.ptm_type
             )
+            await _record_tmm_heartbeat(db, run, "computing_global_kinase_modules")
             annotated = await global_kinase_modules(
                 child.id,
                 {
@@ -104,12 +120,14 @@ async def execute_benchmark_tmm(run_id: int, user_id: int | None) -> dict[str, o
                 }
                 for module in annotated.get("kinase_modules", [])
             ]
+            await _record_tmm_heartbeat(db, run, "computing_tmm_heatmap")
             tmm = await kinase_activity_heatmap(
                 child.id,
                 {"kinase_modules": tmm_modules, "force_refresh": True},
                 db,
                 service_user,
             )
+            await _record_tmm_heartbeat(db, run, "writing_truth_free_artifact")
             artifact = await asyncio.to_thread(
                 build_score_artifact,
                 output_dir=output_dir,
@@ -120,6 +138,7 @@ async def execute_benchmark_tmm(run_id: int, user_id: int | None) -> dict[str, o
             )
             artifact_path = output_dir / "benchmark_blind_analysis_artifact.json"
             artifact_path.write_text(json.dumps(artifact, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            await _record_tmm_heartbeat(db, run, "queueing_locked_score")
             score_task_id = enqueue_locked_score(run.id)
         except Exception as exc:
             logger.exception("Blind TMM failed for BenchmarkRun %s", run_id)

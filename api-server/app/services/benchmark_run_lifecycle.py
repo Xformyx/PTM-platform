@@ -10,8 +10,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-TMM_ACCEPT_STALE_AFTER_SEC = 3 * 60 * 60
-"""Seconds after tmm_accepted_at_utc without an artifact before the UI treats TMM as interrupted.
+TMM_ACCEPT_STALE_AFTER_SEC = 30 * 60
+"""Seconds after the last durable TMM heartbeat without an artifact before retry is enabled.
 
 docs/implementation_log.md [2026-08-26] Blind TMM 재시도가 화면에서 무반응으로 보이던 실행 게이트.
 측정 상수가 아니다. 이 값으로 점수나 TMM 산출을 바꾸지 않는다.
@@ -104,11 +104,11 @@ def tmm_job_state(
         return None
     if artifact_path:
         return "running"
-    accepted = (provenance or {}).get("tmm_accepted_at_utc")
-    if not accepted:
+    last_heartbeat = (provenance or {}).get("tmm_heartbeat_utc") or (provenance or {}).get("tmm_accepted_at_utc")
+    if not last_heartbeat:
         return "interrupted"
     try:
-        stamp = datetime.fromisoformat(str(accepted).replace("Z", "+00:00"))
+        stamp = datetime.fromisoformat(str(last_heartbeat).replace("Z", "+00:00"))
         if stamp.tzinfo is None:
             stamp = stamp.replace(tzinfo=timezone.utc)
     except ValueError:

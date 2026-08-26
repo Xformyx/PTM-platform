@@ -430,6 +430,16 @@ Backend: vector-plot (receptor inference)
 - [x] full TMM request build·production endpoint reuse·offline scorer dispatch의 artifact persistence 경로 점검
 - [x] backend 코드만으로 재현 가능한 interrupted 상태 회귀 test와 safe resume 처리 추가
 
+## Long-running TMM Watchdog and Queue Diagnosis
+- [ ] 2시간 이상 TMM running BenchmarkRun의 Celery queue 소비·worker process·task traceback 확인
+- [x] progress heartbeat·soft/hard timeout·stale-task recovery contract를 TMM worker에 추가
+- [ ] 동일 snapshot의 stale TMM task를 안전하게 failed/retryable 상태로 복구하고 Figure 1–4 completion 확인
+
+## Benchmark Polling Failed-to-fetch Diagnosis
+- [x] BenchmarkEvaluationPanel의 status polling interval·abort·error fallback과 API endpoint contract 감사
+- [x] API restart·CORS/network failure·frontend/API/worker revision mismatch를 운영 상태와 코드로 분리
+- [ ] polling backoff·last-known status 유지·deployment revision 표시를 추가하고 재배포 검증
+
 ## Latest-main Synchronization Before Follow-up Review
 - [x] local benchmark worktree의 미반영 500-diagnosis 기록을 보존하고 upstream main과 차이 확인
 - [x] GitHub `main` 최신 revision으로 안전하게 rebase/sync

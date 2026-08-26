@@ -3,7 +3,7 @@
  * lineage categories and immutable run provenance; source treatment, cell-line,
  * research questions, RAG and locked truth are intentionally not rendered.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertCircle, CheckCircle2, Download, FlaskConical, Loader2, LockKeyhole, Play, RefreshCw, ShieldCheck } from "lucide-react";
 import { api } from "@/lib/api";
 import { BenchmarkFigure2, type Figure2Source } from "@/components/BenchmarkFigure2";
@@ -168,7 +168,7 @@ function RunCard({
         <p className="text-xs text-amber-700">The last TMM accept did not finish. Click Retry TMM + locked score — do not start another blind benchmark.</p>
       )}
       {run.tmm_job === "running" && (
-        <p className="text-xs text-sky-700">TMM is running on the API server. Kinase modules and the temporal heatmap take several minutes. This page refreshes automatically.</p>
+        <p className="text-xs text-sky-700">TMM is running on the durable benchmark worker. The latest worker heartbeat controls stale-task recovery; this page polls status automatically.</p>
       )}
       {run.status === "completed" && (
         <div className="space-y-3">
@@ -207,24 +207,33 @@ export function BenchmarkEvaluationPanel({ orderId, readOnly }: { orderId: numbe
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [pollWarning, setPollWarning] = useState<string | null>(null);
+  const [pollDelayMs, setPollDelayMs] = useState(5000);
 
-  const refresh = async () => {
+  const refresh = useCallback(async (background = false) => {
     try {
       const response = await api.get<{ runs: BenchmarkRun[] }>(`/benchmarks/source-orders/${orderId}/runs`);
       setRuns(response.runs);
+      setPollWarning(null);
+      setPollDelayMs(5000);
     } catch (error: any) {
-      setMessage(error?.message || "Could not load benchmark runs.");
+      if (background) {
+        setPollWarning("Status API is temporarily unavailable. The last known BenchmarkRun state is retained and polling will retry automatically.");
+        setPollDelayMs((delay) => Math.min(delay * 2, 30000));
+      } else {
+        setMessage(error?.message || "Could not load benchmark runs.");
+      }
     } finally {
       setLoading(false);
     }
-  };
+  }, [orderId]);
 
-  useEffect(() => { void refresh(); }, [orderId]);
+  useEffect(() => { void refresh(); }, [refresh]);
   useEffect(() => {
     if (!runs.some(isLive)) return;
-    const timer = window.setInterval(() => void refresh(), 5000);
-    return () => window.clearInterval(timer);
-  }, [runs]);
+    const timer = window.setTimeout(() => void refresh(true), pollDelayMs);
+    return () => window.clearTimeout(timer);
+  }, [runs, refresh, pollDelayMs]);
 
   const latest = runs[0];
   const currentRuns = useMemo(() => runs.filter((run) => !isLeftover(run)), [runs]);
@@ -356,6 +365,7 @@ export function BenchmarkEvaluationPanel({ orderId, readOnly }: { orderId: numbe
 
       {notice && <Alert><CheckCircle2 className="h-4 w-4" /><AlertTitle>TMM started</AlertTitle><AlertDescription>{notice}</AlertDescription></Alert>}
       {message && <Alert variant="destructive"><AlertCircle className="h-4 w-4" /><AlertTitle>Benchmark action needs attention</AlertTitle><AlertDescription>{message}</AlertDescription></Alert>}
+      {pollWarning && <Alert><RefreshCw className="h-4 w-4" /><AlertTitle>Reconnecting to benchmark status</AlertTitle><AlertDescription>{pollWarning}</AlertDescription></Alert>}
 
       <Card>
         <CardHeader className="flex-row items-center justify-between pb-3">
