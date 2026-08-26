@@ -539,6 +539,14 @@ Backend: vector-plot (receptor inference)
 - [x] 모든 PNG/PDF Figure의 non-empty visual QC, source-data correspondence 및 integrated manuscript section 검증
 - [x] corrected code·manuscript·figure bundle GitHub main 반영 및 deliverables 재제공
 
+## Leakage-Safe Truth-Based Development and Holdout Optimization
+- [x] locked truth denominator·anchor strata 감사 및 development/holdout 분할 가능성 평가
+- [x] truth-free artifact·runner-only development scorer·failure taxonomy protocol 구현
+- [x] 사전등록된 제한 변수 후보를 development truth에서 평가하고 ledger에 기록 (eligibility failure로 empty grid/no tuning 결정)
+- [x] generalizable 개선 구현 후 untouched holdout truth로 단회 평가 (insufficient denominator로 holdout claim 차단)
+- [x] truth-free raw replay·semantic noninferiority·blind boundary·regression 검증
+- [ ] 최적화 Methods·Results·overfitting boundary 문서화 및 GitHub main 반영
+
 ## Latest-main Synchronization Before Follow-up Review
 - [x] local benchmark worktree의 미반영 500-diagnosis 기록을 보존하고 upstream main과 차이 확인
 - [x] GitHub `main` 최신 revision으로 안전하게 rebase/sync
