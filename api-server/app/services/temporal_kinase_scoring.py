@@ -1178,6 +1178,9 @@ def attribute_shared_ptm(
     *,
     gaussian_sigma_log: float = _GAUSSIAN_SIGMA_LOG,
     target_transform: str = TMM_TARGET_SIGNED,
+    uncertainty_bootstrap_repeats: int = 0,
+    uncertainty_loto_enabled: bool = False,
+    uncertainty_seed: int = 0,
 ):
     """Report a shared site's attribution at the resolution the data supports.
 
@@ -1207,7 +1210,73 @@ def attribute_shared_ptm(
         [ts.get(c, 0.0) for c in conditions_sorted],
         target_transform=target_transform,
     )
-    return ambiguity_aware_attribution(ptm_key, y, design, names, n_bootstrap=0)
+    attribution = ambiguity_aware_attribution(ptm_key, y, design, names, n_bootstrap=0)
+    singleton_required = any(
+        len(group.members) == 1 and bool(group.required)
+        for group in attribution.groups
+    )
+    repeats = max(0, int(uncertainty_bootstrap_repeats))
+    if repeats > 0 and attribution.attribution_supported and singleton_required:
+        attribution = ambiguity_aware_attribution(
+            ptm_key,
+            y,
+            design,
+            names,
+            n_bootstrap=repeats,
+            seed=int(uncertainty_seed),
+        )
+
+    full_top_members: list[str] = []
+    if attribution.groups:
+        top_group = max(attribution.groups, key=lambda group: float(group.ratio))
+        full_top_members = sorted(top_group.members)
+    loto_records: list[dict] = []
+    if (
+        bool(uncertainty_loto_enabled)
+        and attribution.attribution_supported
+        and singleton_required
+        and len(conditions_sorted) >= 3
+    ):
+        for omitted_index, omitted_condition in enumerate(conditions_sorted):
+            reduced = ambiguity_aware_attribution(
+                f"{ptm_key}__loto_{omitted_index}",
+                np.delete(y, omitted_index),
+                np.delete(design, omitted_index, axis=0),
+                names,
+                n_bootstrap=0,
+            )
+            reduced_top_members: list[str] = []
+            if reduced.groups:
+                reduced_top = max(reduced.groups, key=lambda group: float(group.ratio))
+                reduced_top_members = sorted(reduced_top.members)
+            loto_records.append({
+                "omitted_condition": omitted_condition,
+                "attribution_supported": bool(reduced.attribution_supported),
+                "top_group_members": reduced_top_members,
+                "top_group_preserved": bool(reduced_top_members == full_top_members),
+            })
+    reduced_diagnosis = attribution.reduced_diagnosis
+    attribution.uncertainty = {
+        "contract_version": "adaptive_tmm_uncertainty.v1",
+        "evaluated": bool(repeats > 0 or loto_records),
+        "selection_gate": "attribution_supported_and_required_singleton_group",
+        "bootstrap_repeats": repeats if singleton_required else 0,
+        "bootstrap_top1_stability": (
+            reduced_diagnosis.top1_stability if reduced_diagnosis is not None else None
+        ),
+        "bootstrap_top1_ratio_std": (
+            reduced_diagnosis.top1_ratio_std if reduced_diagnosis is not None else None
+        ),
+        "full_top_group_members": full_top_members,
+        "loto_enabled": bool(uncertainty_loto_enabled),
+        "loto_top_group_stability": (
+            sum(record["top_group_preserved"] for record in loto_records) / len(loto_records)
+            if loto_records else None
+        ),
+        "loto_records": loto_records,
+        "interpretation_boundary": "Uncertainty is reported at the estimable ambiguity-group resolution; withheld per-kinase ratios remain withheld.",
+    }
+    return attribution
 
 
 def deconvolve_shared_ptm(
@@ -1219,6 +1288,8 @@ def deconvolve_shared_ptm(
     *,
     gaussian_sigma_log: float = _GAUSSIAN_SIGMA_LOG,
     target_transform: str = TMM_TARGET_SIGNED,
+    candidate_prior_weights: dict[str, float] | None = None,
+    candidate_prior_strength: float = 0.0,
 ) -> dict[str, float]:
     """Decompose a shared PTM's time-series into per-kinase contribution ratios.
 
@@ -1262,6 +1333,55 @@ def deconvolve_shared_ptm(
         # Simple approach: use absolute dot product as proxy
         coeffs = np.array([max(0.0, float(np.dot(A[:, i], y))) for i in range(len(valid_kinases))])
 
+    # Optional sequence-background candidate prior.  Strength zero is exactly
+    # the historical NNLS result.  Non-zero strengths are selected only by
+    # truth-free replicate holdouts and never convert motif evidence into a
+    # direct kinase-substrate assertion.
+    candidate_prior_strength = max(0.0, float(candidate_prior_strength))
+    if candidate_prior_strength > 0.0 and candidate_prior_weights and len(valid_kinases) > 1:
+        raw_priors = np.array([
+            max(1e-6, float(candidate_prior_weights.get(name, 0.0)))
+            for name in valid_kinases
+        ], dtype=float)
+        # Only calibrate columns the temporal data cannot distinguish.  This
+        # prevents a motif prior from overriding an empirically different
+        # temporal profile.  Connected components are based on near-identical
+        # absolute profile correlation.
+        corr = np.corrcoef(A, rowvar=False)
+        if np.ndim(corr) == 2:
+            parent = list(range(len(valid_kinases)))
+
+            def _find(index):
+                while parent[index] != index:
+                    parent[index] = parent[parent[index]]
+                    index = parent[index]
+                return index
+
+            def _union(left, right):
+                root_left, root_right = _find(left), _find(right)
+                if root_left != root_right:
+                    parent[root_right] = root_left
+
+            for left in range(len(valid_kinases)):
+                for right in range(left + 1, len(valid_kinases)):
+                    value = float(corr[left, right])
+                    if np.isfinite(value) and abs(value) >= 0.98:
+                        _union(left, right)
+            groups: dict[int, list[int]] = {}
+            for index in range(len(valid_kinases)):
+                groups.setdefault(_find(index), []).append(index)
+            blend = candidate_prior_strength / (1.0 + candidate_prior_strength)
+            for indices in groups.values():
+                if len(indices) < 2:
+                    continue
+                group_total = float(coeffs[indices].sum())
+                group_priors = raw_priors[indices]
+                prior_total = float(group_priors.sum())
+                if group_total <= 0 or prior_total <= 0:
+                    continue
+                target = group_total * group_priors / prior_total
+                coeffs[indices] = (1.0 - blend) * coeffs[indices] + blend * target
+
     total = float(coeffs.sum())
     if total < 1e-9:
         # All coefficients near zero → equal distribution
@@ -1282,6 +1402,165 @@ def deconvolve_shared_ptm(
     return ratios
 
 
+def refine_kinase_profiles_iteratively(
+    kinase_profiles: dict[str, dict],
+    ptm_timeseries: dict[str, dict[str, float]],
+    ptm_to_kinases: dict[str, list[str]],
+    conditions_sorted: list[str],
+    *,
+    rounds: int = 0,
+    minimum_top1_probability: float = 0.8,
+    minimum_shared_support: int = 3,
+    blend: float = 0.5,
+    convergence_tolerance: float = 0.01,
+    gaussian_sigma_log: float = _GAUSSIAN_SIGMA_LOG,
+    target_transform: str = TMM_TARGET_SIGNED,
+    ptm_candidate_weights: dict[str, dict[str, float]] | None = None,
+    candidate_prior_strength: float = 0.0,
+) -> tuple[dict[str, dict], dict[str, object]]:
+    """Refine sparse profiles from identifiable high-share shared sites.
+
+    The update is intentionally conservative: a shared site is admitted only
+    when the temporal identifiability engine supports an individual kinase,
+    the selected kinase receives at least ``minimum_top1_probability``, and the
+    kinase has enough admitted sites.  Gaussian-started profiles remain labelled
+    ``iterative_data_assisted`` rather than becoming direct data anchors.
+    """
+
+    rounds = max(0, int(rounds))
+    minimum_top1_probability = min(1.0, max(0.5, float(minimum_top1_probability)))
+    minimum_shared_support = max(1, int(minimum_shared_support))
+    blend = min(1.0, max(0.0, float(blend)))
+    convergence_tolerance = max(0.0, float(convergence_tolerance))
+    candidate_weights = ptm_candidate_weights or {}
+    profiles = {
+        kinase: {**info, "profile": np.asarray(info.get("profile"), dtype=float).copy()}
+        for kinase, info in kinase_profiles.items()
+    }
+    provenance: dict[str, object] = {
+        "contract": "iterative_kinase_profile.v1",
+        "requested_rounds": rounds,
+        "completed_rounds": 0,
+        "minimum_top1_probability": minimum_top1_probability,
+        "minimum_shared_support": minimum_shared_support,
+        "blend": blend,
+        "convergence_tolerance": convergence_tolerance,
+        "truth_used_for_selection": False,
+        "rounds": [],
+    }
+    if rounds == 0 or not profiles:
+        provenance["stop_reason"] = "disabled"
+        return profiles, provenance
+
+    shared_sites = sorted(
+        site for site, candidates in ptm_to_kinases.items()
+        if len({str(candidate).upper() for candidate in candidates if candidate}) > 1
+        and site in ptm_timeseries
+    )
+    if not shared_sites:
+        provenance["stop_reason"] = "no_shared_sites"
+        return profiles, provenance
+
+    for round_index in range(1, rounds + 1):
+        support: dict[str, list[np.ndarray]] = {}
+        support_keys: dict[str, list[str]] = {}
+        eligible_sites = 0
+        for site in shared_sites:
+            candidates = sorted({
+                str(candidate).upper()
+                for candidate in ptm_to_kinases.get(site, [])
+                if candidate
+            })
+            ratios = deconvolve_shared_ptm(
+                site,
+                candidates,
+                profiles,
+                ptm_timeseries,
+                conditions_sorted,
+                gaussian_sigma_log=gaussian_sigma_log,
+                target_transform=target_transform,
+                candidate_prior_weights=candidate_weights.get(site, {}),
+                candidate_prior_strength=candidate_prior_strength,
+            )
+            if not ratios:
+                continue
+            top_kinase, top_ratio = max(ratios.items(), key=lambda item: item[1])
+            if float(top_ratio) < minimum_top1_probability:
+                continue
+            attribution = attribute_shared_ptm(
+                site,
+                candidates,
+                profiles,
+                ptm_timeseries,
+                conditions_sorted,
+                gaussian_sigma_log=gaussian_sigma_log,
+                target_transform=target_transform,
+            )
+            entry = attribution.per_kinase.get(top_kinase) if attribution is not None else None
+            if not entry or not entry.get("attribution_supported") or entry.get("ambiguous"):
+                continue
+            values = np.abs(np.asarray([
+                ptm_timeseries[site].get(condition, 0.0)
+                for condition in conditions_sorted
+            ], dtype=float))
+            scale = float(values.max())
+            if scale <= 0:
+                continue
+            support.setdefault(top_kinase, []).append(values / scale)
+            support_keys.setdefault(top_kinase, []).append(site)
+            eligible_sites += 1
+
+        updates = 0
+        maximum_delta = 0.0
+        for kinase, vectors in support.items():
+            if len(vectors) < minimum_shared_support or kinase not in profiles:
+                continue
+            empirical = np.median(np.stack(vectors, axis=0), axis=0)
+            empirical_scale = float(empirical.max())
+            if empirical_scale <= 0:
+                continue
+            empirical = empirical / empirical_scale
+            previous = np.asarray(profiles[kinase]["profile"], dtype=float)
+            updated = (1.0 - blend) * previous + blend * empirical
+            updated_scale = float(updated.max())
+            if updated_scale > 0:
+                updated = updated / updated_scale
+            delta = float(np.max(np.abs(updated - previous)))
+            maximum_delta = max(maximum_delta, delta)
+            base_type = str(profiles[kinase].get("base_profile_type") or profiles[kinase].get("profile_type"))
+            profiles[kinase].update({
+                "profile": updated,
+                "profile_type": "iterative_data_assisted",
+                "base_profile_type": base_type,
+                "iterative_shared_support": len(vectors),
+                "iterative_shared_keys": support_keys[kinase][:20],
+                "iterative_completed_round": round_index,
+                "iterative_last_delta": round(delta, 8),
+            })
+            updates += 1
+        provenance["rounds"].append({
+            "round": round_index,
+            "eligible_shared_sites": eligible_sites,
+            "updated_kinases": updates,
+            "maximum_profile_delta": round(maximum_delta, 8),
+        })
+        provenance["completed_rounds"] = round_index
+        if updates == 0:
+            provenance["stop_reason"] = "no_kinase_met_support_gate"
+            break
+        if maximum_delta <= convergence_tolerance:
+            provenance["stop_reason"] = "converged"
+            break
+    else:
+        provenance["stop_reason"] = "maximum_rounds_reached"
+
+    provenance["final_iterative_profile_count"] = sum(
+        1 for info in profiles.values()
+        if info.get("profile_type") == "iterative_data_assisted"
+    )
+    return profiles, provenance
+
+
 def compute_weighted_kinase_scores(
     kinase_modules: list[dict],
     ptm_timeseries: dict[str, dict[str, float]],
@@ -1294,6 +1573,16 @@ def compute_weighted_kinase_scores(
     profile_min_exclusive: int = MIN_EXCLUSIVE_FOR_PROFILE,
     gaussian_sigma_log: float = _GAUSSIAN_SIGMA_LOG,
     target_transform: str = TMM_TARGET_SIGNED,
+    ptm_candidate_weights: dict[str, dict[str, float]] | None = None,
+    kinase_hierarchy: dict[str, str] | None = None,
+    candidate_prior_strength: float = 0.0,
+    iterative_profile_rounds: int = 0,
+    iterative_min_top1_probability: float = 0.8,
+    iterative_min_shared_support: int = 3,
+    iterative_profile_blend: float = 0.5,
+    uncertainty_bootstrap_repeats: int = 0,
+    uncertainty_loto_enabled: bool = False,
+    uncertainty_seed: int = 20260826,
 ) -> dict[str, dict]:
     """Compute per-kinase per-condition activity scores with TMM-weighted contributions.
 
@@ -1332,6 +1621,10 @@ def compute_weighted_kinase_scores(
     """
     if ptm_qvalues is None:
         ptm_qvalues = {}
+    if ptm_candidate_weights is None:
+        ptm_candidate_weights = {}
+    if kinase_hierarchy is None:
+        kinase_hierarchy = {}
 
     # Step 1: Build kinase profiles from exclusive substrates
     kinase_profiles = build_kinase_profiles_from_data(
@@ -1341,6 +1634,20 @@ def compute_weighted_kinase_scores(
         conditions_sorted,
         min_exclusive_for_profile=profile_min_exclusive,
         gaussian_sigma_log=gaussian_sigma_log,
+    )
+    kinase_profiles, iterative_profile_provenance = refine_kinase_profiles_iteratively(
+        kinase_profiles,
+        ptm_timeseries,
+        ptm_to_kinases,
+        conditions_sorted,
+        rounds=iterative_profile_rounds,
+        minimum_top1_probability=iterative_min_top1_probability,
+        minimum_shared_support=iterative_min_shared_support,
+        blend=iterative_profile_blend,
+        gaussian_sigma_log=gaussian_sigma_log,
+        target_transform=target_transform,
+        ptm_candidate_weights=ptm_candidate_weights,
+        candidate_prior_strength=candidate_prior_strength,
     )
 
     results: dict[str, dict] = {}
@@ -1391,6 +1698,8 @@ def compute_weighted_kinase_scores(
                     conditions_sorted,
                     gaussian_sigma_log=gaussian_sigma_log,
                     target_transform=target_transform,
+                    candidate_prior_weights=ptm_candidate_weights.get(pk, {}),
+                    candidate_prior_strength=candidate_prior_strength,
                 )
                 ratio = deconv.get(canonical, 1.0 / len(all_candidates))
                 prof_info = kinase_profiles.get(canonical)
@@ -1402,6 +1711,12 @@ def compute_weighted_kinase_scores(
                 "contribution_ratio": round(ratio, 4),
                 "profile_type": profile_type,
                 "n_competing_kinases": len(other_kinases),
+                "candidate_prior_weight": round(
+                    float(ptm_candidate_weights.get(pk, {}).get(canonical, 0.0)),
+                    8,
+                ),
+                "candidate_prior_strength": max(0.0, float(candidate_prior_strength)),
+                "hierarchy_family": kinase_hierarchy.get(canonical, canonical),
             }
 
             if not other_kinases:
@@ -1417,6 +1732,9 @@ def compute_weighted_kinase_scores(
                             conditions_sorted,
                             gaussian_sigma_log=gaussian_sigma_log,
                             target_transform=target_transform,
+                            uncertainty_bootstrap_repeats=uncertainty_bootstrap_repeats,
+                            uncertainty_loto_enabled=uncertainty_loto_enabled,
+                            uncertainty_seed=int(uncertainty_seed) + len(attribution_cache),
                         )
                     except Exception as _attribution_error:
                         _log.warning(
@@ -1448,6 +1766,7 @@ def compute_weighted_kinase_scores(
                 else:
                     detail["resolution"] = "resolved"
                     detail["group_ratio"] = round(float(entry["group_ratio"]), 4)
+                    detail["uncertainty"] = attribution.uncertainty
                     n_resolved += 1
 
             # 증거 없는 균등 ratio를 측정처럼 내보내지 않는다.  GUARD_OFF 에서는
@@ -1516,11 +1835,41 @@ def compute_weighted_kinase_scores(
             "n_exclusive": n_exclusive,
             "n_shared": n_shared,
             "profile_type": _profile_type,
+            "profile_values": {
+                condition: round(float(value), 8)
+                for condition, value in zip(
+                    conditions_sorted,
+                    np.asarray((kinase_profiles.get(canonical) or {}).get("profile", []), dtype=float),
+                )
+            },
+            "profile_peak_condition": (kinase_profiles.get(canonical) or {}).get("peak_condition"),
             "n_profile_substrates": _n_profile_substrates,
             "tmm_profile_config": {
                 "profile_min_exclusive": max(1, int(profile_min_exclusive)),
                 "gaussian_sigma_log": max(1e-6, float(gaussian_sigma_log)),
                 "target_transform": target_transform,
+                "candidate_prior_strength": max(0.0, float(candidate_prior_strength)),
+                "iterative_profile_rounds": max(0, int(iterative_profile_rounds)),
+                "iterative_min_top1_probability": min(1.0, max(0.5, float(iterative_min_top1_probability))),
+                "iterative_min_shared_support": max(1, int(iterative_min_shared_support)),
+                "iterative_profile_blend": min(1.0, max(0.0, float(iterative_profile_blend))),
+                "uncertainty_bootstrap_repeats": max(0, int(uncertainty_bootstrap_repeats)),
+                "uncertainty_loto_enabled": bool(uncertainty_loto_enabled),
+                "uncertainty_seed": int(uncertainty_seed),
+            },
+            "iterative_profile_provenance": iterative_profile_provenance,
+            "kinase_profile_provenance": {
+                "profile_type": _profile_type,
+                "base_profile_type": (kinase_profiles.get(canonical) or {}).get("base_profile_type"),
+                "iterative_shared_support": int((kinase_profiles.get(canonical) or {}).get("iterative_shared_support") or 0),
+                "iterative_completed_round": int((kinase_profiles.get(canonical) or {}).get("iterative_completed_round") or 0),
+                "iterative_last_delta": (kinase_profiles.get(canonical) or {}).get("iterative_last_delta"),
+            },
+            "candidate_calibration": {
+                "contract": "motif_candidate_likelihood.v1",
+                "prior_strength": max(0.0, float(candidate_prior_strength)),
+                "prior_semantics": "relative motif-candidate prior; not direct kinase-substrate evidence",
+                "hierarchy_family": kinase_hierarchy.get(canonical, canonical),
             },
             "tmm_evidence": _tmm_evidence,
             # Additive: how much of this kinase's shared evidence is actually
@@ -1534,6 +1883,11 @@ def compute_weighted_kinase_scores(
                 "n_guard_withheld": n_guard_withheld,
                 # 발표에서 지운 수와 점수에서 뺀 수는 다르다 (§5.5).
                 "n_guard_scoring_excluded": n_guard_scoring_excluded,
+                "uncertainty_contract": "adaptive_tmm_uncertainty.v1",
+                "uncertainty_evaluated_resolved_sites": sum(
+                    1 for detail in contribution_details
+                    if (detail.get("uncertainty") or {}).get("evaluated")
+                ),
             },
         }
 

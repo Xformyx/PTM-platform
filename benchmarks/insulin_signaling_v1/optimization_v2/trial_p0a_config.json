@@ -1,0 +1,16 @@
+{
+  "activity.effect_size": "weighted_sum",
+  "site_aggregation": "median",
+  "tmm.gaussian_sigma_log": 0.8,
+  "tmm.iterative_profile_rounds": 0,
+  "tmm.profile_min_exclusive": 5,
+  "tmm.target_transform": "magnitude",
+  "uncertainty.bootstrap_repeats": 0,
+  "uncertainty.loto_enabled": false,
+  "wave.bootstrap_repeats": 0,
+  "wave.correlation_threshold": 0.7,
+  "wave.maximum_waves": 8,
+  "wave.minimum_amplitude": 0.4,
+  "wave.minimum_cluster_size": 2,
+  "wave.minimum_variance": 0.3
+}

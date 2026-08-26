@@ -11,6 +11,8 @@ import html
 import json
 import math
 import zipfile
+
+from .svg_text_to_path import convert_svg_text_to_paths
 from collections import Counter
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -67,6 +69,7 @@ def write_publication_bundle(output_dir: str | Path, publication: Mapping[str, A
         _write_rows(source_path, _rows_for_figure(number, figure))
         svg_path = figures_dir / f"Fig{number}.svg"
         _write_svg(svg_path, number, figure)
+        convert_svg_text_to_paths(svg_path)
         written[f"fig{number}_svg"] = str(svg_path)
         written[f"fig{number}_source_tsv"] = str(source_path)
         figure_rows.append(
@@ -150,15 +153,34 @@ def _figure3_source(artifact: Mapping[str, Any]) -> dict[str, Any]:
             }
         )
     contributions: list[dict[str, Any]] = []
-    for site, mixture in dict(tmm.get("tmm_site_contribution_matrix") or {}).items():
-        if isinstance(mixture, Mapping):
-            for kinase, contribution in mixture.items():
-                contributions.append({"site": site, "kinase": kinase, "fractional_contribution": contribution})
+    track_matrices = {
+        "relative": dict(
+            tmm.get("relative_site_contribution_matrix")
+            or tmm.get("tmm_site_contribution_matrix")
+            or {}
+        ),
+        "occupancy": dict(tmm.get("occupancy_site_contribution_matrix") or {}),
+    }
+    for track, matrix in track_matrices.items():
+        for site, mixture in matrix.items():
+            if isinstance(mixture, Mapping):
+                for kinase, contribution in mixture.items():
+                    contributions.append({
+                        "site": site,
+                        "kinase": kinase,
+                        "fractional_contribution": contribution,
+                        "quantification_track": track,
+                    })
     return {
-        "schema_version": "ptm_benchmark_figure3.v1",
+        "schema_version": "ptm_benchmark_figure3.v3",
         "profiles": profiles,
         "confidence": confidence,
         "contributions": contributions,
+        "site_contribution_track_provenance": dict(tmm.get("site_contribution_track_provenance") or {}),
+        "relative_uncertainty": dict(tmm.get("relative_tmm_uncertainty_summary") or {}),
+        "occupancy_uncertainty": dict(tmm.get("occupancy_tmm_uncertainty_summary") or {}),
+        "dual_track_evidence": dict(tmm.get("dual_track_evidence_contract") or {}),
+        "tmm_config": dict(tmm.get("tmm_config") or {}),
         "limitations": ["No locked kinase-rank recovery metric is calculated in strict-primary v1."],
     }
 
@@ -168,6 +190,11 @@ def _figure4_source(artifact: Mapping[str, Any]) -> dict[str, Any]:
     tmm = dict(artifact.get("tmm_full_temporal") or {})
     cascade = dict(tmm.get("tmm_weighted_temporal_cascade") or {})
     directionality = list(tmm.get("tmm_kinase_pair_directionality") or [])
+    directionality_candidates = list(tmm.get("tmm_kinase_pair_directionality_candidates") or [])
+    directionality_gate = dict(tmm.get("tmm_directionality_evidence_gate") or {})
+    consensus = dict(waves.get("consensus_membership") or {})
+    site_probabilities = dict(consensus.get("site_membership_probabilities") or {})
+    soft_threshold = _number(consensus.get("soft_membership_threshold"))
     wave_rows: list[dict[str, Any]] = []
     for wave in waves.get("waves") or []:
         if not isinstance(wave, Mapping):
@@ -179,6 +206,10 @@ def _figure4_source(artifact: Mapping[str, Any]) -> dict[str, Any]:
                     "peak_timepoint": wave.get("peak_timepoint"),
                     "site": site,
                     "threshold_provenance": (waves.get("evidence_profile") or {}).get("threshold_source"),
+                    "wave_replicate_stability": (wave.get("evidence_profile") or {}).get("replicate_stability"),
+                    "consensus_membership_probability": (site_probabilities.get(site) or {}).get(wave.get("wave_id")),
+                    "consensus_soft_threshold": soft_threshold,
+                    "consensus_member": site in set(wave.get("consensus_members") or []),
                 }
             )
     cascade_rows: list[dict[str, Any]] = []
@@ -189,10 +220,16 @@ def _figure4_source(artifact: Mapping[str, Any]) -> dict[str, Any]:
             if isinstance(kinase, Mapping):
                 cascade_rows.append({"timepoint": timepoint.get("timepoint"), **dict(kinase)})
     return {
-        "schema_version": "ptm_benchmark_figure4.v1",
+        "schema_version": "ptm_benchmark_figure4.v2",
         "waves": wave_rows,
         "cascade": cascade_rows,
         "directionality": directionality,
+        "directionality_candidates": directionality_candidates,
+        "directionality_evidence_gate": directionality_gate,
+        "consensus_membership": {
+            key: value for key, value in consensus.items()
+            if key != "site_membership_probabilities"
+        },
         "multisite_divergence": [],
         "interpretation_boundary": "Observed temporal precedence and TMM-weighted cascade; not causal evidence.",
     }
@@ -207,8 +244,21 @@ def _rows_for_figure(number: int, figure: Mapping[str, Any]) -> list[dict[str, A
     if number == 2:
         return list(figure.get("panel_2a_metrics") or []) + list(figure.get("panel_2b_branches") or []) + list(figure.get("panel_2c_anchors") or [])
     if number == 3:
-        return list(figure.get("profiles") or []) + list(figure.get("confidence") or []) + list(figure.get("contributions") or [])
-    return list(figure.get("waves") or []) + list(figure.get("cascade") or []) + list(figure.get("directionality") or [])
+        rows = list(figure.get("profiles") or []) + list(figure.get("confidence") or []) + list(figure.get("contributions") or [])
+        rows.append({"section": "relative_uncertainty", **dict(figure.get("relative_uncertainty") or {})})
+        rows.append({"section": "occupancy_uncertainty", **dict(figure.get("occupancy_uncertainty") or {})})
+        rows.extend(
+            {"section": "dual_track", "kinase": kinase, **dict(record)}
+            for kinase, record in dict((figure.get("dual_track_evidence") or {}).get("by_kinase") or {}).items()
+            if isinstance(record, Mapping)
+        )
+        return rows
+    return (
+        list(figure.get("waves") or [])
+        + list(figure.get("cascade") or [])
+        + list(figure.get("directionality") or [])
+        + list(figure.get("directionality_candidates") or [])
+    )
 
 
 def _write_rows(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:

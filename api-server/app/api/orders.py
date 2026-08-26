@@ -5867,6 +5867,28 @@ async def motif_kinase_annotation(
             "concordance_details": concordance_details,
         })
 
+    # Calibrate motif-only candidates against the observed sequence-window
+    # background.  This is a relative candidate prior, never direct
+    # kinase-substrate evidence, and consumes no treatment or benchmark truth.
+    from collections import defaultdict as _defaultdict_calibration
+    from ptm_shared.motif_candidate_calibration import calibrate_motif_annotations
+
+    _patterns_by_canonical: dict[str, list[str]] = _defaultdict_calibration(list)
+    for _motif_name, _pattern in motif_db.items():
+        _base_name = re.sub(
+            r"_(extended|canonical|minimal|like)$",
+            "",
+            str(_motif_name),
+            flags=re.IGNORECASE,
+        )
+        _canonical_motif, _ = normalize_kinase_name(_base_name)
+        if _canonical_motif:
+            _patterns_by_canonical[_canonical_motif].append(_pattern)
+    annotations, motif_candidate_calibration = calibrate_motif_annotations(
+        annotations,
+        _patterns_by_canonical,
+    )
+
     # ── 5. Group-level Anchor Kinase Inference ────────────────────────────
     # Logic: within this co-wave group of PTMs,
     #   1. Collect all known kinases from any PTM → these are "Anchor Kinases"
@@ -6000,6 +6022,7 @@ async def motif_kinase_annotation(
         "summary": {
             "status_counts": status_counts,
             "concordance_counts": concordance_counts,
+            "motif_candidate_calibration": motif_candidate_calibration,
         },
     }
 
@@ -6267,13 +6290,27 @@ async def global_kinase_modules(
 
         motif_families = set()
         motif_display_names = {}  # canonical → display name
+        motif_candidate_metadata: dict[str, dict] = {}
         for mp in ann.get("motif_predicted_kinases", []):
             cf = mp.get("canonical_family", mp.get("kinase_family", ""))
             display = mp.get("kinase_family", cf)
-            for part in cf.split("/"):
+            parts = [part for part in cf.split("/") if part and len(part) >= 2]
+            split_probability = float(mp.get("candidate_probability") or 0.0) / max(len(parts), 1)
+            for part in parts:
                 if part and len(part) >= 2:
                     motif_families.add(part)
                     motif_display_names[part] = display
+                    motif_candidate_metadata[part] = {
+                        "candidate_probability": split_probability,
+                        "candidate_raw_support": mp.get("candidate_raw_support"),
+                        "candidate_support_class": mp.get("candidate_support_class"),
+                        "candidate_likelihood_contract": mp.get("candidate_likelihood_contract"),
+                        "empirical_background_match_rate": mp.get("empirical_background_match_rate"),
+                        "empirical_information_bits": mp.get("empirical_information_bits"),
+                        "sequence_pattern_confirmed": mp.get("sequence_pattern_confirmed"),
+                        "hierarchy_family": mp.get("hierarchy_family"),
+                        "candidate_resolution_level": mp.get("candidate_resolution_level"),
+                    }
 
         # Capture the complete motif candidate set before the legacy graph picks
         # one best kinase.  This is strict-TMM-only evidence and remains labelled
@@ -6291,6 +6328,7 @@ async def global_kinase_modules(
                         "evidence_tier": "motif_only_seed",
                     }
                 if ptm_key not in [m["key"] for m in tmm_motif_candidate_members[mf]["inferred"]]:
+                    _candidate_meta = motif_candidate_metadata.get(mf, {})
                     tmm_motif_candidate_members[mf]["inferred"].append({
                         "key": ptm_key,
                         "gene": gene,
@@ -6300,6 +6338,7 @@ async def global_kinase_modules(
                             f"motif-only TMM candidate ({display}); "
                             "no direct kinase anchor in the blind input"
                         ),
+                        **_candidate_meta,
                     })
 
         # Try to match with existing kinase modules
@@ -6610,6 +6649,10 @@ async def global_kinase_modules(
         "total_motif_candidates": sum(km.get("motif_candidate_count", 0) for km in kinase_module_list),
         "total_unassigned": len(unassigned),
         "status_counts": status_counts,
+        "motif_candidate_calibration": (
+            (annotation_result.get("summary") or {}).get("motif_candidate_calibration")
+            or {}
+        ),
         "top_kinases": [
             {"kinase": km["kinase"], "canonical": km["canonical"], "total": km["total_count"]}
             for km in kinase_module_list[:10]
@@ -7160,6 +7203,7 @@ async def global_kinase_modules(
             "stage": "pre_temporal_redistribution",
             "purpose": "multi_candidate_fractional_attribution",
             "legacy_ui_modules_unchanged": True,
+            "candidate_calibration": summary.get("motif_candidate_calibration", {}),
         }
     return response
 
@@ -7276,11 +7320,35 @@ async def kinase_activity_heatmap(
             "profile_min_exclusive": max(1, int(requested_tmm_config.get("profile_min_exclusive", 3))),
             "gaussian_sigma_log": max(1e-6, float(requested_tmm_config.get("gaussian_sigma_log", 0.6))),
             "target_transform": str(requested_tmm_config.get("target_transform", "signed")),
+            "activity_metric": str(requested_tmm_config.get("activity_metric", "weighted_sum")),
+            "shrinkage_prior_support": max(0.0, float(requested_tmm_config.get("shrinkage_prior_support", 5.0))),
+            "candidate_prior_strength": max(0.0, float(requested_tmm_config.get("candidate_prior_strength", 0.0))),
+            "candidate_hierarchy_mode": str(requested_tmm_config.get("candidate_hierarchy_mode", "off")),
+            "iterative_profile_rounds": max(0, int(requested_tmm_config.get("iterative_profile_rounds", 0))),
+            "iterative_min_top1_probability": min(1.0, max(0.5, float(requested_tmm_config.get("iterative_min_top1_probability", 0.8)))),
+            "iterative_min_shared_support": max(1, int(requested_tmm_config.get("iterative_min_shared_support", 3))),
+            "iterative_profile_blend": min(1.0, max(0.0, float(requested_tmm_config.get("iterative_profile_blend", 0.5)))),
+            "dual_track_correlation_threshold": min(1.0, max(-1.0, float(requested_tmm_config.get("dual_track_correlation_threshold", 0.5)))),
+            "dual_track_peak_index_tolerance": max(0, int(requested_tmm_config.get("dual_track_peak_index_tolerance", 1))),
+            "dual_track_magnitude_log2_ratio_threshold": max(0.0, float(requested_tmm_config.get("dual_track_magnitude_log2_ratio_threshold", 1.0))),
+            "uncertainty_bootstrap_repeats": max(0, int(requested_tmm_config.get("uncertainty_bootstrap_repeats", 0))),
+            "uncertainty_loto_enabled": bool(requested_tmm_config.get("uncertainty_loto_enabled", False)),
+            "uncertainty_seed": int(requested_tmm_config.get("uncertainty_seed", 20260826)),
         }
     except (TypeError, ValueError) as config_error:
         raise HTTPException(status_code=400, detail=f"invalid tmm_config: {config_error}") from config_error
     if effective_tmm_config["target_transform"] not in {"signed", "magnitude"}:
         raise HTTPException(status_code=400, detail="tmm_config.target_transform must be signed or magnitude")
+    if effective_tmm_config["activity_metric"] not in {"weighted_sum", "weighted_mean", "shrunken_mean"}:
+        raise HTTPException(
+            status_code=400,
+            detail="tmm_config.activity_metric must be weighted_sum, weighted_mean, or shrunken_mean",
+        )
+    if effective_tmm_config["candidate_hierarchy_mode"] not in {"off", "family_guard"}:
+        raise HTTPException(
+            status_code=400,
+            detail="tmm_config.candidate_hierarchy_mode must be off or family_guard",
+        )
     from ptm_shared.temporal_contract import resolve_temporal_contract, same_temporal_arm
     temporal = resolve_temporal_contract(order.report_options or {})
 
@@ -7432,6 +7500,8 @@ async def kinase_activity_heatmap(
 
     # ── Build PTM → kinase reverse map (for exclusive/shared classification) ──
     ptm_to_kinases: dict[str, list[str]] = {}  # ptm_key -> [kinase_names]
+    ptm_candidate_weights: dict[str, dict[str, float]] = {}
+    kinase_hierarchy: dict[str, str] = {}
     # v11.3.5: Filter out non-kinase entries (drugs, cyclins, etc.) from kinase_modules
     _HEATMAP_NON_KINASE_BLACKLIST = {
         "RAPAMYCIN", "WORTMANNIN", "STAUROSPORINE", "INSULIN",
@@ -7466,9 +7536,20 @@ async def kinase_activity_heatmap(
 
     for km in kinase_modules:
         kn = km.get("kinase", "")
+        canonical_kn = str(km.get("canonical") or kn).upper()
         for ptm in km.get("ptms", []):
             pk = f"{ptm.get('gene', '').upper()}_{str(ptm.get('position', '')).upper()}"
             ptm_to_kinases.setdefault(pk, []).append(kn)
+            probability = ptm.get("candidate_probability")
+            if probability is not None:
+                try:
+                    ptm_candidate_weights.setdefault(pk, {})[canonical_kn] = max(0.0, float(probability))
+                except (TypeError, ValueError):
+                    pass
+            kinase_hierarchy.setdefault(
+                canonical_kn,
+                str(ptm.get("hierarchy_family") or canonical_kn).upper(),
+            )
 
     kinase_module_provenance = {
         str(module.get("canonical") or module.get("kinase") or "").upper(): {
@@ -8687,6 +8768,16 @@ async def kinase_activity_heatmap(
             profile_min_exclusive=effective_tmm_config["profile_min_exclusive"],
             gaussian_sigma_log=effective_tmm_config["gaussian_sigma_log"],
             target_transform=effective_tmm_config["target_transform"],
+            ptm_candidate_weights=ptm_candidate_weights,
+            kinase_hierarchy=kinase_hierarchy,
+            candidate_prior_strength=effective_tmm_config["candidate_prior_strength"],
+            iterative_profile_rounds=effective_tmm_config["iterative_profile_rounds"],
+            iterative_min_top1_probability=effective_tmm_config["iterative_min_top1_probability"],
+            iterative_min_shared_support=effective_tmm_config["iterative_min_shared_support"],
+            iterative_profile_blend=effective_tmm_config["iterative_profile_blend"],
+            uncertainty_bootstrap_repeats=effective_tmm_config["uncertainty_bootstrap_repeats"],
+            uncertainty_loto_enabled=effective_tmm_config["uncertainty_loto_enabled"],
+            uncertainty_seed=effective_tmm_config["uncertainty_seed"],
         )
         if len(occupancy_complete_timeseries) >= 2 and len(conditions_sorted) >= 3:
             from ptm_shared.temporal_wave_engine import analyze_temporal_waves
@@ -8721,68 +8812,55 @@ async def kinase_activity_heatmap(
                 profile_min_exclusive=effective_tmm_config["profile_min_exclusive"],
                 gaussian_sigma_log=effective_tmm_config["gaussian_sigma_log"],
                 target_transform=effective_tmm_config["target_transform"],
+                ptm_candidate_weights=ptm_candidate_weights,
+                kinase_hierarchy=kinase_hierarchy,
+                candidate_prior_strength=effective_tmm_config["candidate_prior_strength"],
+                iterative_profile_rounds=effective_tmm_config["iterative_profile_rounds"],
+                iterative_min_top1_probability=effective_tmm_config["iterative_min_top1_probability"],
+                iterative_min_shared_support=effective_tmm_config["iterative_min_shared_support"],
+                iterative_profile_blend=effective_tmm_config["iterative_profile_blend"],
+                uncertainty_bootstrap_repeats=effective_tmm_config["uncertainty_bootstrap_repeats"],
+                uncertainty_loto_enabled=effective_tmm_config["uncertainty_loto_enabled"],
+                uncertainty_seed=effective_tmm_config["uncertainty_seed"],
             )
 
-        def _track_peak(score: dict) -> tuple[str | None, float]:
-            if not score:
-                return None, 0.0
-            net = {
-                condition: score.get("weighted_up_sums", {}).get(condition, 0.0)
-                + score.get("weighted_down_sums", {}).get(condition, 0.0)
-                for condition in conditions_sorted
-            }
-            if not net or not any(abs(value) > 0 for value in net.values()):
-                return None, 0.0
-            peak = max(net, key=lambda condition: abs(net[condition]))
-            return peak, float(net[peak])
-
-        for canonical, relative_score in tmm_scores.items():
-            occupancy_score = occupancy_tmm_scores.get(canonical)
-            relative_peak, relative_value = _track_peak(relative_score)
-            occupancy_peak, occupancy_value = _track_peak(occupancy_score or {})
-            relative_top = {
-                item["ptm_key"] for item in sorted(
-                    (
-                        item
-                        for item in relative_score.get("contribution_details", [])
-                        if item.get("contribution_ratio") is not None
-                    ),
-                    key=lambda item: float(item.get("contribution_ratio") or 0.0),
-                    reverse=True,
-                )[:3]
-            }
-            occupancy_top = {
-                item["ptm_key"] for item in sorted(
-                    (
-                        item
-                        for item in (occupancy_score or {}).get("contribution_details", [])
-                        if item.get("contribution_ratio") is not None
-                    ),
-                    key=lambda item: float(item.get("contribution_ratio") or 0.0),
-                    reverse=True,
-                )[:3]
-            }
-            if not occupancy_score or occupancy_peak is None:
-                status = "track2_only_insufficient_occupancy_evidence"
-                peak_concordant = None
-                direction_concordant = None
-            else:
-                peak_concordant = abs(conditions_sorted.index(relative_peak) - conditions_sorted.index(occupancy_peak)) <= 1 if relative_peak else False
-                direction_concordant = (relative_value == 0 or occupancy_value == 0 or (relative_value > 0) == (occupancy_value > 0))
-                status = "dual_track_concordant" if peak_concordant and direction_concordant and relative_top & occupancy_top else "track_discordance"
-            dual_track_kinase_evidence[canonical] = {
-                "status": status,
-                "relative_peak_condition": relative_peak,
-                "occupancy_peak_condition": occupancy_peak,
-                "peak_window_concordant": peak_concordant,
-                "direction_concordant": direction_concordant,
-                "top_contribution_overlap": sorted(relative_top & occupancy_top),
-                "relative_top_contributions": sorted(relative_top),
-                "occupancy_top_contributions": sorted(occupancy_top),
-                "occupancy_tmm_evidence": (occupancy_score or {}).get("tmm_evidence", {}),
-            }
-        from ptm_shared.tmm_multikinase_integration import build_tmm_site_contribution_matrix
-        tmm_site_contribution_matrix = build_tmm_site_contribution_matrix(tmm_scores)
+        from ptm_shared.dual_track_evidence import build_dual_track_evidence
+        dual_track_contract = build_dual_track_evidence(
+            tmm_scores,
+            occupancy_tmm_scores,
+            conditions_sorted,
+            correlation_threshold=effective_tmm_config["dual_track_correlation_threshold"],
+            peak_index_tolerance=effective_tmm_config["dual_track_peak_index_tolerance"],
+            magnitude_log2_ratio_threshold=effective_tmm_config["dual_track_magnitude_log2_ratio_threshold"],
+        )
+        dual_track_kinase_evidence = dual_track_contract["by_kinase"]
+        from ptm_shared.tmm_multikinase_integration import (
+            build_tmm_site_contribution_matrix,
+            summarize_tmm_uncertainty,
+        )
+        relative_site_contribution_matrix = build_tmm_site_contribution_matrix(tmm_scores)
+        occupancy_site_contribution_matrix = build_tmm_site_contribution_matrix(occupancy_tmm_scores)
+        relative_tmm_uncertainty_summary = summarize_tmm_uncertainty(tmm_scores)
+        occupancy_tmm_uncertainty_summary = summarize_tmm_uncertainty(occupancy_tmm_scores)
+        # Backward-compatible field now contains canonical relative-track keys
+        # only. Display aliases and occupancy records are never merged into the
+        # biological calculation matrix.
+        tmm_site_contribution_matrix = relative_site_contribution_matrix
+        site_contribution_track_provenance = {
+            "contract_version": "tmm_site_contribution_tracks.v1",
+            "canonical_key_format": "GENE_SITE",
+            "display_aliases_are_records": False,
+            "relative": {
+                "field": "relative_site_contribution_matrix",
+                "quantification_track": "protein_normalized_relative_log2fc",
+            },
+            "occupancy": {
+                "field": "occupancy_site_contribution_matrix",
+                "quantification_track": "apparent_paired_occupancy_logit_delta",
+            },
+            "compatibility_field": "tmm_site_contribution_matrix",
+            "compatibility_semantics": "canonical relative track only",
+        }
         # Merge TMM scores back into kinase_scores_filtered entries
         # Option A: Replace up/down sums with TMM-weighted values
         for ks_entry in kinase_scores_filtered:
@@ -8832,7 +8910,11 @@ async def kinase_activity_heatmap(
                 ks_entry["tmm_n_exclusive"] = tmm["n_exclusive"]
                 ks_entry["tmm_n_shared"] = tmm["n_shared"]
                 ks_entry["tmm_profile_type"] = tmm["profile_type"]
+                ks_entry["tmm_profile_values"] = tmm.get("profile_values", {})
+                ks_entry["tmm_profile_peak_condition"] = tmm.get("profile_peak_condition")
                 ks_entry["tmm_evidence"] = tmm.get("tmm_evidence", {})
+                ks_entry["tmm_iterative_profile_provenance"] = tmm.get("iterative_profile_provenance", {})
+                ks_entry["tmm_kinase_profile_provenance"] = tmm.get("kinase_profile_provenance", {})
                 ks_entry["tmm_input_evidence"] = kinase_module_provenance.get(canon, {})
                 # Top-5 contribution details for LLM context
                 top5 = sorted(
@@ -8886,17 +8968,22 @@ async def kinase_activity_heatmap(
             cowave_groups = tmm_weighted_cowave_groups
 
         from ptm_shared.tmm_multikinase_integration import (
+            build_evidence_gated_tmm_directionality,
             build_tmm_kinase_pair_directionality,
             build_tmm_weighted_temporal_cascade,
         )
         tmm_weighted_temporal_cascade = build_tmm_weighted_temporal_cascade(
             kinase_scores_filtered,
             conditions_sorted,
+            activity_metric=effective_tmm_config["activity_metric"],
+            shrinkage_prior_support=effective_tmm_config["shrinkage_prior_support"],
         )
-        tmm_kinase_pair_directionality = build_tmm_kinase_pair_directionality(
+        tmm_directionality_gate = build_evidence_gated_tmm_directionality(
             tmm_weighted_temporal_cascade,
             conditions_sorted,
         )
+        tmm_kinase_pair_directionality = tmm_directionality_gate["main_edges"]
+        tmm_kinase_pair_directionality_candidates = tmm_directionality_gate["candidate_edges"]
         _log.info(
             "[TMM] Co-wave provenance: raw_groups=%s, tmm_weighted_groups=%s",
             len(raw_cowave_groups),
@@ -8907,6 +8994,8 @@ async def kinase_activity_heatmap(
         _log.warning(f"[TMM] Deconvolution failed (non-fatal): {_tmm_err}\n{_tb.format_exc()}")
         tmm_weighted_temporal_cascade = {}
         tmm_kinase_pair_directionality = []
+        tmm_kinase_pair_directionality_candidates = []
+        tmm_directionality_gate = {}
 
     # Save to DB
     result_data = {
@@ -8919,12 +9008,28 @@ async def kinase_activity_heatmap(
         "cowave_group_provenance": "tmm_weighted" if tmm_weighted_cowave_groups else "raw_pre_tmm",
         "tmm_weighted_temporal_cascade": tmm_weighted_temporal_cascade,
         "tmm_kinase_pair_directionality": tmm_kinase_pair_directionality,
+        "tmm_kinase_pair_directionality_candidates": tmm_kinase_pair_directionality_candidates,
+        "tmm_directionality_evidence_gate": tmm_directionality_gate,
         "tmm_site_contribution_matrix": tmm_site_contribution_matrix if 'tmm_site_contribution_matrix' in locals() else {},
+        "relative_site_contribution_matrix": relative_site_contribution_matrix if 'relative_site_contribution_matrix' in locals() else {},
+        "occupancy_site_contribution_matrix": occupancy_site_contribution_matrix if 'occupancy_site_contribution_matrix' in locals() else {},
+        "site_contribution_track_provenance": site_contribution_track_provenance if 'site_contribution_track_provenance' in locals() else {},
+        "relative_tmm_uncertainty_summary": relative_tmm_uncertainty_summary if 'relative_tmm_uncertainty_summary' in locals() else {},
+        "occupancy_tmm_uncertainty_summary": occupancy_tmm_uncertainty_summary if 'occupancy_tmm_uncertainty_summary' in locals() else {},
         "tmm_input_kinase_provenance": kinase_module_provenance,
+        "tmm_candidate_calibration_provenance": {
+            "contract": "motif_candidate_likelihood.v1",
+            "prior_strength": effective_tmm_config["candidate_prior_strength"],
+            "hierarchy_mode": effective_tmm_config["candidate_hierarchy_mode"],
+            "weighted_site_count": len(ptm_candidate_weights),
+            "hierarchy_kinase_count": len(kinase_hierarchy),
+            "selection_boundary": "observed sequence windows and generic motif regexes only",
+        },
         "occupancy_track_provenance": occupancy_track_provenance,
         "occupancy_wave_contract": occupancy_wave_contract,
         "occupancy_tmm_scores": occupancy_tmm_scores,
         "dual_track_kinase_evidence": dual_track_kinase_evidence,
+        "dual_track_evidence_contract": dual_track_contract,
         "available_patterns": sorted(all_patterns),
         "translocation_candidates": translocation_candidates,
         "scoring_method": "stratified_winsorized_mean_v11.3+tmm_deconvolution",

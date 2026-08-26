@@ -176,7 +176,19 @@ async def _run_tmm_with_session(
                     "sources": module.get("sources", []),
                     "motif_candidate_count": module.get("motif_candidate_count", 0),
                     "ptms": [
-                        {"gene": member.get("gene"), "position": member.get("position")}
+                        {
+                            "gene": member.get("gene"),
+                            "position": member.get("position"),
+                            "candidate_probability": member.get("candidate_probability"),
+                            "candidate_raw_support": member.get("candidate_raw_support"),
+                            "candidate_support_class": member.get("candidate_support_class"),
+                            "candidate_likelihood_contract": member.get("candidate_likelihood_contract"),
+                            "empirical_background_match_rate": member.get("empirical_background_match_rate"),
+                            "empirical_information_bits": member.get("empirical_information_bits"),
+                            "sequence_pattern_confirmed": member.get("sequence_pattern_confirmed"),
+                            "hierarchy_family": member.get("hierarchy_family"),
+                            "candidate_resolution_level": member.get("candidate_resolution_level"),
+                        }
                         for member in module.get("members", [])
                         if member.get("gene") and member.get("position")
                     ],

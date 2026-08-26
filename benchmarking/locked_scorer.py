@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
+import re
 
 from .contracts import BenchmarkManifest, BenchmarkManifestError, load_locked_truth_bundle
 
@@ -41,6 +42,199 @@ def _normalise_direction(value: Any) -> str:
 
 def _normalise_site(value: Any) -> str:
     return str(value or "").upper().replace(" ", "").replace(";", "/").strip()
+
+
+def _kinase_aliases(value: Any) -> set[str]:
+    """Return conservative aliases for runner-only kinase-family matching."""
+    raw = str(value or "").upper().replace("–", "-").replace("—", "-")
+    raw = re.sub(r"\([^)]*\)", " ", raw)
+    aliases: set[str] = set()
+    for part in re.split(r"[/,;]", raw):
+        token = re.sub(r"[^A-Z0-9]", "", part)
+        token = re.sub(r"(CLASSIA|CLASSI|COMPLEX|KINASE)$", "", token)
+        if token:
+            aliases.add(token)
+        compact_range = re.fullmatch(r"([A-Z]+)(\d+)/(\d+)", re.sub(r"\s+", "", raw))
+        if compact_range:
+            aliases.update({compact_range.group(1) + compact_range.group(2), compact_range.group(1) + compact_range.group(3)})
+    if "PDPK1" in aliases:
+        aliases.add("PDK1")
+    if "PDK1" in aliases:
+        aliases.add("PDPK1")
+    if any(alias.startswith("MTORC") for alias in aliases):
+        aliases.add("MTOR")
+    compact = re.sub(r"\s+", "", raw)
+    numeric_range = re.fullmatch(r"([A-Z]+)(\d+)/(\d+)", compact)
+    if numeric_range:
+        aliases.update({numeric_range.group(1) + numeric_range.group(2), numeric_range.group(1) + numeric_range.group(3)})
+    letter_range = re.fullmatch(r"([A-Z0-9]*)([A-Z])/([A-Z])", compact)
+    if letter_range:
+        aliases.update({
+            letter_range.group(1) + letter_range.group(2),
+            letter_range.group(1) + letter_range.group(3),
+        })
+    synonym_groups = (
+        {"AMPK", "PRKAA1", "PRKAA2"},
+        {"ERK", "ERK1", "ERK2", "MAPK", "MAPK1", "MAPK3"},
+        {"MEK", "MEK1", "MEK2", "MAP2K1", "MAP2K2"},
+        {"RAF", "RAF1", "ARAF", "BRAF"},
+        {"RSK", "RSK1", "RSK2", "RPS6KA1", "RPS6KA2", "RPS6KA3"},
+        {"S6K", "S6K1", "RPS6KB1"},
+        {"GSK3", "GSK3A", "GSK3B"},
+        {"PI3K", "PIK3CA", "PIK3CB", "PIK3CD", "PIK3CG"},
+        {"IKK", "CHUK", "IKBKB", "IKBKE"},
+        {"PKC", "PRKCA", "PRKCB", "PRKCD", "PRKCE"},
+    )
+    for group in synonym_groups:
+        if aliases & group:
+            aliases.update(group)
+    return aliases
+
+
+def _secondary_expected_window(value: Any) -> tuple[float, float] | None:
+    raw = str(value or "").strip().lower()
+    named = {
+        "immediate": (0.0, 5.0),
+        "early": (1.0, 15.0),
+        "intermediate": (5.0, 30.0),
+        "late": (15.0, 60.0),
+        "very late": (60.0, float("inf")),
+    }
+    for label, window in named.items():
+        if label in raw:
+            return window
+    return _parse_window_minutes(raw)
+
+
+def _score_secondary_reference(
+    analysis_artifact: Mapping[str, Any],
+    truth: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Score locked kinase and temporal layers without affecting primary metrics."""
+    tmm = analysis_artifact.get("tmm_full_temporal") or {}
+    predictions = [
+        row for row in tmm.get("kinase_scores", []) or []
+        if isinstance(row, Mapping) and not _as_bool(row.get("is_sub_pattern"))
+    ]
+    prediction_aliases = [(_kinase_aliases(row.get("kinase")), row) for row in predictions]
+    kinase_rows: list[dict[str, Any]] = []
+    direction_num = direction_den = 0
+    timing_num = timing_den = 0
+    matched = data_anchored = 0
+    for reference in truth.get("kinase_reference", truth.get("kinases", [])) or []:
+        if not isinstance(reference, Mapping):
+            continue
+        aliases = _kinase_aliases(reference.get("Kinase_or_complex"))
+        candidates = [row for row_aliases, row in prediction_aliases if aliases & row_aliases]
+        prediction = candidates[0] if len(candidates) == 1 else None
+        if candidates:
+            matched += 1
+        expected_direction = _normalise_direction(reference.get("Expected_activity_direction"))
+        observed_direction = _normalise_direction((prediction or {}).get("direction"))
+        if "up" in expected_direction:
+            expected_direction = "up"
+        elif "down" in expected_direction:
+            expected_direction = "down"
+        if "up" in observed_direction:
+            observed_direction = "up"
+        elif "down" in observed_direction:
+            observed_direction = "down"
+        elif observed_direction in {"activation", "activated", "active"}:
+            observed_direction = "up"
+        elif observed_direction in {"inhibition", "inhibited", "inactivation", "inactive"}:
+            observed_direction = "down"
+        direction_evaluable = prediction is not None and expected_direction in {"up", "down"}
+        direction_match = direction_evaluable and observed_direction == expected_direction
+        if direction_evaluable:
+            direction_den += 1
+            direction_num += int(direction_match)
+        expected_window = _secondary_expected_window(reference.get("Expected_time"))
+        observed_peak = None
+        if prediction is not None:
+            observed_peak = _secondary_expected_window((prediction or {}).get("peak_condition"))
+        observed_peak_min = observed_peak[0] if observed_peak and observed_peak[0] == observed_peak[1] else None
+        timing_evaluable = prediction is not None and expected_window is not None and observed_peak_min is not None
+        timing_match = bool(
+            timing_evaluable and expected_window[0] <= observed_peak_min <= expected_window[1]
+        )
+        if timing_evaluable:
+            timing_den += 1
+            timing_num += int(timing_match)
+        confidence_tier = str(((prediction or {}).get("tmm_evidence") or {}).get("confidence_tier") or "unavailable")
+        if len(candidates) == 1 and confidence_tier == "tmm_data_anchored":
+            data_anchored += 1
+        kinase_rows.append({
+            "kinase_id": reference.get("Kinase_ID"),
+            "reference_label": reference.get("Kinase_or_complex"),
+            "matched_prediction": (prediction or {}).get("kinase"),
+            "matched": bool(candidates),
+            "matched_predictions": [row.get("kinase") for row in candidates],
+            "match_resolution": (
+                "single_prediction" if len(candidates) == 1
+                else "family_or_complex_unresolved" if candidates
+                else "unmatched"
+            ),
+            "expected_direction": reference.get("Expected_activity_direction"),
+            "observed_direction": (prediction or {}).get("direction"),
+            "direction_evaluable": direction_evaluable,
+            "direction_match": direction_match if direction_evaluable else None,
+            "expected_time": reference.get("Expected_time"),
+            "observed_peak_condition": (prediction or {}).get("peak_condition"),
+            "timing_evaluable": timing_evaluable,
+            "timing_match": timing_match if timing_evaluable else None,
+            "tmm_evidence_tier": confidence_tier,
+        })
+
+    temporal = analysis_artifact.get("temporal_wave_contract") or {}
+    observed_peaks: list[float] = []
+    for wave in temporal.get("waves", []) or []:
+        window = _secondary_expected_window(wave.get("peak_timepoint")) if isinstance(wave, Mapping) else None
+        if window and window[0] == window[1]:
+            observed_peaks.append(window[0])
+    layer_rows: list[dict[str, Any]] = []
+    for reference in truth.get("temporal_layers", []) or []:
+        if not isinstance(reference, Mapping):
+            continue
+        window = _secondary_expected_window(reference.get("Biological_window"))
+        covered = bool(window and any(window[0] <= peak <= window[1] for peak in observed_peaks))
+        layer_rows.append({
+            "window_id": reference.get("Window_ID"),
+            "temporal_layer": reference.get("Temporal_layer"),
+            "biological_window": reference.get("Biological_window"),
+            "covered_by_observed_wave_peak": covered,
+        })
+
+    kinase_den = len(kinase_rows)
+    return {
+        "schema_version": "ptm_locked_secondary_score.v1",
+        "metrics": {
+            "kinase_reference_coverage": _safe_ratio(matched, kinase_den),
+            "kinase_data_anchored_coverage": _safe_ratio(data_anchored, kinase_den),
+            "kinase_expected_direction_accuracy": _safe_ratio(direction_num, direction_den),
+            "kinase_expected_timing_accuracy": _safe_ratio(timing_num, timing_den),
+            "temporal_layer_coverage": _safe_ratio(
+                sum(bool(row["covered_by_observed_wave_peak"]) for row in layer_rows),
+                len(layer_rows),
+            ),
+        },
+        "metric_numerators": {
+            "kinase_reference_coverage": matched,
+            "kinase_data_anchored_coverage": data_anchored,
+            "kinase_expected_direction_accuracy": direction_num,
+            "kinase_expected_timing_accuracy": timing_num,
+            "temporal_layer_coverage": sum(bool(row["covered_by_observed_wave_peak"]) for row in layer_rows),
+        },
+        "metric_denominators": {
+            "kinase_reference_coverage": kinase_den,
+            "kinase_data_anchored_coverage": kinase_den,
+            "kinase_expected_direction_accuracy": direction_den,
+            "kinase_expected_timing_accuracy": timing_den,
+            "temporal_layer_coverage": len(layer_rows),
+        },
+        "kinase_results": kinase_rows,
+        "temporal_layer_results": layer_rows,
+        "selection_boundary": "Secondary metrics are runner-only post-freeze evaluation and never enter parameter selection or the primary canonical weighted score.",
+    }
 
 
 def _parse_window_minutes(value: str) -> tuple[float, float] | None:
@@ -202,6 +396,7 @@ class LockedBenchmarkScorer:
             analysis_artifact.get("branch_evidence", []), branch_detected
         )
         metrics["canonical_weighted_score"] = self._weighted_score(metrics)
+        secondary = _score_secondary_reference(analysis_artifact, self.truth)
 
         return {
             "schema_version": "ptm_locked_score_result.v1",
@@ -210,6 +405,7 @@ class LockedBenchmarkScorer:
             "metric_denominators": dict(denominators),
             "metric_numerators": dict(numerators),
             "anchor_results": anchor_rows,
+            "secondary_evaluation": secondary,
             "provenance": {
                 "manifest_path": str(self.manifest.path),
                 "locked_truth_sha256": self.manifest.raw["locked_truth_sha256"],

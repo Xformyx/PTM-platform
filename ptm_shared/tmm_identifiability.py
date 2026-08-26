@@ -616,6 +616,7 @@ class AmbiguityAwareAttribution:
     per_kinase: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     reduced_diagnosis: Optional[SiteIdentifiability] = None
     empty_profile_members: Tuple[str, ...] = ()
+    uncertainty: Dict[str, Any] = field(default_factory=dict)
 
     @property
     def resolved_ratios(self) -> Dict[str, float]:
@@ -634,6 +635,7 @@ class AmbiguityAwareAttribution:
                 "groups": [group.to_dict() for group in self.groups],
                 "per_kinase": self.per_kinase,
                 "empty_profile_members": list(self.empty_profile_members),
+                "uncertainty": self.uncertainty,
                 "reduced_diagnosis": (
                     self.reduced_diagnosis.to_dict() if self.reduced_diagnosis else None
                 ),

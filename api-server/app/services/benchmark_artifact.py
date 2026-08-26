@@ -46,12 +46,19 @@ def build_temporal_request(
         "threshold_source",
         "benchmark_tmm_full_temporal.v1",
     )
+    replicate_time_series, replicate_wave_provenance = _load_replicate_wave_series(
+        output_dir,
+        ptm_type,
+        grouped,
+    )
     wave_contract = analyze_temporal_waves(
         site_time_series,
         timepoints,
         metadata=metadata,
         config=effective_wave_config,
+        replicate_time_series=replicate_time_series,
     )
+    wave_contract["replicate_input_provenance"] = replicate_wave_provenance
     cowave_modules = [
         {
             "id": wave["wave_id"],
@@ -67,6 +74,7 @@ def build_temporal_request(
         "site_rows": grouped,
         "timepoints": timepoints,
         "site_aggregation": site_aggregation,
+        "replicate_wave_provenance": replicate_wave_provenance,
     }
 
 
@@ -145,6 +153,101 @@ def _read_vector_rows(output_dir: Path, ptm_type: str) -> list[dict[str, str]]:
         raise ValueError("normalized PTM vector output is not available")
     with vector_path.open("r", encoding="utf-8", newline="") as handle:
         return list(csv.DictReader(handle, delimiter="\t"))
+
+
+def _load_replicate_wave_series(
+    output_dir: Path,
+    ptm_type: str,
+    grouped_sites: Mapping[str, Mapping[str, Any]],
+) -> tuple[dict[str, dict[str, list[float]]], dict[str, Any]]:
+    """Build paired control-normalized replicate log2FC for consensus Wave.
+
+    Duplicate precursor rows for the same site/sample are median aggregated.
+    Replicates are paired by deterministic within-condition sample order, which
+    matches the grouped-replicate optimization contract.
+    """
+
+    suffix = "_phospho" if ptm_type == "phosphorylation" else "_ubi"
+    path = output_dir / f"site_level_relative_quantification_normalized{suffix}.tsv"
+    if not path.is_file():
+        return {}, {
+            "contract": "temporal_wave_replicate_input.v1",
+            "status": "unavailable",
+            "reason": "site_level_relative_quantification_not_found",
+        }
+    protein_to_gene = {
+        str(site.get("protein_group") or "").strip(): str(site.get("gene") or "").strip().upper()
+        for site in grouped_sites.values()
+        if site.get("protein_group") and site.get("gene")
+    }
+    raw: dict[tuple[str, str, str], list[float]] = defaultdict(list)
+    samples_by_condition: dict[str, set[str]] = defaultdict(set)
+    with path.open("r", encoding="utf-8", newline="") as handle:
+        for row in csv.DictReader(handle, delimiter="\t"):
+            protein = str(row.get("Protein.Group") or "").strip()
+            gene = protein_to_gene.get(protein, "")
+            site = str(row.get("PTM_Position") or "").strip().upper()
+            condition = str(row.get("Condition") or "").strip()
+            sample = str(row.get("Sample") or "").strip()
+            abundance = _optional_float(row.get("PTM_Relative_Abundance"))
+            if not gene or not site or not condition or not sample or abundance is None or abundance <= 0:
+                continue
+            key = f"{gene}_{site}"
+            if key not in grouped_sites:
+                continue
+            raw[(key, condition, sample)].append(abundance)
+            samples_by_condition[condition].add(sample)
+    aggregated = {
+        key: statistics.median(values)
+        for key, values in raw.items()
+        if values
+    }
+    control_label = next(
+        (condition for condition in samples_by_condition if condition.strip().lower() == "control"),
+        None,
+    )
+    if not control_label:
+        return {}, {
+            "contract": "temporal_wave_replicate_input.v1",
+            "status": "unavailable",
+            "reason": "control_condition_not_found",
+        }
+    control_samples = sorted(samples_by_condition[control_label])
+    replicate_series: dict[str, dict[str, list[float]]] = defaultdict(dict)
+    for site_key in grouped_sites:
+        controls = [
+            aggregated.get((site_key, control_label, sample))
+            for sample in control_samples
+        ]
+        for condition, condition_samples_set in samples_by_condition.items():
+            if condition == control_label:
+                continue
+            condition_samples = sorted(condition_samples_set)
+            values = []
+            for index, sample in enumerate(condition_samples):
+                if index >= len(controls):
+                    break
+                control = controls[index]
+                observed = aggregated.get((site_key, condition, sample))
+                if control and observed and control > 0 and observed > 0:
+                    values.append(math.log2(observed / control))
+            if values:
+                replicate_series[site_key][condition] = values
+    replicate_counts = [
+        len(values)
+        for by_condition in replicate_series.values()
+        for values in by_condition.values()
+    ]
+    return dict(replicate_series), {
+        "contract": "temporal_wave_replicate_input.v1",
+        "status": "available" if replicate_series else "unavailable",
+        "source": path.name,
+        "normalization": "paired_condition_to_control_log2_ratio",
+        "duplicate_aggregation": "median_within_site_condition_sample",
+        "site_count": len(replicate_series),
+        "minimum_replicates": min(replicate_counts) if replicate_counts else 0,
+        "maximum_replicates": max(replicate_counts) if replicate_counts else 0,
+    }
 
 
 def _group_rows(

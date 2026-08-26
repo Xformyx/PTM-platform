@@ -38,6 +38,9 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "maximum_waves": 8,
     "missing_value": 0.0,
     "compute_directionality": True,
+    "bootstrap_repeats": 0,
+    "bootstrap_seed": 1729,
+    "soft_membership_threshold": 0.70,
 }
 
 
@@ -88,6 +91,12 @@ def _config_with_provenance(config: Optional[Mapping[str, Any]]) -> Tuple[Dict[s
     merged["minimum_amplitude"] = max(0.0, _as_float(merged["minimum_amplitude"], 0.80))
     merged["missing_value"] = _as_float(merged["missing_value"], 0.0)
     merged["compute_directionality"] = bool(merged["compute_directionality"])
+    merged["bootstrap_repeats"] = max(0, int(merged["bootstrap_repeats"]))
+    merged["bootstrap_seed"] = int(merged["bootstrap_seed"])
+    merged["soft_membership_threshold"] = min(
+        1.0,
+        max(0.5, _as_float(merged["soft_membership_threshold"], 0.70)),
+    )
 
     serialized = json.dumps(merged, sort_keys=True, separators=(",", ":"))
     provenance = {
@@ -104,6 +113,9 @@ def _config_with_provenance(config: Optional[Mapping[str, Any]]) -> Tuple[Dict[s
         "linkage": "average",
         "missing_value_policy": "explicit_fill",
         "compute_directionality": merged["compute_directionality"],
+        "bootstrap_repeats": merged["bootstrap_repeats"],
+        "bootstrap_seed": merged["bootstrap_seed"],
+        "soft_membership_threshold": merged["soft_membership_threshold"],
         "config_sha256": hashlib.sha256(serialized.encode("utf-8")).hexdigest(),
     }
     return merged, provenance
@@ -251,12 +263,150 @@ def _build_wave(
     }
 
 
+def _replicate_bootstrap_consensus(
+    waves: List[Dict[str, Any]],
+    site_keys: Sequence[str],
+    matrix: np.ndarray,
+    timepoints: Sequence[str],
+    replicate_time_series: Mapping[str, Mapping[str, Sequence[Any]]],
+    *,
+    repeats: int,
+    seed: int,
+    correlation_threshold: float,
+    soft_membership_threshold: float,
+) -> Dict[str, Any]:
+    """Estimate assignment stability against fixed deterministic Wave centroids.
+
+    Hard membership is never replaced.  Replicate bootstrap means are assigned
+    to the deterministic centroids, which yields stable-core and boundary
+    probabilities without relabelling clusters across bootstrap runs.
+    """
+
+    if repeats <= 0 or not waves:
+        return {"contract": "temporal_wave_consensus.v1", "status": "disabled"}
+    centroids = []
+    wave_ids = []
+    for wave in waves:
+        vector = np.asarray([wave["mean_profile"].get(tp, 0.0) for tp in timepoints], dtype=float)
+        vector = vector - vector.mean()
+        scale = float(vector.std())
+        centroids.append(vector / scale if scale > 0 else vector)
+        wave_ids.append(wave["wave_id"])
+    centroid_matrix = np.stack(centroids, axis=0)
+    rng = np.random.default_rng(seed)
+    assignment_counts: Dict[str, np.ndarray] = {
+        key: np.zeros(len(waves), dtype=int) for key in site_keys
+    }
+    usable_site_count = 0
+    for site_key in site_keys:
+        per_timepoint = replicate_time_series.get(site_key) or {}
+        if any(len(list(per_timepoint.get(tp) or [])) >= 2 for tp in timepoints):
+            usable_site_count += 1
+    for _ in range(repeats):
+        for site_index, site_key in enumerate(site_keys):
+            per_timepoint = replicate_time_series.get(site_key) or {}
+            values = []
+            used_replicate = False
+            for time_index, timepoint in enumerate(timepoints):
+                observed = [
+                    _as_float(value)
+                    for value in list(per_timepoint.get(timepoint) or [])
+                    if value is not None
+                ]
+                if observed:
+                    sampled = rng.choice(observed, size=len(observed), replace=True)
+                    values.append(float(np.mean(sampled)))
+                    used_replicate = used_replicate or len(observed) >= 2
+                else:
+                    values.append(float(matrix[site_index, time_index]))
+            if not used_replicate:
+                continue
+            vector = np.asarray(values, dtype=float)
+            vector = vector - vector.mean()
+            scale = float(vector.std())
+            if scale <= 0:
+                continue
+            vector = vector / scale
+            correlations = np.clip((centroid_matrix @ vector) / len(timepoints), -1.0, 1.0)
+            best_index = int(np.argmax(correlations))
+            if float(correlations[best_index]) >= correlation_threshold:
+                assignment_counts[site_key][best_index] += 1
+
+    hard_assignment = {
+        member: wave["wave_id"]
+        for wave in waves
+        for member in wave.get("members", [])
+    }
+    site_probabilities: Dict[str, Dict[str, float]] = {}
+    for site_key, counts in assignment_counts.items():
+        probabilities = counts.astype(float) / max(repeats, 1)
+        site_probabilities[site_key] = {
+            wave_ids[index]: round(float(probability), 6)
+            for index, probability in enumerate(probabilities)
+            if probability >= 0.01
+        }
+    stable_core_count = 0
+    boundary_count = 0
+    soft_overlap_count = 0
+    for wave in waves:
+        wave_id = wave["wave_id"]
+        hard_members = set(wave.get("members", []))
+        hard_probabilities = []
+        for detail in wave.get("member_details", []):
+            probability = float(site_probabilities.get(detail["key"], {}).get(wave_id, 0.0))
+            detail["wave_membership_probability"] = round(probability, 6)
+            if probability >= soft_membership_threshold:
+                detail["wave_membership_class"] = "stable_core"
+                stable_core_count += 1
+            else:
+                detail["wave_membership_class"] = "boundary"
+                boundary_count += 1
+            hard_probabilities.append(probability)
+        soft_members = sorted(
+            {
+                site_key for site_key, probabilities in site_probabilities.items()
+                if float(probabilities.get(wave_id, 0.0)) >= soft_membership_threshold
+            }
+        )
+        boundary_members = [site_key for site_key in soft_members if site_key not in hard_members]
+        soft_overlap_count += len(boundary_members)
+        wave["consensus_members"] = soft_members
+        wave["consensus_member_count"] = len(soft_members)
+        wave["soft_boundary_members"] = [
+            {
+                "key": site_key,
+                "membership_probability": site_probabilities[site_key][wave_id],
+                "hard_wave_id": hard_assignment.get(site_key),
+            }
+            for site_key in boundary_members
+        ]
+        stability = float(np.median(hard_probabilities)) if hard_probabilities else 0.0
+        wave["evidence_profile"]["replicate_stability"] = round(stability, 6)
+        wave["evidence_profile"]["consensus_contract"] = "temporal_wave_consensus.v1"
+    return {
+        "contract": "temporal_wave_consensus.v1",
+        "status": "computed",
+        "method": "replicate_bootstrap_mean_to_fixed_deterministic_centroids",
+        "bootstrap_repeats": repeats,
+        "bootstrap_seed": seed,
+        "soft_membership_threshold": soft_membership_threshold,
+        "correlation_threshold": correlation_threshold,
+        "usable_replicate_site_count": usable_site_count,
+        "stable_core_member_count": stable_core_count,
+        "boundary_hard_member_count": boundary_count,
+        "soft_cross_wave_member_count": soft_overlap_count,
+        "site_membership_probabilities": site_probabilities,
+        "interpretation_boundary": "Replicate stability of structural co-movement only; not kinase or causal evidence.",
+    }
+
+
 def analyze_temporal_waves(
     site_time_series: Mapping[str, Mapping[str, Any]],
     timepoints: Sequence[str],
     *,
     metadata: Optional[Mapping[str, Mapping[str, Any]]] = None,
     config: Optional[Mapping[str, Any]] = None,
+    replicate_time_series: Optional[Mapping[str, Mapping[str, Sequence[Any]]]] = None,
 ) -> Dict[str, Any]:
     """Return a reproducible canonical Temporal Wave Contract.
 
@@ -344,6 +494,27 @@ def analyze_temporal_waves(
     for indices, _ in wave_rows[effective_config["maximum_waves"] :]:
         unassigned.extend(_member_detail(site_keys[index], matrix[index], ordered_timepoints, metadata) for index in indices)
     waves = [_build_wave(index + 1, indices, matrix, site_keys, ordered_timepoints, correlation, metadata) for index, (indices, _) in enumerate(retained)]
+    replicate_time_series = replicate_time_series or {}
+    if effective_config["bootstrap_repeats"] > 0:
+        consensus = _replicate_bootstrap_consensus(
+            waves,
+            site_keys,
+            matrix,
+            ordered_timepoints,
+            replicate_time_series,
+            repeats=effective_config["bootstrap_repeats"],
+            seed=effective_config["bootstrap_seed"],
+            correlation_threshold=effective_config["correlation_threshold"],
+            soft_membership_threshold=effective_config["soft_membership_threshold"],
+        )
+        result["consensus_membership"] = consensus
+        if consensus.get("usable_replicate_site_count", 0) == 0:
+            result["quality_warnings"].append("consensus_requested_without_replicate_series")
+    else:
+        result["consensus_membership"] = {
+            "contract": "temporal_wave_consensus.v1",
+            "status": "disabled",
+        }
     # P1: Wave membership remains structural, while between-wave temporal order
     # is represented as a separate, explicitly non-causal evidence contract.
     if effective_config["compute_directionality"]:
@@ -396,6 +567,7 @@ def analyze_temporal_waves(
         "wave_sizes": [wave["member_count"] for wave in waves],
         "missing_values_filled": sum(missing_counts.values()),
         "analysis_scope": "condition_level_protein_normalized_ptm_log2fc",
+        "consensus_status": result["consensus_membership"].get("status"),
     }
     if result["summary"]["missing_values_filled"]:
         result["quality_warnings"].append("missing_values_filled_by_contract_policy")

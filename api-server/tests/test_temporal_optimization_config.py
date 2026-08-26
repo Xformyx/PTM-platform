@@ -16,17 +16,34 @@ from ptm_shared.temporal_optimization_config import (
 
 
 def test_frozen_truth_free_temporal_config_has_expected_boundary() -> None:
-    assert CONFIG_SHA256 == "7b9674a29bde3f094f40e0bb6323f1c3d1ba99b075a801f00e26de9d6825a28c"
-    assert SELECTION_RECORD_SHA256 == "2c625933b8fdab6fe59f7bc48eee00ee1698b1f4f253df86e1099fb79f618c62"
+    assert CONFIG_SHA256 == "ee1671c91e1b8913b35e7eb95c1d9ea3ed916b1f220c69d31a1bbeb96dfa9455"
+    assert SELECTION_RECORD_SHA256 == "2a6c7c728b2b931cb00f275e39be721a4ed904f95c566077219c3f5c254201e1"
     assert SITE_AGGREGATION == "median"
     assert WAVE_CONFIG["minimum_amplitude"] == 0.40
     assert WAVE_CONFIG["compute_directionality"] is True
+    assert WAVE_CONFIG["bootstrap_repeats"] == 25
+    assert WAVE_CONFIG["soft_membership_threshold"] == 0.60
     assert TMM_CONFIG == {
         "profile_min_exclusive": 5,
         "gaussian_sigma_log": 0.80,
         "target_transform": "magnitude",
+        "activity_metric": "shrunken_mean",
+        "shrinkage_prior_support": 10.0,
+        "candidate_prior_strength": 5.0,
+        "candidate_hierarchy_mode": "family_guard",
+        "iterative_profile_rounds": 0,
+        "iterative_min_top1_probability": 0.80,
+        "iterative_min_shared_support": 3,
+        "iterative_profile_blend": 0.50,
+        "dual_track_correlation_threshold": 0.50,
+        "dual_track_peak_index_tolerance": 2,
+        "dual_track_magnitude_log2_ratio_threshold": 1.0,
+        "uncertainty_bootstrap_repeats": 50,
+        "uncertainty_loto_enabled": True,
+        "uncertainty_seed": 20260826,
     }
     assert provenance()["truth_used_for_selection"] is False
+    assert provenance()["iterative_profile_decision"] == "rejected_rounds_zero_retained"
 
 
 def test_magnitude_target_transform_preserves_shape_not_sign() -> None:

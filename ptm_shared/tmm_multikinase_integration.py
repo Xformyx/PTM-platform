@@ -8,6 +8,7 @@ TMM-weighted, condition-specific kinase attribution.
 from __future__ import annotations
 
 from collections import defaultdict
+import re
 from typing import Any, Mapping, Sequence
 
 import numpy as np
@@ -19,6 +20,15 @@ from ptm_shared.directed_temporal_relationship import (
 
 CONTRACT_VERSION = "tmm_multikinase_interpretation.v1"
 DEFAULT_ACTIVE_SCORE_THRESHOLD = 0.30
+ACTIVITY_WEIGHTED_SUM = "weighted_sum"
+ACTIVITY_WEIGHTED_MEAN = "weighted_mean"
+ACTIVITY_SHRUNKEN_MEAN = "shrunken_mean"
+ACTIVITY_METRICS = {
+    ACTIVITY_WEIGHTED_SUM,
+    ACTIVITY_WEIGHTED_MEAN,
+    ACTIVITY_SHRUNKEN_MEAN,
+}
+_PTM_KEY_PATTERN = re.compile(r"^(?P<gene>.+?)[ _](?P<site>[STY]\d+(?:[/;][STY]\d+)*)$", re.I)
 
 
 def _number(value: Any, default: float = 0.0) -> float:
@@ -27,6 +37,24 @@ def _number(value: Any, default: float = 0.0) -> float:
         return parsed if np.isfinite(parsed) else default
     except (TypeError, ValueError):
         return default
+
+
+def canonical_ptm_key(value: Any) -> str:
+    """Return the one calculation key used by Wave, TMM, and source data.
+
+    Legacy payloads sometimes used ``GENE S123`` as a display alias for
+    ``GENE_S123``.  Display labels must never become additional biological
+    records, so both forms resolve to one uppercase canonical key.
+    """
+    raw = str(value or "").strip().upper()
+    if not raw:
+        return ""
+    match = _PTM_KEY_PATTERN.fullmatch(raw)
+    if match:
+        gene = match.group("gene").strip().replace(" ", "_")
+        site = match.group("site").replace(";", "/")
+        return f"{gene}_{site}"
+    return raw.replace(" ", "_", 1)
 
 
 def _profile_for_kinase(entry: Mapping[str, Any], conditions: Sequence[str]) -> dict[str, float]:
@@ -53,6 +81,10 @@ def build_tmm_evidence_profile(tmm: Mapping[str, Any]) -> dict[str, Any]:
         tier = "tmm_sparse_data_anchored"
         flags.append("exclusive_anchor_count_below_recommended_minimum")
         interpretation = "Data-derived profile is available but has sparse exclusive-substrate support."
+    elif profile_type == "iterative_data_assisted":
+        tier = "tmm_iterative_data_assisted"
+        flags.append("shared_site_iterative_profile_not_direct_anchor")
+        interpretation = "Profile was refined from identifiable high-share shared sites and remains data-assisted, not direct substrate evidence."
     elif "fallback" in profile_type or "gaussian" in profile_type:
         tier = "tmm_prior_assisted"
         flags.append("expected_peak_gaussian_fallback")
@@ -90,7 +122,7 @@ def build_tmm_site_contribution_matrix(
         for detail in score.get("contribution_details", []) or []:
             if not isinstance(detail, Mapping):
                 continue
-            site = str(detail.get("ptm_key") or "").strip()
+            site = canonical_ptm_key(detail.get("ptm_key"))
             if site:
                 by_site[site][canonical] = max(0.0, _number(detail.get("contribution_ratio")))
 
@@ -101,9 +133,61 @@ def build_tmm_site_contribution_matrix(
             continue
         row = {kinase: round(value / total, 6) for kinase, value in sorted(contributions.items())}
         normalised[site] = row
-        if "_" in site:
-            normalised.setdefault(site.replace("_", " ", 1), row)
     return normalised
+
+
+def summarize_tmm_uncertainty(
+    tmm_scores: Mapping[str, Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Summarize unique-site adaptive uncertainty without republishing withheld ratios."""
+    by_site: dict[str, Mapping[str, Any]] = {}
+    resolutions: dict[str, str] = {}
+    for score in (tmm_scores or {}).values():
+        for detail in score.get("contribution_details", []) or []:
+            if not isinstance(detail, Mapping):
+                continue
+            site = canonical_ptm_key(detail.get("ptm_key"))
+            if not site:
+                continue
+            resolutions.setdefault(site, str(detail.get("resolution") or "unannotated"))
+            uncertainty = detail.get("uncertainty")
+            if isinstance(uncertainty, Mapping) and uncertainty.get("evaluated"):
+                by_site.setdefault(site, uncertainty)
+
+    bootstrap = [
+        float(item["bootstrap_top1_stability"])
+        for item in by_site.values()
+        if item.get("bootstrap_top1_stability") is not None
+        and np.isfinite(float(item["bootstrap_top1_stability"]))
+    ]
+    loto = [
+        float(item["loto_top_group_stability"])
+        for item in by_site.values()
+        if item.get("loto_top_group_stability") is not None
+        and np.isfinite(float(item["loto_top_group_stability"]))
+    ]
+
+    def _summary(values: Sequence[float]) -> dict[str, Any]:
+        array = np.asarray(values, dtype=float)
+        if array.size == 0:
+            return {"count": 0, "median": None, "q25": None, "q75": None, "fraction_ge_0_8": None}
+        return {
+            "count": int(array.size),
+            "median": round(float(np.median(array)), 6),
+            "q25": round(float(np.quantile(array, 0.25)), 6),
+            "q75": round(float(np.quantile(array, 0.75)), 6),
+            "fraction_ge_0_8": round(float(np.mean(array >= 0.8)), 6),
+        }
+
+    return {
+        "contract_version": "adaptive_tmm_uncertainty.v1",
+        "unique_contribution_sites": len(resolutions),
+        "evaluated_unique_sites": len(by_site),
+        "resolved_unique_sites": sum(1 for value in resolutions.values() if value == "resolved"),
+        "bootstrap_top1_stability": _summary(bootstrap),
+        "loto_top_group_stability": _summary(loto),
+        "interpretation_boundary": "Uncertainty is computed only for supported required singleton groups; ambiguity-group and guard-withheld per-kinase ratios remain withheld.",
+    }
 
 
 def build_kinase_cowave_groups(
@@ -171,14 +255,22 @@ def build_tmm_weighted_temporal_cascade(
     conditions: Sequence[str],
     *,
     activity_threshold: float = DEFAULT_ACTIVE_SCORE_THRESHOLD,
+    activity_metric: str = ACTIVITY_WEIGHTED_SUM,
+    shrinkage_prior_support: float = 5.0,
 ) -> dict[str, Any]:
     """Build a contribution-weighted cascade in parallel with raw overlap cascade.
 
     The activity threshold intentionally matches the existing heatmap directional
     threshold. The output is supplementary and never overwrites raw membership.
     """
+    if activity_metric not in ACTIVITY_METRICS:
+        raise ValueError(f"unsupported activity_metric: {activity_metric}")
+    shrinkage_prior_support = max(0.0, float(shrinkage_prior_support))
     by_timepoint: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    profiles: dict[str, dict[str, float]] = {}
+    selected_profiles: dict[str, dict[str, float]] = {}
+    raw_sum_profiles: dict[str, dict[str, float]] = {}
+    effect_size_profiles: dict[str, dict[str, float]] = {}
+    shrunken_profiles: dict[str, dict[str, float]] = {}
     evidence_by_kinase: dict[str, dict[str, Any]] = {}
     for entry in kinase_scores:
         if entry.get("is_sub_pattern"):
@@ -187,22 +279,49 @@ def build_tmm_weighted_temporal_cascade(
         if not kinase:
             continue
         profile = _profile_for_kinase(entry, conditions)
-        profiles[kinase] = profile
+        raw_sum_profiles[kinase] = {}
+        effect_size_profiles[kinase] = {}
+        shrunken_profiles[kinase] = {}
+        selected_profiles[kinase] = {}
         evidence = dict(entry.get("tmm_evidence") or build_tmm_evidence_profile(entry))
         evidence_by_kinase[kinase] = evidence
         weighted_up_counts = entry.get("tmm_weighted_up_counts") or entry.get("up_counts") or {}
         weighted_down_counts = entry.get("tmm_weighted_down_counts") or entry.get("down_counts") or {}
         for condition in conditions:
-            activity = profile[condition]
-            if abs(activity) < activity_threshold:
+            raw_weighted_sum = profile[condition]
+            evidence_mass = _number(weighted_up_counts.get(condition)) + _number(weighted_down_counts.get(condition))
+            activity_effect_size = raw_weighted_sum / evidence_mass if evidence_mass > 0 else 0.0
+            shrinkage_factor = (
+                evidence_mass / (evidence_mass + shrinkage_prior_support)
+                if evidence_mass > 0 and shrinkage_prior_support > 0
+                else (1.0 if evidence_mass > 0 else 0.0)
+            )
+            shrunken_activity = activity_effect_size * shrinkage_factor
+            activity_by_metric = {
+                ACTIVITY_WEIGHTED_SUM: raw_weighted_sum,
+                ACTIVITY_WEIGHTED_MEAN: activity_effect_size,
+                ACTIVITY_SHRUNKEN_MEAN: shrunken_activity,
+            }
+            selected_activity = activity_by_metric[activity_metric]
+            raw_sum_profiles[kinase][condition] = round(raw_weighted_sum, 6)
+            effect_size_profiles[kinase][condition] = round(activity_effect_size, 6)
+            shrunken_profiles[kinase][condition] = round(shrunken_activity, 6)
+            selected_profiles[kinase][condition] = round(selected_activity, 6)
+            if abs(selected_activity) < activity_threshold:
                 continue
-            support = _number(weighted_up_counts.get(condition)) + _number(weighted_down_counts.get(condition))
             by_timepoint[condition].append({
                 "kinase": kinase,
                 "canonical": str(entry.get("canonical") or kinase).upper(),
-                "tmm_weighted_activity": round(activity, 6),
-                "tmm_weighted_substrate_support": round(support, 6),
-                "direction": "activation" if activity > 0 else "inactivation",
+                "tmm_weighted_activity": round(raw_weighted_sum, 6),
+                "raw_weighted_sum": round(raw_weighted_sum, 6),
+                "activity_effect_size": round(activity_effect_size, 6),
+                "evidence_mass": round(evidence_mass, 6),
+                "tmm_weighted_substrate_support": round(evidence_mass, 6),
+                "shrinkage_factor": round(shrinkage_factor, 6),
+                "shrunken_activity": round(shrunken_activity, 6),
+                "selected_activity": round(selected_activity, 6),
+                "selected_activity_metric": activity_metric,
+                "direction": "activation" if selected_activity > 0 else "inactivation",
                 "tmm_evidence": evidence,
             })
 
@@ -210,16 +329,18 @@ def build_tmm_weighted_temporal_cascade(
     for condition in conditions:
         active = sorted(
             by_timepoint.get(condition, []),
-            key=lambda item: (abs(item["tmm_weighted_activity"]), item["tmm_weighted_substrate_support"]),
+            key=lambda item: (abs(item["selected_activity"]), item["evidence_mass"]),
             reverse=True,
         )
         timepoints.append({
             "timepoint": condition,
             "active_kinases": active,
             "weighted_activity_sum": round(sum(abs(item["tmm_weighted_activity"]) for item in active), 6),
-            "weighted_substrate_support": round(sum(item["tmm_weighted_substrate_support"] for item in active), 6),
+            "selected_activity_abs_sum": round(sum(abs(item["selected_activity"]) for item in active), 6),
+            "weighted_substrate_support": round(sum(item["evidence_mass"] for item in active), 6),
             "activity_threshold": activity_threshold,
-            "score_provenance": "tmm_weighted",
+            "activity_metric": activity_metric,
+            "score_provenance": f"tmm_{activity_metric}",
         })
 
     transitions = []
@@ -237,13 +358,21 @@ def build_tmm_weighted_temporal_cascade(
 
     return {
         "contract_version": CONTRACT_VERSION,
-        "score_provenance": "tmm_weighted",
+        "score_provenance": f"tmm_{activity_metric}",
         "activity_threshold": activity_threshold,
+        "activity_metric": activity_metric,
+        "shrinkage_prior_support": shrinkage_prior_support,
         "timepoints": timepoints,
         "cascade_flow": transitions,
-        "kinase_profiles": profiles,
+        "kinase_profiles": selected_profiles,
+        "kinase_profiles_raw_sum": raw_sum_profiles,
+        "kinase_profiles_effect_size": effect_size_profiles,
+        "kinase_profiles_shrunken": shrunken_profiles,
         "tmm_evidence_by_kinase": evidence_by_kinase,
-        "interpretation_boundary": "Contribution-weighted temporal activity; not a causal cascade.",
+        "interpretation_boundary": (
+            "Contribution-weighted temporal activity with effect size separated from evidence mass; "
+            "not a causal cascade."
+        ),
     }
 
 
@@ -282,3 +411,72 @@ def build_tmm_kinase_pair_directionality(
                     **relation,
                 })
     return records
+
+
+def build_evidence_gated_tmm_directionality(
+    weighted_cascade: Mapping[str, Any],
+    conditions: Sequence[str],
+    *,
+    max_kinases: int = 20,
+) -> dict[str, Any]:
+    """Separate evidence-eligible edges from observational prior-limited candidates.
+
+    The underlying temporal relationship is unchanged.  This gate only controls
+    publication scope: both endpoints must be data-anchored and the relationship
+    must reach D2 or D3 before it enters the main edge list.
+    """
+    candidates = build_tmm_kinase_pair_directionality(
+        weighted_cascade,
+        conditions,
+        max_kinases=max_kinases,
+    )
+    evidence = weighted_cascade.get("tmm_evidence_by_kinase") or {}
+    main_edges: list[dict[str, Any]] = []
+    annotated_candidates: list[dict[str, Any]] = []
+    for record in candidates:
+        source = str(record.get("source") or "")
+        target = str(record.get("target") or "")
+        source_tier = str((evidence.get(source) or {}).get("confidence_tier") or "unclassified")
+        target_tier = str((evidence.get(target) or {}).get("confidence_tier") or "unclassified")
+        directionality_tier = str(record.get("directionality_tier") or "D0_unresolved")
+        reasons: list[str] = []
+        if source_tier != "tmm_data_anchored":
+            reasons.append("source_profile_not_data_anchored")
+        if target_tier != "tmm_data_anchored":
+            reasons.append("target_profile_not_data_anchored")
+        if directionality_tier not in {
+            "D2_reproducible_directionality",
+            "D3_mechanistically_supported_directionality",
+        }:
+            reasons.append("directionality_below_D2")
+        annotated = {
+            **record,
+            "source_tmm_evidence_tier": source_tier,
+            "target_tmm_evidence_tier": target_tier,
+            "evidence_eligible_for_main_edge": not reasons,
+            "evidence_gate_reasons": reasons,
+            "publication_scope": "main_edge" if not reasons else "exploratory_candidate",
+            "interpretation_boundary": "Temporal precedence is observational; no causal intervention was evaluated.",
+        }
+        annotated_candidates.append(annotated)
+        if not reasons:
+            main_edges.append(annotated)
+    return {
+        "contract_version": "evidence_gated_tmm_directionality.v1",
+        "main_edges": main_edges,
+        "candidate_edges": annotated_candidates,
+        "summary": {
+            "main_edge_count": len(main_edges),
+            "candidate_edge_count": len(annotated_candidates),
+            "prior_limited_candidate_count": sum(
+                1 for row in annotated_candidates
+                if "source_profile_not_data_anchored" in row["evidence_gate_reasons"]
+                or "target_profile_not_data_anchored" in row["evidence_gate_reasons"]
+            ),
+            "below_D2_candidate_count": sum(
+                1 for row in annotated_candidates
+                if "directionality_below_D2" in row["evidence_gate_reasons"]
+            ),
+        },
+        "selection_boundary": "Evidence gating is not a tuning objective and never promotes D1 or prior-assisted profiles to main edges.",
+    }

@@ -11,6 +11,7 @@ import argparse
 import json
 import math
 from pathlib import Path
+import re
 
 from ptm_shared.temporal_optimization_config import (
     CONFIG_SHA256,
@@ -37,10 +38,12 @@ def main() -> int:
     parser.add_argument("--artifact", required=True)
     parser.add_argument("--locked-score")
     parser.add_argument("--output")
+    parser.add_argument("--figures-dir")
     parser.add_argument("--expect-sites", type=int, default=2447)
     parser.add_argument("--expect-waves", type=int, default=8)
     parser.add_argument("--expect-tmm-profiles", type=int, default=55)
-    parser.add_argument("--expect-contribution-sites", type=int, default=4486)
+    parser.add_argument("--expect-contribution-sites", type=int, default=2243)
+    parser.add_argument("--expect-occupancy-contribution-sites", type=int, default=768)
     parser.add_argument("--expect-cascade-timepoints", type=int, default=6)
     args = parser.parse_args()
 
@@ -50,6 +53,11 @@ def main() -> int:
     tmm = artifact.get("tmm_full_temporal") or {}
     tmm_config = tmm.get("tmm_config") or {}
     cascade = tmm.get("tmm_weighted_temporal_cascade") or {}
+    consensus = temporal.get("consensus_membership") or {}
+    relative_matrix = tmm.get("relative_site_contribution_matrix") or {}
+    occupancy_matrix = tmm.get("occupancy_site_contribution_matrix") or {}
+    uncertainty = tmm.get("relative_tmm_uncertainty_summary") or {}
+    directionality_gate = tmm.get("tmm_directionality_evidence_gate") or {}
     profile_count = sum(
         1 for row in tmm.get("kinase_scores") or []
         if row.get("tmm_profile_type")
@@ -65,12 +73,32 @@ def main() -> int:
         ),
         "site_count": len(artifact.get("site_availability") or []) == args.expect_sites,
         "wave_count": len(temporal.get("waves") or []) == args.expect_waves,
+        "consensus_wave_computed": consensus.get("status") == "computed",
+        "consensus_wave_repeats": consensus.get("bootstrap_repeats") == WAVE_CONFIG["bootstrap_repeats"],
+        "consensus_wave_probabilities_present": bool(consensus.get("site_membership_probabilities")),
+        "wave_replicate_stability_present": all(
+            ((row.get("evidence_profile") or {}).get("replicate_stability") is not None)
+            for row in temporal.get("waves") or []
+        ),
         "all_sites_sequence_isoform_species_mapped": all(
             (row.get("mapping_evidence") or {}).get("method") == "sequence_isoform_species"
             for row in artifact.get("site_availability") or []
         ),
         "tmm_profiles": profile_count == args.expect_tmm_profiles,
-        "contribution_sites": len(tmm.get("tmm_site_contribution_matrix") or {}) == args.expect_contribution_sites,
+        "contribution_sites": len(relative_matrix) == args.expect_contribution_sites,
+        "occupancy_contribution_sites": len(occupancy_matrix) == args.expect_occupancy_contribution_sites,
+        "canonical_contribution_keys": all(
+            " " not in str(key) and re.search(r"_[STY]\d+$", str(key))
+            for key in relative_matrix
+        ),
+        "adaptive_uncertainty_present": (
+            uncertainty.get("contract_version") == "adaptive_tmm_uncertainty.v1"
+            and int(uncertainty.get("evaluated_unique_sites") or 0) > 0
+            and int(uncertainty.get("resolved_unique_sites") or 0) > 0
+        ),
+        "directionality_evidence_gate_present": (
+            directionality_gate.get("contract_version") == "evidence_gated_tmm_directionality.v1"
+        ),
         "cascade_timepoints": len(cascade.get("timepoints") or []) == args.expect_cascade_timepoints,
     }
 
@@ -84,10 +112,18 @@ def main() -> int:
             "locked_canonical_weighted_score": _close(metrics.get("canonical_weighted_score"), 0.7333333333333334),
             "locked_detectable_denominator": _close(denominators.get("detectable_anchor_recall"), 3.0),
             "locked_regulated_denominator": _close(denominators.get("regulated_anchor_recall"), 3.0),
+            "secondary_evaluation_separate": bool(locked.get("secondary_evaluation")),
         })
 
+    if args.figures_dir:
+        figures_dir = Path(args.figures_dir)
+        for number in (1, 2, 3, 4):
+            figure_path = figures_dir / f"Fig{number}.svg"
+            payload = figure_path.read_text(encoding="utf-8") if figure_path.is_file() else ""
+            checks[f"fig{number}_path_outlined"] = bool(payload) and "<text" not in payload and "<path" in payload
+
     report = {
-        "schema_version": "temporal_benchmark_handoff_verification.v1",
+        "schema_version": "temporal_benchmark_handoff_verification.v2",
         "passed": all(checks.values()),
         "checks": checks,
         "observed": {
@@ -97,9 +133,13 @@ def main() -> int:
             "waves": len(temporal.get("waves") or []),
             "kinase_scores": len(tmm.get("kinase_scores") or []),
             "tmm_profiles": profile_count,
-            "contribution_sites": len(tmm.get("tmm_site_contribution_matrix") or {}),
+            "relative_contribution_sites": len(relative_matrix),
+            "occupancy_contribution_sites": len(occupancy_matrix),
             "cascade_timepoints": len(cascade.get("timepoints") or []),
             "directionality_edges": len(tmm.get("tmm_kinase_pair_directionality") or []),
+            "directionality_candidates": len(tmm.get("tmm_kinase_pair_directionality_candidates") or []),
+            "uncertainty_evaluated_sites": uncertainty.get("evaluated_unique_sites"),
+            "uncertainty_resolved_sites": uncertainty.get("resolved_unique_sites"),
         },
         "locked_score": locked_summary,
         "directionality_note": (

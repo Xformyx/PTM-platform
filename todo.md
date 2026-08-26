@@ -473,6 +473,20 @@ Backend: vector-plot (receptor inference)
 - [x] 개선 후보별 예상 효과·과적합 위험·구현 난이도·논문 기여도와 필수 validation 정의
 - [x] 서버 승격 전 P0/P1/P2 개발 우선순위와 중단 기준을 포함한 권고안 작성
 
+## Strict-blind Temporal Attribution Upgrade — Full Implementation
+- [x] latest GitHub main 동기화 및 workbook-inaccessible truth-free optimization ledger/config registry 구현
+- [x] canonical `GENE_SITE` key 단일화와 relative·occupancy contribution matrix/track provenance 분리
+- [x] raw weighted sum·support-normalized effect size·evidence mass·shrunken activity의 이중 score contract 구현
+- [x] continuous motif likelihood, proteome-background/null calibration, kinase-family ambiguity hierarchy 구현
+- [x] resolved shared-site adaptive bootstrap/LOTO CI와 identifiability·top1 probability provenance 구현
+- [x] high-identifiability shared site 기반 iterative data-derived kinase profile estimation 구현 및 holdout reject/rounds-zero 동결
+- [x] replicate-bootstrap consensus Wave, membership probability, soft boundary membership 구현
+- [x] abundance–occupancy concordance/discordance evidence classification과 Report/source-data 전달 구현
+- [x] secondary kinase/temporal locked metrics와 prior-aware directionality evidence gate 구현
+- [x] actual PR/PG/FASTA에 대한 truth-free trial ledger 반복 실행·중단 기준·configuration freeze 수행
+- [x] frozen full run 후 offline locked scorer 실행, Figure 1–4/source data/Methods/Results 재생성
+- [x] Python·regression·blind-boundary 검증, GitHub main 반영과 서버 handoff package 작성 준비
+
 ## Latest-main Synchronization Before Follow-up Review
 - [x] local benchmark worktree의 미반영 500-diagnosis 기록을 보존하고 upstream main과 차이 확인
 - [x] GitHub `main` 최신 revision으로 안전하게 rebase/sync
