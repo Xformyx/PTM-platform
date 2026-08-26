@@ -43,6 +43,7 @@ APP_STACK_SERVICES=(
   celery-worker-preprocessing
   celery-worker-rag
   celery-worker-report
+  benchmark-tmm-runner
   gateway
 )
 
@@ -203,7 +204,7 @@ git log -1 --format="%ci" HEAD 2>/dev/null | sed 's/ +[0-9]*//' | tr -d '\n' > "
 BUILD_SERVICES=()
 for c in "${CHANGED[@]}"; do
   case "$c" in
-    api-server)    BUILD_SERVICES+=(api-server) ;;
+    api-server)    BUILD_SERVICES+=(api-server benchmark-tmm-runner) ;;
     mcp-server)    BUILD_SERVICES+=(mcp-server) ;;
     frontend)      BUILD_SERVICES+=(frontend) ;;
     workers)       BUILD_SERVICES+=(celery-worker-preprocessing) ;;
@@ -236,7 +237,7 @@ for c in "${CHANGED[@]}"; do
     api-server)   RESTART_SERVICES+=(api-server) ;;
     mcp-server)   RESTART_SERVICES+=(mcp-server) ;;
     frontend)     RESTART_SERVICES+=(frontend) ;;
-    workers)      RESTART_SERVICES+=(celery-worker-preprocessing celery-worker-rag celery-worker-report) ;;
+    workers)      RESTART_SERVICES+=(celery-worker-preprocessing celery-worker-rag celery-worker-report benchmark-tmm-runner) ;;
     gateway)      RESTART_SERVICES+=(gateway) ;;
     dotenv)       RESTART_SERVICES+=("${APP_STACK_SERVICES[@]}") ;;
     compose-file) RESTART_SERVICES+=("${APP_STACK_SERVICES[@]}") ;;
