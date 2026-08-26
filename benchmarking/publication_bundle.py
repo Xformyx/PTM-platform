@@ -333,7 +333,7 @@ def _svg_document(title: str, body: str, *, height: int = 720) -> str:
   <text x="48" y="58" font-size="27" font-weight="700" fill="#172033">{html.escape(title)}</text>
   <line x1="48" y1="80" x2="1232" y2="80" stroke="#cbd5e1"/>
   {body}
-  <text x="48" y="{height - 28}" font-size="13" fill="#475569">Strict-primary blind artifact; Figure 5+ perturbation panels are intentionally excluded.</text>
+  <text x="48" y="{height - 28}" font-size="13" fill="#475569">Strict-blind unified temporal PTM–protein artifact; Figure 5+ perturbation panels are intentionally excluded.</text>
 </svg>'''
 
 
@@ -366,7 +366,7 @@ def _figure1_svg(figure: Mapping[str, Any]) -> str:
       <text x="48" y="420" font-size="17" font-weight="600" fill="#0f172a">1D · Sequence-aware mapping provenance</text>
       <rect x="48" y="440" width="1184" height="58" rx="8" fill="#f8fafc" stroke="#cbd5e1"/><text x="68" y="475" font-size="15" fill="#334155">{html.escape(map_label)}</text>
       <text x="48" y="535" font-size="14" fill="#475569">Source data: source_data/Fig1_source_data.tsv</text>'''
-    return _svg_document("Figure 1 · Blind study design and temporal analysis contract", body, height=620)
+    return _svg_document("Figure 1 · Strict-blind integrated temporal analysis contract", body, height=620)
 
 
 def _figure2_svg(figure: Mapping[str, Any]) -> str:
@@ -383,7 +383,7 @@ def _figure2_svg(figure: Mapping[str, Any]) -> str:
       <text x="48" y="540" font-size="17" font-weight="600" fill="#0f172a">2B–2D · Branch and anchor audit</text>
       <rect x="48" y="560" width="1184" height="58" rx="8" fill="#f8fafc" stroke="#cbd5e1"/><text x="68" y="595" font-size="14" fill="#334155">{html.escape(branch_labels[:175])}</text>
       <text x="48" y="660" font-size="14" fill="#475569">Source data: source_data/Fig2_source_data.tsv and source_data/Fig2_panels/*.tsv</text>'''
-    return _svg_document("Figure 2 · Blind anchor recovery and temporal fidelity", body, height=720)
+    return _svg_document("Figure 2 · Integrated blind benchmark performance", body, height=720)
 
 
 def _figure3_svg(figure: Mapping[str, Any]) -> str:
@@ -396,7 +396,7 @@ def _figure3_svg(figure: Mapping[str, Any]) -> str:
     maximum = max((value for _, value in ranked), default=1.0) or 1.0
     bars = "".join(f'<text x="58" y="{150 + index * 48}" font-size="14" fill="#334155">{html.escape(name)}</text><rect x="240" y="{132 + index * 48}" width="680" height="22" rx="4" fill="#e2e8f0"/><rect x="240" y="{132 + index * 48}" width="{680 * value / maximum:.1f}" height="22" rx="4" fill="#7c3aed"/><text x="940" y="{150 + index * 48}" font-size="14" fill="#0f172a">{value:.3f}</text>' for index, (name, value) in enumerate(ranked))
     contributions = list(figure.get("contributions") or [])
-    profile_panel = bars or _unavailable_panel("No eligible TMM kinase profile", "The archived strict-primary artifact has no persisted TMM kinase-score rows.", y=145, tint="#faf5ff", stroke="#c4b5fd")
+    profile_panel = bars or _unavailable_panel("No eligible TMM kinase profile", "The archived strict-blind artifact has no persisted TMM kinase-score rows.", y=145, tint="#faf5ff", stroke="#c4b5fd")
     contribution_panel = (
         f'<rect x="48" y="575" width="1184" height="56" rx="8" fill="#faf5ff" stroke="#c4b5fd"/><text x="68" y="609" font-size="14" fill="#4c1d95">Observed contribution records: {len(contributions)} · confidence and residual details are retained in Fig3 source data.</text>'
         if contributions else _unavailable_panel("No shared-site TMM contribution records", "This run produced no persisted shared-site fractional attribution matrix.", y=575, tint="#faf5ff", stroke="#c4b5fd")
@@ -425,7 +425,7 @@ def _figure4_svg(figure: Mapping[str, Any]) -> str:
     cascade_panel = boxes or _unavailable_panel("No eligible contribution-weighted cascade", "The archived artifact does not contain persisted active-kinase cascade timepoints.", y=145)
     directionality_panel = (
         f'<rect x="48" y="350" width="1184" height="64" rx="8" fill="#f8fafc" stroke="#cbd5e1"/><text x="68" y="389" font-size="14" fill="#334155">Observed directionality relationships: {len(directional)} · multisite divergence is retained only when the artifact contains eligible pairs.</text>'
-        if directional else _unavailable_panel("No eligible temporal directionality relationship", "No stable kinase-pair directionality edge was persisted for this strict-primary run.", y=350)
+        if directional else _unavailable_panel("No eligible temporal directionality relationship", "No stable kinase-pair directionality edge was persisted for this strict-blind run.", y=350)
     )
     protein_count = len(figure.get("protein_time_series") or [])
     pair_count = len(figure.get("ptm_protein_pairs") or [])
@@ -438,22 +438,22 @@ def _figure4_svg(figure: Mapping[str, Any]) -> str:
     )
     timing = dict((figure.get("v2_provenance") or {}).get("kinase_timing") or {})
     timing_status = str(timing.get("data_anchored_timing_status") or "not_available")
-    v2_panel = (
+    integrated_panel = (
         f'<rect x="48" y="500" width="1184" height="112" rx="8" fill="#f0fdf4" stroke="#16a34a"/>'
-        f'<text x="68" y="530" font-size="14" font-weight="600" fill="#14532d">Enrichment-free additive v2</text>'
+        f'<text x="68" y="530" font-size="14" font-weight="600" fill="#14532d">Integrated enrichment-free temporal evidence</text>'
         f'<text x="68" y="558" font-size="13" fill="#166534">Protein trajectories: {protein_count} · same-gene PTM–protein pairs: {pair_count} · retained cross-layer edges: {len(cross_edges)} · temporally eligible: {eligible_cross}</text>'
         f'<text x="68" y="584" font-size="13" fill="#166534">Mechanism candidates: {len(mechanism_chains)} · evidence-supported: {supported_mechanisms} · data-anchored kinase timing: {html.escape(timing_status)}</text>'
-        f'<text x="68" y="604" font-size="12" fill="#475569">Additive evidence never alters primary-v1 scoring; observational precedence is not causality.</text>'
+        f'<text x="68" y="604" font-size="12" fill="#475569">Evaluation components are isolated after artifact freeze; observational precedence is not causality.</text>'
         if protein_count or cross_edges or mechanism_chains
-        else _unavailable_panel("No additive enrichment-free v2 sidecar", "The archived artifact contains only the backward-compatible v1 core.", y=500, tint="#f0fdf4", stroke="#16a34a")
+        else _unavailable_panel("No integrated enrichment-free PTM–protein evidence", "The archived artifact does not contain a persisted PTM–protein temporal extension.", y=500, tint="#f0fdf4", stroke="#16a34a")
     )
     body = f'''<text x="48" y="120" font-size="17" font-weight="600" fill="#0f172a">4A · Contribution-weighted observed cascade</text>{cascade_panel}
       <text x="48" y="330" font-size="17" font-weight="600" fill="#0f172a">4B–4D · Evidence-aware temporal directionality</text>
       {directionality_panel}
       <text x="48" y="462" font-size="14" fill="#475569">Interpretation boundary: temporal precedence is observational, not causal. Source data: source_data/Fig4_source_data.tsv</text>
-      <text x="48" y="486" font-size="17" font-weight="600" fill="#0f172a">4E · Enrichment-free PTM→protein mechanism evidence</text>
-      {v2_panel}'''
-    return _svg_document("Figure 4 · Observed temporal cascade and directionality", body, height=670)
+      <text x="48" y="486" font-size="17" font-weight="600" fill="#0f172a">4E · Integrated PTM→protein temporal evidence</text>
+      {integrated_panel}'''
+    return _svg_document("Figure 4 · Integrated temporal cascade and PTM→protein evidence", body, height=670)
 
 
 def _number(value: Any) -> float:

@@ -93,6 +93,6 @@ def test_figure4_adds_v2_sidecar_without_removing_v1_rows(tmp_path) -> None:
     write_publication_bundle(tmp_path, publication)
     fig4 = (tmp_path / "figures" / "Fig4.svg").read_text(encoding="utf-8")
     source = (tmp_path / "source_data" / "Fig4_source_data.tsv").read_text(encoding="utf-8")
-    assert "Enrichment-free additive v2" in fig4
+    assert "Integrated enrichment-free temporal evidence" in fig4
     assert "mechanism_chain" in source
     assert "kinase_direct_evidence" in source

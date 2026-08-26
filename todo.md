@@ -532,6 +532,13 @@ Backend: vector-plot (receptor inference)
 - [x] 논문용 Benchmark Methods·Results·Discussion·통계표와 figure legends 작성
 - [x] blind-boundary·v1 noninferiority·handoff 검증 및 재현성 manifest 작성
 
+## Corrected Integrated Benchmark Reporting and Non-empty Figure Delivery
+- [x] SVG attachment blank-rendering 원인 진단 및 PNG/PDF-compatible figure export 경로 확정
+- [x] v1/v2 label을 사용자-facing 결과·통계·Figure에서 제거한 통합 temporal PTM–protein benchmark reporting contract 구현
+- [x] current-head raw replay 기반 통합 benchmark statistics, Figures 1–4, PNG previews 및 PDF figure bundle 재생성
+- [x] 모든 PNG/PDF Figure의 non-empty visual QC, source-data correspondence 및 integrated manuscript section 검증
+- [x] corrected code·manuscript·figure bundle GitHub main 반영 및 deliverables 재제공
+
 ## Latest-main Synchronization Before Follow-up Review
 - [x] local benchmark worktree의 미반영 500-diagnosis 기록을 보존하고 upstream main과 차이 확인
 - [x] GitHub `main` 최신 revision으로 안전하게 rebase/sync
