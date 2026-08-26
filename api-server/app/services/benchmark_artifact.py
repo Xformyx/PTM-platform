@@ -181,7 +181,14 @@ def _mapping_evidence(site: Mapping[str, Any], fasta_index: Mapping[str, Mapping
     record = fasta_index.get(accession)
     residue, position = _site_residue_position(str(site.get("site") or ""))
     peptide = _clean_peptide(str(site.get("modified_sequence") or ""))
-    expected_taxa = {taxon.strip() for taxon in str(site.get("fasta_taxonomy_id") or "").split(";") if taxon.strip()}
+    explicit_taxa = {taxon.strip() for taxon in str(site.get("fasta_taxonomy_id") or "").split(";") if taxon.strip()}
+    # The normalized production vector predates FASTA_Taxonomy_ID.  The supplied
+    # FASTA is nevertheless the trusted mapping authority: when a row has no
+    # explicit taxonomy field, bind its expected taxon to the matched accession's
+    # FASTA record.  This preserves per-record provenance for mixed-species
+    # databases (for example, a host proteome plus one transgene) rather than
+    # treating every otherwise exact sequence mapping as species-unresolved.
+    expected_taxa = explicit_taxa or ({record["taxonomy_id"]} if record and record.get("taxonomy_id") else set())
     sequence_match = bool(record and residue and position and len(record["sequence"]) >= position and record["sequence"][position - 1] == residue and (not peptide or peptide in record["sequence"]))
     isoform_match = bool(record and accession)
     species_match = bool(record and record["taxonomy_id"] and record["taxonomy_id"] in expected_taxa)
@@ -192,6 +199,7 @@ def _mapping_evidence(site: Mapping[str, Any], fasta_index: Mapping[str, Mapping
         "species_match": species_match,
         "accession": accession or None,
         "taxonomy_id": record["taxonomy_id"] if record else None,
+        "species_provenance": "vector_taxonomy" if explicit_taxa else "trusted_fasta_record",
     }
 
 

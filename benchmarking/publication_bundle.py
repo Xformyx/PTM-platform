@@ -121,6 +121,7 @@ def _figure3_source(artifact: Mapping[str, Any]) -> dict[str, Any]:
     tmm = dict(artifact.get("tmm_full_temporal") or {})
     conditions = list(tmm.get("conditions") or [])
     kinase_scores = [row for row in (tmm.get("kinase_scores") or []) if isinstance(row, Mapping)]
+    input_provenance = dict(tmm.get("tmm_input_kinase_provenance") or {})
     profiles: list[dict[str, Any]] = []
     confidence: list[dict[str, Any]] = []
     for row in kinase_scores:
@@ -143,6 +144,8 @@ def _figure3_source(artifact: Mapping[str, Any]) -> dict[str, Any]:
                 "profile_type": row.get("tmm_profile_type"),
                 "n_exclusive": row.get("tmm_n_exclusive"),
                 "n_shared": row.get("tmm_n_shared"),
+                "input_evidence_tier": (row.get("tmm_input_evidence") or input_provenance.get(kinase, {})).get("evidence_tier"),
+                "input_sources_json": json.dumps((row.get("tmm_input_evidence") or input_provenance.get(kinase, {})).get("sources", []), sort_keys=True),
                 "tmm_evidence_json": json.dumps(evidence, sort_keys=True),
             }
         )

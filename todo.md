@@ -450,6 +450,12 @@ Backend: vector-plot (receptor inference)
 - [x] English scientific typography와 explicit unavailable-data panel을 Figure 1–4 renderer에 구현
 - [x] regenerated Figure 1–4 SVG와 source-data bundle을 visual/syntax regression으로 검증
 
+## User Raw-data Benchmark Reproduction
+- [x] report.pr_matrix.tsv·report.pg_matrix.tsv·Rat+human INSR FASTA의 column schema·sample metadata·mapping provenance 확인
+- [x] 동일 strict 0층+1층 TMM pipeline을 로컬에서 실행하여 kinase profile·contribution matrix·cascade artifact 누락 지점 재현
+- [x] 실데이터 TMM output persistence를 수정하고 Figure 1–4/source TSV bundle에 실제 profile·cascade를 반영
+- [x] raw-data benchmark run 결과와 platform run을 대조하고 논문용 artifact 완전성을 검증
+
 ## Latest-main Synchronization Before Follow-up Review
 - [x] local benchmark worktree의 미반영 500-diagnosis 기록을 보존하고 upstream main과 차이 확인
 - [x] GitHub `main` 최신 revision으로 안전하게 rebase/sync

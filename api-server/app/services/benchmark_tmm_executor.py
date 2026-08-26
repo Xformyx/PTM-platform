@@ -147,6 +147,7 @@ async def _run_tmm_with_session(
                 {
                     "ptms": temporal_request["ptms"],
                     "cowave_modules": temporal_request["cowave_modules"],
+                    "allow_motif_only_seed": True,
                     "force_refresh": True,
                 },
                 db,
@@ -155,6 +156,9 @@ async def _run_tmm_with_session(
             tmm_modules = [
                 {
                     "kinase": module.get("canonical") or module.get("kinase"),
+                    "evidence_tier": module.get("evidence_tier", "direct_or_contextual"),
+                    "sources": module.get("sources", []),
+                    "motif_candidate_count": module.get("motif_candidate_count", 0),
                     "ptms": [
                         {"gene": member.get("gene"), "position": member.get("position")}
                         for member in module.get("members", [])

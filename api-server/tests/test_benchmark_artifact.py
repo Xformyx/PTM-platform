@@ -31,3 +31,31 @@ def test_artifact_uses_only_vector_and_fasta_evidence(tmp_path: Path) -> None:
     assert artifact["provenance"]["rag_used"] is False
     assert artifact["provenance"]["llm_used"] is False
     assert "insulin" not in str(artifact).lower()
+
+
+def test_artifact_uses_trusted_fasta_taxonomy_when_vector_has_no_taxonomy_column(tmp_path: Path) -> None:
+    output = tmp_path / "output"
+    output.mkdir()
+    (output / "ptm_vector_data_normalized_phospho.tsv").write_text(
+        "Gene.Name\tPTM_Position\tCondition\tPTM_Relative_Log2FC\tq_value\tProtein.Group\tModified.Sequence\n"
+        "HUMAN_TRANSGENE\tY2\t5min\t1.2\t0.01\tsp|H1|HUMAN_TRANSGENE\tM(Y[Phospho])Y\n",
+        encoding="utf-8",
+    )
+    fasta = tmp_path / "mixed_reference.fasta"
+    fasta.write_text(
+        ">sp|H1|HUMAN_TRANSGENE OS=Homo sapiens OX=9606 GN=HUMAN_TRANSGENE\nMYY\n",
+        encoding="utf-8",
+    )
+
+    artifact = build_score_artifact(
+        output_dir=output,
+        fasta_path=fasta,
+        ptm_type="phosphorylation",
+        production_contract={"id": "tmm_full_temporal.v1"},
+        tmm_result={"kinase_scores": []},
+    )
+
+    evidence = artifact["site_availability"][0]["mapping_evidence"]
+    assert evidence["method"] == "sequence_isoform_species"
+    assert evidence["taxonomy_id"] == "9606"
+    assert evidence["species_provenance"] == "trusted_fasta_record"

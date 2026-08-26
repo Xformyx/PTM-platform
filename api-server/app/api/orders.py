@@ -6080,6 +6080,12 @@ async def global_kinase_modules(
     ptms = body.get("ptms", [])
     cowave_modules_input = body.get("cowave_modules", [])
     force_refresh = body.get("force_refresh", False)
+    # Strict blind benchmark children intentionally omit source-Order RAG and
+    # biological context.  When their direct site annotation has no anchors,
+    # retain sequence/motif candidates as an explicitly labelled TMM input
+    # instead of passing an empty module list to the temporal algorithm.
+    # This never promotes motif-only members to canonical Tier 1/2 scoring.
+    allow_motif_only_seed = bool(body.get("allow_motif_only_seed", False))
 
     if not ptms:
         raise HTTPException(status_code=400, detail="ptms list is required")
@@ -6231,6 +6237,7 @@ async def global_kinase_modules(
                     "sources": set(),
                     "confirmed": [],
                     "inferred": [],
+                    "evidence_tier": "direct_or_contextual",
                 }
             kinase_members[canon]["sources"].add(source)
             if ptm_key not in [m["key"] for m in kinase_members[canon]["confirmed"]]:
@@ -6242,8 +6249,12 @@ async def global_kinase_modules(
                     "evidence": source,
                 })
 
-    # Now assign PTMs without known kinase → inferred via motif match
+    # Now assign PTMs without known kinase → inferred via motif match.  The
+    # optional motif-only seed is only available when the entire direct-anchor
+    # stage is empty.  It is therefore a survival path for blind, sequence-only
+    # TMM analysis, not a replacement for direct substrate evidence.
     is_ubi_global = order.ptm_type == "ubiquitylation"
+    seed_motif_only_modules = allow_motif_only_seed and not kinase_members
     for ann in annotations:
         if ann.get("known_kinases"):
             continue  # Already assigned as confirmed
@@ -6319,10 +6330,11 @@ async def global_kinase_modules(
                     "membership": "inferred",
                     "evidence": f"motif match ({', '.join(motif_families)})",
                 })
-        elif motif_families and is_ubi_global:
-            # Ubiquitylation: if motif prediction exists but no anchor module yet,
-            # create a new E3 module from the motif prediction itself
-            # (phosphorylation requires anchor kinase from literature; ubi relies more on motif/degron)
+        elif motif_families and (is_ubi_global or seed_motif_only_modules):
+            # Ubiquitylation always permits degron/motif modules.  For an
+            # explicitly opted-in strict blind run with *no* direct kinase anchor,
+            # phospho motifs also seed candidate modules so full TMM can quantify
+            # the observed trajectories.  Their provenance remains motif-only.
             for mf in sorted(motif_families):
                 display = motif_display_names.get(mf, mf)
                 if mf not in kinase_members:
@@ -6332,15 +6344,25 @@ async def global_kinase_modules(
                         "sources": set(),
                         "confirmed": [],
                         "inferred": [],
+                        "evidence_tier": (
+                            "motif_only_seed"
+                            if seed_motif_only_modules and not is_ubi_global
+                            else "motif_prediction"
+                        ),
                     }
-                kinase_members[mf]["sources"].add("motif_prediction")
+                evidence_source = "motif_only_seed" if seed_motif_only_modules and not is_ubi_global else "motif_prediction"
+                kinase_members[mf]["sources"].add(evidence_source)
                 if ptm_key not in [m["key"] for m in kinase_members[mf]["inferred"]]:
                     kinase_members[mf]["inferred"].append({
                         "key": ptm_key,
                         "gene": gene,
                         "position": position,
-                        "membership": "inferred",
-                        "evidence": f"degron/motif prediction ({display})",
+                        "membership": "motif_candidate" if seed_motif_only_modules and not is_ubi_global else "inferred",
+                        "evidence": (
+                            f"motif-only seed ({display}); no direct kinase anchor in the blind input"
+                            if seed_motif_only_modules and not is_ubi_global
+                            else f"degron/motif prediction ({display})"
+                        ),
                     })
                 break  # Assign to the first (best) motif prediction only
 
@@ -6403,6 +6425,8 @@ async def global_kinase_modules(
             "members": members,
             "confirmed_count": len(info["confirmed"]),
             "inferred_count": len(info["inferred"]),
+            "motif_candidate_count": sum(1 for member in members if member.get("membership") == "motif_candidate"),
+            "evidence_tier": info.get("evidence_tier", "direct_or_contextual"),
             "total_count": len(members),
             "cowave_overlap": list(cowave_overlap.values()),
         })
@@ -6473,6 +6497,17 @@ async def global_kinase_modules(
         _log.warning(f"[TEMPORAL-SCORING] Redistribution failed: {e}\n{traceback.format_exc()}")
         wave_kinase_profile = []
 
+    # Redistribution may create temporal submodules with a synthetic source
+    # label.  In a strict blind sequence-only run these are transformations of
+    # motif candidates, never new direct kinase evidence; retain that boundary
+    # in every downstream TMM/cascade payload.
+    if seed_motif_only_modules:
+        for module in kinase_module_list:
+            module["evidence_tier"] = "motif_only_seed"
+            sources = set(module.get("sources") or [])
+            sources.add("motif_only_seed")
+            module["sources"] = sorted(sources)
+
     # ── 6. Cowave cross-analysis summary ────────────────────────────────────
     cowave_cross = {}
     if cowave_modules_input:
@@ -6510,6 +6545,7 @@ async def global_kinase_modules(
         "total_kinase_modules": len(kinase_module_list),
         "total_confirmed": sum(km["confirmed_count"] for km in kinase_module_list),
         "total_inferred": sum(km["inferred_count"] for km in kinase_module_list),
+        "total_motif_candidates": sum(km.get("motif_candidate_count", 0) for km in kinase_module_list),
         "total_unassigned": len(unassigned),
         "status_counts": status_counts,
         "top_kinases": [
@@ -7351,6 +7387,16 @@ async def kinase_activity_heatmap(
         for ptm in km.get("ptms", []):
             pk = f"{ptm.get('gene', '').upper()}_{str(ptm.get('position', '')).upper()}"
             ptm_to_kinases.setdefault(pk, []).append(kn)
+
+    kinase_module_provenance = {
+        str(module.get("canonical") or module.get("kinase") or "").upper(): {
+            "evidence_tier": module.get("evidence_tier", "direct_or_contextual"),
+            "sources": list(module.get("sources") or []),
+            "motif_candidate_count": int(module.get("motif_candidate_count") or 0),
+        }
+        for module in kinase_modules
+        if str(module.get("canonical") or module.get("kinase") or "").strip()
+    }
 
     # ── Co-activation Sum Scoring ──
     # Threshold: include substrate if q < 0.05 OR |Log2FC| >= 0.3
@@ -8693,6 +8739,7 @@ async def kinase_activity_heatmap(
                 ks_entry["tmm_n_shared"] = tmm["n_shared"]
                 ks_entry["tmm_profile_type"] = tmm["profile_type"]
                 ks_entry["tmm_evidence"] = tmm.get("tmm_evidence", {})
+                ks_entry["tmm_input_evidence"] = kinase_module_provenance.get(canon, {})
                 # Top-5 contribution details for LLM context
                 top5 = sorted(
                     tmm["contribution_details"],
@@ -8775,6 +8822,7 @@ async def kinase_activity_heatmap(
         "tmm_weighted_temporal_cascade": tmm_weighted_temporal_cascade,
         "tmm_kinase_pair_directionality": tmm_kinase_pair_directionality,
         "tmm_site_contribution_matrix": tmm_site_contribution_matrix if 'tmm_site_contribution_matrix' in locals() else {},
+        "tmm_input_kinase_provenance": kinase_module_provenance,
         "occupancy_track_provenance": occupancy_track_provenance,
         "occupancy_wave_contract": occupancy_wave_contract,
         "occupancy_tmm_scores": occupancy_tmm_scores,
