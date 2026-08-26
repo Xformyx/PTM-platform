@@ -106,6 +106,7 @@ def _execution_status(run: BenchmarkRun, child: Order | None) -> dict:
     provenance = run.provenance if isinstance(run.provenance, dict) else {}
     worker_stage = provenance.get("tmm_worker_stage")
     heartbeat = provenance.get("tmm_heartbeat_utc")
+    log_entries: list[dict] = list(provenance.get("log_entries") or [])
     if run.status == "completed":
         return {
             "stage": "completed",
@@ -114,6 +115,7 @@ def _execution_status(run: BenchmarkRun, child: Order | None) -> dict:
             "heartbeat_at_utc": heartbeat,
             "step_index": 4,
             "step_count": 4,
+            "log_entries": log_entries,
         }
     if run.status in {"scoring_queued", "scoring"}:
         return {
@@ -123,6 +125,7 @@ def _execution_status(run: BenchmarkRun, child: Order | None) -> dict:
             "heartbeat_at_utc": heartbeat,
             "step_index": 3,
             "step_count": 4,
+            "log_entries": log_entries,
         }
     if run.status == "temporal_analysis":
         labels = {
@@ -143,6 +146,7 @@ def _execution_status(run: BenchmarkRun, child: Order | None) -> dict:
             "heartbeat_at_utc": heartbeat,
             "step_index": 2,
             "step_count": 4,
+            "log_entries": log_entries,
         }
     child_status = getattr(child, "status", None)
     if child_status in {"queued", "preprocessing"}:

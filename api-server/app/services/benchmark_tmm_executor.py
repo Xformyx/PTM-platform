@@ -16,11 +16,12 @@ from pathlib import Path
 
 from celery import Celery
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm.attributes import flag_modified
+from sqlalchemy.pool import NullPool
 
 from app.api.orders import global_kinase_modules, kinase_activity_heatmap
 from app.config import get_settings
-from app.core.database import AsyncSessionLocal
 from app.models.benchmark_run import BenchmarkRun
 from app.models.order import Order
 from app.models.user import User
@@ -57,24 +58,66 @@ def enqueue_locked_score(run_id: int) -> str:
     return task.id
 
 
-async def _record_tmm_heartbeat(db, run: BenchmarkRun, stage: str) -> None:
-    """Persist worker liveness so a stranded queue task becomes retryable promptly."""
+_STAGE_LABELS: dict[str, str] = {
+    "building_temporal_request": "Preparing canonical temporal Wave input",
+    "computing_global_kinase_modules": "Computing production kinase modules",
+    "computing_tmm_heatmap": "Computing TMM full temporal attribution",
+    "writing_truth_free_artifact": "Archiving truth-free analysis artifact",
+    "queueing_locked_score": "Queueing offline locked scoring",
+}
 
+
+async def _record_tmm_heartbeat(db, run: BenchmarkRun, stage: str) -> None:
+    """Persist worker liveness so a stranded queue task becomes retryable promptly.
+
+    Also appends an entry to provenance["log_entries"] so the UI can render a
+    chronological stage log without a dedicated log-streaming endpoint.
+    """
+
+    now = datetime.now(timezone.utc).isoformat()
     provenance = dict(run.provenance or {})
     provenance["tmm_worker_stage"] = stage
-    provenance["tmm_heartbeat_utc"] = datetime.now(timezone.utc).isoformat()
+    provenance["tmm_heartbeat_utc"] = now
     if "tmm_worker_started_at_utc" not in provenance:
-        provenance["tmm_worker_started_at_utc"] = provenance["tmm_heartbeat_utc"]
+        provenance["tmm_worker_started_at_utc"] = now
+    entries: list[dict] = list(provenance.get("log_entries") or [])
+    entries.append({"at_utc": now, "stage": stage, "label": _STAGE_LABELS.get(stage, stage)})
+    provenance["log_entries"] = entries
     run.provenance = provenance
     flag_modified(run, "provenance")
     await db.commit()
 
 
 async def execute_benchmark_tmm(run_id: int, user_id: int | None) -> dict[str, object]:
-    """Persist a full-TMM artifact, or persist a terminal error for this run."""
+    """Persist a full-TMM artifact, or persist a terminal error for this run.
+
+    A fresh NullPool engine is created per invocation so the async session is
+    always bound to the event loop started by asyncio.run() in the Celery task.
+    The module-level pooled engine (used by the web app) is intentionally avoided
+    here: reusing a pool-attached connection across event loops raises
+    "Future attached to a different loop" in asyncmy.
+    """
+
+    settings = get_settings()
+    local_engine = create_async_engine(settings.DATABASE_URL, poolclass=NullPool)
+    LocalSession = async_sessionmaker(local_engine, class_=AsyncSession, expire_on_commit=False)
 
     logger.info("Durable blind TMM worker started for BenchmarkRun %s", run_id)
-    async with AsyncSessionLocal() as db:
+    try:
+        result_dict = await _run_tmm_with_session(run_id, user_id, LocalSession)
+    finally:
+        await local_engine.dispose()
+    return result_dict
+
+
+async def _run_tmm_with_session(
+    run_id: int,
+    user_id: int | None,
+    LocalSession: async_sessionmaker,
+) -> dict[str, object]:
+    """Inner implementation; separated so the engine is always disposed on exit."""
+
+    async with LocalSession() as db:
         result = await db.execute(select(BenchmarkRun).where(BenchmarkRun.id == run_id))
         run = result.scalar_one_or_none()
         if not run or not run.benchmark_order_id:

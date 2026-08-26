@@ -3,7 +3,7 @@
  * lineage categories and immutable run provenance; source treatment, cell-line,
  * research questions, RAG and locked truth are intentionally not rendered.
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, CheckCircle2, Download, FlaskConical, Loader2, LockKeyhole, Play, RefreshCw, ShieldCheck } from "lucide-react";
 import { api } from "@/lib/api";
 import { BenchmarkFigure2, type Figure2Source } from "@/components/BenchmarkFigure2";
@@ -31,6 +31,7 @@ type BenchmarkRun = {
     step_index?: number;
     step_count?: number;
     snapshot_progress_pct?: number;
+    log_entries?: { at_utc: string; stage: string; label: string }[];
   };
   production_contract: { id?: string; temporal_contract?: string };
   blind_context: { cell_context?: { lineage_class?: string } };
@@ -134,6 +135,29 @@ function heartbeatText(value?: string | null): string | null {
   return Number.isNaN(timestamp.getTime()) ? null : timestamp.toLocaleTimeString();
 }
 
+function LogPanel({ entries }: { entries: { at_utc: string; stage: string; label: string }[] }) {
+  const bottomRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [entries.length]);
+  if (!entries.length) return null;
+  return (
+    <div className="rounded border bg-black/80 text-[11px] font-mono text-green-400 overflow-y-auto max-h-36 p-2 space-y-0.5" aria-label="Worker stage log">
+      {entries.map((entry, i) => {
+        const ts = new Date(entry.at_utc);
+        const timeStr = Number.isNaN(ts.getTime()) ? entry.at_utc : ts.toLocaleTimeString();
+        return (
+          <div key={i} className="flex gap-2 leading-relaxed">
+            <span className="text-green-600 shrink-0">{timeStr}</span>
+            <span className="text-green-300">{entry.label}</span>
+          </div>
+        );
+      })}
+      <div ref={bottomRef} />
+    </div>
+  );
+}
+
 function RunCard({
   run,
   readOnly,
@@ -193,6 +217,7 @@ function RunCard({
             })}
           </div>
           {execution?.stage === "snapshot" && typeof execution.snapshot_progress_pct === "number" && <p className="text-[10px] text-muted-foreground">Snapshot preprocessing: {execution.snapshot_progress_pct.toFixed(0)}%</p>}
+          {(execution?.log_entries?.length ?? 0) > 0 && <LogPanel entries={execution!.log_entries!} />}
         </div>
       )}
       {run.phase === "snapshot_running" && run.child_order && CHILD_ACTIVE.has(run.child_order.status) && run.child_order.status !== "preprocessing" && run.child_order.status !== "queued" && (
