@@ -6086,6 +6086,7 @@ async def global_kinase_modules(
     # instead of passing an empty module list to the temporal algorithm.
     # This never promotes motif-only members to canonical Tier 1/2 scoring.
     allow_motif_only_seed = bool(body.get("allow_motif_only_seed", False))
+    include_tmm_candidate_modules = bool(body.get("include_tmm_candidate_modules", False))
 
     if not ptms:
         raise HTTPException(status_code=400, detail="ptms list is required")
@@ -6174,6 +6175,7 @@ async def global_kinase_modules(
     # ── 2. Build kinase-centric modules ─────────────────────────────────────
     # Collect ALL kinases across ALL PTMs (known + motif predicted)
     kinase_members: dict = {}  # canonical → {kinase, sources, confirmed: [], inferred: []}
+    tmm_motif_candidate_members: dict = {}
 
     for ann in annotations:
         gene = ann.get("gene", "")
@@ -6272,6 +6274,33 @@ async def global_kinase_modules(
                 if part and len(part) >= 2:
                     motif_families.add(part)
                     motif_display_names[part] = display
+
+        # Capture the complete motif candidate set before the legacy graph picks
+        # one best kinase.  This is strict-TMM-only evidence and remains labelled
+        # motif_only_seed; it never becomes a direct substrate assertion.
+        if seed_motif_only_modules and include_tmm_candidate_modules:
+            for mf in sorted(motif_families):
+                display = motif_display_names.get(mf, mf)
+                if mf not in tmm_motif_candidate_members:
+                    tmm_motif_candidate_members[mf] = {
+                        "kinase": display,
+                        "canonical": mf,
+                        "sources": {"motif_only_seed"},
+                        "confirmed": [],
+                        "inferred": [],
+                        "evidence_tier": "motif_only_seed",
+                    }
+                if ptm_key not in [m["key"] for m in tmm_motif_candidate_members[mf]["inferred"]]:
+                    tmm_motif_candidate_members[mf]["inferred"].append({
+                        "key": ptm_key,
+                        "gene": gene,
+                        "position": position,
+                        "membership": "motif_candidate",
+                        "evidence": (
+                            f"motif-only TMM candidate ({display}); "
+                            "no direct kinase anchor in the blind input"
+                        ),
+                    })
 
         # Try to match with existing kinase modules
         matched_kinases = []
@@ -6474,6 +6503,38 @@ async def global_kinase_modules(
     # Sort by confidence_score descending (replaces simple total_count sort)
     kinase_module_list.sort(key=lambda x: (x.get("confidence_score", 0), x["total_count"]), reverse=True)
 
+    # Preserve the complete pre-redistribution candidate graph for TMM.  The
+    # legacy UI module list remains winner-take-all after temporal redistribution,
+    # but passing that list to TMM makes every site exclusive and turns NNLS
+    # fractional attribution into a no-op.  Return the copy only to explicit
+    # callers so the ordinary response and DB cache remain compact.
+    tmm_candidate_module_list = []
+    if include_tmm_candidate_modules:
+        if tmm_motif_candidate_members:
+            for canon, info in tmm_motif_candidate_members.items():
+                members = info["confirmed"] + info["inferred"]
+                tmm_candidate_module_list.append({
+                    "kinase": info["kinase"],
+                    "canonical": canon,
+                    "sources": sorted(info["sources"]),
+                    "source_count": len(info["sources"]),
+                    "members": members,
+                    "confirmed_count": len(info["confirmed"]),
+                    "inferred_count": len(info["inferred"]),
+                    "motif_candidate_count": len(info["inferred"]),
+                    "evidence_tier": info.get("evidence_tier", "motif_only_seed"),
+                    "total_count": len(members),
+                    "cowave_overlap": [],
+                })
+            tmm_candidate_module_list.sort(
+                key=lambda module: (module["total_count"], module["canonical"]),
+                reverse=True,
+            )
+        else:
+            import copy as _copy
+
+            tmm_candidate_module_list = _copy.deepcopy(kinase_module_list)
+
     # ── 5b. Smart Signal Decomposition: Temporal Kinase Redistribution ─────
     # Disambiguate over-concentrated kinase modules using temporal context
     try:
@@ -6502,11 +6563,12 @@ async def global_kinase_modules(
     # motif candidates, never new direct kinase evidence; retain that boundary
     # in every downstream TMM/cascade payload.
     if seed_motif_only_modules:
-        for module in kinase_module_list:
-            module["evidence_tier"] = "motif_only_seed"
-            sources = set(module.get("sources") or [])
-            sources.add("motif_only_seed")
-            module["sources"] = sorted(sources)
+        for module_list in (kinase_module_list, tmm_candidate_module_list):
+            for module in module_list:
+                module["evidence_tier"] = "motif_only_seed"
+                sources = set(module.get("sources") or [])
+                sources.add("motif_only_seed")
+                module["sources"] = sorted(sources)
 
     # ── 6. Cowave cross-analysis summary ────────────────────────────────────
     cowave_cross = {}
@@ -7080,7 +7142,7 @@ async def global_kinase_modules(
         import traceback as _tb
         _log.warning(f"[GLOBAL-KINASE] Failed to save kinase_analysis_data to DB: {_e}\n{_tb.format_exc()}")
 
-    return {
+    response = {
         "order_id": order_id,
         "kinase_modules": kinase_module_list,
         "unassigned_ptms": unassigned,
@@ -7092,6 +7154,14 @@ async def global_kinase_modules(
         "wave_kinase_profile": wave_kinase_profile,
         "_cache_hash": _cache_hash,
     }
+    if include_tmm_candidate_modules:
+        response["tmm_candidate_modules"] = tmm_candidate_module_list
+        response["tmm_candidate_contract"] = {
+            "stage": "pre_temporal_redistribution",
+            "purpose": "multi_candidate_fractional_attribution",
+            "legacy_ui_modules_unchanged": True,
+        }
+    return response
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -7200,12 +7270,24 @@ async def kinase_activity_heatmap(
 
     kinase_modules = body.get("kinase_modules", [])
     force_refresh = body.get("force_refresh", False)
+    requested_tmm_config = dict(body.get("tmm_config") or {})
+    try:
+        effective_tmm_config = {
+            "profile_min_exclusive": max(1, int(requested_tmm_config.get("profile_min_exclusive", 3))),
+            "gaussian_sigma_log": max(1e-6, float(requested_tmm_config.get("gaussian_sigma_log", 0.6))),
+            "target_transform": str(requested_tmm_config.get("target_transform", "signed")),
+        }
+    except (TypeError, ValueError) as config_error:
+        raise HTTPException(status_code=400, detail=f"invalid tmm_config: {config_error}") from config_error
+    if effective_tmm_config["target_transform"] not in {"signed", "magnitude"}:
+        raise HTTPException(status_code=400, detail="tmm_config.target_transform must be signed or magnitude")
     from ptm_shared.temporal_contract import resolve_temporal_contract, same_temporal_arm
     temporal = resolve_temporal_contract(order.report_options or {})
 
     # Cache key
     km_keys = sorted([m.get("kinase", "") for m in kinase_modules])
-    hash_input = f"{order_id}|{len(kinase_modules)}|{'|'.join(km_keys[:30])}|{temporal.name}"
+    tmm_config_key = json.dumps(effective_tmm_config, sort_keys=True, separators=(",", ":"))
+    hash_input = f"{order_id}|{len(kinase_modules)}|{'|'.join(km_keys[:30])}|{temporal.name}|{tmm_config_key}"
     cache_hash = hashlib.md5(hash_input.encode()).hexdigest()[:12]
 
     # Check cache — v11.3 Pure Renderer pattern:
@@ -8602,6 +8684,9 @@ async def kinase_activity_heatmap(
             q_threshold=Q_THRESHOLD,
             ptm_qvalues=ptm_qvalues,
             guard_policy=temporal.guard_policy,
+            profile_min_exclusive=effective_tmm_config["profile_min_exclusive"],
+            gaussian_sigma_log=effective_tmm_config["gaussian_sigma_log"],
+            target_transform=effective_tmm_config["target_transform"],
         )
         if len(occupancy_complete_timeseries) >= 2 and len(conditions_sorted) >= 3:
             from ptm_shared.temporal_wave_engine import analyze_temporal_waves
@@ -8633,6 +8718,9 @@ async def kinase_activity_heatmap(
                 q_threshold=Q_THRESHOLD,
                 ptm_qvalues=occupancy_complete_qvalues,
                 guard_policy=temporal.guard_policy,
+                profile_min_exclusive=effective_tmm_config["profile_min_exclusive"],
+                gaussian_sigma_log=effective_tmm_config["gaussian_sigma_log"],
+                target_transform=effective_tmm_config["target_transform"],
             )
 
         def _track_peak(score: dict) -> tuple[str | None, float]:
@@ -8654,14 +8742,24 @@ async def kinase_activity_heatmap(
             occupancy_peak, occupancy_value = _track_peak(occupancy_score or {})
             relative_top = {
                 item["ptm_key"] for item in sorted(
-                    relative_score.get("contribution_details", []),
-                    key=lambda item: item.get("contribution_ratio", 0.0), reverse=True,
+                    (
+                        item
+                        for item in relative_score.get("contribution_details", [])
+                        if item.get("contribution_ratio") is not None
+                    ),
+                    key=lambda item: float(item.get("contribution_ratio") or 0.0),
+                    reverse=True,
                 )[:3]
             }
             occupancy_top = {
                 item["ptm_key"] for item in sorted(
-                    (occupancy_score or {}).get("contribution_details", []),
-                    key=lambda item: item.get("contribution_ratio", 0.0), reverse=True,
+                    (
+                        item
+                        for item in (occupancy_score or {}).get("contribution_details", [])
+                        if item.get("contribution_ratio") is not None
+                    ),
+                    key=lambda item: float(item.get("contribution_ratio") or 0.0),
+                    reverse=True,
                 )[:3]
             }
             if not occupancy_score or occupancy_peak is None:
@@ -8722,11 +8820,7 @@ async def kinase_activity_heatmap(
                     for c in conditions_sorted
                 }
                 ks_entry["shared_sums"] = {
-                    c: round(sum(
-                        ptm_timeseries.get(d["ptm_key"], {}).get(c, 0.0) * d["contribution_ratio"]
-                        for d in tmm["contribution_details"]
-                        if d["n_competing_kinases"] > 0
-                    ), 3)
+                    c: round(float(tmm.get("weighted_shared_sums", {}).get(c, 0.0)), 3)
                     for c in conditions_sorted
                 }
 
@@ -8742,8 +8836,12 @@ async def kinase_activity_heatmap(
                 ks_entry["tmm_input_evidence"] = kinase_module_provenance.get(canon, {})
                 # Top-5 contribution details for LLM context
                 top5 = sorted(
-                    tmm["contribution_details"],
-                    key=lambda x: x["contribution_ratio"],
+                    (
+                        detail
+                        for detail in tmm["contribution_details"]
+                        if detail.get("contribution_ratio") is not None
+                    ),
+                    key=lambda detail: float(detail.get("contribution_ratio") or 0.0),
                     reverse=True,
                 )[:5]
                 ks_entry["tmm_top_contributions"] = top5
@@ -8831,6 +8929,7 @@ async def kinase_activity_heatmap(
         "translocation_candidates": translocation_candidates,
         "scoring_method": "stratified_winsorized_mean_v11.3+tmm_deconvolution",
         "scoring_threshold": {"q_value": Q_THRESHOLD, "fc_abs": FC_THRESHOLD},
+        "tmm_config": effective_tmm_config,
         "temporal_contract": temporal.name,
         "guard_policy": temporal.guard_policy,
         "_cache_hash": cache_hash,

@@ -966,6 +966,29 @@ def build_wave_kinase_profile(
 
 MIN_EXCLUSIVE_FOR_PROFILE = 3   # minimum exclusive substrates to build a data-driven profile
 _GAUSSIAN_SIGMA_LOG = 0.6       # log-space sigma for Gaussian fallback profile
+TMM_TARGET_SIGNED = "signed"
+TMM_TARGET_MAGNITUDE = "magnitude"
+
+
+def _tmm_target_vector(
+    values: list[float] | np.ndarray,
+    *,
+    target_transform: str = TMM_TARGET_SIGNED,
+) -> np.ndarray:
+    """Return the NNLS target under an explicit, provenance-ready transform.
+
+    The empirical kinase profiles are magnitude profiles.  ``signed`` preserves
+    the historical production estimator; ``magnitude`` is an opt-in ablation
+    that estimates fractional attribution from temporal magnitude while the
+    downstream weighted score still preserves each site's measured sign.
+    """
+
+    vector = np.asarray(values, dtype=float)
+    if target_transform == TMM_TARGET_MAGNITUDE:
+        return np.abs(vector)
+    if target_transform != TMM_TARGET_SIGNED:
+        raise ValueError(f"unsupported TMM target transform: {target_transform}")
+    return vector
 
 
 def _gaussian_kinase_profile(
@@ -991,6 +1014,9 @@ def build_kinase_profiles_from_data(
     ptm_timeseries: dict[str, dict[str, float]],
     ptm_to_kinases: dict[str, list[str]],
     conditions_sorted: list[str],
+    *,
+    min_exclusive_for_profile: int = MIN_EXCLUSIVE_FOR_PROFILE,
+    gaussian_sigma_log: float = _GAUSSIAN_SIGMA_LOG,
 ) -> dict[str, dict]:
     """Build per-kinase temporal activity profiles from exclusive substrates.
 
@@ -1011,6 +1037,8 @@ def build_kinase_profiles_from_data(
         }]
     """
     n_cond = len(conditions_sorted)
+    min_exclusive_for_profile = max(1, int(min_exclusive_for_profile))
+    gaussian_sigma_log = max(1e-6, float(gaussian_sigma_log))
     profiles: dict[str, dict] = {}
 
     for km in kinase_modules:
@@ -1027,7 +1055,7 @@ def build_kinase_profiles_from_data(
             if len(ptm_to_kinases.get(pk, [])) <= 1
         ]
 
-        if len(exclusive_keys) >= MIN_EXCLUSIVE_FOR_PROFILE:
+        if len(exclusive_keys) >= min_exclusive_for_profile:
             # ── Data-driven profile ──────────────────────────────────────────
             vectors = []
             for pk in exclusive_keys:
@@ -1051,6 +1079,10 @@ def build_kinase_profiles_from_data(
                     "n_exclusive": len(vectors),
                     "exclusive_keys": exclusive_keys[:20],  # cap for storage
                     "peak_condition": conditions_sorted[peak_idx],
+                    "profile_config": {
+                        "min_exclusive_for_profile": min_exclusive_for_profile,
+                        "gaussian_sigma_log": gaussian_sigma_log,
+                    },
                 }
                 _log.debug(
                     f"[TMM] {canonical}: data-driven profile from {len(vectors)} "
@@ -1069,7 +1101,11 @@ def build_kinase_profiles_from_data(
         else:
             peak_min = 30.0  # generic default
 
-        profile = _gaussian_kinase_profile(conditions_sorted, peak_min)
+        profile = _gaussian_kinase_profile(
+            conditions_sorted,
+            peak_min,
+            sigma=gaussian_sigma_log,
+        )
         peak_idx = int(np.argmax(profile))
         profiles[canonical] = {
             "profile": profile,
@@ -1077,6 +1113,10 @@ def build_kinase_profiles_from_data(
             "n_exclusive": len(exclusive_keys),
             "exclusive_keys": exclusive_keys,
             "peak_condition": conditions_sorted[peak_idx],
+            "profile_config": {
+                "min_exclusive_for_profile": min_exclusive_for_profile,
+                "gaussian_sigma_log": gaussian_sigma_log,
+            },
         }
         _log.debug(
             f"[TMM] {canonical}: Gaussian fallback profile "
@@ -1090,6 +1130,8 @@ def _build_kinase_design(
     candidate_kinases: list[str],
     kinase_profiles: dict[str, dict],
     conditions_sorted: list[str],
+    *,
+    gaussian_sigma_log: float = _GAUSSIAN_SIGMA_LOG,
 ) -> tuple[np.ndarray, list[str]]:
     """Assemble the NNLS design matrix: one temporal profile column per candidate.
 
@@ -1112,7 +1154,11 @@ def _build_kinase_design(
                 peak_min = (min_t + max_t) / 2.0
             else:
                 peak_min = 30.0
-            col = _gaussian_kinase_profile(conditions_sorted, peak_min)
+            col = _gaussian_kinase_profile(
+                conditions_sorted,
+                peak_min,
+                sigma=max(1e-6, float(gaussian_sigma_log)),
+            )
         else:
             col = prof_info["profile"]
         valid_kinases.append(canon)
@@ -1129,6 +1175,9 @@ def attribute_shared_ptm(
     kinase_profiles: dict[str, dict],
     ptm_timeseries: dict[str, dict[str, float]],
     conditions_sorted: list[str],
+    *,
+    gaussian_sigma_log: float = _GAUSSIAN_SIGMA_LOG,
+    target_transform: str = TMM_TARGET_SIGNED,
 ):
     """Report a shared site's attribution at the resolution the data supports.
 
@@ -1144,12 +1193,20 @@ def attribute_shared_ptm(
 
     # Sorted so that the grouping does not depend on which kinase asked.
     ordered = sorted({k for k in candidate_kinases if k})
-    design, names = _build_kinase_design(ordered, kinase_profiles, conditions_sorted)
+    design, names = _build_kinase_design(
+        ordered,
+        kinase_profiles,
+        conditions_sorted,
+        gaussian_sigma_log=gaussian_sigma_log,
+    )
     if design.shape[1] == 0:
         return None
 
     ts = ptm_timeseries.get(ptm_key, {})
-    y = np.array([ts.get(c, 0.0) for c in conditions_sorted], dtype=float)
+    y = _tmm_target_vector(
+        [ts.get(c, 0.0) for c in conditions_sorted],
+        target_transform=target_transform,
+    )
     return ambiguity_aware_attribution(ptm_key, y, design, names, n_bootstrap=0)
 
 
@@ -1159,6 +1216,9 @@ def deconvolve_shared_ptm(
     kinase_profiles: dict[str, dict],
     ptm_timeseries: dict[str, dict[str, float]],
     conditions_sorted: list[str],
+    *,
+    gaussian_sigma_log: float = _GAUSSIAN_SIGMA_LOG,
+    target_transform: str = TMM_TARGET_SIGNED,
 ) -> dict[str, float]:
     """Decompose a shared PTM's time-series into per-kinase contribution ratios.
 
@@ -1174,9 +1234,17 @@ def deconvolve_shared_ptm(
         equal = 1.0 / max(len(candidate_kinases), 1)
         return {k: equal for k in candidate_kinases}
 
-    y = np.array([ts.get(c, 0.0) for c in conditions_sorted], dtype=float)
+    y = _tmm_target_vector(
+        [ts.get(c, 0.0) for c in conditions_sorted],
+        target_transform=target_transform,
+    )
 
-    A, valid_kinases = _build_kinase_design(candidate_kinases, kinase_profiles, conditions_sorted)
+    A, valid_kinases = _build_kinase_design(
+        candidate_kinases,
+        kinase_profiles,
+        conditions_sorted,
+        gaussian_sigma_log=gaussian_sigma_log,
+    )
 
     if not valid_kinases:
         equal = 1.0 / max(len(candidate_kinases), 1)
@@ -1223,6 +1291,9 @@ def compute_weighted_kinase_scores(
     q_threshold: float = 0.05,
     ptm_qvalues: dict | None = None,
     guard_policy: str = GUARD_GROUP_SHARE,
+    profile_min_exclusive: int = MIN_EXCLUSIVE_FOR_PROFILE,
+    gaussian_sigma_log: float = _GAUSSIAN_SIGMA_LOG,
+    target_transform: str = TMM_TARGET_SIGNED,
 ) -> dict[str, dict]:
     """Compute per-kinase per-condition activity scores with TMM-weighted contributions.
 
@@ -1264,7 +1335,12 @@ def compute_weighted_kinase_scores(
 
     # Step 1: Build kinase profiles from exclusive substrates
     kinase_profiles = build_kinase_profiles_from_data(
-        kinase_modules, ptm_timeseries, ptm_to_kinases, conditions_sorted
+        kinase_modules,
+        ptm_timeseries,
+        ptm_to_kinases,
+        conditions_sorted,
+        min_exclusive_for_profile=profile_min_exclusive,
+        gaussian_sigma_log=gaussian_sigma_log,
     )
 
     results: dict[str, dict] = {}
@@ -1282,6 +1358,7 @@ def compute_weighted_kinase_scores(
         w_dn_sums = {c: 0.0 for c in conditions_sorted}
         w_up_cnts = {c: 0.0 for c in conditions_sorted}
         w_dn_cnts = {c: 0.0 for c in conditions_sorted}
+        w_shared_sums = {c: 0.0 for c in conditions_sorted}
         contribution_details = []
         n_exclusive = 0
         n_shared = 0
@@ -1307,7 +1384,13 @@ def compute_weighted_kinase_scores(
                 # Shared substrate → NNLS deconvolution
                 all_candidates = [canonical] + other_kinases
                 deconv = deconvolve_shared_ptm(
-                    pk, all_candidates, kinase_profiles, ptm_timeseries, conditions_sorted
+                    pk,
+                    all_candidates,
+                    kinase_profiles,
+                    ptm_timeseries,
+                    conditions_sorted,
+                    gaussian_sigma_log=gaussian_sigma_log,
+                    target_transform=target_transform,
                 )
                 ratio = deconv.get(canonical, 1.0 / len(all_candidates))
                 prof_info = kinase_profiles.get(canonical)
@@ -1332,6 +1415,8 @@ def compute_weighted_kinase_scores(
                             kinase_profiles,
                             ptm_timeseries,
                             conditions_sorted,
+                            gaussian_sigma_log=gaussian_sigma_log,
+                            target_transform=target_transform,
                         )
                     except Exception as _attribution_error:
                         _log.warning(
@@ -1385,6 +1470,10 @@ def compute_weighted_kinase_scores(
 
             contribution_details.append(detail)
 
+            if other_kinases:
+                for c in conditions_sorted:
+                    w_shared_sums[c] += ts.get(c, 0.0) * ratio
+
             # Accumulate weighted sums
             for c in conditions_sorted:
                 fc = ts.get(c, 0.0)
@@ -1422,11 +1511,17 @@ def compute_weighted_kinase_scores(
             "weighted_down_sums": {c: round(v, 4) for c, v in w_dn_sums.items()},
             "weighted_up_counts": {c: round(v, 3) for c, v in w_up_cnts.items()},
             "weighted_down_counts": {c: round(v, 3) for c, v in w_dn_cnts.items()},
+            "weighted_shared_sums": {c: round(v, 4) for c, v in w_shared_sums.items()},
             "contribution_details": contribution_details,
             "n_exclusive": n_exclusive,
             "n_shared": n_shared,
             "profile_type": _profile_type,
             "n_profile_substrates": _n_profile_substrates,
+            "tmm_profile_config": {
+                "profile_min_exclusive": max(1, int(profile_min_exclusive)),
+                "gaussian_sigma_log": max(1e-6, float(gaussian_sigma_log)),
+                "target_transform": target_transform,
+            },
             "tmm_evidence": _tmm_evidence,
             # Additive: how much of this kinase's shared evidence is actually
             # separable from its competitors.  Does not feed the scores above.

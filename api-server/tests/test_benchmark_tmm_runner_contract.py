@@ -32,3 +32,15 @@ def test_benchmark_api_exposes_qualitative_execution_stage_not_inferred_tmm_perc
     assert '"execution": _execution_status(run, child)' in route_source
     assert "computing_tmm_heatmap" in route_source
     assert "scientifically meaningful percentage" in route_source
+
+
+def test_strict_runner_uses_frozen_truth_free_config_and_multi_candidate_graph() -> None:
+    executor = (REPO_ROOT / "api-server/app/services/benchmark_tmm_executor.py").read_text(encoding="utf-8")
+    orders = (REPO_ROOT / "api-server/app/api/orders.py").read_text(encoding="utf-8")
+    assert "SITE_AGGREGATION" in executor
+    assert "WAVE_CONFIG" in executor
+    assert '"tmm_config": TMM_CONFIG' in executor
+    assert '"include_tmm_candidate_modules": True' in executor
+    assert 'annotated.get("tmm_candidate_modules")' in executor
+    assert "tmm_motif_candidate_members" in orders
+    assert '"stage": "pre_temporal_redistribution"' in orders

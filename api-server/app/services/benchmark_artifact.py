@@ -10,6 +10,7 @@ import csv
 import json
 import math
 import re
+import statistics
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Iterable, Mapping
@@ -21,9 +22,11 @@ from ptm_shared.temporal_wave_engine import analyze_temporal_waves
 def build_temporal_request(
     *, output_dir: Path,
     ptm_type: str,
+    wave_config: Mapping[str, Any] | None = None,
+    site_aggregation: str = "legacy_last",
 ) -> dict[str, Any]:
     rows = _read_vector_rows(output_dir, ptm_type)
-    grouped = _group_rows(rows)
+    grouped = _group_rows(rows, site_aggregation=site_aggregation)
     timepoints = _sorted_timepoints(grouped.values())
     site_time_series = {
         key: {timepoint: site["values"].get(timepoint, 0.0) for timepoint in timepoints}
@@ -38,11 +41,16 @@ def build_temporal_request(
         }
         for key, item in grouped.items()
     }
+    effective_wave_config = dict(wave_config or {})
+    effective_wave_config.setdefault(
+        "threshold_source",
+        "benchmark_tmm_full_temporal.v1",
+    )
     wave_contract = analyze_temporal_waves(
         site_time_series,
         timepoints,
         metadata=metadata,
-        config={"threshold_source": "benchmark_tmm_full_temporal.v1"},
+        config=effective_wave_config,
     )
     cowave_modules = [
         {
@@ -58,6 +66,7 @@ def build_temporal_request(
         "wave_contract": wave_contract,
         "site_rows": grouped,
         "timepoints": timepoints,
+        "site_aggregation": site_aggregation,
     }
 
 
@@ -68,8 +77,15 @@ def build_score_artifact(
     ptm_type: str,
     production_contract: Mapping[str, Any],
     tmm_result: Mapping[str, Any],
+    wave_config: Mapping[str, Any] | None = None,
+    site_aggregation: str = "legacy_last",
 ) -> dict[str, Any]:
-    temporal = build_temporal_request(output_dir=output_dir, ptm_type=ptm_type)
+    temporal = build_temporal_request(
+        output_dir=output_dir,
+        ptm_type=ptm_type,
+        wave_config=wave_config,
+        site_aggregation=site_aggregation,
+    )
     fasta_index = _fasta_index(fasta_path)
     availability: list[dict[str, Any]] = []
     observations: list[dict[str, Any]] = []
@@ -131,7 +147,13 @@ def _read_vector_rows(output_dir: Path, ptm_type: str) -> list[dict[str, str]]:
         return list(csv.DictReader(handle, delimiter="\t"))
 
 
-def _group_rows(rows: Iterable[Mapping[str, str]]) -> dict[str, dict[str, Any]]:
+def _group_rows(
+    rows: Iterable[Mapping[str, str]],
+    *,
+    site_aggregation: str = "legacy_last",
+) -> dict[str, dict[str, Any]]:
+    if site_aggregation not in {"legacy_last", "mean", "median"}:
+        raise ValueError(f"unsupported site aggregation: {site_aggregation}")
     grouped: dict[str, dict[str, Any]] = {}
     for row in rows:
         gene = str(row.get("Gene.Name") or row.get("gene") or "").strip().upper()
@@ -146,17 +168,28 @@ def _group_rows(rows: Iterable[Mapping[str, str]]) -> dict[str, dict[str, Any]]:
                 "gene": gene,
                 "site": site,
                 "values": {},
+                "values_by_condition": defaultdict(list),
                 "q_values": [],
                 "protein_group": str(row.get("Protein.Group") or ""),
                 "modified_sequence": str(row.get("Modified.Sequence") or ""),
                 "fasta_taxonomy_id": str(row.get("FASTA_Taxonomy_ID") or ""),
             },
         )
-        entry["values"][condition] = _float(row.get("PTM_Relative_Log2FC") or row.get("ptm_relative_log2fc"))
+        entry["values_by_condition"][condition].append(
+            _float(row.get("PTM_Relative_Log2FC") or row.get("ptm_relative_log2fc"))
+        )
         q_value = _optional_float(row.get("q_value"))
         if q_value is not None:
             entry["q_values"].append(q_value)
     for entry in grouped.values():
+        for condition, values in entry.pop("values_by_condition").items():
+            if site_aggregation == "mean":
+                aggregated = sum(values) / len(values)
+            elif site_aggregation == "median":
+                aggregated = statistics.median(values)
+            else:
+                aggregated = values[-1]
+            entry["values"][condition] = float(aggregated)
         entry["has_q_values"] = bool(entry["q_values"])
         entry["min_q_value"] = min(entry["q_values"]) if entry["q_values"] else None
     return grouped

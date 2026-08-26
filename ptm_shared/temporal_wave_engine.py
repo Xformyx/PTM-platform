@@ -37,6 +37,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "minimum_cluster_size": 2,
     "maximum_waves": 8,
     "missing_value": 0.0,
+    "compute_directionality": True,
 }
 
 
@@ -86,6 +87,7 @@ def _config_with_provenance(config: Optional[Mapping[str, Any]]) -> Tuple[Dict[s
     merged["minimum_variance"] = max(0.0, _as_float(merged["minimum_variance"], 0.30))
     merged["minimum_amplitude"] = max(0.0, _as_float(merged["minimum_amplitude"], 0.80))
     merged["missing_value"] = _as_float(merged["missing_value"], 0.0)
+    merged["compute_directionality"] = bool(merged["compute_directionality"])
 
     serialized = json.dumps(merged, sort_keys=True, separators=(",", ":"))
     provenance = {
@@ -101,6 +103,7 @@ def _config_with_provenance(config: Optional[Mapping[str, Any]]) -> Tuple[Dict[s
         "distance_metric": "signed_pearson_distance=1-r",
         "linkage": "average",
         "missing_value_policy": "explicit_fill",
+        "compute_directionality": merged["compute_directionality"],
         "config_sha256": hashlib.sha256(serialized.encode("utf-8")).hexdigest(),
     }
     return merged, provenance
@@ -343,44 +346,45 @@ def analyze_temporal_waves(
     waves = [_build_wave(index + 1, indices, matrix, site_keys, ordered_timepoints, correlation, metadata) for index, (indices, _) in enumerate(retained)]
     # P1: Wave membership remains structural, while between-wave temporal order
     # is represented as a separate, explicitly non-causal evidence contract.
-    try:
-        from ptm_shared.directed_temporal_relationship import analyze_directed_temporal_relationship
+    if effective_config["compute_directionality"]:
+        try:
+            from ptm_shared.directed_temporal_relationship import analyze_directed_temporal_relationship
 
-        relationships = []
-        for source_index, source_wave in enumerate(waves):
-            for target_wave in waves[source_index + 1 :]:
-                relation = analyze_directed_temporal_relationship(
-                    {"key": source_wave["wave_id"], "temporal_values": source_wave["mean_profile"]},
-                    {"key": target_wave["wave_id"], "temporal_values": target_wave["mean_profile"]},
-                    ordered_timepoints,
-                )
-                relation["source"]["wave_id"] = source_wave["wave_id"]
-                relation["target"]["wave_id"] = target_wave["wave_id"]
-                relationships.append(relation)
-        result["directed_relationships"] = relationships
-        for wave in waves:
-            related = [
-                relation for relation in relationships
-                if relation["source"].get("wave_id") == wave["wave_id"]
-                or relation["target"].get("wave_id") == wave["wave_id"]
-            ]
-            wave["evidence_profile"]["directionality_relations"] = [
-                {
-                    "counterpart_wave_id": (
-                        relation["target"]["wave_id"]
-                        if relation["source"].get("wave_id") == wave["wave_id"]
-                        else relation["source"]["wave_id"]
-                    ),
-                    "direction": relation["direction"],
-                    "directionality_tier": relation["directionality_tier"],
-                    "onset_lag_minutes": relation.get("onset_lag_minutes"),
-                    "peak_lag_minutes": relation.get("peak_lag_minutes"),
-                }
-                for relation in related
-            ]
-    except Exception as directionality_error:
-        result["quality_warnings"].append("directionality_engine_unavailable")
-        result["directionality_warning"] = str(directionality_error)
+            relationships = []
+            for source_index, source_wave in enumerate(waves):
+                for target_wave in waves[source_index + 1 :]:
+                    relation = analyze_directed_temporal_relationship(
+                        {"key": source_wave["wave_id"], "temporal_values": source_wave["mean_profile"]},
+                        {"key": target_wave["wave_id"], "temporal_values": target_wave["mean_profile"]},
+                        ordered_timepoints,
+                    )
+                    relation["source"]["wave_id"] = source_wave["wave_id"]
+                    relation["target"]["wave_id"] = target_wave["wave_id"]
+                    relationships.append(relation)
+            result["directed_relationships"] = relationships
+            for wave in waves:
+                related = [
+                    relation for relation in relationships
+                    if relation["source"].get("wave_id") == wave["wave_id"]
+                    or relation["target"].get("wave_id") == wave["wave_id"]
+                ]
+                wave["evidence_profile"]["directionality_relations"] = [
+                    {
+                        "counterpart_wave_id": (
+                            relation["target"]["wave_id"]
+                            if relation["source"].get("wave_id") == wave["wave_id"]
+                            else relation["source"]["wave_id"]
+                        ),
+                        "direction": relation["direction"],
+                        "directionality_tier": relation["directionality_tier"],
+                        "onset_lag_minutes": relation.get("onset_lag_minutes"),
+                        "peak_lag_minutes": relation.get("peak_lag_minutes"),
+                    }
+                    for relation in related
+                ]
+        except Exception as directionality_error:
+            result["quality_warnings"].append("directionality_engine_unavailable")
+            result["directionality_warning"] = str(directionality_error)
     result["waves"] = waves
     result["unassigned_sites"] = unassigned
     result["summary"] = {

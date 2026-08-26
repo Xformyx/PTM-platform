@@ -26,6 +26,12 @@ from app.models.benchmark_run import BenchmarkRun
 from app.models.order import Order
 from app.models.user import User
 from app.services.benchmark_artifact import build_score_artifact, build_temporal_request
+from ptm_shared.temporal_optimization_config import (
+    SITE_AGGREGATION,
+    TMM_CONFIG,
+    WAVE_CONFIG,
+    provenance as temporal_optimization_provenance,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -139,7 +145,11 @@ async def _run_tmm_with_session(
         try:
             await _record_tmm_heartbeat(db, run, "building_temporal_request")
             temporal_request = await asyncio.to_thread(
-                build_temporal_request, output_dir=output_dir, ptm_type=child.ptm_type
+                build_temporal_request,
+                output_dir=output_dir,
+                ptm_type=child.ptm_type,
+                wave_config=WAVE_CONFIG,
+                site_aggregation=SITE_AGGREGATION,
             )
             await _record_tmm_heartbeat(db, run, "computing_global_kinase_modules")
             annotated = await global_kinase_modules(
@@ -148,10 +158,16 @@ async def _run_tmm_with_session(
                     "ptms": temporal_request["ptms"],
                     "cowave_modules": temporal_request["cowave_modules"],
                     "allow_motif_only_seed": True,
+                    "include_tmm_candidate_modules": True,
                     "force_refresh": True,
                 },
                 db,
                 service_user,
+            )
+            annotation_modules = (
+                annotated.get("tmm_candidate_modules")
+                or annotated.get("kinase_modules")
+                or []
             )
             tmm_modules = [
                 {
@@ -165,12 +181,16 @@ async def _run_tmm_with_session(
                         if member.get("gene") and member.get("position")
                     ],
                 }
-                for module in annotated.get("kinase_modules", [])
+                for module in annotation_modules
             ]
             await _record_tmm_heartbeat(db, run, "computing_tmm_heatmap")
             tmm = await kinase_activity_heatmap(
                 child.id,
-                {"kinase_modules": tmm_modules, "force_refresh": True},
+                {
+                    "kinase_modules": tmm_modules,
+                    "tmm_config": TMM_CONFIG,
+                    "force_refresh": True,
+                },
                 db,
                 service_user,
             )
@@ -182,6 +202,8 @@ async def _run_tmm_with_session(
                 ptm_type=child.ptm_type,
                 production_contract=run.production_contract,
                 tmm_result=tmm,
+                wave_config=WAVE_CONFIG,
+                site_aggregation=SITE_AGGREGATION,
             )
             artifact_path = output_dir / "benchmark_blind_analysis_artifact.json"
             artifact_path.write_text(json.dumps(artifact, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -200,6 +222,7 @@ async def _run_tmm_with_session(
         provenance = {
             **(run.provenance or {}),
             "tmm_full_temporal_completed": True,
+            "temporal_optimization": temporal_optimization_provenance(),
             "locked_score_task_id": score_task_id,
         }
         run.provenance = provenance

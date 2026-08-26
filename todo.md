@@ -456,6 +456,17 @@ Backend: vector-plot (receptor inference)
 - [x] 실데이터 TMM output persistence를 수정하고 Figure 1–4/source TSV bundle에 실제 profile·cascade를 반영
 - [x] raw-data benchmark run 결과와 platform run을 대조하고 논문용 artifact 완전성을 검증
 
+## Insulin Benchmark 변수 최적화 및 논문 전략
+- [x] 첨부 workbook과 runner-only locked reference의 hash·sheet·anchor 동일성 검증
+- [x] 최신 GitHub main 동기화 및 현재 raw-data 기준선 결과 재현
+- [x] preprocessing·Wave·kinase module·TMM·directionality·scoring 변수 registry와 의존성 정의
+- [x] insulin truth leakage와 반복 benchmark 과적합을 차단하는 train·validation·locked-test 계약 구현
+- [x] 단일 변수 민감도·상호작용·nested optimization·replicate holdout 실행
+- [x] 최적 설정의 견고성·독립 subset·효과크기·불확실성 분석 및 baseline 비교
+- [x] 선택된 설정을 explicit strict-benchmark production contract로 구현하고 Python·회귀 테스트 검증
+- [x] 논문용 Methods·Results·ablation·claim boundary·후속 inhibitor validation 전략 작성
+- [x] 서버 이전용 code/config/hash/verification 명령 패키지 작성 및 GitHub main 반영 준비
+
 ## Latest-main Synchronization Before Follow-up Review
 - [x] local benchmark worktree의 미반영 500-diagnosis 기록을 보존하고 upstream main과 차이 확인
 - [x] GitHub `main` 최신 revision으로 안전하게 rebase/sync
