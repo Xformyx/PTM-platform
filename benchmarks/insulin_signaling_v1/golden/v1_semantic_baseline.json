@@ -1,0 +1,51 @@
+{
+  "artifact_sha256": "c2bf25532a3a842b1637810660d3948945af704b345d51deb07c72f86b440497",
+  "code_commit": "fc437d547a06177268adfec10c750f77814b6d0b",
+  "input_hashes": {
+    "fasta": "61b5d367511111d46377c78cfcfc1a09bacb0c1632c9960282520de732823c83",
+    "protein_matrix": "57c874a46f57608a64a779c4ef8ddecd07273cc0603aa228b8fbd662cbfca745",
+    "ptm_matrix": "7160e863ddaf5236d22c5dc95fd3b066355341e8b2b130f11ef12e5a46a52ba4"
+  },
+  "primary_v1": {
+    "metric_denominators": {
+      "detectable_anchor_recall": 3.0,
+      "direction_accuracy": 1.0,
+      "peak_window_accuracy": 1.0,
+      "regulated_anchor_recall": 3.0
+    },
+    "metrics": {
+      "canonical_weighted_score": 0.7333333333333334,
+      "chain_completeness": 0.0,
+      "detectable_anchor_recall": 1.0,
+      "direction_accuracy": 1.0,
+      "peak_window_accuracy": 1.0,
+      "regulated_anchor_recall": 0.3333333333333333
+    }
+  },
+  "publication_sha256": {
+    "figures/Fig1.svg": "cbd79d145d09e1dff3dd66db48f67ec01fb0ae76e2a55516fee06384c638f7b8",
+    "figures/Fig2.svg": "432475f87f0fe7ae20e068753e8bb4ce35bf4047d780b12bfc8e15a750315e76",
+    "figures/Fig3.svg": "74e044a21f37f5b0a5eb5517726a4106fbbb0e1e8e2e63d53fa41c49969841eb",
+    "figures/Fig4.svg": "922018b6a249083fa9cf5f516311ae57f52ff67ae429748e5164e671be74bf1d",
+    "source_data/Fig1_source_data.tsv": "b0dfb6f8134db51237caba8722012af2926b0e0ca6f8322b9a6265976d147e7e",
+    "source_data/Fig2_source_data.tsv": "53407e4b1fce5baac3a2627103e61d8cad65aa9a5773ac6fd4f18b3e23eb226e",
+    "source_data/Fig3_source_data.tsv": "25a2327cac43268ee8b12730375d983b7c549765e6dc3d73a66134c03d9b9209",
+    "source_data/Fig4_source_data.tsv": "af9f63c286bf558c030fe7711fb6418b75cf34b60d916ba9eb23942b9e50fd69"
+  },
+  "schema_version": "ptm_benchmark_v1_golden.v1",
+  "score_summary_sha256": "711eb8a337df3a03e8a7b018d5765e5644929330f750a0036bbca24b48b4b4ec",
+  "semantic": {
+    "artifact_schema_version": "ptm_blind_analysis_artifact.v1",
+    "candidate_directionality_edge_count": 0,
+    "cascade_timepoint_count": 6,
+    "kinase_score_count": 141,
+    "main_directionality_edge_count": 0,
+    "occupancy_contribution_site_count": 768,
+    "relative_contribution_site_count": 2243,
+    "site_availability_count": 2447,
+    "site_observation_count": 2447,
+    "tmm_profile_count": 55,
+    "wave_count": 8,
+    "wave_member_count": 834
+  }
+}

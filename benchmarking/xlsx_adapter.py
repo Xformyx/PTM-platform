@@ -23,6 +23,13 @@ INSULIN_REQUIRED_SHEETS = (
     "Benchmark_Rules",
 )
 
+INSULIN_OPTIONAL_V2_SHEETS = (
+    "Protein_Effectors",
+    "Cross_Layer_Relations",
+    "Mechanism_Chains",
+    "Counterexamples",
+)
+
 _HEADER_TOKENS = {
     "Anchor_Reference": "Anchor_ID",
     "Kinase_Reference": "Kinase_or_complex",
@@ -30,6 +37,10 @@ _HEADER_TOKENS = {
     "Ambiguous_Sites": "Site_or_pattern",
     "Scoring_Template": "Anchor_ID",
     "Benchmark_Rules": "Rule_ID",
+    "Protein_Effectors": "Effector_ID",
+    "Cross_Layer_Relations": "Relation_ID",
+    "Mechanism_Chains": "Chain_ID",
+    "Counterexamples": "Counterexample_ID",
 }
 
 # The analyst-owned Anchor Reference permits an empty Rat_site cell for a
@@ -69,6 +80,14 @@ def build_insulin_locked_reference(
         )
         for sheet in INSULIN_REQUIRED_SHEETS
     }
+    for sheet in INSULIN_OPTIONAL_V2_SHEETS:
+        if sheet not in workbook.sheetnames:
+            continue
+        sheets[sheet] = _worksheet_records(
+            workbook[sheet].iter_rows(values_only=True),
+            header_token=_HEADER_TOKENS[sheet],
+            optional_ragged_headers=_OPTIONAL_RAGGED_HEADERS.get(sheet, ()),
+        )
     anchors = sheets["Anchor_Reference"]
     truth = {
         "schema_version": TRUTH_SCHEMA_VERSION,
@@ -81,6 +100,15 @@ def build_insulin_locked_reference(
         "ambiguous_sites": sheets["Ambiguous_Sites"],
         "scoring_template": sheets["Scoring_Template"],
         "benchmark_rules": sheets["Benchmark_Rules"],
+        "additive_v2_reference": {
+            "protein_effectors": sheets.get("Protein_Effectors", []),
+            "cross_layer_relations": sheets.get("Cross_Layer_Relations", []),
+            "mechanism_chains": sheets.get("Mechanism_Chains", []),
+            "counterexamples": sheets.get("Counterexamples", []),
+            "source_sheets_present": [
+                sheet for sheet in INSULIN_OPTIONAL_V2_SHEETS if sheet in workbook.sheetnames
+            ],
+        },
     }
     truth_path = locked_dir / f"{dataset_id}.truth.json"
     _write_json(truth_path, truth)

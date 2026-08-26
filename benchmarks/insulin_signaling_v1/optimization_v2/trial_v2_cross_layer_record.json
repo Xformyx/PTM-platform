@@ -1,0 +1,47 @@
+{
+  "code_commit": "fc437d547a06177268adfec10c750f77814b6d0b",
+  "config_sha256": "94d1cd0dcb781ebc015b4c64a81e5edc955e841a68a2bfa9900148110a23c978",
+  "created_at": "2026-08-26T15:33:09.390545+00:00",
+  "decision": "select",
+  "decision_reason": "Highest preregistered numeric objective with zero causal overclaim; condition-level protein limitation retained explicitly.",
+  "fold_metrics": [
+    {
+      "evaluated_configurations": 9,
+      "protein_replicate_stability_status": "unavailable_condition_level_only",
+      "selection_warning": "Protein trajectories are condition-level in the preprocessing output; LOTO temporal stability was evaluated but replicate-level protein stability was not inferred.",
+      "v1_semantic_noninferiority": true
+    }
+  ],
+  "input_hashes": {
+    "quant_matrix_normalizer": "57c874a46f57608a64a779c4ef8ddecd07273cc0603aa228b8fbd662cbfca745",
+    "quant_matrix_primary": "7160e863ddaf5236d22c5dc95fd3b066355341e8b2b130f11ef12e5a46a52ba4",
+    "sequence_database": "61b5d367511111d46377c78cfcfc1a09bacb0c1632c9960282520de732823c83"
+  },
+  "objective": {
+    "candidate_coverage": 0.35694389,
+    "causal_overclaim_rate": 0.0,
+    "eligible_fraction": 0.72125,
+    "mechanism_eligible_count": 1154,
+    "median_abs_lag_aware_similarity": 0.8257625,
+    "median_loto_stability": 0.833333,
+    "non_ptm_protein_count": 7539,
+    "objective": 0.73233978,
+    "protein_candidate_count": 2691,
+    "reference_labels_used_for_selection": false,
+    "retained_edge_count": 1600,
+    "selection_data_scope": "numeric_ptm_and_condition_level_protein_timecourses_only"
+  },
+  "parent_config_sha256": "36ca1471f3d5d1ff2b93b37ab834f02bfa7e451b37a87ff163024031494da8cc",
+  "phase": "additive_v2_cross_layer",
+  "previous_record_sha256": "f535cb2e319de574395b7e108216832ba5154d1c4a0bf4f415321f6db59f1b7a",
+  "record_sha256": "8464787a5bd1d43feecaf072de74fe283956f294812be431f68f72c7f7b092b0",
+  "registry_version": "strict_blind_temporal_variables.v1",
+  "schema_version": "strict_blind_optimization_trial.v1",
+  "trial_id": "v2_cross_layer_selected",
+  "truth_used_for_selection": false,
+  "variable_config": {
+    "cross_layer.minimum_absolute_change": 0.3,
+    "cross_layer.minimum_lag_aware_similarity": 0.4,
+    "cross_layer.minimum_loto_stability": 0.6
+  }
+}

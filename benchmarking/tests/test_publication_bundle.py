@@ -57,3 +57,42 @@ def test_publication_bundle_labels_missing_tmm_and_cascade_data_explicitly(tmp_p
     fig4 = (tmp_path / "figures" / "Fig4.svg").read_text(encoding="utf-8")
     assert "No eligible TMM kinase profile" in fig3
     assert "No eligible contribution-weighted cascade" in fig4
+
+
+def test_figure4_adds_v2_sidecar_without_removing_v1_rows(tmp_path) -> None:
+    score = {"metrics": {}, "metric_numerators": {}, "metric_denominators": {}, "anchor_results": []}
+    artifact = {
+        "site_availability": [],
+        "temporal_wave_contract": {"waves": []},
+        "tmm_full_temporal": {
+            "tmm_weighted_temporal_cascade": {"timepoints": []},
+            "tmm_kinase_pair_directionality": [],
+        },
+        "v2_extensions": {
+            "protein_time_series": [{"gene": "P1", "values": {"5min": 1.0}}],
+            "ptm_protein_pairs": [{"ptm_key": "P1_S1", "protein_gene": "P1"}],
+            "cross_layer_edges": [
+                {"source_wave_id": "W1", "target_gene": "P1", "eligible_for_mechanism_chain": True}
+            ],
+            "kinase_direct_evidence": [
+                {"gene": "P1", "observed_site": "S1", "kinase": "K1", "source": "UniProt"}
+            ],
+            "kinase_timing_predictions": [{"kinase": "K1", "data_anchored": False}],
+            "mechanism_chains": [
+                {"chain_id": "K1__W1__P1", "mechanism_status": "temporal_candidate"}
+            ],
+            "mechanism_counterevidence": [
+                {"chain_id": "K1__W1__P1", "status": "insufficient_evidence"}
+            ],
+            "provenance": {"kinase_timing": {"data_anchored_timing_status": "not_evaluable"}},
+        },
+        "provenance": {},
+    }
+    publication = build_publication_sources(score, artifact, {})
+    assert publication["figure4"]["protein_time_series"][0]["gene"] == "P1"
+    write_publication_bundle(tmp_path, publication)
+    fig4 = (tmp_path / "figures" / "Fig4.svg").read_text(encoding="utf-8")
+    source = (tmp_path / "source_data" / "Fig4_source_data.tsv").read_text(encoding="utf-8")
+    assert "Enrichment-free additive v2" in fig4
+    assert "mechanism_chain" in source
+    assert "kinase_direct_evidence" in source

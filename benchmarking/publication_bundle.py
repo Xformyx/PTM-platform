@@ -193,6 +193,7 @@ def _figure4_source(artifact: Mapping[str, Any]) -> dict[str, Any]:
     directionality_candidates = list(tmm.get("tmm_kinase_pair_directionality_candidates") or [])
     directionality_gate = dict(tmm.get("tmm_directionality_evidence_gate") or {})
     consensus = dict(waves.get("consensus_membership") or {})
+    sidecar = dict(artifact.get("v2_extensions") or {})
     site_probabilities = dict(consensus.get("site_membership_probabilities") or {})
     soft_threshold = _number(consensus.get("soft_membership_threshold"))
     wave_rows: list[dict[str, Any]] = []
@@ -226,6 +227,14 @@ def _figure4_source(artifact: Mapping[str, Any]) -> dict[str, Any]:
         "directionality": directionality,
         "directionality_candidates": directionality_candidates,
         "directionality_evidence_gate": directionality_gate,
+        "protein_time_series": list(sidecar.get("protein_time_series") or []),
+        "ptm_protein_pairs": list(sidecar.get("ptm_protein_pairs") or []),
+        "cross_layer_edges": list(sidecar.get("cross_layer_edges") or []),
+        "kinase_direct_evidence": list(sidecar.get("kinase_direct_evidence") or []),
+        "kinase_timing_predictions": list(sidecar.get("kinase_timing_predictions") or []),
+        "mechanism_chains": list(sidecar.get("mechanism_chains") or []),
+        "mechanism_counterevidence": list(sidecar.get("mechanism_counterevidence") or []),
+        "v2_provenance": dict(sidecar.get("provenance") or {}),
         "consensus_membership": {
             key: value for key, value in consensus.items()
             if key != "site_membership_probabilities"
@@ -253,12 +262,48 @@ def _rows_for_figure(number: int, figure: Mapping[str, Any]) -> list[dict[str, A
             if isinstance(record, Mapping)
         )
         return rows
-    return (
+    rows = (
         list(figure.get("waves") or [])
         + list(figure.get("cascade") or [])
         + list(figure.get("directionality") or [])
         + list(figure.get("directionality_candidates") or [])
     )
+    rows.extend(
+        {"section": "protein_time_series", **dict(row)}
+        for row in figure.get("protein_time_series") or []
+        if isinstance(row, Mapping)
+    )
+    rows.extend(
+        {"section": "ptm_protein_pair", **dict(row)}
+        for row in figure.get("ptm_protein_pairs") or []
+        if isinstance(row, Mapping)
+    )
+    rows.extend(
+        {"section": "cross_layer_edge", **dict(row)}
+        for row in figure.get("cross_layer_edges") or []
+        if isinstance(row, Mapping)
+    )
+    rows.extend(
+        {"section": "kinase_direct_evidence", **dict(row)}
+        for row in figure.get("kinase_direct_evidence") or []
+        if isinstance(row, Mapping)
+    )
+    rows.extend(
+        {"section": "kinase_timing", **dict(row)}
+        for row in figure.get("kinase_timing_predictions") or []
+        if isinstance(row, Mapping)
+    )
+    rows.extend(
+        {"section": "mechanism_chain", **dict(row)}
+        for row in figure.get("mechanism_chains") or []
+        if isinstance(row, Mapping)
+    )
+    rows.extend(
+        {"section": "mechanism_counterevidence", **dict(row)}
+        for row in figure.get("mechanism_counterevidence") or []
+        if isinstance(row, Mapping)
+    )
+    return rows
 
 
 def _write_rows(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
@@ -382,11 +427,33 @@ def _figure4_svg(figure: Mapping[str, Any]) -> str:
         f'<rect x="48" y="350" width="1184" height="64" rx="8" fill="#f8fafc" stroke="#cbd5e1"/><text x="68" y="389" font-size="14" fill="#334155">Observed directionality relationships: {len(directional)} · multisite divergence is retained only when the artifact contains eligible pairs.</text>'
         if directional else _unavailable_panel("No eligible temporal directionality relationship", "No stable kinase-pair directionality edge was persisted for this strict-primary run.", y=350)
     )
+    protein_count = len(figure.get("protein_time_series") or [])
+    pair_count = len(figure.get("ptm_protein_pairs") or [])
+    cross_edges = list(figure.get("cross_layer_edges") or [])
+    eligible_cross = sum(bool(row.get("eligible_for_mechanism_chain")) for row in cross_edges)
+    mechanism_chains = list(figure.get("mechanism_chains") or [])
+    supported_mechanisms = sum(
+        row.get("mechanism_status") == "evidence_supported_mechanism_candidate"
+        for row in mechanism_chains
+    )
+    timing = dict((figure.get("v2_provenance") or {}).get("kinase_timing") or {})
+    timing_status = str(timing.get("data_anchored_timing_status") or "not_available")
+    v2_panel = (
+        f'<rect x="48" y="500" width="1184" height="112" rx="8" fill="#f0fdf4" stroke="#16a34a"/>'
+        f'<text x="68" y="530" font-size="14" font-weight="600" fill="#14532d">Enrichment-free additive v2</text>'
+        f'<text x="68" y="558" font-size="13" fill="#166534">Protein trajectories: {protein_count} · same-gene PTM–protein pairs: {pair_count} · retained cross-layer edges: {len(cross_edges)} · temporally eligible: {eligible_cross}</text>'
+        f'<text x="68" y="584" font-size="13" fill="#166534">Mechanism candidates: {len(mechanism_chains)} · evidence-supported: {supported_mechanisms} · data-anchored kinase timing: {html.escape(timing_status)}</text>'
+        f'<text x="68" y="604" font-size="12" fill="#475569">Additive evidence never alters primary-v1 scoring; observational precedence is not causality.</text>'
+        if protein_count or cross_edges or mechanism_chains
+        else _unavailable_panel("No additive enrichment-free v2 sidecar", "The archived artifact contains only the backward-compatible v1 core.", y=500, tint="#f0fdf4", stroke="#16a34a")
+    )
     body = f'''<text x="48" y="120" font-size="17" font-weight="600" fill="#0f172a">4A · Contribution-weighted observed cascade</text>{cascade_panel}
       <text x="48" y="330" font-size="17" font-weight="600" fill="#0f172a">4B–4D · Evidence-aware temporal directionality</text>
       {directionality_panel}
-      <text x="48" y="462" font-size="14" fill="#475569">Interpretation boundary: temporal precedence is observational, not causal. Source data: source_data/Fig4_source_data.tsv</text>'''
-    return _svg_document("Figure 4 · Observed temporal cascade and directionality", body, height=540)
+      <text x="48" y="462" font-size="14" fill="#475569">Interpretation boundary: temporal precedence is observational, not causal. Source data: source_data/Fig4_source_data.tsv</text>
+      <text x="48" y="486" font-size="17" font-weight="600" fill="#0f172a">4E · Enrichment-free PTM→protein mechanism evidence</text>
+      {v2_panel}'''
+    return _svg_document("Figure 4 · Observed temporal cascade and directionality", body, height=670)
 
 
 def _number(value: Any) -> float:

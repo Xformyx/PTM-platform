@@ -1,0 +1,8 @@
+[
+  {
+    "evaluated_configurations": 9,
+    "protein_replicate_stability_status": "unavailable_condition_level_only",
+    "selection_warning": "Protein trajectories are condition-level in the preprocessing output; LOTO temporal stability was evaluated but replicate-level protein stability was not inferred.",
+    "v1_semantic_noninferiority": true
+  }
+]

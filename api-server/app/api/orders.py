@@ -5013,78 +5013,102 @@ async def motif_kinase_annotation(
         else ""
     )
 
-    iptmnet_cache: dict = {}  # gene_upper -> {"uniprot_ac": str, "sites": [{site, enzymes, ...}]}
-    unique_genes = list(set(p.get("gene", "") for p in ptms if p.get("gene")))
-    _log.warning(f"[ANNOTATION DEBUG] iPTMnet lookup: {len(unique_genes)} unique genes, organism={organism_code}")
+    from ptm_shared.direct_kinase_evidence import annotation_queries, extract_direct_kinase_names
 
-    async def _iptmnet_lookup_gene(client: httpx.AsyncClient, gene: str) -> dict:
-        """Search iPTMnet for a gene and fetch its substrate site data."""
-        result = {"uniprot_ac": "", "sites": []}
+    direct_lookup_queries = annotation_queries(ptms, fallback_taxonomy_id=organism_code)
+    iptmnet_cache: dict = {}  # gene_upper -> merged accession/gene-fallback records
+    _log.warning(
+        "[ANNOTATION DEBUG] iPTMnet lookup: %s accession/species-aware queries, fallback organism=%s",
+        len(direct_lookup_queries),
+        organism_code,
+    )
+
+    async def _iptmnet_lookup_query(client: httpx.AsyncClient, query: dict) -> dict:
+        """Fetch exact-accession substrate sites, falling back to gene search."""
+        gene = str(query.get("gene") or "")
+        accession = str(query.get("accession") or "")
+        taxonomy_id = str(query.get("taxonomy_id") or "")
+        result = {
+            "uniprot_ac": accession,
+            "sites": [],
+            "lookup_mode": query.get("lookup_mode"),
+            "taxonomy_id": taxonomy_id or None,
+            "query_positions": list(query.get("positions") or []),
+            "mapping_methods": list(query.get("mapping_methods") or []),
+        }
         try:
-            # Step 1: Search for the gene
-            search_params = {
-                "search_term": gene,
-                "term_type": "All",
-                "ptm_type": "Phosphorylation" if order.ptm_type == "phosphorylation" else "Ubiquitination",
-                "role": "Substrate",
-            }
-            if organism_code:
-                search_params["organism"] = organism_code
-
-            resp = await client.get(f"{IPTMNET_BASE}/search", params=search_params)
-            if resp.status_code != 200:
-                return result
-
-            search_data = resp.json()
-            if not search_data or not isinstance(search_data, list):
-                return result
-
-            # Find best match (exact gene name match preferred)
-            best_match = None
-            for entry in search_data:
-                if entry.get("gene_name", "").upper() == gene.upper():
-                    best_match = entry
-                    break
-            if not best_match and search_data:
-                best_match = search_data[0]
-
-            if not best_match:
-                return result
-
-            uniprot_ac = best_match.get("iptm_id", "")
-            result["uniprot_ac"] = uniprot_ac
-
-            if not uniprot_ac:
+            if not accession:
+                search_params = {
+                    "search_term": gene,
+                    "term_type": "All",
+                    "ptm_type": "Phosphorylation" if order.ptm_type == "phosphorylation" else "Ubiquitination",
+                    "role": "Substrate",
+                }
+                if taxonomy_id:
+                    search_params["organism"] = taxonomy_id
+                resp = await client.get(f"{IPTMNET_BASE}/search", params=search_params)
+                if resp.status_code != 200:
+                    return result
+                search_data = resp.json()
+                if not search_data or not isinstance(search_data, list):
+                    return result
+                best_match = next(
+                    (entry for entry in search_data if entry.get("gene_name", "").upper() == gene.upper()),
+                    search_data[0] if search_data else None,
+                )
+                if not best_match:
+                    return result
+                accession = str(best_match.get("iptm_id") or "")
+                result["uniprot_ac"] = accession
+            if not accession:
                 return result
 
             # Step 2: Get substrate sites with enzyme info
             await asyncio.sleep(0.3)  # Rate limiting
-            resp2 = await client.get(f"{IPTMNET_BASE}/{uniprot_ac}/substrate")
+            resp2 = await client.get(f"{IPTMNET_BASE}/{accession}/substrate")
             if resp2.status_code != 200:
                 return result
 
             substrate_data = resp2.json()
-            sites_list = substrate_data.get(uniprot_ac, [])
+            sites_list = substrate_data.get(accession, [])
             if isinstance(sites_list, list):
                 result["sites"] = sites_list
 
         except Exception as e:
-            _log.warning(f"[ANNOTATION DEBUG] iPTMnet lookup failed for {gene}: {e}")
+            _log.warning(f"[ANNOTATION DEBUG] iPTMnet lookup failed for {gene}/{accession}: {e}")
         return result
 
     try:
         async with httpx.AsyncClient(timeout=20.0) as client:
-            # Process genes in batches of 5 with rate limiting
-            for i in range(0, len(unique_genes), 5):
-                batch = unique_genes[i:i+5]
-                tasks = [_iptmnet_lookup_gene(client, g) for g in batch]
+            # Process accession/species records in batches of 5 with rate limiting.
+            for i in range(0, len(direct_lookup_queries), 5):
+                batch = direct_lookup_queries[i:i+5]
+                tasks = [_iptmnet_lookup_query(client, query) for query in batch]
                 results = await asyncio.gather(*tasks, return_exceptions=True)
-                for gene_name, res in zip(batch, results):
+                for query, res in zip(batch, results):
                     if isinstance(res, dict):
-                        iptmnet_cache[gene_name.upper()] = res
+                        gene_name = str(query.get("gene") or "").upper()
+                        merged = iptmnet_cache.setdefault(
+                            gene_name,
+                            {"uniprot_ac": "", "sites": [], "lookup_records": []},
+                        )
+                        if res.get("uniprot_ac") and not merged.get("uniprot_ac"):
+                            merged["uniprot_ac"] = res["uniprot_ac"]
+                        merged["sites"].extend(res.get("sites") or [])
+                        merged["lookup_records"].append(
+                            {key: value for key, value in res.items() if key != "sites"}
+                        )
                         sites_with_enz = [s for s in res.get("sites", []) if s.get("enzymes")]
-                        _log.warning(f"[ANNOTATION DEBUG] iPTMnet {gene_name}: uniprot={res.get('uniprot_ac','')}, total_sites={len(res.get('sites',[]))}, sites_with_enzymes={len(sites_with_enz)}")
-                if i + 5 < len(unique_genes):
+                        _log.warning(
+                            "[ANNOTATION DEBUG] iPTMnet %s/%s taxon=%s mode=%s: total_sites=%s, sites_with_enzymes=%s",
+                            gene_name,
+                            res.get("uniprot_ac", ""),
+                            res.get("taxonomy_id", ""),
+                            res.get("lookup_mode", ""),
+                            len(res.get("sites", [])),
+                            len(sites_with_enz),
+                        )
+                if i + 5 < len(direct_lookup_queries):
                     await asyncio.sleep(0.5)  # Rate limiting between batches
     except Exception as e:
         _log.warning(f"[ANNOTATION DEBUG] iPTMnet batch lookup error: {e}")
@@ -5104,14 +5128,24 @@ async def motif_kinase_annotation(
     )
 
     uniprot_cache: dict = {}  # gene_upper -> {pos_int -> [kinase_name, ...]}
+    uniprot_lookup_provenance: dict = {}  # gene_upper -> [{accession, taxonomy_id, lookup_mode}]
 
-    async def _uniprot_lookup_gene(client: httpx.AsyncClient, gene: str) -> dict:
+    async def _uniprot_lookup_query(client: httpx.AsyncClient, lookup_query: dict) -> dict:
         """Query UniProt for a gene and extract kinase annotations from Modified residue features."""
-        result = {}  # pos_int -> [kinase_names]
+        gene = str(lookup_query.get("gene") or "")
+        explicit_accession = str(lookup_query.get("accession") or "")
+        taxonomy_id = str(lookup_query.get("taxonomy_id") or "")
+        result = {
+            "sites": {},
+            "accession": explicit_accession,
+            "taxonomy_id": taxonomy_id or None,
+            "lookup_mode": lookup_query.get("lookup_mode"),
+        }
         try:
-            # First try to get the UniProt AC from iPTMnet cache (already resolved)
+            # Prefer trusted FASTA accession, then iPTMnet resolution, then gene search.
             iptm_data = iptmnet_cache.get(gene.upper(), {})
-            uniprot_ac = iptm_data.get("uniprot_ac", "")
+            uniprot_ac = explicit_accession or iptm_data.get("uniprot_ac", "")
+            result["accession"] = uniprot_ac
 
             if uniprot_ac:
                 # Direct lookup by accession (fastest)
@@ -5121,13 +5155,14 @@ async def motif_kinase_annotation(
                 )
             else:
                 # Search by gene name + organism
-                query = f"gene_exact:{gene}"
-                if uniprot_organism_id:
-                    query += f"+AND+organism_id:{uniprot_organism_id}"
-                query += "+AND+reviewed:true"
+                query_text = f"gene_exact:{gene}"
+                effective_taxonomy = taxonomy_id or uniprot_organism_id
+                if effective_taxonomy:
+                    query_text += f"+AND+organism_id:{effective_taxonomy}"
+                query_text += "+AND+reviewed:true"
                 resp = await client.get(
                     f"{UNIPROT_BASE}/search",
-                    params={"query": query, "fields": "accession,ft_mod_res,cc_ptm", "format": "json", "size": "1"},
+                    params={"query": query_text, "fields": "accession,ft_mod_res,cc_ptm", "format": "json", "size": "1"},
                 )
 
             if resp.status_code != 200:
@@ -5169,12 +5204,11 @@ async def motif_kinase_annotation(
                 # Extract kinase names from "by KINASE1 and KINASE2" pattern
                 by_match = by_pattern.search(desc)
                 if by_match:
-                    kinase_str = by_match.group(1).strip()
-                    # Split by " and ", ", ", "/"
-                    kinase_names = _re.split(r'\s+and\s+|,\s*|/', kinase_str)
-                    kinase_names = [k.strip() for k in kinase_names if k.strip() and len(k.strip()) > 1]
+                    kinase_names = extract_direct_kinase_names(
+                        by_match.group(1), substrate_gene=gene
+                    )
                     if kinase_names:
-                        result[int(pos_val)] = kinase_names
+                        result["sites"][int(pos_val)] = kinase_names
 
             # Also parse PTM comments for additional kinase info
             # Example: "Phosphorylated at Ser-4 by PLK1 and PLK2."
@@ -5189,17 +5223,17 @@ async def motif_kinase_annotation(
                     text_val = text_obj.get("value", "")
                     for cm in ptm_comment_pattern.finditer(text_val):
                         c_pos = int(cm.group(1))
-                        c_kinases_str = cm.group(2).strip()
-                        c_kinases = _re.split(r'\s+and\s+|,\s*|/', c_kinases_str)
-                        c_kinases = [k.strip() for k in c_kinases if k.strip() and len(k.strip()) > 1]
+                        c_kinases = extract_direct_kinase_names(
+                            cm.group(2), substrate_gene=gene
+                        )
                         if c_kinases:
-                            if c_pos in result:
-                                existing = set(k.upper() for k in result[c_pos])
+                            if c_pos in result["sites"]:
+                                existing = set(k.upper() for k in result["sites"][c_pos])
                                 for ck in c_kinases:
                                     if ck.upper() not in existing:
-                                        result[c_pos].append(ck)
+                                        result["sites"][c_pos].append(ck)
                             else:
-                                result[c_pos] = c_kinases
+                                result["sites"][c_pos] = c_kinases
 
         except Exception as e:
             _log.warning(f"[ANNOTATION DEBUG] UniProt lookup failed for {gene}: {e}")
@@ -5207,15 +5241,29 @@ async def motif_kinase_annotation(
 
     try:
         async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
-            for i in range(0, len(unique_genes), 5):
-                batch = unique_genes[i:i+5]
-                tasks = [_uniprot_lookup_gene(client, g) for g in batch]
+            for i in range(0, len(direct_lookup_queries), 5):
+                batch = direct_lookup_queries[i:i+5]
+                tasks = [_uniprot_lookup_query(client, query) for query in batch]
                 results = await asyncio.gather(*tasks, return_exceptions=True)
-                for gene_name, res in zip(batch, results):
-                    if isinstance(res, dict) and res:
-                        uniprot_cache[gene_name.upper()] = res
-                        _log.warning(f"[ANNOTATION DEBUG] UniProt {gene_name}: {len(res)} sites with kinase annotations")
-                if i + 5 < len(unique_genes):
+                for lookup_query, res in zip(batch, results):
+                    if isinstance(res, dict):
+                        gene_name = str(lookup_query.get("gene") or "").upper()
+                        sites = res.get("sites") or {}
+                        merged_sites = uniprot_cache.setdefault(gene_name, {})
+                        for position, kinases in sites.items():
+                            merged_sites.setdefault(position, [])
+                            existing = {str(name).upper() for name in merged_sites[position]}
+                            merged_sites[position].extend(
+                                name for name in kinases if str(name).upper() not in existing
+                            )
+                        uniprot_lookup_provenance.setdefault(gene_name, []).append(
+                            {key: value for key, value in res.items() if key != "sites"}
+                        )
+                        if sites:
+                            _log.warning(
+                                f"[ANNOTATION DEBUG] UniProt {gene_name}/{res.get('accession','')}: {len(sites)} sites with kinase annotations"
+                            )
+                if i + 5 < len(direct_lookup_queries):
                     await asyncio.sleep(0.3)  # Rate limiting
     except Exception as e:
         _log.warning(f"[ANNOTATION DEBUG] UniProt batch lookup error: {e}")
@@ -5681,6 +5729,9 @@ async def motif_kinase_annotation(
                                     "source": "iPTMnet_direct",
                                     "pmids": pmids[:5] if pmids else [],
                                     "uniprot_ac": iptmnet_data.get("uniprot_ac", ""),
+                                    "direct_evidence": True,
+                                    "site_alignment": "exact_residue_position",
+                                    "lookup_records": list(iptmnet_data.get("lookup_records") or []),
                                 })
                     break  # Found matching site, no need to continue
 
@@ -5703,6 +5754,9 @@ async def motif_kinase_annotation(
                         "confidence": "curated",
                         "mechanism": f"UniProt Swiss-Prot annotation (pos {pos_num})",
                         "source": "UniProt",
+                        "direct_evidence": True,
+                        "site_alignment": "exact_numeric_position",
+                        "lookup_records": list(uniprot_lookup_provenance.get(gene_upper_for_uniprot) or []),
                     })
 
         # ── Normalize & Deduplicate known_kinases by canonical name ──

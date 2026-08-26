@@ -50,6 +50,26 @@ TMM_CONFIG = {
     "uncertainty_seed": 20260826,
 }
 
+ADDITIVE_V2_CONTRACT_VERSION = "enrichment_free_temporal_mechanism.v2"
+ADDITIVE_V2_SELECTION_LEDGER_SHA256 = "818b7ef4e9ea27b61791ad85f919ab3b1812284edf80c267c078a637cd2ee114"
+ADDITIVE_V2_SELECTION_LAST_RECORD_SHA256 = "8464787a5bd1d43feecaf072de74fe283956f294812be431f68f72c7f7b092b0"
+CROSS_LAYER_CONFIG = {
+    "minimum_absolute_change": 0.30,
+    "minimum_lag_aware_similarity": 0.40,
+    "minimum_loto_stability": 0.60,
+    "maximum_candidates_per_wave": 200,
+    "bootstrap_iterations": 0,
+    "permutation_iterations": 0,
+    "random_seed": 20260827,
+}
+_ADDITIVE_V2_CONFIG = {
+    "contract_version": ADDITIVE_V2_CONTRACT_VERSION,
+    "cross_layer": CROSS_LAYER_CONFIG,
+}
+ADDITIVE_V2_CONFIG_SHA256 = hashlib.sha256(
+    json.dumps(_ADDITIVE_V2_CONFIG, sort_keys=True, separators=(",", ":")).encode("utf-8")
+).hexdigest()
+
 _CANONICAL_CONFIG = {
     "contract_version": CONTRACT_VERSION,
     "site_aggregation": SITE_AGGREGATION,
@@ -75,6 +95,16 @@ def provenance() -> dict[str, object]:
         "site_aggregation": SITE_AGGREGATION,
         "wave": dict(WAVE_CONFIG),
         "tmm": dict(TMM_CONFIG),
+        "additive_v2": {
+            "contract_version": ADDITIVE_V2_CONTRACT_VERSION,
+            "config_sha256": ADDITIVE_V2_CONFIG_SHA256,
+            "selection_ledger_sha256": ADDITIVE_V2_SELECTION_LEDGER_SHA256,
+            "selection_last_record_sha256": ADDITIVE_V2_SELECTION_LAST_RECORD_SHA256,
+            "selection_trial_count": 9,
+            "truth_used_for_selection": False,
+            "cross_layer": dict(CROSS_LAYER_CONFIG),
+            "protein_replicate_stability_status": "unavailable_condition_level_only",
+        },
     }
 
 

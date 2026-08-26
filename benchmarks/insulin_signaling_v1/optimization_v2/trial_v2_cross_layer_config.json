@@ -1,0 +1,5 @@
+{
+  "cross_layer.minimum_absolute_change": 0.3,
+  "cross_layer.minimum_lag_aware_similarity": 0.4,
+  "cross_layer.minimum_loto_stability": 0.6
+}

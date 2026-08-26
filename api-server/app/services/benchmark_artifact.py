@@ -7,6 +7,7 @@ does not load a manifest, anchor, benchmark workbook, RAG collection, or LLM.
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import math
 import re
@@ -16,7 +17,54 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from Bio import SeqIO
+from ptm_shared.enrichment_free_temporal_sidecar import build_v2_sidecar
+from ptm_shared.temporal_optimization_config import (
+    ADDITIVE_V2_CONFIG_SHA256,
+    ADDITIVE_V2_CONTRACT_VERSION,
+    CROSS_LAYER_CONFIG,
+)
 from ptm_shared.temporal_wave_engine import analyze_temporal_waves
+
+
+def attach_v2_extensions(
+    artifact: Mapping[str, Any],
+    *,
+    output_dir: Path,
+    ptm_type: str,
+    cross_layer_config: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Return an additive v2 artifact while preserving every v1 top-level value."""
+
+    augmented = dict(artifact)
+    augmented["extension_schema_versions"] = {
+        "enrichment_free_temporal_mechanism": "v2.sidecar"
+    }
+    effective_cross_layer = dict(CROSS_LAYER_CONFIG if cross_layer_config is None else cross_layer_config)
+    sidecar = build_v2_sidecar(
+        output_dir=output_dir,
+        ptm_type=ptm_type,
+        site_observations=artifact.get("site_observations") or [],
+        wave_contract=artifact.get("temporal_wave_contract") or {},
+        tmm_result=artifact.get("tmm_full_temporal") or {},
+        cross_layer_config=effective_cross_layer,
+    )
+    effective_sha256 = hashlib.sha256(
+        json.dumps(effective_cross_layer, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    sidecar.setdefault("provenance", {})["frozen_config"] = {
+        "contract_version": ADDITIVE_V2_CONTRACT_VERSION,
+        "selected_config_applied": effective_cross_layer == CROSS_LAYER_CONFIG,
+        "config_sha256": ADDITIVE_V2_CONFIG_SHA256 if effective_cross_layer == CROSS_LAYER_CONFIG else effective_sha256,
+        "cross_layer": effective_cross_layer,
+        "selection_boundary": "Numeric time-course evidence only; locked workbook truth and identities were unavailable during selection.",
+    }
+    augmented["v2_extensions"] = sidecar
+    augmented["compatibility"] = {
+        "v1_top_level_fields_preserved": True,
+        "v1_primary_score_contract_unchanged": True,
+        "v2_scored_separately": True,
+    }
+    return augmented
 
 
 def build_temporal_request(
@@ -24,6 +72,7 @@ def build_temporal_request(
     ptm_type: str,
     wave_config: Mapping[str, Any] | None = None,
     site_aggregation: str = "legacy_last",
+    fasta_path: Path | None = None,
 ) -> dict[str, Any]:
     rows = _read_vector_rows(output_dir, ptm_type)
     grouped = _group_rows(rows, site_aggregation=site_aggregation)
@@ -67,8 +116,24 @@ def build_temporal_request(
         }
         for wave in wave_contract.get("waves", [])
     ]
+    fasta_index = _fasta_index(fasta_path) if fasta_path else {}
+    ptms = []
+    for item in grouped.values():
+        mapping = _mapping_evidence(item, fasta_index) if fasta_index else {}
+        ptms.append(
+            {
+                "gene": item["gene"],
+                "position": item["site"],
+                "accession": mapping.get("accession") or _accession(str(item.get("protein_group") or "")) or None,
+                "taxonomy_id": mapping.get("taxonomy_id") or None,
+                "mapping_method": mapping.get("method") or "not_evaluated",
+                "sequence_match": mapping.get("sequence_match"),
+                "isoform_match": mapping.get("isoform_match"),
+                "species_match": mapping.get("species_match"),
+            }
+        )
     return {
-        "ptms": [{"gene": item["gene"], "position": item["site"]} for item in grouped.values()],
+        "ptms": ptms,
         "cowave_modules": cowave_modules,
         "wave_contract": wave_contract,
         "site_rows": grouped,
@@ -87,12 +152,15 @@ def build_score_artifact(
     tmm_result: Mapping[str, Any],
     wave_config: Mapping[str, Any] | None = None,
     site_aggregation: str = "legacy_last",
+    include_v2_extensions: bool = False,
+    cross_layer_config: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     temporal = build_temporal_request(
         output_dir=output_dir,
         ptm_type=ptm_type,
         wave_config=wave_config,
         site_aggregation=site_aggregation,
+        fasta_path=fasta_path,
     )
     fasta_index = _fasta_index(fasta_path)
     availability: list[dict[str, Any]] = []
@@ -124,7 +192,7 @@ def build_score_artifact(
                 "regulation_rule": "q_lt_0.05_and_abs_log2fc_ge_1.0" if site["has_q_values"] else "abs_log2fc_ge_0.8_no_q_value",
             }
         )
-    return {
+    artifact = {
         "schema_version": "ptm_blind_analysis_artifact.v1",
         "site_availability": availability,
         "site_observations": observations,
@@ -140,6 +208,14 @@ def build_score_artifact(
             "mapping_policy": "sequence_isoform_species_or_exclude",
         },
     }
+    if include_v2_extensions:
+        artifact = attach_v2_extensions(
+            artifact,
+            output_dir=output_dir,
+            ptm_type=ptm_type,
+            cross_layer_config=cross_layer_config,
+        )
+    return artifact
 
 
 def _read_vector_rows(output_dir: Path, ptm_type: str) -> list[dict[str, str]]:

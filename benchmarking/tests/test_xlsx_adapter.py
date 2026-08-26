@@ -73,3 +73,44 @@ def test_adapter_restores_declared_optional_anchor_cell_without_shifting_fields(
     assert anchor["Mapping_status"] == "IRS docking motif"
     assert anchor["Evidence_tier"] == "Tier 2"
     assert anchor["Benchmark_truth_use"] == "Positive truth if measurable"
+
+
+def test_adapter_parses_optional_additive_v2_sheets_only_when_present(tmp_path: Path) -> None:
+    source = tmp_path / "insulin-v2.xlsx"
+    _workbook(source)
+    from openpyxl import load_workbook
+
+    workbook = load_workbook(source)
+    optional_rows = {
+        "Protein_Effectors": [
+            ["Effector_ID", "Gene", "Expected_peak", "Expected_direction"],
+            ["E1", "GENE1", "5min", "up"],
+        ],
+        "Cross_Layer_Relations": [
+            ["Relation_ID", "Source_wave_ID", "Target_gene", "Expected_direction"],
+            ["R1", "TW-01", "GENE1", "source_precedes_target"],
+        ],
+        "Mechanism_Chains": [
+            ["Chain_ID", "Kinase_or_complex", "Target_gene", "Required_output_tokens"],
+            ["C1", "K1", "GENE1", "GENE1; GENE2"],
+        ],
+        "Counterexamples": [
+            ["Counterexample_ID", "Chain_ID", "Expected_status"],
+            ["X1", "K1__TW-01__GENE1", "insufficient_evidence"],
+        ],
+    }
+    for name, rows in optional_rows.items():
+        sheet = workbook.create_sheet(name)
+        sheet.append([f"{name} analyst-owned title"])
+        for row in rows:
+            sheet.append(row)
+    workbook.save(source)
+
+    manifest_path, _ = build_insulin_locked_reference(source, tmp_path / "dataset")
+    truth = load_locked_truth_bundle(BenchmarkManifest.load(manifest_path))
+    optional = truth["additive_v2_reference"]
+    assert optional["source_sheets_present"] == list(optional_rows)
+    assert optional["protein_effectors"][0]["Gene"] == "GENE1"
+    assert optional["cross_layer_relations"][0]["Relation_ID"] == "R1"
+    assert optional["mechanism_chains"][0]["Chain_ID"] == "C1"
+    assert optional["counterexamples"][0]["Counterexample_ID"] == "X1"

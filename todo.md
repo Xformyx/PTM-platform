@@ -499,6 +499,23 @@ Backend: vector-plot (receptor inference)
 - [x] 기존 primary score와 Figure 1–4를 깨지 않는 versioned artifact·score·source-data 통합 구조 설계
 - [x] shadow run·noninferiority gate·rollback을 포함한 점진적 구현 및 서버 승격 계획 작성
 
+## Benchmark v1 + Additive v2 Full Implementation and Optimization
+- [x] latest main 동기화, supplied raw input hash 확인, v1 golden artifact·score·Figure/source semantic baseline 고정
+- [x] versioned `v1_core`·`v2_extensions` sidecar artifact와 v1-only compatibility adapter 구현
+- [x] 8,905 protein time-course와 2,447 PTM–protein same-gene pair, replicate/missingness provenance 구현
+- [x] cross-layer PTM→protein/non-PTM effector DirectedTemporalRelationship와 causal-overclaim-free contract 구현
+- [x] accession-first·FASTA record OX·isoform/site-aware direct kinase evidence와 versioned annotation audit 구현
+- [x] data-anchored timing coverage/accuracy/error/interval-overlap 및 denominator-zero `not_evaluable` 구현
+- [x] ordered mechanism chain·counterevidence·interpretation-ready hypothesis evidence packet 구현
+- [x] 기존 v1 truth를 상속하는 runner-only additive v2 truth/workbook adapter와 immutable hash 구현
+- [x] `primary_v1`·`kinase_evidence_v2`·`cross_layer_v2`·`mechanism_v2`·`refutation_v2` 독립 scorer 구현
+- [x] v1 panel·source columns를 보존하는 additive Figure 1–4/source-data renderer 구현
+- [x] truth-free cross-layer 변수 grid를 grouped replicate/LOTO로 병렬 평가하고 hash-chained ledger에 선택·기각 기록
+- [x] 동일 raw input에서 v1-only와 v1+v2 shadow run, v1 noninferiority와 v2 acceptance 확인
+- [x] frozen full replay 후 runner-only offline locked v1+v2 평가와 final Figure 1–4 재생성
+- [x] 논문용 Methods·Results·ablation·claim boundary·source data·visual QC 문서 작성
+- [x] Python/TypeScript·blind-boundary·worker·publication regression, GitHub main push, target-server handoff package 작성
+
 ## Latest-main Synchronization Before Follow-up Review
 - [x] local benchmark worktree의 미반영 500-diagnosis 기록을 보존하고 upstream main과 차이 확인
 - [x] GitHub `main` 최신 revision으로 안전하게 rebase/sync

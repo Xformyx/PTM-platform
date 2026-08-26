@@ -150,6 +150,7 @@ async def _run_tmm_with_session(
                 ptm_type=child.ptm_type,
                 wave_config=WAVE_CONFIG,
                 site_aggregation=SITE_AGGREGATION,
+                fasta_path=Path(child.fasta_path),
             )
             await _record_tmm_heartbeat(db, run, "computing_global_kinase_modules")
             annotated = await global_kinase_modules(
