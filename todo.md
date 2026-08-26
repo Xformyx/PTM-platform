@@ -524,6 +524,14 @@ Backend: vector-plot (receptor inference)
 - [x] 일반 Order와 benchmark shadow replay의 공용-engine parity·v1 noninferiority·blind-boundary regression 검증
 - [x] Python/TypeScript 검증, GitHub main 반영 및 운영 적용 가이드 보고
 
+## Final Unified Benchmark Raw Replay and Manuscript Section
+- [x] immutable raw PR/PG/FASTA input hashes, frozen configuration, runner-only workbook truth boundary 재확인
+- [x] final unified benchmark engine으로 full raw replay와 v1+v2 artifact 재생성
+- [x] runner-only locked v1 primary 및 additive v2 independent score·통계 요약 생성
+- [x] Figures 1–4, source data, SVG text-to-path 및 visual QC 재생성
+- [x] 논문용 Benchmark Methods·Results·Discussion·통계표와 figure legends 작성
+- [x] blind-boundary·v1 noninferiority·handoff 검증 및 재현성 manifest 작성
+
 ## Latest-main Synchronization Before Follow-up Review
 - [x] local benchmark worktree의 미반영 500-diagnosis 기록을 보존하고 upstream main과 차이 확인
 - [x] GitHub `main` 최신 revision으로 안전하게 rebase/sync
