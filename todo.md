@@ -420,6 +420,16 @@ Backend: vector-plot (receptor inference)
 - [ ] manifest loading·Order access·BenchmarkRun persistence 예외를 안전한 API 오류로 수정
 - [ ] preflight·run registration 회귀 테스트와 GitHub main 반영 후 운영 재실행 확인
 
+## TMM Full Temporal + Locked Score Interrupted
+- [ ] 해당 BenchmarkRun의 API TMM task 상태·child artifact·benchmark-runner 로그 수집
+- [x] production global-kinase TMM 호출 또는 offline scorer dispatch 중단 원인 수정
+- [ ] 동일 snapshot run의 Retry TMM + locked score 완료와 Figure 1–4/data bundle 생성 확인
+
+## Direct TMM Interruption Code Audit
+- [x] `run-temporal-analysis` endpoint의 blocking await, timeout, task state transition 및 retry idempotency 점검
+- [x] full TMM request build·production endpoint reuse·offline scorer dispatch의 artifact persistence 경로 점검
+- [x] backend 코드만으로 재현 가능한 interrupted 상태 회귀 test와 safe resume 처리 추가
+
 ## Latest-main Synchronization Before Follow-up Review
 - [x] local benchmark worktree의 미반영 500-diagnosis 기록을 보존하고 upstream main과 차이 확인
 - [x] GitHub `main` 최신 revision으로 안전하게 rebase/sync

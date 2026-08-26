@@ -276,6 +276,40 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # Durable full-TMM executor for strict-primary BenchmarkRuns. Unlike the
+  # reloadable API process it survives source reloads and never mounts truth.
+  benchmark-tmm-runner:
+    build:
+      context: .
+      dockerfile: api-server/Dockerfile
+    image: ptm-benchmark-tmm-runner:${VERSION_API:-001}
+    container_name: ptm-benchmark-tmm-runner
+    entrypoint: []
+    command: celery -A app.tasks.benchmark_tmm:celery_app worker -Q benchmark_tmm -c ${BENCHMARK_TMM_CONCURRENCY:-1} -n benchmark-tmm@%h -l info
+    env_file:
+      - .env
+    volumes:
+      - ./api-server/app:/app/app
+      - ./ptm_shared:/opt/ptm_shared:ro
+      - ./data:/app/data
+    environment:
+      TZ: Asia/Seoul
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONPATH: /app:/opt
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      DATABASE_URL: mysql+asyncmy://${MYSQL_USER:-ptm_user}:${MYSQL_PASSWORD:-ptm_password_change_me}@mysql:3306/${MYSQL_DATABASE:-ptm_platform}?charset=utf8mb4
+      INPUT_DIR: /app/data/inputs
+      OUTPUT_DIR: /app/data/outputs
+    networks:
+      - ptm-network
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
   celery-worker-rag:
     build:
       context: .
