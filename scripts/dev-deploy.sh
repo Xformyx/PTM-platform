@@ -115,7 +115,7 @@ get_changed_components_mtime() {
   local result=()
   local marker="$LAST_DEV_BUILD"
 
-  for dir in api-server mcp-server frontend workers gateway; do
+  for dir in api-server mcp-server frontend workers benchmarking gateway; do
     [[ ! -d "$REPO_ROOT/$dir" ]] && continue
     if [[ ! -f "$marker" ]]; then
       result+=("$dir")
@@ -210,9 +210,10 @@ for c in "${CHANGED[@]}"; do
     mcp-server)    BUILD_SERVICES+=(mcp-server) ;;
     frontend)      BUILD_SERVICES+=(frontend) ;;
     workers)       BUILD_SERVICES+=(celery-worker-preprocessing) ;;
+    benchmarking)  BUILD_SERVICES+=(benchmark-runner) ;;
     gateway)       ;;
     dotenv)        ;;
-    compose-file)  BUILD_SERVICES+=(api-server mcp-server frontend celery-worker-preprocessing) ;;
+    compose-file)  BUILD_SERVICES+=(api-server mcp-server frontend celery-worker-preprocessing benchmark-runner) ;;
   esac
 done
 BUILD_SERVICES=($(printf '%s\n' "${BUILD_SERVICES[@]}" | sort -u))
@@ -240,6 +241,7 @@ for c in "${CHANGED[@]}"; do
     mcp-server)   RESTART_SERVICES+=(mcp-server) ;;
     frontend)     RESTART_SERVICES+=(frontend) ;;
     workers)      RESTART_SERVICES+=(celery-worker-preprocessing celery-worker-rag celery-worker-report benchmark-tmm-runner) ;;
+    benchmarking) RESTART_SERVICES+=(benchmark-runner) ;;
     gateway)      RESTART_SERVICES+=(gateway) ;;
     dotenv)       RESTART_SERVICES+=("${APP_STACK_SERVICES[@]}") ;;
     compose-file) RESTART_SERVICES+=("${APP_STACK_SERVICES[@]}") ;;
