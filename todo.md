@@ -586,6 +586,12 @@ Backend: vector-plot (receptor inference)
 - [x] end-to-end regression, backward compatibility, blind isolation 및 cross-stack validation (sandbox Docker CLI unavailable; target-server compose validation required)
 - [x] 운영 사용법·recomputation semantics 문서화 및 GitHub main 반영
 
+## Dated Insulin Report Before–After Comparison
+- [x] 두 DOCX 보고서의 날짜·섹션·표·Figure·정량 text를 추출하고 비교 가능한 기준 확정
+- [x] kinase·substrate·PTM–protein·temporal/dynamic co-wave·validation content 차이를 정량·정성 분석
+- [x] 최신 보고서의 근거성·기전 해석·claim-boundary 개선과 잔여 약점을 평가
+- [x] 사용자용 before-after 비교 보고서 작성 및 전달
+
 ## Latest-main Synchronization Before Follow-up Review
 - [x] local benchmark worktree의 미반영 500-diagnosis 기록을 보존하고 upstream main과 차이 확인
 - [x] GitHub `main` 최신 revision으로 안전하게 rebase/sync
