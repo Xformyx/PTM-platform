@@ -15,6 +15,7 @@ Order numerical analysis
   → canonical Wave + TMM-weighted temporal cascade
   → PTM–protein sidecar + dynamic co-wave transition + counterevidence
   → compact DB-safe summary
+  → Report sidecar resolver (DB → chained config → full production artifact)
   → report temporal evidence packet v2
   → Results / Research Questions / Discussion / Conclusion / Abstract prompt
   → raw LLM-draft fidelity audit
@@ -23,6 +24,24 @@ Order numerical analysis
 ```
 
 packet builder는 sidecar와 `state['kinase_activity_heatmap']['tmm_weighted_temporal_cascade']`만 사용한다. legacy raw heatmap score만 존재하고 persisted contribution-weighted cascade가 없으면 TMM candidate record를 임의로 만들지 않는다. 마찬가지로 persisted uncertainty 또는 counterevidence가 없으면 해당 record class를 만들지 않으며, LLM에게 없는 값을 채우도록 요구하지 않는다.
+
+## Sidecar resolver: DB race 및 Report-only rerun 보호
+
+RAG 자동 분석은 canonical Wave/TMM/sidecar를 생성한 뒤 DB에 compact summary를 저장하고 Report task를 chain한다. 서로 다른 Celery worker connection에서는 DB commit 직후의 read-after-write visibility가 늦을 수 있다. 따라서 Report task는 DB만 읽고 sidecar를 없다고 판단해서는 안 된다.
+
+Report state 조립은 다음 precedence로 **동일 production Order에서 파생된** compact sidecar를 해석한다.
+
+| 우선순위 | source | 사용 상황 |
+|---:|---|---|
+| 1 | `orders.kinase_analysis_data` | canonical DB projection이 이미 보이는 normal Order |
+| 2 | `orders.kinase_activity_heatmap` | DB heatmap에 보존된 compact projection |
+| 3 | chained `report_config.kinase_analysis_data` | RAG→Report DB read race에서도 fresh auto-analysis output 사용 |
+| 4 | chained `report_config.kinase_activity_heatmap` | config에만 보존된 compact projection recovery |
+| 5 | `temporal_ptm_protein_analysis_v2.json` | report-only rerun 또는 DB/config projection이 없는 경우 full production artifact에서 재요약 |
+
+chained config source에서 sidecar를 회수하면 Report는 **그 config의 matching heatmap/TMM cascade**를 함께 사용한다. 오래된 DB heatmap과 새 sidecar를 조합하지 않아 TMM record의 provenance가 섞이는 것을 막는다. 이 resolver는 user-data-derived Order output만 읽으며 benchmark workbook, locked score, benchmark truth, RAG prose, LLM output을 읽지 않는다.
+
+과거 Order가 DB compact projection도 full `temporal_ptm_protein_analysis_v2.json`도 갖지 않으면 resolver는 의도적으로 `unavailable`을 유지한다. 이 경우 Report worker가 분석을 재계산해서 숫자를 만들어내지 않으며, **Re-run Global Annotation 또는 새 full Order 실행**으로 canonical sidecar를 먼저 생성해야 한다.
 
 ## Packet record schema
 
@@ -94,13 +113,14 @@ docker compose ps celery-worker-report
 docker compose logs --tail=200 celery-worker-report
 ```
 
-그 다음 **새 Order Report를 생성**하고 다음을 확인한다. 기존 19:00 DOCX는 소급해서 바뀌지 않으므로, 그 파일에 개선 효과가 있었다고 주장해서는 안 된다.
+그 다음 새 full Order 또는 sidecar artifact가 이미 존재하는 Order의 Report-only rerun을 실행하고 다음을 확인한다. 기존 19:00 DOCX는 소급해서 바뀌지 않으므로, 그 파일에 개선 효과가 있었다고 주장해서는 안 된다.
 
 1. 결과 파일에 `report_temporal_evidence_packet.json`과 `temporal_report_fidelity.json`이 있는지 확인한다.
 2. packet의 record class가 해당 Order의 persisted sidecar/TMM에 맞는지 확인한다. 없던 TMM·uncertainty·counterevidence가 새로 생기면 안 된다.
 3. fidelity snapshot의 Results와 Discussion에서 final `status`, `llm_draft_status`, `missing_required_groups`, `deterministic_addendum_applied`를 함께 확인한다.
 4. final prose가 Wave interval/type/count/stability, TMM conditional contribution/support/uncertainty, PTM→protein lag/direction/similarity, counterevidence를 **available data 범위에서** 실제로 서술하는지 semantic QA 한다.
 5. temporal observation을 causal propagation, direct regulation, kinase switching으로 과장하지 않았는지 확인한다.
+6. DB record가 잠시 비어도 chained Report에서는 `Resolved shared PTM–protein temporal evidence from chained_report_config...` 또는 artifact recovery 로그가 남는지 확인한다.
 
 ## 제한
 

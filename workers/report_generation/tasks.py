@@ -392,7 +392,12 @@ def run_report_generation(self, order_id: int, config: dict):
         logger.info(f"[Order {order_id}] Loaded {len(enriched_data)} enriched PTMs from {enriched_path}")
 
         # v9.35: Auto-build Global Kinase Modules if not pre-computed
-        kinase_analysis_data = config.get("kinase_analysis_data") or {}
+        # A chained RAG task provides these top-level fields before its DB update
+        # necessarily becomes visible to this worker.  Preserve them as an
+        # explicit fallback for the shared temporal sidecar below.
+        config_kinase_analysis_data = config.get("kinase_analysis_data") or {}
+        config_kinase_activity_heatmap = config.get("kinase_activity_heatmap") or {}
+        kinase_analysis_data = config_kinase_analysis_data
         if kinase_analysis_data.get("kinase_modules"):
             n_km = len(kinase_analysis_data["kinase_modules"])
             _emit_kinase_phase(order_id, "skipped", f"Using pre-computed data ({n_km} kinase modules)")
@@ -409,6 +414,7 @@ def run_report_generation(self, order_id: int, config: dict):
         inferred_receptors_from_db = []
         # v9.44: Load kinase_activity_heatmap + signal_propagation_data from DB
         kinase_activity_heatmap_from_db = {}
+        db_kinase_analysis_data = {}
         temporal_ptm_protein_analysis_from_db = {}
         signal_propagation_from_db = {}
         # v11.6: IP overlay data (physical interaction evidence)
@@ -499,20 +505,59 @@ def run_report_generation(self, order_id: int, config: dict):
                     substrate_go_localization_from_db = _row[4] if isinstance(_row[4], dict) else _json.loads(_row[4])
                     logger.info(f"[Order {order_id}] Loaded GO localization data from DB")
                 if _row[5]:
-                    _kad = _row[5] if isinstance(_row[5], dict) else _json.loads(_row[5])
-                    temporal_ptm_protein_analysis_from_db = _kad.get("temporal_ptm_protein_analysis") or {}
-            if not temporal_ptm_protein_analysis_from_db:
-                temporal_ptm_protein_analysis_from_db = (
-                    kinase_activity_heatmap_from_db.get("temporal_ptm_protein_analysis") or {}
-                )
-            if temporal_ptm_protein_analysis_from_db:
-                kinase_analysis_data["temporal_ptm_protein_analysis"] = temporal_ptm_protein_analysis_from_db
-                logger.info(
-                    f"[Order {order_id}] Loaded shared PTM–protein temporal evidence "
-                    f"({temporal_ptm_protein_analysis_from_db.get('cross_layer_edge_count', 0)} edges)"
-                )
+                    db_kinase_analysis_data = _row[5] if isinstance(_row[5], dict) else _json.loads(_row[5])
         except Exception as _rec_err:
             logger.warning(f"[Order {order_id}] Could not load analysis data from DB: {_rec_err}")
+
+        # Resolve sidecar availability independently of the DB read.  A chained
+        # RAG task supplies the fresh compact projection in config before its DB
+        # write can be visible; report-only reruns can recover from the full
+        # production artifact.  The resolver is production-data-only.
+        from report_generation.core.temporal_sidecar_resolution import (
+            resolve_report_temporal_sidecar,
+            select_report_heatmap,
+        )
+        _temporal_artifact_name = "temporal_ptm_protein_analysis_v2.json"
+        temporal_ptm_protein_analysis_from_db, _temporal_sidecar_source, _temporal_diagnostics = (
+            resolve_report_temporal_sidecar(
+                db_kinase_analysis_data=db_kinase_analysis_data,
+                db_kinase_activity_heatmap=kinase_activity_heatmap_from_db,
+                config_kinase_analysis_data=config_kinase_analysis_data,
+                config_kinase_activity_heatmap=config_kinase_activity_heatmap,
+                artifact_paths=(
+                    order_output / _temporal_artifact_name,
+                    rag_dir / _temporal_artifact_name,
+                ),
+            )
+        )
+        for _temporal_diagnostic in _temporal_diagnostics:
+            logger.warning(
+                "[Order %s] Could not recover shared temporal sidecar from artifact: %s",
+                order_id,
+                _temporal_diagnostic,
+            )
+
+        if temporal_ptm_protein_analysis_from_db:
+            kinase_analysis_data["temporal_ptm_protein_analysis"] = temporal_ptm_protein_analysis_from_db
+            logger.info(
+                "[Order %s] Resolved shared PTM–protein temporal evidence from %s (%s edges)",
+                order_id,
+                _temporal_sidecar_source or "orders.kinase_analysis_data",
+                temporal_ptm_protein_analysis_from_db.get("cross_layer_edge_count", 0),
+            )
+
+        # Pair the sidecar with its matching chained TMM output, rather than a
+        # stale DB heatmap that lacks the current compact sidecar projection.
+        kinase_activity_heatmap_for_report = select_report_heatmap(
+            db_kinase_activity_heatmap=kinase_activity_heatmap_from_db,
+            config_kinase_activity_heatmap=config_kinase_activity_heatmap,
+            sidecar_source=_temporal_sidecar_source,
+        )
+        if _temporal_sidecar_source.startswith("chained_report_config."):
+            logger.info(
+                "[Order %s] Using chained report-config heatmap paired with temporal sidecar",
+                order_id,
+            )
 
         # v11.5f: Fallback — use receptor_inference_data from report_config if DB is empty
         if not inferred_receptors_from_db:
@@ -557,7 +602,7 @@ def run_report_generation(self, order_id: int, config: dict):
             "top_n_ptms": config.get("top_n_ptms", 50),
             "ptm_selection_mode": config.get("ptm_selection_mode", "top_n"),
             # v9.44: Kinase activity heatmap data (auto-computed in RAG stage)
-            "kinase_activity_heatmap": kinase_activity_heatmap_from_db or config.get("kinase_activity_heatmap", {}),
+            "kinase_activity_heatmap": kinase_activity_heatmap_for_report,
             # v9.44: Signal propagation data for report generation
             "signal_propagation_data": signal_propagation_from_db,
             "substrate_go_localization": substrate_go_localization_from_db,

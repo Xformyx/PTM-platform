@@ -639,3 +639,10 @@ Backend: vector-plot (receptor inference)
 - [x] dynamic Wave·TMM·uncertainty·PTM→protein·counterevidence의 Report prose 활용 대조
 - [x] traceability·observational claim boundary·representation delta를 종합 판정
 - [x] 검토 결과와 재현 가능한 후속 조치를 보고
+
+## Production Temporal Sidecar Persistence Repair
+- [x] canonical heatmap/TMM completion path와 Order DB update 지점을 latest main에서 확정
+- [x] shared sidecar full artifact 생성 및 compact summary의 atomic persistence 구현
+- [x] normal Order·legacy cache·Report state의 sidecar 전달 회귀 테스트 구현
+- [x] artifact contract·blind truth isolation·worker suite 검증
+- [ ] 운영 재기동·새 Order/Report artifact 확인 절차 문서화 및 GitHub main 반영
