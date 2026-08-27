@@ -403,7 +403,10 @@ def _build_effector_comparison(order_a: Order, order_b: Order) -> str:
                 f"pairs={cross_layer.get('ptm_protein_pair_count', 0)}, "
                 f"edges={cross_layer.get('cross_layer_edge_count', 0)}, "
                 f"temporally_eligible={cross_layer.get('temporally_eligible_edge_count', 0)}, "
-                f"timing={cross_layer.get('kinase_timing_status', 'not_available')}"
+                f"timing={cross_layer.get('kinase_timing_status', 'not_available')}, "
+                f"dynamic_co-wave={cross_layer.get('dynamic_co_wave_transition_status', 'not_available')}, "
+                f"transition_supported_Waves={cross_layer.get('dynamic_transition_supported_wave_count', 0)}, "
+                f"observed_pair_transitions={cross_layer.get('dynamic_transition_pair_count', 0)}"
             )
             for edge in (cross_layer.get("top_cross_layer_edges") or [])[:6]:
                 if not isinstance(edge, dict):
@@ -418,7 +421,7 @@ def _build_effector_comparison(order_a: Order, order_b: Order) -> str:
                         eligible=edge.get("eligible_for_mechanism_chain", False),
                     )
                 )
-            lines.append("  Interpretation boundary: temporal precedence is observational and does not establish causal mechanism.")
+            lines.append("  Interpretation boundary: temporal precedence and local co-wave membership transitions are observational and do not establish kinase switching or causal mechanism.")
         lines.append("")
 
     return "\n".join(lines)

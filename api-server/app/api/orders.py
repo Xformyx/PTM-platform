@@ -7222,6 +7222,11 @@ async def global_kinase_modules(
                 {k: v for k, v in eff.items() if k != "temporal_profile"}
                 for eff in (effector_proteins or [])[:200]
             ]
+            prior_kinase_analysis = dict(order_obj.kinase_analysis_data or {})
+            preserved_temporal_sidecar = (
+                prior_kinase_analysis.get("temporal_ptm_protein_analysis")
+                or (order_obj.kinase_activity_heatmap or {}).get("temporal_ptm_protein_analysis")
+            )
             order_obj.kinase_analysis_data = {
                 "kinase_modules": kinase_module_list,
                 "temporal_cascade": temporal_cascade,
@@ -7233,6 +7238,11 @@ async def global_kinase_modules(
                 "saved_at": _dt.utcnow().isoformat(),
                 "_cache_hash": _cache_hash,
             }
+            if isinstance(preserved_temporal_sidecar, dict):
+                # Global annotation and heatmap/TMM are separate requests.  Do
+                # not discard an already computed shared PTM–protein sidecar
+                # merely because Global Annotate is run again.
+                order_obj.kinase_analysis_data["temporal_ptm_protein_analysis"] = preserved_temporal_sidecar
             await db.commit()
             _log.info(f"[GLOBAL-KINASE] Saved kinase_analysis_data to order {order_id} DB (slim, no annotation_details)")
     except Exception as _e:
@@ -7303,6 +7313,11 @@ async def save_kinase_analysis_data(
     wave_kinase_profile = body.get("wave_kinase_profile", [])
     # Preserve _cache_hash from body (set by global-kinase-modules endpoint)
     _cache_hash = body.get("_cache_hash", "")
+    prior_kinase_analysis = dict(order.kinase_analysis_data or {})
+    preserved_temporal_sidecar = (
+        prior_kinase_analysis.get("temporal_ptm_protein_analysis")
+        or (order.kinase_activity_heatmap or {}).get("temporal_ptm_protein_analysis")
+    )
     order.kinase_analysis_data = {
         "kinase_modules": kinase_modules,
         "temporal_cascade": temporal_cascade,
@@ -7314,6 +7329,10 @@ async def save_kinase_analysis_data(
         "source": "batched_merge",
         "_cache_hash": _cache_hash,
     }
+    if isinstance(preserved_temporal_sidecar, dict):
+        # Preserve the compact shared analysis projection after a frontend
+        # batch merge so report/chat consumers retain dynamic transitions.
+        order.kinase_analysis_data["temporal_ptm_protein_analysis"] = preserved_temporal_sidecar
     await db.commit()
 
     _log.info(
@@ -7406,10 +7425,23 @@ async def kinase_activity_heatmap(
     from ptm_shared.temporal_contract import resolve_temporal_contract, same_temporal_arm
     temporal = resolve_temporal_contract(order.report_options or {})
 
-    # Cache key
+    # Cache key.  The dynamic co-wave annotation is a production result rather
+    # than display-only metadata, so cache freshness must include its frozen
+    # configuration and contract version.
+    from ptm_shared.dynamic_cowave_transition import dynamic_transition_config_sha256
+    from ptm_shared.temporal_optimization_config import (
+        DYNAMIC_COWAVE_CONFIG,
+        DYNAMIC_COWAVE_CONTRACT_VERSION,
+    )
+
+    dynamic_transition_config_sha = dynamic_transition_config_sha256(DYNAMIC_COWAVE_CONFIG)
+    dynamic_analysis_cache_contract = (
+        f"unified_temporal_ptm_protein.v2|{DYNAMIC_COWAVE_CONTRACT_VERSION}|"
+        f"{dynamic_transition_config_sha}"
+    )
     km_keys = sorted([m.get("kinase", "") for m in kinase_modules])
     tmm_config_key = json.dumps(effective_tmm_config, sort_keys=True, separators=(",", ":"))
-    hash_input = f"{order_id}|{len(kinase_modules)}|{'|'.join(km_keys[:30])}|{temporal.name}|{tmm_config_key}|unified_temporal_ptm_protein.v1"
+    hash_input = f"{order_id}|{len(kinase_modules)}|{'|'.join(km_keys[:30])}|{temporal.name}|{tmm_config_key}|{dynamic_analysis_cache_contract}"
     cache_hash = hashlib.md5(hash_input.encode()).hexdigest()[:12]
 
     # Check cache — v11.3 Pure Renderer pattern:
@@ -7420,9 +7452,25 @@ async def kinase_activity_heatmap(
         cached = order.kinase_activity_heatmap
         cached_contract = cached.get("temporal_contract", "dynamics_v1")
         if same_temporal_arm(cached_contract, temporal.name):
+            cached_sidecar = cached.get("temporal_ptm_protein_analysis") or {}
+            cached_dynamic_config_sha = (
+                (cached_sidecar.get("provenance") or {})
+                .get("dynamic_co_wave_transition", {})
+                .get("config_sha256")
+            )
+            cached_dynamic_ready = (
+                cached_sidecar.get("dynamic_co_wave_transition_status") == "computed"
+                and cached_dynamic_config_sha == dynamic_transition_config_sha
+            )
             if cached.get("_cache_hash") == cache_hash:
                 return {**cached, "_cached": True}
-            return {**cached, "_cached": True, "_stale": True}
+            if not cached_dynamic_ready:
+                # A legacy/static cache must not block dynamic-transition
+                # rollout.  Rebuild automatically; parameter mismatches that
+                # already have a current sidecar remain explicitly stale.
+                _log.info("[TMM] Rebuilding cached heatmap to add current dynamic co-wave annotation")
+            else:
+                return {**cached, "_cached": True, "_stale": True}
 
     # Load vector data (time-series)
     from app.config import get_settings

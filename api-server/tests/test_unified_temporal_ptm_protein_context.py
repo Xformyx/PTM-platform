@@ -12,6 +12,9 @@ def _shared_summary() -> dict:
         "mechanism_chain_count": 15,
         "evidence_supported_mechanism_count": 0,
         "kinase_timing_status": "not_evaluable",
+        "dynamic_co_wave_transition_status": "computed",
+        "dynamic_transition_supported_wave_count": 3,
+        "dynamic_transition_pair_count": 12,
         "causality_status": "not_tested",
         "top_cross_layer_edges": [
             {
@@ -39,3 +42,4 @@ def test_shared_summary_reaches_question_context_without_causal_claim() -> None:
     )
 
     assert any("observational temporal candidate" in question for question in questions)
+    assert any("local co-wave membership transitions" in question for question in questions)

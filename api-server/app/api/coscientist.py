@@ -187,6 +187,9 @@ def _build_data_grounded_seed(order: Order) -> str:
             f"{cross_layer.get('cross_layer_edge_count', 0)} cross-layer edges; "
             f"{cross_layer.get('temporally_eligible_edge_count', 0)} temporally eligible; "
             f"kinase timing={cross_layer.get('kinase_timing_status', 'not_available')}; "
+            f"dynamic co-wave={cross_layer.get('dynamic_co_wave_transition_status', 'not_available')}; "
+            f"transition-supported Waves={cross_layer.get('dynamic_transition_supported_wave_count', 0)}; "
+            f"observed pair transitions={cross_layer.get('dynamic_transition_pair_count', 0)}; "
             "all relationships are observational, not causal."
         )
         for edge in cross_layer.get("top_cross_layer_edges", [])[:6]:
@@ -207,7 +210,7 @@ def _build_data_grounded_seed(order: Order) -> str:
         "",
         "Prioritized questions:",
         "1. Which receptor–kinase–substrate mechanisms best explain the observed time-resolved PTM activity?",
-        "2. Do co-wave substrate groups and shared-substrate assignments support temporal kinase handoffs?",
+        "2. Do local co-wave membership transitions support a testable change in temporal signaling organization without implying kinase switching?",
         "3. Which alternative mechanisms or counter-evidence should constrain each proposed pathway?",
         "=== END DATA-GROUNDED ANALYSIS SEED ===",
     ])

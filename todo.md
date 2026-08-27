@@ -570,6 +570,14 @@ Backend: vector-plot (receptor inference)
 - [x] PNG/PDF non-empty visual QC와 논문용 truth-free purpose·methods·results·discussion 작성
 - [x] artifact integrity·blind boundary·regression 검증, GitHub main 반영 및 graph bundle 전달
 
+## Dynamic Co-Wave Transition Full Platform Integration Audit
+- [x] 일반 Order·preprocessing·kinase module·PTM–protein sidecar 적용 경로 감사
+- [x] API response·database persistence·cache invalidation·full artifact endpoint propagation 점검
+- [x] frontend temporal evidence panel·comparative analysis·Report·Chat·Data-Grounded Analysis consumer 적용 점검
+- [x] 누락된 공용 configuration/provenance/evidence packet 경로 additive integration 구현
+- [x] production regression·TypeScript build·blind isolation·backward compatibility 검증
+- [ ] 운영 적용 범위·재계산 요구사항 문서화 및 GitHub main 반영
+
 ## Latest-main Synchronization Before Follow-up Review
 - [x] local benchmark worktree의 미반영 500-diagnosis 기록을 보존하고 upstream main과 차이 확인
 - [x] GitHub `main` 최신 revision으로 안전하게 rebase/sync

@@ -221,6 +221,16 @@ def _get_co_scientist_questions(state: dict) -> list:
                 target=edge.get("target_gene", "unknown"),
             )
         )
+    if isinstance(cross_layer, dict) and cross_layer.get("dynamic_co_wave_transition_status") == "computed":
+        transition_waves = int(cross_layer.get("dynamic_transition_supported_wave_count") or 0)
+        transition_pairs = int(cross_layer.get("dynamic_transition_pair_count") or 0)
+        if transition_waves > 0 and transition_pairs > 0:
+            questions.append(
+                "Which local co-wave membership transitions are reproducible across timepoint-omission checks, "
+                "and which orthogonal measurements could distinguish a temporal reorganization hypothesis "
+                "from kinase switching or causal propagation? "
+                f"(transition-supported Waves={transition_waves}; observed pair transitions={transition_pairs})"
+            )
     
     # Q4: Autophosphorylation — which kinases show self-activation loops?
     auto_kinases = [

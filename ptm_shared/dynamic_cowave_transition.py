@@ -52,6 +52,12 @@ def _effective_config(config: Mapping[str, Any] | None) -> tuple[dict[str, Any],
     return merged, hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
+def dynamic_transition_config_sha256(config: Mapping[str, Any] | None = None) -> str:
+    """Return the canonical effective-configuration hash for cache freshness."""
+
+    return _effective_config(config)[1]
+
+
 def _static_membership(wave_contract: Mapping[str, Any]) -> dict[str, str]:
     return {
         str(site_key): str(wave.get("wave_id"))

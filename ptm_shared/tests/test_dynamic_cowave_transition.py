@@ -1,5 +1,8 @@
 from benchmarking.dynamic_cowave_evaluation import evaluate_dynamic_candidate
-from ptm_shared.dynamic_cowave_transition import analyze_dynamic_co_wave_transitions
+from ptm_shared.dynamic_cowave_transition import (
+    analyze_dynamic_co_wave_transitions,
+    dynamic_transition_config_sha256,
+)
 from ptm_shared.enrichment_free_temporal_sidecar import summarize_temporal_ptm_protein_analysis
 
 
@@ -68,3 +71,14 @@ def test_compact_sidecar_summary_reports_disabled_transition_explicitly() -> Non
     )
     assert summary["dynamic_co_wave_transition_status"] == "disabled_by_caller"
     assert summary["dynamic_transition_supported_wave_count"] is None
+
+
+def test_compact_sidecar_summary_exposes_frozen_dynamic_config_hash() -> None:
+    config = {"activity_threshold_fc": 0.4, "minimum_observed_timepoints": 4}
+    dynamic = analyze_dynamic_co_wave_transitions(_wave_contract(), config=config)
+    dynamic["status"] = "computed"
+    summary = summarize_temporal_ptm_protein_analysis(
+        {"dynamic_co_wave_transition": dynamic}
+    )
+    assert summary["dynamic_co_wave_transition_status"] == "computed"
+    assert summary["dynamic_co_wave_transition_config_sha256"] == dynamic_transition_config_sha256(config)

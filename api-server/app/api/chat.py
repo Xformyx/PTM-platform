@@ -302,13 +302,18 @@ def _build_kinase_analysis_context(order: Order) -> str:
         lines.append("\nShared PTM–protein temporal evidence (observational):")
         lines.append(
             "- trajectories={protein}, PTM–protein pairs={pairs}, cross-layer edges={edges}, "
-            "temporally eligible={eligible}, mechanism candidates={chains}, timing={timing}".format(
+            "temporally eligible={eligible}, mechanism candidates={chains}, timing={timing}, "
+            "dynamic co-wave={dynamic_status}, transition-supported Waves={dynamic_waves}, "
+            "observed pair transitions={dynamic_pairs}".format(
                 protein=cross_layer.get("protein_trajectory_count", 0),
                 pairs=cross_layer.get("ptm_protein_pair_count", 0),
                 edges=cross_layer.get("cross_layer_edge_count", 0),
                 eligible=cross_layer.get("temporally_eligible_edge_count", 0),
                 chains=cross_layer.get("mechanism_chain_count", 0),
                 timing=cross_layer.get("kinase_timing_status", "not_available"),
+                dynamic_status=cross_layer.get("dynamic_co_wave_transition_status", "not_available"),
+                dynamic_waves=cross_layer.get("dynamic_transition_supported_wave_count", 0),
+                dynamic_pairs=cross_layer.get("dynamic_transition_pair_count", 0),
             )
         )
         for edge in cross_layer.get("top_cross_layer_edges", [])[:8]:
@@ -324,7 +329,7 @@ def _build_kinase_analysis_context(order: Order) -> str:
                     eligible=edge.get("eligible_for_mechanism_chain", False),
                 )
             )
-        lines.append("- Interpretation: temporal precedence is observational and each mechanism packet remains falsifiable, not causal.")
+        lines.append("- Interpretation: temporal precedence and dynamic local membership transitions are observational; they do not establish kinase switching or causality.")
 
     text = "\n".join(lines)
     if len(text) > MAX_KINASE_CHARS:

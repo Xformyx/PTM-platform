@@ -702,6 +702,8 @@ def summarize_temporal_ptm_protein_analysis(
         ),
         "kinase_timing_status": ((sidecar.get("provenance") or {}).get("kinase_timing") or {}).get("data_anchored_timing_status"),
         "dynamic_co_wave_transition_status": dynamic_transition.get("status", "not_requested"),
+        "dynamic_co_wave_transition_contract_version": dynamic_transition.get("contract_version"),
+        "dynamic_co_wave_transition_config_sha256": (dynamic_transition.get("provenance") or {}).get("config_sha256"),
         "dynamic_transition_supported_wave_count": dynamic_summary.get("transition_supported_wave_count"),
         "dynamic_transition_pair_count": dynamic_summary.get("pair_transition_count"),
         "causality_status": "not_tested",
