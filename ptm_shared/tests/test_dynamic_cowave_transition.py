@@ -39,6 +39,9 @@ def test_dynamic_annotation_preserves_static_membership_and_records_transitions(
     assert result["lotto"]["evaluable_pair_fold_count"] > 0
     assert "pair_transitions" not in result
     assert result["transition_examples"]["truncation"]["full_event_sets_used_for_metrics"] is True
+    wave_summary = result["per_wave_summary"][0]
+    assert sum(wave_summary["pair_transition_type_counts"].values()) == wave_summary["pair_transition_count"]
+    assert sum(wave_summary["site_transition_type_counts"].values()) == wave_summary["site_transition_count"]
 
 
 def test_truth_free_evaluation_never_promotes_causality() -> None:

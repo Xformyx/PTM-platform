@@ -107,13 +107,41 @@ def _per_wave_summary(
     grouped: dict[str, dict[str, Any]] = {}
     for row in pair_rows:
         wave_id = str(row.get("static_wave_id") or "")
-        entry = grouped.setdefault(wave_id, {"static_wave_id": wave_id, "pair_transition_count": 0, "nonpersistence_pair_transition_count": 0, "site_transition_count": 0})
+        entry = grouped.setdefault(
+            wave_id,
+            {
+                "static_wave_id": wave_id,
+                "pair_transition_count": 0,
+                "nonpersistence_pair_transition_count": 0,
+                "site_transition_count": 0,
+                "pair_transition_type_counts": {},
+                "site_transition_type_counts": {},
+            },
+        )
         entry["pair_transition_count"] += 1
         entry["nonpersistence_pair_transition_count"] += int(row.get("transition_type") != "persistence")
+        transition_type = str(row.get("transition_type") or "unknown")
+        entry["pair_transition_type_counts"][transition_type] = int(
+            entry["pair_transition_type_counts"].get(transition_type, 0)
+        ) + 1
     for row in site_rows:
         wave_id = str(row.get("static_wave_id") or "")
-        entry = grouped.setdefault(wave_id, {"static_wave_id": wave_id, "pair_transition_count": 0, "nonpersistence_pair_transition_count": 0, "site_transition_count": 0})
+        entry = grouped.setdefault(
+            wave_id,
+            {
+                "static_wave_id": wave_id,
+                "pair_transition_count": 0,
+                "nonpersistence_pair_transition_count": 0,
+                "site_transition_count": 0,
+                "pair_transition_type_counts": {},
+                "site_transition_type_counts": {},
+            },
+        )
         entry["site_transition_count"] += 1
+        transition_type = str(row.get("transition_type") or "unknown")
+        entry["site_transition_type_counts"][transition_type] = int(
+            entry["site_transition_type_counts"].get(transition_type, 0)
+        ) + 1
     return [grouped[wave_id] for wave_id in sorted(grouped)]
 
 
