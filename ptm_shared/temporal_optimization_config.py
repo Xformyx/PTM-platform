@@ -62,9 +62,23 @@ CROSS_LAYER_CONFIG = {
     "permutation_iterations": 0,
     "random_seed": 20260827,
 }
+DYNAMIC_COWAVE_CONTRACT_VERSION = "dynamic_co_wave_transition.v1"
+DYNAMIC_COWAVE_SELECTION_LEDGER_SHA256 = "02ab551eb3c345250fa1e76758599e18026fa6b8c72889d95b7c533ebede882e"
+DYNAMIC_COWAVE_SELECTION_RECORD_SHA256 = "2d12157f12eed4a3322a9a0253257352003e84044534d53dec03336770b1a08e"
+DYNAMIC_COWAVE_LEDGER_TAIL_RECORD_SHA256 = "baf6849198616b6771358cc3e6936c2ac83b7c2c5f558741600345322aefdf51"
+DYNAMIC_COWAVE_CONFIG = {
+    "activity_threshold_fc": 0.40,
+    "minimum_observed_timepoints": 4,
+    "membership_universe": "retained_canonical_wave_members_only",
+    "lotto": "leave_one_timepoint_out",
+    "maximum_pair_transition_examples": 500,
+    "maximum_site_transition_examples": 500,
+    "maximum_membership_examples": 250,
+}
 _ADDITIVE_V2_CONFIG = {
     "contract_version": ADDITIVE_V2_CONTRACT_VERSION,
     "cross_layer": CROSS_LAYER_CONFIG,
+    "dynamic_cowave": DYNAMIC_COWAVE_CONFIG,
 }
 ADDITIVE_V2_CONFIG_SHA256 = hashlib.sha256(
     json.dumps(_ADDITIVE_V2_CONFIG, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -103,6 +117,16 @@ def provenance() -> dict[str, object]:
             "selection_trial_count": 9,
             "truth_used_for_selection": False,
             "cross_layer": dict(CROSS_LAYER_CONFIG),
+            "dynamic_cowave": {
+                "contract_version": DYNAMIC_COWAVE_CONTRACT_VERSION,
+                "configuration": dict(DYNAMIC_COWAVE_CONFIG),
+                "selection_ledger_sha256": DYNAMIC_COWAVE_SELECTION_LEDGER_SHA256,
+                "selection_record_sha256": DYNAMIC_COWAVE_SELECTION_RECORD_SHA256,
+                "ledger_tail_record_sha256": DYNAMIC_COWAVE_LEDGER_TAIL_RECORD_SHA256,
+                "selection_trial_count": 3,
+                "truth_used_for_selection": False,
+                "selection_objective": "0.45_pair_loto_jaccard + 0.25_site_loto_jaccard + 0.20_active_pair_coverage + 0.10_transition_resolution",
+            },
             "protein_replicate_stability_status": "unavailable_condition_level_only",
         },
     }

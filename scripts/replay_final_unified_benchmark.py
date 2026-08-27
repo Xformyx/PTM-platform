@@ -21,6 +21,7 @@ from ptm_shared.temporal_optimization_config import (
     ADDITIVE_V2_CONFIG_SHA256,
     CONFIG_SHA256,
     CROSS_LAYER_CONFIG,
+    DYNAMIC_COWAVE_CONFIG,
     SITE_AGGREGATION,
     WAVE_CONFIG,
 )
@@ -123,6 +124,7 @@ def main() -> int:
             "v1_config_sha256": CONFIG_SHA256,
             "additive_v2_config_sha256": ADDITIVE_V2_CONFIG_SHA256,
             "cross_layer_config": CROSS_LAYER_CONFIG,
+            "dynamic_cowave_config": DYNAMIC_COWAVE_CONFIG,
         },
         "output_artifact_sha256": _sha256(result_path),
         "counts": {

@@ -59,9 +59,9 @@ def test_truth_free_evaluation_never_promotes_causality() -> None:
     assert result["selection_boundary"].startswith("Truth-free")
 
 
-def test_compact_sidecar_summary_keeps_transition_opt_in() -> None:
+def test_compact_sidecar_summary_reports_disabled_transition_explicitly() -> None:
     summary = summarize_temporal_ptm_protein_analysis(
-        {"dynamic_co_wave_transition": {"status": "not_requested"}}
+        {"dynamic_co_wave_transition": {"status": "disabled_by_caller"}}
     )
-    assert summary["dynamic_co_wave_transition_status"] == "not_requested"
+    assert summary["dynamic_co_wave_transition_status"] == "disabled_by_caller"
     assert summary["dynamic_transition_supported_wave_count"] is None

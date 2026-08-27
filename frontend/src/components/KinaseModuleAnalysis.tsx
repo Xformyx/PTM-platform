@@ -4664,6 +4664,9 @@ interface TemporalPtmProteinAnalysisSummary {
   mechanism_chain_count?: number;
   evidence_supported_mechanism_count?: number;
   kinase_timing_status?: string | null;
+  dynamic_co_wave_transition_status?: string | null;
+  dynamic_transition_supported_wave_count?: number | null;
+  dynamic_transition_pair_count?: number | null;
   causality_status?: "not_tested";
   interpretation_boundary?: string;
   top_cross_layer_edges?: Array<{
@@ -5467,8 +5470,14 @@ function KinaseActivityHeatmapView({
                   <span>Mechanism candidates: <b>{evidence.mechanism_chain_count || 0}</b></span>
                   <span>Evidence-supported: <b>{evidence.evidence_supported_mechanism_count || 0}</b></span>
                   <span>Kinase timing: <b>{evidence.kinase_timing_status || "not_available"}</b></span>
+                  <span>Dynamic co-wave: <b>{evidence.dynamic_co_wave_transition_status || "not_available"}</b></span>
+                  <span>Transition-supported Waves: <b>{evidence.dynamic_transition_supported_wave_count ?? 0}</b></span>
+                  <span>Observed pair transitions: <b>{evidence.dynamic_transition_pair_count ?? 0}</b></span>
                   <span>Causality: <b>not tested</b></span>
                 </div>
+                <p className="text-[10px] text-teal-800/80 dark:text-teal-200/80">
+                  Dynamic co-wave reports local membership persistence, split, merge, recruitment, or exit within the static Wave. It does not change Wave membership, TMM attribution, kinase ranking, or establish kinase switching.
+                </p>
                 {rows.length > 0 ? (
                   <div className="overflow-x-auto">
                     <table className="w-full text-[10px]">

@@ -9,7 +9,7 @@ from ptm_shared.enrichment_free_temporal_sidecar import (
     build_ptm_protein_pairs,
     summarize_temporal_ptm_protein_analysis,
 )
-from ptm_shared.temporal_optimization_config import CROSS_LAYER_CONFIG
+from ptm_shared.temporal_optimization_config import CROSS_LAYER_CONFIG, DYNAMIC_COWAVE_CONFIG
 
 from app.services.benchmark_artifact import attach_v2_extensions
 
@@ -70,6 +70,8 @@ def test_attach_v2_extensions_preserves_v1_top_level_fields(tmp_path) -> None:
         assert augmented[key] == value
     assert augmented["compatibility"]["v1_top_level_fields_preserved"] is True
     assert augmented["v2_extensions"]["schema_version"].endswith("v2.sidecar")
+    assert augmented["v2_extensions"]["dynamic_co_wave_transition"]["status"] == "computed"
+    assert augmented["v2_extensions"]["provenance"]["frozen_config"]["dynamic_cowave"] == DYNAMIC_COWAVE_CONFIG
 
 
 def test_cross_layer_edge_remains_non_causal() -> None:
@@ -174,6 +176,8 @@ def test_production_order_uses_shared_v2_sidecar_contract_without_truth(tmp_path
     assert sidecar["provenance"]["shared_engine_contract"] == "unified_temporal_ptm_protein.v1"
     assert sidecar["temporal_wave_contract"]["analysis_scope"] == "production_observed_only_complete_ptm_vectors"
     assert sidecar["provenance"]["benchmark_truth_used"] is False
+    assert sidecar["dynamic_co_wave_transition"]["status"] == "computed"
+    assert sidecar["dynamic_co_wave_transition"]["provenance"]["configuration"] == DYNAMIC_COWAVE_CONFIG
     assert all(row["causality_status"] == "not_tested" for row in sidecar["ptm_protein_pairs"])
     assert summary["full_artifact_available"] is True
     assert summary["artifact_path"] == "temporal_ptm_protein_analysis_v2.json"

@@ -20,6 +20,7 @@ from ptm_shared.temporal_optimization_config import (
     CONFIG_SHA256,
     CONTRACT_VERSION,
     CROSS_LAYER_CONFIG,
+    DYNAMIC_COWAVE_CONFIG,
     SELECTION_RECORD_SHA256,
     TMM_CONFIG,
     WAVE_CONFIG,
@@ -58,6 +59,7 @@ def main() -> int:
     parser.add_argument("--expect-eligible-cross-layer-edges", type=int, default=1154)
     parser.add_argument("--expect-mechanism-chains", type=int, default=8000)
     parser.add_argument("--expect-direct-evidence-rows", type=int, default=47)
+    parser.add_argument("--expect-dynamic-supported-waves", type=int, default=8)
     args = parser.parse_args()
 
     artifact = _read(args.artifact)
@@ -139,6 +141,11 @@ def main() -> int:
         direct_linkage = sidecar_provenance.get("direct_evidence_to_tmm_linkage") or {}
         edges = list(sidecar.get("cross_layer_edges") or [])
         timing_predictions = list(sidecar.get("kinase_timing_predictions") or [])
+        dynamic = sidecar.get("dynamic_co_wave_transition") or {}
+        dynamic_provenance = dynamic.get("provenance") or {}
+        dynamic_summary = dynamic.get("summary") or {}
+        dynamic_lotto = dynamic.get("lotto") or {}
+        dynamic_truncation = (dynamic.get("transition_examples") or {}).get("truncation") or {}
         checks.update(
             {
                 "additive_v2_schema": sidecar.get("schema_version") == "enrichment_free_temporal_mechanism.v2.sidecar",
@@ -187,6 +194,35 @@ def main() -> int:
                     for row in (sidecar.get("mechanism_chains") or [])
                 ),
                 "additive_v2_direct_source_audit_recorded": bool(direct_audit.get("evidence_summary")),
+                "dynamic_cowave_computed": dynamic.get("status") == "computed",
+                "dynamic_cowave_config": all(
+                    _close(dynamic_provenance.get("configuration", {}).get(key), value)
+                    if isinstance(value, (int, float))
+                    else dynamic_provenance.get("configuration", {}).get(key) == value
+                    for key, value in DYNAMIC_COWAVE_CONFIG.items()
+                ),
+                "dynamic_cowave_static_membership_immutable": dynamic_provenance.get("membership_mutation") == "forbidden",
+                "dynamic_cowave_tmm_immutable": dynamic_provenance.get("tmm_mutation") == "forbidden",
+                "dynamic_cowave_pair_lotto": _close(
+                    dynamic_lotto.get("mean_pair_transition_jaccard"), 0.7101714785008109
+                ),
+                "dynamic_cowave_site_lotto": _close(
+                    dynamic_lotto.get("mean_site_transition_jaccard"), 0.7222222222222222
+                ),
+                "dynamic_cowave_supported_waves": (
+                    dynamic_summary.get("transition_supported_wave_count")
+                    == args.expect_dynamic_supported_waves
+                ),
+                "dynamic_cowave_compact_payload": (
+                    int(dynamic_truncation.get("pair_transition_total_count") or 0)
+                    > len((dynamic.get("transition_examples") or {}).get("pair_transitions") or [])
+                    and len((dynamic.get("transition_examples") or {}).get("pair_transitions") or [])
+                    <= int(dynamic_truncation.get("maximum_pair_transition_examples") or 0)
+                    and dynamic_truncation.get("full_event_sets_used_for_metrics") is True
+                ),
+                "dynamic_cowave_observational_boundary": "not kinase or causal evidence" in str(
+                    dynamic_provenance.get("interpretation_boundary") or ""
+                ),
             }
         )
 

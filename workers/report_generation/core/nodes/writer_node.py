@@ -286,7 +286,7 @@ def run_section_writing(state: dict) -> dict:
             "This packet is produced by the same temporal PTM–protein engine used in ordinary production analysis and strict-blind benchmarking.",
             "It summarizes measured PTM and condition-level protein trajectories. Do NOT describe temporal precedence as causality.",
             "",
-            "Counts: protein trajectories={protein}; same-gene PTM–protein pairs={pairs}; cross-layer edges={edges}; temporally eligible edges={eligible}; mechanism candidates={chains}; evidence-supported mechanisms={supported}; kinase timing={timing}.".format(
+            "Counts: protein trajectories={protein}; same-gene PTM–protein pairs={pairs}; cross-layer edges={edges}; temporally eligible edges={eligible}; mechanism candidates={chains}; evidence-supported mechanisms={supported}; kinase timing={timing}; dynamic co-wave status={dynamic_status}; transition-supported Waves={dynamic_waves}; observed within-Wave pair transitions={dynamic_pairs}.".format(
                 protein=temporal_ptm_protein_analysis.get("protein_trajectory_count", 0),
                 pairs=temporal_ptm_protein_analysis.get("ptm_protein_pair_count", 0),
                 edges=temporal_ptm_protein_analysis.get("cross_layer_edge_count", 0),
@@ -294,6 +294,9 @@ def run_section_writing(state: dict) -> dict:
                 chains=temporal_ptm_protein_analysis.get("mechanism_chain_count", 0),
                 supported=temporal_ptm_protein_analysis.get("evidence_supported_mechanism_count", 0),
                 timing=temporal_ptm_protein_analysis.get("kinase_timing_status", "not_available"),
+                dynamic_status=temporal_ptm_protein_analysis.get("dynamic_co_wave_transition_status", "not_available"),
+                dynamic_waves=temporal_ptm_protein_analysis.get("dynamic_transition_supported_wave_count", 0),
+                dynamic_pairs=temporal_ptm_protein_analysis.get("dynamic_transition_pair_count", 0),
             ),
         ]
         for edge in temporal_ptm_protein_analysis.get("top_cross_layer_edges", [])[:12]:
@@ -311,6 +314,7 @@ def run_section_writing(state: dict) -> dict:
                 )
             )
         cross_layer_lines.extend([
+            "Dynamic co-wave labels only describe local same-sign membership persistence, split, merge, recruitment, or exit within immutable static Waves. They do not prove kinase switching, change TMM attribution, or establish causal propagation.",
             "Use these rows to distinguish temporal evidence from a causal claim, state counterexamples or alternative explanations, and propose a perturbation/orthogonal validation only as a future test.",
             "=== END SHARED PTM–PROTEIN TEMPORAL EVIDENCE ===",
         ])

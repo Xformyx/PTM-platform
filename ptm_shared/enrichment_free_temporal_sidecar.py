@@ -8,7 +8,12 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from ptm_shared.directed_temporal_relationship import analyze_directed_temporal_relationship
-from ptm_shared.temporal_optimization_config import CONTRACT_VERSION, CROSS_LAYER_CONFIG, WAVE_CONFIG
+from ptm_shared.temporal_optimization_config import (
+    CONTRACT_VERSION,
+    CROSS_LAYER_CONFIG,
+    DYNAMIC_COWAVE_CONFIG,
+    WAVE_CONFIG,
+)
 
 
 SIDECAR_SCHEMA_VERSION = "enrichment_free_temporal_mechanism.v2.sidecar"
@@ -487,6 +492,7 @@ def build_v2_sidecar(
     tmm_result: Mapping[str, Any] | None = None,
     cross_layer_config: Mapping[str, Any] | None = None,
     dynamic_transition_config: Mapping[str, Any] | None = None,
+    enable_dynamic_transition: bool = True,
 ) -> dict[str, Any]:
     protein_time_series, protein_provenance = load_protein_time_series(output_dir, ptm_type)
     ptm_protein_pairs = build_ptm_protein_pairs(site_observations, protein_time_series)
@@ -504,10 +510,10 @@ def build_v2_sidecar(
         cross_layer_edges,
         kinase_timing_predictions,
     )
-    if dynamic_transition_config is None:
+    if not enable_dynamic_transition:
         dynamic_transition: dict[str, Any] = {
             "contract_version": "dynamic_co_wave_transition.v1",
-            "status": "not_requested",
+            "status": "disabled_by_caller",
             "interpretation_boundary": "Optional additive local co-movement annotation; static Wave membership and TMM are unchanged.",
         }
     else:
@@ -515,7 +521,7 @@ def build_v2_sidecar(
 
         dynamic_transition = analyze_dynamic_co_wave_transitions(
             dict(wave_contract or {}),
-            config=dynamic_transition_config,
+            config=dict(DYNAMIC_COWAVE_CONFIG if dynamic_transition_config is None else dynamic_transition_config),
         )
         dynamic_transition["status"] = "computed"
     return {
@@ -613,6 +619,7 @@ def build_production_temporal_ptm_protein_analysis(
     tmm_result: Mapping[str, Any],
     cross_layer_config: Mapping[str, Any] | None = None,
     dynamic_transition_config: Mapping[str, Any] | None = None,
+    enable_dynamic_transition: bool = True,
 ) -> dict[str, Any]:
     """Build the exact v2 sidecar contract for a normal production order.
 
@@ -653,6 +660,7 @@ def build_production_temporal_ptm_protein_analysis(
         tmm_result=tmm_result,
         cross_layer_config=cross_layer_config,
         dynamic_transition_config=dynamic_transition_config,
+        enable_dynamic_transition=enable_dynamic_transition,
     )
     sidecar["provenance"]["analysis_mode"] = "production"
     sidecar["provenance"]["shared_engine_contract"] = "unified_temporal_ptm_protein.v1"

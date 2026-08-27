@@ -22,6 +22,7 @@ from ptm_shared.temporal_optimization_config import (
     ADDITIVE_V2_CONFIG_SHA256,
     ADDITIVE_V2_CONTRACT_VERSION,
     CROSS_LAYER_CONFIG,
+    DYNAMIC_COWAVE_CONFIG,
 )
 from ptm_shared.temporal_wave_engine import analyze_temporal_waves
 
@@ -56,6 +57,10 @@ def attach_v2_extensions(
         "selected_config_applied": effective_cross_layer == CROSS_LAYER_CONFIG,
         "config_sha256": ADDITIVE_V2_CONFIG_SHA256 if effective_cross_layer == CROSS_LAYER_CONFIG else effective_sha256,
         "cross_layer": effective_cross_layer,
+        "dynamic_cowave": dict(DYNAMIC_COWAVE_CONFIG),
+        "dynamic_cowave_config_sha256": (
+            (sidecar.get("dynamic_co_wave_transition") or {}).get("provenance") or {}
+        ).get("config_sha256"),
         "selection_boundary": "Numeric time-course evidence only; locked workbook truth and identities were unavailable during selection.",
     }
     augmented["v2_extensions"] = sidecar
