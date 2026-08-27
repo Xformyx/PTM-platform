@@ -561,7 +561,7 @@ Backend: vector-plot (receptor inference)
 - [x] 공용 dynamic co-wave transition engine·artifact provenance·regression 구현
 - [x] real raw artifact에서 static 대비 dynamic truth-free metrics 계산
 - [x] preregistered adoption gate, blind boundary, v1 noninferiority 및 full regression 검증
-- [ ] 채택 또는 보류 Methods·Results 문서화, GitHub main 반영 및 결과 보고
+- [x] 채택 또는 보류 Methods·Results 문서화, GitHub main 반영 및 결과 보고
 
 ## Latest-main Synchronization Before Follow-up Review
 - [x] local benchmark worktree의 미반영 500-diagnosis 기록을 보존하고 upstream main과 차이 확인
