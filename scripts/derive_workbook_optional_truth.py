@@ -12,6 +12,7 @@ from benchmarking.workbook_optional_truth_derivation import (
     derive_optional_truth_from_workbook,
     provenance_summary,
 )
+from benchmarking.v2_truth_adapter import build_additive_v2_truth
 
 
 OPTIONAL_HEADERS = {
@@ -53,11 +54,16 @@ def main() -> int:
     args = parser.parse_args()
     base_truth = json.loads(Path(args.base_truth).read_text(encoding="utf-8"))
     derived = derive_optional_truth_from_workbook(base_truth, workbook_path=args.workbook)
+    additive_truth = build_additive_v2_truth(derived)
     output_truth = Path(args.output_truth)
     output_truth.parent.mkdir(parents=True, exist_ok=True)
-    output_truth.write_text(json.dumps(derived, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    output_truth.write_text(json.dumps(additive_truth, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     _write_extension_workbook(Path(args.workbook), Path(args.output_workbook), derived)
-    summary = provenance_summary(derived)
+    summary = {
+        **provenance_summary(derived),
+        "additive_truth_sha256": additive_truth["truth_sha256"],
+        "mechanism_evaluability": additive_truth["evaluability"]["mechanism"],
+    }
     Path(args.summary_output).write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0

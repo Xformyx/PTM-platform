@@ -20,9 +20,34 @@ from .contracts import sha256_file
 
 
 def _tokenize_outputs(value: Any) -> list[str]:
-    tokens = re.findall(r"\b[A-Z][A-Z0-9-]{1,15}\b", str(value or "").upper())
-    excluded = {"NO", "AND", "OR", "USE", "HIGH", "MEDIUM", "LOW", "PIP3"}
-    return sorted({token for token in tokens if token not in excluded})
+    """Extract explicit protein-like targets, not prose or PTM-position fragments.
+
+    The workbook output field is free text.  This intentionally conservative
+    parser only copies token-shaped targets that are already written there; it
+    never uses an analysis artifact to rescue, expand, or rank a token.
+    """
+
+    normalized = str(value or "").upper()
+    normalized = re.sub(r"\b[A-Z0-9-]+-(?:MEDIATED|DEPENDENT)\b", " ", normalized)
+    normalized = re.sub(r"\bP-([A-Z][A-Z0-9-]+)\b", r"\1", normalized)
+    tokens = re.findall(r"\b[A-Z0-9][A-Z0-9-]{1,15}\b", normalized)
+    excluded = {
+        "NO", "AND", "OR", "OF", "TO", "USE", "HIGH", "MEDIUM", "LOW", "PIP3", "PY",
+        "PST", "PS", "PT", "ACTIVATION", "INACTIVATION", "INHIBITION",
+        "PHOSPHORYLATION", "DEPHOSPHORYLATION", "DIRECT", "PREFERRED",
+        "OUTPUT", "OUTPUTS", "DOWNSTREAM", "UPSTREAM", "ANCHOR", "ANCHORS",
+        "RECRUITMENT", "DEPENDENT", "MEDIATED", "SIGNALING", "PATHWAY",
+        "SER", "THR", "TYR", "SITE", "SITES", "UNKNOWN",
+    }
+    protein_like = {
+        token
+        for token in tokens
+        if token not in excluded
+        and re.search(r"[A-Z]", token)
+        and not re.fullmatch(r"P?[STY]\d+", token)
+        and not re.fullmatch(r"P?[STY]", token)
+    }
+    return sorted(protein_like)
 
 
 def _canonical_payload_hash(payload: Mapping[str, Any]) -> str:
