@@ -576,7 +576,7 @@ Backend: vector-plot (receptor inference)
 - [x] frontend temporal evidence panel·comparative analysis·Report·Chat·Data-Grounded Analysis consumer 적용 점검
 - [x] 누락된 공용 configuration/provenance/evidence packet 경로 additive integration 구현
 - [x] production regression·TypeScript build·blind isolation·backward compatibility 검증
-- [ ] 운영 적용 범위·재계산 요구사항 문서화 및 GitHub main 반영
+- [x] 운영 적용 범위·재계산 요구사항 문서화 및 GitHub main 반영
 
 ## Latest-main Synchronization Before Follow-up Review
 - [x] local benchmark worktree의 미반영 500-diagnosis 기록을 보존하고 upstream main과 차이 확인
