@@ -547,6 +547,13 @@ Backend: vector-plot (receptor inference)
 - [x] truth-free raw replay·semantic noninferiority·blind boundary·regression 검증
 - [x] 최적화 Methods·Results·overfitting boundary 문서화 및 GitHub main 반영
 
+## Workbook-Evidence-Only PTM–Protein Reference Extension
+- [x] workbook sheet·curated field 근거와 optional truth schema 감사
+- [x] workbook-derived reference만 허용하는 optional PTM–protein truth derivation 구현
+- [x] frozen integrated artifact를 runner-only cross-layer·mechanism evaluator로 재평가
+- [x] derivation provenance·non-evaluable boundary·benchmark report 업데이트
+- [ ] regression·blind isolation 검증, GitHub main 반영 및 평가 결과 전달
+
 ## Latest-main Synchronization Before Follow-up Review
 - [x] local benchmark worktree의 미반영 500-diagnosis 기록을 보존하고 upstream main과 차이 확인
 - [x] GitHub `main` 최신 revision으로 안전하게 rebase/sync

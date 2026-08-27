@@ -92,7 +92,8 @@ def _normalize_mechanism_chains(rows: list[Mapping[str, Any]]) -> list[dict[str,
                 "evidence_tier": _field(row, "Evidence_tier", "evidence_tier"),
                 "reference": _field(row, "Reference", "reference"),
                 "notes": _field(row, "Notes", "notes"),
-                "reference_origin": "optional_v2_mechanism_chains",
+                "reference_origin": _field(row, "Reference_origin", "reference_origin")
+                or "optional_v2_mechanism_chains",
             }
         )
     return normalized
