@@ -592,6 +592,12 @@ Backend: vector-plot (receptor inference)
 - [x] 최신 보고서의 근거성·기전 해석·claim-boundary 개선과 잔여 약점을 평가
 - [x] 사용자용 before-after 비교 보고서 작성 및 전달
 
+## Representation-Benchmark-Augmented Report Comparison
+- [x] representation benchmark JSON schema·provenance·quality-check audit
+- [x] JSON representation coverage와 최신 report narrative·table·figure usage 대조
+- [x] before-after report의 objective representation utilization·claim quality 평가
+- [x] 정량 보강 comparison report 작성 및 전달
+
 ## Latest-main Synchronization Before Follow-up Review
 - [x] local benchmark worktree의 미반영 500-diagnosis 기록을 보존하고 upstream main과 차이 확인
 - [x] GitHub `main` 최신 revision으로 안전하게 rebase/sync
