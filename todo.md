@@ -645,4 +645,4 @@ Backend: vector-plot (receptor inference)
 - [x] shared sidecar full artifact 생성 및 compact summary의 atomic persistence 구현
 - [x] normal Order·legacy cache·Report state의 sidecar 전달 회귀 테스트 구현
 - [x] artifact contract·blind truth isolation·worker suite 검증
-- [ ] 운영 재기동·새 Order/Report artifact 확인 절차 문서화 및 GitHub main 반영
+- [x] 운영 재기동·새 Order/Report artifact 확인 절차 문서화 및 GitHub main 반영
