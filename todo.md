@@ -563,6 +563,13 @@ Backend: vector-plot (receptor inference)
 - [x] preregistered adoption gate, blind boundary, v1 noninferiority 및 full regression 검증
 - [x] 채택 또는 보류 Methods·Results 문서화, GitHub main 반영 및 결과 보고
 
+## Final Dynamic Co-Wave Truth-Free Graphs and Manuscript Section
+- [x] current commit·frozen numeric inputs·truth-free exclusion·graph plan 확인
+- [x] selected dynamic transition 포함 final truth-free artifact 및 metric replay 실행
+- [x] static 대비 dynamic coverage·LOTO·transition·cross-layer alignment graph와 source data 생성
+- [x] PNG/PDF non-empty visual QC와 논문용 truth-free purpose·methods·results·discussion 작성
+- [ ] artifact integrity·blind boundary·regression 검증, GitHub main 반영 및 graph bundle 전달
+
 ## Latest-main Synchronization Before Follow-up Review
 - [x] local benchmark worktree의 미반영 500-diagnosis 기록을 보존하고 upstream main과 차이 확인
 - [x] GitHub `main` 최신 revision으로 안전하게 rebase/sync

@@ -61,8 +61,8 @@ def _save_figure(fig: plt.Figure, path: Path, pdf: PdfPages) -> None:
 
 def _figure_style(fig: plt.Figure, title: str, subtitle: str) -> None:
     fig.patch.set_facecolor("white")
-    fig.suptitle(title, fontsize=18, fontweight="bold", color=PALETTE["ink"], x=0.02, ha="left", y=0.99)
-    fig.text(0.02, 0.945, subtitle, fontsize=9.5, color="#4d6175", ha="left")
+    fig.suptitle(title, fontsize=18, fontweight="bold", color=PALETTE["ink"], x=0.02, ha="left", y=0.985)
+    fig.text(0.02, 0.915, subtitle, fontsize=9.5, color="#4d6175", ha="left")
 
 
 def _axis_style(axis: plt.Axes) -> None:
@@ -181,7 +181,7 @@ def render(*, evaluation: Mapping[str, Any], artifact: Mapping[str, Any], output
             for index, value in enumerate(values):
                 axis.text(index, value + (limits[1] * 0.025), f"{value:.3f}", ha="center", va="bottom", fontsize=8, color=PALETTE["ink"])
         axes.flat[0].text(selected_index, 0.03, "selected", ha="center", va="bottom", fontsize=8, fontweight="bold", color=PALETTE["gold"])
-        fig.tight_layout(rect=(0, 0, 1, 0.91))
+        fig.tight_layout(rect=(0, 0, 1, 0.87))
         _save_figure(fig, figures / "TF1_candidate_comparison", pdf)
 
         fig, axis = plt.subplots(figsize=(12, 6))
@@ -199,7 +199,7 @@ def render(*, evaluation: Mapping[str, Any], artifact: Mapping[str, Any], output
         axis.legend(frameon=False, loc="lower left")
         _axis_style(axis)
         axis.text(0.99, 0.08, f"mean pair = {lotto.get('mean_pair_transition_jaccard', 0):.3f}\nmean site = {lotto.get('mean_site_transition_jaccard', 0):.3f}", transform=axis.transAxes, ha="right", va="bottom", fontsize=9, color=PALETTE["ink"])
-        fig.tight_layout(rect=(0, 0, 1, 0.90))
+        fig.tight_layout(rect=(0, 0, 1, 0.87))
         _save_figure(fig, figures / "TF2_loto_stability", pdf)
 
         fig, axis = plt.subplots(figsize=(12, 7))
@@ -214,7 +214,7 @@ def render(*, evaluation: Mapping[str, Any], artifact: Mapping[str, Any], output
         axis.set_ylabel("Immutable static Wave", fontsize=10)
         axis.legend(ncol=max(1, min(5, len(event_types))), frameon=False, loc="upper center", bbox_to_anchor=(0.5, -0.12))
         _axis_style(axis)
-        fig.tight_layout(rect=(0, 0.05, 1, 0.90))
+        fig.tight_layout(rect=(0, 0.05, 1, 0.87))
         _save_figure(fig, figures / "TF3_wave_transition_composition", pdf)
 
         fig, axes = plt.subplots(1, 2, figsize=(12, 6))
@@ -248,7 +248,7 @@ def render(*, evaluation: Mapping[str, Any], artifact: Mapping[str, Any], output
         _axis_style(axes[1])
         for index, value in enumerate(count_values):
             axes[1].text(index, value * 1.25, f"{value:,}", ha="center", va="bottom", fontsize=8)
-        fig.tight_layout(rect=(0, 0, 1, 0.90))
+        fig.tight_layout(rect=(0, 0, 1, 0.87))
         _save_figure(fig, figures / "TF4_truth_free_evidence_scale", pdf)
 
     png_paths = sorted(figures.glob("*.png"))
