@@ -598,6 +598,14 @@ Backend: vector-plot (receptor inference)
 - [x] before-after report의 objective representation utilization·claim quality 평가
 - [x] 정량 보강 comparison report 작성 및 전달
 
+## Report LLM Numerical Evidence-Contract Upgrade
+- [x] current report context assembly, supplement budget, numerical evidence loss 및 claim guard audit
+- [ ] structured site·wave·TMM·cross-layer·transition·uncertainty evidence packet and tiered claim contract 설계
+- [ ] report state, question generator and section writers에 compact evidence packet·budget allocation·citation token 구현
+- [x] report-fidelity evaluator와 synthetic/real artifact contract regression 구현
+- [x] LLM context coverage, claim safety, cross-stack validation 및 blind truth isolation 검증
+- [x] 운영 적용 문서, GitHub main 반영 및 개선 결과 전달
+
 ## Latest-main Synchronization Before Follow-up Review
 - [x] local benchmark worktree의 미반영 500-diagnosis 기록을 보존하고 upstream main과 차이 확인
 - [x] GitHub `main` 최신 revision으로 안전하게 rebase/sync

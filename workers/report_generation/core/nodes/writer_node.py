@@ -6,10 +6,12 @@ Generates: Abstract, Introduction, Results, Discussion, Conclusion.
 Each section uses LLM with published literature context for integration.
 """
 
+import json
 import logging
 import os
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 from typing import Dict, List
 
 from common.llm_client import LLMClient
@@ -27,9 +29,15 @@ from report_generation.core.dynamic_prompt_generator import (
     build_pathway_context_for_llm,
     build_signal_propagation_json,
     build_tf_activity_inference,
+    build_temporal_evidence_packet,
+    format_temporal_evidence_packet_for_llm,
     format_condition_display_name,
 )
 from report_generation.core.figure_context import FigureInformationGenerator
+from report_generation.core.report_temporal_fidelity import (
+    audit_report_temporal_fidelity,
+    strip_internal_data_labels,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -274,51 +282,23 @@ def run_section_writing(state: dict) -> dict:
 
     sections: Dict[str, str] = {}
     prev_sections: Dict[str, str] = {}
+    temporal_report_fidelity: Dict[str, dict] = {}
 
     # v10.1: Load vector_plot_raw_data and pipeline_statistics from state
     vector_plot_raw_data = state.get("vector_plot_raw_data", []) or []
     pipeline_statistics = state.get("pipeline_statistics", {}) or {}
     temporal_ptm_protein_analysis = state.get("temporal_ptm_protein_analysis", {}) or {}
-    aux_cross_layer_temporal = ""
-    if isinstance(temporal_ptm_protein_analysis, dict) and temporal_ptm_protein_analysis:
-        cross_layer_lines = [
-            "=== SHARED PTM–PROTEIN TEMPORAL EVIDENCE (OBSERVATIONAL) ===",
-            "This packet is produced by the same temporal PTM–protein engine used in ordinary production analysis and strict-blind benchmarking.",
-            "It summarizes measured PTM and condition-level protein trajectories. Do NOT describe temporal precedence as causality.",
-            "",
-            "Counts: protein trajectories={protein}; same-gene PTM–protein pairs={pairs}; cross-layer edges={edges}; temporally eligible edges={eligible}; mechanism candidates={chains}; evidence-supported mechanisms={supported}; kinase timing={timing}; dynamic co-wave status={dynamic_status}; transition-supported Waves={dynamic_waves}; observed within-Wave pair transitions={dynamic_pairs}.".format(
-                protein=temporal_ptm_protein_analysis.get("protein_trajectory_count", 0),
-                pairs=temporal_ptm_protein_analysis.get("ptm_protein_pair_count", 0),
-                edges=temporal_ptm_protein_analysis.get("cross_layer_edge_count", 0),
-                eligible=temporal_ptm_protein_analysis.get("temporally_eligible_edge_count", 0),
-                chains=temporal_ptm_protein_analysis.get("mechanism_chain_count", 0),
-                supported=temporal_ptm_protein_analysis.get("evidence_supported_mechanism_count", 0),
-                timing=temporal_ptm_protein_analysis.get("kinase_timing_status", "not_available"),
-                dynamic_status=temporal_ptm_protein_analysis.get("dynamic_co_wave_transition_status", "not_available"),
-                dynamic_waves=temporal_ptm_protein_analysis.get("dynamic_transition_supported_wave_count", 0),
-                dynamic_pairs=temporal_ptm_protein_analysis.get("dynamic_transition_pair_count", 0),
-            ),
-        ]
-        for edge in temporal_ptm_protein_analysis.get("top_cross_layer_edges", [])[:12]:
-            if not isinstance(edge, dict):
-                continue
-            cross_layer_lines.append(
-                "- Observational candidate: Wave {wave} → {target}; direction={direction}; onset_lag_min={onset}; "
-                "peak_lag_min={peak}; temporally_eligible={eligible}; causality=not_tested.".format(
-                    wave=edge.get("source_wave_id", "unknown"),
-                    target=edge.get("target_gene", "unknown"),
-                    direction=edge.get("direction", "unknown"),
-                    onset=edge.get("onset_lag_minutes"),
-                    peak=edge.get("peak_lag_minutes"),
-                    eligible=edge.get("eligible_for_mechanism_chain", False),
-                )
-            )
-        cross_layer_lines.extend([
-            "Dynamic co-wave labels only describe local same-sign membership persistence, split, merge, recruitment, or exit within immutable static Waves. They do not prove kinase switching, change TMM attribution, or establish causal propagation.",
-            "Use these rows to distinguish temporal evidence from a causal claim, state counterexamples or alternative explanations, and propose a perturbation/orthogonal validation only as a future test.",
-            "=== END SHARED PTM–PROTEIN TEMPORAL EVIDENCE ===",
-        ])
-        aux_cross_layer_temporal = "\n".join(cross_layer_lines)
+    temporal_evidence_packet = build_temporal_evidence_packet(temporal_ptm_protein_analysis)
+    aux_cross_layer_temporal = format_temporal_evidence_packet_for_llm(temporal_evidence_packet)
+    packet_output_dir = state.get("output_dir")
+    if packet_output_dir:
+        try:
+            packet_path = Path(packet_output_dir) / "report_temporal_evidence_packet.json"
+            packet_path.write_text(json.dumps(temporal_evidence_packet, indent=2, sort_keys=True), encoding="utf-8")
+            temporal_evidence_packet["snapshot_path"] = str(packet_path)
+            logger.info("[report-evidence] Saved temporal numerical packet: %s", packet_path)
+        except Exception as packet_error:
+            logger.warning("[report-evidence] Could not save temporal packet snapshot: %s", packet_error)
 
     # v10.7: Load ubiquitin linkage analysis data
     ubiquitin_linkage_data = state.get("ubiquitin_linkage_data", {}) or {}
@@ -688,6 +668,7 @@ def run_section_writing(state: dict) -> dict:
                 supplement_blocks.append(("verified_findings", aux_verified_findings_context))
             if aux_directionality_context:
                 supplement_blocks.append(("directionality", aux_directionality_context))
+            supplement_blocks.append(("temporal_evidence_packet", aux_cross_layer_temporal))
             # Priority 1 (ESSENTIAL — PTM activity profile core): temporal coordination + temporal kinase + receptor + non-PTM effector
             # v9.35: nonptm_temporal promoted to Priority 1 — effector proteins are integral
             # to the receptor→kinase→substrate→effector signal flow narrative.
@@ -701,8 +682,6 @@ def run_section_writing(state: dict) -> dict:
             # v11.8: TF Activity Inference (Priority 1 — cross-validates PTM→TF→target narrative)
             if aux_tf_inference_context:
                 supplement_blocks.append(("tf_inference", aux_tf_inference_context))
-            if aux_cross_layer_temporal:
-                supplement_blocks.append(("cross_layer_temporal", aux_cross_layer_temporal))
             # Priority 2 (important): v98 + structured data
             supplement_blocks.append(("v98_directive", v98_directive))
             supplement_blocks.append(("v98_structured_data", v98_structured_data))
@@ -734,14 +713,13 @@ def run_section_writing(state: dict) -> dict:
             # output budget before all user Research Questions are answered.
             if aux_directionality_context:
                 supplement_blocks.append(("directionality", aux_directionality_context))
+            supplement_blocks.append(("temporal_evidence_packet", aux_cross_layer_temporal))
             supplement_blocks.append(("comovement", comovement_llm_context))
             supplement_blocks.append(("temporal_kinase", temporal_kinase_cascade_llm_context))
             supplement_blocks.append(("receptor_ctx", receptor_llm_context))
             supplement_blocks.append(("nonptm_temporal", aux_nonptm_temporal))
             supplement_blocks.append(("v98_structured_data", v98_structured_data))
             supplement_blocks.append(("vector_plot_compressed", aux_vector_plot_compressed))
-            if aux_cross_layer_temporal:
-                supplement_blocks.append(("cross_layer_temporal", aux_cross_layer_temporal))
             if atlas_claim_ledger_llm_context:
                 supplement_blocks.append(("atlas_claim_ledger", atlas_claim_ledger_llm_context))
 
@@ -751,6 +729,7 @@ def run_section_writing(state: dict) -> dict:
                 supplement_blocks.append(("verified_findings", aux_verified_findings_context))
             if aux_directionality_context:
                 supplement_blocks.append(("directionality", aux_directionality_context))
+            supplement_blocks.append(("temporal_evidence_packet", aux_cross_layer_temporal))
             # v12.1: External evidence-gated candidates are interpretive only.
             # They are excluded from Results and appear only for explicit enhanced discussion.
             if external_coscientist_context:
@@ -766,8 +745,6 @@ def run_section_writing(state: dict) -> dict:
             # v11.8: TF Activity Inference (Priority 1 — cross-validates PTM→TF→target narrative)
             if aux_tf_inference_context:
                 supplement_blocks.append(("tf_inference", aux_tf_inference_context))
-            if aux_cross_layer_temporal:
-                supplement_blocks.append(("cross_layer_temporal", aux_cross_layer_temporal))
             # Priority 2: v98 directive + structured data
             supplement_blocks.append(("v98_directive", v98_directive))
             supplement_blocks.append(("v98_structured_data", v98_structured_data))
@@ -796,8 +773,7 @@ def run_section_writing(state: dict) -> dict:
             # v9.32: Conclusion/Abstract also need temporal coordination summary for comprehensive coverage
             supplement_blocks.append(("comovement", comovement_llm_context))
             supplement_blocks.append(("temporal_kinase", temporal_kinase_cascade_llm_context))
-            if aux_cross_layer_temporal:
-                supplement_blocks.append(("cross_layer_temporal", aux_cross_layer_temporal))
+            supplement_blocks.append(("temporal_evidence_packet", aux_cross_layer_temporal))
 
         # v9.31: Add blocks respecting budget
         current_len = base_len
@@ -880,6 +856,21 @@ def run_section_writing(state: dict) -> dict:
                 section_type, research_results, validated_hypotheses, parsed_ptms,
                 questions=active_questions,
             )
+
+        temporal_report_fidelity[section_type] = audit_report_temporal_fidelity(
+            content,
+            temporal_evidence_packet,
+        )
+        if temporal_report_fidelity[section_type]["status"] != "pass":
+            logger.warning(
+                "[report-evidence] %s temporal fidelity=%s; cited=%d/%d; unsafe=%d",
+                section_type,
+                temporal_report_fidelity[section_type]["status"],
+                temporal_report_fidelity[section_type]["cited_record_count"],
+                temporal_report_fidelity[section_type]["available_record_count"],
+                temporal_report_fidelity[section_type]["unsafe_temporal_claim_count"],
+            )
+        content = strip_internal_data_labels(content)
 
         # Strip self-generated section headings from LLM output
         # LLM sometimes adds its own ## headings (e.g., "## Results Discussion")
@@ -1080,6 +1071,8 @@ def run_section_writing(state: dict) -> dict:
         "tf_inference_data": tf_inference_data if tf_inference_data else {},
         "causal_validation_recommendations": causal_validation_recommendations,
         "perturbation_evidence": perturbation_evidence,
+        "temporal_report_evidence_packet": temporal_evidence_packet,
+        "temporal_report_fidelity": temporal_report_fidelity,
     }
 
 

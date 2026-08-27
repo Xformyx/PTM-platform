@@ -706,6 +706,10 @@ def summarize_temporal_ptm_protein_analysis(
         "dynamic_co_wave_transition_config_sha256": (dynamic_transition.get("provenance") or {}).get("config_sha256"),
         "dynamic_transition_supported_wave_count": dynamic_summary.get("transition_supported_wave_count"),
         "dynamic_transition_pair_count": dynamic_summary.get("pair_transition_count"),
+        "dynamic_transition_site_count": dynamic_summary.get("site_transition_count"),
+        "dynamic_transition_resolution": dynamic_summary.get("transition_resolution"),
+        "dynamic_transition_loto": dict(dynamic_transition.get("lotto") or {}),
+        "dynamic_transition_per_wave": list(dynamic_transition.get("per_wave_summary") or []),
         "causality_status": "not_tested",
         "interpretation_boundary": "Temporal precedence and mechanism packets are observational, falsifiable candidates; they are not causal claims.",
         "top_cross_layer_edges": [
@@ -713,7 +717,8 @@ def summarize_temporal_ptm_protein_analysis(
                 key: row.get(key)
                 for key in (
                     "edge_id", "source_wave_id", "target_gene", "direction", "onset_lag_minutes",
-                    "peak_lag_minutes", "eligible_for_mechanism_chain", "causality_status",
+                    "peak_lag_minutes", "lag_aware_similarity", "temporal_interpretation",
+                    "eligible_for_mechanism_chain", "causality_status",
                 )
             }
             for row in ordered_edges[:max_examples]

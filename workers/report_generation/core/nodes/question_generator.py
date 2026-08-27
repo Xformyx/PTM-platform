@@ -302,7 +302,16 @@ def run_question_generation(state: dict) -> dict:
         logger.warning("No data available for question generation, using defaults")
         return {"research_questions": _get_fallback_questions()}
 
-    content = _build_content_for_questions(comprehensive_summary, parsed_ptms)
+    from report_generation.core.dynamic_prompt_generator import (
+        build_temporal_evidence_packet,
+        format_temporal_evidence_packet_for_llm,
+    )
+    temporal_packet = build_temporal_evidence_packet(state.get("temporal_ptm_protein_analysis") or {})
+    content = _build_content_for_questions(
+        comprehensive_summary,
+        parsed_ptms,
+        temporal_evidence_packet_text=format_temporal_evidence_packet_for_llm(temporal_packet),
+    )
 
     llm = LLMClient(
         provider=state.get("llm_provider", "ollama"),
@@ -442,7 +451,12 @@ def generate_questions_from_content(
     }
 
 
-def _build_content_for_questions(summary: str, ptms: list) -> str:
+def _build_content_for_questions(
+    summary: str,
+    ptms: list,
+    *,
+    temporal_evidence_packet_text: str = "",
+) -> str:
     """Build content string from summary and PTM data."""
     parts = []
     if summary:
@@ -456,6 +470,8 @@ def _build_content_for_questions(summary: str, ptms: list) -> str:
                 f"Prot_FC={p.get('protein_log2fc', 0):.3f}"
             )
         parts.append("## Key PTM Sites\n" + "\n".join(ptm_lines))
+    if temporal_evidence_packet_text:
+        parts.append(temporal_evidence_packet_text)
     return "\n\n".join(parts)
 
 

@@ -17,7 +17,7 @@ import math
 import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -954,6 +954,158 @@ def build_substrate_dynamics_summary(
     return "\n".join(line for line in lines if line is not None)
 
 
+def build_temporal_evidence_packet(
+    temporal_sidecar: Mapping[str, Any] | None,
+    *,
+    max_edges: int = 12,
+    max_waves: int = 8,
+) -> dict:
+    """Build a compact, numerical, observational evidence packet for Report LLMs.
+
+    The packet is deliberately derived only from the production temporal sidecar.
+    It does not use benchmark truth, RAG, or an LLM-derived hypothesis.  Every
+    record receives a stable ``DATA-*`` identifier so writer prompts can tie a
+    temporal statement to an auditable numerical source.
+    """
+    sidecar = dict(temporal_sidecar or {})
+    if not sidecar:
+        return {
+            "contract_version": "report_temporal_evidence_packet.v1",
+            "status": "unavailable",
+            "reason": "No production temporal PTM-protein sidecar was available for this Order.",
+            "records": [],
+            "claim_boundary": "Do not infer temporal, kinase, PTM-protein, or causal claims from this packet.",
+        }
+
+    records: list[dict] = []
+    records.append({
+        "evidence_id": "DATA-TEMPORAL-SUMMARY",
+        "tier": "observational_summary",
+        "text": (
+            "Measured scope: protein trajectories={protein}; same-gene PTM-protein pairs={pairs}; "
+            "cross-layer edges={edges}; temporally eligible edges={eligible}; mechanism candidates={chains}; "
+            "evidence-supported mechanism candidates={supported}; kinase timing status={timing}."
+        ).format(
+            protein=sidecar.get("protein_trajectory_count", 0),
+            pairs=sidecar.get("ptm_protein_pair_count", 0),
+            edges=sidecar.get("cross_layer_edge_count", 0),
+            eligible=sidecar.get("temporally_eligible_edge_count", 0),
+            chains=sidecar.get("mechanism_chain_count", 0),
+            supported=sidecar.get("evidence_supported_mechanism_count", 0),
+            timing=sidecar.get("kinase_timing_status", "not_evaluable"),
+        ),
+    })
+
+    dynamic_status = sidecar.get("dynamic_co_wave_transition_status", "not_requested")
+    dynamic_loto = dict(sidecar.get("dynamic_transition_loto") or {})
+    records.append({
+        "evidence_id": "DATA-DYNAMIC-SUMMARY",
+        "tier": "observational_dynamic",
+        "text": (
+            "Dynamic co-wave status={status}; transition-supported Waves={waves}; "
+            "pair transitions={pairs}; site transitions={sites}; transition resolution={resolution}; "
+            "mean pair LOTO Jaccard={pair_loto}; mean site LOTO Jaccard={site_loto}."
+        ).format(
+            status=dynamic_status,
+            waves=sidecar.get("dynamic_transition_supported_wave_count", 0),
+            pairs=sidecar.get("dynamic_transition_pair_count", 0),
+            sites=sidecar.get("dynamic_transition_site_count", 0),
+            resolution=sidecar.get("dynamic_transition_resolution"),
+            pair_loto=dynamic_loto.get("mean_pair_transition_jaccard"),
+            site_loto=dynamic_loto.get("mean_site_transition_jaccard"),
+        ),
+    })
+
+    for index, row in enumerate((sidecar.get("dynamic_transition_per_wave") or [])[:max_waves], 1):
+        if not isinstance(row, Mapping):
+            continue
+        records.append({
+            "evidence_id": f"DATA-DYNAMIC-WAVE-{index}",
+            "tier": "observational_dynamic",
+            "text": (
+                "Static Wave {wave}: pair transitions={pairs}; non-persistence pair transitions={nonpersistence}; "
+                "site transitions={sites}; pair transition types={pair_types}; site transition types={site_types}."
+            ).format(
+                wave=row.get("static_wave_id", "unknown"),
+                pairs=row.get("pair_transition_count", 0),
+                nonpersistence=row.get("nonpersistence_pair_transition_count", 0),
+                sites=row.get("site_transition_count", 0),
+                pair_types=dict(row.get("pair_transition_type_counts") or {}),
+                site_types=dict(row.get("site_transition_type_counts") or {}),
+            ),
+        })
+
+    for index, row in enumerate((sidecar.get("top_cross_layer_edges") or [])[:max_edges], 1):
+        if not isinstance(row, Mapping):
+            continue
+        similarity = row.get("lag_aware_similarity") or {}
+        if isinstance(similarity, Mapping):
+            similarity = similarity.get("best_similarity")
+        records.append({
+            "evidence_id": f"DATA-CROSS-LAYER-{index}",
+            "tier": "observational_cross_layer",
+            "text": (
+                "Candidate {edge}: Wave {wave} → protein {target}; direction={direction}; "
+                "onset lag={onset} min; peak lag={peak} min; lag-aware similarity={similarity}; "
+                "mechanism-chain eligibility={eligible}; temporal interpretation={interpretation}; causality=not_tested."
+            ).format(
+                edge=row.get("edge_id", "unknown"),
+                wave=row.get("source_wave_id", "unknown"),
+                target=row.get("target_gene", "unknown"),
+                direction=row.get("direction", "unknown"),
+                onset=row.get("onset_lag_minutes"),
+                peak=row.get("peak_lag_minutes"),
+                similarity=similarity,
+                eligible=row.get("eligible_for_mechanism_chain", False),
+                interpretation=row.get("temporal_interpretation", "observational_peak_order_only"),
+            ),
+        })
+
+    return {
+        "contract_version": "report_temporal_evidence_packet.v1",
+        "status": "available",
+        "shared_engine_contract": sidecar.get("shared_engine_contract"),
+        "artifact_path": sidecar.get("artifact_path"),
+        "record_count": len(records),
+        "records": records,
+        "claim_boundary": (
+            "The packet contains measured temporal summaries and observational candidates only. "
+            "It does not establish kinase switching, direct kinase-substrate attribution, PTM-protein causality, "
+            "or mechanism proof. A numerical statement must match a DATA-* record; otherwise state that the "
+            "quantity is not evaluable from current data."
+        ),
+    }
+
+
+def format_temporal_evidence_packet_for_llm(packet: Mapping[str, Any]) -> str:
+    """Format the packet as a mandatory, compact writer supplement."""
+    if not packet or packet.get("status") != "available":
+        return (
+            "=== TEMPORAL NUMERICAL EVIDENCE PACKET ===\n"
+            "Status: unavailable. Do not invent temporal PTM-protein, dynamic co-wave, or kinase timing results.\n"
+            "=== END TEMPORAL NUMERICAL EVIDENCE PACKET ==="
+        )
+    lines = [
+        "=== TEMPORAL NUMERICAL EVIDENCE PACKET (MANDATORY; OBSERVATIONAL) ===",
+        "Use exact values and identifiers only from the records below. Before every temporal or PTM-protein claim, "
+        "check that it is supported by one DATA-* record. Do not turn a local co-wave transition into kinase switching, "
+        "or a lagged protein trajectory into direct regulation or causality.",
+        "If kinase timing is not_evaluable or an edge is not evidence-supported, state that limitation explicitly.",
+        "For auditability, retain the relevant [DATA-*] label at the end of the sentence in the draft.",
+        "",
+    ]
+    for record in packet.get("records") or []:
+        if not isinstance(record, Mapping):
+            continue
+        lines.append(f"[{record.get('evidence_id', 'DATA-UNKNOWN')}] {record.get('text', '')}")
+    lines.extend([
+        "",
+        f"Claim boundary: {packet.get('claim_boundary', '')}",
+        "=== END TEMPORAL NUMERICAL EVIDENCE PACKET ===",
+    ])
+    return "\n".join(lines)
+
+
 def build_nonptm_temporal_analysis(
     network_results: dict, timepoints: list, ptm_type: str = "phosphorylation"
 ) -> str:
@@ -1104,10 +1256,9 @@ def build_nonptm_temporal_analysis(
     lines = [
         "## NON-PTM EFFECTOR PROTEINS — SUPPORTIVE EVIDENCE FOR KINASE-SUBSTRATE RELATIONSHIPS",
         f"The following Non-PTM proteins are interaction partners of identified {ptm_type}-modified "
-        "substrates. They do NOT carry the target PTM modification but show significant protein "
-        "abundance changes that VALIDATE the identified kinase-substrate signaling axes. "
-        "Use these proteins as INLINE supporting evidence when discussing each kinase-substrate "
-        "relationship — do NOT discuss them as a separate topic.",
+        "substrates. They do NOT carry the target PTM modification. Their protein-abundance changes are "
+        "observational temporal context, not validation of a kinase-substrate signaling axis. "
+        "Use them as qualified, INLINE context when discussing each candidate relationship — do NOT discuss them as a separate topic.",
         "",
     ]
 
@@ -1172,18 +1323,18 @@ def build_nonptm_temporal_analysis(
     lines.append("### Interpretation Instructions (CRITICAL — Supportive Evidence Approach)")
     lines.append(
         "IMPORTANT: Non-PTM proteins are NOT the main subject of this report. They serve as \n"
-        "**supportive evidence** that validates the identified kinase-substrate relationships.\n\n"
+        "**observational context** for candidate kinase-substrate relationships.\n\n"
         "When writing about Non-PTM proteins, you MUST follow these rules:\n"
         "1. DO NOT create a separate dedicated section for Non-PTM proteins.\n"
         "2. Instead, mention Non-PTM proteins INLINE when discussing each kinase-substrate relationship \n"
         "   as validation evidence. For example: 'The activation of MAPK1-mediated phosphorylation of \n"
         "   STAT3 (S727) is further supported by concordant upregulation of 12 downstream interactors \n"
         "   (including HSP90, CDC37), with peak expression changes occurring 30 min after substrate \n"
-        "   PTM peak, confirming the temporal causality of this signaling axis.'\n"
-        "3. The NUMBER of concordant Non-PTM proteins strengthens the confidence — more supporting \n"
-        "   Non-PTM proteins = stronger evidence that the kinase-substrate relationship is real.\n"
+        "   PTM peak, which is temporally consistent with a downstream protein-level response but does not establish causality.'\n"
+        "3. The NUMBER of concordant Non-PTM proteins does not validate a kinase-substrate relationship; "
+        "   report it only as the size of an observationally consistent protein set.\n"
         "4. Use temporal concordance (time-lag) between substrate PTM change and Non-PTM protein \n"
-        "   abundance change as evidence of signal propagation directionality.\n"
+        "   abundance change as observational timing evidence, not signal-propagation directionality proof.\n"
         "5. Group Non-PTM proteins by their connected PTM substrate, not as an independent list.\n"
         "6. Briefly note the signaling role (scaffold, transducer, effector) only when it adds \n"
         "   mechanistic insight to the kinase-substrate relationship being discussed.\n"
@@ -1274,7 +1425,7 @@ def build_ptm_protein_timelag_analysis(
     lines = [
         "## PTM-PROTEIN TIME-LAG ANALYSIS",
         "The following proteins show a temporal offset between PTM modification "
-        "and protein abundance change, suggesting causal regulatory relationships.",
+        "and protein abundance change. This timing is observational and does not establish a causal regulatory relationship.",
         "",
         "| # | Protein | Site | Pattern | PTM First Detected | Protein First Changed | Interpretation |",
         "|---|---|---|---|---|---|---|",
@@ -1290,8 +1441,9 @@ def build_ptm_protein_timelag_analysis(
     prot_first = len(timelag_cases) - ptm_first
     lines.append(
         f"**Summary**: {ptm_first} PTM-first cases, {prot_first} Protein-first cases. "
-        f"PTM-first cases suggest kinase/phosphatase-driven regulation; "
-        f"Protein-first cases suggest expression-driven or degradation-mediated changes."
+        f"PTM-first cases are temporally compatible with modification preceding protein change; "
+        f"Protein-first cases are temporally compatible with abundance or degradation processes preceding modification. "
+        f"Neither pattern establishes causality."
     )
     lines.append("")
     return "\n".join(lines)
