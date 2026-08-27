@@ -329,6 +329,12 @@ interface GlobalKinaseModuleResponse {
   temporal_cascade?: TemporalCascade;
   effector_proteins?: EffectorProtein[];
   wave_kinase_profile?: WaveKinaseProfile[];
+  temporal_ptm_protein_analysis?: {
+    status?: string;
+    full_artifact_available?: boolean;
+    dynamic_co_wave_transition_status?: string;
+    dynamic_transition_supported_wave_count?: number;
+  };
   // v9.44: Cache metadata
   _cached?: boolean;
   _cache_hash?: string;
@@ -649,6 +655,10 @@ export default function KinaseModuleAnalysis({
   const [globalKinaseLoading, setGlobalKinaseLoading] = useState(false);
   const [globalKinaseError, setGlobalKinaseError] = useState<string | null>(null);
   const [globalKinaseBatchProgress, setGlobalKinaseBatchProgress] = useState<{ current: number; total: number; phase: string } | null>(null);
+  const temporalArtifactReady = Boolean(
+    globalKinaseResult?.temporal_ptm_protein_analysis?.full_artifact_available &&
+    globalKinaseResult?.temporal_ptm_protein_analysis?.dynamic_co_wave_transition_status === "computed"
+  );
 
   // ── Receptor→Kinase reverse mapping (v9.21) ─────────────────────────────
   // Maps canonical kinase name (uppercase) → list of receptor names that route through it
@@ -1184,6 +1194,11 @@ export default function KinaseModuleAnalysis({
             <Target className="h-3 w-3 mr-1" /> IP Overlay
           </Button>
           <div className="ml-auto">
+            {temporalArtifactReady && (
+              <span className="mr-2 inline-flex items-center rounded border border-emerald-300 bg-emerald-50 px-2 py-1 text-[10px] font-medium text-emerald-800 dark:border-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-200">
+                Temporal PTM–protein artifact ready
+              </span>
+            )}
             <Button
               variant="outline"
               size="sm"
@@ -1196,7 +1211,11 @@ export default function KinaseModuleAnalysis({
               ) : (
                 <Sparkles className="h-3 w-3 mr-1" />
               )}
-              {globalKinaseLoading ? "Analyzing..." : isUbi ? "E3 Annotate" : "Global Annotate"}
+              {globalKinaseLoading
+                ? "Analyzing..."
+                : isUbi
+                  ? (globalKinaseResult ? "Re-run E3 Annotation" : "E3 Annotate")
+                  : (globalKinaseResult ? "Re-run Global Annotation" : "Global Annotate")}
               <Badge variant="outline" className="text-[9px] ml-1 h-4 px-1">
                 {checkedPtmList.length} PTMs
               </Badge>

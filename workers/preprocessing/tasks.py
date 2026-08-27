@@ -895,6 +895,10 @@ def run_preprocessing(self, order_id: int, config: dict):
             "secondary_pr_matrix_path": secondary_pr_path,
             "secondary_pg_matrix_path": secondary_pg_path,
             "run_generation": config.get("run_generation"),
+            # A normal Order run completes temporal PTM–protein analysis in the
+            # server-side chain.  This remains an explicit flag for controlled
+            # compatibility/ablation runs, but defaults to the one-click path.
+            "run_temporal_ptm_protein_analysis": config.get("run_temporal_ptm_protein_analysis", True),
         }
         rag_task = app.send_task(
             "rag_enrichment.tasks.run_rag_enrichment",

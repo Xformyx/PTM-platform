@@ -45,6 +45,29 @@ _KINASE_STOP_WORDS = {
 }
 
 
+def _build_relative_ptm_timeseries(enriched_data: list) -> dict[str, dict[str, float]]:
+    """Build numeric PTM-relative vectors shared by worker TMM and sidecar.
+
+    This reads only the enriched numeric Order table.  It deliberately excludes
+    workbook truth, stimulus identity, RAG prose, and LLM output so the normal
+    one-click pipeline and strict benchmark sidecar retain the same boundary.
+    """
+
+    ptm_timeseries: dict[str, dict[str, float]] = {}
+    for row in enriched_data:
+        gene = (row.get("gene") or row.get("Gene.Name") or "").upper()
+        position = str(row.get("position") or row.get("PTM_Position") or "")
+        condition = str(row.get("condition") or row.get("Condition") or "")
+        value = row.get("ptm_relative_log2fc") or row.get("PTM_Relative_Log2FC") or 0
+        if not (gene and position and condition):
+            continue
+        try:
+            ptm_timeseries.setdefault(f"{gene}_{position}", {})[condition] = float(value)
+        except (TypeError, ValueError):
+            continue
+    return ptm_timeseries
+
+
 def _auto_run_global_analysis(order_id: int, enriched_data: list, config: dict, mcp_client=None) -> dict:
     """v9.44: Auto-run Global Kinase Modules + Activity Heatmap after RAG enrichment.
 
@@ -647,6 +670,77 @@ def _auto_run_global_analysis(order_id: int, enriched_data: list, config: dict, 
             ptm_type,
             temporal_source=config,
         )
+
+        # Complete the same canonical PTM→Wave→TMM→protein-sidecar contract
+        # server-side.  Do not make the user open the heatmap tab merely to
+        # obtain a report-ready temporal artifact.
+        temporal_sidecar_summary: dict = {
+            "schema_version": "enrichment_free_temporal_mechanism.v2.sidecar",
+            "full_artifact_available": False,
+            "status": "unavailable",
+            "reason": "shared_temporal_ptm_protein_analysis_not_requested",
+            "causality_status": "not_tested",
+        }
+        if config.get("run_temporal_ptm_protein_analysis", True):
+            try:
+                publish_progress(
+                    order_id,
+                    "rag_enrichment",
+                    "temporal_ptm_protein_analysis",
+                    "running",
+                    94,
+                    "Building canonical Wave, TMM, PTM–protein and dynamic co-wave analysis",
+                )
+                from ptm_shared.enrichment_free_temporal_sidecar import (
+                    build_production_temporal_ptm_protein_analysis,
+                    summarize_temporal_ptm_protein_analysis,
+                )
+
+                temporal_output_dir = Path(
+                    config.get("preprocessing_output_dir")
+                    or (Path(OUTPUT_DIR) / str(config.get("order_code") or order_id))
+                )
+                temporal_output_dir.mkdir(parents=True, exist_ok=True)
+                temporal_sidecar = build_production_temporal_ptm_protein_analysis(
+                    output_dir=temporal_output_dir,
+                    ptm_type=ptm_type,
+                    ptm_timeseries=_build_relative_ptm_timeseries(enriched_data),
+                    conditions=heatmap_data.get("conditions") or [],
+                    tmm_result=heatmap_data,
+                )
+                temporal_path = temporal_output_dir / "temporal_ptm_protein_analysis_v2.json"
+                temporal_path.write_text(
+                    json.dumps(temporal_sidecar, ensure_ascii=False, sort_keys=True),
+                    encoding="utf-8",
+                )
+                temporal_sidecar_summary = summarize_temporal_ptm_protein_analysis(
+                    temporal_sidecar,
+                    artifact_path=temporal_path.name,
+                )
+                publish_progress(
+                    order_id,
+                    "rag_enrichment",
+                    "temporal_ptm_protein_analysis",
+                    "completed",
+                    95,
+                    "Canonical Wave, TMM and PTM–protein dynamic sidecar completed",
+                )
+            except Exception as temporal_sidecar_error:
+                logger.warning(
+                    "[Order %s] Automatic shared temporal PTM–protein analysis failed (non-fatal): %s",
+                    order_id,
+                    temporal_sidecar_error,
+                    exc_info=True,
+                )
+                temporal_sidecar_summary = {
+                    "schema_version": "enrichment_free_temporal_mechanism.v2.sidecar",
+                    "full_artifact_available": False,
+                    "status": "unavailable",
+                    "reason": "shared_temporal_ptm_protein_analysis_failed",
+                    "causality_status": "not_tested",
+                }
+        heatmap_data["temporal_ptm_protein_analysis"] = temporal_sidecar_summary
+        kinase_result["temporal_ptm_protein_analysis"] = dict(temporal_sidecar_summary)
 
         # Persist to DB
         from common.db_engine import get_engine as _get_engine
@@ -1705,36 +1799,12 @@ def _compute_kinase_activity_heatmap(
                     ]
                     break
 
-    return {
-        "kinase_scores": kinase_scores_filtered,
-        "conditions": conditions,
-        "peak_sync": peak_sync,
-        "cowave_groups": cowave_groups,
-        "all_kinase_scores": kinase_scores,  # unfiltered for debug
-        "temporal_contract": temporal.name,
-        "guard_policy": temporal.guard_policy,
-        "_cached": True,
-    }
     # ── TMM: Temporal Mixture Modeling (Option B) ────────────────────────────
     # Apply contribution-weighted scoring to shared substrates so that
     # kinases with overlapping substrate sets get data-driven credit allocation.
     try:
         from api.services.temporal_kinase_scoring import compute_weighted_kinase_scores  # type: ignore
-        # Build ptm_timeseries from enriched_data
-        ptm_timeseries: dict[str, dict[str, float]] = {}
-        for row in enriched_data:
-            gene = (row.get("gene") or row.get("Gene.Name") or "").upper()
-            pos = str(row.get("position") or row.get("PTM_Position") or "")
-            cond = row.get("condition") or row.get("Condition") or ""
-            fc = row.get("ptm_relative_log2fc") or row.get("PTM_Relative_Log2FC") or 0
-            if gene and pos and cond:
-                key = f"{gene}_{pos}"
-                if key not in ptm_timeseries:
-                    ptm_timeseries[key] = {}
-                try:
-                    ptm_timeseries[key][cond] = float(fc)
-                except (ValueError, TypeError):
-                    pass
+        ptm_timeseries = _build_relative_ptm_timeseries(enriched_data)
         # Build kinase_modules list for TMM
         tmm_modules = []
         for ks in kinase_scores_filtered:
@@ -1781,6 +1851,18 @@ def _compute_kinase_activity_heatmap(
             logger.info(f"[TMM-RAG] Applied TMM to {len(tmm_scores)} kinases in heatmap")
     except Exception as _tmm_err:
         logger.warning(f"[TMM-RAG] TMM integration skipped (non-fatal): {_tmm_err}")
+
+    return {
+        "kinase_scores": kinase_scores_filtered,
+        "conditions": conditions,
+        "peak_sync": peak_sync,
+        "cowave_groups": cowave_groups,
+        "all_kinase_scores": kinase_scores,  # unfiltered for debug
+        "temporal_contract": temporal.name,
+        "guard_policy": temporal.guard_policy,
+        "tmm_execution_status": "computed" if 'tmm_scores' in locals() else "unavailable",
+        "_cached": False,
+    }
 
 
 def _make_progress_cb(order_id, stage, step, base, span):

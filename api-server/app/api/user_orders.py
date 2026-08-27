@@ -786,6 +786,9 @@ async def _create_order_from_user_impl(
         "secondary_ptm_type": getattr(order, 'secondary_ptm_type', None),
         "secondary_sample_config": getattr(order, 'secondary_sample_config', None),
         "secondary_condition_map": _build_condition_map(getattr(order, 'secondary_sample_config', None)) if getattr(order, 'secondary_sample_config', None) else None,
+        # Same default as admin-started Orders: the worker chain creates the
+        # canonical Wave/TMM/PTM–protein/dynamic artifact in one run.
+        "run_temporal_ptm_protein_analysis": True,
     }
 
     from app.api.orders import _bump_run_generation, _clear_celery_task_ids, _save_celery_task_id

@@ -578,6 +578,14 @@ Backend: vector-plot (receptor inference)
 - [x] production regression·TypeScript build·blind isolation·backward compatibility 검증
 - [x] 운영 적용 범위·재계산 요구사항 문서화 및 GitHub main 반영
 
+## One-Click Order Temporal PTM–Protein Analysis Orchestration
+- [x] existing Order execution, worker, API and frontend trigger orchestration gap 감사
+- [x] single-run server-side stage·progress·non-fatal sidecar failure contract 설계
+- [x] Global Annotation→canonical Wave/TMM→PTM–protein/dynamic sidecar orchestration 구현
+- [x] frontend single-run trigger와 artifact-ready/progress 상태 표시 구현
+- [x] end-to-end regression, backward compatibility, blind isolation 및 cross-stack validation (sandbox Docker CLI unavailable; target-server compose validation required)
+- [ ] 운영 사용법·recomputation semantics 문서화 및 GitHub main 반영
+
 ## Latest-main Synchronization Before Follow-up Review
 - [x] local benchmark worktree의 미반영 500-diagnosis 기록을 보존하고 upstream main과 차이 확인
 - [x] GitHub `main` 최신 revision으로 안전하게 rebase/sync
