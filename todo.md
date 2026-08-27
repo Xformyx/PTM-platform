@@ -626,3 +626,10 @@ Backend: vector-plot (receptor inference)
 - [x] previous and newly supplied representation JSON의 schema·hash·metric·gate delta 확인
 - [x] representation delta와 19:00 Report numerical evidence utilization의 관계 평가
 - [x] updated report-fidelity conclusion과 comparison addendum 작성 및 전달
+
+## Report Temporal Evidence Utilization Failure Diagnosis
+- [x] Report worker state·packet snapshot·prompt·budget·section writer·deployment code path 감사
+- [x] packet delivery failure, stale deployment, prompt omission 및 LLM non-consumption 원인 분리
+- [x] mandatory numerical evidence utilization·per-section traceability·review-required failure visibility 구현
+- [x] synthetic/real artifact fidelity and prompt-budget regression, blind truth isolation 검증
+- [ ] 운영 재배포·재실행 절차 문서화 및 GitHub main 반영

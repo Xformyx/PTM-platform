@@ -899,6 +899,43 @@ def run_report_generation(self, order_id: int, config: dict):
             "hypotheses_count": len(final_state.get("validated_hypotheses", [])),
             "cytoscape_connected": final_state.get("network_analysis", {}).get("cytoscape_connected", False),
         }
+        temporal_fidelity = final_state.get("temporal_report_fidelity") or {}
+        temporal_packet = final_state.get("temporal_report_evidence_packet") or {}
+        temporal_review_sections = [
+            section for section, audit in temporal_fidelity.items()
+            if isinstance(audit, dict) and audit.get("status") == "review_required"
+        ]
+        temporal_llm_draft_review_sections = [
+            section for section, audit in temporal_fidelity.items()
+            if isinstance(audit, dict) and audit.get("llm_draft_status") == "review_required"
+        ]
+        temporal_llm_draft_untraced_sections = [
+            section for section, audit in temporal_fidelity.items()
+            if isinstance(audit, dict) and audit.get("llm_draft_status") == "untraced"
+        ]
+        progress_metadata["temporal_evidence"] = {
+            "packet_status": temporal_packet.get("status", "unavailable"),
+            "record_count": temporal_packet.get("record_count", 0),
+            "section_status": {
+                section: audit.get("status")
+                for section, audit in temporal_fidelity.items()
+                if isinstance(audit, dict)
+            },
+            "llm_draft_section_status": {
+                section: audit.get("llm_draft_status", audit.get("status"))
+                for section, audit in temporal_fidelity.items()
+                if isinstance(audit, dict)
+            },
+            "review_required_sections": temporal_review_sections,
+            "llm_draft_review_required_sections": temporal_llm_draft_review_sections,
+            "llm_draft_untraced_sections": temporal_llm_draft_untraced_sections,
+            "deterministic_addendum_sections": [
+                section for section, audit in temporal_fidelity.items()
+                if isinstance(audit, dict) and audit.get("deterministic_addendum_applied")
+            ],
+            "packet_snapshot": temporal_packet.get("snapshot_path"),
+            "fidelity_snapshot": final_state.get("temporal_report_fidelity_snapshot"),
+        }
         if fallback_sections:
             progress_metadata["llm_fallback_sections"] = fallback_sections
             progress_metadata["llm_fallback_warning"] = fallback_warning
@@ -918,6 +955,7 @@ def run_report_generation(self, order_id: int, config: dict):
         if fallback_sections:
             result_data["llm_fallback_sections"] = fallback_sections
             result_data["llm_fallback_warning"] = fallback_warning
+        result_data["temporal_evidence"] = progress_metadata["temporal_evidence"]
 
         # Persist external Co-Scientist packet telemetry for Order UI / operators.
         try:
@@ -943,6 +981,11 @@ def run_report_generation(self, order_id: int, config: dict):
 
         # v9.35: If LLM effectively failed, mark as completed_with_warnings instead of completed
         completion_detail = f"Report generation complete ({elapsed}s)"
+        if temporal_review_sections:
+            completion_detail += f"; temporal evidence review required: {', '.join(temporal_review_sections)}"
+        elif temporal_llm_draft_review_sections or temporal_llm_draft_untraced_sections:
+            repaired_sections = temporal_llm_draft_review_sections + temporal_llm_draft_untraced_sections
+            completion_detail += f"; deterministic temporal evidence addendum applied: {', '.join(repaired_sections)}"
         if llm_failed:
             update_order_status(
                 order_id, "completed", progress_pct=100, result_files=result_data,

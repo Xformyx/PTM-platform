@@ -679,6 +679,7 @@ def summarize_temporal_ptm_protein_analysis(
     edges = list(sidecar.get("cross_layer_edges") or [])
     chains = list(sidecar.get("mechanism_chains") or [])
     packets = list(sidecar.get("hypothesis_evidence_packets") or [])
+    counterevidence = list(sidecar.get("mechanism_counterevidence") or [])
     dynamic_transition = dict(sidecar.get("dynamic_co_wave_transition") or {})
     dynamic_summary = dict(dynamic_transition.get("summary") or {})
     eligible_edges = [row for row in edges if row.get("eligible_for_mechanism_chain")]
@@ -700,6 +701,7 @@ def summarize_temporal_ptm_protein_analysis(
         "evidence_supported_mechanism_count": sum(
             row.get("mechanism_status") == "evidence_supported_mechanism_candidate" for row in chains
         ),
+        "mechanism_counterevidence_count": len(counterevidence),
         "kinase_timing_status": ((sidecar.get("provenance") or {}).get("kinase_timing") or {}).get("data_anchored_timing_status"),
         "dynamic_co_wave_transition_status": dynamic_transition.get("status", "not_requested"),
         "dynamic_co_wave_transition_contract_version": dynamic_transition.get("contract_version"),
@@ -722,6 +724,15 @@ def summarize_temporal_ptm_protein_analysis(
                 )
             }
             for row in ordered_edges[:max_examples]
+        ],
+        "top_mechanism_counterevidence": [
+            {
+                "chain_id": row.get("chain_id"),
+                "status": row.get("status"),
+                "reasons": list(row.get("reasons") or [])[:6],
+            }
+            for row in counterevidence[:max_examples]
+            if isinstance(row, Mapping)
         ],
         "hypothesis_evidence_packets": packets[:max_examples],
         "provenance": dict(sidecar.get("provenance") or {}),

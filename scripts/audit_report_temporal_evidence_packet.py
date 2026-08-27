@@ -23,6 +23,18 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _packet_heatmap_from_artifact(artifact: dict) -> dict:
+    """Project only persisted TMM fields used by the production Report packet."""
+    tmm = artifact.get("tmm_full_temporal") or artifact
+    if not isinstance(tmm, dict):
+        return {}
+    return {
+        key: tmm[key]
+        for key in ("tmm_weighted_temporal_cascade", "relative_tmm_uncertainty_summary")
+        if key in tmm
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--artifact", required=True, type=Path)
@@ -37,13 +49,27 @@ def main() -> int:
         sidecar,
         artifact_path=args.artifact.name,
     )
-    packet = build_temporal_evidence_packet(summary)
-    formatted = format_temporal_evidence_packet_for_llm(packet)
+    heatmap = _packet_heatmap_from_artifact(artifact)
+    packet = build_temporal_evidence_packet(summary, kinase_activity_heatmap=heatmap)
+    formatted = format_temporal_evidence_packet_for_llm(packet, section_type="results")
+    evidence_ids = [str(row.get("evidence_id")) for row in packet.get("records") or [] if isinstance(row, dict)]
+    evidence_classes = {
+        "dynamic": any(identifier.startswith("DATA-DYNAMIC") for identifier in evidence_ids),
+        "tmm_candidate": any(identifier.startswith("DATA-TMM-KINASE") for identifier in evidence_ids),
+        "tmm_uncertainty": "DATA-TMM-UNCERTAINTY" in evidence_ids,
+        "cross_layer": any(identifier.startswith("DATA-CROSS-LAYER") for identifier in evidence_ids),
+        "counterevidence": any(identifier.startswith("DATA-COUNTEREVIDENCE") for identifier in evidence_ids),
+    }
     output = {
-        "schema_version": "report_temporal_evidence_packet_audit.v1",
+        "schema_version": "report_temporal_evidence_packet_audit.v2",
         "source_artifact": str(args.artifact),
         "source_artifact_sha256": _sha256(args.artifact),
         "packet": packet,
+        "persisted_tmm_input": {
+            "cascade_present": "tmm_weighted_temporal_cascade" in heatmap,
+            "uncertainty_present": "relative_tmm_uncertainty_summary" in heatmap,
+        },
+        "available_evidence_classes": evidence_classes,
         "formatted_prompt_char_count": len(formatted),
         "formatted_prompt_sha256": hashlib.sha256(formatted.encode("utf-8")).hexdigest(),
         "truth_boundary": {
@@ -58,6 +84,7 @@ def main() -> int:
     print(json.dumps({
         "packet_status": packet.get("status"),
         "record_count": packet.get("record_count", 0),
+        "available_evidence_classes": evidence_classes,
         "formatted_prompt_char_count": len(formatted),
         "output": str(args.output),
     }, sort_keys=True))

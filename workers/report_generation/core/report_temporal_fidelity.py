@@ -6,7 +6,9 @@ import re
 from typing import Any, Mapping
 
 
-_DATA_LABEL_PATTERN = re.compile(r"\[?(DATA-(?:TEMPORAL-SUMMARY|DYNAMIC-SUMMARY|DYNAMIC-WAVE-\d+|CROSS-LAYER-\d+))\]?")
+_DATA_LABEL_PATTERN = re.compile(
+    r"\[?(DATA-(?:TEMPORAL-SUMMARY|DYNAMIC-SUMMARY|DYNAMIC-WAVE-\d+|TMM-KINASE-\d+|TMM-UNCERTAINTY|CROSS-LAYER-\d+|COUNTEREVIDENCE-\d+))\]?"
+)
 _UNSAFE_TEMPORAL_CLAIM = re.compile(
     r"\b(?:causes?|drives?|directly activates?|proves?|kinase switching|causal propagation)\b",
     flags=re.IGNORECASE,
@@ -16,6 +18,8 @@ _UNSAFE_TEMPORAL_CLAIM = re.compile(
 def audit_report_temporal_fidelity(
     draft_text: str,
     packet: Mapping[str, Any] | None,
+    *,
+    section_type: str = "general",
 ) -> dict:
     """Audit a draft against the deterministic temporal evidence packet.
 
@@ -39,22 +43,45 @@ def audit_report_temporal_fidelity(
             unsafe_claims.append(sentence.strip()[:500])
 
     cited_dynamic = [identifier for identifier in unique_cited_ids if identifier.startswith("DATA-DYNAMIC")]
+    cited_tmm = [identifier for identifier in unique_cited_ids if identifier.startswith("DATA-TMM")]
     cited_cross_layer = [identifier for identifier in unique_cited_ids if identifier.startswith("DATA-CROSS-LAYER")]
+    cited_counterevidence = [identifier for identifier in unique_cited_ids if identifier.startswith("DATA-COUNTEREVIDENCE")]
+    available_groups = {
+        "dynamic": any(identifier.startswith("DATA-DYNAMIC") for identifier in valid_ids),
+        "tmm": any(identifier.startswith("DATA-TMM-KINASE") for identifier in valid_ids),
+        "cross_layer": any(identifier.startswith("DATA-CROSS-LAYER") for identifier in valid_ids),
+        "counterevidence": any(identifier.startswith("DATA-COUNTEREVIDENCE") for identifier in valid_ids),
+    }
+    cited_groups = {
+        "dynamic": bool(cited_dynamic),
+        "tmm": bool(cited_tmm),
+        "cross_layer": bool(cited_cross_layer),
+        "counterevidence": bool(cited_counterevidence),
+    }
+    mandatory_groups = ("dynamic", "tmm", "cross_layer", "counterevidence") if section_type in {"results", "discussion"} else ()
+    missing_required_groups = [
+        group for group in mandatory_groups if available_groups[group] and not cited_groups[group]
+    ]
     status = "pass"
-    if unsupported_ids or unsafe_claims:
+    if unsupported_ids or unsafe_claims or missing_required_groups:
         status = "review_required"
     elif packet.get("status") == "available" and not unique_cited_ids:
         status = "untraced"
 
     return {
-        "contract_version": "report_temporal_fidelity.v1",
+        "contract_version": "report_temporal_fidelity.v2",
+        "section_type": section_type,
         "status": status,
         "packet_status": packet.get("status", "unavailable"),
         "available_record_count": len(valid_ids),
         "cited_record_count": len(unique_cited_ids),
         "cited_record_ids": unique_cited_ids,
         "cited_dynamic_record_count": len(cited_dynamic),
+        "cited_tmm_record_count": len(cited_tmm),
         "cited_cross_layer_record_count": len(cited_cross_layer),
+        "cited_counterevidence_record_count": len(cited_counterevidence),
+        "available_evidence_groups": available_groups,
+        "missing_required_groups": missing_required_groups,
         "unsupported_record_ids": unsupported_ids,
         "unsafe_temporal_claim_count": len(unsafe_claims),
         "unsafe_temporal_claim_examples": unsafe_claims,

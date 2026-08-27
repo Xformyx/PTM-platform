@@ -30,6 +30,7 @@ from report_generation.core.dynamic_prompt_generator import (
     build_signal_propagation_json,
     build_tf_activity_inference,
     build_temporal_evidence_packet,
+    build_temporal_evidence_fallback_addendum,
     format_temporal_evidence_packet_for_llm,
     format_condition_display_name,
 )
@@ -288,14 +289,20 @@ def run_section_writing(state: dict) -> dict:
     vector_plot_raw_data = state.get("vector_plot_raw_data", []) or []
     pipeline_statistics = state.get("pipeline_statistics", {}) or {}
     temporal_ptm_protein_analysis = state.get("temporal_ptm_protein_analysis", {}) or {}
-    temporal_evidence_packet = build_temporal_evidence_packet(temporal_ptm_protein_analysis)
-    aux_cross_layer_temporal = format_temporal_evidence_packet_for_llm(temporal_evidence_packet)
+    temporal_evidence_packet = build_temporal_evidence_packet(
+        temporal_ptm_protein_analysis,
+        kinase_activity_heatmap=(
+            state.get("kinase_activity_heatmap")
+            or state.get("frontend_kinase_analysis")
+            or {}
+        ),
+    )
     packet_output_dir = state.get("output_dir")
     if packet_output_dir:
         try:
             packet_path = Path(packet_output_dir) / "report_temporal_evidence_packet.json"
-            packet_path.write_text(json.dumps(temporal_evidence_packet, indent=2, sort_keys=True), encoding="utf-8")
             temporal_evidence_packet["snapshot_path"] = str(packet_path)
+            packet_path.write_text(json.dumps(temporal_evidence_packet, indent=2, sort_keys=True), encoding="utf-8")
             logger.info("[report-evidence] Saved temporal numerical packet: %s", packet_path)
         except Exception as packet_error:
             logger.warning("[report-evidence] Could not save temporal packet snapshot: %s", packet_error)
@@ -625,6 +632,10 @@ def run_section_writing(state: dict) -> dict:
     # ── Per-section writer (extracted for parallel execution) ──
     def _write_one(section_type, snap_prev, section_questions=None):
         active_questions = list(section_questions if section_questions is not None else questions)
+        section_temporal_evidence = format_temporal_evidence_packet_for_llm(
+            temporal_evidence_packet,
+            section_type=section_type,
+        )
         # v10.8: _build_section_prompt now returns (prompt_str, chromadb_refs_list)
         result = _build_section_prompt(
             section_type, research_results, validated_hypotheses,
@@ -668,7 +679,7 @@ def run_section_writing(state: dict) -> dict:
                 supplement_blocks.append(("verified_findings", aux_verified_findings_context))
             if aux_directionality_context:
                 supplement_blocks.append(("directionality", aux_directionality_context))
-            supplement_blocks.append(("temporal_evidence_packet", aux_cross_layer_temporal))
+            supplement_blocks.append(("temporal_evidence_packet", section_temporal_evidence))
             # Priority 1 (ESSENTIAL — PTM activity profile core): temporal coordination + temporal kinase + receptor + non-PTM effector
             # v9.35: nonptm_temporal promoted to Priority 1 — effector proteins are integral
             # to the receptor→kinase→substrate→effector signal flow narrative.
@@ -713,7 +724,7 @@ def run_section_writing(state: dict) -> dict:
             # output budget before all user Research Questions are answered.
             if aux_directionality_context:
                 supplement_blocks.append(("directionality", aux_directionality_context))
-            supplement_blocks.append(("temporal_evidence_packet", aux_cross_layer_temporal))
+            supplement_blocks.append(("temporal_evidence_packet", section_temporal_evidence))
             supplement_blocks.append(("comovement", comovement_llm_context))
             supplement_blocks.append(("temporal_kinase", temporal_kinase_cascade_llm_context))
             supplement_blocks.append(("receptor_ctx", receptor_llm_context))
@@ -729,7 +740,7 @@ def run_section_writing(state: dict) -> dict:
                 supplement_blocks.append(("verified_findings", aux_verified_findings_context))
             if aux_directionality_context:
                 supplement_blocks.append(("directionality", aux_directionality_context))
-            supplement_blocks.append(("temporal_evidence_packet", aux_cross_layer_temporal))
+            supplement_blocks.append(("temporal_evidence_packet", section_temporal_evidence))
             # v12.1: External evidence-gated candidates are interpretive only.
             # They are excluded from Results and appear only for explicit enhanced discussion.
             if external_coscientist_context:
@@ -773,7 +784,7 @@ def run_section_writing(state: dict) -> dict:
             # v9.32: Conclusion/Abstract also need temporal coordination summary for comprehensive coverage
             supplement_blocks.append(("comovement", comovement_llm_context))
             supplement_blocks.append(("temporal_kinase", temporal_kinase_cascade_llm_context))
-            supplement_blocks.append(("temporal_evidence_packet", aux_cross_layer_temporal))
+            supplement_blocks.append(("temporal_evidence_packet", section_temporal_evidence))
 
         # v9.31: Add blocks respecting budget
         current_len = base_len
@@ -857,10 +868,38 @@ def run_section_writing(state: dict) -> dict:
                 questions=active_questions,
             )
 
-        temporal_report_fidelity[section_type] = audit_report_temporal_fidelity(
+        llm_draft_fidelity = audit_report_temporal_fidelity(
             content,
             temporal_evidence_packet,
+            section_type=section_type,
         )
+        temporal_report_fidelity[section_type] = llm_draft_fidelity
+        temporal_report_fidelity[section_type]["llm_draft_status"] = temporal_report_fidelity[section_type]["status"]
+        temporal_report_fidelity[section_type]["llm_draft_missing_required_groups"] = list(
+            temporal_report_fidelity[section_type].get("missing_required_groups") or []
+        )
+        if (
+            section_type in {"results", "discussion"}
+            and temporal_report_fidelity[section_type]["status"] in {"untraced", "review_required"}
+        ):
+            fallback_addendum = build_temporal_evidence_fallback_addendum(temporal_evidence_packet)
+            if fallback_addendum:
+                logger.warning(
+                    "[report-evidence] %s LLM draft fidelity=%s; applying deterministic temporal evidence addendum",
+                    section_type,
+                    temporal_report_fidelity[section_type]["status"],
+                )
+                content = f"{content}\n\n{fallback_addendum}"
+                temporal_report_fidelity[section_type] = audit_report_temporal_fidelity(
+                    content,
+                    temporal_evidence_packet,
+                    section_type=section_type,
+                )
+                temporal_report_fidelity[section_type]["deterministic_addendum_applied"] = True
+                temporal_report_fidelity[section_type]["llm_draft_status"] = llm_draft_fidelity["status"]
+                temporal_report_fidelity[section_type]["llm_draft_missing_required_groups"] = list(
+                    llm_draft_fidelity.get("missing_required_groups") or []
+                )
         if temporal_report_fidelity[section_type]["status"] != "pass":
             logger.warning(
                 "[report-evidence] %s temporal fidelity=%s; cited=%d/%d; unsafe=%d",
@@ -1064,6 +1103,30 @@ def run_section_writing(state: dict) -> dict:
             )
         sections["perturbation_evidence"] = "\n".join(evidence_lines)
 
+    temporal_fidelity_snapshot_path = None
+    if packet_output_dir:
+        try:
+            temporal_fidelity_snapshot_path = Path(packet_output_dir) / "temporal_report_fidelity.json"
+            temporal_fidelity_snapshot_path.write_text(
+                json.dumps(
+                    {
+                        "contract_version": "report_temporal_fidelity_snapshot.v1",
+                        "packet_snapshot_path": temporal_evidence_packet.get("snapshot_path"),
+                        "sections": temporal_report_fidelity,
+                        "review_required_sections": [
+                            name for name, audit in temporal_report_fidelity.items()
+                            if audit.get("status") == "review_required"
+                        ],
+                    },
+                    indent=2,
+                    sort_keys=True,
+                ),
+                encoding="utf-8",
+            )
+            logger.info("[report-evidence] Saved temporal fidelity snapshot: %s", temporal_fidelity_snapshot_path)
+        except Exception as fidelity_snapshot_error:
+            logger.warning("[report-evidence] Could not save temporal fidelity snapshot: %s", fidelity_snapshot_error)
+
     return {
         "sections": sections,
         "collected_references": unified_references,
@@ -1073,6 +1136,7 @@ def run_section_writing(state: dict) -> dict:
         "perturbation_evidence": perturbation_evidence,
         "temporal_report_evidence_packet": temporal_evidence_packet,
         "temporal_report_fidelity": temporal_report_fidelity,
+        "temporal_report_fidelity_snapshot": str(temporal_fidelity_snapshot_path) if temporal_fidelity_snapshot_path else None,
     }
 
 

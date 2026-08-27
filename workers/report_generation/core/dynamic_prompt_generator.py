@@ -959,6 +959,9 @@ def build_temporal_evidence_packet(
     *,
     max_edges: int = 12,
     max_waves: int = 8,
+    kinase_activity_heatmap: Mapping[str, Any] | None = None,
+    max_tmm_candidates: int = 6,
+    max_counterevidence: int = 4,
 ) -> dict:
     """Build a compact, numerical, observational evidence packet for Report LLMs.
 
@@ -978,6 +981,7 @@ def build_temporal_evidence_packet(
         }
 
     records: list[dict] = []
+    heatmap = dict(kinase_activity_heatmap or {})
     records.append({
         "evidence_id": "DATA-TEMPORAL-SUMMARY",
         "tier": "observational_summary",
@@ -1061,8 +1065,87 @@ def build_temporal_evidence_packet(
             ),
         })
 
+    # Candidate-level TMM evidence comes from the same production heatmap that
+    # created the sidecar. It is contribution-weighted observational support,
+    # not direct kinase-substrate attribution.
+    weighted_cascade = dict(heatmap.get("tmm_weighted_temporal_cascade") or {})
+    tmm_candidates: list[tuple[float, str, str, Mapping[str, Any]]] = []
+    seen_kinases: set[str] = set()
+    for timepoint in weighted_cascade.get("timepoints") or []:
+        if not isinstance(timepoint, Mapping):
+            continue
+        timepoint_name = str(timepoint.get("timepoint") or "unknown")
+        for active in timepoint.get("active_kinases") or []:
+            if not isinstance(active, Mapping):
+                continue
+            kinase = str(active.get("canonical") or active.get("kinase") or "").strip()
+            if not kinase or kinase in seen_kinases:
+                continue
+            selected = active.get("selected_activity", active.get("tmm_weighted_activity", 0.0))
+            try:
+                magnitude = abs(float(selected or 0.0))
+            except (TypeError, ValueError):
+                magnitude = 0.0
+            tmm_candidates.append((magnitude, kinase, timepoint_name, active))
+            seen_kinases.add(kinase)
+    for index, (_, kinase, timepoint_name, row) in enumerate(
+        sorted(tmm_candidates, key=lambda item: (-item[0], item[1]))[:max_tmm_candidates],
+        1,
+    ):
+        evidence = dict(row.get("tmm_evidence") or {})
+        records.append({
+            "evidence_id": f"DATA-TMM-KINASE-{index}",
+            "tier": "observational_tmm",
+            "text": (
+                "TMM candidate kinase {kinase}: timepoint={timepoint}; selected contribution-weighted activity={activity}; "
+                "raw weighted activity={raw}; substrate support={support}; direction={direction}; activity metric={metric}; "
+                "evidence profile={evidence}. This is a candidate attribution, not direct kinase-substrate proof."
+            ).format(
+                kinase=kinase,
+                timepoint=timepoint_name,
+                activity=row.get("selected_activity", row.get("peak_score")),
+                raw=row.get("tmm_weighted_activity", row.get("peak_score")),
+                support=row.get("tmm_weighted_substrate_support", row.get("substrate_count")),
+                direction=row.get("direction", "observational"),
+                metric=row.get("selected_activity_metric", weighted_cascade.get("activity_metric", "not_persisted")),
+                evidence={key: evidence.get(key) for key in sorted(evidence)[:5]},
+            ),
+        })
+
+    uncertainty = dict(heatmap.get("relative_tmm_uncertainty_summary") or {})
+    if uncertainty:
+        scalar_uncertainty = {
+            key: uncertainty.get(key)
+            for key in sorted(uncertainty)
+            if isinstance(uncertainty.get(key), (str, int, float, bool))
+        }
+        records.append({
+            "evidence_id": "DATA-TMM-UNCERTAINTY",
+            "tier": "uncertainty",
+            "text": (
+                "Relative TMM uncertainty summary={summary}. Treat candidate ranking as uncertain where the "
+                "persisted summary does not support a stable estimate."
+            ).format(summary=scalar_uncertainty),
+        })
+
+    for index, row in enumerate((sidecar.get("top_mechanism_counterevidence") or [])[:max_counterevidence], 1):
+        if not isinstance(row, Mapping):
+            continue
+        records.append({
+            "evidence_id": f"DATA-COUNTEREVIDENCE-{index}",
+            "tier": "counterevidence",
+            "text": (
+                "Mechanism candidate {chain}: status={status}; counterevidence={reasons}. "
+                "Do not promote this candidate to a causal mechanism without resolving these limitations."
+            ).format(
+                chain=row.get("chain_id", "unknown"),
+                status=row.get("status", "insufficient_evidence"),
+                reasons=list(row.get("reasons") or []),
+            ),
+        })
+
     return {
-        "contract_version": "report_temporal_evidence_packet.v1",
+        "contract_version": "report_temporal_evidence_packet.v2",
         "status": "available",
         "shared_engine_contract": sidecar.get("shared_engine_contract"),
         "artifact_path": sidecar.get("artifact_path"),
@@ -1077,7 +1160,11 @@ def build_temporal_evidence_packet(
     }
 
 
-def format_temporal_evidence_packet_for_llm(packet: Mapping[str, Any]) -> str:
+def format_temporal_evidence_packet_for_llm(
+    packet: Mapping[str, Any],
+    *,
+    section_type: str = "general",
+) -> str:
     """Format the packet as a mandatory, compact writer supplement."""
     if not packet or packet.get("status") != "available":
         return (
@@ -1085,12 +1172,31 @@ def format_temporal_evidence_packet_for_llm(packet: Mapping[str, Any]) -> str:
             "Status: unavailable. Do not invent temporal PTM-protein, dynamic co-wave, or kinase timing results.\n"
             "=== END TEMPORAL NUMERICAL EVIDENCE PACKET ==="
         )
+    record_ids = {
+        str(record.get("evidence_id"))
+        for record in packet.get("records") or []
+        if isinstance(record, Mapping)
+    }
+    has_dynamic = any(identifier.startswith("DATA-DYNAMIC") for identifier in record_ids)
+    has_tmm = any(identifier.startswith("DATA-TMM-KINASE") for identifier in record_ids)
+    has_cross_layer = any(identifier.startswith("DATA-CROSS-LAYER") for identifier in record_ids)
+    has_counterevidence = any(identifier.startswith("DATA-COUNTEREVIDENCE") for identifier in record_ids)
+    section = str(section_type or "general").lower()
+    coverage_instruction = (
+        "For Results and Discussion, write a dedicated temporal-evidence paragraph that uses at least one dynamic record, "
+        "one TMM candidate record, and one PTM→protein record when those record classes are present. Also state one explicit "
+        "limitation from counterevidence or not_evaluable status when supplied."
+        if section in {"results", "discussion"}
+        else "Use the relevant supplied numerical temporal records when answering this section; do not substitute generic pathway prose."
+    )
     lines = [
         "=== TEMPORAL NUMERICAL EVIDENCE PACKET (MANDATORY; OBSERVATIONAL) ===",
         "Use exact values and identifiers only from the records below. Before every temporal or PTM-protein claim, "
         "check that it is supported by one DATA-* record. Do not turn a local co-wave transition into kinase switching, "
         "or a lagged protein trajectory into direct regulation or causality.",
         "If kinase timing is not_evaluable or an edge is not evidence-supported, state that limitation explicitly.",
+        coverage_instruction,
+        f"Available required classes: dynamic={has_dynamic}; TMM={has_tmm}; PTM-protein={has_cross_layer}; counterevidence={has_counterevidence}.",
         "For auditability, retain the relevant [DATA-*] label at the end of the sentence in the draft.",
         "",
     ]
@@ -1103,6 +1209,41 @@ def format_temporal_evidence_packet_for_llm(packet: Mapping[str, Any]) -> str:
         f"Claim boundary: {packet.get('claim_boundary', '')}",
         "=== END TEMPORAL NUMERICAL EVIDENCE PACKET ===",
     ])
+    return "\n".join(lines)
+
+
+def build_temporal_evidence_fallback_addendum(packet: Mapping[str, Any]) -> str:
+    """Return deterministic temporal evidence when an LLM omits mandatory classes."""
+    if not packet or packet.get("status") != "available":
+        return ""
+    selected: list[Mapping[str, Any]] = []
+    prefixes = (
+        "DATA-TEMPORAL-SUMMARY",
+        "DATA-DYNAMIC-SUMMARY",
+        "DATA-DYNAMIC-WAVE-",
+        "DATA-TMM-KINASE-",
+        "DATA-TMM-UNCERTAINTY",
+        "DATA-CROSS-LAYER-",
+        "DATA-COUNTEREVIDENCE-",
+    )
+    for prefix in prefixes:
+        record = next(
+            (
+                row for row in packet.get("records") or []
+                if isinstance(row, Mapping) and str(row.get("evidence_id", "")).startswith(prefix)
+            ),
+            None,
+        )
+        if record:
+            selected.append(record)
+    if not selected:
+        return ""
+    lines = [
+        "### Numerical temporal-evidence traceability",
+        "The following engine-generated observations preserve numerical traceability; they do not establish causality.",
+    ]
+    for record in selected:
+        lines.append(f"- [{record.get('evidence_id')}] {record.get('text', '')}")
     return "\n".join(lines)
 
 
