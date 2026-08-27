@@ -632,4 +632,4 @@ Backend: vector-plot (receptor inference)
 - [x] packet delivery failure, stale deployment, prompt omission 및 LLM non-consumption 원인 분리
 - [x] mandatory numerical evidence utilization·per-section traceability·review-required failure visibility 구현
 - [x] synthetic/real artifact fidelity and prompt-budget regression, blind truth isolation 검증
-- [ ] 운영 재배포·재실행 절차 문서화 및 GitHub main 반영
+- [x] 운영 재배포·재실행 절차 문서화 및 GitHub main 반영
