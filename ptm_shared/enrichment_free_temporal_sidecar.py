@@ -486,6 +486,7 @@ def build_v2_sidecar(
     wave_contract: Mapping[str, Any] | None = None,
     tmm_result: Mapping[str, Any] | None = None,
     cross_layer_config: Mapping[str, Any] | None = None,
+    dynamic_transition_config: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     protein_time_series, protein_provenance = load_protein_time_series(output_dir, ptm_type)
     ptm_protein_pairs = build_ptm_protein_pairs(site_observations, protein_time_series)
@@ -503,6 +504,20 @@ def build_v2_sidecar(
         cross_layer_edges,
         kinase_timing_predictions,
     )
+    if dynamic_transition_config is None:
+        dynamic_transition: dict[str, Any] = {
+            "contract_version": "dynamic_co_wave_transition.v1",
+            "status": "not_requested",
+            "interpretation_boundary": "Optional additive local co-movement annotation; static Wave membership and TMM are unchanged.",
+        }
+    else:
+        from ptm_shared.dynamic_cowave_transition import analyze_dynamic_co_wave_transitions
+
+        dynamic_transition = analyze_dynamic_co_wave_transitions(
+            dict(wave_contract or {}),
+            config=dynamic_transition_config,
+        )
+        dynamic_transition["status"] = "computed"
     return {
         "schema_version": SIDECAR_SCHEMA_VERSION,
         "temporal_wave_contract": dict(wave_contract or {}),
@@ -516,6 +531,7 @@ def build_v2_sidecar(
         "mechanism_chains": mechanism_chains,
         "mechanism_counterevidence": mechanism_counterevidence,
         "hypothesis_evidence_packets": hypothesis_evidence_packets,
+        "dynamic_co_wave_transition": dynamic_transition,
         "provenance": {
             "source": "production_preprocessing_outputs",
             "rag_used": False,
@@ -530,6 +546,12 @@ def build_v2_sidecar(
                 row.get("mechanism_status") == "evidence_supported_mechanism_candidate"
                 for row in mechanism_chains
             ),
+            "dynamic_co_wave_transition": {
+                "status": dynamic_transition.get("status"),
+                "config_sha256": (dynamic_transition.get("provenance") or {}).get("config_sha256"),
+                "membership_mutation": (dynamic_transition.get("provenance") or {}).get("membership_mutation"),
+                "tmm_mutation": (dynamic_transition.get("provenance") or {}).get("tmm_mutation"),
+            },
             "causality_boundary": "temporal_order_is_observational_and_not_causal",
         },
     }
@@ -590,6 +612,7 @@ def build_production_temporal_ptm_protein_analysis(
     conditions: Iterable[str],
     tmm_result: Mapping[str, Any],
     cross_layer_config: Mapping[str, Any] | None = None,
+    dynamic_transition_config: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the exact v2 sidecar contract for a normal production order.
 
@@ -629,6 +652,7 @@ def build_production_temporal_ptm_protein_analysis(
         wave_contract=wave_contract,
         tmm_result=tmm_result,
         cross_layer_config=cross_layer_config,
+        dynamic_transition_config=dynamic_transition_config,
     )
     sidecar["provenance"]["analysis_mode"] = "production"
     sidecar["provenance"]["shared_engine_contract"] = "unified_temporal_ptm_protein.v1"
@@ -647,6 +671,8 @@ def summarize_temporal_ptm_protein_analysis(
     edges = list(sidecar.get("cross_layer_edges") or [])
     chains = list(sidecar.get("mechanism_chains") or [])
     packets = list(sidecar.get("hypothesis_evidence_packets") or [])
+    dynamic_transition = dict(sidecar.get("dynamic_co_wave_transition") or {})
+    dynamic_summary = dict(dynamic_transition.get("summary") or {})
     eligible_edges = [row for row in edges if row.get("eligible_for_mechanism_chain")]
     ordered_edges = sorted(
         eligible_edges or edges,
@@ -667,6 +693,9 @@ def summarize_temporal_ptm_protein_analysis(
             row.get("mechanism_status") == "evidence_supported_mechanism_candidate" for row in chains
         ),
         "kinase_timing_status": ((sidecar.get("provenance") or {}).get("kinase_timing") or {}).get("data_anchored_timing_status"),
+        "dynamic_co_wave_transition_status": dynamic_transition.get("status", "not_requested"),
+        "dynamic_transition_supported_wave_count": dynamic_summary.get("transition_supported_wave_count"),
+        "dynamic_transition_pair_count": dynamic_summary.get("pair_transition_count"),
         "causality_status": "not_tested",
         "interpretation_boundary": "Temporal precedence and mechanism packets are observational, falsifiable candidates; they are not causal claims.",
         "top_cross_layer_edges": [

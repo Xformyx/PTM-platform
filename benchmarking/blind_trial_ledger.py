@@ -73,6 +73,8 @@ VARIABLE_REGISTRY: dict[str, dict[str, Any]] = {
     "cross_layer.minimum_absolute_change": {"type": "float", "minimum": 0.10, "maximum": 1.50, "default": 0.40},
     "cross_layer.minimum_lag_aware_similarity": {"type": "float", "minimum": 0.0, "maximum": 0.95, "default": 0.40},
     "cross_layer.minimum_loto_stability": {"type": "float", "minimum": 0.0, "maximum": 1.0, "default": 0.60},
+    "dynamic_cowave.activity_threshold_fc": {"type": "float", "minimum": 0.10, "maximum": 1.50, "default": 0.50},
+    "dynamic_cowave.minimum_observed_timepoints": {"type": "int", "minimum": 2, "maximum": 12, "default": 4},
 }
 
 
