@@ -633,3 +633,9 @@ Backend: vector-plot (receptor inference)
 - [x] mandatory numerical evidence utilization·per-section traceability·review-required failure visibility 구현
 - [x] synthetic/real artifact fidelity and prompt-budget regression, blind truth isolation 검증
 - [x] 운영 재배포·재실행 절차 문서화 및 GitHub main 반영
+
+## New Report Temporal Evidence Utilization Review
+- [x] 신규 DOCX와 representation benchmark JSON의 schema·section·numeric evidence 추출
+- [x] dynamic Wave·TMM·uncertainty·PTM→protein·counterevidence의 Report prose 활용 대조
+- [x] traceability·observational claim boundary·representation delta를 종합 판정
+- [x] 검토 결과와 재현 가능한 후속 조치를 보고
