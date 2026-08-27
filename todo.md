@@ -600,8 +600,8 @@ Backend: vector-plot (receptor inference)
 
 ## Report LLM Numerical Evidence-Contract Upgrade
 - [x] current report context assembly, supplement budget, numerical evidence loss 및 claim guard audit
-- [ ] structured site·wave·TMM·cross-layer·transition·uncertainty evidence packet and tiered claim contract 설계
-- [ ] report state, question generator and section writers에 compact evidence packet·budget allocation·citation token 구현
+- [x] structured site·wave·TMM·cross-layer·transition·uncertainty evidence packet and tiered claim contract 설계
+- [x] report state, question generator and section writers에 compact evidence packet·budget allocation·citation token 구현
 - [x] report-fidelity evaluator와 synthetic/real artifact contract regression 구현
 - [x] LLM context coverage, claim safety, cross-stack validation 및 blind truth isolation 검증
 - [x] 운영 적용 문서, GitHub main 반영 및 개선 결과 전달
@@ -615,3 +615,9 @@ Backend: vector-plot (receptor inference)
 - [x] latest benchmark code의 Figure 1–4 generator, artifact, result bundle, download API/UI 경로 감사
 - [x] inhibitor dependency가 있는 Figure 5 이상을 current strict-primary run에서 제외하는 result contract 확정
 - [x] Figure 1–4와 별도 source-data sheet의 저장 경로·파일명·provenance 및 UI 노출 규칙 검증
+
+## New Report Numerical Evidence-Packet Utilization Audit
+- [x] 19:00 DOCX의 section·table·figure·internal traceability text와 generation metadata 추출
+- [x] 이전 DOCX 대비 site·time·transition·TMM·PTM–protein evidence usage 및 claim safety 대조
+- [x] structured packet 기여도·정확성 강화·누락 정보 및 residual failure mode 판정
+- [x] 객관 비교 결과 보고서 작성 및 전달
