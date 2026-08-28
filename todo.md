@@ -659,3 +659,8 @@ Backend: vector-plot (receptor inference)
 - [x] UI에 temporal evidence ready/missing·생성 진행·Report 대기 상태 표시
 - [x] duplicate dispatch·legacy/manual rerun·normal full Order·blind truth isolation 회귀 검증
 - [x] 운영 문서·GitHub main 반영 및 새 Report acceptance criteria 전달
+
+## Dynamic Co-Wave Developer Handoff
+- [x] 최신 engine·TMM·sidecar·Report preflight source contract와 commit 상태 확인
+- [x] implementation map·data schema·claim boundary·failure semantics를 포함한 인수 문서 작성
+- [x] command·file path·acceptance criteria를 code와 대조해 developer handoff 전달
