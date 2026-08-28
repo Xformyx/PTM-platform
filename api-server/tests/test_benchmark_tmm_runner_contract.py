@@ -42,5 +42,6 @@ def test_strict_runner_uses_frozen_truth_free_config_and_multi_candidate_graph()
     assert '"tmm_config": TMM_CONFIG' in executor
     assert '"include_tmm_candidate_modules": True' in executor
     assert 'annotated.get("tmm_candidate_modules")' in executor
+    assert "include_v2_extensions=True" in executor
     assert "tmm_motif_candidate_members" in orders
     assert '"stage": "pre_temporal_redistribution"' in orders

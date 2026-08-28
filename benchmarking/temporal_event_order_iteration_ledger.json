@@ -1,0 +1,47 @@
+{
+  "schema_version": "temporal_event_order_iteration_ledger.v1",
+  "manifest": "benchmarking/temporal_event_order_iteration_manifest.json",
+  "runs": [
+    {
+      "iteration_id": "baseline_0ee80df",
+      "status": "baseline_recorded",
+      "git_commit": "0ee80df",
+      "analysis_artifact_sha256": "e54c7a7b8195fcbeaf8d465ddf06912238f673eed6db79d79eaac2c7176499d2",
+      "score_result_sha256": "aac28edabcf3a483045a2bff69d6fa2c0c1dc9676b6e3176d7dc663ecf14ecdd",
+      "canonical_weighted_score": 0.7333333333333334,
+      "regulated_anchor_recall": 0.3333333333333333,
+      "secondary_kinase_expected_timing_accuracy": 0.0,
+      "secondary_temporal_layer_coverage": 0.8571428571428571,
+      "dynamic_transition_resolution": 0.751937691,
+      "dynamic_exact_time_index_p_one_sided": 0.5861111111111111,
+      "conclusion": "baseline only; current transition ratio is not temporal-order support",
+      "truth_boundary": "locked scorer only; no truth content in production artifact"
+    },
+    {
+      "iteration_id": "eventorder_v1_0ee80df_frozen_input",
+      "status": "accepted_as_additive_instrumentation_only",
+      "git_commit": "0ee80df_plus_worktree_temporal_event_order_v1",
+      "source_artifact_sha256": "e54c7a7b8195fcbeaf8d465ddf06912238f673eed6db79d79eaac2c7176499d2",
+      "candidate_artifact_sha256": "ed3fb9785940f7424b47ed328b97058ca62faa4d7070088edbc49f533e7889f6",
+      "deterministic_two_builds_identical": true,
+      "canonical_wave_tmm_projection_unchanged": true,
+      "truth_free_artifact_forbidden_truth_paths": [],
+      "rag_used": false,
+      "llm_used": false,
+      "event_contract": "temporal_event_order.v1",
+      "event_estimability_fraction_condition_mean": 0.708633,
+      "event_site_count": 834,
+      "resolved_event_count": 591,
+      "replicate_uncertainty_status": "not_evaluable_condition_mean_only",
+      "canonical_weighted_score": 0.7333333333333334,
+      "regulated_anchor_recall": 0.3333333333333333,
+      "kinase_expected_timing_accuracy": 0.0,
+      "temporal_layer_coverage": 0.8571428571428571,
+      "known_insulin_score_change": "none",
+      "dynamic_transition_resolution": 0.751937691,
+      "dynamic_exact_time_index_p_one_sided": 0.586111111,
+      "conclusion": "New event records and censoring are available without changing known-insulin scores. No temporal-order performance claim is made until raw replicate uncertainty and a pre-specified relation/outcome test are available.",
+      "truth_boundary": "locked scorer was invoked only after the truth-free candidate artifact was archived"
+    }
+  ]
+}

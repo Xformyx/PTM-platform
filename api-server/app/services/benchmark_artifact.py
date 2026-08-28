@@ -33,6 +33,7 @@ def attach_v2_extensions(
     output_dir: Path,
     ptm_type: str,
     cross_layer_config: Mapping[str, Any] | None = None,
+    replicate_time_series: Mapping[str, Mapping[str, Iterable[Any]]] | None = None,
 ) -> dict[str, Any]:
     """Return an additive v2 artifact while preserving every v1 top-level value."""
 
@@ -48,6 +49,7 @@ def attach_v2_extensions(
         wave_contract=artifact.get("temporal_wave_contract") or {},
         tmm_result=artifact.get("tmm_full_temporal") or {},
         cross_layer_config=effective_cross_layer,
+        replicate_time_series=replicate_time_series,
     )
     effective_sha256 = hashlib.sha256(
         json.dumps(effective_cross_layer, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -145,6 +147,7 @@ def build_temporal_request(
         "timepoints": timepoints,
         "site_aggregation": site_aggregation,
         "replicate_wave_provenance": replicate_wave_provenance,
+        "replicate_time_series": replicate_time_series,
     }
 
 
@@ -219,6 +222,7 @@ def build_score_artifact(
             output_dir=output_dir,
             ptm_type=ptm_type,
             cross_layer_config=cross_layer_config,
+            replicate_time_series=temporal["replicate_time_series"],
         )
     return artifact
 

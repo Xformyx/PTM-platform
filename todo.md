@@ -682,3 +682,87 @@ Backend: vector-plot (receptor inference)
 - [x] API·worker resolver·frontend readiness에서 v1 sidecar stale-ready 경로 차단
 - [x] v1/v2 compact/full sidecar freshness 및 preparation dispatch 회귀 추가
 - [x] P0 v2 guard validation·운영 문서·GitHub main 반영
+
+## MEK Inhibitor Perturbation Benchmark Design
+- [x] cell system·insulin time-course·phosphoproteomics endpoint에 맞는 benchmark design constraints 정리
+- [x] MEK inhibitor 기전·selectivity·feedback/off-target·perturbation evidence 수집
+- [x] candidate inhibitor의 benchmark 적합성 및 orthogonal validation matrix 작성
+- [x] bias-minimized time-course perturbation design과 platform evaluation endpoint 설계
+- [x] 문헌 근거 기반 권고·한계·사전 pilot 확인 사항 보고
+
+## MEK Perturbation Alternative Review
+- [x] DIA-NN Report의 MEK·ERK·parallel pathway observable 및 missing evidence 재확인
+- [x] MEK chemical replication·ERK inhibition·genetic perturbation·upstream alternative 근거 수집
+- [x] benchmark 목적별 safety·specificity·acute time-course compatibility matrix 판정
+- [x] 최소 perturbation panel 및 validation hierarchy 권고 보고
+
+## Latest Truth-Free Benchmark Re-run and Comparison
+- [x] latest main benchmark entry point·frozen input·prior canonical baseline artifact 확인
+- [x] latest strict truth-free benchmark 및 companion Dynamic Co-Wave analysis 실행
+- [x] primary metric·P0 v2 semantics·probabilistic/permutation output을 이전 baseline과 분리 비교
+- [x] reproducibility·blind truth isolation·metric validity 확인 및 개선 기회 판정
+- [x] 수치 기반 비교 결과·향상점·한계·권고 보고
+
+## Post-Improvement Truth-Free Benchmark Comparison
+- [x] latest main sync와 user-applied improvement diff·frozen input·prior baseline 확인
+- [x] improved strict truth-free replay·companion null/ledger analysis 실행
+- [x] primary score·permutation·v2 acceptance ledger·runtime의 직전 baseline 대비 정량 비교
+- [x] reproducibility·strict blind isolation·metric validity 및 remaining limitation 확인
+- [x] before-after 보고서·figure·권고 전달
+
+## Time-Course Phosphoproteomics Readiness Assessment
+- [x] 현재 temporal analysis·quality control·inference·reporting 역량을 분석 완결성 기준으로 정리
+- [x] inhibitor 전 단계에서 허용되는 claim과 필수 공백을 판정
+- [x] 현 단계 권장 사용 범위와 inhibitor 이후 validation 목표를 보고
+
+## Manuscript Comparator Model Selection
+- [x] PTM Platform output·input parity·claim boundary 기반 공정 비교 조건 정의
+- [x] temporal phosphoproteomics·kinase inference·network baseline 최신 방법론 수집
+- [x] comparator 적합성·reproducibility·time-awareness·input parity matrix 판정
+- [x] pre-registered evaluation protocol 및 metric hierarchy 작성
+- [x] 권장 comparator set·metric·claim boundary 보고
+
+## Inhibitor-Free A0–A4 and External Comparator Run
+- [x] latest code·frozen input·A0–A4/KSEA/CLUE/KSTAR execution feasibility 및 no-outcome scope 감사
+- [x] common species/site mapping과 comparator-specific input parity plan 고정
+- [x] 가능한 internal ablation·KSEA·CLUE·KSTAR sandbox execution 수행
+- [x] runtime·site coverage·temporal stability·kinase ranking overlap과 not-evaluable endpoint 비교
+- [x] inhibitor-free 결과와 inhibitor 이후 formal evaluation 계획 보고
+
+## Inhibitor-Free Comparator Artifact Delivery
+- [x] frozen raw matrix·exact species/site mapping·KSEA/ClueR/KSTAR output integrity 확인
+- [x] provenance·scope·calibration limitation 안내 작성
+- [x] 요청 artifact와 안내문 전달
+
+## Figure-First Time-Course Phosphoproteomics Manuscript Plan
+- [x] available A0–A4/KSEA/KSTAR/ClueR/mapping evidence와 manuscript claim boundary 정리
+- [x] time-course phosphoproteomics·kinase inference·cross-species mapping·evidence-bounded RAG/LLM reference 검증
+- [x] figure-first Methods·Results·Discussion·claim-to-evidence·supplement plan 작성
+- [x] inhibitor 후 extension과 submission-ready checklist를 포함한 manuscript plan 보고
+
+## PTM Platform Comparator-Derived Advantage Summary
+- [x] comparator input·coverage·output 차이와 direct evidence 재정리
+- [x] PTM Platform의 evidence-preservation advantage와 claim boundary 판정
+- [x] 논문용 차별점 메시지와 검증 전 제한 보고
+
+## Inhibitor-Validated Comparator Manuscript Plan
+- [x] Trametinib/mirdametinib validation cohort의 operational outcome·blinding·claim boundary 정의
+- [x] A0–A4/KSEA/CLUE/KSTAR/SnapKin comparator execution·input parity·metric protocol 설계
+- [x] figure-first Results·Methods·Discussion 및 RAG/LLM evidence-audit storyline 설계
+- [x] 실행 순서·필수 보강 자료·risk mitigation을 포함한 상세 manuscript plan 보고
+
+## Temporal-Order Signal Redesign
+- [x] current transition_resolution/time-index permutation statistic·null·artifact behavior 재감사
+- [x] temporal trajectory/network inference의 pre-specifiable statistic·null model·sampling guidance 연구
+- [x] current insulin artifact에서 exploratory temporal diagnostic을 truth-free로 수행
+- [x] P1 redesign·inhibitor prospective validation·claim boundary·implementation order 설계
+- [x] 엄밀한 진단·권고·단기/중기 실행 순서 보고
+
+## Prospective Temporal Event-Order Iteration
+- [x] remote/current worktree·runner-only known-insulin benchmark isolation·baseline score/hash를 안전하게 재확인
+- [x] known insulin temporal event/order endpoint·acceptance rule·iteration ledger를 사전 명시
+- [x] additive temporal event/order contract와 unit·isolation·canonical Wave/TMM non-regression test 구현
+- [x] frozen insulin input에서 runner-only known-biology score와 truth-free robustness audit을 반복 실행
+- [x] baseline 대비 known-signal score·timing/stability·runtime·claim safety를 함께 판정하고 개선 후보를 선택/거절
+- [ ] Trametinib primary 및 mirdametinib chemical-holdout prospective validation manifest를 frozen version으로 작성
+- [ ] 실행 결과·변경 diff·known-information optimization 상태·unknown discovery 보호 장치·후속 실험 의존성을 보고

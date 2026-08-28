@@ -217,6 +217,7 @@ async def _run_tmm_with_session(
                 tmm_result=tmm,
                 wave_config=WAVE_CONFIG,
                 site_aggregation=SITE_AGGREGATION,
+                include_v2_extensions=True,
             )
             artifact_path = output_dir / "benchmark_blind_analysis_artifact.json"
             artifact_path.write_text(json.dumps(artifact, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

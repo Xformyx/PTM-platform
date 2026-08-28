@@ -495,6 +495,7 @@ def build_v2_sidecar(
     dynamic_transition_config: Mapping[str, Any] | None = None,
     enable_dynamic_transition: bool = True,
     enable_probabilistic_cowave: bool = False,
+    replicate_time_series: Mapping[str, Mapping[str, Iterable[Any]]] | None = None,
 ) -> dict[str, Any]:
     """Build v2 enrichment-free temporal sidecar.
 
@@ -535,6 +536,17 @@ def build_v2_sidecar(
         )
         dynamic_transition["status"] = "computed"
 
+    # A distinct event-time layer prevents Dynamic Co-Wave's descriptive
+    # reorganization ratio from being misreported as temporal-order evidence.
+    # It reads immutable Wave members and does not alter the canonical Wave,
+    # TMM, kinase ranking, or Dynamic Co-Wave v2 result.
+    from ptm_shared.temporal_event_order import build_temporal_event_order_evidence
+
+    temporal_event_order = build_temporal_event_order_evidence(
+        dict(wave_contract or {}),
+        replicate_time_series=replicate_time_series,
+    )
+
     # Probabilistic co-wave companion (P2 — optional, disabled by default)
     # Must not alter Wave membership, TMM, or canonical scores.
     # Production integration gate: enable only after inhibitor holdout confirms
@@ -567,6 +579,7 @@ def build_v2_sidecar(
         "mechanism_counterevidence": mechanism_counterevidence,
         "hypothesis_evidence_packets": hypothesis_evidence_packets,
         "dynamic_co_wave_transition": dynamic_transition,
+        "temporal_event_order": temporal_event_order,
         "probabilistic_co_wave": probabilistic_cowave,
         "provenance": {
             "source": "production_preprocessing_outputs",
@@ -587,6 +600,14 @@ def build_v2_sidecar(
                 "config_sha256": (dynamic_transition.get("provenance") or {}).get("config_sha256"),
                 "membership_mutation": (dynamic_transition.get("provenance") or {}).get("membership_mutation"),
                 "tmm_mutation": (dynamic_transition.get("provenance") or {}).get("tmm_mutation"),
+            },
+            "temporal_event_order": {
+                "status": temporal_event_order.get("status"),
+                "contract_version": temporal_event_order.get("contract_version"),
+                "config_sha256": (temporal_event_order.get("provenance") or {}).get("config_sha256"),
+                "temporal_order_validation_status": (temporal_event_order.get("summary") or {}).get("temporal_order_validation_status"),
+                "membership_mutation": (temporal_event_order.get("provenance") or {}).get("membership_mutation"),
+                "tmm_mutation": (temporal_event_order.get("provenance") or {}).get("tmm_mutation"),
             },
             "causality_boundary": "temporal_order_is_observational_and_not_causal",
             "probabilistic_co_wave": {
@@ -721,6 +742,8 @@ def summarize_temporal_ptm_protein_analysis(
     counterevidence = list(sidecar.get("mechanism_counterevidence") or [])
     dynamic_transition = dict(sidecar.get("dynamic_co_wave_transition") or {})
     dynamic_summary = dict(dynamic_transition.get("summary") or {})
+    temporal_event_order = dict(sidecar.get("temporal_event_order") or {})
+    temporal_event_summary = dict(temporal_event_order.get("summary") or {})
     eligible_edges = [row for row in edges if row.get("eligible_for_mechanism_chain")]
     ordered_edges = sorted(
         eligible_edges or edges,
@@ -753,6 +776,12 @@ def summarize_temporal_ptm_protein_analysis(
         "dynamic_transition_per_wave": list(dynamic_transition.get("per_wave_summary") or []),
         "dynamic_transition_pair_scope": dict(dynamic_transition.get("pair_scope") or {}),
         "dynamic_transition_event_exposure": dict(dynamic_transition.get("event_exposure") or {}),
+        "temporal_event_order_status": temporal_event_order.get("status", "not_available"),
+        "temporal_event_order_contract_version": temporal_event_order.get("contract_version"),
+        "temporal_event_order_validation_status": temporal_event_summary.get("temporal_order_validation_status"),
+        "temporal_event_order_event_estimability_fraction": temporal_event_summary.get("event_estimability_fraction"),
+        "temporal_event_order_replicate_uncertainty_status": temporal_event_summary.get("replicate_uncertainty_status"),
+        "temporal_event_order_current_transition_resolution_status": temporal_event_summary.get("current_transition_resolution_status"),
         "causality_status": "not_tested",
         "interpretation_boundary": "Temporal precedence and mechanism packets are observational, falsifiable candidates; they are not causal claims.",
         "top_cross_layer_edges": [

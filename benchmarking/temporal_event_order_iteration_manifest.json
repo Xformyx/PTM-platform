@@ -1,0 +1,92 @@
+{
+  "schema_version": "temporal_event_order_iteration.v1",
+  "created_utc": "2026-08-28T00:00:00Z",
+  "purpose": "Open development monitoring of known insulin temporal biology while preserving a separate prospective validation path.",
+  "scope": {
+    "production_change_policy": "additive_only",
+    "canonical_wave_tmm_ranking_mutation": "forbidden",
+    "benchmark_truth_access": "runner_only_post_analysis",
+    "rag_or_llm_allowed_in_analysis_or_scoring": false,
+    "inhibitor_outcomes_available": false
+  },
+  "frozen_baseline": {
+    "git_commit": "0ee80df",
+    "analysis_artifact_sha256": "e54c7a7b8195fcbeaf8d465ddf06912238f673eed6db79d79eaac2c7176499d2",
+    "score_result_sha256": "aac28edabcf3a483045a2bff69d6fa2c0c1dc9676b6e3176d7dc663ecf14ecdd",
+    "locked_manifest_sha256": "cc82d690c69d04941f256fad3eb2fca215d9b057f93b11da78a30baef9c7a6c0",
+    "canonical_metrics": {
+      "detectable_anchor_recall": 1.0,
+      "regulated_anchor_recall": 0.3333333333333333,
+      "direction_accuracy": 1.0,
+      "peak_window_accuracy": 1.0,
+      "chain_completeness": 0.0,
+      "canonical_weighted_score": 0.7333333333333334
+    },
+    "secondary_metrics": {
+      "kinase_reference_coverage": 0.4666666666666667,
+      "kinase_data_anchored_coverage": 0.0,
+      "kinase_expected_direction_accuracy": 0.6,
+      "kinase_expected_timing_accuracy": 0.0,
+      "temporal_layer_coverage": 0.8571428571428571
+    },
+    "dynamic_v2_time_order_status": "not_supported_by_current_transition_resolution",
+    "dynamic_v2_exact_time_index_p_one_sided": 0.5861111111111111
+  },
+  "development_endpoints": {
+    "primary_monitoring": [
+      "canonical_weighted_score",
+      "regulated_anchor_recall",
+      "direction_accuracy",
+      "peak_window_accuracy"
+    ],
+    "secondary_monitoring": [
+      "kinase_reference_coverage",
+      "kinase_expected_direction_accuracy",
+      "kinase_expected_timing_accuracy",
+      "temporal_layer_coverage"
+    ],
+    "new_contract_technical_endpoints": [
+      "event_estimability_fraction",
+      "censored_event_fraction",
+      "unresolved_relation_fraction",
+      "condition_mean_only_status",
+      "exact_time_order_diagnostic_exposed"
+    ]
+  },
+  "acceptance_rules": {
+    "all_must_hold": [
+      "all relevant unit, isolation, and canonical non-regression tests pass",
+      "production output contains no benchmark truth, anchor ID, locked score, expected kinase, or known temporal label",
+      "canonical Wave, TMM coefficients, and kinase ranking remain byte/semantic equivalent under the same frozen input unless an independently justified change is separately reviewed",
+      "existing Dynamic Co-Wave v2 acceptance ledger passes",
+      "current transition_resolution is never labeled as temporal-order support when its exact diagnostic is non-significant",
+      "condition-level temporal records are never represented as replicate uncertainty or causal evidence"
+    ],
+    "known_insulin_noninferiority": {
+      "canonical_weighted_score_min": 0.7333333333333334,
+      "detectable_anchor_recall_min": 1.0,
+      "regulated_anchor_recall_min": 0.3333333333333333,
+      "direction_accuracy_min": 1.0,
+      "peak_window_accuracy_min": 1.0,
+      "kinase_reference_coverage_min": 0.4666666666666667,
+      "kinase_expected_direction_accuracy_min": 0.6,
+      "temporal_layer_coverage_min": 0.8571428571428571,
+      "denominator_rule": "An increased percentage is not an improvement when its evaluable denominator decreases; numerator and denominator must both be reported."
+    },
+    "adoption_rule": "A candidate satisfying all mandatory rules but not improving an evaluable known-insulin endpoint is instrumentation-only. It cannot be described as a biological performance improvement.",
+    "rejection_rule": "Reject any candidate that raises a score by using known labels, expected temporal windows, benchmark reference identifiers, RAG text, LLM output, or inhibitor outcomes in production analysis."
+  },
+  "evaluation_sequence": [
+    "archive truth-free production artifact",
+    "run locked scorer only after archival",
+    "run exact time-index diagnostic separately from locked scorer",
+    "record runtime, coverage, denominator, status, and test outcomes in iteration ledger",
+    "compare to frozen baseline without overwriting the baseline",
+    "use prospective perturbation cohort for confirmatory performance claims"
+  ],
+  "interpretation": {
+    "known_insulin_status": "open development monitor; not an independent final performance test after iterative engineering use",
+    "future_confirmation": "Trametinib primary factorial cohort followed by mirdametinib chemical holdout",
+    "unknown_candidate_policy": "Future unknown candidates are not selected in this iteration, but contracts must retain provenance, missingness, counterevidence, and uncertainty so they can later be prioritized without retraining on benchmark truth."
+  }
+}

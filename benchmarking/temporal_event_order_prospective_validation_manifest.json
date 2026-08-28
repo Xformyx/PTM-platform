@@ -1,0 +1,95 @@
+{
+  "schema_version": "temporal_event_order_prospective_validation.v1",
+  "status": "prospective_design_frozen_before_inhibitor_outcomes",
+  "purpose": "Confirm whether temporal event/order evidence improves prediction of a perturbation-sensitive insulin signaling response after its development on the known-insulin monitor.",
+  "analysis_contract": {
+    "canonical_wave_tmm": "truth_free_temporal_optimized.v2",
+    "dynamic_cowave": "dynamic_co_wave_transition.v2",
+    "temporal_event_order": "temporal_event_order.v1",
+    "production_mutation_policy": "event_order_is_additive_only; canonical Wave, TMM, and ranking remain unchanged",
+    "temporal_event_interpretation": "observed event timing with censoring and replicate bootstrap CI; not kinase attribution, direct regulation, propagation, or causality"
+  },
+  "cohorts": {
+    "primary": {
+      "compound": "trametinib",
+      "role": "primary prospective perturbation cohort",
+      "factorial_conditions": ["vehicle", "inhibitor_only", "insulin_only", "inhibitor_plus_insulin"],
+      "time_minutes": [0, 1, 5, 15, 30, 60, 180],
+      "minimum_independent_cultures_per_cell": 3,
+      "pre_omics_qc": [
+        "pERK_total_ERK target-engagement assay",
+        "pMEK_total_MEK assay when coverage is adequate",
+        "one validated downstream marker",
+        "cell-health/viability pilot across the chosen dose and time range"
+      ]
+    },
+    "chemical_holdout": {
+      "compound": "mirdametinib_PD0325901",
+      "role": "chemical replication holdout",
+      "condition": "all code, configuration, event definition, endpoint, and threshold decisions are frozen after primary analysis and before this cohort is unblinded",
+      "factorial_conditions": ["vehicle", "inhibitor_only", "insulin_only", "inhibitor_plus_insulin"],
+      "time_minutes": [0, 1, 5, 15, 30, 60, 180],
+      "minimum_independent_cultures_per_cell": 3
+    }
+  },
+  "outcomes": {
+    "site_level_primary": {
+      "name": "insulin_specific_inhibitor_interaction",
+      "formula": "[inhibitor_plus_insulin - inhibitor_only] - [insulin_only - vehicle]",
+      "direction": "pre-specified per analyte at analysis time from the interaction estimate; no source-target causal interpretation",
+      "required_record": ["effect_estimate", "confidence_interval_or_model_status", "q_value_or_unavailable_status", "missingness", "mapping_evidence"]
+    },
+    "temporal_event_primary": {
+      "name": "replicate_aware_event_time_availability",
+      "criteria": [
+        "each required timepoint has at least two finite biological replicate values for bootstrap CI",
+        "resolved bootstrap fraction meets temporal_event_order.v1 frozen threshold",
+        "left/right censoring is retained rather than converted to a precise time"
+      ]
+    },
+    "method_comparison": {
+      "positive_set": "site-level primary interaction outcome within the primary cohort",
+      "reporting": ["precision-recall or average precision", "calibration curve and Brier score when probabilities are emitted", "coverage, numerator, denominator, and no-call rate", "protein-level grouped confidence intervals"],
+      "comparison_groups": ["A0-A4 ablations", "KSEA-style", "ClueR", "KSTAR", "SnapKin where mapping and output are comparable"],
+      "prohibited": ["pooled drug-specific labels", "post-hoc threshold tuning on mirdametinib", "ranking methods without matching their native output family"]
+    }
+  },
+  "time_order_tests": {
+    "site_event_layer": "Event times are descriptive until replicate-aware uncertainty is available.",
+    "relation_layer": "A source-target temporal order test must name the relation universe before outcomes are examined and use an order-sensitive statistic, not transition_resolution.",
+    "null_policy": {
+      "full_time_index_permutation": "Use only for the declared question that observed adjacent order differs from arbitrary common index order; enumerate exactly where computationally feasible.",
+      "reversal": "Report as a directional sensitivity analysis, not a null distribution.",
+      "adjacent_swap": "Report local timing sensitivity by swap; do not convert to a general p-value.",
+      "circular_or_block_permutation": "Do not use with this 7-point irregular-minute design unless a separate, justified stationarity assumption and pre-specified null are documented."
+    },
+    "dynamic_transition_resolution": "Retained only as a same-static-Wave local reorganization descriptor. It is not the time-order endpoint."
+  },
+  "freezing_and_leakage_controls": {
+    "freeze_before_primary_outcomes": [
+      "event/order config hash",
+      "site/protein grouping rules",
+      "all method comparison settings",
+      "effect and calibration metric definitions",
+      "missingness and censoring policy",
+      "reporting figure templates"
+    ],
+    "freeze_before_holdout_unblinding": [
+      "all primary-cohort modifications",
+      "rank cutoff or probability calibration",
+      "claims and decision rules"
+    ],
+    "never_in_production_analysis": [
+      "benchmark workbook truth", "anchor identifiers", "expected kinase/time labels", "locked score outputs", "inhibitor outcome labels", "RAG prose", "LLM output"
+    ],
+    "reporting_boundary": "RAG/LLM may consume only post-analysis numerical evidence plus permitted ChromaDB context. It cannot influence ranking, validation outcome, or truth assignment."
+  },
+  "decision_rules": {
+    "advance_to_holdout": "Primary cohort passes target engagement/health QC and all locked technical regression checks; no post-outcome alteration of the event/order contract.",
+    "confirmatory_support": "Mirdametinib reproduces the pre-specified effect direction and method-level performance/correlation within reported uncertainty. This supports perturbation consistency, not direct kinase-substrate causality.",
+    "nonconfirmation": "Report compound-specific or non-replicated result, preserve all artifacts, and do not relabel the candidate as validated."
+  },
+  "required_provenance": [
+    "raw-input hash", "frozen-config hash", "code commit", "random seed", "timepoint and replicate inventory", "artifact SHA-256", "runner-only score bundle SHA-256", "no-call/censoring ledger", "data/RAG/LLM usage flags"
+  ]
+}

@@ -10,6 +10,8 @@ def test_production_runtime_does_not_import_benchmarking_package() -> None:
     offenders = []
     for root in (REPO_ROOT / "api-server", REPO_ROOT / "workers", REPO_ROOT / "ptm_shared"):
         for source in root.rglob("*.py"):
+            if "tests" in source.parts:
+                continue
             text = source.read_text(encoding="utf-8")
             if "import benchmarking" in text or "from benchmarking" in text:
                 offenders.append(str(source.relative_to(REPO_ROOT)))

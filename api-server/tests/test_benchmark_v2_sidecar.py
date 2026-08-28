@@ -71,6 +71,7 @@ def test_attach_v2_extensions_preserves_v1_top_level_fields(tmp_path) -> None:
     assert augmented["compatibility"]["v1_top_level_fields_preserved"] is True
     assert augmented["v2_extensions"]["schema_version"].endswith("v2.sidecar")
     assert augmented["v2_extensions"]["dynamic_co_wave_transition"]["status"] == "computed"
+    assert augmented["v2_extensions"]["temporal_event_order"]["status"] == "not_evaluable_invalid_time_axis"
     assert augmented["v2_extensions"]["provenance"]["frozen_config"]["dynamic_cowave"] == DYNAMIC_COWAVE_CONFIG
 
 
@@ -178,6 +179,8 @@ def test_production_order_uses_shared_v2_sidecar_contract_without_truth(tmp_path
     assert sidecar["provenance"]["benchmark_truth_used"] is False
     assert sidecar["dynamic_co_wave_transition"]["status"] == "computed"
     assert sidecar["dynamic_co_wave_transition"]["provenance"]["configuration"] == DYNAMIC_COWAVE_CONFIG
+    assert sidecar["temporal_event_order"]["status"] == "computed_condition_mean_only"
+    assert summary["temporal_event_order_validation_status"] == "not_evaluable_replicate_missing"
     assert all(row["causality_status"] == "not_tested" for row in sidecar["ptm_protein_pairs"])
     assert summary["full_artifact_available"] is True
     assert summary["artifact_path"] == "temporal_ptm_protein_analysis_v2.json"
