@@ -494,7 +494,16 @@ def build_v2_sidecar(
     cross_layer_config: Mapping[str, Any] | None = None,
     dynamic_transition_config: Mapping[str, Any] | None = None,
     enable_dynamic_transition: bool = True,
+    enable_probabilistic_cowave: bool = False,
 ) -> dict[str, Any]:
+    """Build v2 enrichment-free temporal sidecar.
+
+    enable_probabilistic_cowave=True adds a GP-posterior soft co-activity
+    annotation as an optional parallel layer.  Disabled by default: it does not
+    affect Wave membership, TMM scores, kinase rankings, or canonical evidence
+    and must not replace hard-threshold output until inhibitor holdout validation
+    confirms calibration benefit (P2 — Roadmap §3 production integration gate).
+    """
     protein_time_series, protein_provenance = load_protein_time_series(output_dir, ptm_type)
     ptm_protein_pairs = build_ptm_protein_pairs(site_observations, protein_time_series)
     cross_layer_edges, cross_layer_provenance = build_cross_layer_edges(
@@ -525,6 +534,25 @@ def build_v2_sidecar(
             config=dict(DYNAMIC_COWAVE_CONFIG if dynamic_transition_config is None else dynamic_transition_config),
         )
         dynamic_transition["status"] = "computed"
+
+    # Probabilistic co-wave companion (P2 — optional, disabled by default)
+    # Must not alter Wave membership, TMM, or canonical scores.
+    # Production integration gate: enable only after inhibitor holdout confirms
+    # calibration benefit (Roadmap §3; pre-registered 2026-08-28).
+    if enable_probabilistic_cowave and wave_contract:
+        from ptm_shared.probabilistic_cowave import probabilistic_transition_annotation
+        probabilistic_cowave: dict[str, Any] = probabilistic_transition_annotation(
+            dict(wave_contract)
+        )
+    else:
+        probabilistic_cowave = {
+            "status": "disabled_by_caller",
+            "interpretation_boundary": (
+                "GP posterior companion; not integrated into canonical scoring. "
+                "Enable after inhibitor holdout calibration is confirmed."
+            ),
+        }
+
     return {
         "schema_version": SIDECAR_SCHEMA_VERSION,
         "temporal_wave_contract": dict(wave_contract or {}),
@@ -539,6 +567,7 @@ def build_v2_sidecar(
         "mechanism_counterevidence": mechanism_counterevidence,
         "hypothesis_evidence_packets": hypothesis_evidence_packets,
         "dynamic_co_wave_transition": dynamic_transition,
+        "probabilistic_co_wave": probabilistic_cowave,
         "provenance": {
             "source": "production_preprocessing_outputs",
             "rag_used": False,
@@ -560,6 +589,15 @@ def build_v2_sidecar(
                 "tmm_mutation": (dynamic_transition.get("provenance") or {}).get("tmm_mutation"),
             },
             "causality_boundary": "temporal_order_is_observational_and_not_causal",
+            "probabilistic_co_wave": {
+                "status": probabilistic_cowave.get("status"),
+                "enabled": enable_probabilistic_cowave,
+                "interpretation_boundary": (
+                    "GP posterior uncertainty annotation; parallel layer only. "
+                    "Does not replace hard-threshold canonical output. "
+                    "Inhibitor holdout validation required before production use."
+                ),
+            },
         },
     }
 

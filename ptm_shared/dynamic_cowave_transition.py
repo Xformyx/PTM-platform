@@ -340,7 +340,12 @@ def _wave_membership_permutation_test(
 
     null_arr = np.array(null_resolutions)
     obs = observed_resolution if observed_resolution is not None else 0.0
-    p_value = float(np.mean(null_arr >= obs))
+    # Plus-one correction (Phipson & Smyth 2010): prevents p=0 when no
+    # exceedances are observed.  With n_permutations=500 the minimum
+    # representable p is 1/501 ≈ 0.001996.
+    # pre-registered 2026-08-28.
+    n_exceed = int(np.sum(null_arr >= obs))
+    p_empirical = (n_exceed + 1) / (len(null_arr) + 1)
 
     return {
         "status": "computed",
@@ -352,10 +357,120 @@ def _wave_membership_permutation_test(
         "null_std": round(float(np.std(null_arr)), 6),
         "null_5th_pct": round(float(np.percentile(null_arr, 5)), 6),
         "null_95th_pct": round(float(np.percentile(null_arr, 95)), 6),
-        "p_value_resolution_ge_observed": round(p_value, 6),
+        "n_exceedances": n_exceed,
+        "p_empirical_one_sided": round(p_empirical, 6),
+        # Legacy field kept for backward compat; equals p_empirical_one_sided
+        "p_value_resolution_ge_observed": round(p_empirical, 6),
         "interpretation": (
-            "p_value_resolution_ge_observed < 0.05 supports that the observed "
-            "transition_resolution exceeds what random Wave membership produces. "
+            "p_empirical_one_sided: one-sided empirical p-value with plus-one correction "
+            "(Phipson & Smyth 2010). "
+            "Tests whether transition_resolution exceeds random Wave membership. "
+            "Does not test temporal ordering — see time_index_permutation_test for that. "
+            "Does not imply kinase-level mechanism."
+        ),
+    }
+
+
+def _time_index_permutation_test(
+    wave_contract: Mapping[str, Any],
+    timepoints: Sequence[str],
+    trajectories: Mapping[str, Sequence[float | None]],
+    config: Mapping[str, Any],
+    n_permutations: int,
+    seed: int,
+) -> dict[str, Any]:
+    """Estimate null distribution by shuffling time-index order (same shuffle all sites).
+
+    Unlike Wave-membership permutation, this null preserves:
+    - Which sites belong to which Wave (group structure unchanged)
+    - The per-site distribution of FC values
+    - Cross-site contemporaneous correlation structure (all sites get the same shuffle)
+
+    It disrupts:
+    - Temporal adjacency ordering between consecutive windows
+
+    Question answered: "Is the observed temporal ordering more informative than
+    random temporal ordering?" — distinct from the Wave-membership question.
+
+    Implementation target: Roadmap §3 time-index permutation.
+    Pre-registration: 2026-08-28.  n_permutations, seed, and the use of uniform
+      cross-site shuffling are frozen before inhibitor data is seen.
+    Interpretation limits: tests temporal ordering informativeness, not kinase
+      attribution accuracy.
+    Claim boundary: significant p-value supports non-random temporal structure;
+      does not imply causal mechanism.
+    """
+    if len(timepoints) < 3:
+        return {
+            "status": "skipped_too_few_timepoints",
+            "n_permutations": 0,
+            "method": "time_index_permutation",
+        }
+
+    observed_result = _annotate_once(
+        wave_contract=wave_contract,
+        timepoints=list(timepoints),
+        trajectories=trajectories,
+        config=config,
+    )
+    observed_resolution = observed_result["summary"].get("transition_resolution")
+
+    rng = np.random.default_rng(seed)
+    null_resolutions: list[float] = []
+    tp_list = list(timepoints)
+
+    for _ in range(n_permutations):
+        # Same permutation of time indices applied to all sites
+        idx = rng.permutation(len(tp_list)).tolist()
+        shuffled_tps = [tp_list[i] for i in idx]
+        shuffled_trajectories = {
+            key: [list(values)[i] for i in idx]
+            for key, values in trajectories.items()
+        }
+        perm_result = _annotate_once(
+            wave_contract=wave_contract,
+            timepoints=shuffled_tps,
+            trajectories=shuffled_trajectories,
+            config={
+                **config,
+                "minimum_observed_timepoints": min(
+                    int(config["minimum_observed_timepoints"]), len(tp_list)
+                ),
+            },
+        )
+        r = perm_result["summary"].get("transition_resolution")
+        if r is not None:
+            null_resolutions.append(r)
+
+    if not null_resolutions:
+        return {
+            "status": "skipped_no_evaluable_permutations",
+            "n_permutations": n_permutations,
+            "method": "time_index_permutation",
+        }
+
+    null_arr = np.array(null_resolutions)
+    obs = observed_resolution if observed_resolution is not None else 0.0
+    n_exceed = int(np.sum(null_arr >= obs))
+    p_empirical = (n_exceed + 1) / (len(null_arr) + 1)
+
+    return {
+        "status": "computed",
+        "method": "time_index_permutation",
+        "n_permutations": n_permutations,
+        "seed": seed,
+        "observed_transition_resolution": observed_resolution,
+        "null_mean": round(float(np.mean(null_arr)), 6),
+        "null_std": round(float(np.std(null_arr)), 6),
+        "null_5th_pct": round(float(np.percentile(null_arr, 5)), 6),
+        "null_95th_pct": round(float(np.percentile(null_arr, 95)), 6),
+        "n_exceedances": n_exceed,
+        "p_empirical_one_sided": round(p_empirical, 6),
+        "interpretation": (
+            "p_empirical_one_sided: one-sided empirical p-value with plus-one correction. "
+            "Tests whether the observed temporal ordering produces higher transition_resolution "
+            "than random time-index shuffles (same shuffle applied to all sites simultaneously). "
+            "Distinct from Wave-membership permutation — answers a different null hypothesis. "
             "Does not imply kinase-level mechanism."
         ),
     }
@@ -363,7 +478,7 @@ def _wave_membership_permutation_test(
 
 # ── Permutation test defaults (pre-registered 2026-08-28) ─────────────────
 # n_permutations=500: balance between runtime and null-distribution resolution.
-#   At 500 draws the minimum representable p-value is 1/500 = 0.002.
+#   With plus-one correction, minimum representable p-value = 1/(500+1) ≈ 0.001996.
 #   Increasing to 2000 is valid exploratory analysis; do not change threshold
 #   after observing inhibitor results.
 PERMUTATION_N_DEFAULT: int = 500
@@ -377,12 +492,18 @@ def analyze_dynamic_co_wave_transitions(
     permutation_test: bool = False,
     permutation_n: int = PERMUTATION_N_DEFAULT,
     permutation_seed: int = PERMUTATION_SEED_DEFAULT,
+    time_index_permutation_test: bool = False,
+    time_index_permutation_n: int = PERMUTATION_N_DEFAULT,
+    time_index_permutation_seed: int = PERMUTATION_SEED_DEFAULT,
 ) -> dict[str, Any]:
     """Create additive local transition evidence for immutable static Waves.
 
-    permutation_test=True adds a null-distribution estimate via Wave membership
-    label permutation (Roadmap §3).  Disabled by default for production latency;
-    enable explicitly for analysis runs.
+    permutation_test=True — Wave-membership label permutation null (Roadmap §3).
+      Tests: "Is transition_resolution above random group assignment?"
+    time_index_permutation_test=True — time-index permutation null (Roadmap §3).
+      Tests: "Is the observed temporal ordering more informative than random?"
+    Both are disabled by default for production latency; enable for analysis runs.
+    The two tests answer different questions and must not replace each other.
     """
 
     effective, config_sha = _effective_config(config)
@@ -494,4 +615,17 @@ def analyze_dynamic_co_wave_transitions(
         )
     else:
         annotation["permutation_test"] = {"status": "not_requested"}
+
+    if time_index_permutation_test:
+        annotation["time_index_permutation_test"] = _time_index_permutation_test(
+            wave_contract=wave_contract,
+            timepoints=timepoints,
+            trajectories=trajectories,
+            config=effective,
+            n_permutations=time_index_permutation_n,
+            seed=time_index_permutation_seed,
+        )
+    else:
+        annotation["time_index_permutation_test"] = {"status": "not_requested"}
+
     return annotation

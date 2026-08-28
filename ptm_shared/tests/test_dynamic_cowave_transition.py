@@ -199,6 +199,7 @@ def test_compact_sidecar_summary_exposes_frozen_dynamic_config_hash() -> None:
 def test_permutation_test_not_requested_by_default() -> None:
     result = analyze_dynamic_co_wave_transitions(_wave_contract())
     assert result["permutation_test"]["status"] == "not_requested"
+    assert result["time_index_permutation_test"]["status"] == "not_requested"
 
 
 def test_permutation_test_computes_when_requested() -> None:
@@ -212,9 +213,69 @@ def test_permutation_test_computes_when_requested() -> None:
     assert pt["status"] == "computed"
     assert pt["n_permutations"] == 20
     assert pt["seed"] == 42
-    assert 0.0 <= pt["p_value_resolution_ge_observed"] <= 1.0
+    # plus-one correction: p must be > 0
+    assert pt["p_empirical_one_sided"] > 0.0
+    assert 0.0 < pt["p_empirical_one_sided"] <= 1.0
+    # legacy field
+    assert pt["p_value_resolution_ge_observed"] == pt["p_empirical_one_sided"]
+    assert "n_exceedances" in pt
     assert pt["null_mean"] is not None
     assert pt["null_std"] is not None
+
+
+def test_permutation_test_plus_one_correction_prevents_p_zero() -> None:
+    """With plus-one correction p can never be 0 even with 0 exceedances."""
+    contract = _wave_contract()
+    # Run enough permutations that we might get 0 exceedances
+    result = analyze_dynamic_co_wave_transitions(
+        contract,
+        permutation_test=True,
+        permutation_n=50,
+        permutation_seed=20260828,
+    )
+    pt = result["permutation_test"]
+    if pt["status"] == "computed":
+        # p must always be > 0 thanks to plus-one correction
+        assert pt["p_empirical_one_sided"] > 0.0
+        # upper bound: 1/(n+1) when 0 exceedances
+        min_p = 1.0 / (pt["n_permutations"] + 1)
+        assert pt["p_empirical_one_sided"] >= min_p
+
+
+def test_time_index_permutation_test_computes() -> None:
+    result = analyze_dynamic_co_wave_transitions(
+        _wave_contract(),
+        time_index_permutation_test=True,
+        time_index_permutation_n=15,
+        time_index_permutation_seed=7,
+    )
+    pt = result["time_index_permutation_test"]
+    assert pt["status"] == "computed"
+    assert pt["method"] == "time_index_permutation"
+    assert pt["n_permutations"] == 15
+    assert pt["p_empirical_one_sided"] > 0.0
+    assert "n_exceedances" in pt
+
+
+def test_time_index_permutation_distinct_from_wave_membership() -> None:
+    """The two permutation tests answer different questions and may differ."""
+    contract = _wave_contract()
+    r = analyze_dynamic_co_wave_transitions(
+        contract,
+        permutation_test=True,
+        permutation_n=20,
+        permutation_seed=1,
+        time_index_permutation_test=True,
+        time_index_permutation_n=20,
+        time_index_permutation_seed=1,
+    )
+    wm = r["permutation_test"]
+    ti = r["time_index_permutation_test"]
+    assert wm["method"] == "wave_membership_label_permutation"
+    assert ti["method"] == "time_index_permutation"
+    # Both should complete; may have different p-values
+    assert wm["status"] == "computed"
+    assert ti["status"] == "computed"
 
 
 def test_permutation_test_observed_resolution_matches_main() -> None:

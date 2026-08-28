@@ -1966,6 +1966,62 @@
 - **해석 한계:** TMM 산출 식과 locked score 정의를 바꾸지 않는다.
 - **결정성:** 해당 없음
 
+### [2026-08-28] 보고서 권고사항 반영: P1-A plus-one correction, time-index permutation, P1-B v2 ledger, P2 sidecar
+
+- **분류:** 수정 + 구현
+- **대상:**
+  - `ptm_shared/dynamic_cowave_transition.py` (P1-A: p-value fix, time-index permutation 추가)
+  - `ptm_shared/temporal_optimization_config.py` (P1-B: v2 acceptance ledger)
+  - `ptm_shared/enrichment_free_temporal_sidecar.py` (P2: optional probabilistic field)
+  - `ptm_shared/tests/test_dynamic_cowave_transition.py` (plus-one, time-index 테스트 추가)
+- **구현 대상 설계:**
+  `최신_strict_truth_free_benchmark_재실행_비교_보고서.pdf` §7 P1-A, P1-B, P1-D, P2
+- **사전등록 상태:** 해당 없음 (기존 사전등록 상수 변경 없음)
+- **내용:**
+
+  **P1-A: Permutation statistical validity fix**
+  - `p_value_resolution_ge_observed = mean(null >= obs)` → **plus-one correction**
+    `(n_exceedances + 1) / (n_permutations + 1)` (Phipson & Smyth 2010)
+  - 0 exceedance일 때 p=0.0 반환하던 버그 수정. 최소 표현 p = 1/(500+1) ≈ 0.001996.
+  - 새 필드 `p_empirical_one_sided` (명확한 이름). `p_value_resolution_ge_observed`는 backward compat으로 유지.
+  - `n_exceedances` 필드 추가.
+  - **Time-index permutation null** (별도 추가):
+    모든 사이트에 동일한 시점 순서 셔플을 적용. 그룹 구조·사이트 분포·동시성 유지.
+    `analyze_dynamic_co_wave_transitions(..., time_index_permutation_test=True)`.
+    질문: "관찰된 시간 순서가 무작위 순서보다 informative한가?" — Wave-membership 질문과 다름.
+    두 permutation을 서로 대체하지 않음.
+
+  **P1-B: v2 acceptance criterion re-definition**
+  - `DYNAMIC_COWAVE_V2_BASELINE` 상수를 `temporal_optimization_config.py`에 추가.
+    Insulin 2026-08-28 commit 8fc58701 기준 frozen metric values 기록.
+  - v1 site LOTO 0.722222를 v2 통과 기준으로 쓰면 안 되는 이유 명시:
+    v1은 inert event를 event set에 포함, v2는 exposure만 기록 → Jaccard 분모 다름.
+  - v2 전용 임계: pair_loto ≥ 0.689, site_loto_v2 ≥ 0.695, coverage ≥ 0.291, resolution ≥ 0.729.
+  - `check_dynamic_cowave_v2_regression(result)` 함수 추가.
+
+  **P1-D: kinase_data_anchored_coverage=0.0 원인 파악 (코드 수정 없음)**
+  - `kinase_scores=[]` (blind artifact 설계) → denominator=0 → None/0.
+  - 실제 원인: TMM confidence_tier가 `tmm_data_anchored`에 도달하려면 rat/human
+    sequence_isoform_species exact-site 링크가 필요. 현재 미연결.
+  - chain_completeness=0: branch_evidence에 evaluable chain 없음.
+  - 보고서 권고대로 임계 낮춤 금지. inhibitor study + INSR 매핑 연결 필요.
+  - **지금 할 수 있는 코드 수정 없음 — evidence chain 데이터 문제.**
+
+  **P2: Probabilistic layer optional sidecar field**
+  - `build_v2_sidecar(..., enable_probabilistic_cowave=False)` 기본값 disabled.
+  - `True`로 설정 시 `probabilistic_co_wave` 필드를 사이드카에 포함.
+  - Wave membership, TMM, kinase ranking 변경 없음. parallel layer로만 존재.
+  - 프로덕션 통합 게이트: inhibitor holdout에서 calibration benefit 확인 전까지
+    hard threshold 또는 canonical score를 GP probability로 교체하지 않음.
+
+- **논문에서의 용도:**
+  - plus-one p-value: Methods §3 "Wave-membership permutation" 및 "time-order permutation" 절.
+  - v2 baseline ledger: Methods §3 "regression detection" 표.
+- **해석 한계:**
+  - time-index permutation p-value는 temporal ordering 정보성 지지; 인과성 주장 불가.
+  - probabilistic sidecar는 condition-level trajectory만 사용; replicate 불확실성 미분해.
+- **결정성:** 모든 permutation seed와 n이 명시적으로 기록됨.
+
 ### [2026-08-28] Probabilistic Co-Wave, Permutation Test, M1-M3 Feature Extraction 구현
 
 - **분류:** 구현 (P1 Roadmap §3 — Probabilistic Dynamic Co-Wave; §4 — M1-M3)

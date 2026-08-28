@@ -134,5 +134,136 @@ def provenance() -> dict[str, object]:
     }
 
 
+# ── Dynamic Co-Wave v2 Acceptance Ledger (frozen 2026-08-28) ──────────────
+# Records baseline metric values observed on the Insulin_Signaling_Dynamic_V1
+# dataset with commit 8fc58701f6457230dd1203087075e0df1b41c987.
+#
+# WHY A SEPARATE LEDGER (not reusing v1 thresholds):
+#   v1 mixed inert site_observations into the event set; v2 records them as
+#   exposure only.  Jaccard denominator/numerator therefore differ, so v1 site
+#   LOTO (0.722222) must not be used as a v2 pass/fail criterion.  Re-baseline
+#   on v2's non-inert event universe (site LOTO = 0.716677).
+#
+# Pre-registration: 2026-08-28.  These values must not be revised after the
+#   inhibitor study is started.  They define "not worse than insulin-only v2".
+#
+# Source: strict truth-free benchmark re-run report
+#   "최신_strict_truth_free_benchmark_재실행_비교_보고서.pdf", §3, 2026-08-28.
+DYNAMIC_COWAVE_V2_BASELINE: dict[str, object] = {
+    # ── pair-level metrics (event universe identical to v1) ────────────────
+    "pair_loto_jaccard": 0.710171,
+    "pair_transition_count": 105538,
+    "active_pair_coverage": 0.300183,
+    "transition_resolution": 0.751938,
+    "transition_supported_wave_count": 8,
+
+    # ── site-level metrics (v2 non-inert event universe ONLY) ─────────────
+    "site_loto_jaccard_v2_noninert": 0.716677,
+    "noninert_site_transition_count": 2695,
+    "inert_site_observation_count": 641,
+
+    # ── acceptance thresholds for regression detection ─────────────────────
+    # Any metric falling below its threshold → flag as regression.
+    # Thresholds are set at 97% of baseline (1σ buffer against sampling noise).
+    "min_pair_loto_jaccard": 0.689,        # 97% of 0.710171
+    "min_site_loto_jaccard_v2_noninert": 0.695,   # 97% of 0.716677
+    "min_active_pair_coverage": 0.291,     # 97% of 0.300183
+    "min_transition_resolution": 0.729,    # 97% of 0.751938
+    "min_transition_supported_wave_count": 8,
+
+    # ── meta ───────────────────────────────────────────────────────────────
+    "dataset": "Insulin_Signaling_Dynamic_V1",
+    "commit": "8fc58701f6457230dd1203087075e0df1b41c987",
+    "frozen_date": "2026-08-28",
+    "v1_site_loto_jaccard_for_reference_only": 0.722222,
+    "note": (
+        "v1 site LOTO 0.722222 is listed for reference only. "
+        "Do NOT use v1 site LOTO as v2 acceptance criterion: v1 included inert "
+        "state_unchanged_or_inactive events in its Jaccard denominator while v2 "
+        "records them as exposure.  The event universe differs."
+    ),
+}
+
+
+def check_dynamic_cowave_v2_regression(
+    result: Mapping[str, object],
+) -> dict[str, object]:
+    """Check a Dynamic Co-Wave v2 result against the frozen v2 acceptance ledger.
+
+    Implementation target: P1-B acceptance criterion re-definition (2026-08-28).
+    Pre-registration: thresholds from DYNAMIC_COWAVE_V2_BASELINE are frozen.
+    Interpretation limits: detects metric regression vs. insulin-only baseline;
+      does not validate against any new dataset.
+    Claim boundary: passing all thresholds means noninferiority, not improvement.
+
+    Returns
+    -------
+    dict with keys:
+      passed       bool   — True if all thresholds met
+      failures     list   — threshold names that failed
+      warnings     list   — non-threshold observations
+      values       dict   — measured values vs. baseline
+    """
+    B = DYNAMIC_COWAVE_V2_BASELINE
+    summary = result.get("summary") or {}
+    loto = result.get("lotto") or result.get("loto") or {}
+    failures: list[str] = []
+    warnings: list[str] = []
+    values: dict[str, object] = {}
+
+    def _check(name: str, measured: float | None, threshold: float, baseline: float) -> None:
+        values[name] = {"measured": measured, "baseline": baseline, "threshold": threshold}
+        if measured is None:
+            warnings.append(f"{name}: not computed (None)")
+        elif measured < threshold:
+            failures.append(
+                f"{name}: {measured:.6f} < threshold {threshold:.6f} "
+                f"(baseline {baseline:.6f})"
+            )
+
+    _check(
+        "pair_loto_jaccard",
+        loto.get("mean_pair_transition_jaccard"),
+        float(B["min_pair_loto_jaccard"]),
+        float(B["pair_loto_jaccard"]),
+    )
+    _check(
+        "site_loto_jaccard_v2_noninert",
+        loto.get("mean_site_transition_jaccard"),
+        float(B["min_site_loto_jaccard_v2_noninert"]),
+        float(B["site_loto_jaccard_v2_noninert"]),
+    )
+    _check(
+        "active_pair_coverage",
+        summary.get("local_active_pair_coverage"),
+        float(B["min_active_pair_coverage"]),
+        float(B["active_pair_coverage"]),
+    )
+    _check(
+        "transition_resolution",
+        summary.get("transition_resolution"),
+        float(B["min_transition_resolution"]),
+        float(B["transition_resolution"]),
+    )
+    wave_count = summary.get("transition_supported_wave_count")
+    min_w = int(B["min_transition_supported_wave_count"])
+    values["transition_supported_wave_count"] = {
+        "measured": wave_count, "baseline": B["transition_supported_wave_count"], "threshold": min_w,
+    }
+    if wave_count is not None and wave_count < min_w:
+        failures.append(
+            f"transition_supported_wave_count: {wave_count} < threshold {min_w}"
+        )
+
+    return {
+        "passed": len(failures) == 0,
+        "failures": failures,
+        "warnings": warnings,
+        "values": values,
+        "ledger_frozen_date": B["frozen_date"],
+        "ledger_commit": B["commit"],
+    }
+
+
 if __name__ == "__main__":
     print(json.dumps(provenance(), ensure_ascii=False, indent=2))
