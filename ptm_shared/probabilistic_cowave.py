@@ -154,6 +154,28 @@ def _timepoints_to_minutes(labels: Sequence[str]) -> np.ndarray:
     return np.array(result, dtype=float)
 
 
+def _timepoints_to_log1p_minutes(labels: Sequence[str]) -> np.ndarray:
+    """Parse timepoint labels → log1p(minutes) coordinates.
+
+    Why log1p for insulin signaling:
+      Actual minute values: 1, 5, 15, 30, 60, 180
+      Intervals:            4, 10, 15, 30, 120 min  (highly non-uniform)
+      log1p values:         0.69, 1.79, 2.77, 3.43, 4.11, 5.20
+      log1p intervals:      1.10, 0.99, 0.65, 0.68, 1.09 (much more uniform)
+
+    The SE kernel with uniform time spacing assumes equal "informational distance"
+    between consecutive timepoints.  With raw minutes, the 60→180 min gap is
+    30× the 1→5 min gap, so the kernel severely underweights fast events.
+    log1p(time) compresses the late phase and gives the GP a more balanced
+    picture of the entire trajectory.
+
+    Pre-registered as preferred coordinate for insulin signaling GP: 2026-08-28.
+    Source: Image §4 Dynamic Co-Wave v3 recommendation.
+    """
+    minutes = _timepoints_to_minutes(labels)
+    return np.log1p(minutes)
+
+
 # ── Public API ─────────────────────────────────────────────────────────────
 
 def estimate_trajectory_posterior(
@@ -164,13 +186,26 @@ def estimate_trajectory_posterior(
     signal_var: float | None = GP_SIGNAL_VAR,
     noise_var_fraction: float = GP_NOISE_VAR_FRACTION,
     activity_threshold_fc: float = ACTIVITY_THRESHOLD_FC,
+    time_transform: str = "log1p_minutes",
 ) -> dict[str, Any]:
     """Compute GP posterior for a single site trajectory.
 
-    Implementation target: Roadmap §3 Probabilistic Dynamic Co-Wave.
+    Implementation target: Roadmap §3 Probabilistic Dynamic Co-Wave (v2+v3).
     Pre-registration: 2026-08-28.
-    Interpretation limits: condition-level FC only; no replicate decomposition.
+    Interpretation limits:
+      - Condition-level FC only; no replicate decomposition (current v2 limitation).
+      - v3 model will model per-replicate intensity y_irt = f_i(t) + b_ir + ε_irt
+        (requires replicate-level input not yet available in production pipeline).
     Claim boundary: do not claim kinase-activity inference from P(active) alone.
+
+    Parameters
+    ----------
+    time_transform : "log1p_minutes" | "minutes"
+        Coordinate system for GP kernel distances.
+        "log1p_minutes" (default): log1p(minutes) — recommended for insulin signaling
+          because intervals 1→5→15→30→60→180 min are non-uniform; log compression
+          gives the SE kernel more balanced sensitivity (pre-registered 2026-08-28).
+        "minutes": raw minutes — retained for backward compatibility.
 
     Returns
     -------
@@ -186,7 +221,10 @@ def estimate_trajectory_posterior(
     """
     labels = list(timepoint_labels)
     n = len(labels)
-    t = _timepoints_to_minutes(labels)
+    if time_transform == "log1p_minutes":
+        t = _timepoints_to_log1p_minutes(labels)
+    else:
+        t = _timepoints_to_minutes(labels)
     y = np.array([v if v is not None else np.nan for v in fc_values], dtype=float)
 
     obs_var = float(np.nanvar(y)) if np.sum(~np.isnan(y)) > 1 else 1.0
@@ -210,6 +248,7 @@ def estimate_trajectory_posterior(
         "p_inactive": [round(v, 6) for v in p_ina],
         "hyperparameters": {
             "length_scale_min": length_scale_min,
+            "time_transform": time_transform,
             "signal_var": round(sv, 6),
             "noise_var": round(nv, 6),
             "noise_var_fraction": noise_var_fraction,
@@ -261,11 +300,14 @@ def probabilistic_transition_annotation(
     length_scale_min: float = GP_LENGTH_SCALE_MIN,
     noise_var_fraction: float = GP_NOISE_VAR_FRACTION,
     activity_threshold_fc: float = ACTIVITY_THRESHOLD_FC,
+    time_transform: str = "log1p_minutes",
 ) -> dict[str, Any]:
     """Annotate all Wave members with GP posteriors and soft co-activity scores.
 
-    Implementation target: Roadmap §3 full probabilistic layer.
-    Pre-registration: 2026-08-28.
+    Implementation target: Roadmap §3 full probabilistic layer (v2).
+    v3 roadmap (replicate-aware): requires per-replicate intensity input
+      y_irt = f_i(t) + b_ir + ε_irt — not yet supported; noted for future extension.
+    Pre-registration: 2026-08-28.  time_transform="log1p_minutes" pre-registered.
     Interpretation limits: see module docstring.
     Claim boundary: do not promote soft co-activity to kinase attribution.
 
@@ -315,6 +357,7 @@ def probabilistic_transition_annotation(
             length_scale_min=length_scale_min,
             noise_var_fraction=noise_var_fraction,
             activity_threshold_fc=activity_threshold_fc,
+            time_transform=time_transform,
         )
 
     # Per-window, per-pair soft co-activity P(both active | data)
@@ -366,6 +409,7 @@ def probabilistic_transition_annotation(
         "length_scale_min": length_scale_min,
         "noise_var_fraction": noise_var_fraction,
         "activity_threshold_fc": activity_threshold_fc,
+        "time_transform": time_transform,
     }
     prov_sha = hashlib.sha256(
         json.dumps(hyper_key, sort_keys=True, separators=(",", ":")).encode()
@@ -391,7 +435,13 @@ def probabilistic_transition_annotation(
             "tmm_mutation": "forbidden",
             "interpretation_boundary": (
                 "GP posterior uncertainty on condition-level log2FC; "
-                "not replicate-decomposed; not causal evidence."
+                "not replicate-decomposed; not causal evidence. "
+                "v3 roadmap: model from per-replicate intensity y_irt = f_i(t) + b_ir + e_irt "
+                "for true replicate posterior decomposition."
+            ),
+            "time_transform_rationale": (
+                "log1p(minutes) used: insulin intervals 1→5→15→30→60→180 min are non-uniform; "
+                "log1p compression gives SE kernel balanced sensitivity. Pre-registered 2026-08-28."
             ),
             "pre_registration_date": "2026-08-28",
         },

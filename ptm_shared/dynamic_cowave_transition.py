@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-from itertools import combinations
+import math
+from itertools import combinations, permutations
 from typing import Any, Mapping, Sequence
 
 import numpy as np
@@ -244,6 +245,200 @@ def _annotate_once(
             "site_transition_opportunity_count": (raw.get("event_exposure") or {}).get("site_transition_opportunity_count"),
             "inert_site_observation_count": (raw.get("event_exposure") or {}).get("inert_site_observation_count"),
         },
+    }
+
+
+# ── T_adjacency temporal statistic ────────────────────────────────────────
+
+def _coactive_matrix(
+    wave_contract: Mapping[str, Any],
+    timepoints: Sequence[str],
+    trajectories: Mapping[str, Sequence[float | None]],
+    threshold: float,
+) -> tuple[np.ndarray, list[tuple[str, str]]]:
+    """Build binary co-activity matrix [n_pairs × n_timepoints].
+
+    Returns (matrix, pairs) where matrix[p, t] = True if both sites in pair p
+    are active (|FC| >= threshold) at timepoint t.  Only same-static-Wave pairs
+    are included.  Missing values (None) → inactive.
+
+    This vectorized representation enables fast T_adjacency computation without
+    re-running _annotate_once for each permutation.
+    """
+    site_wave = _static_membership(wave_contract)
+    wave_members: dict[str, list[str]] = {}
+    for site, wid in site_wave.items():
+        wave_members.setdefault(wid, []).append(site)
+
+    all_pairs: list[tuple[str, str]] = []
+    for wid in sorted(wave_members):
+        members = sorted(wave_members[wid])
+        for i in range(len(members)):
+            for j in range(i + 1, len(members)):
+                all_pairs.append((members[i], members[j]))
+
+    n_tp = len(timepoints)
+    n_pairs = len(all_pairs)
+    matrix = np.zeros((n_pairs, n_tp), dtype=bool)
+
+    for p_idx, (a, b) in enumerate(all_pairs):
+        fc_a = list(trajectories.get(a, [None] * n_tp))
+        fc_b = list(trajectories.get(b, [None] * n_tp))
+        for t_idx in range(n_tp):
+            fa = fc_a[t_idx]
+            fb = fc_b[t_idx]
+            if fa is not None and fb is not None:
+                matrix[p_idx, t_idx] = abs(fa) >= threshold and abs(fb) >= threshold
+
+    return matrix, all_pairs
+
+
+def _jaccard_binary(col_a: np.ndarray, col_b: np.ndarray) -> float:
+    """Jaccard similarity between two boolean arrays."""
+    inter = np.sum(col_a & col_b)
+    union = np.sum(col_a | col_b)
+    return float(inter / union) if union > 0 else 1.0
+
+
+def _t_adjacency_for_ordering(
+    coactive: np.ndarray,
+    ordering: Sequence[int],
+) -> float | None:
+    """Compute T_adjacency for a given time-index ordering.
+
+    T_adjacency = mean J(E_t, E_{t+1}) - mean J(E_t, E_{t+k}), k > 1
+
+    E_t = co-active pair set at timepoint ordering[t].
+    Adjacent Jaccard: pairs (ordering[0],ordering[1]), (ordering[1],ordering[2]), ...
+    Non-adjacent Jaccard: all pairs (ordering[w], ordering[w+k]) with k >= 2.
+
+    Returns None if non-adjacent Jaccard cannot be computed (fewer than 3 timepoints).
+    """
+    idx = list(ordering)
+    n = len(idx)
+    if n < 3:
+        return None
+
+    adj_j: list[float] = []
+    for w in range(n - 1):
+        adj_j.append(_jaccard_binary(coactive[:, idx[w]], coactive[:, idx[w + 1]]))
+
+    nonadj_j: list[float] = []
+    for k in range(2, n):
+        for w in range(n - k):
+            nonadj_j.append(_jaccard_binary(coactive[:, idx[w]], coactive[:, idx[w + k]]))
+
+    if not adj_j or not nonadj_j:
+        return None
+
+    return float(np.mean(adj_j) - np.mean(nonadj_j))
+
+
+# T_adjacency permutation defaults (pre-registered 2026-08-28)
+T_ADJACENCY_EXACT_MAX_TIMEPOINTS: int = 8
+"""Use exact permutation for n_timepoints <= this value; random otherwise.
+
+6 timepoints → 720 orderings (always exact).
+7 timepoints → 5,040 orderings (exact, fast).
+8 timepoints → 40,320 orderings (exact, seconds).
+Pre-registered 2026-08-28.
+"""
+
+
+def compute_temporal_adjacency_statistic(
+    wave_contract: Mapping[str, Any],
+    timepoints: Sequence[str],
+    trajectories: Mapping[str, Sequence[float | None]],
+    config: Mapping[str, Any],
+    *,
+    random_n: int = 10000,
+    seed: int = 20260828,
+) -> dict[str, Any]:
+    """Compute T_adjacency and its null distribution.
+
+    T_adjacency = mean J(adjacent windows) − mean J(non-adjacent windows).
+
+    A positive T_adjacency means that sites which are co-active at one timepoint
+    tend to remain co-active at the *next* timepoint more than at distant timepoints —
+    i.e., the local structure is temporally coherent.
+
+    Null distribution: all n! orderings of timepoints (exact for n ≤ 8) or
+    random subsample for larger n.  Plus-one correction applied.
+
+    Implementation target: Image "2.1 시간 순서의 정보성" T_adjacency recommendation.
+    Pre-registration: 2026-08-28.
+    Interpretation limits:
+      Significant p (< 0.05) supports that the observed temporal ordering is more
+      structured than random, NOT that Dynamic Co-Wave captures causal kinase ordering.
+      This test is a prerequisite for claiming biologically meaningful temporal structure.
+    Claim boundary: Do NOT claim "Dynamic Co-Wave captures biologically meaningful
+      temporal ordering" unless p_t_adjacency < 0.05 on the actual dataset.
+      Current finding (2026-08-28): p_time_index_permutation = 0.570858 with
+      transition_resolution metric — temporal ordering was NOT statistically significant.
+      T_adjacency is proposed as a better statistic for this question.
+    """
+    threshold = float(config.get("activity_threshold_fc", 0.40))
+    coactive, pairs = _coactive_matrix(wave_contract, timepoints, trajectories, threshold)
+    n_tp = len(timepoints)
+
+    if n_tp < 3:
+        return {
+            "status": "skipped_too_few_timepoints",
+            "t_adjacency_observed": None,
+            "method": "exact" if n_tp <= T_ADJACENCY_EXACT_MAX_TIMEPOINTS else "random",
+        }
+
+    identity_ordering = list(range(n_tp))
+    observed = _t_adjacency_for_ordering(coactive, identity_ordering)
+    if observed is None:
+        return {"status": "skipped_not_computable", "t_adjacency_observed": None}
+
+    use_exact = n_tp <= T_ADJACENCY_EXACT_MAX_TIMEPOINTS
+    method = "exact_all_permutations" if use_exact else f"random_{random_n}_permutations"
+
+    null_values: list[float] = []
+    if use_exact:
+        all_perms = list(permutations(range(n_tp)))
+        for perm in all_perms:
+            v = _t_adjacency_for_ordering(coactive, list(perm))
+            if v is not None:
+                null_values.append(v)
+    else:
+        rng = np.random.default_rng(seed)
+        for _ in range(random_n):
+            perm = rng.permutation(n_tp).tolist()
+            v = _t_adjacency_for_ordering(coactive, perm)
+            if v is not None:
+                null_values.append(v)
+
+    if not null_values:
+        return {"status": "skipped_empty_null", "t_adjacency_observed": observed}
+
+    null_arr = np.array(null_values)
+    n_exceed = int(np.sum(null_arr >= observed))
+    p_empirical = (n_exceed + 1) / (len(null_arr) + 1)
+    null_rank = int(np.sum(null_arr < observed))
+
+    return {
+        "status": "computed",
+        "method": method,
+        "t_adjacency_observed": round(observed, 6),
+        "null_mean": round(float(np.mean(null_arr)), 6),
+        "null_std": round(float(np.std(null_arr)), 6),
+        "null_5th_pct": round(float(np.percentile(null_arr, 5)), 6),
+        "null_95th_pct": round(float(np.percentile(null_arr, 95)), 6),
+        "n_permutations_evaluated": len(null_values),
+        "n_exceedances": n_exceed,
+        "p_empirical_one_sided": round(p_empirical, 6),
+        "null_rank_of_observed": null_rank,
+        "interpretation": (
+            "p_empirical_one_sided < 0.05 supports that the observed temporal ordering "
+            "produces higher adjacency coherence than random orderings — i.e., co-active "
+            "pairs at time t tend to remain co-active at t+1 more than at distant times. "
+            "Prerequisite for claiming biologically meaningful temporal structure. "
+            "Current baseline (2026-08-28) with p_time_index_permutation of transition_resolution "
+            "= 0.570858: temporal ordering was NOT significant with that metric."
+        ),
     }
 
 
@@ -495,6 +690,9 @@ def analyze_dynamic_co_wave_transitions(
     time_index_permutation_test: bool = False,
     time_index_permutation_n: int = PERMUTATION_N_DEFAULT,
     time_index_permutation_seed: int = PERMUTATION_SEED_DEFAULT,
+    t_adjacency_test: bool = False,
+    t_adjacency_random_n: int = 10000,
+    t_adjacency_seed: int = PERMUTATION_SEED_DEFAULT,
 ) -> dict[str, Any]:
     """Create additive local transition evidence for immutable static Waves.
 
@@ -502,8 +700,12 @@ def analyze_dynamic_co_wave_transitions(
       Tests: "Is transition_resolution above random group assignment?"
     time_index_permutation_test=True — time-index permutation null (Roadmap §3).
       Tests: "Is the observed temporal ordering more informative than random?"
-    Both are disabled by default for production latency; enable for analysis runs.
-    The two tests answer different questions and must not replace each other.
+      Note: p=0.570858 was observed (2026-08-28) — transition_resolution was NOT
+      significant for temporal ordering with this test.
+    t_adjacency_test=True — T_adjacency statistic with exact permutation (n≤8 tp).
+      Tests: "Are co-active pairs more stable between adjacent than distant timepoints?"
+      Recommended primary temporal statistic (Image §2.1, 2026-08-28).
+    All tests are disabled by default for production latency; enable for analysis runs.
     """
 
     effective, config_sha = _effective_config(config)
@@ -627,5 +829,17 @@ def analyze_dynamic_co_wave_transitions(
         )
     else:
         annotation["time_index_permutation_test"] = {"status": "not_requested"}
+
+    if t_adjacency_test:
+        annotation["t_adjacency_test"] = compute_temporal_adjacency_statistic(
+            wave_contract=wave_contract,
+            timepoints=timepoints,
+            trajectories=trajectories,
+            config=effective,
+            random_n=t_adjacency_random_n,
+            seed=t_adjacency_seed,
+        )
+    else:
+        annotation["t_adjacency_test"] = {"status": "not_requested"}
 
     return annotation

@@ -62,6 +62,35 @@ CROSS_LAYER_CONFIG = {
     "permutation_iterations": 0,
     "random_seed": 20260827,
 }
+# ── Temporal ordering evidence record (2026-08-28) ─────────────────────────
+# Finding: p_time_index_permutation = 0.570858 (transition_resolution metric,
+#   commit 8fc58701, Insulin_Signaling_Dynamic_V1).
+# Interpretation: current transition_resolution CANNOT distinguish the observed
+#   temporal ordering from random orderings at any conventional alpha level.
+# Consequence:
+#   FORBIDDEN claim: "Dynamic Co-Wave captures biologically meaningful temporal ordering."
+#   PERMITTED claim: "Dynamic Co-Wave provides a reproducible annotation of local
+#     membership reconfiguration within static temporal modules."
+# Resolution path: T_adjacency statistic (mean J_adjacent - mean J_non-adjacent).
+#   Exact permutation over all 720 orderings for 6 timepoints.
+#   A significant T_adjacency p-value is required before claiming temporal structure.
+# Reference: Image §2.1 "시간 순서의 정보성은 아직 증명되지 않았음", 2026-08-28.
+TEMPORAL_ORDERING_P_VALUE_RECORD: dict[str, object] = {
+    "metric": "p_time_index_permutation_of_transition_resolution",
+    "value": 0.570858,
+    "dataset": "Insulin_Signaling_Dynamic_V1",
+    "commit": "8fc58701f6457230dd1203087075e0df1b41c987",
+    "date": "2026-08-28",
+    "verdict": "temporal_ordering_not_statistically_significant",
+    "forbidden_claim": "Dynamic Co-Wave captures biologically meaningful temporal ordering.",
+    "permitted_claim": (
+        "Dynamic Co-Wave provides a reproducible annotation of local membership "
+        "reconfiguration within static temporal modules."
+    ),
+    "resolution": "T_adjacency exact permutation test (compute_temporal_adjacency_statistic)",
+}
+
+
 DYNAMIC_COWAVE_CONTRACT_VERSION = "dynamic_co_wave_transition.v2"
 DYNAMIC_COWAVE_SELECTION_LEDGER_SHA256 = "02ab551eb3c345250fa1e76758599e18026fa6b8c72889d95b7c533ebede882e"
 DYNAMIC_COWAVE_SELECTION_RECORD_SHA256 = "2d12157f12eed4a3322a9a0253257352003e84044534d53dec03336770b1a08e"

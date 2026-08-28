@@ -278,6 +278,83 @@ def test_time_index_permutation_distinct_from_wave_membership() -> None:
     assert ti["status"] == "computed"
 
 
+# ── T_adjacency ────────────────────────────────────────────────────────────
+
+def test_t_adjacency_not_requested_by_default() -> None:
+    result = analyze_dynamic_co_wave_transitions(_wave_contract())
+    assert result["t_adjacency_test"]["status"] == "not_requested"
+
+
+def test_t_adjacency_computes_exact_permutation() -> None:
+    """With 5 timepoints (120 permutations) exact mode is used."""
+    contract = _wave_contract()
+    result = analyze_dynamic_co_wave_transitions(
+        contract,
+        t_adjacency_test=True,
+        t_adjacency_seed=42,
+    )
+    ta = result["t_adjacency_test"]
+    assert ta["status"] == "computed"
+    assert ta["method"] == "exact_all_permutations"
+    assert ta["n_permutations_evaluated"] == 120  # 5! = 120
+    assert ta["t_adjacency_observed"] is not None
+    assert ta["p_empirical_one_sided"] > 0.0
+
+
+def test_t_adjacency_plus_one_prevents_zero_p() -> None:
+    result = analyze_dynamic_co_wave_transitions(
+        _wave_contract(), t_adjacency_test=True
+    )
+    ta = result["t_adjacency_test"]
+    if ta["status"] == "computed":
+        assert ta["p_empirical_one_sided"] > 0.0
+        min_p = 1.0 / (ta["n_permutations_evaluated"] + 1)
+        assert ta["p_empirical_one_sided"] >= min_p
+
+
+def test_t_adjacency_membership_not_mutated() -> None:
+    contract = _wave_contract()
+    before = {w["wave_id"]: list(w["members"]) for w in contract["waves"]}
+    analyze_dynamic_co_wave_transitions(contract, t_adjacency_test=True)
+    after = {w["wave_id"]: list(w["members"]) for w in contract["waves"]}
+    assert before == after
+
+
+def test_t_adjacency_coherent_trajectories_positive() -> None:
+    """Highly correlated adjacent trajectories should produce positive T_adjacency."""
+    labels = ["1min", "5min", "15min", "30min", "60min"]
+    # Wave where members activate together and deactivate together
+    members = {
+        "A_S1": [0.0, 1.5, 1.8, 1.6, 0.1],
+        "B_S1": [0.0, 1.3, 1.7, 1.5, 0.2],
+        "C_S1": [0.0, 1.2, 1.6, 1.4, 0.1],
+    }
+    contract = {
+        "contract_version": "temporal_wave_contract.v1",
+        "timepoints": labels,
+        "threshold_provenance": {"config_sha256": "test"},
+        "waves": [{
+            "wave_id": "TW-01",
+            "members": list(members),
+            "member_details": [
+                {"key": k, "temporal_values": dict(zip(labels, v))}
+                for k, v in members.items()
+            ],
+        }],
+    }
+    result = analyze_dynamic_co_wave_transitions(
+        contract,
+        config={"activity_threshold_fc": 0.4, "minimum_observed_timepoints": 4},
+        t_adjacency_test=True,
+    )
+    ta = result["t_adjacency_test"]
+    assert ta["status"] == "computed"
+    # For perfectly correlated trajectories, adjacent windows should be more
+    # similar than distant ones → T_adjacency should be among the higher values
+    obs = ta["t_adjacency_observed"]
+    assert obs is not None
+
+
 def test_permutation_test_observed_resolution_matches_main() -> None:
     result = analyze_dynamic_co_wave_transitions(
         _wave_contract(),

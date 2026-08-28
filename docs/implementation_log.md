@@ -1966,6 +1966,62 @@
 - **해석 한계:** TMM 산출 식과 locked score 정의를 바꾸지 않는다.
 - **결정성:** 해당 없음
 
+### [2026-08-28] T_adjacency 통계량, log1p(time) 좌표계, claim boundary 업데이트
+
+- **분류:** 구현 + 정정 (claim 경계)
+- **대상:**
+  - `ptm_shared/dynamic_cowave_transition.py` (T_adjacency, exact 720-permutation)
+  - `ptm_shared/probabilistic_cowave.py` (log1p(time) coordinate default)
+  - `ptm_shared/temporal_optimization_config.py` (p=0.570858 finding record)
+  - `ptm_shared/tests/test_dynamic_cowave_transition.py` (T_adjacency 6개 테스트)
+  - `ptm_shared/tests/test_probabilistic_cowave.py` (log1p 8개 테스트)
+- **구현 대상 설계:**
+  - Image §2.1 "시간 순서의 정보성은 아직 증명되지 않았음" — T_adjacency 권장
+  - Image §4 "Dynamic Co-Wave v3 권장 모델" — log1p(time), replicate-aware v3
+- **사전등록 상태:** 2026-08-28 동결.
+- **내용:**
+
+  **T_adjacency 통계량 (`compute_temporal_adjacency_statistic`)**
+  - T_adjacency = mean J(E_t, E_{t+1}) − mean J(E_t, E_{t+k}), k > 1
+    - E_t = 시점 t의 동일-Wave 내 co-active pair set
+    - 인접 window의 공동 활성 구조가 비인접 window보다 유사한지 테스트
+  - Exact permutation: 6 시점 → 720가지 (0.14s), 7 시점 → 5040, 8 시점 → 40320
+  - Plus-one correction 적용. `analyze_dynamic_co_wave_transitions(..., t_adjacency_test=True)`.
+  - 실제 인슐린 데이터 결과: T_adjacency = -0.009, p = 0.553 → 유의하지 않음.
+    시간 순서의 정보성이 아직 통계적으로 증명되지 않았다는 이미지 분석과 일치.
+
+  **Claim boundary 정정 (중요)**
+  - `TEMPORAL_ORDERING_P_VALUE_RECORD` 상수를 `temporal_optimization_config.py`에 추가.
+    p_time_index_permutation = 0.570858 (2026-08-28) 기록.
+  - **금지 주장:** "Dynamic Co-Wave captures biologically meaningful temporal ordering."
+  - **허용 주장:** "Dynamic Co-Wave provides a reproducible annotation of local
+    membership reconfiguration within static temporal modules."
+  - T_adjacency p < 0.05가 달성될 때까지 temporal ordering claim 불가.
+
+  **log1p(time) 좌표계 (GP 기본값 변경)**
+  - `estimate_trajectory_posterior(..., time_transform="log1p_minutes")` 기본값으로 채택.
+  - 이유: 인슐린 구간(1→5→15→30→60→180 min)이 비균등 → raw minute의 CV=2.15,
+    log1p minute의 CV=0.36으로 SE 커널이 모든 구간을 균형 있게 인식.
+  - `time_transform="minutes"`도 backward compat으로 유지.
+  - Hyperparameter SHA256에 `time_transform` 포함 → 좌표계 변경 시 SHA 변화로 추적 가능.
+
+  **v3 로드맵 기록 (미구현, 향후 과제)**
+  - 현재 v2는 condition-level FC를 GP로 soft annotation.
+    진짜 replicate posterior는 y_irt = f_i(t) + b_ir + ε_irt 모델이 필요.
+    replicate-level intensity 입력이 production 파이프라인에 추가되면 구현 가능.
+  - v3 코드에도 docstring에 명시.
+
+- **논문에서의 용도:**
+  - T_adjacency p-value: Methods §3 "temporal ordering informativeness" 검정.
+    p < 0.05를 "생물학적 시간 순서 주장"의 전제조건으로 설정.
+  - log1p(time) rationale: Methods §3 GP hyperparameter 절.
+- **해석 한계:**
+  - T_adjacency p ≥ 0.05 (현재) → temporal ordering claim 불가 (이미 기록됨).
+  - log1p 좌표계는 GP smoothness 개선이며, replicate uncertainty를 해결하지 않음.
+- **결정성:**
+  - T_adjacency exact permutation: 결정적 (순열 열거).
+  - log1p: 결정적 변환. Hyperparameter SHA에 기록.
+
 ### [2026-08-28] 보고서 권고사항 반영: P1-A plus-one correction, time-index permutation, P1-B v2 ledger, P2 sidecar
 
 - **분류:** 수정 + 구현
