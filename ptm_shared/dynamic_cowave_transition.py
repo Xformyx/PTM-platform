@@ -13,6 +13,8 @@ import json
 from itertools import combinations
 from typing import Any, Mapping, Sequence
 
+import numpy as np
+
 from ptm_shared.time_varying_comovement import (
     TimeVaryingCoMovementConfig,
     compute_time_varying_comovement,
@@ -245,12 +247,143 @@ def _annotate_once(
     }
 
 
+def _permuted_wave_contract(
+    wave_contract: Mapping[str, Any],
+    permuted_membership: Mapping[str, str],
+) -> dict[str, Any]:
+    """Rebuild a wave_contract with shuffled Wave-membership assignments.
+
+    Trajectories (temporal_values) are preserved exactly; only which Wave a
+    site belongs to is changed.  This is the null model for the permutation test:
+    if Wave membership is random, the observed transition_resolution should fall
+    in the null distribution.
+    """
+    # Collect all member_details keyed by site
+    all_details: dict[str, dict] = {}
+    for wave in wave_contract.get("waves") or []:
+        for md in wave.get("member_details") or []:
+            if md.get("key"):
+                all_details[str(md["key"])] = dict(md)
+
+    # Rebuild waves with permuted membership
+    new_wave_ids = sorted(set(permuted_membership.values()))
+    new_waves = []
+    for wid in new_wave_ids:
+        members_in = [k for k, v in permuted_membership.items() if v == wid]
+        new_waves.append({
+            "wave_id": wid,
+            "members": members_in,
+            "member_details": [all_details[k] for k in members_in if k in all_details],
+        })
+    return {**dict(wave_contract), "waves": new_waves}
+
+
+def _wave_membership_permutation_test(
+    wave_contract: Mapping[str, Any],
+    timepoints: Sequence[str],
+    trajectories: Mapping[str, Sequence[float | None]],
+    config: Mapping[str, Any],
+    n_permutations: int,
+    seed: int,
+) -> dict[str, Any]:
+    """Estimate null distribution of transition_resolution by shuffling Wave labels.
+
+    Implementation target: Roadmap §3 time-label permutation + bootstrap.
+    Pre-registration: 2026-08-28.  Permutation count and seed fixed before
+      inhibitor data was seen.
+    Interpretation limits: tests whether transition_resolution is above chance
+      given the observed trajectory shapes; does not validate causal mechanisms.
+    Claim boundary: a significant p-value supports annotation informativeness,
+      not kinase attribution accuracy.
+    """
+    membership = _static_membership(wave_contract)
+    if len(membership) < 4:
+        return {
+            "status": "skipped_too_few_members",
+            "n_permutations": 0,
+            "method": "wave_membership_label_permutation",
+        }
+
+    observed_result = _annotate_once(
+        wave_contract=wave_contract,
+        timepoints=list(timepoints),
+        trajectories=trajectories,
+        config=config,
+    )
+    observed_resolution = observed_result["summary"].get("transition_resolution")
+
+    all_keys = list(membership.keys())
+    all_wave_ids = list(membership.values())
+    rng = np.random.default_rng(seed)
+
+    null_resolutions: list[float] = []
+    for _ in range(n_permutations):
+        shuffled_ids = rng.permutation(all_wave_ids).tolist()
+        perm_membership = dict(zip(all_keys, shuffled_ids))
+        perm_contract = _permuted_wave_contract(wave_contract, perm_membership)
+        perm_result = _annotate_once(
+            wave_contract=perm_contract,
+            timepoints=list(timepoints),
+            trajectories=trajectories,
+            config=config,
+        )
+        r = perm_result["summary"].get("transition_resolution")
+        if r is not None:
+            null_resolutions.append(r)
+
+    if not null_resolutions:
+        return {
+            "status": "skipped_no_evaluable_permutations",
+            "n_permutations": n_permutations,
+            "method": "wave_membership_label_permutation",
+        }
+
+    null_arr = np.array(null_resolutions)
+    obs = observed_resolution if observed_resolution is not None else 0.0
+    p_value = float(np.mean(null_arr >= obs))
+
+    return {
+        "status": "computed",
+        "method": "wave_membership_label_permutation",
+        "n_permutations": n_permutations,
+        "seed": seed,
+        "observed_transition_resolution": observed_resolution,
+        "null_mean": round(float(np.mean(null_arr)), 6),
+        "null_std": round(float(np.std(null_arr)), 6),
+        "null_5th_pct": round(float(np.percentile(null_arr, 5)), 6),
+        "null_95th_pct": round(float(np.percentile(null_arr, 95)), 6),
+        "p_value_resolution_ge_observed": round(p_value, 6),
+        "interpretation": (
+            "p_value_resolution_ge_observed < 0.05 supports that the observed "
+            "transition_resolution exceeds what random Wave membership produces. "
+            "Does not imply kinase-level mechanism."
+        ),
+    }
+
+
+# ── Permutation test defaults (pre-registered 2026-08-28) ─────────────────
+# n_permutations=500: balance between runtime and null-distribution resolution.
+#   At 500 draws the minimum representable p-value is 1/500 = 0.002.
+#   Increasing to 2000 is valid exploratory analysis; do not change threshold
+#   after observing inhibitor results.
+PERMUTATION_N_DEFAULT: int = 500
+PERMUTATION_SEED_DEFAULT: int = 20260828
+
+
 def analyze_dynamic_co_wave_transitions(
     wave_contract: Mapping[str, Any],
     *,
     config: Mapping[str, Any] | None = None,
+    permutation_test: bool = False,
+    permutation_n: int = PERMUTATION_N_DEFAULT,
+    permutation_seed: int = PERMUTATION_SEED_DEFAULT,
 ) -> dict[str, Any]:
-    """Create additive local transition evidence for immutable static Waves."""
+    """Create additive local transition evidence for immutable static Waves.
+
+    permutation_test=True adds a null-distribution estimate via Wave membership
+    label permutation (Roadmap §3).  Disabled by default for production latency;
+    enable explicitly for analysis runs.
+    """
 
     effective, config_sha = _effective_config(config)
     timepoints = [str(label) for label in wave_contract.get("timepoints") or []]
@@ -350,4 +483,15 @@ def analyze_dynamic_co_wave_transitions(
         "evaluable_pair_fold_count": len(pair_scores),
         "evaluable_site_fold_count": len(site_scores),
     }
+    if permutation_test:
+        annotation["permutation_test"] = _wave_membership_permutation_test(
+            wave_contract=wave_contract,
+            timepoints=timepoints,
+            trajectories=trajectories,
+            config=effective,
+            n_permutations=permutation_n,
+            seed=permutation_seed,
+        )
+    else:
+        annotation["permutation_test"] = {"status": "not_requested"}
     return annotation

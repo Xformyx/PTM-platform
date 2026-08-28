@@ -1966,6 +1966,67 @@
 - **해석 한계:** TMM 산출 식과 locked score 정의를 바꾸지 않는다.
 - **결정성:** 해당 없음
 
+### [2026-08-28] Probabilistic Co-Wave, Permutation Test, M1-M3 Feature Extraction 구현
+
+- **분류:** 구현 (P1 Roadmap §3 — Probabilistic Dynamic Co-Wave; §4 — M1-M3)
+- **대상:**
+  - `ptm_shared/probabilistic_cowave.py` (신규)
+  - `ptm_shared/inhibitor_prediction_features.py` (신규)
+  - `ptm_shared/dynamic_cowave_transition.py` (permutation test 추가)
+  - `ptm_shared/tests/test_probabilistic_cowave.py` (신규, 26개 테스트)
+  - `ptm_shared/tests/test_inhibitor_prediction_features.py` (신규, 22개 테스트)
+  - `ptm_shared/tests/test_dynamic_cowave_transition.py` (permutation test 6개 추가)
+- **구현 대상 설계:**
+  - `Dynamic_CoWave_AI_Development_Roadmap_KR.pdf` §3 확률적 계층, §4 Inhibitor 예측 M1–M3
+  - `Dynamic_Co-Wave_Developer_Handoff.pdf` §2.2 미구현 항목
+- **사전등록 상태:** 2026-08-28 동결. Inhibitor 데이터 공개 전 확정.
+- **내용:**
+
+  **probabilistic_cowave.py (contract: probabilistic_cowave.v1)**
+  - `estimate_trajectory_posterior(labels, fcs)`: Squared-exponential GP posterior.
+    조건-레벨 log2FC 6개 시점에 대해 posterior mean + std + P(active|data) 계산.
+  - Hyperparameters 사전등록: length_scale=15min (문헌 기반), noise_var_fraction=0.10.
+    Inhibitor 데이터 공개 후 변경 금지.
+  - `p_same_derivative_direction(post_a, post_b, window)`:
+    P(dFC_a/dt, dFC_b/dt 동부호 | GP posterior). 독립 정규 근사.
+  - `probabilistic_transition_annotation(wave_contract)`:
+    모든 Wave 멤버에 GP posterior 및 soft co-activity P(both active) 계산.
+    Wave 멤버십/TMM/kinase ranking 불변 조건 유지.
+
+  **dynamic_cowave_transition.py — permutation null distribution**
+  - `analyze_dynamic_co_wave_transitions(..., permutation_test=True)`:
+    Wave 멤버십 레이블 순열(500회, seed=20260828)로 null distribution 생성.
+    `p_value_resolution_ge_observed` 출력.
+    기본값 permutation_test=False (production latency 보호).
+  - 사전등록: n_permutations=500, seed=20260828 (2026-08-28 동결).
+
+  **inhibitor_prediction_features.py (contract: inhibitor_prediction_features.v1)**
+  - M1: 진폭·타이밍 피처 (peak_abs_fc, onset/exit/span, AUC, direction, recovery_fraction).
+  - M2: M1 + 정적 Wave 멤버십 (wave_id, member_count, amplitude_rank, zscore).
+    protein_id 필드 추가 (GroupKFold 경계).
+  - M3: M2 + Dynamic Co-Wave 전이 피처
+    (partner_count, group_persistence/split/joined/exit fraction, transition_entropy,
+    LOTO Jaccard proxy).
+  - Data leakage prevention: `GROUPKFOLD_COLUMN = "protein_id"` 2026-08-28 선언.
+    Inhibitor 레이블 공개 후 GroupKFold 경계 변경 금지.
+  - `build_feature_matrix(wave_contract, dynamic_cowave_result, model_tier)`:
+    M1/M2/M3 선택 가능. 피처 정의 + provenance SHA256 출력.
+    모델 학습 없음 — 피처 추출만.
+
+- **논문에서의 용도:**
+  - P(active|data): Figure 3 소프트 co-activity 시각화 후보.
+  - Permutation test p-value: Methods에서 "transition_resolution > chance" 주장 근거.
+  - M1-M3 feature matrix: Inhibitor 레이블 공개 시 즉시 AUPRC 평가 가능한 상태.
+    M3 > M2 AUPRC on protein-grouped holdout = 논문 primary evidence (§4 C1).
+- **해석 한계:**
+  - GP는 조건-레벨 FC만 사용; replicate 불확실성 미분해.
+  - P(active) 임계 미만 → inactive 판정이 아닌 낮은 확률 soft label.
+  - 피처 추출 ≠ kinase 귀속 정확도 주장. M3 > M2 AUPRC 없이는 paper claim 불가.
+- **결정성:**
+  - GP: length_scale, noise_var_fraction, seed → SHA256 provenance에 기록.
+  - Permutation: n_permutations=500, seed=20260828 고정.
+  - M1-M3: activity_threshold_fc = DYNAMIC_COWAVE_CONFIG에서 import.
+
 ### [2026-08-26] Figure 2 source table과 Benchmark 탭 표시
 
 - **분류:** 구현

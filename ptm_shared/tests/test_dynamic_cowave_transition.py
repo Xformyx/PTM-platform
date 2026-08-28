@@ -192,3 +192,62 @@ def test_compact_sidecar_summary_exposes_frozen_dynamic_config_hash() -> None:
     )
     assert summary["dynamic_co_wave_transition_status"] == "computed"
     assert summary["dynamic_co_wave_transition_config_sha256"] == dynamic_transition_config_sha256(config)
+
+
+# ── Permutation test ───────────────────────────────────────────────────────
+
+def test_permutation_test_not_requested_by_default() -> None:
+    result = analyze_dynamic_co_wave_transitions(_wave_contract())
+    assert result["permutation_test"]["status"] == "not_requested"
+
+
+def test_permutation_test_computes_when_requested() -> None:
+    result = analyze_dynamic_co_wave_transitions(
+        _wave_contract(),
+        permutation_test=True,
+        permutation_n=20,
+        permutation_seed=42,
+    )
+    pt = result["permutation_test"]
+    assert pt["status"] == "computed"
+    assert pt["n_permutations"] == 20
+    assert pt["seed"] == 42
+    assert 0.0 <= pt["p_value_resolution_ge_observed"] <= 1.0
+    assert pt["null_mean"] is not None
+    assert pt["null_std"] is not None
+
+
+def test_permutation_test_observed_resolution_matches_main() -> None:
+    result = analyze_dynamic_co_wave_transitions(
+        _wave_contract(),
+        permutation_test=True,
+        permutation_n=10,
+        permutation_seed=1,
+    )
+    main_resolution = result["summary"]["transition_resolution"]
+    pt_observed = result["permutation_test"]["observed_transition_resolution"]
+    if main_resolution is None:
+        assert pt_observed is None
+    else:
+        assert abs(main_resolution - pt_observed) < 1e-9
+
+
+def test_permutation_test_deterministic_with_same_seed() -> None:
+    contract = _wave_contract()
+    r1 = analyze_dynamic_co_wave_transitions(
+        contract, permutation_test=True, permutation_n=50, permutation_seed=99
+    )
+    r2 = analyze_dynamic_co_wave_transitions(
+        contract, permutation_test=True, permutation_n=50, permutation_seed=99
+    )
+    assert r1["permutation_test"]["p_value_resolution_ge_observed"] == \
+           r2["permutation_test"]["p_value_resolution_ge_observed"]
+
+
+def test_permutation_test_does_not_mutate_wave_membership() -> None:
+    contract = _wave_contract()
+    before = list(contract["waves"][0]["members"])
+    analyze_dynamic_co_wave_transitions(
+        contract, permutation_test=True, permutation_n=5, permutation_seed=1
+    )
+    assert contract["waves"][0]["members"] == before
