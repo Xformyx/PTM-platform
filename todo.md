@@ -658,4 +658,4 @@ Backend: vector-plot (receptor inference)
 - [x] missing sidecar에서 canonical heatmap/TMM/sidecar를 선행 생성하는 backend orchestration 구현
 - [x] UI에 temporal evidence ready/missing·생성 진행·Report 대기 상태 표시
 - [x] duplicate dispatch·legacy/manual rerun·normal full Order·blind truth isolation 회귀 검증
-- [ ] 운영 문서·GitHub main 반영 및 새 Report acceptance criteria 전달
+- [x] 운영 문서·GitHub main 반영 및 새 Report acceptance criteria 전달
