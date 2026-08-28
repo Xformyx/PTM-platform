@@ -94,11 +94,11 @@ Report-only rerun은 이제 `orders.py::_temporal_evidence_readiness()`를 통�
 
 | 우선순위 | Source | `ready` 조건 |
 |---:|---|---|
-| 1 | `orders.kinase_analysis_data` | compact sidecar가 non-unavailable이고 `full_artifact_available=true` |
-| 2 | `orders.kinase_activity_heatmap` | compact sidecar가 non-unavailable이고 `full_artifact_available=true` |
-| 3 | `${OUTPUT_DIR}/{order_code}/temporal_ptm_protein_analysis_v2.json` | full artifact JSON이 readable |
+| 1 | `orders.kinase_analysis_data` | compact sidecar가 non-unavailable이고 `full_artifact_available=true`, Dynamic contract=`v2`, config SHA=current |
+| 2 | `orders.kinase_activity_heatmap` | compact sidecar가 non-unavailable이고 `full_artifact_available=true`, Dynamic contract=`v2`, config SHA=current |
+| 3 | `${OUTPUT_DIR}/{order_code}/temporal_ptm_protein_analysis_v2.json` | full artifact JSON이 readable이고 nested Dynamic contract=`v2`, config SHA=current |
 
-`ready`인 경우 기존처럼 `report_generation.tasks.run_report_generation`을 바로 dispatch한다. `missing`인 경우 API는 `rag_enrichment.tasks.prepare_temporal_evidence_for_report`를 먼저 queue한다. 이 task는 enriched PTM JSON에서 `_auto_run_global_analysis()`를 재사용하고, canonical heatmap/TMM/full sidecar/compact DB projection이 성공적으로 생성되었을 때에만 matching heatmap과 함께 Report worker를 dispatch한다.
+`ready`인 경우 기존처럼 `report_generation.tasks.run_report_generation`을 바로 dispatch한다. `missing`인 경우 API는 `rag_enrichment.tasks.prepare_temporal_evidence_for_report`를 먼저 queue한다. **P0 v2 이전 Dynamic sidecar 또는 config SHA가 다른 sidecar는 `ready`가 아니라 stale/missing으로 취급**하여 canonical preparation을 다시 실행한다. 이 task는 enriched PTM JSON에서 `_auto_run_global_analysis()`를 재사용하고, canonical heatmap/TMM/full sidecar/compact DB projection이 성공적으로 생성되었을 때에만 matching heatmap과 함께 Report worker를 dispatch한다.
 
 sidecar를 만들지 못하면 Order를 `failed`로 종료하고 Report 생성은 중지한다. 이는 evidence가 없는 상태에서 LLM이 static/general context만으로 그럴듯한 report를 만드는 것을 방지하는 failure semantics이다. Report worker가 numerical analysis를 독립적으로 다시 계산해서 lineage를 두 갈래로 만드는 방식은 금지한다.
 
@@ -171,7 +171,7 @@ packet `status=unavailable`이면 Report는 temporal numerical claim을 만들 �
 
 ## 7. Frontend behavior
 
-`GET /orders/{id}`는 `temporal_evidence_readiness`를 반환한다. `RerunOptionsModal`은 kinase module badge와 별도로 다음 상태를 보여준다.
+`GET /orders/{id}`는 `temporal_evidence_readiness`를 반환한다. `RerunOptionsModal`은 kinase module badge와 별도로 다음 상태를 보여준다. `KinaseModuleAnalysis` panel도 Dynamic contract version `v2`가 아니면 full artifact와 `computed` status만으로 ready를 표시하지 않는다.
 
 | UI 상태 | 사용자에게 보이는 문구 | 클릭 후 backend 동작 |
 |---|---|---|
@@ -187,6 +187,7 @@ packet `status=unavailable`이면 Report는 temporal numerical claim을 만들 �
 | `ptm_shared/time_varying_comovement.py` | local state, window membership, optional group-scoped pair/site transition low-level algorithm |
 | `ptm_shared/dynamic_cowave_transition.py` | static-Wave-scoped additive wrapper, provenance, LOTO, bounded example contract |
 | `ptm_shared/temporal_optimization_config.py` | frozen config, SHA provenance, truth-free selection objective |
+| `ptm_shared/temporal_sidecar_freshness.py` | API preflight와 Report resolver가 공유하는 Dynamic contract/config SHA freshness gate |
 | `ptm_shared/tmm_multikinase_integration.py` | TMM-weighted cascade와 kinase directionality candidate |
 | `ptm_shared/enrichment_free_temporal_sidecar.py` | full sidecar, cross-layer candidates, mechanism/counterevidence, compact summary |
 | `api-server/app/api/orders.py` | heatmap persistence, sidecar API, readiness endpoint response, report-rerun preflight dispatch |
@@ -224,7 +225,7 @@ availability는 모든 class가 항상 존재한다는 뜻이 아니다. sidecar
 
 ### 9.2 권장 diagnosis 순서
 
-1. `GET /orders/{id}`의 `temporal_evidence_readiness`부터 확인한다.
+1. `GET /orders/{id}`의 `temporal_evidence_readiness`부터 확인한다. `required_dynamic_contract_version=dynamic_co_wave_transition.v2`와 stale source를 함께 확인한다.
 2. missing이면 Order log의 `temporal_evidence_preparation`과 `rag_enrichment` progress를 확인한다.
 3. `temporal_ptm_protein_analysis_v2.json` 및 compact `orders.kinase_activity_heatmap.temporal_ptm_protein_analysis`를 확인한다.
 4. Report 뒤에는 packet `status`와 `record_count`를 본다.
@@ -256,7 +257,8 @@ docker compose logs --tail=200 celery-worker-rag celery-worker-report
 |---|---|
 | `ptm_shared/tests/test_dynamic_cowave_transition.py` | membership/TMM 불변, v2 default/config hash, cross-Wave isolation, inert exposure 분리, single-Wave equivalence, LOTO, compact provenance |
 | `workers/tests/test_tmm_multikinase_integration.py` | TMM contribution과 raw membership 분리, prior-assisted labeling, non-causal boundary |
-| `workers/tests/test_temporal_sidecar_resolution.py` | DB/config/full artifact resolver priority와 matching heatmap handoff |
+| `workers/tests/test_temporal_sidecar_resolution.py` | DB/config/full artifact resolver priority, matching heatmap handoff, stale v1 compact/full sidecar rejection |
+| `ptm_shared/tests/test_temporal_sidecar_freshness.py` | API/worker shared v2 contract + config SHA freshness 및 stale/current compact/full artifact readiness rule |
 | `workers/tests/test_temporal_report_evidence_packet.py` | packet v2 records, section coverage, fallback, label-free final prose |
 | `workers/tests/test_one_click_temporal_orchestration.py` | RAG→Report chain 및 temporal preparation task contract |
 | `api-server/tests/test_report_temporal_readiness.py` | API readiness response, missing-sidecar preparation dispatch, UI indicator source contract |

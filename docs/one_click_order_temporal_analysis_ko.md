@@ -28,6 +28,8 @@ Preprocessing은 `run_temporal_ptm_protein_analysis=true`를 기본값으로 RAG
 
 ### Report-only rerun preflight
 
+Report rerun preflight는 full artifact 존재 여부만으로 ready를 판단하지 않는다. Dynamic Co-Wave contract version과 current frozen config SHA도 함께 확인한다. 따라서 `dynamic_co_wave_transition.v1` 또는 이전 config의 compact/full sidecar는 stale로 판정되며, `prepare_temporal_evidence_for_report`가 canonical temporal analysis를 재실행한 뒤에만 Report worker가 시작된다.
+
 Report만 재생성할 때는 kinase module의 존재만으로 temporal numerical evidence가 준비되었다고 간주하지 않는다. API는 다음 source를 순서대로 확인하여 `temporal_evidence_readiness`를 Order Detail과 Rerun modal에 반환한다.
 
 | Readiness source | `ready` 기준 |

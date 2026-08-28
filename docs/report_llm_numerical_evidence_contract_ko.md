@@ -41,7 +41,7 @@ Report state 조립은 다음 precedence로 **동일 production Order에서 파�
 
 chained config source에서 sidecar를 회수하면 Report는 **그 config의 matching heatmap/TMM cascade**를 함께 사용한다. 오래된 DB heatmap과 새 sidecar를 조합하지 않아 TMM record의 provenance가 섞이는 것을 막는다. 이 resolver는 user-data-derived Order output만 읽으며 benchmark workbook, locked score, benchmark truth, RAG prose, LLM output을 읽지 않는다.
 
-과거 Order가 DB compact projection도 full `temporal_ptm_protein_analysis_v2.json`도 갖지 않으면 resolver는 의도적으로 `unavailable`을 유지한다. 이 경우 Report worker가 분석을 재계산해서 숫자를 만들어내지 않으며, **Re-run Global Annotation 또는 새 full Order 실행**으로 canonical sidecar를 먼저 생성해야 한다.
+과거 Order가 DB compact projection도 full `temporal_ptm_protein_analysis_v2.json`도 갖지 않으면 resolver는 의도적으로 `unavailable`을 유지한다. 또한 Dynamic Co-Wave v2보다 오래된 contract 또는 current frozen config SHA와 다른 compact/full sidecar도 stale로 거부한다. 이 경우 Report worker가 분석을 재계산해서 숫자를 만들어내지 않으며, **Re-run Global Annotation 또는 새 full Order 실행**으로 canonical sidecar를 먼저 생성해야 한다.
 
 ## Packet record schema
 

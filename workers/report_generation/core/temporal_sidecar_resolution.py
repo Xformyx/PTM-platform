@@ -12,6 +12,11 @@ import json
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
+from ptm_shared.temporal_sidecar_freshness import (
+    compact_dynamic_is_current,
+    full_dynamic_is_current,
+)
+
 
 def _compact_sidecar(container: Mapping[str, Any] | None) -> dict[str, Any]:
     """Return a copied compact sidecar from one persisted/config container."""
@@ -42,12 +47,14 @@ def resolve_report_temporal_sidecar(
         ("chained_report_config.kinase_analysis_data", config_kinase_analysis_data),
         ("chained_report_config.kinase_activity_heatmap", config_kinase_activity_heatmap),
     )
+    diagnostics: list[str] = []
     for source, container in candidates:
         compact = _compact_sidecar(container)
+        if compact and compact_dynamic_is_current(compact):
+            return compact, source, diagnostics
         if compact:
-            return compact, source, []
+            diagnostics.append(f"{source}: stale Dynamic Co-Wave contract or config")
 
-    diagnostics: list[str] = []
     seen_paths: set[Path] = set()
     for path in artifact_paths:
         if path in seen_paths:
@@ -60,6 +67,9 @@ def resolve_report_temporal_sidecar(
                 full_sidecar = json.load(artifact_file)
             if not isinstance(full_sidecar, Mapping):
                 raise ValueError("full sidecar artifact must contain a JSON object")
+            if not full_dynamic_is_current(full_sidecar):
+                diagnostics.append(f"{path}: stale Dynamic Co-Wave contract or config")
+                continue
             from ptm_shared.enrichment_free_temporal_sidecar import (
                 summarize_temporal_ptm_protein_analysis,
             )

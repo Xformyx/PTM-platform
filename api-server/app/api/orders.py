@@ -1,5 +1,4 @@
 import json
-import json
 import logging
 import os
 import csv
@@ -23,6 +22,9 @@ from app.models.order import Order, OrderLog, OrderShare
 from app.models.rag_collection import RagCollection
 from app.models.user import User
 from app.services.benchmark_run_lifecycle import apply_blind_child_task_config, is_benchmark_child
+from ptm_shared.temporal_sidecar_freshness import (
+    evaluate_temporal_evidence_readiness,
+)
 
 router = APIRouter(prefix="/orders", tags=["orders"])
 logger = logging.getLogger("ptm-platform.orders")
@@ -120,49 +122,20 @@ def _missing_reference_detail(reference_dir: str, species_context) -> str:
 
 def _temporal_evidence_readiness(order: Order, order_output: Path) -> dict:
     """Return production temporal sidecar readiness without using benchmark data."""
-    for source, container in (
-        ("orders.kinase_analysis_data", order.kinase_analysis_data),
-        ("orders.kinase_activity_heatmap", order.kinase_activity_heatmap),
-    ):
-        if not isinstance(container, dict):
-            continue
-        sidecar = container.get("temporal_ptm_protein_analysis")
-        if not isinstance(sidecar, dict) or not sidecar or sidecar.get("status") == "unavailable":
-            continue
-        if sidecar.get("full_artifact_available"):
-            return {
-                "status": "ready",
-                "source": source,
-                "artifact": sidecar.get("artifact_path") or _TEMPORAL_SIDECAR_ARTIFACT,
-                "dynamic_transition_status": sidecar.get("dynamic_co_wave_transition_status"),
-                "message": "Canonical temporal evidence is ready for Report generation.",
-            }
-
-    artifact_path = order_output / _TEMPORAL_SIDECAR_ARTIFACT
-    if artifact_path.is_file():
-        try:
-            with artifact_path.open("r", encoding="utf-8") as artifact_file:
-                artifact = json.load(artifact_file)
-            if isinstance(artifact, dict):
-                return {
-                    "status": "ready",
-                    "source": "production_artifact",
-                    "artifact": artifact_path.name,
-                    "dynamic_transition_status": (
-                        (artifact.get("dynamic_co_wave_transition") or {}).get("status")
-                    ),
-                    "message": "Canonical temporal evidence is ready for Report generation.",
-                }
-        except (OSError, ValueError, TypeError) as error:
-            logger.warning("Order %s temporal sidecar artifact is unreadable: %s", order.id, error)
-
-    return {
-        "status": "missing",
-        "source": None,
-        "artifact": None,
-        "dynamic_transition_status": None,
-        "message": "Temporal evidence is missing; canonical heatmap, TMM, and PTM–protein analysis will run before Report generation.",
-    }
+    readiness = evaluate_temporal_evidence_readiness(
+        compact_sources=(
+            ("orders.kinase_analysis_data", order.kinase_analysis_data),
+            ("orders.kinase_activity_heatmap", order.kinase_activity_heatmap),
+        ),
+        artifact_path=order_output / _TEMPORAL_SIDECAR_ARTIFACT,
+    )
+    if readiness.get("unreadable_artifact_error"):
+        logger.warning(
+            "Order %s temporal sidecar artifact is unreadable: %s",
+            order.id,
+            readiness["unreadable_artifact_error"],
+        )
+    return readiness
 
 
 @router.get("/reference-status")

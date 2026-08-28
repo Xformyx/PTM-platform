@@ -8,6 +8,11 @@ from report_generation.core.temporal_sidecar_resolution import (
     resolve_report_temporal_sidecar,
     select_report_heatmap,
 )
+from ptm_shared.dynamic_cowave_transition import dynamic_transition_config_sha256
+from ptm_shared.temporal_optimization_config import (
+    DYNAMIC_COWAVE_CONFIG,
+    DYNAMIC_COWAVE_CONTRACT_VERSION,
+)
 
 
 def _compact(marker: str) -> dict:
@@ -16,6 +21,8 @@ def _compact(marker: str) -> dict:
         "marker": marker,
         "cross_layer_edge_count": 3,
         "dynamic_co_wave_transition_status": "computed",
+        "dynamic_co_wave_transition_contract_version": DYNAMIC_COWAVE_CONTRACT_VERSION,
+        "dynamic_co_wave_transition_config_sha256": dynamic_transition_config_sha256(DYNAMIC_COWAVE_CONFIG),
     }
 
 
@@ -28,7 +35,12 @@ def _full_sidecar() -> dict:
         "mechanism_chains": [],
         "hypothesis_evidence_packets": [],
         "mechanism_counterevidence": [],
-        "dynamic_co_wave_transition": {"status": "computed", "summary": {}},
+        "dynamic_co_wave_transition": {
+            "status": "computed",
+            "contract_version": DYNAMIC_COWAVE_CONTRACT_VERSION,
+            "provenance": {"config_sha256": dynamic_transition_config_sha256(DYNAMIC_COWAVE_CONFIG)},
+            "summary": {},
+        },
         "provenance": {"shared_engine_contract": "unified_temporal_ptm_protein.v1"},
     }
 
@@ -130,3 +142,35 @@ def test_chained_config_produces_available_packet_when_db_projection_is_missing(
     assert packet["status"] == "available"
     assert any(record["evidence_id"] == "DATA-TMM-KINASE-1" for record in packet["records"])
     assert any(record["evidence_id"] == "DATA-CROSS-LAYER-1" for record in packet["records"])
+
+
+def test_stale_compact_sidecar_is_skipped_for_a_current_chained_config() -> None:
+    stale = _compact("stale_db")
+    stale["dynamic_co_wave_transition_contract_version"] = "dynamic_co_wave_transition.v1"
+    compact, source, diagnostics = resolve_report_temporal_sidecar(
+        db_kinase_analysis_data={"temporal_ptm_protein_analysis": stale},
+        db_kinase_activity_heatmap={},
+        config_kinase_analysis_data={"temporal_ptm_protein_analysis": _compact("fresh_config")},
+        config_kinase_activity_heatmap={},
+        artifact_paths=(),
+    )
+    assert compact["marker"] == "fresh_config"
+    assert source == "chained_report_config.kinase_analysis_data"
+    assert any("stale Dynamic Co-Wave" in item for item in diagnostics)
+
+
+def test_stale_full_artifact_is_not_recovered_for_report_rerun(tmp_path: Path) -> None:
+    artifact = tmp_path / "temporal_ptm_protein_analysis_v2.json"
+    stale = _full_sidecar()
+    stale["dynamic_co_wave_transition"]["contract_version"] = "dynamic_co_wave_transition.v1"
+    artifact.write_text(json.dumps(stale), encoding="utf-8")
+    compact, source, diagnostics = resolve_report_temporal_sidecar(
+        db_kinase_analysis_data={},
+        db_kinase_activity_heatmap={},
+        config_kinase_analysis_data={},
+        config_kinase_activity_heatmap={},
+        artifact_paths=(artifact,),
+    )
+    assert compact == {}
+    assert source == ""
+    assert any("stale Dynamic Co-Wave" in item for item in diagnostics)

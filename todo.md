@@ -677,3 +677,8 @@ Backend: vector-plot (receptor inference)
 - [x] cross-Wave isolation·single-Wave equivalence·version/cache·summary/LOTO/Report packet regression 추가
 - [x] shared temporal·benchmark·Report worker·blind truth isolation 전체 검증
 - [x] P0 semantics·artifact rerun requirement 문서화 및 GitHub main 반영
+
+## Dynamic Co-Wave P0 v2 Readiness Freshness Guard
+- [x] API·worker resolver·frontend readiness에서 v1 sidecar stale-ready 경로 차단
+- [x] v1/v2 compact/full sidecar freshness 및 preparation dispatch 회귀 추가
+- [ ] P0 v2 guard validation·운영 문서·GitHub main 반영

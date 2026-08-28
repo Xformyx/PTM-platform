@@ -7,6 +7,7 @@ ROOT = Path(__file__).resolve().parents[2]
 ORDERS_API = ROOT / "api-server" / "app" / "api" / "orders.py"
 RERUN_MODAL = ROOT / "frontend" / "src" / "components" / "RerunOptionsModal.tsx"
 ORDER_DETAIL = ROOT / "frontend" / "src" / "pages" / "OrderDetail.tsx"
+KINASE_MODULE = ROOT / "frontend" / "src" / "components" / "KinaseModuleAnalysis.tsx"
 
 
 def test_order_detail_exposes_production_temporal_evidence_readiness() -> None:
@@ -15,6 +16,7 @@ def test_order_detail_exposes_production_temporal_evidence_readiness() -> None:
     assert '"temporal_evidence_readiness": temporal_evidence_readiness' in source
     assert '"kinase_activity_heatmap": order.kinase_activity_heatmap' in source
     assert '"temporal_ptm_protein_analysis_v2.json"' in source
+    assert "evaluate_temporal_evidence_readiness" in source
 
 
 def test_missing_sidecar_rerun_dispatches_preparation_before_report() -> None:
@@ -32,3 +34,5 @@ def test_rerun_ui_distinguishes_kinase_modules_from_temporal_evidence() -> None:
     assert "Temporal evidence ready" in modal
     assert "Temporal evidence will be prepared before Report generation" in modal
     assert "Prepare Temporal Evidence + Re-run Report" in detail
+    kinase_module = KINASE_MODULE.read_text(encoding="utf-8")
+    assert 'dynamic_co_wave_transition_contract_version === "dynamic_co_wave_transition.v2"' in kinase_module

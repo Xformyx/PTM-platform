@@ -1,0 +1,71 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from ptm_shared.temporal_sidecar_freshness import (
+    CURRENT_DYNAMIC_CONFIG_SHA256,
+    CURRENT_DYNAMIC_CONTRACT_VERSION,
+    compact_dynamic_is_current,
+    evaluate_temporal_evidence_readiness,
+    full_dynamic_is_current,
+)
+
+
+def _current_compact() -> dict:
+    return {
+        "dynamic_co_wave_transition_contract_version": CURRENT_DYNAMIC_CONTRACT_VERSION,
+        "dynamic_co_wave_transition_config_sha256": CURRENT_DYNAMIC_CONFIG_SHA256,
+    }
+
+
+def _current_full() -> dict:
+    return {
+        "dynamic_co_wave_transition": {
+            "contract_version": CURRENT_DYNAMIC_CONTRACT_VERSION,
+            "provenance": {"config_sha256": CURRENT_DYNAMIC_CONFIG_SHA256},
+        }
+    }
+
+
+def test_current_compact_and_full_sidecars_are_reusable() -> None:
+    assert compact_dynamic_is_current(_current_compact()) is True
+    assert full_dynamic_is_current(_current_full()) is True
+
+
+def test_contract_or_config_mismatch_is_not_reusable() -> None:
+    stale_compact = _current_compact()
+    stale_compact["dynamic_co_wave_transition_contract_version"] = "dynamic_co_wave_transition.v1"
+    stale_full = _current_full()
+    stale_full["dynamic_co_wave_transition"]["provenance"]["config_sha256"] = "stale"
+    assert compact_dynamic_is_current(stale_compact) is False
+    assert full_dynamic_is_current(stale_full) is False
+
+
+def test_readiness_rejects_stale_compact_and_accepts_current_compact(tmp_path: Path) -> None:
+    stale = _current_compact()
+    stale["dynamic_co_wave_transition_contract_version"] = "dynamic_co_wave_transition.v1"
+    stale_readiness = evaluate_temporal_evidence_readiness(
+        compact_sources=(("db", {"temporal_ptm_protein_analysis": stale}),),
+        artifact_path=tmp_path / "temporal_ptm_protein_analysis_v2.json",
+    )
+    ready_readiness = evaluate_temporal_evidence_readiness(
+        compact_sources=(("db", {"temporal_ptm_protein_analysis": {**_current_compact(), "full_artifact_available": True}}),),
+        artifact_path=tmp_path / "temporal_ptm_protein_analysis_v2.json",
+    )
+    assert stale_readiness["status"] == "missing"
+    assert stale_readiness["stale_sources"] == ["db"]
+    assert ready_readiness["status"] == "ready"
+
+
+def test_readiness_rejects_stale_full_artifact_and_accepts_current_full(tmp_path: Path) -> None:
+    artifact_path = tmp_path / "temporal_ptm_protein_analysis_v2.json"
+    stale = _current_full()
+    stale["dynamic_co_wave_transition"]["contract_version"] = "dynamic_co_wave_transition.v1"
+    artifact_path.write_text(json.dumps(stale), encoding="utf-8")
+    stale_readiness = evaluate_temporal_evidence_readiness(compact_sources=(), artifact_path=artifact_path)
+    artifact_path.write_text(json.dumps(_current_full()), encoding="utf-8")
+    ready_readiness = evaluate_temporal_evidence_readiness(compact_sources=(), artifact_path=artifact_path)
+    assert stale_readiness["status"] == "missing"
+    assert stale_readiness["stale_sources"] == ["production_artifact"]
+    assert ready_readiness["status"] == "ready"

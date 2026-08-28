@@ -333,6 +333,8 @@ interface GlobalKinaseModuleResponse {
     status?: string;
     full_artifact_available?: boolean;
     dynamic_co_wave_transition_status?: string;
+    dynamic_co_wave_transition_contract_version?: string;
+    dynamic_co_wave_transition_config_sha256?: string;
     dynamic_transition_supported_wave_count?: number;
   };
   // v9.44: Cache metadata
@@ -657,7 +659,8 @@ export default function KinaseModuleAnalysis({
   const [globalKinaseBatchProgress, setGlobalKinaseBatchProgress] = useState<{ current: number; total: number; phase: string } | null>(null);
   const temporalArtifactReady = Boolean(
     globalKinaseResult?.temporal_ptm_protein_analysis?.full_artifact_available &&
-    globalKinaseResult?.temporal_ptm_protein_analysis?.dynamic_co_wave_transition_status === "computed"
+    globalKinaseResult?.temporal_ptm_protein_analysis?.dynamic_co_wave_transition_status === "computed" &&
+    globalKinaseResult?.temporal_ptm_protein_analysis?.dynamic_co_wave_transition_contract_version === "dynamic_co_wave_transition.v2"
   );
 
   // ── Receptor→Kinase reverse mapping (v9.21) ─────────────────────────────
