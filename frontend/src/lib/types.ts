@@ -1,3 +1,11 @@
+export interface TemporalEvidenceReadiness {
+  status: 'ready' | 'missing';
+  source: string | null;
+  artifact: string | null;
+  dynamic_transition_status: string | null;
+  message: string;
+}
+
 export interface Order {
   id: number;
   order_code: string;
@@ -19,6 +27,8 @@ export interface Order {
   signal_propagation_data?: Record<string, unknown>;
   ip_overlay_data?: Record<string, unknown> | null;
   kinase_analysis_data?: Record<string, unknown>;
+  kinase_activity_heatmap?: Record<string, unknown>;
+  temporal_evidence_readiness?: TemporalEvidenceReadiness;
   rag_collections?: number[] | null;
   started_at?: string;
   completed_at?: string;

@@ -20,11 +20,25 @@ Preprocessing은 `run_temporal_ptm_protein_analysis=true`를 기본값으로 RAG
 
 분석이 완료되면 preprocessing output directory에 `temporal_ptm_protein_analysis_v2.json`이 기록된다. DB heatmap cache와 `kinase_analysis_data`에는 full artifact가 아니라 provenance-rich compact summary만 저장한다. API의 `GET /orders/{order_id}/temporal-ptm-protein-analysis`는 authenticated full artifact retrieval을 제공한다.
 
-진행 상태는 기존 `rag_enrichment` stage 안에서 `global_analysis` 및 `temporal_ptm_protein_analysis` step으로 전달된다. 사용자에게는 canonical Wave, TMM, PTM–protein analysis, dynamic co-wave transition이 생성 중이라는 메시지와 완료 메시지가 표시된다. 새 coarse-grained Order status를 추가하지 않아 기존 queue/status contract를 보존한다.
+진행 상태는 기존 `rag_enrichment` stage 안에서 `global_analysis`, `temporal_ptm_protein_analysis`, 또는 report rerun preflight의 `temporal_evidence_preparation` step으로 전달된다. 사용자에게는 canonical Wave, TMM, PTM–protein analysis, dynamic co-wave transition이 생성 중이라는 메시지와 완료 메시지가 표시된다. 새 coarse-grained Order status를 추가하지 않아 기존 queue/status contract를 보존한다.
 
 ## Cache와 재실행
 
 정상 Order start는 server-side에서 current temporal artifact를 생성한다. 기존 legacy cache에는 frozen dynamic configuration SHA가 없으므로, 현재 heatmap을 요청할 때 cache freshness 검사가 이를 감지하고 current shared contract로 재계산한다. UI의 **Re-run Global Annotation** 또는 Refresh는 수동 재계산/diagnostic 용도이며 normal Order completion의 필수 단계가 아니다.
+
+### Report-only rerun preflight
+
+Report만 재생성할 때는 kinase module의 존재만으로 temporal numerical evidence가 준비되었다고 간주하지 않는다. API는 다음 source를 순서대로 확인하여 `temporal_evidence_readiness`를 Order Detail과 Rerun modal에 반환한다.
+
+| Readiness source | `ready` 기준 |
+|---|---|
+| `orders.kinase_analysis_data` | non-unavailable compact sidecar + `full_artifact_available=true` |
+| `orders.kinase_activity_heatmap` | non-unavailable compact sidecar + `full_artifact_available=true` |
+| output directory | readable `temporal_ptm_protein_analysis_v2.json` full artifact |
+
+`ready`이면 기존처럼 Report worker만 dispatch한다. `missing`이면 버튼과 modal은 **“Temporal evidence will be prepared before Report generation”**을 표시하고, backend는 `rag_enrichment.tasks.prepare_temporal_evidence_for_report`를 먼저 queue에 넣는다. 이 task는 enriched PTM JSON에서 기존 canonical global analysis를 재사용하여 heatmap/TMM/full sidecar/compact DB projection을 만들고, full artifact가 확인된 경우에만 matching heatmap과 함께 Report worker를 dispatch한다.
+
+따라서 legacy Order의 “Re-run Report Generation”은 더 이상 빈 evidence packet Report로 즉시 끝나지 않는다. temporal preparation이 실패하면 Report 생성은 중단되고 Order는 `failed` 상태와 actionable error message를 남긴다. Report worker가 자체적으로 수치를 재계산하지 않으므로 numerical lineage는 canonical RAG/heatmap path 하나로 유지된다.
 
 ## Failure semantics 및 claim boundary
 
@@ -41,4 +55,19 @@ docker compose up -d --build celery-worker-rag api-server frontend
 docker compose logs --tail=200 celery-worker-rag
 ```
 
-신규 test Order에서 `temporal_ptm_protein_analysis` progress message, `tmm_execution_status=computed`, `temporal_ptm_protein_analysis_v2.json`, compact `full_artifact_available=true`를 확인한다. 기존 legacy Order는 heatmap refresh 또는 controlled re-run으로 current artifact를 생성한다.
+신규 test Order에서 `temporal_ptm_protein_analysis` 또는 `temporal_evidence_preparation` progress message, `tmm_execution_status=computed`, `temporal_ptm_protein_analysis_v2.json`, compact `full_artifact_available=true`를 확인한다. Report rerun acceptance criteria는 다음과 같다.
+
+```text
+GET /orders/{id}
+  temporal_evidence_readiness.status == "ready"
+
+report_temporal_evidence_packet.json
+  status == "available"
+  record_count > 0
+
+temporal_report_fidelity.json
+  sections.results.packet_status == "available"
+  sections.discussion.packet_status == "available"
+```
+
+가능한 numerical evidence class는 실제 persisted sidecar/TMM에 한정된다. TMM, uncertainty, counterevidence가 없으면 새 값을 만들지 않으며, final prose는 dynamic co-wave/lag를 kinase switching 또는 causal propagation으로 과장하지 않아야 한다.

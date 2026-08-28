@@ -1,4 +1,5 @@
 import json
+import json
 import logging
 import os
 import csv
@@ -35,6 +36,7 @@ _CELERY_TASK_KEY = "celery_task:{order_id}"
 _CELERY_TASKS_SET = "celery_tasks:{order_id}"
 _RUN_GEN_KEY = "order_run_gen:{order_id}"
 _CELERY_TASK_TTL = 7 * 24 * 3600
+_TEMPORAL_SIDECAR_ARTIFACT = "temporal_ptm_protein_analysis_v2.json"
 
 
 async def _save_celery_task_id(order_id: int, task_id: str) -> None:
@@ -114,6 +116,53 @@ def _missing_reference_detail(reference_dir: str, species_context) -> str:
     """Return an actionable custom-reference error without exposing a fallback species."""
     from ptm_shared.reference_fasta import missing_reference_detail
     return missing_reference_detail(reference_dir, species_context)
+
+
+def _temporal_evidence_readiness(order: Order, order_output: Path) -> dict:
+    """Return production temporal sidecar readiness without using benchmark data."""
+    for source, container in (
+        ("orders.kinase_analysis_data", order.kinase_analysis_data),
+        ("orders.kinase_activity_heatmap", order.kinase_activity_heatmap),
+    ):
+        if not isinstance(container, dict):
+            continue
+        sidecar = container.get("temporal_ptm_protein_analysis")
+        if not isinstance(sidecar, dict) or not sidecar or sidecar.get("status") == "unavailable":
+            continue
+        if sidecar.get("full_artifact_available"):
+            return {
+                "status": "ready",
+                "source": source,
+                "artifact": sidecar.get("artifact_path") or _TEMPORAL_SIDECAR_ARTIFACT,
+                "dynamic_transition_status": sidecar.get("dynamic_co_wave_transition_status"),
+                "message": "Canonical temporal evidence is ready for Report generation.",
+            }
+
+    artifact_path = order_output / _TEMPORAL_SIDECAR_ARTIFACT
+    if artifact_path.is_file():
+        try:
+            with artifact_path.open("r", encoding="utf-8") as artifact_file:
+                artifact = json.load(artifact_file)
+            if isinstance(artifact, dict):
+                return {
+                    "status": "ready",
+                    "source": "production_artifact",
+                    "artifact": artifact_path.name,
+                    "dynamic_transition_status": (
+                        (artifact.get("dynamic_co_wave_transition") or {}).get("status")
+                    ),
+                    "message": "Canonical temporal evidence is ready for Report generation.",
+                }
+        except (OSError, ValueError, TypeError) as error:
+            logger.warning("Order %s temporal sidecar artifact is unreadable: %s", order.id, error)
+
+    return {
+        "status": "missing",
+        "source": None,
+        "artifact": None,
+        "dynamic_transition_status": None,
+        "message": "Temporal evidence is missing; canonical heatmap, TMM, and PTM–protein analysis will run before Report generation.",
+    }
 
 
 @router.get("/reference-status")
@@ -704,6 +753,8 @@ async def get_order(
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
     share_access = await _check_order_access_async(order, user, db)
+    order_output = Path(os.getenv("OUTPUT_DIR", "/app/data/outputs")) / order.order_code
+    temporal_evidence_readiness = _temporal_evidence_readiness(order, order_output)
 
     return {
         "id": order.id,
@@ -727,6 +778,9 @@ async def get_order(
         "signal_propagation_data": order.signal_propagation_data,
         "receptor_inference_data": order.receptor_inference_data,
         "ip_overlay_data": order.ip_overlay_data,
+        "kinase_analysis_data": order.kinase_analysis_data,
+        "kinase_activity_heatmap": order.kinase_activity_heatmap,
+        "temporal_evidence_readiness": temporal_evidence_readiness,
         "is_shared": share_access is not None,
         "share_access": share_access,
         "started_at": order.started_at.isoformat() + "Z" if order.started_at else None,
@@ -1440,13 +1494,21 @@ async def run_stage(
             detail=f"Output directory not found for {order.order_code}. Run full analysis first.",
         )
 
-    new_status = "report_generation" if body.stage == "report_generation" else "queued"
+    temporal_evidence_readiness = _temporal_evidence_readiness(order, order_output)
+    temporal_preparation_required = (
+        body.stage == "report_generation"
+        and temporal_evidence_readiness["status"] != "ready"
+    )
+    dispatch_stage = "rag_enrichment" if temporal_preparation_required else body.stage
+    new_status = "rag_enrichment" if temporal_preparation_required else (
+        "report_generation" if body.stage == "report_generation" else "queued"
+    )
     claimed = await _claim_order_dispatch(
         db,
         order.id,
         allowed_statuses=_RUN_STAGE_ALLOWED,
         new_status=new_status,
-        current_stage=body.stage,
+        current_stage=dispatch_stage,
     )
     if not claimed:
         raise HTTPException(
@@ -1466,7 +1528,7 @@ async def run_stage(
     # Truncate logs + webhook records for stages that will be re-run
     stage_order = ["preprocessing", "rag_enrichment", "report_generation"]
     step_map = {"preprocessing": "preprocessing", "rag_enrichment": "rag_enrichment", "report_generation": "report_generation"}
-    idx = stage_order.index(body.stage)
+    idx = stage_order.index(dispatch_stage)
     stages_to_clear = stage_order[idx:]
     await db.execute(
         OrderLog.__table__.delete().where(
@@ -1632,22 +1694,36 @@ async def run_stage(
             "temporal_contract": report_opts.get("temporal_contract", "dynamics_v1"),
             "run_generation": run_generation,
         }
-        task = celery_app.send_task(
-            "report_generation.tasks.run_report_generation",
-            args=[order.id, task_config],
-            queue="report_generation",
-        )
+        if temporal_preparation_required:
+            task_config["preprocessing_output_dir"] = str(order_output)
+            task_config["prepare_temporal_evidence_for_report"] = True
+            task = celery_app.send_task(
+                "rag_enrichment.tasks.prepare_temporal_evidence_for_report",
+                args=[order.id, task_config],
+                queue="rag_enrichment",
+            )
+        else:
+            task = celery_app.send_task(
+                "report_generation.tasks.run_report_generation",
+                args=[order.id, task_config],
+                queue="report_generation",
+            )
 
     await _save_celery_task_id(order.id, task.id)
-    logger.info(f"Order {order.order_code} stage '{body.stage}' dispatched — task_id={task.id}, collections={active_collections}")
+    dispatch_label = "temporal evidence preparation → report generation" if temporal_preparation_required else body.stage
+    logger.info(f"Order {order.order_code} stage '{dispatch_label}' dispatched — task_id={task.id}, collections={active_collections}")
 
     db_log = OrderLog(
         order_id=order.id,
-        stage=body.stage,
+        stage=dispatch_stage,
         step="dispatch",
         status="started",
         progress_pct=0,
-        message=f"Re-running {body.stage} (task_id={task.id}, {len(active_collections)} RAG collections)",
+        message=(
+            f"Preparing canonical temporal evidence before Report generation (task_id={task.id})"
+            if temporal_preparation_required
+            else f"Re-running {body.stage} (task_id={task.id}, {len(active_collections)} RAG collections)"
+        ),
     )
     db.add(db_log)
     await db.commit()
@@ -1655,9 +1731,13 @@ async def run_stage(
     return {
         "order_code": order.order_code,
         "status": "queued",
-        "stage": body.stage,
+        "stage": "temporal_evidence_preparation" if temporal_preparation_required else body.stage,
         "task_id": task.id,
         "chromadb_collections": active_collections,
+        "temporal_evidence": {
+            **temporal_evidence_readiness,
+            "preparation_dispatched": temporal_preparation_required,
+        },
     }
 
 

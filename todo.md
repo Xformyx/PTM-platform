@@ -646,3 +646,16 @@ Backend: vector-plot (receptor inference)
 - [x] normal Order·legacy cache·Report state의 sidecar 전달 회귀 테스트 구현
 - [x] artifact contract·blind truth isolation·worker suite 검증
 - [x] 운영 재기동·새 Order/Report artifact 확인 절차 문서화 및 GitHub main 반영
+
+## Post-Fix Production Report Evidence Review
+- [x] 신규 packet·fidelity·representation·DOCX의 구조와 핵심 numeric record 추출
+- [x] Results·Discussion의 dynamic/TMM/cross-layer/counterevidence prose 활용 대조
+- [x] fallback·traceability·observational boundary·representation isolation 종합 판정
+- [x] 검토 결론과 재현 가능한 다음 조치를 보고
+
+## Temporal Evidence Readiness Before Report Rerun
+- [x] Report rerun API·heatmap computation·UI readiness 상태와 safe dispatch seam 확정
+- [x] missing sidecar에서 canonical heatmap/TMM/sidecar를 선행 생성하는 backend orchestration 구현
+- [x] UI에 temporal evidence ready/missing·생성 진행·Report 대기 상태 표시
+- [x] duplicate dispatch·legacy/manual rerun·normal full Order·blind truth isolation 회귀 검증
+- [ ] 운영 문서·GitHub main 반영 및 새 Report acceptance criteria 전달

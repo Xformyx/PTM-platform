@@ -115,6 +115,8 @@ docker compose logs --tail=200 celery-worker-report
 
 그 다음 새 full Order 또는 sidecar artifact가 이미 존재하는 Order의 Report-only rerun을 실행하고 다음을 확인한다. 기존 19:00 DOCX는 소급해서 바뀌지 않으므로, 그 파일에 개선 효과가 있었다고 주장해서는 안 된다.
 
+Report-only rerun의 Order Detail에는 `temporal_evidence_readiness`가 표시된다. `missing`인 상태에서 Report 재생성을 확정하면 backend가 canonical temporal evidence preparation을 먼저 dispatch하며, full sidecar를 만들지 못하면 Report를 일부 evidence 없이 생성하지 않고 failure를 반환한다. `ready`일 때만 즉시 Report worker를 dispatch한다.
+
 1. 결과 파일에 `report_temporal_evidence_packet.json`과 `temporal_report_fidelity.json`이 있는지 확인한다.
 2. packet의 record class가 해당 Order의 persisted sidecar/TMM에 맞는지 확인한다. 없던 TMM·uncertainty·counterevidence가 새로 생기면 안 된다.
 3. fidelity snapshot의 Results와 Discussion에서 final `status`, `llm_draft_status`, `missing_required_groups`, `deterministic_addendum_applied`를 함께 확인한다.

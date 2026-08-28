@@ -4271,7 +4271,9 @@ export default function OrderDetail() {
       const labels: Record<string, string> = {
         preprocessing: "Confirm & Re-run Preprocessing",
         rag_enrichment: "Confirm & Re-run RAG Enrichment (+ Report)",
-        report_generation: "Confirm & Re-run Report Generation",
+        report_generation: order?.temporal_evidence_readiness?.status === "missing"
+          ? "Confirm & Prepare Temporal Evidence + Re-run Report"
+          : "Confirm & Re-run Report Generation",
       };
       return labels[pendingAction.stage] || "Confirm & Re-run Stage";
     }

@@ -2521,3 +2521,119 @@ def run_rag_enrichment(self, order_id: int, config: dict):
             mcp.close()
         except Exception:
             pass
+
+
+@app.task(bind=True, name="rag_enrichment.tasks.prepare_temporal_evidence_for_report", max_retries=0)
+def prepare_temporal_evidence_for_report(self, order_id: int, config: dict):
+    """Create canonical temporal evidence before a report-only rerun.
+
+    This task deliberately reuses the production global-analysis path instead of
+    rebuilding numerical evidence inside the Report worker.  It reads the Order's
+    enriched numeric JSON, writes the canonical full sidecar and compact DB
+    projection, then dispatches the requested Report with the same fresh heatmap.
+    Benchmark truth/workbooks and RAG/LLM prose are excluded from this task.
+    """
+    from common.run_control import RunSuperseded, bind_run_generation, is_stale_generation
+
+    bind_run_generation(order_id, config.get("run_generation"))
+    if is_stale_generation(order_id, config.get("run_generation")):
+        logger.info("[Order %s] Temporal evidence preparation skipped — stale run_generation", order_id)
+        return {"order_id": order_id, "status": "skipped", "reason": "stale_generation"}
+
+    order_code = config.get("order_code") or str(order_id)
+    order_output = Path(OUTPUT_DIR) / order_code
+    order_output.mkdir(parents=True, exist_ok=True)
+    enriched_path = Path(config.get("enriched_json_path") or "")
+    if not enriched_path.is_file():
+        candidates = sorted(
+            order_output.glob("enriched_ptm_data*.json"),
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )
+        enriched_path = candidates[0] if candidates else enriched_path
+
+    try:
+        if not enriched_path.is_file():
+            raise FileNotFoundError("enriched PTM JSON is required before temporal evidence preparation")
+        update_order_status(
+            order_id,
+            "rag_enrichment",
+            current_stage="rag_enrichment",
+            progress_pct=90,
+            stage_detail="Preparing canonical temporal evidence for Report",
+        )
+        publish_progress(
+            order_id,
+            "rag_enrichment",
+            "temporal_evidence_preparation",
+            "running",
+            90,
+            "Preparing canonical Wave, TMM, PTM–protein and dynamic co-wave evidence before Report generation",
+        )
+        with enriched_path.open("r", encoding="utf-8") as enriched_file:
+            enriched_data = json.load(enriched_file)
+        if not isinstance(enriched_data, list):
+            raise ValueError("enriched PTM JSON must contain a list")
+
+        auto_analysis = _auto_run_global_analysis(order_id, enriched_data, config)
+        heatmap = auto_analysis.get("kinase_activity_heatmap") or {}
+        sidecar = heatmap.get("temporal_ptm_protein_analysis") or {}
+        if not isinstance(sidecar, dict) or sidecar.get("status") == "unavailable" or not sidecar.get("full_artifact_available"):
+            raise RuntimeError(
+                "canonical temporal sidecar was not produced; Report generation was stopped to prevent an empty evidence packet"
+            )
+        if get_order_status(order_id) != "rag_enrichment":
+            raise RunSuperseded("order status changed before Report dispatch")
+
+        report_config = dict(config)
+        report_config["kinase_analysis_data"] = auto_analysis.get("kinase_analysis_data") or {}
+        report_config["kinase_activity_heatmap"] = heatmap
+        report_task = app.send_task(
+            "report_generation.tasks.run_report_generation",
+            args=[order_id, report_config],
+            queue="report_generation",
+        )
+        save_celery_task_id(order_id, report_task.id)
+        publish_progress(
+            order_id,
+            "rag_enrichment",
+            "temporal_evidence_preparation",
+            "completed",
+            96,
+            "Canonical temporal evidence is ready; starting Report generation",
+            metadata={
+                "sidecar_artifact": sidecar.get("artifact_path"),
+                "dynamic_transition_status": sidecar.get("dynamic_co_wave_transition_status"),
+                "report_task_id": report_task.id,
+            },
+        )
+        return {
+            "order_id": order_id,
+            "status": "completed",
+            "sidecar_artifact": sidecar.get("artifact_path"),
+            "next_stage": "report_generation",
+            "report_task_id": report_task.id,
+        }
+    except RunSuperseded:
+        logger.info("[Order %s] Temporal evidence preparation stopped — run superseded", order_id)
+        return {"order_id": order_id, "status": "skipped", "reason": "superseded"}
+    except Exception as error:
+        error_message = f"Temporal evidence preparation failed: {error}"
+        logger.error("[Order %s] %s", order_id, error_message, exc_info=True)
+        update_order_status(
+            order_id,
+            "failed",
+            current_stage="rag_enrichment",
+            error_message=error_message,
+        )
+        notify_order_status(order_id, "failed", error_message)
+        publish_progress(
+            order_id,
+            "rag_enrichment",
+            "temporal_evidence_preparation",
+            "failed",
+            -1,
+            error_message,
+            metadata={"traceback": traceback.format_exc()},
+        )
+        raise

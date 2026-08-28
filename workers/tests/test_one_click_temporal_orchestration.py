@@ -64,6 +64,14 @@ def test_report_resolves_sidecar_from_chained_config_and_production_artifact() -
     assert "summarize_temporal_ptm_protein_analysis" in resolver
 
 
+def test_report_rerun_preparation_task_blocks_empty_packet_dispatch() -> None:
+    rag_source = RAG_TASKS.read_text(encoding="utf-8")
+    assert 'name="rag_enrichment.tasks.prepare_temporal_evidence_for_report"' in rag_source
+    assert "_auto_run_global_analysis(order_id, enriched_data, config)" in rag_source
+    assert "canonical temporal sidecar was not produced" in rag_source
+    assert "report_generation.tasks.run_report_generation" in rag_source
+
+
 def test_rag_container_can_import_canonical_api_tmm_scorer() -> None:
     compose = COMPOSE.read_text(encoding="utf-8")
     rag_block = compose.split("  celery-worker-rag:", 1)[1].split("\n  celery-worker", 1)[0]

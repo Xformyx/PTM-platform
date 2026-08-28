@@ -54,6 +54,13 @@ interface Order {
   report_options?: Record<string, unknown>;
   rag_collections?: number[] | null;
   kinase_analysis_data?: Record<string, unknown>;
+  temporal_evidence_readiness?: {
+    status: "ready" | "missing";
+    source: string | null;
+    artifact: string | null;
+    dynamic_transition_status: string | null;
+    message: string;
+  };
 }
 
 interface LlmModelOption {
@@ -1030,7 +1037,7 @@ export default function RerunOptionsModal({
           </div>
 
           <DialogFooter>
-            <div className="flex items-center gap-2 mr-auto">
+            <div className="flex flex-wrap items-center gap-2 mr-auto">
               {order?.kinase_analysis_data && (order.kinase_analysis_data as any)?.kinase_modules?.length > 0 && (
                 <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-xs">
                   <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -1039,6 +1046,17 @@ export default function RerunOptionsModal({
                   Kinase analysis included ({(order.kinase_analysis_data as any).kinase_modules.length} modules)
                 </div>
               )}
+              {order?.temporal_evidence_readiness?.status === "ready" ? (
+                <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-sky-500/10 border border-sky-500/20 text-sky-700 dark:text-sky-300 text-xs">
+                  <CheckSquare className="h-3 w-3" />
+                  Temporal evidence ready
+                </div>
+              ) : order?.temporal_evidence_readiness?.status === "missing" ? (
+                <div className="flex max-w-[430px] items-center gap-1.5 px-2 py-1 rounded-md bg-amber-500/10 border border-amber-500/25 text-amber-700 dark:text-amber-300 text-xs">
+                  <Zap className="h-3 w-3 shrink-0" />
+                  Temporal evidence will be prepared before Report generation
+                </div>
+              ) : null}
             </div>
             <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>
               Cancel
