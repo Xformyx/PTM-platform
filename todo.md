@@ -764,5 +764,5 @@ Backend: vector-plot (receptor inference)
 - [x] additive temporal event/order contract와 unit·isolation·canonical Wave/TMM non-regression test 구현
 - [x] frozen insulin input에서 runner-only known-biology score와 truth-free robustness audit을 반복 실행
 - [x] baseline 대비 known-signal score·timing/stability·runtime·claim safety를 함께 판정하고 개선 후보를 선택/거절
-- [ ] Trametinib primary 및 mirdametinib chemical-holdout prospective validation manifest를 frozen version으로 작성
-- [ ] 실행 결과·변경 diff·known-information optimization 상태·unknown discovery 보호 장치·후속 실험 의존성을 보고
+- [x] Trametinib primary 및 mirdametinib chemical-holdout prospective validation manifest를 frozen version으로 작성
+- [x] 실행 결과·변경 diff·known-information optimization 상태·unknown discovery 보호 장치·후속 실험 의존성을 보고
