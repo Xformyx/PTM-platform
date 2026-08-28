@@ -664,3 +664,9 @@ Backend: vector-plot (receptor inference)
 - [x] 최신 engine·TMM·sidecar·Report preflight source contract와 commit 상태 확인
 - [x] implementation map·data schema·claim boundary·failure semantics를 포함한 인수 문서 작성
 - [x] command·file path·acceptance criteria를 code와 대조해 developer handoff 전달
+
+## Dynamic Co-Wave Implementation Review Follow-up
+- [x] 첨부 implementation review PDF의 주장·근거·권고 사항 구조화
+- [x] 각 지적 사항의 current main code 대조와 existing coverage 확인
+- [x] 반영 필요성·우선순위·lineage/claim-boundary 위험을 판정
+- [x] 판정 보고와 권고 구현 순서를 전달
