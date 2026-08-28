@@ -62,7 +62,7 @@ CROSS_LAYER_CONFIG = {
     "permutation_iterations": 0,
     "random_seed": 20260827,
 }
-DYNAMIC_COWAVE_CONTRACT_VERSION = "dynamic_co_wave_transition.v1"
+DYNAMIC_COWAVE_CONTRACT_VERSION = "dynamic_co_wave_transition.v2"
 DYNAMIC_COWAVE_SELECTION_LEDGER_SHA256 = "02ab551eb3c345250fa1e76758599e18026fa6b8c72889d95b7c533ebede882e"
 DYNAMIC_COWAVE_SELECTION_RECORD_SHA256 = "2d12157f12eed4a3322a9a0253257352003e84044534d53dec03336770b1a08e"
 DYNAMIC_COWAVE_LEDGER_TAIL_RECORD_SHA256 = "baf6849198616b6771358cc3e6936c2ac83b7c2c5f558741600345322aefdf51"
@@ -70,6 +70,8 @@ DYNAMIC_COWAVE_CONFIG = {
     "activity_threshold_fc": 0.40,
     "minimum_observed_timepoints": 4,
     "membership_universe": "retained_canonical_wave_members_only",
+    "pair_scope": "same_static_wave_only",
+    "site_event_policy": "record_noninert_transitions_only",
     "lotto": "leave_one_timepoint_out",
     "maximum_pair_transition_examples": 500,
     "maximum_site_transition_examples": 500,

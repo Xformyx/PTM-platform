@@ -4,8 +4,8 @@
 
 **기준 브랜치:** `main`
 **핵심 구현 커밋:** `7174d1b` (`fix(report): prepare temporal evidence before rerun`)
-**문서 기준 최신 커밋:** `ff1f3b8`
-**주요 계약 버전:** `dynamic_co_wave_transition.v1`, `time_varying_comovement.v1`, `enrichment_free_temporal_mechanism.v2.sidecar`, `report_temporal_evidence_packet.v2`
+**문서 기준 최신 커밋:** P0 v2 corrective patch 이후 main
+**주요 계약 버전:** `dynamic_co_wave_transition.v2`, `time_varying_comovement.v1`, `enrichment_free_temporal_mechanism.v2.sidecar`, `report_temporal_evidence_packet.v2`
 
 ## 1. 기능의 범위와 해석 원칙
 
@@ -28,9 +28,11 @@ Dynamic Co-Wave는 immutable static Wave에 속한 PTM site/form들이 인접한
 
 | 항목 | Production 값 | 의미 |
 |---|---:|---|
-| `activity_threshold_fc` | `0.40` | 각 local window 끝 시점의 absolute FC가 이 값 이상일 때 active |
+| `activity_threshold_fc` | `0.40` | production 및 no-config direct call 모두 동일; 각 local window 끝 시점의 absolute FC가 이 값 이상일 때 active |
 | `minimum_observed_timepoints` | `4` | 관측치 부족 trajectory 제외 기준 |
 | membership universe | `retained_canonical_wave_members_only` | static Wave 밖 site는 Dynamic Co-Wave에 포함하지 않음 |
+| pair scope | `same_static_wave_only` | pair transition과 site partner count는 immutable static Wave 내부에서만 계산 |
+| site event policy | `record_noninert_transitions_only` | state/group relation이 실제로 변한 site event만 transition artifact에 기록 |
 | local window | 인접 timepoint 구간 | 예: `5min→15min`, `15min→30min` |
 | stability | leave-one-timepoint-out | 한 timepoint를 제외하고 transition ID의 Jaccard를 계산 |
 | stored examples | pair 500, site 500, membership 250 | metric은 full event set으로 계산하고 example만 cap 적용 |
@@ -39,7 +41,7 @@ low-level state는 다음 세 가지다. `value is None` 또는 `abs(value) < ac
 
 ### 2.2 Pair 및 site transition
 
-각 adjacent window 쌍에서 full pair event와 site event를 만든다. pair transition은 이전·다음 window 모두에서 co-active인지와 active/inactive state를 이용한다. site transition은 해당 site의 partner 수 변화를 별도로 사용한다.
+각 adjacent window 쌍에서 full pair event와 site event를 만든다. **P0 v2에서는 pair transition과 site partner count를 동일 static Wave 내에서만 계산한다.** pair transition은 이전·다음 window 모두에서 co-active인지와 active/inactive state를 이용한다. site transition은 해당 site의 same-Wave partner 수 변화를 별도로 사용하며, `state_unchanged_or_inactive`는 transition event list에 넣지 않고 exposure count로 분리한다.
 
 | 관찰 단위 | Event type | 계산적 정의 | 해석 가능한 최소 표현 |
 |---|---|---|---|
@@ -55,7 +57,7 @@ low-level state는 다음 세 가지다. `value is None` 또는 `abs(value) < ac
 
 ### 2.3 불변식과 reproducibility
 
-`analyze_dynamic_co_wave_transitions()`은 계산이 끝난 뒤 `provenance.membership_mutation="forbidden"`, `provenance.tmm_mutation="forbidden"`을 저장한다. `effective configuration`과 SHA-256 hash, static Wave contract/config hash를 함께 저장해 cache freshness와 재현성을 확보한다. LOTO는 각 timepoint를 하나씩 제외하여 comparable pair/site transition ID의 Jaccard를 계산하며, mean pair/site Jaccard와 evaluable fold count를 sidecar에 저장한다.
+`analyze_dynamic_co_wave_transitions()`은 계산이 끝난 뒤 `provenance.membership_mutation="forbidden"`, `provenance.tmm_mutation="forbidden"`을 저장한다. `effective configuration`과 SHA-256 hash, static Wave contract/config hash를 함께 저장해 cache freshness와 재현성을 확보한다. P0 v2는 config SHA와 contract version을 변경하므로 v1 cached dynamic output은 current contract로 간주하지 않는다. LOTO는 각 timepoint를 하나씩 제외하여 comparable pair/site transition ID의 Jaccard를 계산하며, mean pair/site Jaccard와 evaluable fold count를 sidecar에 저장한다.
 
 ## 3. Data lineage와 실행 구조
 
@@ -130,6 +132,8 @@ sidecar를 만들지 못하면 Order를 `failed`로 종료하고 Report 생성�
 | `dynamic_transition_resolution` | non-persistence pair / all pair transitions |
 | `dynamic_transition_loto` | fold detail 및 mean pair/site Jaccard |
 | `dynamic_transition_per_wave` | Wave별 pair/site transition count와 type histogram |
+| `dynamic_transition_pair_scope` | qualified/group/pair count, excluded cross-Wave pair count, pair-window comparison count |
+| `dynamic_transition_event_exposure` | site transition opportunity, inert observation, recorded non-inert transition count |
 | `top_cross_layer_edges` | Wave, target, onset/peak lag, similarity, eligibility가 있는 bounded edge list |
 | `top_mechanism_counterevidence` | chain ID, insufficient-evidence status, reason list |
 
@@ -180,8 +184,8 @@ packet `status=unavailable`이면 Report는 temporal numerical claim을 만들 �
 
 | 파일 | 책임 |
 |---|---|
-| `ptm_shared/time_varying_comovement.py` | local state, window membership, pair/site transition low-level algorithm |
-| `ptm_shared/dynamic_cowave_transition.py` | static Wave-filtered additive wrapper, provenance, LOTO, bounded example contract |
+| `ptm_shared/time_varying_comovement.py` | local state, window membership, optional group-scoped pair/site transition low-level algorithm |
+| `ptm_shared/dynamic_cowave_transition.py` | static-Wave-scoped additive wrapper, provenance, LOTO, bounded example contract |
 | `ptm_shared/temporal_optimization_config.py` | frozen config, SHA provenance, truth-free selection objective |
 | `ptm_shared/tmm_multikinase_integration.py` | TMM-weighted cascade와 kinase directionality candidate |
 | `ptm_shared/enrichment_free_temporal_sidecar.py` | full sidecar, cross-layer candidates, mechanism/counterevidence, compact summary |
@@ -250,7 +254,7 @@ docker compose logs --tail=200 celery-worker-rag celery-worker-report
 
 | Test | 보호하는 계약 |
 |---|---|
-| `ptm_shared/tests/test_dynamic_cowave_transition.py` | membership/TMM 불변, LOTO, full metrics vs bounded examples, disabled status |
+| `ptm_shared/tests/test_dynamic_cowave_transition.py` | membership/TMM 불변, v2 default/config hash, cross-Wave isolation, inert exposure 분리, single-Wave equivalence, LOTO, compact provenance |
 | `workers/tests/test_tmm_multikinase_integration.py` | TMM contribution과 raw membership 분리, prior-assisted labeling, non-causal boundary |
 | `workers/tests/test_temporal_sidecar_resolution.py` | DB/config/full artifact resolver priority와 matching heatmap handoff |
 | `workers/tests/test_temporal_report_evidence_packet.py` | packet v2 records, section coverage, fallback, label-free final prose |
@@ -276,6 +280,6 @@ git diff --check
 
 ## 11. 다음 개발 시 의사결정 원칙
 
-Dynamic Co-Wave의 개선은 **same static Wave 안에서 time-local state transition을 더 잘 관찰·quantify하는가**를 기준으로 판단한다. 새로운 event type, stability measure 또는 visualization을 추가할 수 있으나, canonical Wave/TMM/causal inference를 implicit하게 바꾸면 안 된다. 새로운 numerical parameter는 `temporal_optimization_config.py`에 versioned provenance와 config hash를 남기고, normal Order와 strict-blind runner가 같은 engine/config를 사용하도록 해야 한다.
+Dynamic Co-Wave의 개선은 **same static Wave 안에서 time-local state transition을 더 잘 관찰·quantify하는가**를 기준으로 판단한다. P0 v2의 non-inert event count와 site LOTO는 v1과 직접 수치 비교하면 안 되며, pre-P0 artifact는 canonical heatmap/TMM/sidecar를 다시 생성해야 한다. 새로운 event type, stability measure 또는 visualization을 추가할 수 있으나, canonical Wave/TMM/causal inference를 implicit하게 바꾸면 안 된다. 새로운 numerical parameter 또는 event semantics는 `temporal_optimization_config.py`에 versioned provenance와 config hash를 남기고, normal Order와 strict-blind runner가 같은 engine/config를 사용하도록 해야 한다.
 
 Report quality 개선은 prompt만 길게 만드는 방식보다 packet availability, numerical record coverage, fidelity snapshot, and final-prose traceability를 함께 확인하는 방식으로 진행한다. 새 feature가 Report에서 보이지 않으면 먼저 sidecar artifact → compact persistence → Report resolver → packet status → fidelity → final DOCX 순서로 data lineage를 역추적한다.

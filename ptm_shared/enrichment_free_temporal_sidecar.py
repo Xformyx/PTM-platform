@@ -12,6 +12,7 @@ from ptm_shared.temporal_optimization_config import (
     CONTRACT_VERSION,
     CROSS_LAYER_CONFIG,
     DYNAMIC_COWAVE_CONFIG,
+    DYNAMIC_COWAVE_CONTRACT_VERSION,
     WAVE_CONFIG,
 )
 
@@ -512,7 +513,7 @@ def build_v2_sidecar(
     )
     if not enable_dynamic_transition:
         dynamic_transition: dict[str, Any] = {
-            "contract_version": "dynamic_co_wave_transition.v1",
+            "contract_version": DYNAMIC_COWAVE_CONTRACT_VERSION,
             "status": "disabled_by_caller",
             "interpretation_boundary": "Optional additive local co-movement annotation; static Wave membership and TMM are unchanged.",
         }
@@ -712,6 +713,8 @@ def summarize_temporal_ptm_protein_analysis(
         "dynamic_transition_resolution": dynamic_summary.get("transition_resolution"),
         "dynamic_transition_loto": dict(dynamic_transition.get("lotto") or {}),
         "dynamic_transition_per_wave": list(dynamic_transition.get("per_wave_summary") or []),
+        "dynamic_transition_pair_scope": dict(dynamic_transition.get("pair_scope") or {}),
+        "dynamic_transition_event_exposure": dict(dynamic_transition.get("event_exposure") or {}),
         "causality_status": "not_tested",
         "interpretation_boundary": "Temporal precedence and mechanism packets are observational, falsifiable candidates; they are not causal claims.",
         "top_cross_layer_edges": [

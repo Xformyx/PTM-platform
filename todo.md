@@ -670,3 +670,10 @@ Backend: vector-plot (receptor inference)
 - [x] 각 지적 사항의 current main code 대조와 existing coverage 확인
 - [x] 반영 필요성·우선순위·lineage/claim-boundary 위험을 판정
 - [x] 판정 보고와 권고 구현 순서를 전달
+
+## Dynamic Co-Wave P0 Corrective Patch
+- [x] default config·inert site event·static-Wave pair scoping seam과 impacted consumers 확인
+- [x] canonical threshold alignment·inert event exposure 분리·group-aware pair calculation 구현
+- [x] cross-Wave isolation·single-Wave equivalence·version/cache·summary/LOTO/Report packet regression 추가
+- [x] shared temporal·benchmark·Report worker·blind truth isolation 전체 검증
+- [x] P0 semantics·artifact rerun requirement 문서화 및 GitHub main 반영

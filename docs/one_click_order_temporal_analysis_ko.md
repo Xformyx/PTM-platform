@@ -24,7 +24,7 @@ Preprocessing은 `run_temporal_ptm_protein_analysis=true`를 기본값으로 RAG
 
 ## Cache와 재실행
 
-정상 Order start는 server-side에서 current temporal artifact를 생성한다. 기존 legacy cache에는 frozen dynamic configuration SHA가 없으므로, 현재 heatmap을 요청할 때 cache freshness 검사가 이를 감지하고 current shared contract로 재계산한다. UI의 **Re-run Global Annotation** 또는 Refresh는 수동 재계산/diagnostic 용도이며 normal Order completion의 필수 단계가 아니다.
+정상 Order start는 server-side에서 current temporal artifact를 생성한다. 기존 legacy cache에는 frozen dynamic configuration SHA가 없으므로, 현재 heatmap을 요청할 때 cache freshness 검사가 이를 감지하고 current shared contract로 재계산한다. Dynamic Co-Wave P0 v2는 `same_static_wave_only` pair scope와 `record_noninert_transitions_only` site event policy를 config hash·contract version에 포함한다. 따라서 v1 dynamic output을 가진 기존 Order는 Report만 다시 생성하지 말고 canonical temporal analysis를 재실행해 v2 full sidecar와 compact summary를 생성해야 한다. UI의 **Re-run Global Annotation** 또는 Refresh는 수동 재계산/diagnostic 용도이며 normal Order completion의 필수 단계가 아니다.
 
 ### Report-only rerun preflight
 

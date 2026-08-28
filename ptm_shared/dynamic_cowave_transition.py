@@ -17,12 +17,17 @@ from ptm_shared.time_varying_comovement import (
     TimeVaryingCoMovementConfig,
     compute_time_varying_comovement,
 )
+from ptm_shared.temporal_optimization_config import (
+    DYNAMIC_COWAVE_CONFIG,
+    DYNAMIC_COWAVE_CONTRACT_VERSION,
+)
 
 
-CONTRACT_VERSION = "dynamic_co_wave_transition.v1"
+CONTRACT_VERSION = DYNAMIC_COWAVE_CONTRACT_VERSION
 DEFAULT_CONFIG: dict[str, Any] = {
-    "activity_threshold_fc": 0.50,
-    "minimum_observed_timepoints": 4,
+    # Direct public calls must use the same frozen baseline as production.
+    "activity_threshold_fc": float(DYNAMIC_COWAVE_CONFIG["activity_threshold_fc"]),
+    "minimum_observed_timepoints": int(DYNAMIC_COWAVE_CONFIG["minimum_observed_timepoints"]),
     "membership_universe": "retained_canonical_wave_members_only",
     "lotto": "leave_one_timepoint_out",
     "maximum_pair_transition_examples": 500,
@@ -47,6 +52,8 @@ def _effective_config(config: Mapping[str, Any] | None) -> tuple[dict[str, Any],
     merged["maximum_site_transition_examples"] = max(0, int(merged["maximum_site_transition_examples"]))
     merged["maximum_membership_examples"] = max(0, int(merged["maximum_membership_examples"]))
     merged["membership_universe"] = "retained_canonical_wave_members_only"
+    merged["pair_scope"] = "same_static_wave_only"
+    merged["site_event_policy"] = "record_noninert_transitions_only"
     merged["lotto"] = "leave_one_timepoint_out"
     encoded = json.dumps(merged, sort_keys=True, separators=(",", ":"))
     return merged, hashlib.sha256(encoded.encode("utf-8")).hexdigest()
@@ -171,7 +178,9 @@ def _annotate_once(
             activity_threshold_fc=float(config["activity_threshold_fc"]),
             min_window_observed=int(config["minimum_observed_timepoints"]),
             require_atlas_eligible=False,
+            include_inert_site_observations=False,
         ),
+        group_by_site={key: membership[key] for key in qualified},
     ).to_dict()
     pair_events = []
     for row in raw.get("pair_transitions") or []:
@@ -213,6 +222,8 @@ def _annotate_once(
         "pair_transitions": pair_events,
         "site_transitions": site_events,
         "excluded_sites": raw.get("excluded_sites") or {},
+        "pair_scope": dict(raw.get("pair_scope") or {}),
+        "event_exposure": dict(raw.get("event_exposure") or {}),
         "summary": {
             "static_wave_member_count": len(membership),
             "qualified_member_count": len(qualified),
@@ -226,6 +237,10 @@ def _annotate_once(
             "transition_resolution": (len(nonpersistent) / len(pair_events)) if pair_events else None,
             "transition_supported_wave_ids": transition_waves,
             "transition_supported_wave_count": len(transition_waves),
+            "within_wave_candidate_pair_count": (raw.get("pair_scope") or {}).get("candidate_pair_count"),
+            "cross_wave_pair_excluded_count": (raw.get("pair_scope") or {}).get("cross_group_pair_excluded_count"),
+            "site_transition_opportunity_count": (raw.get("event_exposure") or {}).get("site_transition_opportunity_count"),
+            "inert_site_observation_count": (raw.get("event_exposure") or {}).get("inert_site_observation_count"),
         },
     }
 
@@ -294,6 +309,8 @@ def analyze_dynamic_co_wave_transitions(
         "membership_mutation": "forbidden",
         "tmm_mutation": "forbidden",
         "interpretation_boundary": "Observed local co-movement membership transitions only; not kinase or causal evidence.",
+        "pair_scope": annotation.get("pair_scope"),
+        "event_exposure": annotation.get("event_exposure"),
     }
     annotation["transition_examples"] = {
         "pair_transitions": _event_examples(
