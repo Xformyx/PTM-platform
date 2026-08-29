@@ -39,6 +39,19 @@ def test_audit_flags_unsupported_ids_and_unsafe_temporal_causality():
     assert audit["unsupported_record_ids"] == ["DATA-CROSS-LAYER-99"]
 
 
+def test_audit_flags_uncited_signal_propagation_when_packet_disallows_mechanism_context():
+    packet = _packet()
+    packet["section_plan"] = {"mechanism_context_allowed": False}
+    audit = audit_report_temporal_fidelity(
+        "The observed pattern shows signal propagation through the cascade.",
+        packet,
+        section_type="results",
+    )
+    assert audit["status"] == "review_required"
+    assert audit["unsafe_temporal_claim_count"] == 1
+    assert audit["recommended_action"] == "constrained_rewrite_required"
+
+
 def test_audit_marks_available_packet_without_trace_labels_as_untraced():
     audit = audit_report_temporal_fidelity("No numerical temporal claim.", _packet())
     assert audit["status"] == "untraced"

@@ -10,7 +10,7 @@ _DATA_LABEL_PATTERN = re.compile(
     r"\[?(DATA-(?:TEMPORAL-SUMMARY|TEMPORAL-PRECEDENCE|DYNAMIC-SUMMARY|DYNAMIC-WAVE-\d+|TMM-KINASE-\d+|TMM-UNCERTAINTY|CROSS-LAYER-\d+|COUNTEREVIDENCE-\d+))\]?"
 )
 _UNSAFE_TEMPORAL_CLAIM = re.compile(
-    r"\b(?:causes?|drives?|directly activates?|proves?|kinase switching|causal propagation)\b",
+    r"\b(?:causes?|drives?|directly activates?|proves?|kinase switching|causal propagation|signal propagation)\b",
     flags=re.IGNORECASE,
 )
 
@@ -37,9 +37,15 @@ def audit_report_temporal_fidelity(
     unique_cited_ids = sorted(set(cited_ids))
     unsupported_ids = sorted(set(unique_cited_ids) - valid_ids)
 
+    section_plan = dict(packet.get("section_plan") or {})
+    mechanism_context_allowed = bool(section_plan.get("mechanism_context_allowed"))
     unsafe_claims: list[str] = []
     for sentence in re.split(r"(?<=[.!?])\s+", draft_text or ""):
-        if _DATA_LABEL_PATTERN.search(sentence) and _UNSAFE_TEMPORAL_CLAIM.search(sentence):
+        has_high_severity_claim = bool(_UNSAFE_TEMPORAL_CLAIM.search(sentence))
+        has_explicit_negation = bool(re.search(r"\b(?:not|no|without|does not|did not)\b", sentence, flags=re.IGNORECASE))
+        if has_high_severity_claim and not has_explicit_negation and (
+            _DATA_LABEL_PATTERN.search(sentence) or not mechanism_context_allowed
+        ):
             unsafe_claims.append(sentence.strip()[:500])
 
     cited_dynamic = [identifier for identifier in unique_cited_ids if identifier.startswith("DATA-DYNAMIC")]
@@ -74,7 +80,7 @@ def audit_report_temporal_fidelity(
         status = "untraced"
 
     return {
-        "contract_version": "report_temporal_fidelity.v3",
+        "contract_version": "report_temporal_fidelity.v4",
         "section_type": section_type,
         "status": status,
         "packet_status": packet.get("status", "unavailable"),
@@ -95,6 +101,11 @@ def audit_report_temporal_fidelity(
         "unsupported_record_ids": unsupported_ids,
         "unsafe_temporal_claim_count": len(unsafe_claims),
         "unsafe_temporal_claim_examples": unsafe_claims,
+        "mechanism_context_allowed": mechanism_context_allowed,
+        "recommended_action": (
+            "constrained_rewrite_required" if unsafe_claims or missing_required_groups
+            else "release_candidate"
+        ),
         "claim_boundary": "Audit measures evidence-traceability and wording, not biological correctness or causality.",
     }
 

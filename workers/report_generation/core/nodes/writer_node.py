@@ -30,7 +30,6 @@ from report_generation.core.dynamic_prompt_generator import (
     build_signal_propagation_json,
     build_tf_activity_inference,
     build_temporal_evidence_packet,
-    build_temporal_evidence_fallback_addendum,
     format_temporal_evidence_packet_for_llm,
     format_condition_display_name,
 )
@@ -632,6 +631,19 @@ def run_section_writing(state: dict) -> dict:
     # ── Per-section writer (extracted for parallel execution) ──
     def _write_one(section_type, snap_prev, section_questions=None):
         active_questions = list(section_questions if section_questions is not None else questions)
+        temporal_section_plan = dict(temporal_evidence_packet.get("section_plan") or {})
+        dynamic_context_allowed = bool(temporal_section_plan.get("dynamic_context_allowed"))
+        directed_temporal_context_allowed = bool(
+            temporal_section_plan.get("directed_temporal_context_allowed")
+        )
+        # Study framing remains available in the Introduction/Methods, but a
+        # receptor/kinase cascade context must not enter observational Results,
+        # Discussion, Conclusion, or Abstract unless all directed temporal
+        # evidence layers are computed for this Order.
+        base_prompt_directed_context_allowed = (
+            directed_temporal_context_allowed
+            or section_type in {"introduction", "methods"}
+        )
         section_temporal_evidence = format_temporal_evidence_packet_for_llm(
             temporal_evidence_packet,
             section_type=section_type,
@@ -643,8 +655,14 @@ def run_section_writing(state: dict) -> dict:
             snap_prev, retriever, comprehensive_summary,
             all_references, ptm_detail_count=ptm_detail_count,
             chromadb_results=chromadb_results,
-            temporal_kinase_cascade=state.get("temporal_kinase_cascade"),
-            inferred_receptors=state.get("inferred_receptors"),
+            temporal_kinase_cascade=(
+                state.get("temporal_kinase_cascade")
+                if base_prompt_directed_context_allowed else None
+            ),
+            inferred_receptors=(
+                state.get("inferred_receptors")
+                if base_prompt_directed_context_allowed else None
+            ),
         )
         # v10.8: Unpack tuple (backward-compatible with str fallback)
         if isinstance(result, tuple):
@@ -677,15 +695,17 @@ def run_section_writing(state: dict) -> dict:
             # v12.0: Co-Scientist verified findings — Priority 0 (highest, must be included first)
             if aux_verified_findings_context:
                 supplement_blocks.append(("verified_findings", aux_verified_findings_context))
-            if aux_directionality_context:
+            if aux_directionality_context and directed_temporal_context_allowed:
                 supplement_blocks.append(("directionality", aux_directionality_context))
             supplement_blocks.append(("temporal_evidence_packet", section_temporal_evidence))
             # Priority 1 (ESSENTIAL — PTM activity profile core): temporal coordination + temporal kinase + receptor + non-PTM effector
             # v9.35: nonptm_temporal promoted to Priority 1 — effector proteins are integral
             # to the receptor→kinase→substrate→effector signal flow narrative.
-            supplement_blocks.append(("comovement", comovement_llm_context))
-            supplement_blocks.append(("temporal_kinase", temporal_kinase_cascade_llm_context))
-            supplement_blocks.append(("receptor_ctx", receptor_llm_context))
+            if dynamic_context_allowed:
+                supplement_blocks.append(("comovement", comovement_llm_context))
+            if directed_temporal_context_allowed:
+                supplement_blocks.append(("temporal_kinase", temporal_kinase_cascade_llm_context))
+                supplement_blocks.append(("receptor_ctx", receptor_llm_context))
             # v11.6: IP overlay — physical interaction evidence (Priority 1, after receptor)
             if aux_ip_overlay_context:
                 supplement_blocks.append(("ip_overlay", aux_ip_overlay_context))
@@ -698,8 +718,9 @@ def run_section_writing(state: dict) -> dict:
             supplement_blocks.append(("v98_structured_data", v98_structured_data))
             # Priority 3 (supporting): pathway, signal propagation, timelag
             supplement_blocks.append(("pathway_ctx", aux_pathway_ctx))
-            supplement_blocks.append(("signal_prop", aux_signal_prop))
-            supplement_blocks.append(("timelag", aux_timelag))
+            if directed_temporal_context_allowed:
+                supplement_blocks.append(("signal_prop", aux_signal_prop))
+                supplement_blocks.append(("timelag", aux_timelag))
             supplement_blocks.append(("ptm_data_summary", aux_ptm_data_summary))
             # P1: Substrate-level temporal dynamics pattern distribution
             if aux_substrate_dynamics:
@@ -716,18 +737,21 @@ def run_section_writing(state: dict) -> dict:
             # Priority 5 (lowest): figure context, writing example
             if figure_gen.has_figures():
                 supplement_blocks.append(("figure_ctx", figure_gen.generate_figure_context_for_llm(section_type)))
-            supplement_blocks.append(("v98_writing_example", v98_writing_example))
+            if directed_temporal_context_allowed:
+                supplement_blocks.append(("v98_writing_example", v98_writing_example))
 
         elif section_type == "research_question_answers":
             # This independent section deliberately uses only a bounded question
             # batch. It prevents a long Results narrative from consuming the
             # output budget before all user Research Questions are answered.
-            if aux_directionality_context:
+            if aux_directionality_context and directed_temporal_context_allowed:
                 supplement_blocks.append(("directionality", aux_directionality_context))
             supplement_blocks.append(("temporal_evidence_packet", section_temporal_evidence))
-            supplement_blocks.append(("comovement", comovement_llm_context))
-            supplement_blocks.append(("temporal_kinase", temporal_kinase_cascade_llm_context))
-            supplement_blocks.append(("receptor_ctx", receptor_llm_context))
+            if dynamic_context_allowed:
+                supplement_blocks.append(("comovement", comovement_llm_context))
+            if directed_temporal_context_allowed:
+                supplement_blocks.append(("temporal_kinase", temporal_kinase_cascade_llm_context))
+                supplement_blocks.append(("receptor_ctx", receptor_llm_context))
             supplement_blocks.append(("nonptm_temporal", aux_nonptm_temporal))
             supplement_blocks.append(("v98_structured_data", v98_structured_data))
             supplement_blocks.append(("vector_plot_compressed", aux_vector_plot_compressed))
@@ -738,7 +762,7 @@ def run_section_writing(state: dict) -> dict:
             # v12.0: Co-Scientist verified findings — Priority 0 (highest for discussion)
             if aux_verified_findings_context:
                 supplement_blocks.append(("verified_findings", aux_verified_findings_context))
-            if aux_directionality_context:
+            if aux_directionality_context and directed_temporal_context_allowed:
                 supplement_blocks.append(("directionality", aux_directionality_context))
             supplement_blocks.append(("temporal_evidence_packet", section_temporal_evidence))
             # v12.1: External evidence-gated candidates are interpretive only.
@@ -746,9 +770,11 @@ def run_section_writing(state: dict) -> dict:
             if external_coscientist_context:
                 supplement_blocks.append(("external_coscientist", external_coscientist_context))
             # Priority 1 (ESSENTIAL): temporal coordination + temporal kinase + receptor + non-PTM
-            supplement_blocks.append(("comovement", comovement_llm_context))
-            supplement_blocks.append(("temporal_kinase", temporal_kinase_cascade_llm_context))
-            supplement_blocks.append(("receptor_ctx", receptor_llm_context))
+            if dynamic_context_allowed:
+                supplement_blocks.append(("comovement", comovement_llm_context))
+            if directed_temporal_context_allowed:
+                supplement_blocks.append(("temporal_kinase", temporal_kinase_cascade_llm_context))
+                supplement_blocks.append(("receptor_ctx", receptor_llm_context))
             # v11.6: IP overlay — physical interaction evidence (Priority 1, after receptor)
             if aux_ip_overlay_context:
                 supplement_blocks.append(("ip_overlay", aux_ip_overlay_context))
@@ -782,8 +808,10 @@ def run_section_writing(state: dict) -> dict:
 
         elif section_type in ("conclusion", "abstract"):
             # v9.32: Conclusion/Abstract also need temporal coordination summary for comprehensive coverage
-            supplement_blocks.append(("comovement", comovement_llm_context))
-            supplement_blocks.append(("temporal_kinase", temporal_kinase_cascade_llm_context))
+            if dynamic_context_allowed:
+                supplement_blocks.append(("comovement", comovement_llm_context))
+            if directed_temporal_context_allowed:
+                supplement_blocks.append(("temporal_kinase", temporal_kinase_cascade_llm_context))
             supplement_blocks.append(("temporal_evidence_packet", section_temporal_evidence))
 
         # v9.31: Add blocks respecting budget
@@ -882,24 +910,54 @@ def run_section_writing(state: dict) -> dict:
             section_type in {"results", "discussion"}
             and temporal_report_fidelity[section_type]["status"] in {"untraced", "review_required"}
         ):
-            fallback_addendum = build_temporal_evidence_fallback_addendum(temporal_evidence_packet)
-            if fallback_addendum:
-                logger.warning(
-                    "[report-evidence] %s LLM draft fidelity=%s; applying deterministic temporal evidence addendum",
-                    section_type,
-                    temporal_report_fidelity[section_type]["status"],
-                )
-                content = f"{content}\n\n{fallback_addendum}"
+            rewrite_prompt = (
+                f"{prompt}\n\n"
+                "=== EVIDENCE-CONSTRAINED REWRITE REQUIRED ===\n"
+                "Rewrite the draft below as a complete replacement for this section. "
+                "Retain only statements supported by the supplied TEMPORAL NUMERICAL EVIDENCE PACKET. "
+                "For every available required evidence class, include one DATA-* citation in the draft. "
+                "Use only each record's allowed verbs. Delete any causal, direct-activation, receptor-cascade, "
+                "or signal-propagation statement that is not supported by a computed layer. "
+                "Do not append a correction or limitation addendum; return the rewritten section only.\n\n"
+                f"=== ORIGINAL DRAFT ===\n{content}\n=== END ORIGINAL DRAFT ==="
+            )
+            logger.warning(
+                "[report-evidence] %s LLM draft fidelity=%s; requesting constrained rewrite",
+                section_type,
+                temporal_report_fidelity[section_type]["status"],
+            )
+            rewritten = llm.generate_with_retry(
+                rewrite_prompt,
+                system_prompt=ptm_system_prompt,
+                temperature=0.0,
+                max_tokens=max_tok,
+                min_words=min_words,
+                section_name=f"{section_type.capitalize()} evidence-constrained rewrite",
+                max_retries=1,
+            )
+            if rewritten and not rewritten.startswith("[LLM Error"):
+                content = rewritten
                 temporal_report_fidelity[section_type] = audit_report_temporal_fidelity(
                     content,
                     temporal_evidence_packet,
                     section_type=section_type,
                 )
-                temporal_report_fidelity[section_type]["deterministic_addendum_applied"] = True
                 temporal_report_fidelity[section_type]["llm_draft_status"] = llm_draft_fidelity["status"]
                 temporal_report_fidelity[section_type]["llm_draft_missing_required_groups"] = list(
                     llm_draft_fidelity.get("missing_required_groups") or []
                 )
+                temporal_report_fidelity[section_type]["constrained_rewrite_attempted"] = True
+                temporal_report_fidelity[section_type]["constrained_rewrite_succeeded"] = True
+            else:
+                temporal_report_fidelity[section_type]["constrained_rewrite_attempted"] = True
+                temporal_report_fidelity[section_type]["constrained_rewrite_succeeded"] = False
+                temporal_report_fidelity[section_type]["constrained_rewrite_error"] = (
+                    rewritten or "generate_with_retry returned None"
+                )
+        if temporal_report_fidelity[section_type].get("unsafe_temporal_claim_count", 0) > 0:
+            temporal_report_fidelity[section_type]["status"] = "blocked_for_review"
+            temporal_report_fidelity[section_type]["recommended_action"] = "blocked_for_review"
+            temporal_report_fidelity[section_type]["release_blocked"] = True
         if temporal_report_fidelity[section_type]["status"] != "pass":
             logger.warning(
                 "[report-evidence] %s temporal fidelity=%s; cited=%d/%d; unsafe=%d",

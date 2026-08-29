@@ -981,11 +981,36 @@ def build_temporal_evidence_packet(
         }
 
     records: list[dict] = []
+
+    def add_record(
+        evidence_id: str,
+        tier: str,
+        text: str,
+        *,
+        availability: str,
+        claim_level: str,
+        allowed_verbs: tuple[str, ...],
+        forbidden_verbs: tuple[str, ...] = (
+            "causes", "drives", "directly activates", "proves",
+            "kinase switching", "causal propagation",
+        ),
+    ) -> None:
+        """Attach machine-readable claim constraints to every temporal record."""
+        records.append({
+            "evidence_id": evidence_id,
+            "tier": tier,
+            "text": text,
+            "availability": availability,
+            "claim_level": claim_level,
+            "allowed_verbs": list(allowed_verbs),
+            "forbidden_verbs": list(forbidden_verbs),
+        })
+
     heatmap = dict(kinase_activity_heatmap or {})
-    records.append({
-        "evidence_id": "DATA-TEMPORAL-SUMMARY",
-        "tier": "observational_summary",
-        "text": (
+    add_record(
+        "DATA-TEMPORAL-SUMMARY",
+        "observational_summary",
+        (
             "Measured scope: protein trajectories={protein}; same-gene PTM-protein pairs={pairs}; "
             "cross-layer edges={edges}; temporally eligible edges={eligible}; mechanism candidates={chains}; "
             "evidence-supported mechanism candidates={supported}; kinase timing status={timing}."
@@ -998,14 +1023,18 @@ def build_temporal_evidence_packet(
             supported=sidecar.get("evidence_supported_mechanism_count", 0),
             timing=sidecar.get("kinase_timing_status", "not_evaluable"),
         ),
-    })
+        availability="computed",
+        claim_level="L1_observed_scope",
+        allowed_verbs=("measured", "quantified", "observed", "reported"),
+    )
 
     dynamic_status = sidecar.get("dynamic_co_wave_transition_status", "not_requested")
     dynamic_loto = dict(sidecar.get("dynamic_transition_loto") or {})
-    records.append({
-        "evidence_id": "DATA-DYNAMIC-SUMMARY",
-        "tier": "observational_dynamic",
-        "text": (
+    dynamic_pair_count = int(sidecar.get("dynamic_transition_pair_count") or 0)
+    add_record(
+        "DATA-DYNAMIC-SUMMARY",
+        "observational_dynamic",
+        (
             "Dynamic co-wave status={status}; transition-supported Waves={waves}; "
             "pair transitions={pairs}; site transitions={sites}; transition resolution={resolution}; "
             "mean pair LOTO Jaccard={pair_loto}; mean site LOTO Jaccard={site_loto}; "
@@ -1023,19 +1052,22 @@ def build_temporal_evidence_packet(
             adj_p=sidecar.get("dynamic_temporal_adjacency_p_value"),
             adj_verdict=sidecar.get("dynamic_temporal_adjacency_verdict", "not_evaluable"),
         ),
-    })
+        availability="computed" if dynamic_status == "computed" and dynamic_pair_count > 0 else "not_evaluable",
+        claim_level="L2_observational_dynamic",
+        allowed_verbs=("co-occurred", "reorganized", "was observed", "was annotated"),
+    )
 
     precedence = dict(sidecar.get("temporal_precedence_status") or {})
     if precedence:
         precedence_status = str(precedence.get("status") or "unavailable")
-        records.append({
-            "evidence_id": "DATA-TEMPORAL-PRECEDENCE",
-            "tier": (
+        add_record(
+            "DATA-TEMPORAL-PRECEDENCE",
+            (
                 "observational_temporal_precedence"
                 if precedence_status == "computed"
                 else "temporal_uncertainty"
             ),
-            "text": (
+            (
                 "Temporal event-order status={status}; event-record sites={sites}; "
                 "evaluable sites={evaluable}; tier breakdown={tiers}; replicate mode={mode}; "
                 "sites with replicate data={replicate_sites}; P4 validation passed={p4}. "
@@ -1056,15 +1088,18 @@ def build_temporal_evidence_packet(
                     "Observed response timing only; causal interpretation is not supported.",
                 ),
             ),
-        })
+            availability="computed" if precedence_status == "computed" and int(precedence.get("n_evaluable") or 0) > 0 else "not_evaluable",
+            claim_level="L2_observational_timing",
+            allowed_verbs=("preceded", "followed", "was temporally ordered", "was observed"),
+        )
 
     for index, row in enumerate((sidecar.get("dynamic_transition_per_wave") or [])[:max_waves], 1):
         if not isinstance(row, Mapping):
             continue
-        records.append({
-            "evidence_id": f"DATA-DYNAMIC-WAVE-{index}",
-            "tier": "observational_dynamic",
-            "text": (
+        add_record(
+            f"DATA-DYNAMIC-WAVE-{index}",
+            "observational_dynamic",
+            (
                 "Static Wave {wave}: pair transitions={pairs}; non-persistence pair transitions={nonpersistence}; "
                 "site transitions={sites}; pair transition types={pair_types}; site transition types={site_types}."
             ).format(
@@ -1075,7 +1110,10 @@ def build_temporal_evidence_packet(
                 pair_types=dict(row.get("pair_transition_type_counts") or {}),
                 site_types=dict(row.get("site_transition_type_counts") or {}),
             ),
-        })
+            availability="computed",
+            claim_level="L2_observational_dynamic",
+            allowed_verbs=("co-occurred", "reorganized", "was observed", "was annotated"),
+        )
 
     for index, row in enumerate((sidecar.get("top_cross_layer_edges") or [])[:max_edges], 1):
         if not isinstance(row, Mapping):
@@ -1083,10 +1121,10 @@ def build_temporal_evidence_packet(
         similarity = row.get("lag_aware_similarity") or {}
         if isinstance(similarity, Mapping):
             similarity = similarity.get("best_similarity")
-        records.append({
-            "evidence_id": f"DATA-CROSS-LAYER-{index}",
-            "tier": "observational_cross_layer",
-            "text": (
+        add_record(
+            f"DATA-CROSS-LAYER-{index}",
+            "observational_cross_layer",
+            (
                 "Candidate {edge}: Wave {wave} → protein {target}; direction={direction}; "
                 "onset lag={onset} min; peak lag={peak} min; lag-aware similarity={similarity}; "
                 "mechanism-chain eligibility={eligible}; temporal interpretation={interpretation}; causality=not_tested."
@@ -1101,7 +1139,10 @@ def build_temporal_evidence_packet(
                 eligible=row.get("eligible_for_mechanism_chain", False),
                 interpretation=row.get("temporal_interpretation", "observational_peak_order_only"),
             ),
-        })
+            availability="computed",
+            claim_level="L2_observational_cross_layer",
+            allowed_verbs=("was temporally consistent with", "lagged", "preceded", "was observed"),
+        )
 
     # Candidate-level TMM evidence comes from the same production heatmap that
     # created the sidecar. It is contribution-weighted observational support,
@@ -1131,10 +1172,10 @@ def build_temporal_evidence_packet(
         1,
     ):
         evidence = dict(row.get("tmm_evidence") or {})
-        records.append({
-            "evidence_id": f"DATA-TMM-KINASE-{index}",
-            "tier": "observational_tmm",
-            "text": (
+        add_record(
+            f"DATA-TMM-KINASE-{index}",
+            "observational_tmm",
+            (
                 "TMM candidate kinase {kinase}: timepoint={timepoint}; selected contribution-weighted activity={activity}; "
                 "raw weighted activity={raw}; substrate support={support}; direction={direction}; activity metric={metric}; "
                 "evidence profile={evidence}. This is a candidate attribution, not direct kinase-substrate proof."
@@ -1148,7 +1189,10 @@ def build_temporal_evidence_packet(
                 metric=row.get("selected_activity_metric", weighted_cascade.get("activity_metric", "not_persisted")),
                 evidence={key: evidence.get(key) for key in sorted(evidence)[:5]},
             ),
-        })
+            availability="computed",
+            claim_level="L2_candidate_attribution",
+            allowed_verbs=("was a candidate", "was contribution-weighted", "was ranked", "was associated with"),
+        )
 
     uncertainty = dict(heatmap.get("relative_tmm_uncertainty_summary") or {})
     if uncertainty:
@@ -1157,22 +1201,25 @@ def build_temporal_evidence_packet(
             for key in sorted(uncertainty)
             if isinstance(uncertainty.get(key), (str, int, float, bool))
         }
-        records.append({
-            "evidence_id": "DATA-TMM-UNCERTAINTY",
-            "tier": "uncertainty",
-            "text": (
+        add_record(
+            "DATA-TMM-UNCERTAINTY",
+            "uncertainty",
+            (
                 "Relative TMM uncertainty summary={summary}. Treat candidate ranking as uncertain where the "
                 "persisted summary does not support a stable estimate."
             ).format(summary=scalar_uncertainty),
-        })
+            availability="computed",
+            claim_level="L0_uncertainty",
+            allowed_verbs=("was uncertain", "was not stable", "was limited"),
+        )
 
     for index, row in enumerate((sidecar.get("top_mechanism_counterevidence") or [])[:max_counterevidence], 1):
         if not isinstance(row, Mapping):
             continue
-        records.append({
-            "evidence_id": f"DATA-COUNTEREVIDENCE-{index}",
-            "tier": "counterevidence",
-            "text": (
+        add_record(
+            f"DATA-COUNTEREVIDENCE-{index}",
+            "counterevidence",
+            (
                 "Mechanism candidate {chain}: status={status}; counterevidence={reasons}. "
                 "Do not promote this candidate to a causal mechanism without resolving these limitations."
             ).format(
@@ -1180,15 +1227,57 @@ def build_temporal_evidence_packet(
                 status=row.get("status", "insufficient_evidence"),
                 reasons=list(row.get("reasons") or []),
             ),
-        })
+            availability="computed",
+            claim_level="L0_limitation",
+            allowed_verbs=("was limited", "was not supported", "requires validation"),
+        )
+
+    computed_layers = {
+        "dynamic": dynamic_status == "computed" and dynamic_pair_count > 0,
+        "cross_layer": any(str(record.get("evidence_id", "")).startswith("DATA-CROSS-LAYER-") for record in records),
+        "temporal_precedence": any(
+            record.get("evidence_id") == "DATA-TEMPORAL-PRECEDENCE"
+            and record.get("availability") == "computed"
+            for record in records
+        ),
+        "tmm": any(str(record.get("evidence_id", "")).startswith("DATA-TMM-KINASE-") for record in records),
+    }
+    # A local Dynamic Co-Wave observation alone is not a receptor/kinase
+    # cascade.  Generic cascade context is enabled only when the packet has
+    # all three independent observational supports required to constrain a
+    # directed temporal candidate: TMM kinase evidence, cross-layer evidence,
+    # and temporal timing evidence. Dynamic context remains separately usable
+    # for local co-movement wording.
+    dynamic_context_allowed = bool(computed_layers["dynamic"])
+    directed_temporal_context_allowed = bool(
+        computed_layers["tmm"]
+        and computed_layers["cross_layer"]
+        and computed_layers["temporal_precedence"]
+    )
+    mechanism_context_allowed = directed_temporal_context_allowed
 
     return {
-        "contract_version": "report_temporal_evidence_packet.v3",
+        "contract_version": "report_temporal_evidence_packet.v4",
         "status": "available",
         "shared_engine_contract": sidecar.get("shared_engine_contract"),
         "artifact_path": sidecar.get("artifact_path"),
         "record_count": len(records),
         "records": records,
+        "section_plan": {
+            "computed_layers": computed_layers,
+            "dynamic_context_allowed": dynamic_context_allowed,
+            "directed_temporal_context_allowed": directed_temporal_context_allowed,
+            "mechanism_context_allowed": mechanism_context_allowed,
+            "results_discussion_claim_ceiling": (
+                "L2_observational_temporal_candidate"
+                if mechanism_context_allowed
+                else "L1_observed_measurement_only"
+            ),
+            "high_severity_forbidden_terms": [
+                "causes", "drives", "directly activates", "proves",
+                "kinase switching", "causal propagation", "signal propagation",
+            ],
+        },
         "claim_boundary": (
             "The packet contains measured temporal summaries and observational candidates only. "
             "It does not establish kinase switching, direct kinase-substrate attribution, PTM-protein causality, "
@@ -1210,6 +1299,9 @@ def format_temporal_evidence_packet_for_llm(
             "Status: unavailable. Do not invent temporal PTM-protein, dynamic co-wave, or kinase timing results.\n"
             "=== END TEMPORAL NUMERICAL EVIDENCE PACKET ==="
         )
+    section_plan = dict(packet.get("section_plan") or {})
+    computed_layers = dict(section_plan.get("computed_layers") or {})
+    mechanism_context_allowed = bool(section_plan.get("mechanism_context_allowed"))
     record_ids = {
         str(record.get("evidence_id"))
         for record in packet.get("records") or []
@@ -1221,19 +1313,23 @@ def format_temporal_evidence_packet_for_llm(
     has_cross_layer = any(identifier.startswith("DATA-CROSS-LAYER") for identifier in record_ids)
     has_counterevidence = any(identifier.startswith("DATA-COUNTEREVIDENCE") for identifier in record_ids)
     section = str(section_type or "general").lower()
-    coverage_instruction = (
-        "For Results and Discussion, write a dedicated temporal-evidence paragraph that uses the temporal event-order status, "
-        "at least one dynamic record, one TMM candidate record, and one PTM→protein record when those record classes are present. Also state one explicit "
-        "limitation from counterevidence or not_evaluable status when supplied."
-        if section in {"results", "discussion"}
-        else "Use the relevant supplied numerical temporal records when answering this section; do not substitute generic pathway prose."
-    )
+    if section in {"results", "discussion", "conclusion", "abstract"}:
+        coverage_instruction = (
+            "SECTION EVIDENCE PLAN: Start with measured observation records. Use a temporal layer only when "
+            f"its computed flag is True: {computed_layers}. Claim ceiling={section_plan.get('results_discussion_claim_ceiling', 'L1_observed_measurement_only')}. "
+            "Use only the allowed verbs attached to each cited record. Do not use receptor-cascade context, "
+            "auxiliary directionality, generic writing examples, or signal-propagation prose as a substitute for a missing layer. "
+            "If a layer is not_evaluable or has zero candidates, state that it was not evaluable and omit that mechanism claim."
+        )
+    else:
+        coverage_instruction = "Use the relevant supplied numerical temporal records when answering this section; do not substitute generic pathway prose."
     lines = [
         "=== TEMPORAL NUMERICAL EVIDENCE PACKET (MANDATORY; OBSERVATIONAL) ===",
         "Use exact values and identifiers only from the records below. Before every temporal or PTM-protein claim, "
         "check that it is supported by one DATA-* record. Do not turn a local co-wave transition into kinase switching, "
         "or a lagged protein trajectory into direct regulation or causality.",
         "If kinase timing is not_evaluable or an edge is not evidence-supported, state that limitation explicitly.",
+        f"Mechanism-context allowed in this section={mechanism_context_allowed}.",
         coverage_instruction,
         f"Available required classes: temporal-precedence={has_precedence}; dynamic={has_dynamic}; TMM={has_tmm}; PTM-protein={has_cross_layer}; counterevidence={has_counterevidence}.",
         "For auditability, retain the relevant [DATA-*] label at the end of the sentence in the draft.",

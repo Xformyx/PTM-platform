@@ -499,6 +499,7 @@ def build_v2_sidecar(
     replicate_time_series: Mapping[str, Mapping[str, Iterable[Any]]] | None = None,
     study_context: Any | None = None,
     raw_replicate_fc_series: Mapping[str, Any] | None = None,
+    temporal_input_provenance: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build v2 enrichment-free temporal sidecar.
 
@@ -701,6 +702,7 @@ def build_v2_sidecar(
             "benchmark_truth_used": False,
             "protein_time_series": protein_provenance,
             "ptm_protein_pair_count": len(ptm_protein_pairs),
+            "temporal_input": dict(temporal_input_provenance or {}),
             "cross_layer": cross_layer_provenance,
             "kinase_timing": kinase_timing_provenance,
             "mechanism_chain_count": len(mechanism_chains),
@@ -795,6 +797,7 @@ def build_production_temporal_ptm_protein_analysis(
     enable_dynamic_transition: bool = True,
     study_context: Any | None = None,
     raw_replicate_fc_series: Mapping[str, Any] | None = None,
+    temporal_input_provenance: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the exact v2 sidecar contract for a normal production order.
 
@@ -852,6 +855,7 @@ def build_production_temporal_ptm_protein_analysis(
         enable_dynamic_transition=enable_dynamic_transition,
         study_context=study_context,
         raw_replicate_fc_series=raw_replicate_fc_series,
+        temporal_input_provenance=temporal_input_provenance,
     )
     sidecar["provenance"]["analysis_mode"] = "production"
     sidecar["provenance"]["shared_engine_contract"] = "unified_temporal_ptm_protein.v1"
@@ -895,7 +899,7 @@ def _compact_temporal_precedence(sidecar: Mapping[str, Any]) -> dict[str, Any]:
         "p4_gate_passed": p4.get("passed"),
         "claim_boundary": (
             "Temporal event records are observational response timing only. "
-            "Causal interpretation requires P4 Trametinib validation. "
+            "Directed regulation or causal interpretation requires independent, study-matched validation. "
             "This field does not expose individual event records or relation registry."
         ),
         "contract_version": tp.get("contract_version"),

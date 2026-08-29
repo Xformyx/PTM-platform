@@ -46,26 +46,18 @@ _KINASE_STOP_WORDS = {
 
 
 def _build_relative_ptm_timeseries(enriched_data: list) -> dict[str, dict[str, float]]:
-    """Build numeric PTM-relative vectors shared by worker TMM and sidecar.
+    """Build trajectory-preserving numeric vectors shared by TMM and the sidecar.
 
-    This reads only the enriched numeric Order table.  It deliberately excludes
-    workbook truth, stimulus identity, RAG prose, and LLM output so the normal
-    one-click pipeline and strict benchmark sidecar retain the same boundary.
+    A collapsed RAG record has one representative top-level condition but retains
+    all measured timepoints in ``condition_data``.  Delegate to the shared
+    source-priority reconstructor so a representative row never erases the
+    observed temporal trajectory.
     """
 
-    ptm_timeseries: dict[str, dict[str, float]] = {}
-    for row in enriched_data:
-        gene = (row.get("gene") or row.get("Gene.Name") or "").upper()
-        position = str(row.get("position") or row.get("PTM_Position") or "")
-        condition = str(row.get("condition") or row.get("Condition") or "")
-        value = row.get("ptm_relative_log2fc") or row.get("PTM_Relative_Log2FC") or 0
-        if not (gene and position and condition):
-            continue
-        try:
-            ptm_timeseries.setdefault(f"{gene}_{position}", {})[condition] = float(value)
-        except (TypeError, ValueError):
-            continue
-    return ptm_timeseries
+    from ptm_shared.temporal_input_reconstruction import reconstruct_ptm_timeseries
+
+    vectors, _ = reconstruct_ptm_timeseries(enriched_data)
+    return vectors
 
 
 def _auto_run_global_analysis(order_id: int, enriched_data: list, config: dict, mcp_client=None) -> dict:
@@ -695,18 +687,44 @@ def _auto_run_global_analysis(order_id: int, enriched_data: list, config: dict, 
                     build_production_temporal_ptm_protein_analysis,
                     summarize_temporal_ptm_protein_analysis,
                 )
+                from ptm_shared.study_temporal_context_resolution import (
+                    resolve_study_temporal_context,
+                )
+                from ptm_shared.temporal_input_reconstruction import (
+                    build_temporal_input_bundle,
+                )
 
                 temporal_output_dir = Path(
                     config.get("preprocessing_output_dir")
                     or (Path(OUTPUT_DIR) / str(config.get("order_code") or order_id))
                 )
                 temporal_output_dir.mkdir(parents=True, exist_ok=True)
+                declared_conditions = [
+                    str(value) for value in (heatmap_data.get("conditions") or [])
+                    if str(value).strip()
+                ]
+                temporal_bundle = build_temporal_input_bundle(
+                    enriched_data,
+                    declared_conditions=declared_conditions,
+                )
+                if not declared_conditions:
+                    declared_conditions = list(temporal_bundle["declared_conditions"])
+                study_context, context_provenance = resolve_study_temporal_context(
+                    experimental_context=config.get("experimental_context") or {},
+                    declared_conditions=declared_conditions,
+                    study_id=f"order_{order_id}",
+                )
                 temporal_sidecar = build_production_temporal_ptm_protein_analysis(
                     output_dir=temporal_output_dir,
                     ptm_type=ptm_type,
-                    ptm_timeseries=_build_relative_ptm_timeseries(enriched_data),
-                    conditions=heatmap_data.get("conditions") or [],
+                    ptm_timeseries=temporal_bundle["ptm_timeseries"],
+                    conditions=declared_conditions,
                     tmm_result=heatmap_data,
+                    study_context=study_context,
+                    temporal_input_provenance={
+                        **temporal_bundle["provenance"],
+                        "study_context_resolution": context_provenance,
+                    },
                 )
                 temporal_path = temporal_output_dir / "temporal_ptm_protein_analysis_v2.json"
                 temporal_path.write_text(

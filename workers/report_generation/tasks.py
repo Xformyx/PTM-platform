@@ -950,6 +950,10 @@ def run_report_generation(self, order_id: int, config: dict):
             section for section, audit in temporal_fidelity.items()
             if isinstance(audit, dict) and audit.get("status") == "review_required"
         ]
+        temporal_blocked_sections = [
+            section for section, audit in temporal_fidelity.items()
+            if isinstance(audit, dict) and audit.get("status") == "blocked_for_review"
+        ]
         temporal_llm_draft_review_sections = [
             section for section, audit in temporal_fidelity.items()
             if isinstance(audit, dict) and audit.get("llm_draft_status") == "review_required"
@@ -972,11 +976,17 @@ def run_report_generation(self, order_id: int, config: dict):
                 if isinstance(audit, dict)
             },
             "review_required_sections": temporal_review_sections,
+            "blocked_for_review_sections": temporal_blocked_sections,
+            "release_status": "blocked_for_review" if temporal_blocked_sections else "release_candidate",
             "llm_draft_review_required_sections": temporal_llm_draft_review_sections,
             "llm_draft_untraced_sections": temporal_llm_draft_untraced_sections,
             "deterministic_addendum_sections": [
                 section for section, audit in temporal_fidelity.items()
                 if isinstance(audit, dict) and audit.get("deterministic_addendum_applied")
+            ],
+            "constrained_rewrite_sections": [
+                section for section, audit in temporal_fidelity.items()
+                if isinstance(audit, dict) and audit.get("constrained_rewrite_attempted")
             ],
             "packet_snapshot": temporal_packet.get("snapshot_path"),
             "fidelity_snapshot": final_state.get("temporal_report_fidelity_snapshot"),

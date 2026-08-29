@@ -9,8 +9,8 @@ PRODUCTION SAFETY RULES
 1. NO static Wave membership change.
 2. NO TMM score, coefficient, or kinase ranking change.
 3. NO locked benchmark truth or known relation flows into production output.
-4. Until P4 (Trametinib validation), all report phrases use "not_evaluable"
-   or "observed temporal precedence with uncertainty".
+4. Until independent, study-matched validation is available, all report phrases
+   use "not_evaluable" or "observed temporal precedence with uncertainty".
 5. Output is additive: a new `temporal_precedence` field on the sidecar.
 
 PHRASE POLICY (PDF §4 P3)
@@ -40,9 +40,9 @@ from ptm_shared.study_temporal_context import StudyTemporalContext
 
 CONTRACT_VERSION = "temporal_precedence_output.v1"
 
-# P4 validation gate — flipped to True only after Trametinib interaction-response
-# validation passes (see interaction_response_validation.py).
-# Until then, all report phrases default to "not_evaluable".
+# Validation gate — flipped to True only after independent, study-matched
+# perturbation or orthogonal validation passes.  Until then, Report phrases
+# remain observational and non-causal.
 _P4_VALIDATION_PASSED: bool = False
 
 
@@ -71,7 +71,7 @@ class TemporalPrecedenceObservation:
     exit_ci95_min : tuple | None
     replicate_bootstrap_stability : float | None
     wave_id : str | None
-    p4_gate_passed : bool  — False until Trametinib validation completes
+    p4_gate_passed : bool  — False until independent validation completes
     """
 
     site_key: str

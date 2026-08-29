@@ -69,7 +69,16 @@ def test_packet_preserves_numerical_fields_and_observational_boundary():
     packet = build_temporal_evidence_packet(_sidecar_summary())
 
     assert packet["status"] == "available"
+    assert packet["contract_version"] == "report_temporal_evidence_packet.v4"
     assert packet["record_count"] == 5
+    dynamic = next(row for row in packet["records"] if row["evidence_id"] == "DATA-DYNAMIC-SUMMARY")
+    assert dynamic["availability"] == "computed"
+    assert dynamic["claim_level"] == "L2_observational_dynamic"
+    assert "drives" in dynamic["forbidden_verbs"]
+    assert packet["section_plan"]["computed_layers"]["dynamic"] is True
+    assert packet["section_plan"]["dynamic_context_allowed"] is True
+    assert packet["section_plan"]["directed_temporal_context_allowed"] is False
+    assert packet["section_plan"]["mechanism_context_allowed"] is False
     text = format_temporal_evidence_packet_for_llm(packet)
     assert "[DATA-TEMPORAL-SUMMARY]" in text
     assert "protein trajectories=12" in text
@@ -87,7 +96,9 @@ def test_packet_preserves_numerical_fields_and_observational_boundary():
 def test_results_instruction_requires_available_record_classes_and_final_prose_hides_ids():
     packet = build_temporal_evidence_packet(_sidecar_summary())
     text = format_temporal_evidence_packet_for_llm(packet, section_type="results")
-    assert "dedicated temporal-evidence paragraph" in text
+    assert "SECTION EVIDENCE PLAN" in text
+    assert "Claim ceiling=L1_observed_measurement_only" in text
+    assert "Do not use receptor-cascade context" in text
     assert "Available required classes: temporal-precedence=True; dynamic=True; TMM=False; PTM-protein=True; counterevidence=False." in text
     assert "DATA-DYNAMIC-SUMMARY" not in strip_internal_data_labels(text)
 
@@ -97,6 +108,28 @@ def test_packet_unavailable_explicitly_blocks_invented_temporal_claims():
     assert packet["status"] == "unavailable"
     text = format_temporal_evidence_packet_for_llm(packet)
     assert "Do not invent temporal PTM-protein" in text
+
+
+def test_zero_temporal_layers_force_observed_measurement_claim_ceiling():
+    summary = _sidecar_summary()
+    summary.update({
+        "dynamic_co_wave_transition_status": "not_evaluable",
+        "dynamic_transition_pair_count": 0,
+        "dynamic_transition_site_count": 0,
+        "dynamic_transition_supported_wave_count": 0,
+        "top_cross_layer_edges": [],
+        "temporal_precedence_status": {
+            "status": "not_evaluable_context_not_registered",
+            "n_sites": 0,
+            "n_evaluable": 0,
+        },
+    })
+    packet = build_temporal_evidence_packet(summary)
+    assert packet["section_plan"]["mechanism_context_allowed"] is False
+    assert packet["section_plan"]["results_discussion_claim_ceiling"] == "L1_observed_measurement_only"
+    text = format_temporal_evidence_packet_for_llm(packet, section_type="results")
+    assert "Mechanism-context allowed in this section=False" in text
+    assert "omit that mechanism claim" in text
 
 
 def test_ordinary_question_content_includes_deterministic_temporal_packet():
@@ -120,12 +153,21 @@ def test_writer_makes_the_packet_mandatory_in_all_temporal_sections():
     assert source.index(required) < source.index('supplement_blocks.append(("vector_plot_full", aux_vector_plot_full))')
     assert "temporal_report_fidelity[section_type] = audit_report_temporal_fidelity" in source
     assert "kinase_activity_heatmap=(" in source
-    assert "build_temporal_evidence_fallback_addendum" in source
+    assert "EVIDENCE-CONSTRAINED REWRITE REQUIRED" in source
+    assert '"status"] = "blocked_for_review"' in source
+    assert "dynamic_context_allowed = bool(temporal_section_plan.get" in source
+    assert "directed_temporal_context_allowed = bool(" in source
+    assert "base_prompt_directed_context_allowed = (" in source
+    assert "if base_prompt_directed_context_allowed else None" in source
+    assert "aux_directionality_context and directed_temporal_context_allowed" in source
     assert '"temporal_report_fidelity.json"' in source
     tasks = Path(__file__).parents[1] / "report_generation/tasks.py"
     task_source = tasks.read_text(encoding="utf-8")
     assert '"llm_draft_section_status"' in task_source
     assert '"fidelity_snapshot"' in task_source
+    assert '"blocked_for_review_sections"' in task_source
+    assert '"constrained_rewrite_sections"' in task_source
+    assert '"release_status"' in task_source
 
 
 def test_packet_includes_tmm_uncertainty_and_counterevidence_when_persisted():
