@@ -113,12 +113,11 @@ def test_same_direction_monotone_increasing() -> None:
     labels = ["1min", "5min", "15min"]
     fcs_a = [0.0, 1.0, 2.0]
     fcs_b = [0.0, 0.8, 1.6]
+    # default is "minutes"; previously relaxed to 0.5 for log1p — restored to 0.6
     post_a = estimate_trajectory_posterior(labels, fcs_a)
     post_b = estimate_trajectory_posterior(labels, fcs_b)
     p = p_same_derivative_direction(post_a, post_b, window_index=0)
-    # With log1p time coordinates the GP posterior derivative uncertainty is wider
-    # for closely-spaced early timepoints; p > 0.5 is still above random
-    assert p > 0.5, f"Expected P(same direction) > 0.5 for parallel trajectories, got {p}"
+    assert p > 0.6, f"Expected high P(same direction) for parallel trajectories, got {p}"
 
 
 def test_opposite_direction_gives_low_probability() -> None:
@@ -222,10 +221,16 @@ def test_log1p_minutes_values() -> None:
     assert math.isclose(vals[2], math.log1p(15.0), rel_tol=1e-5)
 
 
-def test_time_transform_default_is_log1p() -> None:
+def test_time_transform_default_is_minutes() -> None:
+    """Production default is 'minutes': coordinate–length-scale units are consistent.
+
+    log1p default was reverted 2026-08-29: revalidation found T_adjacency p=0.284327
+    (not significant) and a length-scale unit mismatch when log1p is used with
+    the minute-scale length_scale_min=15.
+    """
     labels = ["1min", "5min", "15min"]
     result = estimate_trajectory_posterior(labels, [0.0, 1.5, 0.5])
-    assert result["hyperparameters"]["time_transform"] == "log1p_minutes"
+    assert result["hyperparameters"]["time_transform"] == "minutes"
 
 
 def test_time_transform_minutes_explicit() -> None:
@@ -257,7 +262,18 @@ def test_log1p_gives_higher_p_active_at_early_peak() -> None:
     assert max(r_min["p_active"]) > 0.8
 
 
-def test_annotation_uses_log1p_by_default() -> None:
+def test_annotation_uses_minutes_by_default() -> None:
+    """Production default is 'minutes'; log1p is EXPERIMENTAL (reverted 2026-08-29)."""
     result = probabilistic_transition_annotation(_simple_wave_contract())
+    assert result["provenance"]["hyperparameters"]["time_transform"] == "minutes"
+
+
+def test_annotation_accepts_log1p_when_explicit() -> None:
+    """log1p can still be used explicitly for experiments; check it doesn't crash."""
+    from ptm_shared.probabilistic_cowave import GP_LOG1P_LENGTH_SCALE_MIN
+    result = probabilistic_transition_annotation(
+        _simple_wave_contract(),
+        time_transform="log1p_minutes",
+        length_scale_min=GP_LOG1P_LENGTH_SCALE_MIN,
+    )
     assert result["provenance"]["hyperparameters"]["time_transform"] == "log1p_minutes"
-    assert "log1p" in result["provenance"]["time_transform_rationale"]

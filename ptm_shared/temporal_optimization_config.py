@@ -76,18 +76,134 @@ CROSS_LAYER_CONFIG = {
 #   A significant T_adjacency p-value is required before claiming temporal structure.
 # Reference: Image §2.1 "시간 순서의 정보성은 아직 증명되지 않았음", 2026-08-28.
 TEMPORAL_ORDERING_P_VALUE_RECORD: dict[str, object] = {
-    "metric": "p_time_index_permutation_of_transition_resolution",
-    "value": 0.570858,
-    "dataset": "Insulin_Signaling_Dynamic_V1",
-    "commit": "8fc58701f6457230dd1203087075e0df1b41c987",
-    "date": "2026-08-28",
-    "verdict": "temporal_ordering_not_statistically_significant",
+    "records": [
+        {
+            "metric": "p_time_index_permutation_of_transition_resolution",
+            "value": 0.570858,
+            "dataset": "Insulin_Signaling_Dynamic_V1",
+            "commit": "8fc58701f6457230dd1203087075e0df1b41c987",
+            "date": "2026-08-28",
+            "verdict": "not_significant",
+        },
+        {
+            "metric": "T_adjacency_exact_permutation_720",
+            "value": 0.284327,
+            "n_exceedances": 204,
+            "n_permutations": 720,
+            "t_adjacency_observed": 0.031171,
+            "null_mean": 0.0,
+            "null_std": 0.047861,
+            "dataset": "Insulin_Signaling_Dynamic_V1",
+            "commit": "f02084e",
+            "date": "2026-08-29",
+            "verdict": "not_significant",
+            "note": (
+                "T_adjacency is a more direct measure than transition_resolution "
+                "but still fails to demonstrate temporal ordering informativeness. "
+                "Changing statistics to find significance (score chasing) is forbidden."
+            ),
+        },
+    ],
+    "verdict_summary": "temporal_ordering_not_statistically_significant_in_any_test_to_date",
     "forbidden_claim": "Dynamic Co-Wave captures biologically meaningful temporal ordering.",
     "permitted_claim": (
         "Dynamic Co-Wave provides a reproducible annotation of local membership "
         "reconfiguration within static temporal modules."
     ),
-    "resolution": "T_adjacency exact permutation test (compute_temporal_adjacency_statistic)",
+    "resolution_path": (
+        "Not further global permutation statistics. "
+        "Next: pre-specified kinase/site relation onset/peak/exit difference with CI "
+        "from raw replicate trajectory; Trametinib interaction response as primary "
+        "external outcome; mirdametinib as fixed-pipeline chemical holdout."
+    ),
+    "log1p_coordinate_validation": {
+        "status": "not_demonstrated",
+        "date": "2026-08-29",
+        "reason": (
+            "Coordinate–length-scale unit mismatch (length_scale_min=15 in minute units, "
+            "log1p values span 0.69–5.20). T_adjacency p=0.284327 not significant. "
+            "log1p default reverted to 'minutes'; GP_LOG1P_LENGTH_SCALE_MIN added as "
+            "EXPERIMENTAL constant for future validated use."
+        ),
+    },
+}
+
+
+# ── Next-step roadmap (2026-08-29) ─────────────────────────────────────────
+# Source: "Latest Temporal-Order Remediation Revalidation" PDF, 2026-08-29.
+#
+# The correct path forward is NOT to find another global permutation statistic.
+# It IS:
+#   1. Raw replicate trajectory model: y_irt = f_i(t) + b_ir + ε_irt
+#      (per-replicate intensity, not condition-level FC)
+#   2. Pre-specified kinase/site relations: define onset/peak/exit differences
+#      and confidence intervals BEFORE seeing kinase scores.
+#   3. Primary external outcome: Trametinib interaction response.
+#   4. Fixed-pipeline chemical holdout: mirdametinib.
+#   5. T_adjacency (and any other global order statistic) stays as a
+#      descriptive structure test — NOT used for kinase/causality claims.
+#
+# Prerequisites before implementing:
+#   a. Replicate-level intensity data available in production pipeline
+#   b. Pre-specified kinase–site pair list frozen in docs before data analysis
+#   c. Trametinib/mirdametinib outcome labels isolated from temporal analysis
+TEMPORAL_ORDERING_NEXT_STEPS: dict[str, object] = {
+    "date": "2026-08-29",
+    "source": "Latest_Temporal-Order_Remediation_Revalidation.pdf",
+    "scope": "general (applies to all time-course studies, not insulin-only)",
+    "immediate_action": "none — do NOT change global permutation statistics further",
+    "next_implementation_steps": [
+        "P1: replicate_aware_event_record — model y_irt = f_i(t) + b_ir + epsilon_irt "
+        "from per-replicate intensity; return event_status=not_evaluable when condition-mean only",
+        "P1: event_record_schema — onset_t50 + CI, peak_t + CI, exit_t50 + CI, "
+        "event_status (resolved/left_censored/right_censored/ambiguous/unresolved), "
+        "replicate_bootstrap_stability",
+        "P2: known_relation_registry — study-specific (source, target, allowed_lag, "
+        "expected_direction, evidence_tier); runner-only; start with insulin anchors",
+        "P2: within_wave_synchrony_test (A) — P(|t_onset_i - t_onset_j| <= tau); "
+        "null=membership permutation; tau from StudyTemporalContext",
+        "P2: directed_precedence_concordance_test (B) — P(t_source + delta < t_target); "
+        "null=hierarchical replicate bootstrap + relation-level temporal permutation",
+        "P3: production temporal precedence output as evidence-tiered observation "
+        "(static Wave/TMM/score non-mutation)",
+        "P4: study-specific primary interaction-response validation "
+        "(insulin: Trametinib ΔMEK; other studies: equivalent chemical/genetic holdout)",
+        "P5: study-specific chemical holdout Q2 reproducibility",
+        "t_adjacency_role: descriptive structure test only, NOT causal claim basis",
+    ],
+    "generalisation_notes": {
+        "gp_length_scale": (
+            "15 min (insulin) is NOT a universal default. "
+            "Use StudyTemporalContext.gp_length_scale_min_minutes derived from "
+            "compute_gp_length_scale_from_grid() and biological review per study. "
+            "Cell cycle: ~12 hr. Hypoxia: ~6 hr. EGF: ~6 min."
+        ),
+        "synchrony_tau": (
+            "5 min (insulin) is NOT universal. Set tau = nominal_grid_interval for each study. "
+            "StudyTemporalContext.synchrony_tau_minutes holds this value."
+        ),
+        "chemical_holdout": (
+            "Trametinib/mirdametinib are insulin+MEK specific. "
+            "Every study must define its own chemical/genetic holdout in "
+            "StudyTemporalContext.chemical_holdout_description before primary analysis."
+        ),
+        "known_relation_registry": (
+            "Insulin anchors are insulin-specific. Other studies need their own registry "
+            "in (source, target, allowed_lag_min, expected_direction, evidence_tier) format. "
+            "Registry must be runner-only; never flow into production temporal output."
+        ),
+        "time_grid": (
+            "Current 1-5-15-30-60-180 min grid: 0-5 min onset is left-censored or unresolved. "
+            "Recommended dense early grid: 0, 0.25-0.5, 1, 2, 5, 10, 15, 30, 60, 180 min. "
+            "For other studies, equivalent early-phase density is required."
+        ),
+    },
+    "gating_prerequisites": [
+        "replicate-level intensity available in production preprocessing output",
+        "StudyTemporalContext pre-registered with gp_length_scale and tau for each study",
+        "known-relation registry isolated from temporal analysis code path",
+        "chemical/genetic holdout labels isolated from temporal analysis code path",
+    ],
 }
 
 

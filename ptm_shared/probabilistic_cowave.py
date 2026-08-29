@@ -38,6 +38,34 @@ CONTRACT_VERSION = "probabilistic_cowave.v1"
 #   Source: Humphrey 2013 Cell Metab; Parker 2015 Sci Signal (docs/ refs §10).
 #   Pre-registered 2026-08-28; must not be tuned after inhibitor data is seen.
 GP_LENGTH_SCALE_MIN: float = 15.0
+"""Minimum GP length scale in raw minutes.
+
+Pre-registered 2026-08-28.  Used with time_transform="minutes" (production default).
+Corresponds to ~15-minute smoothing window; prevents single-timepoint overfitting.
+"""
+
+GP_LOG1P_LENGTH_SCALE_MIN: float = 2.0
+"""Minimum GP length scale in log1p(minutes) coordinate space.
+
+EXPERIMENTAL — not production-validated as of 2026-08-29.
+Revalidation on raw insulin (2026-08-29): T_adjacency p=0.284327, not significant.
+log1p default reverted to "minutes"; this constant is available for
+future experiments but must NOT be used without passing it explicitly.
+
+Derivation: log1p(15) ≈ 2.71; log1p(5) ≈ 1.79.  A value of 2.0 ≈ "15 min
+smoothing near the early trajectory" in log1p space.
+
+IMPORTANT — unit mismatch trap: if time_transform="log1p_minutes" is used with
+the default GP_LENGTH_SCALE_MIN=15, the kernel is nearly degenerate because all
+log1p(minute) values lie in [0.69, 5.20] and l=15 dwarfs the entire axis.
+Always pass length_scale_min=GP_LOG1P_LENGTH_SCALE_MIN when using log1p transform:
+    estimate_trajectory_posterior(
+        labels, fcs,
+        time_transform="log1p_minutes",
+        length_scale_min=GP_LOG1P_LENGTH_SCALE_MIN,
+    )
+Pre-registration: 2026-08-29 as EXPERIMENTAL.
+"""
 
 # signal_var: prior variance of the latent trajectory.
 #   Estimated from data variance at runtime when None.
@@ -137,39 +165,89 @@ def _p_below_neg_threshold(
     return _normal_cdf((-threshold - mean) / std)
 
 
-def _timepoints_to_minutes(labels: Sequence[str]) -> np.ndarray:
-    """Parse 'Xmin' / 'X min' / plain numeric labels → float array (minutes).
+def _parse_timepoint_label(label: str) -> float | None:
+    """Parse a single timepoint label to minutes.
 
-    Falls back to 0, 1, 2, ... index spacing if parsing fails, so the GP
-    degrades gracefully on non-minute timepoint labels.
+    Supported formats (case-insensitive, spaces ignored):
+      - minutes:  "15min", "15m", "15 min", "15minutes", "15 minutes" → 15.0
+      - hours:    "2hr", "2h", "2 hr", "2hours", "2 hour"            → 120.0
+      - days:     "1day", "1d", "1 day", "1days"                     → 1440.0
+      - seconds:  "30s", "30sec", "30 sec", "30second"               → 0.5
+      - bare num: "15", "0.5"                                        → 15.0, 0.5
+
+    Returns None if the label cannot be parsed.
+
+    Design notes (generalizability):
+      Different time-course studies use different time units.  This parser enables
+      the platform to handle EGF (minutes), hypoxia (hours), cell cycle (hours),
+      developmental (days) without changing any downstream GP/statistic code.
+      All internal representations use **minutes** as the canonical unit.
     """
-    result = []
+    s = str(label).strip().lower().replace(" ", "")
+    # Try each unit suffix in decreasing specificity
+    for suffix, factor in [
+        ("minutes", 1.0), ("minute", 1.0), ("min", 1.0),
+        ("hours", 60.0), ("hour", 60.0), ("hr", 60.0), ("h", 60.0),
+        ("days", 1440.0), ("day", 1440.0), ("d", 1440.0),
+        ("seconds", 1 / 60.0), ("second", 1 / 60.0), ("sec", 1 / 60.0),
+        ("s", 1 / 60.0),
+        ("m", 1.0),  # "m" last to avoid matching "min" residual
+    ]:
+        if s.endswith(suffix):
+            num_str = s[: len(s) - len(suffix)]
+            try:
+                return float(num_str) * factor
+            except ValueError:
+                return None
+    # Bare number — assume minutes (backward-compatible with original behaviour)
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def _timepoints_to_minutes(labels: Sequence[str]) -> np.ndarray:
+    """Parse timepoint labels → float array of minutes.
+
+    Handles min/h/hr/day/d/s suffixes and bare numbers.
+    Falls back to 0, 1, 2, ... index spacing when any label fails to parse,
+    and emits a warning so the caller is aware of the degradation.
+
+    See _parse_timepoint_label() for supported formats.
+    """
+    result: list[float] = []
     for label in labels:
-        s = str(label).strip().lower().replace(" ", "").replace("min", "").replace("m", "")
-        try:
-            result.append(float(s))
-        except ValueError:
-            result = list(range(len(labels)))
-            break
+        val = _parse_timepoint_label(label)
+        if val is None:
+            import warnings
+            warnings.warn(
+                f"Could not parse timepoint label '{label}' to minutes; "
+                "falling back to integer index spacing for all timepoints. "
+                "Supported suffixes: min/m, hr/h, day/d, s/sec. "
+                "GP kernel distances will be in index units, not physical time.",
+                UserWarning,
+                stacklevel=3,
+            )
+            return np.arange(len(labels), dtype=float)
+        result.append(val)
     return np.array(result, dtype=float)
 
 
 def _timepoints_to_log1p_minutes(labels: Sequence[str]) -> np.ndarray:
     """Parse timepoint labels → log1p(minutes) coordinates.
 
-    Why log1p for insulin signaling:
-      Actual minute values: 1, 5, 15, 30, 60, 180
-      Intervals:            4, 10, 15, 30, 120 min  (highly non-uniform)
-      log1p values:         0.69, 1.79, 2.77, 3.43, 4.11, 5.20
-      log1p intervals:      1.10, 0.99, 0.65, 0.68, 1.09 (much more uniform)
+    EXPERIMENTAL coordinate (reverted to "minutes" default on 2026-08-29).
+    Requires passing length_scale_min=GP_LOG1P_LENGTH_SCALE_MIN when used.
 
-    The SE kernel with uniform time spacing assumes equal "informational distance"
-    between consecutive timepoints.  With raw minutes, the 60→180 min gap is
-    30× the 1→5 min gap, so the kernel severely underweights fast events.
-    log1p(time) compresses the late phase and gives the GP a more balanced
-    picture of the entire trajectory.
+    Notes on generalisation across study types:
+      log1p compression is more beneficial when the time grid spans multiple
+      orders of magnitude (e.g., insulin 1→180 min = 2.3 decades).
+      For uniformly-spaced grids (cell cycle, circadian) it provides little benefit.
+      For studies where ALL intervals are already uniform (e.g., every 4 h), use
+      time_transform="minutes" with an appropriate length_scale.
 
-    Pre-registered as preferred coordinate for insulin signaling GP: 2026-08-28.
+    Pre-registered as EXPERIMENTAL for insulin signaling: 2026-08-28.
+    Revalidation on raw insulin (2026-08-29): T_adjacency p=0.284327, not significant.
     Source: Image §4 Dynamic Co-Wave v3 recommendation.
     """
     minutes = _timepoints_to_minutes(labels)
@@ -186,7 +264,7 @@ def estimate_trajectory_posterior(
     signal_var: float | None = GP_SIGNAL_VAR,
     noise_var_fraction: float = GP_NOISE_VAR_FRACTION,
     activity_threshold_fc: float = ACTIVITY_THRESHOLD_FC,
-    time_transform: str = "log1p_minutes",
+    time_transform: str = "minutes",
 ) -> dict[str, Any]:
     """Compute GP posterior for a single site trajectory.
 
@@ -200,12 +278,17 @@ def estimate_trajectory_posterior(
 
     Parameters
     ----------
-    time_transform : "log1p_minutes" | "minutes"
+    time_transform : "minutes" | "log1p_minutes"
         Coordinate system for GP kernel distances.
-        "log1p_minutes" (default): log1p(minutes) — recommended for insulin signaling
-          because intervals 1→5→15→30→60→180 min are non-uniform; log compression
-          gives the SE kernel more balanced sensitivity (pre-registered 2026-08-28).
-        "minutes": raw minutes — retained for backward compatibility.
+        "minutes" (default, production-safe): raw minutes.  length_scale_min=15 is
+          defined in minute units; coordinate and length-scale are consistent.
+        "log1p_minutes" (experimental only): log1p(minutes).  NOTE: length_scale_min
+          must be re-specified in log1p units when using this transform — see
+          GP_LOG1P_LENGTH_SCALE_MIN.  Do NOT use as production default until the
+          coordinate–length-scale mismatch is resolved and biological validation is
+          complete.  Revalidation on raw insulin (2026-08-29): T_adjacency p=0.284327
+          (not significant); log1p effect not demonstrated.  Promoted back to
+          experimental ("minutes" default restored 2026-08-29).
 
     Returns
     -------
@@ -300,14 +383,18 @@ def probabilistic_transition_annotation(
     length_scale_min: float = GP_LENGTH_SCALE_MIN,
     noise_var_fraction: float = GP_NOISE_VAR_FRACTION,
     activity_threshold_fc: float = ACTIVITY_THRESHOLD_FC,
-    time_transform: str = "log1p_minutes",
+    time_transform: str = "minutes",
 ) -> dict[str, Any]:
     """Annotate all Wave members with GP posteriors and soft co-activity scores.
 
     Implementation target: Roadmap §3 full probabilistic layer (v2).
     v3 roadmap (replicate-aware): requires per-replicate intensity input
       y_irt = f_i(t) + b_ir + ε_irt — not yet supported; noted for future extension.
-    Pre-registration: 2026-08-28.  time_transform="log1p_minutes" pre-registered.
+    Pre-registration: 2026-08-28.
+    Default time_transform reverted to "minutes" on 2026-08-29: log1p coordinate
+      has a length-scale unit mismatch (length_scale_min=15 is in minute scale,
+      log1p values are 0.69–5.20) and was not validated on raw insulin data
+      (T_adjacency p=0.284327, not significant).
     Interpretation limits: see module docstring.
     Claim boundary: do not promote soft co-activity to kinase attribution.
 

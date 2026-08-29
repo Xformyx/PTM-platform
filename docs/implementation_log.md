@@ -1966,6 +1966,101 @@
 - **해석 한계:** TMM 산출 식과 locked score 정의를 바꾸지 않는다.
 - **결정성:** 해당 없음
 
+### [2026-08-29] 범용 시간 파서 + StudyTemporalContext 도입 (insulin 이외 연구 지원)
+
+- **분류:** 구조적 범용화 (인터페이스 계약)
+- **대상:**
+  - `ptm_shared/probabilistic_cowave.py` (_parse_timepoint_label, _timepoints_to_minutes 범용화)
+  - `ptm_shared/study_temporal_context.py` (신규 파일)
+  - `ptm_shared/temporal_optimization_config.py` (TEMPORAL_ORDERING_NEXT_STEPS 범용화)
+  - `ptm_shared/tests/test_study_temporal_context.py` (신규, 46 테스트)
+- **사전등록 상태:** 탐색적 (INSULIN_TEMPORAL_CONTEXT 제외). 범용화 인터페이스.
+- **배경:**
+  PDF 검토 결과, 현재 temporal 코드는 insulin-specific 가정이 코드에 하드코딩되어 있음:
+  - `GP_LENGTH_SCALE_MIN=15` (PI3K/ERK 근거, insulin 전용)
+  - `_timepoints_to_minutes()`: "min"/"m" suffix만 처리; "hr", "h", "day"는 index로 잘못 파싱
+  - `τ=5 min` (insulin early interval 전용)
+  - Trametinib/mirdametinib holdout (MEK inhibitor, insulin 전용)
+  - 글로벌 통계 실패 이유가 insulin-specific (early burst + late plateau cancellation)이지만,
+    동일 문제는 **모든 heterogeneous kinetics 연구에서 발생**
+
+- **구현 내용:**
+
+  **_parse_timepoint_label() + _timepoints_to_minutes() 범용화**
+  - 지원 suffix 추가: hr/h/hour/hours → ×60, day/days/d → ×1440, s/sec/second/seconds → ÷60
+  - 파싱 실패 시 index fallback + UserWarning 발생 (기존: 조용히 fallback)
+  - 버그 수정: "48hr" → 이전에는 index 4, 이제 2880 min으로 올바르게 변환
+
+  **StudyTemporalContext (ptm_shared/study_temporal_context.py)**
+  - frozen dataclass. 연구별 temporal 설정 계약:
+    - `nominal_grid_interval_minutes`: 최소 격자 간격 (분)
+    - `gp_length_scale_min_minutes`: GP length scale (연구별 생물학적 근거 필수)
+    - `synchrony_tau_minutes`: τ for Within-Wave synchrony test (= nominal_grid_interval)
+    - `chemical_holdout_description`: 연구별 chemical/genetic holdout 기술
+    - `known_relation_registry_path`: 연구별 known relation registry
+  - `validate()`: length_scale > grid_interval 검사, tau > 0 검사
+  - `infer_context_from_grid()`: 시간점 레이블에서 안전한 draft context 자동 도출
+  - `compute_gp_length_scale_from_grid()`: 3× 최소 격자를 starting point로 제안
+
+  **Pre-registered 참조 컨텍스트**
+  - `INSULIN_TEMPORAL_CONTEXT`: pre_registered=True, gp_ls=15, τ=5 min
+  - `EGF_TEMPORAL_CONTEXT_DRAFT`: 0-60 min, gp_ls=6, DRAFT
+  - `HYPOXIA_TEMPORAL_CONTEXT_DRAFT`: 0-48 hr → 0-2880 min, gp_ls=360, DRAFT
+  - `CELL_CYCLE_TEMPORAL_CONTEXT_DRAFT`: 0-24 hr, 4-hr interval, gp_ls=720, DRAFT
+
+  **TEMPORAL_ORDERING_NEXT_STEPS 범용화**
+  - Trametinib/mirdametinib → "study-specific chemical/genetic holdout" 로 일반화
+  - `generalisation_notes` 추가: gp_length_scale/τ/holdout/known-registry 각각의 범용화 방법 문서화
+
+- **논문에서의 용도:**
+  - Methods: "이 플랫폼은 min/hr/day 단위 time-course 연구에 적용 가능하며,
+    StudyTemporalContext를 통해 연구별 GP 파라미터를 사전등록한다."
+- **해석 한계:**
+  - StudyTemporalContext는 인터페이스 계약; P1 event record 구현은 replicate 데이터 필요.
+  - Draft context (EGF/Hypoxia/Cell-cycle)는 생물학적 검증 전까지 primary analysis 사용 금지.
+- **결정성:**
+  - `compute_gp_length_scale_from_grid()` 결정적 (3× min_interval).
+  - 연구별 파라미터는 사전등록 문서에 명시해야 함.
+
+### [2026-08-29] T_adjacency 검증 결과 반영, log1p default 되돌리기, 다음 단계 정로 기록
+
+- **분류:** 정정 + 검증 기록
+- **대상:**
+  - `ptm_shared/probabilistic_cowave.py` (log1p default 되돌리기, GP_LOG1P_LENGTH_SCALE_MIN 추가)
+  - `ptm_shared/temporal_optimization_config.py` (p=0.284327 기록, TEMPORAL_ORDERING_NEXT_STEPS)
+  - `ptm_shared/tests/test_probabilistic_cowave.py` (default 변경 반영)
+- **사전등록 상태:** 이 항목은 검증 결과에 의한 정정 기록. 탐색적.
+- **내용:**
+
+  **외부 검증 결과 (Latest_Temporal-Order_Remediation_Revalidation.pdf)**
+  - commit f02084e, raw insulin 입력, clean worktree 검증:
+    - T_adjacency exact permutation 720: observed = 0.031171, p = 0.284327 → **비유의**
+    - Legacy transition_resolution: 0.751938 (변동 없음)
+    - Legacy p_time_index_permutation: 0.586111 (변동 없음)
+    - Locked canonical weighted score: 0.733333 (non-regression 확인)
+  - 결론: T_adjacency도 비유의. **시간 순서 claim은 여전히 금지.**
+    "Dynamic Co-Wave captures biologically meaningful temporal ordering" 논문에서 사용 불가.
+
+  **log1p default 되돌리기 (긴급 정정)**
+  - 문제: `GP_LENGTH_SCALE_MIN=15`는 minute 단위이지만 log1p 좌표 범위는 0.69~5.20.
+    length_scale=15가 log1p 축 전체를 압도 → 사실상 flat prior. 단위 불일치.
+  - 조치: `time_transform` 기본값을 `"minutes"`로 복원.
+  - 해결책: `GP_LOG1P_LENGTH_SCALE_MIN = 2.0` 상수 추가 (EXPERIMENTAL).
+    log1p를 쓸 때는 반드시 이 상수를 명시적으로 전달해야 함.
+    생물학적 검증 완료 전까지 production default 승격 금지.
+
+  **다음 단계 정로 (TEMPORAL_ORDERING_NEXT_STEPS)**
+  - global permutation statistic 변경 금지 (score chasing).
+  - 실제 진전: raw replicate trajectory에서 pre-specified kinase/site onset/peak/exit CI.
+    Trametinib → primary external outcome.
+    Mirdametinib → fixed-pipeline chemical holdout.
+  - 전제 조건 기록: replicate-level intensity 파이프라인 연동, kinase-site 쌍 사전등록, outcome labels 격리.
+
+- **해석 한계:**
+  - p=0.284327: 현재 데이터·statistic·좌표계 하에서 비유의. 다른 statistic으로 재시도 금지.
+  - GP_LOG1P_LENGTH_SCALE_MIN은 탐색적 상수이며 production 사용 불가.
+- **결정성:** 정정은 코드 기본값 및 상수 변경으로 결정적.
+
 ### [2026-08-28] T_adjacency 통계량, log1p(time) 좌표계, claim boundary 업데이트
 
 - **분류:** 구현 + 정정 (claim 경계)
@@ -2154,4 +2249,57 @@
 - **해석 한계:** bootstrap CI, partial window, kinase rank, TMM contribution,
   inhibitor contrast를 만들지 않는다. 이 그림으로 attribution 정확도를 주장하지 않는다.
 - **결정성:** 해당 없음
+
+---
+
+### [2026-08-29] P1–P5 전체 구현: 이벤트 레코드 / 관계 레지스트리 / 선례 출력 / 상호작용 검증
+
+- **분류:** 구현 (연구 인프라)
+- **대상:**
+  - `ptm_shared/replicate_event_adapter.py` (신규)
+  - `ptm_shared/temporal_relation_registry.py` (신규)
+  - `ptm_shared/temporal_precedence_output.py` (신규)
+  - `ptm_shared/interaction_response_validation.py` (신규)
+  - `ptm_shared/tests/test_replicate_event_adapter.py` (신규, 24 테스트)
+  - `ptm_shared/tests/test_temporal_relation_registry.py` (신규, 17 테스트)
+  - `ptm_shared/tests/test_temporal_precedence_output.py` (신규, 12 테스트)
+  - `ptm_shared/tests/test_interaction_response_validation.py` (신규, 15 테스트)
+- **구현 대상 설계:** `Time_Course_Temporal_Order_Weakness.pdf` §2 P1–P5 사양 (2026-08-29 검토)
+- **사전등록 상태:**
+  - P1 이벤트 레코드 인터페이스: 탐색적 (condition-mean GP 기반). replicate 데이터 확보 전까지 primary 사용 불가.
+  - P2 관계 레지스트리/검증: runner-only. 생산 출력 노출 금지.
+  - P3 TemporalPrecedenceOutput: 기록적 (인과 언어 금지, P4 게이트 전).
+  - P4/P5 상호작용 검증: pending_data. Trametinib/mirdametinib 코호트 취득 후 실행.
+
+**P1: ReplicateEventAdapter + EventRecord**
+- `EventRecord`: onset_t50_min + CI / peak_t_min + CI / exit_t50_min + CI / event_status / replicate_bootstrap_stability.
+- 핵심 결정: censoring 판정은 GP posterior가 아닌 raw FC 경계값으로 함 (GP smoothing이 boundary에서 posterior mean을 끌어올리는 아티팩트 방지).
+- condition-mean → parametric bootstrap (diagonal GP uncertainty). replicate-level → true bootstrap.
+- `not_evaluable_record()`: replicate 없는 경우 stub 반환.
+
+**P2: KnownRelationRegistry + 두 검증 테스트**
+- **RUNNER-ONLY**: known relation은 생산 코드·LLM context·TMM 점수에 절대 노출 금지.
+- Test A: Within-Wave event synchrony — P(|Δt| ≤ τ), null = Wave 멤버십 순열 (plus-one correction).
+- Test B: Directed precedence concordance — per-relation posterior_order_probability via CI Monte Carlo.
+- stub_insulin_registry(): INSR→IRS1→AKT1→GSK3β 3개 관계 (timing score 신뢰도 낮음; 확장 필요).
+
+**P3: TemporalPrecedenceOutput**
+- 생산 안전 규칙: Wave/TMM/locked score 변경 금지. known relation 노출 금지. additive-only.
+- P4 게이트 미통과 시 "observed temporal precedence" 문구 한정. 인과 언어 자동 차단.
+- `_P4_VALIDATION_PASSED = False` 하드코딩 (Trametinib 검증 완료 후 수동 변경만 허용).
+
+**P4/P5: InteractionResponseValidation** (PENDING DATA)
+- ΔMEK = [IM − M] − [I − V] (I=insulin, M=MEK inhibitor, V=vehicle, IM=insulin+MEK).
+- 파이프라인 동결 규칙: event_order_ranks는 drug response 확인 전 동결 필수.
+- P4 없이 P5 금지. mirdametinib 효과는 compound-specific으로 명시.
+
+- **논문에서의 용도:**
+  - Methods: "이벤트 레코드는 GP posterior로부터 onset/peak/exit 시간 추출, parametric bootstrap으로 95% CI 추정. 인과적 해석은 P4 Trametinib 상호작용-반응 검증 후에만 허용."
+- **해석 한계:**
+  - 이벤트 시간은 "관측된 반응 타이밍"이며 "활성화/인과성" 아님.
+  - replicate_bootstrap_stability는 구조적 일관성이며 effect size·p-value 아님.
+  - stub_insulin_registry 3개 관계는 timing accuracy 최적화 기준으로 사용 불가.
+- **결정성:**
+  - parametric bootstrap seed: `_PARAMETRIC_BOOTSTRAP_SEED = 20260829`.
+  - ΔMEK 공식: `[IM - M] - [I - V]`, nanmean + sqrt(sum of variances).
 
