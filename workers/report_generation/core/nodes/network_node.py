@@ -1998,32 +1998,38 @@ def _check_cytoscape_http(base_url: str, timeout: int = 5) -> bool:
 
 
 def _check_cytoscape() -> bool:
-    """Check if Cytoscape Desktop is accessible. Retries with fallback to HTTP check."""
+    """Check if Cytoscape Desktop is accessible.
+
+    Pre-check with a strict HTTP timeout BEFORE calling py4cytoscape to prevent
+    indefinite hang when the host port is unreachable (TCP SYN drops cause
+    py4cytoscape to block for many minutes with no timeout).
+
+    Order:
+      1. Quick HTTP GET on host.docker.internal URL with 5 s timeout
+      2. Quick HTTP GET on 127.0.0.1 fallback with 5 s timeout
+      3. Only if step 1 or 2 succeeds: call py4cytoscape.cytoscape_ping
+    """
     base_url = _cytoscape_base_url()
-    max_retries = 3
-    retry_delay = 2
+    fallback_url = f"http://127.0.0.1:{CYTOSCAPE_PORT}/v1"
 
-    for attempt in range(max_retries):
-        try:
-            import py4cytoscape as p4c
-            p4c.cytoscape_ping(base_url=base_url)
-            return True
-        except Exception as e:
-            logger.warning(
-                f"Cytoscape ping failed (attempt {attempt + 1}/{max_retries}): {type(e).__name__}: {e}"
-            )
-            if attempt < max_retries - 1:
-                time.sleep(retry_delay)
+    # Step 1/2: fast reachability check — avoids py4cytoscape hang on unreachable port
+    http_reachable = _check_cytoscape_http(base_url, timeout=5) or _check_cytoscape_http(fallback_url, timeout=5)
+    if not http_reachable:
+        logger.info(
+            f"Cytoscape not reachable at {base_url} (HTTP pre-check timeout=5s) — "
+            f"ensure Cytoscape Desktop is running with CyREST on port {CYTOSCAPE_PORT}"
+        )
+        return False
 
-    # Fallback: if py4cytoscape ping fails, try simple HTTP
-    if _check_cytoscape_http(base_url):
-        logger.info("Cytoscape reachable via HTTP; py4cytoscape ping failed (may be version mismatch)")
+    # Step 3: HTTP is reachable, now try py4cytoscape for full CyREST validation
+    try:
+        import py4cytoscape as p4c
+        p4c.cytoscape_ping(base_url=base_url)
         return True
-
-    logger.info(
-        f"Cytoscape not reachable at {base_url} — ensure Cytoscape Desktop is running with CyREST on port {CYTOSCAPE_PORT}"
-    )
-    return False
+    except Exception as e:
+        logger.warning(f"Cytoscape HTTP reachable but py4cytoscape ping failed: {type(e).__name__}: {e}")
+        # HTTP is up → treat as connected (version mismatch or minor issue)
+        return True
 
 
 def _generate_cytoscape_networks(
