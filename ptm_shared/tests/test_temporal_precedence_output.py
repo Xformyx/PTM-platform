@@ -2,6 +2,7 @@
 from __future__ import annotations
 import pytest
 
+import pytest
 from ptm_shared.replicate_event_adapter import EventRecord, EventStatus
 from ptm_shared.temporal_precedence_output import (
     CONTRACT_VERSION,
@@ -111,21 +112,28 @@ def test_observation_p4_flag():
 def test_build_output_structure(minimal_wave_contract):
     records = {"A_S1": _record("A_S1"), "B_S1": _record("B_S1", status=EventStatus.unresolved)}
     output = build_temporal_precedence_output(records, minimal_wave_contract,
-                                               study_context=INSULIN_TEMPORAL_CONTEXT)
+                                               INSULIN_TEMPORAL_CONTEXT)
     assert "observations" in output
     assert "summary" in output
     assert "p4_gate" in output
     assert output["contract_version"] == CONTRACT_VERSION
 
+def test_build_output_requires_explicit_context(minimal_wave_contract):
+    """build_temporal_precedence_output requires explicit study_context (no default)."""
+    records = {"A_S1": _record("A_S1")}
+    with pytest.raises(TypeError):
+        build_temporal_precedence_output(records, minimal_wave_contract)  # type: ignore[call-arg]
+
 def test_build_output_mutation_guarantee(minimal_wave_contract):
     original_members = list(minimal_wave_contract["waves"][0]["members"])
     records = {"A_S1": _record("A_S1"), "B_S1": _record("B_S1")}
-    build_temporal_precedence_output(records, minimal_wave_contract)
+    build_temporal_precedence_output(records, minimal_wave_contract, INSULIN_TEMPORAL_CONTEXT)
     assert list(minimal_wave_contract["waves"][0]["members"]) == original_members
 
 def test_build_output_mutation_guarantee_text(minimal_wave_contract):
     records = {"A_S1": _record("A_S1")}
-    output = build_temporal_precedence_output(records, minimal_wave_contract)
+    output = build_temporal_precedence_output(records, minimal_wave_contract,
+                                               INSULIN_TEMPORAL_CONTEXT)
     assert "not modified" in output["mutation_guarantee"]
 
 def test_build_output_counts(minimal_wave_contract):
@@ -134,18 +142,21 @@ def test_build_output_counts(minimal_wave_contract):
         "B_S1": _record("B_S1", status=EventStatus.unresolved,
                         onset=None, peak=None, exit_t=None),
     }
-    output = build_temporal_precedence_output(records, minimal_wave_contract)
+    output = build_temporal_precedence_output(records, minimal_wave_contract,
+                                               INSULIN_TEMPORAL_CONTEXT)
     assert output["summary"]["n_sites"] == 2
     assert output["summary"]["n_evaluable"] == 1
 
 def test_p4_gate_not_passed_by_default(minimal_wave_contract):
     records = {"A_S1": _record("A_S1")}
-    output = build_temporal_precedence_output(records, minimal_wave_contract)
+    output = build_temporal_precedence_output(records, minimal_wave_contract,
+                                               INSULIN_TEMPORAL_CONTEXT)
     assert output["p4_gate"]["passed"] is False
     assert "Trametinib" in output["p4_gate"]["note"] or "P4" in output["p4_gate"]["note"]
 
 def test_wave_id_assigned_in_observations(minimal_wave_contract):
     records = {"A_S1": _record("A_S1")}
-    output = build_temporal_precedence_output(records, minimal_wave_contract)
+    output = build_temporal_precedence_output(records, minimal_wave_contract,
+                                               INSULIN_TEMPORAL_CONTEXT)
     obs = next(o for o in output["observations"] if o["site_key"] == "A_S1")
     assert obs["wave_id"] == "TW-01"

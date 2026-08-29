@@ -9,6 +9,7 @@ from ptm_shared.temporal_relation_registry import (
     KnownRelationRegistry,
     RelationSpec,
     directed_precedence_concordance,
+    discover_relation_candidates,
     within_wave_synchrony_test,
 )
 from ptm_shared.study_temporal_context import INSULIN_TEMPORAL_CONTEXT
@@ -196,3 +197,80 @@ def test_concordance_correct_order_gives_high_p(insulin_registry):
     row = next(r for r in result["per_relation"] if "INSR_Y1158" in r["relation"])
     assert row["evaluable"] is True
     assert row["posterior_order_probability"] > 0.5
+
+
+# ── Fix-5: coverage report efficacy warning ───────────────────────────────
+
+def test_coverage_report_has_efficacy_warning_for_small_registry(insulin_registry):
+    report = insulin_registry.coverage_report({})
+    assert "EFFICACY WARNING" in report.get("efficacy_warning", "")
+
+def test_coverage_report_zero_coverage_has_key_note(insulin_registry):
+    report = insulin_registry.coverage_report({})
+    assert "note" in report
+
+def test_coverage_report_no_warning_for_large_registry():
+    relations = [
+        RelationSpec(
+            source_site=f"A_S{i}", target_site=f"B_S{i}",
+            allowed_lag_min=0.0, allowed_lag_max=5.0,
+            expected_direction="source_before_target",
+            evidence_tier=EvidenceTier.known_literature,
+            evidence_note="", study_id="test",
+        )
+        for i in range(10)
+    ]
+    reg = KnownRelationRegistry(relations, study_id="test")
+    report = reg.coverage_report({})
+    assert report.get("efficacy_warning", "") == ""
+
+
+# ── Fix-4: discover_relation_candidates ──────────────────────────────────
+
+def test_discover_candidates_basic():
+    contract = {
+        "timepoints": ["1min", "5min", "15min"],
+        "waves": [{"wave_id": "W1", "members": ["A", "B", "C"], "member_details": []}],
+    }
+    from ptm_shared.replicate_event_adapter import EventRecord, EventStatus
+    records = {
+        "A": EventRecord("A", EventStatus.resolved, peak_t_min=3.0, peak_fc=2.0,
+                         exploratory_model_uncertainty=0.8),
+        "B": EventRecord("B", EventStatus.resolved, peak_t_min=8.0, peak_fc=1.5,
+                         exploratory_model_uncertainty=0.7),
+        "C": EventRecord("C", EventStatus.resolved, peak_t_min=2.0, peak_fc=0.1,
+                         exploratory_model_uncertainty=0.9),  # insufficient signal
+    }
+    candidates = discover_relation_candidates(
+        contract, records,
+        min_lag_min=2.0, max_lag_min=10.0,
+        min_peak_fc_abs=0.4,
+        min_bootstrap_stability=0.0,
+        study_id="test",
+    )
+    # A→B lag=5 within [2,10]; C excluded due to peak_fc<0.4
+    assert any(c["source_site"] == "A" and c["target_site"] == "B" for c in candidates)
+    for c in candidates:
+        assert "C" not in (c["source_site"], c["target_site"])
+
+def test_discover_candidates_all_exploratory_flagged():
+    contract = {
+        "timepoints": ["1min", "5min"],
+        "waves": [{"wave_id": "W1", "members": ["A", "B"], "member_details": []}],
+    }
+    from ptm_shared.replicate_event_adapter import EventRecord, EventStatus
+    records = {
+        "A": EventRecord("A", EventStatus.resolved, peak_t_min=3.0, peak_fc=1.5,
+                         exploratory_model_uncertainty=0.8),
+        "B": EventRecord("B", EventStatus.resolved, peak_t_min=8.0, peak_fc=1.0,
+                         exploratory_model_uncertainty=0.7),
+    }
+    candidates = discover_relation_candidates(contract, records, study_id="test")
+    for c in candidates:
+        assert "Exploratory only" in c["warning"]
+        assert c["status"] == "data_driven_candidate_requires_curation"
+
+def test_discover_candidates_empty_when_no_wave_members():
+    contract = {"timepoints": [], "waves": []}
+    candidates = discover_relation_candidates(contract, {})
+    assert candidates == []

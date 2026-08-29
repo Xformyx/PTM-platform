@@ -496,6 +496,8 @@ def build_v2_sidecar(
     enable_dynamic_transition: bool = True,
     enable_probabilistic_cowave: bool = False,
     replicate_time_series: Mapping[str, Mapping[str, Iterable[Any]]] | None = None,
+    study_context: Any | None = None,
+    raw_replicate_fc_series: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build v2 enrichment-free temporal sidecar.
 
@@ -504,6 +506,18 @@ def build_v2_sidecar(
     affect Wave membership, TMM scores, kinase rankings, or canonical evidence
     and must not replace hard-threshold output until inhibitor holdout validation
     confirms calibration benefit (P2 — Roadmap §3 production integration gate).
+
+    study_context : StudyTemporalContext | None
+        Required for temporal_precedence event extraction.  When None, the
+        temporal_precedence field is populated with status="not_evaluable_context_not_registered".
+        Never silently defaults to INSULIN_TEMPORAL_CONTEXT.
+
+    raw_replicate_fc_series : Mapping[site_key, {"timepoints": [...], "matrix": np.ndarray}] | None
+        Per-site per-replicate FC matrices aligned to the same timepoint labels as
+        wave_contract["timepoints"].  When provided together with study_context,
+        replicate-level event records are computed.  When absent, condition-mean GP
+        records are computed (exploratory_model_uncertainty only, replicate_bootstrap_stability=None).
+        Partial coverage is allowed: sites without replicate data receive condition-mean records.
     """
     protein_time_series, protein_provenance = load_protein_time_series(output_dir, ptm_type)
     ptm_protein_pairs = build_ptm_protein_pairs(site_observations, protein_time_series)
@@ -565,6 +579,76 @@ def build_v2_sidecar(
             ),
         }
 
+    # Temporal precedence output (P3 — additive, non-mutating).
+    # Requires explicit study_context (no insulin default).
+    # Attaches event-time records for each Wave member without modifying
+    # Wave membership, TMM scores, kinase rankings, or canonical evidence.
+    # ISOLATION: no known relation registry / benchmark truth flows in here.
+    temporal_precedence: dict[str, Any]
+    if study_context is None:
+        temporal_precedence = {
+            "status": "not_evaluable_context_not_registered",
+            "note": (
+                "study_context not provided. Pass an explicit StudyTemporalContext "
+                "to enable temporal event record extraction."
+            ),
+            "mutation_guarantee": (
+                "This field is additive. Wave membership, TMM scores, kinase rankings, "
+                "and locked scores are not modified."
+            ),
+        }
+    elif wave_contract:
+        from ptm_shared.replicate_event_adapter import (
+            EventStatus,
+            build_event_records_for_wave_contract,
+            extract_event_record_from_replicates,
+        )
+        from ptm_shared.temporal_precedence_output import build_temporal_precedence_output
+
+        # Build condition-mean records for all Wave members as the base layer
+        event_records = build_event_records_for_wave_contract(
+            dict(wave_contract),
+            study_context=study_context,
+        )
+
+        # Upgrade to replicate-level where raw_replicate_fc_series is available
+        if raw_replicate_fc_series:
+            import numpy as np
+            for site_key, rep_data in raw_replicate_fc_series.items():
+                matrix = rep_data.get("matrix")
+                tps = rep_data.get("timepoints", [])
+                if matrix is None or not tps:
+                    continue
+                arr = np.asarray(matrix, dtype=float)
+                if arr.ndim != 2 or arr.shape[0] < 2:
+                    continue
+                try:
+                    event_records[site_key] = extract_event_record_from_replicates(
+                        site_key, tps, arr,
+                        study_context=study_context,
+                    )
+                except Exception:
+                    pass  # retain condition-mean record on failure
+
+        temporal_precedence = build_temporal_precedence_output(
+            event_records,
+            dict(wave_contract),
+            study_context=study_context,
+        )
+        temporal_precedence["replicate_input_summary"] = {
+            "n_sites_with_replicate_data": len(raw_replicate_fc_series) if raw_replicate_fc_series else 0,
+            "n_sites_with_event_records": len(event_records),
+            "replicate_mode": "replicate_level" if raw_replicate_fc_series else "condition_mean_gp_only",
+        }
+    else:
+        temporal_precedence = {
+            "status": "skipped_no_wave_contract",
+            "mutation_guarantee": (
+                "This field is additive. Wave membership, TMM scores, kinase rankings, "
+                "and locked scores are not modified."
+            ),
+        }
+
     return {
         "schema_version": SIDECAR_SCHEMA_VERSION,
         "temporal_wave_contract": dict(wave_contract or {}),
@@ -581,6 +665,7 @@ def build_v2_sidecar(
         "dynamic_co_wave_transition": dynamic_transition,
         "temporal_event_order": temporal_event_order,
         "probabilistic_co_wave": probabilistic_cowave,
+        "temporal_precedence": temporal_precedence,
         "provenance": {
             "source": "production_preprocessing_outputs",
             "rag_used": False,

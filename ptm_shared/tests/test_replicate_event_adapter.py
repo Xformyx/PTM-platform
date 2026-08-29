@@ -10,7 +10,7 @@ from ptm_shared.replicate_event_adapter import (
     EventStatus,
     _event_times_from_trajectory,
     _find_crossing_time,
-    _parametric_bootstrap_stability,
+    _gp_parametric_uncertainty,
     build_event_records_for_wave_contract,
     extract_event_record,
     extract_event_record_from_replicates,
@@ -123,8 +123,10 @@ def test_extract_resolved_record(insulin_labels, resolved_fcs):
     assert rec.onset_t50_min is not None
     assert rec.peak_t_min is not None
     assert rec.peak_ci95_min is not None
-    assert rec.replicate_bootstrap_stability is not None
-    assert 0.0 <= rec.replicate_bootstrap_stability <= 1.0
+    # condition-mean path: replicate_bootstrap_stability=None; exploratory_model_uncertainty set
+    assert rec.replicate_bootstrap_stability is None
+    assert rec.exploratory_model_uncertainty is not None
+    assert 0.0 <= rec.exploratory_model_uncertainty <= 1.0
 
 def test_extract_right_censored_record(insulin_labels, right_censored_fcs):
     rec = extract_event_record(
@@ -144,24 +146,28 @@ def test_extract_unresolved_record(insulin_labels, unresolved_fcs):
     assert rec.onset_t50_min is None
 
 def test_extract_record_contract_version(insulin_labels, resolved_fcs):
-    rec = extract_event_record("S1", insulin_labels, resolved_fcs)
+    rec = extract_event_record("S1", insulin_labels, resolved_fcs,
+                               study_context=INSULIN_TEMPORAL_CONTEXT)
     assert rec.contract_version == CONTRACT_VERSION
 
 def test_extract_record_claim_limit_present(insulin_labels, resolved_fcs):
-    rec = extract_event_record("S1", insulin_labels, resolved_fcs)
+    rec = extract_event_record("S1", insulin_labels, resolved_fcs,
+                               study_context=INSULIN_TEMPORAL_CONTEXT)
     assert "causality" in rec.claim_limit.lower() or "activation" in rec.claim_limit.lower()
 
 def test_extract_record_with_missing_values(insulin_labels):
     # FC[0]=None → raw_first unknown → GP-posterior fallback for censoring.
     # GP may show left_censored due to smoothing; all statuses are valid.
     fcs = [None, 1.5, 2.0, 1.8, None, 0.2]
-    rec = extract_event_record("S1", insulin_labels, fcs)
+    rec = extract_event_record("S1", insulin_labels, fcs,
+                               study_context=INSULIN_TEMPORAL_CONTEXT)
     assert rec.event_status in EventStatus.__members__.values()
 
 def test_extract_record_never_modifies_input(insulin_labels, resolved_fcs):
     fcs_copy = list(resolved_fcs)
     labels_copy = list(insulin_labels)
-    extract_event_record("S1", insulin_labels, resolved_fcs)
+    extract_event_record("S1", insulin_labels, resolved_fcs,
+                         study_context=INSULIN_TEMPORAL_CONTEXT)
     assert list(resolved_fcs) == fcs_copy
     assert list(insulin_labels) == labels_copy
 
@@ -207,12 +213,61 @@ def test_not_evaluable_record():
 # ── build_event_records_for_wave_contract ─────────────────────────────────
 
 def test_build_event_records_for_wave_contract(wave_contract):
-    records = build_event_records_for_wave_contract(wave_contract)
+    records = build_event_records_for_wave_contract(
+        wave_contract, study_context=INSULIN_TEMPORAL_CONTEXT
+    )
     assert "A_S1" in records
     assert "B_S1" in records
     assert isinstance(records["A_S1"], EventRecord)
 
 def test_wave_contract_not_mutated(wave_contract):
     original_members = list(wave_contract["waves"][0]["members"])
-    build_event_records_for_wave_contract(wave_contract)
+    build_event_records_for_wave_contract(
+        wave_contract, study_context=INSULIN_TEMPORAL_CONTEXT
+    )
     assert list(wave_contract["waves"][0]["members"]) == original_members
+
+
+# ── Fix-1: No silent insulin default ─────────────────────────────────────
+
+def test_no_silent_insulin_default_raises_type_error(insulin_labels, resolved_fcs):
+    """Calling without study_context should raise TypeError (required kwarg)."""
+    with pytest.raises(TypeError):
+        extract_event_record("S1", insulin_labels, resolved_fcs)
+
+def test_replicate_no_silent_default_raises_type_error(insulin_labels):
+    mat = np.array([[0.0, 1.8, 2.0, 1.5, 0.3, 0.0]])
+    with pytest.raises(TypeError):
+        extract_event_record_from_replicates("S1", insulin_labels, mat)
+
+def test_build_contract_no_silent_default_raises_type_error(wave_contract):
+    with pytest.raises(TypeError):
+        build_event_records_for_wave_contract(wave_contract)
+
+
+# ── Fix-3: replicate_bootstrap_stability vs exploratory_model_uncertainty ─
+
+def test_condition_mean_sets_model_uncertainty(insulin_labels, resolved_fcs):
+    rec = extract_event_record("S1", insulin_labels, resolved_fcs,
+                               study_context=INSULIN_TEMPORAL_CONTEXT)
+    assert rec.replicate_bootstrap_stability is None
+    assert rec.exploratory_model_uncertainty is not None
+    assert 0.0 <= rec.exploratory_model_uncertainty <= 1.0
+
+def test_condition_mean_input_type(insulin_labels, resolved_fcs):
+    rec = extract_event_record("S1", insulin_labels, resolved_fcs,
+                               study_context=INSULIN_TEMPORAL_CONTEXT)
+    assert rec.input_type == "condition_mean_gp_parametric_bootstrap"
+
+def test_replicate_level_sets_stability_not_uncertainty(insulin_labels):
+    mat = np.array([
+        [0.0, 1.6, 2.0, 1.5, 0.3, 0.0],
+        [0.0, 1.9, 2.1, 1.6, 0.4, 0.1],
+    ])
+    rec = extract_event_record_from_replicates(
+        "S1", insulin_labels, mat,
+        study_context=INSULIN_TEMPORAL_CONTEXT, n_bootstrap=20
+    )
+    assert rec.replicate_bootstrap_stability is not None
+    assert rec.exploratory_model_uncertainty is None
+    assert rec.input_type == "replicate_level_bootstrap"

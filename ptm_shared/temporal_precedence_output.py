@@ -36,7 +36,7 @@ from dataclasses import dataclass, field
 from typing import Any, Mapping, Sequence
 
 from ptm_shared.replicate_event_adapter import EventRecord, EventStatus
-from ptm_shared.study_temporal_context import StudyTemporalContext, INSULIN_TEMPORAL_CONTEXT
+from ptm_shared.study_temporal_context import StudyTemporalContext
 
 CONTRACT_VERSION = "temporal_precedence_output.v1"
 
@@ -192,12 +192,13 @@ def build_temporal_precedence_observation(
 def build_temporal_precedence_output(
     event_records: Mapping[str, EventRecord],
     wave_contract: Mapping[str, Any],
-    study_context: StudyTemporalContext | None = None,
+    study_context: StudyTemporalContext,
     *,
     p4_passed: bool = _P4_VALIDATION_PASSED,
 ) -> dict[str, Any]:
     """Build production temporal precedence output for all sites.
 
+    study_context is REQUIRED. No insulin default (audit fix, 2026-08-29).
     SAFETY: Does NOT modify wave_contract in any way.
     Returns additive output dict for attachment to sidecar.
 
@@ -209,7 +210,7 @@ def build_temporal_precedence_output(
       p4_gate      : dict        — gate status
       contract_version : str
     """
-    ctx = study_context or INSULIN_TEMPORAL_CONTEXT
+    ctx = study_context
     time_unit = "min" if ctx.time_unit_label == "minutes" else (
         "hr" if ctx.time_unit_label == "hours" else "day"
     )

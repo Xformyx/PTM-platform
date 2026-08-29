@@ -2303,3 +2303,72 @@
   - parametric bootstrap seed: `_PARAMETRIC_BOOTSTRAP_SEED = 20260829`.
   - ΔMEK 공식: `[IM - M] - [I - V]`, nanmean + sqrt(sum of variances).
 
+---
+
+### [2026-08-29] 외부 테스트 감사 반영 — Fix 1-5 (context 등록 규칙, replicate/GP 분리, sidecar wiring, 관계 발견)
+
+- **분류:** 감사 수정 (구현 계약 강화)
+- **대상:**
+  - `ptm_shared/replicate_event_adapter.py` (Fix 1, Fix 3)
+  - `ptm_shared/temporal_precedence_output.py` (Fix 1)
+  - `ptm_shared/enrichment_free_temporal_sidecar.py` (Fix 2)
+  - `ptm_shared/temporal_relation_registry.py` (Fix 4, Fix 5)
+  - 해당 테스트 파일 4개 (13개 신규 테스트 추가, 총 220개)
+- **구현 대상 설계:** `Latest_Temporal_Remediation_Validation___Commit_4813953.pdf` Required Next Fixes §1-5 (2026-08-29)
+- **사전등록 상태:** 해당 없음 (계약 강화 수정)
+
+**긍정적 검증 결과 (감사 리포트):**
+- Within-Wave synchrony: observed=0.3039, null_mean=0.2190 (SD=0.0087), p=0.001996 ← **구조적 증거 확보**
+- 사용 가능한 replicate event records: resolved=67, left_censored=409, right_censored=147, unresolved=43
+- Onset CI95: 412개, Peak CI95: 666개, Exit CI95: 309개
+- Log1p vs minutes 차이: 834개 중 369개 site에서 argmax가 다름 (mean |ΔP(active)|=0.152528) → log1p는 모델 선택, minutes default 유지가 적절
+
+**Fix 1: context=None → not_evaluable_context_not_registered**
+- `extract_event_record`, `extract_event_record_from_replicates`, `build_event_records_for_wave_contract`에서 `study_context`를 keyword-only required로 변경
+- `INSULIN_TEMPORAL_CONTEXT`를 묵시적 default로 사용하지 않음
+- `EventStatus.not_evaluable_context_not_registered` 신규 추가
+- `_NOT_REGISTERED_MSG`에 명확한 사용 지침 기록
+- `build_temporal_precedence_output`도 동일하게 `study_context` required로 변경
+
+**Fix 2: build_v2_sidecar temporal_precedence 필드 wiring**
+- `build_v2_sidecar`에 `study_context: StudyTemporalContext | None` 파라미터 추가 (default=None)
+- `raw_replicate_fc_series: Mapping[site_key, {timepoints, matrix}] | None` 파라미터 추가
+- `study_context=None` → `temporal_precedence.status="not_evaluable_context_not_registered"`
+- `study_context` 있음 → 모든 Wave member에 condition-mean 이벤트 레코드 산출
+- `raw_replicate_fc_series` 있는 사이트는 replicate-level 레코드로 업그레이드
+- `temporal_precedence` 필드를 sidecar 반환 dict에 포함 (additive; Wave/TMM 변경 없음)
+- ISOLATION: known relation / benchmark truth는 이 경로에 유입되지 않음
+
+**Fix 3: condition-mean path의 replicate_bootstrap_stability → exploratory_model_uncertainty 분리**
+- `EventRecord`에 `exploratory_model_uncertainty: float | None` 필드 신규 추가
+- condition-mean path (`input_type="condition_mean_gp_parametric_bootstrap"`):
+  - `replicate_bootstrap_stability = None` (해당 없음)
+  - `exploratory_model_uncertainty = GP parametric bootstrap fraction` (모델 내적 일관성)
+- replicate-level path (`input_type="replicate_level_bootstrap"`):
+  - `replicate_bootstrap_stability = true replicate bootstrap fraction`
+  - `exploratory_model_uncertainty = None` (해당 없음)
+- claim_limit에 "exploratory_model_uncertainty ≠ replicate_bootstrap_stability" 추가
+
+**Fix 4: 데이터 기반 relation candidate discovery**
+- `discover_relation_candidates()` 신규 함수 추가 (runner-only)
+- 동일 Wave 내 pair의 peak 시간 차이 기반으로 탐색적 후보 발굴
+- `candidate_tier`: "replicate_supported" vs "model_only"
+- 모든 후보에 "Exploratory only. Requires expert biological curation..." 경고 내장
+- RUNNER-ONLY: 생산 출력 노출 금지
+
+**Fix 5: 3-relation stub 효능 지표 사용 금지 명시**
+- `coverage_report()`: `efficacy_warning` 필드 추가 (≤3개 관계 시 경고)
+- 감사 결과 확인: INSR_Y1158/IRS1_S302/AKT1_T308/GSK3B_S9가 실제 event record key와 불일치 → coverage 0/3
+- stub은 generic framework / test fixture 용도만 허용
+- coverage_report() 사용 시 site key 포맷 일치 여부 먼저 확인 필요
+
+- **논문에서의 용도:**
+  - Methods: "Within-Wave onset synchrony test (p=0.001996, N=500 permutations)는 static Wave assignment가 무작위 멤버십보다 onset-synchronous event를 농축함을 보인다."
+  - Methods: "Replicate-level event record와 condition-mean GP event record는 별도의 필드로 구분하며, 후자는 탐색적 모델 불확실성으로만 해석한다."
+- **해석 한계:**
+  - Within-Wave synchrony p=0.001996은 "Wave가 동기적 사이트를 농축함"을 지지하지만, kinase 귀속·인과 순서를 증명하지 않음.
+  - exploratory_model_uncertainty는 GP 모델 내적 일관성이며 replicate 안정성이 아님.
+  - 3-relation stub은 timing accuracy 효능 지표로 사용 불가.
+- **결정성:**
+  - context registration: keyword-only required (Python TypeError 보장).
+

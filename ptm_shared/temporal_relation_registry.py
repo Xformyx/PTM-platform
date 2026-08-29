@@ -173,7 +173,18 @@ class KnownRelationRegistry:
         return list(self._relations)
 
     def coverage_report(self, event_records: Mapping[str, EventRecord]) -> dict[str, Any]:
-        """How many relations have both sites with evaluable event records."""
+        """How many relations have both sites with evaluable event records.
+
+        EFFICACY WARNING: Do NOT use the 3-relation stub as an efficacy metric.
+        The insulin stub registry has 3 pre-specified relations whose site keys
+        (e.g. INSR_Y1158) may not match the actual site key format in the event
+        records (e.g. INSR_Y1158_Y1162_Y1163 or similar multi-site keys).
+
+        Before measuring timing accuracy:
+          1. Verify site key format matches the event record keys.
+          2. Expand the registry to >= 10 relations.
+          3. Use discover_relation_candidates() to find data-driven candidates.
+        """
         eligible = 0
         covered = 0
         for rel in self._relations:
@@ -185,24 +196,146 @@ class KnownRelationRegistry:
             src_ok = src.event_status not in (
                 EventStatus.unresolved,
                 EventStatus.not_evaluable_replicate_posterior,
+                EventStatus.not_evaluable_context_not_registered,
             )
             tgt_ok = tgt.event_status not in (
                 EventStatus.unresolved,
                 EventStatus.not_evaluable_replicate_posterior,
+                EventStatus.not_evaluable_context_not_registered,
             )
             if src_ok and tgt_ok and src.peak_t_min is not None and tgt.peak_t_min is not None:
                 covered += 1
+        efficacy_warning = ""
+        if len(self._relations) <= 3:
+            efficacy_warning = (
+                "EFFICACY WARNING: <= 3 relations is insufficient for timing accuracy measurement. "
+                "Expand registry and verify site key format before use as an efficacy metric."
+            )
         return {
             "n_relations_total": len(self._relations),
             "n_eligible": eligible,
             "n_covered": covered,
             "evaluable_coverage": round(covered / eligible, 4) if eligible else 0.0,
+            "efficacy_warning": efficacy_warning,
             "note": (
-                "Insufficient coverage (<= 3 relations) makes timing accuracy "
-                "unstable. Expand registry before optimising timing score."
-                if len(self._relations) <= 3 else ""
+                "Zero coverage may indicate site key format mismatch. "
+                "Run coverage_report() with the actual event_records before using this registry."
+                if covered == 0 and eligible == 0 and len(self._relations) > 0 else ""
             ),
         }
+
+
+# ── Data-driven relation candidate discovery (Fix-4, 2026-08-29 audit) ───
+
+def discover_relation_candidates(
+    wave_contract: Mapping[str, Any],
+    event_records: Mapping[str, EventRecord],
+    *,
+    min_lag_min: float = 1.0,
+    max_lag_min: float = 30.0,
+    min_peak_fc_abs: float = 0.4,
+    min_bootstrap_stability: float = 0.6,
+    study_id: str = "unknown",
+) -> list[dict[str, Any]]:
+    """Discover data-driven temporal precedence candidate pairs within each Wave.
+
+    RUNNER-ONLY: Candidates are exploratory. They require expert curation and
+    independent validation before becoming pre-specified known relations.
+
+    Algorithm:
+      1. Collect same-Wave pairs where both sites have evaluable peak times.
+      2. Require |peak_fc| >= min_peak_fc_abs for signal quality.
+      3. Require bootstrap_stability >= min_bootstrap_stability (replicate) OR
+         exploratory_model_uncertainty >= threshold (GP model — weaker signal).
+      4. Compute observed lag = t_peak_target - t_peak_source.
+      5. Return pairs where min_lag_min <= |lag| <= max_lag_min.
+
+    Returns list of candidate dicts (source_site, target_site, observed_lag_min,
+    wave_id, data_quality, candidate_tier).
+
+    candidate_tier:
+      "replicate_supported" — replicate_bootstrap_stability available
+      "model_only" — only exploratory_model_uncertainty available (weaker)
+    """
+    site_to_wave: dict[str, str] = {}
+    for wave in wave_contract.get("waves", []):
+        wid = wave["wave_id"]
+        for m in wave.get("members", []):
+            site_to_wave[m] = wid
+
+    wave_to_sites: dict[str, list[str]] = {}
+    for site, wid in site_to_wave.items():
+        wave_to_sites.setdefault(wid, []).append(site)
+
+    _not_evaluable_statuses = {
+        EventStatus.unresolved,
+        EventStatus.not_evaluable_replicate_posterior,
+        EventStatus.not_evaluable_context_not_registered,
+    }
+
+    def _quality(rec: EventRecord) -> tuple[bool, float, str]:
+        """(is_evaluable, stability_score, tier)"""
+        if rec.event_status in _not_evaluable_statuses:
+            return False, 0.0, "none"
+        if rec.peak_t_min is None:
+            return False, 0.0, "none"
+        if abs(rec.peak_fc or 0.0) < min_peak_fc_abs:
+            return False, 0.0, "insufficient_signal"
+        if rec.replicate_bootstrap_stability is not None:
+            return True, rec.replicate_bootstrap_stability, "replicate_supported"
+        if rec.exploratory_model_uncertainty is not None:
+            return True, rec.exploratory_model_uncertainty, "model_only"
+        return True, 0.0, "no_stability_estimate"
+
+    candidates: list[dict[str, Any]] = []
+
+    for wave_id, sites in wave_to_sites.items():
+        evaluable = []
+        for site in sites:
+            rec = event_records.get(site)
+            if rec is None:
+                continue
+            is_eval, score, tier = _quality(rec)
+            if not is_eval:
+                continue
+            if score < min_bootstrap_stability and tier == "replicate_supported":
+                continue
+            evaluable.append((site, rec, score, tier))
+
+        for i in range(len(evaluable)):
+            for j in range(len(evaluable)):
+                if i == j:
+                    continue
+                src_site, src_rec, src_score, src_tier = evaluable[i]
+                tgt_site, tgt_rec, tgt_score, tgt_tier = evaluable[j]
+                lag = (tgt_rec.peak_t_min or 0.0) - (src_rec.peak_t_min or 0.0)
+                if not (min_lag_min <= lag <= max_lag_min):
+                    continue
+                candidates.append({
+                    "source_site": src_site,
+                    "target_site": tgt_site,
+                    "wave_id": wave_id,
+                    "observed_lag_min": round(lag, 3),
+                    "source_peak_t_min": src_rec.peak_t_min,
+                    "target_peak_t_min": tgt_rec.peak_t_min,
+                    "source_bootstrap_score": src_score,
+                    "target_bootstrap_score": tgt_score,
+                    "candidate_tier": (
+                        "replicate_supported"
+                        if (src_tier == "replicate_supported"
+                            and tgt_tier == "replicate_supported")
+                        else "model_only"
+                    ),
+                    "study_id": study_id,
+                    "status": "data_driven_candidate_requires_curation",
+                    "warning": (
+                        "Exploratory only. Requires expert biological curation and "
+                        "independent held-out validation before becoming a "
+                        "pre-specified known relation."
+                    ),
+                })
+
+    return sorted(candidates, key=lambda x: x["candidate_tier"])
 
 
 # ── Test A: Within-Wave event synchrony ───────────────────────────────────

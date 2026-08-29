@@ -103,12 +103,45 @@ TEMPORAL_ORDERING_P_VALUE_RECORD: dict[str, object] = {
                 "Changing statistics to find significance (score chasing) is forbidden."
             ),
         },
+        {
+            "metric": "within_wave_onset_synchrony_membership_permutation",
+            "value": 0.001996,
+            "synchrony_fraction_observed": 0.3039,
+            "null_mean": 0.2190,
+            "null_std": 0.0087,
+            "n_permutations": 500,
+            "n_exceedances": 0,
+            "tau_minutes": 5.0,
+            "wave_member_count": 834,
+            "dataset": "Insulin_Signaling_Dynamic_V1",
+            "commit": "4813953",
+            "date": "2026-08-29",
+            "verdict": "significant",
+            "permitted_claim": (
+                "Static Wave assignment enriches onset-synchronized events "
+                "(p=0.001996, N=500 label permutations, τ=5 min). "
+                "Does NOT support kinase attribution or causal temporal ordering."
+            ),
+            "forbidden_claim": (
+                "Wave synchrony demonstrates biological causal order or kinase attribution."
+            ),
+            "note": (
+                "First positive structural test result. "
+                "Claim boundary: Wave structural enrichment only. "
+                "This metric is preserved here for methods citation. "
+                "Do NOT use to justify global temporal ordering claims."
+            ),
+        },
     ],
-    "verdict_summary": "temporal_ordering_not_statistically_significant_in_any_test_to_date",
+    "verdict_summary": (
+        "global_temporal_ordering_not_significant; "
+        "within_wave_onset_synchrony_significant_p=0.001996"
+    ),
     "forbidden_claim": "Dynamic Co-Wave captures biologically meaningful temporal ordering.",
     "permitted_claim": (
         "Dynamic Co-Wave provides a reproducible annotation of local membership "
-        "reconfiguration within static temporal modules."
+        "reconfiguration within static temporal modules. "
+        "Static Wave assignment enriches onset-synchronized events (p=0.001996)."
     ),
     "resolution_path": (
         "Not further global permutation statistics. "
