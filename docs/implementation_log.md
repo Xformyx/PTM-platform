@@ -2372,3 +2372,50 @@
 - **결정성:**
   - context registration: keyword-only required (Python TypeError 보장).
 
+---
+
+### [2026-08-29] Commit f4e30d0 검증 감사 반영 — 생산 진입점 완성 + scope 불일치 수정
+
+- **분류:** 감사 수정 (생산 경로 완성)
+- **대상:**
+  - `ptm_shared/enrichment_free_temporal_sidecar.py`
+    - `build_production_temporal_ptm_protein_analysis()` 파라미터 추가
+    - `build_v2_sidecar()` upgrade loop scope 수정
+  - `ptm_shared/temporal_optimization_config.py` — within-Wave synchrony 결과 동결 기록
+- **구현 대상 설계:** `Latest_Temporal_Contract_Validation___Commit_f4e30d0.pdf` 미해결 항목 2개 (2026-08-29)
+- **사전등록 상태:** 해당 없음 (생산 경로 완성 수정)
+
+**감사 확인 사항 (f4e30d0 실제 데이터 실행 결과):**
+- `without_context` → `not_evaluable_context_not_registered` ✅ (보안 확인)
+- `with_explicit_insulin_context` → 2,117 event records (1,949 replicate + 168 condition-mean) ✅
+- raw_values_persisted=False ✅ (ephemeral 사용만)
+- P4 gate=False, 보고서 문구 non-causal ✅
+- 회귀: locked score 0.733333 유지, 183 regression tests 통과 ✅
+
+**Fix A: `build_production_temporal_ptm_protein_analysis` 생산 진입점 완성**
+- `study_context: Any | None = None` 파라미터 추가
+- `raw_replicate_fc_series: Mapping | None = None` 파라미터 추가
+- 두 파라미터를 `build_v2_sidecar` 호출에 그대로 전달
+- 이제 실제 생산 파이프라인 호출자가 `study_context`를 명시 전달하면 `temporal_precedence` 필드가 활성화됨
+- `study_context=None` (기본값) → `not_evaluable_context_not_registered` (기존 동작 유지, 안전)
+
+**Fix B: upgrade loop scope 불일치 수정 (2,117 > 834)**
+- 감사 발견: `raw_replicate_fc_series`의 모든 site key가 Wave member 여부에 관계없이 event_records에 추가됨 → 2,117 > 834 scope 불일치
+- 수정: Wave member set을 미리 수집하고 `if site_key not in wave_members: continue`로 제한
+- 계약 텍스트 "each Wave member"와 일치
+- raw replicate values는 여전히 ephemeral 사용만 (출력에 matrix/intensity 필드 없음)
+
+**within-Wave synchrony p=0.001996 동결 기록 추가**
+- `TEMPORAL_ORDERING_P_VALUE_RECORD`에 3번째 레코드 추가: verdict="significant"
+- permitted_claim: "Static Wave assignment enriches onset-synchronized events (p=0.001996, N=500 label permutations, τ=5 min). Does NOT support kinase attribution or causal temporal ordering."
+- verdict_summary 갱신: "global_temporal_ordering_not_significant; within_wave_onset_synchrony_significant_p=0.001996"
+
+- **논문에서의 용도:**
+  - Methods: "실제 생산 분석은 `build_production_temporal_ptm_protein_analysis`를 통해 실행되며, 명시적 `StudyTemporalContext`와 raw replicate FC 행렬이 제공될 때 `temporal_precedence` 필드가 활성화된다."
+  - Methods: "이벤트 레코드 추출은 동결된 Wave membership에만 적용된다 (scope: Wave members only)."
+- **해석 한계:**
+  - `study_context=None` (기본값)인 상태로 생산 파이프라인을 호출하는 기존 코드는 `not_evaluable_context_not_registered`를 반환하며 기존 동작이 유지됨.
+  - `temporal_precedence` 활성화는 호출자가 `study_context`를 명시적으로 전달할 때만 가능.
+- **결정성:**
+  - Wave member scope: `{site for wave in waves for site in wave.get("members", [])}` — 동결된 Wave contract에서 결정적으로 계산.
+

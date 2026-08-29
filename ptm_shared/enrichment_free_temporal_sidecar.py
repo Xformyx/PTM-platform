@@ -611,10 +611,22 @@ def build_v2_sidecar(
             study_context=study_context,
         )
 
-        # Upgrade to replicate-level where raw_replicate_fc_series is available
+        # Upgrade to replicate-level where raw_replicate_fc_series is available.
+        # SCOPE RULE (audit 2026-08-29): upgrade is restricted to Wave members only.
+        # Admitting non-Wave-member sites here would produce 2,117 > 834 records,
+        # creating a scope inconsistency vs the contract text "each Wave member".
+        # Raw replicate values are used ephemerally; no matrix/intensity fields
+        # are persisted in the output.
         if raw_replicate_fc_series:
             import numpy as np
+            wave_members: set[str] = {
+                site
+                for wave in (wave_contract or {}).get("waves", [])
+                for site in wave.get("members", [])
+            }
             for site_key, rep_data in raw_replicate_fc_series.items():
+                if site_key not in wave_members:
+                    continue  # restrict to Wave members — scope contract
                 matrix = rep_data.get("matrix")
                 tps = rep_data.get("timepoints", [])
                 if matrix is None or not tps:
@@ -765,6 +777,8 @@ def build_production_temporal_ptm_protein_analysis(
     cross_layer_config: Mapping[str, Any] | None = None,
     dynamic_transition_config: Mapping[str, Any] | None = None,
     enable_dynamic_transition: bool = True,
+    study_context: Any | None = None,
+    raw_replicate_fc_series: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the exact v2 sidecar contract for a normal production order.
 
@@ -772,6 +786,15 @@ def build_production_temporal_ptm_protein_analysis(
     Production derives that contract from the same canonical Wave engine and
     frozen numeric configuration; only runner-only truth/scoring remains
     benchmark-specific.
+
+    study_context : StudyTemporalContext | None
+        When provided, enables temporal_precedence event record extraction.
+        When None, temporal_precedence field is not_evaluable_context_not_registered.
+        Never inferred or defaulted; must be supplied explicitly by the caller.
+
+    raw_replicate_fc_series : Mapping[site_key, {"timepoints": [...], "matrix": np.ndarray}] | None
+        Per-site per-replicate FC matrices.  When provided with study_context,
+        replicate-level event records are extracted for Wave members.
     """
 
     from ptm_shared.temporal_wave_engine import analyze_temporal_waves
@@ -806,6 +829,8 @@ def build_production_temporal_ptm_protein_analysis(
         cross_layer_config=cross_layer_config,
         dynamic_transition_config=dynamic_transition_config,
         enable_dynamic_transition=enable_dynamic_transition,
+        study_context=study_context,
+        raw_replicate_fc_series=raw_replicate_fc_series,
     )
     sidecar["provenance"]["analysis_mode"] = "production"
     sidecar["provenance"]["shared_engine_contract"] = "unified_temporal_ptm_protein.v1"
