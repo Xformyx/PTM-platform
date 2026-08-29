@@ -136,6 +136,7 @@ class EventRecord:
     # Provenance
     input_type: str = "unknown"
     n_replicates_used: int | None = None
+    bootstrap_evaluable_draw_fraction: float | None = None
     amplitude_threshold_fc: float = ACTIVITY_THRESHOLD_FC
     contract_version: str = CONTRACT_VERSION
 
@@ -466,7 +467,21 @@ def extract_event_record_from_replicates(
     times_min = _timepoints_to_minutes(list(timepoint_labels))
     n_rep = replicate_fc_matrix.shape[0]
 
-    cond_mean = np.nanmean(replicate_fc_matrix, axis=0).tolist()
+    finite_by_timepoint = np.any(np.isfinite(replicate_fc_matrix), axis=0)
+    if not bool(np.all(finite_by_timepoint)):
+        return EventRecord(
+            site_key=site_key,
+            event_status=EventStatus.not_evaluable_replicate_posterior,
+            input_type="replicate_level_bootstrap",
+            n_replicates_used=n_rep,
+            amplitude_threshold_fc=thresh,
+            bootstrap_evaluable_draw_fraction=0.0,
+            censoring_note="replicate_matrix_contains_unobserved_timepoint",
+        )
+    cond_mean = [
+        float(np.mean(column[np.isfinite(column)]))
+        for column in replicate_fc_matrix.T
+    ]
     posterior = estimate_trajectory_posterior(
         timepoint_labels, cond_mean, length_scale_min=gp_ls
     )
@@ -479,11 +494,17 @@ def extract_event_record_from_replicates(
     bootstrap_peak: list[float | None] = []
     bootstrap_exit: list[float | None] = []
     status_counts: dict[str, int] = {}
+    evaluable_draws = 0
 
     for _ in range(n_bootstrap):
         idx = rng.integers(0, n_rep, size=n_rep)
         sample_matrix = replicate_fc_matrix[idx, :]
-        sample_mean = np.nanmean(sample_matrix, axis=0).tolist()
+        if not bool(np.all(np.any(np.isfinite(sample_matrix), axis=0))):
+            continue
+        sample_mean = [
+            float(np.mean(column[np.isfinite(column)]))
+            for column in sample_matrix.T
+        ]
         b_posterior = estimate_trajectory_posterior(
             timepoint_labels, sample_mean, length_scale_min=gp_ls
         )
@@ -493,9 +514,11 @@ def extract_event_record_from_replicates(
         bootstrap_peak.append(ev["peak_t"])
         bootstrap_exit.append(ev["exit_t"])
         status_counts[ev["status"].value] = status_counts.get(ev["status"].value, 0) + 1
+        evaluable_draws += 1
 
-    stability = round(
-        status_counts.get(ref_ev["status"].value, 0) / n_bootstrap, 4
+    stability = (
+        round(status_counts.get(ref_ev["status"].value, 0) / evaluable_draws, 4)
+        if evaluable_draws else None
     )
 
     return EventRecord(
@@ -512,6 +535,7 @@ def extract_event_record_from_replicates(
         exploratory_model_uncertainty=None,  # not applicable for replicate-level
         input_type="replicate_level_bootstrap",
         n_replicates_used=n_rep,
+        bootstrap_evaluable_draw_fraction=round(evaluable_draws / max(n_bootstrap, 1), 4),
         amplitude_threshold_fc=thresh,
     )
 

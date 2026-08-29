@@ -299,6 +299,9 @@ def test_t_adjacency_computes_exact_permutation() -> None:
     assert ta["n_permutations_evaluated"] == 120  # 5! = 120
     assert ta["t_adjacency_observed"] is not None
     assert ta["p_empirical_one_sided"] > 0.0
+    assert ta["verdict"] in {"supports_ordered_adjacency", "not_significant"}
+    assert ta["supports_global_temporal_order"] is (ta["p_empirical_one_sided"] < 0.05)
+    assert "causal" in ta["claim_boundary"]
 
 
 def test_t_adjacency_plus_one_prevents_zero_p() -> None:

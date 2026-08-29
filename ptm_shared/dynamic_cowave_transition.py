@@ -418,6 +418,7 @@ def compute_temporal_adjacency_statistic(
     n_exceed = int(np.sum(null_arr >= observed))
     p_empirical = (n_exceed + 1) / (len(null_arr) + 1)
     null_rank = int(np.sum(null_arr < observed))
+    supports_ordered_adjacency = bool(p_empirical < 0.05)
 
     return {
         "status": "computed",
@@ -431,13 +432,18 @@ def compute_temporal_adjacency_statistic(
         "n_exceedances": n_exceed,
         "p_empirical_one_sided": round(p_empirical, 6),
         "null_rank_of_observed": null_rank,
+        "verdict": "supports_ordered_adjacency" if supports_ordered_adjacency else "not_significant",
+        "supports_global_temporal_order": supports_ordered_adjacency,
         "interpretation": (
-            "p_empirical_one_sided < 0.05 supports that the observed temporal ordering "
-            "produces higher adjacency coherence than random orderings — i.e., co-active "
-            "pairs at time t tend to remain co-active at t+1 more than at distant times. "
-            "Prerequisite for claiming biologically meaningful temporal structure. "
-            "Current baseline (2026-08-28) with p_time_index_permutation of transition_resolution "
-            "= 0.570858: temporal ordering was NOT significant with that metric."
+            "Observed ordering has higher adjacent than distant co-activity coherence under the exact null; "
+            "this is structural ordering evidence only, not causal or kinase-direction evidence."
+            if supports_ordered_adjacency
+            else "Observed ordering is not significantly more adjacency-coherent than the exact ordering null. "
+            "Do not claim that Dynamic Co-Wave validates global chronological structure from this result."
+        ),
+        "claim_boundary": (
+            "T_adjacency tests global adjacency coherence only. It does not establish causal propagation, "
+            "direct kinase-substrate regulation, or correctness of any specific event order."
         ),
     }
 

@@ -15,6 +15,7 @@ from ptm_shared.temporal_optimization_config import (
     DYNAMIC_COWAVE_CONTRACT_VERSION,
     WAVE_CONFIG,
 )
+from ptm_shared.temporal_wave_input_projection import project_temporal_wave_input
 
 
 SIDECAR_SCHEMA_VERSION = "enrichment_free_temporal_mechanism.v2.sidecar"
@@ -647,10 +648,25 @@ def build_v2_sidecar(
             dict(wave_contract),
             study_context=study_context,
         )
+        replicate_event_count = sum(
+            record.input_type == "replicate_level_bootstrap"
+            for record in event_records.values()
+        )
+        condition_mean_event_count = sum(
+            record.input_type == "condition_mean_gp_parametric_bootstrap"
+            for record in event_records.values()
+        )
+        if replicate_event_count and condition_mean_event_count:
+            replicate_mode = "mixed_replicate_and_condition_mean"
+        elif replicate_event_count:
+            replicate_mode = "replicate_level"
+        else:
+            replicate_mode = "condition_mean_gp_only"
         temporal_precedence["replicate_input_summary"] = {
-            "n_sites_with_replicate_data": len(raw_replicate_fc_series) if raw_replicate_fc_series else 0,
+            "n_sites_with_replicate_data": replicate_event_count,
+            "n_sites_with_condition_mean_only": condition_mean_event_count,
             "n_sites_with_event_records": len(event_records),
-            "replicate_mode": "replicate_level" if raw_replicate_fc_series else "condition_mean_gp_only",
+            "replicate_mode": replicate_mode,
         }
     else:
         temporal_precedence = {
@@ -726,13 +742,14 @@ def build_production_site_observations(
 ) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
     """Normalize ordinary-order PTM vectors into the shared sidecar input.
 
-    Missing values are retained as missing in site observations and excluded
-    only from canonical Wave fitting, never converted to zero.
+    Missing values are retained as missing in site observations and candidate
+    vectors.  The shared Wave input projector applies the fitting eligibility
+    policy; this helper never converts a missing observation to zero.
     """
 
     ordered_conditions = [str(value) for value in conditions]
     observations: list[dict[str, Any]] = []
-    complete_vectors: dict[str, dict[str, Any]] = {}
+    observed_vectors: dict[str, dict[str, Any]] = {}
     for raw_key, raw_values in sorted(ptm_timeseries.items()):
         key = str(raw_key or "").strip().upper()
         if "_" not in key:
@@ -762,9 +779,8 @@ def build_production_site_observations(
                 "quantification_track": "protein_normalized_relative_log2fc",
             }
         )
-        if len(values) == len(ordered_conditions):
-            complete_vectors[key] = values
-    return observations, complete_vectors
+        observed_vectors[key] = values
+    return observations, observed_vectors
 
 
 def build_production_temporal_ptm_protein_analysis(
@@ -800,8 +816,12 @@ def build_production_temporal_ptm_protein_analysis(
     from ptm_shared.temporal_wave_engine import analyze_temporal_waves
 
     ordered_conditions = [str(value) for value in conditions]
-    observations, complete_vectors = build_production_site_observations(
+    observations, observed_vectors = build_production_site_observations(
         ptm_timeseries,
+        ordered_conditions,
+    )
+    wave_vectors, input_projection = project_temporal_wave_input(
+        observed_vectors,
         ordered_conditions,
     )
     metadata = {
@@ -811,15 +831,16 @@ def build_production_temporal_ptm_protein_analysis(
             "quantification_track": row["quantification_track"],
         }
         for row in observations
-        if row["site_key"] in complete_vectors
+        if row["site_key"] in wave_vectors
     }
     wave_contract = analyze_temporal_waves(
-        complete_vectors,
+        wave_vectors,
         ordered_conditions,
         metadata=metadata,
         config={**dict(WAVE_CONFIG), "threshold_source": CONTRACT_VERSION},
     )
-    wave_contract["analysis_scope"] = "production_observed_only_complete_ptm_vectors"
+    wave_contract["analysis_scope"] = "shared_complete_case_no_imputation"
+    wave_contract["input_projection_provenance"] = input_projection
     sidecar = build_v2_sidecar(
         output_dir=output_dir,
         ptm_type=ptm_type,
@@ -834,17 +855,10 @@ def build_production_temporal_ptm_protein_analysis(
     )
     sidecar["provenance"]["analysis_mode"] = "production"
     sidecar["provenance"]["shared_engine_contract"] = "unified_temporal_ptm_protein.v1"
-    sidecar["provenance"]["complete_wave_site_count"] = len(complete_vectors)
-    # STRICT/PRODUCTION PARITY NOTE (audit 2026-08-29):
-    # Production admits complete-vector sites only (no missingness).
-    # Strict benchmark runner fills missing timepoints with zero at request boundary.
-    # This produces different Wave member universes (629 production vs 834 strict).
-    # Do NOT compare T_adjacency, transition_resolution, or Wave-level aggregates
-    # across strict and production runs without resolving this discrepancy.
-    # Resolution requires aligning missing-value treatment; changing either path
-    # risks altering locked-score baselines or production output quality.
-    sidecar["provenance"]["missing_value_treatment"] = "complete_vectors_only_no_imputation"
-    sidecar["provenance"]["strict_production_parity"] = "NOT_RESOLVED_strict_fills_zero_production_omits"
+    sidecar["provenance"]["complete_wave_site_count"] = len(wave_vectors)
+    sidecar["provenance"]["wave_input_projection"] = input_projection
+    sidecar["provenance"]["missing_value_treatment"] = input_projection["missing_value_policy"]
+    sidecar["provenance"]["strict_production_parity"] = "shared_projection_contract_applied"
     return sidecar
 
 
@@ -876,6 +890,8 @@ def _compact_temporal_precedence(sidecar: Mapping[str, Any]) -> dict[str, Any]:
         "tier_breakdown": dict(summary.get("tier_breakdown") or {}),
         "replicate_mode": rep_summary.get("replicate_mode"),
         "n_sites_with_replicate_data": rep_summary.get("n_sites_with_replicate_data"),
+        "replicate_bootstrap_no_call_count": summary.get("replicate_bootstrap_no_call_count"),
+        "replicate_bootstrap_partial_draw_count": summary.get("replicate_bootstrap_partial_draw_count"),
         "p4_gate_passed": p4.get("passed"),
         "claim_boundary": (
             "Temporal event records are observational response timing only. "
@@ -900,6 +916,7 @@ def summarize_temporal_ptm_protein_analysis(
     counterevidence = list(sidecar.get("mechanism_counterevidence") or [])
     dynamic_transition = dict(sidecar.get("dynamic_co_wave_transition") or {})
     dynamic_summary = dict(dynamic_transition.get("summary") or {})
+    dynamic_t_adjacency = dict(dynamic_transition.get("t_adjacency_test") or {})
     temporal_event_order = dict(sidecar.get("temporal_event_order") or {})
     temporal_event_summary = dict(temporal_event_order.get("summary") or {})
     eligible_edges = [row for row in edges if row.get("eligible_for_mechanism_chain")]
@@ -934,6 +951,12 @@ def summarize_temporal_ptm_protein_analysis(
         "dynamic_transition_per_wave": list(dynamic_transition.get("per_wave_summary") or []),
         "dynamic_transition_pair_scope": dict(dynamic_transition.get("pair_scope") or {}),
         "dynamic_transition_event_exposure": dict(dynamic_transition.get("event_exposure") or {}),
+        "dynamic_temporal_adjacency_status": dynamic_t_adjacency.get("status", "not_requested"),
+        "dynamic_temporal_adjacency_p_value": dynamic_t_adjacency.get("p_empirical_one_sided"),
+        "dynamic_temporal_adjacency_verdict": dynamic_t_adjacency.get("verdict", "not_evaluable"),
+        "dynamic_temporal_adjacency_supports_global_order": dynamic_t_adjacency.get(
+            "supports_global_temporal_order", False
+        ),
         "temporal_event_order_status": temporal_event_order.get("status", "not_available"),
         "temporal_event_order_contract_version": temporal_event_order.get("contract_version"),
         "temporal_event_order_validation_status": temporal_event_summary.get("temporal_order_validation_status"),

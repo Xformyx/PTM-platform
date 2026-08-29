@@ -39,6 +39,17 @@ def _sidecar_summary() -> dict:
             "pair_transition_type_counts": {"persistence": 7, "split": 3},
             "site_transition_type_counts": {"recruitment": 2},
         }],
+        "temporal_precedence_status": {
+            "status": "computed",
+            "n_sites": 9,
+            "n_evaluable": 7,
+            "tier_breakdown": {"resolved_within_grid": 5, "left_censored": 2, "not_evaluable": 2},
+            "replicate_mode": "replicate_level",
+            "n_sites_with_replicate_data": 9,
+            "p4_gate_passed": False,
+            "claim_boundary": "Observed response timing only; causal interpretation is not supported.",
+            "contract_version": "temporal_precedence_output.v1",
+        },
         "top_cross_layer_edges": [{
             "edge_id": "edge-1",
             "source_wave_id": "W1",
@@ -58,11 +69,14 @@ def test_packet_preserves_numerical_fields_and_observational_boundary():
     packet = build_temporal_evidence_packet(_sidecar_summary())
 
     assert packet["status"] == "available"
-    assert packet["record_count"] == 4
+    assert packet["record_count"] == 5
     text = format_temporal_evidence_packet_for_llm(packet)
     assert "[DATA-TEMPORAL-SUMMARY]" in text
     assert "protein trajectories=12" in text
     assert "[DATA-DYNAMIC-WAVE-1]" in text
+    assert "[DATA-TEMPORAL-PRECEDENCE]" in text
+    assert "evaluable sites=7" in text
+    assert "P4 validation passed=False" in text
     assert "Static Wave W1" in text
     assert "[DATA-CROSS-LAYER-1]" in text
     assert "onset lag=15 min" in text
@@ -74,7 +88,7 @@ def test_results_instruction_requires_available_record_classes_and_final_prose_h
     packet = build_temporal_evidence_packet(_sidecar_summary())
     text = format_temporal_evidence_packet_for_llm(packet, section_type="results")
     assert "dedicated temporal-evidence paragraph" in text
-    assert "Available required classes: dynamic=True; TMM=False; PTM-protein=True; counterevidence=False." in text
+    assert "Available required classes: temporal-precedence=True; dynamic=True; TMM=False; PTM-protein=True; counterevidence=False." in text
     assert "DATA-DYNAMIC-SUMMARY" not in strip_internal_data_labels(text)
 
 
@@ -160,10 +174,11 @@ def test_results_fidelity_requires_available_evidence_groups_and_uses_fallback()
     packet = build_temporal_evidence_packet(summary, kinase_activity_heatmap=heatmap)
     audit = audit_report_temporal_fidelity("Generic pathway text.", packet, section_type="results")
     assert audit["status"] == "review_required"
-    assert {"dynamic", "tmm", "cross_layer", "counterevidence"}.issubset(audit["missing_required_groups"])
+    assert {"temporal_precedence", "dynamic", "tmm", "cross_layer", "counterevidence"}.issubset(audit["missing_required_groups"])
     addendum = build_temporal_evidence_fallback_addendum(packet)
     audited = audit_report_temporal_fidelity(addendum, packet, section_type="results")
     assert audited["status"] == "pass"
+    assert audited["temporal_precedence_trace_status"] == "cited"
 
 
 def test_raw_heatmap_without_persisted_tmm_cascade_does_not_create_tmm_record():

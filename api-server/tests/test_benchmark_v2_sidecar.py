@@ -175,7 +175,10 @@ def test_production_order_uses_shared_v2_sidecar_contract_without_truth(tmp_path
     assert sidecar["schema_version"].endswith("v2.sidecar")
     assert sidecar["provenance"]["analysis_mode"] == "production"
     assert sidecar["provenance"]["shared_engine_contract"] == "unified_temporal_ptm_protein.v1"
-    assert sidecar["temporal_wave_contract"]["analysis_scope"] == "production_observed_only_complete_ptm_vectors"
+    assert sidecar["temporal_wave_contract"]["analysis_scope"] == "shared_complete_case_no_imputation"
+    assert sidecar["provenance"]["missing_value_treatment"] == "complete_case_no_imputation"
+    assert sidecar["provenance"]["strict_production_parity"] == "shared_projection_contract_applied"
+    assert sidecar["provenance"]["wave_input_projection"]["imputation_applied"] is False
     assert sidecar["provenance"]["benchmark_truth_used"] is False
     assert sidecar["dynamic_co_wave_transition"]["status"] == "computed"
     assert sidecar["dynamic_co_wave_transition"]["provenance"]["configuration"] == DYNAMIC_COWAVE_CONFIG

@@ -243,6 +243,7 @@ def build_temporal_precedence_output(
             "exit_t50_min": obs.exit_t50_min,
             "exit_ci95_min": obs.exit_ci95_min,
             "replicate_bootstrap_stability": obs.replicate_bootstrap_stability,
+            "bootstrap_evaluable_draw_fraction": record.bootstrap_evaluable_draw_fraction,
             "report_phrase": obs.report_phrase,
             "p4_gate_passed": obs.p4_gate_passed,
             "input_type": obs.input_type,
@@ -253,13 +254,27 @@ def build_temporal_precedence_output(
         1 for o in observations
         if o["tier"] != TemporalObservationTier.not_evaluable.value
     )
+    bootstrap_no_call_count = sum(
+        record.input_type == "replicate_level_bootstrap"
+        and record.bootstrap_evaluable_draw_fraction == 0.0
+        for record in event_records.values()
+    )
+    bootstrap_partial_draw_count = sum(
+        record.input_type == "replicate_level_bootstrap"
+        and record.bootstrap_evaluable_draw_fraction is not None
+        and 0.0 < record.bootstrap_evaluable_draw_fraction < 1.0
+        for record in event_records.values()
+    )
 
     return {
+        "status": "computed",
         "observations": observations,
         "summary": {
             "n_sites": n_total,
             "n_evaluable": n_evaluable,
             "tier_breakdown": tier_counts,
+            "replicate_bootstrap_no_call_count": bootstrap_no_call_count,
+            "replicate_bootstrap_partial_draw_count": bootstrap_partial_draw_count,
             "study_context": ctx.study_id,
         },
         "p4_gate": {

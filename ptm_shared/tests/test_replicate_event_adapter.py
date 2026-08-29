@@ -1,6 +1,7 @@
 """Tests for P1: replicate_event_adapter.py"""
 from __future__ import annotations
 import math
+import warnings
 import pytest
 import numpy as np
 
@@ -271,3 +272,38 @@ def test_replicate_level_sets_stability_not_uncertainty(insulin_labels):
     assert rec.replicate_bootstrap_stability is not None
     assert rec.exploratory_model_uncertainty is None
     assert rec.input_type == "replicate_level_bootstrap"
+
+
+def test_replicate_matrix_with_unobserved_timepoint_returns_deterministic_no_call(insulin_labels):
+    matrix = np.array([
+        [0.0, np.nan, 2.0, 1.5, 0.3, 0.0],
+        [0.1, np.nan, 1.9, 1.4, 0.2, 0.1],
+    ])
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        rec = extract_event_record_from_replicates(
+            "S1", insulin_labels, matrix,
+            study_context=INSULIN_TEMPORAL_CONTEXT, n_bootstrap=20,
+        )
+    assert caught == []
+    assert rec.event_status == EventStatus.not_evaluable_replicate_posterior
+    assert rec.bootstrap_evaluable_draw_fraction == 0.0
+    assert rec.censoring_note == "replicate_matrix_contains_unobserved_timepoint"
+
+
+def test_bootstrap_skips_all_nan_draws_without_warning(insulin_labels):
+    matrix = np.array([
+        [0.0, 1.6, 2.0, 1.5, 0.3, 0.0],
+        [0.1, np.nan, 1.9, 1.4, 0.2, 0.1],
+        [0.0, np.nan, 2.1, 1.6, 0.4, 0.0],
+    ])
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        rec = extract_event_record_from_replicates(
+            "S1", insulin_labels, matrix,
+            study_context=INSULIN_TEMPORAL_CONTEXT, n_bootstrap=100,
+        )
+    assert caught == []
+    assert rec.replicate_bootstrap_stability is not None
+    assert rec.bootstrap_evaluable_draw_fraction is not None
+    assert 0.0 < rec.bootstrap_evaluable_draw_fraction < 1.0

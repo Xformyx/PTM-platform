@@ -25,6 +25,7 @@ from ptm_shared.temporal_optimization_config import (
     DYNAMIC_COWAVE_CONFIG,
 )
 from ptm_shared.temporal_wave_engine import analyze_temporal_waves
+from ptm_shared.temporal_wave_input_projection import project_temporal_wave_input
 
 
 def attach_v2_extensions(
@@ -84,10 +85,14 @@ def build_temporal_request(
     rows = _read_vector_rows(output_dir, ptm_type)
     grouped = _group_rows(rows, site_aggregation=site_aggregation)
     timepoints = _sorted_timepoints(grouped.values())
-    site_time_series = {
-        key: {timepoint: site["values"].get(timepoint, 0.0) for timepoint in timepoints}
+    raw_site_time_series = {
+        key: dict(site["values"])
         for key, site in grouped.items()
     }
+    site_time_series, input_projection = project_temporal_wave_input(
+        raw_site_time_series,
+        timepoints,
+    )
     metadata = {
         key: {
             "gene": item["gene"],
@@ -115,6 +120,7 @@ def build_temporal_request(
         replicate_time_series=replicate_time_series,
     )
     wave_contract["replicate_input_provenance"] = replicate_wave_provenance
+    wave_contract["input_projection_provenance"] = input_projection
     cowave_modules = [
         {
             "id": wave["wave_id"],
@@ -148,6 +154,7 @@ def build_temporal_request(
         "site_aggregation": site_aggregation,
         "replicate_wave_provenance": replicate_wave_provenance,
         "replicate_time_series": replicate_time_series,
+        "wave_input_projection_provenance": input_projection,
     }
 
 

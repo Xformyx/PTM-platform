@@ -973,7 +973,7 @@ def build_temporal_evidence_packet(
     sidecar = dict(temporal_sidecar or {})
     if not sidecar:
         return {
-            "contract_version": "report_temporal_evidence_packet.v1",
+            "contract_version": "report_temporal_evidence_packet.v3",
             "status": "unavailable",
             "reason": "No production temporal PTM-protein sidecar was available for this Order.",
             "records": [],
@@ -1008,7 +1008,9 @@ def build_temporal_evidence_packet(
         "text": (
             "Dynamic co-wave status={status}; transition-supported Waves={waves}; "
             "pair transitions={pairs}; site transitions={sites}; transition resolution={resolution}; "
-            "mean pair LOTO Jaccard={pair_loto}; mean site LOTO Jaccard={site_loto}."
+            "mean pair LOTO Jaccard={pair_loto}; mean site LOTO Jaccard={site_loto}; "
+            "global adjacency-order test status={adj_status}; p={adj_p}; verdict={adj_verdict}. "
+            "Transition resolution is a descriptive local-reorganization ratio, not temporal-order proof."
         ).format(
             status=dynamic_status,
             waves=sidecar.get("dynamic_transition_supported_wave_count", 0),
@@ -1017,8 +1019,44 @@ def build_temporal_evidence_packet(
             resolution=sidecar.get("dynamic_transition_resolution"),
             pair_loto=dynamic_loto.get("mean_pair_transition_jaccard"),
             site_loto=dynamic_loto.get("mean_site_transition_jaccard"),
+            adj_status=sidecar.get("dynamic_temporal_adjacency_status", "not_requested"),
+            adj_p=sidecar.get("dynamic_temporal_adjacency_p_value"),
+            adj_verdict=sidecar.get("dynamic_temporal_adjacency_verdict", "not_evaluable"),
         ),
     })
+
+    precedence = dict(sidecar.get("temporal_precedence_status") or {})
+    if precedence:
+        precedence_status = str(precedence.get("status") or "unavailable")
+        records.append({
+            "evidence_id": "DATA-TEMPORAL-PRECEDENCE",
+            "tier": (
+                "observational_temporal_precedence"
+                if precedence_status == "computed"
+                else "temporal_uncertainty"
+            ),
+            "text": (
+                "Temporal event-order status={status}; event-record sites={sites}; "
+                "evaluable sites={evaluable}; tier breakdown={tiers}; replicate mode={mode}; "
+                "sites with replicate data={replicate_sites}; P4 validation passed={p4}. "
+                "replicate bootstrap no-calls={no_calls}; partial-draw sites={partial_draws}. "
+                "{boundary}"
+            ).format(
+                status=precedence_status,
+                sites=precedence.get("n_sites"),
+                evaluable=precedence.get("n_evaluable"),
+                tiers=dict(precedence.get("tier_breakdown") or {}),
+                mode=precedence.get("replicate_mode"),
+                replicate_sites=precedence.get("n_sites_with_replicate_data"),
+                p4=precedence.get("p4_gate_passed"),
+                no_calls=precedence.get("replicate_bootstrap_no_call_count"),
+                partial_draws=precedence.get("replicate_bootstrap_partial_draw_count"),
+                boundary=precedence.get(
+                    "claim_boundary",
+                    "Observed response timing only; causal interpretation is not supported.",
+                ),
+            ),
+        })
 
     for index, row in enumerate((sidecar.get("dynamic_transition_per_wave") or [])[:max_waves], 1):
         if not isinstance(row, Mapping):
@@ -1145,7 +1183,7 @@ def build_temporal_evidence_packet(
         })
 
     return {
-        "contract_version": "report_temporal_evidence_packet.v2",
+        "contract_version": "report_temporal_evidence_packet.v3",
         "status": "available",
         "shared_engine_contract": sidecar.get("shared_engine_contract"),
         "artifact_path": sidecar.get("artifact_path"),
@@ -1178,13 +1216,14 @@ def format_temporal_evidence_packet_for_llm(
         if isinstance(record, Mapping)
     }
     has_dynamic = any(identifier.startswith("DATA-DYNAMIC") for identifier in record_ids)
+    has_precedence = "DATA-TEMPORAL-PRECEDENCE" in record_ids
     has_tmm = any(identifier.startswith("DATA-TMM-KINASE") for identifier in record_ids)
     has_cross_layer = any(identifier.startswith("DATA-CROSS-LAYER") for identifier in record_ids)
     has_counterevidence = any(identifier.startswith("DATA-COUNTEREVIDENCE") for identifier in record_ids)
     section = str(section_type or "general").lower()
     coverage_instruction = (
-        "For Results and Discussion, write a dedicated temporal-evidence paragraph that uses at least one dynamic record, "
-        "one TMM candidate record, and one PTM→protein record when those record classes are present. Also state one explicit "
+        "For Results and Discussion, write a dedicated temporal-evidence paragraph that uses the temporal event-order status, "
+        "at least one dynamic record, one TMM candidate record, and one PTM→protein record when those record classes are present. Also state one explicit "
         "limitation from counterevidence or not_evaluable status when supplied."
         if section in {"results", "discussion"}
         else "Use the relevant supplied numerical temporal records when answering this section; do not substitute generic pathway prose."
@@ -1196,7 +1235,7 @@ def format_temporal_evidence_packet_for_llm(
         "or a lagged protein trajectory into direct regulation or causality.",
         "If kinase timing is not_evaluable or an edge is not evidence-supported, state that limitation explicitly.",
         coverage_instruction,
-        f"Available required classes: dynamic={has_dynamic}; TMM={has_tmm}; PTM-protein={has_cross_layer}; counterevidence={has_counterevidence}.",
+        f"Available required classes: temporal-precedence={has_precedence}; dynamic={has_dynamic}; TMM={has_tmm}; PTM-protein={has_cross_layer}; counterevidence={has_counterevidence}.",
         "For auditability, retain the relevant [DATA-*] label at the end of the sentence in the draft.",
         "",
     ]
@@ -1219,6 +1258,7 @@ def build_temporal_evidence_fallback_addendum(packet: Mapping[str, Any]) -> str:
     selected: list[Mapping[str, Any]] = []
     prefixes = (
         "DATA-TEMPORAL-SUMMARY",
+        "DATA-TEMPORAL-PRECEDENCE",
         "DATA-DYNAMIC-SUMMARY",
         "DATA-DYNAMIC-WAVE-",
         "DATA-TMM-KINASE-",

@@ -23,6 +23,7 @@ def _record(key, status=EventStatus.resolved, onset=5.0, peak=15.0, exit_t=60.0)
         peak_t_min=peak,
         exit_t50_min=exit_t,
         replicate_bootstrap_stability=0.85,
+        bootstrap_evaluable_draw_fraction=0.9,
     )
 
 
@@ -117,6 +118,7 @@ def test_build_output_structure(minimal_wave_contract):
     assert "summary" in output
     assert "p4_gate" in output
     assert output["contract_version"] == CONTRACT_VERSION
+    assert output["status"] == "computed"
 
 def test_build_output_requires_explicit_context(minimal_wave_contract):
     """build_temporal_precedence_output requires explicit study_context (no default)."""
@@ -160,3 +162,4 @@ def test_wave_id_assigned_in_observations(minimal_wave_contract):
                                                INSULIN_TEMPORAL_CONTEXT)
     obs = next(o for o in output["observations"] if o["site_key"] == "A_S1")
     assert obs["wave_id"] == "TW-01"
+    assert obs["bootstrap_evaluable_draw_fraction"] == 0.9
