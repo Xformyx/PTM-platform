@@ -87,7 +87,7 @@ function Metric({ label, value }: { label: string; value: string }) {
   return <div className="min-w-0"><p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">{label}</p><p className="mt-0.5 truncate text-sm font-medium">{value}</p></div>;
 }
 
-export function TemporalSubstrateAtlas({ orderId, active }: { orderId: number; active: boolean }) {
+export function TemporalSubstrateAtlas({ orderId, active, orderStatus }: { orderId: number; active: boolean; orderStatus?: string }) {
   const [data, setData] = useState<AtlasResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -106,7 +106,7 @@ export function TemporalSubstrateAtlas({ orderId, active }: { orderId: number; a
       .catch((err: unknown) => { if (!cancelled) setError(err instanceof Error ? err.message : "Atlas data could not be loaded."); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [active, orderId, reloadToken]);
+  }, [active, orderId, reloadToken, orderStatus]);
 
   const sites = data?.sites || [];
   const visibleSites = useMemo(() => sites.filter((site) =>

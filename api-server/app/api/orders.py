@@ -2443,18 +2443,21 @@ async def get_vector_plot_data(
                     rel_fc = row.get("PTM_Relative_Log2FC", "")
                     abs_fc = row.get("PTM_Absolute_Log2FC", "")
                     prot_fc = row.get("Protein_Log2FC", "")
-                    try:
-                        rel_fc = float(rel_fc) if rel_fc else 0
-                    except ValueError:
-                        rel_fc = 0
-                    try:
-                        abs_fc = float(abs_fc) if abs_fc else 0
-                    except ValueError:
-                        abs_fc = 0
-                    try:
-                        prot_fc = float(prot_fc) if prot_fc else 0
-                    except ValueError:
-                        prot_fc = 0
+
+                    def _safe_float_zero(v: str) -> float:
+                        """Convert TSV float string, returning 0 for nan/inf/empty."""
+                        import math
+                        if not v or str(v).strip().lower() in ("nan", "inf", "-inf", "infinity", "-infinity"):
+                            return 0.0
+                        try:
+                            f = float(v)
+                            return f if math.isfinite(f) else 0.0
+                        except (ValueError, TypeError):
+                            return 0.0
+
+                    rel_fc = _safe_float_zero(rel_fc)
+                    abs_fc = _safe_float_zero(abs_fc)
+                    prot_fc = _safe_float_zero(prot_fc)
                     pc_used_raw = row.get("Control_Pseudocount_Used", "")
                     pc_used = pc_used_raw.strip().lower() in ("true", "1", "yes") if pc_used_raw else False
                     # p_value / q_value (v9.25: Welch's t-test + BH correction)
@@ -4024,7 +4027,23 @@ async def get_vector_plot_data(
                     significant_keys.add((r["gene"], r["position"]))
             suggested_n = len(significant_keys) if significant_keys else None
 
-    return {
+    import math
+
+    def _sanitize_floats(obj):
+        """재귀적으로 dict/list를 순회하여 NaN/Inf float을 None으로 교체한다.
+
+        JSON은 NaN/Infinity를 직렬화할 수 없어 ValueError가 발생하므로
+        클라이언트에 빈 화면이 나타나는 문제를 방지한다.
+        """
+        if isinstance(obj, float):
+            return None if not math.isfinite(obj) else obj
+        if isinstance(obj, dict):
+            return {k: _sanitize_floats(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [_sanitize_floats(v) for v in obj]
+        return obj
+
+    return _sanitize_floats({
         "vector_data": vector_data,
         "top_n_ptms": top_n_ptms,
         "suggested_n": suggested_n,
@@ -4033,7 +4052,7 @@ async def get_vector_plot_data(
         "inferred_receptors": inferred_receptors,  # v9.18
         "cowave_analysis": _cowave_analysis if '_cowave_analysis' in locals() else None,  # v9.42
         "divergence_pairs": _divergence_pairs[:30] if '_divergence_pairs' in locals() else [],  # v12.0
-    }
+    })
 
 
 @router.get("/{order_id}/file-details")
@@ -9737,14 +9756,26 @@ async def substrate_temporal_atlas(
     except ImportError:
         return {"sites": [], "status": "module_unavailable"}
 
-    # Atlas interpretation needs the stability evidence that lightweight
-    # vector-plot labels intentionally omit.  P1.1 promotion/downgrade is
-    # therefore evaluated here rather than inferred in the frontend.
-    cfg = SiteKineticConfig(run_loto=True, run_threshold_sensitivity=True)
+    from ptm_shared.atlas_compat import atlas_form_trajectories, atlas_records, json_safe
+
+    # Disk cache: compute once, serve instantly on subsequent calls.
+    # Cache is invalidated when the enriched file is newer than the cache.
+    _atlas_cache_path = output_dir / f"_atlas_cache{file_suffix}.json"
+    if _atlas_cache_path.exists() and enriched_path.exists():
+        if _atlas_cache_path.stat().st_mtime >= enriched_path.stat().st_mtime:
+            try:
+                with open(_atlas_cache_path, "r", encoding="utf-8") as _cf:
+                    return _json.load(_cf)
+            except Exception:
+                pass  # corrupt cache → recompute
+
+    # Atlas interpretation needs pattern labels without LOTO for fast API response.
+    # LOTO stability is expensive (~56s for 2447 sites); disable for real-time serving.
+    # Run with LOTO disabled for API; loto_pattern_stability will be None in the response.
+    cfg = SiteKineticConfig(run_loto=False, run_threshold_sensitivity=False)
 
     with open(enriched_path, "r", encoding="utf-8") as f:
         enriched_payload = _json.load(f)
-    from ptm_shared.atlas_compat import atlas_form_trajectories, atlas_records, json_safe
     enriched = atlas_records(enriched_payload)
     compatibility_warnings: list[dict] = []
     if not enriched:
@@ -9988,7 +10019,7 @@ async def substrate_temporal_atlas(
     for site in sites:
         site["claim_id"] = claim_id_by_site.get(site["site_key"])
 
-    return json_safe({
+    _atlas_result = json_safe({
         "order_id": order_id,
         "n_sites": len(sites),
         "n_atlas_eligible_sites": eligible_count,
@@ -10000,3 +10031,9 @@ async def substrate_temporal_atlas(
         "status": "ok",
         "compatibility_warnings": compatibility_warnings[:100],
     })
+    try:
+        with open(_atlas_cache_path, "w", encoding="utf-8") as _cf:
+            _json.dump(_atlas_result, _cf, ensure_ascii=False)
+    except Exception:
+        pass
+    return _atlas_result

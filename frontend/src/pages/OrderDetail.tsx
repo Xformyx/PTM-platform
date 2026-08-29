@@ -949,19 +949,20 @@ type VectorRow = {
   q_value?: number | null;
 };
 
-function ScatterPlotsInteractive({ orderId }: { orderId: number }) {
+function ScatterPlotsInteractive({ orderId, orderStatus }: { orderId: number; orderStatus?: string }) {
   const [data, setData] = useState<{ vector_data: VectorRow[] } | null>(null);
   const [loading, setLoading] = useState(true);
   const [metric, setMetric] = useState<"relative" | "absolute" | "occupancy">("relative");
   const [zoom, setZoom] = useState(1); // 1 = auto, zoom in = narrower range
 
   useEffect(() => {
+    setLoading(true);
     api
       .get<{ vector_data: VectorRow[] }>(`/orders/${orderId}/vector-plot-data`)
       .then((d) => setData({ vector_data: d.vector_data || [] }))
       .catch(() => setData(null))
       .finally(() => setLoading(false));
-  }, [orderId]);
+  }, [orderId, orderStatus]);
 
   if (loading) {
     return (
@@ -3331,7 +3332,7 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
   );
 }
 
-function VectorPlotTab({ orderId, singleTimePoint, ptmType = "phosphorylation" }: { orderId: number; singleTimePoint?: boolean; ptmType?: string }) {
+function VectorPlotTab({ orderId, singleTimePoint, ptmType = "phosphorylation", orderStatus }: { orderId: number; singleTimePoint?: boolean; ptmType?: string; orderStatus?: string }) {
   const isUbi = ptmType.toLowerCase().includes("ubiquityl") || ptmType.toLowerCase().includes("ubiquitin");
   const [files, setFiles] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
@@ -3386,7 +3387,7 @@ function VectorPlotTab({ orderId, singleTimePoint, ptmType = "phosphorylation" }
               </p>
             </CardHeader>
             <CardContent>
-              <ScatterPlotsInteractive orderId={orderId} />
+              <ScatterPlotsInteractive orderId={orderId} orderStatus={orderStatus} />
               {files.length > 0 && (
                 <div className="mt-6 pt-4 border-t">
                   <p className="text-xs text-muted-foreground mb-2">Download static report (PNG)</p>
@@ -5416,7 +5417,7 @@ export default function OrderDetail() {
         <TabsContent value="vector-plot" className="mt-4">
           <div className="flex gap-4">
             <div className={chatOpen ? "flex-1 min-w-0" : "w-full"}>
-              <VectorPlotTab orderId={order.id} singleTimePoint={(order.sample_config as any)?.single_time_point} ptmType={order.ptm_type} />
+              <VectorPlotTab orderId={order.id} singleTimePoint={(order.sample_config as any)?.single_time_point} ptmType={order.ptm_type} orderStatus={order.status} />
             </div>
 
             <div className={`${chatOpen ? "w-[420px]" : "w-10"} flex-shrink-0 h-[calc(100vh-200px)] sticky top-4 rounded-xl border border-border shadow-lg overflow-hidden`}>
@@ -5434,7 +5435,7 @@ export default function OrderDetail() {
 
         {resolveTemporalContract((order.report_options as { temporal_contract?: string } | undefined)?.temporal_contract) === "dynamics_v1" && (
         <TabsContent value="temporal-atlas" className="mt-4">
-          <TemporalSubstrateAtlas orderId={order.id} active={activeTab === "temporal-atlas"} />
+          <TemporalSubstrateAtlas orderId={order.id} active={activeTab === "temporal-atlas"} orderStatus={order.status} />
         </TabsContent>
         )}
 
