@@ -104,6 +104,29 @@ TEMPORAL_ORDERING_P_VALUE_RECORD: dict[str, object] = {
             ),
         },
         {
+            "metric": "T_adjacency_exact_permutation_720_production_path",
+            "value": 0.153953,
+            "n_exceedances": 110,
+            "n_permutations": 720,
+            "t_adjacency_observed": 0.042559,
+            "null_mean": 0.0,
+            "null_std": 0.042717,
+            "wave_member_count": 629,
+            "input_universe": "production_complete_vectors_only",
+            "dataset": "Insulin_Signaling_Dynamic_V1",
+            "commit": "18d4829",
+            "date": "2026-08-29",
+            "verdict": "not_significant",
+            "note": (
+                "Production path (629 complete-vector members, no zero-fill). "
+                "Closer to threshold than strict (p=0.284327, 834 members) but "
+                "still not significant. "
+                "Do NOT compare directly with strict-runner T_adjacency: "
+                "different input universes (complete-vector vs zero-fill). "
+                "Neither result supports global chronological-order claim."
+            ),
+        },
+        {
             "metric": "within_wave_onset_synchrony_membership_permutation",
             "value": 0.001996,
             "synchrony_fraction_observed": 0.3039,

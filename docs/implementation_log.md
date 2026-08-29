@@ -2419,3 +2419,55 @@
 - **결정성:**
   - Wave member scope: `{site for wave in waves for site in wave.get("members", [])}` — 동결된 Wave contract에서 결정적으로 계산.
 
+---
+
+### [2026-08-29] Commit 18d4829 검증 감사 반영 — compact 요약, parity 문서화, production T_adjacency 기록
+
+- **분류:** 감사 수정 (compact 출력 완성, 불일치 문서화)
+- **대상:**
+  - `ptm_shared/enrichment_free_temporal_sidecar.py`
+    - `_compact_temporal_precedence()` 신규 헬퍼 함수 추가
+    - `summarize_temporal_ptm_protein_analysis()` — `temporal_precedence_status` 필드 추가
+    - `build_production_temporal_ptm_protein_analysis()` — provenance에 parity note 추가
+  - `ptm_shared/temporal_optimization_config.py` — production T_adjacency p=0.153953 동결 기록 추가
+- **구현 대상 설계:** `Latest_Production_Temporal_Integration_Validation___Commit_18d4829.pdf` 3가지 잔여 태스크 (2026-08-29)
+- **사전등록 상태:** 해당 없음
+
+**검증 확인 사항 (18d4829 실제 데이터):**
+- event_observation_count=629, wave_member_count=629, non_wave_observation_count=0 ✅
+- 566 replicate_level + 63 condition_mean ✅
+- raw_value_keys_persisted=False ✅, P4 gate=False ✅
+- compact_has_temporal_precedence_summary: False → **이번에 수정**
+
+**Task 2: compact sidecar temporal_precedence 요약 추가**
+- `_compact_temporal_precedence()` 헬퍼: 전체 sidecar에서 Report/UI용 집계 추출
+  - `status`, `n_sites`, `n_evaluable`, `tier_breakdown`, `replicate_mode`, `p4_gate_passed`
+  - 개별 event record, timing 값, relation registry 내용은 노출하지 않음
+  - `claim_boundary` 고정 문구 포함
+- `summarize_temporal_ptm_protein_analysis()`에 `temporal_precedence_status` 키로 추가
+- 이제 Report/UI가 compact sidecar를 통해 이벤트 관측 요약을 소비할 경로 확보
+
+**Task 1: strict/production 입력 universe 불일치 문서화 (동작 변경 없음)**
+- 불일치 내용: strict(834 members, zero-fill) vs production(629 members, complete-only)
+- production T_adjacency p=0.153953 (strict p=0.284327) — 같은 분석이 아니므로 직접 비교 금지
+- `build_production_temporal_ptm_protein_analysis()` provenance에 명시:
+  - `missing_value_treatment: "complete_vectors_only_no_imputation"`
+  - `strict_production_parity: "NOT_RESOLVED_strict_fills_zero_production_omits"`
+- 동작 변경 없음: 어느 쪽을 바꿔도 locked score baseline에 영향 가능성 있음. 추후 별도 결정 필요.
+
+**Task 3: production T_adjacency p=0.153953 동결 기록**
+- `TEMPORAL_ORDERING_P_VALUE_RECORD`에 4번째 레코드 추가
+  - metric: `T_adjacency_exact_permutation_720_production_path`
+  - verdict: `not_significant`
+  - note: "production 경로(629 complete-vector)가 strict(834, p=0.284327)보다 임계에 가깝지만 여전히 비유의미. 두 값은 입력 universe가 달라 직접 비교 금지."
+- 현재 레코드 4개: p_time_index(not_sig), T_adj_strict(not_sig), T_adj_prod(not_sig), within_wave_synchrony(sig)
+
+- **논문에서의 용도:**
+  - Methods: "compact sidecar의 `temporal_precedence_status` 필드를 통해 Report이 temporal event 요약을 소비한다."
+  - Limitation: "strict benchmark과 production 분석은 missing-value treatment가 달라 Wave membership이 상이하다 (834 vs 629). 비교 시 이를 명시해야 한다."
+- **해석 한계:**
+  - production T_adjacency p=0.153953은 임계에 더 가깝지만 비유의미이며, strict와 직접 비교 불가.
+  - compact sidecar는 개별 event record를 노출하지 않는다.
+- **결정성:**
+  - `_compact_temporal_precedence`: 결정적. sidecar 내 `temporal_precedence` 키 구조에 의존.
+

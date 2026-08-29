@@ -835,7 +835,55 @@ def build_production_temporal_ptm_protein_analysis(
     sidecar["provenance"]["analysis_mode"] = "production"
     sidecar["provenance"]["shared_engine_contract"] = "unified_temporal_ptm_protein.v1"
     sidecar["provenance"]["complete_wave_site_count"] = len(complete_vectors)
+    # STRICT/PRODUCTION PARITY NOTE (audit 2026-08-29):
+    # Production admits complete-vector sites only (no missingness).
+    # Strict benchmark runner fills missing timepoints with zero at request boundary.
+    # This produces different Wave member universes (629 production vs 834 strict).
+    # Do NOT compare T_adjacency, transition_resolution, or Wave-level aggregates
+    # across strict and production runs without resolving this discrepancy.
+    # Resolution requires aligning missing-value treatment; changing either path
+    # risks altering locked-score baselines or production output quality.
+    sidecar["provenance"]["missing_value_treatment"] = "complete_vectors_only_no_imputation"
+    sidecar["provenance"]["strict_production_parity"] = "NOT_RESOLVED_strict_fills_zero_production_omits"
     return sidecar
+
+
+def _compact_temporal_precedence(sidecar: Mapping[str, Any]) -> dict[str, Any]:
+    """Extract a provenance-preserving summary of temporal_precedence for compact sidecar.
+
+    This is the Report/UI-facing aggregate — it does not expose individual
+    event records, raw timing values, or relation registry contents.
+
+    Fields emitted:
+      status         : "computed" | "not_evaluable_context_not_registered" | "skipped_*"
+      n_sites        : total sites with event records
+      n_evaluable    : sites with tier != not_evaluable
+      tier_breakdown : {tier: count}
+      replicate_mode : "replicate_level" | "condition_mean_gp_only" | None
+      p4_gate_passed : bool | None
+      claim_boundary : fixed phrase
+    """
+    tp = dict(sidecar.get("temporal_precedence") or {})
+    status = tp.get("status")
+    summary = dict(tp.get("summary") or {})
+    rep_summary = dict(tp.get("replicate_input_summary") or {})
+    p4 = dict(tp.get("p4_gate") or {})
+
+    return {
+        "status": status or "unavailable",
+        "n_sites": summary.get("n_sites"),
+        "n_evaluable": summary.get("n_evaluable"),
+        "tier_breakdown": dict(summary.get("tier_breakdown") or {}),
+        "replicate_mode": rep_summary.get("replicate_mode"),
+        "n_sites_with_replicate_data": rep_summary.get("n_sites_with_replicate_data"),
+        "p4_gate_passed": p4.get("passed"),
+        "claim_boundary": (
+            "Temporal event records are observational response timing only. "
+            "Causal interpretation requires P4 Trametinib validation. "
+            "This field does not expose individual event records or relation registry."
+        ),
+        "contract_version": tp.get("contract_version"),
+    }
 
 
 def summarize_temporal_ptm_protein_analysis(
@@ -915,5 +963,6 @@ def summarize_temporal_ptm_protein_analysis(
             if isinstance(row, Mapping)
         ],
         "hypothesis_evidence_packets": packets[:max_examples],
+        "temporal_precedence_status": _compact_temporal_precedence(sidecar),
         "provenance": dict(sidecar.get("provenance") or {}),
     }
