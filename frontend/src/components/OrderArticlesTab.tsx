@@ -50,6 +50,13 @@ interface OrderArticlesResponse {
   project_name: string;
   total_articles: number;
   articles: OrderArticle[];
+  enrichment_status?: {
+    enriched_records?: number;
+    route_counts?: Record<string, number>;
+    rag_selection_mode?: string;
+    literature_required_count?: number;
+    empty_reason?: string | null;
+  };
 }
 
 interface OrderArticlesTabProps {
@@ -171,15 +178,22 @@ export function OrderArticlesTab({ orderCode, orderStatus }: OrderArticlesTabPro
   }
 
   if (!data || data.total_articles === 0) {
+    const emptyReason = data?.enrichment_status?.empty_reason;
+    const mode = data?.enrichment_status?.rag_selection_mode;
+    const nRecords = data?.enrichment_status?.enriched_records ?? 0;
+    const emptyCopy =
+      orderStatus !== "completed"
+        ? "Articles will appear here after the RAG enrichment stage completes."
+        : emptyReason === "all_ptm_database_first"
+          ? `RAG completed for ${nRecords} sites in ${mode === "all" ? "ALL PTM" : mode || "broad"} mode. PubMed literature search was skipped on purpose (database-first). Re-run RAG on Top-N or significant sites if you need the Articles list.`
+          : emptyReason === "no_enriched_data"
+            ? "No enrichment data with articles was found for this order."
+            : "RAG ran, but no PubMed articles were stored for this order.";
     return (
       <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
         <BookOpen className="h-12 w-12 mb-4 opacity-50" />
         <p className="text-lg font-medium">No articles found</p>
-        <p className="text-sm mt-1">
-          {orderStatus === "completed"
-            ? "No enrichment data with articles was found for this order."
-            : "Articles will appear here after the RAG enrichment stage completes."}
-        </p>
+        <p className="mt-1 max-w-xl text-center text-sm">{emptyCopy}</p>
       </div>
     );
   }

@@ -51,7 +51,7 @@ type Transition = {
 type AtlasResponse = {
   status: string; n_sites?: number; n_atlas_eligible_sites?: number;
   pattern_distribution?: Record<string, number>; sites?: AtlasSite[];
-  transition_map?: { status?: string; reason?: string; transition_counts?: Record<string, number>; pair_transitions?: Transition[]; site_transitions?: Transition[]; excluded_sites?: Record<string, string[]>; observed_transition_semantics?: string };
+  transition_map?: { status?: string; reason?: string; cohort_site_count?: number; transition_counts?: Record<string, number>; pair_transitions?: Transition[]; site_transitions?: Transition[]; excluded_sites?: Record<string, string[]>; observed_transition_semantics?: string };
 };
 
 const PATTERN_COLORS: Record<string, string> = {
@@ -89,7 +89,7 @@ function Metric({ label, value }: { label: string; value: string }) {
 
 export function TemporalSubstrateAtlas({ orderId, active, orderStatus }: { orderId: number; active: boolean; orderStatus?: string }) {
   const [data, setData] = useState<AtlasResponse | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [patternFilter, setPatternFilter] = useState("all");
   const [qualityFilter, setQualityFilter] = useState("eligible");
@@ -99,13 +99,17 @@ export function TemporalSubstrateAtlas({ orderId, active, orderStatus }: { order
 
   useEffect(() => {
     if (!active || !orderId) return;
-    let cancelled = false;
-    setLoading(true); setError("");
-    api.get<AtlasResponse>(`/orders/${orderId}/substrate-temporal`)
-      .then((response) => { if (!cancelled) setData(response); })
-      .catch((err: unknown) => { if (!cancelled) setError(err instanceof Error ? err.message : "Atlas data could not be loaded."); })
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
+    const controller = new AbortController();
+    setLoading(true);
+    setError("");
+    api.get<AtlasResponse>(`/orders/${orderId}/substrate-temporal`, { signal: controller.signal })
+      .then((response) => { if (!controller.signal.aborted) setData(response); })
+      .catch((err: unknown) => {
+        if (controller.signal.aborted) return;
+        setError(err instanceof Error ? err.message : "Atlas data could not be loaded.");
+      })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    return () => { controller.abort(); };
   }, [active, orderId, reloadToken, orderStatus]);
 
   const sites = data?.sites || [];
@@ -134,7 +138,14 @@ export function TemporalSubstrateAtlas({ orderId, active, orderStatus }: { order
     ...(data?.transition_map?.site_transitions || []).map((transition) => ({ ...transition, kind: "site" })),
   ];
 
-  if (loading) return <div className="space-y-4"><Skeleton className="h-28 w-full" /><Skeleton className="h-[420px] w-full" /></div>;
+  if (loading) return (
+    <div className="flex flex-col items-center justify-center gap-3 rounded-lg border bg-muted/20 py-16">
+      <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      <p className="text-sm font-medium">Computing Temporal Atlas…</p>
+      <p className="max-w-md text-center text-xs text-muted-foreground">ALL-PTM orders score every site trajectory. This is usually a few seconds after the first request is cached.</p>
+      <Skeleton className="mt-2 h-3 w-48" />
+    </div>
+  );
   if (error) return <Card><CardContent className="flex flex-col items-center gap-3 py-12"><AlertTriangle className="h-8 w-8 text-destructive" /><p className="text-sm text-muted-foreground">{error}</p><Button variant="outline" size="sm" onClick={() => setReloadToken((token) => token + 1)}>Retry</Button></CardContent></Card>;
   if (data?.status === "disabled_by_contract") return <Card><CardContent className="flex flex-col items-center gap-3 py-14 text-center"><Layers3 className="h-10 w-10 text-muted-foreground/50" /><div><p className="font-medium">Temporal Atlas is off for this order</p><p className="mt-1 max-w-md text-sm text-muted-foreground">This order uses the Legacy temporal contract. Duplicate it and set Temporal Contract to Dynamics v1 to generate the Atlas path.</p></div></CardContent></Card>;
   if (!data || data.status === "no_enriched_data" || sites.length === 0) return <Card><CardContent className="flex flex-col items-center gap-3 py-14 text-center"><Layers3 className="h-10 w-10 text-muted-foreground/50" /><div><p className="font-medium">Temporal Atlas is not available yet</p><p className="mt-1 max-w-md text-sm text-muted-foreground">Run preprocessing with enriched PTM trajectories, then return here. The Atlas never substitutes missing trajectories with inferred patterns.</p></div></CardContent></Card>;
@@ -157,7 +168,7 @@ export function TemporalSubstrateAtlas({ orderId, active, orderStatus }: { order
 
     <section className="grid gap-5 2xl:grid-cols-[0.82fr_1.18fr]">
       <Card className="rounded-lg shadow-none"><CardHeader className="flex-row items-center justify-between space-y-0 pb-3"><CardTitle className="flex items-center gap-2 text-sm"><GitBranch className="h-4 w-4 text-violet-600" />Observed transition map</CardTitle><Badge variant="outline" className="text-[10px]">{data.transition_map?.status || "unavailable"}</Badge></CardHeader><CardContent>
-        {transitions.length === 0 ? <p className="py-6 text-center text-sm text-muted-foreground">{data.transition_map?.reason || "No quality-gated transition was available."}</p> : <div className="max-h-[285px] space-y-2 overflow-y-auto pr-1">{transitions.slice(0, 40).map((transition, index) => <div key={`${transition.kind}-${index}`} className="flex items-center gap-2 border-b border-border/60 py-2 text-xs"><Badge variant="outline" className="min-w-20 justify-center text-[10px] capitalize">{humanize(transition.transition_type)}</Badge><div className="min-w-0 flex-1"><p className="truncate font-mono text-[11px]">{transition.site_a && transition.site_b ? `${transition.site_a} + ${transition.site_b}` : transition.site_key}</p><p className="mt-0.5 flex items-center gap-1 text-muted-foreground"><Clock3 className="h-3 w-3" />{transition.from_window}<ArrowRight className="h-3 w-3" />{transition.to_window}</p></div></div>)}</div>}
+        {transitions.length === 0 ? <p className="py-6 text-center text-sm text-muted-foreground">{data.transition_map?.reason === "pairwise_cohort_exceeds_atlas_ui_limit" ? `Pairwise transitions are omitted in the UI for this ALL-PTM cohort (${data.transition_map?.cohort_site_count ?? "many"} sites). Site patterns below are still scored.` : (data.transition_map?.reason || "No quality-gated transition was available.")}</p> : <div className="max-h-[285px] space-y-2 overflow-y-auto pr-1">{transitions.slice(0, 40).map((transition, index) => <div key={`${transition.kind}-${index}`} className="flex items-center gap-2 border-b border-border/60 py-2 text-xs"><Badge variant="outline" className="min-w-20 justify-center text-[10px] capitalize">{humanize(transition.transition_type)}</Badge><div className="min-w-0 flex-1"><p className="truncate font-mono text-[11px]">{transition.site_a && transition.site_b ? `${transition.site_a} + ${transition.site_b}` : transition.site_key}</p><p className="mt-0.5 flex items-center gap-1 text-muted-foreground"><Clock3 className="h-3 w-3" />{transition.from_window}<ArrowRight className="h-3 w-3" />{transition.to_window}</p></div></div>)}</div>}
         <p className="mt-3 text-[10px] leading-relaxed text-muted-foreground">Edges record changes in observed active membership only. They do not identify a switching kinase or causal cascade arrow.</p>
       </CardContent></Card>
 

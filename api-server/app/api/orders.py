@@ -4544,6 +4544,10 @@ async def get_order_articles(
 
     seen_pmids = set()
     articles = []
+    route_counts: dict[str, int] = {}
+    selection_modes: dict[str, int] = {}
+    enriched_records = 0
+    literature_required_count = 0
 
     for suffix in suffixes_to_check:
         enriched_path = output_dir / f"enriched_ptm_data{suffix}.json"
@@ -4555,14 +4559,35 @@ async def get_order_articles(
                 enriched_ptms = _json.load(f)
         except Exception:
             continue
+        if isinstance(enriched_ptms, dict):
+            for key in ("ptms", "enriched_ptms", "data", "records"):
+                nested = enriched_ptms.get(key)
+                if isinstance(nested, list):
+                    enriched_ptms = nested
+                    break
+            else:
+                continue
 
         for ptm in enriched_ptms:
+            if not isinstance(ptm, dict):
+                continue
+            enriched_records += 1
             gene = ptm.get("Gene.Name") or ptm.get("gene", "Unknown")
             position = ptm.get("PTM_Position") or ptm.get("position", "")
             ptm_type_label = ptm.get("PTM_Type") or ptm.get("ptm_type", "")
 
             # Extract articles from enrichment data (rag_enrichment is the key used by RAG pipeline)
             enrichment = ptm.get("rag_enrichment", {}) or ptm.get("enrichment", {})
+            search_summary = enrichment.get("search_summary") or {}
+            evidence_gap = enrichment.get("evidence_gap_decision") or {}
+            route = str(search_summary.get("evidence_route") or evidence_gap.get("route") or "unknown")
+            route_counts[route] = route_counts.get(route, 0) + 1
+            mode = str(ptm.get("rag_selection_mode") or search_summary.get("rag_selection_mode") or "")
+            if mode:
+                selection_modes[mode] = selection_modes.get(mode, 0) + 1
+            if evidence_gap.get("literature_required"):
+                literature_required_count += 1
+
             ptm_articles = enrichment.get("articles", [])
 
             # Also check recent_findings as fallback
@@ -4592,11 +4617,30 @@ async def get_order_articles(
     # Sort by relevance score descending
     articles.sort(key=lambda a: a.get("relevance_score") or 0, reverse=True)
 
+    dominant_mode = max(selection_modes, key=selection_modes.get) if selection_modes else ""
+    empty_reason = None
+    if not articles:
+        if enriched_records == 0:
+            empty_reason = "no_enriched_data"
+        elif literature_required_count == 0 and (
+            dominant_mode in {"all", "minor"} or route_counts.get("db_only", 0) == enriched_records
+        ):
+            empty_reason = "all_ptm_database_first"
+        else:
+            empty_reason = "pubmed_returned_no_articles"
+
     return {
         "order_code": order_code,
         "project_name": order.project_name,
         "total_articles": len(articles),
         "articles": articles,
+        "enrichment_status": {
+            "enriched_records": enriched_records,
+            "route_counts": route_counts,
+            "rag_selection_mode": dominant_mode,
+            "literature_required_count": literature_required_count,
+            "empty_reason": empty_reason,
+        },
     }
 
 
@@ -9758,16 +9802,33 @@ async def substrate_temporal_atlas(
 
     from ptm_shared.atlas_compat import atlas_form_trajectories, atlas_records, json_safe
 
+    # HTTP payload version. Bump when the UI response is slimmed so a stale
+    # multi-hundred-MB cache cannot be served to the browser.
+    ATLAS_UI_PAYLOAD_VERSION = 2
+    # Presentation bound only — not a scientific gate. Pairwise co-movement is
+    # O(n²); ALL-PTM orders (~1k eligible sites) explode into a 200MB+ JSON
+    # that the browser cannot parse. Full ledger remains in report artifacts.
+    ATLAS_UI_PAIRWISE_MAX_SITES = 200
+    ATLAS_UI_TRANSITION_PREVIEW = 40
+    ATLAS_UI_CACHE_MAX_BYTES = 20 * 1024 * 1024
+
     # Disk cache: compute once, serve instantly on subsequent calls.
-    # Cache is invalidated when the enriched file is newer than the cache.
+    # Cache is invalidated when the enriched file is newer, the payload
+    # version changes, or the file is an oversized pre-slim artifact.
     _atlas_cache_path = output_dir / f"_atlas_cache{file_suffix}.json"
     if _atlas_cache_path.exists() and enriched_path.exists():
-        if _atlas_cache_path.stat().st_mtime >= enriched_path.stat().st_mtime:
+        cache_ok = (
+            _atlas_cache_path.stat().st_mtime >= enriched_path.stat().st_mtime
+            and _atlas_cache_path.stat().st_size <= ATLAS_UI_CACHE_MAX_BYTES
+        )
+        if cache_ok:
             try:
                 with open(_atlas_cache_path, "r", encoding="utf-8") as _cf:
-                    return _json.load(_cf)
+                    cached = _json.load(_cf)
+                if cached.get("atlas_ui_payload_version") == ATLAS_UI_PAYLOAD_VERSION:
+                    return cached
             except Exception:
-                pass  # corrupt cache → recompute
+                pass
 
     # Atlas interpretation needs pattern labels without LOTO for fast API response.
     # LOTO stability is expensive (~56s for 2447 sites); disable for real-time serving.
@@ -9975,17 +10036,33 @@ async def substrate_temporal_atlas(
             for site_key in cohort_trajectories
         }
         if len(cohort_trajectories) >= 2:
-            transition_map = {
-                "status": "ok",
-                "cohort_timepoint_labels": list(cohort_labels),
-                "cohort_site_count": len(cohort_trajectories),
-                "observed_transition_semantics": "membership transitions, not causal arrows",
-                **compute_time_varying_comovement(
+            if len(cohort_trajectories) > ATLAS_UI_PAIRWISE_MAX_SITES:
+                transition_map = {
+                    "status": "unavailable",
+                    "reason": "pairwise_cohort_exceeds_atlas_ui_limit",
+                    "cohort_timepoint_labels": list(cohort_labels),
+                    "cohort_site_count": len(cohort_trajectories),
+                    "atlas_ui_pair_limit": ATLAS_UI_PAIRWISE_MAX_SITES,
+                    "observed_transition_semantics": "membership transitions, not causal arrows",
+                    "contract_version": "time_varying_comovement.v1",
+                }
+            else:
+                raw_transitions = compute_time_varying_comovement(
                     list(cohort_labels),
                     cohort_trajectories,
                     profiles=cohort_profiles,
-                ).to_dict(),
-            }
+                ).to_dict()
+                transition_map = {
+                    "status": "ok",
+                    "cohort_timepoint_labels": list(cohort_labels),
+                    "cohort_site_count": len(cohort_trajectories),
+                    "observed_transition_semantics": "membership transitions, not causal arrows",
+                    "contract_version": raw_transitions.get("contract_version"),
+                    "transition_counts": raw_transitions.get("transition_counts") or {},
+                    "pair_transitions": (raw_transitions.get("pair_transitions") or [])[:ATLAS_UI_TRANSITION_PREVIEW],
+                    "site_transitions": (raw_transitions.get("site_transitions") or [])[:ATLAS_UI_TRANSITION_PREVIEW],
+                    "pair_scope": raw_transitions.get("pair_scope") or {},
+                }
         else:
             transition_map = {
                 "status": "unavailable",
@@ -10025,9 +10102,16 @@ async def substrate_temporal_atlas(
         "n_atlas_eligible_sites": eligible_count,
         "pattern_distribution": pattern_counts,
         "transition_map": transition_map,
-        "claim_ledger": shared_claim_ledger,
+        "claim_ledger": {
+            "contract_version": shared_claim_ledger.get("contract_version"),
+            "summary": shared_claim_ledger.get("summary") or {},
+            "site_claims": [],
+            "transition_claims": [],
+            "omitted_from_ui": True,
+        },
         "sites": sites,
         "contract_version": CONTRACT_VERSION,
+        "atlas_ui_payload_version": ATLAS_UI_PAYLOAD_VERSION,
         "status": "ok",
         "compatibility_warnings": compatibility_warnings[:100],
     })
