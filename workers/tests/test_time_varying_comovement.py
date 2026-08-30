@@ -1,5 +1,8 @@
 from ptm_shared.substrate_temporal_dynamics import SiteKineticConfig, compute_site_kinetic_profile
-from ptm_shared.time_varying_comovement import compute_time_varying_comovement
+from ptm_shared.time_varying_comovement import (
+    TimeVaryingCoMovementConfig,
+    compute_time_varying_comovement,
+)
 
 
 LABELS = ["0min", "5min", "10min", "15min"]
@@ -60,3 +63,29 @@ def test_independent_activation_requires_no_new_coactive_partner():
         item.site_key == "B_S2" and item.transition_type == "independent_activation"
         for item in result.site_transitions
     )
+
+
+def test_missing_endpoint_is_not_evaluable_not_inactive():
+    trajectories = {
+        "A_S1": [0.0, 1.5, None],
+        "B_S2": [0.0, 1.3, None],
+    }
+    result = compute_time_varying_comovement(
+        ["0min", "5min", "15min"],
+        trajectories,
+        config=TimeVaryingCoMovementConfig(
+            activity_threshold_fc=0.4,
+            min_window_observed=2,
+            require_atlas_eligible=False,
+            include_inert_site_observations=False,
+        ),
+    ).to_dict()
+    states = {
+        (row["site_key"], row["window_label"]): row["activity_state"]
+        for row in result["memberships"]
+    }
+    assert states[("A_S1", "5min→15min")] == "not_evaluable"
+    assert states[("B_S2", "5min→15min")] == "not_evaluable"
+    assert result["pair_transitions"] == []
+    assert result["pair_scope"]["non_evaluable_pair_window_comparison_count"] == 1
+    assert result["event_exposure"]["non_evaluable_site_transition_count"] == 2

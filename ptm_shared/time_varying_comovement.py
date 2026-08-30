@@ -20,6 +20,8 @@ CONTRACT_VERSION = "time_varying_comovement.v1"
 STATE_INACTIVE = "inactive"
 STATE_POSITIVE_ACTIVE = "positive_active"
 STATE_NEGATIVE_ACTIVE = "negative_active"
+STATE_NOT_EVALUABLE = "not_evaluable"
+ACTIVE_STATES = {STATE_POSITIVE_ACTIVE, STATE_NEGATIVE_ACTIVE}
 
 
 @dataclass(frozen=True)
@@ -83,13 +85,16 @@ class TimeVaryingCoMovementResult:
 
 
 def _activity_state(value: Optional[float], threshold: float) -> str:
-    if value is None or abs(value) < threshold:
+    """Classify an observed endpoint without converting missingness to biology."""
+    if value is None:
+        return STATE_NOT_EVALUABLE
+    if abs(value) < threshold:
         return STATE_INACTIVE
     return STATE_POSITIVE_ACTIVE if value > 0 else STATE_NEGATIVE_ACTIVE
 
 
 def _coactive_pair(state_a: str, state_b: str) -> bool:
-    return state_a != STATE_INACTIVE and state_a == state_b
+    return state_a in ACTIVE_STATES and state_a == state_b
 
 
 def _trajectory_values(
@@ -199,6 +204,12 @@ def compute_time_varying_comovement(
     global_pair_count = len(all_sites) * (len(all_sites) - 1) // 2
     site_transition_opportunities = 0
     inert_site_observation_count = 0
+    non_evaluable_site_transition_count = 0
+    pair_window_comparison_count = 0
+    evaluable_pair_window_comparison_count = 0
+    non_evaluable_pair_window_comparison_count = 0
+    non_event_pair_window_comparison_count = 0
+    both_windows_noncoactive_pair_count = 0
     for index in range(len(states_by_window) - 1):
         before = states_by_window[index]
         after = states_by_window[index + 1]
@@ -208,6 +219,16 @@ def compute_time_varying_comovement(
 
         for members in grouped_sites.values():
             for site_a, site_b in combinations(members, 2):
+                pair_window_comparison_count += 1
+                if (
+                    before[site_a] == STATE_NOT_EVALUABLE
+                    or before[site_b] == STATE_NOT_EVALUABLE
+                    or after[site_a] == STATE_NOT_EVALUABLE
+                    or after[site_b] == STATE_NOT_EVALUABLE
+                ):
+                    non_evaluable_pair_window_comparison_count += 1
+                    continue
+                evaluable_pair_window_comparison_count += 1
                 prior_pair = _coactive_pair(before[site_a], before[site_b])
                 next_pair = _coactive_pair(after[site_a], after[site_b])
                 if prior_pair:
@@ -227,6 +248,8 @@ def compute_time_varying_comovement(
                     else:
                         transition_type = "merge"
                 else:
+                    non_event_pair_window_comparison_count += 1
+                    both_windows_noncoactive_pair_count += 1
                     continue
                 pair_transitions.append(PairTransition(
                     site_a=site_a,
@@ -241,6 +264,12 @@ def compute_time_varying_comovement(
         for site_key in all_sites:
             site_transition_opportunities += 1
             prior_state, next_state = before[site_key], after[site_key]
+            if (
+                prior_state == STATE_NOT_EVALUABLE
+                or next_state == STATE_NOT_EVALUABLE
+            ):
+                non_evaluable_site_transition_count += 1
+                continue
             partners_before = len(before_partners[site_key])
             partners_after = len(after_partners[site_key])
             if prior_state != STATE_INACTIVE and next_state == STATE_INACTIVE:
@@ -286,10 +315,16 @@ def compute_time_varying_comovement(
             "cross_group_pair_excluded_count": global_pair_count - candidate_pair_count,
             "adjacent_window_transition_count": max(0, len(states_by_window) - 1),
             "candidate_pair_window_comparison_count": candidate_pair_count * max(0, len(states_by_window) - 1),
+            "observed_pair_window_comparison_count": pair_window_comparison_count,
+            "evaluable_pair_window_comparison_count": evaluable_pair_window_comparison_count,
+            "non_evaluable_pair_window_comparison_count": non_evaluable_pair_window_comparison_count,
+            "non_event_pair_window_comparison_count": non_event_pair_window_comparison_count,
+            "both_windows_noncoactive_pair_count": both_windows_noncoactive_pair_count,
         },
         event_exposure={
             "site_transition_opportunity_count": site_transition_opportunities,
             "inert_site_observation_count": inert_site_observation_count,
+            "non_evaluable_site_transition_count": non_evaluable_site_transition_count,
             "recorded_site_transition_count": len(site_transitions),
         },
     )

@@ -370,14 +370,18 @@ def _group_rows(
                 "fasta_taxonomy_id": str(row.get("FASTA_Taxonomy_ID") or ""),
             },
         )
-        entry["values_by_condition"][condition].append(
-            _float(row.get("PTM_Relative_Log2FC") or row.get("ptm_relative_log2fc"))
+        value = _optional_float(
+            row.get("PTM_Relative_Log2FC") or row.get("ptm_relative_log2fc")
         )
+        if value is not None:
+            entry["values_by_condition"][condition].append(value)
         q_value = _optional_float(row.get("q_value"))
         if q_value is not None:
             entry["q_values"].append(q_value)
     for entry in grouped.values():
         for condition, values in entry.pop("values_by_condition").items():
+            if not values:
+                continue
             if site_aggregation == "mean":
                 aggregated = sum(values) / len(values)
             elif site_aggregation == "median":
@@ -462,11 +466,6 @@ def _minutes(label: str) -> float:
         return math.inf
     value, unit = float(match.group(1)), match.group(2).lower()
     return value / 60 if unit in {"sec", "s"} else value * 60 if unit in {"hr", "h", "hour"} else value * 1440 if unit in {"day", "d"} else value
-
-
-def _float(value: Any) -> float:
-    parsed = _optional_float(value)
-    return parsed if parsed is not None else 0.0
 
 
 def _optional_float(value: Any) -> float | None:

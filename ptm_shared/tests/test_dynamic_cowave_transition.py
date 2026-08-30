@@ -111,6 +111,34 @@ def test_dynamic_excludes_inert_site_observations_but_keeps_exposure() -> None:
     assert result["event_exposure"]["inert_site_observation_count"] == 12
 
 
+def test_dynamic_no_call_state_is_not_counted_as_same_sign_active_pair() -> None:
+    labels = ["1min", "5min", "15min", "30min"]
+    members = {
+        "A_S1": [0.0, 1.0, None, 1.0],
+        "B_S1": [0.0, 1.1, None, 1.2],
+    }
+    contract = {
+        "contract_version": "temporal_wave_contract.v1",
+        "timepoints": labels,
+        "waves": [{
+            "wave_id": "TW-01",
+            "members": list(members),
+            "member_details": [
+                {"key": key, "temporal_values": dict(zip(labels, values))}
+                for key, values in members.items()
+            ],
+        }],
+    }
+    result = analyze_dynamic_co_wave_transitions(
+        contract,
+        config={"activity_threshold_fc": 0.4, "minimum_observed_timepoints": 3},
+    )
+    assert result["summary"]["static_pair_window_opportunities"] == 3
+    assert result["summary"]["same_sign_active_pair_windows"] == 2
+    assert result["summary"]["local_active_pair_coverage"] == 2 / 3
+    assert result["pair_scope"]["non_evaluable_pair_window_comparison_count"] == 2
+
+
 def test_single_wave_group_scoping_matches_intended_global_pair_semantics() -> None:
     contract = _wave_contract()
     labels = contract["timepoints"]

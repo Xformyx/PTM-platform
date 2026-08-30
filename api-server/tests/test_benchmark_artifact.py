@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.services.benchmark_artifact import build_score_artifact
+from app.services.benchmark_artifact import build_score_artifact, build_temporal_request
 
 
 def test_artifact_uses_only_vector_and_fasta_evidence(tmp_path: Path) -> None:
@@ -59,3 +59,26 @@ def test_artifact_uses_trusted_fasta_taxonomy_when_vector_has_no_taxonomy_column
     assert evidence["method"] == "sequence_isoform_species"
     assert evidence["taxonomy_id"] == "9606"
     assert evidence["species_provenance"] == "trusted_fasta_record"
+
+
+def test_blank_ptm_log2fc_remains_missing_for_complete_case_projection(tmp_path: Path) -> None:
+    (tmp_path / "ptm_vector_data_normalized_phospho.tsv").write_text(
+        "Gene.Name\tPTM_Position\tCondition\tPTM_Relative_Log2FC\tq_value\n"
+        "G1\tS1\t1min\t0.0\t0.01\n"
+        "G1\tS1\t5min\t\t0.01\n"
+        "G1\tS1\t15min\t1.2\t0.01\n"
+        "G2\tS2\t1min\t0.0\t0.01\n"
+        "G2\tS2\t5min\t0.4\t0.01\n"
+        "G2\tS2\t15min\t1.2\t0.01\n",
+        encoding="utf-8",
+    )
+    request = build_temporal_request(
+        output_dir=tmp_path,
+        ptm_type="phosphorylation",
+        site_aggregation="median",
+        wave_config={"compute_directionality": False},
+    )
+    assert "5min" not in request["site_rows"]["G1_S1"]["values"]
+    projection = request["wave_input_projection_provenance"]
+    assert projection["missing_value_policy"] == "complete_case_no_imputation"
+    assert projection["eligible_site_count"] == 1

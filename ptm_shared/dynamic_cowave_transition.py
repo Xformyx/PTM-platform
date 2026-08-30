@@ -209,6 +209,7 @@ def _annotate_once(
     window_labels = sorted({str(row.get("window_label")) for row in raw.get("memberships") or []})
     opportunities = 0
     active_pairs = 0
+    active_states = {"positive_active", "negative_active"}
     for wave_id in sorted(set(membership.values())):
         members = sorted(key for key, assigned_wave in membership.items() if assigned_wave == wave_id and key in qualified)
         for left, right in combinations(members, 2):
@@ -216,7 +217,7 @@ def _annotate_once(
                 left_state = state_lookup.get((left, window), "inactive")
                 right_state = state_lookup.get((right, window), "inactive")
                 opportunities += 1
-                if left_state != "inactive" and left_state == right_state:
+                if left_state in active_states and left_state == right_state:
                     active_pairs += 1
     nonpersistent = [row for row in pair_events if row.get("transition_type") != "persistence"]
     transition_waves = sorted({str(row["static_wave_id"]) for row in nonpersistent})
