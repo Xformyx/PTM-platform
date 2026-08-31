@@ -20,11 +20,12 @@ from collections import Counter, defaultdict
 from typing import Any, Iterable, Mapping, Sequence
 
 
-CONTRACT_VERSION = "ptm_kinase_feature_provenance.v1"
+CONTRACT_VERSION = "ptm_kinase_feature_provenance.v2"
 DIRECT_NO_CALL_TIER = "E_direct_kinase_no_call"
 TEMPORAL_ASSOCIATION_TIER = "D_temporal_aggregate_context"
 UNRESOLVED_PRIMARY_REASON = "not_assigned_without_approved_f1_f8_priority_policy"
 MAPPING_LEDGER_STATUS = "not_computable_feature_level_exact_mapping_and_curated_edge_provenance_absent"
+CLASS_I_LOCALIZATION_THRESHOLD = 0.75
 
 
 def _text(record: Mapping[str, Any], *keys: str) -> str:
@@ -65,15 +66,46 @@ def _residue_count(modified_sequence: str) -> int:
     return max(named, unimod)
 
 
+def _accession_tokens(protein_group: str) -> list[str]:
+    """Extract accession-like tokens without claiming canonical protein identity."""
+    tokens: list[str] = []
+    for candidate in re.split(r"[;,]", protein_group or ""):
+        item = candidate.strip()
+        if not item:
+            continue
+        pipe_parts = [part.strip() for part in item.split("|")]
+        if len(pipe_parts) >= 2 and pipe_parts[0].lower() in {"sp", "tr"}:
+            item = pipe_parts[1]
+        tokens.append(item)
+    return sorted(set(tokens))
+
+
 def _protein_group_ambiguous(protein_group: str) -> bool:
-    normalized = protein_group.strip()
-    if not normalized:
-        return True
-    return any(delimiter in normalized for delimiter in (";", ",", "|"))
+    return len(_accession_tokens(protein_group)) != 1
+
+
+def _position_tokens(record: Mapping[str, Any]) -> list[str]:
+    raw = _text(
+        record,
+        "all_reported_ptm_positions",
+        "PTM_Positions",
+        "PTM_Sites",
+        "PTM_Position",
+        "position",
+    )
+    return sorted({item.strip().upper() for item in re.split(r"[;,|/]", raw) if item.strip()})
+
+
+def _localization_status(value: float | None) -> str:
+    if value is None:
+        return "not_recorded"
+    if value >= CLASS_I_LOCALIZATION_THRESHOLD:
+        return "recorded_class_I_or_higher"
+    return "recorded_below_class_I_threshold"
 
 
 def _feature_id(record: Mapping[str, Any], site_key: str) -> str:
-    protein_group = _text(record, "protein_group", "Protein.Group", "Protein.Ids")
+    protein_group = _text(record, "protein_group", "Protein.Group", "Protein.Ids", "protein_accession", "UniProt_ID")
     modified_sequence = _text(record, "modified_sequence", "Modified.Sequence", "ModifiedSequence")
     charge = _text(record, "precursor_charge", "Precursor.Charge", "PrecursorCharge")
     precursor = _text(record, "precursor_id", "Precursor.Id", "PrecursorId")
@@ -97,11 +129,16 @@ def _empty_reason_masks() -> dict[str, str]:
 
 def _record_from_rows(site_key: str, rows: Sequence[Mapping[str, Any]], conditions: Sequence[str]) -> dict[str, Any]:
     first = rows[0]
-    protein_group = _text(first, "protein_group", "Protein.Group", "Protein.Ids")
+    protein_group = _text(first, "protein_group", "Protein.Group", "Protein.Ids", "protein_accession", "UniProt_ID")
     modified_sequence = _text(first, "modified_sequence", "Modified.Sequence", "ModifiedSequence")
     precursor_charge = _text(first, "precursor_charge", "Precursor.Charge", "PrecursorCharge")
     precursor_id = _text(first, "precursor_id", "Precursor.Id", "PrecursorId")
     localization = _text(first, "localization_probability", "Localization.Probability", "PTM_Probability")
+    localization_value = _finite(localization)
+    accessions = _accession_tokens(protein_group)
+    reported_positions = _position_tokens(first)
+    source_export_schema = _text(first, "source_export_schema", "Source_Export_Schema")
+    source_feature_key = _text(first, "source_feature_key", "Source_Feature_Key")
     observed_conditions = {
         _text(row, "condition", "Condition")
         for row in rows
@@ -109,15 +146,21 @@ def _record_from_rows(site_key: str, rows: Sequence[Mapping[str, Any]], conditio
     }
     masks = _empty_reason_masks()
     protein_ambiguous = _protein_group_ambiguous(protein_group)
-    multi_phospho = _residue_count(modified_sequence) > 1
-    localization_recorded = _finite(localization) is not None
+    multi_phospho = max(_residue_count(modified_sequence), len(reported_positions)) > 1
+    localization_state = _localization_status(localization_value)
+    localization_recorded = localization_value is not None
     incomplete_grid = any(condition not in observed_conditions for condition in conditions)
     masks["F1_protein_accession_or_group_ambiguous"] = "flagged" if protein_ambiguous else "passed"
-    masks["F2_multi_phosphorylated_or_localization_ambiguous"] = (
-        "flagged_multi_phosphorylated" if multi_phospho
-        else "flagged_localization_not_recorded" if not localization_recorded
-        else "passed"
-    )
+    if multi_phospho and not localization_recorded:
+        masks["F2_multi_phosphorylated_or_localization_ambiguous"] = "flagged_multi_phosphorylated_and_localization_not_recorded"
+    elif multi_phospho:
+        masks["F2_multi_phosphorylated_or_localization_ambiguous"] = "flagged_multi_phosphorylated"
+    elif not localization_recorded:
+        masks["F2_multi_phosphorylated_or_localization_ambiguous"] = "flagged_localization_not_recorded"
+    elif localization_value < CLASS_I_LOCALIZATION_THRESHOLD:
+        masks["F2_multi_phosphorylated_or_localization_ambiguous"] = "flagged_localization_below_class_I_threshold"
+    else:
+        masks["F2_multi_phosphorylated_or_localization_ambiguous"] = "passed"
     masks["F5_quantitative_time_data_insufficient"] = "flagged" if incomplete_grid else "passed"
     direct_no_call_reasons = []
     if protein_ambiguous:
@@ -126,6 +169,8 @@ def _record_from_rows(site_key: str, rows: Sequence[Mapping[str, Any]], conditio
         direct_no_call_reasons.append("multi_phosphorylated_precursor")
     if not localization_recorded:
         direct_no_call_reasons.append("localization_probability_not_recorded")
+    elif localization_value < CLASS_I_LOCALIZATION_THRESHOLD:
+        direct_no_call_reasons.append("localization_probability_below_class_I_threshold")
     direct_no_call_reasons.append("feature_level_exact_mapping_and_curated_edge_provenance_absent")
     return {
         "feature_id": _feature_id(first, site_key),
@@ -133,12 +178,26 @@ def _record_from_rows(site_key: str, rows: Sequence[Mapping[str, Any]], conditio
         "nominal_aggregate_key": site_key,
         "identity_provenance": {
             "protein_group": protein_group or None,
+            "protein_accession_tokens": accessions,
+            "protein_accession_status": (
+                "single_accession_observed" if len(accessions) == 1
+                else "multiple_or_missing_accessions"
+            ),
             "modified_sequence": modified_sequence or None,
             "precursor_charge": precursor_charge or None,
             "precursor_id": precursor_id or None,
+            "all_reported_ptm_positions": reported_positions,
+            "reported_ptm_position_count": len(reported_positions),
+            "localization_probability": localization_value,
+            "source_export_schema": source_export_schema or None,
+            "source_feature_key": source_feature_key or None,
             "protein_group_status": "ambiguous_or_missing" if protein_ambiguous else "single_group_observed",
             "phosphorylation_form_status": "multi_phosphorylated" if multi_phospho else "single_or_unspecified_modification",
-            "localization_status": "recorded_numeric" if localization_recorded else "not_recorded",
+            "localization_status": localization_state,
+            "identity_claim_boundary": (
+                "Feature identity is export provenance only; it does not establish "
+                "a residue-exact species/isoform mapping or direct kinase relation."
+            ),
         },
         "quantification_provenance": {
             "declared_timepoint_count": len(conditions),
@@ -280,6 +339,14 @@ def compact_summary(ledger: Mapping[str, Any]) -> dict[str, Any]:
             for row in records
         ),
     }
+    localization_counts = Counter(
+        str((row.get("identity_provenance") or {}).get("localization_status") or "unknown")
+        for row in records
+    )
+    accession_counts = Counter(
+        str((row.get("identity_provenance") or {}).get("protein_accession_status") or "unknown")
+        for row in records
+    )
     aggregate_count = len({str(row.get("nominal_aggregate_key") or "") for row in records if row.get("nominal_aggregate_key")})
     return {
         "contract_version": CONTRACT_VERSION,
@@ -289,6 +356,11 @@ def compact_summary(ledger: Mapping[str, Any]) -> dict[str, Any]:
         "direct_kinase_evidence_tier_counts": dict(sorted(direct_counts.items())),
         "temporal_evidence_tier_counts": dict(sorted(temporal_counts.items())),
         "reason_mask_counts": reason_masks,
+        "identity_readiness_counts": {
+            "localization_status": dict(sorted(localization_counts.items())),
+            "protein_accession_status": dict(sorted(accession_counts.items())),
+            "class_I_localization_threshold": CLASS_I_LOCALIZATION_THRESHOLD,
+        },
         "mutually_exclusive_f1_f8_ledger_status": MAPPING_LEDGER_STATUS,
         "unmatched_reason_primary_policy": UNRESOLVED_PRIMARY_REASON,
         "direct_kinase_attribution_status": "no_call_without_feature_level_mapping_localization_and_curated_edge_provenance",
@@ -298,7 +370,9 @@ def compact_summary(ledger: Mapping[str, Any]) -> dict[str, Any]:
             "or support causal/perturbation claims."
         ),
         "excluded_fields": [
-            "modified_sequence", "precursor_id", "protein_group", "candidate_kinase_names",
+            "modified_sequence", "precursor_id", "protein_group", "protein_accession_tokens",
+            "all_reported_ptm_positions", "localization_probability", "source_feature_key",
+            "candidate_kinase_names",
             "raw_log2fc", "raw_intensity", "q_value", "benchmark_truth", "known_relation_registry",
         ],
     }
@@ -306,6 +380,7 @@ def compact_summary(ledger: Mapping[str, Any]) -> dict[str, Any]:
 
 __all__ = [
     "CONTRACT_VERSION",
+    "CLASS_I_LOCALIZATION_THRESHOLD",
     "DIRECT_NO_CALL_TIER",
     "TEMPORAL_ASSOCIATION_TIER",
     "attach_temporal_context",

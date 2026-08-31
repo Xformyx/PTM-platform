@@ -42,7 +42,7 @@ def test_ledger_preserves_masks_without_assigning_a_primary_f1_f8_reason():
     ledger = build_feature_provenance_ledger(_rows(), ["1min", "5min"])
     first = next(row for row in ledger["feature_records"] if row["nominal_aggregate_key"] == "MAPK1_Y185")
     assert first["unmatched_reason_masks"]["F1_protein_accession_or_group_ambiguous"] == "flagged"
-    assert first["unmatched_reason_masks"]["F2_multi_phosphorylated_or_localization_ambiguous"] == "flagged_multi_phosphorylated"
+    assert first["unmatched_reason_masks"]["F2_multi_phosphorylated_or_localization_ambiguous"] == "flagged_multi_phosphorylated_and_localization_not_recorded"
     assert first["unmatched_reason_masks"]["F5_quantitative_time_data_insufficient"] == "flagged"
     assert first["unmatched_reason_primary"] == "not_assigned_without_approved_f1_f8_priority_policy"
     assert first["direct_kinase_attribution"]["evidence_tier"] == DIRECT_NO_CALL_TIER
@@ -61,7 +61,48 @@ def test_wave_context_does_not_promote_direct_kinase_tier_and_compact_summary_hi
     summary = compact_summary(enriched)
     assert "feature_records" not in summary
     assert "modified_sequence" in summary["excluded_fields"]
+    assert "all_reported_ptm_positions" in summary["excluded_fields"]
     assert summary["feature_record_count"] == 2
+
+
+def test_v2_identity_ledger_records_localization_readiness_without_promoting_direct_call():
+    ledger = build_feature_provenance_ledger(_rows(), ["1min", "5min"])
+    gab2 = next(row for row in ledger["feature_records"] if row["nominal_aggregate_key"] == "GAB2_S498")
+    identity = gab2["identity_provenance"]
+
+    assert ledger["contract_version"].endswith(".v2")
+    assert identity["protein_accession_tokens"] == ["Q9Z0W4"]
+    assert identity["protein_accession_status"] == "single_accession_observed"
+    assert identity["reported_ptm_position_count"] == 1
+    assert identity["localization_status"] == "recorded_class_I_or_higher"
+    assert gab2["direct_kinase_attribution"]["evidence_tier"] == DIRECT_NO_CALL_TIER
+    assert "feature_level_exact_mapping_and_curated_edge_provenance_absent" in gab2["direct_kinase_attribution"]["reasons"]
+
+
+def test_below_class_i_localization_is_a_no_call_and_compact_summary_is_identity_safe():
+    rows = [
+        {
+            "gene": "AKT1", "position": "S473", "condition": "1min", "log2fc": 0.6,
+            "protein_group": "sp|P31749|AKT1_HUMAN", "modified_sequence": "AA(Phospho)BBCC",
+            "precursor_charge": "2", "precursor_id": "precursor-c",
+            "all_reported_ptm_positions": "S473", "localization_probability": "0.42",
+            "source_export_schema": "ptm_vector_data_normalized_phospho.tsv",
+        },
+        {
+            "gene": "AKT1", "position": "S473", "condition": "5min", "log2fc": 0.4,
+            "protein_group": "sp|P31749|AKT1_HUMAN", "modified_sequence": "AA(Phospho)BBCC",
+            "precursor_charge": "2", "precursor_id": "precursor-c",
+            "all_reported_ptm_positions": "S473", "localization_probability": "0.42",
+            "source_export_schema": "ptm_vector_data_normalized_phospho.tsv",
+        },
+    ]
+    ledger = build_feature_provenance_ledger(rows, ["1min", "5min"])
+    record = ledger["feature_records"][0]
+    assert record["unmatched_reason_masks"]["F2_multi_phosphorylated_or_localization_ambiguous"] == "flagged_localization_below_class_I_threshold"
+    assert "localization_probability_below_class_I_threshold" in record["direct_kinase_attribution"]["reasons"]
+    compact = compact_summary(ledger)
+    assert compact["identity_readiness_counts"]["localization_status"] == {"recorded_below_class_I_threshold": 1}
+    assert "P31749" not in str(compact)
 
 
 def test_compact_sidecar_summary_releases_ledger_counts_but_not_feature_identity():
