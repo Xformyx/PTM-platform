@@ -500,6 +500,7 @@ def build_v2_sidecar(
     study_context: Any | None = None,
     raw_replicate_fc_series: Mapping[str, Any] | None = None,
     temporal_input_provenance: Mapping[str, Any] | None = None,
+    kinase_feature_evidence_ledger: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build v2 enrichment-free temporal sidecar.
 
@@ -678,6 +679,10 @@ def build_v2_sidecar(
             ),
         }
 
+    feature_ledger = dict(kinase_feature_evidence_ledger or {})
+    from ptm_shared.kinase_evidence_ledger import compact_summary as compact_kinase_ledger_summary
+    feature_ledger_summary = compact_kinase_ledger_summary(feature_ledger) if feature_ledger else {}
+
     return {
         "schema_version": SIDECAR_SCHEMA_VERSION,
         "temporal_wave_contract": dict(wave_contract or {}),
@@ -695,6 +700,10 @@ def build_v2_sidecar(
         "temporal_event_order": temporal_event_order,
         "probabilistic_co_wave": probabilistic_cowave,
         "temporal_precedence": temporal_precedence,
+        # Full identity/mapping provenance stays in the persisted sidecar.  The
+        # compact DB/API/RAG projection releases only aggregate no-call counts.
+        "kinase_feature_evidence_ledger": feature_ledger,
+        "kinase_feature_evidence_ledger_summary": feature_ledger_summary,
         "provenance": {
             "source": "production_preprocessing_outputs",
             "rag_used": False,
@@ -798,6 +807,7 @@ def build_production_temporal_ptm_protein_analysis(
     study_context: Any | None = None,
     raw_replicate_fc_series: Mapping[str, Any] | None = None,
     temporal_input_provenance: Mapping[str, Any] | None = None,
+    feature_provenance_rows: Iterable[Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Build the exact v2 sidecar contract for a normal production order.
 
@@ -844,6 +854,16 @@ def build_production_temporal_ptm_protein_analysis(
     )
     wave_contract["analysis_scope"] = "shared_complete_case_no_imputation"
     wave_contract["input_projection_provenance"] = input_projection
+    from ptm_shared.kinase_evidence_ledger import (
+        attach_temporal_context,
+        build_feature_provenance_ledger,
+    )
+
+    feature_ledger = attach_temporal_context(
+        build_feature_provenance_ledger(feature_provenance_rows or (), ordered_conditions),
+        wave_contract,
+        dict(tmm_result or {}).get("relative_site_contribution_matrix") or {},
+    )
     sidecar = build_v2_sidecar(
         output_dir=output_dir,
         ptm_type=ptm_type,
@@ -856,6 +876,7 @@ def build_production_temporal_ptm_protein_analysis(
         study_context=study_context,
         raw_replicate_fc_series=raw_replicate_fc_series,
         temporal_input_provenance=temporal_input_provenance,
+        kinase_feature_evidence_ledger=feature_ledger,
     )
     sidecar["provenance"]["analysis_mode"] = "production"
     sidecar["provenance"]["shared_engine_contract"] = "unified_temporal_ptm_protein.v1"
@@ -923,6 +944,7 @@ def summarize_temporal_ptm_protein_analysis(
     dynamic_t_adjacency = dict(dynamic_transition.get("t_adjacency_test") or {})
     temporal_event_order = dict(sidecar.get("temporal_event_order") or {})
     temporal_event_summary = dict(temporal_event_order.get("summary") or {})
+    kinase_ledger_summary = dict(sidecar.get("kinase_feature_evidence_ledger_summary") or {})
     eligible_edges = [row for row in edges if row.get("eligible_for_mechanism_chain")]
     ordered_edges = sorted(
         eligible_edges or edges,
@@ -991,5 +1013,6 @@ def summarize_temporal_ptm_protein_analysis(
         ],
         "hypothesis_evidence_packets": packets[:max_examples],
         "temporal_precedence_status": _compact_temporal_precedence(sidecar),
+        "kinase_feature_evidence_ledger_summary": kinase_ledger_summary,
         "provenance": dict(sidecar.get("provenance") or {}),
     }

@@ -1028,6 +1028,36 @@ def build_temporal_evidence_packet(
         allowed_verbs=("measured", "quantified", "observed", "reported"),
     )
 
+    ledger_summary = dict(sidecar.get("kinase_feature_evidence_ledger_summary") or {})
+    if ledger_summary:
+        direct_tiers = dict(ledger_summary.get("direct_kinase_evidence_tier_counts") or {})
+        temporal_tiers = dict(ledger_summary.get("temporal_evidence_tier_counts") or {})
+        add_record(
+            "DATA-KINASE-ATTRIBUTION-READINESS",
+            "provenance_no_call",
+            (
+                "Kinase-attribution provenance status: feature records={features}; nominal aggregates={aggregates}; "
+                "direct-kinase evidence tiers={direct_tiers}; temporal evidence tiers={temporal_tiers}; "
+                "reason-mask counts={masks}; mutually exclusive F1-F8 ledger status={ledger_status}; "
+                "direct kinase attribution status={direct_status}. {boundary}"
+            ).format(
+                features=ledger_summary.get("feature_record_count"),
+                aggregates=ledger_summary.get("nominal_aggregate_count"),
+                direct_tiers=direct_tiers,
+                temporal_tiers=temporal_tiers,
+                masks=dict(ledger_summary.get("reason_mask_counts") or {}),
+                ledger_status=ledger_summary.get("mutually_exclusive_f1_f8_ledger_status"),
+                direct_status=ledger_summary.get("direct_kinase_attribution_status"),
+                boundary=ledger_summary.get(
+                    "claim_boundary",
+                    "No direct kinase attribution is available without feature-level mapping, localization, and curated-edge provenance.",
+                ),
+            ),
+            availability="computed",
+            claim_level="L1_provenance_no_call",
+            allowed_verbs=("was recorded", "was unresolved", "was not evaluated"),
+        )
+
     dynamic_status = sidecar.get("dynamic_co_wave_transition_status", "not_requested")
     dynamic_loto = dict(sidecar.get("dynamic_transition_loto") or {})
     dynamic_pair_count = int(sidecar.get("dynamic_transition_pair_count") or 0)

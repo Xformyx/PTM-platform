@@ -7549,11 +7549,12 @@ async def kinase_activity_heatmap(
         DYNAMIC_COWAVE_CONFIG,
         DYNAMIC_COWAVE_CONTRACT_VERSION,
     )
+    from ptm_shared.kinase_evidence_ledger import CONTRACT_VERSION as KINASE_FEATURE_LEDGER_CONTRACT_VERSION
 
     dynamic_transition_config_sha = dynamic_transition_config_sha256(DYNAMIC_COWAVE_CONFIG)
     dynamic_analysis_cache_contract = (
-        f"unified_temporal_ptm_protein.v2|{DYNAMIC_COWAVE_CONTRACT_VERSION}|"
-        f"{dynamic_transition_config_sha}"
+        f"unified_temporal_ptm_protein.v3|{DYNAMIC_COWAVE_CONTRACT_VERSION}|"
+        f"{dynamic_transition_config_sha}|{KINASE_FEATURE_LEDGER_CONTRACT_VERSION}"
     )
     km_keys = sorted([m.get("kinase", "") for m in kinase_modules])
     tmm_config_key = json.dumps(effective_tmm_config, sort_keys=True, separators=(",", ":"))
@@ -7578,13 +7579,18 @@ async def kinase_activity_heatmap(
                 cached_sidecar.get("dynamic_co_wave_transition_status") == "computed"
                 and cached_dynamic_config_sha == dynamic_transition_config_sha
             )
+            cached_ledger_ready = (
+                (cached_sidecar.get("kinase_feature_evidence_ledger_summary") or {}).get("contract_version")
+                == KINASE_FEATURE_LEDGER_CONTRACT_VERSION
+            )
             if cached.get("_cache_hash") == cache_hash:
                 return {**cached, "_cached": True}
-            if not cached_dynamic_ready:
+            if not cached_dynamic_ready or not cached_ledger_ready:
                 # A legacy/static cache must not block dynamic-transition
-                # rollout.  Rebuild automatically; parameter mismatches that
-                # already have a current sidecar remain explicitly stale.
-                _log.info("[TMM] Rebuilding cached heatmap to add current dynamic co-wave annotation")
+                # or provenance-ledger rollout.  Rebuild automatically;
+                # parameter mismatches that already have current contracts
+                # remain explicitly stale.
+                _log.info("[TMM] Rebuilding cached heatmap to add current temporal and provenance contracts")
             else:
                 return {**cached, "_cached": True, "_stale": True}
 
@@ -7611,9 +7617,13 @@ async def kinase_activity_heatmap(
                     occupancy_logit_raw = row.get("Occupancy_Logit_Delta", "")
                     occupancy_q_raw = row.get("Occupancy_Q_Value", "")
                     try:
-                        rel_fc = float(rel_fc) if rel_fc else 0.0
-                    except ValueError:
-                        rel_fc = 0.0
+                        rel_fc = (
+                            float(rel_fc)
+                            if rel_fc and str(rel_fc).strip().lower() not in ("", "nan")
+                            else None
+                        )
+                    except (ValueError, TypeError):
+                        rel_fc = None
                     try:
                         q_val = float(q_val_raw) if q_val_raw and q_val_raw.strip().lower() not in ("", "nan") else None
                     except (ValueError, TypeError):
@@ -7629,6 +7639,11 @@ async def kinase_activity_heatmap(
                     vector_data.append({
                         "gene": gene, "position": str(pos),
                         "condition": cond, "log2fc": rel_fc, "q_value": q_val,
+                        "protein_group": row.get("Protein.Group", row.get("Protein.Ids", "")),
+                        "modified_sequence": row.get("Modified.Sequence", ""),
+                        "precursor_charge": row.get("Precursor.Charge", ""),
+                        "precursor_id": row.get("Precursor.Id", ""),
+                        "localization_probability": row.get("Localization.Probability", row.get("PTM_Probability", "")),
                         "occupancy_logit_delta": occupancy_logit,
                         "occupancy_q_value": occupancy_q,
                         "pair_quality_tier": row.get("Pair_Quality_Tier", "O0"),
@@ -7652,6 +7667,10 @@ async def kinase_activity_heatmap(
         key = f"{row['gene'].upper()}_{row['position'].upper()}"
         cond = row["condition"]
         all_conditions.add(cond)
+        # A blank/non-finite PTM value is missing, not zero.  Keep the row for
+        # provenance masks but do not create a temporal observation.
+        if row["log2fc"] is None:
+            continue
         if key not in ptm_timeseries:
             ptm_timeseries[key] = {}
             ptm_qvalues[key] = {}
@@ -9274,6 +9293,7 @@ async def kinase_activity_heatmap(
             ptm_timeseries=ptm_timeseries,
             conditions=conditions_sorted,
             tmm_result=result_data,
+            feature_provenance_rows=vector_data,
         )
         unified_path = output_dir / "temporal_ptm_protein_analysis_v2.json"
         unified_path.write_text(
