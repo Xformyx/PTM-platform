@@ -4,6 +4,7 @@ import csv
 
 from app.services.benchmark_artifact import build_temporal_request
 from ptm_shared.enrichment_free_temporal_sidecar import build_production_temporal_ptm_protein_analysis
+from ptm_shared.temporal_sidecar_freshness import full_dynamic_is_current
 
 
 def _write_vector(path) -> None:
@@ -64,3 +65,25 @@ def test_strict_and_production_share_complete_case_wave_universe(tmp_path) -> No
     assert strict_projection["eligible_site_keys_sha256"] == production_projection["eligible_site_keys_sha256"]
     assert strict_members == production_members
     assert "G3_S3" not in strict_members
+
+
+def test_production_sidecar_without_mapping_bundle_is_explicit_m0_and_current(tmp_path) -> None:
+    production = build_production_temporal_ptm_protein_analysis(
+        output_dir=tmp_path,
+        ptm_type="phosphorylation",
+        ptm_timeseries={
+            "G1_S1": {"1min": 0.0, "5min": 1.0, "15min": 2.0},
+            "G2_S2": {"1min": 0.1, "5min": 1.1, "15min": 2.1},
+        },
+        conditions=["1min", "5min", "15min"],
+        tmm_result={"conditions": ["1min", "5min", "15min"], "kinase_scores": [], "relative_site_contribution_matrix": {}},
+        enable_dynamic_transition=True,
+    )
+
+    ledger = production["kinase_feature_evidence_ledger"]
+    compact = production["kinase_feature_evidence_ledger_summary"]
+    assert ledger["contract_version"].endswith(".v3")
+    assert ledger["mapping_importer"]["mapping_bundle_status"] == "not_evaluable"
+    assert ledger["mapping_importer"]["mapping_bundle_error_code"] == "mapping_source_bundle_not_supplied"
+    assert compact["mapping_readiness"]["mapping_class_counts"] == {"M0": 0, "M1": 0, "M2": 0, "M3": 0, "M4": 0}
+    assert full_dynamic_is_current(production) is True

@@ -13,6 +13,8 @@ from ptm_shared.temporal_optimization_config import (
     DYNAMIC_COWAVE_CONFIG,
     DYNAMIC_COWAVE_CONTRACT_VERSION,
 )
+from ptm_shared.kinase_evidence_ledger import CONTRACT_VERSION as KINASE_LEDGER_CONTRACT_VERSION
+from ptm_shared.species_site_mapping import MAPPING_IMPORTER_CONTRACT_VERSION
 
 
 def _compact(marker: str) -> dict:
@@ -23,6 +25,15 @@ def _compact(marker: str) -> dict:
         "dynamic_co_wave_transition_status": "computed",
         "dynamic_co_wave_transition_contract_version": DYNAMIC_COWAVE_CONTRACT_VERSION,
         "dynamic_co_wave_transition_config_sha256": dynamic_transition_config_sha256(DYNAMIC_COWAVE_CONFIG),
+        "kinase_feature_evidence_ledger_summary": {
+            "contract_version": KINASE_LEDGER_CONTRACT_VERSION,
+            "mapping_readiness": {
+                "mapping_importer_contract_version": MAPPING_IMPORTER_CONTRACT_VERSION,
+                "mapping_bundle_status": "not_evaluable",
+                "mapping_bundle_sha256": None,
+                "mapping_class_counts": {"M0": 0, "M1": 0, "M2": 0, "M3": 0, "M4": 0},
+            },
+        },
     }
 
 
@@ -40,6 +51,14 @@ def _full_sidecar() -> dict:
             "contract_version": DYNAMIC_COWAVE_CONTRACT_VERSION,
             "provenance": {"config_sha256": dynamic_transition_config_sha256(DYNAMIC_COWAVE_CONFIG)},
             "summary": {},
+        },
+        "kinase_feature_evidence_ledger": {
+            "contract_version": KINASE_LEDGER_CONTRACT_VERSION,
+            "mapping_importer": {
+                "mapping_importer_contract_version": MAPPING_IMPORTER_CONTRACT_VERSION,
+                "mapping_bundle_status": "not_evaluable",
+                "mapping_bundle_sha256": None,
+            },
         },
         "provenance": {"shared_engine_contract": "unified_temporal_ptm_protein.v1"},
     }

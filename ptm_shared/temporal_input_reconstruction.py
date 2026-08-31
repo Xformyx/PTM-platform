@@ -206,3 +206,79 @@ def build_temporal_input_bundle(
             "it contains no benchmark truth, locked evaluation, RAG prose, literature, or LLM output."
         ),
     }
+
+
+def build_feature_provenance_rows(
+    rows: Iterable[Mapping[str, Any]],
+    *,
+    declared_conditions: Iterable[Any],
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Recover only explicit feature identity fields for the P0/P1 full ledger.
+
+    RAG-enriched records may represent an aggregate. This helper never invents a
+    precursor, modified sequence, accession or localization value from a
+    gene/site label. Records without explicit source feature identity are
+    excluded and counted, allowing P1 to remain M0/no-call rather than silently
+    treating a collapsed gene/site aggregate as a feature-level mapping proof.
+    """
+
+    conditions = [str(value) for value in declared_conditions if str(value).strip()]
+    feature_rows: list[dict[str, Any]] = []
+    input_count = 0
+    identity_complete_count = 0
+    excluded_count = 0
+    for raw in rows:
+        if not isinstance(raw, Mapping):
+            continue
+        input_count += 1
+        gene = str(raw.get("gene") or raw.get("Gene.Name") or "").strip()
+        position = str(raw.get("position") or raw.get("PTM_Position") or "").strip()
+        protein_group = str(raw.get("protein_group") or raw.get("Protein.Group") or raw.get("Protein.Ids") or raw.get("UniProt_ID") or "").strip()
+        modified_sequence = str(raw.get("modified_sequence") or raw.get("Modified.Sequence") or raw.get("ModifiedSequence") or "").strip()
+        precursor_id = str(raw.get("precursor_id") or raw.get("Precursor.Id") or raw.get("PrecursorId") or "").strip()
+        if not (gene and position and protein_group and modified_sequence and precursor_id):
+            excluded_count += 1
+            continue
+        identity_complete_count += 1
+        base = {
+            "gene": gene,
+            "position": position,
+            "protein_group": protein_group,
+            "protein_accession": raw.get("protein_accession") or raw.get("UniProt_ID"),
+            "modified_sequence": modified_sequence,
+            "precursor_charge": raw.get("precursor_charge") or raw.get("Precursor.Charge") or raw.get("PrecursorCharge"),
+            "precursor_id": precursor_id,
+            "all_reported_ptm_positions": raw.get("all_reported_ptm_positions") or raw.get("PTM_Positions") or raw.get("PTM_Sites") or position,
+            "localization_probability": raw.get("localization_probability") or raw.get("Localization.Probability") or raw.get("PTM_Probability"),
+            "fasta_taxonomy_id": raw.get("fasta_taxonomy_id") or raw.get("FASTA_Taxonomy_ID"),
+            "fasta_organism": raw.get("fasta_organism") or raw.get("FASTA_Organism"),
+            "source_export_schema": raw.get("source_export_schema") or raw.get("Source_Export_Schema") or "enriched_ptm_record",
+            "source_feature_key": raw.get("source_feature_key") or raw.get("Source_Feature_Key") or precursor_id,
+        }
+        condition_rows = raw.get("condition_data") or []
+        emitted_conditions: set[str] = set()
+        for point in condition_rows:
+            if not isinstance(point, Mapping):
+                continue
+            condition = str(point.get("condition") or point.get("Condition") or "").strip()
+            value = point.get("ptm_relative_log2fc") if point.get("ptm_relative_log2fc") is not None else point.get("PTM_Relative_Log2FC")
+            if condition and _optional_finite_float(value) is not None:
+                feature_rows.append({**base, "condition": condition, "log2fc": value})
+                emitted_conditions.add(condition)
+        if emitted_conditions:
+            continue
+        condition = str(raw.get("condition") or raw.get("Condition") or "").strip()
+        value = raw.get("ptm_relative_log2fc") if raw.get("ptm_relative_log2fc") is not None else raw.get("PTM_Relative_Log2FC")
+        if condition and _optional_finite_float(value) is not None:
+            feature_rows.append({**base, "condition": condition, "log2fc": value})
+
+    return feature_rows, {
+        "contract_version": "feature_provenance_input_reconstruction.v1",
+        "input_row_count": input_count,
+        "explicit_feature_identity_row_count": identity_complete_count,
+        "emitted_feature_condition_row_count": len(feature_rows),
+        "excluded_missing_explicit_feature_identity_count": excluded_count,
+        "declared_condition_count": len(conditions),
+        "identity_fallback_policy": "no_gene_or_site_label_fallback",
+        "excluded_inputs": ["benchmark_truth", "locked_score", "rag_prose", "llm_output"],
+    }

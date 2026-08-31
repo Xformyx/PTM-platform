@@ -808,6 +808,8 @@ def build_production_temporal_ptm_protein_analysis(
     raw_replicate_fc_series: Mapping[str, Any] | None = None,
     temporal_input_provenance: Mapping[str, Any] | None = None,
     feature_provenance_rows: Iterable[Mapping[str, Any]] | None = None,
+    mapping_source_bundle_path: str | Path | None = None,
+    mapping_snapshot_root: str | Path | None = None,
 ) -> dict[str, Any]:
     """Build the exact v2 sidecar contract for a normal production order.
 
@@ -858,11 +860,23 @@ def build_production_temporal_ptm_protein_analysis(
         attach_temporal_context,
         build_feature_provenance_ledger,
     )
+    from ptm_shared.species_site_mapping import (
+        attach_mapping_context,
+        map_feature_records,
+    )
 
     feature_ledger = attach_temporal_context(
         build_feature_provenance_ledger(feature_provenance_rows or (), ordered_conditions),
         wave_contract,
         dict(tmm_result or {}).get("relative_site_contribution_matrix") or {},
+    )
+    feature_ledger = attach_mapping_context(
+        feature_ledger,
+        map_feature_records(
+            feature_ledger,
+            manifest_path=mapping_source_bundle_path,
+            snapshot_root=mapping_snapshot_root,
+        ),
     )
     sidecar = build_v2_sidecar(
         output_dir=output_dir,

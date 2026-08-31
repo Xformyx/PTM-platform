@@ -691,6 +691,7 @@ def _auto_run_global_analysis(order_id: int, enriched_data: list, config: dict, 
                     resolve_study_temporal_context,
                 )
                 from ptm_shared.temporal_input_reconstruction import (
+                    build_feature_provenance_rows,
                     build_temporal_input_bundle,
                 )
 
@@ -709,6 +710,10 @@ def _auto_run_global_analysis(order_id: int, enriched_data: list, config: dict, 
                 )
                 if not declared_conditions:
                     declared_conditions = list(temporal_bundle["declared_conditions"])
+                feature_provenance_rows, feature_provenance_input = build_feature_provenance_rows(
+                    enriched_data,
+                    declared_conditions=declared_conditions,
+                )
                 study_context, context_provenance = resolve_study_temporal_context(
                     experimental_context=config.get("experimental_context") or {},
                     declared_conditions=declared_conditions,
@@ -724,7 +729,17 @@ def _auto_run_global_analysis(order_id: int, enriched_data: list, config: dict, 
                     temporal_input_provenance={
                         **temporal_bundle["provenance"],
                         "study_context_resolution": context_provenance,
+                        "feature_provenance_input": feature_provenance_input,
                     },
+                    feature_provenance_rows=feature_provenance_rows,
+                    mapping_source_bundle_path=(
+                        config.get("mapping_source_bundle_path")
+                        or os.getenv("PTM_MAPPING_SOURCE_BUNDLE_PATH")
+                    ),
+                    mapping_snapshot_root=(
+                        config.get("mapping_snapshot_root")
+                        or os.getenv("PTM_MAPPING_SNAPSHOT_ROOT")
+                    ),
                 )
                 temporal_path = temporal_output_dir / "temporal_ptm_protein_analysis_v2.json"
                 temporal_path.write_text(

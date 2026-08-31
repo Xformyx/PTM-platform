@@ -10,12 +10,20 @@ from ptm_shared.temporal_sidecar_freshness import (
     evaluate_temporal_evidence_readiness,
     full_dynamic_is_current,
 )
+from ptm_shared.kinase_evidence_ledger import CONTRACT_VERSION as KINASE_LEDGER_CONTRACT_VERSION
+from ptm_shared.species_site_mapping import MAPPING_IMPORTER_CONTRACT_VERSION
 
 
 def _current_compact() -> dict:
     return {
         "dynamic_co_wave_transition_contract_version": CURRENT_DYNAMIC_CONTRACT_VERSION,
         "dynamic_co_wave_transition_config_sha256": CURRENT_DYNAMIC_CONFIG_SHA256,
+        "kinase_feature_evidence_ledger_summary": {
+            "contract_version": KINASE_LEDGER_CONTRACT_VERSION,
+            "mapping_readiness": {
+                "mapping_importer_contract_version": MAPPING_IMPORTER_CONTRACT_VERSION,
+            },
+        },
     }
 
 
@@ -24,7 +32,13 @@ def _current_full() -> dict:
         "dynamic_co_wave_transition": {
             "contract_version": CURRENT_DYNAMIC_CONTRACT_VERSION,
             "provenance": {"config_sha256": CURRENT_DYNAMIC_CONFIG_SHA256},
-        }
+        },
+        "kinase_feature_evidence_ledger": {
+            "contract_version": KINASE_LEDGER_CONTRACT_VERSION,
+            "mapping_importer": {
+                "mapping_importer_contract_version": MAPPING_IMPORTER_CONTRACT_VERSION,
+            },
+        },
     }
 
 
@@ -40,6 +54,26 @@ def test_contract_or_config_mismatch_is_not_reusable() -> None:
     stale_full["dynamic_co_wave_transition"]["provenance"]["config_sha256"] = "stale"
     assert compact_dynamic_is_current(stale_compact) is False
     assert full_dynamic_is_current(stale_full) is False
+
+
+def test_legacy_mapping_contract_is_not_reusable() -> None:
+    stale_compact = _current_compact()
+    stale_compact["kinase_feature_evidence_ledger_summary"]["mapping_readiness"]["mapping_importer_contract_version"] = "legacy"
+    stale_full = _current_full()
+    stale_full["kinase_feature_evidence_ledger"]["mapping_importer"]["mapping_importer_contract_version"] = "legacy"
+    assert compact_dynamic_is_current(stale_compact) is False
+    assert full_dynamic_is_current(stale_full) is False
+
+
+def test_configured_mapping_bundle_hash_mismatch_is_not_reusable(monkeypatch) -> None:
+    expected = "a" * 64
+    monkeypatch.setenv("PTM_MAPPING_BUNDLE_SHA256", expected)
+    compact = _current_compact()
+    compact["kinase_feature_evidence_ledger_summary"]["mapping_readiness"]["mapping_bundle_sha256"] = "b" * 64
+    full = _current_full()
+    full["kinase_feature_evidence_ledger"]["mapping_importer"]["mapping_bundle_sha256"] = "b" * 64
+    assert compact_dynamic_is_current(compact) is False
+    assert full_dynamic_is_current(full) is False
 
 
 def test_readiness_rejects_stale_compact_and_accepts_current_compact(tmp_path: Path) -> None:

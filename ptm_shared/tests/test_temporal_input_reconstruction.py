@@ -2,6 +2,7 @@
 
 from ptm_shared.temporal_input_reconstruction import (
     CONTRACT_VERSION,
+    build_feature_provenance_rows,
     build_temporal_input_bundle,
     reconstruct_ptm_timeseries,
 )
@@ -95,3 +96,39 @@ def test_missing_values_are_not_zero_filled_and_bundle_excludes_non_numeric_fiel
         "rag_prose",
         "llm_output",
     ]
+
+
+def test_feature_provenance_rows_require_explicit_precursor_identity_and_exclude_rag_fields() -> None:
+    rows, provenance = build_feature_provenance_rows(
+        [
+            {
+                "gene": "insr",
+                "position": "Y1150",
+                "Protein.Group": "P06213",
+                "Modified.Sequence": "MSTYAA",
+                "Precursor.Id": "precursor-insr-y1150",
+                "FASTA_Taxonomy_ID": "9606",
+                "Localization.Probability": "0.98",
+                "condition_data": [
+                    {"condition": "1min", "ptm_relative_log2fc": 0.4},
+                    {"condition": "5min", "ptm_relative_log2fc": 0.7},
+                ],
+                "benchmark_truth": "must not be used",
+                "rag_enrichment": {"full_text": "must not be used"},
+            },
+            {
+                "gene": "mapk1",
+                "position": "T185",
+                "condition_data": [{"condition": "1min", "ptm_relative_log2fc": 0.2}],
+            },
+        ],
+        declared_conditions=["1min", "5min"],
+    )
+    assert len(rows) == 2
+    assert {row["condition"] for row in rows} == {"1min", "5min"}
+    assert all(row["fasta_taxonomy_id"] == "9606" for row in rows)
+    assert "benchmark_truth" not in str(rows)
+    assert "rag_enrichment" not in str(rows)
+    assert provenance["explicit_feature_identity_row_count"] == 1
+    assert provenance["excluded_missing_explicit_feature_identity_count"] == 1
+    assert provenance["identity_fallback_policy"] == "no_gene_or_site_label_fallback"

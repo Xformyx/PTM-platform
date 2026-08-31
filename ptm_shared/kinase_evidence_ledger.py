@@ -20,7 +20,7 @@ from collections import Counter, defaultdict
 from typing import Any, Iterable, Mapping, Sequence
 
 
-CONTRACT_VERSION = "ptm_kinase_feature_provenance.v2"
+CONTRACT_VERSION = "ptm_kinase_feature_provenance.v3"
 DIRECT_NO_CALL_TIER = "E_direct_kinase_no_call"
 TEMPORAL_ASSOCIATION_TIER = "D_temporal_aggregate_context"
 UNRESOLVED_PRIMARY_REASON = "not_assigned_without_approved_f1_f8_priority_policy"
@@ -137,6 +137,8 @@ def _record_from_rows(site_key: str, rows: Sequence[Mapping[str, Any]], conditio
     localization_value = _finite(localization)
     accessions = _accession_tokens(protein_group)
     reported_positions = _position_tokens(first)
+    fasta_taxonomy_id = _text(first, "fasta_taxonomy_id", "FASTA_Taxonomy_ID", "Annotation_Species_Taxonomy_ID")
+    fasta_organism = _text(first, "fasta_organism", "FASTA_Organism", "Annotation_Organism")
     source_export_schema = _text(first, "source_export_schema", "Source_Export_Schema")
     source_feature_key = _text(first, "source_feature_key", "Source_Feature_Key")
     observed_conditions = {
@@ -191,6 +193,8 @@ def _record_from_rows(site_key: str, rows: Sequence[Mapping[str, Any]], conditio
             "localization_probability": localization_value,
             "source_export_schema": source_export_schema or None,
             "source_feature_key": source_feature_key or None,
+            "fasta_taxonomy_id": fasta_taxonomy_id or None,
+            "fasta_organism": fasta_organism or None,
             "protein_group_status": "ambiguous_or_missing" if protein_ambiguous else "single_group_observed",
             "phosphorylation_form_status": "multi_phosphorylated" if multi_phospho else "single_or_unspecified_modification",
             "localization_status": localization_state,
@@ -347,6 +351,12 @@ def compact_summary(ledger: Mapping[str, Any]) -> dict[str, Any]:
         str((row.get("identity_provenance") or {}).get("protein_accession_status") or "unknown")
         for row in records
     )
+    mapping_counts = Counter(
+        str((row.get("mapping_evidence") or {}).get("mapping_class_code") or "not_assessed")
+        for row in records
+    )
+    mapping_importer = dict(ledger.get("mapping_importer") or {})
+    mapping_importer_summary = dict(mapping_importer.get("compact_summary") or {})
     aggregate_count = len({str(row.get("nominal_aggregate_key") or "") for row in records if row.get("nominal_aggregate_key")})
     return {
         "contract_version": CONTRACT_VERSION,
@@ -361,6 +371,16 @@ def compact_summary(ledger: Mapping[str, Any]) -> dict[str, Any]:
             "protein_accession_status": dict(sorted(accession_counts.items())),
             "class_I_localization_threshold": CLASS_I_LOCALIZATION_THRESHOLD,
         },
+        "mapping_readiness": {
+            "mapping_importer_contract_version": mapping_importer_summary.get("mapping_importer_contract_version"),
+            "mapping_bundle_status": mapping_importer_summary.get("mapping_bundle_status", "not_assessed"),
+            "mapping_bundle_error_code": mapping_importer_summary.get("mapping_bundle_error_code"),
+            "mapping_class_counts": (
+                mapping_importer_summary.get("mapping_class_counts")
+                or {code: mapping_counts.get(code, 0) for code in ("M0", "M1", "M2", "M3", "M4")}
+            ),
+            "claim_boundary": "Mapping readiness is aggregate-only provenance; it does not create a direct kinase relation.",
+        },
         "mutually_exclusive_f1_f8_ledger_status": MAPPING_LEDGER_STATUS,
         "unmatched_reason_primary_policy": UNRESOLVED_PRIMARY_REASON,
         "direct_kinase_attribution_status": "no_call_without_feature_level_mapping_localization_and_curated_edge_provenance",
@@ -372,6 +392,8 @@ def compact_summary(ledger: Mapping[str, Any]) -> dict[str, Any]:
         "excluded_fields": [
             "modified_sequence", "precursor_id", "protein_group", "protein_accession_tokens",
             "all_reported_ptm_positions", "localization_probability", "source_feature_key",
+            "fasta_taxonomy_id", "fasta_organism", "mapping_accession", "mapping_sequence",
+            "mapping_peptide", "mapping_coordinate", "orthology_identifier", "mapping_source_file_path",
             "candidate_kinase_names",
             "raw_log2fc", "raw_intensity", "q_value", "benchmark_truth", "known_relation_registry",
         ],
