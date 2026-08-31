@@ -48,6 +48,26 @@ generated and frozen. The verified human INSR source entry remains human
 source evidence; it must never be relabelled as a rat orthology merely because
 the order-level analysis species is rat.
 
+### Release-116 Compara acquisition decision
+
+The Ensembl June-2026 archive documents comparative-genomics downloads as
+release-116 MySQL and homology XML exports. The complete
+`homology_member.txt.gz` table is 38 GB and `homology.txt.gz` is 4.9 GB, so a
+whole-dump dependency is inappropriate for an order-runtime mapping service.
+The corresponding protein OrthoXML all-homology artifact is also large
+(4.2 GB compressed for the default collection); the 1.8 GB strict artifact
+cannot by itself establish the row-level aligned peptide/CIGAR evidence
+required for M2. [7]
+
+Accordingly, P1 will create a **minimal frozen local rat→human JSONL extract**
+offline, record the source artifact filename/FTP checksum and retrieval date,
+then reconstruct and validate each retained aligned protein pair from the
+already pinned release-116 peptide FASTAs. The resulting JSONL must still
+contain the one-to-one type, high-confidence flag, source/target stable protein
+IDs, ungapped sequences, aligned strings and CIGAR required by this manifest.
+The production importer reads only that frozen JSONL plus the pinned FASTAs.
+It never opens the Ensembl FTP site or API.
+
 ## Candidate public sources
 
 | Source | Candidate record/API | Snapshot rule | License/reuse note |
@@ -88,3 +108,4 @@ the order-level analysis species is rat.
 4. [UniProt rat reference proteome UP000002494](https://www.uniprot.org/proteomes/UP000002494).
 5. [UniProt human reference proteome UP000005640](https://www.uniprot.org/proteomes/UP000005640).
 6. [UniProtKB human INSR P06213](https://www.uniprot.org/uniprotkb/P06213/entry).
+7. [Ensembl release 116 archived FTP download guide](https://jun2026.archive.ensembl.org/info/data/ftp/index.html). The release-116 archive links comparative-genomics MySQL and homology XML download families; observed official directory sizes and checksum registries were recorded during P1 procurement.
