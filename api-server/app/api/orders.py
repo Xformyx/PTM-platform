@@ -9293,35 +9293,55 @@ async def kinase_activity_heatmap(
             build_production_temporal_ptm_protein_analysis,
             summarize_temporal_ptm_protein_analysis,
         )
+        from ptm_shared.temporal_sidecar_freshness import (
+            api_has_local_reference_bundle_access,
+            full_sidecar_has_validated_local_reference_bundles,
+            load_preservable_local_reference_sidecar,
+        )
 
         from ptm_shared.temporal_input_reconstruction import load_stage1_feature_provenance_rows
 
+        unified_path = output_dir / _TEMPORAL_SIDECAR_ARTIFACT
         feature_provenance_rows, _feature_provenance_input = load_stage1_feature_provenance_rows(
             output_dir,
             file_suffix=file_suffix,
             declared_conditions=conditions_sorted,
         )
-        unified_sidecar = build_production_temporal_ptm_protein_analysis(
-            output_dir=output_dir,
-            ptm_type=order.ptm_type,
-            ptm_timeseries=ptm_timeseries,
-            conditions=conditions_sorted,
-            tmm_result=result_data,
-            feature_provenance_rows=feature_provenance_rows,
-            mapping_source_bundle_path=os.getenv("PTM_MAPPING_SOURCE_BUNDLE_PATH"),
-            mapping_snapshot_root=os.getenv("PTM_MAPPING_SNAPSHOT_ROOT"),
-            relation_source_bundle_path=os.getenv("PTM_RELATION_SOURCE_BUNDLE_PATH"),
-            relation_snapshot_root=os.getenv("PTM_RELATION_SNAPSHOT_ROOT"),
+        local_reference_access = api_has_local_reference_bundle_access()
+        unified_sidecar = (
+            None if local_reference_access else load_preservable_local_reference_sidecar(unified_path)
         )
-        unified_path = output_dir / "temporal_ptm_protein_analysis_v2.json"
-        unified_path.write_text(
-            json.dumps(unified_sidecar, ensure_ascii=False, sort_keys=True),
-            encoding="utf-8",
-        )
-        result_data["temporal_ptm_protein_analysis"] = summarize_temporal_ptm_protein_analysis(
+        if unified_sidecar is None:
+            unified_sidecar = build_production_temporal_ptm_protein_analysis(
+                output_dir=output_dir,
+                ptm_type=order.ptm_type,
+                ptm_timeseries=ptm_timeseries,
+                conditions=conditions_sorted,
+                tmm_result=result_data,
+                feature_provenance_rows=feature_provenance_rows,
+                mapping_source_bundle_path=os.getenv("PTM_MAPPING_SOURCE_BUNDLE_PATH"),
+                mapping_snapshot_root=os.getenv("PTM_MAPPING_SNAPSHOT_ROOT"),
+                relation_source_bundle_path=os.getenv("PTM_RELATION_SOURCE_BUNDLE_PATH"),
+                relation_snapshot_root=os.getenv("PTM_RELATION_SNAPSHOT_ROOT"),
+            )
+            unified_path.write_text(
+                json.dumps(unified_sidecar, ensure_ascii=False, sort_keys=True),
+                encoding="utf-8",
+            )
+        temporal_compact = summarize_temporal_ptm_protein_analysis(
             unified_sidecar,
             artifact_path=unified_path.name,
         )
+        temporal_compact["api_reference_bundle_access"] = (
+            "available_rebuilt_or_verified"
+            if local_reference_access
+            else (
+                "unavailable_preserved_validated_rag_sidecar"
+                if full_sidecar_has_validated_local_reference_bundles(unified_sidecar)
+                else "unavailable_fallback_sidecar_written"
+            )
+        )
+        result_data["temporal_ptm_protein_analysis"] = temporal_compact
     except Exception as _unified_sidecar_error:
         _log.warning(
             "[TMM] Shared temporal PTM–protein analysis failed (non-fatal): %s",

@@ -113,3 +113,13 @@ def test_api_direct_sidecar_forwards_same_p1_p2_environment_paths_as_rag_worker(
     assert keywords["mapping_snapshot_root"] == "os.getenv('PTM_MAPPING_SNAPSHOT_ROOT')"
     assert keywords["relation_source_bundle_path"] == "os.getenv('PTM_RELATION_SOURCE_BUNDLE_PATH')"
     assert keywords["relation_snapshot_root"] == "os.getenv('PTM_RELATION_SNAPSHOT_ROOT')"
+
+
+def test_api_direct_sidecar_preserves_validated_rag_artifact_without_reference_mount() -> None:
+    """RAG-only reference volumes must not be replaced by an API M0/R0 fallback."""
+
+    orders_path = Path(__file__).resolve().parents[1] / "app" / "api" / "orders.py"
+    source = orders_path.read_text(encoding="utf-8")
+    assert "api_has_local_reference_bundle_access" in source
+    assert "load_preservable_local_reference_sidecar(unified_path)" in source
+    assert "unavailable_preserved_validated_rag_sidecar" in source

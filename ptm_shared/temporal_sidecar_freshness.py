@@ -55,6 +55,76 @@ def _expected_relation_bundle_sha256() -> str | None:
     return value if len(value) == 64 and all(char in "0123456789abcdef" for char in value) else None
 
 
+def api_has_local_reference_bundle_access() -> bool:
+    """Return whether this process can safely rebuild P1/P2 evidence locally.
+
+    Production deployments may deliberately mount source bundles only in RAG
+    workers.  An API process without every root and manifest must preserve a
+    validated worker-built sidecar rather than serializing an M0/R0 fallback
+    over it.  This check only validates local path availability; the importers
+    remain responsible for manifest/hash/schema verification during a rebuild.
+    """
+
+    values = {
+        "mapping_root": str(os.getenv("PTM_MAPPING_SNAPSHOT_ROOT") or "").strip(),
+        "mapping_manifest": str(os.getenv("PTM_MAPPING_SOURCE_BUNDLE_PATH") or "").strip(),
+        "relation_root": str(os.getenv("PTM_RELATION_SNAPSHOT_ROOT") or "").strip(),
+        "relation_manifest": str(os.getenv("PTM_RELATION_SOURCE_BUNDLE_PATH") or "").strip(),
+    }
+    if not all(values.values()):
+        return False
+    try:
+        mapping_root = Path(values["mapping_root"]).resolve()
+        mapping_manifest = Path(values["mapping_manifest"]).resolve()
+        relation_root = Path(values["relation_root"]).resolve()
+        relation_manifest = Path(values["relation_manifest"]).resolve()
+    except OSError:
+        return False
+    return (
+        mapping_root.is_dir()
+        and mapping_manifest.is_file()
+        and mapping_root in mapping_manifest.parents
+        and relation_root.is_dir()
+        and relation_manifest.is_file()
+        and relation_root in relation_manifest.parents
+    )
+
+
+def full_sidecar_has_validated_local_reference_bundles(full_sidecar: Mapping[str, Any]) -> bool:
+    """Identify an immutable P1/P2 worker-built artifact eligible for preservation.
+
+    This intentionally does not require P1 M1, P2 R3 or P3 allocation.  A
+    M3-dominant/R1-only sidecar can be a valid production result and must not be
+    replaced merely because source coverage is sparse.
+    """
+
+    ledger = full_sidecar.get("kinase_feature_evidence_ledger") or {}
+    mapping = ledger.get("mapping_importer") or {}
+    relation = ledger.get("relation_importer") or {}
+    return (
+        full_dynamic_is_current(full_sidecar)
+        and isinstance(ledger, Mapping)
+        and mapping.get("mapping_bundle_status") == "validated"
+        and relation.get("relation_bundle_status") == "validated"
+        and bool(mapping.get("mapping_bundle_sha256"))
+        and bool(relation.get("relation_bundle_sha256"))
+    )
+
+
+def load_preservable_local_reference_sidecar(artifact_path: Path) -> dict[str, Any] | None:
+    """Load a validated P1/P2 full artifact without triggering reconstruction."""
+
+    if not artifact_path.is_file():
+        return None
+    try:
+        payload = json.loads(artifact_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return None
+    if isinstance(payload, Mapping) and full_sidecar_has_validated_local_reference_bundles(payload):
+        return dict(payload)
+    return None
+
+
 def compact_dynamic_is_current(compact: Mapping[str, Any]) -> bool:
     """Return whether a DB/config compact sidecar uses the current semantics."""
     ledger_summary = compact.get("kinase_feature_evidence_ledger_summary") or {}
