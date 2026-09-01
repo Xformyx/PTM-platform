@@ -155,13 +155,19 @@ def compact_allocation_summary(allocation_context: Mapping[str, Any], feature_re
     entropies = [float(row["candidate_ambiguity_entropy_nats"]) for row in eligible if row.get("candidate_ambiguity_entropy_nats") is not None]
     total_feature_mass = math.fsum(float(row.get("feature_evidence_mass") or 0.0) for row in eligible)
     total_allocated_mass = math.fsum(float(row.get("total_allocated_mass") or 0.0) for row in eligible)
+    if not eligible:
+        mass_conservation_status = "not_evaluable_or_no_candidate_set"
+    elif math.isclose(total_feature_mass, total_allocated_mass, rel_tol=0.0, abs_tol=1e-12):
+        mass_conservation_status = "passed"
+    else:
+        mass_conservation_status = "failed"
     return {
         "allocation_contract_version": ALLOCATION_CONTRACT_VERSION,
         "allocation_status": allocation_context.get("allocation_status", "not_evaluable"),
         "eligible_feature_count": len(eligible),
         "total_feature_evidence_mass": total_feature_mass,
         "total_allocated_candidate_mass": total_allocated_mass,
-        "mass_conservation_status": "passed" if math.isclose(total_feature_mass, total_allocated_mass, rel_tol=0.0, abs_tol=1e-12) else "not_evaluable_or_failed",
+        "mass_conservation_status": mass_conservation_status,
         "candidate_count_histogram": {str(count): candidate_counts[count] for count in sorted(candidate_counts)},
         "mean_candidate_ambiguity_entropy_nats": (math.fsum(entropies) / len(entropies)) if entropies else None,
         "max_candidate_ambiguity_entropy_nats": max(entropies) if entropies else None,

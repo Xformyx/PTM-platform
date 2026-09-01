@@ -11,8 +11,8 @@ or LLM input. Normal Order execution performs no iPTMnet API request.
 This bundle provides accession/site-exact iPTMnet release 6.2 candidate
 provenance. It is not an isoform/sequence assertion, a kinase activity score,
 a direct kinase attribution, a temporal edge, a causal claim or perturbation
-evidence. P3 remains required before assigning one kinase from an R3 candidate
-set.
+evidence. P3 records unresolved candidate-set mass but cannot assign one
+kinase from an R3 candidate set.
 
 ## Frozen source bundle identity
 
@@ -98,8 +98,8 @@ access only, then inspect the compact Report/RAG payload separately.
 
 | Condition | Expected relation class | Direct kinase result |
 | --- | --- | --- |
-| Bundle or hash missing/incompatible | R0 | no-call |
-| P0 not localization/accession/site ready, or P1 not M1 | R1 | no-call |
+| P2 bundle or hash missing/incompatible | R0 | no-call |
+| Valid P2 bundle, but P0 not localization/accession/site ready or P1 is M0/M2/M3/M4 | R1 | no-call |
 | M1 plus source-versioned cross-reference but no exact iPTMnet site edge | R2 | no-call |
 | M1 plus exact iPTMnet release-6.2 source/accession/site candidate(s) | R3 | no-call; full-ledger candidate set only |
 | Conflict/ambiguity | R4 | no-call |
@@ -108,6 +108,16 @@ The compact `relation_readiness` projection may contain only aggregate R0–R4
 counts, validated status and a claim boundary. It must not contain accessions,
 peptides, residue coordinates, iPTMnet source labels, PMIDs, candidate kinases,
 edge IDs, identity-scope tokens or original source paths.
+
+For `Insulin_Signaling_V3`, the release-116 strict-tree P1 snapshot is expected
+to be M3-dominant for rat-to-human context. M1 is expected only for exact
+same-species analysis-FASTA evidence, such as a sequence-compatible human INSR
+feature. Consequently, a valid P2 installation can have R3 = 0 and mostly R1
+records. P3 then reports `eligible_feature_count = 0` and
+`mass_conservation_status = not_evaluable_or_no_candidate_set`; this is a
+normal evidence result, not an installation failure. Diagnose installation from
+bundle status, explicit error code and configured manifest hash rather than
+from candidate counts.
 
 ## Deployment smoke test and rollback
 

@@ -90,5 +90,5 @@ def test_production_sidecar_without_mapping_bundle_is_explicit_m0_and_current(tm
     assert ledger["relation_importer"]["relation_bundle_error_code"] == "relation_source_bundle_not_supplied"
     assert compact["relation_readiness"]["relation_class_counts"] == {"R0": 0, "R1": 0, "R2": 0, "R3": 0, "R4": 0}
     assert compact["candidate_allocation_readiness"]["eligible_feature_count"] == 0
-    assert compact["candidate_allocation_readiness"]["mass_conservation_status"] == "passed"
+    assert compact["candidate_allocation_readiness"]["mass_conservation_status"] == "not_evaluable_or_no_candidate_set"
     assert full_dynamic_is_current(production) is True

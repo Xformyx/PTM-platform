@@ -101,6 +101,9 @@ def test_non_r3_or_invalid_r3_candidate_sets_receive_no_mass_and_remain_no_call(
     assert evidence["empty-r3"]["allocation_status"] == P3_INVALID_CANDIDATE_SET
     assert evidence["duplicate-kinase"]["allocation_status"] == P3_INVALID_CANDIDATE_SET
     assert all(record["direct_kinase_attribution"]["status"] == "no_call" for record in attached["feature_records"])
+    compact = compact_summary(attached)
+    assert compact["candidate_allocation_readiness"]["eligible_feature_count"] == 0
+    assert compact["candidate_allocation_readiness"]["mass_conservation_status"] == "not_evaluable_or_no_candidate_set"
 
 
 def test_candidate_input_order_does_not_change_feature_allocation() -> None:

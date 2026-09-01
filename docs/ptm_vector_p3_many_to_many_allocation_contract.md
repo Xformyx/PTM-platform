@@ -55,6 +55,12 @@ entropy, allocation contract version and a fixed claim boundary. It must not
 contain candidate kinase names, accessions, sites, peptides, edge IDs,
 relation-source labels, PMIDs, weights by named kinase or source file paths.
 
+`mass_conservation_status = passed` is valid only when at least one R3 feature
+has an actual P3 allocation and the observed allocated total matches the
+eligible feature-mass total. When no feature is eligible, both totals are zero
+but the status is explicitly `not_evaluable_or_no_candidate_set`, not
+`passed`. Zero R3 records therefore do not diagnose a failed P2 installation.
+
 No aggregate is a kinase ranking. In particular, a summed fractional mass by
 kinase remains full-ledger-only accounting for a later, explicitly governed
 P3/P4 analytical view; it must not enter compact Report/RAG/LLM packets.

@@ -47,7 +47,7 @@ def _compact(marker: str) -> dict:
                 "eligible_feature_count": 0,
                 "total_feature_evidence_mass": 0.0,
                 "total_allocated_candidate_mass": 0.0,
-                "mass_conservation_status": "passed",
+                "mass_conservation_status": "not_evaluable_or_no_candidate_set",
                 "candidate_count_histogram": {},
             },
         },
