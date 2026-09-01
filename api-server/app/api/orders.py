@@ -9308,6 +9308,10 @@ async def kinase_activity_heatmap(
             conditions=conditions_sorted,
             tmm_result=result_data,
             feature_provenance_rows=feature_provenance_rows,
+            mapping_source_bundle_path=os.getenv("PTM_MAPPING_SOURCE_BUNDLE_PATH"),
+            mapping_snapshot_root=os.getenv("PTM_MAPPING_SNAPSHOT_ROOT"),
+            relation_source_bundle_path=os.getenv("PTM_RELATION_SOURCE_BUNDLE_PATH"),
+            relation_snapshot_root=os.getenv("PTM_RELATION_SNAPSHOT_ROOT"),
         )
         unified_path = output_dir / "temporal_ptm_protein_analysis_v2.json"
         unified_path.write_text(

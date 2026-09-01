@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import csv
+import ast
+from pathlib import Path
 
 from app.services.benchmark_artifact import build_temporal_request
 from ptm_shared.enrichment_free_temporal_sidecar import build_production_temporal_ptm_protein_analysis
@@ -92,3 +94,22 @@ def test_production_sidecar_without_mapping_bundle_is_explicit_m0_and_current(tm
     assert compact["candidate_allocation_readiness"]["eligible_feature_count"] == 0
     assert compact["candidate_allocation_readiness"]["mass_conservation_status"] == "not_evaluable_or_no_candidate_set"
     assert full_dynamic_is_current(production) is True
+
+
+def test_api_direct_sidecar_forwards_same_p1_p2_environment_paths_as_rag_worker() -> None:
+    """An API rebuild must not overwrite a RAG-built P1/P2 sidecar with M0/R0."""
+
+    orders_path = Path(__file__).resolve().parents[1] / "app" / "api" / "orders.py"
+    tree = ast.parse(orders_path.read_text(encoding="utf-8"))
+    calls = [
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "build_production_temporal_ptm_protein_analysis"
+    ]
+    assert calls
+    keywords = {keyword.arg: ast.unparse(keyword.value) for keyword in calls[-1].keywords if keyword.arg}
+    assert keywords["mapping_source_bundle_path"] == "os.getenv('PTM_MAPPING_SOURCE_BUNDLE_PATH')"
+    assert keywords["mapping_snapshot_root"] == "os.getenv('PTM_MAPPING_SNAPSHOT_ROOT')"
+    assert keywords["relation_source_bundle_path"] == "os.getenv('PTM_RELATION_SOURCE_BUNDLE_PATH')"
+    assert keywords["relation_snapshot_root"] == "os.getenv('PTM_RELATION_SNAPSHOT_ROOT')"

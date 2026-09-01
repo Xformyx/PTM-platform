@@ -78,3 +78,6 @@ comparisons TSV에는 이미 있으므로 전처리 재실행 없이 sidecar만 
 - `workers/preprocessing/core/ptm_quantification.py` —
   `create_ptm_vector_data`
 - `workers/rag_enrichment/tasks.py` — canonical sidecar builder
+- `api-server/app/api/orders.py` — API direct sidecar builder passes the same
+  local P1/P2 source-bundle environment paths as the RAG worker, preventing an
+  API-triggered rebuild from replacing a validated P1/P2 sidecar with M0/R0.
