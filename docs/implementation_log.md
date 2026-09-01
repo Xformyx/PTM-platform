@@ -2471,3 +2471,28 @@
 - **결정성:**
   - `_compact_temporal_precedence`: 결정적. sidecar 내 `temporal_precedence` 키 구조에 의존.
 
+---
+
+### [2026-09-01] P0 input provenance restoration — Stage 1 Precursor.Id 보존
+
+- **분류:** 구현
+- **대상:**
+  - `docs/ptm_vector_p0_feature_provenance_restoration.md` (신규 선언)
+  - `ptm_shared/temporal_input_reconstruction.py` — `load_stage1_feature_provenance_rows`
+  - `workers/preprocessing/core/ptm_quantification.py` — `create_ptm_vector_data`
+  - `workers/rag_enrichment/tasks.py`, `api-server/app/api/orders.py` — sidecar P0 입력
+- **구현 대상 설계:** `docs/ptm_vector_p0_feature_provenance_restoration.md` §2–§3 (2026-09-01 선언)
+- **사전등록 상태:** 결과 열람 후 (탐색적, primary 금지). Insulin production sidecar에서
+  P1/P2 `validated`인데 `feature_records=0`인 원인을 본 뒤 복원 규칙을 적었다.
+- **내용:**
+  - vector TSV가 내부 join에 쓰던 `Precursor.Id`를 출력 컬럼으로 보존한다.
+  - RAG/API sidecar는 collapse된 `enriched_ptm_data_*.json`이 아니라 Stage 1 TSV에서
+    feature identity를 읽는다. vector에 `Precursor.Id`가 없으면 같은 run의
+    comparisons TSV + `Protein.Group`→gene annotation으로만 복원한다.
+  - gene/site label로 Precursor.Id를 만들지 않는다. P4는 변경하지 않는다.
+- **논문에서의 용도:** methods (P0 feature identity 입력). results의 mapping/relation
+  count는 이 복원 후 재측정분으로만 보고한다.
+- **해석 한계:** ledger가 채워져도 rat→human P1 ceiling은 대개 M3이며, R3는
+  P0-ready M1만 받는다. feature count > 0은 kinase 귀속이 아니다.
+- **결정성:** 결정적. Stage 1 TSV 행 순서에 의존하지 않고 identity 필드로만 구성.
+

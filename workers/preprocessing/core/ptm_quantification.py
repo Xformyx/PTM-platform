@@ -902,6 +902,14 @@ class PTMQuantificationAnalyzer:
         ptm_protein_changes: pd.DataFrame,
         paired_occupancy_df: Optional[pd.DataFrame] = None,
     ) -> pd.DataFrame:
+        """Emit the Stage 1 site/form × timepoint vector with precursor identity.
+
+        구현 대상: docs/ptm_vector_p0_feature_provenance_restoration.md §2
+        사전등록: 2026-09-01 선언. Insulin P0 ledger 재측정 전.
+        해석 한계: Precursor.Id 보존은 feature identity의 필요조건이며
+        mapping/relation 성공이나 kinase 귀속을 의미하지 않는다.
+        주장 금지: 이 컬럼 추가로 kinase 예측 향상을 주장하지 않는다.
+        """
         try:
             vector_data = []
             occupancy_lookup: Dict[Tuple[str, str, str], Dict[str, object]] = {}
@@ -953,6 +961,8 @@ class PTMQuantificationAnalyzer:
                     "Protein.Group": protein_group,
                     "Protein.Name": pc["Protein.Name"],
                     "Gene.Name": pc["Gene.Name"],
+                    "Precursor.Id": ptm_row["Precursor.Id"],
+                    "Precursor.Charge": ptm_row.get("Precursor.Charge", ""),
                     "Modified.Sequence": ptm_row["Modified.Sequence"],
                     "PTM_Type": ptm_row["PTM_Type"],
                     "PTM_Position": ptm_row["PTM_Position"],

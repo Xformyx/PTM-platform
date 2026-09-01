@@ -43,6 +43,7 @@ def test_worker_builds_and_persists_shared_artifact_server_side() -> None:
     auto_analysis = _function_source(RAG_TASKS, "_auto_run_global_analysis")
     assert "run_temporal_ptm_protein_analysis" in auto_analysis
     assert "build_production_temporal_ptm_protein_analysis" in auto_analysis
+    assert "load_stage1_feature_provenance_rows" in auto_analysis
     assert "temporal_ptm_protein_analysis_v2.json" in auto_analysis
     assert "temporal_ptm_protein_analysis" in auto_analysis
     assert "temporal_ptm_protein_analysis" in PREPROCESSING_TASKS.read_text(encoding="utf-8")

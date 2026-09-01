@@ -330,10 +330,20 @@ services:
       - ./data:/app/data
       - ./storage/reports:/app/storage/reports
       - ./storage/logs:/app/storage/logs
+      # Immutable P1/P2 reference snapshots (host sibling of this repo).
+      # Read-only; not an Order/RAG/LLM payload. RAG worker only.
+      - /Users/ken_studio/Documents/Work/PTM/ptm-reference/rat-human-ensembl-116-strict-tree-20260831:/opt/ptm-reference/rat-human-ensembl-116-strict-tree-20260831:ro
+      - /Users/ken_studio/Documents/Work/PTM/ptm-reference/iptmnet-release-6.2:/opt/ptm-reference/iptmnet-release-6.2:ro
     environment:
       TZ: Asia/Seoul
       PYTHONDONTWRITEBYTECODE: "1"
       PYTHONPATH: /app:/opt:/opt/api_server_app
+      PTM_MAPPING_SNAPSHOT_ROOT: /opt/ptm-reference/rat-human-ensembl-116-strict-tree-20260831
+      PTM_MAPPING_SOURCE_BUNDLE_PATH: /opt/ptm-reference/rat-human-ensembl-116-strict-tree-20260831/bundle.json
+      PTM_MAPPING_BUNDLE_SHA256: f80b6f9abf5568153cde2c730332dd9c55431476f8a2e6cfa3acb01cca291dfe
+      PTM_RELATION_SNAPSHOT_ROOT: /opt/ptm-reference/iptmnet-release-6.2
+      PTM_RELATION_SOURCE_BUNDLE_PATH: /opt/ptm-reference/iptmnet-release-6.2/iptmnet_release_6_2_p2_bundle.json
+      PTM_RELATION_BUNDLE_SHA256: ca3e24df5679a3bd9f93f66c4a99ab461448add19705bc5a3a08d7e8ad5cc783
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/2
       REDIS_URL: redis://redis:6379/0

@@ -132,3 +132,90 @@ def test_feature_provenance_rows_require_explicit_precursor_identity_and_exclude
     assert provenance["explicit_feature_identity_row_count"] == 1
     assert provenance["excluded_missing_explicit_feature_identity_count"] == 1
     assert provenance["identity_fallback_policy"] == "no_gene_or_site_label_fallback"
+
+
+def test_stage1_loader_prefers_vector_tsv_with_explicit_precursor(tmp_path) -> None:
+    from ptm_shared.temporal_input_reconstruction import load_stage1_feature_provenance_rows
+
+    (tmp_path / "ptm_vector_data_normalized_phospho.tsv").write_text(
+        "Protein.Group\tGene.Name\tModified.Sequence\tPTM_Position\tCondition\tPTM_Relative_Log2FC\tPrecursor.Id\n"
+        "P06213\tINSR\tMSTYAA\tY1150\t1min\t0.4\tprecursor-insr-y1150\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "ptm_condition_comparisons_normalized_phospho.tsv").write_text(
+        "Protein.Group\tPrecursor.Id\tModified.Sequence\tPTM_Position\tCondition\tLog2FC\n"
+        "P00000\tshould-not-be-used\tXXXX\tS1\t1min\t9.9\n",
+        encoding="utf-8",
+    )
+
+    rows, provenance = load_stage1_feature_provenance_rows(
+        tmp_path,
+        file_suffix="_phospho",
+        declared_conditions=["1min"],
+    )
+    assert len(rows) == 1
+    assert rows[0]["precursor_id"] == "precursor-insr-y1150"
+    assert provenance["stage1_source_strategy"] == "vector_tsv_explicit_precursor"
+    assert provenance["explicit_feature_identity_row_count"] == 1
+    assert "enriched_ptm_data_json" in provenance["excluded_inputs"]
+
+
+def test_stage1_loader_restores_precursor_from_comparisons_and_protein_group_gene(tmp_path) -> None:
+    from ptm_shared.temporal_input_reconstruction import load_stage1_feature_provenance_rows
+
+    (tmp_path / "ptm_vector_data_normalized_phospho.tsv").write_text(
+        "Protein.Group\tGene.Name\tModified.Sequence\tPTM_Position\tCondition\tPTM_Relative_Log2FC\n"
+        "P06213\tINSR\tMSTYAA\tY1150\t1min\t0.4\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "ptm_condition_comparisons_normalized_phospho.tsv").write_text(
+        "Protein.Group\tPrecursor.Id\tModified.Sequence\tPTM_Position\tCondition\tLog2FC\n"
+        "P06213\tprecursor-insr-y1150\tMSTYAA\tY1150\t1min\t0.4\n"
+        "P06213\tprecursor-insr-y1150-z3\tMSTYAA\tY1150\t1min\t0.5\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "ptm_protein_level_changes_normalized_phospho.tsv").write_text(
+        "Protein.Group\tGene.Name\n"
+        "P06213\tINSR\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "unified_protein_data_enriched_phospho.tsv").write_text(
+        "Protein.Group\tFASTA_Taxonomy_ID\tFASTA_Organism\n"
+        "P06213\t9606\tHomo sapiens\n",
+        encoding="utf-8",
+    )
+
+    rows, provenance = load_stage1_feature_provenance_rows(
+        tmp_path,
+        file_suffix="_phospho",
+        declared_conditions=["1min"],
+    )
+    assert len(rows) == 2
+    assert {row["precursor_id"] for row in rows} == {
+        "precursor-insr-y1150",
+        "precursor-insr-y1150-z3",
+    }
+    assert all(row["gene"] == "INSR" for row in rows)
+    assert all(row["fasta_taxonomy_id"] == "9606" for row in rows)
+    assert provenance["stage1_source_strategy"] == "comparisons_tsv_plus_protein_group_gene"
+    assert provenance["identity_fallback_policy"] == "no_gene_or_site_label_fallback"
+
+
+def test_stage1_loader_does_not_invent_precursor_from_gene_site_only(tmp_path) -> None:
+    from ptm_shared.temporal_input_reconstruction import load_stage1_feature_provenance_rows
+
+    (tmp_path / "ptm_vector_data_normalized_phospho.tsv").write_text(
+        "Protein.Group\tGene.Name\tModified.Sequence\tPTM_Position\tCondition\tPTM_Relative_Log2FC\n"
+        "P06213\tINSR\tMSTYAA\tY1150\t1min\t0.4\n",
+        encoding="utf-8",
+    )
+
+    rows, provenance = load_stage1_feature_provenance_rows(
+        tmp_path,
+        file_suffix="_phospho",
+        declared_conditions=["1min"],
+    )
+    assert rows == []
+    assert provenance["explicit_feature_identity_row_count"] == 0
+    assert provenance["stage1_source_strategy"] == "unavailable"
+    assert provenance["identity_fallback_policy"] == "no_gene_or_site_label_fallback"

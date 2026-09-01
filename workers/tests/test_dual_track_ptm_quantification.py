@@ -104,6 +104,7 @@ def test_track_two_vector_values_survive_when_no_counterpart_is_available():
     vector = analyzer.create_ptm_vector_data(comparisons, protein_changes, pd.DataFrame())
 
     assert vector.iloc[0]["PTM_Relative_Log2FC"] == 1.2
+    assert vector.iloc[0]["Precursor.Id"] == "mod_1"
     assert vector.iloc[0]["Quantification_Track"] == "protein_normalized_relative_ptm"
     assert vector.iloc[0]["Pair_Quality_Tier"] == "O0"
     assert pd.isna(vector.iloc[0]["Occupancy_Fraction"])

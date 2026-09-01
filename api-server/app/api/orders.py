@@ -9294,13 +9294,20 @@ async def kinase_activity_heatmap(
             summarize_temporal_ptm_protein_analysis,
         )
 
+        from ptm_shared.temporal_input_reconstruction import load_stage1_feature_provenance_rows
+
+        feature_provenance_rows, _feature_provenance_input = load_stage1_feature_provenance_rows(
+            output_dir,
+            file_suffix=file_suffix,
+            declared_conditions=conditions_sorted,
+        )
         unified_sidecar = build_production_temporal_ptm_protein_analysis(
             output_dir=output_dir,
             ptm_type=order.ptm_type,
             ptm_timeseries=ptm_timeseries,
             conditions=conditions_sorted,
             tmm_result=result_data,
-            feature_provenance_rows=vector_data,
+            feature_provenance_rows=feature_provenance_rows,
         )
         unified_path = output_dir / "temporal_ptm_protein_analysis_v2.json"
         unified_path.write_text(

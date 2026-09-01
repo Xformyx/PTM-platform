@@ -11,15 +11,18 @@ scores, RAG prose, literature fields, or LLM output.
 
 from __future__ import annotations
 
+import csv
 import hashlib
 import json
 import math
 from collections import Counter, defaultdict
+from pathlib import Path
 from statistics import median
 from typing import Any, Iterable, Mapping
 
 
 CONTRACT_VERSION = "temporal_input_reconstruction.v1"
+STAGE1_FEATURE_SOURCE_CONTRACT = "feature_provenance_stage1_source.v1"
 _SOURCE_PRIORITY = {
     "condition_data": 0,
     "trajectory": 1,
@@ -281,4 +284,146 @@ def build_feature_provenance_rows(
         "declared_condition_count": len(conditions),
         "identity_fallback_policy": "no_gene_or_site_label_fallback",
         "excluded_inputs": ["benchmark_truth", "locked_score", "rag_prose", "llm_output"],
+    }
+
+
+def _read_tsv_rows(path: Path) -> list[dict[str, str]]:
+    if not path.is_file():
+        return []
+    with path.open(newline="", encoding="utf-8") as handle:
+        return list(csv.DictReader(handle, delimiter="\t"))
+
+
+def _explicit_precursor_id(row: Mapping[str, Any]) -> str:
+    return str(row.get("precursor_id") or row.get("Precursor.Id") or row.get("PrecursorId") or "").strip()
+
+
+def _protein_group_annotation_map(
+    rows: Iterable[Mapping[str, Any]],
+    *value_keys: str,
+) -> dict[str, dict[str, str]]:
+    mapping: dict[str, dict[str, str]] = {}
+    for row in rows:
+        group = str(row.get("Protein.Group") or row.get("protein_group") or "").strip()
+        if not group:
+            continue
+        values = {
+            key: str(row.get(key) or "").strip()
+            for key in value_keys
+            if str(row.get(key) or "").strip()
+        }
+        if values:
+            mapping.setdefault(group, {}).update(values)
+    return mapping
+
+
+def load_stage1_feature_provenance_rows(
+    preprocessing_dir: str | Path,
+    *,
+    file_suffix: str,
+    declared_conditions: Iterable[Any],
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Load explicit modified-precursor rows for the P0 ledger from Stage 1.
+
+    구현 대상: docs/ptm_vector_p0_feature_provenance_restoration.md §3
+    사전등록: 2026-09-01 선언. Insulin P0 ledger 재측정 전.
+    해석 한계: Stage 1 identity 복원은 P1/P2/P3가 실제 feature에 적용되기
+    위한 필요조건이며 mapping 성공이나 kinase 귀속을 의미하지 않는다.
+    주장 금지: gene/site 라벨로 Precursor.Id를 만들지 않으며, 이 복원으로
+    kinase 예측 향상을 주장하지 않는다.
+    """
+
+    root = Path(preprocessing_dir)
+    suffix = file_suffix if str(file_suffix).startswith("_") else f"_{file_suffix}"
+    vector_candidates = (
+        root / f"ptm_vector_data_normalized{suffix}.tsv",
+        root / f"ptm_vector_data_with_motifs{suffix}.tsv",
+    )
+    comparison_path = root / f"ptm_condition_comparisons_normalized{suffix}.tsv"
+    gene_source_paths = (
+        root / f"ptm_protein_level_changes_normalized{suffix}.tsv",
+        root / f"all_protein_level_changes_normalized{suffix}.tsv",
+        *vector_candidates,
+    )
+    fasta_source_paths = (
+        root / f"unified_protein_data_enriched_bio_enriched{suffix}.tsv",
+        root / f"unified_protein_data_enriched{suffix}.tsv",
+        root / f"ptm_vector_data_with_motifs{suffix}.tsv",
+    )
+
+    fasta_map: dict[str, dict[str, str]] = {}
+    for path in fasta_source_paths:
+        for group, values in _protein_group_annotation_map(
+            _read_tsv_rows(path), "FASTA_Taxonomy_ID", "FASTA_Organism"
+        ).items():
+            fasta_map.setdefault(group, {}).update(values)
+
+    selected_source = ""
+    source_strategy = "unavailable"
+    source_rows: list[dict[str, Any]] = []
+    for path in vector_candidates:
+        rows = _read_tsv_rows(path)
+        if not rows:
+            continue
+        if any(_explicit_precursor_id(row) for row in rows):
+            selected_source = path.name
+            source_strategy = "vector_tsv_explicit_precursor"
+            source_rows = rows
+            break
+
+    if not source_rows:
+        comparison_rows = _read_tsv_rows(comparison_path)
+        gene_map: dict[str, dict[str, str]] = {}
+        for path in gene_source_paths:
+            for group, values in _protein_group_annotation_map(
+                _read_tsv_rows(path), "Gene.Name", "gene"
+            ).items():
+                gene_map.setdefault(group, {}).update(values)
+        for raw in comparison_rows:
+            group = str(raw.get("Protein.Group") or "").strip()
+            gene = str(
+                raw.get("Gene.Name")
+                or raw.get("gene")
+                or (gene_map.get(group) or {}).get("Gene.Name")
+                or (gene_map.get(group) or {}).get("gene")
+                or ""
+            ).strip()
+            log2fc = raw.get("PTM_Relative_Log2FC")
+            if log2fc is None or str(log2fc).strip() == "":
+                log2fc = raw.get("Log2FC")
+            source_rows.append({
+                **raw,
+                "Gene.Name": gene,
+                "PTM_Relative_Log2FC": log2fc,
+                "source_export_schema": comparison_path.name,
+            })
+        if source_rows:
+            selected_source = comparison_path.name
+            source_strategy = "comparisons_tsv_plus_protein_group_gene"
+
+    annotated_rows: list[dict[str, Any]] = []
+    for raw in source_rows:
+        group = str(raw.get("Protein.Group") or raw.get("protein_group") or "").strip()
+        fasta = fasta_map.get(group) or {}
+        annotated_rows.append({
+            **raw,
+            "FASTA_Taxonomy_ID": raw.get("FASTA_Taxonomy_ID") or fasta.get("FASTA_Taxonomy_ID"),
+            "FASTA_Organism": raw.get("FASTA_Organism") or fasta.get("FASTA_Organism"),
+            "source_export_schema": raw.get("source_export_schema") or selected_source,
+            "source_feature_key": raw.get("source_feature_key") or raw.get("Source_Feature_Key") or _explicit_precursor_id(raw),
+        })
+
+    feature_rows, reconstruction = build_feature_provenance_rows(
+        annotated_rows,
+        declared_conditions=declared_conditions,
+    )
+    return feature_rows, {
+        **reconstruction,
+        "stage1_source_contract_version": STAGE1_FEATURE_SOURCE_CONTRACT,
+        "stage1_source_file": selected_source or None,
+        "stage1_source_strategy": source_strategy,
+        "excluded_inputs": [
+            *reconstruction["excluded_inputs"],
+            "enriched_ptm_data_json",
+        ],
     }

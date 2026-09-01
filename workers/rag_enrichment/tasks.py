@@ -691,8 +691,8 @@ def _auto_run_global_analysis(order_id: int, enriched_data: list, config: dict, 
                     resolve_study_temporal_context,
                 )
                 from ptm_shared.temporal_input_reconstruction import (
-                    build_feature_provenance_rows,
                     build_temporal_input_bundle,
+                    load_stage1_feature_provenance_rows,
                 )
 
                 temporal_output_dir = Path(
@@ -710,8 +710,10 @@ def _auto_run_global_analysis(order_id: int, enriched_data: list, config: dict, 
                 )
                 if not declared_conditions:
                     declared_conditions = list(temporal_bundle["declared_conditions"])
-                feature_provenance_rows, feature_provenance_input = build_feature_provenance_rows(
-                    enriched_data,
+                file_suffix = "_phospho" if str(config.get("ptm_mode") or "phospho") == "phospho" else "_ubi"
+                feature_provenance_rows, feature_provenance_input = load_stage1_feature_provenance_rows(
+                    temporal_output_dir,
+                    file_suffix=file_suffix,
                     declared_conditions=declared_conditions,
                 )
                 study_context, context_provenance = resolve_study_temporal_context(
