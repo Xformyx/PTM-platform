@@ -65,12 +65,12 @@ def test_wave_context_does_not_promote_direct_kinase_tier_and_compact_summary_hi
     assert summary["feature_record_count"] == 2
 
 
-def test_v3_identity_ledger_records_localization_readiness_without_promoting_direct_call():
+def test_v4_identity_ledger_records_localization_readiness_without_promoting_direct_call():
     ledger = build_feature_provenance_ledger(_rows(), ["1min", "5min"])
     gab2 = next(row for row in ledger["feature_records"] if row["nominal_aggregate_key"] == "GAB2_S498")
     identity = gab2["identity_provenance"]
 
-    assert ledger["contract_version"].endswith(".v3")
+    assert ledger["contract_version"].endswith(".v4")
     assert identity["protein_accession_tokens"] == ["Q9Z0W4"]
     assert identity["protein_accession_status"] == "single_accession_observed"
     assert identity["reported_ptm_position_count"] == 1

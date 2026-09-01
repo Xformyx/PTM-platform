@@ -15,6 +15,7 @@ from ptm_shared.temporal_optimization_config import (
 )
 from ptm_shared.kinase_evidence_ledger import CONTRACT_VERSION as KINASE_LEDGER_CONTRACT_VERSION
 from ptm_shared.species_site_mapping import MAPPING_IMPORTER_CONTRACT_VERSION
+from ptm_shared.kinase_relation_evidence import RELATION_IMPORTER_CONTRACT_VERSION
 
 
 def _compact(marker: str) -> dict:
@@ -32,6 +33,12 @@ def _compact(marker: str) -> dict:
                 "mapping_bundle_status": "not_evaluable",
                 "mapping_bundle_sha256": None,
                 "mapping_class_counts": {"M0": 0, "M1": 0, "M2": 0, "M3": 0, "M4": 0},
+            },
+            "relation_readiness": {
+                "relation_importer_contract_version": RELATION_IMPORTER_CONTRACT_VERSION,
+                "relation_bundle_status": "not_evaluable",
+                "relation_bundle_sha256": None,
+                "relation_class_counts": {"R0": 0, "R1": 0, "R2": 0, "R3": 0, "R4": 0},
             },
         },
     }
@@ -58,6 +65,11 @@ def _full_sidecar() -> dict:
                 "mapping_importer_contract_version": MAPPING_IMPORTER_CONTRACT_VERSION,
                 "mapping_bundle_status": "not_evaluable",
                 "mapping_bundle_sha256": None,
+            },
+            "relation_importer": {
+                "relation_importer_contract_version": RELATION_IMPORTER_CONTRACT_VERSION,
+                "relation_bundle_status": "not_evaluable",
+                "relation_bundle_sha256": None,
             },
         },
         "provenance": {"shared_engine_contract": "unified_temporal_ptm_protein.v1"},

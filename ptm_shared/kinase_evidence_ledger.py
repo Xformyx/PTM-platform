@@ -20,7 +20,7 @@ from collections import Counter, defaultdict
 from typing import Any, Iterable, Mapping, Sequence
 
 
-CONTRACT_VERSION = "ptm_kinase_feature_provenance.v3"
+CONTRACT_VERSION = "ptm_kinase_feature_provenance.v4"
 DIRECT_NO_CALL_TIER = "E_direct_kinase_no_call"
 TEMPORAL_ASSOCIATION_TIER = "D_temporal_aggregate_context"
 UNRESOLVED_PRIMARY_REASON = "not_assigned_without_approved_f1_f8_priority_policy"
@@ -357,6 +357,12 @@ def compact_summary(ledger: Mapping[str, Any]) -> dict[str, Any]:
     )
     mapping_importer = dict(ledger.get("mapping_importer") or {})
     mapping_importer_summary = dict(mapping_importer.get("compact_summary") or {})
+    relation_importer = dict(ledger.get("relation_importer") or {})
+    relation_importer_summary = dict(relation_importer.get("compact_summary") or {})
+    relation_counts = Counter(
+        str((row.get("relation_evidence") or {}).get("relation_class_code") or "not_assessed")
+        for row in records
+    )
     aggregate_count = len({str(row.get("nominal_aggregate_key") or "") for row in records if row.get("nominal_aggregate_key")})
     return {
         "contract_version": CONTRACT_VERSION,
@@ -381,9 +387,19 @@ def compact_summary(ledger: Mapping[str, Any]) -> dict[str, Any]:
             ),
             "claim_boundary": "Mapping readiness is aggregate-only provenance; it does not create a direct kinase relation.",
         },
+        "relation_readiness": {
+            "relation_importer_contract_version": relation_importer_summary.get("relation_importer_contract_version"),
+            "relation_bundle_status": relation_importer_summary.get("relation_bundle_status", "not_assessed"),
+            "relation_bundle_error_code": relation_importer_summary.get("relation_bundle_error_code"),
+            "relation_class_counts": (
+                relation_importer_summary.get("relation_class_counts")
+                or {code: relation_counts.get(code, 0) for code in ("R0", "R1", "R2", "R3", "R4")}
+            ),
+            "claim_boundary": "Curated relation readiness is aggregate-only provenance; it does not identify one kinase or establish direct regulation.",
+        },
         "mutually_exclusive_f1_f8_ledger_status": MAPPING_LEDGER_STATUS,
         "unmatched_reason_primary_policy": UNRESOLVED_PRIMARY_REASON,
-        "direct_kinase_attribution_status": "no_call_without_feature_level_mapping_localization_and_curated_edge_provenance",
+        "direct_kinase_attribution_status": "no_call_without_p3_candidate_allocation_and_required_feature_mapping_localization_relation_provenance",
         "claim_boundary": (
             "Counts describe provenance readiness and direct-kinase no-call status only. "
             "They do not identify a kinase, establish a direct kinase-substrate relation, "
@@ -394,7 +410,8 @@ def compact_summary(ledger: Mapping[str, Any]) -> dict[str, Any]:
             "all_reported_ptm_positions", "localization_probability", "source_feature_key",
             "fasta_taxonomy_id", "fasta_organism", "mapping_accession", "mapping_sequence",
             "mapping_peptide", "mapping_coordinate", "orthology_identifier", "mapping_source_file_path",
-            "candidate_kinase_names",
+            "candidate_kinase_names", "relation_candidate_edges", "relation_edge_id", "relation_reference_id",
+            "relation_license_text", "relation_source_file_path", "relation_isoform_or_sequence_id",
             "raw_log2fc", "raw_intensity", "q_value", "benchmark_truth", "known_relation_registry",
         ],
     }

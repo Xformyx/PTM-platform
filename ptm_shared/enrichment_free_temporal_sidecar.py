@@ -810,6 +810,8 @@ def build_production_temporal_ptm_protein_analysis(
     feature_provenance_rows: Iterable[Mapping[str, Any]] | None = None,
     mapping_source_bundle_path: str | Path | None = None,
     mapping_snapshot_root: str | Path | None = None,
+    relation_source_bundle_path: str | Path | None = None,
+    relation_snapshot_root: str | Path | None = None,
 ) -> dict[str, Any]:
     """Build the exact v2 sidecar contract for a normal production order.
 
@@ -864,6 +866,10 @@ def build_production_temporal_ptm_protein_analysis(
         attach_mapping_context,
         map_feature_records,
     )
+    from ptm_shared.kinase_relation_evidence import (
+        attach_relation_evidence,
+        map_feature_relations,
+    )
 
     feature_ledger = attach_temporal_context(
         build_feature_provenance_ledger(feature_provenance_rows or (), ordered_conditions),
@@ -876,6 +882,14 @@ def build_production_temporal_ptm_protein_analysis(
             feature_ledger,
             manifest_path=mapping_source_bundle_path,
             snapshot_root=mapping_snapshot_root,
+        ),
+    )
+    feature_ledger = attach_relation_evidence(
+        feature_ledger,
+        map_feature_relations(
+            feature_ledger,
+            manifest_path=relation_source_bundle_path,
+            snapshot_root=relation_snapshot_root,
         ),
     )
     sidecar = build_v2_sidecar(

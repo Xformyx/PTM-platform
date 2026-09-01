@@ -22,6 +22,9 @@ from ptm_shared.kinase_evidence_ledger import CONTRACT_VERSION as CURRENT_KINASE
 from ptm_shared.species_site_mapping import (
     MAPPING_IMPORTER_CONTRACT_VERSION as CURRENT_MAPPING_IMPORTER_CONTRACT_VERSION,
 )
+from ptm_shared.kinase_relation_evidence import (
+    RELATION_IMPORTER_CONTRACT_VERSION as CURRENT_RELATION_IMPORTER_CONTRACT_VERSION,
+)
 
 
 CURRENT_DYNAMIC_CONTRACT_VERSION = DYNAMIC_COWAVE_CONTRACT_VERSION
@@ -42,11 +45,20 @@ def _expected_mapping_bundle_sha256() -> str | None:
     return value if len(value) == 64 and all(char in "0123456789abcdef" for char in value) else None
 
 
+def _expected_relation_bundle_sha256() -> str | None:
+    """Return an optional operator-configured immutable P2 bundle manifest SHA-256."""
+
+    value = str(os.getenv("PTM_RELATION_BUNDLE_SHA256") or "").strip().lower()
+    return value if len(value) == 64 and all(char in "0123456789abcdef" for char in value) else None
+
+
 def compact_dynamic_is_current(compact: Mapping[str, Any]) -> bool:
     """Return whether a DB/config compact sidecar uses the current semantics."""
     ledger_summary = compact.get("kinase_feature_evidence_ledger_summary") or {}
     mapping_readiness = ledger_summary.get("mapping_readiness") or {}
+    relation_readiness = ledger_summary.get("relation_readiness") or {}
     expected_mapping_bundle = _expected_mapping_bundle_sha256()
+    expected_relation_bundle = _expected_relation_bundle_sha256()
     return (
         compact.get("dynamic_co_wave_transition_contract_version")
         == CURRENT_DYNAMIC_CONTRACT_VERSION
@@ -54,7 +66,9 @@ def compact_dynamic_is_current(compact: Mapping[str, Any]) -> bool:
         == CURRENT_DYNAMIC_CONFIG_SHA256
         and ledger_summary.get("contract_version") == CURRENT_KINASE_LEDGER_CONTRACT_VERSION
         and mapping_readiness.get("mapping_importer_contract_version") == CURRENT_MAPPING_IMPORTER_CONTRACT_VERSION
+        and relation_readiness.get("relation_importer_contract_version") == CURRENT_RELATION_IMPORTER_CONTRACT_VERSION
         and (expected_mapping_bundle is None or mapping_readiness.get("mapping_bundle_sha256") == expected_mapping_bundle)
+        and (expected_relation_bundle is None or relation_readiness.get("relation_bundle_sha256") == expected_relation_bundle)
     )
 
 
@@ -64,13 +78,17 @@ def full_dynamic_is_current(full_sidecar: Mapping[str, Any]) -> bool:
     provenance = dynamic.get("provenance") or {}
     ledger = full_sidecar.get("kinase_feature_evidence_ledger") or {}
     mapping_importer = ledger.get("mapping_importer") or {}
+    relation_importer = ledger.get("relation_importer") or {}
     expected_mapping_bundle = _expected_mapping_bundle_sha256()
+    expected_relation_bundle = _expected_relation_bundle_sha256()
     return (
         dynamic.get("contract_version") == CURRENT_DYNAMIC_CONTRACT_VERSION
         and provenance.get("config_sha256") == CURRENT_DYNAMIC_CONFIG_SHA256
         and ledger.get("contract_version") == CURRENT_KINASE_LEDGER_CONTRACT_VERSION
         and mapping_importer.get("mapping_importer_contract_version") == CURRENT_MAPPING_IMPORTER_CONTRACT_VERSION
+        and relation_importer.get("relation_importer_contract_version") == CURRENT_RELATION_IMPORTER_CONTRACT_VERSION
         and (expected_mapping_bundle is None or mapping_importer.get("mapping_bundle_sha256") == expected_mapping_bundle)
+        and (expected_relation_bundle is None or relation_importer.get("relation_bundle_sha256") == expected_relation_bundle)
     )
 
 

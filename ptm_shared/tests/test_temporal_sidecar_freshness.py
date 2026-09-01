@@ -12,6 +12,7 @@ from ptm_shared.temporal_sidecar_freshness import (
 )
 from ptm_shared.kinase_evidence_ledger import CONTRACT_VERSION as KINASE_LEDGER_CONTRACT_VERSION
 from ptm_shared.species_site_mapping import MAPPING_IMPORTER_CONTRACT_VERSION
+from ptm_shared.kinase_relation_evidence import RELATION_IMPORTER_CONTRACT_VERSION
 
 
 def _current_compact() -> dict:
@@ -22,6 +23,9 @@ def _current_compact() -> dict:
             "contract_version": KINASE_LEDGER_CONTRACT_VERSION,
             "mapping_readiness": {
                 "mapping_importer_contract_version": MAPPING_IMPORTER_CONTRACT_VERSION,
+            },
+            "relation_readiness": {
+                "relation_importer_contract_version": RELATION_IMPORTER_CONTRACT_VERSION,
             },
         },
     }
@@ -37,6 +41,9 @@ def _current_full() -> dict:
             "contract_version": KINASE_LEDGER_CONTRACT_VERSION,
             "mapping_importer": {
                 "mapping_importer_contract_version": MAPPING_IMPORTER_CONTRACT_VERSION,
+            },
+            "relation_importer": {
+                "relation_importer_contract_version": RELATION_IMPORTER_CONTRACT_VERSION,
             },
         },
     }
@@ -72,6 +79,17 @@ def test_configured_mapping_bundle_hash_mismatch_is_not_reusable(monkeypatch) ->
     compact["kinase_feature_evidence_ledger_summary"]["mapping_readiness"]["mapping_bundle_sha256"] = "b" * 64
     full = _current_full()
     full["kinase_feature_evidence_ledger"]["mapping_importer"]["mapping_bundle_sha256"] = "b" * 64
+    assert compact_dynamic_is_current(compact) is False
+    assert full_dynamic_is_current(full) is False
+
+
+def test_configured_relation_bundle_hash_mismatch_is_not_reusable(monkeypatch) -> None:
+    expected = "c" * 64
+    monkeypatch.setenv("PTM_RELATION_BUNDLE_SHA256", expected)
+    compact = _current_compact()
+    compact["kinase_feature_evidence_ledger_summary"]["relation_readiness"]["relation_bundle_sha256"] = "d" * 64
+    full = _current_full()
+    full["kinase_feature_evidence_ledger"]["relation_importer"]["relation_bundle_sha256"] = "d" * 64
     assert compact_dynamic_is_current(compact) is False
     assert full_dynamic_is_current(full) is False
 

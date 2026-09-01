@@ -740,6 +740,14 @@ def _auto_run_global_analysis(order_id: int, enriched_data: list, config: dict, 
                         config.get("mapping_snapshot_root")
                         or os.getenv("PTM_MAPPING_SNAPSHOT_ROOT")
                     ),
+                    relation_source_bundle_path=(
+                        config.get("relation_source_bundle_path")
+                        or os.getenv("PTM_RELATION_SOURCE_BUNDLE_PATH")
+                    ),
+                    relation_snapshot_root=(
+                        config.get("relation_snapshot_root")
+                        or os.getenv("PTM_RELATION_SNAPSHOT_ROOT")
+                    ),
                 )
                 temporal_path = temporal_output_dir / "temporal_ptm_protein_analysis_v2.json"
                 temporal_path.write_text(
