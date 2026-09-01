@@ -1032,21 +1032,45 @@ def build_temporal_evidence_packet(
     if ledger_summary:
         direct_tiers = dict(ledger_summary.get("direct_kinase_evidence_tier_counts") or {})
         temporal_tiers = dict(ledger_summary.get("temporal_evidence_tier_counts") or {})
+        mapping_readiness = dict(ledger_summary.get("mapping_readiness") or {})
+        relation_readiness = dict(ledger_summary.get("relation_readiness") or {})
+        allocation_readiness = dict(ledger_summary.get("candidate_allocation_readiness") or {})
+        mapping_counts = dict(mapping_readiness.get("mapping_class_counts") or {})
+        relation_counts = dict(relation_readiness.get("relation_class_counts") or {})
+        localization_counts = dict(
+            (ledger_summary.get("identity_readiness_counts") or {}).get("localization_status") or {}
+        )
         add_record(
             "DATA-KINASE-ATTRIBUTION-READINESS",
             "provenance_no_call",
             (
-                "Kinase-attribution provenance status: feature records={features}; nominal aggregates={aggregates}; "
-                "direct-kinase evidence tiers={direct_tiers}; temporal evidence tiers={temporal_tiers}; "
-                "reason-mask counts={masks}; mutually exclusive F1-F8 ledger status={ledger_status}; "
-                "direct kinase attribution status={direct_status}. {boundary}"
+                "Kinase-attribution readiness (aggregate only): P0 explicit modified-precursor feature records={features}; "
+                "site-level nominal aggregates={aggregates}; localization provenance counts={localization_counts}. "
+                "P1 mapping bundle status={mapping_status}; M0={m0}, M1={m1}, M2={m2}, M3={m3}, M4={m4}. "
+                "P2 relation bundle status={relation_status}; R0={r0}, R1={r1}, R2={r2}, R3={r3}, R4={r4}. "
+                "P3 candidate allocation status={allocation_status}; eligible feature sets={eligible}; "
+                "mass conservation status={mass_status}. direct kinase attribution status=not established ({direct_status}). "
+                "These are aggregate provenance statuses only; no feature, accession, residue, candidate kinase, edge, "
+                "reference, peptide, sequence, or raw quantitative value is available in this report packet. {boundary}"
             ).format(
                 features=ledger_summary.get("feature_record_count"),
                 aggregates=ledger_summary.get("nominal_aggregate_count"),
-                direct_tiers=direct_tiers,
-                temporal_tiers=temporal_tiers,
-                masks=dict(ledger_summary.get("reason_mask_counts") or {}),
-                ledger_status=ledger_summary.get("mutually_exclusive_f1_f8_ledger_status"),
+                localization_counts=localization_counts,
+                mapping_status=mapping_readiness.get("mapping_bundle_status", "not_assessed"),
+                m0=mapping_counts.get("M0", 0),
+                m1=mapping_counts.get("M1", 0),
+                m2=mapping_counts.get("M2", 0),
+                m3=mapping_counts.get("M3", 0),
+                m4=mapping_counts.get("M4", 0),
+                relation_status=relation_readiness.get("relation_bundle_status", "not_assessed"),
+                r0=relation_counts.get("R0", 0),
+                r1=relation_counts.get("R1", 0),
+                r2=relation_counts.get("R2", 0),
+                r3=relation_counts.get("R3", 0),
+                r4=relation_counts.get("R4", 0),
+                allocation_status=allocation_readiness.get("allocation_status", "not_assessed"),
+                eligible=allocation_readiness.get("eligible_feature_count", 0),
+                mass_status=allocation_readiness.get("mass_conservation_status", "not_assessed"),
                 direct_status=ledger_summary.get("direct_kinase_attribution_status"),
                 boundary=ledger_summary.get(
                     "claim_boundary",
@@ -1286,6 +1310,14 @@ def build_temporal_evidence_packet(
     )
     mechanism_context_allowed = directed_temporal_context_allowed
 
+    direct_status = str(ledger_summary.get("direct_kinase_attribution_status") or "no_call").strip().lower()
+    direct_kinase_attribution_allowed = direct_status in {
+        "perturbation_supported_direct_kinase_attribution",
+    }
+    observation_only_claim_ceiling = not (
+        directed_temporal_context_allowed and direct_kinase_attribution_allowed
+    )
+
     return {
         "contract_version": "report_temporal_evidence_packet.v4",
         "status": "available",
@@ -1298,14 +1330,18 @@ def build_temporal_evidence_packet(
             "dynamic_context_allowed": dynamic_context_allowed,
             "directed_temporal_context_allowed": directed_temporal_context_allowed,
             "mechanism_context_allowed": mechanism_context_allowed,
+            "direct_kinase_attribution_allowed": direct_kinase_attribution_allowed,
+            "observation_only_claim_ceiling": observation_only_claim_ceiling,
             "results_discussion_claim_ceiling": (
-                "L2_observational_temporal_candidate"
-                if mechanism_context_allowed
+                "L2_observational_temporal_candidate_with_no_direct_kinase_call"
+                if directed_temporal_context_allowed and not observation_only_claim_ceiling
                 else "L1_observed_measurement_only"
             ),
             "high_severity_forbidden_terms": [
                 "causes", "drives", "directly activates", "proves",
                 "kinase switching", "causal propagation", "signal propagation",
+                "direct regulation", "autophosphorylation", "feedback loop",
+                "phosphatase activation", "dominant kinase", "direct biochemical evidence",
             ],
         },
         "claim_boundary": (
@@ -1362,7 +1398,8 @@ def format_temporal_evidence_packet_for_llm(
         f"Mechanism-context allowed in this section={mechanism_context_allowed}.",
         coverage_instruction,
         f"Available required classes: temporal-precedence={has_precedence}; dynamic={has_dynamic}; TMM={has_tmm}; PTM-protein={has_cross_layer}; counterevidence={has_counterevidence}.",
-        "For auditability, retain the relevant [DATA-*] label at the end of the sentence in the draft.",
+        "Use DATA labels only as internal audit anchors while drafting. Never reproduce any DATA-* label in user-facing prose; "
+        "the final renderer removes every internal label after traceability is checked.",
         "",
     ]
     for record in packet.get("records") or []:
@@ -1384,6 +1421,7 @@ def build_temporal_evidence_fallback_addendum(packet: Mapping[str, Any]) -> str:
     selected: list[Mapping[str, Any]] = []
     prefixes = (
         "DATA-TEMPORAL-SUMMARY",
+        "DATA-KINASE-ATTRIBUTION-READINESS",
         "DATA-TEMPORAL-PRECEDENCE",
         "DATA-DYNAMIC-SUMMARY",
         "DATA-DYNAMIC-WAVE-",

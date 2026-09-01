@@ -7,10 +7,13 @@ from typing import Any, Mapping
 
 
 _DATA_LABEL_PATTERN = re.compile(
-    r"\[?(DATA-(?:TEMPORAL-SUMMARY|TEMPORAL-PRECEDENCE|DYNAMIC-SUMMARY|DYNAMIC-WAVE-\d+|TMM-KINASE-\d+|TMM-UNCERTAINTY|CROSS-LAYER-\d+|COUNTEREVIDENCE-\d+))\]?"
+    r"\[?(DATA-(?:TEMPORAL-SUMMARY|KINASE-ATTRIBUTION-READINESS|TEMPORAL-PRECEDENCE|DYNAMIC-SUMMARY|DYNAMIC-WAVE-\d+|TMM-KINASE-\d+|TMM-UNCERTAINTY|CROSS-LAYER-\d+|COUNTEREVIDENCE-\d+))\]?"
 )
 _UNSAFE_TEMPORAL_CLAIM = re.compile(
-    r"\b(?:causes?|drives?|directly activates?|proves?|kinase switching|causal propagation|signal propagation)\b",
+    r"\b(?:causes?|drives?|directly activates?|proves?|kinase switching|causal propagation|signal propagation|"
+    r"direct regulation|autophosphorylation|feedback loop|phosphatase activation|dominant kinase|"
+    r"direct biochemical evidence|direct kinase(?:[- ]substrate)?(?: relationship| regulation| attribution)?|"
+    r"regulates? downstream (?:substrates?|targets?)|structured signal flow)\b",
     flags=re.IGNORECASE,
 )
 
@@ -39,12 +42,15 @@ def audit_report_temporal_fidelity(
 
     section_plan = dict(packet.get("section_plan") or {})
     mechanism_context_allowed = bool(section_plan.get("mechanism_context_allowed"))
+    observation_only_claim_ceiling = bool(section_plan.get("observation_only_claim_ceiling", True))
     unsafe_claims: list[str] = []
     for sentence in re.split(r"(?<=[.!?])\s+", draft_text or ""):
         has_high_severity_claim = bool(_UNSAFE_TEMPORAL_CLAIM.search(sentence))
         has_explicit_negation = bool(re.search(r"\b(?:not|no|without|does not|did not)\b", sentence, flags=re.IGNORECASE))
         if has_high_severity_claim and not has_explicit_negation and (
-            _DATA_LABEL_PATTERN.search(sentence) or not mechanism_context_allowed
+            _DATA_LABEL_PATTERN.search(sentence)
+            or not mechanism_context_allowed
+            or observation_only_claim_ceiling
         ):
             unsafe_claims.append(sentence.strip()[:500])
 
@@ -80,7 +86,7 @@ def audit_report_temporal_fidelity(
         status = "untraced"
 
     return {
-        "contract_version": "report_temporal_fidelity.v4",
+        "contract_version": "report_temporal_fidelity.v5",
         "section_type": section_type,
         "status": status,
         "packet_status": packet.get("status", "unavailable"),
@@ -102,6 +108,7 @@ def audit_report_temporal_fidelity(
         "unsafe_temporal_claim_count": len(unsafe_claims),
         "unsafe_temporal_claim_examples": unsafe_claims,
         "mechanism_context_allowed": mechanism_context_allowed,
+        "observation_only_claim_ceiling": observation_only_claim_ceiling,
         "recommended_action": (
             "constrained_rewrite_required" if unsafe_claims or missing_required_groups
             else "release_candidate"

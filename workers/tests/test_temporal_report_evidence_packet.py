@@ -50,6 +50,26 @@ def _sidecar_summary() -> dict:
             "claim_boundary": "Observed response timing only; causal interpretation is not supported.",
             "contract_version": "temporal_precedence_output.v1",
         },
+        "kinase_feature_evidence_ledger_summary": {
+            "feature_record_count": 3030,
+            "nominal_aggregate_count": 2447,
+            "identity_readiness_counts": {"localization_status": {"not_recorded": 3030}},
+            "mapping_readiness": {
+                "mapping_bundle_status": "validated",
+                "mapping_class_counts": {"M0": 0, "M1": 1, "M2": 0, "M3": 1882, "M4": 1147},
+            },
+            "relation_readiness": {
+                "relation_bundle_status": "validated",
+                "relation_class_counts": {"R0": 0, "R1": 3030, "R2": 0, "R3": 0, "R4": 0},
+            },
+            "candidate_allocation_readiness": {
+                "allocation_status": "computed_no_eligible_R3_candidate_sets",
+                "eligible_feature_count": 0,
+                "mass_conservation_status": "not_evaluable_or_no_candidate_set",
+            },
+            "direct_kinase_attribution_status": "no_call_without_p3_candidate_allocation_and_required_feature_mapping_localization_relation_provenance",
+            "claim_boundary": "Counts are aggregate provenance only and do not establish direct kinase attribution.",
+        },
         "top_cross_layer_edges": [{
             "edge_id": "edge-1",
             "source_wave_id": "W1",
@@ -70,7 +90,7 @@ def test_packet_preserves_numerical_fields_and_observational_boundary():
 
     assert packet["status"] == "available"
     assert packet["contract_version"] == "report_temporal_evidence_packet.v4"
-    assert packet["record_count"] == 5
+    assert packet["record_count"] == 6
     dynamic = next(row for row in packet["records"] if row["evidence_id"] == "DATA-DYNAMIC-SUMMARY")
     assert dynamic["availability"] == "computed"
     assert dynamic["claim_level"] == "L2_observational_dynamic"
@@ -91,6 +111,11 @@ def test_packet_preserves_numerical_fields_and_observational_boundary():
     assert "onset lag=15 min" in text
     assert "causality=not_tested" in text
     assert "does not establish kinase switching" in text
+    readiness = next(row for row in packet["records"] if row["evidence_id"] == "DATA-KINASE-ATTRIBUTION-READINESS")
+    assert "P0 explicit modified-precursor feature records=3030" in readiness["text"]
+    assert "M3=1882" in readiness["text"]
+    assert "R3=0" in readiness["text"]
+    assert "eligible feature sets=0" in readiness["text"]
 
 
 def test_results_instruction_requires_available_record_classes_and_final_prose_hides_ids():
@@ -101,6 +126,8 @@ def test_results_instruction_requires_available_record_classes_and_final_prose_h
     assert "Do not use receptor-cascade context" in text
     assert "Available required classes: temporal-precedence=True; dynamic=True; TMM=False; PTM-protein=True; counterevidence=False." in text
     assert "DATA-DYNAMIC-SUMMARY" not in strip_internal_data_labels(text)
+    assert "DATA-KINASE-ATTRIBUTION-READINESS" not in strip_internal_data_labels(text)
+    assert "P0 explicit modified-precursor feature records=3030" in strip_internal_data_labels(text)
 
 
 def test_packet_unavailable_explicitly_blocks_invented_temporal_claims():
@@ -130,6 +157,40 @@ def test_zero_temporal_layers_force_observed_measurement_claim_ceiling():
     text = format_temporal_evidence_packet_for_llm(packet, section_type="results")
     assert "Mechanism-context allowed in this section=False" in text
     assert "omit that mechanism claim" in text
+    assert packet["section_plan"]["observation_only_claim_ceiling"] is True
+
+
+def test_no_call_claim_ceiling_blocks_direct_and_cascade_language():
+    summary = _sidecar_summary()
+    summary["temporal_precedence_status"] = {
+        "status": "not_evaluable_context_not_registered",
+        "n_sites": 0,
+        "n_evaluable": 0,
+    }
+    packet = build_temporal_evidence_packet(summary)
+    audit = audit_report_temporal_fidelity(
+        "CSNK2 drives a receptor-to-kinase cascade through direct regulation, autophosphorylation, and a feedback loop.",
+        packet,
+        section_type="results",
+    )
+    assert audit["status"] == "review_required"
+    assert audit["observation_only_claim_ceiling"] is True
+    assert audit["unsafe_temporal_claim_count"] == 1
+
+
+def test_writer_emits_last_wins_observation_only_directive_for_no_call_packet():
+    from report_generation.core.nodes.writer_node import _build_observation_only_claim_ceiling
+
+    packet = build_temporal_evidence_packet(_sidecar_summary())
+    directive = _build_observation_only_claim_ceiling(
+        "results",
+        packet["section_plan"],
+    )
+    assert directive.startswith("=== MANDATORY CURRENT-ORDER CLAIM CEILING")
+    assert "MUST NOT state or imply receptor-to-kinase-to-substrate propagation" in directive
+    assert "autophosphorylation" in directive
+    assert "local temporal co-membership annotations" in directive
+    assert "Do not emit DATA-* labels" in directive
 
 
 def test_ordinary_question_content_includes_deterministic_temporal_packet():
@@ -156,6 +217,8 @@ def test_writer_makes_the_packet_mandatory_in_all_temporal_sections():
     assert "EVIDENCE-CONSTRAINED REWRITE REQUIRED" in source
     assert '"status"] = "blocked_for_review"' in source
     assert "dynamic_context_allowed = bool(temporal_section_plan.get" in source
+    assert "MANDATORY CURRENT-ORDER CLAIM CEILING" in source
+    assert "generic legacy auxiliary contexts cannot" in source
     assert "directed_temporal_context_allowed = bool(" in source
     assert "base_prompt_directed_context_allowed = (" in source
     assert "if base_prompt_directed_context_allowed else None" in source

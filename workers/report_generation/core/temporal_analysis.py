@@ -274,22 +274,17 @@ def build_ptm_protein_timelag_analysis(
             lag = prot_min - ptm_min
 
             if lag > 0:
-                if lag <= 5:
-                    mechanism = "Direct post-translational effect (PTM-dependent stabilization/destabilization)"
-                elif lag <= 20:
-                    mechanism = "Signal-dependent protein turnover (proteasomal degradation or chaperone-mediated stabilization)"
-                else:
-                    mechanism = "Transcriptional reprogramming downstream of PTM-activated signaling cascade"
-                direction = "Causal: PTM modification precedes protein abundance change"
-                cascade_type = "immediate" if lag <= 5 else ("rapid_relay" if lag <= 20 else "transcriptional")
+                mechanism = "Observed PTM-to-protein abundance timing offset; mechanism not identified"
+                direction = "Observed: PTM first-change time precedes protein abundance first-change time"
+                cascade_type = "positive_lag_observation"
             elif lag < 0:
-                mechanism = "Feedback: protein abundance change precedes PTM (possible autoregulatory loop)"
-                direction = "Feedback"
-                cascade_type = "feedback"
+                mechanism = "Observed protein-to-PTM timing offset; mechanism not identified"
+                direction = "Observed: protein abundance first-change time precedes PTM first-change time"
+                cascade_type = "negative_lag_observation"
             else:
-                mechanism = "Co-regulated: simultaneous PTM and abundance change (shared upstream signal)"
-                direction = "Simultaneous"
-                cascade_type = "co_regulated"
+                mechanism = "Observed same-time-bin PTM and protein abundance change; shared control not established"
+                direction = "Observed: same first-change time bin"
+                cascade_type = "same_bin_observation"
 
             self_timelags.append(
                 {
@@ -309,7 +304,7 @@ def build_ptm_protein_timelag_analysis(
 
     self_timelags.sort(key=lambda x: abs(x["time_lag_minutes"]), reverse=True)
 
-    # -- Part B: PTM->Non-PTM interactor signal propagation --
+    # -- Part B: PTM->Non-PTM interactor temporal alignment --
     cascade_timelags = []
 
     # Build PTM protein first-change map
@@ -346,7 +341,7 @@ def build_ptm_protein_timelag_analysis(
                 nonptm_first_change[gene] = (tp, tp_data[tp])
                 break
 
-    # Find PTM->Non-PTM edges and compute signal propagation lag
+    # Find PTM->Non-PTM edges and compute observational lag.
     for tp in timepoints:
         net = networks.get(tp, {})
         if not isinstance(net, dict):
@@ -375,19 +370,14 @@ def build_ptm_protein_timelag_analysis(
                     continue
 
                 if lag > 0:
-                    if lag <= 5:
-                        mechanism = "Immediate effector recruitment (complex formation/scaffolding)"
-                    elif lag <= 20:
-                        mechanism = "Signal-dependent translational activation of effector protein"
-                    else:
-                        mechanism = "Transcriptional induction of effector gene by PTM-activated transcription factor"
-                    direction = "Signal propagation: PTM substrate -> effector protein"
+                    mechanism = "Observed positive PTM-to-protein timing offset; mechanism not identified"
+                    direction = "Observed: PTM first-change time precedes protein abundance first-change time"
                 elif lag < 0:
-                    mechanism = "Reverse signaling: effector abundance change precedes substrate PTM"
-                    direction = "Reverse signaling"
+                    mechanism = "Observed negative PTM-to-protein timing offset; mechanism not identified"
+                    direction = "Observed: protein abundance first-change time precedes PTM first-change time"
                 else:
-                    mechanism = "Co-activation: simultaneous substrate modification and effector response"
-                    direction = "Co-activation"
+                    mechanism = "Observed same-time-bin change; shared control not established"
+                    direction = "Observed: same first-change time bin"
 
                 cascade_timelags.append(
                     {
@@ -410,28 +400,28 @@ def build_ptm_protein_timelag_analysis(
     if not self_timelags and not cascade_timelags:
         return ""
 
-    parts = ["\n## PTM -> PROTEIN ABUNDANCE TEMPORAL CAUSALITY ANALYSIS\n"]
+    parts = ["\n## PTM -> PROTEIN ABUNDANCE TEMPORAL ASSOCIATION SUMMARY\n"]
     parts.append(
-        "This analysis reveals the temporal relationship between PTM signaling events"
+        "This analysis reports first-change timing relationships between measured PTM sites"
     )
     parts.append(
-        "and downstream protein abundance changes, enabling causal inference about"
+        "and protein abundance changes. It does not identify a regulatory direction or"
     )
-    parts.append("signal transduction mechanisms.\n")
+    parts.append("a causal signal-transduction mechanism.\n")
 
     # Part A: Self-regulation summary
     if self_timelags:
-        causal = [t for t in self_timelags if "Causal" in t["direction"]]
-        feedback = [t for t in self_timelags if "Feedback" in t["direction"]]
-        simultaneous = [t for t in self_timelags if "Simultaneous" in t["direction"]]
+        positive_lag = [t for t in self_timelags if t["time_lag_minutes"] > 0]
+        negative_lag = [t for t in self_timelags if t["time_lag_minutes"] < 0]
+        same_bin = [t for t in self_timelags if t["time_lag_minutes"] == 0]
 
         parts.append("### PTM-Protein Abundance Coupling (Same Protein)")
         parts.append(
             f"Proteins with both significant PTM and abundance changes: {len(self_timelags)}"
         )
-        parts.append(f"  Causal (PTM precedes abundance change): {len(causal)}")
-        parts.append(f"  Feedback (abundance change precedes PTM): {len(feedback)}")
-        parts.append(f"  Simultaneous (co-regulated): {len(simultaneous)}")
+        parts.append(f"  Positive observed lag (PTM first-change time before abundance): {len(positive_lag)}")
+        parts.append(f"  Negative observed lag (abundance first-change time before PTM): {len(negative_lag)}")
+        parts.append(f"  Same observed first-change time bin: {len(same_bin)}")
         parts.append("")
 
         parts.append(
@@ -446,23 +436,23 @@ def build_ptm_protein_timelag_analysis(
             )
         parts.append("")
 
-    # Part B: Signal propagation
+    # Part B: PTM-to-protein temporal alignment
     if cascade_timelags:
-        forward = [t for t in cascade_timelags if "propagation" in t["direction"]]
-        reverse = [t for t in cascade_timelags if "Reverse" in t["direction"]]
+        positive_lag = [t for t in cascade_timelags if t["time_lag_minutes"] > 0]
+        negative_lag = [t for t in cascade_timelags if t["time_lag_minutes"] < 0]
 
-        parts.append("### Signal Propagation: PTM Substrate -> Downstream Effector")
+        parts.append("### PTM-to-Protein Temporal Alignment")
         parts.append(
-            f"PTM->Effector pairs with measurable signal propagation: {len(cascade_timelags)}"
+            f"PTM-to-protein pairs with measured first-change timing: {len(cascade_timelags)}"
         )
         parts.append(
-            f"  Forward propagation (PTM precedes effector response): {len(forward)}"
+            f"  Positive observed lag (PTM first-change time before protein): {len(positive_lag)}"
         )
-        parts.append(f"  Reverse signaling: {len(reverse)}")
+        parts.append(f"  Negative observed lag (protein first-change time before PTM): {len(negative_lag)}")
         parts.append("")
 
         parts.append(
-            "| PTM Substrate | Effector Protein | Substrate PTM at | Effector Response at | Lag (min) | Signal Mechanism |"
+            "| PTM Source | Protein Observation | PTM First Change | Protein First Change | Lag (min) | Interpretation Boundary |"
         )
         parts.append("|" + "|".join(["---"] * 6) + "|")
         for tl in cascade_timelags[:15]:
@@ -474,20 +464,20 @@ def build_ptm_protein_timelag_analysis(
             )
         parts.append("")
 
-    # Summary of signal propagation kinetics
+    # Summary of observed timing offsets
     all_lags = [
         t["time_lag_minutes"]
         for t in self_timelags + cascade_timelags
         if t.get("time_lag_minutes", 0) > 0
     ]
     if all_lags:
-        parts.append("### Signal Propagation Kinetics Summary")
+        parts.append("### Observed Timing-Offset Summary")
         immediate = len([lag for lag in all_lags if lag <= 5])
         rapid = len([lag for lag in all_lags if 5 < lag <= 20])
         delayed = len([lag for lag in all_lags if lag > 20])
-        parts.append(f"  Immediate post-translational effects (<=5min lag): {immediate}")
-        parts.append(f"  Rapid signal relay (5-20min lag): {rapid}")
-        parts.append(f"  Delayed transcriptional response (>20min lag): {delayed}")
+        parts.append(f"  Short positive timing offsets (<=5min): {immediate}")
+        parts.append(f"  Intermediate positive timing offsets (5-20min): {rapid}")
+        parts.append(f"  Longer positive timing offsets (>20min): {delayed}")
         parts.append("")
 
     return "\n".join(parts)
