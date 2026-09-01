@@ -70,7 +70,7 @@ def test_v4_identity_ledger_records_localization_readiness_without_promoting_dir
     gab2 = next(row for row in ledger["feature_records"] if row["nominal_aggregate_key"] == "GAB2_S498")
     identity = gab2["identity_provenance"]
 
-    assert ledger["contract_version"].endswith(".v4")
+    assert ledger["contract_version"].endswith(".v5")
     assert identity["protein_accession_tokens"] == ["Q9Z0W4"]
     assert identity["protein_accession_status"] == "single_accession_observed"
     assert identity["reported_ptm_position_count"] == 1

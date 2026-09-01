@@ -16,6 +16,7 @@ from ptm_shared.temporal_optimization_config import (
 from ptm_shared.kinase_evidence_ledger import CONTRACT_VERSION as KINASE_LEDGER_CONTRACT_VERSION
 from ptm_shared.species_site_mapping import MAPPING_IMPORTER_CONTRACT_VERSION
 from ptm_shared.kinase_relation_evidence import RELATION_IMPORTER_CONTRACT_VERSION
+from ptm_shared.kinase_candidate_allocation import ALLOCATION_CONTRACT_VERSION
 
 
 def _compact(marker: str) -> dict:
@@ -39,6 +40,15 @@ def _compact(marker: str) -> dict:
                 "relation_bundle_status": "not_evaluable",
                 "relation_bundle_sha256": None,
                 "relation_class_counts": {"R0": 0, "R1": 0, "R2": 0, "R3": 0, "R4": 0},
+            },
+            "candidate_allocation_readiness": {
+                "allocation_contract_version": ALLOCATION_CONTRACT_VERSION,
+                "allocation_status": "computed_no_eligible_R3_candidate_sets",
+                "eligible_feature_count": 0,
+                "total_feature_evidence_mass": 0.0,
+                "total_allocated_candidate_mass": 0.0,
+                "mass_conservation_status": "passed",
+                "candidate_count_histogram": {},
             },
         },
     }
@@ -70,6 +80,10 @@ def _full_sidecar() -> dict:
                 "relation_importer_contract_version": RELATION_IMPORTER_CONTRACT_VERSION,
                 "relation_bundle_status": "not_evaluable",
                 "relation_bundle_sha256": None,
+            },
+            "candidate_allocation": {
+                "allocation_contract_version": ALLOCATION_CONTRACT_VERSION,
+                "allocation_status": "computed_no_eligible_R3_candidate_sets",
             },
         },
         "provenance": {"shared_engine_contract": "unified_temporal_ptm_protein.v1"},

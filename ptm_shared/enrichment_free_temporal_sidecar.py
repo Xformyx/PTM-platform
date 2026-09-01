@@ -870,6 +870,10 @@ def build_production_temporal_ptm_protein_analysis(
         attach_relation_evidence,
         map_feature_relations,
     )
+    from ptm_shared.kinase_candidate_allocation import (
+        allocate_candidate_sets,
+        attach_candidate_allocation,
+    )
 
     feature_ledger = attach_temporal_context(
         build_feature_provenance_ledger(feature_provenance_rows or (), ordered_conditions),
@@ -891,6 +895,10 @@ def build_production_temporal_ptm_protein_analysis(
             manifest_path=relation_source_bundle_path,
             snapshot_root=relation_snapshot_root,
         ),
+    )
+    feature_ledger = attach_candidate_allocation(
+        feature_ledger,
+        allocate_candidate_sets(feature_ledger),
     )
     sidecar = build_v2_sidecar(
         output_dir=output_dir,

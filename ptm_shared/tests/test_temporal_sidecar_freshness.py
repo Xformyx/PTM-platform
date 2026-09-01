@@ -13,6 +13,7 @@ from ptm_shared.temporal_sidecar_freshness import (
 from ptm_shared.kinase_evidence_ledger import CONTRACT_VERSION as KINASE_LEDGER_CONTRACT_VERSION
 from ptm_shared.species_site_mapping import MAPPING_IMPORTER_CONTRACT_VERSION
 from ptm_shared.kinase_relation_evidence import RELATION_IMPORTER_CONTRACT_VERSION
+from ptm_shared.kinase_candidate_allocation import ALLOCATION_CONTRACT_VERSION
 
 
 def _current_compact() -> dict:
@@ -26,6 +27,9 @@ def _current_compact() -> dict:
             },
             "relation_readiness": {
                 "relation_importer_contract_version": RELATION_IMPORTER_CONTRACT_VERSION,
+            },
+            "candidate_allocation_readiness": {
+                "allocation_contract_version": ALLOCATION_CONTRACT_VERSION,
             },
         },
     }
@@ -44,6 +48,9 @@ def _current_full() -> dict:
             },
             "relation_importer": {
                 "relation_importer_contract_version": RELATION_IMPORTER_CONTRACT_VERSION,
+            },
+            "candidate_allocation": {
+                "allocation_contract_version": ALLOCATION_CONTRACT_VERSION,
             },
         },
     }

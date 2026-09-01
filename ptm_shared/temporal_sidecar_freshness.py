@@ -25,6 +25,9 @@ from ptm_shared.species_site_mapping import (
 from ptm_shared.kinase_relation_evidence import (
     RELATION_IMPORTER_CONTRACT_VERSION as CURRENT_RELATION_IMPORTER_CONTRACT_VERSION,
 )
+from ptm_shared.kinase_candidate_allocation import (
+    ALLOCATION_CONTRACT_VERSION as CURRENT_ALLOCATION_CONTRACT_VERSION,
+)
 
 
 CURRENT_DYNAMIC_CONTRACT_VERSION = DYNAMIC_COWAVE_CONTRACT_VERSION
@@ -57,6 +60,7 @@ def compact_dynamic_is_current(compact: Mapping[str, Any]) -> bool:
     ledger_summary = compact.get("kinase_feature_evidence_ledger_summary") or {}
     mapping_readiness = ledger_summary.get("mapping_readiness") or {}
     relation_readiness = ledger_summary.get("relation_readiness") or {}
+    allocation_readiness = ledger_summary.get("candidate_allocation_readiness") or {}
     expected_mapping_bundle = _expected_mapping_bundle_sha256()
     expected_relation_bundle = _expected_relation_bundle_sha256()
     return (
@@ -67,6 +71,7 @@ def compact_dynamic_is_current(compact: Mapping[str, Any]) -> bool:
         and ledger_summary.get("contract_version") == CURRENT_KINASE_LEDGER_CONTRACT_VERSION
         and mapping_readiness.get("mapping_importer_contract_version") == CURRENT_MAPPING_IMPORTER_CONTRACT_VERSION
         and relation_readiness.get("relation_importer_contract_version") == CURRENT_RELATION_IMPORTER_CONTRACT_VERSION
+        and allocation_readiness.get("allocation_contract_version") == CURRENT_ALLOCATION_CONTRACT_VERSION
         and (expected_mapping_bundle is None or mapping_readiness.get("mapping_bundle_sha256") == expected_mapping_bundle)
         and (expected_relation_bundle is None or relation_readiness.get("relation_bundle_sha256") == expected_relation_bundle)
     )
@@ -79,6 +84,7 @@ def full_dynamic_is_current(full_sidecar: Mapping[str, Any]) -> bool:
     ledger = full_sidecar.get("kinase_feature_evidence_ledger") or {}
     mapping_importer = ledger.get("mapping_importer") or {}
     relation_importer = ledger.get("relation_importer") or {}
+    candidate_allocation = ledger.get("candidate_allocation") or {}
     expected_mapping_bundle = _expected_mapping_bundle_sha256()
     expected_relation_bundle = _expected_relation_bundle_sha256()
     return (
@@ -87,6 +93,7 @@ def full_dynamic_is_current(full_sidecar: Mapping[str, Any]) -> bool:
         and ledger.get("contract_version") == CURRENT_KINASE_LEDGER_CONTRACT_VERSION
         and mapping_importer.get("mapping_importer_contract_version") == CURRENT_MAPPING_IMPORTER_CONTRACT_VERSION
         and relation_importer.get("relation_importer_contract_version") == CURRENT_RELATION_IMPORTER_CONTRACT_VERSION
+        and candidate_allocation.get("allocation_contract_version") == CURRENT_ALLOCATION_CONTRACT_VERSION
         and (expected_mapping_bundle is None or mapping_importer.get("mapping_bundle_sha256") == expected_mapping_bundle)
         and (expected_relation_bundle is None or relation_importer.get("relation_bundle_sha256") == expected_relation_bundle)
     )

@@ -82,11 +82,13 @@ def test_production_sidecar_without_mapping_bundle_is_explicit_m0_and_current(tm
 
     ledger = production["kinase_feature_evidence_ledger"]
     compact = production["kinase_feature_evidence_ledger_summary"]
-    assert ledger["contract_version"].endswith(".v4")
+    assert ledger["contract_version"].endswith(".v5")
     assert ledger["mapping_importer"]["mapping_bundle_status"] == "not_evaluable"
     assert ledger["mapping_importer"]["mapping_bundle_error_code"] == "mapping_source_bundle_not_supplied"
     assert compact["mapping_readiness"]["mapping_class_counts"] == {"M0": 0, "M1": 0, "M2": 0, "M3": 0, "M4": 0}
     assert ledger["relation_importer"]["relation_bundle_status"] == "not_evaluable"
     assert ledger["relation_importer"]["relation_bundle_error_code"] == "relation_source_bundle_not_supplied"
     assert compact["relation_readiness"]["relation_class_counts"] == {"R0": 0, "R1": 0, "R2": 0, "R3": 0, "R4": 0}
+    assert compact["candidate_allocation_readiness"]["eligible_feature_count"] == 0
+    assert compact["candidate_allocation_readiness"]["mass_conservation_status"] == "passed"
     assert full_dynamic_is_current(production) is True

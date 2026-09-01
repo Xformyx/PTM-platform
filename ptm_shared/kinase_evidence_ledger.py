@@ -20,7 +20,7 @@ from collections import Counter, defaultdict
 from typing import Any, Iterable, Mapping, Sequence
 
 
-CONTRACT_VERSION = "ptm_kinase_feature_provenance.v4"
+CONTRACT_VERSION = "ptm_kinase_feature_provenance.v5"
 DIRECT_NO_CALL_TIER = "E_direct_kinase_no_call"
 TEMPORAL_ASSOCIATION_TIER = "D_temporal_aggregate_context"
 UNRESOLVED_PRIMARY_REASON = "not_assigned_without_approved_f1_f8_priority_policy"
@@ -359,6 +359,8 @@ def compact_summary(ledger: Mapping[str, Any]) -> dict[str, Any]:
     mapping_importer_summary = dict(mapping_importer.get("compact_summary") or {})
     relation_importer = dict(ledger.get("relation_importer") or {})
     relation_importer_summary = dict(relation_importer.get("compact_summary") or {})
+    candidate_allocation = dict(ledger.get("candidate_allocation") or {})
+    allocation_summary = dict(candidate_allocation.get("compact_summary") or {})
     relation_counts = Counter(
         str((row.get("relation_evidence") or {}).get("relation_class_code") or "not_assessed")
         for row in records
@@ -397,6 +399,18 @@ def compact_summary(ledger: Mapping[str, Any]) -> dict[str, Any]:
             ),
             "claim_boundary": "Curated relation readiness is aggregate-only provenance; it does not identify one kinase or establish direct regulation.",
         },
+        "candidate_allocation_readiness": {
+            "allocation_contract_version": allocation_summary.get("allocation_contract_version"),
+            "allocation_status": allocation_summary.get("allocation_status", "not_assessed"),
+            "eligible_feature_count": allocation_summary.get("eligible_feature_count", 0),
+            "total_feature_evidence_mass": allocation_summary.get("total_feature_evidence_mass", 0.0),
+            "total_allocated_candidate_mass": allocation_summary.get("total_allocated_candidate_mass", 0.0),
+            "mass_conservation_status": allocation_summary.get("mass_conservation_status", "not_assessed"),
+            "candidate_count_histogram": allocation_summary.get("candidate_count_histogram", {}),
+            "mean_candidate_ambiguity_entropy_nats": allocation_summary.get("mean_candidate_ambiguity_entropy_nats"),
+            "max_candidate_ambiguity_entropy_nats": allocation_summary.get("max_candidate_ambiguity_entropy_nats"),
+            "claim_boundary": "P3 aggregate bookkeeping preserves candidate ambiguity and cannot identify, rank, or activate a kinase or support direct/causal/perturbation claims.",
+        },
         "mutually_exclusive_f1_f8_ledger_status": MAPPING_LEDGER_STATUS,
         "unmatched_reason_primary_policy": UNRESOLVED_PRIMARY_REASON,
         "direct_kinase_attribution_status": "no_call_without_p3_candidate_allocation_and_required_feature_mapping_localization_relation_provenance",
@@ -412,6 +426,8 @@ def compact_summary(ledger: Mapping[str, Any]) -> dict[str, Any]:
             "mapping_peptide", "mapping_coordinate", "orthology_identifier", "mapping_source_file_path",
             "candidate_kinase_names", "relation_candidate_edges", "relation_edge_id", "relation_reference_id",
             "relation_license_text", "relation_source_file_path", "relation_isoform_or_sequence_id",
+            "allocation_candidate_edges", "allocation_fractional_mass_by_kinase", "allocation_edge_id",
+            "allocation_source_label", "allocation_reference_id",
             "raw_log2fc", "raw_intensity", "q_value", "benchmark_truth", "known_relation_registry",
         ],
     }
