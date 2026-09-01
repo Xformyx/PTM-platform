@@ -18,9 +18,10 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 
-RELATION_IMPORTER_CONTRACT_VERSION = "ptm_kinase_relation_evidence.v1"
+RELATION_IMPORTER_CONTRACT_VERSION = "ptm_kinase_relation_evidence.v2"
 RELATION_SOURCE_BUNDLE_CONTRACT_VERSION = "ptm_kinase_relation_source_bundle.v1"
 RELATION_ROW_SCHEMA_VERSION = "ptm_kinase_relation_rows.v1"
+RELATION_CROSS_REFERENCE_SCHEMA_VERSION = "ptm_kinase_relation_cross_reference.v1"
 R0_NOT_EVALUABLE = "R0_not_evaluable"
 R1_INELIGIBLE = "R1_ineligible_feature_or_mapping"
 R2_NO_EXACT_EDGE = "R2_no_exact_curated_edge"
@@ -48,6 +49,8 @@ class RelationSourceBundle:
     release_or_retrieval_date: str
     relation_path: Path
     relation_rows: tuple[Mapping[str, Any], ...]
+    cross_reference_path: Path
+    cross_references: Mapping[tuple[str, int], Mapping[str, Any]]
 
 
 def _sha256(path: Path) -> str:
@@ -105,7 +108,7 @@ def _normalized_accession(value: Any) -> str:
     return _text(value).upper()
 
 
-def _row_join_key(row: Mapping[str, Any]) -> tuple[str, int, str, int, str, str, int]:
+def _row_join_key(row: Mapping[str, Any]) -> tuple[str, int, str, int, str, str, str, int]:
     substrate_taxonomy = _positive_int(row.get("substrate_taxonomy_id"))
     kinase_taxonomy = _positive_int(row.get("kinase_taxonomy_id"))
     position = _positive_int(row.get("position"))
@@ -116,6 +119,7 @@ def _row_join_key(row: Mapping[str, Any]) -> tuple[str, int, str, int, str, str,
         _text(row.get("residue")).upper(),
         position,
         _text(row.get("substrate_isoform_or_sequence_id")),
+        _text(row.get("source_identity_scope")),
         _normalized_accession(row.get("kinase_accession")),
         kinase_taxonomy,
     )
@@ -125,7 +129,7 @@ def _validate_relation_row(row: Mapping[str, Any], line_number: int) -> dict[str
     required = {
         "edge_id", "relation_type", "kinase_accession", "kinase_taxonomy_id",
         "substrate_accession", "substrate_taxonomy_id", "residue", "position",
-        "substrate_isoform_or_sequence_id", "evidence_reference_ids", "source_provenance",
+        "substrate_isoform_or_sequence_id", "source_identity_scope", "evidence_reference_ids", "source_provenance",
     }
     if required - set(row):
         raise RelationSourceBundleError("relation_snapshot_schema_invalid", f"relation row {line_number} misses required fields")
@@ -142,6 +146,7 @@ def _validate_relation_row(row: Mapping[str, Any], line_number: int) -> dict[str
     isoform = _text(normalized.get("substrate_isoform_or_sequence_id"))
     if not isoform or isoform.lower() == "canonical_unspecified":
         raise RelationSourceBundleError("relation_isoform_or_sequence_missing", f"relation row {line_number} lacks a source-versioned substrate isoform/sequence ID")
+    identity_scope = _required_text(normalized, "source_identity_scope", context=f"relation row {line_number}")
     reference_ids = normalized.get("evidence_reference_ids")
     if not isinstance(reference_ids, list) or not any(_text(value) for value in reference_ids):
         raise RelationSourceBundleError("relation_reference_missing", f"relation row {line_number} has no evidence reference identifier")
@@ -156,6 +161,7 @@ def _validate_relation_row(row: Mapping[str, Any], line_number: int) -> dict[str
         "residue": residue,
         "position": int(normalized["position"]),
         "substrate_isoform_or_sequence_id": isoform,
+        "source_identity_scope": identity_scope,
         "evidence_reference_ids": sorted({_text(value) for value in reference_ids if _text(value)}),
         "source_provenance": dict(normalized["source_provenance"]),
     })
@@ -165,7 +171,7 @@ def _validate_relation_row(row: Mapping[str, Any], line_number: int) -> dict[str
 def _read_relation_rows(path: Path) -> tuple[Mapping[str, Any], ...]:
     rows: list[Mapping[str, Any]] = []
     edge_ids: set[str] = set()
-    join_keys: set[tuple[str, int, str, int, str, str, int]] = set()
+    join_keys: set[tuple[str, int, str, int, str, str, str, int]] = set()
     with _open_text(path) as handle:
         for line_number, raw_line in enumerate(handle, start=1):
             line = raw_line.strip()
@@ -187,6 +193,57 @@ def _read_relation_rows(path: Path) -> tuple[Mapping[str, Any], ...]:
             join_keys.add(key)
             rows.append(row)
     return tuple(rows)
+
+
+def _read_cross_references(path: Path) -> Mapping[tuple[str, int], Mapping[str, Any]]:
+    """Load authoritative source-accession identity mappings without inference."""
+
+    required = {
+        "source_accession", "source_taxonomy_id", "relation_accession",
+        "relation_taxonomy_id", "relation_identity_scope", "relation_isoform_or_sequence_id",
+        "source_protein_record_sha256", "source_protein_line_number", "source_file",
+    }
+    records: dict[tuple[str, int], Mapping[str, Any]] = {}
+    with _open_text(path) as handle:
+        for line_number, raw_line in enumerate(handle, start=1):
+            line = raw_line.strip()
+            if not line:
+                continue
+            try:
+                decoded = json.loads(line)
+            except json.JSONDecodeError as error:
+                raise RelationSourceBundleError("cross_reference_invalid_json", f"cross-reference row {line_number} is not JSON") from error
+            if not isinstance(decoded, Mapping) or required - set(decoded):
+                raise RelationSourceBundleError("cross_reference_schema_invalid", f"cross-reference row {line_number} misses required fields")
+            source_accession = _normalized_accession(decoded.get("source_accession"))
+            source_taxonomy = _positive_int(decoded.get("source_taxonomy_id"))
+            relation_accession = _normalized_accession(decoded.get("relation_accession"))
+            relation_taxonomy = _positive_int(decoded.get("relation_taxonomy_id"))
+            scope = _text(decoded.get("relation_identity_scope"))
+            identity_token = _text(decoded.get("relation_isoform_or_sequence_id"))
+            source_record_sha = _text(decoded.get("source_protein_record_sha256")).lower()
+            source_line = _positive_int(decoded.get("source_protein_line_number"))
+            source_file = _text(decoded.get("source_file"))
+            if not source_accession or not source_taxonomy or not relation_accession or not relation_taxonomy or not scope or not identity_token:
+                raise RelationSourceBundleError("cross_reference_identity_missing", f"cross-reference row {line_number} lacks a source-versioned identity")
+            if not _SHA256_RE.fullmatch(source_record_sha) or not source_line or not source_file:
+                raise RelationSourceBundleError("cross_reference_provenance_invalid", f"cross-reference row {line_number} has invalid original-source provenance")
+            key = (source_accession, source_taxonomy)
+            candidate = {
+                "source_accession": source_accession,
+                "source_taxonomy_id": source_taxonomy,
+                "relation_accession": relation_accession,
+                "relation_taxonomy_id": relation_taxonomy,
+                "relation_identity_scope": scope,
+                "relation_isoform_or_sequence_id": identity_token,
+                "source_protein_record_sha256": source_record_sha,
+                "source_protein_line_number": source_line,
+                "source_file": source_file,
+            }
+            if key in records and records[key] != candidate:
+                raise RelationSourceBundleError("cross_reference_conflict", f"cross-reference row {line_number} conflicts for one source accession/taxon")
+            records[key] = candidate
+    return records
 
 
 def load_relation_source_bundle(
@@ -221,8 +278,9 @@ def load_relation_source_bundle(
     ):
         _required_text(payload, key, context="manifest")
     relation_snapshot = payload.get("relation_snapshot")
-    if not isinstance(relation_snapshot, Mapping):
-        raise RelationSourceBundleError("bundle_schema_invalid", "relation_snapshot is required")
+    cross_reference_snapshot = payload.get("cross_reference_snapshot")
+    if not isinstance(relation_snapshot, Mapping) or not isinstance(cross_reference_snapshot, Mapping):
+        raise RelationSourceBundleError("bundle_schema_invalid", "relation_snapshot and cross_reference_snapshot are required")
     if relation_snapshot.get("schema_version") != RELATION_ROW_SCHEMA_VERSION:
         raise RelationSourceBundleError("relation_schema_version_mismatch", "relation snapshot schema version is not supported")
     relation_path = _trusted_file(
@@ -232,6 +290,27 @@ def load_relation_source_bundle(
         label="relation_snapshot",
     )
     rows = _read_relation_rows(relation_path)
+    if cross_reference_snapshot.get("schema_version") != RELATION_CROSS_REFERENCE_SCHEMA_VERSION:
+        raise RelationSourceBundleError("cross_reference_schema_version_mismatch", "cross-reference snapshot schema version is not supported")
+    cross_reference_path = _trusted_file(
+        root,
+        cross_reference_snapshot.get("relative_path"),
+        cross_reference_snapshot.get("sha256"),
+        label="cross_reference_snapshot",
+    )
+    cross_references = _read_cross_references(cross_reference_path)
+    for row in rows:
+        key = (row["substrate_accession"], row["substrate_taxonomy_id"])
+        cross_reference = cross_references.get(key)
+        if not cross_reference:
+            raise RelationSourceBundleError("relation_cross_reference_missing", "relation snapshot substrate has no matching source-versioned cross-reference")
+        if (
+            cross_reference["relation_accession"] != row["substrate_accession"]
+            or cross_reference["relation_taxonomy_id"] != row["substrate_taxonomy_id"]
+            or cross_reference["relation_isoform_or_sequence_id"] != row["substrate_isoform_or_sequence_id"]
+            or cross_reference["relation_identity_scope"] != row["source_identity_scope"]
+        ):
+            raise RelationSourceBundleError("relation_cross_reference_identity_mismatch", "relation row identity does not match source-versioned cross-reference")
     return RelationSourceBundle(
         bundle_id=_required_text(payload, "bundle_id", context="manifest"),
         manifest_sha256=hashlib.sha256(raw_manifest).hexdigest(),
@@ -239,6 +318,8 @@ def load_relation_source_bundle(
         release_or_retrieval_date=_required_text(payload, "release_or_retrieval_date", context="manifest"),
         relation_path=relation_path,
         relation_rows=rows,
+        cross_reference_path=cross_reference_path,
+        cross_references=cross_references,
     )
 
 
@@ -267,20 +348,29 @@ def _p0_ready(record: Mapping[str, Any]) -> tuple[bool, str | None]:
     return True, None
 
 
-def _p1_exact_target(record: Mapping[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
+def _p1_exact_target(record: Mapping[str, Any], bundle: RelationSourceBundle) -> tuple[dict[str, Any] | None, str | None]:
     mapping = record.get("mapping_evidence") or {}
     if mapping.get("mapping_class_code") != "M1":
         return None, "p1_mapping_is_not_M1_exact_sequence_site"
     target = mapping.get("target") or {}
     accession = _normalized_accession(target.get("target_relation_accession") or target.get("target_accession"))
     taxonomy = _positive_int(target.get("taxonomy_id"))
-    relation_sequence_id = _text(target.get("target_relation_isoform_or_sequence_id"))
-    if not accession or not taxonomy or not relation_sequence_id:
-        return None, "p1_target_relation_identity_not_source_versioned"
+    if not accession or not taxonomy:
+        return None, "p1_exact_target_accession_or_taxonomy_missing"
+    cross_reference = bundle.cross_references.get((accession, taxonomy))
+    if not cross_reference:
+        return None, "p1_target_not_present_in_source_versioned_relation_cross_reference"
+    declared_accession = _normalized_accession(target.get("target_relation_accession"))
+    declared_identity = _text(target.get("target_relation_isoform_or_sequence_id"))
+    if declared_accession and declared_accession != cross_reference["relation_accession"]:
+        return None, "p1_target_relation_accession_conflicts_with_cross_reference"
+    if declared_identity and declared_identity != cross_reference["relation_isoform_or_sequence_id"]:
+        return None, "p1_target_relation_identity_conflicts_with_cross_reference"
     return {
-        "accession": accession,
-        "taxonomy_id": taxonomy,
-        "isoform_or_sequence_id": relation_sequence_id,
+        "accession": cross_reference["relation_accession"],
+        "taxonomy_id": cross_reference["relation_taxonomy_id"],
+        "isoform_or_sequence_id": cross_reference["relation_isoform_or_sequence_id"],
+        "identity_scope": cross_reference["relation_identity_scope"],
     }, None
 
 
@@ -312,11 +402,11 @@ def _record_relation(
     return result
 
 
-def _map_relation(record: Mapping[str, Any], bundle: RelationSourceBundle, index: Mapping[tuple[str, int, str, int, str], tuple[Mapping[str, Any], ...]]) -> dict[str, Any]:
+def _map_relation(record: Mapping[str, Any], bundle: RelationSourceBundle, index: Mapping[tuple[str, int, str, int, str, str], tuple[Mapping[str, Any], ...]]) -> dict[str, Any]:
     ready, p0_reason = _p0_ready(record)
     if not ready:
         return _record_relation(relation_class=R1_INELIGIBLE, status="p0_readiness_not_eligible_for_exact_relation_join", bundle=bundle, reason=p0_reason)
-    target, p1_reason = _p1_exact_target(record)
+    target, p1_reason = _p1_exact_target(record, bundle)
     if target is None:
         return _record_relation(relation_class=R1_INELIGIBLE, status="p1_mapping_not_eligible_for_exact_relation_join", bundle=bundle, reason=p1_reason)
     positions = list((record.get("identity_provenance") or {}).get("all_reported_ptm_positions") or [])
@@ -325,7 +415,7 @@ def _map_relation(record: Mapping[str, Any], bundle: RelationSourceBundle, index
     site = _positive_int(position_token[1:])
     if residue not in {"S", "T", "Y"} or not site:
         return _record_relation(relation_class=R1_INELIGIBLE, status="p0_site_token_not_joinable", bundle=bundle, reason="p0_reported_site_invalid")
-    key = (target["accession"], target["taxonomy_id"], residue, site, target["isoform_or_sequence_id"])
+    key = (target["accession"], target["taxonomy_id"], residue, site, target["isoform_or_sequence_id"], target["identity_scope"])
     candidates = list(index.get(key, ()))
     if not candidates:
         return _record_relation(relation_class=R2_NO_EXACT_EDGE, status="no_exact_local_curated_relation_edge", bundle=bundle)
@@ -357,9 +447,9 @@ def map_feature_relations(
     except RelationSourceBundleError as error:
         diagnostic = _diagnostic(error.code, error.detail)
         return {**diagnostic, "feature_relations": {str(row.get("feature_id")): dict(diagnostic) for row in records if row.get("feature_id")}}
-    index: dict[tuple[str, int, str, int, str], list[Mapping[str, Any]]] = defaultdict(list)
+    index: dict[tuple[str, int, str, int, str, str], list[Mapping[str, Any]]] = defaultdict(list)
     for row in bundle.relation_rows:
-        key = _row_join_key(row)[:5]
+        key = _row_join_key(row)[:6]
         index[key].append(row)
     return {
         "relation_importer_contract_version": RELATION_IMPORTER_CONTRACT_VERSION,

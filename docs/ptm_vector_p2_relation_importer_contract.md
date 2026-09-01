@@ -26,7 +26,7 @@ files are SHA-256 checked before use, and the root path cannot be escaped.
 | `release_or_retrieval_date` | Upstream release tag/date or a bounded retrieval timestamp |
 | `transform_description` | Versioned disclosure of filtering/normalization performed offline |
 | `relation_snapshot` | Relative JSONL(.gz) path, SHA-256 and schema version |
-| `cross_reference_snapshot` | Optional, separately hashed mapping only when an authoritative source-ID ↔ relation-accession cross-reference is required |
+| `cross_reference_snapshot` | Required, separately hashed source-versioned mapping that records how a P1 M1 target accession/taxon is authorized to become a relation-source accession/identity scope |
 
 The operator must retain the original license record and source artifact outside
 the repository. Raw source dumps and derived JSONL do not enter git, an Order
@@ -45,7 +45,8 @@ relax exact matching.
 | `kinase_accession`, `kinase_taxonomy_id` | A single source-versioned canonical kinase protein identity and NCBI taxonomy ID |
 | `substrate_accession`, `substrate_taxonomy_id` | A single source-versioned canonical substrate protein identity and NCBI taxonomy ID |
 | `residue`, `position` | Single `S`, `T`, or `Y` plus positive one-based coordinate in the declared substrate sequence/isoform |
-| `substrate_isoform_or_sequence_id` | Required source-versioned isoform/sequence identifier; `canonical_unspecified` is rejected for direct joining |
+| `substrate_isoform_or_sequence_id` | Required source-versioned identity token; it must disclose whether it is isoform/sequence-exact or source-release accession/site scope |
+| `source_identity_scope` | Required. `isoform_or_sequence_exact` is strongest; iPTMnet release 6.2 may use only `accession_site_exact_iPTMnet_release_6_2`, never a hidden isoform claim |
 | `evidence_reference_ids` | At least one source evidence/publication identifier |
 | `source_provenance` | Source dataset release row/key and relation-specific evidence metadata |
 
@@ -64,16 +65,15 @@ P2 must require all of the following:
 2. **P1 M1:** `M1_exact_sequence_site` only. M0/M2/M3/M4 are unconditionally
    non-joinable. M2 aligned ortholog context and M3 gene context are never
    converted to direct evidence by a P2 relation row.
-3. **Target relation identity:** P1 must expose a source-versioned,
-   unambiguous `target_relation_accession` **and**
-   `target_relation_isoform_or_sequence_id` for the selected relation source.
-   P1’s Ensembl protein ID, a gene symbol, or an analysis FASTA accession alone
-   is not silently equated to a relation-source accession/isoform. The present
-   strict-tree P1 bundle intentionally has no relation-source cross-reference,
-   so even an explicitly human analysis-FASTA entry such as INSR P06213 remains
-   `R1_ineligible_feature_or_mapping` until a separately pinned authoritative
-   cross-reference supplies this identity. It never authorizes a rat→human
-   accession join.
+3. **Target relation identity:** P1 must expose an unambiguous M1 target
+   accession/taxon. A separately validated `cross_reference_snapshot` must
+   then authorize its relation-source accession and identity-scope token. P1’s
+   Ensembl protein ID, a gene symbol, or an analysis FASTA accession alone is
+   not silently equated to a relation-source accession/isoform. For iPTMnet
+   release 6.2, the cross-reference is built only from the source-versioned
+   `protein.txt` accession/organism table and grants the explicitly limited
+   `accession_site_exact_iPTMnet_release_6_2` scope. It never authorizes a
+   rat→human accession join.
 4. **Exact P2 edge:** substrate accession, target taxonomy, residue, position
    and target isoform/sequence ID all match the local P2 row.
 
