@@ -9362,6 +9362,19 @@ async def kinase_activity_heatmap(
     kinase_analysis_data["temporal_ptm_protein_analysis"] = dict(
         result_data["temporal_ptm_protein_analysis"]
     )
+    import math
+
+    def _sanitize_mysql_json(obj):
+        if isinstance(obj, float):
+            return None if not math.isfinite(obj) else obj
+        if isinstance(obj, dict):
+            return {key: _sanitize_mysql_json(value) for key, value in obj.items()}
+        if isinstance(obj, list):
+            return [_sanitize_mysql_json(value) for value in obj]
+        return obj
+
+    kinase_analysis_data = _sanitize_mysql_json(kinase_analysis_data)
+    result_data = _sanitize_mysql_json(result_data)
     order.kinase_analysis_data = kinase_analysis_data
     order.kinase_activity_heatmap = result_data
     await db.commit()
