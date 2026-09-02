@@ -12,6 +12,7 @@ from report_generation.core.dynamic_prompt_generator import (
     build_nonptm_temporal_analysis,
     build_signal_propagation_json,
 )
+from report_generation.core.nodes.cascade_mediator_node import extract_discussed_pathways
 from pathlib import Path
 
 
@@ -80,6 +81,57 @@ def test_data_anchored_rag_plan_covers_system_pathway_candidate_and_temporal_rol
     assert {"study_context", "pathway_comparison", "candidate_biology", "temporal_programme"}.issubset(roles)
     assert any(query.get("anchor") == "PPP4R1" for query in queries)
     assert all("insulin" in query["query"].lower() or query["role"] == "candidate_biology" for query in queries)
+
+
+def test_non_insulin_order_context_drives_packet_and_rag_without_benchmark_leakage():
+    packet = build_biological_synthesis_packet(
+        experimental_context={
+            "cell_type": "BV2 microglia",
+            "organism": "mouse",
+            "treatment": "amyloid-beta oligomers",
+            "timepoints": ["0h", "1h", "6h"],
+            "biological_question": "Which phosphorylation programmes accompany the microglial response?",
+        },
+        vector_plot_raw_data=[
+            {"gene": "SYK", "position": "Y525", "condition": "0h", "ptm_relative_log2fc": 0.0, "protein_log2fc": 0.0},
+            {"gene": "SYK", "position": "Y525", "condition": "1h", "ptm_relative_log2fc": 1.1, "protein_log2fc": 0.1},
+            {"gene": "SYK", "position": "Y525", "condition": "6h", "ptm_relative_log2fc": 0.4, "protein_log2fc": 0.2},
+        ],
+        parsed_ptms=[{"gene": "SYK"}],
+        network_analysis={
+            "pathway_expansion": {"summaries": [{"pathway": "Toll-like receptor signaling", "term": "enriched", "peak_nes": 2.0, "peak_q": 0.02, "n_direct": 2}]}
+        },
+        temporal_evidence_packet={"status": "available", "section_plan": {}},
+    )
+    text = format_biological_synthesis_packet_for_llm(packet, section_type="discussion").lower()
+    queries = build_data_anchored_rag_queries(packet, section_type="discussion")
+    joined_queries = " ".join(row["query"] for row in queries).lower()
+    assert "bv2 microglia" in text
+    assert "amyloid-beta oligomers" in text
+    assert "syk y525" in text
+    assert "insulin" not in text
+    assert "hir" not in text
+    assert "amyloid-beta oligomers" in joined_queries
+    assert "toll-like receptor signaling" in joined_queries
+    assert "insulin" not in joined_queries
+
+
+def test_cascade_mediator_uses_discussed_non_insulin_pathway_without_default_insulin_label():
+    selected = extract_discussed_pathways(
+        {
+            "results": "Toll-like receptor signaling was enriched alongside TLR4 and SYK observations.",
+            "discussion": "The Toll-like receptor context provides a testable framework for the microglial response.",
+        },
+        {
+            "candidates": [
+                {"name": "Toll-like receptor signaling", "genes": ["TLR4", "SYK"], "composite_score": 0.8},
+                {"name": "Insulin signaling", "genes": ["INSR", "IRS1"], "composite_score": 0.9},
+            ],
+            "gene_data": {"TLR4": {}, "SYK": {}, "INSR": {}, "IRS1": {}},
+        },
+        min_gene_cluster=1,
+    )
+    assert [row["name"] for row in selected] == ["Toll-like receptor signaling"]
 
 
 def test_literature_context_is_allowed_but_direct_edge_is_still_flagged_when_no_call():

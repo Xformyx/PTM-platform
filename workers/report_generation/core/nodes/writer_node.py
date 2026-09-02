@@ -1720,8 +1720,8 @@ IMPORTANT: Write a thorough, detailed introduction. The ChromaDB collection refe
                 f"(activated, inhibited, modulated, or network-associated). "
                 f"Do not upgrade 'modulated' to 'activated'.\n"
                 f"3. Do NOT claim a pathway is enriched if it is not in this list.\n"
-                f"4. Do NOT treat insulin/MAPK/PI3K as privileged just because they are canonical. "
-                f"Discuss them only if they appear here and the term/evidence supports it.\n"
+                f"4. Do NOT treat any pathway as privileged just because it is canonical. "
+                f"Discuss a pathway only if it appears here and the stated term/evidence supports it.\n"
                 f"5. STRING/network support is not discovery of a pathway.\n"
             )
 
