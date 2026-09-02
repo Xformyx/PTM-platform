@@ -9,11 +9,19 @@ from typing import Any, Mapping
 _DATA_LABEL_PATTERN = re.compile(
     r"\[?(DATA-(?:TEMPORAL-SUMMARY|KINASE-ATTRIBUTION-READINESS|TEMPORAL-PRECEDENCE|DYNAMIC-SUMMARY|DYNAMIC-WAVE-\d+|TMM-KINASE-\d+|TMM-UNCERTAINTY|CROSS-LAYER-\d+|COUNTEREVIDENCE-\d+))\]?"
 )
-_UNSAFE_TEMPORAL_CLAIM = re.compile(
-    r"\b(?:causes?|drives?|directly activates?|proves?|kinase switching|causal propagation|signal propagation|"
-    r"direct regulation|autophosphorylation|feedback loop|phosphatase activation|dominant kinase|"
-    r"direct biochemical evidence|direct kinase(?:[- ]substrate)?(?: relationship| regulation| attribution)?|"
-    r"regulates? downstream (?:substrates?|targets?)|structured signal flow)\b",
+_DIRECT_EDGE_CLAIM = re.compile(
+    r"\b(?:directly activates?|direct regulation|autophosphorylation|direct biochemical evidence|"
+    r"direct kinase(?:[- ]substrate)?(?: relationship| regulation| attribution)?|"
+    r"regulates? downstream (?:substrates?|targets?))\b",
+    flags=re.IGNORECASE,
+)
+_CAUSAL_ORDER_CLAIM = re.compile(
+    r"\b(?:causes?|drives?|proves?|kinase switching|causal propagation|signal propagation|"
+    r"feedback loop|phosphatase activation|dominant kinase|structured signal flow)\b",
+    flags=re.IGNORECASE,
+)
+_LITERATURE_CONTEXT_QUALIFIER = re.compile(
+    r"\b(?:literature|published|previously reported|canonical|established context|prior work)\b",
     flags=re.IGNORECASE,
 )
 
@@ -45,9 +53,17 @@ def audit_report_temporal_fidelity(
     observation_only_claim_ceiling = bool(section_plan.get("observation_only_claim_ceiling", True))
     unsafe_claims: list[str] = []
     for sentence in re.split(r"(?<=[.!?])\s+", draft_text or ""):
-        has_high_severity_claim = bool(_UNSAFE_TEMPORAL_CLAIM.search(sentence))
+        has_direct_edge_claim = bool(_DIRECT_EDGE_CLAIM.search(sentence))
+        has_causal_order_claim = bool(_CAUSAL_ORDER_CLAIM.search(sentence))
         has_explicit_negation = bool(re.search(r"\b(?:not|no|without|does not|did not)\b", sentence, flags=re.IGNORECASE))
-        if has_high_severity_claim and not has_explicit_negation and (
+        literature_context_only = bool(_LITERATURE_CONTEXT_QUALIFIER.search(sentence))
+        if has_direct_edge_claim and not has_explicit_negation and (
+            _DATA_LABEL_PATTERN.search(sentence)
+            or not mechanism_context_allowed
+            or observation_only_claim_ceiling
+        ):
+            unsafe_claims.append(sentence.strip()[:500])
+        elif has_causal_order_claim and not has_explicit_negation and not literature_context_only and (
             _DATA_LABEL_PATTERN.search(sentence)
             or not mechanism_context_allowed
             or observation_only_claim_ceiling
@@ -86,7 +102,7 @@ def audit_report_temporal_fidelity(
         status = "untraced"
 
     return {
-        "contract_version": "report_temporal_fidelity.v5",
+        "contract_version": "report_temporal_fidelity.v6",
         "section_type": section_type,
         "status": status,
         "packet_status": packet.get("status", "unavailable"),

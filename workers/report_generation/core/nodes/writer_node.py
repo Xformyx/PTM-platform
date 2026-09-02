@@ -38,6 +38,11 @@ from report_generation.core.report_temporal_fidelity import (
     audit_report_temporal_fidelity,
     strip_internal_data_labels,
 )
+from report_generation.core.biological_synthesis import (
+    build_biological_synthesis_packet,
+    build_data_anchored_rag_queries,
+    format_biological_synthesis_packet_for_llm,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -91,15 +96,17 @@ def _build_observation_only_claim_ceiling(
     return (
         "=== MANDATORY CURRENT-ORDER CLAIM CEILING (OVERRIDES ALL EARLIER CASCADE EXAMPLES) ===\n"
         "This Order has no direct kinase attribution and/or no evaluable directed temporal mechanism. "
-        "Write observation-first prose only. You MAY report measured site trajectories, pathway annotations, "
-        "Dynamic Co-Wave co-membership/reorganization, contribution-weighted TMM candidate context, and explicitly "
-        "lagged observational candidates when supplied.\n"
-        "You MUST NOT state or imply receptor-to-kinase-to-substrate propagation, a cascade driver, direct kinase-substrate "
-        "regulation, kinase activation, autophosphorylation, kinase switching, phosphatase activation, feedback loop, "
-        "direct biochemical evidence, causal mechanism, or therapeutic implication from this Order.\n"
-        "For each unavailable layer, say it was not evaluable or that direct attribution was not established. "
-        "Describe co-wave events as local temporal co-membership annotations, not shared kinase control. "
-        "Describe lagged PTM-protein patterns as observed candidates, not regulatory edges. Do not emit DATA-* labels.\n"
+        "Your primary job remains substantive biological synthesis of the measured PTM trajectories, pathway enrichment, "
+        "cell-model/treatment context, and cited literature. You MAY describe early, intermediate, late, transient, sustained, "
+        "or divergent observed programmes; compare those programmes with published biology; and state a clear, testable "
+        "biological model or alternative explanation.\n"
+        "You MUST NOT state that this Order establishes a receptor-to-kinase-to-substrate propagation path, a cascade driver, "
+        "a direct kinase-substrate relationship, autophosphorylation, kinase switching, phosphatase activation, feedback loop, "
+        "direct biochemical evidence, causal mechanism, or therapeutic effect.\n"
+        "Use 'consistent with', 'aligns with', 'contrasts with', 'candidate context', 'literature-established context', or "
+        "'hypothesis for testing' for biological interpretation. Describe co-wave events as local temporal co-membership annotations, "
+        "and lagged PTM-protein patterns as observed candidates, not regulatory edges. State the direct-attribution boundary once; "
+        "do not make the Report a repeated list of limitations. Do not emit DATA-* labels.\n"
         "=== END CURRENT-ORDER CLAIM CEILING ==="
     )
 
@@ -328,12 +335,25 @@ def run_section_writing(state: dict) -> dict:
             or {}
         ),
     )
+    biological_synthesis_packet = build_biological_synthesis_packet(
+        experimental_context=context,
+        vector_plot_raw_data=vector_plot_raw_data,
+        parsed_ptms=parsed_ptms,
+        network_analysis=network_analysis,
+        temporal_evidence_packet=temporal_evidence_packet,
+        candidate_limit=20,
+    )
     packet_output_dir = state.get("output_dir")
     if packet_output_dir:
         try:
             packet_path = Path(packet_output_dir) / "report_temporal_evidence_packet.json"
             temporal_evidence_packet["snapshot_path"] = str(packet_path)
             packet_path.write_text(json.dumps(temporal_evidence_packet, indent=2, sort_keys=True), encoding="utf-8")
+            biological_packet_path = Path(packet_output_dir) / "report_biological_synthesis_packet.json"
+            biological_packet_path.write_text(
+                json.dumps(biological_synthesis_packet, indent=2, sort_keys=True),
+                encoding="utf-8",
+            )
             logger.info("[report-evidence] Saved temporal numerical packet: %s", packet_path)
         except Exception as packet_error:
             logger.warning("[report-evidence] Could not save temporal packet snapshot: %s", packet_error)
@@ -680,6 +700,10 @@ def run_section_writing(state: dict) -> dict:
             temporal_evidence_packet,
             section_type=section_type,
         )
+        section_biological_synthesis = format_biological_synthesis_packet_for_llm(
+            biological_synthesis_packet,
+            section_type=section_type,
+        )
         observation_only_claim_ceiling = _build_observation_only_claim_ceiling(
             section_type,
             temporal_section_plan,
@@ -699,6 +723,7 @@ def run_section_writing(state: dict) -> dict:
                 state.get("inferred_receptors")
                 if base_prompt_directed_context_allowed else None
             ),
+            biological_synthesis_packet=biological_synthesis_packet,
         )
         # v10.8: Unpack tuple (backward-compatible with str fallback)
         if isinstance(result, tuple):
@@ -733,6 +758,7 @@ def run_section_writing(state: dict) -> dict:
                 supplement_blocks.append(("verified_findings", aux_verified_findings_context))
             if aux_directionality_context and directed_temporal_context_allowed:
                 supplement_blocks.append(("directionality", aux_directionality_context))
+            supplement_blocks.append(("biological_synthesis", section_biological_synthesis))
             supplement_blocks.append(("temporal_evidence_packet", section_temporal_evidence))
             # Priority 1 (ESSENTIAL — PTM activity profile core): temporal coordination + temporal kinase + receptor + non-PTM effector
             # v9.35: nonptm_temporal promoted to Priority 1 — effector proteins are integral
@@ -782,6 +808,7 @@ def run_section_writing(state: dict) -> dict:
             # output budget before all user Research Questions are answered.
             if aux_directionality_context and directed_temporal_context_allowed:
                 supplement_blocks.append(("directionality", aux_directionality_context))
+            supplement_blocks.append(("biological_synthesis", section_biological_synthesis))
             supplement_blocks.append(("temporal_evidence_packet", section_temporal_evidence))
             if dynamic_context_allowed:
                 supplement_blocks.append(("comovement", comovement_llm_context))
@@ -800,6 +827,7 @@ def run_section_writing(state: dict) -> dict:
                 supplement_blocks.append(("verified_findings", aux_verified_findings_context))
             if aux_directionality_context and directed_temporal_context_allowed:
                 supplement_blocks.append(("directionality", aux_directionality_context))
+            supplement_blocks.append(("biological_synthesis", section_biological_synthesis))
             supplement_blocks.append(("temporal_evidence_packet", section_temporal_evidence))
             # v12.1: External evidence-gated candidates are interpretive only.
             # They are excluded from Results and appear only for explicit enhanced discussion.
@@ -835,6 +863,7 @@ def run_section_writing(state: dict) -> dict:
                 supplement_blocks.append(("atlas_claim_ledger", atlas_claim_ledger_llm_context))
         elif section_type == "introduction":
             supplement_blocks.append(("receptor_ctx", receptor_llm_context))
+            supplement_blocks.append(("biological_synthesis", section_biological_synthesis))
 
         elif section_type == "suggestion":
             if aux_causal_validation_context:
@@ -848,6 +877,7 @@ def run_section_writing(state: dict) -> dict:
                 supplement_blocks.append(("comovement", comovement_llm_context))
             if directed_temporal_context_allowed:
                 supplement_blocks.append(("temporal_kinase", temporal_kinase_cascade_llm_context))
+            supplement_blocks.append(("biological_synthesis", section_biological_synthesis))
             supplement_blocks.append(("temporal_evidence_packet", section_temporal_evidence))
 
         # v9.31: Add blocks respecting budget
@@ -1232,6 +1262,7 @@ def run_section_writing(state: dict) -> dict:
     return {
         "sections": sections,
         "collected_references": unified_references,
+        "biological_synthesis_packet": biological_synthesis_packet,
         "llm_fallback_sections": fallback_sections,
         "tf_inference_data": tf_inference_data if tf_inference_data else {},
         "causal_validation_recommendations": causal_validation_recommendations,
@@ -1256,6 +1287,7 @@ def _build_section_prompt(
     chromadb_results: int = 10,
     temporal_kinase_cascade: dict = None,
     inferred_receptors: list = None,
+    biological_synthesis_packet: dict | None = None,
 ) -> tuple:
     """Build LLM prompt for a specific report section.
     
@@ -1289,9 +1321,13 @@ def _build_section_prompt(
     ]
     keywords = [k for k in keywords if k and isinstance(k, str)]
     # Introduction has its own dedicated (larger) Chroma search — skip the generic one
+    data_anchored_queries = build_data_anchored_rag_queries(
+        biological_synthesis_packet,
+        section_type=section_type,
+    )
     rag_results = (
-        retriever.search_for_section(section_type, keywords, n_results=chromadb_results)
-        if section_type != "introduction" else []
+        retriever.search_for_biological_synthesis(data_anchored_queries, n_results=chromadb_results)
+        if data_anchored_queries else retriever.search_for_section(section_type, keywords, n_results=chromadb_results)
     )
 
     # v10.8: Collect ChromaDB refs for unified numbering
@@ -1301,7 +1337,10 @@ def _build_section_prompt(
         ref_lines = []
         for idx, r in enumerate(rag_results[:chromadb_results], 1):
             title = r.get("title", "Unknown")
-            ref_lines.append(f"--- Reference [{idx}] ---\nSource: {title}\n{r['document'][:400]}")
+            role = r.get("query_role", "section_context")
+            anchor = r.get("query_anchor", "")
+            role_text = f"; role={role}" + (f"; anchor={anchor}" if anchor else "")
+            ref_lines.append(f"--- Reference [{idx}{role_text}] ---\nSource: {title}\n{r['document'][:400]}")
         lit_context = (
             "\n\n**Published Literature Context (Vector Search):**\n"
             "The following excerpts are from previously published studies. "
@@ -1480,7 +1519,7 @@ def _build_section_prompt(
                 chromadb_abstract_context = (
                     "\n\n**High-Confidence Literature Matches for Research Questions:**\n"
                     "The following literature entries showed strong relevance to the research questions. "
-                    "Incorporate these findings into the abstract to highlight validated results and their significance.\n\n"
+                    "Use them to compare the observed results with published biological context; do not describe literature as validation of an unmeasured edge.\n\n"
                     + "\n\n".join(match_lines)
                 )
 
@@ -1509,10 +1548,10 @@ INSTRUCTIONS:
 - You MUST mention the treatment/stimulus ({treatment}) by name in the abstract. Never use generic terms like 'the treatment'.
 - For each Research Question, identify the most significant PTM findings and their biological implications.
 - If high-confidence literature matches are provided above, explicitly mention how the experimental results align with or diverge from published literature.
-- **PTM Activity Profile Framework**: Frame the abstract through the PTM activity profile approach — describe how PTM activation states reveal the signaling logic of the cellular response.
-- **Temporal signaling**: Briefly describe the receptor → kinase → substrate → effector cascade and its temporal evolution. Mention that Non-PTM downstream interactors provided concordant validation evidence for the identified signaling axes.
+- **PTM Activity Profile Framework**: Frame the abstract through measured PTM/protein trajectory profiles and the biological programmes they define in this experimental system.
+- **Temporal biological model**: Briefly describe the observed early/intermediate/late PTM programmes and how they align with or differ from published biology. Do not describe a receptor → kinase → substrate → effector cascade or treat Non-PTM abundance as validation of a signaling axis.
 - **Temporally coordinated groups**: Mention the major temporally coordinated substrate groups and their biological significance.
-- Highlight the cell signaling commonalities among activated proteins based on PTM activity profile values.
+- Highlight the cell signaling commonalities among proteins with higher/lower measured PTM abundance and pathway enrichment support.
 - Write a comprehensive abstract that captures ALL major findings. Be specific about PTM sites using the correct terminology: '{get_vocabulary(ptm_type_label)["modification_at_site"].format(site=get_vocabulary(ptm_type_label)["site_prefixes"][0] + "48", gene="GENE_NAME")}'. NEVER use terminology from a different PTM type.
 {combined_lit}""", _chromadb_refs_for_section
 
@@ -1522,8 +1561,9 @@ INSTRUCTIONS:
             comp_intro = f"\n\nDetailed Analysis Context (from prior comprehensive analysis):\n{comprehensive_summary[:4000]}\n"
 
         # Enhanced ChromaDB context for Introduction — retrieve MORE results from ChromaDB
-        # For introduction, we fetch double the normal amount to provide richer background
-        intro_rag_results = retriever.search_for_section("introduction", keywords, n_results=chromadb_results * 2)
+        # For introduction, retain the data-anchored result set when available;
+        # otherwise fetch a broader background set.
+        intro_rag_results = rag_results or retriever.search_for_section("introduction", keywords, n_results=chromadb_results * 2)
         intro_chromadb_emphasis = ""
         # v10.8: Compute intro-specific ChromaDB count for PubMed offset
         n_intro_chroma = len(intro_rag_results) if intro_rag_results else 0
@@ -1565,12 +1605,12 @@ Key PTM sites identified:
 Structure (7-9 paragraphs):
 1. Background on post-translational modifications and their critical role in cellular signaling
 2. Specific background on {ptm_type_label} and its regulatory importance
-3. The PTM activity profile approach: Introduce the concept of using PTM modification states as activity profiles to interpret proteomics data. Explain how PTM Log2FC values serve as indicators of signaling pathway activation direction and magnitude.
+3. The PTM activity profile approach: Introduce the concept of using PTM modification states as quantitative trajectory profiles to interpret proteomics data. Explain how PTM Log2FC values report higher/lower measured modification abundance and PTM–protein divergence, not kinase activity by default.
 4. Relevance of the experimental system ({tissue}, {treatment}) — use the ChromaDB literature references below extensively
 5. Current understanding and knowledge gaps in this area — cite the provided references heavily
 6. PTM analysis methodology including mass spectrometry-based proteomics
 7. Overview of the key PTM sites identified and their known biological roles — cross-reference with ChromaDB literature
-8. The importance of temporal analysis: receptor → kinase → substrate → effector cascade and temporally coordinated substrate group analysis for understanding signal propagation dynamics
+8. The importance of temporal analysis: temporally coordinated substrate group analysis and pathway-linked biological programmes for identifying early, intermediate, and late response structure without assuming directed signal propagation
 9. Research questions and specific objectives of this study
 
 IMPORTANT: Write a thorough, detailed introduction. The ChromaDB collection references below are your PRIMARY source for background information. Cite as many of them as possible to establish context. Discuss the biological significance of each research question. Use the comprehensive analysis context provided above to enrich your writing with specific PTM data and findings.
@@ -1601,7 +1641,7 @@ IMPORTANT: Write a thorough, detailed introduction. The ChromaDB collection refe
             research_str += f"  Upregulated: {stats.get('upregulated', 0)}, Downregulated: {stats.get('downregulated', 0)}\n"
             top_act = r.get("activated", [])[:5]
             if top_act:
-                research_str += "  Key activated: " + ", ".join(f"{p['gene']}-{p['position']}(FC={p['ptm_relative_log2fc']})" for p in top_act) + "\n"
+                research_str += "  Highest measured PTM increases: " + ", ".join(f"{p['gene']}-{p['position']}(FC={p['ptm_relative_log2fc']})" for p in top_act) + "\n"
             enriched = r.get("enriched_pathways", [])[:5]
             if enriched:
                 research_str += "  Enriched pathways: " + ", ".join(
@@ -1716,8 +1756,8 @@ You MUST interpret findings through this framework:
    - How the group's temporal pattern (early transient, sustained, delayed) relates to its function
    - What distinguishes this group from other temporally coordinated groups
    - How membership or observed profiles change across timepoints, without assigning a mechanistic order
-5. **Quantitative evidence**: Always cite specific Log2FC values when making claims about
-   activation or inhibition. Use the PTM activity profile magnitude to rank the importance of findings.
+        5. **Quantitative evidence**: Always cite specific Log2FC values when describing higher or lower
+           measured PTM abundance. Use the PTM activity profile magnitude to rank the importance of findings.
 === END PTM ACTIVITY PROFILE FRAMEWORK ===
 
 Research Findings:
@@ -1849,7 +1889,7 @@ PTM Data Summary:
             cs_lines.append("")
             cs_lines.append("CRITICAL INSTRUCTIONS FOR DISCUSSION:")
             cs_lines.append("1. Dedicate a subsection to how the top Figure 1 pathways relate, ")
-            cs_lines.append("   using their terms (activated/inhibited/modulated/network-associated).")
+            cs_lines.append("   using their source-provided terms (activated/inhibited/modulated/network-associated) without converting them into direct kinase activity.")
             cs_lines.append("2. Do not privilege PI3K-Akt, MAPK, or mTOR unless they are in this list ")
             cs_lines.append("   and the Direct NES/term supports discussing them.")
             cs_lines.append("3. STRING/network support is independent annotation, not pathway discovery.")
@@ -1874,9 +1914,9 @@ PTM Data Summary:
                     desc = DEFAULT_PATHWAYS.get(pw, {}).get("description", "")
                     cs_lines.append(f"- **{pw}** ({cnt} PTMs): {desc}")
                 cs_lines.append("")
-                cs_lines.append("INSTRUCTION: Discuss how these shared pathway memberships suggest ")
-                cs_lines.append("coordinated signaling responses. Identify cross-pathway interactions ")
-                cs_lines.append("and potential signal integration points.")
+                cs_lines.append("INSTRUCTION: Discuss how these shared pathway memberships provide ")
+                cs_lines.append("biological-programme context. Identify plausible cross-pathway relationships ")
+                cs_lines.append("as literature-grounded hypotheses, not direct signal-flow evidence.")
                 cs_lines.append("")
                 cell_signaling_block = "\n".join(cs_lines)
 
@@ -1983,11 +2023,11 @@ Discussion Summary:
 {discussion_text}
 
 Summarize through the PTM activity profile framework:
-1. Key findings and how they answer each research question — framed through PTM activation vectors
+1. Key findings and how they answer each research question — framed through measured PTM trajectory vectors
 2. **Temporal observational summary**: Summarize measured site/protein trajectory patterns without asserting a receptor → kinase → substrate → effector cascade. Do not call non-PTM abundance an axis-validation measurement.
 3. **Temporally coordinated group summary**: Briefly describe major local co-membership patterns and their possible biological context while keeping the mechanism unresolved
 4. Novel insights revealed by this analysis — what is new compared to existing literature
-5. Biological and clinical significance of the identified PTM changes
+5. Biological relevance of the identified PTM changes in the declared cell model and treatment context; discuss clinical relevance only if it is supplied by the study context or cited literature
 6. Testable follow-up measurements; do not infer therapeutic implications from this observational Order
 7. Limitations of the current study
 8. Specific future research directions with concrete experimental suggestions
@@ -2124,7 +2164,7 @@ INSTRUCTIONS:
 - Do NOT make the title too narrow (e.g., focusing only on one pathway or one PTM site).
 - Follow academic paper title conventions. Use the correct omics term for this PTM type: '{get_vocabulary(ptm_type_label)["omics_name"]}'. Example: 'Comprehensive {get_vocabulary(ptm_type_label)["omics_name"]} Analysis Reveals ...'. NEVER use an omics term from a different PTM type.
 - Include the PTM type ({ptm_type_label}), the experimental system ({tissue}), and the treatment ({treatment}).
-- The title should reflect the PTM activity profile approach: temporal {ptm_type_label} activation dynamics and signaling cascade analysis in {tissue} in response to {treatment}.
+- The title should reflect the PTM activity profile approach: temporal {ptm_type_label} programme, pathway-context, or quantitative trajectory analysis in {tissue} in response to {treatment}. Do not claim a direct signaling cascade unless the supplied evidence explicitly supports it.
 - Keep it under 25 words.""", []
 
     return f"Write the {section_type} section for a PTM analysis report.\n{single_tp_directive}{ptm_summary}", []

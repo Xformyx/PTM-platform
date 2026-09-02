@@ -271,6 +271,65 @@ class RAGRetriever:
         query_text = f"{section_type}: {' '.join(keywords[:5])}"
         return self.query_with_reranking(query_text, n_results=n_results)
 
+    def search_for_biological_synthesis(
+        self,
+        query_plan: List[dict],
+        *,
+        n_results: int = 10,
+    ) -> List[dict]:
+        """Retrieve literature for data-derived system, pathway, and candidate anchors.
+
+        ``query_plan`` is deterministic Report input, not a generated hypothesis.
+        Results retain the query role/text so the writer can distinguish study
+        background from a pathway or candidate-specific literature comparison.
+        """
+        if not query_plan:
+            return []
+        per_query = max(1, min(3, int(n_results)))
+        unique: list[dict] = []
+        seen: set[tuple[str, str]] = set()
+        for item in query_plan:
+            if not isinstance(item, dict):
+                continue
+            query_text = str(item.get("query") or "").strip()
+            if not query_text:
+                continue
+            try:
+                retrieved = self.query_with_reranking(query_text, n_results=per_query)
+            except Exception as error:
+                logger.warning("[ChromaDB] Biological synthesis query failed for '%s': %s", query_text[:80], error)
+                continue
+            for row in retrieved:
+                doc_key = (str(row.get("title") or ""), str(row.get("document") or "")[:160])
+                if doc_key in seen:
+                    continue
+                seen.add(doc_key)
+                unique.append({
+                    **row,
+                    "query_role": str(item.get("role") or "data_anchored"),
+                    "query_text": query_text,
+                    "query_anchor": str(item.get("anchor") or ""),
+                })
+        # Keep the first result for each role before filling remaining relevance-ranked slots.
+        selected: list[dict] = []
+        represented: set[str] = set()
+        for row in unique:
+            role = row.get("query_role", "data_anchored")
+            if role not in represented:
+                selected.append(row)
+                represented.add(role)
+        for row in unique:
+            if len(selected) >= n_results:
+                break
+            if row not in selected:
+                selected.append(row)
+        selected = selected[:n_results]
+        logger.info(
+            "[ChromaDB] Biological synthesis retrieval: %d data-anchored queries -> %d references",
+            len(query_plan), len(selected),
+        )
+        return selected
+
     def search_for_cascade_pathways(
         self,
         temporal_kinase_cascade: dict,

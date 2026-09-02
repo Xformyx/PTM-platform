@@ -100,14 +100,14 @@ def test_packet_preserves_numerical_fields_and_observational_boundary():
     assert packet["section_plan"]["directed_temporal_context_allowed"] is False
     assert packet["section_plan"]["mechanism_context_allowed"] is False
     text = format_temporal_evidence_packet_for_llm(packet)
-    assert "[DATA-TEMPORAL-SUMMARY]" in text
+    assert "DATA-TEMPORAL-SUMMARY" not in text
     assert "protein trajectories=12" in text
-    assert "[DATA-DYNAMIC-WAVE-1]" in text
-    assert "[DATA-TEMPORAL-PRECEDENCE]" in text
+    assert "DATA-DYNAMIC-WAVE-1" not in text
+    assert "DATA-TEMPORAL-PRECEDENCE" not in text
     assert "evaluable sites=7" in text
     assert "P4 validation passed=False" in text
     assert "Static Wave W1" in text
-    assert "[DATA-CROSS-LAYER-1]" in text
+    assert "DATA-CROSS-LAYER-1" not in text
     assert "onset lag=15 min" in text
     assert "causality=not_tested" in text
     assert "does not establish kinase switching" in text
@@ -187,7 +187,8 @@ def test_writer_emits_last_wins_observation_only_directive_for_no_call_packet():
         packet["section_plan"],
     )
     assert directive.startswith("=== MANDATORY CURRENT-ORDER CLAIM CEILING")
-    assert "MUST NOT state or imply receptor-to-kinase-to-substrate propagation" in directive
+    assert "substantive biological synthesis" in directive
+    assert "MUST NOT state that this Order establishes a receptor-to-kinase-to-substrate propagation path" in directive
     assert "autophosphorylation" in directive
     assert "local temporal co-membership annotations" in directive
     assert "Do not emit DATA-* labels" in directive
@@ -203,7 +204,8 @@ def test_ordinary_question_content_includes_deterministic_temporal_packet():
         temporal_evidence_packet_text=packet_text,
     )
     assert "summary" in content
-    assert "DATA-DYNAMIC-SUMMARY" in content
+    assert "DATA-DYNAMIC-SUMMARY" not in content
+    assert "transition-supported Waves=2" in content
 
 
 def test_writer_makes_the_packet_mandatory_in_all_temporal_sections():

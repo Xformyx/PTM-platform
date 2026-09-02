@@ -260,22 +260,22 @@ class FigureInformationGenerator:
             )
         else:
             pw_sentence = (
-                "The diagram will show the key signaling pathways discussed in the text, "
-                "depicting their compartmentalized signal transduction flow. "
+                "The diagram will place the pathways discussed in the text into a compartmentalized "
+                "literature-context map. "
             )
         
         desc = (
-            f"This compartmentalized signaling cascade diagram{cond_str} depicts the signal "
-            "transduction flow across cellular compartments (Extracellular Space, Plasma Membrane, "
+            f"This compartmentalized pathway-context diagram{cond_str} organizes measured PTM and protein observations "
+            "across cellular compartments (Extracellular Space, Plasma Membrane, "
             "Cytoplasm, Nucleus). "
             f"{pw_sentence}"
             "Each horizontal lane represents a distinct signaling pathway, with proteins positioned "
             "in their annotated subcellular compartment (based on UniProt and GO annotations). "
-            "Protein nodes are color-coded: red = activated PTM (Log2FC > 0), "
-            "blue = inhibited PTM (Log2FC < 0), green = upregulated Non-PTM, "
-            "purple = downregulated Non-PTM, orange diamond = kinase. "
+            "Protein nodes are color-coded: red = higher measured PTM abundance (Log2FC > 0), "
+            "blue = lower measured PTM abundance (Log2FC < 0), green = higher Non-PTM abundance, "
+            "purple = lower Non-PTM abundance, orange diamond = kinase annotation. "
             "Node size is proportional to |PTM Log2FC| magnitude. "
-            "Gray arrows indicate canonical signal flow direction."
+            "Gray arrows indicate literature/pathway context only and do not establish Order-specific direction or direct regulation."
         )
 
         # Add condition-specific protein summary if available
@@ -283,20 +283,19 @@ class FigureInformationGenerator:
             cond_ptms = [p for p in self.parsed_ptms
                          if (p.get("condition") or p.get("Condition", "")) == condition]
             if cond_ptms:
-                activated = [p for p in cond_ptms if (p.get("ptm_relative_log2fc") or 0) > 0]
-                inhibited = [p for p in cond_ptms if (p.get("ptm_relative_log2fc") or 0) < 0]
+                higher = [p for p in cond_ptms if (p.get("ptm_relative_log2fc") or 0) > 0]
+                lower = [p for p in cond_ptms if (p.get("ptm_relative_log2fc") or 0) < 0]
                 desc += (
-                    f" In the {condition} condition, {len(activated)} PTMs show activation "
-                    f"and {len(inhibited)} show inhibition."
+                    f" In the {condition} condition, {len(higher)} PTMs have higher measured abundance "
+                    f"and {len(lower)} have lower measured abundance."
                 )
-                # Top activated
-                top_act = sorted(activated, key=lambda x: -(x.get("ptm_relative_log2fc") or 0))[:5]
+                top_act = sorted(higher, key=lambda x: -(x.get("ptm_relative_log2fc") or 0))[:5]
                 if top_act:
                     top_str = ", ".join(
                         f"{p.get('gene', '?')}({p.get('position', '')})"
                         for p in top_act
                     )
-                    desc += f" Key activated: {top_str}."
+                    desc += f" Highest measured PTM increases: {top_str}."
 
         return desc
 
@@ -478,7 +477,7 @@ class FigureInformationGenerator:
             "CRITICAL: Main figures use 'Figure N' (e.g., Figure 1). "
             "Supplementary figures use 'Supplementary Figure N' (e.g., Supplementary Figure 1).",
             "For example: 'As shown in Figure 1, the pathway distribution reveals...'",
-            "or 'The signaling cascade diagram (Supplementary Figure 1) illustrates the compartmentalized signal flow...'",
+            "or 'The pathway-context diagram (Supplementary Figure 1) summarizes literature-linked cellular compartments...'",
             "or 'The network at 2min (Supplementary Figure 9A) shows...'",
             "NEVER use 'Figure 2' to refer to a Supplementary Figure. Always include the word 'Supplementary'.",
             "",
@@ -499,8 +498,8 @@ class FigureInformationGenerator:
                     stats = self.timepoint_results[tp].get("stats", {})
                     phase = self._tp_to_phase(tp)
                     lines.append(
-                        f"- {tp} ({phase}): {stats.get('active_ptm_count', 0)} activated, "
-                        f"{stats.get('inhibited_ptm_count', 0)} inhibited, "
+                        f"- {tp} ({phase}): {stats.get('active_ptm_count', 0)} higher-abundance PTMs, "
+                        f"{stats.get('inhibited_ptm_count', 0)} lower-abundance PTMs, "
                         f"{stats.get('non_ptm_count', 0)} Non-PTM proteins"
                     )
             lines.append("")
@@ -573,7 +572,7 @@ class FigureInformationGenerator:
                 "Reference cascade diagrams as Supplementary Figures (e.g., Supplementary Figure 1). "
                 "Reference Cytoscape network images as Supplementary Figures with panel letters "
                 "(e.g., Supplementary Figure 9A, 9B, etc.). "
-                "Mention specific PTM nodes, their activation states, Non-PTM interactors, "
+                "Mention specific PTM nodes, their measured-abundance states, Non-PTM observations, "
                 "and key interaction edges visible in the networks. "
                 "When discussing signaling pathways, focus on those most supported by your "
                 "PTM data and enrichment analysis. The cascade diagrams will be generated "
@@ -593,10 +592,9 @@ class FigureInformationGenerator:
                 "and discuss the biological significance of the observed interaction patterns. "
                 "Reference the figures by their EXACT labels when discussing findings "
                 "(Figure 1 for main, Supplementary Figure N for supplementary). "
-                "Discuss how the pathway distribution (Figure 1) and cascade diagrams "
-                "(Supplementary Figures) reveal the dominant signaling axes, and how the "
-                "Cytoscape networks (Supplementary Figures with panel letters) provide "
-                "detailed protein-level interaction evidence. "
+                "Discuss how the pathway distribution (Figure 1) and pathway-context diagrams "
+                "(Supplementary Figures) organize the most relevant literature-linked biological programmes, and how the "
+                "Cytoscape networks (Supplementary Figures with panel letters) provide detailed observation and annotation context. "
                 "Focus your pathway discussion on those most strongly supported by the data. "
                 "If temporal data is available, discuss how the signaling network evolves "
                 f"over time and the implications for cellular response mechanisms.{candidate_hint}"

@@ -167,12 +167,12 @@ def classify_ptm_patterns(ptms: List[dict], threshold: float = 0.5) -> Dict[str,
     Classify PTMs into 6 patterns based on Protein Log2FC vs PTM Log2FC.
 
     Patterns:
-      1A: PTM up, Protein stable/up → Kinase activation
-      1B: PTM down, Protein stable/down → Phosphatase activation
-      2A: PTM up, Protein down → Compensatory hyperactivation
-      2B: PTM down, Protein up → Desensitization
-      3A: PTM stable, Protein up → Expression-driven
-      3B: PTM stable, Protein down → Degradation-driven
+      1A: PTM up, Protein stable/up → PTM-increase dominant
+      1B: PTM down, Protein stable/down → PTM-decrease dominant
+      2A: PTM up, Protein down → PTM/protein divergence (increase/decrease)
+      2B: PTM down, Protein up → PTM/protein divergence (decrease/increase)
+      3A: PTM stable, Protein up → protein-abundance dominant increase
+      3B: PTM stable, Protein down → protein-abundance dominant decrease
     """
     patterns = {"1A": [], "1B": [], "2A": [], "2B": [], "3A": [], "3B": []}
 
@@ -212,7 +212,9 @@ FEW_SHOT_QUANTITATIVE = """
 **Example of good quantitative data integration (STYLE ONLY — do NOT use these proteins/sites):**
 
 "The phosphorylation of [Gene]-[Site] showed a dramatic X-fold increase (PTM Log2FC = Y)
-without significant change in protein abundance (Protein Log2FC = Z), indicating specific
+without significant change in protein abundance (Protein Log2FC = Z), indicating a site-level
+PTM/protein divergence that is consistent with specific regulation of phosphorylation abundance,
+but does not by itself establish an exact upstream kinase.
 kinase-mediated activation. This is consistent with [kinase]-dependent phosphorylation of [Gene] at
 [Site], which [biological function] [1]. The magnitude of this change suggests [interpretation]."
 
@@ -1405,7 +1407,9 @@ def format_temporal_evidence_packet_for_llm(
     for record in packet.get("records") or []:
         if not isinstance(record, Mapping):
             continue
-        lines.append(f"[{record.get('evidence_id', 'DATA-UNKNOWN')}] {record.get('text', '')}")
+        # Evidence IDs are internal routing keys. The LLM receives only the
+        # human-readable aggregate statement so DATA-* labels cannot leak to DOCX.
+        lines.append(str(record.get("text", "")))
     lines.extend([
         "",
         f"Claim boundary: {packet.get('claim_boundary', '')}",
@@ -1455,10 +1459,9 @@ def build_nonptm_temporal_analysis(
     network_results: dict, timepoints: list, ptm_type: str = "phosphorylation"
 ) -> str:
     """
-    GAP A-2: Build Non-PTM temporal analysis block.
-    Shows how Non-PTM effector proteins change across timepoints,
-    including signaling role classification, PTM relationship directionality,
-    and canonical pathway context.
+    Build a measured Non-PTM temporal abundance context block.
+    It reports protein trajectories, broad annotation categories, relative observed
+    timing, and pathway context without treating abundance as a directed PTM edge.
     """
     # Support both 'networks' (legacy) and 'timepoint_results' (network_node.py output)
     networks = network_results.get("networks", {})
@@ -1487,7 +1490,7 @@ def build_nonptm_temporal_analysis(
     if not nonptm_temporal:
         return ""
 
-    # Collect PTM proteins for directionality analysis
+    # Collect PTM proteins only for relative observed timing comparison.
     ptm_temporal: Dict[str, Dict[str, float]] = {}
     for tp in timepoints:
         net = source.get(tp, {})
@@ -1505,7 +1508,8 @@ def build_nonptm_temporal_analysis(
                     ptm_temporal[gene] = {}
                 ptm_temporal[gene][tp] = ptm_fc
 
-    # Collect edges for directionality
+    # Collect network annotations only to select comparable PTM observations;
+    # they are not causal edges.
     ptm_nonptm_edges: Dict[str, List[str]] = {}  # nonptm_gene -> [ptm_gene, ...]
     for tp in timepoints:
         net = source.get(tp, {})
@@ -1521,12 +1525,12 @@ def build_nonptm_temporal_analysis(
             elif tgt in nonptm_temporal and src in ptm_temporal:
                 ptm_nonptm_edges.setdefault(tgt, []).append(src)
 
-    # --- Signaling Role Classification ---
+    # --- Broad protein-category annotation ---
     SIGNALING_ROLES = {
         "upstream_regulator": {
             "keywords": ["mapk", "erk", "jnk", "p38", "raf", "ras", "mek", "src", "fak",
                          "jak", "pi3k", "akt", "pkc", "pka", "camk", "rock", "cdk"],
-            "label": "Upstream Regulator",
+            "label": "Kinase-family/context annotation",
         },
         "scaffold_adaptor": {
             "keywords": ["grb", "shc", "sos", "gab", "irs", "nck", "crk", "14-3-3",
@@ -1537,13 +1541,13 @@ def build_nonptm_temporal_analysis(
         "transducer": {
             "keywords": ["stat", "smad", "nfkb", "rela", "relb", "creb", "nfat",
                          "foxo", "myc", "jun", "fos", "atf"],
-            "label": "Signal Transducer",
+            "label": "Transcription/signaling context annotation",
         },
         "downstream_effector": {
             "keywords": ["casp", "bax", "bcl", "mtor", "s6k", "4ebp", "eif",
                          "rps6", "gsk3", "ctnnb", "ccn", "cdc", "chk",
                          "p53", "tp53", "rb1", "mdm"],
-            "label": "Downstream Effector",
+            "label": "Cellular process context annotation",
         },
     }
 
@@ -1553,13 +1557,13 @@ def build_nonptm_temporal_analysis(
             for kw in role_info["keywords"]:
                 if kw in gene_lower:
                     return role_info["label"]
-        return "Effector Protein"
+        return "Protein context annotation"
 
-    def _classify_directionality(nonptm_gene: str, tp_data: Dict[str, float]) -> str:
-        """Classify PTM→Non-PTM relationship directionality."""
+    def _classify_relative_timing(nonptm_gene: str, tp_data: Dict[str, float]) -> str:
+        """Describe relative observed onset without inferring directionality."""
         connected_ptms = ptm_nonptm_edges.get(nonptm_gene, [])
         if not connected_ptms or not ptm_temporal:
-            return "Interactor"
+            return "No comparable PTM context"
 
         # Compare temporal patterns: does PTM change precede Non-PTM change?
         nonptm_values = [tp_data.get(tp, 0) for tp in timepoints]
@@ -1576,20 +1580,12 @@ def build_nonptm_temporal_analysis(
                     break
 
         if ptm_first_change_idx < nonptm_first_change_idx:
-            return "Downstream of PTM"
+            return "PTM change observed earlier"
         elif nonptm_first_change_idx < ptm_first_change_idx:
-            return "Upstream of PTM"
+            return "Protein change observed earlier"
         elif nonptm_first_change_idx == ptm_first_change_idx and nonptm_first_change_idx < len(timepoints):
-            # Check if Non-PTM opposes PTM direction → feedback
-            ptm_direction = sum(
-                ptm_temporal.get(pg, {}).get(timepoints[nonptm_first_change_idx], 0)
-                for pg in connected_ptms
-            )
-            nonptm_direction = nonptm_values[nonptm_first_change_idx]
-            if ptm_direction * nonptm_direction < 0:
-                return "Feedback Regulator"
-            return "Co-regulated"
-        return "Interactor"
+            return "Same first observed change"
+        return "No evaluable timing comparison"
 
     # Sort by max absolute change
     sorted_nonptm = sorted(
@@ -1599,16 +1595,16 @@ def build_nonptm_temporal_analysis(
     )
 
     lines = [
-        "## NON-PTM EFFECTOR PROTEINS — SUPPORTIVE EVIDENCE FOR KINASE-SUBSTRATE RELATIONSHIPS",
+        "## NON-PTM PROTEIN TEMPORAL ABUNDANCE CONTEXT",
         f"The following Non-PTM proteins are interaction partners of identified {ptm_type}-modified "
         "substrates. They do NOT carry the target PTM modification. Their protein-abundance changes are "
-        "observational temporal context, not validation of a kinase-substrate signaling axis. "
-        "Use them as qualified, INLINE context when discussing each candidate relationship — do NOT discuss them as a separate topic.",
+        "observational temporal context, not validation of a kinase-substrate signaling axis or an upstream/downstream relationship. "
+        "Use them as qualified, INLINE context when discussing biological programmes.",
         "",
     ]
 
     # Table header
-    header = "| # | Protein | Signaling Role | PTM Relationship |"
+    header = "| # | Protein | Protein Category | Relative Observed Timing |"
     for tp in timepoints:
         header += f" {tp} Prot_Log2FC |"
     header += " Trend | Pathway |"
@@ -1622,7 +1618,7 @@ def build_nonptm_temporal_analysis(
 
     for i, (gene, tp_data) in enumerate(sorted_nonptm[:15], 1):
         role = _classify_signaling_role(gene)
-        directionality = _classify_directionality(gene, tp_data)
+        directionality = _classify_relative_timing(gene, tp_data)
         pathways = classify_gene_pathway(gene, DEFAULT_PATHWAYS)
         pw_str = ", ".join(pathways[:2]) if pathways else "—"
 
@@ -1645,44 +1641,38 @@ def build_nonptm_temporal_analysis(
         row += f" {trend} | {pw_str} |"
         lines.append(row)
 
-    # Signaling role summary
+    # Protein-category and relative observed-timing summary
     role_counts: Dict[str, int] = {}
     direction_counts: Dict[str, int] = {}
     for gene, tp_data in sorted_nonptm[:15]:
         role = _classify_signaling_role(gene)
-        directionality = _classify_directionality(gene, tp_data)
+        directionality = _classify_relative_timing(gene, tp_data)
         role_counts[role] = role_counts.get(role, 0) + 1
         direction_counts[directionality] = direction_counts.get(directionality, 0) + 1
 
     lines.append("")
-    lines.append("### Non-PTM Signaling Role Distribution")
+    lines.append("### Non-PTM Protein Category Distribution")
     for role, cnt in sorted(role_counts.items(), key=lambda x: x[1], reverse=True):
         lines.append(f"- **{role}**: {cnt} proteins")
 
     lines.append("")
-    lines.append("### PTM→Non-PTM Relationship Directionality")
+    lines.append("### PTM/Non-PTM Relative Observed Timing")
     for direction, cnt in sorted(direction_counts.items(), key=lambda x: x[1], reverse=True):
         lines.append(f"- **{direction}**: {cnt} proteins")
 
     lines.append("")
-    lines.append("### Interpretation Instructions (CRITICAL — Supportive Evidence Approach)")
+    lines.append("### Interpretation Instructions (CRITICAL — Observational Context)")
     lines.append(
-        "IMPORTANT: Non-PTM proteins are NOT the main subject of this report. They serve as \n"
-        "**observational context** for candidate kinase-substrate relationships.\n\n"
+        "IMPORTANT: Non-PTM proteins are interpreted as measured protein-abundance context for the PTM response.\n\n"
         "When writing about Non-PTM proteins, you MUST follow these rules:\n"
         "1. DO NOT create a separate dedicated section for Non-PTM proteins.\n"
-        "2. Instead, mention Non-PTM proteins INLINE when discussing each kinase-substrate relationship \n"
-        "   as validation evidence. For example: 'The activation of MAPK1-mediated phosphorylation of \n"
-        "   STAT3 (S727) is further supported by concordant upregulation of 12 downstream interactors \n"
-        "   (including HSP90, CDC37), with peak expression changes occurring 30 min after substrate \n"
-        "   PTM peak, which is temporally consistent with a downstream protein-level response but does not establish causality.'\n"
-        "3. The NUMBER of concordant Non-PTM proteins does not validate a kinase-substrate relationship; "
-        "   report it only as the size of an observationally consistent protein set.\n"
-        "4. Use temporal concordance (time-lag) between substrate PTM change and Non-PTM protein \n"
-        "   abundance change as observational timing evidence, not signal-propagation directionality proof.\n"
-        "5. Group Non-PTM proteins by their connected PTM substrate, not as an independent list.\n"
-        "6. Briefly note the signaling role (scaffold, transducer, effector) only when it adds \n"
-        "   mechanistic insight to the kinase-substrate relationship being discussed.\n"
+        "2. Mention Non-PTM proteins INLINE when they sharpen a data-grounded biological programme, pathway context, "
+        "   or a testable explanation for a measured PTM trajectory.\n"
+        "3. The NUMBER of concordant Non-PTM proteins reports the size of an observationally consistent protein set; "
+        "   it does not validate a kinase-substrate relationship.\n"
+        "4. Use relative timing between PTM and Non-PTM measurements as descriptive context, not proof of signal propagation.\n"
+        "5. Group Non-PTM proteins by shared temporal profile, pathway annotation, or biological programme when useful.\n"
+        "6. Use broad protein-category annotations only as literature-oriented context, not as an upstream/downstream mechanism.\n"
     )
 
     lines.append("")
@@ -1885,32 +1875,32 @@ def build_signal_propagation_json(
             if isinstance(n, dict):
                 active_genes.add(n.get("gene", n.get("id", "")))
 
-        # New activations at this timepoint
+        # Newly higher-abundance PTM genes at this timepoint.
         new_activations = active_genes - prev_active_genes
         lost_activations = prev_active_genes - active_genes
 
-        # Classify new activations by canonical pathway
+        # Annotate newly higher-abundance PTM genes by canonical pathway context.
         pathway_groups: Dict[str, List[str]] = {}
         for gene in new_activations:
             matched = classify_gene_pathway(gene, DEFAULT_PATHWAYS)
             for pw in matched:
                 pathway_groups.setdefault(pw, []).append(gene)
 
-        # Classify lost activations by canonical pathway
+        # Annotate no-longer-higher-abundance PTM genes by canonical pathway context.
         lost_pathway_groups: Dict[str, List[str]] = {}
         for gene in lost_activations:
             matched = classify_gene_pathway(gene, DEFAULT_PATHWAYS)
             for pw in matched:
                 lost_pathway_groups.setdefault(pw, []).append(gene)
 
-        # Determine biological significance of this timepoint transition
+        # Describe measured set turnover without inferring propagation or causality.
         bio_significance = []
         if len(new_activations) > len(lost_activations) * 2:
-            bio_significance.append("signal_amplification")
+            bio_significance.append("ptm_set_expansion")
         elif len(lost_activations) > len(new_activations) * 2:
-            bio_significance.append("signal_termination")
+            bio_significance.append("ptm_set_contraction")
         elif new_activations and lost_activations:
-            bio_significance.append("signal_relay")
+            bio_significance.append("ptm_set_reconfiguration")
         if pathway_groups:
             if len(pathway_groups) > 2:
                 bio_significance.append("pathway_divergence")
@@ -1935,14 +1925,14 @@ def build_signal_propagation_json(
         propagation["timepoints"].append(tp_data)
 
         if prev_active_genes and new_activations:
-            # Determine cascade biological meaning
-            cascade_meaning = "signal_relay"
+            # Describe local temporal turnover; do not infer a cascade.
+            cascade_meaning = "ptm_set_reconfiguration"
             if len(new_activations) > 5:
-                cascade_meaning = "signal_amplification"
+                cascade_meaning = "ptm_set_expansion"
             elif lost_activations and len(lost_activations) > len(new_activations):
-                cascade_meaning = "signal_attenuation"
+                cascade_meaning = "ptm_set_contraction"
             elif not lost_activations and new_activations:
-                cascade_meaning = "signal_expansion"
+                cascade_meaning = "new_ptm_set_emergence"
 
             propagation["propagation_events"].append({
                 "from_tp": timepoints[timepoints.index(tp) - 1] if timepoints.index(tp) > 0 else tp,
@@ -1952,9 +1942,9 @@ def build_signal_propagation_json(
                 "cascade_type": cascade_meaning,
                 "pathways_involved": list(pathway_groups.keys())[:5],
                 "interpretation": (
-                    f"Signal propagated to {len(new_activations)} new proteins at {tp} "
+                    f"{len(new_activations)} newly higher-abundance PTM genes were observed at {tp} "
                     f"({cascade_meaning.replace('_', ' ')}). "
-                    f"Pathways: {', '.join(list(pathway_groups.keys())[:3]) or 'unclassified'}."
+                    f"Pathway annotations: {', '.join(list(pathway_groups.keys())[:3]) or 'unclassified'}."
                 ),
             })
 
@@ -1965,17 +1955,17 @@ def build_signal_propagation_json(
 
     # Build Markdown table summary in addition to JSON
     lines = [
-        "## SIGNAL PROPAGATION TIMELINE (with Canonical Pathway & Biological Significance)",
-        "Use this structured timeline to describe how signaling events propagate across timepoints.",
-        "For each cascade event, discuss: (1) which canonical pathways are involved, "
-        "(2) whether the event represents signal amplification, relay, or termination, "
-        "(3) the biological meaning of pathway activation/deactivation patterns.",
+        "## TEMPORAL PTM-SET RECONFIGURATION (with Canonical Pathway Context)",
+        "Use this structured timeline to describe measured PTM-set turnover across timepoints.",
+        "For each transition, discuss: (1) which pathway annotations are represented, "
+        "(2) whether the observed set expands, contracts, or reconfigures, "
+        "(3) the biological interpretation and alternatives without asserting directional propagation.",
         "",
     ]
 
     # Summary table
-    lines.append("### Propagation Summary")
-    lines.append("| Timepoint | Active | Inhibited | Non-PTM | New Activations | Lost | Significance | Top Pathways |")
+    lines.append("### Temporal Reconfiguration Summary")
+    lines.append("| Timepoint | Higher PTM | Lower PTM | Non-PTM | Newly Higher | No Longer Higher | Pattern | Top Pathways |")
     lines.append("|---|---|---|---|---|---|---|---|")
     for tp_d in propagation["timepoints"]:
         pathways_str = ", ".join(list(tp_d.get("canonical_pathways_activated", {}).keys())[:3]) or "\u2014"
@@ -1987,9 +1977,9 @@ def build_signal_propagation_json(
         )
     lines.append("")
 
-    # Cascade events
+    # Local temporal reconfiguration events
     if propagation["propagation_events"]:
-        lines.append("### Cascade Events")
+        lines.append("### Temporal Reconfiguration Events")
         for evt in propagation["propagation_events"]:
             lines.append(
                 f"- **{evt['from_tp']} \u2192 {evt['to_tp']}**: {evt['interpretation']} "

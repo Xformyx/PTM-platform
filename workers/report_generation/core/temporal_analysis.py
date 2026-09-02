@@ -75,9 +75,9 @@ def build_nonptm_temporal_analysis(
         return ""
 
     parts = [
-        "\n## NON-PTM EFFECTOR PROTEIN TEMPORAL DYNAMICS\n",
-        "These are downstream effector proteins (kinases, interactors, scaffolds) whose",
-        "protein abundance changes reflect the propagation of upstream PTM signaling events.\n",
+        "\n## NON-PTM PROTEIN TEMPORAL ABUNDANCE PROFILES\n",
+        "These are measured non-PTM proteins (including kinases, interactors, and scaffolds) whose",
+        "abundance trajectories provide context for the PTM response. They do not by themselves establish upstream PTM propagation or direct regulation.\n",
     ]
 
     # Classify each non-PTM protein's temporal response
@@ -123,23 +123,23 @@ def build_nonptm_temporal_analysis(
     for _, _, pattern, _, _ in classified:
         pattern_counts[pattern] = pattern_counts.get(pattern, 0) + 1
 
-    parts.append("### Signal Propagation Summary")
-    parts.append(f"Total downstream effector proteins tracked: {len(classified)}")
+    parts.append("### Temporal Abundance Profile Summary")
+    parts.append(f"Total measured non-PTM proteins tracked: {len(classified)}")
     for pattern, count in sorted(pattern_counts.items(), key=lambda x: x[1], reverse=True):
         label = {
-            "immediate_early_response": "Immediate early responders (signal relay within 15min)",
-            "delayed_effector_response": "Delayed effectors (transcriptional/translational response >15min)",
-            "sustained_response": "Sustained responders (continuous signal integration)",
-            "biphasic_switch": "Biphasic switchers (signal adaptation/feedback)",
+            "immediate_early_response": "Immediate early abundance responders (within 15min)",
+            "delayed_effector_response": "Delayed abundance responders (>15min)",
+            "sustained_response": "Sustained abundance responders",
+            "biphasic_switch": "Biphasic abundance responders (direction switch)",
             "stable_baseline": "Stable (no significant abundance change)",
         }.get(pattern, pattern)
         parts.append(f"  {label}: {count}")
     parts.append("")
 
-    # Detailed table for top 20 most responsive
+    # Detailed table for top 20 most responsive measured non-PTM proteins
     responsive = [c for c in classified if c[2] != "stable_baseline"]
     if responsive:
-        parts.append("### Top Effector Protein Temporal Profiles")
+        parts.append("### Top Non-PTM Protein Temporal Profiles")
         header = (
             "| Effector Protein | Role | Response Kinetics | "
             + " | ".join([f"{tp}" for tp in timepoints])
@@ -152,7 +152,7 @@ def build_nonptm_temporal_analysis(
         for gene, role, pattern, max_abs, tp_data in responsive[:20]:
             kinetics_label = {
                 "immediate_early_response": "Immediate early",
-                "delayed_effector_response": "Delayed effector",
+                "delayed_effector_response": "Delayed abundance",
                 "sustained_response": "Sustained",
                 "biphasic_switch": "Biphasic",
             }.get(pattern, pattern)
@@ -164,9 +164,9 @@ def build_nonptm_temporal_analysis(
             )
         parts.append("")
 
-    # Functional group analysis
-    parts.append("### Coordinated Effector Group Responses")
-    parts.append("Non-PTM proteins grouped by coordinated temporal behavior:\n")
+    # Functional grouping is descriptive, not a causal effector assignment.
+    parts.append("### Coordinated Non-PTM Group Profiles")
+    parts.append("Non-PTM proteins grouped by observed temporal behavior:\n")
 
     for pattern_key in [
         "immediate_early_response",
@@ -177,10 +177,10 @@ def build_nonptm_temporal_analysis(
         group = [c for c in classified if c[2] == pattern_key]
         if group:
             label = {
-                "immediate_early_response": "Immediate Signal Relay Effectors (<=15min)",
-                "delayed_effector_response": "Delayed Transcriptional/Translational Effectors (>15min)",
-                "sustained_response": "Sustained Signal Integration Effectors",
-                "biphasic_switch": "Biphasic Adaptation Effectors (direction switch)",
+                "immediate_early_response": "Immediate Early Non-PTM Profiles (<=15min)",
+                "delayed_effector_response": "Delayed Non-PTM Profiles (>15min)",
+                "sustained_response": "Sustained Non-PTM Profiles",
+                "biphasic_switch": "Biphasic Non-PTM Profiles (direction switch)",
             }.get(pattern_key, pattern_key)
             up_genes = [g[0] for g in group if max(g[4].values()) > 0.3]
             down_genes = [g[0] for g in group if min(g[4].values()) < -0.3]
