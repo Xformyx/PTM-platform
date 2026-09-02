@@ -2496,3 +2496,21 @@
   P0-ready M1만 받는다. feature count > 0은 kinase 귀속이 아니다.
 - **결정성:** 결정적. Stage 1 TSV 행 순서에 의존하지 않고 identity 필드로만 구성.
 
+### [2026-09-02] enriched JSON Extra data — 동시 쓰기 잔여 fragment
+
+- **분류:** 정정
+- **대상:**
+  - `data/outputs/Insulin_Signaling_V3/enriched_ptm_data_phospho.json` (첫 유효 배열만 유지)
+  - `workers/common/json_files.py` (신규)
+  - `workers/rag_enrichment/tasks.py`, `workers/report_generation/tasks.py`,
+    `workers/report_generation/core/nodes/context_loader.py`
+- **구현 대상 설계:** 해당 없음 (파일 I/O 경쟁. 측정 상수·임계 변경 없음)
+- **사전등록 상태:** 해당 없음
+- **내용:** 유효한 2,447-item JSON 배열 뒤에 다른 writer의 약 9.7KB fragment가
+  붙어 Report `json.load`가 Extra data로 실패했다. 첫 값만 truncate로 복구하고,
+  RAG 산출물은 temp+replace로 쓰며 로더는 첫 완전한 JSON 값만 읽는다.
+- **논문에서의 용도:** 사용 안 함 (파이프라인 산출물 무결성)
+- **해석 한계:** 복구는 첫 완전한 배열을 유지할 뿐이며 사이트 집합을 새로 만들지 않는다.
+  kinase 귀속·전달 가능성과 무관하다.
+- **결정성:** 결정적. 첫 `raw_decode` 종료 오프셋에서 자른다.
+

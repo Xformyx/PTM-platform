@@ -22,6 +22,7 @@ import redis as _redis
 
 from celery_app import app
 from common.db_update import get_order_status, update_order_status
+from common.json_files import load_json_first_value
 from common.notifications import notify_order_status
 from common.progress import publish_analysis_log, publish_progress
 from common.webhook import send_step_webhook
@@ -387,8 +388,7 @@ def run_report_generation(self, order_id: int, config: dict):
         )
 
         # Load enriched data
-        with open(enriched_path, "r", encoding="utf-8") as f:
-            enriched_data = json.load(f)
+        enriched_data = load_json_first_value(enriched_path)
         logger.info(f"[Order {order_id}] Loaded {len(enriched_data)} enriched PTMs from {enriched_path}")
 
         # v9.35: Auto-build Global Kinase Modules if not pre-computed
@@ -646,8 +646,7 @@ def run_report_generation(self, order_id: int, config: dict):
             secondary_enriched_data = []
             if secondary_enriched_json and Path(secondary_enriched_json).exists():
                 try:
-                    with open(secondary_enriched_json, "r") as f:
-                        secondary_enriched_data = json.load(f)
+                    secondary_enriched_data = load_json_first_value(secondary_enriched_json)
                     logger.info(f"[Order {order_id}] Loaded {len(secondary_enriched_data)} secondary enriched PTMs")
                 except Exception as sec_err:
                     logger.warning(f"[Order {order_id}] Failed to load secondary enriched JSON: {sec_err}")

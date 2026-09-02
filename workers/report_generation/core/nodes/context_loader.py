@@ -27,8 +27,9 @@ def run_context_loader(state: dict) -> dict:
     if not enriched_data:
         enriched_path = state.get("enriched_json_path")
         if enriched_path and Path(enriched_path).exists():
-            with open(enriched_path, "r") as f:
-                enriched_data = json.load(f)
+            from common.json_files import load_json_first_value
+
+            enriched_data = load_json_first_value(enriched_path)
             logger.info(f"Loaded {len(enriched_data)} enriched PTMs from {enriched_path}")
 
     # Parse PTMs into structured format

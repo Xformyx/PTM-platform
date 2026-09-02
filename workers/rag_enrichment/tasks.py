@@ -20,6 +20,7 @@ import pandas as pd
 
 from celery_app import app
 from common.db_update import get_order_status, update_order_status
+from common.json_files import atomic_write_json, load_json_first_value
 from common.notifications import notify_order_status
 from common.mcp_client import MCPClient
 from common.progress import publish_analysis_log, publish_progress, save_celery_task_id
@@ -752,9 +753,11 @@ def _auto_run_global_analysis(order_id: int, enriched_data: list, config: dict, 
                     ),
                 )
                 temporal_path = temporal_output_dir / "temporal_ptm_protein_analysis_v2.json"
-                temporal_path.write_text(
-                    json.dumps(temporal_sidecar, ensure_ascii=False, sort_keys=True),
-                    encoding="utf-8",
+                atomic_write_json(
+                    temporal_path,
+                    temporal_sidecar,
+                    sort_keys=True,
+                    default=None,
                 )
                 temporal_sidecar_summary = summarize_temporal_ptm_protein_analysis(
                     temporal_sidecar,
@@ -2312,8 +2315,7 @@ def run_rag_enrichment(self, order_id: int, config: dict):
 
         # Save enriched data as JSON
         enriched_json_path = order_output / f"enriched_ptm_data{file_suffix}.json"
-        with open(enriched_json_path, "w", encoding="utf-8") as f:
-            json.dump(enriched_ptms, f, indent=2, default=str)
+        atomic_write_json(enriched_json_path, enriched_ptms, indent=2)
 
         # ── Logging: JSON 저장 결과 ──────────────────────────────────────────
         _json_unique_keys = set()
@@ -2429,8 +2431,7 @@ def run_rag_enrichment(self, order_id: int, config: dict):
 
                 # Save secondary enriched JSON
                 secondary_enriched_json_path = order_output / f"enriched_ptm_data{secondary_file_suffix}.json"
-                with open(secondary_enriched_json_path, "w", encoding="utf-8") as f:
-                    json.dump(sec_enriched, f, indent=2, default=str)
+                atomic_write_json(secondary_enriched_json_path, sec_enriched, indent=2)
                 logger.info(f"[Order {order_id}] Saved secondary enriched data: {secondary_enriched_json_path.name}")
 
                 # Generate secondary MD report
@@ -2613,8 +2614,7 @@ def prepare_temporal_evidence_for_report(self, order_id: int, config: dict):
             90,
             "Preparing canonical Wave, TMM, PTM–protein and dynamic co-wave evidence before Report generation",
         )
-        with enriched_path.open("r", encoding="utf-8") as enriched_file:
-            enriched_data = json.load(enriched_file)
+        enriched_data = load_json_first_value(enriched_path)
         if not isinstance(enriched_data, list):
             raise ValueError("enriched PTM JSON must contain a list")
 
