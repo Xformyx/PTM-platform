@@ -309,15 +309,18 @@ class RAGRetriever:
                     "query_role": str(item.get("role") or "data_anchored"),
                     "query_text": query_text,
                     "query_anchor": str(item.get("anchor") or ""),
+                    "selection_bucket": str(item.get("selection_bucket") or ""),
                 })
-        # Keep the first result for each role before filling remaining relevance-ranked slots.
+        # Keep the first result for each role/anchor before filling remaining relevance-ranked slots.
+        # This prevents high-amplitude canonical anchors from exhausting all candidate-specific
+        # literature slots ahead of selected discovery candidates.
         selected: list[dict] = []
-        represented: set[str] = set()
+        represented: set[tuple[str, str]] = set()
         for row in unique:
-            role = row.get("query_role", "data_anchored")
-            if role not in represented:
+            representation_key = (str(row.get("query_role") or "data_anchored"), str(row.get("query_anchor") or ""))
+            if representation_key not in represented:
                 selected.append(row)
-                represented.add(role)
+                represented.add(representation_key)
         for row in unique:
             if len(selected) >= n_results:
                 break

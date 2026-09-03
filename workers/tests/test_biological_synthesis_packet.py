@@ -78,9 +78,114 @@ def test_packet_formatter_supplies_named_quantitative_anchors_and_synthesis_patt
 def test_data_anchored_rag_plan_covers_system_pathway_candidate_and_temporal_roles():
     queries = build_data_anchored_rag_queries(_packet(), section_type="discussion")
     roles = {query["role"] for query in queries}
-    assert {"study_context", "pathway_comparison", "candidate_biology", "temporal_programme"}.issubset(roles)
+    assert {"study_context", "pathway_comparison", "discovery_candidate_biology", "temporal_programme"}.issubset(roles)
     assert any(query.get("anchor") == "PPP4R1" for query in queries)
-    assert all("insulin" in query["query"].lower() or query["role"] == "candidate_biology" for query in queries)
+    assert all(
+        "insulin" in query["query"].lower()
+        or query["role"] in {"canonical_anchor_biology", "discovery_candidate_biology"}
+        for query in queries
+    )
+
+
+def test_candidate_discovery_packet_reserves_annotation_negative_candidates_under_canonical_crowding():
+    rows = []
+    known_members = []
+    for index in range(8):
+        gene = f"CAN{index}"
+        position = f"S{index + 1}"
+        rows.extend([
+            {"gene": gene, "position": position, "condition": "0min", "ptm_relative_log2fc": 0.0, "protein_log2fc": 0.0, "q_value": 0.01},
+            {"gene": gene, "position": position, "condition": "30min", "ptm_relative_log2fc": 5.0 - index / 10, "protein_log2fc": 0.2, "q_value": 0.01},
+        ])
+        known_members.append({"key": f"{gene}_{position}", "gene": gene, "position": position, "membership": "confirmed"})
+    for gene, position, score, q_value in [("NEW1", "Y10", 0.9, 0.03), ("NEW2", "S25", 0.7, None)]:
+        rows.extend([
+            {"gene": gene, "position": position, "condition": "0min", "ptm_relative_log2fc": 0.0, "protein_log2fc": 0.0, "q_value": q_value},
+            {"gene": gene, "position": position, "condition": "30min", "ptm_relative_log2fc": score, "protein_log2fc": 0.3, "q_value": q_value},
+        ])
+    packet = build_biological_synthesis_packet(
+        experimental_context={"cell_type": "generic cells", "treatment": "compound X", "timepoints": ["0min", "30min"]},
+        vector_plot_raw_data=rows,
+        parsed_ptms=[],
+        network_analysis={},
+        temporal_evidence_packet={"status": "available", "section_plan": {}},
+        global_kinase_modules={"kinase_modules": [{"members": known_members}]},
+        candidate_limit=10,
+    )
+    discovery = packet["candidate_discovery_packet"]
+    cards = discovery["selected_cards"]
+    assert discovery["contract_version"] == "candidate_discovery_packet.v1"
+    assert {card["gene"] for card in cards}.issuperset({"NEW1", "NEW2"})
+    new1 = next(card for card in cards if card["gene"] == "NEW1")
+    new2 = next(card for card in cards if card["gene"] == "NEW2")
+    assert new1["primary_bucket"] == "annotation_negative_discovery"
+    assert new1["selection_components"]["finite_q_value_count"] == 2
+    assert new2["selection_components"]["finite_q_value_count"] == 0
+    assert discovery["selection_summary"]["selected_by_quota"]["annotation_negative_discovery"] == 2
+    assert "direct kinase" in discovery["boundary"].lower()
+
+
+def test_candidate_discovery_packet_preserves_multisite_and_decoupled_observation_rationale():
+    packet = build_biological_synthesis_packet(
+        experimental_context={"cell_type": "generic cells", "treatment": "compound X", "timepoints": ["0min", "30min"]},
+        vector_plot_raw_data=[
+            {"gene": "MULTI", "position": "S10", "condition": "0min", "ptm_relative_log2fc": 0.0, "protein_log2fc": 0.0, "q_value": 0.02},
+            {"gene": "MULTI", "position": "S10", "condition": "30min", "ptm_relative_log2fc": 0.9, "protein_log2fc": 0.0, "q_value": 0.02},
+            {"gene": "DECOUP", "position": "Y5", "condition": "0min", "ptm_relative_log2fc": 0.0, "protein_log2fc": 0.0},
+            {"gene": "DECOUP", "position": "Y5", "condition": "30min", "ptm_relative_log2fc": 1.3, "protein_log2fc": 0.1},
+        ],
+        parsed_ptms=[],
+        network_analysis={},
+        temporal_evidence_packet={"status": "available", "section_plan": {}},
+        multisite_divergence=[{"gene": "MULTI", "siteA": {"key": "MULTI_S10"}, "siteB": {"key": "MULTI_S20"}}],
+    )
+    cards = {card["gene"]: card for card in packet["candidate_discovery_packet"]["selected_cards"]}
+    assert cards["MULTI"]["primary_bucket"] == "multi_site_divergent"
+    assert cards["MULTI"]["selection_components"]["multisite_divergent"] is True
+    assert cards["DECOUP"]["primary_bucket"] == "ptm_protein_decoupled"
+    assert cards["DECOUP"]["selection_components"]["ptm_protein_decoupled"] is True
+    formatted = format_biological_synthesis_packet_for_llm(packet, section_type="discussion")
+    assert "bucket=multi_site_divergent" in formatted
+    assert "q coverage=0; best q=not recorded" in formatted
+
+
+def test_candidate_rag_roles_reserve_discovery_and_canonical_anchors():
+    packet = _packet()
+    packet["candidate_discovery_packet"] = {
+        "selected_cards": [
+            {"gene": "MAPK1", "primary_bucket": "canonical_context_anchor"},
+            {"gene": "PPP4R1", "primary_bucket": "annotation_negative_discovery"},
+        ]
+    }
+    queries = build_data_anchored_rag_queries(packet, section_type="discussion")
+    roles = {row["role"] for row in queries}
+    assert "canonical_anchor_biology" in roles
+    assert "discovery_candidate_biology" in roles
+    assert any(row.get("selection_bucket") == "annotation_negative_discovery" for row in queries)
+
+
+def test_candidate_discovery_selection_is_deterministic_and_not_a_direct_kinase_claim():
+    rows = [
+        {"gene": "NOVELB", "position": "S2", "condition": "0min", "ptm_relative_log2fc": 0.0, "protein_log2fc": 0.0},
+        {"gene": "NOVELB", "position": "S2", "condition": "30min", "ptm_relative_log2fc": 0.8, "protein_log2fc": 0.2},
+        {"gene": "NOVELA", "position": "Y1", "condition": "0min", "ptm_relative_log2fc": 0.0, "protein_log2fc": 0.0},
+        {"gene": "NOVELA", "position": "Y1", "condition": "30min", "ptm_relative_log2fc": 0.8, "protein_log2fc": 0.2},
+    ]
+    kwargs = {
+        "experimental_context": {"cell_type": "generic cells", "treatment": "compound X", "timepoints": ["0min", "30min"]},
+        "parsed_ptms": [],
+        "network_analysis": {},
+        "temporal_evidence_packet": {"status": "available", "section_plan": {}},
+    }
+    first = build_biological_synthesis_packet(vector_plot_raw_data=rows, **kwargs)
+    second = build_biological_synthesis_packet(vector_plot_raw_data=list(reversed(rows)), **kwargs)
+    first_cards = first["candidate_discovery_packet"]["selected_cards"]
+    second_cards = second["candidate_discovery_packet"]["selected_cards"]
+    assert [(row["gene"], row["position"], row["primary_bucket"]) for row in first_cards] == [
+        (row["gene"], row["position"], row["primary_bucket"]) for row in second_cards
+    ]
+    assert all("kinase" not in row for row in first_cards)
+    assert "not direct kinase" in first["candidate_discovery_packet"]["boundary"].lower()
 
 
 def test_non_insulin_order_context_drives_packet_and_rag_without_benchmark_leakage():
@@ -179,6 +284,7 @@ def test_writer_keeps_biological_packet_ahead_of_full_vector_data_in_core_sectio
     assert source.count(required) == 5
     assert source.index(required) < source.index('supplement_blocks.append(("vector_plot_full", aux_vector_plot_full))')
     assert "search_for_biological_synthesis(data_anchored_queries" in source
+    assert 'state.get("comovement_analysis") or {}).get("multisite_divergence")' in source
 
 
 def test_nonptm_context_reports_relative_observed_timing_not_directional_relationships():

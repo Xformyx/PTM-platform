@@ -341,6 +341,17 @@ def run_section_writing(state: dict) -> dict:
         parsed_ptms=parsed_ptms,
         network_analysis=network_analysis,
         temporal_evidence_packet=temporal_evidence_packet,
+        global_kinase_modules=(
+            state.get("global_kinase_modules")
+            or state.get("frontend_kinase_analysis")
+            or {}
+        ),
+        multisite_divergence=(
+            state.get("multisite_divergence")
+            or state.get("multisite_divergence_analysis")
+            or (state.get("comovement_analysis") or {}).get("multisite_divergence")
+            or []
+        ),
         candidate_limit=20,
     )
     packet_output_dir = state.get("output_dir")
