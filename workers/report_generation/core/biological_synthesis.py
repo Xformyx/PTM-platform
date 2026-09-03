@@ -27,6 +27,7 @@ DEFAULT_CANDIDATE_BUCKET_QUOTAS = {
     "special_discovery": 4,
 }
 DEFAULT_PTM_PROTEIN_DECOUPLING_THRESHOLD = 0.75
+PATHWAY_SIGNIFICANCE_Q_THRESHOLD = 0.05
 
 
 def _as_float(value: Any) -> float | None:
@@ -374,16 +375,28 @@ def _pathway_anchors(network_analysis: Mapping[str, Any] | None, *, limit: int) 
         for row in summaries:
             if not isinstance(row, Mapping) or not row.get("pathway"):
                 continue
+            peak_q = _as_float(row.get("peak_q"))
+            if peak_q is None:
+                enrichment_claim_class = "annotation_or_q_not_recorded"
+            elif peak_q < PATHWAY_SIGNIFICANCE_Q_THRESHOLD:
+                enrichment_claim_class = "fdr_supported"
+            else:
+                enrichment_claim_class = "descriptive_ranked_trend_not_fdr_supported"
             anchors.append({
                 "pathway": str(row.get("pathway")),
                 "term": str(row.get("term") or "modulated"),
                 "peak_nes": _as_float(row.get("peak_nes")),
-                "peak_q": _as_float(row.get("peak_q")),
+                "peak_q": peak_q,
                 "n_direct": row.get("n_direct"),
+                "enrichment_claim_class": enrichment_claim_class,
             })
     if not anchors:
         for name in network_analysis.get("fig1_pathway_names") or []:
-            anchors.append({"pathway": str(name), "term": "pathway annotation", "peak_nes": None, "peak_q": None, "n_direct": None})
+            anchors.append({
+                "pathway": str(name), "term": "pathway annotation", "peak_nes": None,
+                "peak_q": None, "n_direct": None,
+                "enrichment_claim_class": "annotation_or_q_not_recorded",
+            })
     return anchors[:max(1, int(limit))]
 
 
@@ -547,6 +560,8 @@ def format_biological_synthesis_packet_for_llm(packet: Mapping[str, Any] | None,
         "=== DATA-GROUNDED BIOLOGICAL SYNTHESIS PACKET ===",
         "Use this packet as the primary bridge from measured PTM data to biological interpretation.",
         "Write a substantive model of the actual study system. Separate measured observations, computed annotations, literature comparison, and testable hypotheses.",
+        "Protein-abundance-adjusted PTM change is not directly measured phosphorylation occupancy or stoichiometry. "
+        "Use 'protein-abundance-adjusted PTM change' or 'PTM-specific regulation adjusted for protein abundance'; do not claim stoichiometry or occupancy.",
         f"Study frame: cell model={frame.get('cell_model')}; organism={frame.get('organism')}; treatment={frame.get('treatment')}; timepoints={', '.join(map(str, frame.get('timepoints') or [])) or 'not specified'}.",
         f"Biological question: {frame.get('biological_question') or 'not specified'}",
         f"Quantitative landscape: vector rows={landscape.get('vector_row_count', 0)}; unique sites={landscape.get('unique_site_count', 0)}; unique genes={landscape.get('unique_gene_count', 0)}; max |conventional PTM log2FC|={landscape.get('maximum_absolute_conventional_ptm_log2fc', 0)}; de novo rows={landscape.get('de_novo_vector_row_count', 0)}.",
@@ -587,6 +602,13 @@ def format_biological_synthesis_packet_for_llm(packet: Mapping[str, Any] | None,
             text += f"; q={anchor.get('peak_q')}"
         if anchor.get("n_direct") is not None:
             text += f"; direct-site support={anchor.get('n_direct')}"
+        claim_class = str(anchor.get("enrichment_claim_class") or "annotation_or_q_not_recorded")
+        if claim_class == "fdr_supported":
+            text += "; wording=FDR-supported enrichment (statistically significant)"
+        elif claim_class == "descriptive_ranked_trend_not_fdr_supported":
+            text += "; wording=top-ranked descriptive pathway trend; do not call significant/enriched"
+        else:
+            text += "; wording=pathway annotation or q not recorded; do not call significant/enriched"
         lines.append(text)
     lines.extend([
         "",
@@ -594,6 +616,8 @@ def format_biological_synthesis_packet_for_llm(packet: Mapping[str, Any] | None,
         "measured observation → pathway/candidate context → cited literature comparison → biological model or alternative explanation → discriminating follow-up measurement.",
         "Use strong but calibrated terms such as 'defines an early programme', 'is consistent with', 'aligns with', 'contrasts with', 'prioritizes', or 'generates a testable model'.",
         "For discovery buckets, state why the measured feature was data-prioritized, compare literature agreement/disagreement, and propose a specific next measurement. Do not call it a confirmed novel substrate.",
+        "Only anchors explicitly labelled FDR-supported enrichment may be called statistically significant or enriched. "
+        "For q≥0.05, use 'top-ranked descriptive pathway trend' or 'pathway-level context' instead.",
         "Do not turn a literature relationship, motif score, Wave co-membership, lag, or pathway diagram into an Order-specific direct kinase–site or causal edge.",
         "=== END DATA-GROUNDED BIOLOGICAL SYNTHESIS PACKET ===",
     ])

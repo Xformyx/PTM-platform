@@ -825,26 +825,24 @@ def run_section_writing(state: dict) -> dict:
                 supplement_blocks.append(("directionality", aux_directionality_context))
             supplement_blocks.append(("biological_synthesis", section_biological_synthesis))
             supplement_blocks.append(("temporal_evidence_packet", section_temporal_evidence))
-            # Priority 1 (ESSENTIAL — PTM activity profile core): temporal coordination + temporal kinase + receptor + non-PTM effector
-            # v9.35: nonptm_temporal promoted to Priority 1 — effector proteins are integral
-            # to the receptor→kinase→substrate→effector signal flow narrative.
-            if dynamic_context_allowed:
-                supplement_blocks.append(("comovement", comovement_llm_context))
+            # Dynamic Co-Wave is represented by the audited temporal evidence
+            # packet above. Do not inject the legacy free-form Co-Wave context:
+            # it can translate sampled-timepoint co-movement into an unsupported
+            # signaling relay, common regulator, stoichiometry, or causal model.
             if directed_temporal_context_allowed:
                 supplement_blocks.append(("temporal_kinase", temporal_kinase_cascade_llm_context))
                 supplement_blocks.append(("receptor_ctx", receptor_llm_context))
             # v11.6: IP overlay — physical interaction evidence (Priority 1, after receptor)
             if aux_ip_overlay_context:
                 supplement_blocks.append(("ip_overlay", aux_ip_overlay_context))
-            supplement_blocks.append(("nonptm_temporal", aux_nonptm_temporal))
-            # v11.8: TF Activity Inference (Priority 1 — cross-validates PTM→TF→target narrative)
-            if aux_tf_inference_context:
-                supplement_blocks.append(("tf_inference", aux_tf_inference_context))
+            # Eligible observed PTM–protein timing is supplied by the audited
+            # packet. Legacy non-PTM/TF helper prose is excluded because it can
+            # overstate condition-level abundance as directional validation.
             # Priority 2 (important): v98 + structured data
             supplement_blocks.append(("v98_directive", v98_directive))
             supplement_blocks.append(("v98_structured_data", v98_structured_data))
-            # Priority 3 (supporting): pathway, signal propagation, timelag
-            supplement_blocks.append(("pathway_ctx", aux_pathway_ctx))
+            # Pathway enrichment is supplied by the biological synthesis packet,
+            # where q-value-specific claim wording is deterministic.
             if directed_temporal_context_allowed:
                 supplement_blocks.append(("signal_prop", aux_signal_prop))
                 supplement_blocks.append(("timelag", aux_timelag))
@@ -875,12 +873,9 @@ def run_section_writing(state: dict) -> dict:
                 supplement_blocks.append(("directionality", aux_directionality_context))
             supplement_blocks.append(("biological_synthesis", section_biological_synthesis))
             supplement_blocks.append(("temporal_evidence_packet", section_temporal_evidence))
-            if dynamic_context_allowed:
-                supplement_blocks.append(("comovement", comovement_llm_context))
             if directed_temporal_context_allowed:
                 supplement_blocks.append(("temporal_kinase", temporal_kinase_cascade_llm_context))
                 supplement_blocks.append(("receptor_ctx", receptor_llm_context))
-            supplement_blocks.append(("nonptm_temporal", aux_nonptm_temporal))
             supplement_blocks.append(("v98_structured_data", v98_structured_data))
             supplement_blocks.append(("vector_plot_compressed", aux_vector_plot_compressed))
             if atlas_claim_ledger_llm_context:
@@ -898,19 +893,16 @@ def run_section_writing(state: dict) -> dict:
             # They are excluded from Results and appear only for explicit enhanced discussion.
             if external_coscientist_context:
                 supplement_blocks.append(("external_coscientist", external_coscientist_context))
-            # Priority 1 (ESSENTIAL): temporal coordination + temporal kinase + receptor + non-PTM
-            if dynamic_context_allowed:
-                supplement_blocks.append(("comovement", comovement_llm_context))
+            # Dynamic and cross-layer observations are drawn from the audited
+            # numerical packet; omit legacy mechanism-oriented Co-Wave prose.
             if directed_temporal_context_allowed:
                 supplement_blocks.append(("temporal_kinase", temporal_kinase_cascade_llm_context))
                 supplement_blocks.append(("receptor_ctx", receptor_llm_context))
             # v11.6: IP overlay — physical interaction evidence (Priority 1, after receptor)
             if aux_ip_overlay_context:
                 supplement_blocks.append(("ip_overlay", aux_ip_overlay_context))
-            supplement_blocks.append(("nonptm_temporal", aux_nonptm_temporal))
-            # v11.8: TF Activity Inference (Priority 1 — cross-validates PTM→TF→target narrative)
-            if aux_tf_inference_context:
-                supplement_blocks.append(("tf_inference", aux_tf_inference_context))
+            # Condition-level non-PTM abundance and TF helper text remain
+            # available elsewhere but are not supplied as mechanism validation.
             # Priority 2: v98 directive + structured data
             supplement_blocks.append(("v98_directive", v98_directive))
             supplement_blocks.append(("v98_structured_data", v98_structured_data))
@@ -937,9 +929,8 @@ def run_section_writing(state: dict) -> dict:
                 supplement_blocks.append(("perturbation_evidence", aux_perturbation_evidence_context))
 
         elif section_type in ("conclusion", "abstract"):
-            # v9.32: Conclusion/Abstract also need temporal coordination summary for comprehensive coverage
-            if dynamic_context_allowed:
-                supplement_blocks.append(("comovement", comovement_llm_context))
+            # Conclusion/Abstract use the compact audited dynamic summary rather
+            # than the legacy free-form Co-Wave interpretation block.
             if directed_temporal_context_allowed:
                 supplement_blocks.append(("temporal_kinase", temporal_kinase_cascade_llm_context))
             supplement_blocks.append(("biological_synthesis", section_biological_synthesis))

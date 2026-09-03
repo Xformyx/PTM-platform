@@ -31,6 +31,21 @@ def _sidecar_summary() -> dict:
             "mean_pair_transition_jaccard": 0.71,
             "mean_site_transition_jaccard": 0.72,
         },
+        "dynamic_transition_pair_scope": {
+            "candidate_pair_count": 42,
+            "non_evaluable_pair_window_count": 6,
+        },
+        "dynamic_transition_event_exposure": {
+            "non_evaluable_site_transition_count": 3,
+        },
+        "provenance": {
+            "wave_input_projection": {
+                "missing_value_policy": "complete_case_no_imputation",
+                "eligible_site_count": 7,
+                "excluded_site_count": 2,
+                "excluded_reason_counts": {"incomplete_time_grid": 2},
+            },
+        },
         "dynamic_transition_per_wave": [{
             "static_wave_id": "W1",
             "pair_transition_count": 10,
@@ -90,7 +105,7 @@ def test_packet_preserves_numerical_fields_and_observational_boundary():
 
     assert packet["status"] == "available"
     assert packet["contract_version"] == "report_temporal_evidence_packet.v4"
-    assert packet["record_count"] == 6
+    assert packet["record_count"] == 7
     dynamic = next(row for row in packet["records"] if row["evidence_id"] == "DATA-DYNAMIC-SUMMARY")
     assert dynamic["availability"] == "computed"
     assert dynamic["claim_level"] == "L2_observational_dynamic"
@@ -108,9 +123,14 @@ def test_packet_preserves_numerical_fields_and_observational_boundary():
     assert "P4 validation passed=False" in text
     assert "Static Wave W1" in text
     assert "DATA-CROSS-LAYER-1" not in text
-    assert "onset lag=15 min" in text
+    assert "observed onset-timepoint difference=15 min" in text
     assert "causality=not_tested" in text
     assert "does not establish kinase switching" in text
+    quality = next(row for row in packet["records"] if row["evidence_id"] == "DATA-WAVE-INPUT-QUALITY")
+    assert "complete_case_no_imputation" in quality["text"]
+    assert "not converted to biological zeroes" in quality["text"]
+    assert "same-Wave candidate pairs=42" in dynamic["text"]
+    assert "exposure-dependent descriptive counts" in dynamic["text"]
     readiness = next(row for row in packet["records"] if row["evidence_id"] == "DATA-KINASE-ATTRIBUTION-READINESS")
     assert "P0 explicit modified-precursor feature records=3030" in readiness["text"]
     assert "M3=1882" in readiness["text"]
@@ -226,6 +246,16 @@ def test_writer_makes_the_packet_mandatory_in_all_temporal_sections():
     assert "if base_prompt_directed_context_allowed else None" in source
     assert "aux_directionality_context and directed_temporal_context_allowed" in source
     assert '"temporal_report_fidelity.json"' in source
+    assert 'supplement_blocks.append(("comovement", comovement_llm_context))' not in source
+    assert 'supplement_blocks.append(("nonptm_temporal", aux_nonptm_temporal))' not in source
+    assert 'supplement_blocks.append(("tf_inference", aux_tf_inference_context))' not in source
+    assert 'supplement_blocks.append(("pathway_ctx", aux_pathway_ctx))' not in source
+    comovement = Path(__file__).parents[1] / "report_generation/core/nodes/temporal_comovement_node.py"
+    comovement_source = comovement.read_text(encoding="utf-8")
+    assert "protein_complex_stoichiometry" not in comovement_source
+    assert "transcriptional_coregulation" not in comovement_source
+    assert "upstream_regulation" not in comovement_source
+    assert "Observed sampled-timepoint association only" in comovement_source
     tasks = Path(__file__).parents[1] / "report_generation/tasks.py"
     task_source = tasks.read_text(encoding="utf-8")
     assert '"llm_draft_section_status"' in task_source

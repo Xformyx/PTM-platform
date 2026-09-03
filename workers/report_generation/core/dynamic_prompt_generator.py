@@ -204,6 +204,22 @@ def classify_ptm_patterns(ptms: List[dict], threshold: float = 0.5) -> Dict[str,
     return patterns
 
 
+def _is_denovo_representation(row: Mapping[str, Any]) -> bool:
+    """Return whether a row uses the non-conventional de novo representation.
+
+    Conventional/pseudocount PTM log2FC is not quantitative fold-change data and
+    must not enter legacy ranking, distribution, or fold-multiple prompt blocks.
+    De novo detection evidence is supplied separately by the P5 packet.
+    """
+    return bool(
+        row.get("conventional_log2fc_na")
+        or row.get("Conventional_Log2FC_NA")
+        or row.get("control_pseudocount_used")
+        or row.get("Control_Pseudocount_Used")
+        or str(row.get("activity_class") or row.get("Activity_Class") or "").strip().lower().startswith("de_novo")
+    )
+
+
 # ---------------------------------------------------------------------------
 # Few-Shot Examples
 # ---------------------------------------------------------------------------
@@ -211,20 +227,19 @@ def classify_ptm_patterns(ptms: List[dict], threshold: float = 0.5) -> Dict[str,
 FEW_SHOT_QUANTITATIVE = """
 **Example of good quantitative data integration (STYLE ONLY — do NOT use these proteins/sites):**
 
-"The phosphorylation of [Gene]-[Site] showed a dramatic X-fold increase (PTM Log2FC = Y)
-without significant change in protein abundance (Protein Log2FC = Z), indicating a site-level
-PTM/protein divergence that is consistent with specific regulation of phosphorylation abundance,
-but does not by itself establish an exact upstream kinase.
-kinase-mediated activation. This is consistent with [kinase]-dependent phosphorylation of [Gene] at
-[Site], which [biological function] [1]. The magnitude of this change suggests [interpretation]."
+"The protein-abundance-adjusted PTM signal at [Gene]-[Site] changed by PTM Log2FC = Y,
+whereas protein abundance changed by Protein Log2FC = Z. This measured PTM–protein contrast
+prioritizes a site-level regulatory hypothesis, but does not establish occupancy, stoichiometry,
+an exact upstream kinase, or a causal mechanism. The observed pattern can be compared with
+the cited literature model and followed by a discriminating measurement."
 
 CRITICAL: The above is a STYLE template. You MUST use ONLY proteins and PTM sites from the
 actual data provided in this prompt. Never mention ACC1, Ser79, AMPK, MAPK, or any other
 example proteins from prompt templates — they are placeholders for illustration only.
 
 Note how the style:
-1. Includes specific fold-change values with units
-2. Compares PTM vs protein changes to infer mechanism
+1. Includes specific measured log2FC values with units when the feature is conventionally quantified
+2. Compares PTM vs protein changes to prioritize a hypothesis, not to infer mechanism
 3. Cites literature with reference numbers
 4. Interprets the magnitude of change biologically
 """
@@ -238,36 +253,38 @@ class DynamicPromptGenerator:
     """Generates data-driven prompts for report sections using PTM statistics."""
 
     def __init__(self, ptms: List[dict], experimental_context: Optional[dict] = None):
-        self.ptms = ptms
+        self.denovo_count = sum(1 for ptm in ptms if _is_denovo_representation(ptm))
+        self.ptms = [ptm for ptm in ptms if not _is_denovo_representation(ptm)]
         self.context = experimental_context or {}
 
         # Classify patterns
-        self.patterns = classify_ptm_patterns(ptms)
+        self.patterns = classify_ptm_patterns(self.ptms)
 
         # Group by pathway
         self.pathway_ptms: Dict[str, List] = defaultdict(list)
-        for ptm in ptms:
+        for ptm in self.ptms:
             gene = ptm.get("gene", "")
             pathways = classify_gene_pathway(gene)
             for pw in pathways:
                 self.pathway_ptms[pw].append(ptm)
 
         # Statistics
-        ptm_fcs = [float(p.get("ptm_relative_log2fc", 0)) for p in ptms]
-        prot_fcs = [float(p.get("protein_log2fc", 0)) for p in ptms]
+        ptm_fcs = [float(p.get("ptm_relative_log2fc", 0)) for p in self.ptms]
+        prot_fcs = [float(p.get("protein_log2fc", 0)) for p in self.ptms]
 
         self.ptm_dist = calculate_distribution(ptm_fcs)
         self.prot_dist = calculate_distribution(prot_fcs)
         self.correlation = calculate_correlation(prot_fcs, ptm_fcs)
-        self.enrichment = calculate_enrichment(self.pathway_ptms, len(ptms))
+        self.enrichment = calculate_enrichment(self.pathway_ptms, len(self.ptms))
 
     def get_statistics_context(self) -> str:
         """Generate statistics context string for prompts."""
         lines = [
             "**Statistical Summary:**",
-            f"- Total PTMs: {len(self.ptms)}",
-            f"- Pattern 1A (Kinase activation): {len(self.patterns['1A'])} PTMs",
-            f"- Pattern 1B (Phosphatase activation): {len(self.patterns['1B'])} PTMs",
+            f"- Conventionally quantified PTMs: {len(self.ptms)}",
+            f"- De novo detection-representation rows (reported separately): {self.denovo_count}",
+            f"- Pattern 1A (higher protein-abundance-adjusted PTM signal): {len(self.patterns['1A'])} PTMs",
+            f"- Pattern 1B (lower protein-abundance-adjusted PTM signal): {len(self.patterns['1B'])} PTMs",
             f"- Pattern 2A (Compensatory): {len(self.patterns['2A'])} PTMs",
             f"- Pattern 2B (Desensitization): {len(self.patterns['2B'])} PTMs",
             f"- Protein-PTM correlation: r={self.correlation['r']:.3f} (p={self.correlation['p_value']:.2e})",
@@ -280,11 +297,11 @@ class DynamicPromptGenerator:
             self.enrichment.items(), key=lambda x: x[1]["fold_enrichment"], reverse=True,
         )
         if sorted_enrichment:
-            lines.append("\n**Pathway Enrichment:**")
+            lines.append("\n**Descriptive pathway-category counts (not statistical enrichment):**")
             for pw, stats in sorted_enrichment[:5]:
                 lines.append(
                     f"- {pw}: {stats['count']} PTMs "
-                    f"({stats['fold_enrichment']:.1f}x enriched, {stats['percentage']:.1f}%)"
+                    f"({stats['percentage']:.1f}% of this descriptive classification set)"
                 )
 
         return "\n".join(lines)
@@ -304,23 +321,21 @@ class DynamicPromptGenerator:
             key=lambda x: float(x.get("ptm_relative_log2fc", 0)),
         )[:n]
 
-        lines = ["**Top Activated PTMs (Pattern 1A, quantified only):**"]
+        lines = ["**Top higher PTM signals (Pattern 1A, conventionally quantified only):**"]
         for ptm in top_activated[:10]:
             fc = float(ptm.get("ptm_relative_log2fc", 0))
-            fold = 2 ** fc
             lines.append(
                 f"- {ptm.get('gene', '?')} {ptm.get('position', '?')}: "
-                f"PTM Log2FC={fc:.2f} ({fold:,.0f}x), "
+                f"protein-abundance-adjusted PTM Log2FC={fc:.2f}, "
                 f"Protein Log2FC={float(ptm.get('protein_log2fc', 0)):.3f}"
             )
 
-        lines.append("\n**Top Inhibited PTMs (Pattern 1B):**")
+        lines.append("\n**Top lower PTM signals (Pattern 1B, conventionally quantified only):**")
         for ptm in top_inhibited[:10]:
             fc = float(ptm.get("ptm_relative_log2fc", 0))
-            fold = 2 ** fc
             lines.append(
                 f"- {ptm.get('gene', '?')} {ptm.get('position', '?')}: "
-                f"PTM Log2FC={fc:.2f} ({fold:.2f}x), "
+                f"protein-abundance-adjusted PTM Log2FC={fc:.2f}, "
                 f"Protein Log2FC={float(ptm.get('protein_log2fc', 0)):.3f}"
             )
 
@@ -1086,22 +1101,50 @@ def build_temporal_evidence_packet(
 
     dynamic_status = sidecar.get("dynamic_co_wave_transition_status", "not_requested")
     dynamic_loto = dict(sidecar.get("dynamic_transition_loto") or {})
+    dynamic_exposure = dict(sidecar.get("dynamic_transition_event_exposure") or {})
+    dynamic_scope = dict(sidecar.get("dynamic_transition_pair_scope") or {})
     dynamic_pair_count = int(sidecar.get("dynamic_transition_pair_count") or 0)
+    sidecar_provenance = dict(sidecar.get("provenance") or {})
+    wave_projection = dict(sidecar_provenance.get("wave_input_projection") or {})
+    if wave_projection:
+        excluded = dict(wave_projection.get("excluded_reason_counts") or {})
+        add_record(
+            "DATA-WAVE-INPUT-QUALITY",
+            "observational_input_quality",
+            (
+                "Canonical static Co-Wave fitting used missing-value policy={policy}; eligible complete trajectories={eligible}; "
+                "excluded input sites={excluded_total}, including incomplete time grids={incomplete}. "
+                "Missing measurements were retained as missing and were not converted to biological zeroes or imputed."
+            ).format(
+                policy=wave_projection.get("missing_value_policy", "not_recorded"),
+                eligible=wave_projection.get("eligible_site_count", "not_recorded"),
+                excluded_total=wave_projection.get("excluded_site_count", "not_recorded"),
+                incomplete=excluded.get("incomplete_time_grid", "not_recorded"),
+            ),
+            availability="computed",
+            claim_level="L1_input_quality",
+            allowed_verbs=("were observed", "were excluded", "were retained as missing"),
+        )
     add_record(
         "DATA-DYNAMIC-SUMMARY",
         "observational_dynamic",
         (
             "Dynamic co-wave status={status}; transition-supported Waves={waves}; "
             "pair transitions={pairs}; site transitions={sites}; transition resolution={resolution}; "
+            "same-Wave candidate pairs={candidate_pairs}; non-evaluable pair windows={non_evaluable_pairs}; "
+            "non-evaluable site transition opportunities={non_evaluable_sites}; "
             "mean pair LOTO Jaccard={pair_loto}; mean site LOTO Jaccard={site_loto}; "
             "global adjacency-order test status={adj_status}; p={adj_p}; verdict={adj_verdict}. "
-            "Transition resolution is a descriptive local-reorganization ratio, not temporal-order proof."
+            "Transition totals are exposure-dependent descriptive counts, not biological-effect size or temporal-order proof."
         ).format(
             status=dynamic_status,
             waves=sidecar.get("dynamic_transition_supported_wave_count", 0),
             pairs=sidecar.get("dynamic_transition_pair_count", 0),
             sites=sidecar.get("dynamic_transition_site_count", 0),
             resolution=sidecar.get("dynamic_transition_resolution"),
+            candidate_pairs=dynamic_scope.get("candidate_pair_count", "not_recorded"),
+            non_evaluable_pairs=dynamic_scope.get("non_evaluable_pair_window_count", "not_recorded"),
+            non_evaluable_sites=dynamic_exposure.get("non_evaluable_site_transition_count", "not_recorded"),
             pair_loto=dynamic_loto.get("mean_pair_transition_jaccard"),
             site_loto=dynamic_loto.get("mean_site_transition_jaccard"),
             adj_status=sidecar.get("dynamic_temporal_adjacency_status", "not_requested"),
@@ -1181,8 +1224,9 @@ def build_temporal_evidence_packet(
             f"DATA-CROSS-LAYER-{index}",
             "observational_cross_layer",
             (
-                "Candidate {edge}: Wave {wave} → protein {target}; direction={direction}; "
-                "onset lag={onset} min; peak lag={peak} min; lag-aware similarity={similarity}; "
+                "Candidate {edge}: Wave {wave} and protein {target}; observed sampled-timepoint order={direction}; "
+                "observed onset-timepoint difference={onset} min; observed peak-timepoint difference={peak} min; "
+                "lag-aware similarity={similarity}; "
                 "mechanism-chain eligibility={eligible}; temporal interpretation={interpretation}; causality=not_tested."
             ).format(
                 edge=row.get("edge_id", "unknown"),
@@ -1197,7 +1241,7 @@ def build_temporal_evidence_packet(
             ),
             availability="computed",
             claim_level="L2_observational_cross_layer",
-            allowed_verbs=("was temporally consistent with", "lagged", "preceded", "was observed"),
+            allowed_verbs=("was temporally consistent with", "showed an observed sampled-timepoint difference", "preceded", "was observed"),
         )
 
     # Candidate-level TMM evidence comes from the same production heatmap that

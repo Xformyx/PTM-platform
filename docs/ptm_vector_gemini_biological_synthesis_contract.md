@@ -91,6 +91,16 @@ Figure 4 and all supplementary pathway/cascade diagrams are context-only by defa
 
 The writer receives section-local literature subsets. Before final assembly, local `[N]` citations are converted to identity-based `PMID`, `DOI`, or normalized-title markers. The final renderer resolves those markers in first-appearance order and generates the bibliography from the same resolved records. A bare local numeric citation whose identity cannot be recovered is removed rather than being matched to an unrelated bibliography entry.
 
+### Co-Wave and protein-abundance interpretation safeguards
+
+The canonical Wave-fitting universe is `complete_case_no_imputation`. A missing site-timepoint remains missing, is excluded from the rectangular Wave-fitting input, and is never converted to a biological zero. The compact Report packet must display the eligible and excluded input counts with this policy so that the reader can distinguish reduced coverage from an observed inactive state.
+
+Dynamic Co-Wave transition totals are exposure-dependent descriptive counts. The Report must place them beside same-Wave candidate-pair scope, non-evaluable window exposure, LOTO stability, and the persisted global adjacency-order test status. A transition count, local co-membership, or sampled-timepoint order cannot be used as a measure of biological effect size, proof of chronological ordering, common kinase control, direct regulation, or causality.
+
+For a PTM–protein comparison, onset and peak values are **observed sampled-timepoint differences**. They are not continuous-time estimates and do not establish a biological lag, upstream/downstream relation, transcriptional programme, or a PTM-to-protein mechanism. Condition-level protein abundance is a parallel observation, not a stoichiometry or occupancy measurement. Accordingly, Report prose uses “protein-abundance-adjusted PTM change” or “PTM-specific regulation adjusted for protein abundance,” and may not claim phosphosite occupancy, complex stoichiometry, or phosphorylation stoichiometry.
+
+Pathway anchors must carry deterministic q-value wording. Only `q < 0.05` anchors are rendered as FDR-supported/statistically significant enrichment. An available `q >= 0.05` is a top-ranked descriptive pathway trend, and an unavailable q-value is annotation/context only; neither may be called significant or enriched. Free-form legacy Co-Wave, non-PTM, TF and pathway helper prose is not injected into Results, Research Question Answers, Discussion, Abstract, or Conclusion; the audited temporal and biological synthesis packets are the sole Report route for these interpretations.
+
 ## 7. Claim ceiling: narrow, not silencing
 
 For an Order with `direct_attribution=no_call`, `R3=0`, or `P3=not_evaluable_or_no_candidate_set`, prohibit only these claims:
@@ -113,6 +123,8 @@ The same Order may still state that its observed programme is consistent with, c
 7. The final Markdown/DOCX includes the P0–P3 aggregate readiness/no-call note and selected P5 discovery cards without raw full-ledger or de novo pseudo-log2FC leakage.
 8. A no-call Order renders Figure 4 and all supplementary cascade diagrams with dashed context-only connectors and no activation/inhibition arrow grammar.
 9. Every final bibliography entry corresponds to a resolved collection-local or PubMed reference identity; section-local numeric citations cannot point to a different paper after global assembly.
+10. The final Report states `complete_case_no_imputation` and its input exclusions when persisted, reports Dynamic Co-Wave totals with exposure/LOTO/null status, and never turns a sampled-timepoint difference into a continuous biological lag or mechanism.
+11. A q≥0.05 pathway anchor is rendered as a top-ranked descriptive trend rather than significant enrichment; protein-abundance-adjusted PTM values are never labelled occupancy or stoichiometry.
 
 ## 9. Methodological references
 

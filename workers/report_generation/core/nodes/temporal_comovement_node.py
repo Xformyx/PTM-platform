@@ -1130,9 +1130,10 @@ def _link_to_nonptm_interactors(
                 dominant_count = max(up_count, down_count)
                 concordance = round(dominant_count / total_responsive, 2)
 
-                # ── Time lag statistics for mechanism inference ──
-                # Collect all time lags to understand the temporal relationship
-                # between PTM changes and Non-PTM protein abundance changes.
+                # ── Sampled-timepoint pattern summary ──
+                # These values describe observed timing on the sampled grid. They
+                # cannot identify complex stoichiometry, transcriptional control,
+                # upstream regulation, or a causal PTM→protein mechanism.
                 lags = [l["time_lag_minutes"] for l in nonptm_links]
                 abs_lags = [abs(lg) for lg in lags]
                 median_lag = float(np.median(abs_lags)) if abs_lags else 0.0
@@ -1142,18 +1143,16 @@ def _link_to_nonptm_interactors(
                 precedes_count = sum(1 for l in nonptm_links
                                      if l["response_pattern"] == "precedes_cluster")
 
-                # Mechanism hint: combine direction concordance + time lag pattern
-                # 1) Simultaneous + concordant → complex stoichiometry
-                # 2) Delayed (>15min median) + concordant → transcriptional co-regulation
-                # 3) Mixed timing → pathway-level coordination
+                # Observation label: summarize the timing pattern without assigning
+                # a biological mechanism from condition-level abundance trajectories.
                 if simultaneous_count >= dominant_count * 0.6 and median_lag <= 10:
-                    mechanism_hint = "protein_complex_stoichiometry"
+                    timing_pattern = "predominantly_simultaneous_sampled_observations"
                 elif delayed_count >= dominant_count * 0.5 and median_lag > 15:
-                    mechanism_hint = "transcriptional_coregulation"
+                    timing_pattern = "predominantly_later_sampled_observations"
                 elif precedes_count >= dominant_count * 0.4:
-                    mechanism_hint = "upstream_regulation"
+                    timing_pattern = "predominantly_earlier_sampled_observations"
                 else:
-                    mechanism_hint = "pathway_level_coordination"
+                    timing_pattern = "mixed_sampled_timepoint_pattern"
 
                 cluster["neighborhood_concordance"] = {
                     "total_responsive_nonptm": total_responsive,
@@ -1167,7 +1166,12 @@ def _link_to_nonptm_interactors(
                     "precedes_count": precedes_count,
                     "median_lag_minutes": round(median_lag, 1),
                     "mean_lag_minutes": round(mean_lag, 1),
-                    "mechanism_hint": mechanism_hint,
+                    "timing_pattern": timing_pattern,
+                    "interpretation_boundary": (
+                        "Observed sampled-timepoint association only; not evidence of "
+                        "occupancy, stoichiometry, transcriptional regulation, upstream "
+                        "regulation, direct PTM-protein control, or causality."
+                    ),
                     "cluster_direction": cluster_direction,
                 }
                 logger.info(
@@ -3399,32 +3403,14 @@ def _append_cluster_detail(
                 f"PTM cluster direction: {nc['cluster_direction']})"
             )
             parts.append(
-                f"  Time lag pattern: {nc['simultaneous_count']} simultaneous, "
-                f"{nc['delayed_count']} delayed, {nc['precedes_count']} precedes; "
-                f"median lag={nc['median_lag_minutes']:.0f}min, "
-                f"mean lag={nc['mean_lag_minutes']:.0f}min"
+                f"  Observed sampled-timepoint pattern: {nc['simultaneous_count']} simultaneous, "
+                f"{nc['delayed_count']} later, {nc['precedes_count']} earlier; "
+                f"median absolute sampled-timepoint difference={nc['median_lag_minutes']:.0f}min, "
+                f"mean={nc['mean_lag_minutes']:.0f}min"
             )
-            hint_desc = {
-                "protein_complex_stoichiometry": (
-                    "Most Non-PTM neighbors change SIMULTANEOUSLY with PTM cluster, "
-                    "suggesting they belong to the same protein complex whose "
-                    "stability/abundance is co-regulated."),
-                "transcriptional_coregulation": (
-                    "Non-PTM neighbors show DELAYED response (median lag >{:.0f}min), "
-                    "suggesting PTM-driven transcriptional activation leads to "
-                    "new protein synthesis of these neighbors.".format(nc['median_lag_minutes'])),
-                "upstream_regulation": (
-                    "Non-PTM neighbors change BEFORE the PTM cluster, suggesting "
-                    "they may be upstream regulators whose abundance change "
-                    "triggers the downstream PTM events."),
-                "pathway_level_coordination": (
-                    "Mixed timing pattern among Non-PTM neighbors suggests "
-                    "pathway-level coordination with both direct and indirect "
-                    "regulatory connections."),
-            }
             parts.append(
-                f"  Mechanism hint: {nc['mechanism_hint']} — "
-                f"{hint_desc.get(nc['mechanism_hint'], 'See individual lag values.')}"
+                f"  Observation label: {nc.get('timing_pattern', 'not_recorded')} — "
+                f"{nc.get('interpretation_boundary', 'See individual sampled-timepoint differences.')}"
             )
 
         # Per-member peak details for burst clusters
@@ -3487,11 +3473,14 @@ def _append_cluster_detail(
                 f"PTM cluster direction: {nc['cluster_direction']})"
             )
             parts.append(
-                f"  Time lag: median={nc['median_lag_minutes']:.0f}min, "
+                f"  Observed sampled-timepoint difference: median absolute={nc['median_lag_minutes']:.0f}min, "
                 f"{nc['simultaneous_count']} simultaneous / "
-                f"{nc['delayed_count']} delayed / "
-                f"{nc['precedes_count']} precedes"
+                f"{nc['delayed_count']} later / "
+                f"{nc['precedes_count']} earlier"
             )
-            parts.append(f"  Mechanism hint: {nc['mechanism_hint']}")
+            parts.append(
+                f"  Observation label: {nc.get('timing_pattern', 'not_recorded')} — "
+                f"{nc.get('interpretation_boundary', 'Observed association only; no mechanism or causality is inferred.')}"
+            )
 
     parts.append("")

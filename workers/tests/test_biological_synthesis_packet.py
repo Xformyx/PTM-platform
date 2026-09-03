@@ -9,6 +9,7 @@ from report_generation.core.biological_synthesis import (
 from report_generation.core.report_temporal_fidelity import audit_report_temporal_fidelity
 from report_generation.core.rag_retriever import RAGRetriever
 from report_generation.core.dynamic_prompt_generator import (
+    DynamicPromptGenerator,
     build_nonptm_temporal_analysis,
     build_signal_propagation_json,
 )
@@ -73,6 +74,49 @@ def test_packet_formatter_supplies_named_quantitative_anchors_and_synthesis_patt
     assert "MAPK signaling" in text
     assert "measured observation → pathway/candidate context → cited literature comparison" in text
     assert "not direct kinase assignments" in text
+    assert "FDR-supported enrichment (statistically significant)" in text
+    assert "do not claim stoichiometry or occupancy" in text
+
+
+def test_pathway_q_value_claim_ceiling_and_legacy_quantitative_prompt_exclude_denovo_pseudofc():
+    packet = build_biological_synthesis_packet(
+        experimental_context={"cell_type": "generic cells", "treatment": "compound X"},
+        vector_plot_raw_data=[
+            {"gene": "OBSERVED", "position": "S1", "condition": "0min", "ptm_relative_log2fc": 0.0},
+            {"gene": "OBSERVED", "position": "S1", "condition": "30min", "ptm_relative_log2fc": 1.2},
+        ],
+        parsed_ptms=[],
+        network_analysis={
+            "pathway_expansion": {"summaries": [
+                {"pathway": "FDR pathway", "peak_q": 0.01},
+                {"pathway": "Ranked trend", "peak_q": 0.25},
+                {"pathway": "Annotation only"},
+            ]}
+        },
+        temporal_evidence_packet={"status": "available", "section_plan": {}},
+    )
+    classes = {row["pathway"]: row["enrichment_claim_class"] for row in packet["pathway_anchors"]}
+    assert classes == {
+        "FDR pathway": "fdr_supported",
+        "Ranked trend": "descriptive_ranked_trend_not_fdr_supported",
+        "Annotation only": "annotation_or_q_not_recorded",
+    }
+    text = format_biological_synthesis_packet_for_llm(packet, section_type="discussion")
+    assert "Ranked trend: term=modulated; q=0.25; wording=top-ranked descriptive pathway trend; do not call significant/enriched" in text
+    assert "Only anchors explicitly labelled FDR-supported enrichment" in text
+
+    legacy = DynamicPromptGenerator([
+        {"gene": "OBSERVED", "position": "S1", "ptm_relative_log2fc": 1.5, "protein_log2fc": 0.1},
+        {
+            "gene": "DENOVO", "position": "S2", "ptm_relative_log2fc": 99.0,
+            "protein_log2fc": 0.0, "Conventional_Log2FC_NA": True,
+            "DeNovo_Confidence": "high", "Ranking_Score": 4.0,
+        },
+    ])
+    quantitative = legacy.get_top_ptms_context()
+    assert "DENOVO" not in quantitative
+    assert "99.00" not in quantitative
+    assert "x)" not in quantitative
 
 
 def test_data_anchored_rag_plan_covers_system_pathway_candidate_and_temporal_roles():
