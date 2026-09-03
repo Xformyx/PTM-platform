@@ -188,6 +188,107 @@ def test_candidate_discovery_selection_is_deterministic_and_not_a_direct_kinase_
     assert "not direct kinase" in first["candidate_discovery_packet"]["boundary"].lower()
 
 
+def test_extreme_denovo_pseudo_log2fc_cannot_dominate_candidate_selection_or_llm_card():
+    rows = [
+        {
+            "gene": "DENOVO_EXTREME", "position": "S7", "condition": "0min",
+            "ptm_relative_log2fc": 99.0, "Conventional_Log2FC_NA": True,
+            "DeNovo_Confidence": "low", "Ranking_Score": 0.10, "LOD_Relative_Log2": 50.0,
+        },
+        {
+            "gene": "DENOVO_EXTREME", "position": "S7", "condition": "30min",
+            "ptm_relative_log2fc": 99.0, "Conventional_Log2FC_NA": True,
+            "DeNovo_Confidence": "low", "Ranking_Score": 0.10, "LOD_Relative_Log2": 50.0,
+        },
+        {"gene": "OBSERVED", "position": "Y11", "condition": "0min", "ptm_relative_log2fc": 0.0, "q_value": 0.02},
+        {"gene": "OBSERVED", "position": "Y11", "condition": "30min", "ptm_relative_log2fc": 1.2, "q_value": 0.02},
+    ]
+    packet = build_biological_synthesis_packet(
+        experimental_context={"cell_type": "generic cells", "treatment": "compound X", "timepoints": ["0min", "30min"]},
+        vector_plot_raw_data=rows,
+        parsed_ptms=[],
+        network_analysis={},
+        temporal_evidence_packet={"status": "available", "section_plan": {}},
+        candidate_limit=1,
+    )
+    cards = packet["candidate_discovery_packet"]["selected_cards"]
+    assert [card["gene"] for card in cards] == ["OBSERVED"]
+    landscape = packet["quantitative_landscape"]
+    assert landscape["maximum_absolute_conventional_ptm_log2fc"] == 1.2
+    assert landscape["de_novo_vector_row_count"] == 2
+
+    eligible_rows = [
+        {
+            "gene": "DENOVO_ELIGIBLE", "position": "S9", "condition": "0min",
+            "ptm_relative_log2fc": 99.0, "Conventional_Log2FC_NA": True,
+            "DeNovo_Confidence": "high", "Ranking_Score": 4.0, "LOD_Relative_Log2": 99.0,
+            "Detection_Pattern": "4/4 → 4/4",
+        },
+        {
+            "gene": "DENOVO_ELIGIBLE", "position": "S9", "condition": "30min",
+            "ptm_relative_log2fc": 99.0, "Conventional_Log2FC_NA": True,
+            "DeNovo_Confidence": "high", "Ranking_Score": 4.0, "LOD_Relative_Log2": 99.0,
+            "Detection_Pattern": "4/4 → 4/4",
+        },
+        {"gene": "OBSERVED", "position": "Y11", "condition": "0min", "ptm_relative_log2fc": 0.0, "q_value": 0.02},
+        {"gene": "OBSERVED", "position": "Y11", "condition": "30min", "ptm_relative_log2fc": 3.8, "q_value": 0.02},
+    ]
+    packet = build_biological_synthesis_packet(
+        experimental_context={"cell_type": "generic cells", "treatment": "compound X", "timepoints": ["0min", "30min"]},
+        vector_plot_raw_data=eligible_rows,
+        parsed_ptms=[],
+        network_analysis={},
+        temporal_evidence_packet={"status": "available", "section_plan": {}},
+        candidate_limit=2,
+    )
+    denovo = next(card for card in packet["candidate_discovery_packet"]["selected_cards"] if card["gene"] == "DENOVO_ELIGIBLE")
+    assert denovo["selection_components"]["selection_effect"] == 4.0
+    assert denovo["selection_components"]["selection_effect_type"] == "de_novo_confidence_weighted_capped_lod_relative"
+    assert denovo["profile_label"] == "de_novo_detection_context"
+    text = format_biological_synthesis_packet_for_llm(packet, section_type="discussion")
+    assert "PTM=99.0" not in text
+    assert "selection effect=4.0" in text
+
+
+def test_denovo_p5_requires_eligible_frozen_score_and_fails_closed_for_mixed_rows():
+    base = {
+        "experimental_context": {"cell_type": "generic cells", "treatment": "compound X", "timepoints": ["0min", "30min"]},
+        "parsed_ptms": [],
+        "network_analysis": {},
+        "temporal_evidence_packet": {"status": "available", "section_plan": {}},
+    }
+    rows = [
+        {"gene": "LOW", "position": "S1", "condition": "0min", "ptm_relative_log2fc": 99.0, "Conventional_Log2FC_NA": True, "DeNovo_Confidence": "low", "Ranking_Score": 0.8},
+        {"gene": "AMBIGUOUS", "position": "S2", "condition": "0min", "ptm_relative_log2fc": 99.0, "Conventional_Log2FC_NA": True, "DeNovo_Confidence": "ambiguous", "Ranking_Score": 0.4},
+        {"gene": "MISSING", "position": "S3", "condition": "0min", "ptm_relative_log2fc": 99.0, "Conventional_Log2FC_NA": True, "DeNovo_Confidence": "high"},
+        {"gene": "MIXED", "position": "S4", "condition": "0min", "ptm_relative_log2fc": 99.0, "Conventional_Log2FC_NA": True, "DeNovo_Confidence": "low", "Ranking_Score": 0.8},
+        {"gene": "MIXED", "position": "S4", "condition": "30min", "ptm_relative_log2fc": 8.0},
+        {"gene": "OBSERVED", "position": "Y11", "condition": "0min", "ptm_relative_log2fc": 0.0},
+        {"gene": "OBSERVED", "position": "Y11", "condition": "30min", "ptm_relative_log2fc": 0.7},
+    ]
+    packet = build_biological_synthesis_packet(vector_plot_raw_data=rows, **base)
+    assert [card["gene"] for card in packet["candidate_discovery_packet"]["selected_cards"]] == ["OBSERVED"]
+
+    moderate_rows = [
+        {"gene": "DENOVO_MODERATE", "position": "S6", "condition": "0min", "ptm_relative_log2fc": 99.0, "Conventional_Log2FC_NA": True, "DeNovo_Confidence": "moderate", "Ranking_Score": 2.2, "Detection_Pattern": "3/4 → 2/4"},
+        {"gene": "DENOVO_MODERATE", "position": "S6", "condition": "30min", "ptm_relative_log2fc": 99.0, "Conventional_Log2FC_NA": True, "DeNovo_Confidence": "moderate", "Ranking_Score": 2.2, "Detection_Pattern": "3/4 → 2/4"},
+        {"gene": "OBSERVED", "position": "Y11", "condition": "0min", "ptm_relative_log2fc": 0.0},
+        {"gene": "OBSERVED", "position": "Y11", "condition": "30min", "ptm_relative_log2fc": 3.0},
+    ]
+    first = build_biological_synthesis_packet(vector_plot_raw_data=moderate_rows, candidate_limit=2, **base)
+    second = build_biological_synthesis_packet(vector_plot_raw_data=list(reversed(moderate_rows)), candidate_limit=2, **base)
+    first_cards = first["candidate_discovery_packet"]["selected_cards"]
+    second_cards = second["candidate_discovery_packet"]["selected_cards"]
+    assert [(card["gene"], card["position"]) for card in first_cards] == [(card["gene"], card["position"]) for card in second_cards]
+    moderate = next(card for card in first_cards if card["gene"] == "DENOVO_MODERATE")
+    assert moderate["selection_components"]["finite_condition_count"] == 2
+    assert moderate["selection_components"]["selection_effect"] == 2.2
+    queries = build_data_anchored_rag_queries(first, section_type="discussion")
+    moderate_query = next(query for query in queries if query.get("anchor") == "DENOVO_MODERATE")
+    assert moderate_query["role"] == "discovery_candidate_biology"
+    assert "kinase" not in moderate_query["query"].lower()
+
+
 def test_non_insulin_order_context_drives_packet_and_rag_without_benchmark_leakage():
     packet = build_biological_synthesis_packet(
         experimental_context={

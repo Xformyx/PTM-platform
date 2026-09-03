@@ -23,14 +23,16 @@ Eligible candidates must have a finite multi-condition PTM trajectory whenever t
 
 | Component | Definition | Role |
 |---|---|---|
-| finite-condition count | count of finite measured PTM-relative log2FC values | minimum observability and first ranking component |
-| maximum absolute PTM magnitude | maximum finite `abs(PTM_Relative_Log2FC)` | observed effect scale |
+| finite-condition count | conventional feature: count of finite measured PTM-relative log2FC values; de novo feature: count of conditions carrying a positive frozen confidence-weighted LOD-relative `Ranking_Score` | minimum observability and first ranking component without pseudo-log2FC credit |
+| selection effect | conventional feature: maximum finite `abs(PTM_Relative_Log2FC)`; de novo feature: frozen confidence-weighted LOD-relative `Ranking_Score`, capped at 4.0 | observed effect scale for conventional features; conservative detection/LOD evidence for de novo features |
 | q-value coverage | count of finite q-values; best finite q-value if present | precision context, never imputed |
 | maximum PTM–protein contrast | maximum finite `abs(PTM_Relative_Log2FC - Protein_Log2FC)` | layer-decoupling context |
 | temporal context count | number of computed Wave/Dynamic/recurrence labels attached to the site | descriptive temporal support only |
 | multisite divergence flag | computed evidence flag | within-gene regulation heterogeneity context |
 
 No component is a kinase probability or p-value. Missing values remain `not_recorded` and cannot be synthetically supplied.
+
+For a de novo feature, conventional/pseudocount Log2FC is never a selection component, observability count, landscape maximum or LLM-facing trajectory value. The pre-existing `de_novo_representation` contract supplies the only allowable selection effect: `Ranking_Score`, calculated from detection completeness, confidence and LOD-relative induction, then capped at 4.0. A gene-site with any de novo row is handled as de novo for the whole P5 card, so that mixed representations fail closed rather than allowing an extreme pseudo value to enter through another condition. De novo rows with low/ambiguous/not-recorded confidence or no positive frozen ranking score are excluded from P5 candidate selection even when a source file contains an extreme pseudo-Log2FC. The observed detection/LOD context remains visible in a candidate card; it is not converted to a conventional fold change.
 
 ## Capacity and quota policy
 
@@ -40,7 +42,7 @@ This policy prevents high-amplitude canonical candidates from occupying all Repo
 
 ## LLM-facing card boundary
 
-Each card may expose only Report-eligible observation fields: gene/site label, condition-level PTM-relative and protein log2FC, q-value coverage/best q, observed temporal profile and peak, bucket, component vector, stated novelty rationale, pathway context and computed Wave/Dynamic/multisite descriptors. P0–P3 aggregate readiness may be included separately. Full feature ledger identity, protein accession, peptide/sequence, coordinate provenance, P2 candidate kinase identity, P3 allocation detail, raw precursor ID and benchmark truth remain excluded.
+Each conventional card may expose only Report-eligible observation fields: gene/site label, condition-level PTM-relative and protein log2FC, q-value coverage/best q, observed temporal profile and peak, bucket, component vector, stated novelty rationale, pathway context and computed Wave/Dynamic/multisite descriptors. A de novo card instead exposes its confidence, capped LOD-relative selection effect and detection context; it never exposes a conventional/pseudocount Log2FC. P0–P3 aggregate readiness may be included separately. Full feature ledger identity, protein accession, peptide/sequence, coordinate provenance, P2 candidate kinase identity, P3 allocation detail, raw precursor ID and benchmark truth remain excluded.
 
 Gemini must write each discovery discussion as: **measured trajectory → data-derived discovery rationale → literature agreement/disagreement or unresolved status → system-specific biological model → discriminating next measurement**. The card must be called a data-prioritized candidate, not a confirmed novel substrate or direct kinase target.
 
@@ -50,4 +52,4 @@ RAG receives two dedicated bounded roles: `canonical_anchor_biology` and `discov
 
 ## Acceptance criteria
 
-P5 is accepted only if tests demonstrate: canonical crowding cannot erase an eligible annotation-negative candidate; candidate order is deterministic; all cards report their selection components; missing q-values are explicit; multi-site and decoupled buckets preserve their measured rationale; non-insulin contexts receive no insulin leakage; RAG has canonical/discovery role quotas and telemetry; and no P5 output can create a direct kinase, causal or perturbation-supported assertion.
+P5 is accepted only if tests demonstrate: canonical crowding cannot erase an eligible annotation-negative candidate; candidate order is deterministic; all cards report their selection components; missing q-values are explicit; multi-site and decoupled buckets preserve their measured rationale; an extreme de novo pseudo-Log2FC cannot outrank a lower-amplitude conventional feature solely by magnitude; non-insulin contexts receive no insulin leakage; RAG has canonical/discovery role quotas and telemetry; and no P5 output can create a direct kinase, causal or perturbation-supported assertion.
