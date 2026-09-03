@@ -56,6 +56,19 @@ from common.temporal_utils import tp_to_minutes
 logger = logging.getLogger(__name__)
 
 
+def _direct_attribution_figure_allowed(state: dict) -> bool:
+    """Allow directed figure edges only for an explicitly supported P4 outcome.
+
+    Legacy annotation, motif, pathway and RAG context cannot unlock visual
+    arrows because the Report must not turn them into an Order-specific direct
+    kinase or causal relationship.
+    """
+    sidecar = dict(state.get("temporal_ptm_protein_analysis") or {})
+    ledger = dict(sidecar.get("kinase_feature_evidence_ledger_summary") or {})
+    status = str(ledger.get("direct_kinase_attribution_status") or "").strip().lower()
+    return status == "perturbation_supported_direct_kinase_attribution"
+
+
 # ── Motif DB (same as orders.py — inline matching fallback) ──────────────
 PHOSPHO_MOTIF_DB = {
     "CDK1/CDK2": r"[ST]P.[KR]",
@@ -195,9 +208,10 @@ def run_kinase_annotation(state: dict) -> dict:
 
                     entity_label = "E3 Ligase" if ptm_type.lower().strip() in ("ubiquitylation", "ubiquitination") else "Kinase"
 
-                    # Figure A (v10.2): Pathway Diagram — publication-standard cascade arrows
+                    # Figure A: context-only unless a dedicated perturbation-supported direct relation exists.
                     if inferred_receptors:
                         _effector_data = (global_km or {}).get("effector_proteins", [])
+                        _direct_figure_allowed = _direct_attribution_figure_allowed(state)
                         pd_path = generate_pathway_diagram(
                             inferred_receptors=inferred_receptors,
                             global_kinase_modules=global_km,
@@ -207,11 +221,12 @@ def run_kinase_annotation(state: dict) -> dict:
                             experimental_context=state.get("experimental_context"),
                             kinase_activity_heatmap=kinase_activity_heatmap,
                             effector_proteins=_effector_data,
+                            context_only=not _direct_figure_allowed,
                         )
                         if pd_path:
                             signal_flow_figures.append({
                                 "path": pd_path,
-                                "caption": f"Inferred Signaling Pathway: Receptor → {entity_label} → Substrate cascade",
+                                "caption": f"Contextual signaling map: receptor, {entity_label}, PTM and effector annotations",
                                 "type": "pathway_diagram",
                             })
 
@@ -223,12 +238,13 @@ def run_kinase_annotation(state: dict) -> dict:
                             output_dir=output_dir,
                             ptm_type=ptm_type,
                             effector_proteins=_effector_data,
+                            context_only=not _direct_figure_allowed,
                         )
                         _has_eff = " + Non-PTM Effectors" if _effector_data else ""
                         if sf_path:
                             signal_flow_figures.append({
                                 "path": sf_path,
-                                "caption": f"Detailed Signal Flow: Upstream Receptor → {entity_label} → PTM Substrate{_has_eff} (Supplementary)",
+                                "caption": f"Detailed signaling context: receptor, {entity_label}, PTM substrate{_has_eff} (Supplementary)",
                                 "type": "signal_flow_supplementary",
                             })
 
@@ -243,7 +259,7 @@ def run_kinase_annotation(state: dict) -> dict:
                         entity_label = "E3 Ligase" if ptm_type.lower().strip() in ("ubiquitylation", "ubiquitination") else "Kinase"
                         signal_flow_figures.append({
                             "path": ht_path,
-                            "caption": f"Temporal {entity_label} Activity: Activation (Red) vs Inhibition (Blue) across conditions",
+                            "caption": f"Temporal substrate-derived {entity_label} candidate score across conditions",
                             "type": "kinase_heatmap",
                         })
                 except Exception as fig_err:
@@ -409,9 +425,10 @@ def run_kinase_annotation(state: dict) -> dict:
 
                 entity_label = "E3 Ligase" if ptm_type.lower().strip() in ("ubiquitylation", "ubiquitination") else "Kinase"
 
-                # Figure A (v10.2): Pathway Diagram — publication-standard cascade arrows
+                # Figure A: context-only unless a dedicated perturbation-supported direct relation exists.
                 if inferred_receptors:
                     _effector_data = (global_km or {}).get("effector_proteins", [])
+                    _direct_figure_allowed = _direct_attribution_figure_allowed(state)
                     pd_path = generate_pathway_diagram(
                         inferred_receptors=inferred_receptors,
                         global_kinase_modules=global_km,
@@ -421,11 +438,12 @@ def run_kinase_annotation(state: dict) -> dict:
                         experimental_context=state.get("experimental_context"),
                         kinase_activity_heatmap=kinase_activity_heatmap,
                         effector_proteins=_effector_data,
+                        context_only=not _direct_figure_allowed,
                     )
                     if pd_path:
                         signal_flow_figures.append({
                             "path": pd_path,
-                            "caption": f"Inferred Signaling Pathway: Receptor → {entity_label} → Substrate cascade",
+                            "caption": f"Contextual signaling map: receptor, {entity_label}, PTM and effector annotations",
                             "type": "pathway_diagram",
                         })
                         logger.info(f"[KINASE-ANNOTATION] Generated Pathway Diagram: {pd_path}")
@@ -438,12 +456,13 @@ def run_kinase_annotation(state: dict) -> dict:
                         output_dir=output_dir,
                         ptm_type=ptm_type,
                         effector_proteins=_effector_data,
+                        context_only=not _direct_figure_allowed,
                     )
                     _has_eff = " + Non-PTM Effectors" if _effector_data else ""
                     if sf_path:
                         signal_flow_figures.append({
                             "path": sf_path,
-                            "caption": f"Detailed Signal Flow: Upstream Receptor → {entity_label} → PTM Substrate{_has_eff} (Supplementary)",
+                            "caption": f"Detailed signaling context: receptor, {entity_label}, PTM substrate{_has_eff} (Supplementary)",
                             "type": "signal_flow_supplementary",
                         })
                         logger.info(f"[KINASE-ANNOTATION] Generated Signal Flow (supplementary): {sf_path}")
@@ -461,7 +480,7 @@ def run_kinase_annotation(state: dict) -> dict:
                     entity_label = "E3 Ligase" if ptm_type.lower().strip() in ("ubiquitylation", "ubiquitination") else "Kinase"
                     signal_flow_figures.append({
                         "path": ht_path,
-                        "caption": f"Temporal {entity_label} Activity: Activation (Red) vs Inhibition (Blue) across conditions",
+                        "caption": f"Temporal substrate-derived {entity_label} candidate score across conditions",
                         "type": "kinase_heatmap",
                     })
                     logger.info(f"[KINASE-ANNOTATION] Generated Kinase Temporal Heatmap: {ht_path}")

@@ -415,7 +415,10 @@ def format_citations(state: ReportState) -> dict:
     that maps LLM inline citations [N] back to the actual PubMed papers.
     """
     from .citation_formatter import CitationFormatter, Reference, ReportPostProcessor
+    from .dynamic_prompt_generator import format_compact_attribution_readiness_for_report
+    from .biological_synthesis import format_candidate_discovery_packet_for_report
     from .nodes.network_node import generate_network_figure_section
+    import re as _re
     logger.info("Formatting citations and post-processing report")
 
     sections = state.get("sections", {})
@@ -478,6 +481,19 @@ def format_citations(state: ReportState) -> dict:
             parts.append(sections[key])
             logger.info(f"[FORMAT-CIT] Added section: {key} ({len(sections[key])} chars)")
         if key == "results":
+            # Deterministic aggregate-only evidence appears once in the final
+            # document so an LLM omission cannot hide P0–P3 no-call status or
+            # P5 discovery selection semantics.
+            readiness_section = format_compact_attribution_readiness_for_report(
+                state.get("temporal_report_evidence_packet") or {}
+            )
+            if readiness_section:
+                parts.append(readiness_section)
+            p5_section = format_candidate_discovery_packet_for_report(
+                state.get("biological_synthesis_packet") or {}
+            )
+            if p5_section:
+                parts.append(p5_section)
             # ═══════════════════════════════════════════════════════════════════
             # v10.3: Figure Placement Overhaul
             # Main Figures:  Fig 1 (Pathway Bar) → Fig 2 (Kinase Heatmap) →
@@ -541,17 +557,17 @@ def format_citations(state: ReportState) -> dict:
                     "kinase_heatmap", "pathway_diagram", "signal_flow_supplementary", "signal_flow")]
                 supp_figs = [f for f in signal_flow_figures if f.get("type") in ("signal_flow_supplementary", "signal_flow")]
 
-                # Fig 2: Kinase Temporal Activity Heatmap
+                # Fig 2: substrate-derived candidate context score heatmap
                 for sf_fig in kinase_heatmap_figs:
                     fig_path = sf_fig.get("path", "")
                     fig_caption = sf_fig.get("caption", "")
                     if not fig_path:
                         continue
                     sf_section_parts.append(
-                        f"\n### Figure {fig_num}. Temporal {entity_label} Activity Heatmap\n\n"
-                        f"Directional heatmap showing {entity_label.lower()} "
-                        f"activation (red) and inhibition (blue) across experimental conditions. "
-                        f"Color intensity reflects average fold-change magnitude per substrate. "
+                        f"\n### Figure {fig_num}. Temporal {entity_label} Candidate Context Score Heatmap\n\n"
+                        f"Substrate-derived directional score heatmap for candidate {entity_label.lower()} context "
+                        f"across experimental conditions. Red and blue summarize the signed substrate score; they do "
+                        f"not establish direct {entity_label.lower()} activity or a kinase–site relation. "
                         f"Temporal pattern annotations (right) classify each "
                         f"{entity_label.lower()} as sustained, early-only, late-onset, spike, or reversal. "
                         f"Substrate count (n=N) indicates the number of PTM substrates contributing to each score.\n\n"
@@ -576,11 +592,11 @@ def format_citations(state: ReportState) -> dict:
                     if not fig_path:
                         continue
                     pathway_diagram_section = (
-                        f"\n### Figure {pathway_diagram_fig_num}. Inferred Signaling Pathway Diagram\n\n"
-                        f"Publication-standard cascade diagram showing the inferred signal "
-                        f"transduction pathway from upstream receptors through intermediate {entity_label.lower()}s to their "
-                        f"target PTM substrates. Arrows indicate activation (→) or inhibition (⊣). "
-                        f"Node colors indicate direction: red = activation, blue = inhibition.\n\n"
+                        f"\n### Figure {pathway_diagram_fig_num}. Contextual Signaling Map\n\n"
+                        f"Compartmentalized context map placing treatment context, literature/pathway-linked receptors, "
+                        f"candidate {entity_label.lower()} context, and measured PTM/non-PTM observations in a common view. "
+                        f"Dashed connectors denote context association only; they do not encode Order-specific direction, "
+                        f"activation, inhibition, direct kinase–substrate regulation, or causality.\n\n"
                         f"![{fig_caption}]({fig_path})\n\n---\n"
                     )
                     logger.info(f"[FORMAT-CIT] v10.3: Pathway Diagram prepared as Figure {pathway_diagram_fig_num}")
@@ -598,7 +614,8 @@ def format_citations(state: ReportState) -> dict:
                     fig_caption = sf_fig.get("caption", "")
                     if fig_path:
                         sf_supp_items.append((fig_caption, fig_path,
-                            f"Detailed 4-layer signal flow diagram showing all receptor-{entity_label.lower()}-substrate connections."))
+                            f"Detailed context map showing receptor, {entity_label.lower()}, PTM, and non-PTM annotations. "
+                            f"Connectors indicate literature/pathway context only and are not direct Order-specific relations."))
 
                 sf_combined = "\n".join(sf_section_parts)
                 parts.append(sf_combined)
@@ -694,6 +711,23 @@ def format_citations(state: ReportState) -> dict:
         except Exception as addendum_err:
             logger.warning("[FORMAT-CIT] Could not rebuild Co-Scientist addendum citations: %s", addendum_err)
     if external_addendum:
+        # External addendum citations use the already-global collected-reference
+        # index. Convert only this deterministic, globally numbered addendum to
+        # stable markers before local LLM numeric citations are fail-closed.
+        def _global_ref_marker(match: _re.Match) -> str:
+            index = int(match.group(1))
+            if not 0 < index <= len(collected_refs):
+                return ""
+            ref = collected_refs[index - 1]
+            pmid = str(ref.get("pmid") or "").strip()
+            if pmid:
+                return f"[REF:pmid:{pmid.lower()}]"
+            doi = str(ref.get("doi") or "").strip().lower()
+            if doi:
+                return f"[REF:doi:{doi}]"
+            title_key = _re.sub(r"[^a-z0-9]", "", str(ref.get("title") or "").lower())[:120]
+            return f"[REF:title:{title_key}]" if title_key else ""
+        external_addendum = _re.sub(r"\[(\d+)\]", _global_ref_marker, external_addendum)
         parts.append(external_addendum)
         logger.info(f"[FORMAT-CIT] Added external Co-Scientist addendum ({len(external_addendum)} chars)")
 
@@ -708,9 +742,8 @@ def format_citations(state: ReportState) -> dict:
     # Reference [N]).  We build a canonical reference list from
     # collected_references and emit a ## References section.
     # -----------------------------------------------------------------------
-    import re as _re
-
-    # v1.2 Fix: Normalize LLM citation formats to [N]
+    # v1.2 Fix: Normalize legacy LLM citation formats to [N].  New sections
+    # already use stable [REF:<identity>] markers created by writer_node.
     # LLM sometimes writes [PubMed Ref 1] or [Reference 1] instead of [1]
     all_text = _re.sub(r'\[PubMed Ref\s*(\d+)\]', r'[\1]', all_text)
     all_text = _re.sub(r'\[Reference\s*(\d+)\]', r'[\1]', all_text)
@@ -718,9 +751,6 @@ def format_citations(state: ReportState) -> dict:
     all_text = _re.sub(r'\[ChromaDB Reference\s*(\d+)\]', r'[\1]', all_text)
     logger.info("[FORMAT-CIT] Normalized inline citation formats to [N]")
 
-    # Discover which citation numbers the LLM actually used in the text
-    cited_numbers = sorted(set(int(m) for m in _re.findall(r'\[(\d+)\]', all_text)))
-    logger.info(f"[FORMAT-CIT] LLM inline citation numbers found: {cited_numbers[:20]}{'...' if len(cited_numbers) > 20 else ''} (total {len(cited_numbers)})")
     logger.info(f"[FORMAT-CIT] collected_references count: {len(collected_refs)}")
 
     # v10.8: Build Reference objects from collected_references (ChromaDB + PubMed unified)
@@ -751,13 +781,50 @@ def format_citations(state: ReportState) -> dict:
         ref_objects.append(ref)
     logger.info(f"[FORMAT-CIT] Reference breakdown: {n_chromadb_refs} ChromaDB + {len(ref_objects) - n_chromadb_refs} PubMed = {len(ref_objects)} total")
 
-    # Build the ## References section
-    # Strategy: include all collected references so that every [N] the LLM
-    # used has a matching entry.  References beyond what the LLM cited are
-    # also included as supporting literature.
-    # v10.8: ChromaDB refs have no PMID/DOI — render with collection name as source
+    def _reference_key(ref: Reference, index: int) -> str:
+        if ref.pmid:
+            return f"pmid:{ref.pmid.lower()}"
+        if ref.doi:
+            return f"doi:{ref.doi.lower()}"
+        title = _re.sub(r"[^a-z0-9]", "", ref.title.lower())[:120]
+        return f"title:{title}" if title else f"local:{index}"
+
+    # A bare [N] is section-local LLM numbering and cannot be joined safely to
+    # the document-wide bibliography. Remove it before resolving stable
+    # markers, whose final [N] representation is assigned below.
+    raw_citations = sorted(set(int(value) for value in _re.findall(r"\[(\d+)\]", all_text)))
+    if raw_citations:
+        logger.warning(
+            "[FORMAT-CIT] Removing %d legacy numeric citations without stable markers; "
+            "their section-local numbering cannot be safely mapped to the final bibliography.", len(raw_citations),
+        )
+        all_text = _re.sub(r"\[(\d+(?:\s*(?:,|-)\s*\d+)*)\]", "", all_text)
+
+    # Resolve stable markers in first-appearance order.  This makes every
+    # inline citation unambiguous even when individual LLM sections received
+    # different RAG subsets and local reference numbering.
+    reference_by_key: dict[str, Reference] = {}
+    for index, ref in enumerate(ref_objects, 1):
+        reference_by_key.setdefault(_reference_key(ref, index), ref)
+    cited_keys: list[str] = []
+
+    def _resolve_marker(match: _re.Match) -> str:
+        key = str(match.group(1) or "").strip().lower()
+        if key not in reference_by_key:
+            logger.warning("[FORMAT-CIT] Dropping unresolved stable citation marker: %s", key)
+            return ""
+        if key not in cited_keys:
+            cited_keys.append(key)
+        return f"[{cited_keys.index(key) + 1}]"
+
+    all_text = _re.sub(r"\[REF:([^\]]+)\]", _resolve_marker, all_text)
+    resolved_refs = [reference_by_key[key] for key in cited_keys]
+
+    # Build the ## References section strictly from successfully resolved
+    # collection-local or PubMed references.  This prevents an untraceable
+    # text citation from being paired with an unrelated bibliography entry.
     ref_lines = ["## References\n"]
-    for idx, ref in enumerate(ref_objects, 1):
+    for idx, ref in enumerate(resolved_refs, 1):
         entry_parts = []
         if ref.authors:
             entry_parts.append(ref.authors.rstrip("."))
@@ -781,8 +848,8 @@ def format_citations(state: ReportState) -> dict:
             line += " " + " | ".join(links)
         ref_lines.append(line)
 
-    reference_section = "\n".join(ref_lines) if ref_objects else ""
-    logger.info(f"[FORMAT-CIT] Built reference section with {len(ref_objects)} entries")
+    reference_section = "\n".join(ref_lines) if resolved_refs else ""
+    logger.info(f"[FORMAT-CIT] Built resolved reference section with {len(resolved_refs)} entries")
 
     # Post-process the body text (heading normalization, dedup, table fixes)
     processor = ReportPostProcessor()
@@ -835,7 +902,7 @@ def format_citations(state: ReportState) -> dict:
     return {
         "final_report": processed,
         "citation_data": {
-            "total_references": len(ref_objects),
+            "total_references": len(resolved_refs),
             "reference_section": reference_section,
         },
     }

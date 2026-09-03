@@ -598,3 +598,92 @@ def format_biological_synthesis_packet_for_llm(packet: Mapping[str, Any] | None,
         "=== END DATA-GROUNDED BIOLOGICAL SYNTHESIS PACKET ===",
     ])
     return "\n".join(lines)
+
+
+def _report_cell(value: Any) -> str:
+    """Return a compact Markdown-table-safe deterministic display value."""
+    text = str(value if value not in (None, "") else "not recorded")
+    return text.replace("|", "/").replace("\n", " ").strip()
+
+
+def format_candidate_discovery_packet_for_report(
+    packet: Mapping[str, Any] | None,
+    *,
+    max_cards: int = 20,
+) -> str:
+    """Render selected P5 cards without exposing pseudo-log2FC as observed data.
+
+    Candidate cards are compact, deterministic observation-prioritization
+    records.  They are not a kinase attribution, causal relation, or
+    perturbation result.  In particular, de novo rows show only the existing
+    confidence-weighted capped selection effect and detection context.
+    """
+    packet = dict(packet or {})
+    discovery = dict(packet.get("candidate_discovery_packet") or {})
+    cards = [
+        dict(card) for card in discovery.get("selected_cards") or []
+        if isinstance(card, Mapping)
+    ][:max(1, int(max_cards))]
+    if not cards:
+        return ""
+
+    summary = dict(discovery.get("selection_summary") or {})
+    selected_by_quota = dict(summary.get("selected_by_quota") or {})
+    quota_text = "; ".join(
+        f"{_report_cell(bucket)}={_report_cell(count)}"
+        for bucket, count in sorted(selected_by_quota.items())
+    ) or "not recorded"
+    lines = [
+        "### Data-prioritized candidate discoveries",
+        "",
+        "The P5 packet preserves canonical context while reserving discovery capacity for annotation-negative "
+        "and special discovery candidates. Selection is based on observed trajectory evidence and declared "
+        "quality components; it does not assign a direct kinase, causal path, or perturbation effect.",
+        "",
+        f"Candidate capacity={_report_cell(summary.get('candidate_capacity'))}; selected by quota: {quota_text}.",
+        "",
+        "| Candidate | Discovery bucket | Observed context used for priority | Selection-quality context |",
+        "|---|---|---|---|",
+    ]
+    for card in cards:
+        components = dict(card.get("selection_components") or {})
+        candidate = f"{_report_cell(card.get('gene'))} {_report_cell(card.get('position'))}"
+        bucket = _report_cell(card.get("primary_bucket"))
+        rationale = "; ".join(
+            _report_cell(item) for item in card.get("discovery_rationale") or []
+        ) or "observed trajectory"
+        if card.get("is_de_novo"):
+            detections = sorted({
+                _report_cell(point.get("detection_pattern"))
+                for point in card.get("trajectory") or []
+                if isinstance(point, Mapping) and point.get("detection_pattern")
+            })
+            observed = (
+                f"de novo detection context; peak={_report_cell(card.get('peak_condition'))}; "
+                f"pattern={'; '.join(detections) or 'not recorded'}"
+            )
+            quality = (
+                f"confidence={_report_cell(components.get('de_novo_confidence'))}; "
+                f"frozen capped LOD-relative selection effect={_report_cell(components.get('selection_effect'))} "
+                f"(cap={_report_cell(components.get('de_novo_lod_induction_rank_cap'))}); {rationale}"
+            )
+        else:
+            observed = (
+                f"profile={_report_cell(card.get('profile_label'))}; peak={_report_cell(card.get('peak_condition'))}; "
+                f"max |measured PTM log2FC|={_report_cell(components.get('max_abs_ptm_log2fc'))}"
+            )
+            quality = (
+                f"q coverage={_report_cell(components.get('finite_q_value_count'))}; "
+                f"best q={_report_cell(components.get('best_q_value'))}; {rationale}"
+            )
+        lines.append(f"| {candidate} | {bucket} | {observed} | {quality} |")
+    lines.extend([
+        "",
+        "**De novo representation rule.** For control-undetected sites, conventional/pseudocount log2FC is not "
+        "rendered or used as the P5 selection effect. The displayed effect is the pre-existing confidence-weighted, "
+        "LOD-relative value capped by the frozen de novo contract.",
+        "",
+        "**Attribution boundary.** A selected discovery candidate is an observed feature prioritized for literature "
+        "comparison and follow-up measurement, not a confirmed novel substrate or a direct kinase target.",
+    ])
+    return "\n".join(lines)

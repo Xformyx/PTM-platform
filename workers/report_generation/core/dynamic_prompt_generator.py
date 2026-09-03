@@ -1418,6 +1418,35 @@ def format_temporal_evidence_packet_for_llm(
     return "\n".join(lines)
 
 
+def format_compact_attribution_readiness_for_report(packet: Mapping[str, Any] | None) -> str:
+    """Render the compact P0–P3 readiness aggregate for the final Report.
+
+    This deliberately reuses the same aggregate-only record supplied to the
+    writer.  It therefore cannot expose full-ledger identities, candidate-edge
+    details, source PMIDs, peptides, sequences, or raw provenance values.
+    """
+    packet = dict(packet or {})
+    readiness = next(
+        (
+            record for record in packet.get("records") or []
+            if isinstance(record, Mapping)
+            and record.get("evidence_id") == "DATA-KINASE-ATTRIBUTION-READINESS"
+        ),
+        None,
+    )
+    if not readiness:
+        return ""
+    return "\n".join([
+        "### Kinase-attribution readiness and provenance boundary",
+        "",
+        str(readiness.get("text") or ""),
+        "",
+        "**Interpretation boundary.** This aggregate readiness summary preserves what was available "
+        "for attribution without promoting legacy annotation, motif context, pathway membership, "
+        "or literature context to an Order-specific direct kinase–site relationship.",
+    ])
+
+
 def build_temporal_evidence_fallback_addendum(packet: Mapping[str, Any]) -> str:
     """Return deterministic temporal evidence when an LLM omits mandatory classes."""
     if not packet or packet.get("status") != "available":

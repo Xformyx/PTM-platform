@@ -34,7 +34,7 @@ v6.0 — Compartmentalized Signaling Cascade Diagram:
     PTM: Red (up) / Blue (down) gradient
     Non-PTM: Green (up) / Purple (down) gradient
     Kinase: Orange gradient
-  - Signal flow arrows connect proteins in pathway progression order
+  - Dashed connectors place pathway-template proteins in shared literature context
   - Focuses on top N pathways from Figure 1 (signed Direct NES)
   - Node shape: Circle (PTM/Non-PTM), Diamond (Kinase)
   - Node size proportional to |Log2FC|
@@ -303,7 +303,7 @@ def generate_signaling_cascade_diagram(
     - Cellular compartments (Extracellular, Membrane, Cytoplasm, Nucleus)
     - Proteins placed in their correct compartments
     - Color-coded by activation state (PTM Red/Blue, Non-PTM Green/Purple)
-    - Signal flow arrows connecting proteins in pathway order
+    - Dashed context connectors between proteins adjacent in a pathway template
     
     Focuses on top N pathways. Production rank is Direct NES from Figure 1;
     PATHWAY_SIGNAL_ORDER is arrow layout only.
@@ -823,7 +823,9 @@ def generate_signaling_cascade_diagram(
             if not adjusted:
                 break
         
-        # Draw signal flow arrows between consecutive proteins
+        # Draw context-only connectors between consecutive pathway-template
+        # nodes. Template adjacency is a layout aid, not an Order-specific
+        # directed relationship.
         for i in range(len(gene_positions) - 1):
             g1, x1, y1, _ = gene_positions[i]
             g2, x2, y2, _ = gene_positions[i + 1]
@@ -851,16 +853,8 @@ def generate_signaling_cascade_diagram(
             ax2 = x2 - dx * ratio_e
             ay2 = y2 - dy * ratio_e
             
-            arrow = FancyArrowPatch(
-                (ax1, ay1), (ax2, ay2),
-                arrowstyle="->,head_width=6,head_length=5",
-                color="#546E7A",
-                linewidth=2.0,
-                alpha=0.85,
-                connectionstyle="arc3,rad=0.0",
-                zorder=1,
-            )
-            ax.add_patch(arrow)
+            ax.plot([ax1, ax2], [ay1, ay2], color="#78909C", linewidth=1.5,
+                    alpha=0.8, linestyle=(0, (3, 2)), zorder=1)
         
         # Draw protein nodes
         for gene, x, y, comp in gene_positions:
@@ -984,7 +978,7 @@ def generate_signaling_cascade_diagram(
     legend_x = margin_left + 0.3
     
     # Title
-    title_main = "Signal Transduction Pathway Cascade Diagram"
+    title_main = "Compartmentalized Signaling Context Diagram"
     if condition:
         title_main += f" — {condition}"
     ax.text(
@@ -996,7 +990,7 @@ def generate_signaling_cascade_diagram(
     )
     ax.text(
         fig_width / 2, fig_height - 0.7,
-        f"Key Signaling Pathways by Multi-Factor Analysis — Compartmentalized Signal Flow",
+        "Key Signaling Pathways by Multi-Factor Analysis — Context Association Map",
         ha="center", va="top",
         fontsize=11,
         color="#455A64",
@@ -1004,8 +998,8 @@ def generate_signaling_cascade_diagram(
 
     # Legend items — color legend (Row 1)
     legend_items = [
-        ("PTM \u2191", "#E53935", "circle"),
-        ("PTM \u2193", "#1E88E5", "circle"),
+        ("PTM higher abundance", "#E53935", "circle"),
+        ("PTM lower abundance", "#1E88E5", "circle"),
         ("Non-PTM \u2191", "#43A047", "circle"),
         ("Non-PTM \u2193", "#8E24AA", "circle"),
         ("Kinase", "#FF8F00", "diamond"),
@@ -1043,16 +1037,12 @@ def generate_signaling_cascade_diagram(
             zorder=5,
         )
 
-    # Arrow legend
+    # Context connector legend
     arrow_x = legend_start_x + len(legend_items) * item_spacing
-    arrow = FancyArrowPatch(
-        (arrow_x, legend_y), (arrow_x + 0.8, legend_y),
-        arrowstyle="->,head_width=8,head_length=6",
-        color="#546E7A", linewidth=2.5, zorder=5,
-    )
-    ax.add_patch(arrow)
+    ax.plot([arrow_x, arrow_x + 0.8], [legend_y, legend_y], color="#546E7A",
+            linewidth=2.0, linestyle=(0, (3, 2)), zorder=5)
     ax.text(
-        arrow_x + 1.1, legend_y, "Signal flow",
+        arrow_x + 1.1, legend_y, "Pathway/literature context (not directed)",
         ha="left", va="center",
         fontsize=10, color="#263238",
         fontweight="normal",
@@ -1567,7 +1557,7 @@ def generate_cascade_from_selected_pathways(
 
                 node_positions[gene] = (x, y)
 
-    # ---- Draw signal flow arrows ----
+    # ---- Draw pathway/literature context connectors ----
     for chain in pathway_chains:
         genes = chain["genes"]
         for i in range(len(genes) - 1):
@@ -1584,17 +1574,10 @@ def generate_cascade_from_selected_pathways(
                 if dist < 0.01:
                     continue
                 ux, uy = dx / dist, dy / dist
-                ax.annotate(
-                    "",
-                    xy=(tx - ux * tr * 1.1, ty - uy * tr * 1.1),
-                    xytext=(sx + ux * sr * 1.1, sy + uy * sr * 1.1),
-                    arrowprops=dict(
-                        arrowstyle="-|>",
-                        color="#90A4AE",
-                        lw=1.2,
-                        mutation_scale=12,
-                    ),
-                    zorder=2,
+                ax.plot(
+                    [sx + ux * sr * 1.1, tx - ux * tr * 1.1],
+                    [sy + uy * sr * 1.1, ty - uy * tr * 1.1],
+                    color="#90A4AE", lw=1.2, linestyle=(0, (3, 2)), zorder=2,
                 )
 
     # ---- Legend ----
@@ -1602,7 +1585,7 @@ def generate_cascade_from_selected_pathways(
     legend_x = margin_left + 0.3
 
     # Title — content-driven subtitle
-    title_main = "Signal Transduction Pathway Cascade Diagram"
+    title_main = "Compartmentalized Signaling Context Diagram"
     if condition:
         title_main += f" — {condition}"
     ax.text(
@@ -1614,7 +1597,7 @@ def generate_cascade_from_selected_pathways(
     )
     ax.text(
         fig_width / 2, fig_height - 0.7,
-        "Key Signaling Pathways Discussed in Analysis — Compartmentalized Signal Flow",
+        "Key Signaling Pathways Discussed in Analysis — Context Association Map",
         ha="center", va="top",
         fontsize=11,
         color="#455A64",
@@ -1623,8 +1606,8 @@ def generate_cascade_from_selected_pathways(
 
     # Color legend
     legend_items = [
-        ("#E53935", "PTM Activated (Log2FC > 0)"),
-        ("#1E88E5", "PTM Inhibited (Log2FC < 0)"),
+        ("#E53935", "PTM higher abundance (Log2FC > 0)"),
+        ("#1E88E5", "PTM lower abundance (Log2FC < 0)"),
         ("#43A047", "Non-PTM Upregulated"),
         ("#8E24AA", "Non-PTM Downregulated"),
         ("#FF8F00", "Kinase (◆)"),

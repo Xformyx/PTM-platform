@@ -191,6 +191,60 @@ SYSTEM_PROMPT = (
 )
 
 
+def _reference_marker_key(reference: dict, index: int) -> str:
+    """Return a stable local citation key shared with the final bibliography renderer."""
+    pmid = str(reference.get("pmid") or "").strip()
+    if pmid:
+        return f"pmid:{pmid.lower()}"
+    doi = str(reference.get("doi") or "").strip().lower()
+    if doi:
+        return f"doi:{doi}"
+    title = re.sub(r"[^a-z0-9]", "", str(reference.get("title") or "").lower())[:120]
+    return f"title:{title}" if title else f"local:{index}"
+
+
+def _expand_citation_indices(citation_text: str) -> list[int]:
+    """Expand a local LLM citation list such as ``1,3-5`` safely."""
+    indices: list[int] = []
+    for part in str(citation_text or "").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        range_match = re.fullmatch(r"(\d+)\s*-\s*(\d+)", part)
+        if range_match:
+            first, last = map(int, range_match.groups())
+            if 0 < first <= last and last - first <= 49:
+                indices.extend(range(first, last + 1))
+            continue
+        if part.isdigit():
+            indices.append(int(part))
+    return indices
+
+
+def _stabilize_section_citations(text: str, local_references: list[dict]) -> str:
+    """Replace a section's local numeric citations with stable reference markers.
+
+    Each writer section has a different RAG retrieval subset.  Keeping raw [N]
+    values would make a later global reference list ambiguous.  Markers are
+    resolved only after section reference lists have been deduplicated.
+    """
+    if not text or not local_references:
+        return text
+
+    def _replace(match: re.Match) -> str:
+        indices = _expand_citation_indices(match.group(1))
+        markers: list[str] = []
+        for index in indices:
+            if not 0 < index <= len(local_references):
+                continue
+            key = _reference_marker_key(local_references[index - 1], index)
+            if key not in markers:
+                markers.append(key)
+        return "".join(f"[REF:{key}]" for key in markers) if markers else match.group(0)
+
+    return re.sub(r"\[(\d+(?:\s*(?:,|-)\s*\d+)*)\]", _replace, text)
+
+
 def run_section_writing(state: dict) -> dict:
     """Write all report sections using LLM."""
     cb = state.get("progress_callback")
@@ -1095,6 +1149,10 @@ def run_section_writing(state: dict) -> dict:
                 logger.warning(f"[v98] {section_type} validation failed (non-fatal): {e}")
 
 
+        # Local prompt numbering is section-specific. Convert it before the
+        # section is merged into the document-wide bibliography.
+        local_references = list(chroma_refs or []) + list(all_references or [])
+        content = _stabilize_section_citations(content, local_references)
         return section_type, content
 
     # ── Phase 1: independent sections (parallel) ──

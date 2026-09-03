@@ -31,6 +31,7 @@ def generate_signal_flow_figure(
     max_receptors: int = 8,
     max_substrates_per_kinase: int = 15,
     effector_proteins: Optional[List[dict]] = None,
+    context_only: bool = True,
 ) -> Optional[str]:
     """Generate a publication-quality Signal Flow diagram.
 
@@ -126,14 +127,14 @@ def generate_signal_flow_figure(
     layers_label = "Non-PTM Effectors" if has_effectors else "PTM Substrates"
     ax.text(
         fig_width / 2, fig_height - 0.5,
-        f"Signal Flow: Upstream Receptor → {entity_label} → PTM Substrates" + (" → Non-PTM Effectors" if has_effectors else ""),
+        f"Signaling Context: Receptor · {entity_label} · PTM Substrates" + (" · Non-PTM Effectors" if has_effectors else ""),
         fontsize=14, fontweight="bold", color="white",
         ha="center", va="top",
     )
     ax.text(
         fig_width / 2, fig_height - 1.0,
-        f"Top {len(receptors)} inferred receptors with downstream {ptm_type} signaling cascade"
-        + (f" + {len(substrate_to_effectors)} effector connections" if has_effectors else ""),
+        f"Top {len(receptors)} pathway/literature-linked receptors with measured {ptm_type} context"
+        + (f" + {len(substrate_to_effectors)} effector context links" if has_effectors else ""),
         fontsize=9, color="#9ca3af",
         ha="center", va="top",
     )
@@ -227,20 +228,17 @@ def generate_signal_flow_figure(
             if has_effectors:
                 kinase_spacing = max(1.8, min(3.0, (fig_width - kinase_start_x - 6) / max(len(via_kinases), 1)))
 
-            # Arrow from receptor to kinase area
-            ax.annotate(
-                "", xy=(kinase_start_x - 0.3, y_center),
-                xytext=(rec_x + 3.0, y_center),
-                arrowprops=dict(
-                    arrowstyle="->",
-                    color="#4b5563",
-                    lw=1.5,
-                    connectionstyle="arc3,rad=0",
-                ),
-            )
+            # Context-only by default. Receptor-to-kinase visual adjacency is
+            # not an Order-specific directed relationship.
+            if context_only:
+                ax.plot([rec_x + 3.0, kinase_start_x - 0.3], [y_center, y_center],
+                        color="#6b7280", lw=1.2, ls=(0, (3, 2)))
+            else:
+                ax.annotate("", xy=(kinase_start_x - 0.3, y_center), xytext=(rec_x + 3.0, y_center),
+                            arrowprops=dict(arrowstyle="->", color="#4b5563", lw=1.5, connectionstyle="arc3,rad=0"))
             ax.text(
                 kinase_start_x - 0.8, y_center + 0.25,
-                f"via {entity_label.lower()}:",
+                f"{entity_label.lower()} context:",
                 fontsize=7, color="#6b7280",
                 ha="center", va="bottom",
             )
@@ -278,7 +276,7 @@ def generate_signal_flow_figure(
                     sub_y = y_center - 0.5
                     ax.text(
                         k_x + 0.2, sub_y,
-                        f"→ {len(ptms)} substrates:",
+                        f"• {len(ptms)} PTM context:",
                         fontsize=6, color="#6b7280",
                         ha="left", va="top",
                     )
@@ -398,16 +396,13 @@ def generate_signal_flow_figure(
                     sub_gene_upper = sub.get("gene", "").upper()
                     if sub_gene_upper in _substrate_positions:
                         sx, sy = _substrate_positions[sub_gene_upper]
-                        ax.annotate(
-                            "", xy=(effector_x, ey),
-                            xytext=(sx + 0.3, sy),
-                            arrowprops=dict(
-                                arrowstyle="->",
-                                color=eff_clr["border"] + "60",
-                                lw=0.8,
-                                connectionstyle="arc3,rad=0.15",
-                            ),
-                        )
+                        if context_only:
+                            ax.plot([sx + 0.3, effector_x], [sy, ey], color=eff_clr["border"] + "80",
+                                    lw=0.8, ls=(0, (3, 2)))
+                        else:
+                            ax.annotate("", xy=(effector_x, ey), xytext=(sx + 0.3, sy),
+                                        arrowprops=dict(arrowstyle="->", color=eff_clr["border"] + "60",
+                                                        lw=0.8, connectionstyle="arc3,rad=0.15"))
 
     # ── Legend ──
     legend_y = 0.8
@@ -497,9 +492,9 @@ def generate_kinase_temporal_heatmap(
 ) -> Optional[str]:
     """Generate a kinase temporal activity heatmap showing activation/inhibition direction.
 
-    v10.2: Uses kinase_activity_heatmap data (scores with direction) instead of
-    simple PTM counts. Shows activation (red) vs inhibition (blue) with intensity
-    proportional to signal strength. Kinases are grouped by temporal pattern.
+    Uses kinase_activity_heatmap data (substrate-derived signed scores) instead
+    of simple PTM counts. Colors distinguish higher versus lower aggregate
+    substrate signals; this is candidate context, not direct kinase activity.
 
     Args:
         global_kinase_modules: Kinase module analysis result
@@ -604,8 +599,8 @@ def _generate_directional_heatmap(
 ) -> Optional[str]:
     """Generate publication-quality directional kinase activity heatmap.
 
-    Red = activation (substrates up-phosphorylated)
-    Blue = inhibition (substrates de-phosphorylated)
+    Red = higher aggregate substrate score
+    Blue = lower aggregate substrate score
     Intensity = signal strength (dominant direction sum)
     Rows grouped by temporal pattern with annotation sidebar.
     """
@@ -685,9 +680,9 @@ def _generate_directional_heatmap(
     ax_main = fig.add_subplot(gs[0, 1])
     ax_cbar = fig.add_subplot(gs[0, 2])
 
-    # ── Diverging colormap: Blue (inhibition) → White → Red (activation) ──
+    # ── Diverging colormap: lower score → White → higher score ──
     colors_div = ["#1e3a5f", "#3b82f6", "#93c5fd", "#ffffff", "#fca5a5", "#ef4444", "#7f1d1d"]
-    cmap_div = LinearSegmentedColormap.from_list("activation_inhibition", colors_div)
+    cmap_div = LinearSegmentedColormap.from_list("candidate_context_score", colors_div)
 
     # Symmetric normalization
     max_abs = max(abs(matrix.min()), abs(matrix.max()), 0.1)
@@ -718,7 +713,7 @@ def _generate_directional_heatmap(
         ax_main.axvline(j - 0.5, color="#e5e7eb", linewidth=0.5)
 
     ax_main.set_title(
-        f"Temporal {entity_label} Activity: Activation (Red) vs Inhibition (Blue)",
+        f"Temporal {entity_label} Candidate Context Score (Substrate-Derived)",
         fontsize=11, fontweight="bold", color="#1f2937", pad=12,
     )
     ax_main.set_xlabel("Condition / Timepoint", fontsize=9, color="#4b5563")
@@ -772,22 +767,22 @@ def _generate_directional_heatmap(
 
     # ── Colorbar ──
     cb = fig.colorbar(im, cax=ax_cbar)
-    cb.set_label(f"{entity_label} Activity Score\n(Weighted Sum Log2FC)", fontsize=8, color="#4b5563")
+    cb.set_label(f"{entity_label} Candidate Context Score\n(Weighted Substrate Log2FC)", fontsize=8, color="#4b5563")
     cb.ax.yaxis.set_tick_params(color="#4b5563", labelsize=7)
     plt.setp(cb.ax.yaxis.get_ticklabels(), color="#4b5563")
 
-    # Add direction labels to colorbar
-    ax_cbar.text(0.5, 1.02, "Activation", transform=ax_cbar.transAxes,
+    # Candidate-context labels, not direct activity labels.
+    ax_cbar.text(0.5, 1.02, "Higher score", transform=ax_cbar.transAxes,
                 fontsize=7, color="#dc2626", ha="center", fontweight="bold")
-    ax_cbar.text(0.5, -0.02, "Inhibition", transform=ax_cbar.transAxes,
+    ax_cbar.text(0.5, -0.02, "Lower score", transform=ax_cbar.transAxes,
                 fontsize=7, color="#2563eb", ha="center", fontweight="bold", va="top")
 
     # ── Footer: data source note ──
     fig.text(
         0.5, 0.01,
         f"Score = weighted sum of substrate Log2FC per condition. "
-        f"Positive (red) = substrates up-regulated; Negative (blue) = substrates down-regulated. "
-        f"Rows grouped by detected temporal pattern. {entity_label}s selected from temporally coordinated substrate groups.",
+        f"Positive (red) = higher aggregate substrate score; negative (blue) = lower aggregate substrate score. "
+        f"Rows grouped by detected temporal pattern. This figure provides candidate context only, not direct {entity_label.lower()} activity or kinase–site attribution.",
         fontsize=7, color="#6b7280", ha="center", va="bottom", style="italic",
     )
 
@@ -1191,6 +1186,7 @@ def generate_pathway_diagram(
     max_kinases: int = 8,
     max_substrates: int = 10,
     max_effectors: int = 6,
+    context_only: bool = True,
 ) -> Optional[str]:
     """Generate a publication-quality pathway diagram in cascade arrow format.
 
@@ -1347,7 +1343,11 @@ def generate_pathway_diagram(
         return (x, y)
 
     def _draw_arrow(start_xy, end_xy, style="activate"):
-        """Draw an arrow between layers."""
+        """Draw a context connector or an explicit arrow when evidence permits."""
+        if context_only:
+            ax.plot([start_xy[0], end_xy[0]], [start_xy[1], end_xy[1]],
+                    color="#64748b", lw=1.1, linestyle=(0, (3, 2)), zorder=1)
+            return
         color = COLORS["arrow_activate"] if style == "activate" else COLORS["arrow_inhibit"]
         linestyle = "-" if style == "activate" else "--"
         ax.annotate(
@@ -1508,7 +1508,7 @@ def generate_pathway_diagram(
     # ── Title ──
     ax.text(
         fig_width / 2, fig_height - 0.3,
-        f"Inferred Signaling Pathway",
+        "Contextual Signaling Map" if context_only else "Inferred Signaling Pathway",
         fontsize=12, fontweight="bold", color="#1f2937",
         ha="center", va="top",
     )
@@ -1516,11 +1516,12 @@ def generate_pathway_diagram(
     # ── Legend ──
     legend_y = 0.6
     legend_items = [
-        ("Activation (→)", COLORS["arrow_activate"], "-"),
-        ("Inhibition (⊣)", COLORS["arrow_inhibit"], "--"),
+        (("Context association (dashed)" if context_only else "Activation (→)"), COLORS["arrow_activate"], "--" if context_only else "-"),
         ("De novo substrate", COLORS["substrate_denovo"]["border"], "-"),
         ("Regulated substrate", COLORS["substrate_regulated"]["border"], "-"),
     ]
+    if not context_only:
+        legend_items.insert(1, ("Inhibition (⊣)", COLORS["arrow_inhibit"], "--"))
     if has_effectors:
         legend_items.append(("Effector ▲ up / ▼ down", COLORS["effector_up"]["border"], "-"))
 
@@ -1530,6 +1531,12 @@ def generate_pathway_diagram(
                 linewidth=2, linestyle=ls)
         ax.text(x_pos + 0.5, legend_y, label, fontsize=6.5, color="#4b5563",
                 ha="left", va="center")
+    if context_only:
+        ax.text(
+            fig_width / 2, 0.25,
+            "Connectors show shared pathway/literature context, not direct regulation, direction, or causality.",
+            fontsize=6.2, color="#64748b", ha="center", va="center",
+        )
 
     # ── Save ──
     output_path = Path(output_dir) / "pathway_diagram.png"

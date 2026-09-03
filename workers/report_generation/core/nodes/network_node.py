@@ -13,7 +13,7 @@ v6.0 — Add Signaling Cascade Diagram (Figure 2):
   - Draws cell cross-section with compartments: Extracellular → Membrane → Cytoplasm → Nucleus
   - Proteins placed by UniProt subcellular_location + GO Cellular Component + heuristic fallback
   - Color-coded by activation state (PTM Red/Blue, Non-PTM Green/Purple, Kinase Orange)
-  - Signal flow arrows connect proteins in canonical pathway progression order
+  - Dashed context connectors place proteins adjacent in canonical pathway templates
   - Focuses on top 5 pathways from Figure 1 (signed Direct NES)
   - Inserted as Figure 2 in generate_network_figure_section (between pathway graph and Cytoscape)
 
@@ -2832,8 +2832,8 @@ def generate_network_figure_section(
 
     # v8.5: Cascade Diagrams → Supplementary Figures
     _cascade_legend_text = (
-        "**Figure Legend:** This compartmentalized signaling cascade diagram depicts "
-        "the signal transduction flow across cellular compartments (Extracellular Space, "
+        "**Figure Legend:** This compartmentalized signaling context diagram places "
+        "pathway-linked observations across cellular compartments (Extracellular Space, "
         "Plasma Membrane, Cytoplasm, Nucleus) for the key signaling pathways identified "
         "through multi-factor analysis of the PTM data. Each horizontal lane represents "
         "a distinct signaling pathway, with proteins positioned in their annotated "
@@ -2845,8 +2845,8 @@ def generate_network_figure_section(
         "**purple circles** = downregulated Non-PTM interactors, "
         f"**orange diamonds** = {'E3 ligases' if ptm_type.lower().strip() in ('ubiquitylation', 'ubiquitination') else 'kinases'}. "
         "Node size is proportional to |Log2FC| magnitude. "
-        "Gray arrows indicate the canonical signal flow direction from upstream "
-        "receptors/adaptors to downstream effectors/transcription factors. "
+        "Gray dashed connectors indicate literature/pathway context only; they do not establish "
+        "Order-specific direction, direct regulation, kinase–site attribution, or causality. "
         "Fold-change values (Log2FC) are annotated above each node."
     )
 

@@ -80,8 +80,16 @@ Figures can strengthen interpretation only if their captions and writer context 
 |---|---|
 | activated/inhibited PTM | higher/lower measured PTM abundance unless an explicit functional-site sign is supplied |
 | signaling cascade / signal transduction flow | literature-context pathway map or compartmentalized biological context diagram |
-| gray arrows show canonical signal flow | arrows indicate literature/pathway context and do not establish the Order-specific direction or direct regulation |
+| gray arrows show canonical signal flow | dashed connectors indicate literature/pathway context only; they do not establish an Order-specific direction, direct regulation, or causality |
 | kinase–substrate interaction evidence | network/pathway annotation; direct kinase–site attribution is reported only from P2 R3 and remains no-call in the current Order |
+
+### Deterministic final rendering
+
+The final renderer must expose the following compact records even when an LLM omits them. First, the P0–P3 readiness note is inserted once after Results using only the existing aggregate evidence record; it never serializes full-ledger identities, candidate edges, accession, peptide, sequence, source PMID, or raw provenance values. Second, the selected P5 cards are rendered as a compact discovery table. A conventional card may show its observed profile, peak, measured magnitude, and available q-value context. A de novo card must show only detection pattern, confidence and the frozen confidence-weighted capped LOD-relative selection effect; it must never show a conventional or control-pseudocount log2FC.
+
+Figure 4 and all supplementary pathway/cascade diagrams are context-only by default. They use the title **Contextual Signaling Map** or **Compartmentalized Signaling Context Diagram** and dashed non-directional connectors. A directed figure edge can be enabled only if the compact direct-attribution status explicitly equals `perturbation_supported_direct_kinase_attribution`; legacy annotation, motif compatibility, pathway membership, RAG prose, receptor context and TMM candidate scores cannot enable it.
+
+The writer receives section-local literature subsets. Before final assembly, local `[N]` citations are converted to identity-based `PMID`, `DOI`, or normalized-title markers. The final renderer resolves those markers in first-appearance order and generates the bibliography from the same resolved records. A bare local numeric citation whose identity cannot be recovered is removed rather than being matched to an unrelated bibliography entry.
 
 ## 7. Claim ceiling: narrow, not silencing
 
@@ -102,6 +110,9 @@ The same Order may still state that its observed programme is consistent with, c
 4. When `R3=0`, direct kinase/site and causal edge claims are blocked, while pathway- and literature-grounded biological synthesis remains permitted.
 5. Figure context and caption prompts use measured-abundance and literature-context language, not generic signal-flow assertions.
 6. RAG query telemetry records system, pathway, candidate, and temporal query roles; direct-cascade retrieval is disabled when the current Order lacks its required evidence.
+7. The final Markdown/DOCX includes the P0–P3 aggregate readiness/no-call note and selected P5 discovery cards without raw full-ledger or de novo pseudo-log2FC leakage.
+8. A no-call Order renders Figure 4 and all supplementary cascade diagrams with dashed context-only connectors and no activation/inhibition arrow grammar.
+9. Every final bibliography entry corresponds to a resolved collection-local or PubMed reference identity; section-local numeric citations cannot point to a different paper after global assembly.
 
 ## 9. Methodological references
 
