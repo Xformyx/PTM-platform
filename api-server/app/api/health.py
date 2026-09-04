@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
 from app.core.database import get_db
+from app.core.git_date import format_git_date_kst
 from app.core.redis import get_redis
 from app.dependencies import get_current_user, require_role, require_sse_role
 
@@ -47,7 +48,7 @@ async def get_version() -> dict[str, str]:
             git_date = f.read().strip() or ""
     except FileNotFoundError:
         pass
-    return {"version": v, "git_hash": git_hash, "git_date": git_date}
+    return {"version": v, "git_hash": git_hash, "git_date": format_git_date_kst(git_date)}
 
 
 @router.get("/health/detailed")

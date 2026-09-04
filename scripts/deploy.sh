@@ -186,6 +186,6 @@ docker compose up -d "${RESTART_SERVICES[@]}"
 
 git rev-parse HEAD > "$LAST_DEPLOY_FILE"
 git rev-parse --short HEAD > "$REPO_ROOT/GIT_HASH" 2>/dev/null || true
-git log -1 --format="%ci" HEAD 2>/dev/null | sed 's/ +[0-9]*//' | tr -d '\n' > "$REPO_ROOT/GIT_DATE" || true
+git log -1 --format="%cI" HEAD 2>/dev/null | tr -d '\n' > "$REPO_ROOT/GIT_DATE" || true
 
 echo "Deploy complete. Version $NEW_VERSION is live."

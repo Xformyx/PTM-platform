@@ -241,24 +241,23 @@ function VersionDisplay({ collapsed }: { collapsed?: boolean }) {
 
   return (
     <div
-      className={cn(
-        "shrink-0 px-3 py-2 border-t",
-        collapsed ? "flex justify-center" : ""
-      )}
+      className="shrink-0 px-3 py-2.5 border-t flex flex-col items-center text-center"
       title={tooltip}
     >
       {collapsed ? (
-        <span className="text-[9px] text-muted-foreground font-mono">{hashPart || "—"}</span>
+        <span className="text-[11px] text-muted-foreground font-mono">{hashPart || "—"}</span>
       ) : (
-        <div className="space-y-0.5">
-          <div className="flex items-center gap-1.5">
-            <span className="text-[10px] text-muted-foreground font-mono">v{version}</span>
+        <div className="flex flex-col items-center gap-1">
+          <div className="flex items-center justify-center gap-1.5">
+            <span className="text-xs text-muted-foreground font-mono">v{version}</span>
             {hashPart && (
-              <span className="text-[9px] font-mono px-1 py-0.5 rounded bg-muted text-muted-foreground">{hashPart}</span>
+              <span className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+                {hashPart}
+              </span>
             )}
           </div>
           {gitDate && (
-            <div className="text-[9px] text-muted-foreground/60 font-mono">{gitDate}</div>
+            <div className="text-[11px] text-muted-foreground font-mono">{gitDate}</div>
           )}
         </div>
       )}
