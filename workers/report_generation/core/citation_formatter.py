@@ -302,9 +302,33 @@ class ReportPostProcessor:
         text = self._renumber_research_questions(text)
         text = self._ensure_section_order(text)
         text = self._ensure_conventional_log2fc_reporting_policy(text)
+        text = self._normalize_unpersisted_wave_tables(text)
         text = self._normalize_residual_claim_tone(text)
 
         return text
+
+    def _normalize_unpersisted_wave_tables(self, text: str) -> str:
+        """Replace unsupported per-Wave biological labels with a clear boundary."""
+        header = "| Temporal Cluster | Peak Time | Key Member(s) | Associated Biological Process |"
+        if header not in text:
+            return text
+        lines = text.splitlines()
+        normalized: list[str] = []
+        in_wave_table = False
+        for line in lines:
+            if line == header:
+                normalized.append("| Temporal Cluster | Peak Time | Key Member(s) | Membership interpretation boundary |")
+                in_wave_table = True
+                continue
+            if in_wave_table and line.startswith("|") and line.count("|") >= 5 and not set(line.replace("|", "").strip()) <= {"-", ":"}:
+                cells = line.split("|")
+                cells[-2] = " not assigned (no persisted per-Wave enrichment) "
+                normalized.append("|".join(cells))
+                continue
+            if in_wave_table and not line.startswith("|"):
+                in_wave_table = False
+            normalized.append(line)
+        return "\n".join(normalized)
 
     def _ensure_conventional_log2fc_reporting_policy(self, text: str) -> str:
         """Guarantee the measured-contrast versus inference boundary in Methods.
@@ -348,6 +372,9 @@ class ReportPostProcessor:
             (re.compile(r"\bmolecular switch (?:is|was) flipped\b", re.IGNORECASE), "pronounced measured contrast was observed"),
             (re.compile(r"\bpowerful,? rapid signal\b", re.IGNORECASE), "rapid measured contrast"),
             (re.compile(r"\bsubstantially increased\b", re.IGNORECASE), "higher measured abundance"),
+            (re.compile(r"\b(?:potent|robust|massive|strong) (?:activation|activity|signal(?:ing)?|response)\b", re.IGNORECASE), "measured contrast"),
+            (re.compile(r"\bPTM-driven hyperactivation\b", re.IGNORECASE), "PTM–protein decoupling pattern"),
+            (re.compile(r"\bcoupled activation\b", re.IGNORECASE), "coupled measured-abundance pattern"),
         ]
         normalized_sentences = []
         for sentence in sentence_splitter.split(text):
@@ -359,6 +386,42 @@ class ReportPostProcessor:
         text = re.sub(
             r"\bsignificant rewiring\b",
             "observed local co-membership reorganization",
+            text,
+            flags=re.IGNORECASE,
+        )
+        text = re.sub(
+            r"\b(?:extensive|substantial) rewiring of (?:the )?phosphoproteome\b",
+            "observed local co-membership changes",
+            text,
+            flags=re.IGNORECASE,
+        )
+        text = re.sub(
+            r"\bdirect evidence for (?:the )?dynamic assembly and disassembly of signaling modules\b",
+            "observed local co-membership transitions",
+            text,
+            flags=re.IGNORECASE,
+        )
+        text = re.sub(
+            r"\btransient signaling hubs\b",
+            "transient local membership patterns",
+            text,
+            flags=re.IGNORECASE,
+        )
+        text = re.sub(
+            r"\bstable core signaling modules\b",
+            "persistent local membership patterns",
+            text,
+            flags=re.IGNORECASE,
+        )
+        text = re.sub(
+            r"\bkinase switching\b",
+            "kinase-switching hypothesis",
+            text,
+            flags=re.IGNORECASE,
+        )
+        text = re.sub(
+            r"\bcausal propagation\b",
+            "causal-propagation hypothesis",
             text,
             flags=re.IGNORECASE,
         )

@@ -123,3 +123,27 @@ def test_final_renderer_processes_supplementary_before_appending_references():
     assert "## References" in final
     assert final.rfind("## References") > final.rfind("## Supplementary Figures")
     assert final.rstrip().endswith("https://pubmed.ncbi.nlm.nih.gov/12345/)")
+
+
+def test_final_renderer_marks_missing_traceable_bibliography_for_review():
+    result = format_citations({
+        "sections": {"title": "No literature", "results": "Observed trajectories."},
+        "network_analysis": {},
+        "signal_flow_figures": [],
+        "collected_references": [],
+    })
+    assert "## References" in result["final_report"]
+    assert "Citation completeness status: blocked for review" in result["final_report"]
+    assert result["citation_data"]["completion_status"] == "blocked_for_review_missing_traceable_references"
+
+
+def test_final_renderer_marks_missing_traceable_bibliography_for_review():
+    result = format_citations({
+        "sections": {"title": "No literature", "results": "Observed trajectories."},
+        "network_analysis": {},
+        "signal_flow_figures": [],
+        "collected_references": [],
+    })
+    assert "## References" in result["final_report"]
+    assert "Citation completeness status: blocked for review" in result["final_report"]
+    assert result["citation_data"]["completion_status"] == "blocked_for_review_missing_traceable_references"

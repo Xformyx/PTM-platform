@@ -1221,21 +1221,22 @@ def _generate_comovement_figures(
                 burst_clusters, timepoints, output_dir
             )
             if burst_fig_path:
-                n_sites = sum(c["member_count"] for c in burst_clusters)
+                burst_members = [member for cluster in burst_clusters for member in cluster["member_details"]]
+                n_sites = len(_conventional_members(burst_members))
+                denovo_count = len(burst_members) - n_sites
                 peak_tps = set(c["peak_timepoint"] for c in burst_clusters)
                 figures.append({
                     "path": burst_fig_path,
                     "caption": (
                         f"Transient {ptm_type} trajectory pattern. "
                         f"{len(burst_clusters)} temporally coordinated cluster(s) comprising "
-                        f"{n_sites} PTM sites showed an observed transient higher/lower measured PTM-abundance pattern. "
+                        f"{n_sites} conventional quantified PTM sites showed an observed transient higher/lower measured PTM-abundance pattern. "
                         f"Peak measured contrasts were observed at "
                         f"{', '.join(sorted(peak_tps))}. "
-                        f"(a) Individual PTM time-series profiles colored by activity class: "
-                        f"orange/★=De novo (newly induced), blue/●=Regulated (q<0.05, |FC|≥1), "
-                        f"green solid/◆=Minor (patterned). Cluster mean shown as bold line. "
-                        f"(b) Peak amplitude profiles ranked by intensity, colored by activity class. "
-                        f"(c) Cluster mean temporal envelope across sampled timepoints. "
+                        f"(a) Individual conventional PTM time-series profiles; cluster mean shown as bold line. "
+                        f"(b) Conventional peak contrasts ranked descriptively. "
+                        f"(c) Conventional cluster mean temporal envelope across sampled timepoints. "
+                        f"De novo rows (n={denovo_count}) are detection/LOD context and are not plotted or ranked on conventional Log2FC axes. "
                         f"Cluster membership does not assign function, common regulation, or causal order."
                     ),
                     "type": "transient_burst_composite",
@@ -1328,6 +1329,35 @@ def _generate_comovement_figures(
 # v8.4: NATURE-STYLE TRANSIENT BURST COMPOSITE FIGURE (Fig 1)
 # ═══════════════════════════════════════════════════════════════════════════
 
+def _is_denovo_member(member: dict) -> bool:
+    """Fail closed for Report numerical figures when a member is de novo.
+
+    Clustering may retain a pseudocount-derived trajectory internally. Report
+    figures must never represent that trajectory as conventional Log2FC, peak
+    amplitude, cluster mean, colour-scale input, or ranked magnitude.
+    """
+    return (
+        str(member.get("activity_class") or "").strip().lower() == "de_novo"
+        or bool(member.get("control_pseudocount_used"))
+    )
+
+
+def _conventional_members(members: list[dict]) -> list[dict]:
+    """Return only conventional quantified members for numerical figure axes."""
+    return [member for member in members if not _is_denovo_member(member)]
+
+
+def _conventional_mean_profile(members: list[dict], timepoints: list) -> np.ndarray | None:
+    """Compute a conventional-only mean without pseudo-log2FC leakage."""
+    conventional = _conventional_members(members)
+    if not conventional:
+        return None
+    values = np.array([
+        [member["temporal_values"].get(tp, 0) for tp in timepoints]
+        for member in conventional
+    ], dtype=float)
+    return np.mean(values, axis=0)
+
 # Nature-inspired color palette (colorblind-safe, high contrast)
 _NATURE_COLORS = [
     "#E64B35",  # Vermillion (Nature Red)
@@ -1408,6 +1438,25 @@ def _generate_transient_burst_figure(
     """
     if not burst_clusters:
         return None
+
+    original_members = [member for cluster in burst_clusters for member in cluster["member_details"]]
+    denovo_count = sum(1 for member in original_members if _is_denovo_member(member))
+    display_clusters = []
+    for cluster in burst_clusters:
+        conventional = _conventional_members(cluster["member_details"])
+        if not conventional:
+            continue
+        display_cluster = dict(cluster)
+        display_cluster["member_details"] = conventional
+        mean_profile = _conventional_mean_profile(conventional, timepoints)
+        display_cluster["mean_profile"] = {
+            tp: float(mean_profile[index]) for index, tp in enumerate(timepoints)
+        }
+        display_clusters.append(display_cluster)
+    if not display_clusters:
+        logger.info("[COMOVEMENT] Skipping transient composite: all members are de novo detection-context rows")
+        return None
+    burst_clusters = display_clusters
 
     # ── Collect all members across burst clusters ──
     all_members = []  # (member_detail, cluster_idx, cluster_id)
@@ -1567,15 +1616,15 @@ def _generate_transient_burst_figure(
     ax_a.set_xticks(x)
     ax_a.set_xticklabels(timepoints, rotation=0)
     ax_a.set_xlabel("Time point")
-    ax_a.set_ylabel("PTM Log\u2082FC")
+    ax_a.set_ylabel("Conventional PTM Log\u2082FC")
     ax_a.spines["top"].set_visible(False)
     ax_a.spines["right"].set_visible(False)
     ax_a.grid(axis="y", alpha=0.15, linewidth=0.3)
 
-    # v9.28: Build legend with activity class section headers
-    # First: class legend icons (De novo ★, Regulated ●, Minor ◆)
+    # Numerical axes show conventional quantified rows only. De novo is a
+    # detection/LOD context and is not represented by a numerical trace.
     class_handles = []
-    for cls_key, cls_label in [("de_novo", "De novo"), ("regulated", "Regulated"), ("minor", "Minor")]:
+    for cls_key, cls_label in [("regulated", "Regulated"), ("minor", "Minor")]:
         cls_palette = _ACTIVITY_CLASS_COLORS[cls_key]
         cls_marker = _ACTIVITY_CLASS_MARKERS[cls_key]
         cls_ls = _ACTIVITY_CLASS_LINESTYLE[cls_key]
@@ -1584,6 +1633,11 @@ def _generate_transient_burst_figure(
             [0], [0], marker=cls_marker, markersize=7 if cls_key == "de_novo" else 5,
             color=cls_palette[0], linewidth=cls_lw, linestyle=cls_ls,
             label=cls_label, markerfacecolor=cls_palette[0],
+        ))
+    if denovo_count:
+        class_handles.append(Line2D(
+            [0], [0], linewidth=0,
+            label=f"De novo (n={denovo_count}): detection/LOD context; not plotted on Log\u2082FC axes",
         ))
     # Then: cluster mean handles
     for ci, cluster in enumerate(burst_clusters):
@@ -1618,7 +1672,8 @@ def _generate_transient_burst_figure(
     # ══════════════════════════════════════════════════════════════════════
     # Panel (b): Peak Amplitude — smooth Gaussian curves (no fill)
     # ══════════════════════════════════════════════════════════════════════
-    # Sort all members by peak |Log2FC| descending
+    # `all_members` contains only conventional quantified rows after the
+    # display-cluster reconstruction above; de novo rows cannot be ranked.
     sorted_members = sorted(all_members, key=lambda m: m[0]["max_fc"], reverse=True)
     top_n = min(15, len(sorted_members))
     top_members = sorted_members[:top_n]
@@ -1656,8 +1711,8 @@ def _generate_transient_burst_figure(
 
     ax_b.set_xlim(0, top_n + 1)
     ax_b.set_ylim(0, None)
-    ax_b.set_xlabel("PTM Sites (ranked by amplitude)")
-    ax_b.set_ylabel("Peak |Log\u2082FC|")
+    ax_b.set_xlabel("Conventional PTM sites (ranked by measured contrast)")
+    ax_b.set_ylabel("Peak |conventional Log\u2082FC|")
     ax_b.set_xticks([])
     ax_b.spines["top"].set_visible(False)
     ax_b.spines["right"].set_visible(False)
@@ -1684,14 +1739,14 @@ def _generate_transient_burst_figure(
                     ax_c.plot(
                         x_smooth, spl_c(x_smooth), linewidth=1.8,
                         color=color, alpha=0.9,
-                        label=f"C{cluster['cluster_id']} ({cluster['member_count']} sites)",
+                        label=f"C{cluster['cluster_id']} ({len(members)} conventional sites)",
                     )
                 except Exception:
                     ax_c.plot(x, mean_vals, linewidth=1.8, color=color, alpha=0.9,
-                              label=f"C{cluster['cluster_id']} ({cluster['member_count']} sites)")
+                              label=f"C{cluster['cluster_id']} ({len(members)} conventional sites)")
             else:
                 ax_c.plot(x, mean_vals, linewidth=1.8, color=color, alpha=0.9,
-                          label=f"C{cluster['cluster_id']} ({cluster['member_count']} sites)")
+                          label=f"C{cluster['cluster_id']} ({len(members)} conventional sites)")
             ax_c.scatter(x, mean_vals, s=18, color=color, alpha=0.9, zorder=5, edgecolors="white", linewidths=0.3)
 
             # Envelope — smooth
@@ -1728,6 +1783,13 @@ def _generate_transient_burst_figure(
             fontsize=14, fontweight="bold", va="bottom", ha="right",
         )
 
+    fig.text(
+        0.02, 0.01,
+        f"Conventional quantified PTM rows only (n={len(all_members)}). "
+        f"De novo rows (n={denovo_count}) are detection/LOD context and are not plotted or ranked on Log\u2082FC axes.",
+        fontsize=6.5, color="#4b5563",
+    )
+
     # ── Save ──
     path = os.path.join(output_dir, "fig1_transient_burst.png")
     fig.savefig(path, dpi=300, bbox_inches="tight", facecolor="white", pad_inches=0.3)
@@ -1759,6 +1821,8 @@ def _generate_summary_heatmap(
     for cluster in clusters:
         start = len(ordered_indices)
         for md in cluster["member_details"]:
+            if _is_denovo_member(md):
+                continue
             idx = key_to_idx.get(md["key"])
             if idx is not None:
                 ordered_indices.append(idx)
@@ -1770,6 +1834,8 @@ def _generate_summary_heatmap(
     # Add singletons
     singleton_start = len(ordered_indices)
     for s in singletons:
+        if _is_denovo_member(s):
+            continue
         idx = key_to_idx.get(s["key"])
         if idx is not None:
             ordered_indices.append(idx)
@@ -1812,7 +1878,7 @@ def _generate_summary_heatmap(
     )
 
     ax_heatmap.set_title(
-        "Temporal PTM Coordination Analysis",
+        "Temporal PTM Trajectory Clustering (conventional quantified rows)",
         fontsize=13, fontweight="normal", pad=12
     )
 
@@ -1835,7 +1901,7 @@ def _generate_summary_heatmap(
         )
 
     # Colorbar
-    plt.colorbar(im, cax=ax_cbar, label="Log2FC")
+    plt.colorbar(im, cax=ax_cbar, label="Conventional Log2FC")
 
     # v9.28: Activity class sidebar (De novo=orange, Regulated=blue, Minor=green)
     _AC_SIDEBAR_COLORS = {
@@ -1871,7 +1937,15 @@ def _generate_cluster_lineplot(
     cluster: dict, timepoints: list, output_dir: str
 ) -> Optional[str]:
     """Generate a detailed line plot for a single cluster."""
-    members = cluster["member_details"]
+    original_members = cluster["member_details"]
+    members = _conventional_members(original_members)
+    denovo_count = len(original_members) - len(members)
+    if not members:
+        logger.info(
+            "[COMOVEMENT] Skipping numerical cluster plot %s: all members are de novo detection-context rows",
+            cluster.get("cluster_id", "?"),
+        )
+        return None
     nonptm_links = cluster.get("nonptm_links", [])
     has_nonptm = len(nonptm_links) > 0
 
@@ -1932,8 +2006,8 @@ def _generate_cluster_lineplot(
                            zorder=zo + 1, edgecolors="white", linewidths=0.3,
                            marker=marker)
 
-    # Cluster mean (thick dashed, smooth)
-    mean_vals = np.array([cluster["mean_profile"].get(tp, 0) for tp in timepoints], dtype=float)
+    # Conventional-only cluster mean, never a pseudocount-derived mean.
+    mean_vals = _conventional_mean_profile(members, timepoints)
     if len(x_arr) >= 4:
         try:
             spl_mean = make_interp_spline(x_arr, mean_vals, k=3)
@@ -1949,7 +2023,7 @@ def _generate_cluster_lineplot(
                    edgecolors="white", linewidths=0.3)
 
     ax_ptm.axhline(y=0, color="gray", linewidth=0.5, linestyle=":")
-    ax_ptm.set_ylabel("PTM Log2FC", fontsize=11)
+    ax_ptm.set_ylabel("Conventional PTM Log2FC", fontsize=11)
     ax_ptm.grid(True, alpha=0.2)
 
     # v9.28: Legend with activity class section headers
@@ -1979,15 +2053,13 @@ def _generate_cluster_lineplot(
                   bbox_to_anchor=(1.01, 1.0), ncol=1, framealpha=0.95,
                   borderaxespad=0)
 
-    # Title with biological annotation
-    ann = cluster.get("annotations", {})
-    bio_summary = ann.get("biological_summary", "")
+    # Title intentionally omits unpersisted per-cluster biological annotation.
     pattern_label = _pattern_display_name(cluster["pattern"])
     # v9.28: Include activity class composition in title
     ac_counts = cluster.get("activity_class_counts", {})
     ac_parts = []
-    if ac_counts.get("de_novo", 0) > 0:
-        ac_parts.append(f"★{ac_counts['de_novo']} De novo")
+    if denovo_count > 0:
+        ac_parts.append(f"{denovo_count} De novo (detection/LOD context; not plotted)")
     if ac_counts.get("regulated", 0) > 0:
         ac_parts.append(f"●{ac_counts['regulated']} Regulated")
     if ac_counts.get("minor", 0) > 0:
@@ -1995,14 +2067,12 @@ def _generate_cluster_lineplot(
     ac_str = " | ".join(ac_parts) if ac_parts else ""
     title = (
         f"Cluster {cluster['cluster_id']}: {pattern_label}\n"
-        f"{cluster['member_count']} PTM sites | "
+        f"{len(members)} conventional PTM sites | "
         f"Mean correlation: {cluster['correlation_mean']:.2f} | "
         f"Peak: {cluster['peak_timepoint']}"
     )
     if ac_str:
         title += f"\n{ac_str}"
-    if bio_summary:
-        title += f"\n{bio_summary}"
     ax_ptm.set_title(title, fontsize=10, fontweight="normal", loc="left", pad=8)
 
     # ── Non-PTM interactor lines (smooth spline, distinct colors) ──
@@ -2088,14 +2158,14 @@ def _pattern_display_name(pattern: str, ptm_type: str = "phosphorylation") -> st
         "suppression": f"Transient De-{ptm_type.lower()}",
     })
     base = {
-        "co_activated": "Co-activated",
-        "co_inhibited": "Co-inhibited",
-        "transient_burst": labels["burst"],
-        "transient_suppression": labels["suppression"],
-        "sustained_activation": "Sustained Activation",
-        "sustained_inhibition": "Sustained Inhibition",
-        "biphasic_switch": "Biphasic Switch",
-        "sequential_wave": "Sequential Signaling Wave",
+        "co_activated": "Co-higher measured PTM profile",
+        "co_inhibited": "Co-lower measured PTM profile",
+        "transient_burst": f"Transient higher measured {ptm_type} profile",
+        "transient_suppression": f"Transient lower measured {ptm_type} profile",
+        "sustained_activation": "Sustained higher measured PTM profile",
+        "sustained_inhibition": "Sustained lower measured PTM profile",
+        "biphasic_switch": "Biphasic measured-contrast profile",
+        "sequential_wave": "Sequential sampled-timepoint profile",
         "mixed_response": "Mixed Response",
     }
     return base.get(pattern, pattern.replace("_", " ").title())

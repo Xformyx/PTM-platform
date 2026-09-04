@@ -10,7 +10,11 @@ from report_generation.core.citation_formatter import ReportPostProcessor
 from report_generation.core.nodes.kinase_annotation_node import _direct_attribution_figure_allowed
 from report_generation.core.nodes.question_generator import _get_co_scientist_questions
 from report_generation.core.nodes.signal_flow_figure import generate_context_aware_ptm_heatmap, generate_pathway_diagram
-from report_generation.core.nodes.temporal_comovement_node import _append_cluster_detail
+from report_generation.core.nodes.temporal_comovement_node import (
+    _append_cluster_detail,
+    _conventional_members,
+    _generate_transient_burst_figure,
+)
 from report_generation.core.nodes.writer_node import _stabilize_section_citations
 
 
@@ -94,6 +98,12 @@ def test_p5_report_renderer_keeps_denovo_detection_context_without_pseudo_log2fc
     assert "cap=4.0" in rendered
     assert "99.0" not in rendered
     assert "not a confirmed novel substrate" in rendered
+
+
+def test_p5_report_renderer_exposes_explicit_unavailable_state():
+    rendered = format_candidate_discovery_packet_for_report({})
+    assert "P5 availability: not available" in rendered
+    assert "No direct kinase target" in rendered
 
 
 def test_citation_renderer_resolves_stable_markers_and_drops_ambiguous_raw_numbers():
@@ -206,7 +216,9 @@ def test_chromadb_bundle_label_without_bibliographic_metadata_is_not_rendered_as
     })
     report = final["final_report"]
     assert "All PTM Articles" not in report
-    assert "## References" not in report
+    assert "## References" in report
+    assert "blocked for review" in report
+    assert final["citation_data"]["completion_status"] == "blocked_for_review_missing_traceable_references"
 
 
 def test_postprocessor_removes_orphan_spacing_after_unresolved_citation_drop():
@@ -233,6 +245,35 @@ def test_postprocessor_lowers_numeric_contrast_and_no_null_overclaim_tone():
     assert "pronounced measured contrast" in processed
     assert "observed local co-membership reorganization" in processed
     assert "MAPK/SRC-associated pathway context" in processed
+
+
+def test_postprocessor_lowers_residual_conventional_contrast_and_local_membership_overclaim():
+    text = (
+        "## Results\n\n"
+        "Log2FC 28.97 confirms potent activation and PTM-driven hyperactivation. "
+        "This is direct evidence for the dynamic assembly and disassembly of signaling modules. "
+        "The transient signaling hubs show extensive rewiring of the phosphoproteome and kinase switching."
+    )
+    processed = ReportPostProcessor().process(text)
+    assert "potent activation" not in processed
+    assert "PTM-driven hyperactivation" not in processed
+    assert "direct evidence for the dynamic assembly" not in processed
+    assert "transient signaling hubs" not in processed
+    assert "extensive rewiring" not in processed
+    assert "kinase switching" not in processed
+    assert "measured contrast" in processed
+    assert "observed local co-membership" in processed
+
+
+def test_postprocessor_removes_unpersisted_per_wave_biological_process_column():
+    text = (
+        "| Temporal Cluster | Peak Time | Key Member(s) | Associated Biological Process |\n"
+        "|---|---|---|---|\n"
+        "| Cluster 1 | 5 min | SITE1 | Proximal signaling |\n"
+    )
+    processed = ReportPostProcessor().process(text)
+    assert "Associated Biological Process" not in processed
+    assert "no persisted per-Wave enrichment" in processed
 
 
 def test_co_scientist_questions_do_not_presume_kinase_activation_or_wave_function():
@@ -282,6 +323,29 @@ def test_cluster_detail_excludes_unpersisted_per_wave_functional_annotations():
     assert "Metabolic pathway module" not in rendered
     assert "Per-Gene Pathway Mapping" not in rendered
     assert "Shared Pathways Explaining Temporal Coordination" not in rendered
+
+
+def test_transient_composite_excludes_extreme_denovo_pseudocount_from_numerical_display(tmp_path):
+    members = [
+        {
+            "key": "DENOVO_S7", "activity_class": "de_novo", "control_pseudocount_used": True,
+            "max_fc": 99.0, "temporal_values": {"0min": 99.0, "15min": 99.0},
+        },
+        {
+            "key": "CONVENTIONAL_S8", "activity_class": "regulated", "max_fc": 1.2,
+            "temporal_values": {"0min": 0.0, "15min": 1.2},
+        },
+    ]
+    assert [member["key"] for member in _conventional_members(members)] == ["CONVENTIONAL_S8"]
+    path = _generate_transient_burst_figure(
+        [{
+            "cluster_id": "TW-01", "member_count": 2, "member_details": members,
+            "mean_profile": {"0min": 49.5, "15min": 50.1},
+        }],
+        ["0min", "15min"], str(tmp_path),
+    )
+    assert path is not None
+    assert (tmp_path / "fig1_transient_burst.png").exists()
 
 
 def test_dense_context_heatmap_renders_with_adaptive_text_thinning(tmp_path):

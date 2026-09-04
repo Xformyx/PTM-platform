@@ -649,7 +649,17 @@ def format_candidate_discovery_packet_for_report(
         if isinstance(card, Mapping)
     ][:max(1, int(max_cards))]
     if not cards:
-        return ""
+        availability = "not available"
+        reason = "no candidate-discovery packet was serialized for this Order"
+        if discovery:
+            availability = "available; no cards selected"
+            reason = "the deterministic quota and evidence gates selected no candidate card"
+        return "\n".join([
+            "### Data-prioritized candidate discoveries",
+            "",
+            f"**P5 availability: {availability}.** {reason}.",
+            "No direct kinase target, causal path, or perturbation conclusion is implied by this absence state.",
+        ])
 
     summary = dict(discovery.get("selection_summary") or {})
     selected_by_quota = dict(summary.get("selected_by_quota") or {})

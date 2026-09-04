@@ -1419,10 +1419,11 @@ def generate_pathway_diagram(
         for i, k in enumerate(all_kinases):
             x = start_x + i * spacing
             direction = kinase_direction.get(k.upper(), "mixed")
-            color_key = f"kinase_{direction}"
+            # A signed substrate footprint is candidate context, not a direct
+            # catalytic activity call. Keep context-map kinase nodes neutral.
+            color_key = "kinase_mixed"
             name = k if len(k) <= 10 else k[:8] + "…"
-            direction_symbol = "↑" if direction == "up" else ("↓" if direction == "down" else "")
-            pos = _draw_node(x, current_y, 1.8, 0.6, f"{name}{direction_symbol}", "", COLORS[color_key])
+            pos = _draw_node(x, current_y, 1.8, 0.6, name, "candidate context", COLORS[color_key])
             kinase_positions.append((pos, direction))
     layer_y_positions.append(current_y)
     current_y -= 2.0

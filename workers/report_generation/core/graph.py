@@ -314,11 +314,11 @@ def _build_comovement_figure_section(comovement_figures: list, network_analysis:
     # ── Main Figures Section ──
     main_section = "\n## Temporal PTM Coordination Analysis\n\n"
     main_section += (
-        "The following figures show the results of temporal substrate coordination analysis. "
-        "PTM sites with correlated temporal dynamics were grouped into clusters using "
-        "hierarchical clustering of their Log2FC time-series profiles. "
-        "Temporally coordinated PTMs within the same cluster suggest coordinated regulation, "
-        f"potentially sharing upstream {'E3 ligases' if ptm_type.lower().strip() in ('ubiquitylation', 'ubiquitination') else 'kinases'} or participating in the same signaling cascade.\n\n"
+        "The following figures show observed temporal trajectory clustering. Conventional quantified PTM sites "
+        "were grouped by similarity of their sampled-timepoint profiles using hierarchical clustering. "
+        "Cluster membership is descriptive only and does not assign common regulation, upstream "
+        f"{'E3-ligase' if ptm_type.lower().strip() in ('ubiquitylation', 'ubiquitination') else 'kinase'} control, "
+        "pathway function, signaling-cascade position, or causality.\n\n"
     )
 
     fig_num = 2  # Fig 1 is Canonical Pathway from network_node
@@ -331,12 +331,12 @@ def _build_comovement_figure_section(comovement_figures: list, network_analysis:
             main_section += f"### Figure {fig_num}. {cf_caption}\n\n"
             main_section += f"![{cf_caption}]({img_ref})\n\n"
             main_section += (
-                f"**Legend:** Composite figure of transient {ptm_type} burst clusters. "
-                "**(a)** Individual PTM time-series profiles colored by cluster membership; "
-                "bold lines indicate cluster means with shaded min-max envelopes. "
-                "**(b)** Peak amplitude profiles showing Log\u2082FC magnitude ranked by intensity. "
-                "**(c)** Cluster mean temporal envelopes showing activation-recovery kinetics. "
-                "Color palette: colorblind-safe scheme.\n\n"
+                f"**Legend:** Composite figure of transient {ptm_type} trajectory clusters. "
+                "**(a)** Conventional quantified PTM time-series profiles; bold lines indicate conventional-only "
+                "cluster means with shaded ranges. **(b)** Conventional peak contrasts ranked descriptively. "
+                "**(c)** Conventional cluster mean envelopes across sampled timepoints. De novo observations are "
+                "detection/LOD context and are not plotted or ranked on conventional Log2FC axes. "
+                "Cluster membership does not assign function, common regulation, cascade position, or causality.\n\n"
             )
             main_section += "---\n\n"
             fig_num += 1
@@ -351,9 +351,10 @@ def _build_comovement_figure_section(comovement_figures: list, network_analysis:
             main_section += f"### Figure {fig_num}. {cf_caption}\n\n"
             main_section += f"![{cf_caption}]({img_ref})\n\n"
             main_section += (
-                "**Legend:** Temporal Log\u2082FC profiles of cluster members. "
-                "Solid lines = PTM proteins; dashed lines = linked Non-PTM interactors. "
-                "Shaded area = cluster envelope (min-max range).\n\n"
+                "**Legend:** Temporal Log₂FC profiles of cluster members. "
+                "Only conventional quantified PTM rows are displayed on the numerical axis; de novo observations "
+                "remain detection/LOD context. Solid lines = PTM proteins; dashed lines = linked Non-PTM interactors. "
+                "Cluster membership does not assign function, common regulation, or causal order.\n\n"
             )
             main_section += "---\n\n"
             fig_num += 1
@@ -371,8 +372,9 @@ def _build_comovement_figure_section(comovement_figures: list, network_analysis:
             supp_items.append((
                 cf_caption, img_ref,
                 "**Legend:** Hierarchical clustering heatmap of PTM temporal profiles. "
-                "Rows = PTM sites, columns = time points. Color intensity reflects Log2FC magnitude. "
-                "Cluster color bars on left sidebar indicate membership."
+                "Rows = conventional quantified PTM sites, columns = time points. Color intensity reflects conventional "
+                "Log2FC magnitude. De novo detection/LOD rows are omitted from the numerical colour scale. "
+                "Cluster color bars on left sidebar indicate descriptive membership only."
             ))
 
     # Supplementary: Additional cluster plots
@@ -382,9 +384,10 @@ def _build_comovement_figure_section(comovement_figures: list, network_analysis:
         if img_ref:
             supp_items.append((
                 cf_caption, img_ref,
-                "**Legend:** Temporal Log\u2082FC profiles of cluster members. "
-                "Solid lines = PTM proteins; dashed lines = linked Non-PTM interactors. "
-                "Shaded area = cluster envelope (min-max range)."
+                "**Legend:** Temporal Log₂FC profiles of cluster members. "
+                "Only conventional quantified PTM rows are displayed on the numerical axis; de novo observations "
+                "remain detection/LOD context. Solid lines = PTM proteins; dashed lines = linked Non-PTM interactors. "
+                "Cluster membership does not assign function, common regulation, or causal order."
             ))
 
     return main_section, supp_items, fig_num
@@ -867,7 +870,16 @@ def format_citations(state: ReportState) -> dict:
             line += " " + " | ".join(links)
         ref_lines.append(line)
 
-    reference_section = "\n".join(ref_lines) if resolved_refs else ""
+    citation_completion_status = "complete" if resolved_refs else "blocked_for_review_missing_traceable_references"
+    if resolved_refs:
+        reference_section = "\n".join(ref_lines)
+    else:
+        reference_section = (
+            "## References\n\n"
+            "**Citation completeness status: blocked for review.** No traceable collection-local or PubMed "
+            "reference was resolved for this Report. Literature comparison and external biological background "
+            "must be treated as unavailable until traceable reference metadata is supplied."
+        )
     logger.info(f"[FORMAT-CIT] Built resolved reference section with {len(resolved_refs)} entries")
 
     # v8.7: Append ALL supplementary figures at the very end
@@ -926,6 +938,7 @@ def format_citations(state: ReportState) -> dict:
         "citation_data": {
             "total_references": len(resolved_refs),
             "reference_section": reference_section,
+            "completion_status": citation_completion_status,
         },
     }
 

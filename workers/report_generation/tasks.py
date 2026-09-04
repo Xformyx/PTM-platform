@@ -945,6 +945,8 @@ def run_report_generation(self, order_id: int, config: dict):
         }
         temporal_fidelity = final_state.get("temporal_report_fidelity") or {}
         temporal_packet = final_state.get("temporal_report_evidence_packet") or {}
+        citation_data = final_state.get("citation_data") or {}
+        citation_completion_status = citation_data.get("completion_status", "unavailable")
         temporal_review_sections = [
             section for section, audit in temporal_fidelity.items()
             if isinstance(audit, dict) and audit.get("status") == "review_required"
@@ -990,6 +992,15 @@ def run_report_generation(self, order_id: int, config: dict):
             "packet_snapshot": temporal_packet.get("snapshot_path"),
             "fidelity_snapshot": final_state.get("temporal_report_fidelity_snapshot"),
         }
+        progress_metadata["citation_completeness"] = {
+            "status": citation_completion_status,
+            "total_references": citation_data.get("total_references", 0),
+            "release_status": (
+                "blocked_for_review"
+                if citation_completion_status == "blocked_for_review_missing_traceable_references"
+                else "release_candidate"
+            ),
+        }
         if fallback_sections:
             progress_metadata["llm_fallback_sections"] = fallback_sections
             progress_metadata["llm_fallback_warning"] = fallback_warning
@@ -1010,6 +1021,7 @@ def run_report_generation(self, order_id: int, config: dict):
             result_data["llm_fallback_sections"] = fallback_sections
             result_data["llm_fallback_warning"] = fallback_warning
         result_data["temporal_evidence"] = progress_metadata["temporal_evidence"]
+        result_data["citation_completeness"] = progress_metadata["citation_completeness"]
 
         # Persist external Co-Scientist packet telemetry for Order UI / operators.
         try:
@@ -1040,17 +1052,30 @@ def run_report_generation(self, order_id: int, config: dict):
         elif temporal_llm_draft_review_sections or temporal_llm_draft_untraced_sections:
             repaired_sections = temporal_llm_draft_review_sections + temporal_llm_draft_untraced_sections
             completion_detail += f"; deterministic temporal evidence addendum applied: {', '.join(repaired_sections)}"
-        if llm_failed:
+        if citation_completion_status == "blocked_for_review_missing_traceable_references":
+            completion_detail += "; citation completeness blocked for review (no traceable references)"
+        if llm_failed or citation_completion_status == "blocked_for_review_missing_traceable_references":
             update_order_status(
                 order_id, "completed", progress_pct=100, result_files=result_data,
-                error_message=fallback_warning,
+                error_message=(
+                    fallback_warning
+                    if llm_failed
+                    else "Citation completeness blocked for review: no traceable references were resolved."
+                ),
                 current_stage="completed",
                 stage_detail=completion_detail,
             )
-            notify_order_status(order_id, "completed", fallback_warning)
+            notify_order_status(
+                order_id,
+                "completed",
+                fallback_warning
+                if llm_failed
+                else "Report completed with citation-completeness warning.",
+            )
             logger.warning(
                 f"[Order {order_id}] Report completed WITH WARNINGS in {elapsed}s — "
-                f"LLM fallback used for {len(core_fallbacks)} core sections"
+                f"LLM fallback used for {len(core_fallbacks)} core sections; "
+                f"citation_status={citation_completion_status}"
             )
         else:
             update_order_status(
