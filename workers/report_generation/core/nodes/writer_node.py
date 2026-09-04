@@ -17,6 +17,7 @@ from typing import Dict, List
 from common.llm_client import LLMClient
 from common.report_postprocessor import validate_llm_output_against_data, postprocess_log2fc_formatting
 from common.ptm_vocabulary import get_vocabulary, get_system_prompt_for_ptm, build_vocabulary_prompt_block, get_normalized_ptm_type
+from ptm_shared.de_novo_representation import is_de_novo_representation
 from report_generation.core.rag_retriever import RAGRetriever
 from report_generation.core.dynamic_prompt_generator import (
     build_anti_hallucination_directive,
@@ -464,77 +465,89 @@ def run_section_writing(state: dict) -> dict:
         )
         aux_linkage_context = "\n".join(linkage_lines)
 
-    # v10.1: Build full vector plot context for LLM (all PTM + Non-PTM FC values)
+    # v10.1/v13.2: Build conventional quantitative vector context for the LLM.
+    # Pseudocount/de novo rows remain observable through their detection/LOD and
+    # P5 packet, but their pseudo-Log2FC must never drive a generic vector rank.
     aux_vector_plot_full = ""
     aux_vector_plot_compressed = ""
     if vector_plot_raw_data:
+        def _finite_value(value):
+            try:
+                parsed = float(value)
+            except (TypeError, ValueError):
+                return None
+            return parsed if parsed == parsed and abs(parsed) != float("inf") else None
+
+        def _vector_sort_key(row):
+            if is_de_novo_representation(row):
+                return (1, 0.0, str(row.get("gene") or ""), str(row.get("position") or ""))
+            value = _finite_value(row.get("ptm_relative_log2fc"))
+            return (0, -(abs(value) if value is not None else 0.0), str(row.get("gene") or ""), str(row.get("position") or ""))
+
+        def _vector_ptm_display(row):
+            if is_de_novo_representation(row):
+                return "NA — de novo detection/LOD context"
+            value = _finite_value(row.get("ptm_relative_log2fc"))
+            return f"{value:+.3f}" if value is not None else "NA"
+
+        denovo_row_count = sum(1 for row in vector_plot_raw_data if is_de_novo_representation(row))
+        conventional_rows = [row for row in vector_plot_raw_data if not is_de_novo_representation(row)]
         vp_lines = [
-            "=== FULL VECTOR PLOT DATA (All PTM sites + Non-PTM protein abundance) ===",
-            "This table contains the complete quantitative data for ALL measured PTM sites and proteins.",
-            "Use this data to answer specific questions about individual proteins or PTM sites.",
+            "=== FULL VECTOR PLOT DATA (Conventional PTM contrast + Non-PTM protein abundance) ===",
+            "This table contains conventional quantitative PTM contrasts and Non-PTM protein abundance for measured rows.",
+            f"Detection/LOD-only de novo rows={denovo_row_count}; pseudo-Log2FC is not supplied and those rows are not ranked here.",
+            "Use numerical contrast as a descriptive observation only, never as a biological-priority ranking; use the P5 packet for candidate priority.",
             "",
             "| Gene | Position | Condition | PTM_Relative_Log2FC | Protein_Log2FC |",
             "|------|----------|-----------|---------------------|----------------|",
         ]
-        # Sort by absolute PTM FC for relevance, include all
-        sorted_vp = sorted(
-            vector_plot_raw_data,
-            key=lambda x: abs(float(x.get("ptm_relative_log2fc", 0) or 0)),
-            reverse=True
-        )
-        for row in sorted_vp:
+        for row in sorted(vector_plot_raw_data, key=_vector_sort_key):
             gene = row.get("gene", "")
             pos = row.get("position", "")
             cond = row.get("condition", "")
-            ptm_fc = row.get("ptm_relative_log2fc", "")
-            prot_fc = row.get("protein_log2fc", "")
-            ptm_fc_str = f"{float(ptm_fc):+.3f}" if ptm_fc not in (None, "", "NA") else "NA"
-            prot_fc_str = f"{float(prot_fc):+.3f}" if prot_fc not in (None, "", "NA") else "NA"
-            vp_lines.append(f"| {gene} | {pos} | {cond} | {ptm_fc_str} | {prot_fc_str} |")
+            prot_fc_value = _finite_value(row.get("protein_log2fc", ""))
+            prot_fc_str = f"{prot_fc_value:+.3f}" if prot_fc_value is not None else "NA"
+            vp_lines.append(f"| {gene} | {pos} | {cond} | {_vector_ptm_display(row)} | {prot_fc_str} |")
         vp_lines.append("")
         vp_lines.append("=== END FULL VECTOR PLOT DATA ===")
         aux_vector_plot_full = "\n".join(vp_lines)
-        logger.info(f"[v10.1] Built full vector plot context: {len(vector_plot_raw_data)} rows, {len(aux_vector_plot_full):,} chars")
+        logger.info(f"[v10.1] Built de-novo-safe full vector context: {len(vector_plot_raw_data)} rows, {len(aux_vector_plot_full):,} chars")
 
-        # v12.0: Also build a compressed version (top 200 sites + per-condition stats)
-        # Used as fallback when budget is insufficient for full data
+        # Compressed fallback deliberately excludes de novo pseudo-Log2FC from
+        # per-condition statistics and magnitude ordering. P5 preserves eligible
+        # de novo candidates separately with frozen capped ranking evidence.
         import collections as _coll
-        sorted_vp_all = sorted(
-            vector_plot_raw_data,
-            key=lambda x: abs(float(x.get("ptm_relative_log2fc", 0) or 0)),
-            reverse=True
-        )
-        # Per-condition statistics
+        sorted_vp_all = sorted(conventional_rows, key=_vector_sort_key)
         cond_stats: dict[str, list[float]] = _coll.defaultdict(list)
-        for row in vector_plot_raw_data:
-            fc = row.get("ptm_relative_log2fc", 0)
-            try:
-                cond_stats[row.get("condition", "")].append(float(fc or 0))
-            except (ValueError, TypeError):
-                pass
-        stat_lines = ["=== VECTOR PLOT COMPRESSED (top 200 PTMs + per-condition statistics) ===", ""]
-        stat_lines.append("Per-condition summary:")
+        for row in conventional_rows:
+            fc = _finite_value(row.get("ptm_relative_log2fc"))
+            if fc is not None:
+                cond_stats[row.get("condition", "")].append(fc)
+        stat_lines = ["=== VECTOR PLOT COMPRESSED (top 200 conventional PTMs + per-condition statistics) ===", ""]
+        stat_lines.append(
+            f"De novo detection/LOD-only rows={denovo_row_count}; excluded from Log2FC statistics and magnitude ranking. "
+            "See the P5 packet for capped confidence-weighted de novo evidence."
+        )
+        stat_lines.append("Per-condition conventional-quantification summary:")
         for cond_name, fcs in sorted(cond_stats.items()):
             up = sum(1 for f in fcs if f > 0.5)
             dn = sum(1 for f in fcs if f < -0.5)
             med = sorted(fcs)[len(fcs) // 2] if fcs else 0
             stat_lines.append(f"  {cond_name}: n={len(fcs)}, up(>0.5)={up}, down(<-0.5)={dn}, median={med:+.2f}")
         stat_lines.append("")
-        stat_lines.append("Top 200 PTMs by |Log2FC|:")
+        stat_lines.append("Top 200 conventionally quantified PTMs by |Log2FC| (descriptive, not a biological-priority rank):")
         stat_lines.append("| Gene | Position | Condition | PTM_Relative_Log2FC | Protein_Log2FC |")
         stat_lines.append("|------|----------|-----------|---------------------|----------------|")
         for row in sorted_vp_all[:200]:
             gene = row.get("gene", "")
             pos = row.get("position", "")
             cond = row.get("condition", "")
-            ptm_fc = row.get("ptm_relative_log2fc", "")
-            prot_fc = row.get("protein_log2fc", "")
-            ptm_fc_str = f"{float(ptm_fc):+.3f}" if ptm_fc not in (None, "", "NA") else "NA"
-            prot_fc_str = f"{float(prot_fc):+.3f}" if prot_fc not in (None, "", "NA") else "NA"
-            stat_lines.append(f"| {gene} | {pos} | {cond} | {ptm_fc_str} | {prot_fc_str} |")
+            prot_fc_value = _finite_value(row.get("protein_log2fc", ""))
+            prot_fc_str = f"{prot_fc_value:+.3f}" if prot_fc_value is not None else "NA"
+            stat_lines.append(f"| {gene} | {pos} | {cond} | {_vector_ptm_display(row)} | {prot_fc_str} |")
         stat_lines.append("=== END COMPRESSED VECTOR PLOT DATA ===")
         aux_vector_plot_compressed = "\n".join(stat_lines)
-        logger.info(f"[v12.0] Built compressed vector plot context: 200 rows, {len(aux_vector_plot_compressed):,} chars")
+        logger.info(f"[v12.0] Built de-novo-safe compressed vector context: {min(200, len(sorted_vp_all))} rows, {len(aux_vector_plot_compressed):,} chars")
 
     # Inject pipeline_statistics into experimental_context for Methods prompt
     if pipeline_statistics:

@@ -29,6 +29,8 @@ import logging
 from collections import defaultdict
 from typing import Dict, List, Optional
 
+from ptm_shared.de_novo_representation import is_de_novo_representation
+
 logger = logging.getLogger(__name__)
 
 
@@ -274,7 +276,8 @@ class FigureInformationGenerator:
             "Protein nodes are color-coded: red = higher measured PTM abundance (Log2FC > 0), "
             "blue = lower measured PTM abundance (Log2FC < 0), green = higher Non-PTM abundance, "
             "purple = lower Non-PTM abundance, orange diamond = kinase annotation. "
-            "Node size is proportional to |PTM Log2FC| magnitude. "
+            "For conventionally quantified sites, node size is proportional to |PTM Log2FC| magnitude; "
+            "de novo sites use detection/LOD context rather than a fold-change scale. "
             "Gray arrows indicate literature/pathway context only and do not establish Order-specific direction or direct regulation."
         )
 
@@ -283,11 +286,13 @@ class FigureInformationGenerator:
             cond_ptms = [p for p in self.parsed_ptms
                          if (p.get("condition") or p.get("Condition", "")) == condition]
             if cond_ptms:
-                higher = [p for p in cond_ptms if (p.get("ptm_relative_log2fc") or 0) > 0]
-                lower = [p for p in cond_ptms if (p.get("ptm_relative_log2fc") or 0) < 0]
+                quantified = [p for p in cond_ptms if not is_de_novo_representation(p)]
+                denovo_count = len(cond_ptms) - len(quantified)
+                higher = [p for p in quantified if (p.get("ptm_relative_log2fc") or 0) > 0]
+                lower = [p for p in quantified if (p.get("ptm_relative_log2fc") or 0) < 0]
                 desc += (
-                    f" In the {condition} condition, {len(higher)} PTMs have higher measured abundance "
-                    f"and {len(lower)} have lower measured abundance."
+                    f" In the {condition} condition, {len(higher)} conventionally quantified PTMs have higher measured abundance "
+                    f"and {len(lower)} have lower measured abundance; {denovo_count} de novo rows are represented by detection/LOD context."
                 )
                 top_act = sorted(higher, key=lambda x: -(x.get("ptm_relative_log2fc") or 0))[:5]
                 if top_act:
@@ -295,7 +300,7 @@ class FigureInformationGenerator:
                         f"{p.get('gene', '?')}({p.get('position', '')})"
                         for p in top_act
                     )
-                    desc += f" Highest measured PTM increases: {top_str}."
+                    desc += f" Largest conventionally quantified PTM contrasts: {top_str}. Numerical contrast magnitude is descriptive and is not a biological-priority ranking."
 
         return desc
 

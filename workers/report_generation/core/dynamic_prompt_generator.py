@@ -835,19 +835,15 @@ def build_ptm_data_summary(parsed_ptms: List[dict], ptm_type: str = "phosphoryla
 
     total = len(parsed_ptms)
 
-    def _is_denovo(p):
-        return bool(
-            p.get("conventional_log2fc_na")
-            or p.get("control_pseudocount_used")
-            or p.get("activity_class") == "de_novo"
-        )
+    from ptm_shared.de_novo_representation import (
+        format_denovo_prompt_line,
+        is_de_novo_representation,
+    )
 
-    quantified = [p for p in parsed_ptms if not _is_denovo(p)]
+    quantified = [p for p in parsed_ptms if not is_de_novo_representation(p)]
     up = sum(1 for p in quantified if float(p.get("ptm_relative_log2fc", 0) or 0) > 0)
     down = sum(1 for p in quantified if float(p.get("ptm_relative_log2fc", 0) or 0) < 0)
     denovo_n = total - len(quantified)
-
-    from ptm_shared.de_novo_representation import format_denovo_prompt_line
 
     def _rank(p):
         score = p.get("ranking_score")
@@ -856,7 +852,7 @@ def build_ptm_data_summary(parsed_ptms: List[dict], ptm_type: str = "phosphoryla
                 return abs(float(score))
             except (TypeError, ValueError):
                 pass
-        if p.get("conventional_log2fc_na") or p.get("control_pseudocount_used") or p.get("activity_class") == "de_novo":
+        if is_de_novo_representation(p):
             return 0.0
         return abs(float(p.get("ptm_relative_log2fc", 0) or 0))
 
@@ -874,7 +870,7 @@ def build_ptm_data_summary(parsed_ptms: List[dict], ptm_type: str = "phosphoryla
     for i, p in enumerate(sorted_ptms[:5], 1):
         gene = p.get("gene", "?")
         pos = p.get("position", "?")
-        if p.get("conventional_log2fc_na") or p.get("control_pseudocount_used") or p.get("activity_class") == "de_novo":
+        if is_de_novo_representation(p):
             lines.append(f"  {i}. {format_denovo_prompt_line(p).strip()}")
             continue
         ptm_fc = float(p.get("ptm_relative_log2fc", 0))
@@ -1104,6 +1100,13 @@ def build_temporal_evidence_packet(
     dynamic_exposure = dict(sidecar.get("dynamic_transition_event_exposure") or {})
     dynamic_scope = dict(sidecar.get("dynamic_transition_pair_scope") or {})
     dynamic_pair_count = int(sidecar.get("dynamic_transition_pair_count") or 0)
+    adjacency_status = str(sidecar.get("dynamic_temporal_adjacency_status", "not_requested"))
+    adjacency_supported = bool(sidecar.get("dynamic_temporal_adjacency_supports_global_order", False))
+    null_boundary = (
+        "A valid global adjacency-order null calibration supported temporal ordering."
+        if adjacency_status == "computed" and adjacency_supported
+        else "No valid global adjacency-order null calibration supports temporal ordering; do not call this result robust, significant, or globally temporally resolved."
+    )
     sidecar_provenance = dict(sidecar.get("provenance") or {})
     wave_projection = dict(sidecar_provenance.get("wave_input_projection") or {})
     if wave_projection:
@@ -1135,7 +1138,7 @@ def build_temporal_evidence_packet(
             "non-evaluable site transition opportunities={non_evaluable_sites}; "
             "mean pair LOTO Jaccard={pair_loto}; mean site LOTO Jaccard={site_loto}; "
             "global adjacency-order test status={adj_status}; p={adj_p}; verdict={adj_verdict}. "
-            "Transition totals are exposure-dependent descriptive counts, not biological-effect size or temporal-order proof."
+            "Transition totals are exposure-dependent descriptive counts, not biological-effect size or temporal-order proof. {null_boundary}"
         ).format(
             status=dynamic_status,
             waves=sidecar.get("dynamic_transition_supported_wave_count", 0),
@@ -1147,9 +1150,10 @@ def build_temporal_evidence_packet(
             non_evaluable_sites=dynamic_exposure.get("non_evaluable_site_transition_count", "not_recorded"),
             pair_loto=dynamic_loto.get("mean_pair_transition_jaccard"),
             site_loto=dynamic_loto.get("mean_site_transition_jaccard"),
-            adj_status=sidecar.get("dynamic_temporal_adjacency_status", "not_requested"),
+            adj_status=adjacency_status,
             adj_p=sidecar.get("dynamic_temporal_adjacency_p_value"),
             adj_verdict=sidecar.get("dynamic_temporal_adjacency_verdict", "not_evaluable"),
+            null_boundary=null_boundary,
         ),
         availability="computed" if dynamic_status == "computed" and dynamic_pair_count > 0 else "not_evaluable",
         claim_level="L2_observational_dynamic",
@@ -1200,7 +1204,8 @@ def build_temporal_evidence_packet(
             "observational_dynamic",
             (
                 "Static Wave {wave}: pair transitions={pairs}; non-persistence pair transitions={nonpersistence}; "
-                "site transitions={sites}; pair transition types={pair_types}; site transition types={site_types}."
+                "site transitions={sites}; pair transition types={pair_types}; site transition types={site_types}. "
+                "This packet does not expose member identities or per-Wave enrichment; do not assign a functional module to this Wave."
             ).format(
                 wave=row.get("static_wave_id", "unknown"),
                 pairs=row.get("pair_transition_count", 0),
@@ -1441,6 +1446,7 @@ def format_temporal_evidence_packet_for_llm(
         "check that it is supported by one DATA-* record. Do not turn a local co-wave transition into kinase switching, "
         "or a lagged protein trajectory into direct regulation or causality.",
         "If kinase timing is not_evaluable or an edge is not evidence-supported, state that limitation explicitly.",
+        "When the dynamic summary states that no valid global adjacency-order null calibration supports ordering, do not call a co-wave pattern robust, significant, validated, or globally temporally resolved. Treat it as a sampled-timepoint local observation only.",
         f"Mechanism-context allowed in this section={mechanism_context_allowed}.",
         coverage_instruction,
         f"Available required classes: temporal-precedence={has_precedence}; dynamic={has_dynamic}; TMM={has_tmm}; PTM-protein={has_cross_layer}; counterevidence={has_counterevidence}.",

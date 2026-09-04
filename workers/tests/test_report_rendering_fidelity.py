@@ -6,6 +6,7 @@ from report_generation.core.biological_synthesis import (
 )
 from report_generation.core.dynamic_prompt_generator import build_temporal_evidence_packet
 from report_generation.core.graph import format_citations
+from report_generation.core.citation_formatter import ReportPostProcessor
 from report_generation.core.nodes.kinase_annotation_node import _direct_attribution_figure_allowed
 from report_generation.core.nodes.signal_flow_figure import generate_pathway_diagram
 from report_generation.core.nodes.writer_node import _stabilize_section_citations
@@ -160,3 +161,35 @@ def test_pathway_diagram_defaults_to_context_only_output(tmp_path):
     assert path is not None
     output = tmp_path / "pathway_diagram.png"
     assert output.exists() and output.stat().st_size > 1000
+
+
+def test_report_postprocessor_renumbers_batched_questions_and_collapses_table_separators():
+    text = """## Research Question Answers
+
+### Q1: First question?
+Answer one.
+
+### Q1: Second question?
+Answer two.
+
+| Metric | Value |
+|---|---|
+|---|---|
+| n | 2 |
+"""
+    processed = ReportPostProcessor().process(text)
+    assert "### Q1: First question?" in processed
+    assert "### Q2: Second question?" in processed
+    assert processed.count("|---|---|") == 1
+
+
+def test_chromadb_bundle_label_without_bibliographic_metadata_is_not_rendered_as_reference():
+    final = format_citations({
+        "sections": {"title": "Citation provenance", "discussion": "Internal bundle reference [REF:title:allptmarticles]."},
+        "network_analysis": {},
+        "signal_flow_figures": [],
+        "collected_references": [{"chromadb_ref": True, "title": "All PTM Articles"}],
+    })
+    report = final["final_report"]
+    assert "All PTM Articles" not in report
+    assert "## References" not in report

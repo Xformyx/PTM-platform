@@ -664,10 +664,10 @@ def format_citations(state: ReportState) -> dict:
                     if ctx_heatmap_path:
                         ctx_fig_section = (
                             f"\n\n### Figure {context_ptm_fig_num}. Key PTM Sites Referenced in This Report\n\n"
-                            f"Heatmap showing the temporal fold-change profiles (Log₂FC) of PTM sites "
+                            f"Heatmap showing the temporal conventional Log₂FC profiles of PTM sites "
                             f"specifically discussed in the Results and Discussion sections above. "
-                            f"Sites are clustered by temporal pattern similarity. "
-                            f"Red = up-regulated; Blue = down-regulated.\n\n"
+                            f"Sites are clustered by temporal pattern similarity. Red/blue encode conventional quantified contrasts; "
+                            f"starred de novo sites, where present, use LOD-relative detection context and are excluded from the colour scale.\n\n"
                             f"![Context-aware PTM Heatmap]({ctx_heatmap_path})\n\n---\n"
                         )
                         parts.append(ctx_fig_section)
@@ -759,6 +759,15 @@ def format_citations(state: ReportState) -> dict:
     n_chromadb_refs = 0
     for ref_dict in collected_refs:
         is_chromadb = ref_dict.get("chromadb_ref", False)
+        # A Chroma collection/bundle label without paper-level metadata is an
+        # internal retrieval provenance label, not a citable publication. Do
+        # not let it masquerade as a journal in the final bibliography.
+        if is_chromadb and not any(
+            str(ref_dict.get(field) or "").strip()
+            for field in ("pmid", "doi", "authors", "year", "pub_date")
+        ):
+            logger.info("[FORMAT-CIT] Excluding non-bibliographic Chroma bundle label from references")
+            continue
         if is_chromadb:
             n_chromadb_refs += 1
             ref = Reference(

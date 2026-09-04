@@ -682,6 +682,7 @@ def build_v2_sidecar(
     feature_ledger = dict(kinase_feature_evidence_ledger or {})
     from ptm_shared.kinase_evidence_ledger import compact_summary as compact_kinase_ledger_summary
     feature_ledger_summary = compact_kinase_ledger_summary(feature_ledger) if feature_ledger else {}
+    membership_audit = _write_wave_membership_audit(output_dir, dict(wave_contract or {}))
 
     return {
         "schema_version": SIDECAR_SCHEMA_VERSION,
@@ -704,6 +705,7 @@ def build_v2_sidecar(
         # compact DB/API/RAG projection releases only aggregate no-call counts.
         "kinase_feature_evidence_ledger": feature_ledger,
         "kinase_feature_evidence_ledger_summary": feature_ledger_summary,
+        "co_wave_membership_audit": membership_audit,
         "provenance": {
             "source": "production_preprocessing_outputs",
             "rag_used": False,
@@ -745,6 +747,41 @@ def build_v2_sidecar(
             },
         },
     }
+
+
+def _write_wave_membership_audit(output_dir: Path, wave_contract: Mapping[str, Any]) -> dict[str, Any]:
+    """Write a deterministic Wave membership TSV outside compact Report input.
+
+    The export contains static membership already present in the immutable Wave
+    contract. It is not per-Wave enrichment, it is never sent to RAG/LLM, and
+    it is deliberately separate from the P0–P3 feature ledger.
+    """
+    destination = Path(output_dir) / "co_wave_membership_audit.tsv"
+    waves = list(wave_contract.get("waves") or [])
+    lines = ["wave_id\tmember_rank\tsite_key"]
+    member_count = 0
+    for wave in sorted(waves, key=lambda row: str(row.get("wave_id") or "")):
+        wave_id = str(wave.get("wave_id") or "unknown")
+        for rank, site_key in enumerate(sorted(str(value) for value in (wave.get("members") or [])), 1):
+            lines.append(f"{wave_id}\t{rank}\t{site_key}")
+            member_count += 1
+    try:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        return {
+            "status": "written",
+            "artifact_name": destination.name,
+            "static_wave_count": len(waves),
+            "member_row_count": member_count,
+            "interpretation_boundary": "Static membership audit only; no per-Wave functional enrichment is implied.",
+        }
+    except OSError as error:
+        return {
+            "status": "not_written",
+            "reason": type(error).__name__,
+            "static_wave_count": len(waves),
+            "member_row_count": member_count,
+        }
 
 
 def build_production_site_observations(

@@ -19,6 +19,8 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from ptm_shared.de_novo_representation import is_de_novo_representation
+
 logger = logging.getLogger(__name__)
 
 
@@ -839,7 +841,7 @@ def _build_activity_classification(enriched_ptm_data: List[dict]) -> Dict[str, s
         key = f"{gene}_{position}"
 
         # Check de_novo flag
-        if ptm.get("de_novo", False) or ptm.get("control_pseudocount_used", False):
+        if is_de_novo_representation(ptm):
             activity_map[key] = "de_novo"
             continue
 
@@ -993,11 +995,7 @@ def generate_context_aware_ptm_heatmap(
         fc = row.get("ptm_relative_log2fc") or row.get("log2fc") or row.get("Log2FC")
         if not gene or not condition:
             continue
-        is_denovo = bool(
-            row.get("conventional_log2fc_na")
-            or row.get("control_pseudocount_used")
-            or row.get("Control_Pseudocount_Used")
-        )
+        is_denovo = is_de_novo_representation(row)
         lod_rel = row.get("lod_relative_log2") or row.get("LOD_Relative_Log2")
         try:
             fc_val = float(fc) if fc is not None else 0.0

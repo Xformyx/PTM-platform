@@ -10,8 +10,18 @@ from pathlib import Path
 from typing import List
 
 import pandas as pd
+from ptm_shared.de_novo_representation import is_de_novo_representation
 
 logger = logging.getLogger(__name__)
+
+
+def _as_bool(value) -> bool:
+    """Parse vector provenance flags without treating the string ``false`` as true."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return value != 0
+    return str(value or "").strip().lower() in {"1", "true", "yes", "y"}
 
 
 def run_context_loader(state: dict) -> dict:
@@ -130,18 +140,17 @@ def _parse_enriched_ptms(enriched_data: list) -> list:
         classification = enr.get("classification", {})
 
         # v9.27: activity_class for De novo / Regulated / Minor classification
-        control_pseudocount_used = ptm.get("control_pseudocount_used") or ptm.get("Control_Pseudocount_Used", False)
+        control_pseudocount_used = _as_bool(
+            ptm.get("control_pseudocount_used", ptm.get("Control_Pseudocount_Used", False))
+        )
         q_value = ptm.get("q_value") or ptm.get("Q_Value")
         ptm_relative_log2fc_val = _safe_float(ptm.get("ptm_relative_log2fc") or ptm.get("PTM_Relative_Log2FC"))
-        try:
-            control_pseudocount_used = bool(control_pseudocount_used) if control_pseudocount_used not in (None, "", "nan", "None") else False
-        except Exception:
-            control_pseudocount_used = False
         try:
             q_value_float = float(q_value) if q_value not in (None, "", "nan", "None") else None
         except (TypeError, ValueError):
             q_value_float = None
-        if control_pseudocount_used:
+        representation_is_denovo = is_de_novo_representation(ptm)
+        if representation_is_denovo:
             activity_class = "de_novo"
         elif q_value_float is not None and q_value_float < 0.05 and abs(ptm_relative_log2fc_val or 0) >= 1.0:
             activity_class = "regulated"
@@ -170,11 +179,7 @@ def _parse_enriched_ptms(enriched_data: list) -> list:
             "detection_control": ptm.get("detection_control") or ptm.get("Detection_Control") or "",
             "detection_pattern": ptm.get("detection_pattern") or ptm.get("Detection_Pattern") or "",
             "lod_relative_log2": _safe_float(ptm.get("lod_relative_log2") or ptm.get("LOD_Relative_Log2")),
-            "conventional_log2fc_na": bool(
-                ptm.get("conventional_log2fc_na")
-                or ptm.get("Conventional_Log2FC_NA")
-                or control_pseudocount_used
-            ),
+            "conventional_log2fc_na": representation_is_denovo,
             "peak_condition": ptm.get("peak_condition") or ptm.get("Peak_Condition") or "",
             "onset_condition": ptm.get("onset_condition") or ptm.get("Onset_Condition") or "",
             "reliable_onset_condition": ptm.get("reliable_onset_condition") or ptm.get("Reliable_Onset_Condition") or "",

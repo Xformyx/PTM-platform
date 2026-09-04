@@ -324,3 +324,16 @@ def test_raw_heatmap_without_persisted_tmm_cascade_does_not_create_tmm_record():
         kinase_activity_heatmap={"kinase_scores": [{"kinase": "KIN1", "peak_score": 0.7}]},
     )
     assert not any(record["evidence_id"].startswith("DATA-TMM-KINASE") for record in packet["records"])
+
+
+def test_dynamic_packet_forbids_robust_order_claim_without_a_valid_null_calibration():
+    packet = build_temporal_evidence_packet({
+        "dynamic_co_wave_transition_status": "computed",
+        "dynamic_transition_pair_count": 4,
+        "dynamic_transition_site_count": 3,
+        "dynamic_temporal_adjacency_status": "not_requested",
+        "dynamic_temporal_adjacency_verdict": "not_evaluable",
+    })
+    rendered = format_temporal_evidence_packet_for_llm(packet, section_type="results")
+    assert "No valid global adjacency-order null calibration supports temporal ordering" in rendered
+    assert "do not call a co-wave pattern robust, significant, validated, or globally temporally resolved" in rendered

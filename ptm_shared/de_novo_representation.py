@@ -177,6 +177,44 @@ def is_control_condition(condition: str) -> bool:
     return token in CONTROL_LABELS or token.startswith("control")
 
 
+def is_de_novo_representation(row: Mapping[str, Any] | None) -> bool:
+    """Return whether a row uses detection/LOD rather than conventional Log2FC.
+
+    This is the Report, figure and P5-facing representation boundary.  It
+    deliberately uses only provenance flags and a declared activity class; the
+    numerical value itself must never be used to infer de novo status.  A
+    string value such as ``"false"`` is treated as false rather than relying on
+    Python's truthiness, which would otherwise leak a conventional row into a
+    detection-only rendering path (or vice versa).
+    """
+    if not isinstance(row, Mapping):
+        return False
+
+    def _flag(value: Any) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return value != 0
+        return str(value or "").strip().lower() in {"1", "true", "yes", "y"}
+
+    if any(
+        _flag(row.get(key))
+        for key in (
+            "conventional_log2fc_na",
+            "Conventional_Log2FC_NA",
+            "control_pseudocount_used",
+            "Control_Pseudocount_Used",
+            "de_novo",
+            "De_Novo",
+        )
+    ):
+        return True
+    return str(row.get("activity_class") or row.get("Activity_Class") or "").strip().lower() in {
+        "de_novo",
+        "denovo",
+    }
+
+
 def is_shared_protein_group(protein_group: Any) -> bool:
     parts = [p.strip() for p in str(protein_group or "").split(";") if p.strip()]
     return len(parts) > 1

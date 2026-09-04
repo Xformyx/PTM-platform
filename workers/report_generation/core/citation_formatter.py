@@ -298,6 +298,8 @@ class ReportPostProcessor:
         text = self._fix_citation_format(text)
         text = self._remove_duplicate_paragraphs(text)
         text = self._fix_table_formatting(text)
+        text = self._collapse_repeated_table_separators(text)
+        text = self._renumber_research_questions(text)
         text = self._ensure_section_order(text)
 
         return text
@@ -394,6 +396,34 @@ class ReportPostProcessor:
             result.append(line)
 
         return "\n".join(result)
+
+    def _collapse_repeated_table_separators(self, text: str) -> str:
+        """Keep one Markdown separator row per table header."""
+        separator = re.compile(r"^\s*\|(?:\s*:?-{3,}:?\s*\|)+\s*$")
+        result = []
+        for line in text.split("\n"):
+            if separator.match(line) and result and separator.match(result[-1]):
+                continue
+            result.append(line)
+        return "\n".join(result)
+
+    def _renumber_research_questions(self, text: str) -> str:
+        """Renumber batch-local Q headings once after all answer batches are joined."""
+        lines = text.split("\n")
+        in_questions = False
+        next_number = 1
+        heading = re.compile(r"^(#{1,3}\s*)(?:Question\s*)?Q\s*\d+(\s*[:.\-].*)$", re.IGNORECASE)
+        for index, line in enumerate(lines):
+            if line.startswith("## "):
+                in_questions = line.strip().lower() == "## research question answers"
+                continue
+            if not in_questions:
+                continue
+            match = heading.match(line)
+            if match:
+                lines[index] = f"{match.group(1)}Q{next_number}{match.group(2)}"
+                next_number += 1
+        return "\n".join(lines)
 
     def _ensure_section_order(self, text: str) -> str:
         """
