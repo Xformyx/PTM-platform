@@ -7472,7 +7472,7 @@ async def kinase_activity_heatmap(
 ):
     """Compute Kinase Activity Temporal Scores for heatmap/line chart.
 
-    v11.3: Stratified Clustering + Winsorized Mean scoring.
+    v11.4: Stratified Clustering + Winsorized Mean scoring with footprint diagnostics.
     - Substrates grouped by magnitude tier (Strong >5.0, Moderate 2-5, Weak <=2.0)
     - Within each tier: K-Means with Absolute Correlation (1-|r|) distance
     - Dominant cluster selected by: coherence × √size × |peak_score| × tier_bonus
@@ -7485,7 +7485,7 @@ async def kinase_activity_heatmap(
       - force_refresh: bool (default false)
 
     Response:
-      - kinase_scores: [{kinase, scores, substrate_count, confidence, peak_condition, peak_score,
+      - kinase_scores: [{kinase, scores, substrate_count, confidence_status, peak_condition, peak_score,
                          cluster_details, coact_counts, exclusive_sums, shared_sums, ...}]
       - conditions: [str]  (ordered)
       - _cached: bool
@@ -7550,11 +7550,13 @@ async def kinase_activity_heatmap(
         DYNAMIC_COWAVE_CONTRACT_VERSION,
     )
     from ptm_shared.kinase_evidence_ledger import CONTRACT_VERSION as KINASE_FEATURE_LEDGER_CONTRACT_VERSION
+    from ptm_shared.kinase_footprint_diagnostics import CONTRACT_VERSION as KINASE_FOOTPRINT_DIAGNOSTICS_CONTRACT_VERSION
 
     dynamic_transition_config_sha = dynamic_transition_config_sha256(DYNAMIC_COWAVE_CONFIG)
     dynamic_analysis_cache_contract = (
         f"unified_temporal_ptm_protein.v3|{DYNAMIC_COWAVE_CONTRACT_VERSION}|"
-        f"{dynamic_transition_config_sha}|{KINASE_FEATURE_LEDGER_CONTRACT_VERSION}"
+        f"{dynamic_transition_config_sha}|{KINASE_FEATURE_LEDGER_CONTRACT_VERSION}|"
+        f"{KINASE_FOOTPRINT_DIAGNOSTICS_CONTRACT_VERSION}"
     )
     km_keys = sorted([m.get("kinase", "") for m in kinase_modules])
     tmm_config_key = json.dumps(effective_tmm_config, sort_keys=True, separators=(",", ":"))
@@ -7601,6 +7603,15 @@ async def kinase_activity_heatmap(
     output_dir = Path(settings.OUTPUT_DIR) / order.order_code
     file_suffix = "_phospho" if order.ptm_type == "phosphorylation" else "_ubi"
 
+    from ptm_shared.kinase_footprint_diagnostics import detection_aware_footprint_value
+
+    def _optional_finite(raw_value):
+        try:
+            value = float(raw_value)
+        except (TypeError, ValueError):
+            return None
+        return value if np.isfinite(value) else None
+
     vector_data = []
     for name in (f"ptm_vector_data_normalized{file_suffix}.tsv", f"ptm_vector_data_with_motifs{file_suffix}.tsv"):
         p = output_dir / name
@@ -7616,29 +7627,36 @@ async def kinase_activity_heatmap(
                     q_val_raw = row.get("q_value", "")
                     occupancy_logit_raw = row.get("Occupancy_Logit_Delta", "")
                     occupancy_q_raw = row.get("Occupancy_Q_Value", "")
-                    try:
-                        rel_fc = (
-                            float(rel_fc)
-                            if rel_fc and str(rel_fc).strip().lower() not in ("", "nan")
-                            else None
-                        )
-                    except (ValueError, TypeError):
-                        rel_fc = None
-                    try:
-                        q_val = float(q_val_raw) if q_val_raw and q_val_raw.strip().lower() not in ("", "nan") else None
-                    except (ValueError, TypeError):
-                        q_val = None
-                    try:
-                        occupancy_logit = float(occupancy_logit_raw) if occupancy_logit_raw and occupancy_logit_raw.strip().lower() not in ("", "nan") else None
-                    except (ValueError, TypeError):
-                        occupancy_logit = None
-                    try:
-                        occupancy_q = float(occupancy_q_raw) if occupancy_q_raw and occupancy_q_raw.strip().lower() not in ("", "nan") else None
-                    except (ValueError, TypeError):
-                        occupancy_q = None
+                    rel_fc = _optional_finite(rel_fc)
+                    q_val = _optional_finite(q_val_raw)
+                    occupancy_logit = _optional_finite(occupancy_logit_raw)
+                    occupancy_q = _optional_finite(occupancy_q_raw)
+                    denovo_row = {
+                        "conventional_log2fc_na": row.get("Conventional_Log2FC_NA", row.get("conventional_log2fc_na")),
+                        "control_pseudocount_used": row.get("Control_Pseudocount_Used", row.get("control_pseudocount_used")),
+                        "activity_class": row.get("Activity_Class", row.get("activity_class")),
+                    }
+                    lod_relative = _optional_finite(row.get("LOD_Relative_Log2", row.get("lod_relative_log2")))
+                    denovo_confidence = str(row.get("DeNovo_Confidence", row.get("denovo_confidence", "")) or "").strip().lower()
+                    # De novo rows have a detection/LOD representation rather than
+                    # a conventional fold-change representation.  Do not let their
+                    # pseudocount Log2FC enter substrate tiers, temporal clustering,
+                    # heatmap scores or TMM.  The frozen LOD cap and confidence
+                    # weight are reused; no new threshold is introduced here.
+                    footprint_value, is_denovo = detection_aware_footprint_value(
+                        {
+                            **denovo_row,
+                            "LOD_Relative_Log2": lod_relative,
+                            "DeNovo_Confidence": denovo_confidence,
+                        },
+                        rel_fc,
+                    )
                     vector_data.append({
                         "gene": gene, "position": str(pos),
-                        "condition": cond, "log2fc": rel_fc, "q_value": q_val,
+                        "condition": cond, "log2fc": footprint_value, "q_value": q_val,
+                        "is_de_novo_representation": is_denovo,
+                        "denovo_confidence": denovo_confidence,
+                        "lod_relative_log2": lod_relative,
                         "protein_group": row.get("Protein.Group", row.get("Protein.Ids", "")),
                         "protein_accession": row.get("UniProt_ID", row.get("Protein.Ids", "")),
                         "modified_sequence": row.get("Modified.Sequence", ""),
@@ -7664,6 +7682,8 @@ async def kinase_activity_heatmap(
     # Build PTM key → condition → log2fc map
     ptm_timeseries: dict[str, dict[str, float]] = {}
     ptm_qvalues: dict[str, dict[str, float | None]] = {}
+    ptm_is_denovo: dict[str, bool] = {}
+    ptm_condition_records: dict[str, dict[str, dict]] = {}
     # Track 1 intentionally keeps missing values absent.  Its parallel wave/TMM
     # path below only accepts complete observed-only vectors and never turns a
     # missing modified/unmodified counterpart into zero.
@@ -7681,15 +7701,23 @@ async def kinase_activity_heatmap(
         if key not in ptm_timeseries:
             ptm_timeseries[key] = {}
             ptm_qvalues[key] = {}
-        # Cap extreme Log2FC values (pseudocount artifacts)
+            ptm_condition_records[key] = {}
+        # A mixed representation fails closed for the footprint layer as well:
+        # one de novo row prevents any pseudocount conventional value from
+        # becoming a score source for the gene-site.
+        ptm_is_denovo[key] = bool(ptm_is_denovo.get(key) or row.get("is_de_novo_representation"))
+        # The value is conventional only for conventional rows; de novo rows
+        # were converted above to the frozen capped LOD/confidence representation.
         _raw_fc_raw = row["log2fc"]
         try:
             _raw_fc = float(_raw_fc_raw) if _raw_fc_raw is not None else 0.0
         except (ValueError, TypeError):
             _raw_fc = 0.0
-        # v11.2: Store raw Log2FC (no cap). Winsorization applied per-kinase during scoring.
-        ptm_timeseries[key][cond] = _raw_fc
-        ptm_qvalues[key][cond] = row["q_value"]
+        ptm_condition_records[key][cond] = {
+            "value": _raw_fc,
+            "q_value": row["q_value"],
+            "is_de_novo_representation": bool(row.get("is_de_novo_representation")),
+        }
         _occupancy = row.get("occupancy_logit_delta")
         if (
             row.get("pair_quality_tier") in {"O1", "O2"}
@@ -7698,6 +7726,28 @@ async def kinase_activity_heatmap(
         ):
             occupancy_timeseries.setdefault(key, {})[cond] = float(_occupancy)
             occupancy_qvalues.setdefault(key, {})[cond] = row.get("occupancy_q_value")
+
+    # Apply the mixed-representation fail-closed rule after all rows have been
+    # observed. If any condition uses detection/LOD representation, only those
+    # conditions contribute to the heatmap and TMM footprint for the gene-site.
+    for key, by_condition in ptm_condition_records.items():
+        selected = (
+            {
+                condition: record
+                for condition, record in by_condition.items()
+                if record.get("is_de_novo_representation")
+            }
+            if ptm_is_denovo.get(key)
+            else by_condition
+        )
+        ptm_timeseries[key] = {
+            condition: float(record["value"])
+            for condition, record in selected.items()
+        }
+        ptm_qvalues[key] = {
+            condition: record.get("q_value")
+            for condition, record in selected.items()
+        }
 
     # Sort conditions by actual time value (unit-aware: sec/min/hr/day)
     import re
@@ -7795,6 +7845,24 @@ async def kinase_activity_heatmap(
                 str(ptm.get("hierarchy_family") or canonical_kn).upper(),
             )
 
+    from ptm_shared.kinase_footprint_diagnostics import (
+        build_exact_footprint_equivalence,
+        summarize_weighted_footprint,
+    )
+    kinase_to_site_keys: dict[str, list[str]] = {}
+    for module in kinase_modules:
+        canonical = str(module.get("canonical") or module.get("kinase") or "").upper().strip()
+        if not canonical:
+            continue
+        kinase_to_site_keys.setdefault(canonical, []).extend(
+            f"{str(member.get('gene') or '').upper()}_{str(member.get('position') or '').upper()}"
+            for member in module.get("ptms", [])
+            if str(member.get("gene") or "").strip() and str(member.get("position") or "").strip()
+        )
+    exact_footprint_equivalence_groups, exact_footprint_equivalence_by_kinase = (
+        build_exact_footprint_equivalence(kinase_to_site_keys)
+    )
+
     kinase_module_provenance = {
         str(module.get("canonical") or module.get("kinase") or "").upper(): {
             "evidence_tier": module.get("evidence_tier", "direct_or_contextual"),
@@ -7810,13 +7878,13 @@ async def kinase_activity_heatmap(
     FC_THRESHOLD = 0.3
     Q_THRESHOLD = 0.05
 
-    # Signal tier thresholds
-    DE_NOVO_THRESHOLD = 2.0   # |FC| >= 2.0
+    # Signal tier thresholds. `de_novo` means a declared detection/LOD
+    # representation, never a conventional row whose magnitude is large.
     REGULATED_THRESHOLD = 0.58  # 0.58 <= |FC| < 2.0
     # minor: 0.3 <= |FC| < 0.58
 
-    def _classify_tier(fc_abs: float) -> str:
-        if fc_abs >= DE_NOVO_THRESHOLD:
+    def _classify_tier(fc_abs: float, *, is_denovo: bool = False) -> str:
+        if is_denovo:
             return "de_novo"
         elif fc_abs >= REGULATED_THRESHOLD:
             return "regulated"
@@ -8173,7 +8241,7 @@ async def kinase_activity_heatmap(
     for km in kinase_modules:
         kinase_name = km.get("kinase", "")
         ptms = km.get("ptms", [])
-        confidence = km.get("confidence_score", 0.5)
+        annotation_evidence_score = _optional_finite(km.get("confidence_score"))
 
         # v11.3: Cluster substrates by temporal trajectory (Stratified + AbsCorr)
         clusters = _cluster_ptms_by_trajectory(ptms)
@@ -8257,7 +8325,7 @@ async def kinase_activity_heatmap(
                     passes_threshold = True
                 if passes_threshold:
                     coact_counts[c] += 1
-                    tier = _classify_tier(abs(fc))
+                    tier = _classify_tier(abs(fc), is_denovo=bool(ptm_is_denovo.get(pk)))
                     if fc > 0:
                         up_sums[c] += fc
                         up_counts[c] += 1
@@ -8303,7 +8371,11 @@ async def kinase_activity_heatmap(
                     cl_scores_dict[c] = round(c_sum / max(len(cl["ptm_keys"]), 1), 4)
                 cl_peak_cond = max(conditions_sorted, key=lambda c: abs(cl_scores_dict.get(c, 0)))
                 cl_peak_score = cl_scores_dict.get(cl_peak_cond, 0.0)
-            cl_dir = "activation" if cl_peak_score > 0.3 else ("inactivation" if cl_peak_score < -0.3 else "neutral")
+            cl_dir = (
+                "positive_substrate_footprint" if cl_peak_score > 0.3
+                else "negative_substrate_footprint" if cl_peak_score < -0.3
+                else "near_zero_footprint"
+            )
             cluster_details.append({
                 "cluster_id": cl["cluster_id"],
                 "size": cl["size"],
@@ -8441,7 +8513,12 @@ async def kinase_activity_heatmap(
             "tiers": tier_data,
             "substrate_count": dominant["size"],        # dominant cluster size
             "total_substrates": len(ptms),               # original total
-            "confidence": confidence,
+            # No calibrated scalar footprint confidence is currently available.
+            # Preserve any legacy annotation score separately, but do not render
+            # a fallback 50% as if it were a data-derived confidence estimate.
+            "confidence": None,
+            "confidence_status": "component_based_not_scalar_calibrated",
+            "annotation_evidence_score": annotation_evidence_score,
             "peak_condition": peak_cond,
             "peak_score": round(peak_score, 4),
             "coact_counts": coact_counts,
@@ -8539,7 +8616,11 @@ async def kinase_activity_heatmap(
                 else:
                     sub_label_category = "mid_response"
                 sub_label = sub_peak_cond  # Use actual condition name (e.g., "5min", "12h")
-                sub_dir = "activation" if sub_peak_score > 0.3 else ("inactivation" if sub_peak_score < -0.3 else "neutral")
+                sub_dir = (
+                    "positive_substrate_footprint" if sub_peak_score > 0.3
+                    else "negative_substrate_footprint" if sub_peak_score < -0.3
+                    else "near_zero_footprint"
+                )
                 kinase_scores.append({
                     "kinase": f"{kinase_name}_c{cl['cluster_id']}",
                     "parent_kinase": kinase_name,
@@ -8554,7 +8635,9 @@ async def kinase_activity_heatmap(
                     "tiers": {},
                     "substrate_count": cl["size"],
                     "total_substrates": len(ptms),
-                    "confidence": confidence * 0.7,  # slightly lower confidence for sub-patterns
+                    "confidence": None,
+                    "confidence_status": "component_based_not_scalar_calibrated",
+                    "annotation_evidence_score": annotation_evidence_score,
                     "peak_condition": sub_peak_cond,
                     "peak_score": round(sub_peak_score, 4),
                     "coact_counts": {c: 0 for c in conditions_sorted},
@@ -8667,17 +8750,17 @@ async def kinase_activity_heatmap(
         # replaced with a contribution-weighted version after TMM succeeds.
         ks_entry["raw_cowave_group"] = ks_entry["cowave_group"]
 
-    # ── Activation / Inactivation classification (Sum-based) ──
+    # ── Signed substrate-footprint classification (Sum-based) ──
     for ks_entry in kinase_scores:
         peak = ks_entry.get("peak_score", 0)
         peak_cond = ks_entry.get("peak_condition", "")
         peak_coact = ks_entry.get("coact_counts", {}).get(peak_cond, 0)
         if peak > 0 and peak_coact >= 2:
-            ks_entry["direction"] = "activation"
+            ks_entry["direction"] = "positive_substrate_footprint"
         elif peak < 0 and peak_coact >= 2:
-            ks_entry["direction"] = "inactivation"
+            ks_entry["direction"] = "negative_substrate_footprint"
         else:
-            ks_entry["direction"] = "neutral"
+            ks_entry["direction"] = "near_zero_footprint"
 
     # ── Temporal Pattern Classification ──────────────────────────────────────
     # Detect notable temporal patterns for each kinase across conditions.
@@ -8807,6 +8890,20 @@ async def kinase_activity_heatmap(
     kinase_scores_filtered = [ks for ks in kinase_scores if ks["substrate_count"] >= 2]
     if len(kinase_scores_filtered) < 5 and len(kinase_scores) >= 5:
         kinase_scores_filtered = kinase_scores[:20]
+
+    # P0: these diagnostics are available even if later contribution weighting
+    # is unavailable. They preserve each candidate row and never merge or rank
+    # exact-equivalent candidates automatically.
+    for ks_entry in kinase_scores_filtered:
+        canonical = str(ks_entry.get("parent_kinase") or ks_entry.get("kinase") or "").upper()
+        ks_entry["footprint_equivalence"] = exact_footprint_equivalence_by_kinase.get(canonical)
+        ks_entry.setdefault("confidence", None)
+        ks_entry.setdefault("confidence_status", "component_based_not_scalar_calibrated")
+        ks_entry.setdefault("footprint_diagnostics", {
+            "contract_version": "kinase_footprint_diagnostics.v1",
+            "status": "not_evaluable_tmm_weighting_unavailable",
+            "interpretation_boundary": "Robustness diagnostics require contribution-weighted site profiles.",
+        })
 
     # ── v11.3.4: Shared-substrate deduplication ──────────────────────────────
     # When multiple kinases share the same (or highly overlapping) substrate set,
@@ -9160,6 +9257,33 @@ async def kinase_activity_heatmap(
                 ks_entry["tmm_iterative_profile_provenance"] = tmm.get("iterative_profile_provenance", {})
                 ks_entry["tmm_kinase_profile_provenance"] = tmm.get("kinase_profile_provenance", {})
                 ks_entry["tmm_input_evidence"] = kinase_module_provenance.get(canon, {})
+                ks_entry["footprint_equivalence"] = exact_footprint_equivalence_by_kinase.get(canon)
+                ks_entry["footprint_diagnostics"] = summarize_weighted_footprint(
+                    tmm.get("_weighted_site_profiles_for_diagnostics", {}),
+                    conditions_sorted,
+                    shrinkage_prior_support=effective_tmm_config["shrinkage_prior_support"],
+                    max_leave_one_out=3,
+                    exclusive_site_keys=[
+                        detail.get("ptm_key", "")
+                        for detail in tmm.get("contribution_details", [])
+                        if detail.get("n_competing_kinases") == 0
+                    ],
+                )
+                ks_entry["footprint_diagnostics"].update({
+                    "n_exclusive": int(tmm.get("n_exclusive", 0)),
+                    "n_shared": int(tmm.get("n_shared", 0)),
+                    "shared_fraction": round(
+                        float(tmm.get("n_shared", 0)) / max(1, int(tmm.get("n_exclusive", 0)) + int(tmm.get("n_shared", 0))),
+                        6,
+                    ),
+                    # A display-only shrinkage diagnostic. Raw coherence remains
+                    # available and no ranking or threshold is changed.
+                    "support_adjusted_coherence": round(
+                        float(ks_entry.get("coherence") or 0.0)
+                        * float(ks_entry["footprint_diagnostics"].get("support_shrinkage_factor") or 0.0),
+                        6,
+                    ),
+                })
                 # Top-5 contribution details for LLM context
                 top5 = sorted(
                     (
@@ -9183,9 +9307,9 @@ async def kinase_activity_heatmap(
                     ks_entry["peak_condition"] = new_peak_cond
                     ks_entry["peak_score"] = new_peak_score
                     ks_entry["direction"] = (
-                        "activation" if new_peak_score > 0.3
-                        else "inactivation" if new_peak_score < -0.3
-                        else "neutral"
+                        "positive_substrate_footprint" if new_peak_score > 0.3
+                        else "negative_substrate_footprint" if new_peak_score < -0.3
+                        else "near_zero_footprint"
                     )
 
         _log.info(f"[TMM] Merged weighted scores for {len(tmm_scores)} kinases (Option A: up/down_sums replaced)")
@@ -9261,6 +9385,7 @@ async def kinase_activity_heatmap(
         "relative_tmm_uncertainty_summary": relative_tmm_uncertainty_summary if 'relative_tmm_uncertainty_summary' in locals() else {},
         "occupancy_tmm_uncertainty_summary": occupancy_tmm_uncertainty_summary if 'occupancy_tmm_uncertainty_summary' in locals() else {},
         "tmm_input_kinase_provenance": kinase_module_provenance,
+        "exact_footprint_equivalence_groups": exact_footprint_equivalence_groups,
         "tmm_candidate_calibration_provenance": {
             "contract": "motif_candidate_likelihood.v1",
             "prior_strength": effective_tmm_config["candidate_prior_strength"],

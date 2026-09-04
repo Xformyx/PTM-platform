@@ -1667,6 +1667,9 @@ def compute_weighted_kinase_scores(
         w_dn_cnts = {c: 0.0 for c in conditions_sorted}
         w_shared_sums = {c: 0.0 for c in conditions_sorted}
         contribution_details = []
+        # Transient, endpoint-local input for footprint robustness diagnostics.
+        # This is intentionally not a published per-edge attribution payload.
+        weighted_site_profiles_for_diagnostics: dict[str, dict[str, float]] = {}
         n_exclusive = 0
         n_shared = 0
         n_resolved = 0
@@ -1794,6 +1797,7 @@ def compute_weighted_kinase_scores(
                     w_shared_sums[c] += ts.get(c, 0.0) * ratio
 
             # Accumulate weighted sums
+            site_profile = {condition: 0.0 for condition in conditions_sorted}
             for c in conditions_sorted:
                 fc = ts.get(c, 0.0)
                 q_val = ptm_qvalues.get(pk, {}).get(c)
@@ -1801,12 +1805,14 @@ def compute_weighted_kinase_scores(
                 if not passes:
                     continue
                 weighted_fc = fc * ratio
+                site_profile[c] = weighted_fc
                 if weighted_fc > 0:
                     w_up_sums[c] += weighted_fc
                     w_up_cnts[c] += ratio
                 elif weighted_fc < 0:
                     w_dn_sums[c] += weighted_fc
                     w_dn_cnts[c] += ratio
+            weighted_site_profiles_for_diagnostics[pk] = site_profile
 
         _profile_type = (kinase_profiles.get(canonical) or {}).get("profile_type", "gaussian_fallback")
         _n_profile_substrates = (kinase_profiles.get(canonical) or {}).get("n_exclusive", 0)
@@ -1832,6 +1838,7 @@ def compute_weighted_kinase_scores(
             "weighted_down_counts": {c: round(v, 3) for c, v in w_dn_cnts.items()},
             "weighted_shared_sums": {c: round(v, 4) for c, v in w_shared_sums.items()},
             "contribution_details": contribution_details,
+            "_weighted_site_profiles_for_diagnostics": weighted_site_profiles_for_diagnostics,
             "n_exclusive": n_exclusive,
             "n_shared": n_shared,
             "profile_type": _profile_type,

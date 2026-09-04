@@ -2312,7 +2312,7 @@ function CascadeView({
           <div className="space-y-3">
             <div className="flex items-center gap-2 text-xs font-medium">
               <Timer className={`h-3.5 w-3.5 ${isUbi ? "text-orange-500" : "text-blue-500"}`} />
-              {isUbi ? "Temporal E3 Ligase Activation Timeline" : "Temporal Kinase Activation Timeline"}
+              {isUbi ? "Temporal E3 Ligase Footprint Timeline" : "Temporal Kinase Substrate-Footprint Timeline"}
               <span className="text-muted-foreground font-normal">— {tc.timepoints.length} timepoints</span>
             </div>
 
@@ -3577,7 +3577,7 @@ function SignalFlowView({
     const map: Record<string, {
       peakCondition: string;
       peakScore: number;
-      direction: "activation" | "inactivation" | "neutral";
+      direction: "positive_substrate_footprint" | "negative_substrate_footprint" | "near_zero_footprint";
       scores: Record<string, number>;
       absScores: Record<string, number>; // mean(|FC|) per condition — captures total activity regardless of direction
       peakOrder: number; // 0-based index in conditions array
@@ -3626,8 +3626,8 @@ function SignalFlowView({
         }
       }
 
-      const direction: "activation" | "inactivation" | "neutral" =
-        peakVal > 0.3 ? "activation" : peakVal < -0.3 ? "inactivation" : "neutral";
+      const direction: "positive_substrate_footprint" | "negative_substrate_footprint" | "near_zero_footprint" =
+        peakVal > 0.3 ? "positive_substrate_footprint" : peakVal < -0.3 ? "negative_substrate_footprint" : "near_zero_footprint";
 
       map[kinaseKey] = {
         peakCondition: peakCond,
@@ -4172,15 +4172,15 @@ function SignalFlowView({
                                 <>
                                   <span
                                     className={`ml-0.5 text-[7px] px-1 py-px rounded border ${
-                                      t.direction === "activation"
+                                      t.direction === "positive_substrate_footprint"
                                         ? "bg-red-900/30 text-red-300 border-red-500/40"
-                                        : t.direction === "inactivation"
+                                        : t.direction === "negative_substrate_footprint"
                                         ? "bg-blue-900/30 text-blue-300 border-blue-500/40"
                                         : "bg-gray-900/30 text-gray-400 border-gray-500/40"
                                     }`}
                                     title={`Peak: ${t.peakCondition} (${t.peakScore > 0 ? "+" : ""}${t.peakScore.toFixed(1)})\nDirection: ${t.direction}`}
                                   >
-                                    {t.direction === "activation" ? "▲" : t.direction === "inactivation" ? "▼" : "—"}
+                                    {t.direction === "positive_substrate_footprint" ? "▲" : t.direction === "negative_substrate_footprint" ? "▼" : "—"}
                                     {t.peakCondition}
                                   </span>
                                   {recOrder >= 0 && (
@@ -4559,12 +4559,50 @@ interface KinaseActivityScore {
   kinase: string;
   scores: Record<string, number>;
   substrate_count: number;
-  confidence: number;
+  confidence?: number | null;
+  confidence_status?: string;
+  annotation_evidence_score?: number | null;
   peak_condition: string;
   peak_score: number;
   coherence?: number;
   cowave_group?: number;
-  direction?: "activation" | "inactivation" | "neutral";
+  direction?: "positive_substrate_footprint" | "negative_substrate_footprint" | "near_zero_footprint";
+  footprint_equivalence?: {
+    equivalence_group_id: string;
+    equivalence: "exact_substrate_set";
+    member_count: number;
+    site_count: number;
+    members: string[];
+    interpretation_boundary: string;
+  } | null;
+  footprint_diagnostics?: {
+    status: string;
+    effective_substrate_number?: number;
+    support_shrinkage_factor?: number;
+    dominant_substrate_fraction?: number;
+    n_exclusive?: number;
+    n_shared?: number;
+    shared_fraction?: number;
+    support_adjusted_coherence?: number;
+    unique_only_footprint?: {
+      status: string;
+      weighted_site_count?: number;
+      peak_condition?: string | null;
+      peak_score?: number;
+      direction?: string;
+    };
+    leave_one_substrate_out?: Array<{
+      site_key: string;
+      leverage_fraction: number;
+      peak_condition: string | null;
+      peak_score: number;
+      direction: string;
+      peak_condition_preserved: boolean;
+      direction_preserved: boolean;
+      max_score_delta: number;
+    }>;
+    interpretation_boundary?: string;
+  };
   // v11.3 Multi-pattern fields
   parent_kinase?: string;          // if this is a sub-pattern, the parent kinase name
   is_sub_pattern?: boolean;        // true for non-dominant cluster entries
@@ -4580,7 +4618,8 @@ interface KinaseActivityScore {
   shared_sums?: Record<string, number>;
   exclusive_counts?: Record<string, number>;
   shared_counts?: Record<string, number>;
-  // Per-tier breakdown: de_novo (|FC|>=2), regulated (0.58<=|FC|<2), minor (0.3<=|FC|<0.58)
+  // Per-tier breakdown: de_novo (declared detection/LOD representation),
+  // regulated (conventional |Log2FC|>=0.58), minor (conventional 0.3<=|Log2FC|<0.58)
   tiers?: Record<"de_novo" | "regulated" | "minor", TierData>;
   // Temporal pattern classification (auto-detected by backend)
   temporal_pattern?: string[];
@@ -4736,7 +4775,7 @@ function CascadeTimelineView({
       peakCondition: string;
       peakOrder: number;
       peakScore: number;
-      direction: "activation" | "inactivation" | "neutral";
+              direction: "positive_substrate_footprint" | "negative_substrate_footprint" | "near_zero_footprint";
       scores: Record<string, number>;
       substrateCount: number;
       upstreamReceptors: string[];
@@ -4762,8 +4801,8 @@ function CascadeTimelineView({
           peakCond = cond;
         }
       }
-      const direction: "activation" | "inactivation" | "neutral" =
-        peakVal > 0.3 ? "activation" : peakVal < -0.3 ? "inactivation" : "neutral";
+      const direction: "positive_substrate_footprint" | "negative_substrate_footprint" | "near_zero_footprint" =
+        peakVal > 0.3 ? "positive_substrate_footprint" : peakVal < -0.3 ? "negative_substrate_footprint" : "near_zero_footprint";
 
       // Find upstream receptors
       const kinaseUpper = (mod.canonical || mod.kinase).toUpperCase();
@@ -4867,8 +4906,8 @@ function CascadeTimelineView({
       <div className="grid grid-cols-4 gap-2">
         {conditions.map((cond, idx) => {
           const group = phaseGroups[cond] || [];
-          const activations = group.filter(g => g.direction === "activation").length;
-          const inactivations = group.filter(g => g.direction === "inactivation").length;
+          const positiveFootprints = group.filter(g => g.direction === "positive_substrate_footprint").length;
+          const negativeFootprints = group.filter(g => g.direction === "negative_substrate_footprint").length;
           const colors = phaseColors[idx] || phaseColors[3];
           return (
             <div key={cond} className={`rounded-lg p-2 border ${colors.bg} ${colors.border}`}>
@@ -4877,7 +4916,7 @@ function CascadeTimelineView({
               </div>
               <div className="text-lg font-bold text-foreground">{group.length}</div>
               <div className="text-[9px] text-muted-foreground">
-                ▲{activations} ▼{inactivations}
+                ▲{positiveFootprints} ▼{negativeFootprints}
               </div>
             </div>
           );
@@ -4922,8 +4961,8 @@ function CascadeTimelineView({
                       onClick={() => onKinaseClick?.(entry.canonical)}
                       title={`${entry.kinase}\nPeak: ${entry.peakCondition} (${entry.peakScore > 0 ? "+" : ""}${entry.peakScore.toFixed(2)})\nSubstrates: ${entry.substrateCount}\nReceptors: ${entry.upstreamReceptors.join(", ") || "unknown"}`}
                     >
-                      <span className={`text-[8px] ${entry.direction === "activation" ? "text-red-400" : entry.direction === "inactivation" ? "text-blue-400" : "text-gray-400"}`}>
-                        {entry.direction === "activation" ? "▲" : entry.direction === "inactivation" ? "▼" : "—"}
+                      <span className={`text-[8px] ${entry.direction === "positive_substrate_footprint" ? "text-red-400" : entry.direction === "negative_substrate_footprint" ? "text-blue-400" : "text-gray-400"}`}>
+                        {entry.direction === "positive_substrate_footprint" ? "▲" : entry.direction === "negative_substrate_footprint" ? "▼" : "—"}
                       </span>
                       <span className="text-foreground font-medium truncate flex-1">{entry.kinase}</span>
                       <span className="text-muted-foreground">{entry.peakScore > 0 ? "+" : ""}{entry.peakScore.toFixed(1)}</span>
@@ -5030,7 +5069,7 @@ function KinaseActivityHeatmapView({
       const kinase_modules = globalKinaseResult.kinase_modules.map((km) => ({
         kinase: km.kinase,
         ptms: km.members.map((m) => ({ gene: m.gene, position: m.position })),
-        confidence_score: km.confidence_score || 0.5,
+        confidence_score: Number.isFinite(km.confidence_score) ? km.confidence_score : null,
       }));
       const result = await api.post<KinaseHeatmapData>(
         `/orders/${orderId}/kinase-activity-heatmap`,
@@ -5179,7 +5218,7 @@ function KinaseActivityHeatmapView({
           break;
         }
         case "confidence":
-          scores.sort((a, b) => b.confidence - a.confidence);
+          scores.sort((a, b) => (b.footprint_diagnostics?.effective_substrate_number ?? -1) - (a.footprint_diagnostics?.effective_substrate_number ?? -1));
           break;
         case "substrate_count":
           scores.sort((a, b) => b.substrate_count - a.substrate_count);
@@ -5407,7 +5446,7 @@ function KinaseActivityHeatmapView({
         >
           <option value="peak_score">Peak Score</option>
           <option value="peak_time">Peak Time</option>
-          <option value="confidence">Confidence</option>
+          <option value="confidence">Effective Support</option>
           <option value="substrate_count">Substrate Count</option>
           <option value="alphabetical">Alphabetical</option>
           <option value="cowave_group">Co-wave Group</option>
@@ -5430,10 +5469,10 @@ function KinaseActivityHeatmapView({
           className="text-xs h-7 bg-background border border-border rounded px-2"
           value={signalTierFilter}
           onChange={(e) => setSignalTierFilter(e.target.value as typeof signalTierFilter)}
-          title="Filter by per-substrate signal tier (legacy breakdown):\n  de_novo: |FC|≥2\n  regulated: 0.58≤|FC|<2\n  minor: 0.3≤|FC|<0.58\n\nNote: v11.3 Magnitude Tier (S/M/W badge) is based on\nmax |Log2FC| across all conditions per substrate."
+          title="Filter by representation/signal tier:\n  de_novo: declared detection/LOD representation only\n  regulated: conventional |Log2FC|≥0.58\n  minor: conventional 0.3≤|Log2FC|<0.58\n\nDe novo pseudo-Log2FC is never used to assign this tier."
         >
           <option value="all">All Tiers</option>
-          <option value="de_novo">De Novo (|FC|≥2)</option>
+          <option value="de_novo">De Novo (detection/LOD)</option>
           <option value="regulated">Regulated (0.58≤|FC|&lt;2)</option>
           <option value="minor">Minor (0.3≤|FC|&lt;0.58)</option>
         </select>
@@ -5572,10 +5611,10 @@ function KinaseActivityHeatmapView({
               <tr className="border-b border-border">
                 <th className="w-2 px-0 py-1 cursor-help" title={`Co-Wave Group (CW)\n\nColor bar = ${isUbi ? "E3 ligases" : "kinases"} with correlated temporal substrate activity (Pearson r≥0.7).\nSame color = same group.\n\nG-label (e.g. G2) = CW Group number.\n${isUbi ? "E3 ligases" : "Kinases"} in the same group have substrates whose\n${isUbi ? "ubiquitylation" : "phosphorylation"} levels move together over time.\n\nClick a group in the legend below to filter Vector Plot.`}>CW</th>
                 <th className="text-left px-2 py-1 sticky left-0 bg-background z-10 min-w-[100px] cursor-help" title={`${isUbi ? "E3 Ligase" : "Kinase"}\n\nName of the ${isUbi ? "E3 ligase" : "kinase"} (or ${isUbi ? "E3 ligase" : "kinase"} family).\nG-label shows its Co-Wave Group number.`}>{isUbi ? "E3 Ligase" : "Kinase"}</th>
-                <th className="text-center px-1 py-1 w-8 cursor-help" title={`Direction\n\nOverall activation direction of this ${isUbi ? "E3 ligase" : "kinase"}'s substrates:\n  ▲ = activating (substrates ${isUbi ? "ubiquitylation" : "phosphorylation"} increases)\n  ▼ = inhibitory (substrates ${isUbi ? "ubiquitylation" : "phosphorylation"} decreases)\n  ↕ = mixed`}>Dir</th>
+                <th className="text-center px-1 py-1 w-8 cursor-help" title={`Signed substrate footprint\n\n  ▲ = positive weighted aggregate substrate footprint\n  ▼ = negative weighted aggregate substrate footprint\n  — = near-zero/mixed footprint\n\nThis is not direct catalytic activation, inhibition, or kinase attribution.`}>Dir</th>
                 <th className="text-center px-1 py-1 w-10 cursor-help" title={`Number of Substrates (#Sub)\n\nTotal confirmed + inferred ${isUbi ? "ubiquitylation" : "phosphorylation"} substrates\nfor this ${isUbi ? "E3 ligase" : "kinase"} in the current dataset.`}>#Sub</th>
-                <th className="text-center px-1 py-1 w-10 cursor-help" title={`Confidence (Conf)\n\nWeighted evidence score (0–100%) based on:\n  • Number of substrates\n  • Source quality (${isUbi ? "UbiBrowser, literature" : "PhosphoSitePlus, KEA3, motif"})\n  • Annotation depth\nHigher = more reliable ${isUbi ? "E3 ligase" : "kinase"}-substrate assignment.`}>Conf</th>
-                <th className="text-center px-1 py-1 w-10 cursor-help" title={`Coherence (Coh)\n\nMean pairwise |Pearson r| within dominant cluster (0 to 1).\nv11.3: Uses absolute correlation so anti-correlated\nsubstrates (inhibitory targets) also score high.\n\nHigher = substrates change more synchronously over time.\n0.7+ = strong co-regulation, 0.4-0.7 = moderate.`}>Coh</th>
+                <th className="text-center px-1 py-1 w-10 cursor-help" title={`Effective support (n_eff)\n\nContribution-weighted effective substrate number. It falls when one substrate dominates the footprint.\n\nNo scalar confidence percentage is shown because bootstrap, replicate and permutation calibration are not always available.`}>n_eff</th>
+                <th className="text-center px-1 py-1 w-10 cursor-help" title={`Coherence (Coh)\n\nRaw mean pairwise |Pearson r| is shown with its support-adjusted diagnostic in the tooltip. The support adjustment is descriptive only; it does not change rank or score.`}>Coh</th>
                 {heatmapData.conditions.map((c) => (
                   <th
                     key={c}
@@ -5652,7 +5691,17 @@ function KinaseActivityHeatmapView({
                           </span>
                         </span>
                       ) : (
-                        <>{ks.kinase}</>
+                        <>
+                          {ks.kinase}
+                          {ks.footprint_equivalence && (
+                            <span
+                              className="ml-1 text-[8px] px-1 py-0 rounded border bg-amber-500/15 text-amber-300 border-amber-500/30 cursor-help"
+                              title={`Exact footprint equivalence\n\nMembers: ${ks.footprint_equivalence.members.join(", ")}\nObserved sites: ${ks.footprint_equivalence.site_count}\n\n${ks.footprint_equivalence.interpretation_boundary}`}
+                            >
+                              =F{ks.footprint_equivalence.member_count}
+                            </span>
+                          )}
+                        </>
                       )}
                       {/* v11.3.1: Same-time cluster count badge (tooltip shows details) */}
                       {!ks.is_sub_pattern && ks.same_time_clusters && ks.same_time_clusters.length > 0 && (() => {
@@ -5689,7 +5738,7 @@ function KinaseActivityHeatmapView({
                           weak: "W",
                         };
                         const tierTitles: Record<string, string> = {
-                          strong: "Tier 1 (Strong): max |Log2FC| > 5.0\nDe novo / high-amplitude substrates",
+                          strong: "Tier 1 (Strong): max |Log2FC| > 5.0\nHigh-amplitude dominant-cluster observation; not a direct regulatory-strength claim",
                           moderate: "Tier 2 (Moderate): 2.0 < max |Log2FC| ≤ 5.0\nRegulated substrates",
                           weak: "Tier 3 (Weak): max |Log2FC| ≤ 2.0\nMinor change substrates",
                         };
@@ -5858,8 +5907,8 @@ function KinaseActivityHeatmapView({
                         ];
                         for (const sp of spList.slice(0, 5)) {
                           const r = sp.correlation_with_activity;
-                          const relLabel = sp.relationship === "concordant" ? "✓ concordant (likely activation site)"
-                            : sp.relationship === "discordant" ? "⊘ discordant (likely inhibitory site)"
+                          const relLabel = sp.relationship === "concordant" ? "✓ concordant self-PTM temporal observation"
+                            : sp.relationship === "discordant" ? "⊘ discordant self-PTM temporal observation"
                             : "— independent";
                           tipLines.push(`${sp.site}: peak@${sp.peak_condition} (${sp.peak_fc > 0 ? "+" : ""}${sp.peak_fc.toFixed(2)})`);
                           tipLines.push(`  r=${r > 0 ? "+" : ""}${r.toFixed(3)} → ${relLabel}`);
@@ -5881,10 +5930,10 @@ function KinaseActivityHeatmapView({
                     </td>
                     {/* Direction indicator */}
                     <td className="text-center px-0.5 py-0.5">
-                      {ks.direction === "activation" ? (
-                        <span className="text-red-400 font-bold text-xs" title="Kinase Activation (substrates up-phosphorylated)">▲</span>
-                      ) : ks.direction === "inactivation" ? (
-                        <span className="text-blue-400 font-bold text-xs" title="Inactivation / Phosphatase action (substrates de-phosphorylated)">▼</span>
+                      {ks.direction === "positive_substrate_footprint" ? (
+                        <span className="text-red-400 font-bold text-xs" title="Positive weighted substrate footprint; not direct kinase activation">▲</span>
+                      ) : ks.direction === "negative_substrate_footprint" ? (
+                        <span className="text-blue-400 font-bold text-xs" title="Negative weighted substrate footprint; not direct kinase inhibition or phosphatase attribution">▼</span>
                       ) : (
                         <span className="text-muted-foreground/50 text-[9px]">—</span>
                       )}
@@ -5905,17 +5954,32 @@ function KinaseActivityHeatmapView({
                         : ks.substrate_count
                       }
                     </td>
-                    {/* Confidence */}
+                    {/* Contribution-weighted effective support */}
                     <td className="text-center px-1 py-0.5">
-                      <span className={`${ks.confidence >= 0.7 ? "text-green-400" : ks.confidence >= 0.4 ? "text-yellow-400" : "text-red-400"}`}>
-                        {(ks.confidence * 100).toFixed(0)}%
+                      <span className="text-cyan-300" title={(() => {
+                        const diag = ks.footprint_diagnostics;
+                        if (!diag || diag.status !== "computed") return "Effective support not evaluable because contribution-weighted site profiles are unavailable.";
+                        const loo = diag.leave_one_substrate_out || [];
+                        const top = loo[0];
+                        return [
+                          `Effective support: n_eff=${diag.effective_substrate_number?.toFixed(2) ?? "—"}`,
+                          `Unique/shared: ${diag.n_exclusive ?? "—"}/${diag.n_shared ?? "—"} (shared ${(100 * (diag.shared_fraction ?? 0)).toFixed(1)}%)`,
+                          `Dominant substrate leverage: ${(100 * (diag.dominant_substrate_fraction ?? 0)).toFixed(1)}%`,
+                          top ? `Top leave-one-out: ${top.site_key}; peak ${top.peak_condition ?? "—"}; direction preserved=${top.direction_preserved ? "yes" : "no"}` : "No leave-one-out record",
+                          diag.unique_only_footprint ? `Unique-only: ${diag.unique_only_footprint.status}; peak ${diag.unique_only_footprint.peak_condition ?? "—"}` : "",
+                          "Diagnostic only: does not establish direct kinase attribution or causal regulation.",
+                        ].filter(Boolean).join("\n");
+                      })()}>
+                        {ks.footprint_diagnostics?.status === "computed"
+                          ? (ks.footprint_diagnostics.effective_substrate_number ?? 0).toFixed(1)
+                          : "—"}
                       </span>
                     </td>
                     {/* Coherence */}
                     <td className="text-center px-1 py-0.5">
                       <span
                         className={`text-[10px] ${getCoherenceColor(ks.coherence ?? 0)}`}
-                        title={`Intra-kinase substrate coherence: ${(ks.coherence ?? 0).toFixed(3)}\n(mean pairwise |Pearson r| within dominant cluster)\n\nv11.3: Uses Absolute Correlation (|r|) so anti-correlated\nsubstrates (inhibitory targets) also contribute positively.\nRange: 0 (random) to 1 (perfectly co-regulated).${ks.n_clusters && ks.n_clusters > 1 ? `\n\nBased on dominant cluster (${ks.substrate_count}/${ks.total_substrates ?? ks.substrate_count} substrates)\n${ks.n_clusters} trajectory clusters detected` : ""}`}
+                        title={`Raw intra-footprint coherence: ${(ks.coherence ?? 0).toFixed(3)}\nSupport-adjusted diagnostic coherence: ${(ks.footprint_diagnostics?.support_adjusted_coherence ?? 0).toFixed(3)}\n\nThe adjusted value shrinks raw coherence by the contribution-weighted effective support, so small-n footprints are not over-interpreted. It does not change the displayed score or rank.${ks.n_clusters && ks.n_clusters > 1 ? `\n\nBased on dominant cluster (${ks.substrate_count}/${ks.total_substrates ?? ks.substrate_count} substrates)\n${ks.n_clusters} trajectory clusters detected` : ""}`}
                       >
                         {(ks.coherence ?? 0).toFixed(2)}
                       </span>
@@ -6849,23 +6913,23 @@ function KinaseActivityHeatmapView({
         </div>
         <div className="bg-muted/30 rounded p-2 text-center">
           <div className="text-lg font-bold text-red-400">
-            {sortedScores.filter((s) => s.direction === "activation").length}
+            {sortedScores.filter((s) => s.direction === "positive_substrate_footprint").length}
           </div>
-          <div className="text-muted-foreground">▲ Activation</div>
+          <div className="text-muted-foreground">▲ Positive footprint</div>
         </div>
         <div className="bg-muted/30 rounded p-2 text-center">
           <div className="text-lg font-bold text-blue-400">
-            {sortedScores.filter((s) => s.direction === "inactivation").length}
+            {sortedScores.filter((s) => s.direction === "negative_substrate_footprint").length}
           </div>
-          <div className="text-muted-foreground">▼ Inactivation</div>
+          <div className="text-muted-foreground">▼ Negative footprint</div>
         </div>
         <div className="bg-muted/30 rounded p-2 text-center">
           <div className="text-lg font-bold text-purple-400">
-            {sortedScores.filter((s) => s.confidence >= 0.7).length}
+            {sortedScores.filter((s) => s.footprint_diagnostics?.status === "computed").length}
           </div>
-          <div className="text-muted-foreground">High Conf (≥70%)</div>
+          <div className="text-muted-foreground">Support diagnostics</div>
         </div>
-        <div className="bg-muted/30 rounded p-2 text-center cursor-help" title={`Co-wave Groups: Clusters of ${isUbi ? "E3 ligases" : "kinases"} whose substrate activity profiles are highly correlated (Pearson r≥0.7). ${isUbi ? "E3 ligases" : "Kinases"} in the same group show similar temporal activation/inactivation patterns.`}>
+        <div className="bg-muted/30 rounded p-2 text-center cursor-help" title={`Co-wave Groups: Clusters of ${isUbi ? "E3 ligases" : "kinases"} whose substrate footprint profiles are highly correlated (Pearson r≥0.7). ${isUbi ? "E3 ligases" : "Kinases"} in the same group show similar temporal positive/negative footprint patterns.`}>
           <div className="text-lg font-bold text-fuchsia-400">
             {heatmapData.cowave_groups?.length ?? 0}
           </div>
