@@ -1562,31 +1562,31 @@ def _generate_legends(
 
     ptm_nodes = [n for n in nodes if n.get("type") == "PTM"]
     non_ptm_nodes = [n for n in nodes if n.get("type") == "Non-PTM"]
-    active = [n for n in ptm_nodes if n["state"] in ("high_active", "moderate_active")]
-    inhibited = [n for n in ptm_nodes if n["state"] in ("inhibited", "low_inhibited")]
+    higher_ptm = [n for n in ptm_nodes if n["state"] in ("high_active", "moderate_active")]
+    lower_ptm = [n for n in ptm_nodes if n["state"] in ("inhibited", "low_inhibited")]
 
     # --- Full Legend (guide §5.2) ---
     legend_lines = [
-        "### Figure: Temporal Dynamics of PTM Signaling Networks\n",
+        "### Figure: Temporal PTM and Network Context Map\n",
     ]
 
     # Overview
     legend_lines.append(
-        f"**Overview**: This figure presents the temporal dynamics of post-translational "
-        f"modification (PTM) signaling networks. The network contains **{len(ptm_nodes)} PTM nodes**, "
-        f"**{len(non_ptm_nodes)} Non-PTM proteins**, and **{len(edges)} interaction edges**.\n"
+        f"**Overview**: This figure presents measured post-translational modification "
+        f"(PTM) and network context. The map contains **{len(ptm_nodes)} PTM nodes**, "
+        f"**{len(non_ptm_nodes)} Non-PTM proteins**, and **{len(edges)} context edges**.\n"
     )
 
      # Color Legend v4.0
     legend_lines.append("**Node Color Legend**:")
     legend_lines.append("*PTM Proteins (Red/Blue gradient — intensity = |Log2FC|):*")
-    legend_lines.append(f"- Dark Red ({NODE_COLORS['high_active']}): Strong upregulation (Log2FC > 2.0)")
-    legend_lines.append(f"- Red ({NODE_COLORS['moderate_active']}): Moderate upregulation (1.0 < Log2FC ≤ 2.0)")
-    legend_lines.append(f"- Light Red ({NODE_COLORS['low_active']}): Weak upregulation (0 < Log2FC ≤ 1.0)")
-    legend_lines.append(f"- Gray ({NODE_COLORS['neutral']}): No significant change")
-    legend_lines.append(f"- Light Blue ({NODE_COLORS['low_inhibited']}): Weak downregulation (-1.0 ≤ Log2FC < 0)")
-    legend_lines.append(f"- Blue ({NODE_COLORS['inhibited']}): Moderate downregulation (-2.0 ≤ Log2FC < -1.0)")
-    legend_lines.append(f"- Dark Blue ({NODE_COLORS['high_inhibited']}): Strong downregulation (Log2FC < -2.0)")
+    legend_lines.append(f"- Dark Red ({NODE_COLORS['high_active']}): Higher measured PTM abundance (Log2FC > 2.0)")
+    legend_lines.append(f"- Red ({NODE_COLORS['moderate_active']}): Higher measured PTM abundance (1.0 < Log2FC ≤ 2.0)")
+    legend_lines.append(f"- Light Red ({NODE_COLORS['low_active']}): Higher measured PTM abundance (0 < Log2FC ≤ 1.0)")
+    legend_lines.append(f"- Gray ({NODE_COLORS['neutral']}): Near-zero measured contrast")
+    legend_lines.append(f"- Light Blue ({NODE_COLORS['low_inhibited']}): Lower measured PTM abundance (-1.0 ≤ Log2FC < 0)")
+    legend_lines.append(f"- Blue ({NODE_COLORS['inhibited']}): Lower measured PTM abundance (-2.0 ≤ Log2FC < -1.0)")
+    legend_lines.append(f"- Dark Blue ({NODE_COLORS['high_inhibited']}): Lower measured PTM abundance (Log2FC < -2.0)")
     legend_lines.append("")
     legend_lines.append("*Non-PTM Proteins (Green/Purple gradient — Protein_Log2FC):*")
     legend_lines.append(f"- Dark Green ({NODE_COLORS['nonptm_up_strong']}): Strong increase (Log2FC > 1.5)")
@@ -1601,13 +1601,13 @@ def _generate_legends(
     _is_ubi_leg = ptm_type.lower().strip() in ("ubiquitylation", "ubiquitination")
     _reg_label = "E3 Ligase" if _is_ubi_leg else "Kinase"
     legend_lines.append(f"*{_reg_label} / Upstream Regulators (Diamond shape):*")
-    legend_lines.append(f"- Deep Orange ({NODE_COLORS['kinase_up']}): {_reg_label} with increased activity (Log2FC > 0.5)")
-    legend_lines.append(f"- Amber ({NODE_COLORS['kinase']}): {_reg_label} / upstream regulator (neutral)")
-    legend_lines.append(f"- Light Orange ({NODE_COLORS['kinase_down']}): {_reg_label} with decreased activity (Log2FC < -0.5)")
+    legend_lines.append(f"- Deep Orange ({NODE_COLORS['kinase_up']}): {_reg_label} candidate context with positive substrate footprint")
+    legend_lines.append(f"- Amber ({NODE_COLORS['kinase']}): {_reg_label} candidate context (neutral)")
+    legend_lines.append(f"- Light Orange ({NODE_COLORS['kinase_down']}): {_reg_label} candidate context with negative substrate footprint")
     if _is_ubi_leg:
-        legend_lines.append(f"- Dark Teal ({NODE_COLORS['dub_up']}): DUB with increased activity (Log2FC > 0.5)")
+        legend_lines.append(f"- Dark Teal ({NODE_COLORS['dub_up']}): DUB candidate context with positive substrate footprint")
         legend_lines.append(f"- Teal ({NODE_COLORS['dub']}): DUB / deubiquitylase (neutral)")
-        legend_lines.append(f"- Light Teal ({NODE_COLORS['dub_down']}): DUB with decreased activity (Log2FC < -0.5)")
+        legend_lines.append(f"- Light Teal ({NODE_COLORS['dub_down']}): DUB candidate context with negative substrate footprint")
     legend_lines.append("")
     # Node Shape Legend v4.0
     legend_lines.append("**Node Shape Legend**:")
@@ -1634,16 +1634,16 @@ def _generate_legends(
         legend_lines.append(f"- {et} ({color}, {style}{arrow}): {cnt} connections")
     legend_lines.append("")
 
-    # Key Active PTMs
-    if active:
-        legend_lines.append("**Key Active PTMs**:")
-        for n in sorted(active, key=lambda x: -x["value"])[:10]:
+    # Largest measured contrasts are descriptive, not functional activity.
+    if higher_ptm:
+        legend_lines.append("**Largest Higher Measured PTM Contrasts**:")
+        for n in sorted(higher_ptm, key=lambda x: -x["value"])[:10]:
             legend_lines.append(f"- {n['id']}: Log2FC = {n['value']}")
         legend_lines.append("")
 
-    if inhibited:
-        legend_lines.append("**Key Inhibited PTMs**:")
-        for n in sorted(inhibited, key=lambda x: x["value"])[:5]:
+    if lower_ptm:
+        legend_lines.append("**Largest Lower Measured PTM Contrasts**:")
+        for n in sorted(lower_ptm, key=lambda x: x["value"])[:5]:
             legend_lines.append(f"- {n['id']}: Log2FC = {n['value']}")
         legend_lines.append("")
 
@@ -1675,13 +1675,13 @@ def _generate_legends(
 
             panel_legend = (
                 f"**Panel {panel} ({tp}, {phase})**: "
-                f"{active_count} activated PTMs, {inhibited_count} inhibited PTMs, "
-                f"{non_ptm_count} Non-PTM proteins, {edge_count} active edges. "
+                f"{active_count} PTMs with higher measured abundance, {inhibited_count} PTMs with lower measured abundance, "
+                f"{non_ptm_count} Non-PTM proteins, {edge_count} context edges. "
             )
             if top_str:
-                panel_legend += f"Top activated: {top_str}. "
+                panel_legend += f"Largest positive measured contrasts: {top_str}. "
             if top_pw:
-                panel_legend += f"Key pathways: {', '.join(top_pw)}."
+                panel_legend += f"Descriptive pathway-membership context: {', '.join(top_pw)}."
 
             individual_legends[tp] = panel_legend
 
@@ -1689,10 +1689,10 @@ def _generate_legends(
     summary_table_lines = []
     if timepoint_results:
         summary_table_lines.append(
-            "\n| Time Point | Activated PTMs | Inhibited PTMs | Non-PTM Proteins | Active Connections | Top Pathway |"
+            "\n| Time Point | Higher PTM Contrasts | Lower PTM Contrasts | Non-PTM Proteins | Context Edges | Descriptive Pathway Context |"
         )
         summary_table_lines.append(
-            "|------------|:--------------:|:--------------:|:----------------:|:------------------:|-------------|"
+            "|------------|:--------------------:|:-------------------:|:----------------:|:-------------:|------------------------------|"
         )
         for tp, tp_data in sorted(
             timepoint_results.items(), key=lambda x: _tp_to_minutes(x[0])
@@ -1712,7 +1712,7 @@ def _generate_legends(
     comparison_legend = ""
     if timepoint_results and len(timepoint_results) > 1:
         sorted_tps = sorted(timepoint_results.keys(), key=_tp_to_minutes)
-        comp_lines = ["**Temporal Comparison Analysis**:\n"]
+        comp_lines = ["**Temporal Measured-Contrast Comparison**:\n"]
         prev_active = 0
         for tp in sorted_tps:
             stats = timepoint_results[tp].get("stats", {})
@@ -1720,7 +1720,7 @@ def _generate_legends(
             change = curr_active - prev_active
             direction = "↑" if change > 0 else ("↓" if change < 0 else "→")
             comp_lines.append(
-                f"- {tp}: {curr_active} active PTMs ({direction}{abs(change)} from previous)"
+                f"- {tp}: {curr_active} PTMs with higher measured abundance ({direction}{abs(change)} from previous)"
             )
             prev_active = curr_active
         comparison_legend = "\n".join(comp_lines)
@@ -2807,8 +2807,8 @@ def generate_network_figure_section(
         if pw_path_obj.exists() and pw_path_obj.stat().st_size > 1000:
             pw_img_ref = pw_path_obj.name
             main_section += (
-                f"### Figure {figure_num}. Time-resolved Direct PTM Pathway Enrichment "
-                f"with Independent Protein and Network Support\n\n"
+                f"### Figure {figure_num}. Time-resolved PTM Pathway-Membership Enrichment "
+                f"with Protein and Network Context\n\n"
             )
             main_section += f"![Direct PTM Pathway Enrichment]({pw_img_ref})\n\n"
             main_section += (
@@ -2821,8 +2821,8 @@ def generate_network_figure_section(
                 "is not a Direct hit. Coherence is the geometric mean of observed "
                 "coverage, connectedness, temporal order, and direction consistency; "
                 "missing components are omitted, not filled with 1. "
-                "Terms (activated/inhibited/modulated/network-associated) require "
-                "annotated functional sites and are not a ranking prior. "
+                "Terms (higher/lower member contrast, descriptive membership, or network-associated context) are "
+                "display descriptors and are not a ranking prior. "
                 "NES is enrichment of the evidence ranking, not pathway activation "
                 "or kinase activity.\n\n"
             )
@@ -2868,7 +2868,7 @@ def generate_network_figure_section(
                         f"### Figure {figure_num}. Compartmentalized Signaling Context Diagram "
                         f"— {tp}{pw_subtitle}\n\n"
                     )
-                    main_section += f"![Signal Transduction Pathway Cascade Diagram — {tp}]({tp_img_ref})\n\n"
+                    main_section += f"![Compartmentalized Signaling Context Diagram — {tp}]({tp_img_ref})\n\n"
                     main_section += _cascade_legend_text + f" Data shown for condition: **{tp}**.\n\n"
                     main_section += "---\n\n"
                     logger.info(f"[NET-SECTION] v9.4: Per-condition cascade for '{tp}' promoted to Figure {figure_num}")
@@ -2876,10 +2876,10 @@ def generate_network_figure_section(
                 else:
                     # v8.5: Cascade → Supplementary
                     supp_section += (
-                        f"### Supplementary Figure {supp_num}. Signal Transduction Pathway Cascade Diagram "
+                        f"### Supplementary Figure {supp_num}. Compartmentalized Signaling Context Diagram "
                         f"— {tp}{pw_subtitle}\n\n"
                     )
-                    supp_section += f"![Signal Transduction Pathway Cascade Diagram — {tp}]({tp_img_ref})\n\n"
+                    supp_section += f"![Compartmentalized Signaling Context Diagram — {tp}]({tp_img_ref})\n\n"
                     supp_section += _cascade_legend_text + f" Data shown for condition: **{tp}**.\n\n"
                     supp_section += "---\n\n"
                     logger.info(f"[NET-SECTION] Per-condition cascade for '{tp}' inserted as Supplementary Figure {supp_num}")
@@ -2894,9 +2894,9 @@ def generate_network_figure_section(
             if promote_to_main:
                 # v9.4: Cascade → Main Figure
                 main_section += (
-                    f"### Figure {figure_num}. Signal Transduction Pathway Cascade Diagram{pw_subtitle}\n\n"
+                    f"### Figure {figure_num}. Compartmentalized Signaling Context Diagram{pw_subtitle}\n\n"
                 )
-                main_section += f"![Signal Transduction Pathway Cascade Diagram]({cascade_img_ref})\n\n"
+                main_section += f"![Compartmentalized Signaling Context Diagram]({cascade_img_ref})\n\n"
                 main_section += _cascade_legend_text + "\n\n"
                 main_section += "---\n\n"
                 logger.info(f"[NET-SECTION] v9.4: Combined cascade promoted to Figure {figure_num}")
@@ -2904,9 +2904,9 @@ def generate_network_figure_section(
             else:
                 # v8.5: Cascade → Supplementary
                 supp_section += (
-                    f"### Supplementary Figure {supp_num}. Signal Transduction Pathway Cascade Diagram{pw_subtitle}\n\n"
+                    f"### Supplementary Figure {supp_num}. Compartmentalized Signaling Context Diagram{pw_subtitle}\n\n"
                 )
-                supp_section += f"![Signal Transduction Pathway Cascade Diagram]({cascade_img_ref})\n\n"
+                supp_section += f"![Compartmentalized Signaling Context Diagram]({cascade_img_ref})\n\n"
                 supp_section += _cascade_legend_text + "\n\n"
                 supp_section += "---\n\n"
                 logger.info(f"[NET-SECTION] Signaling cascade diagram inserted as Supplementary Figure {supp_num}")

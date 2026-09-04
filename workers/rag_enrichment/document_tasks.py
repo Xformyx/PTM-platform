@@ -175,3 +175,44 @@ def index_document(self, doc_id: int, collection_id: int, file_path: str):
                 "error": error_msg,
                 "elapsed_seconds": elapsed,
             }
+
+
+@app.task(bind=True, name="rag_enrichment.document_tasks.index_publication_manifest", max_retries=1)
+def index_publication_manifest(self, collection_id: int, manifest_path: str):
+    """Reindex publication-identified sources into an existing collection.
+
+    This task is deliberately separate from ordinary uploads. It accepts only a
+    validated manifest with title + PMID/DOI per source and therefore cannot
+    turn a generic bundle label into a Report citation.
+    """
+    start_time = time.time()
+    logger.info("[Publication manifest] Starting reindex: collection=%s manifest=%s", collection_id, manifest_path)
+    try:
+        col_info = _get_collection_info(collection_id)
+        indexer = DocumentIndexer(
+            embedding_model=col_info["embedding_model"],
+            chunk_size=col_info["chunk_size"],
+            overlap_sentences=2,
+        )
+        result = indexer.index_publication_manifest(
+            manifest_path=manifest_path,
+            collection_name=col_info["chromadb_name"],
+        )
+        _update_collection_counts(collection_id)
+        result.update({
+            "collection_id": collection_id,
+            "elapsed_seconds": round(time.time() - start_time, 1),
+        })
+        logger.info("[Publication manifest] Reindex completed: %s", result)
+        return result
+    except Exception as exc:
+        logger.error("[Publication manifest] Reindex failed: %s", exc, exc_info=True)
+        try:
+            self.retry(countdown=30, exc=exc)
+        except self.MaxRetriesExceededError:
+            return {
+                "collection_id": collection_id,
+                "status": "failed",
+                "error": str(exc),
+                "elapsed_seconds": round(time.time() - start_time, 1),
+            }

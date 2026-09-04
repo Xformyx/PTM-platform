@@ -472,6 +472,17 @@ class ReportPostProcessor:
         )
         return text
 
+    @staticmethod
+    def bibliography_blocked_reference_section() -> str:
+        """Return the fixed review gate when no publication identity is traceable."""
+        return (
+            "## References\n\n"
+            "**Citation completeness status: blocked for review.** No traceable collection-local or PubMed "
+            "reference was resolved for this Report. External biological background, literature comparison, "
+            "pathway-function interpretation, and cascade claims are withheld until publication-level metadata "
+            "is supplied."
+        )
+
     def _normalize_headings(self, text: str) -> str:
         """Normalize section headings.
         

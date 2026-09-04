@@ -1405,6 +1405,12 @@ def _build_section_prompt(
         if data_anchored_queries else retriever.search_for_section(section_type, keywords, n_results=chromadb_results)
     )
     citable_rag_results = [row for row in rag_results if row.get("citation_eligible")]
+    has_traceable_pubmed = any(
+        isinstance(reference, dict)
+        and (str(reference.get("pmid") or "").strip() or str(reference.get("doi") or "").strip())
+        for reference in all_references
+    )
+    bibliography_expected = bool(citable_rag_results or has_traceable_pubmed)
 
     # v10.8: Collect ChromaDB refs for unified numbering
     _all_chroma_results = list(citable_rag_results)  # traceable references only
@@ -1538,6 +1544,15 @@ def _build_section_prompt(
         f"- Example: Instead of 'the applied treatment induced {ptm_type_label}', write "
         f"'{treatment} induced {ptm_type_label} in {tissue}'.\n"
     )
+    if not bibliography_expected:
+        analysis_context_block += (
+            "\n**CITATION-INTEGRITY DATA-ONLY MODE (MANDATORY):**\n"
+            "- No traceable publication-level reference is available for this Report.\n"
+            "- Use only Order-derived observations, compact provenance/readiness packets, and explicitly testable hypotheses.\n"
+            "- Do NOT write external canonical biology, prior-work comparison, known protein function, pathway-function, "
+            "kinase/cascade mechanism, activation/inhibition, or literature-background claims.\n"
+            "- Do NOT assign functional modules to temporal clusters. Describe only observed local membership and sampled-timepoint profiles.\n"
+        )
 
     # v9.1: PTM-type-specific interpretation framework (from vocabulary dictionary)
     normalized_ptm = get_normalized_ptm_type(ptm_type_label)

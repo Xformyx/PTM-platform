@@ -410,6 +410,61 @@ def _resolve_figure_path(cf: dict, Path) -> str | None:
     return None
 
 
+def _build_bibliography_blocked_data_only_report(
+    state: ReportState,
+    *,
+    title_text: str,
+    generated_at: str,
+) -> str:
+    """Render a fail-closed report when no traceable bibliography exists.
+
+    An LLM-written full report can contain external canonical biology even after
+    prompt-level boundaries.  A missing bibliography is therefore not only a
+    warning: it changes the output contract to compact deterministic evidence.
+    This path intentionally avoids LLM sections, RAG prose, pathway figures and
+    supplementary cascade captions.  It does not alter numerical analysis.
+    """
+    from .citation_formatter import ReportPostProcessor
+    from .dynamic_prompt_generator import format_compact_attribution_readiness_for_report
+    from .biological_synthesis import format_candidate_discovery_packet_for_report
+    from .nodes.kinase_annotation_node import format_kinase_footprint_diagnostics_for_report
+
+    parts = [
+        f"# {title_text}\n",
+        f"*Generated: {generated_at}*\n",
+        "## Citation Integrity Gate\n\n"
+        "This Report is rendered in **data-only review mode** because no traceable publication-level "
+        "reference identity was resolved from the selected collection or PubMed. External biological background, "
+        "literature comparison, pathway-function interpretation, and cascade claims are intentionally withheld. "
+        "Reindex the selected collection with a title and PMID or DOI per source document before requesting a "
+        "citation-complete Report.\n",
+        "## Results\n\n"
+        "Only deterministic Order-derived evidence is shown below. Measured contrasts are not, by themselves, "
+        "biological priority, mechanistic importance, direct regulatory strength, or kinase activity.\n",
+    ]
+    readiness = format_compact_attribution_readiness_for_report(
+        state.get("temporal_report_evidence_packet") or {}
+    )
+    if readiness:
+        parts.append(readiness)
+    p5 = format_candidate_discovery_packet_for_report(
+        state.get("biological_synthesis_packet") or {}
+    )
+    if p5:
+        parts.append(p5)
+    footprint = format_kinase_footprint_diagnostics_for_report(
+        state.get("kinase_activity_heatmap") or {},
+        state.get("ptm_type", "phosphorylation"),
+    )
+    if footprint:
+        parts.append(footprint)
+    parts.append("## Methods\n\n### Reporting Policy\n\n"
+                 "Large conventional Log2FC values are retained as measured numeric contrasts, but are not used "
+                 "alone to infer biological priority, mechanistic importance, or direct regulatory strength.\n")
+    parts.append(ReportPostProcessor.bibliography_blocked_reference_section())
+    return ReportPostProcessor().process("\n\n".join(parts))
+
+
 def format_citations(state: ReportState) -> dict:
     """Format citations and generate reference list. Includes network figures (Cytoscape) between Results and Discussion.
 
@@ -877,13 +932,24 @@ def format_citations(state: ReportState) -> dict:
     if resolved_refs:
         reference_section = "\n".join(ref_lines)
     else:
-        reference_section = (
-            "## References\n\n"
-            "**Citation completeness status: blocked for review.** No traceable collection-local or PubMed "
-            "reference was resolved for this Report. Literature comparison and external biological background "
-            "must be treated as unavailable until traceable reference metadata is supplied."
-        )
+        reference_section = ReportPostProcessor.bibliography_blocked_reference_section()
     logger.info(f"[FORMAT-CIT] Built resolved reference section with {len(resolved_refs)} entries")
+
+    if not resolved_refs:
+        blocked_report = _build_bibliography_blocked_data_only_report(
+            state,
+            title_text=title_text,
+            generated_at=_dt.now().strftime('%Y-%m-%d %H:%M'),
+        )
+        return {
+            "final_report": blocked_report,
+            "citation_data": {
+                "total_references": 0,
+                "reference_section": reference_section,
+                "completion_status": citation_completion_status,
+                "data_only_review_mode": True,
+            },
+        }
 
     # v8.7: Append ALL supplementary figures at the very end
     supp_combined = "\n\n## Supplementary Figures\n\n"

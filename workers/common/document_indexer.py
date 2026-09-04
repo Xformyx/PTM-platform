@@ -14,6 +14,7 @@ Features:
 """
 
 import hashlib
+import json
 import logging
 import os
 import re
@@ -257,6 +258,31 @@ def _extract_bibliographic_hints(text: str) -> Dict[str, str]:
     if doi:
         metadata["doi"] = doi.group(1).rstrip(".,;)")
     return metadata
+
+
+def load_publication_manifest(manifest_path: str) -> List[Dict[str, str]]:
+    """Validate a publication-level reindex manifest without indexing anything.
+
+    Each document requires a relative ``path``, human-readable ``title``, and
+    at least one stable bibliographic identifier (``pmid`` or ``doi``).  This
+    prevents generic collection labels from becoming pseudo-citations.
+    """
+    path = Path(manifest_path)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    entries = payload.get("documents") if isinstance(payload, dict) else None
+    if not isinstance(entries, list) or not entries:
+        raise ValueError("Publication manifest must contain a non-empty 'documents' list")
+    normalized: List[Dict[str, str]] = []
+    for index, entry in enumerate(entries, 1):
+        if not isinstance(entry, dict):
+            raise ValueError(f"Manifest document {index} must be an object")
+        result = {key: str(entry.get(key) or "").strip() for key in ("path", "title", "pmid", "doi", "authors", "journal", "year")}
+        if not result["path"] or not result["title"]:
+            raise ValueError(f"Manifest document {index} requires non-empty path and title")
+        if not (result["pmid"] or result["doi"]):
+            raise ValueError(f"Manifest document {index} requires PMID or DOI")
+        normalized.append(result)
+    return normalized
 
 
 # ---------------------------------------------------------------------------
@@ -512,4 +538,30 @@ class DocumentIndexer:
                     {"file": str(file_path), "error": result.get("message", "Unknown error")},
                 )
 
+        return results
+
+    def index_publication_manifest(
+        self,
+        manifest_path: str,
+        collection_name: str,
+        progress_callback=None,
+    ) -> Dict:
+        """Index only publication-identified sources declared in a manifest."""
+        manifest = Path(manifest_path)
+        entries = load_publication_manifest(str(manifest))
+        root = manifest.parent
+        results = {"total_files": len(entries), "total_chunks": 0, "errors": [], "collection": sanitize_collection_name(collection_name)}
+        for index, entry in enumerate(entries, 1):
+            source_path = (root / entry["path"]).resolve()
+            if not source_path.is_file():
+                results["errors"].append({"file": entry["path"], "error": "manifest source file not found"})
+                continue
+            if progress_callback:
+                progress_callback((index - 1) / len(entries) * 100, f"Indexing identified publication {index}/{len(entries)}")
+            metadata = {key: value for key, value in entry.items() if key != "path" and value}
+            result = self.index_document(str(source_path), collection_name, extra_metadata=metadata, progress_callback=None)
+            if result.get("status") == "success":
+                results["total_chunks"] += int(result.get("chunk_count") or 0)
+            else:
+                results["errors"].append({"file": entry["path"], "error": result.get("message", "unknown indexing error")})
         return results

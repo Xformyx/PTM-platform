@@ -78,10 +78,10 @@ class FigureInformationGenerator:
         v8.9.3: Fixed to match the ACTUAL figure numbering in
         generate_network_figure_section (network_node.py):
           Figure 1 = Pathway Distribution Graph (main figure)
-          Supplementary Figure 1+ = Cascade Diagrams (per-condition or combined)
+          Supplementary Figure 1+ = Compartmentalized Signaling Context Diagrams (per-condition or combined)
           Supplementary Figure N{A-Z} = Cytoscape Network Images (per-timepoint panels)
         
-        IMPORTANT: Only Figure 1 is a main figure. All cascade diagrams and
+        IMPORTANT: Only Figure 1 is a main figure. All context diagrams and
         Cytoscape network images are Supplementary Figures in the final report.
         The LLM must reference them as "Supplementary Figure X" to match.
         """
@@ -95,14 +95,14 @@ class FigureInformationGenerator:
             fig_map["pathway_graph"] = {
                 "figure_number": main_fig_num,
                 "figure_label": f"Figure {main_fig_num}",
-                "display_name": "Canonical Pathway Distribution of Activated PTM and Non-PTM Interactor Proteins",
+                "display_name": "PTM Pathway-Membership Distribution with Protein and Network Context",
                 "description": self._describe_pathway_graph(),
                 "panel_index": 0,
                 "figure_type": "pathway_graph",
             }
             main_fig_num += 1
 
-        # ── Supplementary Figure 1+: Signaling Cascade Diagrams ──
+        # ── Supplementary Figure 1+: Compartmentalized Signaling Context Diagrams ──
         if self.cascade_diagram_paths:
             # Per-condition cascade diagrams
             cascade_timepoints = self.timepoints if self.timepoints else sorted(self.cascade_diagram_paths.keys())
@@ -112,7 +112,7 @@ class FigureInformationGenerator:
                 fig_map[f"cascade_{tp}"] = {
                     "figure_number": supp_num,
                     "figure_label": f"Supplementary Figure {supp_num}",
-                    "display_name": f"Signal Transduction Pathway Cascade Diagram — {tp}",
+                    "display_name": f"Compartmentalized Signaling Context Diagram — {tp}",
                     "description": self._describe_cascade_diagram(condition=tp),
                     "panel_index": 0,
                     "figure_type": "cascade_diagram",
@@ -124,7 +124,7 @@ class FigureInformationGenerator:
             fig_map["cascade_combined"] = {
                 "figure_number": supp_num,
                 "figure_label": f"Supplementary Figure {supp_num}",
-                "display_name": "Signal Transduction Pathway Cascade Diagram",
+                "display_name": "Compartmentalized Signaling Context Diagram",
                 "description": self._describe_cascade_diagram(),
                 "panel_index": 0,
                 "figure_type": "cascade_diagram",

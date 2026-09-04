@@ -188,7 +188,8 @@ def _get_co_scientist_questions(state: dict) -> list:
             f"across {', '.join(timepoints[:4])}, and which orthogonal measurements would be needed to test a temporal order?"
         )
     
-    # Q2: Candidate contexts are not direct kinase/substrate attribution.
+    # Q2: Candidate contexts remain data-derived; literature/pathway claims are
+    # added later only when the report has traceable reference identity.
     top_ks = sorted(
         [ks for ks in kinase_scores if not ks.get("is_sub_pattern")],
         key=lambda x: abs(x.get("peak_score", 0)), reverse=True
@@ -196,8 +197,8 @@ def _get_co_scientist_questions(state: dict) -> list:
     if top_ks:
         k_names = ", ".join(ks.get("kinase", "") for ks in top_ks)
         questions.append(
-            f"What pathway and literature context is associated with the substrate-derived candidate kinase families ({k_names}) "
-            f"in {tissue}, and what evidence would be required before assigning direct substrate regulation?"
+            f"Which observed substrate-derived candidate-context patterns involve ({k_names}) in {tissue}, "
+            f"and what additional evidence would be required before assigning pathway function or direct substrate regulation?"
         )
     
     # Q3: Local membership is descriptive until per-Wave enrichment is persisted.
@@ -227,8 +228,8 @@ def _get_co_scientist_questions(state: dict) -> list:
         if transition_waves > 0 and transition_pairs > 0:
             questions.append(
                 "Which local co-wave membership transitions are reproducible across timepoint-omission checks, "
-                "and which orthogonal measurements could distinguish a temporal reorganization hypothesis "
-                "from kinase switching or causal propagation? "
+                "and which orthogonal measurements could test a temporal reorganization hypothesis "
+                "without assigning kinase switching or causal propagation? "
                 f"(transition-supported Waves={transition_waves}; observed pair transitions={transition_pairs})"
             )
     

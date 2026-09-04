@@ -8,6 +8,7 @@ from report_generation.core.dynamic_prompt_generator import build_temporal_evide
 from report_generation.core.graph import format_citations
 from report_generation.core.citation_formatter import ReportPostProcessor
 from report_generation.core.nodes.kinase_annotation_node import _direct_attribution_figure_allowed
+from report_generation.core.nodes.network_node import _generate_legends
 from report_generation.core.nodes.question_generator import _get_co_scientist_questions
 from report_generation.core.nodes.signal_flow_figure import generate_context_aware_ptm_heatmap, generate_pathway_diagram
 from report_generation.core.nodes.temporal_comovement_node import (
@@ -173,6 +174,24 @@ def test_pathway_diagram_defaults_to_context_only_output(tmp_path):
     assert path is not None
     output = tmp_path / "pathway_diagram.png"
     assert output.exists() and output.stat().st_size > 1000
+
+
+def test_network_legend_uses_measured_contrast_and_candidate_context_not_activation():
+    legend = _generate_legends(
+        {
+            "nodes": [
+                {"type": "PTM", "state": "high_active", "id": "SITE1", "value": 2.5},
+                {"type": "PTM", "state": "inhibited", "id": "SITE2", "value": -1.8},
+            ],
+            "edges": [],
+        },
+        [],
+        ptm_type="phosphorylation",
+    )["full_legend"]
+    assert "Higher measured PTM abundance" in legend
+    assert "candidate context" in legend
+    assert "Strong upregulation" not in legend
+    assert "increased activity" not in legend
 
 
 def test_report_postprocessor_renumbers_batched_questions_and_collapses_table_separators():
