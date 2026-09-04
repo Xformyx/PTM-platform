@@ -52,7 +52,9 @@ The current generic query pattern, `section + cell type + treatment + question +
 | Candidate biology | `{candidate gene} phosphorylation {treatment or pathway anchor}` | Results, Discussion |
 | Temporal programme | `{treatment} phosphoproteomics early late signaling response` | Discussion, Conclusion |
 
-Each retrieved excerpt must retain its query role, query text, collection, title, score, and source type. The writer may use references only as **literature context**: “consistent with”, “contrasts with”, “extends”, “raises the possibility”, or “motivates testing”. A retrieval labelled as a direct kinase cascade may not be generated when the current Order lacks directed temporal evidence or direct attribution.
+Each retrieved excerpt must retain its query role, query text, collection, title, score, and source type. A selected-collection result is citation eligible only when it has a traceable paper-level identity: an explicit `PMID`/`DOI`, or title plus author/year/journal metadata. Legacy chunks may recover explicit in-chunk title/PMID/DOI hints; otherwise the Report worker may perform a bounded, rate-limited PubMed exact-title lookup. Multiple/non-exact title matches fail closed. A collection name or paper-bundle label is provenance only and must never be rendered as a journal or reference.
+
+The writer may use references only as **literature context**: “consistent with”, “contrasts with”, “extends”, “raises the possibility”, or “motivates testing”. Every external biological-background, canonical-pathway, prior-work or literature-comparison claim must carry a citation from the traceable section-local reference list. If no such list is available, external claims are unavailable and the section is limited to declared study context, measured Order observations, computed analysis outputs and explicitly labelled testable hypotheses. A retrieval labelled as a direct kinase cascade may not be generated when the current Order lacks directed temporal evidence or direct attribution.
 
 ## 5. Section-specific writing contract
 
@@ -91,7 +93,7 @@ Figure 4 and all supplementary pathway/cascade diagrams are context-only by defa
 
 The writer receives section-local literature subsets. Before final assembly, local `[N]` citations are converted to identity-based `PMID`, `DOI`, or normalized-title markers. The final renderer resolves those markers in first-appearance order and generates the bibliography from the same resolved records. A bare local numeric citation whose identity cannot be recovered is removed rather than being matched to an unrelated bibliography entry.
 
-A Chroma collection or internal paper-bundle label without paper-level author, year, PMID or DOI metadata is retrieval provenance, not a bibliography entry. It must be excluded from the final reference list rather than being displayed as a journal or paper citation. The final postprocessor also renumbers research-question headings after batch assembly and collapses repeated Markdown table separator rows.
+A Chroma collection or internal paper-bundle label without paper-level author, year, PMID or DOI metadata is retrieval provenance, not a bibliography entry. It must be excluded from the final reference list rather than being displayed as a journal or paper citation. The final postprocessor also renumbers research-question headings after batch assembly and collapses repeated Markdown table separator rows. `citation_completeness=complete` requires at least one resolved traceable reference; a zero-reference Report remains `blocked_for_review_missing_traceable_references` in task metadata and cannot be treated as an R1.0 release artifact.
 
 ### Co-Wave and protein-abundance interpretation safeguards
 
@@ -145,6 +147,7 @@ The same Order may still state that its observed programme is consistent with, c
 13. The static Wave membership audit is deterministic and separate from compact Report/RAG/LLM payloads; Report text does not assign per-Wave function when no persisted per-Wave enrichment is present.
 14. A missing or unsupported global adjacency-order null blocks robust/significant/global-order Co-Wave wording, and final Markdown contains globally unique Q headings and no consecutive table separator rows.
 15. A conventional extreme contrast does not generate molecular-switch, powerful-signal, substantial biological-effect or direct-regulatory-strength prose; automated co-scientist questions use pathway-context and testable-hypothesis grammar, not activation-loop or direct-substrate grammar.
+16. A selected Chroma result with explicit article metadata, a legacy in-chunk identifier, or one unambiguous PubMed exact-title match produces the same stable paper identity in the section prompt, inline citation and final bibliography. Ambiguous/unresolved collection entries cannot support external biological prose and leave the final Report blocked for review when no traceable references remain.
 
 ## 9. Methodological references
 

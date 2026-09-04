@@ -7,14 +7,118 @@ Provides literature evidence retrieval for hypothesis validation and section wri
 
 import logging
 import os
+import re
 import threading
+import time
 from typing import Dict, List, Optional, Tuple
+
+import requests
 
 from ptm_shared.embedding_registry import collection_embedding_spec, encode_texts
 
 logger = logging.getLogger(__name__)
 
 CHROMADB_URL = os.getenv("CHROMADB_URL", "http://chromadb:8000")
+NCBI_EUTILS_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
+NCBI_MIN_REQUEST_INTERVAL_SECONDS = 0.35
+MAX_BIBLIOGRAPHIC_TITLE_LOOKUPS = 12
+
+
+def _clean_metadata_value(value: object) -> str:
+    """Return a normalized scalar metadata value without inventing identity."""
+    if value is None:
+        return ""
+    if isinstance(value, (list, tuple)):
+        return "; ".join(str(item).strip() for item in value if str(item).strip())
+    return str(value).strip()
+
+
+def _first_metadata_value(metadata: dict, *aliases: str) -> str:
+    for alias in aliases:
+        value = _clean_metadata_value(metadata.get(alias))
+        if value:
+            return value
+    return ""
+
+
+def _normalise_title(value: object) -> str:
+    return re.sub(r"[^a-z0-9]", "", str(value or "").lower())
+
+
+def _legacy_chunk_bibliographic_hints(result: dict) -> dict:
+    """Recover only explicit article identity hints from a legacy collection chunk.
+
+    Some historical collections stored a bundle label in metadata while preserving
+    an article heading, PMID or DOI in the chunk text.  This helper never promotes
+    arbitrary prose to a paper title and never treats a collection label as one.
+    """
+    document = str(result.get("document") or "")[:6_000]
+    hints: dict[str, str] = {}
+    title_match = re.search(
+        r"(?mi)^\s*(?:article\s+)?title\s*:\s*(.{20,300})$|^\s*#\s+(.{20,300})$",
+        document,
+    )
+    if title_match:
+        hints["title"] = (title_match.group(1) or title_match.group(2) or "").strip()
+    pmid_match = re.search(r"\bPMID\s*[:#]?\s*(\d{5,10})\b", document, flags=re.IGNORECASE)
+    if pmid_match:
+        hints["pmid"] = pmid_match.group(1)
+    doi_match = re.search(r"\b(10\.\d{4,9}/[-._;()/:A-Z0-9]+)\b", document, flags=re.IGNORECASE)
+    if doi_match:
+        hints["doi"] = doi_match.group(1).rstrip(".,;)")
+    return hints
+
+
+def traceable_reference_from_rag_result(result: dict) -> dict:
+    """Normalize collection-local bibliographic fields into a citable identity.
+
+    A collection name, filename, or free-text source label is never treated as a
+    journal.  A result becomes citation eligible only if it contains a title plus
+    a persistent identifier, or a minimal author-year publication identity.
+    """
+    metadata = result.get("metadata") if isinstance(result.get("metadata"), dict) else {}
+    legacy_hints = _legacy_chunk_bibliographic_hints(result)
+    title = _clean_metadata_value(result.get("title")) or _first_metadata_value(
+        metadata, "title", "article_title", "paper_title", "source_title"
+    )
+    collection_label = _first_metadata_value(metadata, "collection", "collection_name", "bundle")
+    if legacy_hints.get("title") and (
+        not title
+        or _normalise_title(title) == _normalise_title(collection_label)
+        or _normalise_title(title) in {"allptmarticles", "allarticles", "collection"}
+    ):
+        title = legacy_hints["title"]
+    title = title or legacy_hints.get("title", "")
+    authors = _clean_metadata_value(result.get("authors")) or _first_metadata_value(
+        metadata, "authors", "author", "author_string", "first_author"
+    )
+    year = _clean_metadata_value(result.get("year")) or _first_metadata_value(
+        metadata, "year", "pub_year", "publication_year", "pub_date", "date"
+    )
+    year_match = re.search(r"\b(?:19|20)\d{2}\b", year)
+    year = year_match.group(0) if year_match else ""
+    journal = _first_metadata_value(
+        metadata, "journal", "journal_name", "fulljournalname", "venue", "publication"
+    )
+    pmid = _first_metadata_value(metadata, "pmid", "PMID", "pubmed_id", "pubmed") or legacy_hints.get("pmid", "")
+    pmid_match = re.search(r"\b\d{5,10}\b", pmid)
+    pmid = pmid_match.group(0) if pmid_match else ""
+    doi = _first_metadata_value(metadata, "doi", "DOI", "doi_url") or legacy_hints.get("doi", "")
+    doi = re.sub(r"^https?://(?:dx\.)?doi\.org/", "", doi, flags=re.IGNORECASE).strip()
+    doi_match = re.search(r"10\.\d{4,9}/\S+", doi, flags=re.IGNORECASE)
+    doi = doi_match.group(0).rstrip(".,;)])") if doi_match else ""
+    persistent_identity = bool(pmid or doi)
+    author_year_identity = bool(authors and year and journal)
+    return {
+        "title": title,
+        "authors": authors,
+        "year": year,
+        "journal": journal,
+        "pmid": pmid,
+        "doi": doi,
+        "citation_eligible": bool(title and (persistent_identity or author_year_identity)),
+        "citation_identity_source": "collection_metadata" if title else "missing",
+    }
 
 
 class RAGRetriever:
@@ -39,6 +143,94 @@ class RAGRetriever:
         self._cache: Dict[str, list] = {}
         self._cache_lock = threading.Lock()
         self._resolved_names: Optional[List[str]] = None  # Filtered to existing only
+        self._bibliography_cache: Dict[str, dict] = {}
+        self._bibliography_lock = threading.Lock()
+        self._bibliography_lookups = 0
+        self._last_bibliography_request = 0.0
+
+    def _eutils_json(self, endpoint: str, params: dict) -> dict:
+        """Fetch a small bibliographic response under the public NCBI rate limit."""
+        now = time.monotonic()
+        last_request = getattr(self, "_last_bibliography_request", 0.0)
+        wait_seconds = NCBI_MIN_REQUEST_INTERVAL_SECONDS - (now - last_request)
+        if wait_seconds > 0:
+            time.sleep(wait_seconds)
+        response = requests.get(
+            f"{NCBI_EUTILS_URL}/{endpoint}",
+            params={**params, "tool": "ptm_vector_report"},
+            timeout=8,
+            headers={"User-Agent": "PTM-Vector/1.0 bibliographic-metadata"},
+        )
+        self._last_bibliography_request = time.monotonic()
+        response.raise_for_status()
+        return response.json()
+
+    def _resolve_pubmed_title(self, title: str) -> dict:
+        """Resolve an exact PubMed title match; ambiguous matches fail closed."""
+        normalized_title = _normalise_title(title)
+        if len(normalized_title) < 20:
+            return {}
+        cache = getattr(self, "_bibliography_cache", None)
+        if cache is None:
+            self._bibliography_cache = {}
+            cache = self._bibliography_cache
+        if normalized_title in cache:
+            return dict(cache[normalized_title])
+        if getattr(self, "_bibliography_lookups", 0) >= MAX_BIBLIOGRAPHIC_TITLE_LOOKUPS:
+            cache[normalized_title] = {}
+            return {}
+        try:
+            self._bibliography_lookups = getattr(self, "_bibliography_lookups", 0) + 1
+            search = self._eutils_json(
+                "esearch.fcgi",
+                {"db": "pubmed", "term": f'"{title}"[Title]', "retmax": 3, "retmode": "json"},
+            )
+            identifiers = list((search.get("esearchresult") or {}).get("idlist") or [])
+            if not identifiers:
+                cache[normalized_title] = {}
+                return {}
+            summary = self._eutils_json(
+                "esummary.fcgi",
+                {"db": "pubmed", "id": ",".join(str(item) for item in identifiers), "retmode": "json"},
+            )
+            payload = summary.get("result") or {}
+            matches = []
+            for identifier in identifiers:
+                item = payload.get(str(identifier)) or {}
+                resolved_title = _clean_metadata_value(item.get("title"))
+                if _normalise_title(resolved_title) != normalized_title:
+                    continue
+                article_ids = item.get("articleids") or []
+                doi = ""
+                for article_id in article_ids:
+                    if str(article_id.get("idtype") or "").lower() == "doi":
+                        doi = _clean_metadata_value(article_id.get("value"))
+                        break
+                matches.append({
+                    "title": resolved_title,
+                    "authors": _clean_metadata_value(item.get("sortfirstauthor")),
+                    "year": _clean_metadata_value(item.get("pubdate")),
+                    "journal": _clean_metadata_value(item.get("fulljournalname") or item.get("source")),
+                    "pmid": str(identifier),
+                    "doi": doi,
+                    "citation_eligible": True,
+                    "citation_identity_source": "pubmed_exact_title",
+                })
+            resolved = matches[0] if len(matches) == 1 else {}
+        except Exception as exc:
+            logger.info("[ChromaDB] PubMed metadata resolution skipped for '%s': %s", title[:80], exc)
+            resolved = {}
+        cache[normalized_title] = dict(resolved)
+        return resolved
+
+    def resolve_traceable_reference(self, result: dict) -> dict:
+        """Attach an exact PubMed identity to a selected collection result when needed."""
+        normalized = traceable_reference_from_rag_result(result)
+        if normalized.get("citation_eligible"):
+            return normalized
+        title = normalized.get("title") or _clean_metadata_value(result.get("title"))
+        resolved = self._resolve_pubmed_title(title) if title else {}
+        return resolved or normalized
 
     @property
     def client(self):
@@ -124,14 +316,25 @@ class RAGRetriever:
                 for doc, meta, dist in zip(docs, metas, dists):
                     relevance = max(0, 1.0 - dist)
                     if relevance >= relevance_threshold:
+                        raw_result = {"metadata": meta or {}, "title": (meta or {}).get("title", "")}
+                        bibliography = self.resolve_traceable_reference(raw_result)
+                        enriched_meta = {**(meta or {}), **{
+                            key: value for key, value in bibliography.items()
+                            if key in {"authors", "year", "journal", "pmid", "doi"} and value
+                        }}
                         all_results.append({
                             "document": doc[:500],
-                            "metadata": meta or {},
+                            "metadata": enriched_meta,
                             "relevance": round(relevance, 3),
                             "collection": coll_name,
-                            "title": (meta or {}).get("title", ""),
-                            "authors": (meta or {}).get("authors", ""),
-                            "year": (meta or {}).get("year", ""),
+                            "title": bibliography.get("title") or (meta or {}).get("title", ""),
+                            "authors": bibliography.get("authors", ""),
+                            "year": bibliography.get("year", ""),
+                            "journal": bibliography.get("journal", ""),
+                            "pmid": bibliography.get("pmid", ""),
+                            "doi": bibliography.get("doi", ""),
+                            "citation_eligible": bool(bibliography.get("citation_eligible")),
+                            "citation_identity_source": bibliography.get("citation_identity_source", "missing"),
                             "source": (meta or {}).get("source", ""),
                         })
 

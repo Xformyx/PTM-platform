@@ -125,6 +125,30 @@ def test_final_renderer_processes_supplementary_before_appending_references():
     assert final.rstrip().endswith("https://pubmed.ncbi.nlm.nih.gov/12345/)")
 
 
+def test_final_renderer_preserves_traceable_chromadb_pmid_and_doi():
+    final = format_citations({
+        "sections": {
+            "title": "Collection metadata",
+            "results": "Selected collection comparison [REF:pmid:34567890].",
+        },
+        "network_analysis": {},
+        "signal_flow_figures": [],
+        "collected_references": [{
+            "chromadb_ref": True,
+            "title": "Traceable collection article",
+            "authors": "Evidence Author",
+            "journal": "Evidence Journal",
+            "year": "2023",
+            "pmid": "34567890",
+            "doi": "10.1000/example.1",
+        }],
+    })
+    assert final["citation_data"]["completion_status"] == "complete"
+    assert "Traceable collection article" in final["final_report"]
+    assert "https://pubmed.ncbi.nlm.nih.gov/34567890/" in final["final_report"]
+    assert "https://doi.org/10.1000/example.1" in final["final_report"]
+
+
 def test_final_renderer_marks_missing_traceable_bibliography_for_review():
     result = format_citations({
         "sections": {"title": "No literature", "results": "Observed trajectories."},

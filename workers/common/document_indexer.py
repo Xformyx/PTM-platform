@@ -241,6 +241,24 @@ def _extract_title_from_text(text: str) -> Optional[str]:
     return None
 
 
+def _extract_bibliographic_hints(text: str) -> Dict[str, str]:
+    """Extract only explicit identifier hints from an uploaded source document.
+
+    This is intentionally conservative: the indexer never infers authors or a
+    journal from arbitrary prose.  Runtime exact-title resolution may later add
+    missing PubMed metadata, while explicit DOI/PMID survive reindexing now.
+    """
+    sample = text[:50_000]
+    metadata: Dict[str, str] = {}
+    pmid = re.search(r"\bPMID\s*[:#]?\s*(\d{5,10})\b", sample, flags=re.IGNORECASE)
+    if pmid:
+        metadata["pmid"] = pmid.group(1)
+    doi = re.search(r"\b(10\.\d{4,9}/[-._;()/:A-Z0-9]+)\b", sample, flags=re.IGNORECASE)
+    if doi:
+        metadata["doi"] = doi.group(1).rstrip(".,;)")
+    return metadata
+
+
 # ---------------------------------------------------------------------------
 # Document Indexer
 # ---------------------------------------------------------------------------
@@ -374,6 +392,7 @@ class DocumentIndexer:
             "file_type": doc["file_type"],
             "filename": doc["metadata"].get("filename", ""),
         }
+        base_meta.update(_extract_bibliographic_hints(doc["text"]))
         if extra_metadata:
             base_meta.update(extra_metadata)
 

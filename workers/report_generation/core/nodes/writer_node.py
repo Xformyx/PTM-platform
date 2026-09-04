@@ -182,6 +182,8 @@ SYSTEM_PROMPT = (
     "Write in formal academic English. Use flowing prose, not bullet points. "
     "Cite references using numbered brackets (e.g., [1], [2]) matching the provided reference list. "
     "Include as many relevant citations as possible to support your statements. "
+    "Every external biological background, canonical-pathway, prior-work, or literature-comparison claim MUST carry at least one citation from the provided traceable reference list. "
+    "If no traceable reference list is supplied, do not make external biological or prior-work claims; restrict the section to the declared study context, measured Order observations, computed analysis outputs, and explicitly labelled testable hypotheses. "
     "NEVER mention 'ChromaDB' or 'knowledge base'. "
     "Be precise with PTM site nomenclature. For phosphorylation use e.g. 'phosphorylation at Ser165 of GENE_NAME'; for ubiquitylation use e.g. 'ubiquitylation at Lys48 of GENE_NAME'. Match the PTM type being analyzed. "
     "CRITICAL: Use ONLY proteins and PTM sites from the actual data provided in the prompt. "
@@ -1402,13 +1404,14 @@ def _build_section_prompt(
         retriever.search_for_biological_synthesis(data_anchored_queries, n_results=chromadb_results)
         if data_anchored_queries else retriever.search_for_section(section_type, keywords, n_results=chromadb_results)
     )
+    citable_rag_results = [row for row in rag_results if row.get("citation_eligible")]
 
     # v10.8: Collect ChromaDB refs for unified numbering
-    _all_chroma_results = list(rag_results)  # copy; will extend with cascade results
+    _all_chroma_results = list(citable_rag_results)  # traceable references only
 
-    if rag_results:
+    if citable_rag_results:
         ref_lines = []
-        for idx, r in enumerate(rag_results[:chromadb_results], 1):
+        for idx, r in enumerate(citable_rag_results[:chromadb_results], 1):
             title = r.get("title", "Unknown")
             role = r.get("query_role", "section_context")
             anchor = r.get("query_anchor", "")
@@ -1421,6 +1424,12 @@ def _build_section_prompt(
             "(e.g., 'as previously reported [1]'). NEVER mention 'ChromaDB' or 'knowledge base'.\n\n"
             + "\n\n".join(ref_lines)
         )
+    elif rag_results:
+        lit_context = (
+            "\n\n**Literature availability boundary:** Selected collection excerpts were retrieved, but no "
+            "traceable title/author/year/PMID/DOI identity was resolved. Do not make external biological "
+            "background or prior-work claims from these excerpts in this Report.\n"
+        )
 
     # v9.35: Cascade-specific ChromaDB search — pathway-level evidence
     cascade_lit_context = ""
@@ -1432,12 +1441,13 @@ def _build_section_prompt(
             n_results_per_query=3,
             max_queries=5,
         )
-        if cascade_results:
-            _all_chroma_results.extend(cascade_results)  # v10.8: track all chroma results
+        citable_cascade_results = [row for row in cascade_results if row.get("citation_eligible")]
+        if citable_cascade_results:
+            _all_chroma_results.extend(citable_cascade_results)
             # Number cascade refs starting after general refs
-            start_idx = len(rag_results) + 1 if rag_results else 1
+            start_idx = len(citable_rag_results) + 1 if citable_rag_results else 1
             cascade_lines = []
-            for idx, r in enumerate(cascade_results[:8], start_idx):
+            for idx, r in enumerate(citable_cascade_results[:8], start_idx):
                 title = r.get("title", "Unknown")
                 cascade_ctx = r.get("cascade_context", "")
                 cascade_lines.append(
@@ -1451,7 +1461,7 @@ def _build_section_prompt(
                 "pathway-level evidence when describing each signaling cascade.\n\n"
                 + "\n\n".join(cascade_lines)
             )
-            logger.info(f"[v9.35] Added {len(cascade_results)} cascade-specific references for {section_type}")
+            logger.info(f"[v9.35] Added {len(citable_cascade_results)} traceable cascade references for {section_type}")
 
     # --- v10.8: Compute ChromaDB ref count for PubMed offset ---
     n_chroma_refs = len(_all_chroma_results)
@@ -1462,9 +1472,9 @@ def _build_section_prompt(
             "title": r.get("title", r.get("source", "Unknown")),
             "authors": r.get("authors", r.get("metadata", {}).get("authors", "") if isinstance(r.get("metadata"), dict) else ""),
             "year": str(r.get("year", r.get("metadata", {}).get("year", "") if isinstance(r.get("metadata"), dict) else "")),
-            "journal": r.get("collection", ""),
-            "pmid": "",
-            "doi": "",
+            "journal": r.get("journal", r.get("metadata", {}).get("journal", "") if isinstance(r.get("metadata"), dict) else ""),
+            "pmid": str(r.get("pmid", r.get("metadata", {}).get("pmid", "") if isinstance(r.get("metadata"), dict) else "")),
+            "doi": r.get("doi", r.get("metadata", {}).get("doi", "") if isinstance(r.get("metadata"), dict) else ""),
             "source_type": r.get("source_type", "research_article"),
             "chromadb_ref": True,  # marker to distinguish from PubMed refs
         }
@@ -1583,8 +1593,8 @@ def _build_section_prompt(
 
         # Build ChromaDB high-confidence matching context for Abstract
         chromadb_abstract_context = ""
-        if rag_results:
-            high_confidence = [r for r in rag_results if r.get("relevance", 0) >= 0.6 or r.get("combined_score", 0) >= 0.6]
+        if citable_rag_results:
+            high_confidence = [r for r in citable_rag_results if r.get("relevance", 0) >= 0.6 or r.get("combined_score", 0) >= 0.6]
             if high_confidence:
                 match_lines = []
                 for idx, r in enumerate(high_confidence[:8], 1):
@@ -1641,7 +1651,11 @@ INSTRUCTIONS:
         # Enhanced ChromaDB context for Introduction — retrieve MORE results from ChromaDB
         # For introduction, retain the data-anchored result set when available;
         # otherwise fetch a broader background set.
-        intro_rag_results = rag_results or retriever.search_for_section("introduction", keywords, n_results=chromadb_results * 2)
+        intro_rag_results = citable_rag_results or [
+            row
+            for row in retriever.search_for_section("introduction", keywords, n_results=chromadb_results * 2)
+            if row.get("citation_eligible")
+        ]
         intro_chromadb_emphasis = ""
         # v10.8: Compute intro-specific ChromaDB count for PubMed offset
         n_intro_chroma = len(intro_rag_results) if intro_rag_results else 0
@@ -1700,13 +1714,13 @@ IMPORTANT: Write a thorough, detailed introduction. The ChromaDB collection refe
                 "title": r.get("title", r.get("source", "Unknown")),
                 "authors": r.get("authors", r.get("metadata", {}).get("authors", "") if isinstance(r.get("metadata"), dict) else ""),
                 "year": str(r.get("year", r.get("metadata", {}).get("year", "") if isinstance(r.get("metadata"), dict) else "")),
-                "journal": r.get("collection", ""),
-                "pmid": "",
-                "doi": "",
+                "journal": r.get("journal", r.get("metadata", {}).get("journal", "") if isinstance(r.get("metadata"), dict) else ""),
+                "pmid": str(r.get("pmid", r.get("metadata", {}).get("pmid", "") if isinstance(r.get("metadata"), dict) else "")),
+                "doi": r.get("doi", r.get("metadata", {}).get("doi", "") if isinstance(r.get("metadata"), dict) else ""),
                 "source_type": r.get("source_type", "research_article"),
                 "chromadb_ref": True,
             }
-            for r in (intro_rag_results or [])
+            for r in (intro_rag_results or []) if r.get("citation_eligible")
         ]
         return intro_prompt, _intro_chroma_refs
 

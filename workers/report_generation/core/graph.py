@@ -775,10 +775,13 @@ def format_citations(state: ReportState) -> dict:
         # A Chroma collection/bundle label without paper-level metadata is an
         # internal retrieval provenance label, not a citable publication. Do
         # not let it masquerade as a journal in the final bibliography.
-        if is_chromadb and not any(
-            str(ref_dict.get(field) or "").strip()
-            for field in ("pmid", "doi", "authors", "year", "pub_date")
-        ):
+        has_persistent_identifier = bool(str(ref_dict.get("pmid") or "").strip() or str(ref_dict.get("doi") or "").strip())
+        has_minimal_publication_identity = bool(
+            str(ref_dict.get("authors") or "").strip()
+            and str(ref_dict.get("year") or ref_dict.get("pub_date") or "").strip()
+            and str(ref_dict.get("journal") or "").strip()
+        )
+        if is_chromadb and not (has_persistent_identifier or has_minimal_publication_identity):
             logger.info("[FORMAT-CIT] Excluding non-bibliographic Chroma bundle label from references")
             continue
         if is_chromadb:
@@ -786,10 +789,10 @@ def format_citations(state: ReportState) -> dict:
             ref = Reference(
                 authors=ref_dict.get("authors", ""),
                 title=ref_dict.get("title", "Untitled"),
-                journal=ref_dict.get("journal", ""),  # collection name as journal
+                journal=ref_dict.get("journal", ""),
                 year=str(ref_dict.get("year", "")),
-                pmid="",
-                doi="",
+                pmid=str(ref_dict.get("pmid", "")),
+                doi=ref_dict.get("doi", ""),
             )
         else:
             ref = Reference(
