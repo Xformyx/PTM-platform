@@ -494,6 +494,16 @@ def format_citations(state: ReportState) -> dict:
             )
             if p5_section:
                 parts.append(p5_section)
+            try:
+                from .nodes.kinase_annotation_node import format_kinase_footprint_diagnostics_for_report
+                footprint_section = format_kinase_footprint_diagnostics_for_report(
+                    state.get("kinase_activity_heatmap") or {},
+                    state.get("ptm_type", "phosphorylation"),
+                )
+                if footprint_section:
+                    parts.append(footprint_section)
+            except Exception as footprint_error:
+                logger.warning("[FORMAT-CIT] Could not render P0/P1 footprint diagnostics: %s", footprint_error)
             # ═══════════════════════════════════════════════════════════════════
             # v10.3: Figure Placement Overhaul
             # Main Figures:  Fig 1 (Pathway Bar) → Fig 2 (Kinase Heatmap) →
@@ -860,14 +870,6 @@ def format_citations(state: ReportState) -> dict:
     reference_section = "\n".join(ref_lines) if resolved_refs else ""
     logger.info(f"[FORMAT-CIT] Built resolved reference section with {len(resolved_refs)} entries")
 
-    # Post-process the body text (heading normalization, dedup, table fixes)
-    processor = ReportPostProcessor()
-    processed = processor.process(all_text)
-
-    # Append references
-    if reference_section:
-        processed += "\n\n" + reference_section
-
     # v8.7: Append ALL supplementary figures at the very end
     supp_combined = "\n\n## Supplementary Figures\n\n"
     has_supp = False
@@ -905,8 +907,19 @@ def format_citations(state: ReportState) -> dict:
         logger.info(f"[FORMAT-CIT] Collected network supplementary section ({len(network_supp_section)} chars), offset by {comovement_supp_count}")
 
     if has_supp:
-        processed += supp_combined
+        # Run all supplementary captions through the same claim/citation/table
+        # cleanup as the main body. References are appended only after this so
+        # they stay at the physical end of the rendered Markdown/DOCX.
+        all_text += supp_combined
         logger.info("[FORMAT-CIT] Appended all supplementary figures at end of report")
+
+    # Process the complete body, including supplementary captions, before
+    # appending the bibliography. This prevents supplementary legacy prose from
+    # bypassing the R1.0 claim boundary and keeps References as the last section.
+    processor = ReportPostProcessor()
+    processed = processor.process(all_text)
+    if reference_section:
+        processed += "\n\n" + reference_section
 
     return {
         "final_report": processed,

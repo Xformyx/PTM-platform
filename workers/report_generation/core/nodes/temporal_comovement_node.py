@@ -1226,16 +1226,17 @@ def _generate_comovement_figures(
                 figures.append({
                     "path": burst_fig_path,
                     "caption": (
-                        f"Transient {ptm_type} burst dynamics. "
+                        f"Transient {ptm_type} trajectory pattern. "
                         f"{len(burst_clusters)} temporally coordinated cluster(s) comprising "
-                        f"{n_sites} PTM sites exhibited rapid activation followed by "
-                        f"return to baseline. Peak responses observed at "
+                        f"{n_sites} PTM sites showed an observed transient higher/lower measured PTM-abundance pattern. "
+                        f"Peak measured contrasts were observed at "
                         f"{', '.join(sorted(peak_tps))}. "
                         f"(a) Individual PTM time-series profiles colored by activity class: "
-                        f"orange/\u2605=De novo (newly induced), blue/\u25cf=Regulated (q<0.05, |FC|\u22651), "
-                        f"green solid/\u25c6=Minor (patterned). Cluster mean shown as bold line. "
+                        f"orange/★=De novo (newly induced), blue/●=Regulated (q<0.05, |FC|≥1), "
+                        f"green solid/◆=Minor (patterned). Cluster mean shown as bold line. "
                         f"(b) Peak amplitude profiles ranked by intensity, colored by activity class. "
-                        f"(c) Cluster mean temporal envelope showing activation-recovery kinetics."
+                        f"(c) Cluster mean temporal envelope across sampled timepoints. "
+                        f"Cluster membership does not assign function, common regulation, or causal order."
                     ),
                     "type": "transient_burst_composite",
                 })
@@ -1251,11 +1252,12 @@ def _generate_comovement_figures(
         if heatmap_path:
             figures.append({
                 "path": heatmap_path,
-                "caption": "Temporal Coordination Heatmap: PTM sites grouped by "
+                "caption": "Temporal PTM Trajectory Clustering Heatmap: PTM sites grouped by "
                            "correlated temporal dynamics. Color intensity represents "
-                           "Log2FC magnitude (red=activated, blue=inhibited). "
+                           "conventional Log2FC magnitude (red=higher measured PTM abundance, blue=lower measured PTM abundance). "
                            "Left sidebar: cluster assignments. "
-                           "Activity class sidebar: orange=De novo, blue=Regulated, green=Minor.",
+                           "Activity class sidebar: orange=De novo, blue=Regulated, green=Minor. "
+                           "De novo detection context is not encoded by the conventional Log2FC colour scale.",
                 "type": "supplementary_heatmap",
             })
     except Exception as e:
@@ -1280,8 +1282,6 @@ def _generate_comovement_figures(
                 cluster, timepoints, output_dir
             )
             if cluster_path:
-                ann = cluster.get("annotations", {})
-                bio_summary = ann.get("biological_summary", "")
                 pattern_label = _pattern_display_name(cluster["pattern"], ptm_type)
                 figures.append({
                     "path": cluster_path,
@@ -1289,7 +1289,8 @@ def _generate_comovement_figures(
                         f"Cluster {cluster['cluster_id']}: {pattern_label} "
                         f"({cluster['member_count']} PTM sites, "
                         f"mean r={cluster['correlation_mean']:.2f}). "
-                        f"{bio_summary}"
+                        "Observed trajectory-cluster membership at sampled timepoints; no per-cluster functional enrichment, "
+                        "common regulator, or causal mechanism is assigned."
                     ),
                     "type": "cluster_detail",
                     "cluster_id": cluster["cluster_id"],
@@ -1304,8 +1305,6 @@ def _generate_comovement_figures(
                 cluster, timepoints, output_dir
             )
             if cluster_path:
-                ann = cluster.get("annotations", {})
-                bio_summary = ann.get("biological_summary", "")
                 pattern_label = _pattern_display_name(cluster["pattern"], ptm_type)
                 figures.append({
                     "path": cluster_path,
@@ -1313,7 +1312,8 @@ def _generate_comovement_figures(
                         f"Cluster {cluster['cluster_id']}: {pattern_label} "
                         f"({cluster['member_count']} PTM sites, "
                         f"mean r={cluster['correlation_mean']:.2f}). "
-                        f"{bio_summary}"
+                        "Observed trajectory-cluster membership at sampled timepoints; no per-cluster functional enrichment, "
+                        "common regulator, or causal mechanism is assigned."
                     ),
                     "type": "supplementary_cluster",
                     "cluster_id": cluster["cluster_id"],
@@ -2676,56 +2676,23 @@ def _build_comovement_llm_context(
         "(e.g., if studying osteocytes, do NOT extensively discuss neuronal "
         "or immune cell-specific pathways unless directly supported by data).\n"
         "\n"
-        "10. CLUSTER \u2194 FIGURE 1 PATHWAY CONNECTION (CRITICAL \u2014 v8.10):\n"
-        "   - For EACH cluster (Figures 2-6), you are provided with:\n"
-        "     (a) Per-Gene Pathway Mapping: the pathways each cluster member\n"
-        "         participates in, from the same 3-Layer enrichment shown in Figure 1.\n"
-        "     (b) Shared Pathways Explaining Temporal Coordination: pathways shared by 2+\n"
-        "         cluster members, which explain WHY they move together.\n"
-        "   - When discussing each cluster, you MUST:\n"
-        "     * Identify the shared pathways from the Per-Gene Pathway Mapping data\n"
-        "     * Explicitly state: 'These proteins are temporally coordinated because they share\n"
-        "       membership in [pathway name(s)] (Figure 1), suggesting coordinated\n"
-        "       regulation within this signaling axis.'\n"
-        "     * If a cluster's shared pathways overlap with Figure 1's top pathways,\n"
-        "       reference Figure 1 explicitly to connect the two analyses.\n"
-        "   - This creates a coherent narrative arc: Figure 1 identifies the active\n"
-        "     pathways, and Figures 2-6 show HOW proteins within those pathways\n"
-        "     respond temporally as coordinated groups.\n"
-        "   - If a cluster has NO shared pathways from the 3-Layer data, state this\n"
-        "     honestly and discuss alternative explanations (e.g., novel interactions,\n"
-        f"     shared upstream {'E3 ligase' if ptm_type.lower().strip() in ('ubiquitylation', 'ubiquitination') else 'kinase'}, or physical proximity in a protein complex).\n"
-        "   - Do NOT invent pathway connections that are not in the provided data.\n"
+        "10. CLUSTER INTERPRETATION BOUNDARY (R1.0):\n"
+        "   - A temporal PTM cluster is a complete-case trajectory-clustering result.\n"
+        "   - Its local co-membership annotation describes sampled-timepoint patterns only.\n"
+        "   - Do NOT assign a functional module, shared pathway, common regulator,\n"
+        "     kinase family, or causal explanation to an individual cluster unless a\n"
+        "     separately persisted per-cluster enrichment or validated relation record is supplied.\n"
+        "   - Global pathway enrichment may be discussed as global context, but it must\n"
+        "     not be recast as an explanation of any individual cluster's membership.\n"
         "\n"
-        "11. NEIGHBORHOOD CONCORDANCE ANALYSIS (v8.10):\n"
-        "   - When a 'Neighborhood Concordance Analysis' section is provided for a\n"
-        "     cluster, it summarizes the COLLECTIVE behavior of Non-PTM protein\n"
-        "     neighbors surrounding the PTM cluster members.\n"
-        "   - The Concordance Score (0-1) indicates what fraction of responsive\n"
-        "     Non-PTM neighbors move in the SAME direction. High concordance (>0.7)\n"
-        "     indicates a coordinated neighborhood response.\n"
-        "   - CRITICAL: Use the TIME LAG information to infer the MECHANISM:\n"
-        "     * If most neighbors are SIMULTANEOUS (median lag <=10min):\n"
-        "       → Protein complex stoichiometry: these proteins likely form a\n"
-        "         physical complex whose components are co-stabilized/co-degraded.\n"
-        "       → The PTM may regulate complex assembly or stability.\n"
-        "     * If most neighbors are DELAYED (median lag >15min):\n"
-        "       → Transcriptional co-regulation: the PTM event likely activates a\n"
-        "         transcription factor, leading to new mRNA and protein synthesis\n"
-        "         of the neighbor proteins after a time delay.\n"
-        "       → Discuss which transcription factor might mediate this.\n"
-        "     * If neighbors PRECEDE the PTM cluster:\n"
-        "       → The Non-PTM abundance changes may be upstream events that\n"
-        "         trigger the downstream PTM cascade.\n"
-        "     * If timing is MIXED:\n"
-        "       → Pathway-level coordination with both direct (complex) and\n"
-        "         indirect (transcriptional) regulatory layers.\n"
-        "   - When concordance direction is SAME as cluster direction:\n"
-        "     → Positive feedback or co-activation/co-suppression.\n"
-        "   - When concordance direction is OPPOSITE to cluster direction:\n"
-        "     → Negative feedback, competitive binding, or compensatory response.\n"
-        "   - Always name the specific Non-PTM proteins involved and discuss\n"
-        "     their known biological roles in the experimental context.\n"
+        "11. NEIGHBORHOOD CONCORDANCE OBSERVATION (R1.0):\n"
+        "   - When present, neighborhood concordance summarizes the observed direction\n"
+        "     and sampled-timepoint difference of linked Non-PTM measurements.\n"
+        "   - Describe simultaneous/later/earlier patterns and their uncertainty as\n"
+        "     observations. Do not infer complex stoichiometry, transcriptional regulation,\n"
+        "     upstream/downstream order, feedback, kinase/phosphatase action, or causality.\n"
+        "   - Treat any mechanistic explanation as a testable hypothesis only when it is\n"
+        "     supported by separately cited literature and clearly distinguished from the data.\n"
     )
 
     # ── v9.30 / v12.1 / v13.0: Multi-site Temporal Divergence Analysis ──
@@ -3319,184 +3286,8 @@ def _append_cluster_detail(
         "no per-Wave functional enrichment, common regulator, or causal mechanism is assigned here."
     )
 
-    # v8.9.5: Enrichr cluster-level pathway enrichment results (Layer 2)
-    enrichr_results = cluster.get("enrichr_enrichment", {})
-    if enrichr_results:
-        enrichr_parts = []
-        for lib_name, terms in enrichr_results.items():
-            if terms:
-                top_terms = terms[:5] if is_primary else terms[:3]
-                term_strs = []
-                for t in top_terms:
-                    if isinstance(t, dict):
-                        term_strs.append(
-                            f"    {t.get('term', '?')} "
-                            f"(p={t.get('adjusted_p_value', t.get('p_value', '?')):.2e}, "
-                            f"genes: {', '.join(t.get('genes', [])[:6])})"
-                        )
-                    else:
-                        term_strs.append(f"    {t}")
-                if term_strs:
-                    lib_display = lib_name.replace("_", " ")
-                    enrichr_parts.append(f"  [{lib_display}]\n" + "\n".join(term_strs))
-        if enrichr_parts:
-            parts.append("\nCluster Pathway Enrichment (Enrichr):")
-            parts.extend(enrichr_parts)
-
-    # v8.10: Per-gene pathway mapping (for ALL clusters — explains WHY they co-move)
-    per_gene_pws = ann.get("per_gene_pathways", {})
-    if per_gene_pws:
-        parts.append("\nPer-Gene Pathway Mapping (from Figure 1 / 3-Layer Enrichment):")
-        parts.append("  (These are the pathways each cluster member participates in,")
-        parts.append("   as identified by the same 3-Layer enrichment shown in Figure 1)")
-        for gene, pws in sorted(per_gene_pws.items()):
-            pw_display = pws[:8] if isinstance(pws, list) else sorted(pws)[:8]
-            more = f" (+{len(pws)-8} more)" if len(pws) > 8 else ""
-            parts.append(f"  - {gene}: {', '.join(pw_display)}{more}")
-
-    # v8.10: Shared pathways across cluster members (from per-gene 3-Layer data)
-    per_gene_shared = ann.get("per_gene_shared_pathways", [])
-    if per_gene_shared:
-        parts.append("\nShared Pathways Explaining Temporal Coordination (from 3-Layer Enrichment):")
-        parts.append("  (Pathways shared by 2+ cluster members — these explain")
-        parts.append("   why these proteins move together in the same temporal pattern)")
-        for pw in per_gene_shared[:8]:
-            parts.append(
-                f"  - {pw['name']} ({pw['overlap_count']}/{pw['total_cluster']} members: "
-                f"{', '.join(pw['members'][:8])})"
-            )
-
-    if is_primary:
-        # Full detail for burst clusters
-        if ann.get("shared_pathways"):
-            pw_strs = []
-            for pw in ann["shared_pathways"][:5]:
-                pw_strs.append(
-                    f"  - {pw['name']} ({pw['overlap_count']}/{pw['total_cluster']} members: "
-                    f"{', '.join(pw['members'][:8])})"
-                )
-            parts.append("Shared Pathways (from pathway_candidates):\n" + "\n".join(pw_strs))
-
-        if ann.get("shared_kinases"):
-            k_strs = []
-            for k in ann["shared_kinases"][:5]:
-                k_strs.append(
-                    f"  - {k['kinase']} \u2192 {', '.join(k['substrates'][:8])}"
-                )
-            regulator_label = 'Predicted Upstream E3 Ligases' if ptm_type.lower().strip() in ('ubiquitylation', 'ubiquitination') else 'Predicted Upstream Kinases'
-            parts.append(f"{regulator_label}:\n" + "\n".join(k_strs))
-
-        if ann.get("shared_go_terms"):
-            go_strs = [f"  - {g['term']} ({g['count']} members)"
-                       for g in ann["shared_go_terms"][:5]]
-            parts.append("Shared GO Terms:\n" + "\n".join(go_strs))
-
-        # Non-PTM interactor links (important for burst interpretation)
-        nonptm_links = cluster.get("nonptm_links", [])
-        if nonptm_links:
-            parts.append("\nConnected Non-PTM Interactors:")
-            for link in nonptm_links[:8]:
-                parts.append(
-                    f"  - {link['gene']} ({link['role']}): "
-                    f"r={link['correlation_with_cluster']:.2f}, "
-                    f"{link['response_pattern']}, "
-                    f"lag={link['time_lag_minutes']:.0f}min, "
-                    f"max|FC|={link['max_change']:.2f}"
-                )
-
-        # v8.10: Neighborhood Concordance Summary (collective Non-PTM behavior)
-        nc = cluster.get("neighborhood_concordance")
-        if nc:
-            parts.append("\nNeighborhood Concordance Analysis:")
-            parts.append(
-                f"  Concordance Score: {nc['concordance_score']:.2f} "
-                f"({nc['up_count']} up / {nc['down_count']} down out of "
-                f"{nc['total_responsive_nonptm']} responsive Non-PTM neighbors)"
-            )
-            parts.append(
-                f"  Dominant direction: {nc['dominant_direction']} "
-                f"({'SAME as' if nc['same_as_cluster'] else 'OPPOSITE to'} "
-                f"PTM cluster direction: {nc['cluster_direction']})"
-            )
-            parts.append(
-                f"  Observed sampled-timepoint pattern: {nc['simultaneous_count']} simultaneous, "
-                f"{nc['delayed_count']} later, {nc['precedes_count']} earlier; "
-                f"median absolute sampled-timepoint difference={nc['median_lag_minutes']:.0f}min, "
-                f"mean={nc['mean_lag_minutes']:.0f}min"
-            )
-            parts.append(
-                f"  Observation label: {nc.get('timing_pattern', 'not_recorded')} — "
-                f"{nc.get('interpretation_boundary', 'See individual sampled-timepoint differences.')}"
-            )
-
-        # Per-member peak details for burst clusters
-        parts.append("\nIndividual PTM Peak Details:")
-        sorted_members = sorted(
-            cluster["member_details"],
-            key=lambda m: m["max_fc"], reverse=True
-        )
-        for md in sorted_members[:15]:
-            parts.append(
-                f"  - {md['key']}: peak |Log2FC|={md['max_fc']:.1f} at {md['peak_tp']}"
-            )
-    else:
-        # v8.10: Enhanced non-burst cluster detail (was too condensed)
-        if ann.get("shared_pathways"):
-            pw_strs = []
-            for pw in ann["shared_pathways"][:5]:
-                pw_strs.append(
-                    f"  - {pw['name']} ({pw['overlap_count']}/{pw['total_cluster']} members: "
-                    f"{', '.join(pw['members'][:6])})"
-                )
-            parts.append("Shared Pathways:\n" + "\n".join(pw_strs))
-        if ann.get("shared_kinases"):
-            k_strs = []
-            for k in ann["shared_kinases"][:3]:
-                k_strs.append(
-                    f"  - {k['kinase']} \u2192 {', '.join(k['substrates'][:6])}"
-                )
-            regulator_label = 'Predicted E3 Ligases' if ptm_type.lower().strip() in ('ubiquitylation', 'ubiquitination') else 'Predicted Kinases'
-            parts.append(f"{regulator_label}:\n" + "\n".join(k_strs))
-        if ann.get("shared_go_terms"):
-            go_strs = [f"  - {g['term']} ({g['count']} members)"
-                       for g in ann["shared_go_terms"][:3]]
-            parts.append("Shared GO Terms:\n" + "\n".join(go_strs))
-
-        # Non-PTM interactor links (also useful for non-burst)
-        nonptm_links = cluster.get("nonptm_links", [])
-        if nonptm_links:
-            parts.append("Connected Non-PTM Interactors:")
-            for link in nonptm_links[:5]:
-                parts.append(
-                    f"  - {link['gene']} ({link['role']}): "
-                    f"r={link['correlation_with_cluster']:.2f}, "
-                    f"{link['response_pattern']}, "
-                    f"lag={link['time_lag_minutes']:.0f}min"
-                )
-
-        # v8.10: Neighborhood Concordance Summary (also for non-burst)
-        nc = cluster.get("neighborhood_concordance")
-        if nc:
-            parts.append("\nNeighborhood Concordance Analysis:")
-            parts.append(
-                f"  Concordance Score: {nc['concordance_score']:.2f} "
-                f"({nc['up_count']} up / {nc['down_count']} down out of "
-                f"{nc['total_responsive_nonptm']} responsive Non-PTM neighbors)"
-            )
-            parts.append(
-                f"  Dominant direction: {nc['dominant_direction']} "
-                f"({'SAME as' if nc['same_as_cluster'] else 'OPPOSITE to'} "
-                f"PTM cluster direction: {nc['cluster_direction']})"
-            )
-            parts.append(
-                f"  Observed sampled-timepoint difference: median absolute={nc['median_lag_minutes']:.0f}min, "
-                f"{nc['simultaneous_count']} simultaneous / "
-                f"{nc['delayed_count']} later / "
-                f"{nc['precedes_count']} earlier"
-            )
-            parts.append(
-                f"  Observation label: {nc.get('timing_pattern', 'not_recorded')} — "
-                f"{nc.get('interpretation_boundary', 'Observed association only; no mechanism or causality is inferred.')}"
-            )
+    # R1.0: cluster annotation and enrichment are not a persisted per-Wave
+    # evidence layer. Keep them out of Report/RAG/LLM serialization until an
+    # explicit immutable per-Wave enrichment contract exists.
 
     parts.append("")

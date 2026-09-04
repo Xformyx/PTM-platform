@@ -69,6 +69,112 @@ def _direct_attribution_figure_allowed(state: dict) -> bool:
     return status == "perturbation_supported_direct_kinase_attribution"
 
 
+def format_kinase_footprint_diagnostics_for_report(
+    kinase_activity_heatmap: dict | None,
+    ptm_type: str = "phosphorylation",
+    *,
+    max_candidates: int = 12,
+) -> str:
+    """Render compact P0/P1 footprint diagnostics without raw edge disclosure.
+
+    This is a transparency layer for an already cached, contribution-weighted
+    heatmap. It neither changes ranking nor upgrades a footprint into direct
+    kinase attribution. Site keys and contribution edges remain out of the
+    Report/RAG/LLM payload; leave-one-out is summarized only as an aggregate
+    robustness result.
+    """
+    heatmap = dict(kinase_activity_heatmap or {})
+    raw_scores = heatmap.get("kinase_scores") or []
+    if not isinstance(raw_scores, list):
+        return ""
+    scores = [row for row in raw_scores if isinstance(row, dict) and not row.get("is_sub_pattern")]
+    if not scores:
+        return ""
+
+    regulator_label = "E3-ligase" if ptm_type.lower().strip() in ("ubiquitylation", "ubiquitination") else "kinase"
+    direction_label = {
+        "positive_substrate_footprint": "positive substrate footprint",
+        "negative_substrate_footprint": "negative substrate footprint",
+        "near_zero_footprint": "mixed/near-zero substrate footprint",
+    }
+
+    def _abs_peak(row: dict) -> float:
+        try:
+            return abs(float(row.get("peak_score") or 0.0))
+        except (TypeError, ValueError):
+            return 0.0
+
+    parts = [
+        "### Kinase Footprint Diagnostics (P0/P1)",
+        "",
+        f"These are contribution-weighted substrate-footprint diagnostics for candidate {regulator_label} context. "
+        "They do not establish catalytic activity, isoform-specific activity, a direct kinase–site relation, "
+        "or causality. Scalar confidence is intentionally not reported because it is not calibrated from this Order.",
+        "",
+    ]
+
+    exact_groups: dict[str, dict] = {}
+    for row in scores:
+        equivalence = row.get("footprint_equivalence") or {}
+        group_id = str(equivalence.get("equivalence_group_id") or "")
+        if group_id:
+            exact_groups.setdefault(group_id, equivalence)
+    if exact_groups:
+        parts.append("**Exact substrate-footprint equivalence groups**")
+        for equivalence in sorted(exact_groups.values(), key=lambda value: str(value.get("equivalence_group_id") or "")):
+            members = [str(member) for member in equivalence.get("members", []) if str(member)]
+            if len(members) < 2:
+                continue
+            parts.append(
+                f"- {' / '.join(members)}: identical observed substrate set "
+                f"(n={int(equivalence.get('site_count') or 0)}); isoform-specific activity is not resolved."
+            )
+        parts.append("")
+
+    parts.append("**Candidate footprint support (displayed score order is unchanged)**")
+    for row in sorted(scores, key=lambda value: (-_abs_peak(value), str(value.get("kinase") or "")))[:max_candidates]:
+        diagnostics = row.get("footprint_diagnostics") or {}
+        kinase = str(row.get("kinase") or row.get("canonical") or "candidate")
+        direction = direction_label.get(
+            str(row.get("direction") or diagnostics.get("footprint_direction") or ""),
+            "footprint direction unavailable",
+        )
+        status = str(diagnostics.get("status") or "not_evaluable")
+        if status != "computed":
+            parts.append(f"- **{kinase}**: {direction}; support diagnostics={status}.")
+            continue
+        n_eff = diagnostics.get("effective_substrate_number")
+        n_unique = int(diagnostics.get("n_exclusive") or 0)
+        n_shared = int(diagnostics.get("n_shared") or 0)
+        shared_fraction = diagnostics.get("shared_fraction")
+        dominant = diagnostics.get("dominant_substrate_fraction")
+        unique_only = diagnostics.get("unique_only_footprint") or {}
+        unique_status = str(unique_only.get("status") or "not_evaluable")
+        unique_direction = direction_label.get(str(unique_only.get("direction") or ""), "unavailable")
+        loso = diagnostics.get("leave_one_substrate_out") or []
+        robust = sum(
+            1 for item in loso
+            if item.get("peak_condition_preserved") and item.get("direction_preserved")
+        )
+        loso_status = f"{robust}/{len(loso)} top-site omissions preserved peak and direction" if loso else "not evaluated"
+        n_eff_display = f"{float(n_eff):.2f}" if isinstance(n_eff, (int, float)) else "unavailable"
+        shared_display = f"{float(shared_fraction):.0%}" if isinstance(shared_fraction, (int, float)) else "unavailable"
+        dominant_display = f"{float(dominant):.0%}" if isinstance(dominant, (int, float)) else "unavailable"
+        parts.append(
+            f"- **{kinase}**: {direction}; n_eff={n_eff_display}; unique/shared={n_unique}/{n_shared} "
+            f"(shared={shared_display}); dominant-site leverage={dominant_display}; "
+            f"LOSO={loso_status}; unique-only={unique_status} ({unique_direction})."
+        )
+    parts.extend([
+        "",
+        "**Interpretation boundary:** `n_eff`, unique/shared composition and leave-one-substrate-out are robustness diagnostics, "
+        "not confidence percentages or biological effect sizes. A positive/negative footprint reports the sign of an aggregate "
+        "substrate score only. Exact-equivalent candidates remain separate names for provenance but must not be interpreted as "
+        "independently resolved isoform activities.",
+    ])
+    return "\n".join(parts)
+
+
 # ── Motif DB (same as orders.py — inline matching fallback) ──────────────
 PHOSPHO_MOTIF_DB = {
     "CDK1/CDK2": r"[ST]P.[KR]",
@@ -1562,6 +1668,24 @@ def _build_frontend_kinase_llm_context(frontend_kinase: dict, ptm_type: str, kin
     temporal_cascade = frontend_kinase.get("temporal_cascade", {})
     summary = frontend_kinase.get("summary", {})
     saved_at = frontend_kinase.get("saved_at", "")
+
+    # R1.0: the cached P0/P1 heatmap is the authoritative report-facing
+    # footprint source. Do not append the legacy 8-source cascade prose when
+    # it is available: that prose predates no-call/direct-edge and component-
+    # based-confidence boundaries and can turn overlap into causal narrative.
+    if kinase_activity_heatmap and kinase_activity_heatmap.get("kinase_scores"):
+        compact = format_kinase_footprint_diagnostics_for_report(
+            kinase_activity_heatmap,
+            ptm_type,
+        )
+        if compact:
+            return (
+                "## GLOBAL KINASE FOOTPRINT CONTEXT (P0/P1)\n\n"
+                + compact
+                + "\n\nLLM instruction: use these as aggregate substrate-footprint support diagnostics only. "
+                "Do not infer kinase activation, direct substrate regulation, cascade order, common upstream control, "
+                "or isoform-specific activity from these values."
+            )
 
     if not kinase_modules:
         return ""

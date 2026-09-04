@@ -322,7 +322,14 @@ class ReportPostProcessor:
             return text
         match = re.search(r"(?m)^## Methods\s*$", text)
         if not match:
-            return text
+            # The LLM can omit a full Methods section. A minimal deterministic
+            # Reporting Policy is still required in the final scientific output;
+            # insert it before Discussion rather than silently losing the rule.
+            discussion = re.search(r"(?m)^## Discussion\s*$", text)
+            insertion = f"## Methods\n\n### Reporting Policy\n\n{policy}\n\n"
+            if discussion:
+                return text[:discussion.start()] + insertion + text[discussion.start():]
+            return text.rstrip() + "\n\n" + insertion
         insertion = f"\n\n### Reporting Policy\n\n{policy}\n"
         return text[:match.end()] + insertion + text[match.end():]
 
@@ -358,6 +365,45 @@ class ReportPostProcessor:
         text = re.sub(
             r"\bextensive evidence for activation of (?:the )?MAPK(?:/ERK)? and SRC(?: family)? kinase signaling\b",
             "observations consistent with MAPK/SRC-associated pathway context",
+            text,
+            flags=re.IGNORECASE,
+        )
+        # Supplementary network captions use legacy display labels. Convert
+        # them to measured-contrast language without changing any numeric
+        # observation or reclassifying the underlying PTM data.
+        text = re.sub(
+            r"\bTop Activated PTMs\b",
+            "Top higher measured PTM-abundance contrasts",
+            text,
+            flags=re.IGNORECASE,
+        )
+        text = re.sub(
+            r"\bTop Inhibited PTMs\b",
+            "Top lower measured PTM-abundance contrasts",
+            text,
+            flags=re.IGNORECASE,
+        )
+        text = re.sub(
+            r"\bTop activated:\s*",
+            "Largest positive measured PTM contrasts:",
+            text,
+            flags=re.IGNORECASE,
+        )
+        text = re.sub(
+            r"\bTop inhibited:\s*",
+            "Largest negative measured PTM contrasts:",
+            text,
+            flags=re.IGNORECASE,
+        )
+        text = re.sub(
+            r"\b(\d+) activated PTMs\b",
+            r"\1 PTMs with higher measured abundance",
+            text,
+            flags=re.IGNORECASE,
+        )
+        text = re.sub(
+            r"\b(\d+) inhibited PTMs\b",
+            r"\1 PTMs with lower measured abundance",
             text,
             flags=re.IGNORECASE,
         )
@@ -418,6 +464,11 @@ class ReportPostProcessor:
         # citation. Remove the resulting orphan whitespace before punctuation
         # without changing valid citation punctuation such as "work[1].".
         text = re.sub(r"(?<=\w)\s+([.,;:])", r"\1", text)
+        # Placeholder-like citation text has no stable paper identity and must
+        # never survive as if it were a source. Removing it before punctuation
+        # cleanup prevents artifacts such as "prior work ." in final output.
+        text = re.sub(r"\[(?:provided function|citation needed|reference needed)\]", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\s+([.,;:])", r"\1", text)
         return text
 
     def _remove_duplicate_paragraphs(self, text: str) -> str:
