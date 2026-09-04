@@ -2537,8 +2537,20 @@ def _build_comovement_llm_context(
             )
         parts.append("")
 
-    # ── LLM Instructions (v8.4: transient burst focus + report coherence) ──
+    # ── Report-safe Co-Wave instructions ───────────────────────────────────
     parts.append(
+        "\nCO-WAVE REPORTING POLICY:\n"
+        "- Describe only observed local co-membership patterns at sampled timepoints, their member counts, profiles, and available stability/exposure metadata.\n"
+        "- Do not name a functional module, shared pathway enrichment, common regulator, kinase/phosphatase, activation loop, relay, feedback, signal-flow direction, or causal mechanism for an individual cluster unless a dedicated persisted per-Wave evidence record is supplied.\n"
+        "- Compare clusters only with globally computed pathway context and cited literature as a hypothesis; do not state that a shared pathway explains why members move together.\n"
+        "- A sampled-timepoint peak, local co-membership, or non-PTM timing difference is not evidence of biological lag, upstream/downstream regulation, stoichiometry, transcriptional regulation, or a molecular switch.\n"
+        "- If global adjacency-order null calibration is unavailable or unsupported, call the result an observed local co-membership reorganization only; never robust, significant, validated, or globally temporally resolved.\n"
+        "- Refer to the associated figures as descriptive evidence maps. Dense network/cascade diagrams are supplementary context, not direct-regulation graphs.\n"
+    )
+
+    # Historical v8.x directive retained for source-history readability only.
+    # It contains mechanism-forward wording and must never enter an LLM prompt.
+    _legacy_mechanistic_instruction_not_for_report = (
         "\nCRITICAL INSTRUCTIONS FOR REPORT WRITING:\n"
         "\n"
         "1. TRANSIENT BURST AS CENTRAL THEME:\n"
@@ -3262,8 +3274,10 @@ def _append_cluster_detail(
     cid = cluster["cluster_id"]
     pattern = _pattern_display_name(cluster["pattern"], ptm_type)
     members = cluster["members"]
-    ann = cluster.get("annotations", {})
-    bio_summary = ann.get("biological_summary", "No shared annotations found")
+    # Cluster annotation is not a persisted per-Wave enrichment result. Keep it
+    # out of the Report/LLM payload so global pathway context cannot be recast
+    # as a functional module assigned to an individual Wave.
+    ann = {}
 
     # v9.27: activity class breakdown
     class_counts = cluster.get("activity_class_counts", {})
@@ -3300,8 +3314,10 @@ def _append_cluster_detail(
     )
     parts.append(f"Mean profile: {profile_str}")
 
-    # Biological annotations
-    parts.append(f"Biological Context: {bio_summary}")
+    parts.append(
+        "Membership interpretation boundary: local co-membership is an observed sampled-timepoint pattern; "
+        "no per-Wave functional enrichment, common regulator, or causal mechanism is assigned here."
+    )
 
     # v8.9.5: Enrichr cluster-level pathway enrichment results (Layer 2)
     enrichr_results = cluster.get("enrichr_enrichment", {})

@@ -1515,6 +1515,11 @@ def _build_section_prompt(
         f"- Limit your interpretation to: (1) the experimental data (TSV/MD files), (2) ChromaDB literature, and (3) PubMed references provided below.\n"
         f"- Do NOT fabricate connections to unrelated biological systems.\n"
         f"\n"
+        f"**NUMERIC-CONTRAST CLAIM CEILING (MANDATORY):**\n"
+        f"- A conventional PTM Log2FC is a measured numeric contrast, not by itself a molecular switch, a powerful signal, a biological priority, mechanistic importance, direct regulatory strength, or kinase activation.\n"
+        f"- When only a conventional contrast is available, write 'higher/lower measured PTM abundance' or 'pronounced measured contrast' and name the independent evidence required for a stronger biological interpretation.\n"
+        f"- Do NOT use 'molecular switch is flipped', 'powerful rapid signal', 'significant rewiring', or comparable mechanistic-strength language from Log2FC magnitude alone.\n"
+        f"\n"
         f"**NAMING RULE (MANDATORY):**\n"
         f"- ALWAYS use the ACTUAL names: '{tissue}' for cell type, '{treatment}' for treatment.\n"
         f"- NEVER use generic placeholders like 'the experimental system', 'the applied treatment', "
@@ -1881,7 +1886,7 @@ Each major subsection should correspond to a key analytical output (figure or da
   A separate, mandatory **Research Question Answers** section will provide one bounded,
   explicit answer for every submitted question after Results.
 
-IMPORTANT: Be thorough and detailed. Discuss each significant PTM site individually.
+IMPORTANT: Be thorough and detailed. Discuss each Report-eligible PTM site individually, but do not promote a large conventional Log2FC alone into a molecular switch, powerful signal, mechanistic importance, direct regulatory strength, or biological priority.
 Include quantitative data (Log2FC for regulated sites; detection + LOD-relative ≥ for de novo). Cite the provided references to support your findings.
 This is the most important section of the report.
 - You MUST explicitly name the treatment/stimulus ({treatment}) when describing PTM responses.

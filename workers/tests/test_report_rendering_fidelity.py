@@ -8,7 +8,9 @@ from report_generation.core.dynamic_prompt_generator import build_temporal_evide
 from report_generation.core.graph import format_citations
 from report_generation.core.citation_formatter import ReportPostProcessor
 from report_generation.core.nodes.kinase_annotation_node import _direct_attribution_figure_allowed
-from report_generation.core.nodes.signal_flow_figure import generate_pathway_diagram
+from report_generation.core.nodes.question_generator import _get_co_scientist_questions
+from report_generation.core.nodes.signal_flow_figure import generate_context_aware_ptm_heatmap, generate_pathway_diagram
+from report_generation.core.nodes.temporal_comovement_node import _append_cluster_detail
 from report_generation.core.nodes.writer_node import _stabilize_section_citations
 
 
@@ -205,3 +207,102 @@ def test_chromadb_bundle_label_without_bibliographic_metadata_is_not_rendered_as
     report = final["final_report"]
     assert "All PTM Articles" not in report
     assert "## References" not in report
+
+
+def test_postprocessor_removes_orphan_spacing_after_unresolved_citation_drop():
+    processed = ReportPostProcessor().process("## Discussion\n\nThis extends prior work .")
+    assert "prior work ." not in processed
+    assert "prior work." in processed
+
+
+def test_postprocessor_lowers_numeric_contrast_and_no_null_overclaim_tone():
+    text = (
+        "## Results\n\n"
+        "IRS1 S522 Log2FC 28.97 indicates a molecular switch is flipped. "
+        "CFLAR T231 Log2FC 31.98 is a powerful, rapid signal. "
+        "UBC T83 Log2FC 32.61 is substantially increased. "
+        "The analysis shows significant rewiring and extensive evidence for activation of MAPK and SRC family kinase signaling."
+    )
+    processed = ReportPostProcessor().process(text)
+    assert "molecular switch is flipped" not in processed
+    assert "powerful, rapid signal" not in processed
+    assert "substantially increased" not in processed
+    assert "significant rewiring" not in processed
+    assert "extensive evidence for activation of MAPK and SRC family kinase signaling" not in processed
+    assert "IRS1 S522 Log2FC 28.97" in processed
+    assert "pronounced measured contrast" in processed
+    assert "observed local co-membership reorganization" in processed
+    assert "MAPK/SRC-associated pathway context" in processed
+
+
+def test_co_scientist_questions_do_not_presume_kinase_activation_or_wave_function():
+    questions = _get_co_scientist_questions({
+        "experimental_context": {"cell_type": "generic cells", "treatment": "compound X"},
+        "kinase_activity_heatmap": {
+            "kinase_scores": [{"kinase": "MAPK1", "peak_score": 0.7, "self_ptm": True, "tmm_n_shared": 4}],
+            "cowave_groups": [{"group_id": "TW-01"}],
+        },
+        "frontend_kinase_analysis": {"temporal_cascade": {"cascade_flow": [{"timepoint": "15min"}]}},
+    })
+    joined = "\n".join(questions).lower()
+    assert "top-activated kinase" not in joined
+    assert "which specific substrates do they regulate" not in joined
+    assert "functional modules are revealed" not in joined
+    assert "autophosphorylation-based activation loops" not in joined
+    assert "candidate-context patterns" in joined
+    assert "local co-wave membership" in joined
+
+
+def test_cluster_detail_excludes_unpersisted_per_wave_functional_annotations():
+    parts: list[str] = []
+    _append_cluster_detail(
+        parts,
+        {
+            "cluster_id": "TW-01",
+            "pattern": "transient_burst",
+            "members": ["IRS1_S522"],
+            "member_details": [{"key": "IRS1_S522", "activity_class": "regulated"}],
+            "activity_class_counts": {"regulated": 1},
+            "dominant_activity_class": "regulated",
+            "correlation_mean": 0.9,
+            "peak_timepoint": "15min",
+            "mean_profile": {"0min": 0.0, "15min": 1.5},
+            "annotations": {
+                "biological_summary": "Metabolic pathway module",
+                "per_gene_pathways": {"IRS1": ["Insulin signaling"]},
+                "per_gene_shared_pathways": [{"name": "Insulin signaling", "overlap_count": 1, "total_cluster": 1, "members": ["IRS1"]}],
+            },
+        },
+        ["0min", "15min"],
+        is_primary=False,
+        figure_num=2,
+    )
+    rendered = "\n".join(parts)
+    assert "Membership interpretation boundary" in rendered
+    assert "Metabolic pathway module" not in rendered
+    assert "Per-Gene Pathway Mapping" not in rendered
+    assert "Shared Pathways Explaining Temporal Coordination" not in rendered
+
+
+def test_dense_context_heatmap_renders_with_adaptive_text_thinning(tmp_path):
+    conditions = ["0min", "1min", "5min", "15min"]
+    rows = []
+    genes = []
+    for index in range(20):
+        gene = f"GENE{index}"
+        genes.append(gene)
+        for condition in conditions:
+            rows.append({
+                "gene": gene,
+                "position": f"S{index + 1}",
+                "condition": condition,
+                "ptm_relative_log2fc": 1.0 if condition != "0min" else 0.0,
+            })
+    output = generate_context_aware_ptm_heatmap(
+        sections={"results": " ".join(genes)},
+        vector_plot_raw_data=rows,
+        conditions=conditions,
+        output_dir=str(tmp_path),
+    )
+    assert output is not None
+    assert (tmp_path / "context_ptm_heatmap.png").exists()

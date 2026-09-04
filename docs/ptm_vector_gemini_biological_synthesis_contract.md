@@ -109,7 +109,11 @@ Every Report consumer that accepts a vector row must use the shared provenance-b
 
 The final Methods section renders this exact reporting policy once: **“Large conventional Log2FC values are retained as measured numeric contrasts, but are not used alone to infer biological priority, mechanistic importance, or direct regulatory strength.”** This policy preserves quantitative observations and does not alter thresholds, candidate scoring, or direct-attribution gates.
 
+The writer must use the same ceiling in Results, Research Question Answers, Discussion, Conclusion and validation suggestions. A conventional contrast alone may be described as higher/lower measured PTM abundance or a pronounced measured contrast, but not as a molecular switch, powerful/strong signal, substantial biological effect, direct regulatory strength, kinase activation, or mechanistic importance. The final renderer normalizes common orphan punctuation left after an unresolved citation is deliberately removed.
+
 The canonical sidecar writes `co_wave_membership_audit.tsv`, containing static Wave ID and immutable site-key membership in deterministic order. This is a user-facing audit artifact, not a compact sidecar field and never an RAG/LLM input. Until a dedicated per-Wave enrichment result is computed and persisted, a Report may discuss per-Wave counts and transition annotations but may not assign a functional module, pathway enrichment or common regulator to an individual Wave.
+
+Research questions use the same boundary. They ask about local sampled-timepoint membership, global pathway comparison and the evidence needed to test kinase/activation-loop hypotheses; they do not presume top-activated kinases, direct substrates, functional modules, kinase cooperation or kinase dominance. MAPK, SRC and any other named family may be discussed only as candidate-associated pathway context unless a permitted direct-attribution or perturbation evidence record is present.
 
 When the persisted global adjacency-order null test is not computed or does not support temporal order, Dynamic Co-Wave remains a local sampled-timepoint annotation. The writer must not call it robust, significant, validated or globally temporally resolved; transition totals retain their exposure/LOTO context only.
 
@@ -140,6 +144,7 @@ The same Order may still state that its observed programme is consistent with, c
 12. A conventional-NA/de novo row with pseudo-Log2FC of any magnitude is rendered through detection/LOD context only; it cannot enter generic vector ranking, statistics, figure colour scale or biological-priority prose.
 13. The static Wave membership audit is deterministic and separate from compact Report/RAG/LLM payloads; Report text does not assign per-Wave function when no persisted per-Wave enrichment is present.
 14. A missing or unsupported global adjacency-order null blocks robust/significant/global-order Co-Wave wording, and final Markdown contains globally unique Q headings and no consecutive table separator rows.
+15. A conventional extreme contrast does not generate molecular-switch, powerful-signal, substantial biological-effect or direct-regulatory-strength prose; automated co-scientist questions use pathway-context and testable-hypothesis grammar, not activation-loop or direct-substrate grammar.
 
 ## 9. Methodological references
 

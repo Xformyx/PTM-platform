@@ -302,6 +302,7 @@ class ReportPostProcessor:
         text = self._renumber_research_questions(text)
         text = self._ensure_section_order(text)
         text = self._ensure_conventional_log2fc_reporting_policy(text)
+        text = self._normalize_residual_claim_tone(text)
 
         return text
 
@@ -324,6 +325,43 @@ class ReportPostProcessor:
             return text
         insertion = f"\n\n### Reporting Policy\n\n{policy}\n"
         return text[:match.end()] + insertion + text[match.end():]
+
+    def _normalize_residual_claim_tone(self, text: str) -> str:
+        """Lower recurrent unsupported claims without deleting observations.
+
+        The writer receives an explicit evidence-tier policy, but final output is
+        additionally normalized for phrases that have repeatedly converted a
+        large observed contrast, local co-membership pattern, or candidate
+        pathway context into a stronger mechanistic conclusion. Measured values
+        and traceable literature citations remain unchanged.
+        """
+        sentence_splitter = re.compile(r"(?<=[.!?])(?=\s+|$)")
+        numeric_contrast = re.compile(r"(?:log\s*(?:2|₂)\s*fc|ptm[^.\n]{0,80}[+-]?\d+\.\d+)", re.IGNORECASE)
+        strength_substitutions = [
+            (re.compile(r"\bmolecular switch (?:is|was) flipped\b", re.IGNORECASE), "pronounced measured contrast was observed"),
+            (re.compile(r"\bpowerful,? rapid signal\b", re.IGNORECASE), "rapid measured contrast"),
+            (re.compile(r"\bsubstantially increased\b", re.IGNORECASE), "higher measured abundance"),
+        ]
+        normalized_sentences = []
+        for sentence in sentence_splitter.split(text):
+            if numeric_contrast.search(sentence):
+                for pattern, replacement in strength_substitutions:
+                    sentence = pattern.sub(replacement, sentence)
+            normalized_sentences.append(sentence)
+        text = "".join(normalized_sentences)
+        text = re.sub(
+            r"\bsignificant rewiring\b",
+            "observed local co-membership reorganization",
+            text,
+            flags=re.IGNORECASE,
+        )
+        text = re.sub(
+            r"\bextensive evidence for activation of (?:the )?MAPK(?:/ERK)? and SRC(?: family)? kinase signaling\b",
+            "observations consistent with MAPK/SRC-associated pathway context",
+            text,
+            flags=re.IGNORECASE,
+        )
+        return text
 
     def _normalize_headings(self, text: str) -> str:
         """Normalize section headings.
@@ -376,6 +414,10 @@ class ReportPostProcessor:
         # Fix space before citation: word [1] -> word[1] (optional style)
         # Fix citations without closing bracket
         text = re.sub(r"\[(\d+)\s*$", r"[\1]", text, flags=re.MULTILINE)
+        # Stable-marker resolution can intentionally drop an untraceable
+        # citation. Remove the resulting orphan whitespace before punctuation
+        # without changing valid citation punctuation such as "work[1].".
+        text = re.sub(r"(?<=\w)\s+([.,;:])", r"\1", text)
         return text
 
     def _remove_duplicate_paragraphs(self, text: str) -> str:

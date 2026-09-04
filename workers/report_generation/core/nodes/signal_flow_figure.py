@@ -1108,9 +1108,15 @@ def generate_context_aware_ptm_heatmap(
     im = ax.imshow(matrix, cmap=cmap_div, norm=norm, aspect="auto", interpolation="nearest")
 
     # Cell annotations. De novo uses ≥ LOD-relative, not conventional Log2FC.
+    # A dense body figure remains readable by retaining the colour pattern and
+    # thinning text labels; the full numeric matrix remains in the underlying
+    # vector artifact rather than becoming an unreadable network of overlays.
+    dense_display = n_sites > 18 or n_conds > 8
     for i in range(n_sites):
         for j in range(n_conds):
             val = matrix[i, j]
+            if dense_display:
+                continue
             if denovo_rows[i]:
                 if abs(val) >= 0.3:
                     ax.text(j, i, f"≥{val:.1f}", ha="center", va="center",
@@ -1124,8 +1130,10 @@ def generate_context_aware_ptm_heatmap(
     # Labels
     ax.set_xticks(range(n_conds))
     ax.set_xticklabels(conditions, fontsize=9, rotation=45, ha="right", color="#333333")
-    ax.set_yticks(range(n_sites))
-    ax.set_yticklabels(site_labels, fontsize=7, color="#333333")
+    label_stride = max(1, int(np.ceil(n_sites / 18)))
+    visible_label_indices = list(range(0, n_sites, label_stride))
+    ax.set_yticks(visible_label_indices)
+    ax.set_yticklabels([site_labels[i] for i in visible_label_indices], fontsize=7, color="#333333")
 
     # Grid
     for i in range(n_sites + 1):
@@ -1136,7 +1144,7 @@ def generate_context_aware_ptm_heatmap(
     mod_label = "Ubiquitylation" if ptm_type.lower().strip() in ("ubiquitylation", "ubiquitination") else "Phosphorylation"
     ax.set_title(
         f"Key {mod_label} Sites Discussed in This Report "
-        f"(Log₂FC; ★ de novo = LOD-relative ≥)",
+        f"(Log₂FC; ★ de novo = detection/LOD context)",
         fontsize=11, fontweight="bold", color="#1f2937", pad=12,
     )
     ax.set_xlabel("Condition / Timepoint", fontsize=9, color="#4b5563")
@@ -1152,7 +1160,8 @@ def generate_context_aware_ptm_heatmap(
         0.5, 0.005,
         f"Heatmap of {n_sites} PTM sites referenced in the report text. "
         f"Red/blue = quantified Log₂FC. ★ de novo cells are LOD-relative lower bounds, not fold-change. "
-        f"Colormap scale excludes de novo.",
+        f"Colormap scale excludes de novo. "
+        f"{'Dense display: cell labels and alternating site labels are suppressed for readability.' if dense_display else ''}",
         fontsize=7, color="#6b7280", ha="center", va="bottom", style="italic",
     )
 

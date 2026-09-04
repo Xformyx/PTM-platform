@@ -180,15 +180,15 @@ def _get_co_scientist_questions(state: dict) -> list:
     treatment = context.get("treatment") or "the treatment"
     ptm_type = state.get("ptm_type", "phosphorylation")
     
-    # Q1: Temporal cascade — what is the kinase activation order?
+    # Q1: Temporal candidate context — no direct activation order is implied.
     if cascade_flow:
         timepoints = [step.get("timepoint", "") for step in cascade_flow]
         questions.append(
-            f"What is the temporal order of kinase activation in {tissue} following {treatment}, "
-            f"and how does the signaling cascade progress across {', '.join(timepoints[:4])}?"
+            f"Which timepoint-specific substrate-derived kinase candidate-context patterns are observed in {tissue} following {treatment} "
+            f"across {', '.join(timepoints[:4])}, and which orthogonal measurements would be needed to test a temporal order?"
         )
     
-    # Q2: Top kinases — what are the dominant kinases and their substrates?
+    # Q2: Candidate contexts are not direct kinase/substrate attribution.
     top_ks = sorted(
         [ks for ks in kinase_scores if not ks.get("is_sub_pattern")],
         key=lambda x: abs(x.get("peak_score", 0)), reverse=True
@@ -196,15 +196,15 @@ def _get_co_scientist_questions(state: dict) -> list:
     if top_ks:
         k_names = ", ".join(ks.get("kinase", "") for ks in top_ks)
         questions.append(
-            f"What are the biological roles of the top-activated kinases ({k_names}) "
-            f"and which specific substrates do they regulate in {tissue}?"
+            f"What pathway and literature context is associated with the substrate-derived candidate kinase families ({k_names}) "
+            f"in {tissue}, and what evidence would be required before assigning direct substrate regulation?"
         )
     
-    # Q3: Co-wave modules — what do co-activated substrates have in common?
+    # Q3: Local membership is descriptive until per-Wave enrichment is persisted.
     if cowave_groups:
         questions.append(
-            f"What functional modules are revealed by co-wave analysis — "
-            f"do substrates activated simultaneously share common cellular pathways or compartments?"
+            "Which local co-wave membership patterns are observed at the sampled timepoints, "
+            "and how can they be compared with global pathway context without assigning per-Wave functional enrichment?"
         )
 
     # Shared production/benchmark temporal sidecar: formulate a falsifiable
@@ -232,15 +232,15 @@ def _get_co_scientist_questions(state: dict) -> list:
                 f"(transition-supported Waves={transition_waves}; observed pair transitions={transition_pairs})"
             )
     
-    # Q4: Autophosphorylation — which kinases show self-activation loops?
+    # Q4: Self-PTM annotations do not establish activation loops.
     auto_kinases = [
         ks.get("kinase", "") for ks in kinase_scores
         if not ks.get("is_sub_pattern") and ks.get("self_ptm")
     ]
     if auto_kinases:
         questions.append(
-            f"Which kinases ({', '.join(auto_kinases[:3])}) exhibit autophosphorylation-based "
-            f"activation loops, and how does this amplify downstream {ptm_type} signaling?"
+            f"Which kinase-associated contexts ({', '.join(auto_kinases[:3])}) contain self-PTM annotations, "
+            f"and what direct functional-site or perturbation evidence would be required to test an activation-loop hypothesis?"
         )
     
     # Q5: TMM — how are shared substrates attributed between kinases?
@@ -251,8 +251,8 @@ def _get_co_scientist_questions(state: dict) -> list:
     if shared_kinases:
         k_names2 = ", ".join(ks.get("kinase", "") for ks in shared_kinases[:3])
         questions.append(
-            f"How do kinases ({k_names2}) cooperate through shared substrates, "
-            f"and what does the TMM contribution analysis reveal about their relative dominance?"
+            f"How do substrate-derived kinase candidate contexts ({k_names2}) overlap in the TMM contribution analysis, "
+            f"and what cannot be concluded about direct kinase cooperation or dominance from those scores alone?"
         )
     
     # Q6: Biological significance — what does this signaling pattern mean?
@@ -262,7 +262,7 @@ def _get_co_scientist_questions(state: dict) -> list:
     else:
         questions.append(
             f"What is the overall biological significance of the observed {ptm_type} signaling pattern "
-            f"in {tissue} following {treatment}, and what are the key mechanistic insights?"
+            f"in {tissue} following {treatment}, and which testable biological hypotheses are supported without claiming direct regulation?"
         )
     
     # Fallback: ensure at least 3 questions

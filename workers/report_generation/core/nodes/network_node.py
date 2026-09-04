@@ -2838,16 +2838,16 @@ def generate_network_figure_section(
         "through multi-factor analysis of the PTM data. Each horizontal lane represents "
         "a distinct signaling pathway, with proteins positioned in their annotated "
         "subcellular compartment (based on UniProt subcellular location and GO Cellular "
-        "Component annotations). Protein nodes are color-coded by activation state: "
-        "**red circles** = activated PTM proteins (Log2FC > 0), "
-        "**blue circles** = inhibited PTM proteins (Log2FC < 0), "
-        "**green circles** = upregulated Non-PTM interactors, "
-        "**purple circles** = downregulated Non-PTM interactors, "
+        "Component annotations). Protein nodes are color-coded by measured abundance context: "
+        "**red circles** = higher measured PTM abundance (Log2FC > 0), "
+        "**blue circles** = lower measured PTM abundance (Log2FC < 0), "
+        "**green circles** = higher measured Non-PTM abundance, "
+        "**purple circles** = lower measured Non-PTM abundance, "
         f"**orange diamonds** = {'E3 ligases' if ptm_type.lower().strip() in ('ubiquitylation', 'ubiquitination') else 'kinases'}. "
-        "Node size is proportional to |Log2FC| magnitude. "
+        "Node size is a display aid for measured contrast magnitude and is not biological priority, mechanistic importance, direct regulatory strength, or kinase activity. "
         "Gray dashed connectors indicate literature/pathway context only; they do not establish "
         "Order-specific direction, direct regulation, kinase–site attribution, or causality. "
-        "Fold-change values (Log2FC) are annotated above each node."
+        "Dense context diagrams are supplementary evidence maps; fold-change labels are descriptive observations."
     )
 
     if cascade_diagram_paths:
@@ -2865,7 +2865,7 @@ def generate_network_figure_section(
                 if promote_to_main:
                     # v9.4: Cascade → Main Figure
                     main_section += (
-                        f"### Figure {figure_num}. Signal Transduction Pathway Cascade Diagram "
+                        f"### Figure {figure_num}. Compartmentalized Signaling Context Diagram "
                         f"— {tp}{pw_subtitle}\n\n"
                     )
                     main_section += f"![Signal Transduction Pathway Cascade Diagram — {tp}]({tp_img_ref})\n\n"
