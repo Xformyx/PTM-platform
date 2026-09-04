@@ -301,8 +301,29 @@ class ReportPostProcessor:
         text = self._collapse_repeated_table_separators(text)
         text = self._renumber_research_questions(text)
         text = self._ensure_section_order(text)
+        text = self._ensure_conventional_log2fc_reporting_policy(text)
 
         return text
+
+    def _ensure_conventional_log2fc_reporting_policy(self, text: str) -> str:
+        """Guarantee the measured-contrast versus inference boundary in Methods.
+
+        This deterministic reporting policy cannot be omitted by an LLM section
+        writer. It neither changes a numerical threshold nor modifies the
+        underlying quantification or candidate-scoring contract.
+        """
+        policy = (
+            "Large conventional Log2FC values are retained as measured numeric contrasts, "
+            "but are not used alone to infer biological priority, mechanistic importance, "
+            "or direct regulatory strength."
+        )
+        if policy in text:
+            return text
+        match = re.search(r"(?m)^## Methods\s*$", text)
+        if not match:
+            return text
+        insertion = f"\n\n### Reporting Policy\n\n{policy}\n"
+        return text[:match.end()] + insertion + text[match.end():]
 
     def _normalize_headings(self, text: str) -> str:
         """Normalize section headings.

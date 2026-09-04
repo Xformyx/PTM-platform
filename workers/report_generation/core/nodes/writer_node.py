@@ -2169,7 +2169,7 @@ The Methods section MUST cover:
    d. Hypothesis generation and validation against literature
 4. **Network Analysis**: {'Cytoscape-based network visualization with force-directed layout, exported at 300 DPI' if has_network else 'Network analysis was performed to identify protein-protein interactions'}
 5. **Statistical Analysis**: Describe significance thresholds and multiple testing correction
-6. **Report Generation**: LLM-assisted scientific writing with anti-hallucination validation
+6. **Report Generation and Reporting Policy**: LLM-assisted scientific writing with anti-hallucination validation. Include this exact policy once: "Large conventional Log2FC values are retained as measured numeric contrasts, but are not used alone to infer biological priority, mechanistic importance, or direct regulatory strength."
 
 IMPORTANT: Write in past tense. Be specific about computational tools and databases used. Do NOT include results or interpretations.""", []
 
@@ -2179,14 +2179,21 @@ IMPORTANT: Write in past tense. Be specific about computational tools and databa
         discussion_text = prev_sections.get("discussion", "")[:2000]
         conclusion_text = prev_sections.get("conclusion", "")[:1500]
 
-        # Extract top PTMs for specific suggestions
+        # Extract conventional measured contrasts for suggestion context. De novo
+        # entries remain eligible only through their P5 detection/LOD evidence,
+        # never through a pseudo-log2FC magnitude sort.
         top_ptms_str = ""
-        sorted_ptms = sorted(ptms, key=lambda x: abs(float(x.get("ptm_relative_log2fc", 0))), reverse=True)
+        conventional_ptms = [p for p in ptms if not is_de_novo_representation(p)]
+        sorted_ptms = sorted(
+            conventional_ptms,
+            key=lambda x: abs(float(x.get("ptm_relative_log2fc", 0) or 0)),
+            reverse=True,
+        )
         for p in sorted_ptms[:10]:
             gene = p.get("gene", "?")
             pos = p.get("position", "?")
             fc = float(p.get("ptm_relative_log2fc", 0))
-            top_ptms_str += f"  - {gene}-{pos}: PTM Log2FC={fc:.2f}\n"
+            top_ptms_str += f"  - {gene}-{pos}: measured PTM Log2FC={fc:.2f} (descriptive contrast; not a priority or direct-regulation score)\n"
 
         return f"""Write a Suggested Validation Experiments section (~800-1200 words) for this PTM analysis report.
 {single_tp_directive}

@@ -183,6 +183,18 @@ Answer two.
     assert processed.count("|---|---|") == 1
 
 
+def test_methods_always_include_conventional_log2fc_reporting_policy_once():
+    text = "## Methods\n\nQuantification was performed.\n\n## Results\n\nObserved data."
+    processed = ReportPostProcessor().process(text)
+    policy = (
+        "Large conventional Log2FC values are retained as measured numeric contrasts, "
+        "but are not used alone to infer biological priority, mechanistic importance, "
+        "or direct regulatory strength."
+    )
+    assert processed.count(policy) == 1
+    assert "### Reporting Policy" in processed
+
+
 def test_chromadb_bundle_label_without_bibliographic_metadata_is_not_rendered_as_reference():
     final = format_citations({
         "sections": {"title": "Citation provenance", "discussion": "Internal bundle reference [REF:title:allptmarticles]."},
