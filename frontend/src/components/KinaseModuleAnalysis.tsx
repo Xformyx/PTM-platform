@@ -60,6 +60,7 @@ import {
 } from "@/components/ui/table";
 import { api } from "@/lib/api";
 import IPOverlayView from "@/components/IPOverlayView";
+import { TEMPORAL_TERMS, formatLocalTransitionStatus, formatTemporalClusterLabel } from "@/lib/temporal-terminology";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -1104,7 +1105,7 @@ export default function KinaseModuleAnalysis({
         <p className="text-xs text-muted-foreground">
           {isUbi
             ? "Temporal module detection, E3 Ligase annotation (RING/HECT/RBR), Ubiquitin chain type classification (K48/K63/Mono), and Phospho-Ub cross-talk inference."
-            : "Co-wave module detection, multi-source kinase annotation (8 sources + motif prediction), and cascade inference. PTMs co-moving in the same time-point waves likely share common upstream kinases."}
+            : "Temporal PTM trajectory clustering, multi-source kinase annotation (8 sources + motif prediction), and contextual footprint display. Similar trajectories are grouped for inspection; cluster membership alone does not establish a shared regulator, pathway, or causal cascade."}
         </p>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -1116,7 +1117,7 @@ export default function KinaseModuleAnalysis({
             className="text-xs h-7"
             onClick={() => { setActiveTab("cowave"); setInternalHighlightedKinase(null); }}
           >
-            <GitMerge className="h-3 w-3 mr-1" /> {isUbi ? "Temporal Modules" : "Co-wave Modules"}
+            <GitMerge className="h-3 w-3 mr-1" /> {isUbi ? "Temporal Modules" : TEMPORAL_TERMS.clusters}
           </Button>
           <Button
             variant={activeTab === "lookup" ? "default" : "ghost"}
@@ -1132,7 +1133,7 @@ export default function KinaseModuleAnalysis({
             className="text-xs h-7"
             onClick={() => { setActiveTab("cascade"); setInternalHighlightedKinase(null); }}
           >
-            <BarChart3 className="h-3 w-3 mr-1" /> {isUbi ? "Ubi Cascade" : "Cascade View"}
+            <BarChart3 className="h-3 w-3 mr-1" /> {isUbi ? "Ubi Temporal Context" : "Temporal Context"}
           </Button>
           <Button
             variant={activeTab === "kinaseModules" ? "default" : "ghost"}
@@ -1175,7 +1176,7 @@ export default function KinaseModuleAnalysis({
               className="text-xs h-7"
               onClick={() => setActiveTab("cascadeTimeline")}
             >
-              <Clock className="h-3 w-3 mr-1" /> Cascade Timeline
+            <Clock className="h-3 w-3 mr-1" /> Temporal Context Timeline
             </Button>
           )}
           {isUbi && (
@@ -1274,7 +1275,7 @@ export default function KinaseModuleAnalysis({
           </Alert>
         )}
 
-        {/* ── Tab: Co-wave Modules ──────────────────────────────────────── */}
+        {/* ── Tab: Temporal PTM Clusters (internal tab key: cowave) ─────── */}
         {activeTab === "cowave" && (
           <div className="space-y-3">
             {conditions.length < 3 && (
@@ -1282,7 +1283,7 @@ export default function KinaseModuleAnalysis({
                 <AlertTriangle className="h-4 w-4" />
                 <AlertTitle>Insufficient Time Points</AlertTitle>
                 <AlertDescription className="text-xs">
-                  {isUbi ? "Temporal module" : "Co-wave"} detection requires at least 3 time points. Current: {conditions.length}
+                  {isUbi ? "Temporal module" : "Temporal PTM cluster"} detection requires at least 3 time points. Current: {conditions.length}
                 </AlertDescription>
               </Alert>
             )}
@@ -1290,7 +1291,7 @@ export default function KinaseModuleAnalysis({
             {coWaveModules.length === 0 && conditions.length >= 3 && (
               <div className="text-center py-6 text-sm text-muted-foreground">
                 <Info className="h-8 w-8 mx-auto mb-2 opacity-40" />
-                No {isUbi ? "temporal" : "co-wave"} modules detected. Enable more PTMs in the checklist above, or try a different trend filter.
+                No {isUbi ? "temporal" : "Temporal PTM"} clusters detected. Enable more PTMs in the checklist above, or try a different trend filter.
               </div>
             )}
 
@@ -1319,7 +1320,7 @@ export default function KinaseModuleAnalysis({
                         ) : (
                           <ChevronDown className="h-3.5 w-3.5" />
                         )}
-                        {mod.label}
+                        {formatTemporalClusterLabel(mod.label)}
                       </button>
                       <Badge variant="outline" className="text-[10px]">
                         {mod.ptms.length} PTMs
@@ -1366,7 +1367,7 @@ export default function KinaseModuleAnalysis({
                           <Badge
                             variant="outline"
                             className="text-[9px] border-cyan-500 text-cyan-600 dark:text-cyan-400 cursor-help"
-                            title={`Linked ${isUbi ? "E3 ligases" : "kinases"} (Heatmap): ${kinaseNames.slice(0, 6).join(", ")}${kinaseNames.length > 6 ? "..." : ""}\nThese ${isUbi ? "E3 ligases" : "kinases"} have substrates in this ${isUbi ? "Temporal" : "Co-Wave"} module.\nSwitch to Heatmap tab to see their activity patterns.`}
+                            title={`Linked ${isUbi ? "E3 ligases" : "kinases"} (Heatmap): ${kinaseNames.slice(0, 6).join(", ")}${kinaseNames.length > 6 ? "..." : ""}\nThese ${isUbi ? "E3 ligases" : "kinases"} have substrates represented in this ${isUbi ? "temporal" : "Temporal PTM"} cluster. This is contextual display only.\nSwitch to Heatmap tab to inspect footprint patterns.`}
                           >
                             ↔ {kinaseNames.length} {isUbi ? "E3 ligases" : "kinases"}
                           </Badge>
@@ -1465,7 +1466,7 @@ export default function KinaseModuleAnalysis({
                           const actClassConfig = ({
                             de_novo: { symbol: "★", color: "text-[#E65100]", title: "De novo (no control signal)" },
                             regulated: { symbol: "●", color: "text-[#1565C0]", title: "Regulated (q<0.05, |FC|≥1)" },
-                            coordinated: { symbol: "◆", color: "text-[#7B1FA2]", title: `Coordinated (${isUbi ? "temporal" : "co-wave"} boosted, |FC|≥0.5)` },
+                            coordinated: { symbol: "◆", color: "text-[#7B1FA2]", title: `Patterned (${isUbi ? "temporal" : "local cluster"} membership, |FC|≥0.5)` },
                             minor: { symbol: "◇", color: "text-[#4CAF50]", title: "Minor (sub-threshold)" },
                           } as Record<string, { symbol: string; color: string; title: string }>)[actClass];
 
@@ -2082,7 +2083,7 @@ function GroupInferencePanel({ inference, isUbi = false }: { inference: GroupInf
             <div className="space-y-1">
               <p className="text-[10px] font-medium text-blue-700 dark:text-blue-400 flex items-center gap-1">
                 <ArrowRight className="h-3 w-3" />
-                Inferred by {isUbi ? "temporal" : "co-wave"} + motif match ({km.inferred_count})
+                Context matches: {isUbi ? "temporal" : "local cluster"} membership + motif annotation ({km.inferred_count})
               </p>
               <div className="flex flex-wrap gap-1">
                 {km.inferred_ptms.map((ptm) => {
@@ -2210,7 +2211,7 @@ function CascadeView({
     return (
       <div className="text-center py-6 text-sm text-muted-foreground">
         <BarChart3 className="h-8 w-8 mx-auto mb-2 opacity-40" />
-        Run {isUbi ? "temporal module" : "co-wave"} detection first (enable PTMs in the chart above).
+        Run {isUbi ? "temporal module" : "Temporal PTM cluster"} detection first (enable PTMs in the chart above).
         {isUbi ? "Cascade view shows temporal ordering of E3 ligase modules and ubiquitylation dynamics." : "Cascade view shows temporal ordering of kinase modules."}
       </div>
     );
@@ -2283,7 +2284,7 @@ function CascadeView({
           </Alert>
 
           {/* Fallback: basic co-wave module timeline */}
-          <div className="text-xs font-medium text-muted-foreground mb-2">Basic {isUbi ? "Temporal" : "Co-wave"} Module Timeline (preview):</div>
+          <div className="text-xs font-medium text-muted-foreground mb-2">Basic {isUbi ? "Temporal" : "Temporal PTM Cluster"} Timeline (preview):</div>
           <div className="flex items-center gap-0 overflow-x-auto pb-2">
             {sortedModules.map((mod, idx) => (
               <div key={mod.id} className="flex items-center">
@@ -3150,7 +3151,7 @@ function GlobalKinaseModulesPanel({
               {mod.cowave_overlap && mod.cowave_overlap.length > 0 && (
                 <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
                   <GitMerge className="h-3 w-3" />
-                  {isUbi ? "Temporal" : "Co-wave"} overlap:
+                  {isUbi ? "Temporal" : "Temporal PTM Cluster"} overlap:
                   {mod.cowave_overlap.map((ov) => (
                     <Badge key={ov.cowave_id} variant="outline" className="text-[9px]">
                       {ov.cowave_label} ({ov.shared_ptms.length} PTMs)
@@ -3341,20 +3342,20 @@ function GlobalKinaseModulesPanel({
           >
             {showCrossAnalysis ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
             <GitMerge className="h-3.5 w-3.5" />
-            {isUbi ? "Co-wave × E3 Ligase Module Cross Analysis" : "Co-wave × Kinase Module Cross Analysis"}
+            {isUbi ? "Temporal Cluster × E3 Ligase Context Overlap" : "Temporal PTM Cluster × Kinase Context Overlap"}
           </button>
 
           {showCrossAnalysis && (
             <div className="space-y-2">
               <p className="text-[10px] text-muted-foreground">
                 {isUbi
-                  ? "Ubiquitylation sites that belong to the same E3 ligase module AND the same co-wave group have the strongest evidence for coordinated ubiquitylation — regulated by the same E3 AND moving together temporally."
-                  : "PTMs that belong to the same kinase module AND the same co-wave group have the strongest evidence for shared regulation — they are regulated by the same kinase AND move together temporally."}
+                  ? "Ubiquitylation sites overlapping an E3-ligase module and a temporal cluster are shown as a contextual diagnostic. The overlap does not establish common E3 regulation."
+                  : "PTMs overlapping a kinase module and a Temporal PTM Cluster are shown as a contextual diagnostic. The overlap does not establish shared regulation or direct kinase attribution."}
               </p>
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="text-[10px] h-7">{isUbi ? "Temporal Module" : "Co-wave Module"}</TableHead>
+                    <TableHead className="text-[10px] h-7">{isUbi ? "Temporal Module" : "Temporal PTM Cluster"}</TableHead>
                     <TableHead className="text-[10px] h-7">{isUbi ? "Total Sites" : "Total PTMs"}</TableHead>
                     <TableHead className="text-[10px] h-7">{isUbi ? "Overlapping E3 Modules" : "Overlapping Kinase Modules"}</TableHead>
                   </TableRow>
@@ -4069,8 +4070,8 @@ function SignalFlowView({
                   </div>
                 )}
                 {primary.cowave_score != null && primary.cowave_score > 0 && (
-                  <span className="text-[8px] px-1 py-0.5 rounded bg-cyan-900/20 text-cyan-300 border border-cyan-500/40" title={`Co-wave divergence score: ${primary.cowave_score.toFixed(1)} — higher = more temporally specific signaling`}>
-                    CW:{primary.cowave_score.toFixed(1)}
+                  <span className="text-[8px] px-1 py-0.5 rounded bg-cyan-900/20 text-cyan-300 border border-cyan-500/40" title={`Local co-membership pattern score: ${primary.cowave_score.toFixed(1)} — descriptive temporal-pattern diagnostic only`}>
+                    LC:{primary.cowave_score.toFixed(1)}
                   </span>
                 )}
                 {/* v9.47: Receptor temporal classification */}
@@ -4157,7 +4158,7 @@ function SignalFlowView({
                             {kinaseConfidence[kinaseKey]?.cowave_boost > 0.3 && (
                               <span
                                 className="ml-0.5 text-[7px] px-0.5 rounded bg-purple-900/30 text-purple-300"
-                                title={`Module confidence: ${((kinaseConfidence[kinaseKey]?.confidence_score ?? 0) * 100).toFixed(0)}% (co-wave boost: ${((kinaseConfidence[kinaseKey]?.cowave_boost ?? 0) * 100).toFixed(0)}%)`}
+                                title={`Module diagnostic: ${((kinaseConfidence[kinaseKey]?.confidence_score ?? 0) * 100).toFixed(0)}% (local co-membership contribution: ${((kinaseConfidence[kinaseKey]?.cowave_boost ?? 0) * 100).toFixed(0)}%). This is not a direct kinase-confidence estimate.`}
                               >
                                 {((kinaseConfidence[kinaseKey]?.confidence_score ?? 0) * 100).toFixed(0)}%
                               </span>
@@ -4230,7 +4231,7 @@ function SignalFlowView({
                                         <span
                                           key={modId}
                                           className={`inline-flex items-center gap-0.5 px-1 py-px rounded ${cowaveColors[colorIdx].bg} ${cowaveColors[colorIdx].text} border ${cowaveColors[colorIdx].border}`}
-                                          title={`${info.label}: ${info.count}/${ptms.length} substrates co-move (peak: ${info.peakCondition})`}
+                                          title={`${formatTemporalClusterLabel(info.label)}: ${info.count}/${ptms.length} substrates share this observed temporal-cluster profile (peak: ${info.peakCondition})`}
                                         >
                                           <span className={`w-1.5 h-1.5 rounded-full ${cowaveColors[colorIdx].dot}`} />
                                           <span className="text-[8px]">{info.count}/{ptms.length}</span>
@@ -4255,11 +4256,11 @@ function SignalFlowView({
                                   const actLabel =
                                     actClass === "de_novo" ? "De novo (control imputed)" :
                                     actClass === "regulated" ? "Regulated (|Log2FC| ≥ 1.0 AND q < 0.05)" :
-                                    actClass === "coordinated" ? "Coordinated (co-wave boosted, |FC|≥0.5 + group≥3)" :
+                                    actClass === "coordinated" ? "Patterned (local temporal-cluster membership, |FC|≥0.5 + group≥3)" :
                                     "Minor (sub-threshold)";
                                   const cowaveInfo = ptmCoWaveMap[ptmKey] || [];
                                   const cowaveTooltip = cowaveInfo.length > 0
-                                    ? `\nCo-wave: ${cowaveInfo.map(c => `${c.label} (n=${c.groupSize}, peak=${c.peakCondition})`).join("; ")}`
+                                    ? `\nTemporal PTM cluster: ${cowaveInfo.map(c => `${formatTemporalClusterLabel(c.label)} (n=${c.groupSize}, peak=${c.peakCondition})`).join("; ")}`
                                     : "";
                                   return (
                                     <span
@@ -4280,7 +4281,7 @@ function SignalFlowView({
                                               <span
                                                 key={cw.moduleId}
                                                 className={`w-1.5 h-1.5 rounded-full inline-block ${cowaveColors[colorIdx].dot}`}
-                                                title={`${cw.label} (${cw.groupSize} PTMs, peak: ${cw.peakCondition})`}
+                                                title={`${formatTemporalClusterLabel(cw.label)} (${cw.groupSize} PTMs, peak: ${cw.peakCondition})`}
                                               />
                                             );
                                           })}
@@ -4431,7 +4432,7 @@ function SignalFlowView({
           </span>
           <span className="flex items-center gap-1">
             <span className="px-1.5 py-0.5 rounded bg-purple-900/30 text-purple-300 border border-purple-500 text-[9px]">◆ Coordinated</span>
-            <span className="text-[9px]">co-wave boosted (|FC|≥0.5, group≥3, has anchor signal)</span>
+            <span className="text-[9px]">local temporal-cluster membership (|FC|≥0.5, group≥3, anchor signal)</span>
           </span>
           <span className="flex items-center gap-1">
             <span className="px-1.5 py-0.5 rounded bg-green-900/30 text-green-300 border border-green-500 text-[9px]">◇ Minor</span>
@@ -4440,14 +4441,14 @@ function SignalFlowView({
         </div>
         {coWaveModules.length > 0 && (
           <div className="flex flex-wrap items-center gap-3 text-[10px] text-muted-foreground">
-            <span className="font-medium text-muted-foreground/70">Co-wave group:</span>
+            <span className="font-medium text-muted-foreground/70">{TEMPORAL_TERMS.localGroup}:</span>
             <span className="flex items-center gap-1">
               <span className="flex gap-0.5">
                 {cowaveColors.slice(0, Math.min(coWaveModules.length, 4)).map((c, i) => (
                   <span key={i} className={`w-2 h-2 rounded-full inline-block ${c.dot}`} />
                 ))}
               </span>
-              <span className="text-[9px]">colored dots = co-movement group (substrates with same temporal peak)</span>
+              <span className="text-[9px]">colored dots = local co-membership group (correlated substrate-footprint profile)</span>
             </span>
             <span className="text-[9px] text-muted-foreground/50">
               ({coWaveModules.length} groups detected)
@@ -5440,7 +5441,7 @@ function KinaseActivityHeatmapView({
           onChange={(e) => {
             const mode = e.target.value as HeatmapSortMode;
             setSortMode(mode);
-            // Auto-expand to show all when sorting by co-wave group
+            // Auto-expand to show all when sorting by local co-membership group
             if (mode === "cowave_group") setTopN(9999);
           }}
         >
@@ -5449,7 +5450,7 @@ function KinaseActivityHeatmapView({
           <option value="confidence">Effective Support</option>
           <option value="substrate_count">Substrate Count</option>
           <option value="alphabetical">Alphabetical</option>
-          <option value="cowave_group">Co-wave Group</option>
+          <option value="cowave_group">{TEMPORAL_TERMS.localGroup}</option>
         </select>
         <span className="text-xs text-muted-foreground">Top:</span>
         <select
@@ -5531,20 +5532,20 @@ function KinaseActivityHeatmapView({
                   <span>Mechanism candidates: <b>{evidence.mechanism_chain_count || 0}</b></span>
                   <span>Evidence-supported: <b>{evidence.evidence_supported_mechanism_count || 0}</b></span>
                   <span>Kinase timing: <b>{evidence.kinase_timing_status || "not_available"}</b></span>
-                  <span>Dynamic co-wave: <b>{evidence.dynamic_co_wave_transition_status || "not_available"}</b></span>
-                  <span>Transition-supported Waves: <b>{evidence.dynamic_transition_supported_wave_count ?? 0}</b></span>
+                  <span>{TEMPORAL_TERMS.localTransition}: <b>{formatLocalTransitionStatus(evidence.dynamic_co_wave_transition_status)}</b></span>
+                  <span>Transition-supported clusters: <b>{evidence.dynamic_transition_supported_wave_count ?? 0}</b></span>
                   <span>Observed pair transitions: <b>{evidence.dynamic_transition_pair_count ?? 0}</b></span>
                   <span>Causality: <b>not tested</b></span>
                 </div>
                 <p className="text-[10px] text-teal-800/80 dark:text-teal-200/80">
-                  Dynamic co-wave reports local membership persistence, split, merge, recruitment, or exit within the static Wave. It does not change Wave membership, TMM attribution, kinase ranking, or establish kinase switching.
+                  {TEMPORAL_TERMS.localTransition} reports local membership persistence, split, merge, recruitment, or exit within a fixed {TEMPORAL_TERMS.cluster}. It does not re-estimate cluster membership, change TMM attribution or kinase ranking, or establish kinase switching.
                 </p>
                 {rows.length > 0 ? (
                   <div className="overflow-x-auto">
                     <table className="w-full text-[10px]">
                       <thead className="text-muted-foreground">
                         <tr className="border-b border-teal-200/70 dark:border-teal-900">
-                          <th className="text-left py-1 pr-2">Wave</th>
+                          <th className="text-left py-1 pr-2">Temporal PTM Cluster</th>
                           <th className="text-left py-1 pr-2">Protein</th>
                           <th className="text-left py-1 pr-2">Temporal direction</th>
                           <th className="text-right py-1 pr-2">Peak lag (min)</th>
@@ -5584,7 +5585,7 @@ function KinaseActivityHeatmapView({
               {/* Peak Sync Indicator Row */}
               {heatmapData.peak_sync && Object.keys(heatmapData.peak_sync).length > 0 && (
                 <tr className="border-b border-border/20">
-                  <th className="sticky left-0 bg-background z-10" />{/* CW bar spacer */}
+                  <th className="sticky left-0 bg-background z-10" />{/* local co-membership bar spacer */}
                   <th />{/* Kinase spacer */}
                   <th />{/* Dir spacer */}
                   <th />{/* #Sub spacer */}
@@ -5609,8 +5610,8 @@ function KinaseActivityHeatmapView({
               )}
               {/* Main header row */}
               <tr className="border-b border-border">
-                <th className="w-2 px-0 py-1 cursor-help" title={`Co-Wave Group (CW)\n\nColor bar = ${isUbi ? "E3 ligases" : "kinases"} with correlated temporal substrate activity (Pearson r≥0.7).\nSame color = same group.\n\nG-label (e.g. G2) = CW Group number.\n${isUbi ? "E3 ligases" : "Kinases"} in the same group have substrates whose\n${isUbi ? "ubiquitylation" : "phosphorylation"} levels move together over time.\n\nClick a group in the legend below to filter Vector Plot.`}>CW</th>
-                <th className="text-left px-2 py-1 sticky left-0 bg-background z-10 min-w-[100px] cursor-help" title={`${isUbi ? "E3 Ligase" : "Kinase"}\n\nName of the ${isUbi ? "E3 ligase" : "kinase"} (or ${isUbi ? "E3 ligase" : "kinase"} family).\nG-label shows its Co-Wave Group number.`}>{isUbi ? "E3 Ligase" : "Kinase"}</th>
+                <th className="w-2 px-0 py-1 cursor-help" title={`${TEMPORAL_TERMS.localGroup} (LC)\n\nColor bar = ${isUbi ? "E3 ligases" : "kinases"} with correlated temporal substrate-footprint profiles (Pearson r≥0.7).\nSame color = same descriptive group.\n\nG-label (e.g. G2) = local co-membership group number.\nThis diagnostic does not establish common regulation or direct kinase attribution.\n\nClick a group in the legend below to filter Vector Plot.`}>LC</th>
+                <th className="text-left px-2 py-1 sticky left-0 bg-background z-10 min-w-[100px] cursor-help" title={`${isUbi ? "E3 Ligase" : "Kinase"}\n\nName of the ${isUbi ? "E3 ligase" : "kinase"} (or ${isUbi ? "E3 ligase" : "kinase"} family).\nG-label shows its ${TEMPORAL_TERMS.localGroup} number.`}>{isUbi ? "E3 Ligase" : "Kinase"}</th>
                 <th className="text-center px-1 py-1 w-8 cursor-help" title={`Signed substrate footprint\n\n  ▲ = positive weighted aggregate substrate footprint\n  ▼ = negative weighted aggregate substrate footprint\n  — = near-zero/mixed footprint\n\nThis is not direct catalytic activation, inhibition, or kinase attribution.`}>Dir</th>
                 <th className="text-center px-1 py-1 w-10 cursor-help" title={`Number of Substrates (#Sub)\n\nTotal confirmed + inferred ${isUbi ? "ubiquitylation" : "phosphorylation"} substrates\nfor this ${isUbi ? "E3 ligase" : "kinase"} in the current dataset.`}>#Sub</th>
                 <th className="text-center px-1 py-1 w-10 cursor-help" title={`Effective support (n_eff)\n\nContribution-weighted effective substrate number. It falls when one substrate dominates the footprint.\n\nNo scalar confidence percentage is shown because bootstrap, replicate and permutation calibration are not always available.`}>n_eff</th>
@@ -5621,7 +5622,7 @@ function KinaseActivityHeatmapView({
                     className={`text-center px-1 py-1 min-w-[40px] max-w-[60px] truncate cursor-pointer select-none transition-colors ${
                       sortByCondition === c && sortMode === "condition_sort" ? "bg-amber-900/40 text-amber-300" : "hover:bg-muted/40 cursor-help"
                     }`}
-                    title={`Click to sort by activation at ${c}\n\nCo-activation Sum at this timepoint.\n= Sum of Log2FC for substrates passing threshold\n  (q<0.05 or |Log2FC|≥0.3)\n\nPositive (warm) = substrates co-activated (${isUbi ? "ubiquitylation" : "phosphorylation"} up)\nNegative (cool) = substrates co-inhibited (${isUbi ? "ubiquitylation" : "phosphorylation"} down)`}
+                    title={`Click to sort by signed substrate-footprint summary at ${c}\n\nFootprint sum at this sampled condition.\n= Sum of Log2FC for substrates passing threshold\n  (q<0.05 or |Log2FC|≥0.3)\n\nPositive (warm) and negative (cool) show observed signed substrate contrasts; neither denotes catalytic activation or inhibition.`}
                     onClick={() => {
                       setSortByCondition(c);
                       setSortMode("condition_sort");
@@ -5659,7 +5660,7 @@ function KinaseActivityHeatmapView({
                       {cwColor ? (() => {
                         const grpInfo = heatmapData.cowave_groups?.find(g => g.group_id === cwGroup);
                         const tipLines = [
-                          `Co-wave Group G${cwGroup}`,
+                          `${TEMPORAL_TERMS.localGroup} G${cwGroup}`,
                           grpInfo?.dominant_peak ? `Peak: ${grpInfo.dominant_peak}` : "",
                           grpInfo ? `Members (${grpInfo.size}): ${grpInfo.kinases.slice(0, 8).join(", ")}${grpInfo.kinases.length > 8 ? "..." : ""}` : "",
                           grpInfo ? `Correlation: r=${grpInfo.mean_correlation.toFixed(2)}` : "",
@@ -5757,11 +5758,11 @@ function KinaseActivityHeatmapView({
                           <span
                             className={`ml-1 text-[8px] ${cwColor.text} opacity-70 cursor-help`}
                             title={grpInfo
-                              ? `Co-Wave Group G${cwGroup}\n\n` +
+                              ? `${TEMPORAL_TERMS.localGroup} G${cwGroup}\n\n` +
                                 `Members (${grpInfo.size}): ${grpInfo.kinases.slice(0, 6).join(", ")}${grpInfo.kinases.length > 6 ? "..." : ""}\n` +
                                 (grpInfo.dominant_peak ? `Peak: ${grpInfo.dominant_peak}\n` : "") +
                                 `Correlation: r=${grpInfo.mean_correlation.toFixed(2)}\n\n` +
-                                `Kinases whose substrates show correlated\ntemporal activation patterns (r≥0.7).\n\nClick group in legend to filter Vector Plot.`
+                                `Kinases whose substrates show correlated\ntemporal footprint patterns (r≥0.7). This is a descriptive diagnostic.\n\nClick group in legend to filter Vector Plot.`
                               : `Group ${cwGroup}`}
                           >
                             G{cwGroup}
@@ -6279,7 +6280,7 @@ function KinaseActivityHeatmapView({
                           }
                         }}
                         title={[
-                          `Co-wave Group G${grp.group_id}`,
+                          `${TEMPORAL_TERMS.localGroup} G${grp.group_id}`,
                           `Members: ${grp.kinases.join(", ")}`,
                           `Mean correlation: r=${grp.mean_correlation.toFixed(2)}`,
                           grp.dominant_peak ? `Dominant peak: ${grp.dominant_peak}` : "",
@@ -6929,7 +6930,7 @@ function KinaseActivityHeatmapView({
           </div>
           <div className="text-muted-foreground">Support diagnostics</div>
         </div>
-        <div className="bg-muted/30 rounded p-2 text-center cursor-help" title={`Co-wave Groups: Clusters of ${isUbi ? "E3 ligases" : "kinases"} whose substrate footprint profiles are highly correlated (Pearson r≥0.7). ${isUbi ? "E3 ligases" : "Kinases"} in the same group show similar temporal positive/negative footprint patterns.`}>
+        <div className="bg-muted/30 rounded p-2 text-center cursor-help" title={`${TEMPORAL_TERMS.localGroups}: descriptive groups of ${isUbi ? "E3 ligases" : "kinases"} whose substrate-footprint profiles are highly correlated (Pearson r≥0.7). ${isUbi ? "E3 ligases" : "Kinases"} in the same group show similar observed temporal signed-footprint patterns; the group does not establish shared regulation.`}>
           <div className="text-lg font-bold text-fuchsia-400">
             {heatmapData.cowave_groups?.length ?? 0}
           </div>

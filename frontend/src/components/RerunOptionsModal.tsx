@@ -573,10 +573,10 @@ export default function RerunOptionsModal({
                     <p className="font-semibold text-blue-200">🔬 Data-Grounded Analysis</p>
                     <p>AI가 4개 데이터 소스를 통합하여 가설을 자동 생성하고 실험 데이터로 직접 검증합니다:</p>
                     <ul className="list-disc list-inside space-y-0.5 text-blue-300/80">
-                      <li>Temporal Cascade — 시간대별 kinase 활성화 순서 분석</li>
-                      <li>Co-Wave Modules — 동시 활성화 substrate 공통점 분석</li>
-                      <li>Autophosphorylation — 자기인산화 = 활성화 마커 검증</li>
-                      <li>TMM Contribution — 데이터 기반 kinase-substrate 귀속</li>
+                      <li>Temporal PTM Trajectory Clustering — complete-case PTM trajectory의 구조적 군집화</li>
+                      <li>Local Co-membership Transition — 고정 cluster 내 sampled-interval pattern annotation</li>
+                      <li>Self-PTM annotation — regulatory-site interpretation에 필요한 추가 evidence 확인</li>
+                      <li>TMM Contribution — candidate substrate footprint의 many-to-many allocation</li>
                     </ul>
                     <p className="text-blue-200/70">검증된 가설은 레포트에 수치 포함 자동 삽입됩니다 (예: "21/28 substrates peak at 1h")</p>
                   </div>

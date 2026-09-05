@@ -131,7 +131,7 @@ class FigureInformationGenerator:
             }
             supp_num += 1
 
-        # ── Co-movement Figures (v8.0) — these remain as main figures ──
+        # ── Temporal PTM trajectory-cluster figures (internal: comovement) ──
         for cf in self.comovement_figures:
             cf_type = cf.get("type", "unknown")
             cf_caption = cf.get("caption", "Temporal Coordination Analysis")
@@ -139,13 +139,13 @@ class FigureInformationGenerator:
                 fig_map["comovement_heatmap"] = {
                     "figure_number": main_fig_num,
                     "figure_label": f"Figure {main_fig_num}",
-                    "display_name": "Temporal PTM Coordination Cluster Heatmap",
+                    "display_name": "Temporal PTM Trajectory Cluster Heatmap",
                     "description": (
                         "Hierarchical clustering heatmap of PTM temporal profiles. "
                         "Rows represent individual PTM sites, columns represent time points. "
-                        "Color intensity reflects Log2FC magnitude. Dendrogram and cluster "
-                        "color bars group temporally coordinated PTMs that share similar temporal dynamics. "
-                        "Clusters reveal coordinated phosphorylation waves."
+                        "Color intensity reflects conventionally quantified Log2FC magnitude. Dendrogram and cluster "
+                        "color bars group structurally similar site-level trajectories. Temporal PTM Clusters "
+                        "are descriptive and do not establish shared regulation, pathway membership, or causality."
                     ),
                     "panel_index": 0,
                     "figure_type": "comovement_heatmap",
@@ -155,12 +155,12 @@ class FigureInformationGenerator:
                 fig_map["comovement_burst"] = {
                     "figure_number": main_fig_num,
                     "figure_label": f"Figure {main_fig_num}",
-                    "display_name": f"Transient Phosphorylation Burst Dynamics",
+                    "display_name": "Transient PTM Trajectory Pattern",
                     "description": (
                         f"{cf_caption} "
                         "Panel (a) shows individual PTM time-series profiles colored by cluster membership "
                         "with cluster mean (bold). Panel (b) shows peak amplitude profiles. "
-                        "Panel (c) shows cluster mean temporal envelope showing activation-recovery kinetics."
+                        "Panel (c) shows the temporal-cluster mean envelope as a descriptive sampled-timepoint pattern."
                     ),
                     "panel_index": 0,
                     "figure_type": "comovement_burst",
@@ -175,8 +175,8 @@ class FigureInformationGenerator:
                     "description": (
                         f"Line plot showing the temporal Log2FC profiles of PTM sites in {cf_caption}. "
                         "Solid lines represent PTM proteins; dashed lines represent linked Non-PTM interactors. "
-                        "Shaded area indicates the cluster envelope. Temporally coordinated PTMs share similar "
-                        "temporal dynamics, suggesting coordinated regulation."
+                        "Shaded area indicates the cluster envelope. Similar trajectory profiles identify a "
+                        "Temporal PTM Cluster and do not, by themselves, imply coordinated regulation."
                     ),
                     "panel_index": 0,
                     "figure_type": "comovement_lineplot",
@@ -218,15 +218,15 @@ class FigureInformationGenerator:
         v8.9.1: Now includes the actual pathway names shown in the figure.
         """
         desc = (
-            "This bar graph shows the cumulative |Protein_Log2FC| score of activated PTM proteins "
-            "(red), inhibited PTM proteins (blue), and Non-PTM interactor proteins (green) across "
+            "This bar graph shows cumulative |Protein_Log2FC| context scores for higher measured PTM signals "
+            "(red), lower measured PTM signals (blue), and Non-PTM interactor proteins (green) across "
             "canonical signaling pathways identified via 3-Layer Pathway Enrichment: "
             "(1) KEGG + Reactome per-gene pathway mapping, "
             "(2) STRING interaction partner-based indirect pathway inference for genes with "
             "limited direct pathway annotations. "
             "Disease-related pathways (KEGG 05xxx) are excluded. "
-            "Pathways are ranked by total cumulative score, highlighting pathways with the "
-            "strongest combined expression changes. "
+            "Pathways are ordered by total cumulative context score. The order is descriptive and does not "
+            "by itself indicate pathway activity, biological priority, or direct regulation. "
             "Bar labels show the score followed by protein count in parentheses."
         )
         if self.fig1_pathway_names:

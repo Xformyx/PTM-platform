@@ -159,10 +159,10 @@ def _get_co_scientist_questions(state: dict) -> list:
     """Generate data-driven research questions for co-scientist mode.
     
     Questions are derived from actual data patterns rather than user input:
-    - Temporal cascade: kinase activation order
-    - Co-wave modules: substrate co-activation groups
-    - Autophosphorylation: self-activation markers
-    - TMM: kinase-substrate attribution
+    - Temporal PTM trajectory clusters: structurally similar site-level profiles
+    - Local co-membership transitions: sampled-interval annotations in fixed clusters
+    - Self-PTM annotations: evidence requiring functional-site corroboration
+    - TMM: many-to-many candidate substrate-footprint allocation
     """
     questions = []
     
@@ -201,11 +201,11 @@ def _get_co_scientist_questions(state: dict) -> list:
             f"and what additional evidence would be required before assigning pathway function or direct substrate regulation?"
         )
     
-    # Q3: Local membership is descriptive until per-Wave enrichment is persisted.
+    # Q3: Local membership is descriptive until per-cluster enrichment is persisted.
     if cowave_groups:
         questions.append(
-            "Which local co-wave membership patterns are observed at the sampled timepoints, "
-            "and how can they be compared with global pathway context without assigning per-Wave functional enrichment?"
+            "Which within-cluster local co-membership patterns are observed at the sampled timepoints, "
+            "and how can they be compared with global pathway context without assigning per-cluster functional enrichment?"
         )
 
     # Shared production/benchmark temporal sidecar: formulate a falsifiable
@@ -215,7 +215,7 @@ def _get_co_scientist_questions(state: dict) -> list:
     if top_edges and isinstance(top_edges[0], dict):
         edge = top_edges[0]
         questions.append(
-            "Does the observed PTM Wave {wave} preceding protein abundance change in {target} "
+            "Does the observed Temporal PTM Cluster {wave} associated with protein abundance change in {target} "
             "remain supported after orthogonal validation, and which alternative explanations constrain "
             "this observational temporal candidate?".format(
                 wave=edge.get("source_wave_id", "unknown"),
@@ -227,10 +227,10 @@ def _get_co_scientist_questions(state: dict) -> list:
         transition_pairs = int(cross_layer.get("dynamic_transition_pair_count") or 0)
         if transition_waves > 0 and transition_pairs > 0:
             questions.append(
-                "Which local co-wave membership transitions are reproducible across timepoint-omission checks, "
+                "Which within-cluster local co-membership transitions are reproducible across timepoint-omission checks, "
                 "and which orthogonal measurements could test a temporal reorganization hypothesis "
                 "without assigning kinase switching or causal propagation? "
-                f"(transition-supported Waves={transition_waves}; observed pair transitions={transition_pairs})"
+                f"(transition-supported clusters={transition_waves}; observed pair transitions={transition_pairs})"
             )
     
     # Q4: Self-PTM annotations do not establish activation loops.
