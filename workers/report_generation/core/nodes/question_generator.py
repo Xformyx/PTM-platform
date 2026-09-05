@@ -159,8 +159,8 @@ def _get_co_scientist_questions(state: dict) -> list:
     """Generate data-driven research questions for co-scientist mode.
     
     Questions are derived from actual data patterns rather than user input:
-    - Temporal phosphosite trajectory clusters: structurally similar site-level profiles
-    - Within-cluster trajectory concordance: sampled-interval annotations in fixed clusters
+    - Temporal profile clusters: similar complete-case quantitative phosphorylation-feature profiles
+    - Interval-wise activity-state concordance: sampled-interval annotations in fixed clusters
     - Self-PTM annotations: evidence requiring functional-site corroboration
     - TMM: many-to-many candidate substrate-footprint allocation
     """
@@ -201,10 +201,10 @@ def _get_co_scientist_questions(state: dict) -> list:
             f"and what additional evidence would be required before assigning pathway function or direct substrate regulation?"
         )
     
-    # Q3: Local membership is descriptive until per-cluster enrichment is persisted.
+    # Q3: Interval-wise concordance is descriptive until per-cluster enrichment is persisted.
     if cowave_groups:
         questions.append(
-            "Which within-cluster trajectory concordance patterns are observed at the sampled timepoints, "
+            "Which within-cluster interval-wise activity-state concordance patterns are observed at the sampled intervals, "
             "and how can they be compared with global pathway context without assigning per-cluster functional enrichment?"
         )
 
@@ -215,7 +215,7 @@ def _get_co_scientist_questions(state: dict) -> list:
     if top_edges and isinstance(top_edges[0], dict):
         edge = top_edges[0]
         questions.append(
-            "Does the observed Temporal Phosphosite Cluster {wave} associated with protein abundance change in {target} "
+            "Does the observed Temporal Profile Cluster {wave} associated with protein abundance change in {target} "
             "remain supported after orthogonal validation, and which alternative explanations constrain "
             "this observational temporal candidate?".format(
                 wave=edge.get("source_wave_id", "unknown"),
@@ -227,8 +227,8 @@ def _get_co_scientist_questions(state: dict) -> list:
         transition_pairs = int(cross_layer.get("dynamic_transition_pair_count") or 0)
         if transition_waves > 0 and transition_pairs > 0:
             questions.append(
-                "Which within-cluster trajectory concordance patterns are reproducible across timepoint-omission checks, "
-                "and which orthogonal measurements could test a temporal reorganization hypothesis "
+                "Which within-cluster interval-wise activity-state concordance patterns are reproducible across timepoint-omission checks, "
+                "and which orthogonal measurements could test the observed concordance pattern "
                 "without assigning kinase switching or causal propagation? "
                 f"(transition-supported clusters={transition_waves}; observed pair transitions={transition_pairs})"
             )

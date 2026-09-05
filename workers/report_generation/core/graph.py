@@ -313,9 +313,9 @@ def _build_comovement_figure_section(comovement_figures: list, network_analysis:
     heatmap_figs = [f for f in comovement_figures if f.get("type") in ("heatmap", "supplementary_heatmap")]
 
     # ── Main Figures Section ──
-    main_section = "\n## Temporal PTM Coordination Analysis\n\n"
+    main_section = "\n## Temporal Phosphorylation Profile Analysis\n\n"
     main_section += (
-        "The following figures show observed temporal trajectory clustering. Conventional quantified PTM sites "
+        "The following figures show observed temporal profile clustering. Conventionally quantified phosphorylation features "
         "were grouped by similarity of their sampled-timepoint profiles using hierarchical clustering. "
         "Cluster membership is descriptive only and does not assign common regulation, upstream "
         f"{'E3-ligase' if ptm_type.lower().strip() in ('ubiquitylation', 'ubiquitination') else 'kinase'} control, "
@@ -332,7 +332,7 @@ def _build_comovement_figure_section(comovement_figures: list, network_analysis:
             main_section += f"### Figure {fig_num}. {cf_caption}\n\n"
             main_section += f"![{cf_caption}]({img_ref})\n\n"
             main_section += (
-                f"**Legend:** Composite figure of transient {ptm_type} trajectory clusters. "
+                f"**Legend:** Composite figure of transient {ptm_type} profile clusters. "
                 "**(a)** Conventional quantified PTM time-series profiles; bold lines indicate conventional-only "
                 "cluster means with shaded ranges. **(b)** Conventional peak contrasts ranked descriptively. "
                 "**(c)** Conventional cluster mean envelopes across sampled timepoints. De novo observations are "
@@ -744,10 +744,10 @@ def format_citations(state: ReportState) -> dict:
                         cm_figures = _re_cm.findall(r'!\[([^\]]*)\]\(([^)]+)\)', main_section)
                         for cm_cap, cm_path in cm_figures:
                             comovement_supp_items.append((
-                                cm_cap or "Temporal PTM Coordination",
+                                cm_cap or "Temporal Phosphorylation Profile Analysis",
                                 cm_path,
-                                "Temporal Log₂FC profiles of temporally coordinated PTM cluster members. "
-                                "Solid lines = PTM proteins; dashed lines = linked Non-PTM interactors."
+                                "Temporal Log₂FC profiles of quantitative phosphorylation features in a Temporal Profile Cluster. "
+                                "Solid lines = phosphorylation features; dashed lines = linked non-PTM interactors."
                             ))
                         logger.info(f"[FORMAT-CIT] v10.3: Moved {len(cm_figures)} co-movement figures to supplementary (was main)")
                     if supp_items:

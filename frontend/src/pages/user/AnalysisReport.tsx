@@ -898,11 +898,11 @@ function KinaseActivityTab({ orderId }: { orderId: number }) {
           </CardContent>
         </Card>
       )}
-      {/* Within-Cluster Concordance summary (internal field: cowave) */}
+      {/* Interval-wise concordance summary (internal field: cowave) */}
       {cowave && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Within-Cluster Concordance Analysis</CardTitle>
+            <CardTitle className="text-base">Interval-wise Concordance Analysis</CardTitle>
           </CardHeader>
           <CardContent>
             <p className="text-sm text-muted-foreground">

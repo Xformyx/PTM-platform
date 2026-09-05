@@ -1099,8 +1099,8 @@ def build_temporal_evidence_packet(
             "DATA-WAVE-INPUT-QUALITY",
             "observational_input_quality",
             (
-                "Temporal Phosphosite Trajectory Clustering used missing-value policy={policy}; eligible complete trajectories={eligible}; "
-                "excluded input sites={excluded_total}, including incomplete time grids={incomplete}. "
+                "Hierarchical clustering of temporal phosphorylation feature profiles used missing-value policy={policy}; eligible complete feature profiles={eligible}; "
+                "excluded input features={excluded_total}, including incomplete time grids={incomplete}. "
                 "Missing measurements were retained as missing and were not converted to biological zeroes or imputed."
             ).format(
                 policy=wave_projection.get("missing_value_policy", "not_recorded"),
@@ -1116,8 +1116,8 @@ def build_temporal_evidence_packet(
         "DATA-DYNAMIC-SUMMARY",
         "observational_dynamic",
         (
-            "Within-cluster trajectory concordance status={status}; transition-supported clusters={waves}; "
-            "pair transitions={pairs}; site transitions={sites}; transition resolution={resolution}; "
+            "Within-cluster interval-wise activity-state concordance status={status}; concordance-annotated temporal profile clusters={waves}; "
+            "pairwise concordance changes={pairs}; feature-level status changes={sites}; transition resolution={resolution}; "
             "within-cluster candidate pairs={candidate_pairs}; non-evaluable pair windows={non_evaluable_pairs}; "
             "non-evaluable site transition opportunities={non_evaluable_sites}; "
             "mean pair LOTO Jaccard={pair_loto}; mean site LOTO Jaccard={site_loto}; "
@@ -1141,7 +1141,7 @@ def build_temporal_evidence_packet(
         ),
         availability="computed" if dynamic_status == "computed" and dynamic_pair_count > 0 else "not_evaluable",
         claim_level="L2_observational_dynamic",
-        allowed_verbs=("co-occurred", "reorganized", "was observed", "was annotated"),
+        allowed_verbs=("was observed", "was annotated", "was summarized"),
     )
 
     precedence = dict(sidecar.get("temporal_precedence_status") or {})
@@ -1187,9 +1187,9 @@ def build_temporal_evidence_packet(
             f"DATA-DYNAMIC-WAVE-{index}",
             "observational_dynamic",
             (
-                "Static Wave {wave}: pair transitions={pairs}; non-persistence pair transitions={nonpersistence}; "
-                "site transitions={sites}; pair transition types={pair_types}; site transition types={site_types}. "
-                "This packet does not expose member identities or per-Wave enrichment; do not assign a functional module to this Wave."
+                "Fixed temporal profile cluster {wave}: pairwise concordance changes={pairs}; non-retained concordance changes={nonpersistence}; "
+                "feature-level status changes={sites}; internal pair-event counts={pair_types}; internal feature-event counts={site_types}. "
+                "This packet does not expose member identities or per-cluster enrichment; do not assign a functional module to this cluster."
             ).format(
                 wave=row.get("static_wave_id", "unknown"),
                 pairs=row.get("pair_transition_count", 0),
@@ -1200,7 +1200,7 @@ def build_temporal_evidence_packet(
             ),
             availability="computed",
             claim_level="L2_observational_dynamic",
-            allowed_verbs=("co-occurred", "reorganized", "was observed", "was annotated"),
+            allowed_verbs=("was observed", "was annotated", "was summarized"),
         )
 
     for index, row in enumerate((sidecar.get("top_cross_layer_edges") or [])[:max_edges], 1):
@@ -1213,7 +1213,7 @@ def build_temporal_evidence_packet(
             f"DATA-CROSS-LAYER-{index}",
             "observational_cross_layer",
             (
-                "Candidate {edge}: Wave {wave} and protein {target}; observed sampled-timepoint order={direction}; "
+                "Candidate {edge}: temporal profile cluster {wave} and protein {target}; observed sampled-timepoint order={direction}; "
                 "observed onset-timepoint difference={onset} min; observed peak-timepoint difference={peak} min; "
                 "lag-aware similarity={similarity}; "
                 "mechanism-chain eligibility={eligible}; temporal interpretation={interpretation}; causality=not_tested."
@@ -1397,7 +1397,7 @@ def format_temporal_evidence_packet_for_llm(
     if not packet or packet.get("status") != "available":
         return (
             "=== TEMPORAL NUMERICAL EVIDENCE PACKET ===\n"
-            "Status: unavailable. Do not invent temporal PTM-protein, within-cluster trajectory concordance, or kinase timing results.\n"
+            "Status: unavailable. Do not invent temporal phosphorylation-feature/protein, within-cluster interval-wise activity-state concordance, or kinase timing results.\n"
             "=== END TEMPORAL NUMERICAL EVIDENCE PACKET ==="
         )
     section_plan = dict(packet.get("section_plan") or {})

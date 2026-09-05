@@ -323,7 +323,7 @@ export default function CrossTalkHeatmap({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="concordance">Concordance Pattern</SelectItem>
+                <SelectItem value="concordance">Concordance Change</SelectItem>
                 <SelectItem value="primary_log2fc">{pType} Log2FC</SelectItem>
                 <SelectItem value="secondary_log2fc">{sType} Log2FC</SelectItem>
               </SelectContent>

@@ -131,7 +131,7 @@ class FigureInformationGenerator:
             }
             supp_num += 1
 
-        # ── Temporal phosphosite trajectory-cluster figures (internal: comovement) ──
+        # ── Temporal phosphorylation-feature profile figures (internal: comovement) ──
         for cf in self.comovement_figures:
             cf_type = cf.get("type", "unknown")
             cf_caption = cf.get("caption", "Temporal Coordination Analysis")
@@ -139,13 +139,13 @@ class FigureInformationGenerator:
                 fig_map["comovement_heatmap"] = {
                     "figure_number": main_fig_num,
                     "figure_label": f"Figure {main_fig_num}",
-                    "display_name": "Temporal Phosphosite Trajectory Cluster Heatmap",
+                    "display_name": "Temporal Profile Clustering Heatmap",
                     "description": (
-                        "Hierarchical clustering heatmap of PTM temporal profiles. "
-                        "Rows represent individual PTM sites, columns represent time points. "
+                        "Hierarchical clustering heatmap of quantitative phosphorylation-feature temporal profiles. "
+                        "Rows represent individual quantitative phosphorylation features, columns represent sampled time points. "
                         "Color intensity reflects conventionally quantified Log2FC magnitude. Dendrogram and cluster "
-                        "color bars group structurally similar site-level trajectories. Temporal Phosphosite Clusters "
-                        "are descriptive and do not establish shared regulation, pathway membership, or causality."
+                        "color bars group similar measured temporal profiles. Temporal Profile Clusters are descriptive "
+                        "and do not establish co-regulation, pathway membership, or causality."
                     ),
                     "panel_index": 0,
                     "figure_type": "comovement_heatmap",
@@ -155,7 +155,7 @@ class FigureInformationGenerator:
                 fig_map["comovement_burst"] = {
                     "figure_number": main_fig_num,
                     "figure_label": f"Figure {main_fig_num}",
-                    "display_name": "Transient PTM Trajectory Pattern",
+                    "display_name": "Transient Temporal Phosphorylation Feature Profile Pattern",
                     "description": (
                         f"{cf_caption} "
                         "Panel (a) shows individual PTM time-series profiles colored by cluster membership "
@@ -173,10 +173,10 @@ class FigureInformationGenerator:
                     "figure_label": f"Figure {main_fig_num}",
                     "display_name": f"Temporal Profile \u2014 {cf_caption}",
                     "description": (
-                        f"Line plot showing the temporal Log2FC profiles of PTM sites in {cf_caption}. "
-                        "Solid lines represent PTM proteins; dashed lines represent linked Non-PTM interactors. "
+                        f"Line plot showing the temporal Log2FC profiles of quantitative phosphorylation features in {cf_caption}. "
+                        "Solid lines represent phosphorylation features; dashed lines represent linked non-PTM interactors. "
                         "Shaded area indicates the cluster envelope. Similar trajectory profiles identify a "
-                        "Temporal Phosphosite Cluster and do not, by themselves, imply coordinated regulation."
+                        "Temporal Profile Cluster and do not, by themselves, imply co-regulation."
                     ),
                     "panel_index": 0,
                     "figure_type": "comovement_lineplot",
@@ -479,9 +479,9 @@ class FigureInformationGenerator:
                 lines.append(legend_text)
             lines.append("")
 
-        # v8.0: Add co-movement analysis context
+        # Add temporal profile analysis context
         if self.comovement_llm_context:
-            lines.append("**Temporal PTM Coordination Analysis:**")
+            lines.append("**Temporal Phosphorylation Profile Analysis:**")
             lines.append(self.comovement_llm_context)
             lines.append("")
 

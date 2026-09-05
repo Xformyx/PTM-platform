@@ -1200,7 +1200,7 @@ export default function KinaseModuleAnalysis({
           <div className="ml-auto">
             {temporalArtifactReady && (
               <span className="mr-2 inline-flex items-center rounded border border-emerald-300 bg-emerald-50 px-2 py-1 text-[10px] font-medium text-emerald-800 dark:border-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-200">
-                Temporal PTM–protein artifact ready
+                Temporal phosphorylation–protein artifact ready
               </span>
             )}
             <Button
@@ -1275,7 +1275,7 @@ export default function KinaseModuleAnalysis({
           </Alert>
         )}
 
-        {/* ── Tab: Temporal Phosphosite Clusters (internal tab key: cowave) ─────── */}
+        {/* ── Tab: Temporal Profile Clusters (internal tab key: cowave) ────────── */}
         {activeTab === "cowave" && (
           <div className="space-y-3">
             {conditions.length < 3 && (
@@ -1291,7 +1291,7 @@ export default function KinaseModuleAnalysis({
             {coWaveModules.length === 0 && conditions.length >= 3 && (
               <div className="text-center py-6 text-sm text-muted-foreground">
                 <Info className="h-8 w-8 mx-auto mb-2 opacity-40" />
-                No {isUbi ? "temporal" : "Temporal Phosphosite"} clusters detected. Enable more PTMs in the checklist above, or try a different trend filter.
+                No {isUbi ? "temporal" : TEMPORAL_TERMS.cluster} detected. Enable more phosphorylation features in the checklist above, or try a different trend filter.
               </div>
             )}
 
@@ -1367,7 +1367,7 @@ export default function KinaseModuleAnalysis({
                           <Badge
                             variant="outline"
                             className="text-[9px] border-cyan-500 text-cyan-600 dark:text-cyan-400 cursor-help"
-                            title={`Linked ${isUbi ? "E3 ligases" : "kinases"} (Heatmap): ${kinaseNames.slice(0, 6).join(", ")}${kinaseNames.length > 6 ? "..." : ""}\nThese ${isUbi ? "E3 ligases" : "kinases"} have substrates represented in this ${isUbi ? "temporal" : "Temporal Phosphosite"} cluster. This is contextual display only.\nSwitch to Heatmap tab to inspect footprint patterns.`}
+                            title={`Linked ${isUbi ? "E3 ligases" : "kinases"} (Heatmap): ${kinaseNames.slice(0, 6).join(", ")}${kinaseNames.length > 6 ? "..." : ""}\nThese ${isUbi ? "E3 ligases" : "kinases"} have annotated phosphorylation features represented in this ${isUbi ? "temporal" : TEMPORAL_TERMS.cluster}. This is contextual display only.\nSwitch to Heatmap tab to inspect footprint patterns.`}
                           >
                             ↔ {kinaseNames.length} {isUbi ? "E3 ligases" : "kinases"}
                           </Badge>
@@ -2283,8 +2283,8 @@ function CascadeView({
             </AlertDescription>
           </Alert>
 
-          {/* Fallback: basic co-wave module timeline */}
-          <div className="text-xs font-medium text-muted-foreground mb-2">Basic {isUbi ? "Temporal" : "Temporal Phosphosite Cluster"} Timeline (preview):</div>
+          {/* Fallback: basic temporal profile cluster timeline */}
+          <div className="text-xs font-medium text-muted-foreground mb-2">Basic {isUbi ? "Temporal" : TEMPORAL_TERMS.cluster} Timeline (preview):</div>
           <div className="flex items-center gap-0 overflow-x-auto pb-2">
             {sortedModules.map((mod, idx) => (
               <div key={mod.id} className="flex items-center">
@@ -3151,7 +3151,7 @@ function GlobalKinaseModulesPanel({
               {mod.cowave_overlap && mod.cowave_overlap.length > 0 && (
                 <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
                   <GitMerge className="h-3 w-3" />
-                  {isUbi ? "Temporal" : "Temporal Phosphosite Cluster"} overlap:
+                  {isUbi ? "Temporal" : TEMPORAL_TERMS.cluster} overlap:
                   {mod.cowave_overlap.map((ov) => (
                     <Badge key={ov.cowave_id} variant="outline" className="text-[9px]">
                       {ov.cowave_label} ({ov.shared_ptms.length} PTMs)
@@ -3333,7 +3333,7 @@ function GlobalKinaseModulesPanel({
         </div>
       )}
 
-      {/* Temporal phosphosite cluster × kinase context cross-analysis */}
+      {/* Temporal profile cluster × kinase context cross-analysis */}
       {cowave_cross_analysis && Object.keys(cowave_cross_analysis).length > 0 && (
         <div className="space-y-2">
           <button
@@ -3342,7 +3342,7 @@ function GlobalKinaseModulesPanel({
           >
             {showCrossAnalysis ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
             <GitMerge className="h-3.5 w-3.5" />
-            {isUbi ? "Temporal Cluster × E3 Ligase Context Overlap" : "Temporal Phosphosite Cluster × Kinase Context Overlap"}
+            {isUbi ? "Temporal Cluster × E3 Ligase Context Overlap" : "Temporal Profile Cluster × Kinase Context Overlap"}
           </button>
 
           {showCrossAnalysis && (
@@ -3350,13 +3350,13 @@ function GlobalKinaseModulesPanel({
               <p className="text-[10px] text-muted-foreground">
                 {isUbi
                   ? "Ubiquitylation sites overlapping an E3-ligase module and a temporal cluster are shown as a contextual diagnostic. The overlap does not establish common E3 regulation."
-                  : "PTMs overlapping a kinase module and a Temporal Phosphosite Cluster are shown as a contextual diagnostic. The overlap does not establish shared regulation or direct kinase attribution."}
+                  : "Phosphorylation features overlapping a kinase module and a Temporal Profile Cluster are shown as a contextual diagnostic. The overlap does not establish shared regulation or a direct kinase–substrate relationship."}
               </p>
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="text-[10px] h-7">{isUbi ? "Temporal Module" : "Temporal Phosphosite Cluster"}</TableHead>
-                    <TableHead className="text-[10px] h-7">{isUbi ? "Total Sites" : "Total PTMs"}</TableHead>
+                    <TableHead className="text-[10px] h-7">{isUbi ? "Temporal Module" : "Temporal Profile Cluster"}</TableHead>
+                    <TableHead className="text-[10px] h-7">{isUbi ? "Total Sites" : "Total Phosphorylation Features"}</TableHead>
                     <TableHead className="text-[10px] h-7">{isUbi ? "Overlapping E3 Modules" : "Overlapping Kinase Modules"}</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -4070,7 +4070,7 @@ function SignalFlowView({
                   </div>
                 )}
                 {primary.cowave_score != null && primary.cowave_score > 0 && (
-                  <span className="text-[8px] px-1 py-0.5 rounded bg-cyan-900/20 text-cyan-300 border border-cyan-500/40" title={`Within-cluster trajectory concordance score: ${primary.cowave_score.toFixed(1)} — descriptive temporal-pattern diagnostic only`}>
+                  <span className="text-[8px] px-1 py-0.5 rounded bg-cyan-900/20 text-cyan-300 border border-cyan-500/40" title={`Within-cluster interval-wise activity-state concordance score: ${primary.cowave_score.toFixed(1)} — descriptive temporal-pattern diagnostic only`}>
                     WC:{primary.cowave_score.toFixed(1)}
                   </span>
                 )}
@@ -4158,7 +4158,7 @@ function SignalFlowView({
                             {kinaseConfidence[kinaseKey]?.cowave_boost > 0.3 && (
                               <span
                                 className="ml-0.5 text-[7px] px-0.5 rounded bg-purple-900/30 text-purple-300"
-                                title={`Module diagnostic: ${((kinaseConfidence[kinaseKey]?.confidence_score ?? 0) * 100).toFixed(0)}% (within-cluster trajectory concordance contribution: ${((kinaseConfidence[kinaseKey]?.cowave_boost ?? 0) * 100).toFixed(0)}%). This is not a direct kinase-confidence estimate.`}
+                                title={`Module diagnostic: ${((kinaseConfidence[kinaseKey]?.confidence_score ?? 0) * 100).toFixed(0)}% (within-cluster interval-wise activity-state concordance contribution: ${((kinaseConfidence[kinaseKey]?.cowave_boost ?? 0) * 100).toFixed(0)}%). This is not a direct kinase-confidence estimate.`}
                               >
                                 {((kinaseConfidence[kinaseKey]?.confidence_score ?? 0) * 100).toFixed(0)}%
                               </span>
@@ -4260,7 +4260,7 @@ function SignalFlowView({
                                     "Minor (sub-threshold)";
                                   const cowaveInfo = ptmCoWaveMap[ptmKey] || [];
                                   const cowaveTooltip = cowaveInfo.length > 0
-                                    ? `\nTemporal Phosphosite Cluster: ${cowaveInfo.map(c => `${formatTemporalClusterLabel(c.label)} (n=${c.groupSize}, peak=${c.peakCondition})`).join("; ")}`
+                                    ? `\nTemporal Profile Cluster: ${cowaveInfo.map(c => `${formatTemporalClusterLabel(c.label)} (n=${c.groupSize}, sampled maximum=${c.peakCondition})`).join("; ")}`
                                     : "";
                                   return (
                                     <span
@@ -5538,14 +5538,14 @@ function KinaseActivityHeatmapView({
                   <span>Causality: <b>not tested</b></span>
                 </div>
                 <p className="text-[10px] text-teal-800/80 dark:text-teal-200/80">
-                  {TEMPORAL_TERMS.localTransition} reports pairwise concordance persistence, split, merge, recruitment, or exit within a fixed {TEMPORAL_TERMS.cluster}. It does not re-estimate cluster membership, change TMM attribution or kinase ranking, or establish kinase switching.
+                  {TEMPORAL_TERMS.localTransition} summarizes retained concordance, concordance gain, or concordance loss from pairwise endpoint activity-state agreement within a fixed {TEMPORAL_TERMS.cluster}. It does not re-estimate cluster membership, change TMM attribution or kinase ranking, or establish co-regulation, kinase switching, or causality.
                 </p>
                 {rows.length > 0 ? (
                   <div className="overflow-x-auto">
                     <table className="w-full text-[10px]">
                       <thead className="text-muted-foreground">
                         <tr className="border-b border-teal-200/70 dark:border-teal-900">
-                          <th className="text-left py-1 pr-2">Temporal Phosphosite Cluster</th>
+                          <th className="text-left py-1 pr-2">Temporal Profile Cluster</th>
                           <th className="text-left py-1 pr-2">Protein</th>
                           <th className="text-left py-1 pr-2">Temporal direction</th>
                           <th className="text-right py-1 pr-2">Peak lag (min)</th>

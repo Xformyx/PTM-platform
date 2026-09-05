@@ -1253,8 +1253,8 @@ def _generate_comovement_figures(
         if heatmap_path:
             figures.append({
                 "path": heatmap_path,
-                "caption": "Temporal Phosphosite Trajectory Clustering Heatmap: phosphosites grouped by "
-                           "correlated temporal dynamics. Color intensity represents "
+                "caption": "Temporal Profile Clustering Heatmap: quantitative phosphorylation features grouped by "
+                           "correlation-based similarity of measured temporal profiles. Color intensity represents "
                            "conventional Log2FC magnitude (red=higher measured PTM abundance, blue=lower measured PTM abundance). "
                            "Left sidebar: cluster assignments. "
                            "Activity class sidebar: orange=De novo, blue=Regulated, green=Minor. "
@@ -1878,7 +1878,7 @@ def _generate_summary_heatmap(
     )
 
     ax_heatmap.set_title(
-        "Temporal Phosphosite Trajectory Clustering (conventional quantified rows)",
+        "Temporal Profile Clustering (conventional quantified feature rows)",
         fontsize=13, fontweight="normal", pad=12
     )
 
@@ -2607,10 +2607,10 @@ def _build_comovement_llm_context(
             )
         parts.append("")
 
-    # ── Report-safe within-cluster trajectory concordance instructions ─────
+    # ── Report-safe interval-wise activity-state concordance instructions ───
     parts.append(
-        "\nWITHIN-CLUSTER TRAJECTORY CONCORDANCE REPORTING POLICY:\n"
-        "- Describe only observed within-cluster trajectory concordance patterns at sampled timepoints, their member counts, profiles, and available stability/exposure metadata.\n"
+        "\nWITHIN-CLUSTER INTERVAL-WISE ACTIVITY-STATE CONCORDANCE REPORTING POLICY:\n"
+        "- Describe only observed endpoint activity-state concordance patterns at adjacent sampled intervals, their member counts, profiles, and available stability/exposure metadata.\n"
         "- Do not name a functional module, shared pathway enrichment, common regulator, kinase/phosphatase, activation loop, relay, feedback, signal-flow direction, or causal mechanism for an individual cluster unless a dedicated persisted per-cluster evidence record is supplied.\n"
         "- Compare clusters only with globally computed pathway context and cited literature as a hypothesis; do not state that a shared pathway explains why members move together.\n"
         "- A sampled-timepoint peak, within-cluster concordance pattern, or non-PTM timing difference is not evidence of biological lag, upstream/downstream regulation, stoichiometry, transcriptional regulation, or a molecular switch.\n"
@@ -2746,9 +2746,9 @@ def _build_comovement_llm_context(
         "(e.g., if studying osteocytes, do NOT extensively discuss neuronal "
         "or immune cell-specific pathways unless directly supported by data).\n"
         "\n"
-        "10. TEMPORAL PHOSPHOSITE CLUSTER INTERPRETATION BOUNDARY (R1.0):\n"
-        "   - A Temporal Phosphosite Cluster is a complete-case trajectory-clustering result.\n"
-        "   - Its Within-Cluster Trajectory Concordance Annotation describes sampled-timepoint patterns only.\n"
+        "10. TEMPORAL PROFILE CLUSTER INTERPRETATION BOUNDARY (R1.0):\n"
+        "   - A Temporal Profile Cluster is a complete-case correlation-based clustering result for quantitative phosphorylation features.\n"
+        "   - Its Interval-wise Activity-State Concordance Annotation describes adjacent sampled-interval patterns only.\n"
         "   - Do NOT assign a functional module, shared pathway, common regulator,\n"
         "     kinase family, or causal explanation to an individual cluster unless a\n"
         "     separately persisted per-cluster enrichment or validated relation record is supplied.\n"
@@ -3326,7 +3326,7 @@ def _append_cluster_detail(
     ) if class_counts else "unknown"
     dominant_label = class_label_map.get(dominant, dominant)
 
-    parts.append(f"\n#### Temporal Phosphosite Cluster {cid}: {pattern} ({len(members)} members) [Figure {figure_num}]")
+    parts.append(f"\n#### Temporal Profile Cluster {cid}: {pattern} ({len(members)} quantitative phosphorylation features) [Figure {figure_num}]")
     parts.append(
         f"Members: {', '.join(members[:20])}"
         + (f" ... (+{len(members)-20} more)" if len(members) > 20 else "")
@@ -3352,7 +3352,7 @@ def _append_cluster_detail(
     parts.append(f"Mean profile: {profile_str}")
 
     parts.append(
-        "Concordance interpretation boundary: within-cluster trajectory concordance is an observed sampled-timepoint pattern; "
+        "Concordance interpretation boundary: within-cluster interval-wise activity-state concordance is an observed sampled-interval pattern; "
         "no per-cluster functional enrichment, common regulator, or causal mechanism is assigned here."
     )
 

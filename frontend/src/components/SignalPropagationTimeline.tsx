@@ -325,7 +325,7 @@ export default function SignalPropagationTimeline({ data, orderId }: Props) {
               <div>
                 <p className="text-sm font-semibold flex items-center gap-2"><Upload className="h-4 w-4 text-slate-600" /> Optional post-analysis perturbation evidence</p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Upload only after unbiased discovery is complete. This does not change Temporal Phosphosite Trajectory Clustering or directionality; it evaluates the uploaded condition against existing source-precedes-target candidates.
+                  Upload only after unbiased discovery is complete. This does not change Temporal Profile Clustering or directionality; it evaluates the uploaded condition against existing source-precedes-target candidates.
                 </p>
               </div>
               <Badge variant="outline" className="w-fit text-[10px]">Optional validation layer</Badge>

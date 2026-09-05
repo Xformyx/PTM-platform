@@ -1340,7 +1340,7 @@ export default function OrderCreate() {
                           </Badge>
                         </div>
                         <p className="text-xs text-muted-foreground">
-                          PR/PG에서 대상 PTM precursor만 남기고 같은 정량·Temporal Phosphosite Trajectory Clustering·TMM 경로를 돌립니다.
+                          PR/PG에서 대상 PTM precursor만 남기고 같은 정량·Temporal Profile Clustering·TMM 경로를 돌립니다.
                           기본값은 400 / 단백질당 4 / 검출률 0.50 입니다. 아래 숫자와 체크로 Custom 할 수 있습니다.
                           시점·replicate 열은 유지합니다. Quick 수치는 Full과 비교하거나 논문 primary로 쓰지 마세요.
                         </p>
@@ -1380,7 +1380,7 @@ export default function OrderCreate() {
                       {form.report_type === "extended"
                         ? "Drug target prioritization 및 repositioning 분석 포함"
                         : form.report_type === "co_scientist"
-                        ? "AI 자율 분석: Temporal Phosphosite Cluster · Within-Cluster Concordance Analysis · Self-PTM annotation · TMM을 근거로 한 가설 생성 및 데이터 검증"
+                        ? "AI 자율 분석: Temporal Profile Cluster · Interval-wise Concordance Analysis · Self-PTM annotation · TMM을 근거로 한 가설 생성 및 데이터 검증"
                         : "PTM 분석, 가설 검증, 네트워크 분석 기반 보고서"}
                     </p>
                     {form.report_type === "co_scientist" && (
