@@ -310,13 +310,13 @@ class ReportPostProcessor:
         return text
 
     def _normalize_unpersisted_wave_tables(self, text: str) -> str:
-        """Replace unsupported per-Wave biological labels with a clear boundary."""
+        """Render fixed trajectory-cluster tables without per-cluster biological claims."""
         headers = {
             "| Temporal Cluster | Peak Time | Key Member(s) | Associated Biological Process |": (
                 "| Temporal Cluster | Peak Time | Key Member(s) | Membership interpretation boundary |"
             ),
             "| Co-Wave | Peak Time | Temporal Pattern | Potential Functional Context (based on members) |": (
-                "| Co-Wave | Peak Time | Temporal Pattern | Membership interpretation boundary |"
+                "| Temporal PTM Cluster | Peak Time | Trajectory Pattern | Membership interpretation boundary |"
             ),
         }
         if not any(header in text for header in headers):
@@ -331,7 +331,7 @@ class ReportPostProcessor:
                 continue
             if in_wave_table and line.startswith("|") and line.count("|") >= 5 and not set(line.replace("|", "").strip()) <= {"-", ":"}:
                 cells = line.split("|")
-                cells[-2] = " not assigned (no persisted per-Wave enrichment) "
+                cells[-2] = " not assigned (no persisted per-cluster enrichment) "
                 normalized.append("|".join(cells))
                 continue
             if in_wave_table and not line.startswith("|"):

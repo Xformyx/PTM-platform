@@ -898,16 +898,16 @@ function KinaseActivityTab({ orderId }: { orderId: number }) {
           </CardContent>
         </Card>
       )}
-      {/* Co-Wave Analysis Summary */}
+      {/* Local Co-membership Transition summary (internal field: cowave) */}
       {cowave && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Co-Wave Divergence Analysis</CardTitle>
+            <CardTitle className="text-base">Local Co-membership Transition Analysis</CardTitle>
           </CardHeader>
           <CardContent>
             <p className="text-sm text-muted-foreground">
-              Co-Wave analysis detected temporal divergence patterns in PTM dynamics.
-              See the Modules tab for detailed kinase module groupings.
+              Local co-membership analysis annotates observed sampled-interval trajectory patterns within fixed Temporal PTM Clusters.
+              See the Modules tab for cluster and footprint diagnostics; this does not establish shared regulation or causal order.
             </p>
           </CardContent>
         </Card>

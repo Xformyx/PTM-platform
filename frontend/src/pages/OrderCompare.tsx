@@ -43,7 +43,9 @@ interface ChatMessage {
 const SECTION_TITLES = [
   /Temporal Substrate Activity\s*비교/i,
   /Temporal Signaling Cascade\s*비교/i,
+  /Temporal Context\s*비교/i,
   /Co-Wave\s*기반\s*Upstream Regulator\s*비교/i,
+  /Local Co-membership Transition\s*기반\s*Candidate Context\s*비교/i,
   /공통\s*Signaling Mechanism/i,
   /물질\s*특이적\s*반응\s*및\s*작용기전/,
   /Kinase Activity\s*정량\s*비교/i,
@@ -51,7 +53,9 @@ const SECTION_TITLES = [
   /종합\s*결론\s*및\s*치료적\s*함의/,
   /Temporal Substrate Activity Comparison/i,
   /Temporal Signaling Cascade Comparison/i,
+  /Temporal Context Comparison/i,
   /Co-Wave[- ]Based Upstream Regulator Comparison/i,
+  /Local Co-membership Transition[- ]Based Candidate Context Comparison/i,
   /Shared Signaling Mechanisms?/i,
   /Condition[- ]Specific Responses?(?:\s+and\s+Mechanisms?)?/i,
   /Quantitative Kinase Activity Comparison/i,
@@ -72,6 +76,14 @@ function paragraphizeBody(body: string): string {
   t = t.replace(/([^\n])\s*[•▪‣]\s*/g, "$1\n\n- ");
   t = t.replace(/([.다요임음])\s*-\s+(?=[A-Za-z가-힣])/g, "$1\n\n- ");
   return t.replace(/\n{3,}/g, "\n\n").trim();
+}
+
+/** Display adapter for legacy comparison headings; archived source text is not mutated. */
+function toOfficialTemporalComparisonTitle(title: string): string {
+  return title
+    .replace(/Temporal Signaling Cascade/gi, "Temporal Context")
+    .replace(/Co-Wave\s*기반\s*Upstream Regulator/gi, "Local Co-membership Transition 기반 Candidate Context")
+    .replace(/Co-Wave[- ]Based Upstream Regulator/gi, "Local Co-membership Transition–Based Candidate Context");
 }
 
 /**
@@ -131,7 +143,7 @@ function normalizeMarkdown(md: string): string {
         }
       }
     }
-    out.push(`${prefix}${title}\n\n${paragraphizeBody(body)}`.trimEnd());
+    out.push(`${prefix}${toOfficialTemporalComparisonTitle(title)}\n\n${paragraphizeBody(body)}`.trimEnd());
   }
 
   return out.join("\n\n").replace(/\n{3,}/g, "\n\n").trim();

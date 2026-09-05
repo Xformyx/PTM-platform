@@ -2582,7 +2582,7 @@ def _build_comovement_llm_context(
 
     # ── SECONDARY: Other pattern clusters (with individual figures) ──
     if other_clusters:
-        parts.append("\n### Other Temporal Coordination Patterns")
+        parts.append("\n### Other Temporal PTM Trajectory Patterns")
         parts.append(
             f"{len(other_clusters)} additional cluster(s) with non-burst patterns "
             f"were detected. Each cluster has its own figure for detailed inspection.\n"
@@ -2607,11 +2607,11 @@ def _build_comovement_llm_context(
             )
         parts.append("")
 
-    # ── Report-safe Co-Wave instructions ───────────────────────────────────
+    # ── Report-safe local co-membership instructions ───────────────────────
     parts.append(
-        "\nCO-WAVE REPORTING POLICY:\n"
+        "\nLOCAL CO-MEMBERSHIP TRANSITION REPORTING POLICY:\n"
         "- Describe only observed local co-membership patterns at sampled timepoints, their member counts, profiles, and available stability/exposure metadata.\n"
-        "- Do not name a functional module, shared pathway enrichment, common regulator, kinase/phosphatase, activation loop, relay, feedback, signal-flow direction, or causal mechanism for an individual cluster unless a dedicated persisted per-Wave evidence record is supplied.\n"
+        "- Do not name a functional module, shared pathway enrichment, common regulator, kinase/phosphatase, activation loop, relay, feedback, signal-flow direction, or causal mechanism for an individual cluster unless a dedicated persisted per-cluster evidence record is supplied.\n"
         "- Compare clusters only with globally computed pathway context and cited literature as a hypothesis; do not state that a shared pathway explains why members move together.\n"
         "- A sampled-timepoint peak, local co-membership, or non-PTM timing difference is not evidence of biological lag, upstream/downstream regulation, stoichiometry, transcriptional regulation, or a molecular switch.\n"
         "- If global adjacency-order null calibration is unavailable or unsupported, call the result an observed local co-membership reorganization only; never robust, significant, validated, or globally temporally resolved.\n"
@@ -3311,9 +3311,9 @@ def _append_cluster_detail(
     cid = cluster["cluster_id"]
     pattern = _pattern_display_name(cluster["pattern"], ptm_type)
     members = cluster["members"]
-    # Cluster annotation is not a persisted per-Wave enrichment result. Keep it
+    # Cluster annotation is not a persisted per-cluster enrichment result. Keep it
     # out of the Report/LLM payload so global pathway context cannot be recast
-    # as a functional module assigned to an individual Wave.
+    # as a functional module assigned to an individual Temporal PTM Cluster.
     ann = {}
 
     # v9.27: activity class breakdown
@@ -3326,7 +3326,7 @@ def _append_cluster_detail(
     ) if class_counts else "unknown"
     dominant_label = class_label_map.get(dominant, dominant)
 
-    parts.append(f"\n#### Cluster {cid}: {pattern} ({len(members)} members) [Figure {figure_num}]")
+    parts.append(f"\n#### Temporal PTM Cluster {cid}: {pattern} ({len(members)} members) [Figure {figure_num}]")
     parts.append(
         f"Members: {', '.join(members[:20])}"
         + (f" ... (+{len(members)-20} more)" if len(members) > 20 else "")
@@ -3353,11 +3353,11 @@ def _append_cluster_detail(
 
     parts.append(
         "Membership interpretation boundary: local co-membership is an observed sampled-timepoint pattern; "
-        "no per-Wave functional enrichment, common regulator, or causal mechanism is assigned here."
+        "no per-cluster functional enrichment, common regulator, or causal mechanism is assigned here."
     )
 
-    # R1.0: cluster annotation and enrichment are not a persisted per-Wave
+    # R1.0: cluster annotation and enrichment are not a persisted per-cluster
     # evidence layer. Keep them out of Report/RAG/LLM serialization until an
-    # explicit immutable per-Wave enrichment contract exists.
+    # explicit immutable per-cluster enrichment contract exists.
 
     parts.append("")

@@ -339,7 +339,7 @@ def test_postprocessor_removes_unpersisted_per_wave_biological_process_column():
     )
     processed = ReportPostProcessor().process(text)
     assert "Associated Biological Process" not in processed
-    assert "no persisted per-Wave enrichment" in processed
+    assert "no persisted per-cluster enrichment" in processed
 
 
 def test_postprocessor_removes_unpersisted_cowave_functional_context_column():
@@ -352,7 +352,8 @@ def test_postprocessor_removes_unpersisted_cowave_functional_context_column():
     assert "Potential Functional Context" not in processed
     assert "Proximal signaling, RNA processing" not in processed
     assert "Membership interpretation boundary" in processed
-    assert "not assigned (no persisted per-Wave enrichment)" in processed
+    assert "| Temporal PTM Cluster | Peak Time | Trajectory Pattern |" in processed
+    assert "not assigned (no persisted per-cluster enrichment)" in processed
 
 
 def test_postprocessor_enforces_actual_report_claim_and_contrast_boundaries():
@@ -395,7 +396,7 @@ def test_co_scientist_questions_do_not_presume_kinase_activation_or_wave_functio
     assert "functional modules are revealed" not in joined
     assert "autophosphorylation-based activation loops" not in joined
     assert "candidate-context patterns" in joined
-    assert "local co-wave membership" in joined
+    assert "within-cluster local co-membership" in joined
 
 
 def test_cluster_detail_excludes_unpersisted_per_wave_functional_annotations():

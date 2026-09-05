@@ -1608,8 +1608,8 @@ function computeMultiSiteDivergence(
           description = `${gene} ${early.position}과 ${late.position}에서 시간적으로 분리된 반대 방향 response 관찰; inhibition-to-activation mechanism을 증명하지 않음`;
         } else {
           pattern = "sequential_regulation";
-          const dir = earlyPeak.peakFC > 0 && latePeak.peakFC > 0 ? "두 Activating site" : "두 Inhibitory site";
-          description = `${gene} ${early.position} (wave: ${earlyPeak.peakCondition})와 ${late.position} (wave: ${latePeak.peakCondition})의 시간적으로 분리된 ${dir} site response 관찰`;
+          const dir = earlyPeak.peakFC > 0 && latePeak.peakFC > 0 ? "두 positive-response" : "두 negative-response";
+          description = `${gene} ${early.position} (trajectory peak: ${earlyPeak.peakCondition})와 ${late.position} (trajectory peak: ${latePeak.peakCondition})의 시간적으로 분리된 ${dir} site contrast 관찰`;
         }
 
         // v12.1 #3: Lag computation
@@ -1687,8 +1687,8 @@ function computeMultiSiteDivergence(
 
         results.push({
           gene,
-          siteA: { position: early.position, label: early.label, waveLabel: `Wave (peak: ${earlyPeak.peakCondition})`, peakCondition: earlyPeak.peakCondition, peakFC: earlyPeak.peakFC, isDeNovo: earlyDeNovo, activityClass: earlyAC },
-          siteB: { position: late.position, label: late.label, waveLabel: `Wave (peak: ${latePeak.peakCondition})`, peakCondition: latePeak.peakCondition, peakFC: latePeak.peakFC, isDeNovo: lateDeNovo, activityClass: lateAC },
+          siteA: { position: early.position, label: early.label, waveLabel: `Trajectory peak (${earlyPeak.peakCondition})`, peakCondition: earlyPeak.peakCondition, peakFC: earlyPeak.peakFC, isDeNovo: earlyDeNovo, activityClass: earlyAC },
+          siteB: { position: late.position, label: late.label, waveLabel: `Trajectory peak (${latePeak.peakCondition})`, peakCondition: latePeak.peakCondition, peakFC: latePeak.peakFC, isDeNovo: lateDeNovo, activityClass: lateAC },
           pattern,
           description,
           confidenceTier,
