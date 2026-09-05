@@ -91,6 +91,53 @@ def test_final_renderer_includes_compact_p0_p3_and_denovo_safe_p5_cards():
     assert "direct kinase target" in final
 
 
+def test_citation_complete_observation_only_order_replaces_llm_sections_deterministically():
+    packet = build_temporal_evidence_packet(_sidecar())
+    assert packet["section_plan"]["observation_only_claim_ceiling"] is True
+    final = format_citations({
+        "report_title": "Observation-only final artifact",
+        "experimental_context": {
+            "cell_type": "generic cells",
+            "treatment": "compound X",
+            "timepoints": ["0min", "30min"],
+        },
+        "sections": {
+            "title": "Observation-only final artifact",
+            "abstract": "LLM claim: a molecular switch proves direct activation.",
+            "introduction": "LLM claim: pathway cascade.",
+            "results": "### Nested Results\nLLM claim: kinase X directly drives a functional module.",
+            "research_question_answers": "### Q1\nLLM claim: direct causal pathway.",
+            "discussion": "### Nested Discussion\nLLM claim: high-priority kinase activity.",
+            "conclusion": "LLM claim: validated biological priority.",
+        },
+        "network_analysis": {},
+        "signal_flow_figures": [],
+        "temporal_report_evidence_packet": packet,
+        "biological_synthesis_packet": _p5_packet(),
+        "collected_references": [{
+            "chromadb_ref": True,
+            "title": "Traceable collection article",
+            "authors": "Evidence Author",
+            "journal": "Evidence Journal",
+            "year": "2025",
+            "pmid": "34567890",
+            "doi": "10.1000/example.1",
+        }],
+    })["final_report"]
+    assert "Evidence-status summary" in final
+    assert "Evidence-bounded answers" in final
+    assert "Observational conclusion" in final
+    assert "molecular switch proves" not in final.lower()
+    assert "kinase x directly drives" not in final.lower()
+    assert "high-priority kinase" not in final.lower()
+    assert "validated biological priority" not in final.lower()
+    assert "Traceable collection article" in final
+    assert "https://pubmed.ncbi.nlm.nih.gov/34567890/" in final
+    assert "[1]" in final
+    assert "P0 explicit modified-precursor feature records=3030" in final
+    assert "P5 availability" in final
+
+
 def test_p5_report_renderer_keeps_denovo_detection_context_without_pseudo_log2fc():
     rendered = format_candidate_discovery_packet_for_report(_p5_packet())
     assert "DENOVO S7" in rendered

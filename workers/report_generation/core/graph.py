@@ -465,6 +465,140 @@ def _build_bibliography_blocked_data_only_report(
     return ReportPostProcessor().process("\n\n".join(parts))
 
 
+def _traceable_reference_markers(collected_references: List[dict], limit: int = 3) -> str:
+    """Return stable citation markers for final deterministic context statements.
+
+    Numeric citations produced by individual LLM sections are intentionally not
+    portable because each section can receive a different retrieval subset.
+    These stable identities are resolved exactly once in ``format_citations``.
+    """
+    markers: List[str] = []
+    for reference in collected_references or []:
+        if not isinstance(reference, dict):
+            continue
+        pmid = str(reference.get("pmid") or "").strip().lower()
+        doi = str(reference.get("doi") or "").strip().lower()
+        marker = f"[REF:pmid:{pmid}]" if pmid else (f"[REF:doi:{doi}]" if doi else "")
+        if marker and marker not in markers:
+            markers.append(marker)
+        if len(markers) >= limit:
+            break
+    return " ".join(markers)
+
+
+def _compact_record_text(packet: dict, evidence_id: str) -> str:
+    """Fetch an already claim-bounded sentence from the compact Report packet."""
+    for record in packet.get("records") or []:
+        if isinstance(record, dict) and str(record.get("evidence_id") or "") == evidence_id:
+            return str(record.get("text") or "").strip()
+    return ""
+
+
+def _compose_observation_only_report_sections(
+    state: ReportState,
+    sections: Dict[str, str],
+    collected_references: List[dict],
+) -> tuple[Dict[str, str], bool]:
+    """Build the final narrative deterministically when direct mechanism is unavailable.
+
+    The temporal packet already makes an explicit section-plan decision.  When
+    that decision is L1 observation-only, passing free-form LLM Results/Q&A or
+    Conclusion prose into a DOCX creates a second, uncontrolled interpretation
+    path after the engine has declared P0–P3 no-call.  This composer is the
+    citation-complete counterpart of the bibliography-blocked data-only report:
+    it preserves traceable publication context, compact numerical evidence and
+    prospective validation boundaries, while discarding the unsafe prose path.
+    """
+    packet = dict(state.get("temporal_report_evidence_packet") or {})
+    section_plan = dict(packet.get("section_plan") or {})
+    observation_only = bool(section_plan.get("observation_only_claim_ceiling"))
+    if not observation_only:
+        return dict(sections), False
+
+    context = dict(state.get("experimental_context") or {})
+    cell_context = str(context.get("cell_type") or context.get("cell_line") or "the recorded experimental system").strip()
+    treatment = str(context.get("treatment") or context.get("compound") or "the recorded treatment context").strip()
+    timepoints = context.get("timepoints") or context.get("conditions") or []
+    if isinstance(timepoints, str):
+        timepoints = [timepoints]
+    sampled_context = ", ".join(str(value) for value in timepoints if str(value).strip()) or "the recorded sampled conditions"
+    ptm_type = str(state.get("ptm_type") or "PTM").strip()
+    references = _traceable_reference_markers(collected_references)
+
+    temporal_summary = _compact_record_text(packet, "DATA-TEMPORAL-SUMMARY")
+    dynamic_summary = _compact_record_text(packet, "DATA-DYNAMIC-SUMMARY")
+    precedence_summary = _compact_record_text(packet, "DATA-TEMPORAL-PRECEDENCE")
+    tmm_summary = _compact_record_text(packet, "DATA-TMM-UNCERTAINTY")
+    record_texts = [text for text in (temporal_summary, dynamic_summary, precedence_summary, tmm_summary) if text]
+    if not record_texts:
+        record_texts = [
+            "No compact temporal summary was available for deterministic narrative rendering; numerical claims are therefore withheld."
+        ]
+    evidence_lines = "\n".join(f"- {text}" for text in record_texts)
+    reference_clause = f" {references}" if references else ""
+
+    rendered = dict(sections)
+    rendered["abstract"] = (
+        f"This evidence-first report summarizes {ptm_type} and total-protein abundance observations in {cell_context} "
+        f"under {treatment}, across {sampled_context}. The final interpretation is generated from compact, "
+        "provenance-bounded analysis packets rather than free-form mechanism narration. Measured contrasts, "
+        "sampled-timepoint profiles, candidate footprint context, and literature context are reported as separate "
+        "evidence classes. The analysis does not establish direct kinase–site regulation, catalytic activity, "
+        "causal propagation, isoform-specific attribution, or perturbation outcomes." + reference_clause
+    )
+    rendered["introduction"] = (
+        "### Scope and cited context\n\n"
+        f"The selected traceable publication collection provides external biological context for the recorded "
+        f"{treatment} experiment in {cell_context}. The Order-specific interpretation below remains constrained "
+        "to quantified PTM/protein observations and compact analysis diagnostics; cited context is not treated as "
+        "an Order-specific measurement or direct mechanistic relation." + reference_clause
+    )
+    rendered["results"] = (
+        "### Evidence-status summary\n\n"
+        f"The report evaluates {ptm_type} and total-protein abundance across {sampled_context}. "
+        "The following engine-generated summaries are observation-level statements; they do not establish pathway "
+        "activation, molecular switching, direct regulation, kinase activity, or causal order.\n\n"
+        f"{evidence_lines}\n\n"
+        "### Figure interpretation boundary\n\n"
+        "Figure 1 supplies descriptive pathway-membership context; Figure 2 displays conventional quantified PTM "
+        "profiles with de novo detection context excluded from the numerical colour scale; Figure 3 is a dashed, "
+        "non-directional context map. Figure annotations are display context and are not direct edges or evidence "
+        "of pathway function."
+    )
+    rendered["research_question_answers"] = (
+        "### Evidence-bounded answers\n\n"
+        "**Q1. What does the current Order directly measure?** It measures PTM and total-protein abundance patterns "
+        "at recorded sampled conditions; these measurements support numerical description and candidate context.\n\n"
+        "**Q2. What does local temporal grouping establish?** Local membership and transition summaries describe "
+        "sampled-timepoint co-movement only. They do not assign a common regulator, function, complex state, or "
+        "causal sequence.\n\n"
+        "**Q3. What does kinase footprint context establish?** Substrate-derived scores and footprint diagnostics "
+        "remain candidate context. Exact-equivalent and shared footprints do not resolve independent isoform activity "
+        "or a direct kinase–site relation.\n\n"
+        "**Q4. What requires a follow-up study?** Direct kinase attribution, causal PTM–protein relationships, "
+        "activation-loop status, and perturbation-dependent effects require matched orthogonal or perturbation data; "
+        "they are not reported as current findings."
+    )
+    rendered["discussion"] = (
+        "### Evidence-constrained interpretation\n\n"
+        "The report separates data-derived abundance observations from substrate-derived candidate context and from "
+        "traceable publication context. This separation preserves the value of time-resolved, protein-abundance-adjusted "
+        "PTM measurement without using contrast magnitude, local co-membership, pathway labels, or database annotations "
+        "as a substitute for direct mechanistic evidence. The cited collection may guide prospective biological questions, "
+        "but it does not elevate an Order-specific candidate into a verified pathway edge or kinase action." + reference_clause
+    )
+    rendered["conclusion"] = (
+        "### Observational conclusion\n\n"
+        f"This Order provides a provenance-bounded quantitative record of {ptm_type} and total-protein abundance across "
+        f"{sampled_context}. The final artifact preserves P0–P3 readiness/no-call, P0/P1 footprint diagnostics, P5 "
+        "availability state, and de novo-safe numerical presentation. It is suitable for reporting measured contrasts, "
+        "candidate context, and pre-specified validation questions, but not for direct kinase, causal, isoform-specific, "
+        "or perturbation-supported claims."
+    )
+    rendered.pop("co_scientist_addendum", None)
+    return rendered, True
+
+
 def format_citations(state: ReportState) -> dict:
     """Format citations and generate reference list. Includes network figures (Cytoscape) between Results and Discussion.
 
@@ -479,8 +613,13 @@ def format_citations(state: ReportState) -> dict:
     import re as _re
     logger.info("Formatting citations and post-processing report")
 
-    sections = state.get("sections", {})
     collected_refs = state.get("collected_references", [])
+    source_sections = state.get("sections", {})
+    sections, deterministic_observation_only = _compose_observation_only_report_sections(
+        state,
+        source_sections,
+        collected_refs,
+    )
     network_analysis = state.get("network_analysis", {})
 
     # v7.0: Inject cascade_mediator results into network_analysis for figure insertion.
@@ -523,7 +662,8 @@ def format_citations(state: ReportState) -> dict:
     network_supp_section = ""  # v8.7: network supplementary (cascade/cytoscape)
 
     logger.info(
-        f"[FORMAT-CIT] sections keys: {list(sections.keys())}, "
+        f"[FORMAT-CIT] sections keys: {list(sections.keys())}; "
+        f"deterministic_observation_only={deterministic_observation_only}, "
         f"network_analysis keys: {list(network_analysis.keys()) if network_analysis else 'EMPTY'}"
     )
     if network_analysis:
@@ -700,11 +840,16 @@ def format_citations(state: ReportState) -> dict:
             # Step 4 (v10.3): Context-aware PTM Heatmap — Fig 3 (post-writing, uses mentioned PTMs)
             try:
                 from .nodes.signal_flow_figure import generate_context_aware_ptm_heatmap
+                # The final observation-only prose is intentionally generic;
+                # retain the pre-composition, observed-site mentions solely as
+                # a bounded figure-row selection input. They never re-enter the
+                # final narrative and the heatmap itself retains conventional/
+                # de novo display constraints.
                 sections_for_ctx = {
-                    "results": sections.get("results", ""),
-                    "discussion": sections.get("discussion", ""),
-                    "abstract": sections.get("abstract", ""),
-                    "conclusion": sections.get("conclusion", ""),
+                    "results": source_sections.get("results", ""),
+                    "discussion": source_sections.get("discussion", ""),
+                    "abstract": source_sections.get("abstract", ""),
+                    "conclusion": source_sections.get("conclusion", ""),
                 }
                 output_dir = state.get("output_dir", "")
                 vector_plot_raw_data = state.get("vector_plot_raw_data", [])
@@ -732,8 +877,8 @@ def format_citations(state: ReportState) -> dict:
                     if ctx_heatmap_path:
                         ctx_fig_section = (
                             f"\n\n### Figure {context_ptm_fig_num}. Key PTM Sites Referenced in This Report\n\n"
-                            f"Heatmap showing the temporal conventional Log₂FC profiles of PTM sites "
-                            f"specifically discussed in the Results and Discussion sections above. "
+                            f"Heatmap showing temporal conventional Log₂FC profiles selected under the "
+                            f"evidence-first Report display contract. "
                             f"Sites are clustered by temporal pattern similarity. Red/blue encode conventional quantified contrasts; "
                             f"starred de novo sites, where present, use LOD-relative detection context and are excluded from the colour scale.\n\n"
                             f"![Context-aware PTM Heatmap]({ctx_heatmap_path})\n\n---\n"
@@ -758,7 +903,9 @@ def format_citations(state: ReportState) -> dict:
     # Results/Discussion observations. Rebuild it here so re-resolved literature
     # can use the same [N] numbering as the final ## References section.
     external_addendum = sections.get("co_scientist_addendum", "")
-    if state.get("co_scientist_status") == "ready" and state.get("co_scientist_integration_mode") == "addendum":
+    if (not deterministic_observation_only
+            and state.get("co_scientist_status") == "ready"
+            and state.get("co_scientist_integration_mode") == "addendum"):
         try:
             from .nodes.external_coscientist_node import (
                 build_citation_map,
