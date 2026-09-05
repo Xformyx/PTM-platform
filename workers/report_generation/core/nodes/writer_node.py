@@ -1746,9 +1746,6 @@ IMPORTANT: Write a thorough, detailed introduction. The ChromaDB collection refe
             research_str += f"\nQ{i+1}: {r['question']}\n"
             research_str += f"  Relevant PTMs: {r.get('relevant_ptm_count', 0)}\n"
             research_str += f"  Upregulated: {stats.get('upregulated', 0)}, Downregulated: {stats.get('downregulated', 0)}\n"
-            top_act = r.get("activated", [])[:5]
-            if top_act:
-                research_str += "  Highest measured PTM increases: " + ", ".join(f"{p['gene']}-{p['position']}(FC={p['ptm_relative_log2fc']})" for p in top_act) + "\n"
             enriched = r.get("enriched_pathways", [])[:5]
             if enriched:
                 research_str += "  Enriched pathways: " + ", ".join(
@@ -1772,7 +1769,7 @@ IMPORTANT: Write a thorough, detailed introduction. The ChromaDB collection refe
             rq_lines.append("For EACH research question, you MUST provide a subsection (### heading) that includes:")
             rq_lines.append("1. **Direct Answer**: A clear 1-2 sentence answer to the question")
             rq_lines.append("2. **Time Course Table** (if multi-timepoint): Show how key PTMs change across timepoints")
-            rq_lines.append("3. **Functional Interpretation**: What the PTM changes mean biologically")
+            rq_lines.append("3. **Observation-level interpretation**: State only the biological context permitted by the supplied evidence; do not assign per-Wave function, a common regulator, direct kinase action, or causal order")
             rq_lines.append("4. **Alternative Explanations**: Other possible interpretations of the data")
             rq_lines.append("5. **Testable Prediction**: A specific prediction that could validate the finding")
             rq_lines.append("")
@@ -1809,7 +1806,7 @@ IMPORTANT: Write a thorough, detailed introduction. The ChromaDB collection refe
                     if rec.get("peak_q") is not None:
                         extra += f" q={rec['peak_q']:.3f}"
                     extra += (
-                        f" n={rec.get('n_direct', '?')} term={rec.get('term', '')} "
+                        f" n={rec.get('n_direct', '?')} membership_context=descriptive "
                         f"prot={rec.get('protein_support', 0):.2f} "
                         f"net={rec.get('network_support', 0):.2f}"
                     )
@@ -1823,9 +1820,8 @@ IMPORTANT: Write a thorough, detailed introduction. The ChromaDB collection refe
                 f"{pw_numbered}\n\n"
                 f"CRITICAL INSTRUCTIONS FOR RESULTS SECTION:\n"
                 f"1. Discuss the TOP 5 pathways from this list by name and cite Figure 1.\n"
-                f"2. For each, report Direct NES / FDR / n_direct and the stated term "
-                f"(activated, inhibited, modulated, or network-associated). "
-                f"Do not upgrade 'modulated' to 'activated'.\n"
+                f"2. For each, report Direct NES / FDR / n_direct as descriptive pathway-membership context. "
+                f"Direct NES does not establish pathway activation, inhibition, or kinase activity.\n"
                 f"3. Do NOT claim a pathway is enriched if it is not in this list.\n"
                 f"4. Do NOT treat any pathway as privileged just because it is canonical. "
                 f"Discuss a pathway only if it appears here and the stated term/evidence supports it.\n"
@@ -1844,9 +1840,9 @@ IMPORTANT: Write a thorough, detailed introduction. The ChromaDB collection refe
 === PTM EVIDENCE INTERPRETATION FRAMEWORK ===
 Site-level PTM Log2FC is a signed abundance change at a measured site. It is not protein
 activation or kinase activity unless a functional-sign annotation exists for that site.
-Pathway terms come from Figure 1 (activated / inhibited / modulated / network-associated)
-and require annotated sites plus direction consistency. Phosphorylation increase is not
-activation by default.
+Figure 1 reports descriptive pathway membership enrichment. Direct NES, positive/negative
+member contrast, and phosphorylation change do not establish pathway activation, inhibition,
+or kinase activity.
 
 You MUST interpret findings through this framework:
 1. **Evidence, not activation by default**: Use PTM Log2FC as site abundance evidence.
@@ -1858,13 +1854,11 @@ You MUST interpret findings through this framework:
 3. **Temporal observations**: At each timepoint, describe measured site/protein trajectory patterns and their
    uncertainty. Do not infer which signaling layer is active, or treat timing alone as direction or causality.
 4. **Temporally coordinated substrate group analysis**: Dynamic/static group membership is an observed local
-   co-membership pattern. For each group, explain:
-   - What biological process or pathway unites the group members
-   - How the group's temporal pattern (early transient, sustained, delayed) relates to its function
-   - What distinguishes this group from other temporally coordinated groups
-   - How membership or observed profiles change across timepoints, without assigning a mechanistic order
-        5. **Quantitative evidence**: Always cite specific Log2FC values when describing higher or lower
-           measured PTM abundance. Use the PTM activity profile magnitude to rank the importance of findings.
+   co-membership pattern. Report membership count, observed profile shape, sampled-timepoint occurrence, and
+   reproducibility when supplied. Do not assign per-Wave functional enrichment, common regulator, physical
+   complex, pathway arm, biological role, leader/follower order, or causal mechanism.
+5. **Quantitative evidence**: Cite conventional Log2FC only as a measured contrast. Do not use its magnitude
+   to rank biological importance, mechanistic priority, direct regulatory strength, or pathway position.
 === END PTM ACTIVITY PROFILE FRAMEWORK ===
 
 Research Findings:
@@ -1886,10 +1880,9 @@ Structure (Figure-Centric, Nature Style):
 Organize the Results section around the analytical figures and data, NOT around hypotheses.
 Each major subsection should correspond to a key analytical output (figure or data table).
 
-### Part 1: Pathway Enrichment Landscape (Figure 1)
-- Present the top enriched signaling pathways from Figure 1 (3-Layer Pathway Enrichment)
-- For each top pathway, identify which PTM proteins contribute and their Log2FC values
-- Highlight pathway convergence: where do multiple PTMs converge on the same signaling axis?
+### Part 1: Pathway-Membership Enrichment Landscape (Figure 1)
+- Present only statistically qualified findings as formal enrichment. When q-values do not qualify, report Direct NES as descriptive membership context.
+- Do not infer pathway convergence, receptor crosstalk, pathway activation, inhibition, or a signaling axis from this figure.
 
 ### Part 2: {entity_label} Candidate Contribution Context (Figure 2 — {entity_label} Activity Heatmap)
 - Describe the contribution-weighted candidate patterns visible in the heatmap, including whether evidence is data-anchored or prior-assisted
@@ -1904,8 +1897,8 @@ Each major subsection should correspond to a key analytical output (figure or da
 - Do not use concordant non-PTM abundance as validation of a kinase-substrate axis
 
 ### Part 4: Key PTM Site Dynamics (Figure 4 — Context PTM Heatmap)
-- For the most important PTM sites discussed in Parts 1-3, describe their temporal profiles in detail
-- Group sites by functional category ({entity_label_lower} substrates, transcription factors, cytoskeletal, metabolic)
+- Describe preselected evidence-packet PTM site profiles in detail; do not select or rank sites by absolute conventional Log2FC.
+- Do not group sites into unpersisted functional categories or promote a site to a regulatory node from contrast magnitude.
 - Quantify: exact Log2FC values at each timepoint for regulated sites. For de novo sites use detection repeats + LOD-relative induction ≥X.X (Conventional Log2FC=NA)
 - Highlight any unexpected patterns (e.g., a known activation site showing inhibition)
 
@@ -2066,16 +2059,12 @@ PTM Biological Context:
 {cell_signaling_block}
 
 Structure (8 core topics):
-1. **Primary Observational Pattern (PTM Activity Profile Perspective)**: Interpret the measured PTM profiles, their pathway annotations, and their uncertainty without tracing a receptor-to-effector mechanism.
+1. **Primary Observational Pattern (PTM Activity Profile Perspective)**: Interpret the measured PTM profiles, their pathway annotations, and their uncertainty without tracing a receptor-to-effector mechanism or ranking biological importance by conventional Log2FC magnitude.
 2. **Temporal Pattern Description**: Discuss how measured site/protein profiles differ over time. Do not infer active signaling layers, relay, amplification, termination, or causal order unless explicitly supported by the evidence packet.
-3. **Temporally Coordinated Substrate Group Interpretation**: For each temporally coordinated group identified in the Results:
-   - What is the biological commonality (shared pathway, function, or subcellular localization)?
-   - How does this group's temporal pattern (early transient, sustained, delayed) relate to its function?
-   - What distinguishes this group from other temporally coordinated groups?
-   - How do these temporal coordination patterns differ across timepoints without assigning leader/follower mechanism?
+3. **Temporally Coordinated Substrate Group Description**: Describe observed local membership, profile shape, sampled-timepoint patterns, and reproducibility only. Do not assign shared pathway/function/localization, common regulator, complex, pathway arm, or biological role to a group unless a separately persisted per-group analysis is supplied.
 4. **Mechanistic Hypotheses for Testing**: Relate key PTM sites to published context as hypotheses; state that current P0–P3 evidence does not establish a direct {('E3 ligase-substrate' if ptm_type_str.lower().strip() in ('ubiquitylation', 'ubiquitination') else 'kinase-substrate')} relation.
 5. **Parallel Non-PTM Observations**: Mention non-PTM protein abundance only as a parallel observation. Do not call it validation, downstream effector support, or directionality evidence for a kinase-substrate relationship.
-6. **Pathway Annotation Commonality**: Discuss shared pathway memberships as annotations and literature context. Do not describe amplification, relay, or termination from timing alone.
+6. **Pathway Annotation Context**: Discuss global pathway memberships as annotations and cited literature context. Do not describe pathway convergence, crosstalk, amplification, relay, or termination from timing alone.
 7. **Comparison with Literature**: Compare and contrast your findings with published studies. Specifically compare the observed PTM activity profiles with known signaling models from the literature.
 8. **Limitations and Future Directions**: Acknowledge limitations and propose follow-up experiments
 
@@ -2099,9 +2088,9 @@ at least once in the Discussion. If a figure is not referenced, the Discussion i
 === MANDATORY SUPPLEMENTARY DISCUSSION (v10.5) ===
 The Supplementary Figures contain temporally coordinated substrate groups (cluster analysis).
 Even though these are in the Supplementary section, you MUST discuss them in the Discussion:
-  - Mention that temporally coordinated substrate groups were identified (Supplementary Figures).
-  - Discuss the biological significance of the major temporal coordination patterns observed.
-  - Explain how these temporally coordinated groups describe observed local patterns and motivate testable hypotheses.
+  - Mention only observed temporally coordinated substrate-group membership and profile patterns (Supplementary Figures).
+  - Report their algorithmic stability when supplied; do not assign biological significance, functional modules, common regulation, or causal hierarchy.
+  - Explain how local observed patterns motivate a predeclared orthogonal measurement, without calling them a mechanism.
   - Reference them as '(Supplementary Figures 1-N)' when discussing temporal coordination patterns.
 This ensures the Discussion provides a comprehensive interpretation of ALL analytical results.
 === END SUPPLEMENTARY DISCUSSION ===

@@ -39,6 +39,15 @@ _TERM_COLOR = {
     "network-associated": "#1E8449",
 }
 
+# Direct NES terms are internal display classes. They must never be rendered as
+# Order-specific activation/inhibition statements in the final report figure.
+_TERM_DISPLAY_LABEL = {
+    "activated": "higher member contrast",
+    "inhibited": "lower member contrast",
+    "modulated": "descriptive membership",
+    "network-associated": "network-associated context",
+}
+
 FIG1_TITLE = (
     "Time-resolved Direct PTM Pathway Enrichment "
     "with Independent Protein and Network Support"
@@ -243,7 +252,7 @@ def generate_pathway_distribution_graph(
     ax.grid(axis="x", alpha=0.3, linestyle="--")
 
     handles = [
-        plt.Rectangle((0, 0), 1, 1, color=color, label=term)
+        plt.Rectangle((0, 0), 1, 1, color=color, label=_TERM_DISPLAY_LABEL[term])
         for term, color in _TERM_COLOR.items()
     ]
     ax.legend(handles=handles, loc="lower right", fontsize=8, framealpha=0.9, title="Term")

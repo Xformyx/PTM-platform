@@ -139,6 +139,14 @@ def test_unannotated_pathway_is_modulated_not_activated():
     assert functional_sign("UNKNOWN", "S1") == 0
 
 
+def test_figure_term_legend_is_context_only_even_when_internal_classes_are_directional():
+    from report_generation.core.nodes.pathway_figure import _TERM_DISPLAY_LABEL
+
+    assert _TERM_DISPLAY_LABEL["activated"] == "higher member contrast"
+    assert _TERM_DISPLAY_LABEL["inhibited"] == "lower member contrast"
+    assert _TERM_DISPLAY_LABEL["modulated"] == "descriptive membership"
+
+
 def test_membership_strips_species_suffix_and_excludes_string_indirect():
     membership = extract_direct_membership([
         {

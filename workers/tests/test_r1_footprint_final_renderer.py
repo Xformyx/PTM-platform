@@ -99,7 +99,9 @@ def test_postprocessor_lowers_legacy_network_caption_activation_labels():
     assert "65 PTMs with lower measured abundance" in processed
     assert "Top activated" not in processed
     assert "Top Activated PTMs" not in processed
-    assert "Top higher measured PTM-abundance contrasts" in processed
+    assert "Top higher measured PTM-abundance contrasts" not in processed
+    assert "SITE1" not in processed
+    assert "SITE2" not in processed
 
 
 def test_final_renderer_processes_supplementary_before_appending_references():

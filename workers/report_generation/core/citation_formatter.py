@@ -304,20 +304,28 @@ class ReportPostProcessor:
         text = self._ensure_conventional_log2fc_reporting_policy(text)
         text = self._normalize_unpersisted_wave_tables(text)
         text = self._normalize_residual_claim_tone(text)
+        text = self._enforce_final_artifact_boundaries(text)
 
         return text
 
     def _normalize_unpersisted_wave_tables(self, text: str) -> str:
         """Replace unsupported per-Wave biological labels with a clear boundary."""
-        header = "| Temporal Cluster | Peak Time | Key Member(s) | Associated Biological Process |"
-        if header not in text:
+        headers = {
+            "| Temporal Cluster | Peak Time | Key Member(s) | Associated Biological Process |": (
+                "| Temporal Cluster | Peak Time | Key Member(s) | Membership interpretation boundary |"
+            ),
+            "| Co-Wave | Peak Time | Temporal Pattern | Potential Functional Context (based on members) |": (
+                "| Co-Wave | Peak Time | Temporal Pattern | Membership interpretation boundary |"
+            ),
+        }
+        if not any(header in text for header in headers):
             return text
         lines = text.splitlines()
         normalized: list[str] = []
         in_wave_table = False
         for line in lines:
-            if line == header:
-                normalized.append("| Temporal Cluster | Peak Time | Key Member(s) | Membership interpretation boundary |")
+            if line in headers:
+                normalized.append(headers[line])
                 in_wave_table = True
                 continue
             if in_wave_table and line.startswith("|") and line.count("|") >= 5 and not set(line.replace("|", "").strip()) <= {"-", ":"}:
@@ -470,6 +478,64 @@ class ReportPostProcessor:
             text,
             flags=re.IGNORECASE,
         )
+        return text
+
+    def _enforce_final_artifact_boundaries(self, text: str) -> str:
+        """Apply output-only R1.0 boundaries that must not depend on LLM compliance.
+
+        This deliberately preserves measured counts, conventional contrasts, compact
+        P0–P5 diagnostics, and cited background. It removes only legacy report blocks
+        that convert numeric salience or local membership into biological priority,
+        per-Wave function, or a causal/kinase path.
+        """
+        lines: list[str] = []
+        for line in text.splitlines():
+            # Network panel lists are a legacy display-priority path. The raw measured
+            # values remain in exported analysis artefacts and figure labels, but they
+            # must not be repeated as a Report ranking block.
+            if re.match(r"^\s*\*{0,2}Top (?:higher|lower) measured PTM-abundance contrasts\*{0,2}:", line, re.IGNORECASE):
+                continue
+            line = re.sub(
+                r"\s*Largest (?:positive|negative) measured (?:PTM )?contrasts:\s*[^.\n]*(?:\.)?",
+                "",
+                line,
+                flags=re.IGNORECASE,
+            )
+            lines.append(line)
+        text = "\n".join(lines)
+
+        substitutions = [
+            (
+                r"\bPTM-driven hyperactivation(?: pattern)?\b",
+                "PTM–protein decoupling pattern",
+            ),
+            (
+                r"\bThe pathway context diagram \((Figure \d+)\) places these candidate kinases downstream of inferred upstream receptors\.",
+                r"The pathway context diagram (\1) places treatment, receptor and candidate-kinase annotations in a shared context without ordering or direct relations.",
+            ),
+            (
+                r"\bThis high number of unique substrates provides strong, data-anchored evidence for a role for ([^.]+)\.",
+                r"This unique-substrate composition provides data-anchored candidate footprint context for \1; it does not establish catalytic activity or direct substrate regulation.",
+            ),
+            (
+                r"\bThese events, with their large fold-changes and involvement of key signaling nodes, likely represent critical steps in the propagation of [^.]+\.",
+                "These are measured contrasts at named sites; their magnitude does not by itself establish biological priority, pathway placement, or propagation.",
+            ),
+            (
+                r"\bThis delayed onset suggests that ([^.]+) is a (?:secondary|tertiary) event, likely downstream of initial kinase activation cascades\.",
+                r"The later sampled contrast for \1 is an observational temporal pattern; upstream pathway placement is not assigned.",
+            ),
+            (
+                r"\bThis transient profile is indicative of a signaling node that is rapidly modulated and then potentially subjected to negative feedback[^.]*\.",
+                "This transient profile is a measured temporal pattern; feedback is not inferred from sampled-timepoint membership alone.",
+            ),
+            (
+                r"\bThese dephosphorylation events are as critical to the signaling outcome as phosphorylation, reflecting the potential activation of specific phosphatases or the deactivation of constitutively active kinases[^.]*\.",
+                "These lower measured PTM-abundance contrasts are retained as observations; they do not identify phosphatase activity or kinase deactivation.",
+            ),
+        ]
+        for pattern, replacement in substitutions:
+            text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
         return text
 
     @staticmethod

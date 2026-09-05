@@ -1662,13 +1662,6 @@ def _generate_legends(
             non_ptm_count = stats.get("non_ptm_count", 0)
             edge_count = stats.get("active_edge_count", 0)
 
-            # Top activated PTMs
-            top_active = sorted(
-                tp_data.get("active_ptm_nodes", []),
-                key=lambda x: -x.get("value", 0)
-            )[:5]
-            top_str = ", ".join(f"{n['gene']}({n['site']})" for n in top_active)
-
             # Top pathways
             pw_summary = tp_data.get("pathway_summary", {})
             top_pw = sorted(pw_summary.keys(), key=lambda k: -len(pw_summary[k]))[:3]
@@ -1678,8 +1671,6 @@ def _generate_legends(
                 f"{active_count} PTMs with higher measured abundance, {inhibited_count} PTMs with lower measured abundance, "
                 f"{non_ptm_count} Non-PTM proteins, {edge_count} context edges. "
             )
-            if top_str:
-                panel_legend += f"Largest positive measured contrasts: {top_str}. "
             if top_pw:
                 panel_legend += f"Descriptive pathway-membership context: {', '.join(top_pw)}."
 
@@ -2979,31 +2970,6 @@ def generate_network_figure_section(
                     f"**{stats.get('non_ptm_count', 0)} Non-PTM proteins**, "
                     f"and **{stats.get('total_edge_count', 0)} edges**.\n\n"
                 )
-
-        # Top activated PTMs for this panel
-        if label in timepoint_results:
-            tp_data = timepoint_results[label]
-            top_active = sorted(
-                tp_data.get("active_ptm_nodes", []),
-                key=lambda x: -x.get("value", 0)
-            )[:5]
-            if top_active:
-                top_str = "; ".join(
-                    f"{n.get('gene', '?')}({n.get('site', '')}): Log2FC={n.get('value', 0):.2f}"
-                    for n in top_active
-                )
-                fig_block += f"**Top Activated PTMs**: {top_str}\n\n"
-
-            top_inhib = sorted(
-                tp_data.get("inhibited_ptm_nodes", []),
-                key=lambda x: x.get("value", 0)
-            )[:5]
-            if top_inhib:
-                top_str = "; ".join(
-                    f"{n.get('gene', '?')}({n.get('site', '')}): Log2FC={n.get('value', 0):.2f}"
-                    for n in top_inhib
-                )
-                fig_block += f"**Top Inhibited PTMs**: {top_str}\n\n"
 
         fig_block += "---\n\n"
 

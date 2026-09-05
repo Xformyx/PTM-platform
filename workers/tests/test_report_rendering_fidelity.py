@@ -295,6 +295,44 @@ def test_postprocessor_removes_unpersisted_per_wave_biological_process_column():
     assert "no persisted per-Wave enrichment" in processed
 
 
+def test_postprocessor_removes_unpersisted_cowave_functional_context_column():
+    text = (
+        "| Co-Wave | Peak Time | Temporal Pattern | Potential Functional Context (based on members) |\n"
+        "|---|---|---|---|\n"
+        "| TW-05 | 5 min | transient_burst | Proximal signaling, RNA processing |\n"
+    )
+    processed = ReportPostProcessor().process(text)
+    assert "Potential Functional Context" not in processed
+    assert "Proximal signaling, RNA processing" not in processed
+    assert "Membership interpretation boundary" in processed
+    assert "not assigned (no persisted per-Wave enrichment)" in processed
+
+
+def test_postprocessor_enforces_actual_report_claim_and_contrast_boundaries():
+    text = (
+        "## Results\n\n"
+        "The pathway context diagram (Figure 4) places these candidate kinases downstream of inferred upstream receptors. "
+        "This high number of unique substrates provides strong, data-anchored evidence for a role for CSNK2 activity in the response. "
+        "These events, with their large fold-changes and involvement of key signaling nodes, likely represent critical steps in the propagation of the insulin signal in HIRc-B cells. "
+        "Ppp4r1 Log2FC=12.08 shows a PTM-driven hyperactivation pattern.\n\n"
+        "## Supplementary Figures\n\n"
+        "Panel A (1min): 272 PTMs with higher measured abundance, 65 PTMs with lower measured abundance, 293 context edges. "
+        "Largest positive measured contrasts: CFLAR(T231), SITE2(S20). "
+        "Descriptive pathway-membership context: Metabolic pathways.\n\n"
+        "Top higher measured PTM-abundance contrasts: CFLAR(T231): Log2FC=31.98\n"
+    )
+    processed = ReportPostProcessor().process(text)
+    assert "downstream of inferred upstream receptors" not in processed
+    assert "strong, data-anchored evidence for a role" not in processed
+    assert "critical steps in the propagation" not in processed
+    assert "PTM-driven hyperactivation" not in processed
+    assert "candidate footprint context" in processed
+    assert "measured contrasts at named sites" in processed
+    assert "Largest positive measured contrasts" not in processed
+    assert "Top higher measured PTM-abundance contrasts" not in processed
+    assert "CFLAR(T231)" not in processed
+
+
 def test_co_scientist_questions_do_not_presume_kinase_activation_or_wave_function():
     questions = _get_co_scientist_questions({
         "experimental_context": {"cell_type": "generic cells", "treatment": "compound X"},
