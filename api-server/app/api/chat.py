@@ -30,6 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
 from app.core.database import AsyncSessionLocal, get_db
+from app.core.json_files import load_json_first_value
 from app.dependencies import assert_not_viewer, get_current_user
 from app.models.chat_message import ChatMessage as ChatMessageDB  # DB model (renamed to avoid clash)
 from app.models.order import Order
@@ -195,8 +196,7 @@ def _load_enriched_ptm_summary(output_dir: Path, file_suffix: str) -> str:
     if not path.exists():
         return ""
     try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
+        data = load_json_first_value(path)
         if not data:
             return ""
 
@@ -1009,8 +1009,7 @@ async def get_chat_context_info(
     enriched_path = output_dir / f"enriched_ptm_data{file_suffix}.json"
     if enriched_path.exists():
         try:
-            with open(enriched_path, "r", encoding="utf-8") as f:
-                enriched_count = len(json.load(f))
+            enriched_count = len(load_json_first_value(enriched_path))
         except Exception:
             pass
 

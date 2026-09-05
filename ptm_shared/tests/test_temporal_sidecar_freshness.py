@@ -165,6 +165,8 @@ def test_api_can_preserve_validated_worker_sidecar_without_local_mount(tmp_path:
     path.write_text(json.dumps(artifact), encoding="utf-8")
     assert full_sidecar_has_validated_local_reference_bundles(artifact) is True
     assert load_preservable_local_reference_sidecar(path) == artifact
+    path.write_text(json.dumps(artifact) + "\n{\"partial\":", encoding="utf-8")
+    assert load_preservable_local_reference_sidecar(path) == artifact
     artifact["kinase_feature_evidence_ledger"]["relation_importer"]["relation_bundle_status"] = "not_evaluable"
     assert full_sidecar_has_validated_local_reference_bundles(artifact) is False
     artifact["kinase_feature_evidence_ledger"]["relation_importer"]["relation_bundle_status"] = "validated"

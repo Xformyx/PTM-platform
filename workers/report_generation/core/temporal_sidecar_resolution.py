@@ -8,13 +8,13 @@ analysis and the chained Report task, while also supporting report-only reruns.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from ptm_shared.temporal_sidecar_freshness import (
     compact_dynamic_is_current,
     full_dynamic_is_current,
+    load_sidecar_json,
 )
 
 
@@ -63,8 +63,7 @@ def resolve_report_temporal_sidecar(
         if not path.exists():
             continue
         try:
-            with path.open("r", encoding="utf-8") as artifact_file:
-                full_sidecar = json.load(artifact_file)
+            full_sidecar = load_sidecar_json(path)
             if not isinstance(full_sidecar, Mapping):
                 raise ValueError("full sidecar artifact must contain a JSON object")
             if not full_dynamic_is_current(full_sidecar):
@@ -91,8 +90,11 @@ def select_report_heatmap(
     sidecar_source: str,
 ) -> dict[str, Any]:
     """Select a heatmap paired with the resolved sidecar whenever possible."""
+    prefer_config = sidecar_source.startswith("chained_report_config.") or sidecar_source.startswith(
+        "production_artifact:"
+    )
     if (
-        sidecar_source.startswith("chained_report_config.")
+        prefer_config
         and isinstance(config_kinase_activity_heatmap, Mapping)
         and config_kinase_activity_heatmap
     ):

@@ -752,6 +752,9 @@ def _auto_run_global_analysis(order_id: int, enriched_data: list, config: dict, 
                         or os.getenv("PTM_RELATION_SNAPSHOT_ROOT")
                     ),
                 )
+                from common.run_control import abort_if_superseded as _abort_sidecar
+
+                _abort_sidecar(order_id)
                 temporal_path = temporal_output_dir / "temporal_ptm_protein_analysis_v2.json"
                 atomic_write_json(
                     temporal_path,
@@ -772,6 +775,10 @@ def _auto_run_global_analysis(order_id: int, enriched_data: list, config: dict, 
                     "Canonical Wave, TMM and PTM–protein dynamic sidecar completed",
                 )
             except Exception as temporal_sidecar_error:
+                from common.run_control import RunSuperseded as _SidecarSuperseded
+
+                if isinstance(temporal_sidecar_error, _SidecarSuperseded):
+                    raise
                 logger.warning(
                     "[Order %s] Automatic shared temporal PTM–protein analysis failed (non-fatal): %s",
                     order_id,
@@ -789,8 +796,21 @@ def _auto_run_global_analysis(order_id: int, enriched_data: list, config: dict, 
         kinase_result["temporal_ptm_protein_analysis"] = dict(temporal_sidecar_summary)
 
         # Persist to DB
+        import math as _math
         from common.db_engine import get_engine as _get_engine
+        from common.run_control import abort_if_superseded as _abort_heatmap_db
         from sqlalchemy import text as _text
+
+        def _sanitize_mysql_json(obj):
+            if isinstance(obj, float):
+                return None if not _math.isfinite(obj) else obj
+            if isinstance(obj, dict):
+                return {key: _sanitize_mysql_json(value) for key, value in obj.items()}
+            if isinstance(obj, list):
+                return [_sanitize_mysql_json(value) for value in obj]
+            return obj
+
+        _abort_heatmap_db(order_id)
         _engine = _get_engine()
         with _engine.connect() as _conn:
             _conn.execute(
@@ -800,8 +820,8 @@ def _auto_run_global_analysis(order_id: int, enriched_data: list, config: dict, 
                 ),
                 {
                     "oid": order_id,
-                    "kad": json.dumps(kinase_result, default=str),
-                    "kah": json.dumps(heatmap_data, default=str),
+                    "kad": json.dumps(_sanitize_mysql_json(kinase_result), default=str),
+                    "kah": json.dumps(_sanitize_mysql_json(heatmap_data), default=str),
                 },
             )
             _conn.commit()
@@ -843,6 +863,10 @@ def _auto_run_global_analysis(order_id: int, enriched_data: list, config: dict, 
             "receptor_inference_data": receptor_inference_result,
         }
     except Exception as e:
+        from common.run_control import RunSuperseded as _RunSuperseded
+
+        if isinstance(e, _RunSuperseded):
+            raise
         logger.warning(f"[Order {order_id}] Auto global analysis failed (non-fatal): {e}")
         import traceback as _tb
         logger.warning(f"[Order {order_id}] Traceback: {_tb.format_exc()}")
@@ -1937,7 +1961,13 @@ def run_rag_enrichment(self, order_id: int, config: dict):
           'all'              : all PTMs (no limit)
       - top_n_ptms: int                 (default 50 — used only when mode is 'top_n')
     """
-    from common.run_control import RunSuperseded, bind_run_generation, bound_run_is_stale, is_stale_generation
+    from common.run_control import (
+        RunSuperseded,
+        abort_if_superseded,
+        bind_run_generation,
+        bound_run_is_stale,
+        is_stale_generation,
+    )
 
     bind_run_generation(order_id, config.get("run_generation"))
     if is_stale_generation(order_id, config.get("run_generation")):
@@ -2297,10 +2327,15 @@ def run_rag_enrichment(self, order_id: int, config: dict):
         # Stop the poller once the pipeline finishes (normal or early exit).
         cancel_event.set()
 
-        # Do not continue to MD report / webhooks / chain if the user cancelled (cancel_event is always set here).
-        if get_order_status(order_id) == "cancelled":
+        # Do not continue to MD report / webhooks / chain if the user cancelled
+        # or a newer start/run-stage replaced this generation. cancel_event is
+        # always set above, so status/generation must be checked explicitly.
+        if get_order_status(order_id) == "cancelled" or is_stale_generation(
+            order_id, config.get("run_generation")
+        ):
             logger.info(
-                f"[Order {order_id}] RAG enrichment stopped by user — skipping MD report, finalization, and chain"
+                f"[Order {order_id}] RAG enrichment stopped — superseded or cancelled; "
+                "skipping MD report, finalization, and chain"
             )
             try:
                 mcp.close()
@@ -2312,6 +2347,8 @@ def run_rag_enrichment(self, order_id: int, config: dict):
                 "elapsed_seconds": round(time.time() - start_time, 1),
                 "message": "Stopped by user",
             }
+
+        abort_if_superseded(order_id)
 
         # Save enriched data as JSON
         enriched_json_path = order_output / f"enriched_ptm_data{file_suffix}.json"
@@ -2430,6 +2467,7 @@ def run_rag_enrichment(self, order_id: int, config: dict):
                 )
 
                 # Save secondary enriched JSON
+                abort_if_superseded(order_id)
                 secondary_enriched_json_path = order_output / f"enriched_ptm_data{secondary_file_suffix}.json"
                 atomic_write_json(secondary_enriched_json_path, sec_enriched, indent=2)
                 logger.info(f"[Order {order_id}] Saved secondary enriched data: {secondary_enriched_json_path.name}")
@@ -2461,23 +2499,6 @@ def run_rag_enrichment(self, order_id: int, config: dict):
                 publish_progress(order_id, "rag_enrichment", "secondary_enrichment", "skipped", 95,
                                 "Secondary PTM vector file not found — skipping secondary enrichment")
 
-        # ================================================================
-        # Step 4: Finalization (95% – 100%)
-        # ================================================================
-        elapsed = round(time.time() - start_time, 1)
-        output_files = [f.name for f in order_output.iterdir() if f.suffix in (".json", ".md")]
-
-        publish_progress(
-            order_id, "rag_enrichment", "finalization", "completed", 100,
-            f"RAG enrichment complete ({elapsed}s, {len(output_files)} files)",
-            metadata={"output_files": output_files, "elapsed_seconds": elapsed,
-                      "ptms_enriched": len(enriched_ptms)},
-        )
-
-        logger.info(f"[Order {order_id}] RAG enrichment completed in {elapsed}s")
-        send_step_webhook(order_id, "rag_enrichment", "completed")
-        mcp.close()
-
         # Chain to Stage 3: Report Generation
         report_config = {
             "order_code": order_code,
@@ -2507,6 +2528,7 @@ def run_rag_enrichment(self, order_id: int, config: dict):
             report_config["secondary_output_dir"] = str(order_output / "secondary_ptm") if (order_output / "secondary_ptm").exists() else str(order_output)
             logger.info(f"[Order {order_id}] Cross-Talk report_config: secondary_enriched={secondary_enriched_json_path}, secondary_md={secondary_md_path_out}")
         # ── v9.44: Auto-run Global Annotate + Upstream Inference before Report Gen ──
+        abort_if_superseded(order_id)
         _auto_analysis_data = _auto_run_global_analysis(order_id, enriched_ptms, config, mcp_client=mcp)
         if _auto_analysis_data:
             report_config["kinase_analysis_data"] = _auto_analysis_data.get("kinase_analysis_data", {})
@@ -2521,8 +2543,44 @@ def run_rag_enrichment(self, order_id: int, config: dict):
                 )
             logger.info(f"[Order {order_id}] Auto global analysis completed — kinase modules + heatmap + receptors cached")
 
+        # Finalize after sidecar/heatmap so MCP is still open during auto-analysis
+        # and progress does not rewind from 100% back to 92–95.
+        elapsed = round(time.time() - start_time, 1)
+        output_files = [f.name for f in order_output.iterdir() if f.suffix in (".json", ".md")]
+
+        publish_progress(
+            order_id, "rag_enrichment", "finalization", "completed", 100,
+            f"RAG enrichment complete ({elapsed}s, {len(output_files)} files)",
+            metadata={"output_files": output_files, "elapsed_seconds": elapsed,
+                      "ptms_enriched": len(enriched_ptms)},
+        )
+
+        logger.info(f"[Order {order_id}] RAG enrichment completed in {elapsed}s")
+        send_step_webhook(order_id, "rag_enrichment", "completed")
+        mcp.close()
+
         _status_before_chain = get_order_status(order_id)
-        if config.get("chain_to_next", True) and _status_before_chain == "rag_enrichment":
+        _chain_sidecar = (
+            ((_auto_analysis_data or {}).get("kinase_activity_heatmap") or {}).get(
+                "temporal_ptm_protein_analysis"
+            )
+            or {}
+        )
+        _sidecar_ready = (
+            isinstance(_chain_sidecar, dict)
+            and _chain_sidecar.get("status") != "unavailable"
+            and bool(_chain_sidecar.get("full_artifact_available"))
+        )
+        if config.get("chain_to_next", True) and not _sidecar_ready:
+            raise RuntimeError(
+                "canonical temporal sidecar was not produced; Report generation was stopped "
+                "to prevent an empty evidence packet"
+            )
+        if (
+            config.get("chain_to_next", True)
+            and _status_before_chain == "rag_enrichment"
+            and not is_stale_generation(order_id, config.get("run_generation"))
+        ):
             report_task = app.send_task(
                 "report_generation.tasks.run_report_generation",
                 args=[order_id, report_config],
@@ -2625,7 +2683,9 @@ def prepare_temporal_evidence_for_report(self, order_id: int, config: dict):
             raise RuntimeError(
                 "canonical temporal sidecar was not produced; Report generation was stopped to prevent an empty evidence packet"
             )
-        if get_order_status(order_id) != "rag_enrichment":
+        if get_order_status(order_id) != "rag_enrichment" or is_stale_generation(
+            order_id, config.get("run_generation")
+        ):
             raise RunSuperseded("order status changed before Report dispatch")
 
         report_config = dict(config)

@@ -50,7 +50,7 @@ def audit_report_temporal_fidelity(
 
     section_plan = dict(packet.get("section_plan") or {})
     mechanism_context_allowed = bool(section_plan.get("mechanism_context_allowed"))
-    observation_only_claim_ceiling = bool(section_plan.get("observation_only_claim_ceiling", True))
+    observation_only_claim_ceiling = bool(section_plan.get("observation_only_claim_ceiling", False))
     unsafe_claims: list[str] = []
     for sentence in re.split(r"(?<=[.!?])\s+", draft_text or ""):
         has_direct_edge_claim = bool(_DIRECT_EDGE_CLAIM.search(sentence))

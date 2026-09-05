@@ -46,6 +46,12 @@ def run_editor(state: dict) -> dict:
         ptm_type = state.get("ptm_type", "phosphorylation")
         report = _compile_report(title, sections, hypotheses, network_analysis, context, questions, dr_results, collected_references, ptm_type=ptm_type)
 
+    order_id = state.get("order_id")
+    if order_id:
+        from common.run_control import abort_if_superseded
+
+        abort_if_superseded(int(order_id))
+
     # Save report: [Order_name]_report_[YYMMDD_HHMM].md
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)

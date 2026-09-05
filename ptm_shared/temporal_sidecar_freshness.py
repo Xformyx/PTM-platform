@@ -9,9 +9,12 @@ by another.
 from __future__ import annotations
 
 import json
+import logging
 import os
 from pathlib import Path
 from typing import Any, Mapping
+
+logger = logging.getLogger("ptm_shared.temporal_sidecar_freshness")
 
 from ptm_shared.dynamic_cowave_transition import dynamic_transition_config_sha256
 from ptm_shared.temporal_optimization_config import (
@@ -111,13 +114,34 @@ def full_sidecar_has_validated_local_reference_bundles(full_sidecar: Mapping[str
     )
 
 
+def load_sidecar_json(path: Path) -> Any:
+    """Load the first complete JSON value from a sidecar artifact.
+
+    Concurrent writers can leave a valid document plus a trailing Extra data
+    fragment. ``json.loads`` then fails and the API treats a validated P1/P2
+    artifact as missing, which triggers an M0/R0 rebuild.
+    """
+    text = path.read_text(encoding="utf-8")
+    obj, end = json.JSONDecoder().raw_decode(text)
+    leftover = text[end:].strip()
+    if leftover:
+        logger.warning(
+            "Ignoring trailing Extra data in %s after first JSON value "
+            "(end=%s leftover_chars=%s)",
+            path.name,
+            end,
+            len(leftover),
+        )
+    return obj
+
+
 def load_preservable_local_reference_sidecar(artifact_path: Path) -> dict[str, Any] | None:
     """Load a validated P1/P2 full artifact without triggering reconstruction."""
 
     if not artifact_path.is_file():
         return None
     try:
-        payload = json.loads(artifact_path.read_text(encoding="utf-8"))
+        payload = load_sidecar_json(artifact_path)
     except (OSError, ValueError, TypeError):
         return None
     if isinstance(payload, Mapping) and full_sidecar_has_validated_local_reference_bundles(payload):
@@ -204,7 +228,7 @@ def evaluate_temporal_evidence_readiness(
     unreadable_error: str | None = None
     if artifact_path.is_file():
         try:
-            artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+            artifact = load_sidecar_json(artifact_path)
             if isinstance(artifact, Mapping) and full_dynamic_is_current(artifact):
                 dynamic = artifact.get("dynamic_co_wave_transition") or {}
                 return {

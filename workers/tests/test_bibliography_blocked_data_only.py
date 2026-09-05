@@ -50,3 +50,39 @@ def test_bibliography_blocked_report_retains_compact_order_evidence_without_llm_
     assert "Known pathway function" not in report
     assert "## Results" in report
     assert "## Methods" in report
+
+
+def test_observation_only_title_identity_keeps_narrative():
+    result = format_citations({
+        "sections": {
+            "title": "Insulin context",
+            "results": "SHOULD BE REPLACED by observation-only composer",
+        },
+        "network_analysis": {},
+        "signal_flow_figures": [],
+        "collected_references": [{
+            "authors": "Smith A",
+            "title": "Insulin receptor signaling",
+            "journal": "Nature",
+            "year": "2020",
+            "chromadb_ref": True,
+        }],
+        "temporal_report_evidence_packet": {
+            "section_plan": {"observation_only_claim_ceiling": True},
+            "records": [
+                {
+                    "evidence_id": "DATA-TEMPORAL-SUMMARY",
+                    "text": "Three timepoints were quantified.",
+                },
+            ],
+        },
+        "biological_synthesis_packet": {},
+        "kinase_activity_heatmap": {},
+    })
+    report = result["final_report"]
+    assert result["citation_data"].get("data_only_review_mode") is not True
+    assert result["citation_data"]["completion_status"] == "complete"
+    assert "SHOULD BE REPLACED" not in report
+    assert "Three timepoints were quantified" in report
+    assert "Insulin receptor signaling" in report
+    assert "## Citation Integrity Gate" not in report

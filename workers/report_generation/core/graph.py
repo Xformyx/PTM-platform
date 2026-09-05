@@ -13,6 +13,7 @@ Each node reads/writes to a shared TypedDict state.
 """
 
 import logging
+import re
 from typing import Any, Dict, List, Optional, TypedDict
 
 from langgraph.graph import END, StateGraph
@@ -478,7 +479,12 @@ def _traceable_reference_markers(collected_references: List[dict], limit: int = 
             continue
         pmid = str(reference.get("pmid") or "").strip().lower()
         doi = str(reference.get("doi") or "").strip().lower()
-        marker = f"[REF:pmid:{pmid}]" if pmid else (f"[REF:doi:{doi}]" if doi else "")
+        title_key = re.sub(r"[^a-z0-9]", "", str(reference.get("title") or "").lower())[:120]
+        marker = (
+            f"[REF:pmid:{pmid}]"
+            if pmid
+            else (f"[REF:doi:{doi}]" if doi else (f"[REF:title:{title_key}]" if title_key else ""))
+        )
         if marker and marker not in markers:
             markers.append(marker)
         if len(markers) >= limit:
@@ -1046,6 +1052,18 @@ def format_citations(state: ReportState) -> dict:
 
     all_text = _re.sub(r"\[REF:([^\]]+)\]", _resolve_marker, all_text)
     resolved_refs = [reference_by_key[key] for key in cited_keys]
+
+    # Observation-only composer emits [REF:pmid|doi|title:…] markers. Title-only
+    # bibliographic identities used to produce no markers, so this gate wiped a
+    # valid deterministic narrative even when authors+year+journal were present.
+    # Keep that narrative and attach the bibliographic collection instead.
+    if not resolved_refs and deterministic_observation_only and ref_objects:
+        logger.info(
+            "[FORMAT-CIT] Observation-only report kept; attaching %d bibliographic "
+            "identities without resolved inline markers",
+            len(ref_objects),
+        )
+        resolved_refs = list(ref_objects)
 
     # Build the ## References section strictly from successfully resolved
     # collection-local or PubMed references.  This prevents an untraceable

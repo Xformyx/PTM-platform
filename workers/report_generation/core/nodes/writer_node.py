@@ -92,7 +92,7 @@ def _build_observation_only_claim_ceiling(
     plan = dict(section_plan or {})
     if section not in {"abstract", "results", "discussion", "conclusion", "research_question_answers"}:
         return ""
-    if not bool(plan.get("observation_only_claim_ceiling", True)):
+    if not bool(plan.get("observation_only_claim_ceiling", False)):
         return ""
     return (
         "=== MANDATORY CURRENT-ORDER CLAIM CEILING (OVERRIDES ALL EARLIER CASCADE EXAMPLES) ===\n"
@@ -150,16 +150,16 @@ def _get_budget_multiplier(provider: str, model: str) -> float:
     if model_lower in _MODEL_BUDGET_MULTIPLIERS:
         return _MODEL_BUDGET_MULTIPLIERS[model_lower]
     # Prefix match for versioned models
-        if provider == "gemini" or model_lower.startswith("gemini-"):
-            if "pro" in model_lower:
-                return 3.0
-            if "flash" in model_lower:
-                return 3.0
-            return 2.0
-        if provider == "openai" or model_lower.startswith("gpt-"):
-            if "mini" in model_lower:
-                return 1.5
+    if provider == "gemini" or model_lower.startswith("gemini-"):
+        if "pro" in model_lower:
             return 3.0
+        if "flash" in model_lower:
+            return 3.0
+        return 2.0
+    if provider == "openai" or model_lower.startswith("gpt-"):
+        if "mini" in model_lower:
+            return 1.5
+        return 3.0
     # Default for unknown local models
     return 1.0
 
@@ -414,13 +414,17 @@ def run_section_writing(state: dict) -> dict:
     packet_output_dir = state.get("output_dir")
     if packet_output_dir:
         try:
+            from common.json_files import atomic_write_json
+
             packet_path = Path(packet_output_dir) / "report_temporal_evidence_packet.json"
             temporal_evidence_packet["snapshot_path"] = str(packet_path)
-            packet_path.write_text(json.dumps(temporal_evidence_packet, indent=2, sort_keys=True), encoding="utf-8")
+            atomic_write_json(packet_path, temporal_evidence_packet, indent=2, sort_keys=True)
             biological_packet_path = Path(packet_output_dir) / "report_biological_synthesis_packet.json"
-            biological_packet_path.write_text(
-                json.dumps(biological_synthesis_packet, indent=2, sort_keys=True),
-                encoding="utf-8",
+            atomic_write_json(
+                biological_packet_path,
+                biological_synthesis_packet,
+                indent=2,
+                sort_keys=True,
             )
             logger.info("[report-evidence] Saved temporal numerical packet: %s", packet_path)
         except Exception as packet_error:

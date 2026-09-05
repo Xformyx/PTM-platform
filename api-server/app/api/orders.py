@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.core.database import get_db
+from app.core.json_files import atomic_write_json, load_json_first_value
 from app.core.redis import get_redis
 from app.core.webhook import send_order_webhook
 from app.dependencies import assert_not_viewer, get_current_user
@@ -76,6 +77,32 @@ async def _clear_celery_task_ids(order_id: int) -> None:
         _CELERY_TASK_KEY.format(order_id=order_id),
         _CELERY_TASKS_SET.format(order_id=order_id),
     )
+
+
+async def _revoke_known_celery_tasks(order_id: int, *, order_code: str | None = None) -> None:
+    """Terminate leftover Celery workers before a replacement start/run-stage.
+
+    Start and Run Stage used to delete Redis task ids without revoke. A still
+    running RAG dump could then append Extra data onto the next run's JSON.
+    Cancel already revoked; dispatch must do the same before clearing ids.
+    """
+    task_ids = await _get_celery_task_ids(order_id)
+    if not task_ids:
+        return
+    try:
+        from celery import Celery as _Celery
+
+        _capp = _Celery("ptm_workers")
+        _capp.conf.broker_url = os.getenv("CELERY_BROKER_URL", "redis://redis:6379/1")
+        for task_id in task_ids:
+            _capp.control.revoke(task_id, terminate=True, signal="SIGTERM")
+        logger.info("Revoked prior Celery tasks for order %s: %s", order_code or order_id, task_ids)
+    except Exception as exc:
+        logger.warning(
+            "Could not revoke prior Celery tasks for order %s: %s",
+            order_code or order_id,
+            exc,
+        )
 
 
 async def _bump_run_generation(order_id: int) -> int:
@@ -576,6 +603,7 @@ async def _claim_order_dispatch(
     claimed = (result.rowcount or 0) > 0
     if not claimed:
         return False
+    await _revoke_known_celery_tasks(order_id)
     await _clear_celery_task_ids(order_id)
     return True
 
@@ -1467,6 +1495,15 @@ async def run_stage(
             detail=f"Output directory not found for {order.order_code}. Run full analysis first.",
         )
 
+    if body.stage == "report_generation":
+        _pre_suffix = "_phospho" if order.ptm_type == "phosphorylation" else "_ubi"
+        _pre_enriched = order_output / f"enriched_ptm_data{_pre_suffix}.json"
+        if not _pre_enriched.exists() and not any(order_output.glob("enriched_ptm_data*.json")):
+            raise HTTPException(
+                status_code=400,
+                detail="enriched_ptm_data JSON not found. Run RAG Enrichment first.",
+            )
+
     temporal_evidence_readiness = _temporal_evidence_readiness(order, order_output)
     temporal_preparation_required = (
         body.stage == "report_generation"
@@ -1700,10 +1737,12 @@ async def run_stage(
     )
     db.add(db_log)
     await db.commit()
+    await db.refresh(order)
 
     return {
         "order_code": order.order_code,
-        "status": "queued",
+        "status": order.status,
+        "current_stage": order.current_stage,
         "stage": "temporal_evidence_preparation" if temporal_preparation_required else body.stage,
         "task_id": task.id,
         "chromadb_collections": active_collections,
@@ -1745,18 +1784,8 @@ async def cancel_order(
     await _clear_order_locks(order_id)
 
     # Revoke every known Celery task in the chain (preprocessing → RAG → report).
-    task_ids = await _get_celery_task_ids(order_id)
-    if task_ids:
-        try:
-            from celery import Celery as _Celery
-            _capp = _Celery("ptm_workers")
-            _capp.conf.broker_url = os.getenv("CELERY_BROKER_URL", "redis://redis:6379/1")
-            for task_id in task_ids:
-                _capp.control.revoke(task_id, terminate=True, signal="SIGTERM")
-            logger.info(f"Order {order.order_code} Celery tasks revoked: {task_ids}")
-        except Exception as exc:
-            logger.warning(f"Order {order.order_code} — could not revoke tasks {task_ids}: {exc}")
-        await _clear_celery_task_ids(order_id)
+    await _revoke_known_celery_tasks(order.id, order_code=order.order_code)
+    await _clear_celery_task_ids(order.id)
 
     logger.info(f"Order {order.order_code} cancelled (stopped)")
 
@@ -2531,11 +2560,9 @@ async def get_vector_plot_data(
     ptm_type_str = (order.ptm_type or "phosphorylation").lower().strip()
 
     if enriched_path.exists():
-        import json as _json
         from ptm_shared.temporal_contract import resolve_temporal_contract as _resolve_tc
         show_p1_ui = _resolve_tc(order.report_options or {}).show_p1_ui
-        with open(enriched_path, "r", encoding="utf-8") as f:
-            enriched = _json.load(f)
+        enriched = load_json_first_value(enriched_path)
         seen = set()
         for ptm in enriched:
             gene = ptm.get("gene") or ptm.get("Gene.Name", "")
@@ -4555,8 +4582,7 @@ async def get_order_articles(
             continue
 
         try:
-            with open(enriched_path, "r", encoding="utf-8") as f:
-                enriched_ptms = _json.load(f)
+            enriched_ptms = load_json_first_value(enriched_path)
         except Exception:
             continue
         if isinstance(enriched_ptms, dict):
@@ -4734,8 +4760,7 @@ async def kinase_enrichment(
 
     if enriched_path.exists():
         try:
-            with open(enriched_path, "r", encoding="utf-8") as f:
-                enriched = _json.load(f)
+            enriched = load_json_first_value(enriched_path)
             gene_set = set(g.upper() for g in genes)
             for ptm in enriched:
                 gene = ptm.get("gene") or ptm.get("Gene.Name", "")
@@ -5089,8 +5114,7 @@ async def motif_kinase_annotation(
     _log.warning(f"[ANNOTATION DEBUG] enriched_path={enriched_path}, exists={enriched_path.exists()}")
     if enriched_path.exists():
         try:
-            with open(enriched_path, "r", encoding="utf-8") as f:
-                enriched = _json.load(f)
+            enriched = load_json_first_value(enriched_path)
             _log.warning(f"[ANNOTATION DEBUG] Loaded {len(enriched)} entries from enriched JSON")
             for ptm_entry in enriched:
                 gene = ptm_entry.get("gene") or ptm_entry.get("Gene.Name", "")
@@ -7046,9 +7070,7 @@ async def global_kinase_modules(
         enriched_path = output_dir / f"enriched_ptm_data{file_suffix}.json"
         _substrate_to_partners: dict = {}  # substrate_gene_upper -> [{partner, source, score}]
         if enriched_path.exists():
-            import json as _json2
-            with open(enriched_path, "r", encoding="utf-8") as _ef:
-                enriched_list = _json2.load(_ef)
+            enriched_list = load_json_first_value(enriched_path)
             for ptm_item in enriched_list:
                 gene = (ptm_item.get("gene") or ptm_item.get("Gene.Name", "")).strip()
                 gene_upper = gene.upper()
@@ -7572,7 +7594,9 @@ async def kinase_activity_heatmap(
         cached_contract = cached.get("temporal_contract", "dynamics_v1")
         if same_temporal_arm(cached_contract, temporal.name):
             cached_sidecar = cached.get("temporal_ptm_protein_analysis") or {}
-            cached_dynamic_config_sha = (
+            cached_dynamic_config_sha = cached_sidecar.get(
+                "dynamic_co_wave_transition_config_sha256"
+            ) or (
                 (cached_sidecar.get("provenance") or {})
                 .get("dynamic_co_wave_transition", {})
                 .get("config_sha256")
@@ -9449,9 +9473,12 @@ async def kinase_activity_heatmap(
                 relation_source_bundle_path=os.getenv("PTM_RELATION_SOURCE_BUNDLE_PATH"),
                 relation_snapshot_root=os.getenv("PTM_RELATION_SNAPSHOT_ROOT"),
             )
-            unified_path.write_text(
-                json.dumps(unified_sidecar, ensure_ascii=False, sort_keys=True),
-                encoding="utf-8",
+            atomic_write_json(
+                unified_path,
+                unified_sidecar,
+                sort_keys=True,
+                default=None,
+                ensure_ascii=False,
             )
         temporal_compact = summarize_temporal_ptm_protein_analysis(
             unified_sidecar,
@@ -10031,8 +10058,7 @@ async def substrate_temporal_atlas(
     # Run with LOTO disabled for API; loto_pattern_stability will be None in the response.
     cfg = SiteKineticConfig(run_loto=False, run_threshold_sensitivity=False)
 
-    with open(enriched_path, "r", encoding="utf-8") as f:
-        enriched_payload = _json.load(f)
+    enriched_payload = load_json_first_value(enriched_path)
     enriched = atlas_records(enriched_payload)
     compatibility_warnings: list[dict] = []
     if not enriched:

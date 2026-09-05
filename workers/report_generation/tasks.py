@@ -315,7 +315,12 @@ def run_report_generation(self, order_id: int, config: dict):
       - llm_model: str                (default from env)
       - report_title: str
     """
-    from common.run_control import RunSuperseded, bind_run_generation, is_stale_generation
+    from common.run_control import (
+        RunSuperseded,
+        abort_if_superseded,
+        bind_run_generation,
+        is_stale_generation,
+    )
 
     bind_run_generation(order_id, config.get("run_generation"))
     if is_stale_generation(order_id, config.get("run_generation")):
@@ -324,7 +329,22 @@ def run_report_generation(self, order_id: int, config: dict):
 
     lock_key = f"report_gen_lock:{order_id}"
     lock_client = _redis.from_url(_REDIS_URL, decode_responses=True)
-    acquired = lock_client.set(lock_key, "1", nx=True, ex=14400)  # 4-hour TTL
+    lock_token = str(
+        config.get("run_generation")
+        if config.get("run_generation") is not None
+        else getattr(getattr(self, "request", None), "id", None)
+        or "1"
+    )
+
+    def _release_own_lock() -> None:
+        """Do not delete a lock that a newer run-stage already re-acquired."""
+        try:
+            if lock_client.get(lock_key) == lock_token:
+                lock_client.delete(lock_key)
+        except Exception:
+            pass
+
+    acquired = lock_client.set(lock_key, lock_token, nx=True, ex=14400)  # 4-hour TTL
     if not acquired:
         logger.warning(
             f"[Order {order_id}] Report generation already running (lock exists). "
@@ -343,10 +363,7 @@ def run_report_generation(self, order_id: int, config: dict):
     # cancelled / preprocessing / None = stale task; must not overwrite state.
     _allowed_start_statuses = {"rag_enrichment", "completed", "failed", "report_generation"}
     if _current_status not in _allowed_start_statuses:
-        try:
-            lock_client.delete(lock_key)
-        except Exception:
-            pass
+        _release_own_lock()
         logger.info(
             f"[Order {order_id}] Report generation skipped — "
             f"unexpected status: {_current_status!r} (expected one of {_allowed_start_statuses})"
@@ -553,10 +570,13 @@ def run_report_generation(self, order_id: int, config: dict):
             config_kinase_activity_heatmap=config_kinase_activity_heatmap,
             sidecar_source=_temporal_sidecar_source,
         )
-        if _temporal_sidecar_source.startswith("chained_report_config."):
+        if _temporal_sidecar_source.startswith("chained_report_config.") or _temporal_sidecar_source.startswith(
+            "production_artifact:"
+        ):
             logger.info(
-                "[Order %s] Using chained report-config heatmap paired with temporal sidecar",
+                "[Order %s] Using paired heatmap for temporal sidecar from %s",
                 order_id,
+                _temporal_sidecar_source or "unknown",
             )
 
         # v11.5f: Fallback — use receptor_inference_data from report_config if DB is empty
@@ -765,16 +785,23 @@ def run_report_generation(self, order_id: int, config: dict):
         except RuntimeError:
             raise  # Re-raise our own pre-flight errors
         except Exception as preflight_err:
-            # Non-critical: if the pre-flight check itself fails (e.g., import error),
-            # log a warning but allow the pipeline to proceed
-            logger.warning(f"[Order {order_id}] LLM pre-flight check could not be performed: {preflight_err}")
+            error_msg = f"LLM pre-flight check could not be performed: {preflight_err}"
+            logger.error(f"[Order {order_id}] {error_msg}", exc_info=True)
+            update_order_status(order_id, "failed", error_message=error_msg)
+            notify_order_status(order_id, "failed", error_msg)
+            publish_progress(
+                order_id, "report_generation", "llm_preflight", "failed", -1, error_msg,
+            )
+            raise RuntimeError(error_msg) from preflight_err
 
         # Execute LangGraph pipeline
         publish_progress(order_id, "report_generation", "graph", "started", 2, "Executing LangGraph pipeline")
 
         from report_generation.core.graph import build_report_graph
+        abort_if_superseded(order_id)
         graph = build_report_graph()
         final_state = graph.invoke(initial_state)
+        abort_if_superseded(order_id)
 
         # v11.8: Save TF inference data to signal_propagation_data (append tf_inferences key)
         _tf_inf = final_state.get("tf_inference_data") or {}
@@ -1112,7 +1139,4 @@ def run_report_generation(self, order_id: int, config: dict):
         )
         raise
     finally:
-        try:
-            lock_client.delete(lock_key)
-        except Exception:
-            pass
+        _release_own_lock()

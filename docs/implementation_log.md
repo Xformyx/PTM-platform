@@ -2514,3 +2514,59 @@
   kinase 귀속·전달 가능성과 무관하다.
 - **결정성:** 결정적. 첫 `raw_decode` 종료 오프셋에서 자른다.
 
+### [2026-09-05] 최근 파이프라인 재실행 경쟁·citation 게이트 정정
+
+- **분류:** 정정
+- **대상:**
+  - `api-server/app/api/orders.py` — Start/Run Stage에서 잔여 Celery revoke
+  - `workers/rag_enrichment/tasks.py`, `workers/report_generation/tasks.py`,
+    `workers/report_generation/core/nodes/editor_node.py` — 산출 쓰기 직전 abort
+  - `workers/report_generation/core/graph.py` — observation-only title identity
+  - `api-server/app/core/json_files.py` — API Extra data 내성
+- **구현 대상 설계:** 해당 없음 (실행 게이트·산출물 I/O·bibliography identity.
+  측정 상수·임계 변경 없음)
+- **사전등록 상태:** 해당 없음
+- **내용:** Start/Run Stage가 Redis task id만 지우고 revoke하지 않아 이전 RAG
+  writer가 다음 산출 JSON에 Extra data를 붙일 수 있었다. 교체 dispatch는
+  revoke 후 id를 지운다. stale/cancel 워커는 enriched JSON·sidecar·report
+  markdown 쓰기 직전에 중단한다. report lock은 generation token으로만 해제해
+  종료된 이전 워커가 새 lock을 지우지 않는다. observation-only 보고서는
+  pmid/doi가 없는 title identity도 `[REF:title:…]`로 남기고, 인라인 marker가
+  비어도 bibliographic collection이 있으면 data-only wipe를 하지 않는다.
+  API heatmap/atlas/chat은 첫 완전한 JSON 값만 읽는다. RAG는 sidecar/heatmap을
+  100% finalize·webhook·`mcp.close()` 이전에 돌려, 닫힌 MCP로 분석을 하거나
+  진행률이 100에서 92로 되감기지 않게 한다. heatmap API sidecar 쓰기도
+  temp+replace다.
+- **논문에서의 용도:** 사용 안 함 (파이프라인 무결성·citation 게이트).
+  측정값·P0–P3 판정을 바꾸지 않는다.
+- **해석 한계:** revoke는 SIGTERM이며 즉시 SIGKILL을 보장하지 않는다.
+  bibliography 첨부는 문헌 컨텍스트 추적성이지 kinase 귀속이 아니다.
+- **결정성:** 결정적. Extra data는 첫 `raw_decode` 종료 오프셋. citation key는
+  pmid → doi → title[:120] 정규화 순서.
+
+### [2026-09-05] sidecar 보존·Report 체인 가드 후속 정정
+
+- **분류:** 정정
+- **대상:**
+  - `ptm_shared/temporal_sidecar_freshness.py` — Extra data 내성 로드
+  - `workers/report_generation/core/temporal_sidecar_resolution.py` — artifact
+    sidecar와 heatmap 페어링
+  - `workers/rag_enrichment/tasks.py` — stale 후 쓰기/체인 차단, NaN sanitize
+  - `workers/report_generation/core/nodes/writer_node.py` — observation-only
+    default, budget prefix, atomic packet write
+- **구현 대상 설계:** 해당 없음 (실행 게이트·산출물 I/O. 측정 상수 변경 없음)
+- **사전등록 상태:** 해당 없음
+- **내용:** 잔여 Extra data가 `json.loads`를 깨면 검증된 P1/P2 sidecar를
+  없는 것으로 보고 API가 M0/R0로 덮어쓸 수 있었다. 첫 값만 읽는다.
+  artifact에서 sidecar를 복구한 Report는 stale DB heatmap 대신 chained
+  config heatmap을 쓴다. RAG→Report 체인은 sidecar가 unavailable이거나
+  generation이 stale이면 중단한다. compact sidecar 캐시 SHA는 top-level
+  `dynamic_co_wave_transition_config_sha256`을 본다. writer와 fidelity의
+  observation-only default를 False로 맞춰 section_plan이 없을 때 ceiling을
+  임의로 켜지 않는다.
+- **논문에서의 용도:** 사용 안 함 (파이프라인 무결성)
+- **해석 한계:** sidecar 존재는 kinase 귀속이 아니다. cache SHA 정정은
+  재계산 여부를 바꿀 뿐 수치 정의를 바꾸지 않는다.
+- **결정성:** 결정적. Extra data는 첫 `raw_decode`. compact SHA 필드는
+  `dynamic_co_wave_transition_config_sha256`.
+

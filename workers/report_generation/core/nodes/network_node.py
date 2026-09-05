@@ -1877,7 +1877,8 @@ def _run_network_analysis_inner(state: dict) -> dict:
             cb(62, "Generating Cytoscape network images")
         # Phase 1/4: Generate networks with isolated node separation
         network_images = _generate_cytoscape_networks(
-            network_data, output_dir, parsed_ptms, timepoint_results
+            network_data, output_dir, parsed_ptms, timepoint_results,
+            progress_callback=cb,
         )
     else:
         logger.info("Cytoscape not available — using text-based legends only")
@@ -2028,6 +2029,7 @@ def _generate_cytoscape_networks(
     output_dir: str,
     parsed_ptms: list = None,
     timepoint_results: dict = None,
+    progress_callback=None,
 ) -> Dict[str, str]:
     """Generate Cytoscape network visualizations and export as PNG.
     
@@ -2104,9 +2106,15 @@ def _generate_cytoscape_networks(
 
         # --- Per-timepoint networks ---
         if timepoint_results:
-            for tp, tp_data in sorted(
+            tp_items = sorted(
                 timepoint_results.items(), key=lambda x: _tp_to_minutes(x[0])
-            ):
+            )
+            for tp_index, (tp, tp_data) in enumerate(tp_items, 1):
+                if progress_callback:
+                    progress_callback(
+                        62,
+                        f"Generating Cytoscape network images ({tp_index}/{len(tp_items)}: {tp})",
+                    )
                 tp_nodes = (
                     tp_data.get("active_ptm_nodes", []) +
                     tp_data.get("inhibited_ptm_nodes", []) +

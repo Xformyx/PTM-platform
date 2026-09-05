@@ -132,6 +132,30 @@ def test_full_production_artifact_recovers_report_only_rerun(tmp_path: Path) -> 
     assert diagnostics == []
 
 
+def test_artifact_sidecar_prefers_config_heatmap_over_stale_db() -> None:
+    selected = select_report_heatmap(
+        db_kinase_activity_heatmap={"marker": "stale_db"},
+        config_kinase_activity_heatmap={"marker": "fresh_config", "tmm_weighted_temporal_cascade": {}},
+        sidecar_source="production_artifact:temporal_ptm_protein_analysis_v2.json",
+    )
+    assert selected["marker"] == "fresh_config"
+
+
+def test_full_production_artifact_tolerates_trailing_extra_data(tmp_path: Path) -> None:
+    artifact = tmp_path / "temporal_ptm_protein_analysis_v2.json"
+    artifact.write_text(json.dumps(_full_sidecar()) + "\n{\"partial\":", encoding="utf-8")
+    compact, source, diagnostics = resolve_report_temporal_sidecar(
+        db_kinase_analysis_data={},
+        db_kinase_activity_heatmap={},
+        config_kinase_analysis_data={},
+        config_kinase_activity_heatmap={},
+        artifact_paths=(artifact,),
+    )
+    assert compact["full_artifact_available"] is True
+    assert source == "production_artifact:temporal_ptm_protein_analysis_v2.json"
+    assert diagnostics == []
+
+
 def test_chained_sidecar_selects_matching_config_heatmap() -> None:
     selected = select_report_heatmap(
         db_kinase_activity_heatmap={"marker": "stale_db"},
