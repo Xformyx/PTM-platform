@@ -22,32 +22,32 @@ QUESTION_GENERATION_PROMPT = """You are an expert PTM (Post-Translational Modifi
 ## CRITICAL INSTRUCTIONS
 1. **Read the input data carefully** - Extract experimental conditions, cell types, treatments, and time points from the markdown content
 2. **Reference specific PTMs** - Each question MUST mention at least one specific protein and modification site from the data
-3. **Be mechanistically precise** - Questions should probe specific molecular mechanisms, not general concepts
-4. **Consider temporal dynamics** - If time points exist (and this is NOT a single timepoint experiment), ask about the progression and transition of signaling states
+3. **Be evidence-specific** - Questions should distinguish measured observations from candidate context and from mechanisms requiring independent validation
+4. **Consider temporal profiles** - If time points exist (and this is NOT a single timepoint experiment), ask about sampled-timepoint changes and reproducibility without presupposing a causal sequence
 
 ## Question Categories (Generate diverse questions across these types)
 
 ### 1. temporal_pathway (Time-dependent pathway analysis)
-- Focus on: Which pathways are activated vs inhibited at each time point?
+- Focus on: Which pathway-membership contexts and higher/lower measured PTM-abundance patterns are observed at each time point?
 - **SKIP this category if single_time_point_note above is present**
 
 ### 2. ecm_context (Extracellular matrix and cell-matrix interactions)
 - Focus on: How do ECM components or cell adhesion affect signaling?
 
 ### 3. pathway_crosstalk (Inter-pathway communication)
-- Focus on: How do different signaling cascades interact or regulate each other?
+- Focus on: Which literature-linked pathway contexts can be compared with the observations, and which relationships remain hypotheses?
 
 ### 4. kinase_phosphatase (Enzyme-substrate relationships)
-- Focus on: Which {enzyme_type} drive the observed PTM changes?
+- Focus on: Which substrate-derived {enzyme_type} candidate contexts are observed, and what evidence is still required for direct attribution?
 
 ### 5. adaptation_mechanism (Functional consequences)
-- Focus on: How do PTM changes relate to cellular adaptation or phenotype?
+- Focus on: Which measured PTM/protein patterns motivate a bounded, testable adaptation hypothesis?
 
 ### 6. network (Systems-level analysis)
 - Focus on: Protein interaction networks and hub proteins
 
 ### 7. novelty (Unexpected findings)
-- Focus on: Unusual patterns or novel regulatory mechanisms
+- Focus on: Unusual observed patterns and the follow-up measurement needed before proposing a regulatory mechanism
 
 ## Input Data (Analyze this carefully)
 {markdown_content}
@@ -68,7 +68,7 @@ Generate exactly {max_questions} questions as a JSON array. Each question object
 - Each question mentions specific protein names and modification sites from the input data
 - Questions are diverse across at least 4 different categories
 - Rationales cite specific observations from the data
-- Questions are testable and mechanistically focused
+- Questions are testable, evidence-classed, and do not presuppose direct regulation, activity, pathway function, or causality
 - Confidence scores reflect actual data support
 
 Return ONLY the JSON array, no additional text or explanation."""
@@ -262,8 +262,8 @@ def _get_co_scientist_questions(state: dict) -> list:
         questions.append(bio_q)
     else:
         questions.append(
-            f"What is the overall biological significance of the observed {ptm_type} signaling pattern "
-            f"in {tissue} following {treatment}, and which testable biological hypotheses are supported without claiming direct regulation?"
+            f"Which measured {ptm_type} and protein-abundance patterns are observed in {tissue} following {treatment}, "
+            "which cited biological contexts are compatible with them, and which bounded hypotheses require independent validation?"
         )
     
     # Fallback: ensure at least 3 questions

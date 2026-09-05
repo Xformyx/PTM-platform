@@ -104,6 +104,44 @@ def test_postprocessor_lowers_legacy_network_caption_activation_labels():
     assert "SITE2" not in processed
 
 
+def test_final_gate_bounds_residual_1207_style_claims_in_narrative_and_tables():
+    text = """## Results
+
+### Temporal Results Subsection
+
+Ppp4r1 showed PTM Log2FC=12.08, a strong and persistent signaling input and key regulatory event [7].
+The co-wave membership establishes a signaling cascade and functional module that is assembled over time.
+The temporal synchronization may reflect a coordinated cellular feedback mechanism.
+The observed profile suggests a direct signaling input into the chaperone machinery.
+
+| Kinase Family | Example Putative Substrates |
+|---|---|
+| KINA | SITE1 |
+
+| Time Point | Key Observation | Classification |
+|---|---|---|
+| 15 min | Transition to later signaling phase | PTM-driven ↑↑ |
+
+## Introduction
+
+A cited canonical signaling cascade may be described as external background [1].
+"""
+    processed = ReportPostProcessor().process(text)
+    assert "strong and persistent signaling input" not in processed.lower()
+    assert "key regulatory event" not in processed.lower()
+    assert "establishes a signaling cascade" not in processed.lower()
+    assert "functional module" not in processed.lower()
+    assert "Example Putative Substrates" not in processed
+    assert "PTM-driven" not in processed
+    assert "feedback mechanism" not in processed.lower()
+    assert "direct signaling input" not in processed.lower()
+    assert "measured PTM/protein contrasts" in processed
+    assert "[7]" in processed
+    # Cited canonical background in the Introduction remains outside the
+    # Order-derived Results/Q&A/Discussion/Conclusion claim ceiling.
+    assert "canonical signaling cascade may be described" in processed
+
+
 def test_final_renderer_processes_supplementary_before_appending_references():
     final = format_citations({
         "sections": {

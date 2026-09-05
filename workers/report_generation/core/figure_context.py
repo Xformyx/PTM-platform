@@ -329,30 +329,14 @@ class FigureInformationGenerator:
                 edge_types[e.get("evidence_type", "Unknown")] += 1
 
         desc = (
-            f"The combined PTM-NonPTM signaling network contains "
+            f"The combined PTM-NonPTM context map contains "
             f"{len(ptm_nodes)} PTM nodes (circles), "
             f"{len(non_ptm_nodes)} Non-PTM protein nodes (diamonds), "
             f"and {len(edges)} interaction edges. "
-            f"{len(active)} PTMs show activation (red/orange), "
-            f"while {len(inhibited)} show inhibition (blue). "
+            f"{len(active)} PTMs have higher measured abundance (red/orange), "
+            f"while {len(inhibited)} have lower measured abundance (blue). "
             f"Non-PTM proteins are shown in green diamonds. "
         )
-
-        if active:
-            top = sorted(active, key=lambda x: -x.get("value", 0))[:5]
-            top_str = ", ".join(
-                f"{n.get('gene', '?')}-{n.get('site', '')} (Log2FC={n.get('value', 0):.2f})"
-                for n in top
-            )
-            desc += f"The most strongly activated PTMs are {top_str}. "
-
-        if inhibited:
-            top = sorted(inhibited, key=lambda x: x.get("value", 0))[:3]
-            top_str = ", ".join(
-                f"{n.get('gene', '?')}-{n.get('site', '')} (Log2FC={n.get('value', 0):.2f})"
-                for n in top
-            )
-            desc += f"The most strongly inhibited PTMs are {top_str}. "
 
         if edge_types:
             et_str = ", ".join(
@@ -362,13 +346,12 @@ class FigureInformationGenerator:
 
         # GAP 6: Updated color descriptions to match guide palette
         desc += (
-            "Node colors represent activation state: red=high activation (Log2FC>1.0), "
-            "dark orange=moderate activation (0<Log2FC≤1.0), "
-            "royal blue=inhibited (Log2FC<-1.0), light blue=weak inhibition, "
+            "Node colors represent measured abundance context: red=higher measured PTM abundance, "
+            "dark orange=modestly higher measured PTM abundance, "
+            "royal blue=lower measured PTM abundance, light blue=modestly lower measured abundance, "
             "light green=Non-PTM protein. "
-            "Node size is proportional to |Log2FC| magnitude (30-100px). "
-            "Edge colors indicate evidence type: gray=STRING-DB PPI, "
-            "forest green=KEGG pathway, orange-red=KEA3 kinase-substrate."
+            "Node size is a display aid and is not biological priority or direct regulatory strength. "
+            "Edges are literature/database context and do not establish Order-specific direction, activity, or causality."
         )
 
         return desc
@@ -390,38 +373,16 @@ class FigureInformationGenerator:
             phase = self._tp_to_phase(timepoint)
 
             desc = (
-                f"The {timepoint} ({phase}) network shows "
-                f"{active_count} activated PTMs, {inhibited_count} inhibited PTMs, "
-                f"{non_ptm_count} Non-PTM proteins, and {edge_count} active edges. "
+                f"The {timepoint} ({phase}) network display contains "
+                f"{active_count} PTMs with higher measured abundance, {inhibited_count} with lower measured abundance, "
+                f"{non_ptm_count} Non-PTM proteins, and {edge_count} context edges. "
             )
-
-            # Top activated PTMs
-            top_active = sorted(
-                tp_data.get("active_ptm_nodes", []),
-                key=lambda x: -x.get("value", 0)
-            )[:5]
-            if top_active:
-                top_str = ", ".join(
-                    f"{n['gene']}({n['site']}): Log2FC={n['value']:.2f}" for n in top_active
-                )
-                desc += f"Top activated: {top_str}. "
-
-            # Top inhibited PTMs
-            top_inhib = sorted(
-                tp_data.get("inhibited_ptm_nodes", []),
-                key=lambda x: x.get("value", 0)
-            )[:3]
-            if top_inhib:
-                top_str = ", ".join(
-                    f"{n['gene']}({n['site']}): Log2FC={n['value']:.2f}" for n in top_inhib
-                )
-                desc += f"Top inhibited: {top_str}. "
 
             # Key pathways
             pw_summary = tp_data.get("pathway_summary", {})
             if pw_summary:
                 top_pw = sorted(pw_summary.keys(), key=lambda k: -len(pw_summary[k]))[:3]
-                desc += f"Key pathways: {', '.join(top_pw)}. "
+                desc += f"Descriptive pathway-membership context: {', '.join(top_pw)}. "
 
             return desc
 
@@ -450,14 +411,9 @@ class FigureInformationGenerator:
         inhibited = [n for n in cond_nodes if n.get("state") in self.INHIBITED_STATES]
 
         desc = (
-            f"The {condition} condition sub-network shows {len(cond_nodes)} PTM nodes, "
-            f"with {len(active)} activated and {len(inhibited)} inhibited. "
+            f"The {condition} condition sub-network contains {len(cond_nodes)} PTM nodes, "
+            f"with {len(active)} higher and {len(inhibited)} lower measured-abundance observations. "
         )
-
-        if active:
-            top = sorted(active, key=lambda x: -x.get("value", 0))[:3]
-            top_str = ", ".join(f"{n.get('gene', '?')}-{n.get('site', '')}" for n in top)
-            desc += f"Key activated PTMs: {top_str}. "
 
         return desc
 
@@ -481,9 +437,9 @@ class FigureInformationGenerator:
             "You MUST reference these figures naturally in your writing using their EXACT labels.",
             "CRITICAL: Main figures use 'Figure N' (e.g., Figure 1). "
             "Supplementary figures use 'Supplementary Figure N' (e.g., Supplementary Figure 1).",
-            "For example: 'As shown in Figure 1, the pathway distribution reveals...'",
-            "or 'The pathway-context diagram (Supplementary Figure 1) summarizes literature-linked cellular compartments...'",
-            "or 'The network at 2min (Supplementary Figure 9A) shows...'",
+            "For example: 'Figure 1 summarizes descriptive pathway-membership context at sampled timepoints.'",
+            "or 'Figure 3 places literature/pathway annotations and measured observations in a common non-directional context.'",
+            "or 'Supplementary Figure N provides a condition-specific observation map.'",
             "NEVER use 'Figure 2' to refer to a Supplementary Figure. Always include the word 'Supplementary'.",
             "",
         ]
@@ -548,7 +504,7 @@ class FigureInformationGenerator:
                 "- When discussing signaling pathways in the text, primarily reference "
                 "the pathways listed above (Figure 1 Direct NES).\n"
                 "- If you mention a pathway that IS in Figure 1, cite it as Direct NES "
-                "enrichment, not as pathway activation unless the term is 'activated'.\n"
+                "context and apply its recorded q-value; never call it pathway activation.\n"
                 "- If you mention a pathway that is NOT in Figure 1, say it is from literature.\n"
                 "- Do NOT describe a pathway as 'enriched in our analysis' if it is not "
                 "in Figure 1. STRING support is not discovery.\n"
@@ -572,18 +528,13 @@ class FigureInformationGenerator:
             lines.append(
                 "INSTRUCTION: In the Results section, you MUST reference the figures by their "
                 "exact labels (Figure N for main figures, Supplementary Figure N for supplementary). "
-                "Describe the pathway distribution (Figure 1 — the ONLY main figure in the "
-                "Network Visualization section). "
-                "Reference cascade diagrams as Supplementary Figures (e.g., Supplementary Figure 1). "
-                "Reference Cytoscape network images as Supplementary Figures with panel letters "
-                "(e.g., Supplementary Figure 9A, 9B, etc.). "
-                "Mention specific PTM nodes, their measured-abundance states, Non-PTM observations, "
-                "and key interaction edges visible in the networks. "
-                "When discussing signaling pathways, focus on those most supported by your "
-                "PTM data and enrichment analysis. The cascade diagrams will be generated "
-                "to match the pathways you discuss. "
-                "If multiple conditions/timepoints are present, describe the differences "
-                f"between conditions.{candidate_hint}"
+                "Use the exact figure labels. Figure 1 supplies pathway-membership context; Figure 2 "
+                "summarizes substrate-derived candidate context; Figure 3 is a non-directional context map. "
+                "Supplementary figures are observation maps, not proof of pathway order. Mention only "
+                "measured PTM/Non-PTM contrasts and the evidence boundary stated in each caption. "
+                "For q>=0.05 use 'descriptive pathway trend' or 'pathway context', never enriched, active, "
+                "or functionally engaged. For multiple conditions, describe sampled-timepoint differences "
+                f"without imposing an ordered mechanism.{candidate_hint}"
             )
         elif section_type == "discussion":
             candidate_hint = ""
@@ -593,16 +544,12 @@ class FigureInformationGenerator:
                     "Focus on the pathways most relevant to your biological interpretation."
                 )
             lines.append(
-                "INSTRUCTION: In the Discussion section, interpret the network topology "
-                "and discuss the biological significance of the observed interaction patterns. "
-                "Reference the figures by their EXACT labels when discussing findings "
-                "(Figure 1 for main, Supplementary Figure N for supplementary). "
-                "Discuss how the pathway distribution (Figure 1) and pathway-context diagrams "
-                "(Supplementary Figures) organize the most relevant literature-linked biological programmes, and how the "
-                "Cytoscape networks (Supplementary Figures with panel letters) provide detailed observation and annotation context. "
-                "Focus your pathway discussion on those most strongly supported by the data. "
-                "If temporal data is available, discuss how the signaling network evolves "
-                f"over time and the implications for cellular response mechanisms.{candidate_hint}"
+                "INSTRUCTION: In the Discussion section, distinguish observed contrasts and local profiles "
+                "from traceable literature context and prospective hypotheses. Reference figures by their "
+                "EXACT labels. Figure 1 and context diagrams organize annotation context; they do not demonstrate "
+                "activity, direct edges, pathway function, or causal ordering. If temporal data are available, "
+                "discuss only sampled-timepoint profiles and aggregate robustness. Do not call a co-wave a functional "
+                "module, assign a common regulator, or infer signaling propagation from membership alone."
             )
 
         lines.append("--- END FIGURE CONTEXT ---\n")

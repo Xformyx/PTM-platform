@@ -491,24 +491,24 @@ detailed, and publication-quality analysis.
 3. **Prefer proteins from this dataset** over well-known examples from general knowledge (e.g., avoid GSK3B, YWHAZ, HSP90, ACTB, GAPDH unless they appear in the registry above)
 4. **NEVER use example proteins from prompt templates** — any proteins/sites in examples (e.g., ACC1, Ser79, MAPK3, AMPK) are for style illustration only. Use ONLY proteins from the VERIFIED PROTEIN REGISTRY above.
 5. **Write concretely** — instead of "proteins such as X", name the actual proteins from the data
-6. **Interpret extensively** — provide rich biological interpretation, mechanistic insights, and signaling pathway analysis for each finding. The more detailed your biological reasoning, the better.
-7. **Connect findings** — link individual protein changes to broader signaling cascades and cellular responses
+6. **Interpret evidence first** — distinguish a measured observation, a computational candidate context, cited external biological context, and a testable hypothesis. Rich interpretation is welcome only when this evidence class is explicit.
+7. **Preserve the claim ceiling** — a PTM/protein contrast, temporal profile, local co-membership, motif, pathway membership, or network connector does not alone establish direct regulation, kinase activity, biological priority, pathway placement, or causality.
 
 ### NON-PTM / PTM SIGNALING INTERPRETATION GUIDELINES
 When discussing Non-PTM effector proteins alongside PTM-modified proteins:
-1. **Classify signaling roles** — identify whether each Non-PTM protein acts as an upstream regulator, scaffold/adaptor, signal transducer, or downstream effector in the signaling cascade
-2. **Describe relationship directionality** — explain whether the Non-PTM protein is upstream of PTM (regulating the modification), downstream of PTM (responding to the modification), or part of a feedback loop
-3. **Place in canonical pathways** — connect each PTM→Non-PTM relationship to known signaling pathways (e.g., MAPK/ERK, PI3K/AKT, JAK/STAT, NF-κB, Calcium signaling)
-4. **Interpret temporal dynamics** — when time-course data is available, discuss whether Non-PTM protein changes are immediate (suggesting direct interaction), delayed (suggesting transcriptional regulation), or sustained (suggesting stable complex formation)
-5. **Discuss cascade significance** — explain whether each signaling cascade represents signal amplification, signal relay, signal termination, or feedback regulation
+1. **Report layers separately** — describe PTM and Non-PTM trajectories as measured observations unless an eligible, persisted cross-layer evidence record explicitly supports a more limited statement.
+2. **Do not assign directionality** — independent PTM and protein timing cannot establish upstream/downstream order, feedback, direct interaction, transcriptional regulation, or stable-complex formation.
+3. **Use pathways as cited context** — literature or pathway membership may frame an observation, but may not convert it into an Order-specific edge, regulatory role, or direct relationship.
+4. **Describe sampled-timepoint profiles** — early, intermediate, late, transient, and sustained are profile labels, not mechanistic stages or causal sequence labels.
+5. **State hypotheses conditionally** — proposed validation may test a hypothesis, but do not present perturbation outcomes, kinase action, or functional effects as current findings.
 
 ### WRITING QUALITY EXPECTATIONS
 - Write at the level of a peer-reviewed journal article (e.g., Molecular Cell, Cell Reports)
-- Each paragraph should contain 5-8 sentences with specific data references
-- Provide biological context and mechanistic interpretation for every quantitative finding
-- Discuss implications for signaling pathway regulation and cellular function
-- When describing signaling cascades, always specify the canonical pathway and the biological significance (amplification/termination/relay)
-- A comprehensive, detailed section is always preferred over a brief summary
+- Each paragraph should contain 3-6 precise sentences with data references where relevant
+- Provide biological context only at its supported level: measured data, computational candidate context, traceable cited context, or testable hypothesis
+- State what a result does and does not establish; do not compensate for an unavailable layer by inventing a pathway role or mechanism
+- Large conventional Log2FC values remain measured contrasts and must not determine biological priority, mechanistic importance, direct regulatory strength, or visual/narrative prominence by themselves
+- Prefer compact evidence-rich synthesis over repeated mechanistic speculation
 """
     return directive
 
@@ -541,8 +541,7 @@ def build_dynamic_writing_example(
     # Find the first timepoint with data
     first_tp = None
     first_panel = "A"
-    top_activated = []
-    top_inhibited = []
+    observed_nodes = []
 
     for i, tp in enumerate(timepoints):
         net = networks.get(tp, {})
@@ -556,22 +555,13 @@ def build_dynamic_writing_example(
             first_tp = tp
             first_panel = chr(65 + i)
 
-            active_sorted = sorted(
-                [n for n in active if isinstance(n, dict)],
-                key=lambda x: abs(x.get("value", x.get("ptm_log2fc", x.get("log2fc", 0)))),
-                reverse=True,
-            )
-            inhibited_sorted = sorted(
-                [n for n in inhibited if isinstance(n, dict)],
-                key=lambda x: abs(x.get("value", x.get("ptm_log2fc", x.get("log2fc", 0)))),
-                reverse=True,
-            )
-
-            top_activated = active_sorted[:3]
-            top_inhibited = inhibited_sorted[:2]
+            observed_nodes = sorted(
+                [n for n in [*active, *inhibited] if isinstance(n, dict)],
+                key=lambda x: (str(x.get("gene", x.get("id", ""))).upper(), str(x.get("site", ""))),
+            )[:3]
             break
 
-    if not first_tp or not top_activated:
+    if not first_tp or not observed_nodes:
         return ""
 
     net = networks.get(first_tp, {})
@@ -581,7 +571,7 @@ def build_dynamic_writing_example(
 
     # Format top proteins
     protein_examples = []
-    for node in top_activated[:3]:
+    for node in observed_nodes:
         gene = node.get("gene", node.get("id", "Unknown"))
         site = node.get("site", "")
         val = node.get("value", node.get("ptm_log2fc", node.get("log2fc", 0)))
@@ -596,10 +586,10 @@ def build_dynamic_writing_example(
 
     # Build temporal example if multiple timepoints
     temporal_example = ""
-    if len(timepoints) >= 2 and top_activated:
-        first_gene = top_activated[0].get("gene", "Unknown")
-        first_site = top_activated[0].get("site", "")
-        first_val = top_activated[0].get("value", top_activated[0].get("ptm_log2fc", 0))
+    if len(timepoints) >= 2 and observed_nodes:
+        first_gene = observed_nodes[0].get("gene", "Unknown")
+        first_site = observed_nodes[0].get("site", "")
+        first_val = observed_nodes[0].get("value", observed_nodes[0].get("ptm_log2fc", 0))
 
         later_tp = timepoints[-1]
         later_net = networks.get(later_tp, {})
@@ -611,32 +601,26 @@ def build_dynamic_writing_example(
                         later_val = node.get("value", node.get("ptm_log2fc", 0))
                         protein_ref = f"{first_gene}({first_site})" if first_site else first_gene
                         if abs(later_val - first_val) > 0.5:
-                            if later_val > first_val:
-                                temporal_example = (
-                                    f"\n> {protein_ref} showed progressive increase from "
-                                    f"PTM Log2FC of {first_val:.2f} at {first_tp} to {later_val:.2f} at {later_tp} "
-                                    f"(Figure 1{later_panel}), suggesting sustained {ptm_type} signaling."
-                                )
-                            else:
-                                temporal_example = (
-                                    f"\n> In contrast, {protein_ref} showed a shift from "
-                                    f"PTM Log2FC of {first_val:.2f} at {first_tp} to {later_val:.2f} at {later_tp} "
-                                    f"(Figure 1{later_panel}), suggesting a biphasic regulatory mechanism."
-                                )
+                            temporal_example = (
+                                f"\n> {protein_ref} changed from a measured PTM Log2FC of {first_val:.2f} "
+                                f"at {first_tp} to {later_val:.2f} at {later_tp}. This is a sampled-timepoint "
+                                "profile observation; it does not by itself assign a regulatory mechanism, "
+                                "pathway position, or causal order."
+                            )
                         break
 
-    example = f"""## CORRECT WRITING EXAMPLE (Follow this style — uses YOUR actual data)
+    example = f"""## EVIDENCE-FIRST WRITING EXAMPLE (Use this style — uses YOUR actual data)
 
 GOOD EXAMPLE:
-> The {ptm_type} signaling network at {first_tp} (Figure 1{first_panel}) revealed {n_active} activated PTMs and {n_inhibited} inhibited PTMs,
-> with {n_nonptm} non-PTM proteins forming the interaction network. Among the most strongly modified substrates,
-> {example_proteins_text},{temporal_example}
-> indicating coordinated activation of multiple signaling nodes.
+> At {first_tp}, the network display contains {n_active} PTM nodes with higher measured abundance,
+> {n_inhibited} with lower measured abundance, and {n_nonptm} Non-PTM observations. Illustrative
+> observed sites include {example_proteins_text}. These values are measured contrasts, not a ranking
+> of biological priority and not evidence of direct regulation or catalytic activity.{temporal_example}
 
-BAD EXAMPLE (NEVER write like this — and NEVER use example proteins like MAPK, ACC1, Ser79 from prompts):
-> The [pathway] pathway demonstrated a clear temporal profile. At [timepoint], we observed robust
-> phosphorylation of several key substrates, including [list from YOUR data]. Use ONLY proteins
-> and sites from the actual data provided — never copy placeholder or example names from prompts.
+BAD EXAMPLE (NEVER write this):
+> The most strongly modified substrate proves a pathway switch, drives a cascade, or confirms kinase activation.
+> Do not rank sites by raw contrast, assign a pathway mechanism from local co-membership, or copy placeholder
+> proteins from prompts. Use only actual data and name the evidence class for every interpretation.
 """
     return example
 

@@ -305,6 +305,7 @@ class ReportPostProcessor:
         text = self._normalize_unpersisted_wave_tables(text)
         text = self._normalize_residual_claim_tone(text)
         text = self._enforce_final_artifact_boundaries(text)
+        text = self._enforce_section_claim_ceiling(text)
 
         return text
 
@@ -537,6 +538,122 @@ class ReportPostProcessor:
         for pattern, replacement in substitutions:
             text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
         return text
+
+    def _enforce_section_claim_ceiling(self, text: str) -> str:
+        """Bound residual LLM claim language in final Results/Q&A/Discussion output.
+
+        This is intentionally section-aware: a cited Introduction can describe a
+        canonical literature model, whereas the Order-derived Results, research
+        answers, Discussion and Conclusion must retain an observation/candidate/
+        hypothesis distinction. The transform preserves measured values and
+        citations but replaces unsupported mechanism language with the narrowest
+        evidence class that remains valid for a generic PTM Order.
+        """
+        guarded_sections = {"abstract", "results", "research question answers", "discussion", "conclusion"}
+        pieces = re.split(r"(?m)(^#{1,3}\s+.+$)", text)
+        active_section = ""
+
+        direct_replacements = [
+            (r"\bPTM-driven\s*(?:↑↑|↑|modulation|activation|inactivation|regulation)?\b", "measured PTM-abundance pattern"),
+            (r"\b(?:bona fide|direct)\s+(?:signaling|regulatory|functional)\s+(?:regulation|input|response|event)\b", "measured PTM/protein pattern"),
+            (r"\b(?:strong and persistent|potent|high-priority|key regulatory|critical)\s+(?:signaling\s+)?(?:input|effect|event|node|nodes|regulation|response)\b", "measured observation"),
+            (r"\b(?:phased|temporal)\s+(?:signal(?:ing)?\s+)?propagation\b", "sampled-timepoint temporal pattern"),
+            (r"\b(?:signaling|regulatory)\s+cascade(?:s)?\b", "pathway context"),
+            (r"\b(?:functional|signaling)\s+modules?\b", "local membership groups"),
+            (r"\bsignaling complexes\b", "protein groups"),
+            (r"\b(?:co-?regulated|coordinated)\s+(?:groups|modules|patterns)\b", "local co-membership patterns"),
+            (r"\b(?:candidate|key)\s+(?:mediators?|players?|nodes?)\b", "candidate-context annotations"),
+            (r"\b(?:directly\s+)?(?:modulates?|impinges upon)\b", "is associated with"),
+            (r"\b(?:kinase|phosphatase)\s+activity\b", "substrate-derived candidate context"),
+        ]
+
+        def normalize_content(content: str) -> str:
+            # Tables are deterministic report content and must not circumvent
+            # the narrative ceiling through a legacy classification label.
+            content = re.sub(r"\bExample Putative Substrates?\b", "Example motif-context sites (not direct substrates)", content, flags=re.IGNORECASE)
+            content = re.sub(r"\bTransition to (?:later )?signaling phase\b", "Later sampled-timepoint measured-abundance pattern", content, flags=re.IGNORECASE)
+            content = re.sub(r"\bSustained phosphorylation on key targets\b", "Sustained measured PTM-abundance pattern", content, flags=re.IGNORECASE)
+
+            sentences = re.split(r"(?<=[.!?])(?=\s+|$)", content)
+            normalized: list[str] = []
+
+            def bounded_sentence(message: str, original: str) -> str:
+                """Retain numeric citation markers when replacing unsafe prose."""
+                citations = "".join(re.findall(r"\[\d+\]", original))
+                return f"{message}{(' ' + citations) if citations else ''}"
+
+            for sentence in sentences:
+                lowered = sentence.lower()
+                has_temporal_membership = any(term in lowered for term in ("co-wave", "co wave", "wave tw-", "co-membership", "transition-supported", "loto", "lot o"))
+                has_mechanistic_promotion = any(term in lowered for term in (
+                    "common regulator", "kinase activation", "kinase activity", "causal", "cascade", "pathway function",
+                    "functional role", "functional significance", "signaling complex", "assembled", "disassembled",
+                    "propagation", "upstream", "downstream", "feedback", "reorganization of signaling",
+                ))
+                if has_temporal_membership and has_mechanistic_promotion and "does not" not in lowered and "not establish" not in lowered:
+                    normalized.append(
+                        bounded_sentence(
+                            "These are observed local co-membership and sampled-timepoint transition patterns; "
+                            "they do not assign a common regulator, pathway function, complex state, causal order, or kinase switching.",
+                            sentence,
+                        )
+                    )
+                    continue
+
+                has_numeric = bool(re.search(r"(?:log\s*(?:2|₂)\s*(?:fc)?|ptm_fc|prot_fc|measured contrast|\b\d+\.\d+)", lowered))
+                has_priority_promotion = any(term in lowered for term in (
+                    "priority", "critical", "core signaling", "key regulatory", "bona fide", "direct response",
+                    "direct signaling", "strong and persistent", "potent effect", "proves", "confirms the engagement",
+                ))
+                if has_numeric and has_priority_promotion and "not " not in lowered:
+                    normalized.append(
+                        bounded_sentence(
+                            "The reported values are measured PTM/protein contrasts; their magnitude and timing alone do not establish "
+                            "biological priority, direct regulation, catalytic activity, pathway placement, or functional consequence.",
+                            sentence,
+                        )
+                    )
+                    continue
+
+                has_uncited_mechanism = (
+                    "[" not in sentence
+                    and any(term in lowered for term in (
+                        "feedback mechanism", "direct signaling input", "direct regulatory", "kinase activation",
+                        "phosphatase activation", "pathway propagation", "signaling cascade", "causal pathway",
+                        "functional consequence", "functional modulation",
+                    ))
+                    and any(term in lowered for term in ("suggest", "indicate", "reflect", "reveal", "confirm", "demonstrate"))
+                    and "does not" not in lowered
+                    and "not establish" not in lowered
+                )
+                if has_uncited_mechanism:
+                    normalized.append(
+                        bounded_sentence(
+                            "The measured pattern is compatible with several mechanisms but does not establish direct regulation, "
+                            "feedback, pathway order, kinase activity, or functional consequence.",
+                            sentence,
+                        )
+                    )
+                    continue
+                for pattern, replacement in direct_replacements:
+                    sentence = re.sub(pattern, replacement, sentence, flags=re.IGNORECASE)
+                normalized.append(sentence)
+            return "".join(normalized)
+
+        for index, piece in enumerate(pieces):
+            if index % 2:
+                # Only a level-2 heading changes the parent report section.
+                # Level-3 headings (e.g., Results subsections, figures, or
+                # individual Q&A items) remain covered by their enclosing
+                # Results/Discussion/Conclusion claim ceiling.
+                if re.match(r"^##\s+", piece):
+                    active_section = re.sub(r"^##\s+", "", piece).strip().lower()
+                elif re.match(r"^#\s+", piece):
+                    active_section = ""
+                continue
+            if active_section in guarded_sections:
+                pieces[index] = normalize_content(piece)
+        return "".join(pieces)
 
     @staticmethod
     def bibliography_blocked_reference_section() -> str:
