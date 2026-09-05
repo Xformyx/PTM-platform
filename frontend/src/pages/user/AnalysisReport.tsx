@@ -898,15 +898,15 @@ function KinaseActivityTab({ orderId }: { orderId: number }) {
           </CardContent>
         </Card>
       )}
-      {/* Local Co-membership Transition summary (internal field: cowave) */}
+      {/* Within-Cluster Concordance summary (internal field: cowave) */}
       {cowave && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Local Co-membership Transition Analysis</CardTitle>
+            <CardTitle className="text-base">Within-Cluster Concordance Analysis</CardTitle>
           </CardHeader>
           <CardContent>
             <p className="text-sm text-muted-foreground">
-              Local co-membership analysis annotates observed sampled-interval trajectory patterns within fixed Temporal PTM Clusters.
+              Within-cluster concordance analysis annotates observed sampled-interval trajectory patterns within fixed temporal phosphosite clusters.
               See the Modules tab for cluster and footprint diagnostics; this does not establish shared regulation or causal order.
             </p>
           </CardContent>

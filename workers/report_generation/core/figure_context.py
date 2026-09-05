@@ -131,7 +131,7 @@ class FigureInformationGenerator:
             }
             supp_num += 1
 
-        # ── Temporal PTM trajectory-cluster figures (internal: comovement) ──
+        # ── Temporal phosphosite trajectory-cluster figures (internal: comovement) ──
         for cf in self.comovement_figures:
             cf_type = cf.get("type", "unknown")
             cf_caption = cf.get("caption", "Temporal Coordination Analysis")
@@ -139,12 +139,12 @@ class FigureInformationGenerator:
                 fig_map["comovement_heatmap"] = {
                     "figure_number": main_fig_num,
                     "figure_label": f"Figure {main_fig_num}",
-                    "display_name": "Temporal PTM Trajectory Cluster Heatmap",
+                    "display_name": "Temporal Phosphosite Trajectory Cluster Heatmap",
                     "description": (
                         "Hierarchical clustering heatmap of PTM temporal profiles. "
                         "Rows represent individual PTM sites, columns represent time points. "
                         "Color intensity reflects conventionally quantified Log2FC magnitude. Dendrogram and cluster "
-                        "color bars group structurally similar site-level trajectories. Temporal PTM Clusters "
+                        "color bars group structurally similar site-level trajectories. Temporal Phosphosite Clusters "
                         "are descriptive and do not establish shared regulation, pathway membership, or causality."
                     ),
                     "panel_index": 0,
@@ -176,7 +176,7 @@ class FigureInformationGenerator:
                         f"Line plot showing the temporal Log2FC profiles of PTM sites in {cf_caption}. "
                         "Solid lines represent PTM proteins; dashed lines represent linked Non-PTM interactors. "
                         "Shaded area indicates the cluster envelope. Similar trajectory profiles identify a "
-                        "Temporal PTM Cluster and do not, by themselves, imply coordinated regulation."
+                        "Temporal Phosphosite Cluster and do not, by themselves, imply coordinated regulation."
                     ),
                     "panel_index": 0,
                     "figure_type": "comovement_lineplot",

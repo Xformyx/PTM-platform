@@ -8,14 +8,14 @@
  */
 export const TEMPORAL_TERMS = {
   productFeature: "PTM-Vector Temporal Dynamics",
-  method: "Temporal PTM Trajectory Clustering",
-  cluster: "Temporal PTM Cluster",
-  clusters: "Temporal PTM Clusters",
-  localTransition: "Local Co-membership Transition",
-  localTransitions: "Local Co-membership Transitions",
-  localGroup: "Local Co-membership Group",
-  localGroups: "Local Co-membership Groups",
-  trajectoryPattern: "Local trajectory pattern",
+  method: "Temporal Phosphosite Trajectory Clustering",
+  cluster: "Temporal Phosphosite Cluster",
+  clusters: "Temporal Phosphosite Clusters",
+  localTransition: "Within-Cluster Concordance Analysis",
+  localTransitions: "Within-Cluster Concordance Analyses",
+  localGroup: "Concordant Phosphosite Set",
+  localGroups: "Concordant Phosphosite Sets",
+  trajectoryPattern: "Within-Cluster Concordance Pattern",
   provenanceId: "Provenance ID",
   legacySchemaId: "Legacy schema ID",
 } as const;
@@ -24,7 +24,8 @@ export const TEMPORAL_TERMS = {
 export function formatTemporalClusterLabel(label: string | null | undefined): string {
   const raw = String(label || "").trim();
   if (!raw) return TEMPORAL_TERMS.cluster;
-  if (/^temporal\s+ptm\s+cluster\b/i.test(raw)) return raw;
+  const persistedClusterMatch = raw.match(/^temporal\s+(?:ptm|phosphosite)\s+cluster\b(.*)$/i);
+  if (persistedClusterMatch) return `${TEMPORAL_TERMS.cluster}${persistedClusterMatch[1] || ""}`;
   const moduleMatch = raw.match(/^(?:co[-\s]?wave\s+)?module\s*(\d+)?(.*)$/i);
   if (moduleMatch) {
     const [, id, suffix] = moduleMatch;
@@ -34,6 +35,7 @@ export function formatTemporalClusterLabel(label: string | null | undefined): st
   if (waveMatch) return `${TEMPORAL_TERMS.cluster}${waveMatch[1] ? ` ${waveMatch[1].trim()}` : ""}`;
   return raw
     .replace(/dynamic\s+co[-\s]?wave/gi, TEMPORAL_TERMS.localTransition)
+    .replace(/local\s+co[-\s]?membership\s+transition/gi, TEMPORAL_TERMS.localTransition)
     .replace(/co[-\s]?wave/gi, TEMPORAL_TERMS.localGroup)
     .replace(/\bwave\b/gi, TEMPORAL_TERMS.cluster);
 }
@@ -42,7 +44,8 @@ export function formatTemporalClusterLabel(label: string | null | undefined): st
 export function formatLocalTransitionStatus(status: string | null | undefined): string {
   const raw = String(status || "not available").trim();
   return raw
-    .replace(/dynamic[_\s-]*co[_\s-]*wave/gi, "local co-membership transition")
-    .replace(/co[_\s-]*wave/gi, "local co-membership")
-    .replace(/\bwave\b/gi, "temporal cluster");
+    .replace(/dynamic[_\s-]*co[_\s-]*wave/gi, "within-cluster trajectory concordance")
+    .replace(/local[_\s-]*co[_\s-]*membership[_\s-]*transition/gi, "within-cluster trajectory concordance")
+    .replace(/co[_\s-]*wave/gi, "within-cluster concordance")
+    .replace(/\bwave\b/gi, "temporal phosphosite cluster");
 }

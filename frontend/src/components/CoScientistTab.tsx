@@ -749,7 +749,7 @@ export function CoScientistTab({ orderId, orderCode, orderStatus }: Props) {
               {researchMode === "goal_led"
                 ? "사용자가 정의한 질문을 중심으로 독립적인 Co-Scientist 연구를 수행합니다."
                 : researchMode === "data_guided"
-                ? "시간대별 kinase footprint, Temporal PTM Cluster, Local Co-membership Transition 및 receptor context 요약을 연구 방향의 seed context로 사용합니다."
+                ? "시간대별 kinase footprint, Temporal Phosphosite Cluster, Within-Cluster Concordance Analysis 및 receptor context 요약을 연구 방향의 seed context로 사용합니다."
                 : "사용자 Research Goal을 주 목표로 유지하면서 Data-Grounded Analysis 요약을 보조 seed context로 제공합니다."}
             </p>
           </div>

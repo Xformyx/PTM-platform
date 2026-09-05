@@ -53,7 +53,7 @@ def resolve_report_temporal_sidecar(
         if compact and compact_dynamic_is_current(compact):
             return compact, source, diagnostics
         if compact:
-            diagnostics.append(f"{source}: stale Dynamic Co-Wave contract or config")
+            diagnostics.append(f"{source}: stale Within-Cluster Trajectory Concordance contract or config")
 
     seen_paths: set[Path] = set()
     for path in artifact_paths:
@@ -67,7 +67,7 @@ def resolve_report_temporal_sidecar(
             if not isinstance(full_sidecar, Mapping):
                 raise ValueError("full sidecar artifact must contain a JSON object")
             if not full_dynamic_is_current(full_sidecar):
-                diagnostics.append(f"{path}: stale Dynamic Co-Wave contract or config")
+                diagnostics.append(f"{path}: stale Within-Cluster Trajectory Concordance contract or config")
                 continue
             from ptm_shared.enrichment_free_temporal_sidecar import (
                 summarize_temporal_ptm_protein_analysis,

@@ -1105,7 +1105,7 @@ export default function KinaseModuleAnalysis({
         <p className="text-xs text-muted-foreground">
           {isUbi
             ? "Temporal module detection, E3 Ligase annotation (RING/HECT/RBR), Ubiquitin chain type classification (K48/K63/Mono), and Phospho-Ub cross-talk inference."
-            : "Temporal PTM trajectory clustering, multi-source kinase annotation (8 sources + motif prediction), and contextual footprint display. Similar trajectories are grouped for inspection; cluster membership alone does not establish a shared regulator, pathway, or causal cascade."}
+            : "Temporal phosphosite trajectory clustering, multi-source kinase annotation (8 sources + motif prediction), and contextual footprint display. Similar trajectories are grouped for inspection; cluster membership alone does not establish a shared regulator, pathway, or causal cascade."}
         </p>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -1275,7 +1275,7 @@ export default function KinaseModuleAnalysis({
           </Alert>
         )}
 
-        {/* ── Tab: Temporal PTM Clusters (internal tab key: cowave) ─────── */}
+        {/* ── Tab: Temporal Phosphosite Clusters (internal tab key: cowave) ─────── */}
         {activeTab === "cowave" && (
           <div className="space-y-3">
             {conditions.length < 3 && (
@@ -1283,7 +1283,7 @@ export default function KinaseModuleAnalysis({
                 <AlertTriangle className="h-4 w-4" />
                 <AlertTitle>Insufficient Time Points</AlertTitle>
                 <AlertDescription className="text-xs">
-                  {isUbi ? "Temporal module" : "Temporal PTM cluster"} detection requires at least 3 time points. Current: {conditions.length}
+                  {isUbi ? "Temporal module" : "Temporal phosphosite cluster"} detection requires at least 3 time points. Current: {conditions.length}
                 </AlertDescription>
               </Alert>
             )}
@@ -1291,7 +1291,7 @@ export default function KinaseModuleAnalysis({
             {coWaveModules.length === 0 && conditions.length >= 3 && (
               <div className="text-center py-6 text-sm text-muted-foreground">
                 <Info className="h-8 w-8 mx-auto mb-2 opacity-40" />
-                No {isUbi ? "temporal" : "Temporal PTM"} clusters detected. Enable more PTMs in the checklist above, or try a different trend filter.
+                No {isUbi ? "temporal" : "Temporal Phosphosite"} clusters detected. Enable more PTMs in the checklist above, or try a different trend filter.
               </div>
             )}
 
@@ -1367,7 +1367,7 @@ export default function KinaseModuleAnalysis({
                           <Badge
                             variant="outline"
                             className="text-[9px] border-cyan-500 text-cyan-600 dark:text-cyan-400 cursor-help"
-                            title={`Linked ${isUbi ? "E3 ligases" : "kinases"} (Heatmap): ${kinaseNames.slice(0, 6).join(", ")}${kinaseNames.length > 6 ? "..." : ""}\nThese ${isUbi ? "E3 ligases" : "kinases"} have substrates represented in this ${isUbi ? "temporal" : "Temporal PTM"} cluster. This is contextual display only.\nSwitch to Heatmap tab to inspect footprint patterns.`}
+                            title={`Linked ${isUbi ? "E3 ligases" : "kinases"} (Heatmap): ${kinaseNames.slice(0, 6).join(", ")}${kinaseNames.length > 6 ? "..." : ""}\nThese ${isUbi ? "E3 ligases" : "kinases"} have substrates represented in this ${isUbi ? "temporal" : "Temporal Phosphosite"} cluster. This is contextual display only.\nSwitch to Heatmap tab to inspect footprint patterns.`}
                           >
                             ↔ {kinaseNames.length} {isUbi ? "E3 ligases" : "kinases"}
                           </Badge>
@@ -2211,8 +2211,8 @@ function CascadeView({
     return (
       <div className="text-center py-6 text-sm text-muted-foreground">
         <BarChart3 className="h-8 w-8 mx-auto mb-2 opacity-40" />
-        Run {isUbi ? "temporal module" : "Temporal PTM cluster"} detection first (enable PTMs in the chart above).
-        {isUbi ? "Cascade view shows temporal ordering of E3 ligase modules and ubiquitylation dynamics." : "Cascade view shows temporal ordering of kinase modules."}
+        Run {isUbi ? "temporal module" : "temporal phosphosite cluster"} detection first (enable PTMs in the chart above).
+        {isUbi ? "Temporal context view summarizes E3-ligase module and ubiquitylation patterns." : "Temporal context view summarizes kinase-footprint patterns across sampled conditions."}
       </div>
     );
   }
@@ -2245,7 +2245,7 @@ function CascadeView({
           <Clock className="h-3 w-3 inline mr-1" />
           {isUbi
             ? "Temporal ubiquitylation cascade: shows which E3 ligases are active at each timepoint, chain type dynamics, and DUB activity inference."
-            : "Temporal kinase cascade: shows which kinases are active at each timepoint and how signaling flows over time."}
+            : "Temporal kinase context: summarizes footprint diagnostics across sampled conditions; it does not establish catalytic activity or signaling flow."}
         </p>
         {!hasTemporalData && (
           <Button
@@ -2256,7 +2256,7 @@ function CascadeView({
             onClick={() => onRunGlobalKinase()}
           >
             {globalKinaseLoading ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Network className="h-3 w-3 mr-1" />}
-            {isUbi ? "Build Ubi Cascade" : "Build Temporal Cascade"}
+            {isUbi ? "Build Ubiquitylation Context" : "Build Kinase Temporal Context"}
           </Button>
         )}
       </div>
@@ -2267,7 +2267,7 @@ function CascadeView({
           <Loader2 className="h-4 w-4 animate-spin" />
           {isUbi
             ? "Building temporal ubiquitylation cascade — E3 ligases, chain types, DUB activity..."
-            : "Building temporal kinase cascade from all PTM annotations..."}
+            : "Building kinase temporal context from all PTM annotations..."}
         </div>
       )}
 
@@ -2276,15 +2276,15 @@ function CascadeView({
         <div className="space-y-3">
           <Alert>
             <Info className="h-4 w-4" />
-            <AlertTitle>{isUbi ? "Ubiquitylation Cascade Not Yet Built" : "Temporal Cascade Not Yet Built"}</AlertTitle>
+            <AlertTitle>{isUbi ? "Ubiquitylation Context Not Yet Built" : "Kinase Temporal Context Not Yet Built"}</AlertTitle>
             <AlertDescription className="text-xs">
-              Click <strong>{isUbi ? "\"Build Ubi Cascade\"" : "\"Build Temporal Cascade\""}</strong> above (or run <strong>{isUbi ? "\"E3 Modules\"" : "\"Global Kinase Modules\""}</strong> from the {isUbi ? "E3 Modules" : "Kinase Modules"} tab) to generate the temporal {isUbi ? "ubiquitylation" : "kinase"} cascade.
-              This will annotate all PTMs with 8 sources and build a time-ordered kinase activation map.
+              Click <strong>{isUbi ? "\"Build Ubiquitylation Context\"" : "\"Build Kinase Temporal Context\""}</strong> above (or run <strong>{isUbi ? "\"E3 Modules\"" : "\"Global Kinase Modules\""}</strong> from the {isUbi ? "E3 Modules" : "Kinase Modules"} tab) to generate the temporal {isUbi ? "ubiquitylation" : "kinase"} context.
+              This will annotate PTMs with eight sources and summarize sampled-condition footprint context; it does not build a directed activation map.
             </AlertDescription>
           </Alert>
 
           {/* Fallback: basic co-wave module timeline */}
-          <div className="text-xs font-medium text-muted-foreground mb-2">Basic {isUbi ? "Temporal" : "Temporal PTM Cluster"} Timeline (preview):</div>
+          <div className="text-xs font-medium text-muted-foreground mb-2">Basic {isUbi ? "Temporal" : "Temporal Phosphosite Cluster"} Timeline (preview):</div>
           <div className="flex items-center gap-0 overflow-x-auto pb-2">
             {sortedModules.map((mod, idx) => (
               <div key={mod.id} className="flex items-center">
@@ -3147,11 +3147,11 @@ function GlobalKinaseModulesPanel({
                 })}
               </div>
 
-              {/* Co-wave overlap badges */}
+              {/* Temporal phosphosite cluster overlap badges */}
               {mod.cowave_overlap && mod.cowave_overlap.length > 0 && (
                 <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
                   <GitMerge className="h-3 w-3" />
-                  {isUbi ? "Temporal" : "Temporal PTM Cluster"} overlap:
+                  {isUbi ? "Temporal" : "Temporal Phosphosite Cluster"} overlap:
                   {mod.cowave_overlap.map((ov) => (
                     <Badge key={ov.cowave_id} variant="outline" className="text-[9px]">
                       {ov.cowave_label} ({ov.shared_ptms.length} PTMs)
@@ -3333,7 +3333,7 @@ function GlobalKinaseModulesPanel({
         </div>
       )}
 
-      {/* Co-wave × Kinase Module Cross Analysis */}
+      {/* Temporal phosphosite cluster × kinase context cross-analysis */}
       {cowave_cross_analysis && Object.keys(cowave_cross_analysis).length > 0 && (
         <div className="space-y-2">
           <button
@@ -3342,7 +3342,7 @@ function GlobalKinaseModulesPanel({
           >
             {showCrossAnalysis ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
             <GitMerge className="h-3.5 w-3.5" />
-            {isUbi ? "Temporal Cluster × E3 Ligase Context Overlap" : "Temporal PTM Cluster × Kinase Context Overlap"}
+            {isUbi ? "Temporal Cluster × E3 Ligase Context Overlap" : "Temporal Phosphosite Cluster × Kinase Context Overlap"}
           </button>
 
           {showCrossAnalysis && (
@@ -3350,12 +3350,12 @@ function GlobalKinaseModulesPanel({
               <p className="text-[10px] text-muted-foreground">
                 {isUbi
                   ? "Ubiquitylation sites overlapping an E3-ligase module and a temporal cluster are shown as a contextual diagnostic. The overlap does not establish common E3 regulation."
-                  : "PTMs overlapping a kinase module and a Temporal PTM Cluster are shown as a contextual diagnostic. The overlap does not establish shared regulation or direct kinase attribution."}
+                  : "PTMs overlapping a kinase module and a Temporal Phosphosite Cluster are shown as a contextual diagnostic. The overlap does not establish shared regulation or direct kinase attribution."}
               </p>
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="text-[10px] h-7">{isUbi ? "Temporal Module" : "Temporal PTM Cluster"}</TableHead>
+                    <TableHead className="text-[10px] h-7">{isUbi ? "Temporal Module" : "Temporal Phosphosite Cluster"}</TableHead>
                     <TableHead className="text-[10px] h-7">{isUbi ? "Total Sites" : "Total PTMs"}</TableHead>
                     <TableHead className="text-[10px] h-7">{isUbi ? "Overlapping E3 Modules" : "Overlapping Kinase Modules"}</TableHead>
                   </TableRow>
@@ -4070,8 +4070,8 @@ function SignalFlowView({
                   </div>
                 )}
                 {primary.cowave_score != null && primary.cowave_score > 0 && (
-                  <span className="text-[8px] px-1 py-0.5 rounded bg-cyan-900/20 text-cyan-300 border border-cyan-500/40" title={`Local co-membership pattern score: ${primary.cowave_score.toFixed(1)} — descriptive temporal-pattern diagnostic only`}>
-                    LC:{primary.cowave_score.toFixed(1)}
+                  <span className="text-[8px] px-1 py-0.5 rounded bg-cyan-900/20 text-cyan-300 border border-cyan-500/40" title={`Within-cluster trajectory concordance score: ${primary.cowave_score.toFixed(1)} — descriptive temporal-pattern diagnostic only`}>
+                    WC:{primary.cowave_score.toFixed(1)}
                   </span>
                 )}
                 {/* v9.47: Receptor temporal classification */}
@@ -4158,7 +4158,7 @@ function SignalFlowView({
                             {kinaseConfidence[kinaseKey]?.cowave_boost > 0.3 && (
                               <span
                                 className="ml-0.5 text-[7px] px-0.5 rounded bg-purple-900/30 text-purple-300"
-                                title={`Module diagnostic: ${((kinaseConfidence[kinaseKey]?.confidence_score ?? 0) * 100).toFixed(0)}% (local co-membership contribution: ${((kinaseConfidence[kinaseKey]?.cowave_boost ?? 0) * 100).toFixed(0)}%). This is not a direct kinase-confidence estimate.`}
+                                title={`Module diagnostic: ${((kinaseConfidence[kinaseKey]?.confidence_score ?? 0) * 100).toFixed(0)}% (within-cluster trajectory concordance contribution: ${((kinaseConfidence[kinaseKey]?.cowave_boost ?? 0) * 100).toFixed(0)}%). This is not a direct kinase-confidence estimate.`}
                               >
                                 {((kinaseConfidence[kinaseKey]?.confidence_score ?? 0) * 100).toFixed(0)}%
                               </span>
@@ -4256,11 +4256,11 @@ function SignalFlowView({
                                   const actLabel =
                                     actClass === "de_novo" ? "De novo (control imputed)" :
                                     actClass === "regulated" ? "Regulated (|Log2FC| ≥ 1.0 AND q < 0.05)" :
-                                    actClass === "coordinated" ? "Patterned (local temporal-cluster membership, |FC|≥0.5 + group≥3)" :
+                                    actClass === "coordinated" ? "Concordant trajectory pattern (within-cluster, |FC|≥0.5 + set≥3)" :
                                     "Minor (sub-threshold)";
                                   const cowaveInfo = ptmCoWaveMap[ptmKey] || [];
                                   const cowaveTooltip = cowaveInfo.length > 0
-                                    ? `\nTemporal PTM cluster: ${cowaveInfo.map(c => `${formatTemporalClusterLabel(c.label)} (n=${c.groupSize}, peak=${c.peakCondition})`).join("; ")}`
+                                    ? `\nTemporal Phosphosite Cluster: ${cowaveInfo.map(c => `${formatTemporalClusterLabel(c.label)} (n=${c.groupSize}, peak=${c.peakCondition})`).join("; ")}`
                                     : "";
                                   return (
                                     <span
@@ -4448,7 +4448,7 @@ function SignalFlowView({
                   <span key={i} className={`w-2 h-2 rounded-full inline-block ${c.dot}`} />
                 ))}
               </span>
-              <span className="text-[9px]">colored dots = local co-membership group (correlated substrate-footprint profile)</span>
+              <span className="text-[9px]">colored dots = concordant phosphosite set (similar temporal profile; descriptive context)</span>
             </span>
             <span className="text-[9px] text-muted-foreground/50">
               ({coWaveModules.length} groups detected)
@@ -5533,19 +5533,19 @@ function KinaseActivityHeatmapView({
                   <span>Evidence-supported: <b>{evidence.evidence_supported_mechanism_count || 0}</b></span>
                   <span>Kinase timing: <b>{evidence.kinase_timing_status || "not_available"}</b></span>
                   <span>{TEMPORAL_TERMS.localTransition}: <b>{formatLocalTransitionStatus(evidence.dynamic_co_wave_transition_status)}</b></span>
-                  <span>Transition-supported clusters: <b>{evidence.dynamic_transition_supported_wave_count ?? 0}</b></span>
+                  <span>Concordance-annotated clusters: <b>{evidence.dynamic_transition_supported_wave_count ?? 0}</b></span>
                   <span>Observed pair transitions: <b>{evidence.dynamic_transition_pair_count ?? 0}</b></span>
                   <span>Causality: <b>not tested</b></span>
                 </div>
                 <p className="text-[10px] text-teal-800/80 dark:text-teal-200/80">
-                  {TEMPORAL_TERMS.localTransition} reports local membership persistence, split, merge, recruitment, or exit within a fixed {TEMPORAL_TERMS.cluster}. It does not re-estimate cluster membership, change TMM attribution or kinase ranking, or establish kinase switching.
+                  {TEMPORAL_TERMS.localTransition} reports pairwise concordance persistence, split, merge, recruitment, or exit within a fixed {TEMPORAL_TERMS.cluster}. It does not re-estimate cluster membership, change TMM attribution or kinase ranking, or establish kinase switching.
                 </p>
                 {rows.length > 0 ? (
                   <div className="overflow-x-auto">
                     <table className="w-full text-[10px]">
                       <thead className="text-muted-foreground">
                         <tr className="border-b border-teal-200/70 dark:border-teal-900">
-                          <th className="text-left py-1 pr-2">Temporal PTM Cluster</th>
+                          <th className="text-left py-1 pr-2">Temporal Phosphosite Cluster</th>
                           <th className="text-left py-1 pr-2">Protein</th>
                           <th className="text-left py-1 pr-2">Temporal direction</th>
                           <th className="text-right py-1 pr-2">Peak lag (min)</th>
@@ -5585,7 +5585,7 @@ function KinaseActivityHeatmapView({
               {/* Peak Sync Indicator Row */}
               {heatmapData.peak_sync && Object.keys(heatmapData.peak_sync).length > 0 && (
                 <tr className="border-b border-border/20">
-                  <th className="sticky left-0 bg-background z-10" />{/* local co-membership bar spacer */}
+                  <th className="sticky left-0 bg-background z-10" />{/* concordant phosphosite set bar spacer */}
                   <th />{/* Kinase spacer */}
                   <th />{/* Dir spacer */}
                   <th />{/* #Sub spacer */}
@@ -5610,7 +5610,7 @@ function KinaseActivityHeatmapView({
               )}
               {/* Main header row */}
               <tr className="border-b border-border">
-                <th className="w-2 px-0 py-1 cursor-help" title={`${TEMPORAL_TERMS.localGroup} (LC)\n\nColor bar = ${isUbi ? "E3 ligases" : "kinases"} with correlated temporal substrate-footprint profiles (Pearson r≥0.7).\nSame color = same descriptive group.\n\nG-label (e.g. G2) = local co-membership group number.\nThis diagnostic does not establish common regulation or direct kinase attribution.\n\nClick a group in the legend below to filter Vector Plot.`}>LC</th>
+                <th className="w-2 px-0 py-1 cursor-help" title={`${TEMPORAL_TERMS.localGroup} (CS)\n\nColor bar = ${isUbi ? "E3 ligases" : "kinases"} with similar temporal substrate-footprint profiles (Pearson r≥0.7).\nSame color = same descriptive set.\n\nS-label (e.g. S2) = concordant phosphosite set number.\nThis diagnostic does not establish common regulation or direct kinase attribution.\n\nClick a set in the legend below to filter Vector Plot.`}>CS</th>
                 <th className="text-left px-2 py-1 sticky left-0 bg-background z-10 min-w-[100px] cursor-help" title={`${isUbi ? "E3 Ligase" : "Kinase"}\n\nName of the ${isUbi ? "E3 ligase" : "kinase"} (or ${isUbi ? "E3 ligase" : "kinase"} family).\nG-label shows its ${TEMPORAL_TERMS.localGroup} number.`}>{isUbi ? "E3 Ligase" : "Kinase"}</th>
                 <th className="text-center px-1 py-1 w-8 cursor-help" title={`Signed substrate footprint\n\n  ▲ = positive weighted aggregate substrate footprint\n  ▼ = negative weighted aggregate substrate footprint\n  — = near-zero/mixed footprint\n\nThis is not direct catalytic activation, inhibition, or kinase attribution.`}>Dir</th>
                 <th className="text-center px-1 py-1 w-10 cursor-help" title={`Number of Substrates (#Sub)\n\nTotal confirmed + inferred ${isUbi ? "ubiquitylation" : "phosphorylation"} substrates\nfor this ${isUbi ? "E3 ligase" : "kinase"} in the current dataset.`}>#Sub</th>

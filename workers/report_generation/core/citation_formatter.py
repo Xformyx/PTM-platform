@@ -316,7 +316,7 @@ class ReportPostProcessor:
                 "| Temporal Cluster | Peak Time | Key Member(s) | Membership interpretation boundary |"
             ),
             "| Co-Wave | Peak Time | Temporal Pattern | Potential Functional Context (based on members) |": (
-                "| Temporal PTM Cluster | Peak Time | Trajectory Pattern | Membership interpretation boundary |"
+                "| Temporal Phosphosite Cluster | Peak Time | Trajectory Pattern | Concordance interpretation boundary |"
             ),
         }
         if not any(header in text for header in headers):
@@ -394,31 +394,31 @@ class ReportPostProcessor:
         text = "".join(normalized_sentences)
         text = re.sub(
             r"\bsignificant rewiring\b",
-            "observed local co-membership reorganization",
+            "observed within-cluster concordance-pattern change",
             text,
             flags=re.IGNORECASE,
         )
         text = re.sub(
             r"\b(?:extensive|substantial) rewiring of (?:the )?phosphoproteome\b",
-            "observed local co-membership changes",
+            "observed within-cluster concordance-pattern changes",
             text,
             flags=re.IGNORECASE,
         )
         text = re.sub(
             r"\bdirect evidence for (?:the )?dynamic assembly and disassembly of signaling modules\b",
-            "observed local co-membership transitions",
+            "observed within-cluster trajectory concordance patterns",
             text,
             flags=re.IGNORECASE,
         )
         text = re.sub(
             r"\btransient signaling hubs\b",
-            "transient local membership patterns",
+            "transient within-cluster concordance patterns",
             text,
             flags=re.IGNORECASE,
         )
         text = re.sub(
             r"\bstable core signaling modules\b",
-            "persistent local membership patterns",
+            "persistent trajectory-concordance patterns",
             text,
             flags=re.IGNORECASE,
         )
@@ -559,9 +559,9 @@ class ReportPostProcessor:
             (r"\b(?:strong and persistent|potent|high-priority|key regulatory|critical)\s+(?:signaling\s+)?(?:input|effect|event|node|nodes|regulation|response)\b", "measured observation"),
             (r"\b(?:phased|temporal)\s+(?:signal(?:ing)?\s+)?propagation\b", "sampled-timepoint temporal pattern"),
             (r"\b(?:signaling|regulatory)\s+cascade(?:s)?\b", "pathway context"),
-            (r"\b(?:functional|signaling)\s+modules?\b", "local membership groups"),
+            (r"\b(?:functional|signaling)\s+modules?\b", "descriptive trajectory clusters"),
             (r"\bsignaling complexes\b", "protein groups"),
-            (r"\b(?:co-?regulated|coordinated)\s+(?:groups|modules|patterns)\b", "local co-membership patterns"),
+            (r"\b(?:co-?regulated|coordinated)\s+(?:groups|modules|patterns)\b", "within-cluster trajectory concordance patterns"),
             (r"\b(?:candidate|key)\s+(?:mediators?|players?|nodes?)\b", "candidate-context annotations"),
             (r"\b(?:directly\s+)?(?:modulates?|impinges upon)\b", "is associated with"),
             (r"\b(?:kinase|phosphatase)\s+activity\b", "substrate-derived candidate context"),
@@ -584,7 +584,7 @@ class ReportPostProcessor:
 
             for sentence in sentences:
                 lowered = sentence.lower()
-                has_temporal_membership = any(term in lowered for term in ("co-wave", "co wave", "wave tw-", "co-membership", "transition-supported", "loto", "lot o"))
+                has_temporal_membership = any(term in lowered for term in ("co-wave", "co wave", "wave tw-", "co-membership", "within-cluster concordance", "trajectory concordance", "transition-supported", "loto", "lot o"))
                 has_mechanistic_promotion = any(term in lowered for term in (
                     "common regulator", "kinase activation", "kinase activity", "causal", "cascade", "pathway function",
                     "functional role", "functional significance", "signaling complex", "assembled", "disassembled",
@@ -593,7 +593,7 @@ class ReportPostProcessor:
                 if has_temporal_membership and has_mechanistic_promotion and "does not" not in lowered and "not establish" not in lowered:
                     normalized.append(
                         bounded_sentence(
-                            "These are observed local co-membership and sampled-timepoint transition patterns; "
+                            "These are observed within-cluster trajectory concordance and sampled-timepoint patterns; "
                             "they do not assign a common regulator, pathway function, complex state, causal order, or kinase switching.",
                             sentence,
                         )

@@ -1099,7 +1099,7 @@ def build_temporal_evidence_packet(
             "DATA-WAVE-INPUT-QUALITY",
             "observational_input_quality",
             (
-                "Canonical static Co-Wave fitting used missing-value policy={policy}; eligible complete trajectories={eligible}; "
+                "Temporal Phosphosite Trajectory Clustering used missing-value policy={policy}; eligible complete trajectories={eligible}; "
                 "excluded input sites={excluded_total}, including incomplete time grids={incomplete}. "
                 "Missing measurements were retained as missing and were not converted to biological zeroes or imputed."
             ).format(
@@ -1116,9 +1116,9 @@ def build_temporal_evidence_packet(
         "DATA-DYNAMIC-SUMMARY",
         "observational_dynamic",
         (
-            "Dynamic co-wave status={status}; transition-supported Waves={waves}; "
+            "Within-cluster trajectory concordance status={status}; transition-supported clusters={waves}; "
             "pair transitions={pairs}; site transitions={sites}; transition resolution={resolution}; "
-            "same-Wave candidate pairs={candidate_pairs}; non-evaluable pair windows={non_evaluable_pairs}; "
+            "within-cluster candidate pairs={candidate_pairs}; non-evaluable pair windows={non_evaluable_pairs}; "
             "non-evaluable site transition opportunities={non_evaluable_sites}; "
             "mean pair LOTO Jaccard={pair_loto}; mean site LOTO Jaccard={site_loto}; "
             "global adjacency-order test status={adj_status}; p={adj_p}; verdict={adj_verdict}. "
@@ -1397,7 +1397,7 @@ def format_temporal_evidence_packet_for_llm(
     if not packet or packet.get("status") != "available":
         return (
             "=== TEMPORAL NUMERICAL EVIDENCE PACKET ===\n"
-            "Status: unavailable. Do not invent temporal PTM-protein, dynamic co-wave, or kinase timing results.\n"
+            "Status: unavailable. Do not invent temporal PTM-protein, within-cluster trajectory concordance, or kinase timing results.\n"
             "=== END TEMPORAL NUMERICAL EVIDENCE PACKET ==="
         )
     section_plan = dict(packet.get("section_plan") or {})

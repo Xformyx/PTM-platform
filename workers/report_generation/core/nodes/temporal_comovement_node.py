@@ -1253,7 +1253,7 @@ def _generate_comovement_figures(
         if heatmap_path:
             figures.append({
                 "path": heatmap_path,
-                "caption": "Temporal PTM Trajectory Clustering Heatmap: PTM sites grouped by "
+                "caption": "Temporal Phosphosite Trajectory Clustering Heatmap: phosphosites grouped by "
                            "correlated temporal dynamics. Color intensity represents "
                            "conventional Log2FC magnitude (red=higher measured PTM abundance, blue=lower measured PTM abundance). "
                            "Left sidebar: cluster assignments. "
@@ -1878,7 +1878,7 @@ def _generate_summary_heatmap(
     )
 
     ax_heatmap.set_title(
-        "Temporal PTM Trajectory Clustering (conventional quantified rows)",
+        "Temporal Phosphosite Trajectory Clustering (conventional quantified rows)",
         fontsize=13, fontweight="normal", pad=12
     )
 
@@ -2607,14 +2607,14 @@ def _build_comovement_llm_context(
             )
         parts.append("")
 
-    # ── Report-safe local co-membership instructions ───────────────────────
+    # ── Report-safe within-cluster trajectory concordance instructions ─────
     parts.append(
-        "\nLOCAL CO-MEMBERSHIP TRANSITION REPORTING POLICY:\n"
-        "- Describe only observed local co-membership patterns at sampled timepoints, their member counts, profiles, and available stability/exposure metadata.\n"
+        "\nWITHIN-CLUSTER TRAJECTORY CONCORDANCE REPORTING POLICY:\n"
+        "- Describe only observed within-cluster trajectory concordance patterns at sampled timepoints, their member counts, profiles, and available stability/exposure metadata.\n"
         "- Do not name a functional module, shared pathway enrichment, common regulator, kinase/phosphatase, activation loop, relay, feedback, signal-flow direction, or causal mechanism for an individual cluster unless a dedicated persisted per-cluster evidence record is supplied.\n"
         "- Compare clusters only with globally computed pathway context and cited literature as a hypothesis; do not state that a shared pathway explains why members move together.\n"
-        "- A sampled-timepoint peak, local co-membership, or non-PTM timing difference is not evidence of biological lag, upstream/downstream regulation, stoichiometry, transcriptional regulation, or a molecular switch.\n"
-        "- If global adjacency-order null calibration is unavailable or unsupported, call the result an observed local co-membership reorganization only; never robust, significant, validated, or globally temporally resolved.\n"
+        "- A sampled-timepoint peak, within-cluster concordance pattern, or non-PTM timing difference is not evidence of biological lag, upstream/downstream regulation, stoichiometry, transcriptional regulation, or a molecular switch.\n"
+        "- If global adjacency-order null calibration is unavailable or unsupported, call the result an observed within-cluster concordance-pattern change only; never robust, significant, validated, or globally temporally resolved.\n"
         "- Refer to the associated figures as descriptive evidence maps. Dense network/cascade diagrams are supplementary context, not direct-regulation graphs.\n"
     )
 
@@ -2746,9 +2746,9 @@ def _build_comovement_llm_context(
         "(e.g., if studying osteocytes, do NOT extensively discuss neuronal "
         "or immune cell-specific pathways unless directly supported by data).\n"
         "\n"
-        "10. CLUSTER INTERPRETATION BOUNDARY (R1.0):\n"
-        "   - A temporal PTM cluster is a complete-case trajectory-clustering result.\n"
-        "   - Its local co-membership annotation describes sampled-timepoint patterns only.\n"
+        "10. TEMPORAL PHOSPHOSITE CLUSTER INTERPRETATION BOUNDARY (R1.0):\n"
+        "   - A Temporal Phosphosite Cluster is a complete-case trajectory-clustering result.\n"
+        "   - Its Within-Cluster Trajectory Concordance Annotation describes sampled-timepoint patterns only.\n"
         "   - Do NOT assign a functional module, shared pathway, common regulator,\n"
         "     kinase family, or causal explanation to an individual cluster unless a\n"
         "     separately persisted per-cluster enrichment or validated relation record is supplied.\n"
@@ -3313,7 +3313,7 @@ def _append_cluster_detail(
     members = cluster["members"]
     # Cluster annotation is not a persisted per-cluster enrichment result. Keep it
     # out of the Report/LLM payload so global pathway context cannot be recast
-    # as a functional module assigned to an individual Temporal PTM Cluster.
+    # as a functional module assigned to an individual Temporal Phosphosite Cluster.
     ann = {}
 
     # v9.27: activity class breakdown
@@ -3326,7 +3326,7 @@ def _append_cluster_detail(
     ) if class_counts else "unknown"
     dominant_label = class_label_map.get(dominant, dominant)
 
-    parts.append(f"\n#### Temporal PTM Cluster {cid}: {pattern} ({len(members)} members) [Figure {figure_num}]")
+    parts.append(f"\n#### Temporal Phosphosite Cluster {cid}: {pattern} ({len(members)} members) [Figure {figure_num}]")
     parts.append(
         f"Members: {', '.join(members[:20])}"
         + (f" ... (+{len(members)-20} more)" if len(members) > 20 else "")
@@ -3352,7 +3352,7 @@ def _append_cluster_detail(
     parts.append(f"Mean profile: {profile_str}")
 
     parts.append(
-        "Membership interpretation boundary: local co-membership is an observed sampled-timepoint pattern; "
+        "Concordance interpretation boundary: within-cluster trajectory concordance is an observed sampled-timepoint pattern; "
         "no per-cluster functional enrichment, common regulator, or causal mechanism is assigned here."
     )
 

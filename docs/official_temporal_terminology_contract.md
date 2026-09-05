@@ -7,16 +7,16 @@
 
 | Legacy display label | Official manuscript term | Official UI/Report label | Interpretation boundary |
 |---|---|---|---|
-| Wave | **Temporal PTM Trajectory Cluster** | **Temporal PTM Cluster** | A correlation-based hierarchical cluster of complete-case site-level trajectories. |
-| Co-Wave | **Within-Cluster Local Co-membership Transition Analysis** | **Local Co-membership Transition** | A local concordance annotation across adjacent sampled intervals within a fixed cluster. |
+| Wave | **Temporal Phosphosite Trajectory Clustering** | **Temporal Phosphosite Cluster** | A correlation-based hierarchical cluster of complete-case site-level phosphosite trajectories. |
+| Co-Wave | **Within-Cluster Trajectory Concordance Analysis** | **Within-Cluster Concordance Analysis** | A pairwise trajectory-concordance annotation across adjacent sampled intervals within a fixed cluster. |
 | Dynamic Co-Wave Learning | Do not use | Do not use | The current method does not re-estimate community membership at every timepoint. |
-| Co-Wave Module | **Temporal PTM Trajectory Cluster** | **Temporal PTM Cluster** | Never a synonym for pathway, functional module, or shared regulator. |
-| Co-Wave Group | **Local Co-membership Group** | **Local Co-membership Group** | A descriptive correlated substrate-footprint group, not direct kinase evidence. |
-| Wave transition | **Within-cluster local co-membership transition** | **Local Co-membership Transition** | Persistence, split, merge, recruitment or exit at sampled intervals only. |
+| Co-Wave Module | **Temporal Phosphosite Cluster** | **Temporal Phosphosite Cluster** | Never a synonym for pathway, functional module, or shared regulator. |
+| Co-Wave Group | **Concordant Phosphosite Set** | **Concordant Site Set** | A descriptive temporal-profile set, not direct kinase evidence. |
+| Wave transition | **Within-Cluster Concordance Pattern Annotation** | **Concordance Pattern** | Persistence, split, merge, recruitment or exit at sampled intervals only. |
 
 ## Required scientific boundary
 
-Temporal PTM clusters summarize structurally coherent complete-case site trajectories. Local co-membership transitions annotate observed patterns at discrete sampled intervals inside fixed clusters. Neither result alone establishes shared regulation, pathway membership, direct kinase-site attribution, continuous biological event order, catalytic activation, or causality.
+Temporal Phosphosite Clusters summarize structurally coherent complete-case site trajectories. Within-Cluster Trajectory Concordance Analysis annotates observed pairwise trajectory-concordance patterns at discrete sampled intervals inside fixed clusters. Neither result alone establishes shared regulation, pathway membership, direct kinase-site attribution, continuous biological event order, catalytic activation, or causality.
 
 ## Backwards compatibility
 

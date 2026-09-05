@@ -309,7 +309,7 @@ def test_postprocessor_lowers_numeric_contrast_and_no_null_overclaim_tone():
     assert "extensive evidence for activation of MAPK and SRC family kinase signaling" not in processed
     assert "IRS1 S522 Log2FC 28.97" in processed
     assert "pronounced measured contrast" in processed
-    assert "observed local co-membership reorganization" in processed
+    assert "observed within-cluster concordance-pattern change" in processed
     assert "MAPK/SRC-associated pathway context" in processed
 
 
@@ -328,7 +328,7 @@ def test_postprocessor_lowers_residual_conventional_contrast_and_local_membershi
     assert "extensive rewiring" not in processed
     assert "kinase switching" not in processed
     assert "measured contrast" in processed
-    assert "observed local co-membership" in processed
+    assert "observed within-cluster trajectory concordance" in processed
 
 
 def test_postprocessor_removes_unpersisted_per_wave_biological_process_column():
@@ -351,8 +351,8 @@ def test_postprocessor_removes_unpersisted_cowave_functional_context_column():
     processed = ReportPostProcessor().process(text)
     assert "Potential Functional Context" not in processed
     assert "Proximal signaling, RNA processing" not in processed
-    assert "Membership interpretation boundary" in processed
-    assert "| Temporal PTM Cluster | Peak Time | Trajectory Pattern |" in processed
+    assert "Concordance interpretation boundary" in processed
+    assert "| Temporal Phosphosite Cluster | Peak Time | Trajectory Pattern |" in processed
     assert "not assigned (no persisted per-cluster enrichment)" in processed
 
 
@@ -396,7 +396,7 @@ def test_co_scientist_questions_do_not_presume_kinase_activation_or_wave_functio
     assert "functional modules are revealed" not in joined
     assert "autophosphorylation-based activation loops" not in joined
     assert "candidate-context patterns" in joined
-    assert "within-cluster local co-membership" in joined
+    assert "within-cluster trajectory concordance" in joined
 
 
 def test_cluster_detail_excludes_unpersisted_per_wave_functional_annotations():
@@ -424,7 +424,7 @@ def test_cluster_detail_excludes_unpersisted_per_wave_functional_annotations():
         figure_num=2,
     )
     rendered = "\n".join(parts)
-    assert "Membership interpretation boundary" in rendered
+    assert "Concordance interpretation boundary" in rendered
     assert "Metabolic pathway module" not in rendered
     assert "Per-Gene Pathway Mapping" not in rendered
     assert "Shared Pathways Explaining Temporal Coordination" not in rendered

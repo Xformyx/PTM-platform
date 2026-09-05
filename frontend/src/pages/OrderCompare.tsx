@@ -46,6 +46,7 @@ const SECTION_TITLES = [
   /Temporal Context\s*비교/i,
   /Co-Wave\s*기반\s*Upstream Regulator\s*비교/i,
   /Local Co-membership Transition\s*기반\s*Candidate Context\s*비교/i,
+  /Within-Cluster Concordance\s*기반\s*Candidate Context\s*비교/i,
   /공통\s*Signaling Mechanism/i,
   /물질\s*특이적\s*반응\s*및\s*작용기전/,
   /Kinase Activity\s*정량\s*비교/i,
@@ -56,6 +57,7 @@ const SECTION_TITLES = [
   /Temporal Context Comparison/i,
   /Co-Wave[- ]Based Upstream Regulator Comparison/i,
   /Local Co-membership Transition[- ]Based Candidate Context Comparison/i,
+  /Within-Cluster Concordance[- ]Based Candidate Context Comparison/i,
   /Shared Signaling Mechanisms?/i,
   /Condition[- ]Specific Responses?(?:\s+and\s+Mechanisms?)?/i,
   /Quantitative Kinase Activity Comparison/i,
@@ -82,8 +84,10 @@ function paragraphizeBody(body: string): string {
 function toOfficialTemporalComparisonTitle(title: string): string {
   return title
     .replace(/Temporal Signaling Cascade/gi, "Temporal Context")
-    .replace(/Co-Wave\s*기반\s*Upstream Regulator/gi, "Local Co-membership Transition 기반 Candidate Context")
-    .replace(/Co-Wave[- ]Based Upstream Regulator/gi, "Local Co-membership Transition–Based Candidate Context");
+    .replace(/Co-Wave\s*기반\s*Upstream Regulator/gi, "Within-Cluster Concordance 기반 Candidate Context")
+    .replace(/Co-Wave[- ]Based Upstream Regulator/gi, "Within-Cluster Concordance–Based Candidate Context")
+    .replace(/Local Co-membership Transition\s*기반\s*Candidate Context/gi, "Within-Cluster Concordance 기반 Candidate Context")
+    .replace(/Local Co-membership Transition[- ]Based Candidate Context/gi, "Within-Cluster Concordance–Based Candidate Context");
 }
 
 /**
