@@ -124,7 +124,7 @@ def test_citation_complete_observation_only_order_replaces_llm_sections_determin
             "doi": "10.1000/example.1",
         }],
     })["final_report"]
-    assert "Evidence-status summary" in final
+    assert "Quantitative coverage and evidence status" in final
     assert "Evidence-bounded answers" in final
     assert "Observational conclusion" in final
     assert "molecular switch proves" not in final.lower()

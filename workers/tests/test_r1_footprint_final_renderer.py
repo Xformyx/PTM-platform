@@ -78,6 +78,19 @@ def test_footprint_diagnostics_are_aggregate_only_and_do_not_expose_loso_site_ke
     assert "LOSO=1/2" in rendered
 
 
+def test_all_non_evaluable_footprints_are_summarized_without_candidate_names():
+    payload = {
+        "kinase_scores": [
+            {"kinase": "KINA", "peak_score": 2.0, "footprint_diagnostics": {"status": "not_evaluable_no_profiles"}},
+            {"kinase": "KINB", "peak_score": 1.0, "footprint_diagnostics": {"status": "not_evaluable_no_profiles"}},
+        ]
+    }
+    rendered = format_kinase_footprint_diagnostics_for_report(payload)
+    assert "No candidate-specific kinase footprint diagnostic was evaluable" in rendered
+    assert "KINA" not in rendered
+    assert "KINB" not in rendered
+
+
 def test_methods_policy_is_created_when_llm_omits_methods_section():
     processed = ReportPostProcessor().process(
         "## Results\n\nObserved data.\n\n## Discussion\n\nInterpretation."
@@ -187,6 +200,59 @@ def test_final_renderer_preserves_traceable_chromadb_pmid_and_doi():
     assert "Traceable collection article" in final["final_report"]
     assert "https://pubmed.ncbi.nlm.nih.gov/34567890/" in final["final_report"]
     assert "https://doi.org/10.1000/example.1" in final["final_report"]
+
+
+def test_data_only_report_uses_neutral_title_and_nonempty_scientific_sections():
+    result = format_citations({
+        "sections": {"title": "Delineates a signaling network response", "results": "Unsafe free prose."},
+        "network_analysis": {},
+        "signal_flow_figures": [],
+        "collected_references": [],
+        "ptm_type": "phosphorylation",
+        "experimental_context": {
+            "cell_type": "primary microglia",
+            "treatment": "amyloid fibril",
+            "timepoints": ["0 min", "15 min"],
+        },
+        "biological_synthesis_packet": {
+            "study_frame": {"cell_model": "primary microglia", "treatment": "amyloid fibril", "timepoints": ["0 min", "15 min"]},
+            "quantitative_landscape": {"vector_row_count": 12, "unique_site_count": 8, "unique_gene_count": 7, "parsed_ptm_count": 8, "de_novo_vector_row_count": 1},
+        },
+        "temporal_report_evidence_packet": {"status": "unavailable", "records": []},
+    })["final_report"]
+    assert "Delineates a signaling network response" not in result
+    assert "# Data-only evidence and readiness summary" in result
+    for section in ("## Abstract", "## Introduction", "## Results", "## Discussion", "## Conclusion"):
+        assert section in result
+
+
+def test_observation_only_composer_uses_landscape_temporal_and_traceable_context():
+    result = format_citations({
+        "sections": {"title": "Observation-only test", "results": "Unsafe LLM prose."},
+        "network_analysis": {},
+        "signal_flow_figures": [],
+        "ptm_type": "phosphorylation",
+        "experimental_context": {"cell_type": "cells", "treatment": "treatment", "timepoints": ["0 min", "15 min"]},
+        "biological_synthesis_packet": {
+            "study_frame": {"cell_model": "cells", "treatment": "treatment", "timepoints": ["0 min", "15 min"]},
+            "quantitative_landscape": {"vector_row_count": 40, "unique_site_count": 20, "unique_gene_count": 15, "parsed_ptm_count": 20, "de_novo_vector_row_count": 3},
+            "candidate_discovery_packet": {"selection_summary": {"candidate_capacity": 5, "selected_by_quota": {"discovery": 2}}},
+        },
+        "temporal_report_evidence_packet": {
+            "status": "available",
+            "section_plan": {"observation_only_claim_ceiling": True},
+            "records": [
+                {"evidence_id": "DATA-TEMPORAL-SUMMARY", "text": "Measured scope: protein trajectories=10."},
+                {"evidence_id": "DATA-WAVE-INPUT-QUALITY", "text": "Eligible complete feature profiles=8."},
+                {"evidence_id": "DATA-DYNAMIC-SUMMARY", "text": "Interval-wise concordance status=computed."},
+            ],
+        },
+        "collected_references": [{"pmid": "12345", "title": "Traceable context", "authors": "Author A", "journal": "Journal", "pub_date": "2025"}],
+    })["final_report"]
+    assert "vector rows=40" in result
+    assert "Measured scope: protein trajectories=10." in result
+    assert "Traceable context" in result
+    assert "Unsafe LLM prose" not in result
 
 
 def test_final_renderer_marks_missing_traceable_bibliography_for_review():

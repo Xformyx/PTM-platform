@@ -430,8 +430,19 @@ def _build_bibliography_blocked_data_only_report(
     from .biological_synthesis import format_candidate_discovery_packet_for_report
     from .nodes.kinase_annotation_node import format_kinase_footprint_diagnostics_for_report
 
+    packet = dict(state.get("temporal_report_evidence_packet") or {})
+    cell_context, treatment, sampled_context, ptm_type = _study_frame_for_report(state, packet)
+    landscape = _quantitative_landscape_text(state)
+    temporal_records = _compact_record_texts(
+        packet,
+        ("DATA-TEMPORAL-SUMMARY", "DATA-WAVE-INPUT-QUALITY", "DATA-DYNAMIC-SUMMARY", "DATA-TEMPORAL-PRECEDENCE"),
+        limit=4,
+    )
+    temporal_block = "\n".join(f"- {text}" for text in temporal_records) or (
+        "- No compact temporal summary was available; temporal quantitative claims are withheld."
+    )
     parts = [
-        f"# {title_text}\n",
+        f"# {_neutral_data_only_title(state)}\n",
         f"*Generated: {generated_at}*\n",
         "## Citation Integrity Gate\n\n"
         "This Report is rendered in **data-only review mode** because no traceable publication-level "
@@ -439,9 +450,23 @@ def _build_bibliography_blocked_data_only_report(
         "literature comparison, pathway-function interpretation, and cascade claims are intentionally withheld. "
         "Reindex the selected collection with a title and PMID or DOI per source document before requesting a "
         "citation-complete Report.\n",
+        "## Abstract\n\n"
+        f"This data-only report summarizes {ptm_type} and total-protein abundance observations in {cell_context} under "
+        f"{treatment}, across {sampled_context}. {landscape} The artifact supports reproducible quantitative description, "
+        "readiness assessment and pre-specified follow-up design, but not literature comparison, direct kinase attribution, "
+        "causal pathway claims or perturbation conclusions.\n",
+        "## Introduction\n\n"
+        "### Study scope and analytical rationale\n\n"
+        f"The recorded experiment evaluates {ptm_type} and total-protein abundance at {sampled_context}. PTM feature contrasts, "
+        "linked protein-abundance context, temporal-profile availability and candidate-footprint diagnostics are preserved as "
+        "separate evidence classes. Without traceable references, the report intentionally does not state external biological "
+        "background, canonical pathway function or prior-work comparison.\n",
         "## Results\n\n"
-        "Only deterministic Order-derived evidence is shown below. Measured contrasts are not, by themselves, "
-        "biological priority, mechanistic importance, direct regulatory strength, or kinase activity.\n",
+        "### Quantitative coverage and temporal availability\n\n"
+        f"{landscape}\n\n{temporal_block}\n\n"
+        "### Reporting boundary\n\n"
+        "Only deterministic Order-derived evidence is shown below. Measured contrasts are not, by themselves, biological "
+        "priority, mechanistic importance, direct regulatory strength or kinase activity.\n",
     ]
     readiness = format_compact_attribution_readiness_for_report(
         state.get("temporal_report_evidence_packet") or {}
@@ -459,6 +484,24 @@ def _build_bibliography_blocked_data_only_report(
     )
     if footprint:
         parts.append(footprint)
+    parts.append(
+        "## Discussion\n\n"
+        "### Evidence-constrained interpretation\n\n"
+        "The present data-only artifact separates measured PTM/protein observations, temporal/readiness diagnostics and candidate "
+        "context from external biological interpretation. A missing citation identity is a documentation/readiness limitation, not "
+        "evidence that the treatment has no cellular effect. Traceable literature metadata and the corresponding deterministic "
+        "temporal packet are required before a citation-complete biological synthesis can be rendered.\n\n"
+        "### Prospective resolution\n\n"
+        "The next eligible analysis step is to establish traceable publication metadata and verify the availability of the canonical "
+        "temporal sidecar. Where a feature, mapping, relation or footprint is not evaluable, the appropriate result remains a no-call "
+        "until a matched measurement or pre-specified validation design resolves that specific evidence gap.\n"
+    )
+    parts.append(
+        "## Conclusion\n\n"
+        f"This Order provides a provenance-bounded quantitative record of {ptm_type} and total-protein abundance across "
+        f"{sampled_context}. It is suitable for measured observation and readiness reporting, but not for citation-dependent "
+        "biological interpretation, direct kinase attribution or causal conclusions.\n"
+    )
     parts.append("## Methods\n\n### Reporting Policy\n\n"
                  "Large conventional Log2FC values are retained as measured numeric contrasts, but are not used "
                  "alone to infer biological priority, mechanistic importance, or direct regulatory strength.\n")
@@ -500,6 +543,98 @@ def _compact_record_text(packet: dict, evidence_id: str) -> str:
     return ""
 
 
+def _compact_record_texts(packet: dict, prefixes: tuple[str, ...], *, limit: int) -> list[str]:
+    """Return bounded report-packet text for the requested evidence classes."""
+    selected: list[str] = []
+    for record in packet.get("records") or []:
+        if not isinstance(record, dict):
+            continue
+        evidence_id = str(record.get("evidence_id") or "")
+        if any(evidence_id.startswith(prefix) for prefix in prefixes):
+            text = str(record.get("text") or "").strip()
+            if text:
+                selected.append(text)
+        if len(selected) >= limit:
+            break
+    return selected
+
+
+def _study_frame_for_report(state: ReportState, packet: dict) -> tuple[str, str, str, str]:
+    """Return compact recorded study context without inventing missing metadata."""
+    context = dict(state.get("experimental_context") or {})
+    synthesis = dict(state.get("biological_synthesis_packet") or {})
+    frame = dict(synthesis.get("study_frame") or {})
+    cell_context = str(
+        frame.get("cell_model")
+        or context.get("cell_type")
+        or context.get("cell_line")
+        or "the recorded experimental system"
+    ).strip()
+    treatment = str(
+        frame.get("treatment")
+        or context.get("treatment")
+        or context.get("compound")
+        or "the recorded treatment context"
+    ).strip()
+    timepoints = frame.get("timepoints") or context.get("timepoints") or context.get("conditions") or []
+    if isinstance(timepoints, str):
+        timepoints = [timepoints]
+    sampled_context = ", ".join(str(value) for value in timepoints if str(value).strip()) or "the recorded sampled conditions"
+    ptm_type = str(state.get("ptm_type") or "PTM").strip()
+    return cell_context, treatment, sampled_context, ptm_type
+
+
+def _quantitative_landscape_text(state: ReportState) -> str:
+    """Format safe aggregate coverage without promoting magnitude to priority."""
+    synthesis = dict(state.get("biological_synthesis_packet") or {})
+    landscape = dict(synthesis.get("quantitative_landscape") or {})
+    return (
+        "Observed quantitative landscape: vector rows={rows}; unique quantitative feature aggregates={sites}; "
+        "unique gene labels={genes}; parsed PTM records={parsed}; de novo detection/LOD-only rows={denovo}. "
+        "Conventional numerical contrasts and de novo detection evidence are retained as separate representations; "
+        "neither is a stand-alone biological-priority, direct-regulation, or kinase-activity measure."
+    ).format(
+        rows=landscape.get("vector_row_count", "not recorded"),
+        sites=landscape.get("unique_site_count", "not recorded"),
+        genes=landscape.get("unique_gene_count", "not recorded"),
+        parsed=landscape.get("parsed_ptm_count", "not recorded"),
+        denovo=landscape.get("de_novo_vector_row_count", "not recorded"),
+    )
+
+
+def _traceable_reference_inventory(collected_references: List[dict], *, limit: int = 3) -> str:
+    """List citable publications as context only, preserving stable citation markers."""
+    lines: list[str] = []
+    seen: set[str] = set()
+    for index, reference in enumerate(collected_references or [], 1):
+        if not isinstance(reference, dict):
+            continue
+        title = str(reference.get("title") or "").strip()
+        if not title:
+            continue
+        marker = _traceable_reference_markers([reference], limit=1)
+        if not marker or marker in seen:
+            continue
+        seen.add(marker)
+        authors = str(reference.get("authors") or "").strip()
+        journal = str(reference.get("journal") or "").strip()
+        year = str(reference.get("year") or reference.get("pub_date") or "").strip()[:4]
+        identity = "; ".join(value for value in (authors, journal, year) if value)
+        lines.append(f"- {title}" + (f" ({identity})" if identity else "") + f" {marker}")
+        if len(lines) >= limit:
+            break
+    return "\n".join(lines)
+
+
+def _neutral_data_only_title(state: ReportState) -> str:
+    """Prevent an LLM title from implying a mechanism when citations are blocked."""
+    cell_context, treatment, sampled_context, ptm_type = _study_frame_for_report(state, {})
+    return (
+        f"Data-only evidence and readiness summary for {ptm_type} observations in {cell_context} "
+        f"under {treatment} across {sampled_context}"
+    )
+
+
 def _compose_observation_only_report_sections(
     state: ReportState,
     sections: Dict[str, str],
@@ -521,50 +656,70 @@ def _compose_observation_only_report_sections(
     if not observation_only:
         return dict(sections), False
 
-    context = dict(state.get("experimental_context") or {})
-    cell_context = str(context.get("cell_type") or context.get("cell_line") or "the recorded experimental system").strip()
-    treatment = str(context.get("treatment") or context.get("compound") or "the recorded treatment context").strip()
-    timepoints = context.get("timepoints") or context.get("conditions") or []
-    if isinstance(timepoints, str):
-        timepoints = [timepoints]
-    sampled_context = ", ".join(str(value) for value in timepoints if str(value).strip()) or "the recorded sampled conditions"
-    ptm_type = str(state.get("ptm_type") or "PTM").strip()
+    cell_context, treatment, sampled_context, ptm_type = _study_frame_for_report(state, packet)
     references = _traceable_reference_markers(collected_references)
-
-    temporal_summary = _compact_record_text(packet, "DATA-TEMPORAL-SUMMARY")
-    dynamic_summary = _compact_record_text(packet, "DATA-DYNAMIC-SUMMARY")
-    precedence_summary = _compact_record_text(packet, "DATA-TEMPORAL-PRECEDENCE")
-    tmm_summary = _compact_record_text(packet, "DATA-TMM-UNCERTAINTY")
-    record_texts = [text for text in (temporal_summary, dynamic_summary, precedence_summary, tmm_summary) if text]
+    reference_inventory = _traceable_reference_inventory(collected_references)
+    temporal_scope = _compact_record_texts(
+        packet,
+        ("DATA-TEMPORAL-SUMMARY", "DATA-WAVE-INPUT-QUALITY", "DATA-DYNAMIC-SUMMARY", "DATA-TEMPORAL-PRECEDENCE"),
+        limit=4,
+    )
+    temporal_detail = _compact_record_texts(
+        packet,
+        ("DATA-DYNAMIC-WAVE-", "DATA-CROSS-LAYER-", "DATA-TMM-", "DATA-COUNTEREVIDENCE-"),
+        limit=6,
+    )
+    record_texts = temporal_scope + temporal_detail
     if not record_texts:
         record_texts = [
             "No compact temporal summary was available for deterministic narrative rendering; numerical claims are therefore withheld."
         ]
     evidence_lines = "\n".join(f"- {text}" for text in record_texts)
     reference_clause = f" {references}" if references else ""
+    landscape = _quantitative_landscape_text(state)
+    p5_summary = dict((state.get("biological_synthesis_packet") or {}).get("candidate_discovery_packet") or {}).get("selection_summary") or {}
+    p5_capacity = p5_summary.get("candidate_capacity", "not recorded")
+    p5_selected = sum(
+        int(value or 0) for value in dict(p5_summary.get("selected_by_quota") or {}).values()
+        if isinstance(value, (int, float))
+    )
 
     rendered = dict(sections)
     rendered["abstract"] = (
         f"This evidence-first report summarizes {ptm_type} and total-protein abundance observations in {cell_context} "
-        f"under {treatment}, across {sampled_context}. The final interpretation is generated from compact, "
-        "provenance-bounded analysis packets rather than free-form mechanism narration. Measured contrasts, "
-        "sampled-timepoint profiles, candidate footprint context, and literature context are reported as separate "
-        "evidence classes. The analysis does not establish direct kinase–site regulation, catalytic activity, "
-        "causal propagation, isoform-specific attribution, or perturbation outcomes." + reference_clause
+        f"under {treatment}, across {sampled_context}. {landscape} The final narrative is assembled from compact, "
+        "provenance-bounded packets: observed quantitative coverage, temporal-profile input quality, interval-wise "
+        "concordance summaries, candidate-footprint diagnostics, and separately labelled literature context. "
+        "This report therefore supports measured observations, candidate context and discriminating follow-up questions; "
+        "it does not establish direct kinase–feature regulation, catalytic activity, causal propagation, isoform-specific "
+        "attribution, or perturbation outcomes." + reference_clause
     )
     rendered["introduction"] = (
-        "### Scope and cited context\n\n"
-        f"The selected traceable publication collection provides external biological context for the recorded "
-        f"{treatment} experiment in {cell_context}. The Order-specific interpretation below remains constrained "
-        "to quantified PTM/protein observations and compact analysis diagnostics; cited context is not treated as "
-        "an Order-specific measurement or direct mechanistic relation." + reference_clause
+        "### Study scope and analytical rationale\n\n"
+        f"The recorded experiment evaluates {ptm_type} and total-protein abundance in {cell_context} under {treatment} "
+        f"at {sampled_context}. The analysis retains feature-level quantitative contrasts alongside linked non-PTM protein "
+        "abundance, rather than treating either signal as a direct readout of kinase activity or phosphorylation occupancy. "
+        "Temporal Profile Clustering and Interval-wise Concordance Analysis are used to describe observed sampled-interval "
+        "profile patterns, whereas kinase-footprint scores remain contribution-weighted candidate context.\n\n"
+        "### Traceable literature context\n\n"
+        f"The following selected publications provide cited external context. They do not convert a literature relationship "
+        f"into an Order-specific observation, direct kinase–feature relationship, or causal pathway statement.\n\n"
+        + (reference_inventory or "No traceable publication inventory was available for contextual comparison.")
+        + reference_clause
     )
     rendered["results"] = (
-        "### Evidence-status summary\n\n"
-        f"The report evaluates {ptm_type} and total-protein abundance across {sampled_context}. "
-        "The following engine-generated summaries are observation-level statements; they do not establish pathway "
-        "activation, molecular switching, direct regulation, kinase activity, or causal order.\n\n"
+        "### Quantitative coverage and evidence status\n\n"
+        f"The report evaluates {ptm_type} and total-protein abundance across {sampled_context}. {landscape}\n\n"
+        "### Temporal profile and cross-layer observations\n\n"
+        "The following engine-generated summaries preserve measured scope, temporal availability and uncertainty. They are "
+        "observation-level statements and do not establish pathway activation, molecular switching, direct regulation, kinase "
+        "activity or causal order.\n\n"
         f"{evidence_lines}\n\n"
+        "### Candidate-discovery and attribution scope\n\n"
+        f"P5 candidate capacity={p5_capacity}; selected candidate cards={p5_selected}. Candidate cards, when available, are "
+        "data-prioritized observed features for literature comparison and follow-up measurement. They are not confirmed novel "
+        "substrates, direct kinase targets, or perturbation results. P0–P3 readiness, P5 availability and footprint diagnostics "
+        "are rendered in the following deterministic sections.\n\n"
         "### Figure interpretation boundary\n\n"
         "Figure 1 supplies descriptive pathway-membership context; Figure 2 displays conventional quantified PTM "
         "profiles with de novo detection context excluded from the numerical colour scale; Figure 3 is a dashed, "
@@ -574,7 +729,7 @@ def _compose_observation_only_report_sections(
     rendered["research_question_answers"] = (
         "### Evidence-bounded answers\n\n"
         "**Q1. What does the current Order directly measure?** It measures PTM and total-protein abundance patterns "
-        "at recorded sampled conditions; these measurements support numerical description and candidate context.\n\n"
+        f"at recorded sampled conditions. {landscape}\n\n"
         "**Q2. What does local temporal grouping establish?** Local membership and transition summaries describe "
         "sampled-timepoint co-movement only. They do not assign a common regulator, function, complex state, or "
         "causal sequence.\n\n"
@@ -587,11 +742,18 @@ def _compose_observation_only_report_sections(
     )
     rendered["discussion"] = (
         "### Evidence-constrained interpretation\n\n"
-        "The report separates data-derived abundance observations from substrate-derived candidate context and from "
-        "traceable publication context. This separation preserves the value of time-resolved, protein-abundance-adjusted "
-        "PTM measurement without using contrast magnitude, local co-membership, pathway labels, or database annotations "
-        "as a substitute for direct mechanistic evidence. The cited collection may guide prospective biological questions, "
-        "but it does not elevate an Order-specific candidate into a verified pathway edge or kinase action." + reference_clause
+        "The report separates data-derived abundance observations from substrate-derived candidate context and traceable "
+        "publication context. This separation preserves the value of time-resolved, protein-abundance-adjusted PTM measurement "
+        "without using contrast magnitude, interval-wise concordance, pathway labels or database annotations as substitutes for "
+        "direct mechanistic evidence. The current Order can therefore support biologically focused comparison and hypothesis "
+        "generation while retaining explicit provenance and no-call states.\n\n"
+        "### Cited context and discriminating next measurements\n\n"
+        "The cited collection provides a bounded basis for comparing the study frame and observed temporal patterns with prior "
+        "biology. Where the current packet reports non-evaluable mapping, relation, temporal-order, or footprint evidence, the "
+        "appropriate next step is a paired measurement or pre-specified perturbation/orthogonal assay, not conversion of a "
+        "candidate score into a direct kinase or causal conclusion.\n\n"
+        + (reference_inventory or "Traceable literature comparison is unavailable for this Order.")
+        + reference_clause
     )
     rendered["conclusion"] = (
         "### Observational conclusion\n\n"

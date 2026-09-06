@@ -91,6 +91,28 @@ def format_kinase_footprint_diagnostics_for_report(
     if not scores:
         return ""
 
+    computed_scores = [
+        row for row in scores
+        if str((row.get("footprint_diagnostics") or {}).get("status") or "not_evaluable") == "computed"
+    ]
+    if not computed_scores:
+        statuses: dict[str, int] = defaultdict(int)
+        for row in scores:
+            status = str((row.get("footprint_diagnostics") or {}).get("status") or "not_evaluable")
+            statuses[status] += 1
+        regulator_label = "E3-ligase" if ptm_type.lower().strip() in ("ubiquitylation", "ubiquitination") else "kinase"
+        status_text = "; ".join(f"{name}={count}" for name, count in sorted(statuses.items()))
+        return "\n".join([
+            "### Kinase Footprint Diagnostics (P0/P1)",
+            "",
+            f"No candidate-specific {regulator_label} footprint diagnostic was evaluable for this Order ({status_text}). "
+            "Candidate names and score order are withheld because non-evaluable footprint rows do not provide an interpretable "
+            "basis for ranking or attribution.",
+            "",
+            "**Interpretation boundary:** absence of an evaluable footprint is not evidence that a kinase is absent or inactive. "
+            "It is a no-call for the current provenance/quantitative input.",
+        ])
+
     regulator_label = "E3-ligase" if ptm_type.lower().strip() in ("ubiquitylation", "ubiquitination") else "kinase"
     direction_label = {
         "positive_substrate_footprint": "positive substrate footprint",
