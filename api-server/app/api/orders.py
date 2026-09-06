@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import csv
+from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -29,6 +30,9 @@ from ptm_shared.temporal_sidecar_freshness import (
 
 router = APIRouter(prefix="/orders", tags=["orders"])
 logger = logging.getLogger("ptm-platform.orders")
+
+_NORMALIZATION_METHOD = "separate_samplewise_median_scaling"
+_RATIO_TRACK_INTERPRETATION = "protein_abundance_adjusted_relative_ptm_ratio_contrast"
 
 _STAGE_LOCK_KEYS = [
     "report_gen_lock:{order_id}",
@@ -4337,8 +4341,8 @@ def _generate_statistics_from_outputs(order: Order, output_dir: Path, file_suffi
                 # path does not fit a batch covariate, injection-order drift
                 # model, or pooled-QC correction, so those states must never
                 # be implied by the historical statistics endpoint.
-                "method": "separate_samplewise_median_scaling",
-                "normalization_method": "separate_samplewise_median_scaling",
+                "method": _NORMALIZATION_METHOD,
+                "normalization_method": _NORMALIZATION_METHOD,
                 "sample_scaling_status": "performed",
                 # Retained as a boolean compatibility field for existing
                 # consumers; explicit status fields carry the reader-facing
@@ -4347,10 +4351,7 @@ def _generate_statistics_from_outputs(order: Order, output_dir: Path, file_suffi
                 "batch_correction_status": "not_performed",
                 "injection_order_drift_correction_status": "not_performed",
                 "upstream_quantity_scale_status": "unknown_not_recorded",
-                "ratio_track_interpretation": (
-                    "protein_abundance_adjusted_relative_phosphorylation_"
-                    "ratio_contrast"
-                ),
+                "ratio_track_interpretation": _RATIO_TRACK_INTERPRETATION,
             }
             norm_factors_path = output_dir / "normalization_factors.tsv"
             if norm_factors_path.exists():
@@ -4410,7 +4411,47 @@ def _generate_statistics_from_outputs(order: Order, output_dir: Path, file_suffi
             return stats
     except Exception as e:
         logger.warning(f"Failed to generate statistics from outputs: {e}")
-        return None
+    return None
+
+
+def _with_truthful_normalization_provenance(stats: dict | None) -> dict | None:
+    """Return a response-only normalization provenance view of legacy stats.
+
+    Older ``pipeline_statistics*.json`` files were written with
+    ``batch_variation_corrected: true`` despite the active preprocessing path
+    only performing separate sample-wise median scaling.  Do not edit those
+    historical files or their numerical outputs: copy the decoded response and
+    attach explicit provenance statuses instead.  A future pipeline that emits
+    an explicit ``batch_correction_status`` owns its declared state and is not
+    overwritten by this legacy compatibility shim.
+    """
+    if not isinstance(stats, dict):
+        return stats
+
+    sanitized = deepcopy(stats)
+    step2 = sanitized.get("step2_quantification")
+    if not isinstance(step2, dict):
+        return sanitized
+    normalization = step2.get("normalization")
+    if not isinstance(normalization, dict):
+        return sanitized
+
+    # ``method: median`` was the historical shorthand for the active N0 path.
+    # Preserve custom future methods and normalize only the known legacy label.
+    if normalization.get("method") == "median":
+        normalization["method"] = _NORMALIZATION_METHOD
+    normalization.setdefault("normalization_method", normalization.get("method", _NORMALIZATION_METHOD))
+    normalization.setdefault("sample_scaling_status", "performed")
+    normalization.setdefault("upstream_quantity_scale_status", "unknown_not_recorded")
+    normalization.setdefault("ratio_track_interpretation", _RATIO_TRACK_INTERPRETATION)
+
+    # Absence of an explicit status identifies legacy stats.  Only these records
+    # are corrected from the historical false boolean to the truthful state.
+    if "batch_correction_status" not in normalization:
+        normalization["batch_variation_corrected"] = False
+        normalization["batch_correction_status"] = "not_performed"
+    normalization.setdefault("injection_order_drift_correction_status", "not_performed")
+    return sanitized
 
 
 def _merge_cross_talk_stats(phospho_stats: dict, ubi_stats: dict) -> dict:
@@ -4482,12 +4523,18 @@ async def get_order_statistics(
             except Exception:
                 pass
         if phospho_stats or ubi_stats:
-            stats = _merge_cross_talk_stats(phospho_stats or {}, ubi_stats or {})
+            stats = _merge_cross_talk_stats(
+                _with_truthful_normalization_provenance(phospho_stats) or {},
+                _with_truthful_normalization_provenance(ubi_stats) or {},
+            )
             return {"statistics": stats, "available": True}
         phospho_fallback = _generate_statistics_from_outputs(order, output_dir, "_phospho")
         ubi_fallback = _generate_statistics_from_outputs(order, output_dir, "_ubi")
         if phospho_fallback or ubi_fallback:
-            stats = _merge_cross_talk_stats(phospho_fallback or {}, ubi_fallback or {})
+            stats = _merge_cross_talk_stats(
+                _with_truthful_normalization_provenance(phospho_fallback) or {},
+                _with_truthful_normalization_provenance(ubi_fallback) or {},
+            )
             if stats:
                 return {"statistics": stats, "available": True}
 
@@ -4498,13 +4545,19 @@ async def get_order_statistics(
         try:
             with open(stats_file, "r", encoding="utf-8") as f:
                 stats = _json.load(f)
-            return {"statistics": stats, "available": True}
+            return {
+                "statistics": _with_truthful_normalization_provenance(stats),
+                "available": True,
+            }
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Error reading statistics: {str(e)}")
 
     stats = _generate_statistics_from_outputs(order, output_dir, file_suffix)
     if stats:
-        return {"statistics": stats, "available": True}
+        return {
+            "statistics": _with_truthful_normalization_provenance(stats),
+            "available": True,
+        }
     return {"statistics": None, "available": False}
 
 
