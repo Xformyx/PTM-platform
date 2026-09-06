@@ -4333,8 +4333,24 @@ def _generate_statistics_from_outputs(order: Order, output_dir: Path, file_suffi
             norm_stats = {
                 "pr_precursors_before": n_pr,
                 "pg_proteins_before": n_pg,
-                "method": "median",
-                "batch_variation_corrected": True,
+                # This is a sample-level scaling summary.  The preprocessing
+                # path does not fit a batch covariate, injection-order drift
+                # model, or pooled-QC correction, so those states must never
+                # be implied by the historical statistics endpoint.
+                "method": "separate_samplewise_median_scaling",
+                "normalization_method": "separate_samplewise_median_scaling",
+                "sample_scaling_status": "performed",
+                # Retained as a boolean compatibility field for existing
+                # consumers; explicit status fields carry the reader-facing
+                # provenance contract.
+                "batch_variation_corrected": False,
+                "batch_correction_status": "not_performed",
+                "injection_order_drift_correction_status": "not_performed",
+                "upstream_quantity_scale_status": "unknown_not_recorded",
+                "ratio_track_interpretation": (
+                    "protein_abundance_adjusted_relative_phosphorylation_"
+                    "ratio_contrast"
+                ),
             }
             norm_factors_path = output_dir / "normalization_factors.tsv"
             if norm_factors_path.exists():
