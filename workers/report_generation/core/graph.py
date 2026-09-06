@@ -626,6 +626,52 @@ def _traceable_reference_inventory(collected_references: List[dict], *, limit: i
     return "\n".join(lines)
 
 
+_ORDER_SPECIFIC_OR_DIRECT_CONTEXT_RE = re.compile(
+    r"\b(?:this|current|present)\s+(?:order|experiment|dataset|analysis|study)|"
+    r"\bour\s+(?:data|results|analysis|study)|\bwe\s+(?:observed|found|identified|demonstrated)|"
+    r"\b(?:direct(?:ly)?|caus(?:e|es|ed|al)|driv(?:e|es|en)|prove(?:s|d)?|"
+    r"establish(?:es|ed)?|kinase\s*(?:-|–)?\s*substrate)\b",
+    flags=re.IGNORECASE,
+)
+
+
+def _citation_bound_context_sentences(
+    source_text: str,
+    collected_references: List[dict],
+    *,
+    limit: int = 2,
+) -> list[str]:
+    """Select traceable, external-context-only sentences from writer output.
+
+    Each retained sentence must carry a stable reference marker resolvable by
+    the final bibliography. Current-Order, directness and causal language is
+    excluded before deterministic assembly so an LLM prose path cannot bypass
+    observation-only evidence ceilings.
+    """
+    known_markers = set(re.findall(
+        r"\[REF:[^\]]+\]", _traceable_reference_markers(collected_references, limit=999)
+    ))
+    if not source_text or not known_markers:
+        return []
+
+    without_headings_or_tables = re.sub(r"^#{1,6}\s+.*$|^\|.*\|$", "", str(source_text), flags=re.MULTILINE)
+    normalized = re.sub(r"\s+", " ", without_headings_or_tables).strip()
+    selected: list[str] = []
+    for sentence in re.split(r"(?<=[.!?])\s+", normalized):
+        sentence = sentence.strip(" -\t")
+        markers = set(re.findall(r"\[REF:[^\]]+\]", sentence))
+        if not markers or not markers.issubset(known_markers):
+            continue
+        if _ORDER_SPECIFIC_OR_DIRECT_CONTEXT_RE.search(sentence):
+            continue
+        if not 40 <= len(sentence) <= 700:
+            continue
+        selected.append(sentence)
+        if len(selected) >= limit:
+            break
+    return selected
+
+
 def _neutral_data_only_title(state: ReportState) -> str:
     """Prevent an LLM title from implying a mechanism when citations are blocked."""
     cell_context, treatment, sampled_context, ptm_type = _study_frame_for_report(state, {})
@@ -659,6 +705,14 @@ def _compose_observation_only_report_sections(
     cell_context, treatment, sampled_context, ptm_type = _study_frame_for_report(state, packet)
     references = _traceable_reference_markers(collected_references)
     reference_inventory = _traceable_reference_inventory(collected_references)
+    intro_context = _citation_bound_context_sentences(
+        str(sections.get("introduction") or ""), collected_references
+    )
+    discussion_context = _citation_bound_context_sentences(
+        str(sections.get("discussion") or ""), collected_references
+    )
+    intro_context_block = "\n".join(f"- {sentence}" for sentence in intro_context)
+    discussion_context_block = "\n".join(f"- {sentence}" for sentence in discussion_context)
     temporal_scope = _compact_record_texts(
         packet,
         ("DATA-TEMPORAL-SUMMARY", "DATA-WAVE-INPUT-QUALITY", "DATA-DYNAMIC-SUMMARY", "DATA-TEMPORAL-PRECEDENCE"),
@@ -705,6 +759,13 @@ def _compose_observation_only_report_sections(
         f"The following selected publications provide cited external context. They do not convert a literature relationship "
         f"into an Order-specific observation, direct kinase–feature relationship, or causal pathway statement.\n\n"
         + (reference_inventory or "No traceable publication inventory was available for contextual comparison.")
+        + (
+            "\n\n### Cited contextual observations\n\n"
+            "The following statements are retained solely as cited external context, not as current-Order findings.\n\n"
+            + intro_context_block
+            if intro_context_block
+            else ""
+        )
         + reference_clause
     )
     rendered["results"] = (
@@ -753,6 +814,13 @@ def _compose_observation_only_report_sections(
         "appropriate next step is a paired measurement or pre-specified perturbation/orthogonal assay, not conversion of a "
         "candidate score into a direct kinase or causal conclusion.\n\n"
         + (reference_inventory or "Traceable literature comparison is unavailable for this Order.")
+        + (
+            "\n\n### Cited contextual observations\n\n"
+            "The following statements are retained solely as cited external context, not as current-Order findings.\n\n"
+            + discussion_context_block
+            if discussion_context_block
+            else ""
+        )
         + reference_clause
     )
     rendered["conclusion"] = (

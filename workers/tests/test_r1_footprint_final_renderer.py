@@ -255,6 +255,64 @@ def test_observation_only_composer_uses_landscape_temporal_and_traceable_context
     assert "Unsafe LLM prose" not in result
 
 
+def test_observation_only_composer_retains_only_safe_stable_cited_context():
+    result = format_citations({
+        "sections": {
+            "title": "Cited context test",
+            "introduction": (
+                "Prior work reported a phosphorylation profile under comparable experimental exposure "
+                "[REF:pmid:12345]. This study proves direct kinase regulation [REF:pmid:12345]."
+            ),
+            "discussion": (
+                "The cited study described a time-resolved proteomic measurement framework [REF:pmid:12345]. "
+                "Our data directly establishes a causal pathway [REF:pmid:12345]."
+            ),
+        },
+        "network_analysis": {},
+        "signal_flow_figures": [],
+        "ptm_type": "phosphorylation",
+        "experimental_context": {"cell_type": "cells", "treatment": "treatment", "timepoints": ["0 min", "15 min"]},
+        "temporal_report_evidence_packet": {
+            "status": "available", "section_plan": {"observation_only_claim_ceiling": True},
+            "records": [{"evidence_id": "DATA-TEMPORAL-SUMMARY", "text": "Measured scope: protein trajectories=10."}],
+        },
+        "collected_references": [{"pmid": "12345", "title": "Traceable context", "authors": "Author A", "journal": "Journal", "pub_date": "2025"}],
+    })["final_report"]
+    assert "Prior work reported a phosphorylation profile" in result
+    assert "The cited study described a time-resolved proteomic measurement framework" in result
+    assert "This study proves direct kinase regulation" not in result
+    assert "Our data directly establishes a causal pathway" not in result
+
+
+def test_observation_only_composer_retains_only_safe_stable_cited_context():
+    result = format_citations({
+        "sections": {
+            "title": "Cited context test",
+            "introduction": (
+                "Prior work reported a phosphorylation profile under comparable experimental exposure "
+                "[REF:pmid:12345]. This Order proves direct kinase regulation [REF:pmid:12345]."
+            ),
+            "discussion": (
+                "The cited study described a time-resolved proteomic measurement framework [REF:pmid:12345]. "
+                "Our data directly establishes a causal pathway [REF:pmid:12345]."
+            ),
+        },
+        "network_analysis": {},
+        "signal_flow_figures": [],
+        "ptm_type": "phosphorylation",
+        "experimental_context": {"cell_type": "cells", "treatment": "treatment", "timepoints": ["0 min", "15 min"]},
+        "temporal_report_evidence_packet": {
+            "status": "available", "section_plan": {"observation_only_claim_ceiling": True},
+            "records": [{"evidence_id": "DATA-TEMPORAL-SUMMARY", "text": "Measured scope: protein trajectories=10."}],
+        },
+        "collected_references": [{"pmid": "12345", "title": "Traceable context", "authors": "Author A", "journal": "Journal", "pub_date": "2025"}],
+    })["final_report"]
+    assert "Prior work reported a phosphorylation profile" in result
+    assert "The cited study described a time-resolved proteomic measurement framework" in result
+    assert "This Order proves direct kinase regulation" not in result
+    assert "Our data directly establishes a causal pathway" not in result
+
+
 def test_final_renderer_marks_missing_traceable_bibliography_for_review():
     result = format_citations({
         "sections": {"title": "No literature", "results": "Observed trajectories."},
