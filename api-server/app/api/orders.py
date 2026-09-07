@@ -1523,6 +1523,8 @@ async def run_stage(
         allowed_statuses=_RUN_STAGE_ALLOWED,
         new_status=new_status,
         current_stage=dispatch_stage,
+        user_id=user.id if getattr(user, "id", 0) != 0 else None,
+        set_started=True,
     )
     if not claimed:
         raise HTTPException(
