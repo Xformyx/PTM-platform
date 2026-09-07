@@ -602,6 +602,35 @@ def _quantitative_landscape_text(state: ReportState) -> str:
     )
 
 
+def _normalization_provenance_text(state: ReportState) -> str:
+    """Render recorded preprocessing provenance without inventing a correction model."""
+    pipeline_statistics = dict(state.get("pipeline_statistics") or {})
+    metadata = dict(pipeline_statistics.get("metadata") or {})
+    normalization = dict(pipeline_statistics.get("normalization") or metadata.get("normalization") or {})
+    method = (
+        normalization.get("normalization_method")
+        or normalization.get("method")
+        or metadata.get("normalization_method")
+    )
+    if not method:
+        return (
+            "Preprocessing normalization provenance was not available in the compact Report state. "
+            "The Report therefore does not infer an unrecorded batch, drift, or upstream quantity-scale correction."
+        )
+
+    sample_scaling = normalization.get("sample_scaling_status", "not_recorded")
+    batch_status = normalization.get("batch_correction_status", "not_recorded")
+    drift_status = normalization.get("injection_order_drift_correction_status", "not_recorded")
+    upstream_scale = normalization.get("upstream_quantity_scale_status", "not_recorded")
+    ratio_track = normalization.get("ratio_track_interpretation", "not_recorded")
+    return (
+        f"Recorded preprocessing provenance: normalization method={method}; sample scaling={sample_scaling}; "
+        f"batch correction={batch_status}; injection-order drift correction={drift_status}; "
+        f"upstream quantity scale={upstream_scale}. The linked PTM/protein ratio track is labelled {ratio_track}; "
+        "this is a preprocessing interpretation label, not a calibrated occupancy, kinase-activity, or causal measurement."
+    )
+
+
 def _traceable_reference_inventory(collected_references: List[dict], *, limit: int = 3) -> str:
     """List citable publications as context only, preserving stable citation markers."""
     lines: list[str] = []
@@ -731,6 +760,10 @@ def _compose_observation_only_report_sections(
     evidence_lines = "\n".join(f"- {text}" for text in record_texts)
     reference_clause = f" {references}" if references else ""
     landscape = _quantitative_landscape_text(state)
+    normalization_provenance = _normalization_provenance_text(state)
+    temporal_abstract_context = " ".join(temporal_scope[:2]) or (
+        "No compact temporal summary was available; temporal interpretation is therefore limited to recorded availability status."
+    )
     p5_summary = dict((state.get("biological_synthesis_packet") or {}).get("candidate_discovery_packet") or {}).get("selection_summary") or {}
     p5_capacity = p5_summary.get("candidate_capacity", "not recorded")
     p5_selected = sum(
@@ -741,12 +774,14 @@ def _compose_observation_only_report_sections(
     rendered = dict(sections)
     rendered["abstract"] = (
         f"This evidence-first report summarizes {ptm_type} and total-protein abundance observations in {cell_context} "
-        f"under {treatment}, across {sampled_context}. {landscape} The final narrative is assembled from compact, "
-        "provenance-bounded packets: observed quantitative coverage, temporal-profile input quality, interval-wise "
-        "concordance summaries, candidate-footprint diagnostics, and separately labelled literature context. "
-        "This report therefore supports measured observations, candidate context and discriminating follow-up questions; "
-        "it does not establish direct kinase–feature regulation, catalytic activity, causal propagation, isoform-specific "
-        "attribution, or perturbation outcomes." + reference_clause
+        f"under {treatment}, across {sampled_context}. {landscape} {normalization_provenance}\n\n"
+        "The analysis keeps conventional quantitative PTM contrasts, de novo detection/LOD context, linked non-PTM protein "
+        "abundance, temporal-profile summaries, interval-wise concordance, and kinase-footprint diagnostics as distinct evidence "
+        "classes rather than collapsing them into a single biological score. "
+        f"{temporal_abstract_context} P5 candidate capacity={p5_capacity}; selected candidate cards={p5_selected}. "
+        "The final narrative supports measured observations, bounded candidate context, literature comparison, and discriminating "
+        "follow-up questions; it does not establish direct kinase–feature regulation, catalytic activity, causal propagation, "
+        "isoform-specific attribution, or perturbation outcomes." + reference_clause
     )
     rendered["introduction"] = (
         "### Study scope and analytical rationale\n\n"
@@ -755,6 +790,16 @@ def _compose_observation_only_report_sections(
         "abundance, rather than treating either signal as a direct readout of kinase activity or phosphorylation occupancy. "
         "Temporal Profile Clustering and Interval-wise Concordance Analysis are used to describe observed sampled-interval "
         "profile patterns, whereas kinase-footprint scores remain contribution-weighted candidate context.\n\n"
+        "### Quantitative and provenance framework\n\n"
+        f"{landscape} {normalization_provenance} Conventional contrasts remain descriptive measurements, and de novo rows are "
+        "kept as detection/LOD context rather than being placed on conventional numerical axes or magnitude ranks. This distinction "
+        "allows protein-abundance context and phosphorylation-feature measurements to be reported together without converting a "
+        "ratio, contrast, or profile into an occupancy estimate, a kinase activity call, or a biological-priority score.\n\n"
+        "### Time-resolved analytical framework\n\n"
+        "The temporal layer summarizes feature-profile availability, sampled-interval concordance, cross-layer timing records, "
+        "and counterevidence only at the level supported by the compact packet. It treats a time course as a source of observed "
+        "profile structure and candidate context, not as proof of a globally ordered signaling cascade. "
+        f"{temporal_abstract_context}\n\n"
         "### Traceable literature context\n\n"
         f"The following selected publications provide cited external context. They do not convert a literature relationship "
         f"into an Order-specific observation, direct kinase–feature relationship, or causal pathway statement.\n\n"

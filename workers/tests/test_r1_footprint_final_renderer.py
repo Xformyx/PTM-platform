@@ -255,6 +255,57 @@ def test_observation_only_composer_uses_landscape_temporal_and_traceable_context
     assert "Unsafe LLM prose" not in result
 
 
+def test_observation_only_composer_expands_abstract_and_introduction_without_restoring_claims():
+    result = format_citations({
+        "sections": {"title": "Section parity test", "results": "Unsafe LLM prose."},
+        "network_analysis": {},
+        "signal_flow_figures": [],
+        "ptm_type": "phosphorylation",
+        "experimental_context": {"cell_type": "cells", "treatment": "treatment", "timepoints": ["0 min", "15 min"]},
+        "pipeline_statistics": {
+            "metadata": {
+                "normalization_method": "separate_samplewise_median_scaling",
+                "normalization": {
+                    "sample_scaling_status": "performed",
+                    "batch_correction_status": "not_performed",
+                    "injection_order_drift_correction_status": "not_performed",
+                    "upstream_quantity_scale_status": "unknown_not_recorded",
+                    "ratio_track_interpretation": "protein_abundance_adjusted_relative_ptm_ratio_contrast",
+                },
+            }
+        },
+        "biological_synthesis_packet": {
+            "study_frame": {"cell_model": "cells", "treatment": "treatment", "timepoints": ["0 min", "15 min"]},
+            "quantitative_landscape": {"vector_row_count": 40, "unique_site_count": 20, "unique_gene_count": 15, "parsed_ptm_count": 20, "de_novo_vector_row_count": 3},
+            "candidate_discovery_packet": {"selection_summary": {"candidate_capacity": 5, "selected_by_quota": {"discovery": 2}}},
+        },
+        "temporal_report_evidence_packet": {
+            "status": "available", "section_plan": {"observation_only_claim_ceiling": True},
+            "records": [
+                {"evidence_id": "DATA-TEMPORAL-SUMMARY", "text": "Measured scope: protein trajectories=10."},
+                {"evidence_id": "DATA-WAVE-INPUT-QUALITY", "text": "Eligible complete feature profiles=8."},
+                {"evidence_id": "DATA-DYNAMIC-SUMMARY", "text": "Interval-wise concordance status=computed."},
+            ],
+        },
+        "collected_references": [{"pmid": "12345", "title": "Traceable context", "authors": "Author A", "journal": "Journal", "pub_date": "2025"}],
+    })["final_report"]
+    abstract = result.split("## Abstract", 1)[1].split("## Introduction", 1)[0]
+    introduction = result.split("## Introduction", 1)[1].split("## Results", 1)[0]
+    results = result.split("## Results", 1)[1].split("## Discussion", 1)[0]
+    discussion = result.split("## Discussion", 1)[1].split("## Conclusion", 1)[0]
+    conclusion = result.split("## Conclusion", 1)[1].split("## Research Question Answers", 1)[0]
+    assert len(abstract) >= 900
+    assert len(introduction) >= 1600
+    assert "Recorded preprocessing provenance" in abstract
+    assert "Quantitative and provenance framework" in introduction
+    assert "Time-resolved analytical framework" in introduction
+    assert "P5 candidate capacity=5" in results
+    assert "Evidence-constrained interpretation" in discussion
+    assert "Observational conclusion" in conclusion
+    assert "Unsafe LLM prose" not in result
+    assert "direct kinase–feature regulation" in abstract
+
+
 def test_observation_only_composer_retains_only_safe_stable_cited_context():
     result = format_citations({
         "sections": {
