@@ -495,6 +495,15 @@ class FigureInformationGenerator:
             lines.append(f"  {info['description']}")
             lines.append("")
 
+        if self.figure_manifest.get("figures"):
+            lines.append(
+                "INSTRUCTION: Reference only the figures listed above, using their exact labels. "
+                "Do not describe technical-audit or suppressed figures, and do not treat a figure as "
+                "activation, direct regulation, or causal flow."
+            )
+            lines.append("--- END FIGURE CONTEXT ---\n")
+            return "\n".join(lines)
+
         # GAP 3: Add temporal comparison context when multiple timepoints exist
         if len(self.timepoints) > 1 and self.timepoint_results:
             lines.append("**Temporal Dynamics Summary:**")

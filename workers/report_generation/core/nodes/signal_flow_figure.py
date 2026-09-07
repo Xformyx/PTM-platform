@@ -1088,7 +1088,7 @@ def generate_context_aware_ptm_heatmap(
     try:
         from scipy.cluster.hierarchy import linkage, leaves_list
         from scipy.spatial.distance import pdist
-        if n_sites > 2:
+        if n_sites > 2 and not selected_features:
             dist = pdist(matrix, metric="euclidean")
             Z = linkage(dist, method="ward")
             order = leaves_list(Z)
@@ -1173,10 +1173,18 @@ def generate_context_aware_ptm_heatmap(
     # Footer
     fig.text(
         0.5, 0.005,
-        f"Heatmap of {n_sites} PTM feature aggregates {'selected by the FigureManifest' if selected_features else 'referenced in the report text'}. "
-        f"Red/blue = quantified Log₂FC. ★ de novo cells are LOD-relative lower bounds, not fold-change. "
-        f"Colormap scale excludes de novo. "
-        f"{'Dense display: cell labels and alternating site labels are suppressed for readability.' if dense_display else ''}",
+        (
+            f"Heatmap of {n_sites} conventional PTM feature aggregates selected by the FigureManifest. "
+            f"Red/blue = conventional Log₂FC. De novo / detection-LOD rows are excluded from this display and color scale. "
+            f"{'Dense display: cell labels and alternating site labels are suppressed for readability.' if dense_display else ''}"
+        )
+        if selected_features
+        else (
+            f"Heatmap of {n_sites} PTM feature aggregates referenced in the report text. "
+            f"Red/blue = quantified Log₂FC. ★ de novo cells are LOD-relative lower bounds, not fold-change. "
+            f"Colormap scale excludes de novo. "
+            f"{'Dense display: cell labels and alternating site labels are suppressed for readability.' if dense_display else ''}"
+        ),
         fontsize=7, color="#6b7280", ha="center", va="bottom", style="italic",
     )
 

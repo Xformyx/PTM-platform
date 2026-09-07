@@ -32,6 +32,21 @@ Temporal Profile Clusters summarize quantitative phosphorylation features with s
 
 `TW-*`, `wave_id`, `wave_label`, `cowave_*`, `dynamic_co_wave_*` and `temporal_wave_*` remain internal or archived identifiers unless a separately approved data-contract migration is executed. UI adapters and Report renderers must convert these internal identifiers into the official display vocabulary. They may expose `TW-*` only as a **Provenance ID**, never as a method name or claim basis.
 
+## Reader-facing selected-feature heatmap encoding
+
+Declared 2026-09-07 as a Report display rule, before reuse as a figure-selection
+constant. This is a reader-figure encoding, not a primary scientific threshold
+and not a biological-priority rank.
+
+A conventional feature is assigned a signed temporal pattern string by coding
+each sampled conventional Log2FC as `+` when greater than `0.25`, `-` when less
+than `-0.25`, and `0` otherwise. Main Figure 1 may show 12–20 complete
+conventional features, taking one lexical representative per distinct pattern
+and completing the set lexically. De novo / detection-LOD rows are excluded
+from row selection and from the numeric color scale. Display order follows that
+selection; magnitude-based reordering is not applied. A large conventional
+contrast is not activation, directness, or biological priority.
+
 ## Implementation checklist
 
 All new UI copy, Report prompts, caption text, manuscript prose and comparison-report headings must use the official terms above. Unit tests must preserve the distinction between display terms and serialized keys. Any new output that presents `Wave`, `Co-Wave`, `trajectory`, `phosphosite`, `split`, `merge`, `recruitment`, or `exit` as a reader-facing default method label without satisfying this contract must be treated as a terminology regression.

@@ -2570,3 +2570,37 @@
 - **결정성:** 결정적. Extra data는 첫 `raw_decode`. compact SHA 필드는
   `dynamic_co_wave_transition_config_sha256`.
 
+### [2026-09-07] Reader-authoring shadow 경로의 입력·검증·조립 계약 정정
+
+- **분류:** 구현
+- **대상:**
+  - `docs/official_temporal_terminology_contract.md` — selected-feature heatmap
+    표시 규칙 선언
+  - `workers/report_generation/core/reader_authoring.py`
+  - `workers/report_generation/core/nodes/writer_node.py`
+  - `workers/report_generation/core/graph.py`
+  - `workers/report_generation/core/figure_manifest.py`
+  - `workers/report_generation/core/figure_context.py`
+  - `workers/report_generation/core/nodes/signal_flow_figure.py`
+- **구현 대상 설계:** `docs/official_temporal_terminology_contract.md`
+  § Reader-facing selected-feature heatmap encoding; 동일 문서의 reader-facing
+  용어 계약. 측정 알고리즘 변경 아님.
+- **사전등록 상태:** 결과 열람 전 표시 계약. primary 승격 금지. 탐색적
+  Report 렌더 규칙이며 C1/C2 판정 임계가 아니다.
+- **내용:** shadow writer는 `[1]` 인용과 패킷 밖 기전 지식을 금지하는
+  전용 system prompt를 쓴다. Gemini section plan은 파싱되어 작성 입력의
+  `sections`에 연결되고, 파싱 실패 시 deterministic fallback을 유지한다.
+  validator는 마커 없는 관측 문장을 삭제하지 않고 문헌·인과·de novo 축·
+  occupancy 과장만 수리한다. 인라인 `[REF:]`가 없어도 검증된 본문과
+  Methods를 유지하며, title-only Chroma label은 문헌 complete로 보지 않는다.
+  Main heatmap 행 순서는 선택 규칙을 보존하고, 기존 clustering atlas는
+  shadow 본문에 자동 삽입하지 않는다. 표시용 부호 패턴 임계 0.25를 문서에
+  먼저 선언한 뒤 코드가 그 절을 인용한다.
+- **논문에서의 용도:** methods (reader-facing Report 표시 계약) /
+  사용 안 함 (kinase 측정)
+- **해석 한계:** 이 정정은 Gemini 준수를 보장하지 않는다. 문헌 비교 차단은
+  데이터가 없다는 뜻이 아니다. 0.25는 가독성 있는 패턴 bin이며 활성·직접성·
+  우선순위 임계가 아니다.
+- **결정성:** 결정적. 패턴 bin = conventional Log2FC `> 0.25` / `< -0.25`.
+  문헌 complete = PMID 또는 DOI 또는 authors+year+journal+title.
+

@@ -9,6 +9,14 @@ from ptm_shared.de_novo_representation import is_de_novo_representation
 
 
 FIGURE_MANIFEST_VERSION = "report_figure_manifest.v1"
+SIGNED_PATTERN_THRESHOLD = 0.25
+"""Main-figure signed temporal pattern bin.
+
+docs/official_temporal_terminology_contract.md § Reader-facing selected-feature
+heatmap encoding, declared 2026-09-07 before reuse as a display constant.
+This is a reader-figure encoding, not a primary scientific threshold.
+Do not treat the bin as activation, directness, or biological priority.
+"""
 
 
 def _mapping(value: Any) -> dict:
@@ -93,6 +101,12 @@ def _entry(
 def select_reader_heatmap_features(vector_rows: list[Mapping[str, Any]], conditions: list[str], *, minimum: int = 12, maximum: int = 20) -> list[dict]:
     """Select complete conventional features by temporal shape, not effect magnitude.
 
+    구현 대상: docs/official_temporal_terminology_contract.md § Reader-facing
+    selected-feature heatmap encoding.
+    사전등록: 2026-09-07 표시 계약. 결과 기반 primary 승격 아님.
+    해석 한계: 선택된 행은 가독성 있는 관측 카드이며 우선순위 또는 직접성 순위가 아니다.
+    주장 금지: 이 선택으로 kinase 예측이나 생물학적 중요도 향상을 주장하지 않는다.
+
     One lexical representative is retained per distinct signed time-course pattern,
     followed by lexical completion. This avoids a sole |Log2FC| ranking while
     supplying a reproducible, readable 12–20 feature display candidate set.
@@ -126,7 +140,12 @@ def select_reader_heatmap_features(vector_rows: list[Mapping[str, Any]], conditi
             values.append(value)
         if not valid:
             continue
-        pattern = "".join("+" if value > 0.25 else "-" if value < -0.25 else "0" for value in values)
+        pattern = "".join(
+            "+" if value > SIGNED_PATTERN_THRESHOLD
+            else "-" if value < -SIGNED_PATTERN_THRESHOLD
+            else "0"
+            for value in values
+        )
         candidates.append({
             "gene": gene,
             "position": site,
@@ -158,7 +177,14 @@ def select_reader_heatmap_features(vector_rows: list[Mapping[str, Any]], conditi
 
 
 def build_figure_manifest(state: Mapping[str, Any], *, citation_complete: bool) -> dict:
-    """Inventory current figure outputs and apply figure eligibility policy."""
+    """Inventory current figure outputs and apply figure eligibility policy.
+
+    구현 대상: docs/official_temporal_terminology_contract.md reader-facing
+    figure wording; 2026-09-07 implementation_log figure-manifest contract.
+    사전등록: 2026-09-07 표시 계약.
+    해석 한계: placement는 본문 삽입 자격이며 경로 활성화나 인과를 보이지 않는다.
+    주장 금지: manifest 항목 수를 kinase 활성 또는 네트워크 증명으로 해석하지 않는다.
+    """
     policy = FigureEligibilityPolicy()
     network = _mapping(state.get("network_analysis"))
     entries: list[dict] = []

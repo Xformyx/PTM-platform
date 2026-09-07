@@ -21,6 +21,7 @@ from langgraph.graph import END, StateGraph
 from common.temporal_utils import condition_sort_key
 from .reader_authoring import (
     build_authoring_packet,
+    references_are_citation_complete,
     render_data_only_reader_report,
     render_evidence_reproducibility_audit,
 )
@@ -928,7 +929,7 @@ def format_citations(state: ReportState) -> dict:
         )
     figure_manifest = build_figure_manifest(
         state,
-        citation_complete=bool(collected_refs),
+        citation_complete=references_are_citation_complete(collected_refs),
     )
     state["figure_manifest"] = figure_manifest
     network_analysis = state.get("network_analysis", {})
@@ -960,12 +961,23 @@ def format_citations(state: ReportState) -> dict:
     ]
 
     section_order = ["abstract", "introduction", "results", "research_question_answers", "discussion", "conclusion"]
+    if reader_authoring_shadow:
+        section_order = [
+            "abstract",
+            "introduction",
+            "results",
+            "research_question_answers",
+            "discussion",
+            "methods",
+            "conclusion",
+        ]
     section_headings = {
         "abstract": "## Abstract",
         "introduction": "## Introduction",
         "results": "## Results",
         "research_question_answers": "## Research Question Answers",
         "discussion": "## Discussion",
+        "methods": "## Methods",
         "conclusion": "## Conclusion",
     }
     parts = header_parts[:]
@@ -1039,7 +1051,7 @@ def format_citations(state: ReportState) -> dict:
             network_supp_section = net_supp  # store for appending at end
 
             # Step 2 (v10.3): Co-movement → ALL to Supplementary (no main figures)
-            if comovement_figures:
+            if comovement_figures and not reader_authoring_shadow:
                 result = _build_comovement_figure_section(comovement_figures, network_analysis, ptm_type=state.get('ptm_type', 'phosphorylation'))
                 if result:
                     main_section, supp_items, _next_fig = result
@@ -1459,7 +1471,11 @@ def format_citations(state: ReportState) -> dict:
     except Exception as audit_error:
         logger.warning("[FORMAT-CIT] Could not save evidence/reproducibility audit: %s", audit_error)
 
-    if not resolved_refs and reader_authoring_shadow:
+    researcher_body_present = any(
+        str(sections.get(key) or "").strip()
+        for key in ("abstract", "introduction", "results", "discussion", "conclusion", "methods")
+    )
+    if not resolved_refs and reader_authoring_shadow and not researcher_body_present:
         authoring_packet = state.get("authoring_packet") or build_authoring_packet(state, references=[])
         data_only = render_data_only_reader_report(
             state,
@@ -1480,7 +1496,12 @@ def format_citations(state: ReportState) -> dict:
             "figure_manifest": figure_manifest,
         }
 
-    if not resolved_refs:
+    if not resolved_refs and reader_authoring_shadow:
+        logger.info(
+            "[FORMAT-CIT] Shadow data-only path kept the validated narrative; "
+            "literature comparison remains blocked because no inline citation resolved."
+        )
+    elif not resolved_refs:
         blocked_report = _build_bibliography_blocked_data_only_report(
             state,
             title_text=title_text,
@@ -1555,6 +1576,7 @@ def format_citations(state: ReportState) -> dict:
             "total_references": len(resolved_refs),
             "reference_section": reference_section,
             "completion_status": citation_completion_status,
+            "data_only_review_mode": not bool(resolved_refs),
             "evidence_reproducibility_audit_path": str(audit_path) if audit_path else None,
         },
         "evidence_reproducibility_audit_path": str(audit_path) if audit_path else None,

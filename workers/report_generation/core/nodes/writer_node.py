@@ -45,9 +45,13 @@ from report_generation.core.biological_synthesis import (
     format_biological_synthesis_packet_for_llm,
 )
 from report_generation.core.reader_authoring import (
+    apply_llm_authoring_plan,
     build_authoring_packet,
     deterministic_authoring_plan,
     format_authoring_packet_for_llm,
+    get_reader_authoring_system_prompt,
+    is_traceable_reference,
+    references_are_citation_complete,
     strip_authoring_anchors,
     validate_and_repair_sections,
 )
@@ -371,6 +375,11 @@ def run_section_writing(state: dict) -> dict:
 
     # v98: Build structured protein data for anti-hallucination
     ptm_type = state.get("ptm_type", "phosphorylation")
+    authoring_system_prompt = (
+        get_reader_authoring_system_prompt(ptm_type)
+        if reader_authoring_shadow
+        else get_system_prompt_for_ptm(ptm_type)
+    )
     network_results = state.get("network_results", {})
     timepoints = sorted(network_results.get("timepoints", []))
     v98_structured_data, v98_protein_names, v98_log2fc_values = build_structured_protein_data_for_llm(
@@ -424,7 +433,10 @@ def run_section_writing(state: dict) -> dict:
     if reader_authoring_shadow:
         # A preliminary manifest contains only known figure candidates and is
         # updated with an actual image path by the final renderer.
-        state["figure_manifest"] = build_figure_manifest(state, citation_complete=False)
+        state["figure_manifest"] = build_figure_manifest(
+            state,
+            citation_complete=references_are_citation_complete(state.get("collected_references")),
+        )
         figure_gen = FigureInformationGenerator(
             network_analysis,
             parsed_ptms,
@@ -478,7 +490,7 @@ def run_section_writing(state: dict) -> dict:
             )
             planned = llm.generate_with_retry(
                 plan_prompt,
-                system_prompt=get_system_prompt_for_ptm(ptm_type),
+                system_prompt=authoring_system_prompt,
                 temperature=0.0,
                 max_tokens=1500,
                 min_words=60,
@@ -486,8 +498,7 @@ def run_section_writing(state: dict) -> dict:
                 max_retries=1,
             )
             if planned and not planned.startswith("[LLM Error"):
-                authoring_plan["gemini_plan"] = planned.strip()
-                authoring_plan["source"] = "gemini_with_deterministic_safety_fallback"
+                authoring_plan = apply_llm_authoring_plan(planned, authoring_plan)
         except Exception as plan_error:
             logger.warning("[reader-authoring] Planner unavailable; retaining deterministic plan: %s", plan_error)
 
@@ -1078,7 +1089,11 @@ def run_section_writing(state: dict) -> dict:
             snap_prev.get("results", "").startswith("The PTM analysis")
             and len(snap_prev.get("results", "").split()) < 200
         )
-        if results_is_fallback and section_type in ("discussion", "conclusion", "abstract"):
+        if (
+            results_is_fallback
+            and not reader_authoring_shadow
+            and section_type in ("discussion", "conclusion", "abstract")
+        ):
             ptm_summary_for_cascade = _ptm_summary_text(parsed_ptms[:30], detail_count=20)
             cascade_supplement = (
                 f"\n\n=== DIRECT PTM DATA (Results section was incomplete) ===\n"
@@ -1106,7 +1121,7 @@ def run_section_writing(state: dict) -> dict:
         )
 
         # v9.1: Use PTM-aware system prompt from vocabulary dictionary
-        ptm_system_prompt = get_system_prompt_for_ptm(ptm_type)
+        ptm_system_prompt = authoring_system_prompt
 
         # v9.30: Use generate_with_retry for robust LLM calls
         min_words = SECTION_MIN_WORDS.get(section_type, 100)
@@ -1376,7 +1391,7 @@ def run_section_writing(state: dict) -> dict:
     # In reader-authoring shadow mode, the bibliography is limited to the
     # selected ChromaDB collection identities that entered authoring packets.
     unified_references = (
-        unique_chroma_refs
+        [ref for ref in unique_chroma_refs if is_traceable_reference(ref)]
         if reader_authoring_shadow
         else unique_chroma_refs + (all_references or [])
     )

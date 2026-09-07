@@ -30,7 +30,12 @@ _DIRECT_OR_CAUSAL_RE = re.compile(
     r"activates?|activation loop|catalytic activity|causal propagation|"
     r"signal propagation|feedback loop|autophosphorylation|"
     r"kinase[- ]substrate(?: relationship| regulation| attribution)?|"
-    r"isoform[- ]specific)\b",
+    r"isoform[- ]specific|kinase activity|pathway activation)\b",
+    flags=re.IGNORECASE,
+)
+_PLAN_SECTION_RE = re.compile(
+    r"(?:^|\n)\s*(?:#{1,3}\s*|\*\*)?"
+    r"(abstract|introduction|results|discussion|conclusion|methods)\b\*?\*?:?\s*",
     flags=re.IGNORECASE,
 )
 _LITERATURE_SIGNAL_RE = re.compile(
@@ -69,6 +74,55 @@ def _number(value: Any) -> int | float | None:
         return float(str(value))
     except (TypeError, ValueError):
         return None
+
+
+def is_traceable_reference(reference: Mapping[str, Any] | None) -> bool:
+    """Return True only for publication identities that may enter a bibliography.
+
+    구현 대상: docs/official_temporal_terminology_contract.md reader-facing
+    Report wording; 2026-09-07 implementation_log reader-authoring repair.
+    사전등록: 2026-09-07 표시 계약. 결과 기반 primary 승격 아님.
+    해석 한계: 추적 가능한 서지 식별자의 존재는 현재 Order 관측을 입증하지 않는다.
+    주장 금지: title-only Chroma bundle label을 문헌 합의나 kinase 근거로 쓰지 않는다.
+    """
+    ref = _as_mapping(reference)
+    if str(ref.get("pmid") or "").strip() or str(ref.get("doi") or "").strip():
+        return True
+    return bool(
+        str(ref.get("title") or "").strip()
+        and str(ref.get("authors") or "").strip()
+        and str(ref.get("year") or ref.get("pub_date") or "").strip()
+        and str(ref.get("journal") or "").strip()
+    )
+
+
+def references_are_citation_complete(references: Iterable[Mapping[str, Any]] | None) -> bool:
+    """True when at least one supplied record is a traceable publication identity."""
+    return any(is_traceable_reference(item) for item in (references or []) if isinstance(item, Mapping))
+
+
+def get_reader_authoring_system_prompt(ptm_type: str = "phosphorylation") -> str:
+    """Return the shadow-mode writer prompt without numbered-citation instructions.
+
+    구현 대상: 2026-09-07 reader-authoring shadow contract.
+    사전등록: 2026-09-07 표시 계약.
+    해석 한계: 이 프롬프트는 입력 제한이지 모델 준수 보장은 아니다.
+    주장 금지: system prompt 존재로 서술 품질이나 kinase 예측 향상을 주장하지 않는다.
+    """
+    label = str(ptm_type or "PTM").strip() or "PTM"
+    return (
+        f"You are a scientific author writing a {label} time-course manuscript for "
+        "cell-signaling and proteomics researchers. Use only the supplied authoring packet. "
+        "Do not add background pathway knowledge, receptor cascades, generic mechanism examples, "
+        "or citations that are not listed in the packet. "
+        "Every literature-context sentence must use a supplied [REF:pmid:*], [REF:doi:*], or "
+        "[REF:title:*] marker. Do not write numbered citations such as [1] or [2]. "
+        "When a supplied [EVID:<id>] marker exists, append it to the current-study sentence it supports; "
+        "those markers are removed before rendering. "
+        "Do not claim direct kinase–substrate regulation, catalytic activation, causal propagation, "
+        "isoform-specific activity, or perturbation outcome. "
+        "Write formal academic prose and do not expose implementation codes or readiness labels."
+    )
 
 
 def _stable_reference_id(reference: Mapping[str, Any]) -> str:
@@ -213,7 +267,7 @@ def _literature_cards(references: Iterable[Mapping[str, Any]]) -> list[dict]:
         ref = _as_mapping(reference)
         stable_id = _stable_reference_id(ref)
         title = _clean_text(ref.get("title"))
-        if not stable_id or not title:
+        if not stable_id or not title or not is_traceable_reference(ref):
             continue
         authors = _clean_text(ref.get("authors"))
         year = _clean_text(ref.get("year") or ref.get("pub_date"))[:4]
@@ -309,6 +363,12 @@ def build_authoring_packet(
     references: Iterable[Mapping[str, Any]] | None = None,
 ) -> dict:
     """Build the sole model-visible reader-ready evidence packet.
+
+    구현 대상: docs/official_temporal_terminology_contract.md reader-facing
+    wording; 2026-09-07 implementation_log reader-authoring shadow contract.
+    사전등록: 2026-09-07 표시 계약. primary 측정 임계가 아니다.
+    해석 한계: cards are a writer-input serialization, not a readiness proof.
+    주장 금지: packet 존재로 kinase 예측 향상이나 직접 귀속을 주장하지 않는다.
 
     The function deliberately serializes only short cards.  Full provenance,
     P-layer readiness data, relation snapshots, and raw diagnostic payloads stay
@@ -475,6 +535,42 @@ def deterministic_authoring_plan(packet: Mapping[str, Any]) -> dict:
     }
 
 
+def apply_llm_authoring_plan(planned_text: str, fallback: Mapping[str, Any] | None = None) -> dict:
+    """Parse a model section plan into the deterministic section map.
+
+    구현 대상: 2026-09-07 reader-authoring plan→write contract.
+    사전등록: 2026-09-07 표시 계약.
+    해석 한계: 파싱 실패 시 deterministic fallback이 유지된다. 계획이 데이터 존재를 증명하지 않는다.
+    주장 금지: 계획 문구로 직접 조절이나 경로 활성화를 주장하지 않는다.
+    """
+    base = _as_mapping(fallback)
+    sections = dict(_as_mapping(base.get("sections")))
+    result = {
+        "source": str(base.get("source") or "deterministic_fallback"),
+        "sections": sections,
+        "available_categories": list(base.get("available_categories") or []),
+    }
+    text = str(planned_text or "").strip()
+    if not text:
+        return result
+    result["gemini_plan"] = text
+    matches = list(_PLAN_SECTION_RE.finditer(text))
+    parsed: dict[str, str] = {}
+    for index, match in enumerate(matches):
+        name = match.group(1).lower()
+        start = match.end()
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        body = _clean_text(text[start:end])
+        if body:
+            parsed[name] = body
+    if len(parsed) >= 3:
+        sections.update(parsed)
+        result["source"] = "gemini_parsed_with_deterministic_fallback"
+    else:
+        result["source"] = "deterministic_fallback_unparsed_gemini_plan"
+    return result
+
+
 def _known_evidence_ids(packet: Mapping[str, Any]) -> set[str]:
     return {
         evidence_id
@@ -507,6 +603,8 @@ def _replace_unsafe_terms(text: str) -> str:
         (r"\bcatalytic activity\b", "candidate-context score"),
         (r"\bisoform[- ]specific\b", "kinase-family"),
         (r"\bkinase[- ]substrate(?: relationship| regulation| attribution)?\b", "kinase-family candidate context"),
+        (r"\bkinase activity\b", "kinase-family candidate context"),
+        (r"\bpathway activation\b", "pathway-membership context"),
     ]
     for pattern, replacement in replacements:
         text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
@@ -523,8 +621,14 @@ def validate_and_repair_sections(
 ) -> tuple[dict, dict]:
     """Validate evidence/citation/claim boundaries and repair clauses locally.
 
-    Valid sentences are retained.  A problematic clause is either rewritten with
-    candidate-context wording or removed; no whole section is replaced.
+    구현 대상: 2026-09-07 reader-authoring validator contract.
+    사전등록: 2026-09-07 표시 계약.
+    해석 한계: 문장 수리는 필요조건이며 모델이 패킷 밖 지식을 쓰지 않았음을 증명하지 않는다.
+    주장 금지: validator pass를 kinase 귀속 또는 인과 입증으로 해석하지 않는다.
+
+    Valid observation sentences are retained even without draft-only [EVID:]
+    anchors. A problematic clause is rewritten or removed; no whole section is
+    replaced with a deterministic status paragraph.
     """
     known_evidence = _known_evidence_ids(packet)
     known_references = _known_reference_ids(packet)
@@ -585,12 +689,6 @@ def validate_and_repair_sections(
                 sentence = " ".join(keep).strip()
                 actions.append("remove_uncited_literature_clause")
                 reasons.append("literature_context_without_stable_citation")
-            # A meaningful factual sentence needs a supplied evidence anchor.
-            factual = bool(re.search(r"\b(?:measured|observed|identified|summarized|increased|decreased|profile|feature|protein|kinase|PTM|time)\b", sentence, flags=re.IGNORECASE))
-            if factual and not evidence_ids and not citations:
-                actions.append("remove_unanchored_factual_sentence")
-                reasons.append("missing_evidence_anchor")
-                sentence = ""
             if sentence:
                 retained.append(sentence.strip())
             audit_entries.append({

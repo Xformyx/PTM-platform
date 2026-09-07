@@ -20,7 +20,11 @@ from report_generation.core.nodes.temporal_comovement_node import (
 )
 from report_generation.core.nodes.writer_node import _stabilize_section_citations
 from report_generation.core.reader_authoring import (
+    apply_llm_authoring_plan,
     build_authoring_packet,
+    deterministic_authoring_plan,
+    get_reader_authoring_system_prompt,
+    is_traceable_reference,
     render_data_only_reader_report,
     validate_and_repair_sections,
 )
@@ -208,6 +212,76 @@ def test_clause_validator_preserves_cited_observation_and_repairs_only_unsafe_cl
     assert audit["repaired_sentence_count"] >= 1
 
 
+def test_clause_validator_preserves_unanchored_observation_sentences():
+    packet = build_authoring_packet(
+        {
+            "experimental_context": {"cell_type": "generic cells", "treatment": "compound X"},
+            "ptm_type": "phosphorylation",
+        },
+        temporal_evidence_packet=build_temporal_evidence_packet(_sidecar()),
+        biological_synthesis_packet=_p5_packet(),
+    )
+    sections, audit = validate_and_repair_sections(
+        {
+            "results": (
+                "The study measured phosphorylation features across the sampled conditions. "
+                "Kinase X directly activates its substrate."
+            )
+        },
+        packet,
+    )
+    rendered = sections["results"].lower()
+    assert "the study measured phosphorylation features" in rendered
+    assert "directly activates" not in rendered
+    assert "remove_unanchored_factual_sentence" not in str(audit)
+
+
+def test_reader_authoring_system_prompt_forbids_numeric_citations():
+    prompt = get_reader_authoring_system_prompt("phosphorylation")
+    assert "Do not write numbered citations such as [1] or [2]" in prompt
+    assert "[REF:pmid:*]" in prompt
+    assert "Cite references using numbered brackets" not in prompt
+
+
+def test_apply_llm_authoring_plan_replaces_section_roles():
+    fallback = deterministic_authoring_plan({"reader_cards": []})
+    plan = apply_llm_authoring_plan(
+        "\n".join([
+            "Abstract: State the recorded study frame only.",
+            "Introduction: Use supplied literature cards.",
+            "Results: Move from coverage to selected temporal profiles.",
+            "Discussion: Separate observation from cited context.",
+            "Conclusion: Keep candidate context testable.",
+        ]),
+        fallback,
+    )
+    assert plan["source"] == "gemini_parsed_with_deterministic_fallback"
+    assert "recorded study frame" in plan["sections"]["abstract"]
+    assert plan["sections"]["methods"] == fallback["sections"]["methods"]
+
+
+def test_authoring_packet_ignores_nonbibliographic_chroma_label():
+    packet = build_authoring_packet(
+        {
+            "experimental_context": {"cell_type": "generic cells", "treatment": "compound X"},
+            "ptm_type": "phosphorylation",
+        },
+        temporal_evidence_packet=build_temporal_evidence_packet(_sidecar()),
+        biological_synthesis_packet=_p5_packet(),
+        references=[{"chromadb_ref": True, "title": "All PTM Articles"}],
+    )
+    assert packet["mode"] == "data_only"
+    assert not any(card.get("claim_tier") == "L1" for card in packet["reader_cards"])
+    assert not is_traceable_reference({"title": "All PTM Articles", "chromadb_ref": True})
+    assert is_traceable_reference({
+        "title": "Traceable collection article",
+        "authors": "Evidence Author",
+        "year": "2025",
+        "journal": "Evidence Journal",
+        "pmid": "34567890",
+    })
+
+
 def test_reader_data_only_fallback_is_substantive_without_internal_statuses():
     packet = build_authoring_packet(
         {
@@ -320,6 +394,35 @@ def test_shadow_data_only_renderer_keeps_reader_body_and_separate_audit(tmp_path
     assert "P0 explicit modified-precursor" not in report
     assert "traceable publication metadata were not available" in report.lower()
     assert (tmp_path / "evidence_and_reproducibility_audit.md").exists()
+
+
+def test_shadow_keeps_validated_body_when_inline_citations_are_absent(tmp_path):
+    final = format_citations({
+        "report_title": "Shadow narrative retention",
+        "reader_authoring_mode": "shadow",
+        "sections": {
+            "title": "Shadow narrative retention",
+            "abstract": "Observed temporal profiles were summarized for the recorded study.",
+            "results": "The quantitative landscape was interpreted as descriptive evidence.",
+            "methods": "Recorded preprocessing used sample-wise median normalization.",
+        },
+        "network_analysis": {},
+        "signal_flow_figures": [],
+        "output_dir": str(tmp_path),
+        "temporal_report_evidence_packet": build_temporal_evidence_packet(_sidecar()),
+        "biological_synthesis_packet": _p5_packet(),
+        "collected_references": [{
+            "chromadb_ref": True, "title": "Traceable collection article", "authors": "Evidence Author",
+            "journal": "Evidence Journal", "year": "2025", "pmid": "34567890",
+        }],
+    })
+    report = final["final_report"]
+    assert "Observed temporal profiles were summarized" in report
+    assert "The quantitative landscape was interpreted as descriptive evidence" in report
+    assert "## Methods" in report
+    assert "sample-wise median normalization" in report
+    assert "Quantitative coverage and evidence status" not in report
+    assert final["citation_data"]["data_only_review_mode"] is True
 
 
 def _complete_conventional_vector_rows() -> list[dict]:
