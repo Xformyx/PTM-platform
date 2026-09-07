@@ -83,5 +83,5 @@ def test_rag_container_can_import_canonical_api_tmm_scorer() -> None:
 def test_frontend_marks_server_completed_artifact_ready() -> None:
     frontend = FRONTEND.read_text(encoding="utf-8")
     assert "temporalArtifactReady" in frontend
-    assert "Temporal PTM–protein artifact ready" in frontend
+    assert "Temporal phosphorylation–protein artifact ready" in frontend
     assert "Re-run Global Annotation" in frontend

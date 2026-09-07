@@ -2716,6 +2716,7 @@ def generate_network_figure_section(
     ptm_type: str = "phosphorylation",
     *,
     has_comovement: bool = True,
+    figure_manifest: dict | None = None,
 ) -> tuple:
     """Generate Markdown section with embedded network figures and legends.
 
@@ -2733,6 +2734,14 @@ def generate_network_figure_section(
     Returns:
         Tuple of (main_section_str, supplementary_section_str).
     """
+    # FigureManifest is the sole placement contract for reader-authoring
+    # shadow runs. Existing pathway/cascade/network renderers remain available
+    # for legacy Reports, while their paths and audit payload remain captured
+    # in the manifest rather than appearing as developer-style body content.
+    if figure_manifest is not None:
+        logger.info("[NET-SECTION] FigureManifest mode: legacy network figures withheld from manuscript assembly")
+        return "", ""
+
     network_images = network_analysis.get("network_images", {})
     legends = network_analysis.get("legends", {})
     network_data = network_analysis.get("network_data", {})

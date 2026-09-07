@@ -44,6 +44,14 @@ from report_generation.core.biological_synthesis import (
     build_data_anchored_rag_queries,
     format_biological_synthesis_packet_for_llm,
 )
+from report_generation.core.reader_authoring import (
+    build_authoring_packet,
+    deterministic_authoring_plan,
+    format_authoring_packet_for_llm,
+    strip_authoring_anchors,
+    validate_and_repair_sections,
+)
+from report_generation.core.figure_manifest import build_figure_manifest
 
 logger = logging.getLogger(__name__)
 
@@ -256,6 +264,8 @@ def run_section_writing(state: dict) -> dict:
 
     # Load report_config from state for dynamic settings
     report_config = state.get("report_config", {})
+    reader_authoring_mode = str(report_config.get("reader_authoring_mode", "")).strip().lower()
+    reader_authoring_shadow = reader_authoring_mode in {"shadow", "opt_in_shadow"}
     llm_tokens_cfg = report_config.get("llm_tokens", {})
     section_max_tokens = {
         "abstract": llm_tokens_cfg.get("abstract", SECTION_MAX_TOKENS["abstract"]),
@@ -411,6 +421,29 @@ def run_section_writing(state: dict) -> dict:
         ),
         candidate_limit=20,
     )
+    if reader_authoring_shadow:
+        # A preliminary manifest contains only known figure candidates and is
+        # updated with an actual image path by the final renderer.
+        state["figure_manifest"] = build_figure_manifest(state, citation_complete=False)
+        figure_gen = FigureInformationGenerator(
+            network_analysis,
+            parsed_ptms,
+            comovement_analysis=comovement_analysis,
+            comovement_figures=comovement_figures,
+            comovement_llm_context=comovement_llm_context,
+            figure_manifest=state["figure_manifest"],
+        )
+    # Shadow mode is opt-in and therefore cannot alter frozen or legacy Report
+    # runs.  It starts from compact packets but exposes only reader-safe cards.
+    authoring_packet = build_authoring_packet(
+        state,
+        temporal_evidence_packet=temporal_evidence_packet,
+        biological_synthesis_packet=biological_synthesis_packet,
+        references=[],
+    )
+    authoring_plan = deterministic_authoring_plan(authoring_packet)
+    reader_authoring_validator_audit: Dict[str, dict] = {}
+    _reader_authoring_lock = __import__("threading").Lock()
     packet_output_dir = state.get("output_dir")
     if packet_output_dir:
         try:
@@ -429,6 +462,34 @@ def run_section_writing(state: dict) -> dict:
             logger.info("[report-evidence] Saved temporal numerical packet: %s", packet_path)
         except Exception as packet_error:
             logger.warning("[report-evidence] Could not save temporal packet snapshot: %s", packet_error)
+
+    if reader_authoring_shadow:
+        logger.info(
+            "[reader-authoring] Shadow mode enabled: reader-safe cards replace legacy auxiliary mechanism context."
+        )
+        try:
+            plan_prompt = (
+                format_authoring_packet_for_llm(authoring_packet, "introduction", authoring_plan)
+                + "\n\n=== SCIENTIFIC AUTHOR PLAN ===\n"
+                "Write a concise six-section plan for Abstract, Introduction, Results, Discussion, Methods, and Conclusion. "
+                "For each section, state its logical role and the supplied evidence-card category it should use. "
+                "Do not introduce external knowledge, directness claims, or citations not present in the packet.\n"
+                "=== END SCIENTIFIC AUTHOR PLAN ==="
+            )
+            planned = llm.generate_with_retry(
+                plan_prompt,
+                system_prompt=get_system_prompt_for_ptm(ptm_type),
+                temperature=0.0,
+                max_tokens=1500,
+                min_words=60,
+                section_name="Scientific author plan",
+                max_retries=1,
+            )
+            if planned and not planned.startswith("[LLM Error"):
+                authoring_plan["gemini_plan"] = planned.strip()
+                authoring_plan["source"] = "gemini_with_deterministic_safety_fallback"
+        except Exception as plan_error:
+            logger.warning("[reader-authoring] Planner unavailable; retaining deterministic plan: %s", plan_error)
 
     # v10.7: Load ubiquitin linkage analysis data
     ubiquitin_linkage_data = state.get("ubiquitin_linkage_data", {}) or {}
@@ -815,6 +876,34 @@ def run_section_writing(state: dict) -> dict:
         else:
             prompt, chroma_refs = result, []
 
+        section_authoring_packet = None
+        if reader_authoring_shadow and section_type in {
+            "abstract", "introduction", "results", "research_question_answers", "discussion", "conclusion", "methods"
+        }:
+            # Only citation identities recovered from the selected ChromaDB query
+            # enter this packet. Legacy broad auxiliary references remain outside
+            # the model-visible scientific author context.
+            section_authoring_packet = build_authoring_packet(
+                state,
+                temporal_evidence_packet=temporal_evidence_packet,
+                biological_synthesis_packet=biological_synthesis_packet,
+                references=chroma_refs,
+            )
+            prompt = format_authoring_packet_for_llm(
+                section_authoring_packet,
+                section_type,
+                authoring_plan,
+            )
+            if active_questions and section_type == "research_question_answers":
+                prompt += "\n\nUser research questions to answer strictly from the supplied cards:\n" + "\n".join(
+                    f"- {question}" for question in active_questions
+                )
+            prompt += (
+                "\n\nWrite this section as cohesive manuscript prose. Keep current-study observations distinct from "
+                "cited external context. Do not add a technical audit, implementation status, raw feature list, "
+                "or figure not supplied by the packet."
+            )
+
         # v10.8: Thread-safe accumulation of ChromaDB refs
         if chroma_refs:
             with _chroma_refs_lock:
@@ -836,7 +925,9 @@ def run_section_writing(state: dict) -> dict:
         # v9.32: Priority-ordered supplementary blocks — temporal coordination, temporal kinase,
         # receptor, and non-PTM are now ESSENTIAL (Priority 1-2) for PTM activity profile interpretation.
         supplement_blocks = []
-        if section_type == "results":
+        if reader_authoring_shadow and section_authoring_packet is not None:
+            pass
+        elif section_type == "results":
             # v12.0: Co-Scientist verified findings — Priority 0 (highest, must be included first)
             if aux_verified_findings_context:
                 supplement_blocks.append(("verified_findings", aux_verified_findings_context))
@@ -973,7 +1064,7 @@ def run_section_writing(state: dict) -> dict:
         # This directive is deliberately not budget-gated. It must appear last
         # so generic legacy auxiliary contexts cannot reintroduce a mechanism
         # narrative in an Order whose evidence status is no-call/not-evaluable.
-        if observation_only_claim_ceiling:
+        if observation_only_claim_ceiling and not reader_authoring_shadow:
             prompt += "\n\n" + observation_only_claim_ceiling
 
         if added_blocks:
@@ -1054,7 +1145,8 @@ def run_section_writing(state: dict) -> dict:
             temporal_report_fidelity[section_type].get("missing_required_groups") or []
         )
         if (
-            section_type in {"results", "discussion"}
+            not reader_authoring_shadow
+            and section_type in {"results", "discussion"}
             and temporal_report_fidelity[section_type]["status"] in {"untraced", "review_required"}
         ):
             rewrite_prompt = (
@@ -1103,7 +1195,19 @@ def run_section_writing(state: dict) -> dict:
                 temporal_report_fidelity[section_type]["constrained_rewrite_error"] = (
                     rewritten or "generate_with_retry returned None"
                 )
-        if temporal_report_fidelity[section_type].get("unsafe_temporal_claim_count", 0) > 0:
+        if reader_authoring_shadow and section_authoring_packet is not None:
+            repaired_sections, clause_audit = validate_and_repair_sections(
+                {section_type: content},
+                section_authoring_packet,
+            )
+            content = strip_authoring_anchors(repaired_sections.get(section_type, ""))
+            with _reader_authoring_lock:
+                reader_authoring_validator_audit[section_type] = clause_audit
+            temporal_report_fidelity[section_type]["legacy_status"] = temporal_report_fidelity[section_type]["status"]
+            temporal_report_fidelity[section_type]["status"] = "shadow_clause_validated"
+            temporal_report_fidelity[section_type]["recommended_action"] = "local_repair_complete"
+            temporal_report_fidelity[section_type]["reader_authoring_mode"] = "shadow"
+        if temporal_report_fidelity[section_type].get("unsafe_temporal_claim_count", 0) > 0 and not reader_authoring_shadow:
             temporal_report_fidelity[section_type]["status"] = "blocked_for_review"
             temporal_report_fidelity[section_type]["recommended_action"] = "blocked_for_review"
             temporal_report_fidelity[section_type]["release_blocked"] = True
@@ -1268,9 +1372,21 @@ def run_section_writing(state: dict) -> dict:
     logger.info(f"[v10.8] Collected {len(_all_section_chroma_refs)} total ChromaDB refs, "
                 f"{len(unique_chroma_refs)} unique after dedup")
 
-    # v10.8: Prepend ChromaDB refs to PubMed refs for unified numbering
-    # ChromaDB refs are [1]~[N], PubMed refs are [N+1]~[N+M]
-    unified_references = unique_chroma_refs + (all_references or [])
+    # v10.8: Prepend ChromaDB refs to PubMed refs for unified numbering.
+    # In reader-authoring shadow mode, the bibliography is limited to the
+    # selected ChromaDB collection identities that entered authoring packets.
+    unified_references = (
+        unique_chroma_refs
+        if reader_authoring_shadow
+        else unique_chroma_refs + (all_references or [])
+    )
+    if reader_authoring_shadow:
+        authoring_packet = build_authoring_packet(
+            state,
+            temporal_evidence_packet=temporal_evidence_packet,
+            biological_synthesis_packet=biological_synthesis_packet,
+            references=unique_chroma_refs,
+        )
 
     # Addendum mode does not alter the LLM-written core sections. Its content is
     # deterministic, provenance-preserving, and appended after Conclusion.
@@ -1349,6 +1465,10 @@ def run_section_writing(state: dict) -> dict:
         "temporal_report_evidence_packet": temporal_evidence_packet,
         "temporal_report_fidelity": temporal_report_fidelity,
         "temporal_report_fidelity_snapshot": str(temporal_fidelity_snapshot_path) if temporal_fidelity_snapshot_path else None,
+        "authoring_packet": authoring_packet,
+        "reader_authoring_plan": authoring_plan,
+        "reader_authoring_validator_audit": reader_authoring_validator_audit,
+        "reader_authoring_mode": "shadow" if reader_authoring_shadow else "legacy",
     }
 
 

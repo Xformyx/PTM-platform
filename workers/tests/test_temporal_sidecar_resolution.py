@@ -225,7 +225,7 @@ def test_stale_compact_sidecar_is_skipped_for_a_current_chained_config() -> None
     )
     assert compact["marker"] == "fresh_config"
     assert source == "chained_report_config.kinase_analysis_data"
-    assert any("stale Dynamic Co-Wave" in item for item in diagnostics)
+    assert any("stale Interval-wise Activity-State Concordance contract" in item for item in diagnostics)
 
 
 def test_stale_full_artifact_is_not_recovered_for_report_rerun(tmp_path: Path) -> None:
@@ -242,4 +242,4 @@ def test_stale_full_artifact_is_not_recovered_for_report_rerun(tmp_path: Path) -
     )
     assert compact == {}
     assert source == ""
-    assert any("stale Dynamic Co-Wave" in item for item in diagnostics)
+    assert any("stale Interval-wise Activity-State Concordance contract" in item for item in diagnostics)

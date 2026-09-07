@@ -946,11 +946,13 @@ def generate_context_aware_ptm_heatmap(
     output_dir: str,
     ptm_type: str = "phosphorylation",
     max_sites: int = 40,
+    selected_features: Optional[List[dict]] = None,
 ) -> Optional[str]:
     """Generate a PTM heatmap showing only sites discussed in the report text.
 
-    Post-writing figure: extracts protein/site mentions from LLM-written sections,
-    matches them against vector_plot_raw_data, and generates a clustered heatmap.
+    Legacy mode extracts protein/site mentions from LLM-written sections. Reader
+    mode receives a FigureManifest-selected conventional feature-card list and
+    never uses post-hoc prose mentions or magnitude sorting for row selection.
 
     Args:
         sections: Dict of section_type → text (from write_sections)
@@ -958,7 +960,8 @@ def generate_context_aware_ptm_heatmap(
         conditions: List of condition/timepoint labels in order
         output_dir: Directory to save the figure
         ptm_type: 'phosphorylation' or 'ubiquitylation'
-        max_sites: Maximum number of PTM sites to display
+        max_sites: Maximum number of PTM sites to display in legacy mode
+        selected_features: Optional manifest-selected conventional feature cards
 
     Returns:
         Path to the generated PNG file, or None if generation fails.
@@ -979,8 +982,9 @@ def generate_context_aware_ptm_heatmap(
         return None
 
     # ── Step 1: Extract mentioned proteins/sites from report text ──
+    selected_features = selected_features or []
     combined_text = " ".join(sections.get(k, "") for k in ["results", "discussion", "abstract", "conclusion"])
-    if not combined_text.strip():
+    if not combined_text.strip() and not selected_features:
         logger.info("[CTX-HEATMAP] No text in results/discussion — skipping")
         return None
 
@@ -1019,37 +1023,47 @@ def generate_context_aware_ptm_heatmap(
         logger.info("[CTX-HEATMAP] No site_data built from vector_plot_raw_data — skipping")
         return None
 
-    # Extract gene names mentioned in text (case-insensitive match against known genes)
-    mentioned_genes = set()
-    text_upper = combined_text.upper()
-    for gene in all_genes:
-        # Match whole word (avoid partial matches like "AKT" in "RAKTL")
-        if re.search(r'\b' + re.escape(gene) + r'\b', text_upper):
-            mentioned_genes.add(gene)
-
-    # Also try to extract specific site mentions (e.g., "Ser473", "T308", "Y416")
-    site_pattern = re.compile(r'\b([A-Z][a-z]*\d+[A-Z]?\d*)\b')  # e.g., Ser473, T308
-    mentioned_sites_raw = set(site_pattern.findall(combined_text))
-
-    # Match mentioned genes to available sites
     matched_sites = []
-    for (gene, pos), fc_dict in site_data.items():
-        if gene in mentioned_genes:
-            # Check if any condition has non-zero FC
-            if any(abs(v) > 0.01 for k, v in fc_dict.items() if k != "_denovo" and isinstance(v, (int, float))):
-                matched_sites.append((gene, pos, fc_dict))
+    if selected_features:
+        requested_keys = [
+            (str(feature.get("gene") or "").upper(), str(feature.get("position") or ""))
+            for feature in selected_features
+            if str(feature.get("gene") or "").strip() and str(feature.get("position") or "").strip()
+        ]
+        for key in requested_keys:
+            fc_dict = site_data.get(key)
+            if fc_dict and not fc_dict.get("_denovo"):
+                matched_sites.append((key[0], key[1], fc_dict))
+        mentioned_genes = {gene for gene, _, _ in matched_sites}
+    else:
+        # Extract gene names mentioned in text (case-insensitive match against known genes)
+        mentioned_genes = set()
+        text_upper = combined_text.upper()
+        for gene in all_genes:
+            # Match whole word (avoid partial matches like "AKT" in "RAKTL")
+            if re.search(r'\b' + re.escape(gene) + r'\b', text_upper):
+                mentioned_genes.add(gene)
+
+        # Match mentioned genes to available sites
+        for (gene, pos), fc_dict in site_data.items():
+            if gene in mentioned_genes:
+                # Check if any condition has non-zero FC
+                if any(abs(v) > 0.01 for k, v in fc_dict.items() if k != "_denovo" and isinstance(v, (int, float))):
+                    matched_sites.append((gene, pos, fc_dict))
 
     if not matched_sites:
         logger.info(f"[CTX-HEATMAP] No PTM sites matched from {len(mentioned_genes)} mentioned genes — skipping")
         return None
 
-    # Sort by max absolute display value. De novo already uses LOD-relative, not pseudo-FC.
-    def _site_sort_value(item):
-        values = [v for k, v in item[2].items() if k != "_denovo" and isinstance(v, (int, float))]
-        return max((abs(v) for v in values), default=0.0)
+    if not selected_features:
+        # Legacy fallback only. Manifest-selected figures preserve deterministic
+        # row order and never rank solely by contrast magnitude.
+        def _site_sort_value(item):
+            values = [v for k, v in item[2].items() if k != "_denovo" and isinstance(v, (int, float))]
+            return max((abs(v) for v in values), default=0.0)
 
-    matched_sites.sort(key=_site_sort_value, reverse=True)
-    matched_sites = matched_sites[:max_sites]
+        matched_sites.sort(key=_site_sort_value, reverse=True)
+        matched_sites = matched_sites[:max_sites]
 
     logger.info(f"[CTX-HEATMAP] Matched {len(matched_sites)} PTM sites from {len(mentioned_genes)} mentioned genes")
 
@@ -1142,9 +1156,10 @@ def generate_context_aware_ptm_heatmap(
         ax.axvline(j - 0.5, color="#e5e7eb", linewidth=0.3)
 
     mod_label = "Ubiquitylation" if ptm_type.lower().strip() in ("ubiquitylation", "ubiquitination") else "Phosphorylation"
+    title_suffix = "Selected conventional feature cards" if selected_features else "Key sites discussed in this Report"
     ax.set_title(
-        f"Key {mod_label} Sites Discussed in This Report "
-        f"(Log₂FC; ★ de novo = detection/LOD context)",
+        f"{mod_label} Feature Profiles — {title_suffix} "
+        f"(conventional Log₂FC scale)",
         fontsize=11, fontweight="bold", color="#1f2937", pad=12,
     )
     ax.set_xlabel("Condition / Timepoint", fontsize=9, color="#4b5563")
@@ -1158,7 +1173,7 @@ def generate_context_aware_ptm_heatmap(
     # Footer
     fig.text(
         0.5, 0.005,
-        f"Heatmap of {n_sites} PTM sites referenced in the report text. "
+        f"Heatmap of {n_sites} PTM feature aggregates {'selected by the FigureManifest' if selected_features else 'referenced in the report text'}. "
         f"Red/blue = quantified Log₂FC. ★ de novo cells are LOD-relative lower bounds, not fold-change. "
         f"Colormap scale excludes de novo. "
         f"{'Dense display: cell labels and alternating site labels are suppressed for readability.' if dense_display else ''}",

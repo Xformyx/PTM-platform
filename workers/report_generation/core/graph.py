@@ -19,6 +19,16 @@ from typing import Any, Dict, List, Optional, TypedDict
 from langgraph.graph import END, StateGraph
 
 from common.temporal_utils import condition_sort_key
+from .reader_authoring import (
+    build_authoring_packet,
+    render_data_only_reader_report,
+    render_evidence_reproducibility_audit,
+)
+from .figure_manifest import (
+    attach_reader_heatmap,
+    build_figure_manifest,
+    compile_reader_caption,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +87,11 @@ class ReportState(TypedDict, total=False):
     temporal_ptm_protein_analysis: dict     # shared production/benchmark temporal sidecar summary; observational only
     temporal_report_evidence_packet: dict  # deterministic Report LLM evidence packet derived from the shared sidecar
     temporal_report_fidelity: dict         # per-section traceability/claim-boundary audit before internal DATA labels are stripped
+    authoring_packet: dict                 # reader-ready evidence cards for opt-in shadow authoring
+    reader_authoring_plan: dict            # scientific author section plan
+    reader_authoring_validator_audit: dict # clause-level repair log; technical audit only
+    reader_authoring_mode: str             # legacy | shadow
+    evidence_reproducibility_audit_path: str  # separate technical audit sidecar
 
     # v9.14: Ubiquitylation Analysis Suite (auto-built when ptm_type == 'ubiquitylation')
     ubi_chain_classifications: dict         # Module 1: per-site chain type classification
@@ -896,11 +911,26 @@ def format_citations(state: ReportState) -> dict:
 
     collected_refs = state.get("collected_references", [])
     source_sections = state.get("sections", {})
-    sections, deterministic_observation_only = _compose_observation_only_report_sections(
+    reader_authoring_shadow = str(
+        state.get("reader_authoring_mode")
+        or (state.get("report_config") or {}).get("reader_authoring_mode")
+        or ""
+    ).strip().lower() in {"shadow", "opt_in_shadow"}
+    if reader_authoring_shadow:
+        # The shadow path has already applied sentence-local validation. Do not
+        # replace its researcher-facing narrative with legacy compact diagnostics.
+        sections, deterministic_observation_only = dict(source_sections), False
+    else:
+        sections, deterministic_observation_only = _compose_observation_only_report_sections(
+            state,
+            source_sections,
+            collected_refs,
+        )
+    figure_manifest = build_figure_manifest(
         state,
-        source_sections,
-        collected_refs,
+        citation_complete=bool(collected_refs),
     )
+    state["figure_manifest"] = figure_manifest
     network_analysis = state.get("network_analysis", {})
 
     # v7.0: Inject cascade_mediator results into network_analysis for figure insertion.
@@ -963,26 +993,27 @@ def format_citations(state: ReportState) -> dict:
             # Deterministic aggregate-only evidence appears once in the final
             # document so an LLM omission cannot hide P0–P3 no-call status or
             # P5 discovery selection semantics.
-            readiness_section = format_compact_attribution_readiness_for_report(
-                state.get("temporal_report_evidence_packet") or {}
-            )
-            if readiness_section:
-                parts.append(readiness_section)
-            p5_section = format_candidate_discovery_packet_for_report(
-                state.get("biological_synthesis_packet") or {}
-            )
-            if p5_section:
-                parts.append(p5_section)
-            try:
-                from .nodes.kinase_annotation_node import format_kinase_footprint_diagnostics_for_report
-                footprint_section = format_kinase_footprint_diagnostics_for_report(
-                    state.get("kinase_activity_heatmap") or {},
-                    state.get("ptm_type", "phosphorylation"),
+            if not reader_authoring_shadow:
+                readiness_section = format_compact_attribution_readiness_for_report(
+                    state.get("temporal_report_evidence_packet") or {}
                 )
-                if footprint_section:
-                    parts.append(footprint_section)
-            except Exception as footprint_error:
-                logger.warning("[FORMAT-CIT] Could not render P0/P1 footprint diagnostics: %s", footprint_error)
+                if readiness_section:
+                    parts.append(readiness_section)
+                p5_section = format_candidate_discovery_packet_for_report(
+                    state.get("biological_synthesis_packet") or {}
+                )
+                if p5_section:
+                    parts.append(p5_section)
+                try:
+                    from .nodes.kinase_annotation_node import format_kinase_footprint_diagnostics_for_report
+                    footprint_section = format_kinase_footprint_diagnostics_for_report(
+                        state.get("kinase_activity_heatmap") or {},
+                        state.get("ptm_type", "phosphorylation"),
+                    )
+                    if footprint_section:
+                        parts.append(footprint_section)
+                except Exception as footprint_error:
+                    logger.warning("[FORMAT-CIT] Could not render P0/P1 footprint diagnostics: %s", footprint_error)
             # ═══════════════════════════════════════════════════════════════════
             # v10.3: Figure Placement Overhaul
             # Main Figures:  Fig 1 (Pathway Bar) → Fig 2 (Kinase Heatmap) →
@@ -998,6 +1029,7 @@ def format_citations(state: ReportState) -> dict:
                 supplementary_start=1,
                 ptm_type=state.get('ptm_type', 'phosphorylation'),
                 has_comovement=True,  # v10.3: always push cascade/cytoscape to supplementary
+                figure_manifest=figure_manifest if reader_authoring_shadow else None,
             )
             if net_main:
                 parts.append(net_main)
@@ -1033,9 +1065,9 @@ def format_citations(state: ReportState) -> dict:
             # Supplementary: signal_flow_supplementary, signal_flow (legacy)
             signal_flow_figures = state.get("signal_flow_figures", []) or []
             entity_label = "E3 Ligase" if state.get('ptm_type', 'phosphorylation').lower().strip() in ('ubiquitylation', 'ubiquitination') else "Kinase"
-            fig_num = 2  # Fig 1 is Pathway Bar from network_node
+            fig_num = 1 if reader_authoring_shadow else 2  # Shadow Fig 1 is the narrow selected-feature heatmap.
 
-            if signal_flow_figures:
+            if signal_flow_figures and not reader_authoring_shadow:
                 sf_section_parts = []
                 sf_supp_items = []  # Collect supplementary items
 
@@ -1147,25 +1179,62 @@ def format_citations(state: ReportState) -> dict:
                         r.get("condition", "") for r in vector_plot_raw_data if r.get("condition")
                     ), key=condition_sort_key)
 
-                if output_dir and vector_plot_raw_data and ctx_conditions:
+                selected_heatmap_features = []
+                if reader_authoring_shadow:
+                    selected_heatmap_features = next(
+                        (
+                            list(figure.get("selected_features") or [])
+                            for figure in figure_manifest.get("figures") or []
+                            if figure.get("figure_key") == "reader_quantitative_heatmap"
+                        ),
+                        [],
+                    )
+                if output_dir and vector_plot_raw_data and ctx_conditions and (
+                    not reader_authoring_shadow or selected_heatmap_features
+                ):
                     ctx_heatmap_path = generate_context_aware_ptm_heatmap(
                         sections=sections_for_ctx,
                         vector_plot_raw_data=vector_plot_raw_data,
                         conditions=ctx_conditions,
                         output_dir=output_dir,
                         ptm_type=state.get('ptm_type', 'phosphorylation'),
+                        selected_features=selected_heatmap_features if reader_authoring_shadow else None,
                     )
                     if ctx_heatmap_path:
-                        ctx_fig_section = (
-                            f"\n\n### Figure {context_ptm_fig_num}. Key PTM Sites Referenced in This Report\n\n"
-                            f"Heatmap showing temporal conventional Log₂FC profiles selected under the "
-                            f"evidence-first Report display contract. "
-                            f"Sites are clustered by temporal pattern similarity. Red/blue encode conventional quantified contrasts; "
-                            f"starred de novo sites, where present, use LOD-relative detection context and are excluded from the colour scale.\n\n"
-                            f"![Context-aware PTM Heatmap]({ctx_heatmap_path})\n\n---\n"
-                        )
-                        parts.append(ctx_fig_section)
-                        logger.info(f"[FORMAT-CIT] v10.3: Context-aware PTM heatmap inserted as Figure {context_ptm_fig_num}")
+                        if reader_authoring_shadow:
+                            figure_manifest = attach_reader_heatmap(
+                                figure_manifest,
+                                ctx_heatmap_path,
+                                selected_heatmap_features,
+                            )
+                            state["figure_manifest"] = figure_manifest
+                            reader_heatmap = next(
+                                figure for figure in figure_manifest.get("figures") or []
+                                if figure.get("figure_key") == "reader_quantitative_heatmap"
+                            )
+                            if reader_heatmap.get("placement") == "main":
+                                caption = compile_reader_caption(reader_heatmap)
+                                ctx_fig_section = (
+                                    f"\n\n### Figure {context_ptm_fig_num}. Quantitative Phosphorylation-Feature Landscape\n\n"
+                                    f"![Quantitative Phosphorylation-Feature Landscape]({ctx_heatmap_path})\n\n"
+                                    f"**Figure legend.** {caption}\n\n---\n"
+                                )
+                                parts.append(ctx_fig_section)
+                                logger.info(
+                                    "[FORMAT-CIT] Reader selected-feature heatmap inserted as Figure %s",
+                                    context_ptm_fig_num,
+                                )
+                        else:
+                            ctx_fig_section = (
+                                f"\n\n### Figure {context_ptm_fig_num}. Key PTM Sites Referenced in This Report\n\n"
+                                f"Heatmap showing temporal conventional Log₂FC profiles selected under the "
+                                f"evidence-first Report display contract. "
+                                f"Sites are clustered by temporal pattern similarity. Red/blue encode conventional quantified contrasts; "
+                                f"starred de novo sites, where present, use LOD-relative detection context and are excluded from the colour scale.\n\n"
+                                f"![Context-aware PTM Heatmap]({ctx_heatmap_path})\n\n---\n"
+                            )
+                            parts.append(ctx_fig_section)
+                            logger.info(f"[FORMAT-CIT] v10.3: Context-aware PTM heatmap inserted as Figure {context_ptm_fig_num}")
                     else:
                         logger.info("[FORMAT-CIT] Context-aware PTM heatmap returned None — skipping")
                 else:
@@ -1375,6 +1444,42 @@ def format_citations(state: ReportState) -> dict:
         reference_section = ReportPostProcessor.bibliography_blocked_reference_section()
     logger.info(f"[FORMAT-CIT] Built resolved reference section with {len(resolved_refs)} entries")
 
+    audit_path = None
+    try:
+        output_dir = state.get("output_dir")
+        if output_dir:
+            from pathlib import Path
+
+            audit_path = Path(output_dir) / "evidence_and_reproducibility_audit.md"
+            audit_path.write_text(
+                render_evidence_reproducibility_audit(state, figure_manifest=figure_manifest),
+                encoding="utf-8",
+            )
+            logger.info("[FORMAT-CIT] Saved separate evidence/reproducibility audit: %s", audit_path)
+    except Exception as audit_error:
+        logger.warning("[FORMAT-CIT] Could not save evidence/reproducibility audit: %s", audit_error)
+
+    if not resolved_refs and reader_authoring_shadow:
+        authoring_packet = state.get("authoring_packet") or build_authoring_packet(state, references=[])
+        data_only = render_data_only_reader_report(
+            state,
+            authoring_packet,
+            title=title_text or _neutral_data_only_title(state),
+            generated_at=_dt.now().strftime('%Y-%m-%d %H:%M'),
+        )
+        return {
+            "final_report": ReportPostProcessor().process(data_only),
+            "citation_data": {
+                "total_references": 0,
+                "reference_section": reference_section,
+                "completion_status": citation_completion_status,
+                "data_only_review_mode": True,
+                "evidence_reproducibility_audit_path": str(audit_path) if audit_path else None,
+            },
+            "evidence_reproducibility_audit_path": str(audit_path) if audit_path else None,
+            "figure_manifest": figure_manifest,
+        }
+
     if not resolved_refs:
         blocked_report = _build_bibliography_blocked_data_only_report(
             state,
@@ -1388,7 +1493,9 @@ def format_citations(state: ReportState) -> dict:
                 "reference_section": reference_section,
                 "completion_status": citation_completion_status,
                 "data_only_review_mode": True,
+                "evidence_reproducibility_audit_path": str(audit_path) if audit_path else None,
             },
+            "evidence_reproducibility_audit_path": str(audit_path) if audit_path else None,
         }
 
     # v8.7: Append ALL supplementary figures at the very end
@@ -1448,7 +1555,10 @@ def format_citations(state: ReportState) -> dict:
             "total_references": len(resolved_refs),
             "reference_section": reference_section,
             "completion_status": citation_completion_status,
+            "evidence_reproducibility_audit_path": str(audit_path) if audit_path else None,
         },
+        "evidence_reproducibility_audit_path": str(audit_path) if audit_path else None,
+        "figure_manifest": figure_manifest,
     }
 
 

@@ -1,5 +1,7 @@
 """Focused regression tests for deterministic Report rendering boundaries."""
 
+import re
+
 from report_generation.core.biological_synthesis import (
     build_biological_synthesis_packet,
     format_candidate_discovery_packet_for_report,
@@ -17,6 +19,17 @@ from report_generation.core.nodes.temporal_comovement_node import (
     _generate_transient_burst_figure,
 )
 from report_generation.core.nodes.writer_node import _stabilize_section_citations
+from report_generation.core.reader_authoring import (
+    build_authoring_packet,
+    render_data_only_reader_report,
+    validate_and_repair_sections,
+)
+from report_generation.core.figure_manifest import (
+    FigureEligibilityPolicy,
+    build_figure_manifest,
+    compile_reader_caption,
+    select_reader_heatmap_features,
+)
 
 
 def _sidecar() -> dict:
@@ -136,6 +149,256 @@ def test_citation_complete_observation_only_order_replaces_llm_sections_determin
     assert "[1]" in final
     assert "P0 explicit modified-precursor feature records=3030" in final
     assert "P5 availability" in final
+
+
+def test_reader_authoring_packet_never_exposes_internal_readiness_labels():
+    packet = build_authoring_packet(
+        {
+            "experimental_context": {
+                "cell_type": "generic cells",
+                "treatment": "compound X",
+                "timepoints": ["0min", "30min"],
+            },
+            "ptm_type": "phosphorylation",
+        },
+        temporal_evidence_packet=build_temporal_evidence_packet(_sidecar()),
+        biological_synthesis_packet=_p5_packet(),
+        references=[{
+            "title": "Traceable collection article", "authors": "Evidence Author", "year": "2025",
+            "journal": "Evidence Journal", "pmid": "34567890",
+        }],
+    )
+    reader_text = "\n".join(card["reader_summary"] for card in packet["reader_cards"])
+    for forbidden in ("P0", "P1", "P2", "P3", "P5", "M1", "R3"):
+        assert not re.search(rf"\b{forbidden}\b", reader_text, flags=re.IGNORECASE)
+    for forbidden in ("TW-", "not_recorded", "DATA-"):
+        assert forbidden.lower() not in reader_text.lower()
+    assert packet["mode"] == "citation_complete"
+    assert any(card["claim_tier"] == "L1" for card in packet["reader_cards"])
+
+
+def test_clause_validator_preserves_cited_observation_and_repairs_only_unsafe_clause():
+    packet = build_authoring_packet(
+        {
+            "experimental_context": {"cell_type": "generic cells", "treatment": "compound X"},
+            "ptm_type": "phosphorylation",
+        },
+        temporal_evidence_packet=build_temporal_evidence_packet(_sidecar()),
+        biological_synthesis_packet=_p5_packet(),
+        references=[{
+            "title": "Traceable collection article", "authors": "Evidence Author", "year": "2025",
+            "journal": "Evidence Journal", "pmid": "34567890",
+        }],
+    )
+    sections, audit = validate_and_repair_sections(
+        {
+            "results": (
+                "The study measured phosphorylation features [EVID:study.frame]. "
+                "Kinase X directly activates its substrate [EVID:study.frame]. "
+                "Prior literature provided context [REF:pmid:34567890]."
+            )
+        },
+        packet,
+    )
+    rendered = sections["results"].lower()
+    assert "the study measured phosphorylation features" in rendered
+    assert "directly activates" not in rendered
+    assert "candidate context" in rendered
+    assert "[ref:pmid:34567890]" in rendered
+    assert audit["repaired_sentence_count"] >= 1
+
+
+def test_reader_data_only_fallback_is_substantive_without_internal_statuses():
+    packet = build_authoring_packet(
+        {
+            "experimental_context": {"cell_type": "generic cells", "treatment": "compound X", "timepoints": ["0min", "30min"]},
+            "ptm_type": "phosphorylation",
+        },
+        temporal_evidence_packet=build_temporal_evidence_packet(_sidecar()),
+        biological_synthesis_packet=_p5_packet(),
+        references=[],
+    )
+    report = render_data_only_reader_report(
+        {}, packet, title="Data-only report", generated_at="2026-09-07 00:00"
+    )
+    assert "## Abstract" in report and "## Discussion" in report and "## Methods" in report
+    assert "traceable publication metadata were not available" in report.lower()
+    assert "P0" not in report and "M1" not in report and "R3" not in report
+    assert "direct kinase–substrate regulation" in report
+
+
+def test_authoring_packet_suppresses_kinase_names_when_all_footprints_are_non_evaluable():
+    packet = build_authoring_packet(
+        {
+            "experimental_context": {"cell_type": "generic cells", "treatment": "compound X"},
+            "ptm_type": "phosphorylation",
+            "kinase_activity_heatmap": {
+                "kinase_scores": [{
+                    "kinase": "SHOULD_NOT_APPEAR",
+                    "footprint_diagnostics": {"status": "not_evaluable"},
+                }]
+            },
+        },
+        temporal_evidence_packet=build_temporal_evidence_packet(_sidecar()),
+        biological_synthesis_packet=_p5_packet(),
+    )
+    summaries = "\n".join(card["reader_summary"] for card in packet["reader_cards"])
+    assert "SHOULD_NOT_APPEAR" not in summaries
+    assert "did not support a stable evaluation of kinase footprint candidate context" in summaries
+
+
+def test_authoring_packet_uses_kinase_family_not_isoform_specific_activity():
+    packet = build_authoring_packet(
+        {
+            "experimental_context": {"cell_type": "generic cells", "treatment": "compound X"},
+            "ptm_type": "phosphorylation",
+            "kinase_activity_heatmap": {
+                "kinase_scores": [{
+                    "kinase": "KIN1",
+                    "peak_score": 2.0,
+                    "footprint_diagnostics": {"status": "computed"},
+                    "footprint_equivalence": {"equivalence_group_id": "KIN1_KIN2", "members": ["KIN1", "KIN2"]},
+                }]
+            },
+        },
+        temporal_evidence_packet=build_temporal_evidence_packet(_sidecar()),
+        biological_synthesis_packet=_p5_packet(),
+    )
+    kinase_cards = [card for card in packet["reader_cards"] if card["category"] == "kinase_context"]
+    assert len(kinase_cards) == 1
+    assert "KIN1 / KIN2 family" in kinase_cards[0]["reader_summary"]
+    assert "isoform-specific activity" in kinase_cards[0]["counterevidence"]
+
+
+def test_shadow_renderer_preserves_validated_narrative_without_deterministic_replacement(tmp_path):
+    final = format_citations({
+        "report_title": "Reader authoring shadow report",
+        "reader_authoring_mode": "shadow",
+        "sections": {
+            "title": "Reader authoring shadow report",
+            "abstract": "Observed temporal profiles were summarized for the recorded study [REF:pmid:34567890].",
+            "results": "The quantitative landscape was interpreted as descriptive evidence [REF:pmid:34567890].",
+        },
+        "network_analysis": {},
+        "signal_flow_figures": [],
+        "output_dir": str(tmp_path),
+        "temporal_report_evidence_packet": build_temporal_evidence_packet(_sidecar()),
+        "biological_synthesis_packet": _p5_packet(),
+        "collected_references": [{
+            "chromadb_ref": True, "title": "Traceable collection article", "authors": "Evidence Author",
+            "journal": "Evidence Journal", "year": "2025", "pmid": "34567890",
+        }],
+    })["final_report"]
+    assert "Observed temporal profiles were summarized" in final
+    assert "Quantitative coverage and evidence status" not in final
+    assert "P0 explicit modified-precursor" not in final
+    audit_path = tmp_path / "evidence_and_reproducibility_audit.md"
+    assert audit_path.exists()
+    audit = audit_path.read_text(encoding="utf-8")
+    assert "Evidence and Reproducibility Audit" in audit
+    assert "P0 explicit modified-precursor feature records=3030" in audit
+
+
+def test_shadow_data_only_renderer_keeps_reader_body_and_separate_audit(tmp_path):
+    rendered = format_citations({
+        "report_title": "Reader authoring data-only report",
+        "reader_authoring_mode": "shadow",
+        "experimental_context": {
+            "cell_type": "generic cells", "treatment": "compound X", "timepoints": ["0min", "30min"],
+        },
+        "ptm_type": "phosphorylation",
+        "sections": {"title": "Reader authoring data-only report"},
+        "network_analysis": {},
+        "signal_flow_figures": [],
+        "output_dir": str(tmp_path),
+        "temporal_report_evidence_packet": build_temporal_evidence_packet(_sidecar()),
+        "biological_synthesis_packet": _p5_packet(),
+        "collected_references": [],
+    })
+    report = rendered["final_report"]
+    assert "## Abstract" in report and "## Results" in report and "## Discussion" in report
+    assert "P0 explicit modified-precursor" not in report
+    assert "traceable publication metadata were not available" in report.lower()
+    assert (tmp_path / "evidence_and_reproducibility_audit.md").exists()
+
+
+def _complete_conventional_vector_rows() -> list[dict]:
+    rows = []
+    for index in range(12):
+        for condition, value in (("0min", -0.5), ("15min", 0.25), ("60min", 0.75)):
+            rows.append({
+                "gene": f"GENE{index:02d}",
+                "position": f"S{index + 1}",
+                "condition": condition,
+                "ptm_relative_log2fc": value + (index % 3) * 0.1,
+            })
+    rows.extend([
+        {"gene": "DENOVO", "position": "S99", "condition": "0min", "ptm_relative_log2fc": 99.0, "Conventional_Log2FC_NA": True},
+        {"gene": "DENOVO", "position": "S99", "condition": "15min", "ptm_relative_log2fc": 99.0, "Conventional_Log2FC_NA": True},
+        {"gene": "DENOVO", "position": "S99", "condition": "60min", "ptm_relative_log2fc": 99.0, "Conventional_Log2FC_NA": True},
+    ])
+    return rows
+
+
+def test_figure_manifest_selects_12_to_20_complete_conventional_feature_cards_without_denovo_ranking():
+    rows = _complete_conventional_vector_rows()
+    selected = select_reader_heatmap_features(rows, ["0min", "15min", "60min"])
+    assert len(selected) == 12
+    assert all(item["gene"] != "DENOVO" for item in selected)
+    assert all("representative signed profile pattern" in item["selection_reason"] for item in selected)
+    manifest = build_figure_manifest(
+        {"vector_plot_raw_data": rows, "network_analysis": {"timepoints": ["0min", "15min", "60min"]}},
+        citation_complete=False,
+    )
+    heatmap = next(item for item in manifest["figures"] if item["figure_key"] == "reader_quantitative_heatmap")
+    assert heatmap["placement"] == "main"
+    assert heatmap["suppression_reason"] is None
+    caption = compile_reader_caption(heatmap)
+    assert "Data unit and scope" in caption and "Visual encoding" in caption and "Interpretation boundary" in caption
+
+
+def test_figure_policy_suppresses_uncited_context_and_routes_dense_network_to_technical_audit():
+    policy = FigureEligibilityPolicy()
+    assert policy.classify({"kind": "context_map", "image_path": "/tmp/context.png"}, citation_complete=False) == (
+        "suppressed", "traceable_citations_unavailable"
+    )
+    assert policy.classify({"kind": "dense_network", "image_path": "/tmp/network.png"}, citation_complete=True) == (
+        "technical_audit", "dense_or_diagnostic_visualization"
+    )
+
+
+def test_shadow_renderer_inserts_manifest_selected_heatmap_as_main_figure_one(tmp_path):
+    final = format_citations({
+        "report_title": "Manifest figure report",
+        "reader_authoring_mode": "shadow",
+        "experimental_context": {"cell_type": "generic cells", "treatment": "compound X"},
+        "ptm_type": "phosphorylation",
+        "sections": {
+            "title": "Manifest figure report",
+            "results": "Observed profiles were summarized [REF:pmid:34567890].",
+        },
+        "network_analysis": {"timepoints": ["0min", "15min", "60min"]},
+        "signal_flow_figures": [],
+        "output_dir": str(tmp_path),
+        "vector_plot_raw_data": _complete_conventional_vector_rows(),
+        "kinase_activity_heatmap": {"conditions": ["0min", "15min", "60min"]},
+        "temporal_report_evidence_packet": build_temporal_evidence_packet(_sidecar()),
+        "biological_synthesis_packet": _p5_packet(),
+        "collected_references": [{
+            "chromadb_ref": True, "title": "Traceable collection article", "authors": "Evidence Author",
+            "journal": "Evidence Journal", "year": "2025", "pmid": "34567890",
+        }],
+    })
+    assert "### Figure 1. Quantitative Phosphorylation-Feature Landscape" in final["final_report"]
+    assert "Selection rule:" in final["final_report"]
+    manifest = final["figure_manifest"]
+    heatmap = next(item for item in manifest["figures"] if item["figure_key"] == "reader_quantitative_heatmap")
+    assert heatmap["placement"] == "main"
+    assert heatmap["image_path"].endswith("context_ptm_heatmap.png")
+    assert "pathway_membership" not in [item["figure_key"] for item in manifest["figures"] if item["placement"] == "main"]
+    audit = (tmp_path / "evidence_and_reproducibility_audit.md").read_text(encoding="utf-8")
+    assert "reader_quantitative_heatmap" in audit
+    assert '"placement": "main"' in audit
 
 
 def test_p5_report_renderer_keeps_denovo_detection_context_without_pseudo_log2fc():

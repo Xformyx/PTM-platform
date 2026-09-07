@@ -121,7 +121,7 @@ def test_packet_preserves_numerical_fields_and_observational_boundary():
     assert "DATA-TEMPORAL-PRECEDENCE" not in text
     assert "evaluable sites=7" in text
     assert "P4 validation passed=False" in text
-    assert "Static Wave W1" in text
+    assert "Fixed temporal profile cluster W1" in text
     assert "DATA-CROSS-LAYER-1" not in text
     assert "observed onset-timepoint difference=15 min" in text
     assert "causality=not_tested" in text
@@ -129,7 +129,7 @@ def test_packet_preserves_numerical_fields_and_observational_boundary():
     quality = next(row for row in packet["records"] if row["evidence_id"] == "DATA-WAVE-INPUT-QUALITY")
     assert "complete_case_no_imputation" in quality["text"]
     assert "not converted to biological zeroes" in quality["text"]
-    assert "same-Wave candidate pairs=42" in dynamic["text"]
+    assert "within-cluster candidate pairs=42" in dynamic["text"]
     assert "exposure-dependent descriptive counts" in dynamic["text"]
     readiness = next(row for row in packet["records"] if row["evidence_id"] == "DATA-KINASE-ATTRIBUTION-READINESS")
     assert "P0 explicit modified-precursor feature records=3030" in readiness["text"]
@@ -154,7 +154,7 @@ def test_packet_unavailable_explicitly_blocks_invented_temporal_claims():
     packet = build_temporal_evidence_packet({})
     assert packet["status"] == "unavailable"
     text = format_temporal_evidence_packet_for_llm(packet)
-    assert "Do not invent temporal PTM-protein" in text
+    assert "Do not invent temporal phosphorylation-feature/protein" in text
 
 
 def test_zero_temporal_layers_force_observed_measurement_claim_ceiling():
@@ -225,7 +225,7 @@ def test_ordinary_question_content_includes_deterministic_temporal_packet():
     )
     assert "summary" in content
     assert "DATA-DYNAMIC-SUMMARY" not in content
-    assert "transition-supported Waves=2" in content
+    assert "concordance-annotated temporal profile clusters=2" in content
 
 
 def test_writer_makes_the_packet_mandatory_in_all_temporal_sections():

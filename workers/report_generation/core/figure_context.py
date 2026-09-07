@@ -50,7 +50,7 @@ class FigureInformationGenerator:
 
     def __init__(self, network_analysis: dict, parsed_ptms: list = None,
                  comovement_analysis: dict = None, comovement_figures: list = None,
-                 comovement_llm_context: str = ""):
+                 comovement_llm_context: str = "", figure_manifest: dict = None):
         self.network_analysis = network_analysis
         self.network_images = network_analysis.get("network_images", {})
         self.network_data = network_analysis.get("network_data", {})
@@ -70,6 +70,7 @@ class FigureInformationGenerator:
         self.comovement_analysis = comovement_analysis or {}
         self.comovement_figures = comovement_figures or []
         self.comovement_llm_context = comovement_llm_context
+        self.figure_manifest = figure_manifest or {}
         self.figure_map = self._build_figure_map()
 
     def _build_figure_map(self) -> Dict[str, dict]:
@@ -85,6 +86,10 @@ class FigureInformationGenerator:
         Cytoscape network images are Supplementary Figures in the final report.
         The LLM must reference them as "Supplementary Figure X" to match.
         """
+        manifest_figures = self.figure_manifest.get("figures", []) if isinstance(self.figure_manifest, dict) else []
+        if manifest_figures:
+            return self._build_manifest_figure_map(manifest_figures)
+
         fig_map = {}
         main_fig_num = 1
         supp_num = 1  # Supplementary figure counter (matches network_node.py)
@@ -208,6 +213,45 @@ class FigureInformationGenerator:
                 "figure_type": "cytoscape_network",
             }
 
+        return fig_map
+
+    @staticmethod
+    def _build_manifest_figure_map(manifest_figures: list) -> Dict[str, dict]:
+        """Map only policy-eligible figures using the final placement order.
+
+        Technical-audit and suppressed figures are deliberately absent from the
+        model-visible figure context. Main and supplementary counters are each
+        allocated from the manifest, avoiding legacy hard-coded Figure labels.
+        """
+        fig_map: Dict[str, dict] = {}
+        main_number = 1
+        supplementary_number = 1
+        for figure in manifest_figures:
+            if not isinstance(figure, dict):
+                continue
+            placement = str(figure.get("placement") or "")
+            if placement not in {"main", "supplementary"}:
+                continue
+            number = main_number if placement == "main" else supplementary_number
+            label = f"Figure {number}" if placement == "main" else f"Supplementary Figure {number}"
+            if placement == "main":
+                main_number += 1
+            else:
+                supplementary_number += 1
+            facts = figure.get("caption_facts") or {}
+            fig_map[str(figure.get("figure_key") or f"figure_{number}")] = {
+                "figure_number": number,
+                "figure_label": label,
+                "display_name": str(figure.get("kind") or "Reader-facing evidence figure"),
+                "description": (
+                    f"Question: {figure.get('research_question')}. Data scope: "
+                    f"{facts.get('data_scope') or facts.get('data_unit_scope') or 'recorded evidence'}. "
+                    f"Interpretation boundary: {facts.get('interpretation_boundary') or 'see FigureManifest'}"
+                ),
+                "panel_index": 0,
+                "figure_type": str(figure.get("kind") or "manifest_figure"),
+                "source_evidence_ids": list(figure.get("source_evidence_ids") or []),
+            }
         return fig_map
 
     # ── Description generators ──
