@@ -332,6 +332,7 @@ export default function OrderCreate() {
     llm_temperature: 0.6,
     chromadb_results_per_section: 10,
     ptm_detail_count: 30,
+    reader_authoring_shadow: false,
   });
 
   const goTo = useCallback((s: number) => {
@@ -553,6 +554,7 @@ export default function OrderCreate() {
       llm_temperature: reportConfig.llm_temperature,
       chromadb_results_per_section: reportConfig.chromadb_results_per_section,
       ptm_detail_count: reportConfig.ptm_detail_count,
+      ...(reportConfig.reader_authoring_shadow ? { reader_authoring_mode: "shadow" } : {}),
     };
     formData.append("report_options", JSON.stringify({
       report_type: form.report_type, ptm_selection_mode: form.ptm_selection_mode, top_n_ptms: form.top_n_ptms, output_format: "md",
@@ -1433,6 +1435,25 @@ export default function OrderCreate() {
                   </div>
                 </div>
 
+                <div className="flex items-start gap-3 rounded-lg border px-4 py-3">
+                  <input
+                    type="checkbox"
+                    id="reader-authoring-shadow"
+                    checked={reportConfig.reader_authoring_shadow}
+                    onChange={(e) => setReportConfig({ ...reportConfig, reader_authoring_shadow: e.target.checked })}
+                    className="h-4 w-4 rounded border-input shrink-0 mt-0.5"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <Label htmlFor="reader-authoring-shadow" className="text-sm font-medium cursor-pointer">
+                      연구자용 Report 작성
+                    </Label>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Abstract·Results·Discussion을 연구자가 읽는 서술로 쓰고, P0–P5 같은 내부 진단은
+                      별도 audit 파일에 둡니다. 정량·kinase 계산은 바뀌지 않습니다.
+                    </p>
+                  </div>
+                </div>
+
                 {/* LLM Model for RAG Enrichment */}
                 <div className="space-y-2">
                   <Label className="flex items-center gap-2">
@@ -1773,7 +1794,7 @@ export default function OrderCreate() {
                             llm_tokens_results: 16384, llm_tokens_time_course: 8192,
                             llm_tokens_discussion: 12288, llm_tokens_conclusion: 6144,
                             llm_temperature: 0.6, chromadb_results_per_section: 10,
-                            ptm_detail_count: 30,
+                            ptm_detail_count: 30, reader_authoring_shadow: false,
                           })}>
                           <RotateCcw className="h-3 w-3" /> Reset to Defaults
                         </Button>
@@ -1873,6 +1894,8 @@ export default function OrderCreate() {
                     <span className="font-medium">{temporalContractLabel(form.temporal_contract)}</span>
                     <span className="text-muted-foreground">Report Type</span>
                     <span className="font-medium">{form.report_type === "extended" ? "Extended" : form.report_type === "co_scientist" ? "Data-Grounded Analysis" : "Standard"}</span>
+                    <span className="text-muted-foreground">연구자용 Report 작성</span>
+                    <span className="font-medium">{reportConfig.reader_authoring_shadow ? "사용" : "사용 안 함"}</span>
                     <span className="text-muted-foreground">Samples</span>
                     <span className="font-medium">{samples.length} configured</span>
                     <span className="text-muted-foreground">Research Questions</span>

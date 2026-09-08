@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { api } from "@/lib/api";
 import AnalysisOptionsModal from "./AnalysisOptionsModal";
 import type { AnalysisOptions, TemporalContract } from "@/lib/types";
-import { DEFAULT_ANALYSIS_OPTIONS, DEFAULT_TEMPORAL_CONTRACT, clampQuickSettings, pickQuickSettings, resolveTemporalContract } from "@/lib/types";
+import { DEFAULT_ANALYSIS_OPTIONS, DEFAULT_TEMPORAL_CONTRACT, clampQuickSettings, isReaderAuthoringShadow, pickQuickSettings, resolveTemporalContract } from "@/lib/types";
 import QuickAnalysisCustomFields from "./QuickAnalysisOptions";
 import { cn } from "@/lib/utils";
 import { CLOUD_PROVIDER_SENTINEL, CLOUD_MODEL_PRESETS, type CloudProvider } from "@/lib/llm-models";
@@ -151,7 +151,7 @@ export default function RerunOptionsModal({
     llm_tokens_results: 16384, llm_tokens_time_course: 8192,
     llm_tokens_discussion: 12288, llm_tokens_conclusion: 6144,
     llm_temperature: 0.6, chromadb_results_per_section: 10,
-    ptm_detail_count: 30,
+    ptm_detail_count: 30, reader_authoring_shadow: false,
   });
 
   // Load RAG collections when modal opens
@@ -271,7 +271,10 @@ export default function RerunOptionsModal({
           llm_temperature: typeof rc.llm_temperature === "number" ? rc.llm_temperature : 0.6,
           chromadb_results_per_section: n(rc.chromadb_results_per_section, 10),
           ptm_detail_count: n(rc.ptm_detail_count, 30),
+          reader_authoring_shadow: isReaderAuthoringShadow(rc.reader_authoring_mode),
         });
+      } else {
+        setReportConfig((prev) => ({ ...prev, reader_authoring_shadow: false }));
       }
     }
   }, [open, order, llmModels]);
@@ -306,6 +309,7 @@ export default function RerunOptionsModal({
         llm_temperature: reportConfig.llm_temperature,
         chromadb_results_per_section: reportConfig.chromadb_results_per_section,
         ptm_detail_count: reportConfig.ptm_detail_count,
+        ...(reportConfig.reader_authoring_shadow ? { reader_authoring_mode: "shadow" } : {}),
       };
       await onConfirm({
         analysis_context: analysisContext,
@@ -547,6 +551,23 @@ export default function RerunOptionsModal({
               <h4 className="text-sm font-semibold flex items-center gap-2">
                 <Brain className="h-4 w-4" /> Report Options
               </h4>
+              <div className="flex items-start gap-3 rounded-lg border px-3 py-2.5">
+                <input
+                  type="checkbox"
+                  id="rerun-reader-authoring-shadow"
+                  checked={reportConfig.reader_authoring_shadow}
+                  onChange={(e) => setReportConfig({ ...reportConfig, reader_authoring_shadow: e.target.checked })}
+                  className="h-4 w-4 rounded border-input shrink-0 mt-0.5"
+                />
+                <div className="min-w-0">
+                  <Label htmlFor="rerun-reader-authoring-shadow" className="text-xs font-medium cursor-pointer">
+                    연구자용 Report 작성
+                  </Label>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">
+                    본문을 연구자 서술로 쓰고 내부 진단은 별도 audit 파일에 둡니다. 정량·kinase 계산은 바뀌지 않습니다.
+                  </p>
+                </div>
+              </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1.5">
                   <Label className="text-xs">Report Type</Label>
@@ -955,7 +976,7 @@ export default function RerunOptionsModal({
                         llm_tokens_results: 16384, llm_tokens_time_course: 8192,
                         llm_tokens_discussion: 12288, llm_tokens_conclusion: 6144,
                         llm_temperature: 0.6, chromadb_results_per_section: 10,
-                        ptm_detail_count: 30,
+                        ptm_detail_count: 30, reader_authoring_shadow: false,
                       })}>
                       <RotateCcw className="h-3 w-3" /> Reset to Defaults
                     </Button>

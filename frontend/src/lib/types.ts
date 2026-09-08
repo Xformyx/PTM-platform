@@ -236,6 +236,11 @@ export function temporalContractLabel(value: unknown): string {
   return resolveTemporalContract(value) === 'legacy' ? 'Legacy' : 'Dynamics v1';
 }
 
+export function isReaderAuthoringShadow(mode: unknown): boolean {
+  const value = String(mode ?? "").trim().toLowerCase();
+  return value === "shadow" || value === "opt_in_shadow";
+}
+
 export interface ProgressEvent {
   order_id: number;
   stage: string;

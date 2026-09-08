@@ -22,7 +22,7 @@ import { AutoResizeTextarea } from "@/components/ui/auto-resize-textarea";
 import { api } from "@/lib/api";
 import { useOrderProgress } from "@/hooks/useSSE";
 import type { Order, OrderLog, ProgressEvent } from "@/lib/types";
-import { formatQuickAnalysisSummary, resolveTemporalContract, temporalContractLabel } from "@/lib/types";
+import { formatQuickAnalysisSummary, isReaderAuthoringShadow, resolveTemporalContract, temporalContractLabel } from "@/lib/types";
 import { AnalysisStatisticsTab } from "@/components/AnalysisStatisticsTab";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -4968,6 +4968,14 @@ export default function OrderDetail() {
                       : (order.report_options as any)?.report_type === "co_scientist"
                         ? "Data-Grounded Analysis"
                         : "Standard"
+                  }
+                />
+                <OverviewField
+                  label="연구자용 Report 작성"
+                  value={
+                    isReaderAuthoringShadow((order.report_options as any)?.report_config?.reader_authoring_mode)
+                      ? "사용"
+                      : "사용 안 함"
                   }
                 />
                 <OverviewField
