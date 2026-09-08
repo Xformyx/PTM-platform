@@ -17,6 +17,55 @@ from typing import Any, Iterable, Mapping
 AUTHORING_PACKET_VERSION = "reader_authoring_packet.v1"
 VALID_CLAIM_TIERS = {"O1", "O2", "C1", "L1", "H1", "D1"}
 
+# The reader-facing manuscript has one stable story arc.  These are authoring
+# obligations, not evidence and not a claim-promotion mechanism.  Keeping them
+# beside the card contract prevents every section from becoming an inventory of
+# the same compact diagnostics.
+SECTION_STORY_CONTRACT = {
+    "abstract": {
+        "categories": ("study_frame", "quantitative_landscape", "temporal_profile", "kinase_context", "candidate_discovery"),
+        "minimum_words": 170,
+        "role": "Summarize the study frame, the most informative observed pattern, its bounded significance, and the discriminating next question.",
+        "sequence": "study frame → measured landscape → selected observation → bounded candidate context → next question",
+    },
+    "introduction": {
+        "categories": ("study_frame", "quantitation_provenance", "traceable_literature", "temporal_profile"),
+        "minimum_words": 320,
+        "role": "Establish the recorded biological question, why time-resolved PTM and protein measurements are informative, the traceable background, and the study objective.",
+        "sequence": "study problem → measurement rationale → cited context → unresolved question → present study objective",
+    },
+    "results": {
+        "categories": ("quantitative_landscape", "quantitative_provenance", "temporal_profile", "kinase_context", "candidate_discovery"),
+        "minimum_words": 350,
+        "role": "Report measured scope before selected temporal observations, protein-linked context, and any eligible candidate context.",
+        "sequence": "coverage → selected temporal observation → protein-linked quantitative context → candidate context → observation boundary",
+    },
+    "research_question_answers": {
+        "categories": ("study_frame", "quantitative_landscape", "temporal_profile", "kinase_context", "candidate_discovery"),
+        "minimum_words": 140,
+        "role": "Answer each supplied research question directly from the available cards, distinguishing observation from a proposed follow-up test.",
+        "sequence": "question → direct evidence-bound answer → alternative interpretation or boundary → discriminating next measurement",
+    },
+    "discussion": {
+        "categories": ("quantitative_provenance", "temporal_profile", "kinase_context", "candidate_discovery", "traceable_literature"),
+        "minimum_words": 300,
+        "role": "Interpret current observations in the selected literature context, state the alternative explanation that remains, and identify the next discriminating experiment.",
+        "sequence": "principal observation → cited comparison → bounded interpretation → remaining alternative → discriminating validation",
+    },
+    "methods": {
+        "categories": ("study_frame", "quantitation_provenance", "temporal_profile"),
+        "minimum_words": 180,
+        "role": "Describe only recorded quantitative and temporal analysis procedures and their interpretation boundaries.",
+        "sequence": "study design → recorded quantitation track → temporal descriptive method → reporting boundary",
+    },
+    "conclusion": {
+        "categories": ("study_frame", "quantitative_landscape", "temporal_profile", "kinase_context", "candidate_discovery"),
+        "minimum_words": 150,
+        "role": "Close the same study question with the observed advance, the bounded interpretation, and the testable next step.",
+        "sequence": "study question → observed advance → bounded interpretation → next validation",
+    },
+}
+
 _INTERNAL_TERM_RE = re.compile(
     r"\b(?:P[0-5]|M[0-4]|R[0-4]|TW-\d+|wave_[\w-]+|cowave_[\w-]+|"
     r"DATA-[A-Z0-9_-]+|computed_no_eligible_[\w-]+|not_recorded|"
@@ -263,22 +312,32 @@ def _normalization_card(state: Mapping[str, Any]) -> dict:
 
 def _literature_cards(references: Iterable[Mapping[str, Any]]) -> list[dict]:
     cards: list[dict] = []
+    emitted: set[str] = set()
     for index, reference in enumerate(references or [], 1):
         ref = _as_mapping(reference)
         stable_id = _stable_reference_id(ref)
         title = _clean_text(ref.get("title"))
-        if not stable_id or not title or not is_traceable_reference(ref):
+        if not stable_id or stable_id in emitted or not title or not is_traceable_reference(ref):
             continue
+        emitted.add(stable_id)
         authors = _clean_text(ref.get("authors"))
         year = _clean_text(ref.get("year") or ref.get("pub_date"))[:4]
         identity = ", ".join(value for value in (authors, year) if value)
+        excerpt = _clean_text(ref.get("reader_excerpt") or ref.get("excerpt") or ref.get("document"))
+        # A short source excerpt lets the scientific author write actual
+        # literature context rather than an uninformative bibliography list.
+        # It remains bound to the supplied publication identity and is never a
+        # current-order observation.
+        excerpt = excerpt[:600].rsplit(" ", 1)[0].strip() if len(excerpt) > 600 else excerpt
+        contextual_summary = (
+            f"Selected literature reported the following relevant external context: {excerpt}"
+            if excerpt
+            else f"Selected literature provides external context through {title}"
+        )
         cards.append({
             "card_id": f"literature.{index}",
             "category": "traceable_literature",
-            "reader_summary": (
-                f"Selected literature provides external context through {title}" +
-                (f" ({identity})." if identity else ".")
-            ),
+            "reader_summary": contextual_summary + (f" ({identity})." if identity else "."),
             "claim_tier": "L1",
             "evidence_ids": [f"literature.{stable_id}"],
             "citation_ids": [stable_id],
@@ -455,12 +514,20 @@ def build_authoring_packet(
         "conclusion": ["O1", "O2", "C1", "H1"],
         "methods": ["O1", "O2"],
     }
+    story_contract = {
+        section: {
+            **contract,
+            "categories": list(contract["categories"]),
+        }
+        for section, contract in SECTION_STORY_CONTRACT.items()
+    }
     return {
         "contract_version": AUTHORING_PACKET_VERSION,
         "mode": "citation_complete" if has_traceable_literature else "data_only",
         "reader_cards": reader_cards,
         "figure_cards": figure_cards,
         "section_claim_budget": section_claim_budget,
+        "section_story_contract": story_contract,
         "authoring_rules": {
             "required_evidence_anchor": "[EVID:<evidence_id>] after each factual sentence; this anchor is removed before reader rendering.",
             "citation_marker": "Use [REF:pmid:*], [REF:doi:*], or [REF:title:*] only for supplied literature cards.",
@@ -474,12 +541,17 @@ def build_authoring_packet(
 def format_authoring_packet_for_llm(packet: Mapping[str, Any], section_type: str, plan: Mapping[str, Any] | None = None) -> str:
     """Format the narrow writer context without exposing internal evidence state."""
     allowed = set(_as_mapping(packet.get("section_claim_budget")).get(section_type) or ["O1", "O2"])
+    story_contract = _as_mapping(packet.get("section_story_contract"))
+    section_contract = _as_mapping(story_contract.get(section_type))
+    allowed_categories = set(section_contract.get("categories") or ())
     lines = [
         "=== READER-READY AUTHORING PACKET ===",
         f"Mode: {packet.get('mode', 'data_only')}",
         f"Section: {section_type}",
         "Write formal academic prose for general cell-signaling and proteomics researchers.",
         "Use only these evidence cards and citations; do not add background knowledge.",
+        "Write connected paragraphs, not an evidence-card inventory, a technical status list, or a bullet summary.",
+        "Follow the stated narrative sequence so this section continues the same study question as the rest of the manuscript.",
         "Every factual sentence must end with one supplied [EVID:<id>] marker. These markers will be removed before rendering.",
         "Use supplied [REF:*] markers for every literature-context sentence. Never cite a source not listed below.",
         "Do not expose implementation codes, raw diagnostic field names, serialized status strings, or temporal internal identifiers.",
@@ -487,10 +559,13 @@ def format_authoring_packet_for_llm(packet: Mapping[str, Any], section_type: str
         "Temporal Profile Clustering and Interval-wise Concordance Analysis are descriptive methods; do not call them causal flow.",
         "",
         "Allowed claim tiers: " + ", ".join(sorted(allowed)),
+        "Narrative role: " + str(section_contract.get("role") or "Write a bounded evidence-guided manuscript section."),
+        "Required narrative sequence: " + str(section_contract.get("sequence") or "study frame → observation → bounded interpretation"),
+        "Target minimum length: approximately " + str(section_contract.get("minimum_words") or 120) + " words unless available evidence is genuinely sparse.",
         "Evidence cards:",
     ]
     for card in packet.get("reader_cards") or []:
-        if card.get("claim_tier") not in allowed:
+        if card.get("claim_tier") not in allowed or (allowed_categories and card.get("category") not in allowed_categories):
             continue
         line = (
             f"- [EVID:{card['evidence_ids'][0]}] tier={card['claim_tier']}; "
@@ -521,16 +596,22 @@ def deterministic_authoring_plan(packet: Mapping[str, Any]) -> dict:
     """Return a safe plan fallback when the optional LLM planner is unavailable."""
     cards = packet.get("reader_cards") or []
     categories = {str(card.get("category")) for card in cards if isinstance(card, Mapping)}
+    story_contract = _as_mapping(packet.get("section_story_contract"))
+    default_sections = {
+        "abstract": "State the study frame, quantitative scope, observed temporal pattern, candidate-context boundary, and a testable next question.",
+        "introduction": "Connect the recorded study question, time-resolved measurement design, and traceable literature context without making current-order mechanistic claims.",
+        "results": "Progress from coverage to selected temporal profile observations, interval-wise concordance, protein-linked context, and candidate context.",
+        "discussion": "Distinguish current observations from cited external context, explain alternative interpretations, and end with a discriminating validation experiment.",
+        "conclusion": "Summarize what was observed and what is proposed for testing without promoting candidate context to direct regulation.",
+        "methods": "Describe recorded normalization, conventional/de-novo representation, Temporal Profile Clustering, and Interval-wise Concordance Analysis.",
+    }
+    for section, contract in story_contract.items():
+        default_sections[section] = str(
+            contract.get("sequence") or default_sections.get(section) or "study frame → observation → bounded interpretation"
+        )
     return {
         "source": "deterministic_fallback",
-        "sections": {
-            "abstract": "State the study frame, quantitative scope, observed temporal pattern, candidate-context boundary, and a testable next question.",
-            "introduction": "Connect the recorded study question, time-resolved measurement design, and traceable literature context without making current-order mechanistic claims.",
-            "results": "Progress from coverage to selected temporal profile observations, interval-wise concordance, protein-linked context, and candidate context.",
-            "discussion": "Distinguish current observations from cited external context, explain alternative interpretations, and end with a discriminating validation experiment.",
-            "conclusion": "Summarize what was observed and what is proposed for testing without promoting candidate context to direct regulation.",
-            "methods": "Describe recorded normalization, conventional/de novo representation, Temporal Profile Clustering, and Interval-wise Concordance Analysis.",
-        },
+        "sections": default_sections,
         "available_categories": sorted(categories),
     }
 
@@ -718,6 +799,151 @@ def strip_authoring_anchors(text: str) -> str:
     return re.sub(r"[ \t]{2,}", " ", text).strip()
 
 
+def _summaries_by_category(packet: Mapping[str, Any], *categories: str, limit: int = 4) -> list[str]:
+    """Return bounded card summaries without turning a manuscript into a dump."""
+    selected: list[str] = []
+    category_set = set(categories)
+    for card in packet.get("reader_cards") or []:
+        if not isinstance(card, Mapping) or card.get("category") not in category_set:
+            continue
+        summary = _clean_text(card.get("reader_summary"))
+        if summary:
+            selected.append(summary)
+        if len(selected) >= limit:
+            break
+    return selected
+
+
+def _literature_context_for_fallback(packet: Mapping[str, Any], *, limit: int = 2) -> str:
+    """Render only traceable, selected literature context with stable markers."""
+    fragments: list[str] = []
+    for card in packet.get("reader_cards") or []:
+        if not isinstance(card, Mapping) or card.get("category") != "traceable_literature":
+            continue
+        summary = _clean_text(card.get("reader_summary"))
+        citation_ids = [str(value).strip().lower() for value in card.get("citation_ids") or [] if str(value).strip()]
+        if summary and citation_ids:
+            fragments.append(summary + " " + " ".join(f"[REF:{identifier}]" for identifier in citation_ids))
+        if len(fragments) >= limit:
+            break
+    return " ".join(fragments)
+
+
+def _default_summary(values: list[str], default: str) -> str:
+    return " ".join(values) if values else default
+
+
+def render_reader_section_fallback(
+    section_type: str,
+    packet: Mapping[str, Any],
+    *,
+    questions: Iterable[str] | None = None,
+) -> str:
+    """Write a substantive, evidence-bounded section when the LLM is unavailable.
+
+    This is intentionally a section-specific scientific narrative rather than the
+    legacy generic fallback.  It uses only reader cards and keeps the same study
+    frame → observation → bounded interpretation → next-test logic as the model
+    prompt.  It never receives raw diagnostics or external context without a
+    stable citation marker.
+    """
+    study = _default_summary(
+        _summaries_by_category(packet, "study_frame", limit=1),
+        "The report evaluates the recorded PTM and linked total-protein measurements in the stated experimental system.",
+    )
+    quantitative = _default_summary(
+        _summaries_by_category(packet, "quantitative_landscape", "quantitative_provenance", limit=3),
+        "The available quantitative data are interpreted as recorded PTM measurements with linked protein-abundance context.",
+    )
+    temporal = _default_summary(
+        _summaries_by_category(packet, "temporal_profile", limit=4),
+        "The time-course analysis provides a bounded description of measured Temporal Profile Clusters and Interval-wise Concordance Analysis.",
+    )
+    kinase = _default_summary(
+        _summaries_by_category(packet, "kinase_context", limit=3),
+        "Any kinase-related result is retained as contribution-weighted candidate context rather than a direct kinase–substrate assignment.",
+    )
+    candidates = _default_summary(
+        _summaries_by_category(packet, "candidate_discovery", limit=3),
+        "Observed features can be prioritized for a pre-specified follow-up measurement without being represented as confirmed substrates.",
+    )
+    literature = _literature_context_for_fallback(packet)
+
+    if section_type == "abstract":
+        paragraphs = [
+            f"{study} {quantitative}",
+            f"{temporal} {kinase}",
+            "Together, these measurements provide a time-resolved, protein-abundance-aware description of the recorded response. "
+            f"{candidates} The resulting interpretation remains bounded to measured observations and candidate context, and the next informative step is a matched temporal or orthogonal assay that can discriminate the proposed explanation.",
+        ]
+        if literature:
+            paragraphs[2] += " Selected literature is used only as external context for this interpretation. " + literature
+        return "\n\n".join(paragraphs)
+
+    if section_type == "introduction":
+        paragraphs = [
+            f"{study} The scientific question is how the recorded perturbation is reflected in time-resolved PTM measurements while accounting for linked changes in total-protein abundance.",
+            "PTM measurements can change on a different time scale from protein abundance. The analysis therefore retains these signals as linked but distinct quantitative observations, rather than treating their ratio as an absolute occupancy measurement or a direct readout of kinase activity. " + quantitative,
+            "Temporal Profile Clustering summarizes similar measured phosphorylation-feature profiles, and Interval-wise Concordance Analysis describes endpoint activity-state concordance within fixed clusters across adjacent sampled intervals. These descriptive layers identify patterns that warrant comparison and follow-up without asserting a common regulator or causal signal flow. " + temporal,
+            (
+                "The selected traceable literature frames the biological question and defines the external context against which the current observations can be discussed. " + literature
+                if literature else
+                "This data-only report does not introduce external pathway background because traceable publication metadata were not available for comparison."
+            ),
+            "Accordingly, the report asks which quantitative and temporal patterns are observed in this experimental system, which protein-linked or kinase-family candidate contexts remain interpretable, and which next measurement would most clearly distinguish a testable hypothesis from an observed association.",
+        ]
+        return "\n\n".join(paragraphs)
+
+    if section_type == "results":
+        return "\n\n".join([
+            "### Quantitative landscape\n\n" + study + " " + quantitative,
+            "### Temporal-profile observations\n\n" + temporal,
+            "### Candidate context\n\n" + kinase + " " + candidates,
+            "### Interpretation boundary\n\nThe reported patterns describe measured phosphorylation features and linked protein-abundance context. They do not on their own establish direct kinase–substrate regulation, catalytic activation, causal propagation, isoform-specific activity, or a perturbation outcome.",
+        ])
+
+    if section_type == "research_question_answers":
+        prompt_questions = [str(question).strip() for question in questions or [] if str(question).strip()]
+        if not prompt_questions:
+            prompt_questions = ["What does the current experiment establish, and what requires a discriminating follow-up measurement?"]
+        answers: list[str] = []
+        for index, question in enumerate(prompt_questions, 1):
+            evidence = temporal if index == 1 else kinase if index == 2 else candidates
+            answers.append(
+                f"### Q{index}. {question}\n\n"
+                f"{study} {evidence} This answer is restricted to the supplied quantitative evidence. "
+                "A matched temporal measurement, orthogonal assay, or pre-specified perturbation design is required before promoting this observation to a direct regulatory conclusion."
+            )
+        return "\n\n".join(answers)
+
+    if section_type == "discussion":
+        paragraphs = [
+            f"{temporal} These observations define a structured time-resolved response in the recorded experimental system, while retaining protein abundance and PTM evidence as distinct but linked layers.",
+            f"{kinase} {candidates}",
+            (
+                "The selected literature supplies external context for comparison rather than validation of an Order-specific mechanism. " + literature
+                if literature else
+                "Because traceable literature metadata were not available, this data-only discussion does not extend the observed patterns to external pathway assertions."
+            ),
+            "The remaining alternative explanation is that a measured temporal association may reflect shared regulation, protein-abundance context, incomplete mapping, or other unmeasured processes. A follow-up experiment should therefore preserve matched temporal sampling and specify in advance the observation that would support or refute the candidate interpretation.",
+        ]
+        return "\n\n".join(paragraphs)
+
+    if section_type == "methods":
+        return "\n\n".join([
+            study,
+            quantitative,
+            "Hierarchical Clustering of Temporal Phosphorylation Feature Profiles was used to derive descriptive Temporal Profile Clusters. Interval-wise Concordance Analysis then summarized retained concordance, concordance gain, and concordance loss across adjacent sampled intervals within those fixed clusters.",
+            "Large conventional Log2FC values were retained as measured numeric contrasts but were not used alone to infer biological priority, mechanistic importance, direct regulatory strength, absolute occupancy, or kinase activity. Control-undetected features were kept as detection/LOD context rather than placed on conventional quantitative axes or magnitude ranks.",
+        ])
+
+    return "\n\n".join([
+        f"{study} {quantitative}",
+        f"{temporal} {kinase}",
+        f"This report advances a bounded quantitative description and identifies testable candidate context without promoting an observed association to direct regulation or causality. {candidates}",
+    ])
+
+
 def render_data_only_reader_report(
     state: Mapping[str, Any],
     packet: Mapping[str, Any],
@@ -731,62 +957,65 @@ def render_data_only_reader_report(
     the same reader cards as the LLM path and therefore never exposes internal
     provenance status in the researcher-facing body.
     """
-    cards = [card for card in packet.get("reader_cards") or [] if isinstance(card, Mapping)]
-    by_category: dict[str, list[str]] = {}
-    for card in cards:
-        by_category.setdefault(str(card.get("category") or "other"), []).append(str(card.get("reader_summary") or ""))
-
-    def summaries(*categories: str, limit: int = 4) -> str:
-        selected: list[str] = []
-        for category in categories:
-            selected.extend(value for value in by_category.get(category, []) if value)
-        return " ".join(selected[:limit]) or "The available data support a bounded quantitative description of the recorded study frame."
-
-    study = summaries("study_frame", limit=1)
-    quantitative = summaries("quantitative_landscape", "quantitative_provenance", limit=3)
-    temporal = summaries("temporal_profile", limit=5)
-    kinase = summaries("kinase_context", limit=3)
-    candidate = summaries("candidate_discovery", limit=3)
     return "\n\n".join([
         f"# {title}",
         f"*Generated: {generated_at}*",
-        "## Abstract\n\n"
-        f"{study} {quantitative} {temporal} This data-only manuscript intentionally confines interpretation to "
-        "recorded observations, bounded temporal-profile summaries, and pre-specified follow-up questions because "
-        "traceable publication metadata were not available for literature comparison. The results are not used to "
-        "claim direct kinase–substrate regulation, catalytic activity, causal propagation, isoform-specific action, "
-        "or perturbation outcome.",
-        "## Introduction\n\n"
-        f"{study} The report separates phosphorylation-feature measurements from linked total-protein abundance so that "
-        "a relative PTM signal is not treated as a direct activity or occupancy measurement. Temporal Profile Clustering "
-        "and Interval-wise Concordance Analysis provide a descriptive framework for comparing sampled response profiles. "
-        "External biological background and pathway assertions are deliberately omitted in this data-only version; this "
-        "maintains a clear distinction between the current experiment and claims requiring traceable literature support.",
-        "## Results\n\n"
-        f"### Quantitative landscape\n\n{quantitative}\n\n"
-        f"### Temporal-profile observations\n\n{temporal}\n\n"
-        "### Candidate context and next question\n\n"
-        f"{kinase} {candidate} Candidate context is used to prioritize a discriminating measurement or perturbation design, "
-        "rather than to assert a direct regulatory relationship.",
-        "## Discussion\n\n"
-        "The current data provide a time-resolved quantitative record that can be inspected for reproducible profile structure, "
-        "concordance change, and protein-linked context. The analytical value of this record does not depend on converting a "
-        "large numeric contrast, a profile grouping, or a substrate-derived score into mechanistic proof. The most informative "
-        "next experiment is one that tests a specific candidate relationship with matched temporal sampling and an orthogonal "
-        "measurement, while preserving the distinction between observed data and the proposed hypothesis.",
-        "## Methods\n\n"
-        "The report uses recorded preprocessing provenance, separates conventional quantitative contrasts from control-undetected "
-        "detection/LOD context, and reports phosphorylation-feature change alongside linked protein-abundance context. "
-        "Hierarchical Clustering of Temporal Phosphorylation Feature Profiles was used to construct descriptive Temporal Profile "
-        "Clusters. Interval-wise Concordance Analysis summarizes retained, gained, or lost local profile concordance across sampled intervals. "
-        "Large conventional Log2FC values are retained as measured numeric contrasts but are not used alone to infer biological priority, "
-        "mechanistic importance, or direct regulatory strength.",
-        "## Conclusion\n\n"
-        "This data-only report presents the recorded quantitative and temporal observations in researcher-facing language while reserving "
-        "citation-dependent biological interpretation and direct mechanistic claims for a citation-complete follow-up report.",
+        "## Abstract\n\n" + render_reader_section_fallback("abstract", packet),
+        "## Introduction\n\n" + render_reader_section_fallback("introduction", packet),
+        "## Results\n\n" + render_reader_section_fallback("results", packet),
+        "## Discussion\n\n" + render_reader_section_fallback("discussion", packet),
+        "## Methods\n\n" + render_reader_section_fallback("methods", packet),
+        "## Conclusion\n\n" + render_reader_section_fallback("conclusion", packet),
         "## References\n\n"
         "Traceable publication metadata were not available for this Report. No external biological or prior-work claims are included.",
     ])
+
+
+def assess_narrative_continuity(
+    sections: Mapping[str, Any],
+    packet: Mapping[str, Any],
+) -> dict:
+    """Audit narrative depth and the shared study arc without rewriting prose.
+
+    This is a release-review signal only.  It must never trigger a whole-section
+    replacement or elevate the evidence tier of the generated manuscript.
+    """
+    contract = _as_mapping(packet.get("section_story_contract"))
+    observed_categories = {
+        str(card.get("category"))
+        for card in packet.get("reader_cards") or []
+        if isinstance(card, Mapping)
+    }
+    audits: dict[str, dict] = {}
+    for section, rule in contract.items():
+        text = str(_as_mapping(sections).get(section) or "").strip()
+        words = len(re.findall(r"\b\w+[\w-]*\b", text))
+        paragraphs = len([item for item in re.split(r"\n\s*\n", text) if item.strip()])
+        categories = [str(item) for item in rule.get("categories") or []]
+        usable_categories = [item for item in categories if item in observed_categories]
+        has_internal_leak = bool(_INTERNAL_TERM_RE.search(text))
+        audits[section] = {
+            "word_count": words,
+            "paragraph_count": paragraphs,
+            "target_minimum_words": int(rule.get("minimum_words") or 0),
+            "story_sequence": str(rule.get("sequence") or ""),
+            "available_story_categories": usable_categories,
+            "internal_term_leak_detected": has_internal_leak,
+            "status": (
+                "missing" if not text else
+                "review_for_depth" if words < max(60, int(rule.get("minimum_words") or 0) // 2) else
+                "review_for_internal_leakage" if has_internal_leak else
+                "present"
+            ),
+        }
+    return {
+        "contract_version": "reader_narrative_continuity_audit.v1",
+        "sections": audits,
+        "review_required_sections": [
+            section for section, audit in audits.items()
+            if audit["status"] != "present"
+        ],
+    }
 
 
 def render_evidence_reproducibility_audit(
@@ -805,6 +1034,7 @@ def render_evidence_reproducibility_audit(
         "kinase_activity_heatmap": state.get("kinase_activity_heatmap") or state.get("frontend_kinase_analysis") or {},
         "authoring_packet": authoring_packet or state.get("authoring_packet") or {},
         "validator_audit": validator_audit or state.get("reader_authoring_validator_audit") or {},
+        "narrative_continuity_audit": state.get("reader_narrative_continuity_audit") or {},
         "figure_manifest": figure_manifest or state.get("figure_manifest") or {},
     }
     serialized = json.dumps(payload, indent=2, sort_keys=True, default=str)

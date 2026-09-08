@@ -45,6 +45,7 @@ from report_generation.core.biological_synthesis import (
     format_biological_synthesis_packet_for_llm,
 )
 from report_generation.core.reader_authoring import (
+    assess_narrative_continuity,
     apply_llm_authoring_plan,
     build_authoring_packet,
     deterministic_authoring_plan,
@@ -52,6 +53,7 @@ from report_generation.core.reader_authoring import (
     get_reader_authoring_system_prompt,
     is_traceable_reference,
     references_are_citation_complete,
+    render_reader_section_fallback,
     strip_authoring_anchors,
     validate_and_repair_sections,
 )
@@ -455,6 +457,7 @@ def run_section_writing(state: dict) -> dict:
     )
     authoring_plan = deterministic_authoring_plan(authoring_packet)
     reader_authoring_validator_audit: Dict[str, dict] = {}
+    reader_authoring_fallback_sections: list[str] = []
     _reader_authoring_lock = __import__("threading").Lock()
     packet_output_dir = state.get("output_dir")
     if packet_output_dir:
@@ -1144,10 +1147,19 @@ def run_section_writing(state: dict) -> dict:
             )
             if cb:
                 cb(70, f"WARNING: LLM failed for {section_type} — using fallback text")
-            content = _fallback_section(
-                section_type, research_results, validated_hypotheses, parsed_ptms,
-                questions=active_questions,
-            )
+            if reader_authoring_shadow and section_authoring_packet is not None:
+                content = render_reader_section_fallback(
+                    section_type,
+                    section_authoring_packet,
+                    questions=active_questions,
+                )
+                with _reader_authoring_lock:
+                    reader_authoring_fallback_sections.append(section_type)
+            else:
+                content = _fallback_section(
+                    section_type, research_results, validated_hypotheses, parsed_ptms,
+                    questions=active_questions,
+                )
 
         llm_draft_fidelity = audit_report_temporal_fidelity(
             content,
@@ -1469,6 +1481,16 @@ def run_section_writing(state: dict) -> dict:
         except Exception as fidelity_snapshot_error:
             logger.warning("[report-evidence] Could not save temporal fidelity snapshot: %s", fidelity_snapshot_error)
 
+    reader_narrative_continuity_audit = (
+        assess_narrative_continuity(sections, authoring_packet)
+        if reader_authoring_shadow else {}
+    )
+    if reader_authoring_shadow and reader_narrative_continuity_audit.get("review_required_sections"):
+        logger.warning(
+            "[reader-authoring] Narrative continuity review required for: %s",
+            ", ".join(reader_narrative_continuity_audit["review_required_sections"]),
+        )
+
     return {
         "sections": sections,
         "collected_references": unified_references,
@@ -1483,6 +1505,8 @@ def run_section_writing(state: dict) -> dict:
         "authoring_packet": authoring_packet,
         "reader_authoring_plan": authoring_plan,
         "reader_authoring_validator_audit": reader_authoring_validator_audit,
+        "reader_authoring_fallback_sections": reader_authoring_fallback_sections,
+        "reader_narrative_continuity_audit": reader_narrative_continuity_audit,
         "reader_authoring_mode": "shadow" if reader_authoring_shadow else "legacy",
     }
 
@@ -1621,6 +1645,9 @@ def _build_section_prompt(
             "pmid": str(r.get("pmid", r.get("metadata", {}).get("pmid", "") if isinstance(r.get("metadata"), dict) else "")),
             "doi": r.get("doi", r.get("metadata", {}).get("doi", "") if isinstance(r.get("metadata"), dict) else ""),
             "source_type": r.get("source_type", "research_article"),
+            "reader_excerpt": str(r.get("document") or "")[:650],
+            "query_role": r.get("query_role", "section_context"),
+            "query_anchor": r.get("query_anchor", ""),
             "chromadb_ref": True,  # marker to distinguish from PubMed refs
         }
         for r in _all_chroma_results
@@ -1872,6 +1899,9 @@ IMPORTANT: Write a thorough, detailed introduction. The ChromaDB collection refe
                 "pmid": str(r.get("pmid", r.get("metadata", {}).get("pmid", "") if isinstance(r.get("metadata"), dict) else "")),
                 "doi": r.get("doi", r.get("metadata", {}).get("doi", "") if isinstance(r.get("metadata"), dict) else ""),
                 "source_type": r.get("source_type", "research_article"),
+                "reader_excerpt": str(r.get("document") or "")[:650],
+                "query_role": r.get("query_role", "introduction_context"),
+                "query_anchor": r.get("query_anchor", ""),
                 "chromadb_ref": True,
             }
             for r in (intro_rag_results or []) if r.get("citation_eligible")

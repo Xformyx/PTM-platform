@@ -24,6 +24,7 @@ from .reader_authoring import (
     references_are_citation_complete,
     render_data_only_reader_report,
     render_evidence_reproducibility_audit,
+    render_reader_section_fallback,
 )
 from .figure_manifest import (
     attach_reader_heatmap,
@@ -921,6 +922,52 @@ def format_citations(state: ReportState) -> dict:
         # The shadow path has already applied sentence-local validation. Do not
         # replace its researcher-facing narrative with legacy compact diagnostics.
         sections, deterministic_observation_only = dict(source_sections), False
+        # An LLM timeout or an unexpectedly empty section must not turn the
+        # manuscript into an incomplete status document.  Fill only the missing
+        # section from the same reader-safe cards; preserve every non-empty
+        # validated section verbatim.
+        authoring_packet = state.get("authoring_packet") or build_authoring_packet(
+            state,
+            references=collected_refs,
+        )
+        # If a partially completed shadow manuscript has no stable citation
+        # marker, preserve its data-only review mode when adding only missing
+        # sections.  An all-empty LLM failure still receives the citation-ready
+        # fallback because there is no user-facing body to preserve.
+        preexisting_body = "\n".join(
+            str(source_sections.get(section) or "")
+            for section in (
+                "abstract", "introduction", "results", "research_question_answers",
+                "discussion", "methods", "conclusion",
+            )
+        )
+        if preexisting_body.strip() and not _re.search(r"\[REF:[^\]]+\]", preexisting_body):
+            authoring_packet = {
+                **authoring_packet,
+                "reader_cards": [
+                    card for card in authoring_packet.get("reader_cards") or []
+                    if card.get("category") != "traceable_literature"
+                ],
+            }
+        final_fallback_sections: list[str] = []
+        for required_section in (
+            "abstract", "introduction", "results", "research_question_answers",
+            "discussion", "methods", "conclusion",
+        ):
+            if str(sections.get(required_section) or "").strip():
+                continue
+            sections[required_section] = render_reader_section_fallback(
+                required_section,
+                authoring_packet,
+                questions=state.get("original_research_questions") or state.get("research_questions") or [],
+            )
+            final_fallback_sections.append(required_section)
+        if final_fallback_sections:
+            logger.warning(
+                "[reader-authoring] Final assembly supplied reader-safe fallback for empty sections: %s",
+                ", ".join(final_fallback_sections),
+            )
+            state["reader_authoring_final_fallback_sections"] = final_fallback_sections
     else:
         sections, deterministic_observation_only = _compose_observation_only_report_sections(
             state,
@@ -1534,7 +1581,7 @@ def format_citations(state: ReportState) -> dict:
 
     # Network supplementary (cascade diagrams, cytoscape networks)
     # Re-number network supplementary figures to continue after comovement supp
-    if network_supp_section:
+    if network_supp_section and not reader_authoring_shadow:
         import re as _re_supp
         comovement_supp_count = len(comovement_supp_items) if comovement_supp_items else 0
         if comovement_supp_count > 0:

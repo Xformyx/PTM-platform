@@ -20,12 +20,15 @@ from report_generation.core.nodes.temporal_comovement_node import (
 )
 from report_generation.core.nodes.writer_node import _stabilize_section_citations
 from report_generation.core.reader_authoring import (
+    assess_narrative_continuity,
     apply_llm_authoring_plan,
     build_authoring_packet,
     deterministic_authoring_plan,
+    format_authoring_packet_for_llm,
     get_reader_authoring_system_prompt,
     is_traceable_reference,
     render_data_only_reader_report,
+    render_reader_section_fallback,
     validate_and_repair_sections,
 )
 from report_generation.core.figure_manifest import (
@@ -299,6 +302,83 @@ def test_reader_data_only_fallback_is_substantive_without_internal_statuses():
     assert "traceable publication metadata were not available" in report.lower()
     assert "P0" not in report and "M1" not in report and "R3" not in report
     assert "direct kinase–substrate regulation" in report
+
+
+def test_authoring_packet_carries_traceable_excerpt_and_section_story_contract():
+    packet = build_authoring_packet(
+        {
+            "experimental_context": {"cell_type": "generic cells", "treatment": "compound X", "timepoints": ["0min", "30min"]},
+            "ptm_type": "phosphorylation",
+        },
+        temporal_evidence_packet=build_temporal_evidence_packet(_sidecar()),
+        biological_synthesis_packet=_p5_packet(),
+        references=[{
+            "title": "Traceable collection article", "authors": "Evidence Author", "year": "2025",
+            "journal": "Evidence Journal", "pmid": "34567890",
+            "reader_excerpt": "The selected study described time-resolved phosphorylation measurements in the relevant model.",
+        }],
+    )
+    literature_cards = [card for card in packet["reader_cards"] if card["category"] == "traceable_literature"]
+    assert len(literature_cards) == 1
+    assert "time-resolved phosphorylation measurements" in literature_cards[0]["reader_summary"]
+    assert packet["section_story_contract"]["discussion"]["sequence"].startswith("principal observation")
+    prompt = format_authoring_packet_for_llm(packet, "introduction")
+    assert "Required narrative sequence:" in prompt
+    assert "Target minimum length:" in prompt
+    assert "time-resolved phosphorylation measurements" in prompt
+
+
+def test_reader_section_fallback_preserves_scientific_story_arc_without_internal_codes():
+    packet = build_authoring_packet(
+        {
+            "experimental_context": {"cell_type": "generic cells", "treatment": "compound X", "timepoints": ["0min", "30min"]},
+            "ptm_type": "phosphorylation",
+        },
+        temporal_evidence_packet=build_temporal_evidence_packet(_sidecar()),
+        biological_synthesis_packet=_p5_packet(),
+        references=[{
+            "title": "Traceable collection article", "authors": "Evidence Author", "year": "2025",
+            "journal": "Evidence Journal", "pmid": "34567890",
+            "reader_excerpt": "Prior work described a relevant temporal response.",
+        }],
+    )
+    introduction = render_reader_section_fallback("introduction", packet)
+    discussion = render_reader_section_fallback("discussion", packet)
+    for internal in ("P0", "P1", "P2", "P3", "M1", "R3", "TW-", "not_recorded"):
+        assert internal.lower() not in (introduction + discussion).lower()
+    assert "scientific question" in introduction
+    assert "selected traceable literature" in introduction.lower()
+    assert "remaining alternative explanation" in discussion.lower()
+    assert "[REF:pmid:34567890]" in discussion
+    audit = assess_narrative_continuity(
+        {"introduction": introduction, "discussion": discussion},
+        packet,
+    )
+    assert audit["sections"]["introduction"]["paragraph_count"] >= 4
+    assert audit["sections"]["introduction"]["internal_term_leak_detected"] is False
+
+
+def test_shadow_final_assembly_fills_only_missing_sections_with_reader_fallback(tmp_path):
+    rendered = format_citations({
+        "report_title": "Reader narrative fallback report",
+        "reader_authoring_mode": "shadow",
+        "experimental_context": {"cell_type": "generic cells", "treatment": "compound X", "timepoints": ["0min", "30min"]},
+        "ptm_type": "phosphorylation",
+        "sections": {"title": "Reader narrative fallback report", "results": "Validated observed result is retained."},
+        "network_analysis": {},
+        "signal_flow_figures": [],
+        "output_dir": str(tmp_path),
+        "temporal_report_evidence_packet": build_temporal_evidence_packet(_sidecar()),
+        "biological_synthesis_packet": _p5_packet(),
+        "collected_references": [],
+    })
+    report = rendered["final_report"]
+    assert "Validated observed result is retained." in report
+    for heading in ("## Abstract", "## Introduction", "## Results", "## Research Question Answers", "## Discussion", "## Methods", "## Conclusion"):
+        assert heading in report
+    assert "P0 explicit modified-precursor" not in report
+    assert "directly activates" not in report.lower()
+    assert not (tmp_path / "evidence_and_reproducibility_audit.md").read_text(encoding="utf-8").startswith("# P0")
 
 
 def test_authoring_packet_suppresses_kinase_names_when_all_footprints_are_non_evaluable():
