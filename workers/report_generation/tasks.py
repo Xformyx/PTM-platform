@@ -766,11 +766,19 @@ def run_report_generation(self, order_id: int, config: dict):
                 logger.warning(f"[Order {order_id}] LLM pre-flight attempt {_attempt + 1}/3 failed, retrying in 10s…")
                 time.sleep(10)
             if test_response is None or test_response.startswith("[LLM Error"):
-                error_msg = (
-                    f"LLM pre-flight generation test FAILED: {llm_info} returned error. "
-                    f"Response: {test_response[:200] if test_response else 'None'}. "
-                    f"The model may be loading or misconfigured."
-                )
+                response_text = test_response[:200] if test_response else "None"
+                if "429" in response_text or "TooManyRequests" in response_text:
+                    error_msg = (
+                        f"LLM pre-flight generation test FAILED: {llm_info} hit Gemini rate/quota limit (HTTP 429) "
+                        f"after retries. Wait for the quota window to reset, then re-run Report Generation only. "
+                        f"Preprocessing and RAG outputs are kept."
+                    )
+                else:
+                    error_msg = (
+                        f"LLM pre-flight generation test FAILED: {llm_info} returned error. "
+                        f"Response: {response_text}. "
+                        f"The model may be loading or misconfigured."
+                    )
                 logger.error(f"[Order {order_id}] {error_msg}")
                 update_order_status(order_id, "failed", error_message=error_msg)
                 notify_order_status(order_id, "failed", error_msg)
