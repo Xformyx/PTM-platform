@@ -13,8 +13,13 @@ import json
 import re
 from typing import Any, Iterable, Mapping
 
+from report_generation.core.measured_feature_cards import (
+    build_feature_observation_cards,
+    build_quantitation_comparison_cards,
+)
 
-AUTHORING_PACKET_VERSION = "reader_authoring_packet.v2"
+
+AUTHORING_PACKET_VERSION = "reader_authoring_packet.v3"
 VALID_CLAIM_TIERS = {"O1", "O2", "C1", "L1", "H1", "D1"}
 
 # The reader-facing manuscript has one stable story arc.  These are authoring
@@ -23,7 +28,7 @@ VALID_CLAIM_TIERS = {"O1", "O2", "C1", "L1", "H1", "D1"}
 # the same compact diagnostics.
 SECTION_STORY_CONTRACT = {
     "abstract": {
-        "categories": ("study_frame", "quantitative_landscape", "temporal_profile", "kinase_context", "candidate_discovery"),
+        "categories": ("study_frame", "measured_feature_observation", "quantitation_comparison", "temporal_profile", "kinase_context", "candidate_discovery"),
         "minimum_words": 170,
         "role": "Summarize the study frame, the most informative observed pattern, its bounded significance, and the discriminating next question.",
         "sequence": "study frame → measured landscape → selected observation → bounded candidate context → next question",
@@ -35,31 +40,31 @@ SECTION_STORY_CONTRACT = {
         "sequence": "study problem → measurement rationale → cited context → unresolved question → present study objective",
     },
     "results": {
-        "categories": ("quantitative_landscape", "quantitative_provenance", "temporal_profile", "kinase_context", "candidate_discovery"),
+        "categories": ("quantitative_landscape", "quantitative_provenance", "measured_feature_observation", "quantitation_comparison", "temporal_profile", "kinase_context", "candidate_discovery"),
         "minimum_words": 350,
         "role": "Report measured scope before selected temporal observations, protein-linked context, and any eligible candidate context.",
         "sequence": "coverage → selected temporal observation → protein-linked quantitative context → candidate context → observation boundary",
     },
     "research_question_answers": {
-        "categories": ("study_frame", "quantitative_landscape", "temporal_profile", "kinase_context", "candidate_discovery"),
+        "categories": ("study_frame", "measured_feature_observation", "quantitation_comparison", "temporal_profile", "kinase_context", "candidate_discovery"),
         "minimum_words": 140,
         "role": "Answer each supplied research question directly from the available cards, distinguishing observation from a proposed follow-up test.",
         "sequence": "question → direct evidence-bound answer → alternative interpretation or boundary → discriminating next measurement",
     },
     "discussion": {
-        "categories": ("quantitative_provenance", "temporal_profile", "kinase_context", "candidate_discovery", "traceable_literature"),
+        "categories": ("measured_feature_observation", "quantitation_comparison", "quantitative_provenance", "temporal_profile", "kinase_context", "candidate_discovery", "traceable_literature"),
         "minimum_words": 300,
         "role": "Interpret current observations in the selected literature context, state the alternative explanation that remains, and identify the next discriminating experiment.",
         "sequence": "principal observation → cited comparison → bounded interpretation → remaining alternative → discriminating validation",
     },
     "methods": {
-        "categories": ("study_frame", "quantitation_provenance", "temporal_profile"),
+        "categories": ("study_frame", "quantitation_provenance", "quantitation_comparison", "temporal_profile"),
         "minimum_words": 180,
         "role": "Describe only recorded quantitative and temporal analysis procedures and their interpretation boundaries.",
         "sequence": "study design → recorded quantitation track → temporal descriptive method → reporting boundary",
     },
     "conclusion": {
-        "categories": ("study_frame", "quantitative_landscape", "temporal_profile", "kinase_context", "candidate_discovery"),
+        "categories": ("study_frame", "measured_feature_observation", "quantitation_comparison", "temporal_profile", "kinase_context", "candidate_discovery"),
         "minimum_words": 150,
         "role": "Close the same study question with the observed advance, the bounded interpretation, and the testable next step.",
         "sequence": "study question → observed advance → bounded interpretation → next validation",
@@ -440,6 +445,8 @@ def build_authoring_packet(
     temporal = _as_mapping(temporal_evidence_packet or state.get("temporal_report_evidence_packet"))
     synthesis = _as_mapping(biological_synthesis_packet or state.get("biological_synthesis_packet"))
     cards = [_study_frame_card(state, synthesis), *_quantitative_cards(synthesis), _normalization_card(state)]
+    cards.extend(build_feature_observation_cards(state, maximum=5))
+    cards.extend(build_quantitation_comparison_cards(state, maximum=8))
     for index, record in enumerate(temporal.get("records") or [], 1):
         if len([card for card in cards if card["category"] == "temporal_profile"]) >= 5:
             break
@@ -537,6 +544,8 @@ def build_authoring_packet(
             "directness": "Do not claim direct kinase–substrate regulation, causal propagation, catalytic activation, isoform-specific attribution, or perturbation outcome.",
             "de_novo": "Control-undetected rows are detection/LOD context only and must not be placed on conventional Log2FC axes or magnitude rankings.",
             "normalization": "Describe the track as protein-abundance-adjusted relative PTM ratio, not absolute occupancy or kinase activity.",
+            "measured_features": "Name current-order measured features and report supplied time-resolved values before aggregate counts or availability statements. Do not call a candidate-residue feature a localized phosphosite unless the card does so.",
+            "protein_adjustment": "Compare only the independent unadjusted PTM contrast with the protein-adjusted PTM contrast and linked protein contrast. The reconstructed legacy metric is audit-only and adjustment does not prove biological truth.",
         },
     }
 
@@ -643,13 +652,19 @@ def deterministic_authoring_plan(packet: Mapping[str, Any]) -> dict:
     central_question = _clean_text(study_card.get("reader_summary")) or (
         "How do the recorded phosphorylation and linked protein-abundance measurements change across the sampled study design?"
     )
+    phase2_named_categories = {"measured_feature_observation", "quantitation_comparison"}
+    has_phase2_named_evidence = any(
+        isinstance(card, Mapping) and card.get("category") in phase2_named_categories
+        for card in cards
+    )
     category_priority = (
-        "quantitative_landscape",
+        "measured_feature_observation",
+        "quantitation_comparison",
         "temporal_profile",
         "quantitative_observation",
         "kinase_context",
         "candidate_discovery",
-    )
+    ) + (() if has_phase2_named_evidence else ("quantitative_landscape",))
     selected_cards: list[Mapping[str, Any]] = []
     for category in category_priority:
         candidate = next(
@@ -673,14 +688,18 @@ def deterministic_authoring_plan(packet: Mapping[str, Any]) -> dict:
             "quantitative_landscape": {"reader_quantitative_heatmap"},
             "temporal_profile": {"reader_temporal_profiles", "reader_interval_concordance"},
             "quantitative_observation": {"reader_protein_context"},
+            "measured_feature_observation": {"reader_quantitative_heatmap"},
+            "quantitation_comparison": {"reader_protein_context"},
         }.get(category, set())
         return [str(figure.get("figure_key")) for figure in figure_cards if figure.get("figure_key") in desired]
 
     def next_test_for(category: str) -> str:
         if category == "temporal_profile":
             return "repeat the time course with biological replicates and denser sampling around the selected profile changes"
-        if category == "quantitative_observation":
+        if category in {"quantitative_observation", "quantitation_comparison"}:
             return "test the matched PTM/protein pattern with an explicitly paired quantitative contrast model"
+        if category == "measured_feature_observation":
+            return "repeat the named feature trajectory in an independent experiment with matched sampling and the same quantitative contract"
         if category in {"kinase_context", "candidate_discovery"}:
             return "evaluate the candidate in a matched vehicle–stimulus–intervention time course without changing the discovery result"
         return "repeat the measured contrast in an independent experiment using the same preprocessing and reporting contract"
@@ -1121,6 +1140,14 @@ def render_reader_section_fallback(
         _summaries_by_category(packet, "quantitative_landscape", "quantitative_provenance", limit=3),
         "The available quantitative data are interpreted as recorded PTM measurements with linked protein-abundance context.",
     )
+    measured = _default_summary(
+        _summaries_by_category(packet, "measured_feature_observation", limit=4),
+        "Named current-order feature observations were not available in the reader packet for this legacy analysis run.",
+    )
+    adjustment = _default_summary(
+        _summaries_by_category(packet, "quantitation_comparison", limit=3),
+        "An independent unadjusted-versus-protein-adjusted PTM comparison was not available for this legacy analysis run.",
+    )
     temporal = _default_summary(
         _summaries_by_category(packet, "temporal_profile", limit=4),
         "The time-course analysis provides a bounded description of measured Temporal Profile Clusters and Interval-wise Concordance Analysis.",
@@ -1137,7 +1164,8 @@ def render_reader_section_fallback(
 
     if section_type == "abstract":
         paragraphs = [
-            f"{study} {quantitative}",
+            f"{study} {measured}",
+            adjustment,
             f"{temporal} {kinase}",
             "Together, these measurements provide a time-resolved, protein-abundance-aware description of the recorded response. "
             f"{candidates} The resulting interpretation remains bounded to measured observations and candidate context, and the next informative step is a matched temporal or orthogonal assay that can discriminate the proposed explanation.",
@@ -1149,7 +1177,7 @@ def render_reader_section_fallback(
     if section_type == "introduction":
         paragraphs = [
             f"{study} The scientific question is how the recorded perturbation is reflected in time-resolved PTM measurements while accounting for linked changes in total-protein abundance.",
-            "PTM measurements can change on a different time scale from protein abundance. The analysis therefore retains these signals as linked but distinct quantitative observations, rather than treating their ratio as an absolute occupancy measurement or a direct readout of kinase activity. " + quantitative,
+            "PTM measurements can change on a different time scale from protein abundance. The analysis therefore retains independent unadjusted PTM, protein-adjusted PTM, and linked protein contrasts as distinct quantitative observations, rather than treating their ratio as an absolute occupancy measurement or a direct readout of kinase activity. " + quantitative,
             "Temporal Profile Clustering summarizes similar measured phosphorylation-feature profiles, and Interval-wise Concordance Analysis describes endpoint activity-state concordance within fixed clusters across adjacent sampled intervals. These descriptive layers identify patterns that warrant comparison and follow-up without asserting a common regulator or causal signal flow. " + temporal,
             (
                 "The selected traceable literature frames the biological question and defines the external context against which the current observations can be discussed. " + literature
@@ -1163,6 +1191,8 @@ def render_reader_section_fallback(
     if section_type == "results":
         return "\n\n".join([
             "### Quantitative landscape\n\n" + study + " " + quantitative,
+            "### Named current-order feature observations\n\n" + measured,
+            "### Protein-adjustment comparison\n\n" + adjustment,
             "### Temporal-profile observations\n\n" + temporal,
             "### Candidate context\n\n" + kinase + " " + candidates,
             "### Interpretation boundary\n\nThe reported patterns describe measured phosphorylation features and linked protein-abundance context. They do not on their own establish direct kinase–substrate regulation, catalytic activation, causal propagation, isoform-specific activity, or a perturbation outcome.",
@@ -1184,6 +1214,7 @@ def render_reader_section_fallback(
 
     if section_type == "discussion":
         paragraphs = [
+            f"{measured} {adjustment} These current-order observations anchor the interpretation before aggregate temporal and candidate summaries.",
             f"{temporal} These observations define a structured time-resolved response in the recorded experimental system, while retaining protein abundance and PTM evidence as distinct but linked layers.",
             f"{kinase} {candidates}",
             (
@@ -1199,12 +1230,13 @@ def render_reader_section_fallback(
         return "\n\n".join([
             study,
             quantitative,
+            "The independent unadjusted PTM contrast was computed from normalized modified-precursor replicate intensities. It was compared with the protein-adjusted relative PTM contrast and the linked protein contrast only when all three conventional values were available. The legacy reconstructed metric was excluded from this comparison, and arithmetic differences were not treated as proof that adjustment improved biological truth.",
             "Hierarchical Clustering of Temporal Phosphorylation Feature Profiles was used to derive descriptive Temporal Profile Clusters. Interval-wise Concordance Analysis then summarized retained concordance, concordance gain, and concordance loss across adjacent sampled intervals within those fixed clusters.",
             "Large conventional Log2FC values were retained as measured numeric contrasts but were not used alone to infer biological priority, mechanistic importance, direct regulatory strength, absolute occupancy, or kinase activity. Control-undetected features were kept as detection/LOD context rather than placed on conventional quantitative axes or magnitude ranks.",
         ])
 
     return "\n\n".join([
-        f"{study} {quantitative}",
+        f"{study} {measured} {adjustment}",
         f"{temporal} {kinase}",
         f"This report advances a bounded quantitative description and identifies testable candidate context without promoting an observed association to direct regulation or causality. {candidates}",
     ])

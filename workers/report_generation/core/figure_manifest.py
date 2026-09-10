@@ -6,9 +6,10 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from ptm_shared.de_novo_representation import is_de_novo_representation
+from report_generation.core.measured_feature_cards import build_quantitation_comparison_cards
 
 
-FIGURE_MANIFEST_VERSION = "report_figure_manifest.v2"
+FIGURE_MANIFEST_VERSION = "report_figure_manifest.v3"
 SIGNED_PATTERN_THRESHOLD = 0.25
 """Main-figure signed temporal pattern bin.
 
@@ -66,8 +67,11 @@ class FigureEligibilityPolicy:
                 return "main", None
             return "suppressed", "requires_3_to_8_readable_cluster_transition_summaries"
         if kind == "reader_protein_context":
-            if bool(figure.get("matched_protein_context")) and bool(figure.get("labels_readable")):
+            matched_count = int(figure.get("matched_feature_count") or 0)
+            if matched_count >= 2 and bool(figure.get("matched_protein_context")) and bool(figure.get("labels_readable")):
                 return "main", None
+            if matched_count == 1 and bool(figure.get("matched_protein_context")) and bool(figure.get("labels_readable")):
+                return "supplementary", "single_complete_comparison_retained_as_supplementary_context"
             return "suppressed", "matched_protein_context_or_readable_labels_unavailable"
         if kind == "literature_comparison":
             return ("main", None) if citation_complete else ("suppressed", "traceable_citations_unavailable")
@@ -428,6 +432,89 @@ def _generate_concordance_summary(
         return "", []
 
 
+def _generate_protein_adjustment_comparison(
+    state: Mapping[str, Any],
+    output_dir: str,
+) -> tuple[str, list[dict]]:
+    """Render independent unadjusted, adjusted and protein contrasts.
+
+    Records are preselected by comparison-class diversity and lexical tie-breaker
+    in ``build_quantitation_comparison_cards``.  The legacy reconstructed metric
+    and de-novo rows never enter this visual axis.
+    """
+    cards = build_quantitation_comparison_cards(state, maximum=12)
+    if not cards or not output_dir:
+        return "", []
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        import numpy as np
+
+        labels = []
+        unadjusted = []
+        adjusted = []
+        protein = []
+        for card in cards:
+            identity = _mapping(card.get("feature_identity"))
+            gene = str(identity.get("gene") or "feature")
+            residue = str(identity.get("candidate_residue_annotation") or "").strip()
+            condition = str(card.get("condition") or "recorded condition")
+            labels.append(f"{gene}{' ' + residue if residue else ''} · {condition}")
+            unadjusted.append(float(card["ptm_unadjusted_log2fc"]))
+            adjusted.append(float(card["ptm_protein_adjusted_log2fc"]))
+            protein.append(float(card["protein_log2fc"]))
+
+        y = np.arange(len(cards))
+        fig_height = max(5.2, 1.9 + 0.56 * len(cards))
+        fig, ax = plt.subplots(figsize=(10.8, fig_height))
+        for index in range(len(cards)):
+            ax.plot(
+                [unadjusted[index], adjusted[index]],
+                [y[index], y[index]],
+                color="#B8B8B8",
+                linewidth=1.5,
+                zorder=1,
+            )
+        ax.scatter(unadjusted, y, s=58, color="#2F5597", label="Independent unadjusted PTM", zorder=3)
+        ax.scatter(adjusted, y, s=62, marker="D", color="#D97706", label="Protein-adjusted PTM", zorder=4)
+        ax.scatter(protein, y, s=48, marker="s", color="#6B7280", label="Linked protein", zorder=3)
+        ax.axvline(0.0, color="#222222", linewidth=0.9, alpha=0.55)
+        ax.set_yticks(y)
+        ax.set_yticklabels(labels)
+        ax.invert_yaxis()
+        ax.set_xlabel("Conventional log2 contrast", labelpad=10)
+        ax.set_title(
+            "How Protein Adjustment Changed Matched PTM Contrasts",
+            loc="left",
+            weight="bold",
+            pad=34,
+        )
+        ax.text(
+            0.0,
+            1.01,
+            "Lines connect independent unadjusted and protein-adjusted PTM values; squares show linked protein contrasts.",
+            transform=ax.transAxes,
+            ha="left",
+            va="bottom",
+            fontsize=9,
+            color="#4B5563",
+        )
+        ax.legend(frameon=False, ncol=1, loc="upper right", fontsize=8.5)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        ax.spines["left"].set_visible(False)
+        ax.grid(axis="x", alpha=0.18)
+        fig.subplots_adjust(left=0.28, bottom=0.14, top=0.78, right=0.98)
+        path = Path(output_dir) / "reader_protein_adjustment_comparison.png"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(path, dpi=220, bbox_inches="tight")
+        plt.close(fig)
+        return _available_path(path), cards
+    except Exception:
+        return "", []
+
+
 def _assign_reader_figure_labels(manifest: Mapping[str, Any]) -> dict:
     preferred = {
         "reader_quantitative_heatmap": 0,
@@ -544,6 +631,40 @@ def prepare_reader_figure_manifest(state: Mapping[str, Any], *, citation_complet
         concordance_entry["placement"] = placement
         concordance_entry["suppression_reason"] = reason
         manifest["figures"].append(concordance_entry)
+
+    comparison_path, comparison_cards = _generate_protein_adjustment_comparison(state, output_dir)
+    if comparison_path:
+        comparison_entry = _entry(
+            "reader_protein_context", "reader_protein_context", comparison_path,
+            question="For matched current-order features, how did protein adjustment change the independently measured PTM contrast?",
+            evidence_tier="O1",
+            source_evidence_ids=[
+                str(card.get("evidence_ids", [""])[0])
+                for card in comparison_cards
+                if card.get("evidence_ids")
+            ],
+            caption_facts={
+                "data_scope": "matched conventional current-order feature-condition records with independent unadjusted PTM, protein-adjusted PTM, and linked protein contrasts",
+                "data_unit_scope": "modified-precursor feature-condition comparison",
+                "visual_encoding": "paired unadjusted and protein-adjusted PTM points connected within each record; linked protein contrast shown as a separate square",
+                "interpretation_boundary": "arithmetic change after adjustment does not prove improved biological truth, absolute occupancy, kinase activity, direct regulation, or biological priority; de-novo and reconstructed values are excluded",
+            },
+            selection_rule="matched conventional axes; comparison-class diversity; lexical tie-breaker; no magnitude ranking",
+            matched_feature_count=len(comparison_cards),
+            matched_protein_context=True,
+            labels_readable=True,
+            comparison_classes=sorted({str(card.get("comparison_class") or "") for card in comparison_cards}),
+            reconstructed_metric_excluded=True,
+            de_novo_excluded=True,
+            title="Independent PTM and Protein-Adjustment Comparison",
+        )
+        placement, reason = FigureEligibilityPolicy().classify(
+            comparison_entry,
+            citation_complete=citation_complete,
+        )
+        comparison_entry["placement"] = placement
+        comparison_entry["suppression_reason"] = reason
+        manifest["figures"].append(comparison_entry)
 
     manifest["prepared_before_writer"] = True
     return _assign_reader_figure_labels(manifest)

@@ -1119,7 +1119,7 @@ def format_citations(state: ReportState) -> dict:
                     "reader_quantitative_heatmap": "Quantitative Phosphorylation-Feature Landscape",
                     "reader_temporal_profiles": "Selected Temporal Profile Clusters",
                     "reader_interval_concordance": "Interval-wise Concordance Change Summary",
-                    "reader_protein_context": "PTM/Protein-Linked Trajectory Context",
+                    "reader_protein_context": "Independent PTM and Protein-Adjustment Comparison",
                 }
                 verified_main = [
                     dict(figure) for figure in figure_manifest.get("figures") or []
