@@ -92,6 +92,14 @@ def _feature_key(row: Mapping[str, Any]) -> tuple[str, str, str, str]:
     return gene, position, precursor, sequence
 
 
+def _has_reader_identity(row: Mapping[str, Any]) -> bool:
+    """Require a source feature identity before reader-facing aggregation."""
+    explicit = row.get("identity_complete_for_reader_cards")
+    if isinstance(explicit, bool):
+        return explicit
+    return bool(_text(row, "Precursor.Id", "precursor_id", "source_feature_id", "Modified.Sequence", "modified_sequence"))
+
+
 def _group_feature_rows(rows: Iterable[Mapping[str, Any]]) -> list[tuple[tuple[str, str, str, str], list[dict]]]:
     grouped: dict[tuple[str, str, str, str], list[dict]] = defaultdict(list)
     for source in rows:
@@ -99,11 +107,32 @@ def _group_feature_rows(rows: Iterable[Mapping[str, Any]]) -> list[tuple[tuple[s
         gene, position, precursor, sequence = _feature_key(row)
         if not gene or gene in {"?", "UNKNOWN", "UNMAPPED"}:
             continue
+        if not _has_reader_identity(row):
+            # A gene plus candidate-residue annotation is not a unique modified
+            # precursor.  Preserve such rows for aggregate legacy summaries, but
+            # do not synthesize a named feature card from them.
+            continue
         key = (gene, position, precursor, sequence)
         for condition_row in _condition_rows(row):
             merged = {**row, **condition_row}
             grouped[key].append(merged)
     return sorted(grouped.items(), key=lambda item: item[0])
+
+
+def _identity_complete_condition_rows(rows: Iterable[Mapping[str, Any]]) -> list[dict] | None:
+    """Return one identity-complete row per condition or withhold the group.
+
+    Multiple rows for one `(modified precursor, condition)` can be genuine
+    replicate/aggregation ambiguity.  It must carry an explicit aggregation
+    contract before a future renderer may summarize it; Phase 2 reader cards do
+    not silently select a subset or treat the array as a trajectory.
+    """
+    per_condition: dict[str, list[dict]] = defaultdict(list)
+    for row in rows:
+        per_condition[_condition_label(row)].append(dict(row))
+    if any(len(items) != 1 for items in per_condition.values()):
+        return None
+    return [items[0] for _, items in sorted(per_condition.items(), key=lambda item: _condition_sort_key(item[0]))]
 
 
 def _condition_value(row: Mapping[str, Any], axis: str) -> float | None:
@@ -165,7 +194,9 @@ def build_feature_observation_cards(
     """
     candidates: list[dict] = []
     for key, rows in _group_feature_rows(_source_rows(state)):
-        ordered = sorted(rows, key=lambda row: _condition_sort_key(_condition_label(row)))
+        ordered = _identity_complete_condition_rows(rows)
+        if ordered is None:
+            continue
         first = ordered[0]
         measurement = _mapping(first.get("measurement_provenance")) or build_measurement_provenance(
             first,
@@ -293,6 +324,8 @@ def build_feature_observation_cards(
                 "gene": candidate["key"][0],
                 "candidate_residue_annotation": candidate["key"][1] or None,
                 "source_feature_id": candidate["key"][2] or None,
+                "modified_sequence": candidate["key"][3] or None,
+                "condition_identity_status": "unique_per_feature_condition",
             },
             "measurement_provenance": candidate["measurement"],
             "trajectory": candidate["points"],
@@ -321,7 +354,10 @@ def build_quantitation_comparison_cards(
     """Build matched independent-unadjusted versus protein-adjusted comparisons."""
     rows: list[dict] = []
     for key, grouped_rows in _group_feature_rows(_source_rows(state)):
-        for row in grouped_rows:
+        unique_rows = _identity_complete_condition_rows(grouped_rows)
+        if unique_rows is None:
+            continue
+        for row in unique_rows:
             if is_de_novo_representation(row) or _truthy(
                 row,
                 "PTM_Unadjusted_Conventional_Log2FC_NA",
@@ -408,6 +444,8 @@ def build_quantitation_comparison_cards(
                 "gene": row["key"][0],
                 "candidate_residue_annotation": row["key"][1] or None,
                 "source_feature_id": row["key"][2] or None,
+                "modified_sequence": row["key"][3] or None,
+                "condition_identity_status": "unique_per_feature_condition",
             },
             "condition": row["condition"],
             "ptm_unadjusted_log2fc": row["unadjusted"],

@@ -373,7 +373,7 @@ def _generate_concordance_summary(
     output_dir: str,
     selected_cluster_ids: list[str],
 ) -> tuple[str, list[str]]:
-    """Plot retained/gain/loss pair events aggregated across sampled intervals."""
+    """Plot retained/gain/loss rates by cluster and adjacent sampled interval."""
     rows = _dynamic_transition_rows(state)
     if not rows or not output_dir:
         return "", []
@@ -386,20 +386,20 @@ def _generate_concordance_summary(
         matched = sorted(rows, key=lambda row: str(row.get("static_wave_id") or row.get("cluster_id") or ""))[:8]
     matched = matched[:8]
     labels: list[str] = []
-    retained: list[int] = []
-    gained: list[int] = []
-    lost: list[int] = []
+    retained: list[float] = []
+    gained: list[float] = []
+    lost: list[float] = []
     for row in matched:
-        counts = _mapping(row.get("pair_transition_type_counts"))
-        keep = int(counts.get("persistence") or 0)
-        gain = int(counts.get("recruitment") or 0) + int(counts.get("merge") or 0)
-        loss = int(counts.get("split") or 0)
-        if keep + gain + loss <= 0:
+        rates = _mapping(row.get("concordance_change_rates"))
+        denominator = int(row.get("evaluable_pair_window_comparison_count") or 0)
+        if denominator <= 0 or not rates:
             continue
-        labels.append(f"Cluster {len(labels) + 1}")
-        retained.append(keep)
-        gained.append(gain)
-        lost.append(loss)
+        from_window = str(row.get("from_window") or "")
+        to_window = str(row.get("to_window") or "")
+        labels.append(f"Cluster {len(labels) + 1}\n{from_window} → {to_window}")
+        retained.append(float(rates.get("retained") or 0.0))
+        gained.append(float(rates.get("gain") or 0.0))
+        lost.append(float(rates.get("loss") or 0.0))
     if len(labels) < 3:
         return "", []
     try:
@@ -416,8 +416,9 @@ def _generate_concordance_summary(
         ax.bar(x, lost, bottom=stacked, label="Loss", color="#E15759")
         ax.set_xticks(x)
         ax.set_xticklabels(labels, rotation=35, ha="right")
-        ax.set_ylabel("Observed pair-transition events")
-        ax.set_title("Concordance Change across Adjacent Sampled Intervals")
+        ax.set_ylabel("Rate per evaluable within-cluster pair-window")
+        ax.set_ylim(0, 1)
+        ax.set_title("Interval-wise Concordance Change Rates")
         ax.legend(frameon=False, ncol=3, loc="upper right")
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
@@ -616,10 +617,10 @@ def prepare_reader_figure_manifest(state: Mapping[str, Any], *, citation_complet
             question="How did within-cluster activity-state concordance change across adjacent sampled intervals?",
             evidence_tier="O2", source_evidence_ids=["temporal.concordance_summary"],
             caption_facts={
-                "data_scope": "observed within-cluster pair-transition events aggregated across adjacent sampled intervals",
+                "data_scope": "observed within-cluster pair transitions normalized by evaluable pair-window comparisons in each adjacent sampled interval",
                 "data_unit_scope": "eligible within-cluster feature pairs",
-                "visual_encoding": "stacked retained, gain and loss event counts by Temporal Profile Cluster",
-                "interpretation_boundary": "Concordance Change is descriptive and does not establish common regulation, causal order, kinase switching, or pathway rewiring",
+                "visual_encoding": "stacked retained, gain and loss rates per evaluable pair-window by Temporal Profile Cluster and adjacent sampled interval",
+                "interpretation_boundary": "Concordance Change is descriptive; persistence is distinct from change, and rates do not establish common regulation, causal order, kinase switching, or pathway rewiring",
             },
             selection_rule="same selected cluster set as the temporal-profile panel when evaluable; otherwise lexical cluster-ID subset",
             selected_cluster_count=len(concordance_ids),

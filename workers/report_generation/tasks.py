@@ -449,22 +449,11 @@ def run_report_generation(self, order_id: int, config: dict):
                 with open(_vp_path, "r", encoding="utf-8") as _vf:
                     _reader = _csv.DictReader(_vf, delimiter="\t")
                     for _row in _reader:
-                        _gene = _row.get("Gene.Name", _row.get("gene", ""))
-                        _pos = _row.get("PTM_Position", _row.get("position", ""))
-                        _cond = _row.get("Condition", "")
-                        try:
-                            _rel_fc = float(_row.get("PTM_Relative_Log2FC", "") or 0)
-                        except (ValueError, TypeError):
-                            _rel_fc = 0
-                        try:
-                            _prot_fc = float(_row.get("Protein_Log2FC", "") or 0)
-                        except (ValueError, TypeError):
-                            _prot_fc = 0
-                        vector_plot_raw_data.append({
-                            "gene": _gene, "position": str(_pos), "condition": _cond,
-                            "ptm_relative_log2fc": round(_rel_fc, 3),
-                            "protein_log2fc": round(_prot_fc, 3),
-                        })
+                        from report_generation.core.vector_projection import project_report_vector_row
+
+                        # Do not turn missing values into zero or collapse modified
+                        # precursors by gene/residue before reader-card selection.
+                        vector_plot_raw_data.append(project_report_vector_row(_row))
                 logger.info(f"[Order {order_id}] Loaded {len(vector_plot_raw_data)} vector plot raw data rows from {_vp_name}")
                 break
 
@@ -811,6 +800,16 @@ def run_report_generation(self, order_id: int, config: dict):
         final_state = graph.invoke(initial_state)
         abort_if_superseded(order_id)
 
+        # Shadow reports distinguish a retained diagnostic draft from a
+        # user-facing final artifact. Re-check after task-level formatting.
+        from report_generation.core.reader_authoring import audit_report_output_correctness
+        from report_generation.core.report_release import resolve_report_release
+        reader_authoring_shadow = str(
+            config.get("reader_authoring_mode")
+            or (config.get("report_config") or {}).get("reader_authoring_mode")
+            or ""
+        ).strip().lower() == "shadow"
+
         # v11.8: Save TF inference data to signal_propagation_data (append tf_inferences key)
         _tf_inf = final_state.get("tf_inference_data") or {}
         if _tf_inf and _tf_inf.get("inferred_tfs"):
@@ -872,47 +871,83 @@ def run_report_generation(self, order_id: int, config: dict):
             logger.warning(f"[Order {order_id}] Post-processing skipped: {pp_err}")
             logger.warning(f"[Order {order_id}] Post-processing traceback:\n{traceback.format_exc()}")
 
-        # Convert report to Word (.docx)
-        try:
-            from common.markdown_to_docx import convert_report_to_docx
-            for rpt_path in final_state.get("report_files", []):
-                if rpt_path and Path(rpt_path).exists() and rpt_path.endswith(".md"):
-                    docx_out = convert_report_to_docx(rpt_path, str(order_output))
-                    if docx_out:
-                        logger.info(f"[Order {order_id}] Word export: {Path(docx_out).name}")
-        except Exception as docx_err:
-            logger.warning(f"[Order {order_id}] Word export skipped: {docx_err}")
+        # The graph audit runs before this task-level formatter. Re-audit the
+        # exact markdown that would otherwise be exported to the user.
+        report_markdown = [
+            Path(path) for path in final_state.get("report_files", [])
+            if path and Path(path).exists() and str(path).endswith(".md")
+        ]
+        if reader_authoring_shadow and report_markdown:
+            postprocessed_audits = [
+                audit_report_output_correctness(
+                    path.read_text(encoding="utf-8", errors="replace"),
+                    final_state.get("figure_manifest"),
+                )
+                for path in report_markdown
+            ]
+            postprocess_reasons = sorted({
+                code for audit in postprocessed_audits for code in audit.get("reason_codes") or []
+            })
+            if postprocess_reasons:
+                final_state["report_output_correctness"] = {
+                    **dict(final_state.get("report_output_correctness") or {}),
+                    "contract_version": "reader_report_output_correctness.v1",
+                    "status": "blocked_for_review",
+                    "reason_codes": postprocess_reasons,
+                    "postprocess_audit_count": len(postprocessed_audits),
+                }
 
-        # Convert report to HTML (interactive: ref links, article modal, zoom, sidebar)
-        try:
-            from common.markdown_to_html import convert_report_to_html
-            refs = final_state.get("collected_references") or []
-            for rpt_path in final_state.get("report_files", []):
-                if rpt_path and Path(rpt_path).exists() and rpt_path.endswith(".md"):
-                    html_out = convert_report_to_html(
-                        rpt_path,
-                        output_dir=str(order_output),
-                        references=refs,
-                        api_base_url="/api",
-                    )
-                    if html_out:
-                        logger.info(f"[Order {order_id}] HTML export: {Path(html_out).name}")
-                        break
-        except Exception as html_err:
-            logger.warning(f"[Order {order_id}] HTML export skipped: {html_err}")
+        report_release = resolve_report_release(
+            reader_authoring_shadow=reader_authoring_shadow,
+            output_correctness=final_state.get("report_output_correctness"),
+        )
+        final_export_allowed = not bool(report_release.get("final_artifact_withheld"))
+        if not final_export_allowed:
+            logger.error("[Order %s] Final Report export withheld: %s", order_id, report_release.get("reason_codes"))
+
+        if final_export_allowed:
+            # Convert report to Word (.docx)
+            try:
+                from common.markdown_to_docx import convert_report_to_docx
+                for rpt_path in final_state.get("report_files", []):
+                    if rpt_path and Path(rpt_path).exists() and rpt_path.endswith(".md"):
+                        docx_out = convert_report_to_docx(rpt_path, str(order_output))
+                        if docx_out:
+                            logger.info(f"[Order {order_id}] Word export: {Path(docx_out).name}")
+            except Exception as docx_err:
+                logger.warning(f"[Order {order_id}] Word export skipped: {docx_err}")
+
+            # Convert report to HTML (interactive: ref links, article modal, zoom, sidebar)
+            try:
+                from common.markdown_to_html import convert_report_to_html
+                refs = final_state.get("collected_references") or []
+                for rpt_path in final_state.get("report_files", []):
+                    if rpt_path and Path(rpt_path).exists() and rpt_path.endswith(".md"):
+                        html_out = convert_report_to_html(
+                            rpt_path,
+                            output_dir=str(order_output),
+                            references=refs,
+                            api_base_url="/api",
+                        )
+                        if html_out:
+                            logger.info(f"[Order {order_id}] HTML export: {Path(html_out).name}")
+                            break
+            except Exception as html_err:
+                logger.warning(f"[Order {order_id}] HTML export skipped: {html_err}")
 
         # Collect output files
         report_files = final_state.get("report_files", [])
-        output_file_names = [Path(f).name for f in report_files if f]
-        for f in order_output.glob("*.docx"):
-            if f.name not in output_file_names:
-                output_file_names.append(f.name)
-        for rpt_path in final_state.get("report_files", []):
-            if rpt_path and str(rpt_path).endswith(".md"):
-                html_name = Path(rpt_path).stem + ".html"
-                if (order_output / html_name).exists() and html_name not in output_file_names:
-                    output_file_names.append(html_name)
-                break
+        output_file_names = [Path(f).name for f in report_files if f] if final_export_allowed else []
+        if final_export_allowed:
+            for f in order_output.glob("*.docx"):
+                if f.name not in output_file_names:
+                    output_file_names.append(f.name)
+            for rpt_path in final_state.get("report_files", []):
+                if rpt_path and str(rpt_path).endswith(".md"):
+                    html_name = Path(rpt_path).stem + ".html"
+                    if (order_output / html_name).exists() and html_name not in output_file_names:
+                        output_file_names.append(html_name)
+                    break
 
         elapsed = round(time.time() - start_time, 1)
 
@@ -1047,6 +1082,7 @@ def run_report_generation(self, order_id: int, config: dict):
                 else "release_candidate"
             ),
         }
+        progress_metadata["report_release"] = report_release
         if fallback_sections:
             progress_metadata["llm_fallback_sections"] = fallback_sections
             progress_metadata["llm_fallback_warning"] = fallback_warning
@@ -1069,6 +1105,9 @@ def run_report_generation(self, order_id: int, config: dict):
         result_data["temporal_evidence"] = progress_metadata["temporal_evidence"]
         result_data["citation_completeness"] = progress_metadata["citation_completeness"]
         result_data["report_output_correctness"] = progress_metadata["report_output_correctness"]
+        result_data["report_release"] = report_release
+        if not final_export_allowed:
+            result_data["draft_files"] = [path.name for path in report_markdown]
 
         # Persist external Co-Scientist packet telemetry for Order UI / operators.
         try:
@@ -1101,13 +1140,19 @@ def run_report_generation(self, order_id: int, config: dict):
             completion_detail += f"; deterministic temporal evidence addendum applied: {', '.join(repaired_sections)}"
         if citation_completion_status == "blocked_for_review_missing_traceable_references":
             completion_detail += "; citation completeness blocked for review (no traceable references)"
-        if llm_failed or citation_completion_status == "blocked_for_review_missing_traceable_references":
+        if not final_export_allowed:
+            completion_detail += "; final Report artifact withheld pending output-correctness repair"
+        if llm_failed or citation_completion_status == "blocked_for_review_missing_traceable_references" or not final_export_allowed:
             update_order_status(
                 order_id, "completed", progress_pct=100, result_files=result_data,
                 error_message=(
                     fallback_warning
                     if llm_failed
-                    else "Citation completeness blocked for review: no traceable references were resolved."
+                    else (
+                        report_release.get("message")
+                        if not final_export_allowed
+                        else "Citation completeness blocked for review: no traceable references were resolved."
+                    )
                 ),
                 current_stage="completed",
                 stage_detail=completion_detail,
@@ -1117,7 +1162,10 @@ def run_report_generation(self, order_id: int, config: dict):
                 "completed",
                 fallback_warning
                 if llm_failed
-                else "Report completed with citation-completeness warning.",
+                else (
+                    "Report draft retained; final artifact withheld pending output-correctness repair."
+                    if not final_export_allowed else "Report completed with citation-completeness warning."
+                ),
             )
             logger.warning(
                 f"[Order {order_id}] Report completed WITH WARNINGS in {elapsed}s — "

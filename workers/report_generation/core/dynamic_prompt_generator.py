@@ -1117,12 +1117,13 @@ def build_temporal_evidence_packet(
         "observational_dynamic",
         (
             "Within-cluster interval-wise activity-state concordance status={status}; concordance-annotated temporal profile clusters={waves}; "
-            "pairwise concordance changes={pairs}; feature-level status changes={sites}; transition resolution={resolution}; "
+            "pair-transition records={pairs}; feature-level status records={sites}; transition resolution={resolution}; "
             "within-cluster candidate pairs={candidate_pairs}; non-evaluable pair windows={non_evaluable_pairs}; "
             "non-evaluable site transition opportunities={non_evaluable_sites}; "
             "mean pair LOTO Jaccard={pair_loto}; mean site LOTO Jaccard={site_loto}; "
             "global adjacency-order test status={adj_status}; p={adj_p}; verdict={adj_verdict}. "
-            "Transition totals are exposure-dependent descriptive counts, not biological-effect size or temporal-order proof. {null_boundary}"
+            "Cluster-level retained, gain and loss interpretation requires its own evaluable pair-window denominator. "
+            "Record totals are exposure-dependent descriptive counts, not biological-effect size or temporal-order proof. {null_boundary}"
         ).format(
             status=dynamic_status,
             waves=sidecar.get("dynamic_transition_supported_wave_count", 0),
@@ -1147,6 +1148,13 @@ def build_temporal_evidence_packet(
     precedence = dict(sidecar.get("temporal_precedence_status") or {})
     if precedence:
         precedence_status = str(precedence.get("status") or "unavailable")
+        event_censoring = dict(precedence.get("event_specific_censoring") or {})
+        onset_left = dict(event_censoring.get("onset") or {}).get("censoring_type", {}).get("left", 0)
+        exit_right = dict(event_censoring.get("exit") or {}).get("censoring_type", {}).get("right", 0)
+        event_censoring_summary = (
+            f"onset left-censored={onset_left}; exit right-censored={exit_right}"
+            if event_censoring else "event-specific censoring was not available in the compact artifact"
+        )
         add_record(
             "DATA-TEMPORAL-PRECEDENCE",
             (
@@ -1159,6 +1167,8 @@ def build_temporal_evidence_packet(
                 "evaluable sites={evaluable}; tier breakdown={tiers}; replicate mode={mode}; "
                 "sites with replicate data={replicate_sites}; P4 validation passed={p4}. "
                 "replicate bootstrap no-calls={no_calls}; partial-draw sites={partial_draws}. "
+                "event-specific censoring summary={event_censoring}. "
+                "A right-censored exit means that exit was not resolved by the final sampled timepoint; it is not response onset. "
                 "{boundary}"
             ).format(
                 status=precedence_status,
@@ -1170,6 +1180,7 @@ def build_temporal_evidence_packet(
                 p4=precedence.get("p4_gate_passed"),
                 no_calls=precedence.get("replicate_bootstrap_no_call_count"),
                 partial_draws=precedence.get("replicate_bootstrap_partial_draw_count"),
+                event_censoring=event_censoring_summary,
                 boundary=precedence.get(
                     "claim_boundary",
                     "Observed response timing only; causal interpretation is not supported.",
@@ -1183,20 +1194,37 @@ def build_temporal_evidence_packet(
     for index, row in enumerate((sidecar.get("dynamic_transition_per_wave") or [])[:max_waves], 1):
         if not isinstance(row, Mapping):
             continue
+        rates = dict(row.get("concordance_change_rates") or {})
+        denominator = int(row.get("evaluable_pair_window_comparison_count") or 0)
+        from_window = str(row.get("from_window") or "recorded interval start")
+        to_window = str(row.get("to_window") or "recorded interval end")
+        if denominator > 0 and rates:
+            rate_summary = (
+                "Across adjacent sampled interval {from_window} to {to_window}, retained={retained:.3f}, "
+                "gain={gain:.3f}, and loss={loss:.3f} per evaluable within-cluster pair-window "
+                "(denominator={denominator})."
+            ).format(
+                from_window=from_window,
+                to_window=to_window,
+                retained=float(rates.get("retained") or 0.0),
+                gain=float(rates.get("gain") or 0.0),
+                loss=float(rates.get("loss") or 0.0),
+                denominator=denominator,
+            )
+        else:
+            rate_summary = (
+                "A denominator-normalized retained/gain/loss comparison was not available for this cluster interval; "
+                "no rate-based interpretation is made."
+            )
         add_record(
             f"DATA-DYNAMIC-WAVE-{index}",
             "observational_dynamic",
             (
-                "Fixed temporal profile cluster {wave}: pairwise concordance changes={pairs}; non-retained concordance changes={nonpersistence}; "
-                "feature-level status changes={sites}; internal pair-event counts={pair_types}; internal feature-event counts={site_types}. "
+                "Temporal Profile Cluster {wave}. {rate_summary} "
                 "This packet does not expose member identities or per-cluster enrichment; do not assign a functional module to this cluster."
             ).format(
                 wave=row.get("static_wave_id", "unknown"),
-                pairs=row.get("pair_transition_count", 0),
-                nonpersistence=row.get("nonpersistence_pair_transition_count", 0),
-                sites=row.get("site_transition_count", 0),
-                pair_types=dict(row.get("pair_transition_type_counts") or {}),
-                site_types=dict(row.get("site_transition_type_counts") or {}),
+                rate_summary=rate_summary,
             ),
             availability="computed",
             claim_level="L2_observational_dynamic",

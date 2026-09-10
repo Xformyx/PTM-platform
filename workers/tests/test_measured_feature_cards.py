@@ -100,3 +100,30 @@ def test_phase2_card_builders_fail_closed_for_legacy_rows_without_independent_un
     }
 
     assert build_quantitation_comparison_cards(legacy_state) == []
+
+
+def test_named_feature_cards_withhold_rows_without_modified_precursor_identity():
+    state = {
+        "vector_plot_raw_data": [{
+            "gene": "AMBIGUOUS", "position": "S10", "condition": "5min",
+            "ptm_unadjusted_log2fc": 0.5, "ptm_protein_adjusted_log2fc": 0.3,
+            "protein_log2fc": 0.1, "identity_complete_for_reader_cards": False,
+        }]
+    }
+
+    assert build_feature_observation_cards(state) == []
+    assert build_quantitation_comparison_cards(state) == []
+
+
+def test_named_feature_cards_withhold_duplicate_feature_condition_rows():
+    duplicated = _row("GENE1", "S2", "5min", 0.4, 0.3, 0.1, precursor="shared_precursor")
+    state = {
+        "vector_plot_raw_data": [
+            _row("GENE1", "S2", "1min", 0.1, 0.1, 0.0, precursor="shared_precursor"),
+            duplicated,
+            {**duplicated, "ptm_unadjusted_log2fc": 0.8, "ptm_protein_adjusted_log2fc": 0.7},
+        ]
+    }
+
+    assert build_feature_observation_cards(state) == []
+    assert build_quantitation_comparison_cards(state) == []

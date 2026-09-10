@@ -17,6 +17,10 @@ from report_generation.core.measured_feature_cards import (
     build_feature_observation_cards,
     build_quantitation_comparison_cards,
 )
+from report_generation.core.study_metadata import (
+    build_study_metadata_contract,
+    repair_unrecorded_metadata_claim,
+)
 
 
 AUTHORING_PACKET_VERSION = "reader_authoring_packet.v3"
@@ -80,6 +84,13 @@ _INTERNAL_TERM_RE = re.compile(
 _EVIDENCE_MARKER_RE = re.compile(r"\s*\[EVID:([A-Za-z0-9_.:-]+)\]")
 _MALFORMED_EVIDENCE_MARKER_RE = re.compile(
     r"\s*\[EVID(?:\s*:\s*(?:[A-Za-z0-9_.:-]+|<[^>\n]*>)?)?\]?",
+    re.IGNORECASE,
+)
+# A formatter can remove an opening bracket while leaving a draft-only anchor
+# such as `EVID:` or `EVID:feature.observation.1]` behind.  Treat every such
+# residue as internal routing syntax, never as reader content.
+_ANY_EVIDENCE_RESIDUE_RE = re.compile(
+    r"\s*(?:\[\s*)?\bEVID\b\s*(?::\s*(?:[A-Za-z0-9_.:-]+|<[^>\n]*>)?)?\]?",
     re.IGNORECASE,
 )
 _REFERENCE_MARKER_RE = re.compile(r"\[REF:(pmid:[^\]]+|doi:[^\]]+|title:[^\]]+)\]", re.IGNORECASE)
@@ -222,7 +233,8 @@ def _record_card(record: Mapping[str, Any], index: int) -> dict | None:
 def _study_frame_card(state: Mapping[str, Any], synthesis: Mapping[str, Any]) -> dict:
     context = _as_mapping(state.get("experimental_context"))
     frame = _as_mapping(synthesis.get("study_frame"))
-    cell_model = str(frame.get("cell_model") or context.get("cell_type") or context.get("cell_line") or "the recorded experimental system").strip()
+    metadata = build_study_metadata_contract(context)
+    cell_model = str(frame.get("cell_model") or metadata.get("cell_model") or "the recorded experimental system").strip()
     treatment = str(frame.get("treatment") or context.get("treatment") or context.get("compound") or "the recorded perturbation context").strip()
     timepoints = frame.get("timepoints") or context.get("timepoints") or context.get("conditions") or []
     if isinstance(timepoints, str):
@@ -242,6 +254,7 @@ def _study_frame_card(state: Mapping[str, Any], synthesis: Mapping[str, Any]) ->
         "allowed_verbs": ["measured", "evaluated", "summarized"],
         "forbidden_interpretations": ["caused", "activated", "directly regulates"],
         "counterevidence": "Study-frame metadata define experimental scope rather than a mechanistic conclusion.",
+        "study_metadata_contract": metadata,
     }
 
 
@@ -535,6 +548,7 @@ def build_authoring_packet(
         "contract_version": AUTHORING_PACKET_VERSION,
         "mode": "citation_complete" if has_traceable_literature else "data_only",
         "reader_cards": reader_cards,
+        "study_metadata_contract": build_study_metadata_contract(_as_mapping(state.get("experimental_context"))),
         "figure_cards": figure_cards,
         "section_claim_budget": section_claim_budget,
         "section_story_contract": story_contract,
@@ -546,6 +560,7 @@ def build_authoring_packet(
             "normalization": "Describe the track as protein-abundance-adjusted relative PTM ratio, not absolute occupancy or kinase activity.",
             "measured_features": "Name current-order measured features and report supplied time-resolved values before aggregate counts or availability statements. Do not call a candidate-residue feature a localized phosphosite unless the card does so.",
             "protein_adjustment": "Compare only the independent unadjusted PTM contrast with the protein-adjusted PTM contrast and linked protein contrast. The reconstructed legacy metric is audit-only and adjustment does not prove biological truth.",
+            "study_metadata": "Repeat only recorded cell-model and organism metadata. Do not infer lineage, species, receptor status, or engineering history from a cell-model name.",
         },
     }
 
@@ -832,6 +847,40 @@ def _known_reference_ids(packet: Mapping[str, Any]) -> set[str]:
     }
 
 
+def _candidate_residue_feature_labels(packet: Mapping[str, Any]) -> list[tuple[str, str, str]]:
+    """Return current-order feature identities lacking localized-site evidence."""
+    labels: list[tuple[str, str, str]] = []
+    for card in packet.get("reader_cards") or []:
+        if not isinstance(card, Mapping) or card.get("category") != "measured_feature_observation":
+            continue
+        measurement = _as_mapping(card.get("measurement_provenance"))
+        if measurement.get("reader_measurement_unit") == "localized_ptm_site_feature":
+            continue
+        identity = _as_mapping(card.get("feature_identity"))
+        gene = str(identity.get("gene") or "").strip()
+        residue = str(identity.get("candidate_residue_annotation") or "").strip()
+        if gene and residue:
+            labels.append((gene, residue, f"{gene} modified-precursor feature with candidate residue annotation {residue}"))
+    return labels
+
+
+def _repair_candidate_residue_site_claim(sentence: str, labels: Iterable[tuple[str, str, str]]) -> tuple[str, bool]:
+    """Prevent candidate residue annotations from being relabelled as localized sites."""
+    if not re.search(r"\b(?:phosphosite|phosphorylation site|localized site|site-specific)\b", sentence, flags=re.IGNORECASE):
+        return sentence, False
+    repaired = sentence
+    changed = False
+    for gene, residue, replacement in labels:
+        pattern = re.compile(
+            rf"\b{re.escape(gene)}\s*(?:[-( ]+)?{re.escape(residue)}\b(?:\s+(?:phosphosite|phosphorylation site|site))?",
+            flags=re.IGNORECASE,
+        )
+        if pattern.search(repaired):
+            repaired = pattern.sub(replacement, repaired)
+            changed = True
+    return repaired, changed
+
+
 def _replace_unsafe_terms(text: str) -> str:
     replacements = [
         (r"\bdirectly activates?\b", "provides candidate context for"),
@@ -889,6 +938,8 @@ def validate_and_repair_sections(
             validated[section_name] = content
             continue
         allowed_tiers = set(budgets.get(section_name) or ["O1", "O2"])
+        metadata_contract = _as_mapping(packet.get("study_metadata_contract"))
+        candidate_residue_labels = _candidate_residue_feature_labels(packet)
         repaired_paragraphs: list[str] = []
         sentence_index = 0
         for paragraph_index, paragraph in enumerate(_split_paragraphs(content), 1):
@@ -934,6 +985,18 @@ def validate_and_repair_sections(
                     sentence = _OCCUPANCY_RE.sub("protein-abundance-adjusted relative PTM ratio", sentence)
                     actions.append("rewrite_quantitation_interpretation")
                     reasons.append("uncalibrated_occupancy_or_stoichiometry")
+                repaired_metadata, metadata_repaired = repair_unrecorded_metadata_claim(sentence, metadata_contract)
+                if metadata_repaired:
+                    sentence = repaired_metadata
+                    actions.append("remove_unrecorded_metadata_inference")
+                    reasons.append("study_metadata_lineage_or_species_not_recorded")
+                repaired_measurement, measurement_repaired = _repair_candidate_residue_site_claim(
+                    sentence, candidate_residue_labels
+                )
+                if measurement_repaired:
+                    sentence = repaired_measurement
+                    actions.append("rewrite_candidate_residue_as_modified_precursor_feature")
+                    reasons.append("candidate_residue_not_localized_site")
                 if _LITERATURE_SIGNAL_RE.search(sentence) and not citations:
                     # Preserve current-study observations but remove an unsupported external-context clause.
                     clauses = re.split(r"(?<=[,;:])\s+|\s+(?=whereas\b|while\b)", sentence, flags=re.IGNORECASE)
@@ -941,8 +1004,8 @@ def validate_and_repair_sections(
                     sentence = " ".join(keep).strip()
                     actions.append("remove_uncited_literature_clause")
                     reasons.append("literature_context_without_stable_citation")
-                if _MALFORMED_EVIDENCE_MARKER_RE.search(sentence):
-                    sentence = _MALFORMED_EVIDENCE_MARKER_RE.sub("", sentence)
+                if _ANY_EVIDENCE_RESIDUE_RE.search(sentence):
+                    sentence = _ANY_EVIDENCE_RESIDUE_RE.sub("", sentence)
                     actions.append("remove_malformed_evidence_anchor")
                     reasons.append("malformed_draft_only_anchor")
                 sentence = re.sub(r"\s+([,.;:!?])", r"\1", sentence).strip()
@@ -975,7 +1038,7 @@ def validate_and_repair_sections(
 def strip_authoring_anchors(text: str) -> str:
     """Remove draft-only evidence anchors after validation, preserving citations."""
     text = _EVIDENCE_MARKER_RE.sub("", text or "")
-    text = _MALFORMED_EVIDENCE_MARKER_RE.sub("", text)
+    text = _ANY_EVIDENCE_RESIDUE_RE.sub("", text)
     text = re.sub(r"\s+([,.;:!?])", r"\1", text)
     return re.sub(r"[ \t]{2,}", " ", text).strip()
 
@@ -1049,7 +1112,7 @@ def audit_report_output_correctness(text: str, figure_manifest: Mapping[str, Any
         and figure.get("placement") in {"main", "supplementary"}
         and not str(figure.get("image_path") or "").strip()
     )
-    malformed_anchor_count = len(re.findall(r"\[EVID\b|\[EVID:", body, flags=re.IGNORECASE))
+    malformed_anchor_count = len(_ANY_EVIDENCE_RESIDUE_RE.findall(body))
     unresolved_reference_marker_count = len(re.findall(r"\[REF:", body, flags=re.IGNORECASE))
     reason_codes: list[str] = []
     if malformed_anchor_count:

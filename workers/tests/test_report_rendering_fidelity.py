@@ -36,6 +36,7 @@ from report_generation.core.reader_authoring import (
     strip_authoring_anchors,
     validate_and_repair_sections,
 )
+from report_generation.core.report_release import resolve_report_release
 from report_generation.core.figure_manifest import (
     FigureEligibilityPolicy,
     build_figure_manifest,
@@ -661,7 +662,15 @@ def test_prepare_reader_manifest_builds_three_verified_main_figures_and_final_re
         clusters.append({"cluster_id": index, "pattern": pattern})
         transition_rows.append({
             "static_wave_id": str(index),
+            "from_window": "0min→15min",
+            "to_window": "15min→60min",
+            "evaluable_pair_window_comparison_count": 10,
             "pair_transition_type_counts": {"persistence": index + 2, "recruitment": index, "split": 1},
+            "concordance_change_rates": {
+                "retained": (index + 2) / 10,
+                "gain": index / 10,
+                "loss": 0.1,
+            },
         })
     state = {
         "reader_authoring_mode": "shadow",
@@ -684,6 +693,8 @@ def test_prepare_reader_manifest_builds_three_verified_main_figures_and_final_re
         "reader_quantitative_heatmap", "reader_temporal_profiles", "reader_interval_concordance",
     }
     assert all(item["insertion_verified"] and Path(item["image_path"]).exists() for item in main)
+    concordance = next(item for item in main if item["figure_key"] == "reader_interval_concordance")
+    assert "rates per evaluable pair-window" in concordance["caption_facts"]["visual_encoding"]
 
     rendered = format_citations({
         **state,
@@ -1060,3 +1071,30 @@ def test_dense_context_heatmap_renders_with_adaptive_text_thinning(tmp_path):
     )
     assert output is not None
     assert (tmp_path / "context_ptm_heatmap.png").exists()
+
+
+def test_final_anchor_sanitizer_and_release_gate_block_unbracketed_evid_residue():
+    raw = (
+        "Observed measurements remained descriptive, EVID:. "
+        "A second sentence retained EVID:feature.observation.3]."
+    )
+    cleaned = strip_authoring_anchors(raw)
+    assert "EVID" not in cleaned
+
+    audit = audit_report_output_correctness(raw)
+    assert audit["status"] == "blocked_for_review"
+    assert "malformed_evidence_anchor" in audit["reason_codes"]
+
+    release = resolve_report_release(reader_authoring_shadow=True, output_correctness=audit)
+    assert release["status"] == "blocked_final"
+    assert release["final_artifact_withheld"] is True
+
+
+def test_release_gate_allows_clean_shadow_output_and_does_not_gate_legacy_path():
+    clean = audit_report_output_correctness("## Abstract\n\nA measured observation was reported.")
+    shadow = resolve_report_release(reader_authoring_shadow=True, output_correctness=clean)
+    legacy = resolve_report_release(reader_authoring_shadow=False, output_correctness={"status": "blocked_for_review"})
+
+    assert shadow["status"] == "final_ready"
+    assert shadow["final_artifact_withheld"] is False
+    assert legacy["status"] == "legacy_not_gated"

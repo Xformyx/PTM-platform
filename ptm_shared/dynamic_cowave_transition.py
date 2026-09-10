@@ -116,17 +116,97 @@ def _event_examples(rows: Sequence[Mapping[str, Any]], maximum: int, *, identity
     return [dict(row) for row in ordered[:maximum]]
 
 
+def _per_wave_interval_exposure(
+    memberships: Sequence[Mapping[str, Any]],
+    membership: Mapping[str, str],
+) -> list[dict[str, Any]]:
+    """Compute same-wave pair-window opportunities using engine evaluability rules.
+
+    The denominator is the count of candidate pairs with both members evaluable
+    in both adjacent windows.  It includes non-events so retained/gain/loss are
+    rates rather than a composition of only observed events.
+    """
+    labels_by_index: dict[int, str] = {}
+    state_lookup: dict[tuple[str, str], str] = {}
+    for row in memberships:
+        try:
+            index = int(row.get("window_index"))
+        except (TypeError, ValueError):
+            continue
+        label = str(row.get("window_label") or "")
+        site = str(row.get("site_key") or "")
+        if not label or not site:
+            continue
+        labels_by_index[index] = label
+        state_lookup[(site, label)] = str(row.get("activity_state") or "not_evaluable")
+    ordered = [labels_by_index[index] for index in sorted(labels_by_index)]
+    records: list[dict[str, Any]] = []
+    for wave_id in sorted(set(membership.values())):
+        members = sorted(site for site, assigned in membership.items() if assigned == wave_id and (site, ordered[0]) in state_lookup) if ordered else []
+        for before_label, after_label in zip(ordered, ordered[1:]):
+            candidate = 0
+            evaluable = 0
+            non_evaluable = 0
+            for site_a, site_b in combinations(members, 2):
+                candidate += 1
+                states = (
+                    state_lookup.get((site_a, before_label), "not_evaluable"),
+                    state_lookup.get((site_b, before_label), "not_evaluable"),
+                    state_lookup.get((site_a, after_label), "not_evaluable"),
+                    state_lookup.get((site_b, after_label), "not_evaluable"),
+                )
+                if "not_evaluable" in states:
+                    non_evaluable += 1
+                else:
+                    evaluable += 1
+            records.append({
+                "static_wave_id": wave_id,
+                "from_window": before_label,
+                "to_window": after_label,
+                "candidate_pair_window_comparison_count": candidate,
+                "evaluable_pair_window_comparison_count": evaluable,
+                "non_evaluable_pair_window_comparison_count": non_evaluable,
+            })
+    return records
+
+
 def _per_wave_summary(
     pair_rows: Sequence[Mapping[str, Any]],
     site_rows: Sequence[Mapping[str, Any]],
+    interval_exposure: Sequence[Mapping[str, Any]],
 ) -> list[dict[str, Any]]:
-    grouped: dict[str, dict[str, Any]] = {}
+    grouped: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for exposure in interval_exposure:
+        wave_id = str(exposure.get("static_wave_id") or "")
+        from_window = str(exposure.get("from_window") or "")
+        to_window = str(exposure.get("to_window") or "")
+        grouped[(wave_id, from_window, to_window)] = {
+            "static_wave_id": wave_id,
+            "from_window": from_window,
+            "to_window": to_window,
+            "candidate_pair_window_comparison_count": int(exposure.get("candidate_pair_window_comparison_count") or 0),
+            "evaluable_pair_window_comparison_count": int(exposure.get("evaluable_pair_window_comparison_count") or 0),
+            "non_evaluable_pair_window_comparison_count": int(exposure.get("non_evaluable_pair_window_comparison_count") or 0),
+            "pair_transition_count": 0,
+            "nonpersistence_pair_transition_count": 0,
+            "site_transition_count": 0,
+            "pair_transition_type_counts": {},
+            "site_transition_type_counts": {},
+        }
     for row in pair_rows:
         wave_id = str(row.get("static_wave_id") or "")
+        from_window = str(row.get("from_window") or "")
+        to_window = str(row.get("to_window") or "")
+        key = (wave_id, from_window, to_window)
         entry = grouped.setdefault(
-            wave_id,
+            key,
             {
                 "static_wave_id": wave_id,
+                "from_window": from_window,
+                "to_window": to_window,
+                "candidate_pair_window_comparison_count": 0,
+                "evaluable_pair_window_comparison_count": 0,
+                "non_evaluable_pair_window_comparison_count": 0,
                 "pair_transition_count": 0,
                 "nonpersistence_pair_transition_count": 0,
                 "site_transition_count": 0,
@@ -142,10 +222,18 @@ def _per_wave_summary(
         ) + 1
     for row in site_rows:
         wave_id = str(row.get("static_wave_id") or "")
+        from_window = str(row.get("from_window") or "")
+        to_window = str(row.get("to_window") or "")
+        key = (wave_id, from_window, to_window)
         entry = grouped.setdefault(
-            wave_id,
+            key,
             {
                 "static_wave_id": wave_id,
+                "from_window": from_window,
+                "to_window": to_window,
+                "candidate_pair_window_comparison_count": 0,
+                "evaluable_pair_window_comparison_count": 0,
+                "non_evaluable_pair_window_comparison_count": 0,
                 "pair_transition_count": 0,
                 "nonpersistence_pair_transition_count": 0,
                 "site_transition_count": 0,
@@ -158,7 +246,18 @@ def _per_wave_summary(
         entry["site_transition_type_counts"][transition_type] = int(
             entry["site_transition_type_counts"].get(transition_type, 0)
         ) + 1
-    return [grouped[wave_id] for wave_id in sorted(grouped)]
+    for entry in grouped.values():
+        denominator = int(entry.get("evaluable_pair_window_comparison_count") or 0)
+        counts = entry["pair_transition_type_counts"]
+        retained = int(counts.get("persistence") or 0)
+        gained = int(counts.get("recruitment") or 0) + int(counts.get("merge") or 0)
+        lost = int(counts.get("split") or 0)
+        entry["concordance_change_rates"] = {
+            "retained": (retained / denominator) if denominator else None,
+            "gain": (gained / denominator) if denominator else None,
+            "loss": (lost / denominator) if denominator else None,
+        }
+    return [grouped[key] for key in sorted(grouped)]
 
 
 def _annotate_once(
@@ -221,6 +320,7 @@ def _annotate_once(
                     active_pairs += 1
     nonpersistent = [row for row in pair_events if row.get("transition_type") != "persistence"]
     transition_waves = sorted({str(row["static_wave_id"]) for row in nonpersistent})
+    per_wave_interval_exposure = _per_wave_interval_exposure(raw.get("memberships") or [], membership)
     return {
         "memberships": raw.get("memberships") or [],
         "pair_transitions": pair_events,
@@ -228,6 +328,7 @@ def _annotate_once(
         "excluded_sites": raw.get("excluded_sites") or {},
         "pair_scope": dict(raw.get("pair_scope") or {}),
         "event_exposure": dict(raw.get("event_exposure") or {}),
+        "per_wave_interval_exposure": per_wave_interval_exposure,
         "summary": {
             "static_wave_member_count": len(membership),
             "qualified_member_count": len(qualified),
@@ -801,7 +902,11 @@ def analyze_dynamic_co_wave_transitions(
             "full_event_sets_used_for_metrics": True,
         },
     }
-    annotation["per_wave_summary"] = _per_wave_summary(full_pair_rows, full_site_rows)
+    annotation["per_wave_summary"] = _per_wave_summary(
+        full_pair_rows,
+        full_site_rows,
+        annotation.get("per_wave_interval_exposure") or [],
+    )
     annotation.pop("pair_transitions", None)
     annotation.pop("site_transitions", None)
     annotation.pop("memberships", None)

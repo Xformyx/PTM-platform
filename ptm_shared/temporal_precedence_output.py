@@ -223,6 +223,10 @@ def build_temporal_precedence_output(
 
     observations: list[dict[str, Any]] = []
     tier_counts: dict[str, int] = {}
+    event_specific_summary: dict[str, dict[str, dict[str, int]]] = {
+        event: {"observation_status": {}, "censoring_type": {}}
+        for event in ("onset", "peak", "exit")
+    }
 
     for site_key, record in sorted(event_records.items()):
         obs = build_temporal_precedence_observation(
@@ -232,6 +236,13 @@ def build_temporal_precedence_output(
             p4_passed=p4_passed,
         )
         tier_counts[obs.tier.value] = tier_counts.get(obs.tier.value, 0) + 1
+        for event_name in ("onset", "peak", "exit"):
+            detail = dict(getattr(record, f"{event_name}_event", {}) or {})
+            status = str(detail.get("observation_status") or "not_recorded")
+            censoring = str(detail.get("censoring_type") or "none")
+            for field, value in (("observation_status", status), ("censoring_type", censoring)):
+                bucket = event_specific_summary[event_name][field]
+                bucket[value] = bucket.get(value, 0) + 1
         observations.append({
             "site_key": obs.site_key,
             "wave_id": obs.wave_id,
@@ -247,6 +258,9 @@ def build_temporal_precedence_output(
             "report_phrase": obs.report_phrase,
             "p4_gate_passed": obs.p4_gate_passed,
             "input_type": obs.input_type,
+            "onset_event": dict(record.onset_event or {}),
+            "peak_event": dict(record.peak_event or {}),
+            "exit_event": dict(record.exit_event or {}),
         })
 
     n_total = len(observations)
@@ -275,6 +289,7 @@ def build_temporal_precedence_output(
             "tier_breakdown": tier_counts,
             "replicate_bootstrap_no_call_count": bootstrap_no_call_count,
             "replicate_bootstrap_partial_draw_count": bootstrap_partial_draw_count,
+            "event_specific_censoring": event_specific_summary,
             "study_context": ctx.study_id,
         },
         "p4_gate": {

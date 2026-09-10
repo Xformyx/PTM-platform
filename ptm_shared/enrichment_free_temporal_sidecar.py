@@ -990,6 +990,7 @@ def _compact_temporal_precedence(sidecar: Mapping[str, Any]) -> dict[str, Any]:
         "n_sites_with_replicate_data": rep_summary.get("n_sites_with_replicate_data"),
         "replicate_bootstrap_no_call_count": summary.get("replicate_bootstrap_no_call_count"),
         "replicate_bootstrap_partial_draw_count": summary.get("replicate_bootstrap_partial_draw_count"),
+        "event_specific_censoring": dict(summary.get("event_specific_censoring") or {}),
         "p4_gate_passed": p4.get("passed"),
         "claim_boundary": (
             "Temporal event records are observational response timing only. "

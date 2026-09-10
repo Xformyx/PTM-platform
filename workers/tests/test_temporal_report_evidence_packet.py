@@ -121,7 +121,8 @@ def test_packet_preserves_numerical_fields_and_observational_boundary():
     assert "DATA-TEMPORAL-PRECEDENCE" not in text
     assert "evaluable sites=7" in text
     assert "P4 validation passed=False" in text
-    assert "Fixed temporal profile cluster W1" in text
+    assert "Temporal Profile Cluster W1" in text
+    assert "no rate-based interpretation is made" in text
     assert "DATA-CROSS-LAYER-1" not in text
     assert "observed onset-timepoint difference=15 min" in text
     assert "causality=not_tested" in text
