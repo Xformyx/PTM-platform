@@ -42,6 +42,32 @@ def test_collapse_creates_one_rag_work_item_and_preserves_trajectory():
     ]
 
 
+def test_collapse_preserves_independent_and_reconstructed_quantitation_axes():
+    row = _row("5min", 1.0, protein_fc=0.5)
+    row.update({
+        "PTM_ProteinAdjusted_Log2FC": 1.0,
+        "PTM_Unadjusted_Log2FC": 1.4,
+        "PTM_Unadjusted_Status": "computed_from_normalized_pr_replicates",
+        "PTM_Unadjusted_Conventional_Log2FC_NA": False,
+        "PTM_Unadjusted_Calculation_Mode": (
+            "ratio_of_condition_arithmetic_means_from_normalized_pr_intensity"
+        ),
+        "PTM_Absolute_Log2FC": 1.5,
+        "PTM_Reconstructed_Log2FC": 1.5,
+        "Protein_Adjustment_Delta_Log2FC": -0.4,
+    })
+
+    collapsed = collapse_ptm_rows_for_enrichment([row])
+    condition = collapsed[0]["condition_data"][0]
+
+    assert condition["ptm_unadjusted_log2fc"] == 1.4
+    assert condition["ptm_protein_adjusted_log2fc"] == 1.0
+    assert condition["ptm_reconstructed_log2fc"] == 1.5
+    assert condition["protein_adjustment_delta_log2fc"] == -0.4
+    assert condition["ptm_unadjusted_status"] == "computed_from_normalized_pr_replicates"
+    assert condition["ptm_unadjusted_conventional_log2fc_na"] is False
+
+
 def test_post_enrichment_merge_preserves_precollapsed_condition_data():
     collapsed = collapse_ptm_rows_for_enrichment([
         _row("0min", 0.0),

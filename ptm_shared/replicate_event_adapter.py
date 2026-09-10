@@ -62,7 +62,8 @@ Audit remediation: 2026-08-29 (context registration rule, replicate/GP separatio
 from __future__ import annotations
 
 import enum
-from dataclasses import dataclass
+import math
+from dataclasses import dataclass, field
 from typing import Any, Mapping, Sequence
 
 import numpy as np
@@ -74,6 +75,7 @@ from ptm_shared.probabilistic_cowave import (
 from ptm_shared.study_temporal_context import StudyTemporalContext
 
 CONTRACT_VERSION = "replicate_event_adapter.v2"
+EVENT_DETAIL_CONTRACT_VERSION = "temporal_event_details.v1"
 
 _NOT_REGISTERED_MSG = (
     "study_context=None is not allowed. "
@@ -139,6 +141,14 @@ class EventRecord:
     bootstrap_evaluable_draw_fraction: float | None = None
     amplitude_threshold_fc: float = ACTIVITY_THRESHOLD_FC
     contract_version: str = CONTRACT_VERSION
+    event_detail_contract_version: str = EVENT_DETAIL_CONTRACT_VERSION
+
+    # Event-specific observation/censoring records.  These preserve simultaneous
+    # states such as left-censored onset and right-censored exit.  Legacy scalar
+    # fields and event_status remain available for existing consumers.
+    onset_event: dict[str, Any] = field(default_factory=dict)
+    peak_event: dict[str, Any] = field(default_factory=dict)
+    exit_event: dict[str, Any] = field(default_factory=dict)
 
     # Interpretation notes
     censoring_note: str | None = None
@@ -224,6 +234,9 @@ def _event_times_from_trajectory(
             "peak_fc": peak_fc,
             "exit_t": None,
             "direction": "none",
+            "onset_status": EventStatus.unresolved,
+            "exit_status": "not_applicable",
+            "peak_idx": peak_idx,
         }
 
     direction = "positive" if peak_fc > 0 else "negative"
@@ -286,7 +299,139 @@ def _event_times_from_trajectory(
         "peak_fc": peak_fc,
         "exit_t": exit_t,
         "direction": direction,
+        "onset_status": status_onset,
+        "exit_status": status_exit,
+        "peak_idx": peak_idx,
     }
+
+
+def _sampled_interval(times_min: np.ndarray, estimate: float | None) -> list[float | None] | None:
+    if estimate is None or len(times_min) == 0:
+        return None
+    value = float(estimate)
+    for time in times_min:
+        if math.isclose(value, float(time), rel_tol=0.0, abs_tol=1e-9):
+            return [float(time), float(time)]
+    for index in range(len(times_min) - 1):
+        left = float(times_min[index])
+        right = float(times_min[index + 1])
+        if left < value < right:
+            return [left, right]
+    return None
+
+
+def _event_specific_details(
+    times_min: np.ndarray,
+    event: Mapping[str, Any],
+    *,
+    onset_ci95_min: tuple[float, float] | None = None,
+    peak_ci95_min: tuple[float, float] | None = None,
+    exit_ci95_min: tuple[float, float] | None = None,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """Return orthogonal onset, peak and exit timing/censoring records."""
+    first_time = float(times_min[0]) if len(times_min) else None
+    last_time = float(times_min[-1]) if len(times_min) else None
+    legacy_status = event.get("status")
+    onset_status = event.get("onset_status")
+    exit_status = event.get("exit_status")
+    onset_t = event.get("onset_t")
+    peak_t = event.get("peak_t")
+    exit_t = event.get("exit_t")
+
+    if onset_status == EventStatus.left_censored:
+        onset = {
+            "observation_status": "observed_at_first_sample",
+            "censoring_type": "left",
+            "sampled_interval_min": [None, first_time],
+            "model_estimate_min": None,
+            "estimate_type": "boundary_censored",
+            "ci95_min": None,
+        }
+    elif onset_t is not None:
+        interval = _sampled_interval(times_min, float(onset_t))
+        interpolated = bool(interval and interval[0] != interval[1])
+        onset = {
+            "observation_status": "observed_within_window",
+            "censoring_type": "interval" if interpolated else "none",
+            "sampled_interval_min": interval,
+            "model_estimate_min": round(float(onset_t), 3),
+            "estimate_type": "model_interpolated" if interpolated else "sampled_grid",
+            "ci95_min": onset_ci95_min,
+        }
+    elif legacy_status == EventStatus.unresolved:
+        onset = {
+            "observation_status": "not_observed_within_window",
+            "censoring_type": "right",
+            "sampled_interval_min": [last_time, None],
+            "model_estimate_min": None,
+            "estimate_type": "not_estimated",
+            "ci95_min": None,
+        }
+    else:
+        onset = {
+            "observation_status": "ambiguous",
+            "censoring_type": "none",
+            "sampled_interval_min": None,
+            "model_estimate_min": None,
+            "estimate_type": "not_estimated",
+            "ci95_min": onset_ci95_min,
+        }
+
+    peak_index = int(event.get("peak_idx") or 0)
+    boundary_limited = len(times_min) > 0 and peak_index in {0, len(times_min) - 1}
+    peak = {
+        "observation_status": (
+            "below_activity_threshold" if legacy_status == EventStatus.unresolved else "observed_within_window"
+        ),
+        "status": "boundary_limited" if boundary_limited else "posterior_sampled_grid_maximum",
+        "censoring_type": "none",
+        "sampled_interval_min": _sampled_interval(times_min, float(peak_t)) if peak_t is not None else None,
+        "model_estimate_min": round(float(peak_t), 3) if peak_t is not None else None,
+        "estimate_type": "model_posterior_sampled_grid",
+        "effect_value": round(float(event["peak_fc"]), 4) if event.get("peak_fc") is not None else None,
+        "effect_direction": str(event.get("direction") or "none"),
+        "ci95_min": peak_ci95_min,
+    }
+
+    if exit_status == EventStatus.right_censored:
+        exit_record = {
+            "observation_status": "not_observed_within_window",
+            "censoring_type": "right",
+            "sampled_interval_min": [last_time, None],
+            "model_estimate_min": None,
+            "estimate_type": "boundary_censored",
+            "ci95_min": None,
+        }
+    elif exit_t is not None:
+        interval = _sampled_interval(times_min, float(exit_t))
+        interpolated = bool(interval and interval[0] != interval[1])
+        exit_record = {
+            "observation_status": "observed_within_window",
+            "censoring_type": "interval" if interpolated else "none",
+            "sampled_interval_min": interval,
+            "model_estimate_min": round(float(exit_t), 3),
+            "estimate_type": "model_interpolated" if interpolated else "sampled_grid",
+            "ci95_min": exit_ci95_min,
+        }
+    elif exit_status == "not_applicable":
+        exit_record = {
+            "observation_status": "not_applicable",
+            "censoring_type": "none",
+            "sampled_interval_min": None,
+            "model_estimate_min": None,
+            "estimate_type": "not_estimated",
+            "ci95_min": None,
+        }
+    else:
+        exit_record = {
+            "observation_status": "ambiguous",
+            "censoring_type": "none",
+            "sampled_interval_min": None,
+            "model_estimate_min": None,
+            "estimate_type": "not_estimated",
+            "ci95_min": exit_ci95_min,
+        }
+    return onset, peak, exit_record
 
 
 def _gp_parametric_uncertainty(
@@ -422,21 +567,35 @@ def extract_event_record(
     elif status == EventStatus.right_censored:
         censoring_note = study_context.censoring_right_note
 
+    onset_ci = _ci_from_samples(bootstrap_onset)
+    peak_ci = _ci_from_samples(bootstrap_peak)
+    exit_ci = _ci_from_samples(bootstrap_exit)
+    onset_event, peak_event, exit_event = _event_specific_details(
+        times_min,
+        ref_ev,
+        onset_ci95_min=onset_ci,
+        peak_ci95_min=peak_ci,
+        exit_ci95_min=exit_ci,
+    )
+
     return EventRecord(
         site_key=site_key,
         event_status=status,
         onset_t50_min=round(ref_ev["onset_t"], 3) if ref_ev["onset_t"] is not None else None,
-        onset_ci95_min=_ci_from_samples(bootstrap_onset),
+        onset_ci95_min=onset_ci,
         peak_t_min=round(ref_ev["peak_t"], 3) if ref_ev["peak_t"] is not None else None,
-        peak_ci95_min=_ci_from_samples(bootstrap_peak),
+        peak_ci95_min=peak_ci,
         peak_fc=round(ref_ev["peak_fc"], 4) if ref_ev["peak_fc"] is not None else None,
         exit_t50_min=round(ref_ev["exit_t"], 3) if ref_ev["exit_t"] is not None else None,
-        exit_ci95_min=_ci_from_samples(bootstrap_exit),
+        exit_ci95_min=exit_ci,
         replicate_bootstrap_stability=None,            # not applicable for condition-mean
         exploratory_model_uncertainty=model_uncertainty,
         input_type="condition_mean_gp_parametric_bootstrap",
         n_replicates_used=None,
         amplitude_threshold_fc=thresh,
+        onset_event=onset_event,
+        peak_event=peak_event,
+        exit_event=exit_event,
         censoring_note=censoring_note,
     )
 
@@ -476,6 +635,21 @@ def extract_event_record_from_replicates(
             n_replicates_used=n_rep,
             amplitude_threshold_fc=thresh,
             bootstrap_evaluable_draw_fraction=0.0,
+            onset_event={
+                "observation_status": "not_evaluable",
+                "censoring_type": "none",
+                "reason_code": "replicate_matrix_contains_unobserved_timepoint",
+            },
+            peak_event={
+                "observation_status": "not_evaluable",
+                "censoring_type": "none",
+                "reason_code": "replicate_matrix_contains_unobserved_timepoint",
+            },
+            exit_event={
+                "observation_status": "not_evaluable",
+                "censoring_type": "none",
+                "reason_code": "replicate_matrix_contains_unobserved_timepoint",
+            },
             censoring_note="replicate_matrix_contains_unobserved_timepoint",
         )
     cond_mean = [
@@ -487,7 +661,13 @@ def extract_event_record_from_replicates(
     )
     mean_arr = np.array(posterior["posterior_mean"])
 
-    ref_ev = _event_times_from_trajectory(times_min, mean_arr, thresh)
+    ref_ev = _event_times_from_trajectory(
+        times_min,
+        mean_arr,
+        thresh,
+        raw_first_abs_fc=abs(float(cond_mean[0])),
+        raw_last_abs_fc=abs(float(cond_mean[-1])),
+    )
 
     rng = np.random.default_rng(seed)
     bootstrap_onset: list[float | None] = []
@@ -509,7 +689,13 @@ def extract_event_record_from_replicates(
             timepoint_labels, sample_mean, length_scale_min=gp_ls
         )
         b_mean = np.array(b_posterior["posterior_mean"])
-        ev = _event_times_from_trajectory(times_min, b_mean, thresh)
+        ev = _event_times_from_trajectory(
+            times_min,
+            b_mean,
+            thresh,
+            raw_first_abs_fc=abs(float(sample_mean[0])),
+            raw_last_abs_fc=abs(float(sample_mean[-1])),
+        )
         bootstrap_onset.append(ev["onset_t"])
         bootstrap_peak.append(ev["peak_t"])
         bootstrap_exit.append(ev["exit_t"])
@@ -521,22 +707,36 @@ def extract_event_record_from_replicates(
         if evaluable_draws else None
     )
 
+    onset_ci = _ci_from_samples(bootstrap_onset)
+    peak_ci = _ci_from_samples(bootstrap_peak)
+    exit_ci = _ci_from_samples(bootstrap_exit)
+    onset_event, peak_event, exit_event = _event_specific_details(
+        times_min,
+        ref_ev,
+        onset_ci95_min=onset_ci,
+        peak_ci95_min=peak_ci,
+        exit_ci95_min=exit_ci,
+    )
+
     return EventRecord(
         site_key=site_key,
         event_status=ref_ev["status"],
         onset_t50_min=round(ref_ev["onset_t"], 3) if ref_ev["onset_t"] is not None else None,
-        onset_ci95_min=_ci_from_samples(bootstrap_onset),
+        onset_ci95_min=onset_ci,
         peak_t_min=round(ref_ev["peak_t"], 3) if ref_ev["peak_t"] is not None else None,
-        peak_ci95_min=_ci_from_samples(bootstrap_peak),
+        peak_ci95_min=peak_ci,
         peak_fc=round(ref_ev["peak_fc"], 4) if ref_ev["peak_fc"] is not None else None,
         exit_t50_min=round(ref_ev["exit_t"], 3) if ref_ev["exit_t"] is not None else None,
-        exit_ci95_min=_ci_from_samples(bootstrap_exit),
+        exit_ci95_min=exit_ci,
         replicate_bootstrap_stability=stability,
         exploratory_model_uncertainty=None,  # not applicable for replicate-level
         input_type="replicate_level_bootstrap",
         n_replicates_used=n_rep,
         bootstrap_evaluable_draw_fraction=round(evaluable_draws / max(n_bootstrap, 1), 4),
         amplitude_threshold_fc=thresh,
+        onset_event=onset_event,
+        peak_event=peak_event,
+        exit_event=exit_event,
     )
 
 

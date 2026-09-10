@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import math
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -29,6 +30,16 @@ from ptm_shared.de_novo_representation import (
     plot_value_for_row,
     ranking_score_for_site,
 )
+
+
+def test_chat_methodology_uses_independent_unadjusted_axis_and_does_not_promote_de_novo_priority():
+    chat_source = (
+        Path(__file__).resolve().parents[2] / "api-server" / "app" / "api" / "chat.py"
+    ).read_text(encoding="utf-8")
+
+    assert "PTM_Unadjusted_Log2FC" in chat_source
+    assert "not an independently measured unadjusted contrast" in chat_source
+    assert "strongest biological signal" not in chat_source
 
 
 def _count(cond: str, detected: int, expected: int = 3) -> DetectionCount:

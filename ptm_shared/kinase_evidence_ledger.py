@@ -19,6 +19,14 @@ import re
 from collections import Counter, defaultdict
 from typing import Any, Iterable, Mapping, Sequence
 
+from ptm_shared.evidence_contracts import (
+    EvaluationStatus,
+    ObservationStatus,
+    OutcomeClass,
+    build_evidence_envelope,
+    build_measurement_provenance,
+)
+
 
 CONTRACT_VERSION = "ptm_kinase_feature_provenance.v5"
 DIRECT_NO_CALL_TIER = "E_direct_kinase_no_call"
@@ -148,15 +156,47 @@ def _record_from_rows(site_key: str, rows: Sequence[Mapping[str, Any]], conditio
     }
     masks = _empty_reason_masks()
     protein_ambiguous = _protein_group_ambiguous(protein_group)
-    multi_phospho = max(_residue_count(modified_sequence), len(reported_positions)) > 1
+    multi_phospho = _residue_count(modified_sequence) > 1
+    multiple_candidate_residues = len(reported_positions) > 1
     localization_state = _localization_status(localization_value)
     localization_recorded = localization_value is not None
     incomplete_grid = any(condition not in observed_conditions for condition in conditions)
+    feature_id = _feature_id(first, site_key)
+    measurement_provenance = build_measurement_provenance(
+        first,
+        feature_id=feature_id,
+        member_feature_ids=(feature_id,),
+        aggregation_rule="modified_precursor_collapsed_across_declared_conditions",
+    )
+    observation_status = (
+        ObservationStatus.observed_partial if incomplete_grid else ObservationStatus.observed_complete
+    )
+    evidence_envelope = build_evidence_envelope(
+        observation_status=observation_status,
+        measurement_unit=measurement_provenance["reader_measurement_unit"],
+        value_ids=(feature_id,),
+        evaluation_status=EvaluationStatus.not_evaluable,
+        method_id=None,
+        reason_codes=("feature_level_exact_mapping_and_curated_edge_provenance_absent",),
+        outcome_class=OutcomeClass.unavailable,
+        maximum_tier="O1",
+        allowed_predicates=("observed", "quantified", "showed"),
+        forbidden_predicates=(
+            "directly phosphorylated",
+            "activated the kinase",
+            "caused",
+            "proved",
+        ),
+    )
     masks["F1_protein_accession_or_group_ambiguous"] = "flagged" if protein_ambiguous else "passed"
     if multi_phospho and not localization_recorded:
         masks["F2_multi_phosphorylated_or_localization_ambiguous"] = "flagged_multi_phosphorylated_and_localization_not_recorded"
     elif multi_phospho:
         masks["F2_multi_phosphorylated_or_localization_ambiguous"] = "flagged_multi_phosphorylated"
+    elif multiple_candidate_residues and not localization_recorded:
+        masks["F2_multi_phosphorylated_or_localization_ambiguous"] = "flagged_multiple_candidate_residues_and_localization_not_recorded"
+    elif multiple_candidate_residues:
+        masks["F2_multi_phosphorylated_or_localization_ambiguous"] = "flagged_multiple_candidate_residues"
     elif not localization_recorded:
         masks["F2_multi_phosphorylated_or_localization_ambiguous"] = "flagged_localization_not_recorded"
     elif localization_value < CLASS_I_LOCALIZATION_THRESHOLD:
@@ -169,15 +209,19 @@ def _record_from_rows(site_key: str, rows: Sequence[Mapping[str, Any]], conditio
         direct_no_call_reasons.append("protein_group_or_accession_ambiguous")
     if multi_phospho:
         direct_no_call_reasons.append("multi_phosphorylated_precursor")
+    if multiple_candidate_residues:
+        direct_no_call_reasons.append("multiple_candidate_residues")
     if not localization_recorded:
         direct_no_call_reasons.append("localization_probability_not_recorded")
     elif localization_value < CLASS_I_LOCALIZATION_THRESHOLD:
         direct_no_call_reasons.append("localization_probability_below_class_I_threshold")
     direct_no_call_reasons.append("feature_level_exact_mapping_and_curated_edge_provenance_absent")
     return {
-        "feature_id": _feature_id(first, site_key),
+        "feature_id": feature_id,
         "feature_unit": "modified_precursor_feature_collapsed_across_declared_conditions",
         "nominal_aggregate_key": site_key,
+        "measurement_provenance": measurement_provenance,
+        "evidence_envelope": evidence_envelope,
         "identity_provenance": {
             "protein_group": protein_group or None,
             "protein_accession_tokens": accessions,
@@ -197,6 +241,11 @@ def _record_from_rows(site_key: str, rows: Sequence[Mapping[str, Any]], conditio
             "fasta_organism": fasta_organism or None,
             "protein_group_status": "ambiguous_or_missing" if protein_ambiguous else "single_group_observed",
             "phosphorylation_form_status": "multi_phosphorylated" if multi_phospho else "single_or_unspecified_modification",
+            "candidate_residue_status": (
+                "multiple_candidates" if multiple_candidate_residues
+                else "single_candidate" if len(reported_positions) == 1
+                else "not_recorded"
+            ),
             "localization_status": localization_state,
             "identity_claim_boundary": (
                 "Feature identity is export provenance only; it does not establish "

@@ -52,13 +52,16 @@ MAX_RAG_CHARS = 5000
 METHODOLOGY_CONTEXT = """
 ## PTM-Vector Analysis Methodology
 
-**PTM-Vector Approach**: Unlike traditional PTM analysis that only considers PTM fold-change,
-PTM-Vector uses a 2D vector representation: (Protein_Log2FC, PTM_Relative_Log2FC).
-PTM_Relative_Log2FC = PTM_Absolute_Log2FC - Protein_Log2FC, isolating PTM-specific changes
-from protein abundance changes. This reveals true PTM regulation independent of protein expression.
+**PTM-Vector Approach**: PTM-Vector represents protein abundance and the sample-wise
+protein-adjusted PTM ratio as separate quantitative axes. `PTM_Unadjusted_Log2FC` is calculated
+independently from normalized modified-precursor intensities. `PTM_Relative_Log2FC` is the
+protein-adjusted ratio contrast. The legacy `PTM_Absolute_Log2FC` field is a reconstructed value
+(`PTM_Relative_Log2FC + Protein_Log2FC`), not an independently measured unadjusted contrast.
+Protein adjustment does not establish occupancy, stoichiometry, direct regulation, or causality.
 
 **PTM Selection Modes**:
-- De novo: PTMs not detected in control (pseudocount imputed) — strongest biological signal
+- De novo: PTMs not detected in control — represented by detection pattern and an LOD-relative
+  lower bound; conventional Log2FC is unavailable and de novo status alone does not establish priority
 - Regulated: Statistically significant (q < 0.05, |Log2FC| ≥ 1.0) — reliable quantitative changes
 - De novo + Regulated: Union of both — recommended default for comprehensive coverage
 
@@ -69,7 +72,7 @@ from protein abundance changes. This reveals true PTM regulation independent of 
 
 **Kinase Module Analysis**: Groups substrates by shared upstream kinases using
 KEA3 (Kinase Enrichment Analysis 3), kinase_prediction, and kinase_substrate databases.
-Modules represent coordinated signaling cascades.
+Modules represent candidate substrate-footprint context and do not establish a direct signaling cascade.
 
 **Signal Flow (4-Layer)**: Receptor → Kinase → Substrate (PTM) → Effector
 Effectors are non-PTM proteins from STRING (score ≥ 400) / BioGRID PPI partners.

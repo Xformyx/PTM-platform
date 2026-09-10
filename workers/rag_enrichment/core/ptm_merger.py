@@ -55,6 +55,33 @@ def collapse_ptm_rows_for_enrichment(
                     if entry.get("PTM_Relative_Log2FC") is not None
                     else entry.get("ptm_relative_log2fc")
                 ),
+                "ptm_protein_adjusted_log2fc": _safe_float(
+                    entry.get("PTM_ProteinAdjusted_Log2FC")
+                    if entry.get("PTM_ProteinAdjusted_Log2FC") is not None
+                    else entry.get("ptm_protein_adjusted_log2fc")
+                    if entry.get("ptm_protein_adjusted_log2fc") is not None
+                    else entry.get("PTM_Relative_Log2FC", entry.get("ptm_relative_log2fc"))
+                ),
+                "ptm_unadjusted_log2fc": _safe_float(
+                    entry.get("PTM_Unadjusted_Log2FC")
+                    if entry.get("PTM_Unadjusted_Log2FC") is not None
+                    else entry.get("ptm_unadjusted_log2fc")
+                ),
+                "ptm_unadjusted_status": (
+                    entry.get("PTM_Unadjusted_Status")
+                    or entry.get("ptm_unadjusted_status")
+                    or "not_computed"
+                ),
+                "ptm_unadjusted_conventional_log2fc_na": str(
+                    entry.get("PTM_Unadjusted_Conventional_Log2FC_NA")
+                    or entry.get("ptm_unadjusted_conventional_log2fc_na")
+                    or ""
+                ).strip().lower() in {"true", "1", "yes"},
+                "ptm_unadjusted_calculation_mode": (
+                    entry.get("PTM_Unadjusted_Calculation_Mode")
+                    or entry.get("ptm_unadjusted_calculation_mode")
+                    or "not_computed"
+                ),
                 "protein_log2fc": _safe_float(
                     entry.get("Protein_Log2FC")
                     if entry.get("Protein_Log2FC") is not None
@@ -64,6 +91,18 @@ def collapse_ptm_rows_for_enrichment(
                     entry.get("PTM_Absolute_Log2FC")
                     if entry.get("PTM_Absolute_Log2FC") is not None
                     else entry.get("ptm_absolute_log2fc")
+                ),
+                "ptm_reconstructed_log2fc": _safe_float(
+                    entry.get("PTM_Reconstructed_Log2FC")
+                    if entry.get("PTM_Reconstructed_Log2FC") is not None
+                    else entry.get("ptm_reconstructed_log2fc")
+                    if entry.get("ptm_reconstructed_log2fc") is not None
+                    else entry.get("PTM_Absolute_Log2FC", entry.get("ptm_absolute_log2fc"))
+                ),
+                "protein_adjustment_delta_log2fc": _safe_float(
+                    entry.get("Protein_Adjustment_Delta_Log2FC")
+                    if entry.get("Protein_Adjustment_Delta_Log2FC") is not None
+                    else entry.get("protein_adjustment_delta_log2fc")
                 ),
                 "q_value": entry.get("q_value"),
                 "control_pseudocount_used": entry.get("Control_Pseudocount_Used"),

@@ -2525,7 +2525,36 @@ async def get_vector_plot_data(
                         "condition": cond,
                         "protein_log2fc": prot_fc,
                         "ptm_relative_log2fc": rel_fc,
+                        "ptm_protein_adjusted_log2fc": (
+                            _optional_vector_float("PTM_ProteinAdjusted_Log2FC")
+                            if _optional_vector_float("PTM_ProteinAdjusted_Log2FC") is not None
+                            else rel_fc
+                        ),
+                        "ptm_unadjusted_log2fc": _optional_vector_float("PTM_Unadjusted_Log2FC"),
+                        "ptm_unadjusted_control_mean": _optional_vector_float("PTM_Unadjusted_Control_Mean"),
+                        "ptm_unadjusted_treatment_mean": _optional_vector_float("PTM_Unadjusted_Treatment_Mean"),
+                        "ptm_unadjusted_p_value": _optional_vector_float("PTM_Unadjusted_P_Value"),
+                        "ptm_unadjusted_q_value": _optional_vector_float("PTM_Unadjusted_Q_Value"),
+                        "ptm_unadjusted_control_n": _optional_vector_float("PTM_Unadjusted_Control_N"),
+                        "ptm_unadjusted_treatment_n": _optional_vector_float("PTM_Unadjusted_Treatment_N"),
+                        "ptm_unadjusted_status": _optional_text("PTM_Unadjusted_Status"),
+                        "ptm_unadjusted_conventional_log2fc_na": str(
+                            row.get("PTM_Unadjusted_Conventional_Log2FC_NA", "")
+                        ).strip().lower() in ("true", "1", "yes"),
+                        "ptm_unadjusted_calculation_mode": _optional_text("PTM_Unadjusted_Calculation_Mode"),
+                        "ptm_unadjusted_input_scale": _optional_text("PTM_Unadjusted_Input_Scale"),
                         "ptm_absolute_log2fc": abs_fc,
+                        "ptm_reconstructed_log2fc": (
+                            _optional_vector_float("PTM_Reconstructed_Log2FC")
+                            if _optional_vector_float("PTM_Reconstructed_Log2FC") is not None
+                            else abs_fc
+                        ),
+                        "ptm_reconstructed_calculation_mode": _optional_text(
+                            "PTM_Reconstructed_Calculation_Mode"
+                        ),
+                        "protein_adjustment_delta_log2fc": _optional_vector_float(
+                            "Protein_Adjustment_Delta_Log2FC"
+                        ),
                         "control_pseudocount_used": pc_used,
                         "conventional_log2fc_na": conventional_na,
                         "denovo_confidence": _optional_text("DeNovo_Confidence"),

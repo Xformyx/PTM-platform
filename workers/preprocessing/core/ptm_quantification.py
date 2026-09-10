@@ -122,7 +122,10 @@ class PTMQuantificationAnalyzer:
             self._progress(0.40, "Paired modified/unmodified audit")
             paired_occupancy_df, pair_audit_df = self.calculate_paired_occupancy(ptm_precursors)
 
-            self._progress(0.50, "Condition comparisons")
+            self._progress(0.45, "Independent unadjusted PTM comparisons")
+            unadjusted_ptm_comparisons = self.calculate_unadjusted_condition_comparisons(ptm_precursors)
+
+            self._progress(0.50, "Protein-adjusted condition comparisons")
             ptm_comparisons = self.calculate_condition_comparisons(relative_quant_df)
             if ptm_comparisons.empty:
                 return False
@@ -134,7 +137,10 @@ class PTMQuantificationAnalyzer:
 
             self._progress(0.75, "PTM vector data")
             ptm_vector_df = self.create_ptm_vector_data(
-                ptm_comparisons, ptm_protein_changes, paired_occupancy_df
+                ptm_comparisons,
+                ptm_protein_changes,
+                paired_occupancy_df,
+                unadjusted_ptm_comparisons=unadjusted_ptm_comparisons,
             )
             if ptm_vector_df.empty:
                 return False
@@ -143,6 +149,7 @@ class PTMQuantificationAnalyzer:
             self.save_results(
                 relative_quant_df, ptm_comparisons,
                 all_protein_changes, ptm_protein_changes, ptm_vector_df, pair_audit_df,
+                unadjusted_ptm_comparisons=unadjusted_ptm_comparisons,
             )
 
             self._progress(0.95, "Quantification complete")
@@ -700,6 +707,120 @@ class PTMQuantificationAnalyzer:
     # Condition comparisons & Log2FC
     # ------------------------------------------------------------------
 
+    def calculate_unadjusted_condition_comparisons(self, ptm_precursors: pd.DataFrame) -> pd.DataFrame:
+        """Calculate conventional PTM contrasts directly from normalized PR intensities.
+
+        This axis is independent of protein abundance in the calculation.  It is
+        intentionally distinct from the legacy ``PTM_Absolute_Log2FC`` field,
+        which is reconstructed downstream from the protein-adjusted contrast and
+        the protein contrast.  Control-nondetected features retain a NaN
+        conventional value; no pseudocount-derived fold change is emitted here.
+        """
+        if ptm_precursors is None or ptm_precursors.empty:
+            return pd.DataFrame()
+
+        sample_columns = list(getattr(self, "sample_columns", None) or [])
+        condition_map = dict(getattr(self, "condition_map", None) or {})
+        control_samples = [
+            sample for sample in sample_columns
+            if condition_map.get(sample) == "Control" and sample in ptm_precursors.columns
+        ]
+        treatments = list(getattr(self, "treatment_conditions", None) or []) or sorted({
+            str(condition)
+            for condition in condition_map.values()
+            if str(condition) != "Control"
+        })
+        treatment_samples = {
+            treatment: [
+                sample for sample in sample_columns
+                if condition_map.get(sample) == treatment and sample in ptm_precursors.columns
+            ]
+            for treatment in treatments
+        }
+
+        def positive_values(row: pd.Series, samples: List[str]) -> List[float]:
+            values: List[float] = []
+            for sample in samples:
+                value = row.get(sample)
+                if pd.notna(value) and float(value) > 0:
+                    values.append(float(value))
+            return values
+
+        records: List[Dict[str, object]] = []
+        for _, row in ptm_precursors.iterrows():
+            protein_group = str(row.get("Protein.Group", ""))
+            precursor_id = str(row.get("Precursor.Id", ""))
+            modified_sequence = str(row.get("Modified.Sequence", ""))
+            ptm_type = self._determine_ptm_type(modified_sequence)
+            ptm_position = self._extract_ptm_position(protein_group, modified_sequence, ptm_type)
+            control_values = positive_values(row, control_samples)
+
+            for treatment in treatments:
+                current_values = positive_values(row, treatment_samples.get(treatment, []))
+                if not current_values:
+                    continue
+
+                control_mean = float(np.mean(control_values)) if control_values else np.nan
+                treatment_mean = float(np.mean(current_values))
+                conventional_log2fc = (
+                    float(np.log2(treatment_mean / control_mean))
+                    if control_values and control_mean > 0 and treatment_mean > 0
+                    else np.nan
+                )
+                status = (
+                    "computed_from_normalized_pr_replicates"
+                    if control_values
+                    else "control_not_detected_conventional_log2fc_na"
+                )
+                p_value = np.nan
+                if len(control_values) >= 2 and len(current_values) >= 2:
+                    try:
+                        _, p_value = stats.ttest_ind(
+                            control_values,
+                            current_values,
+                            equal_var=False,
+                            nan_policy="omit",
+                        )
+                    except Exception:
+                        p_value = np.nan
+
+                records.append({
+                    "Protein.Group": protein_group,
+                    "Precursor.Id": precursor_id,
+                    "Modified.Sequence": modified_sequence,
+                    "PTM_Type": ptm_type,
+                    "PTM_Position": ptm_position,
+                    "Condition": treatment,
+                    "Comparison": f"{treatment}_vs_Control",
+                    "PTM_Unadjusted_Control_Mean": control_mean,
+                    "PTM_Unadjusted_Treatment_Mean": treatment_mean,
+                    "PTM_Unadjusted_Log2FC": conventional_log2fc,
+                    "PTM_Unadjusted_P_Value": p_value,
+                    "PTM_Unadjusted_Control_N": len(control_values),
+                    "PTM_Unadjusted_Treatment_N": len(current_values),
+                    "PTM_Unadjusted_Status": status,
+                    "PTM_Unadjusted_Conventional_Log2FC_NA": not bool(control_values),
+                    "PTM_Unadjusted_Calculation_Mode": (
+                        "ratio_of_condition_arithmetic_means_from_normalized_pr_intensity"
+                    ),
+                    "PTM_Unadjusted_Input_Scale": "sample_wise_median_scaled_pr_intensity",
+                    "PTM_Unadjusted_Pseudocount_Used": False,
+                })
+
+        if not records:
+            return pd.DataFrame()
+        result = pd.DataFrame(records)
+        result["PTM_Unadjusted_Q_Value"] = np.nan
+        valid = result["PTM_Unadjusted_P_Value"].notna()
+        if valid.any():
+            _, q_values, _, _ = multipletests(
+                result.loc[valid, "PTM_Unadjusted_P_Value"].values,
+                alpha=0.05,
+                method="fdr_bh",
+            )
+            result.loc[valid, "PTM_Unadjusted_Q_Value"] = q_values
+        return result
+
     def calculate_condition_comparisons(self, relative_quant_df: pd.DataFrame) -> pd.DataFrame:
         """Calculate condition comparisons with Welch's t-test and BH correction.
 
@@ -901,6 +1022,7 @@ class PTMQuantificationAnalyzer:
         ptm_comparisons: pd.DataFrame,
         ptm_protein_changes: pd.DataFrame,
         paired_occupancy_df: Optional[pd.DataFrame] = None,
+        unadjusted_ptm_comparisons: Optional[pd.DataFrame] = None,
     ) -> pd.DataFrame:
         """Emit the Stage 1 site/form × timepoint vector with precursor identity.
 
@@ -920,6 +1042,14 @@ class PTMQuantificationAnalyzer:
                         str(occupancy_row.get("Modified.Sequence", "")),
                         str(occupancy_row.get("Condition", "")),
                     )] = occupancy_row.to_dict()
+            unadjusted_lookup: Dict[Tuple[str, str, str], Dict[str, object]] = {}
+            if unadjusted_ptm_comparisons is not None and not unadjusted_ptm_comparisons.empty:
+                for _, unadjusted_row in unadjusted_ptm_comparisons.iterrows():
+                    unadjusted_lookup[(
+                        str(unadjusted_row.get("Protein.Group", "")),
+                        str(unadjusted_row.get("Precursor.Id", "")),
+                        str(unadjusted_row.get("Condition", "")),
+                    )] = unadjusted_row.to_dict()
             treatments = self.treatment_conditions or [
                 c for c in ptm_comparisons["Condition"].unique() if c != "Control"
             ]
@@ -938,6 +1068,9 @@ class PTMQuantificationAnalyzer:
                 pc = pchange.iloc[0]
                 occupancy = occupancy_lookup.get((
                     str(protein_group), str(ptm_row["Modified.Sequence"]), str(condition)
+                ), {})
+                unadjusted = unadjusted_lookup.get((
+                    str(protein_group), str(ptm_row["Precursor.Id"]), str(condition)
                 ), {})
                 cmeans: Dict[str, float] = {
                     "Control_Mean_PTM_Relative": ptm_row["Control_Mean"],
@@ -969,7 +1102,35 @@ class PTMQuantificationAnalyzer:
                     "Condition": condition,
                     "Comparison": ptm_row["Comparison"],
                     "PTM_Relative_Log2FC": ptm_row["Log2FC"],
+                    "PTM_ProteinAdjusted_Log2FC": ptm_row["Log2FC"],
+                    "PTM_Unadjusted_Log2FC": unadjusted.get("PTM_Unadjusted_Log2FC", np.nan),
+                    "PTM_Unadjusted_Control_Mean": unadjusted.get("PTM_Unadjusted_Control_Mean", np.nan),
+                    "PTM_Unadjusted_Treatment_Mean": unadjusted.get("PTM_Unadjusted_Treatment_Mean", np.nan),
+                    "PTM_Unadjusted_P_Value": unadjusted.get("PTM_Unadjusted_P_Value", np.nan),
+                    "PTM_Unadjusted_Q_Value": unadjusted.get("PTM_Unadjusted_Q_Value", np.nan),
+                    "PTM_Unadjusted_Control_N": unadjusted.get("PTM_Unadjusted_Control_N", np.nan),
+                    "PTM_Unadjusted_Treatment_N": unadjusted.get("PTM_Unadjusted_Treatment_N", np.nan),
+                    "PTM_Unadjusted_Status": unadjusted.get("PTM_Unadjusted_Status", "not_computed"),
+                    "PTM_Unadjusted_Conventional_Log2FC_NA": bool(
+                        unadjusted.get("PTM_Unadjusted_Conventional_Log2FC_NA", False)
+                    ),
+                    "PTM_Unadjusted_Calculation_Mode": unadjusted.get(
+                        "PTM_Unadjusted_Calculation_Mode", "not_computed"
+                    ),
+                    "PTM_Unadjusted_Input_Scale": unadjusted.get(
+                        "PTM_Unadjusted_Input_Scale", "not_recorded"
+                    ),
+                    "PTM_Unadjusted_Pseudocount_Used": bool(
+                        unadjusted.get("PTM_Unadjusted_Pseudocount_Used", False)
+                    ),
                     "PTM_Absolute_Log2FC": ptm_row["Log2FC"] + cmeans.get("Protein_Log2FC", 0),
+                    "PTM_Reconstructed_Log2FC": ptm_row["Log2FC"] + cmeans.get("Protein_Log2FC", 0),
+                    "PTM_Reconstructed_Calculation_Mode": "protein_adjusted_log2fc_plus_protein_log2fc",
+                    "Protein_Adjustment_Delta_Log2FC": (
+                        float(ptm_row["Log2FC"]) - float(unadjusted.get("PTM_Unadjusted_Log2FC"))
+                        if pd.notna(unadjusted.get("PTM_Unadjusted_Log2FC"))
+                        else np.nan
+                    ),
                     "Residual": ptm_row["Log2FC"],
                     "Has_PTM": True,
                     "Data_Type": "PTM",
@@ -1037,6 +1198,7 @@ class PTMQuantificationAnalyzer:
         ptm_protein_changes: pd.DataFrame,
         ptm_vector_df: pd.DataFrame,
         pair_audit_df: Optional[pd.DataFrame] = None,
+        unadjusted_ptm_comparisons: Optional[pd.DataFrame] = None,
     ):
         sfx = self.file_suffix
 
@@ -1049,6 +1211,11 @@ class PTMQuantificationAnalyzer:
             p = self.output_dir / f"ptm_condition_comparisons_normalized{sfx}.tsv"
             ptm_comparisons.to_csv(p, sep="\t", index=False)
             logger.info(f"Saved: {p.name}")
+
+        if unadjusted_ptm_comparisons is not None and not unadjusted_ptm_comparisons.empty:
+            p = self.output_dir / f"ptm_unadjusted_condition_comparisons_normalized{sfx}.tsv"
+            unadjusted_ptm_comparisons.to_csv(p, sep="\t", index=False)
+            logger.info(f"Saved independent unadjusted PTM comparisons: {p.name}")
 
         if not all_protein_changes.empty:
             p = self.output_dir / f"all_protein_level_changes_normalized{sfx}.tsv"

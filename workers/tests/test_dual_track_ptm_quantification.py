@@ -19,9 +19,12 @@ CONDITIONS = {
 def _analyzer(pr_matrix):
     analyzer = PTMQuantificationAnalyzer.__new__(PTMQuantificationAnalyzer)
     analyzer.ptm_mode_config = {"unimod_id": "21"}
+    analyzer.target_ptms = {"21": "Phosphorylation"}
     analyzer.pr_matrix_normalized = pr_matrix
     analyzer.sample_columns = SAMPLES
     analyzer.condition_map = CONDITIONS
+    analyzer.treatment_conditions = ["5min", "15min", "30min", "60min"]
+    analyzer.fasta_dict = {}
     return analyzer
 
 
@@ -108,3 +111,112 @@ def test_track_two_vector_values_survive_when_no_counterpart_is_available():
     assert vector.iloc[0]["Quantification_Track"] == "protein_normalized_relative_ptm"
     assert vector.iloc[0]["Pair_Quality_Tier"] == "O0"
     assert pd.isna(vector.iloc[0]["Occupancy_Fraction"])
+
+
+def test_independent_unadjusted_contrast_is_computed_from_normalized_pr_replicates():
+    matrix = pd.DataFrame([{
+        "Protein.Group": "P12345",
+        "Precursor.Id": "mod_truth",
+        "Modified.Sequence": "AST(UniMod:21)YK",
+        "control_r1": 10.0,
+        "control_r2": 10.0,
+        "5min_r1": 40.0,
+        "5min_r2": 40.0,
+        "15min_r1": 20.0,
+        "15min_r2": 20.0,
+        "30min_r1": 10.0,
+        "30min_r2": 10.0,
+        "60min_r1": 5.0,
+        "60min_r2": 5.0,
+    }])
+    analyzer = _analyzer(matrix)
+
+    unadjusted = analyzer.calculate_unadjusted_condition_comparisons(matrix)
+    row = unadjusted.loc[unadjusted["Condition"] == "5min"].iloc[0]
+
+    assert row["PTM_Unadjusted_Log2FC"] == 2.0
+    assert row["PTM_Unadjusted_Control_Mean"] == 10.0
+    assert row["PTM_Unadjusted_Treatment_Mean"] == 40.0
+    assert row["PTM_Unadjusted_Control_N"] == 2
+    assert row["PTM_Unadjusted_Treatment_N"] == 2
+    assert row["PTM_Unadjusted_Status"] == "computed_from_normalized_pr_replicates"
+    assert row["PTM_Unadjusted_Conventional_Log2FC_NA"] == False
+    assert row["PTM_Unadjusted_Pseudocount_Used"] == False
+
+
+def test_independent_unadjusted_contrast_is_not_reconstructed_from_adjusted_and_protein_axes():
+    matrix = pd.DataFrame([{
+        "Protein.Group": "P12345",
+        "Precursor.Id": "mod_ratio_order",
+        "Modified.Sequence": "AST(UniMod:21)YK",
+        "control_r1": 10.0,
+        "control_r2": 30.0,
+        "5min_r1": 30.0,
+        "5min_r2": 30.0,
+        "15min_r1": 30.0,
+        "15min_r2": 30.0,
+        "30min_r1": 30.0,
+        "30min_r2": 30.0,
+        "60min_r1": 30.0,
+        "60min_r2": 30.0,
+    }])
+    analyzer = _analyzer(matrix)
+    unadjusted = analyzer.calculate_unadjusted_condition_comparisons(matrix)
+    unadjusted_5min = unadjusted.loc[unadjusted["Condition"] == "5min"].iloc[0]
+
+    comparisons = pd.DataFrame([{
+        "Protein.Group": "P12345", "Precursor.Id": "mod_ratio_order",
+        "Modified.Sequence": "AST(UniMod:21)YK", "PTM_Type": "Phosphorylation",
+        "PTM_Position": "T3", "Condition": "5min", "Comparison": "5min_vs_Control",
+        "Log2FC": 0.5, "Control_Mean": 0.5, "Treatment_Mean": 0.7071067811865476,
+        "Control_Pseudocount_Used": False, "p_value": 0.2, "q_value": 0.3,
+    }])
+    protein_changes = pd.DataFrame([{
+        "Protein.Group": "P12345", "Condition": "5min", "Protein.Name": "Example protein",
+        "Gene.Name": "EXAMPLE", "Control_Mean": 10.0, "Treatment_Mean": 20.0,
+        "Log2FC": 1.0, "Fold_Change": 2.0,
+    }])
+    vector = analyzer.create_ptm_vector_data(
+        comparisons,
+        protein_changes,
+        pd.DataFrame(),
+        unadjusted_ptm_comparisons=unadjusted,
+    )
+    row = vector.iloc[0]
+
+    assert abs(unadjusted_5min["PTM_Unadjusted_Log2FC"] - 0.5849625007211562) < 1e-12
+    assert row["PTM_ProteinAdjusted_Log2FC"] == 0.5
+    assert row["Protein_Log2FC"] == 1.0
+    assert row["PTM_Reconstructed_Log2FC"] == 1.5
+    assert row["PTM_Absolute_Log2FC"] == row["PTM_Reconstructed_Log2FC"]
+    assert row["PTM_Unadjusted_Log2FC"] != row["PTM_Reconstructed_Log2FC"]
+    assert abs(row["Protein_Adjustment_Delta_Log2FC"] - (0.5 - 0.5849625007211562)) < 1e-12
+
+
+def test_unadjusted_control_nondetection_is_na_without_pseudocount():
+    matrix = pd.DataFrame([{
+        "Protein.Group": "P12345",
+        "Precursor.Id": "mod_denovo",
+        "Modified.Sequence": "AST(UniMod:21)YK",
+        "control_r1": 0.0,
+        "control_r2": 0.0,
+        "5min_r1": 20.0,
+        "5min_r2": 22.0,
+        "15min_r1": 0.0,
+        "15min_r2": 0.0,
+        "30min_r1": 0.0,
+        "30min_r2": 0.0,
+        "60min_r1": 0.0,
+        "60min_r2": 0.0,
+    }])
+    analyzer = _analyzer(matrix)
+
+    unadjusted = analyzer.calculate_unadjusted_condition_comparisons(matrix)
+    row = unadjusted.iloc[0]
+
+    assert row["Condition"] == "5min"
+    assert pd.isna(row["PTM_Unadjusted_Log2FC"])
+    assert row["PTM_Unadjusted_Status"] == "control_not_detected_conventional_log2fc_na"
+    assert row["PTM_Unadjusted_Conventional_Log2FC_NA"] == True
+    assert row["PTM_Unadjusted_Control_N"] == 0
+    assert row["PTM_Unadjusted_Pseudocount_Used"] == False
