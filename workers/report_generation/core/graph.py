@@ -20,6 +20,7 @@ from langgraph.graph import END, StateGraph
 
 from common.temporal_utils import condition_sort_key
 from .reader_authoring import (
+    audit_report_output_correctness,
     build_authoring_packet,
     references_are_citation_complete,
     render_data_only_reader_report,
@@ -30,6 +31,7 @@ from .figure_manifest import (
     attach_reader_heatmap,
     build_figure_manifest,
     compile_reader_caption,
+    prepare_reader_figure_manifest,
 )
 
 logger = logging.getLogger(__name__)
@@ -92,8 +94,12 @@ class ReportState(TypedDict, total=False):
     authoring_packet: dict                 # reader-ready evidence cards for opt-in shadow authoring
     reader_authoring_plan: dict            # scientific author section plan
     reader_authoring_validator_audit: dict # clause-level repair log; technical audit only
+    reader_narrative_continuity_audit: dict # paragraph/repetition/figure-reference audit; technical audit only
     reader_authoring_mode: str             # legacy | shadow
     evidence_reproducibility_audit_path: str  # separate technical audit sidecar
+    figure_manifest: dict                  # final insertable main figures prepared before writing
+    report_output_correctness: dict        # heading/anchor/figure/citation release gate
+    report_output_correctness_audit_path: str
 
     # v9.14: Ubiquitylation Analysis Suite (auto-built when ptm_type == 'ubiquitylation')
     ubi_chain_classifications: dict         # Module 1: per-site chain type classification
@@ -974,10 +980,21 @@ def format_citations(state: ReportState) -> dict:
             source_sections,
             collected_refs,
         )
-    figure_manifest = build_figure_manifest(
-        state,
-        citation_complete=references_are_citation_complete(collected_refs),
-    )
+    prepared_manifest = state.get("figure_manifest") or {}
+    if reader_authoring_shadow:
+        figure_manifest = (
+            dict(prepared_manifest)
+            if prepared_manifest.get("prepared_before_writer")
+            else prepare_reader_figure_manifest(
+                state,
+                citation_complete=references_are_citation_complete(collected_refs),
+            )
+        )
+    else:
+        figure_manifest = build_figure_manifest(
+            state,
+            citation_complete=references_are_citation_complete(collected_refs),
+        )
     state["figure_manifest"] = figure_manifest
     network_analysis = state.get("network_analysis", {})
 
@@ -1012,11 +1029,11 @@ def format_citations(state: ReportState) -> dict:
         section_order = [
             "abstract",
             "introduction",
-            "results",
-            "research_question_answers",
-            "discussion",
             "methods",
+            "results",
+            "discussion",
             "conclusion",
+            "research_question_answers",
         ]
     section_headings = {
         "abstract": "## Abstract",
@@ -1096,6 +1113,36 @@ def format_citations(state: ReportState) -> dict:
             else:
                 logger.warning("[FORMAT-CIT] network main section is EMPTY")
             network_supp_section = net_supp  # store for appending at end
+
+            if reader_authoring_shadow:
+                title_by_key = {
+                    "reader_quantitative_heatmap": "Quantitative Phosphorylation-Feature Landscape",
+                    "reader_temporal_profiles": "Selected Temporal Profile Clusters",
+                    "reader_interval_concordance": "Interval-wise Concordance Change Summary",
+                    "reader_protein_context": "PTM/Protein-Linked Trajectory Context",
+                }
+                verified_main = [
+                    dict(figure) for figure in figure_manifest.get("figures") or []
+                    if isinstance(figure, dict)
+                    and figure.get("placement") == "main"
+                    and figure.get("insertion_verified")
+                    and figure.get("image_path")
+                ]
+                verified_main.sort(key=lambda figure: str(figure.get("display_label") or ""))
+                for figure in verified_main:
+                    display_label = str(figure.get("display_label") or "Figure")
+                    title = str(figure.get("title") or title_by_key.get(str(figure.get("figure_key") or "")) or "Reader Figure")
+                    image_path = str(figure.get("image_path"))
+                    caption = compile_reader_caption(figure)
+                    parts.append(
+                        f"\n\n### {display_label}. {title}\n\n"
+                        f"![{title}]({image_path})\n\n"
+                        f"**Figure legend.** {caption}\n\n---\n"
+                    )
+                logger.info(
+                    "[FORMAT-CIT] Inserted %s verified reader main figure(s) from frozen manifest",
+                    len(verified_main),
+                )
 
             # Step 2 (v10.3): Co-movement → ALL to Supplementary (no main figures)
             if comovement_figures and not reader_authoring_shadow:
@@ -1248,9 +1295,7 @@ def format_citations(state: ReportState) -> dict:
                         ),
                         [],
                     )
-                if output_dir and vector_plot_raw_data and ctx_conditions and (
-                    not reader_authoring_shadow or selected_heatmap_features
-                ):
+                if not reader_authoring_shadow and output_dir and vector_plot_raw_data and ctx_conditions:
                     ctx_heatmap_path = generate_context_aware_ptm_heatmap(
                         sections=sections_for_ctx,
                         vector_plot_raw_data=vector_plot_raw_data,
@@ -1530,8 +1575,12 @@ def format_citations(state: ReportState) -> dict:
             title=title_text or _neutral_data_only_title(state),
             generated_at=_dt.now().strftime('%Y-%m-%d %H:%M'),
         )
+        data_only_processor = ReportPostProcessor()
+        data_only_processor.EXPECTED_SECTIONS = [
+            "Abstract", "Introduction", "Methods", "Results", "Discussion", "Conclusion", "References"
+        ]
         return {
-            "final_report": ReportPostProcessor().process(data_only),
+            "final_report": data_only_processor.process(data_only),
             "citation_data": {
                 "total_references": 0,
                 "reference_section": reference_section,
@@ -1613,9 +1662,40 @@ def format_citations(state: ReportState) -> dict:
     # appending the bibliography. This prevents supplementary legacy prose from
     # bypassing the R1.0 claim boundary and keeps References as the last section.
     processor = ReportPostProcessor()
+    if reader_authoring_shadow:
+        processor.EXPECTED_SECTIONS = [
+            "Abstract",
+            "Introduction",
+            "Methods",
+            "Results",
+            "Discussion",
+            "Conclusion",
+            "Research Question Answers",
+            "References",
+        ]
     processed = processor.process(all_text)
     if reference_section:
         processed += "\n\n" + reference_section
+
+    report_output_correctness = audit_report_output_correctness(
+        processed,
+        figure_manifest if reader_authoring_shadow else None,
+    )
+    state["report_output_correctness"] = report_output_correctness
+    correctness_path = None
+    if reader_authoring_shadow and state.get("output_dir"):
+        try:
+            import json as _json
+            from pathlib import Path as _Path
+
+            correctness_path = _Path(str(state.get("output_dir"))) / "report_output_correctness_audit.json"
+            correctness_path.parent.mkdir(parents=True, exist_ok=True)
+            correctness_path.write_text(
+                _json.dumps(report_output_correctness, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except Exception as correctness_error:
+            logger.warning("[reader-authoring] Could not save output correctness audit: %s", correctness_error)
 
     return {
         "final_report": processed,
@@ -1625,8 +1705,11 @@ def format_citations(state: ReportState) -> dict:
             "completion_status": citation_completion_status,
             "data_only_review_mode": not bool(resolved_refs),
             "evidence_reproducibility_audit_path": str(audit_path) if audit_path else None,
+            "report_release_status": report_output_correctness.get("status"),
         },
         "evidence_reproducibility_audit_path": str(audit_path) if audit_path else None,
+        "report_output_correctness": report_output_correctness,
+        "report_output_correctness_audit_path": str(correctness_path) if correctness_path else None,
         "figure_manifest": figure_manifest,
     }
 

@@ -8,7 +8,7 @@ from typing import Any, Mapping
 from ptm_shared.de_novo_representation import is_de_novo_representation
 
 
-FIGURE_MANIFEST_VERSION = "report_figure_manifest.v1"
+FIGURE_MANIFEST_VERSION = "report_figure_manifest.v2"
 SIGNED_PATTERN_THRESHOLD = 0.25
 """Main-figure signed temporal pattern bin.
 
@@ -60,6 +60,11 @@ class FigureEligibilityPolicy:
             if 3 <= profile_count <= 5 and 3 <= cluster_count <= 5 and bool(figure.get("labels_readable")):
                 return "main", None
             return "supplementary", "requires_preselected_profile_and_cluster_cards"
+        if kind == "reader_concordance":
+            cluster_count = int(figure.get("selected_cluster_count") or 0)
+            if 3 <= cluster_count <= 8 and bool(figure.get("labels_readable")):
+                return "main", None
+            return "suppressed", "requires_3_to_8_readable_cluster_transition_summaries"
         if kind == "reader_protein_context":
             if bool(figure.get("matched_protein_context")) and bool(figure.get("labels_readable")):
                 return "main", None
@@ -262,6 +267,288 @@ def build_figure_manifest(state: Mapping[str, Any], *, citation_complete: bool) 
     return {"contract_version": FIGURE_MANIFEST_VERSION, "figures": entries}
 
 
+def _select_cluster_figures(state: Mapping[str, Any], *, minimum: int = 3, maximum: int = 5) -> list[dict]:
+    """Select readable cluster plots by distinct temporal pattern, never magnitude."""
+    analysis = _mapping(state.get("comovement_analysis"))
+    clusters = [dict(row) for row in analysis.get("clusters") or [] if isinstance(row, Mapping)]
+    metadata: dict[str, dict] = {}
+    for cluster in clusters:
+        cluster_id = str(cluster.get("cluster_id") or cluster.get("wave_id") or cluster.get("id") or "")
+        if cluster_id:
+            metadata[cluster_id] = cluster
+    candidates: list[dict] = []
+    for record in state.get("comovement_figures") or []:
+        figure = _mapping(record)
+        if str(figure.get("type") or "") not in {"cluster_detail", "supplementary_cluster"}:
+            continue
+        path = _available_path(figure.get("path"))
+        cluster_id = str(figure.get("cluster_id") or "")
+        if not path or not cluster_id:
+            continue
+        cluster = metadata.get(cluster_id, {})
+        pattern = str(cluster.get("pattern") or cluster.get("pattern_type") or "unclassified")
+        candidates.append({
+            "path": path,
+            "cluster_id": cluster_id,
+            "pattern": pattern,
+            "caption": str(figure.get("caption") or ""),
+        })
+    candidates.sort(key=lambda item: (item["pattern"], item["cluster_id"]))
+    selected: list[dict] = []
+    seen_patterns: set[str] = set()
+    for candidate in candidates:
+        if candidate["pattern"] in seen_patterns:
+            continue
+        selected.append(candidate)
+        seen_patterns.add(candidate["pattern"])
+        if len(selected) >= maximum:
+            break
+    if len(selected) < minimum:
+        selected_ids = {item["cluster_id"] for item in selected}
+        for candidate in candidates:
+            if candidate["cluster_id"] in selected_ids:
+                continue
+            selected.append(candidate)
+            selected_ids.add(candidate["cluster_id"])
+            if len(selected) >= maximum:
+                break
+    return selected if len(selected) >= minimum else []
+
+
+def _compose_cluster_panel(selected: list[Mapping[str, Any]], output_dir: str) -> str:
+    """Stitch pre-rendered cluster plots into one bounded reader panel."""
+    if not selected or not output_dir:
+        return ""
+    try:
+        from PIL import Image, ImageDraw
+    except ImportError:
+        return ""
+    opened = []
+    try:
+        for item in selected:
+            image = Image.open(str(item.get("path"))).convert("RGB")
+            image.thumbnail((980, 650))
+            opened.append((item, image.copy()))
+        if not opened:
+            return ""
+        columns = 2
+        rows = (len(opened) + columns - 1) // columns
+        cell_width = max(image.width for _, image in opened) + 36
+        cell_height = max(image.height for _, image in opened) + 60
+        canvas = Image.new("RGB", (columns * cell_width, rows * cell_height), "white")
+        draw = ImageDraw.Draw(canvas)
+        for index, (item, image) in enumerate(opened):
+            row, column = divmod(index, columns)
+            x = column * cell_width + 18
+            y = row * cell_height + 34
+            draw.text((x, 10 + row * cell_height), f"{chr(65 + index)}  Temporal Profile Cluster {index + 1}", fill="black")
+            canvas.paste(image, (x, y))
+        path = Path(output_dir) / "reader_temporal_profile_clusters.png"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        canvas.save(path, format="PNG", optimize=True)
+        return _available_path(path)
+    except Exception:
+        return ""
+    finally:
+        for _, image in opened:
+            try:
+                image.close()
+            except Exception:
+                pass
+
+
+def _dynamic_transition_rows(state: Mapping[str, Any]) -> list[dict]:
+    temporal = _mapping(state.get("temporal_ptm_protein_analysis"))
+    dynamic = _mapping(temporal.get("dynamic_co_wave_transition"))
+    rows = temporal.get("dynamic_transition_per_wave") or dynamic.get("per_wave_summary") or []
+    return [dict(row) for row in rows if isinstance(row, Mapping)]
+
+
+def _generate_concordance_summary(
+    state: Mapping[str, Any],
+    output_dir: str,
+    selected_cluster_ids: list[str],
+) -> tuple[str, list[str]]:
+    """Plot retained/gain/loss pair events aggregated across sampled intervals."""
+    rows = _dynamic_transition_rows(state)
+    if not rows or not output_dir:
+        return "", []
+    selected_set = {str(value) for value in selected_cluster_ids if str(value)}
+    matched = [
+        row for row in rows
+        if not selected_set or str(row.get("static_wave_id") or row.get("cluster_id") or "") in selected_set
+    ]
+    if len(matched) < 3:
+        matched = sorted(rows, key=lambda row: str(row.get("static_wave_id") or row.get("cluster_id") or ""))[:8]
+    matched = matched[:8]
+    labels: list[str] = []
+    retained: list[int] = []
+    gained: list[int] = []
+    lost: list[int] = []
+    for row in matched:
+        counts = _mapping(row.get("pair_transition_type_counts"))
+        keep = int(counts.get("persistence") or 0)
+        gain = int(counts.get("recruitment") or 0) + int(counts.get("merge") or 0)
+        loss = int(counts.get("split") or 0)
+        if keep + gain + loss <= 0:
+            continue
+        labels.append(f"Cluster {len(labels) + 1}")
+        retained.append(keep)
+        gained.append(gain)
+        lost.append(loss)
+    if len(labels) < 3:
+        return "", []
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        import numpy as np
+
+        x = np.arange(len(labels))
+        fig, ax = plt.subplots(figsize=(max(8.5, len(labels) * 1.25), 5.4))
+        ax.bar(x, retained, label="Retained", color="#4C78A8")
+        ax.bar(x, gained, bottom=retained, label="Gain", color="#59A14F")
+        stacked = np.array(retained) + np.array(gained)
+        ax.bar(x, lost, bottom=stacked, label="Loss", color="#E15759")
+        ax.set_xticks(x)
+        ax.set_xticklabels(labels, rotation=35, ha="right")
+        ax.set_ylabel("Observed pair-transition events")
+        ax.set_title("Concordance Change across Adjacent Sampled Intervals")
+        ax.legend(frameon=False, ncol=3, loc="upper right")
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        ax.grid(axis="y", alpha=0.2)
+        fig.tight_layout()
+        path = Path(output_dir) / "reader_interval_concordance_change_summary.png"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(path, dpi=220, bbox_inches="tight")
+        plt.close(fig)
+        return _available_path(path), labels
+    except Exception:
+        return "", []
+
+
+def _assign_reader_figure_labels(manifest: Mapping[str, Any]) -> dict:
+    preferred = {
+        "reader_quantitative_heatmap": 0,
+        "reader_temporal_profiles": 1,
+        "reader_interval_concordance": 2,
+        "reader_protein_context": 3,
+    }
+    figures = [dict(item) for item in manifest.get("figures") or [] if isinstance(item, Mapping)]
+    main = sorted(
+        [item for item in figures if item.get("placement") == "main"],
+        key=lambda item: (preferred.get(str(item.get("figure_key")), 100), str(item.get("figure_key"))),
+    )
+    supplementary = sorted(
+        [item for item in figures if item.get("placement") == "supplementary" and item.get("image_path")],
+        key=lambda item: str(item.get("figure_key")),
+    )
+    for index, item in enumerate(main, 1):
+        item["display_label"] = f"Figure {index}"
+        item["insertion_verified"] = bool(_available_path(item.get("image_path")))
+    for index, item in enumerate(supplementary, 1):
+        item["display_label"] = f"Supplementary Figure {index}"
+    labelled = {str(item.get("figure_key")): item for item in main + supplementary}
+    result = []
+    for item in figures:
+        result.append(labelled.get(str(item.get("figure_key")), item))
+    return {
+        **dict(manifest),
+        "figures": result,
+        "main_figure_count": len(main),
+        "supplementary_figure_count": len(supplementary),
+    }
+
+
+def prepare_reader_figure_manifest(state: Mapping[str, Any], *, citation_complete: bool) -> dict:
+    """Generate and freeze insertable reader figures before scientific writing."""
+    output_dir = str(state.get("output_dir") or "")
+    manifest = build_figure_manifest(state, citation_complete=citation_complete)
+    vector_rows = [row for row in state.get("vector_plot_raw_data") or [] if isinstance(row, Mapping)]
+    network = _mapping(state.get("network_analysis"))
+    heatmap = _mapping(state.get("kinase_activity_heatmap"))
+    conditions = [str(value) for value in heatmap.get("conditions") or network.get("timepoints") or [] if str(value).strip()]
+    if not conditions:
+        conditions = sorted({str(row.get("condition") or "") for row in vector_rows if str(row.get("condition") or "")})
+    selected_features = next((list(item.get("selected_features") or []) for item in manifest.get("figures") or [] if item.get("figure_key") == "reader_quantitative_heatmap"), [])
+    if output_dir and selected_features:
+        try:
+            from report_generation.core.nodes.signal_flow_figure import generate_context_aware_ptm_heatmap
+
+            heatmap_path = generate_context_aware_ptm_heatmap(
+                sections={},
+                vector_plot_raw_data=vector_rows,
+                conditions=conditions,
+                output_dir=output_dir,
+                ptm_type=str(state.get("ptm_type") or "phosphorylation"),
+                selected_features=selected_features,
+            )
+            if heatmap_path:
+                manifest = attach_reader_heatmap(manifest, heatmap_path, selected_features)
+        except Exception:
+            pass
+
+    # Legacy temporal images remain available to the technical audit but are not
+    # exposed to the author once a reader composite is prepared.
+    for item in manifest.get("figures") or []:
+        if str(item.get("figure_key") or "").startswith("temporal."):
+            item["placement"] = "technical_audit"
+            item["suppression_reason"] = "replaced_by_reader_temporal_profile_panel"
+
+    selected_clusters = _select_cluster_figures(state)
+    profile_path = _compose_cluster_panel(selected_clusters, output_dir)
+    if profile_path:
+        profile_entry = _entry(
+            "reader_temporal_profiles", "reader_temporal_profile", profile_path,
+            question="Which selected Temporal Profile Clusters represent distinct measured phosphorylation trajectories?",
+            evidence_tier="O2", source_evidence_ids=["temporal.profile_summary"],
+            caption_facts={
+                "data_scope": "three to five preselected Temporal Profile Clusters with existing cluster-detail plots",
+                "data_unit_scope": "conventional quantified phosphorylation-feature profiles",
+                "visual_encoding": "cluster-specific sampled-timepoint trajectories and cluster summaries",
+                "interpretation_boundary": "descriptive temporal profiles; not common regulation, kinase activity, pathway function, or causal order",
+            },
+            selection_rule="distinct temporal pattern class; readable existing cluster plot; lexical cluster-ID tie-breaker",
+            selected_profile_count=len(selected_clusters),
+            selected_cluster_count=len(selected_clusters),
+            selected_cluster_ids=[str(item.get("cluster_id")) for item in selected_clusters],
+            labels_readable=True,
+            title="Selected Temporal Profile Clusters",
+        )
+        placement, reason = FigureEligibilityPolicy().classify(profile_entry, citation_complete=citation_complete)
+        profile_entry["placement"] = placement
+        profile_entry["suppression_reason"] = reason
+        manifest["figures"].append(profile_entry)
+
+    selected_ids = [str(item.get("cluster_id")) for item in selected_clusters]
+    concordance_path, concordance_ids = _generate_concordance_summary(state, output_dir, selected_ids)
+    if concordance_path:
+        concordance_entry = _entry(
+            "reader_interval_concordance", "reader_concordance", concordance_path,
+            question="How did within-cluster activity-state concordance change across adjacent sampled intervals?",
+            evidence_tier="O2", source_evidence_ids=["temporal.concordance_summary"],
+            caption_facts={
+                "data_scope": "observed within-cluster pair-transition events aggregated across adjacent sampled intervals",
+                "data_unit_scope": "eligible within-cluster feature pairs",
+                "visual_encoding": "stacked retained, gain and loss event counts by Temporal Profile Cluster",
+                "interpretation_boundary": "Concordance Change is descriptive and does not establish common regulation, causal order, kinase switching, or pathway rewiring",
+            },
+            selection_rule="same selected cluster set as the temporal-profile panel when evaluable; otherwise lexical cluster-ID subset",
+            selected_cluster_count=len(concordance_ids),
+            selected_cluster_ids=concordance_ids,
+            labels_readable=True,
+            title="Interval-wise Concordance Change Summary",
+        )
+        placement, reason = FigureEligibilityPolicy().classify(concordance_entry, citation_complete=citation_complete)
+        concordance_entry["placement"] = placement
+        concordance_entry["suppression_reason"] = reason
+        manifest["figures"].append(concordance_entry)
+
+    manifest["prepared_before_writer"] = True
+    return _assign_reader_figure_labels(manifest)
+
+
 def attach_reader_heatmap(manifest: Mapping[str, Any], image_path: str, selected_features: list[Mapping[str, Any]]) -> dict:
     """Add the narrow conventional selected-feature heatmap and classify it."""
     result = {
@@ -297,10 +584,17 @@ def figure_cards_from_manifest(manifest: Mapping[str, Any]) -> list[dict]:
     """Return only eligible reader-facing figure cards for the scientific author."""
     cards: list[dict] = []
     for figure in manifest.get("figures") or []:
-        if not isinstance(figure, Mapping) or figure.get("placement") not in {"main", "supplementary"}:
+        if (
+            not isinstance(figure, Mapping)
+            or figure.get("placement") != "main"
+            or not bool(figure.get("insertion_verified"))
+        ):
             continue
         cards.append({
             "figure_key": figure.get("figure_key"),
+            "display_label": figure.get("display_label"),
+            "image_path": figure.get("image_path"),
+            "title": figure.get("title"),
             "placement": figure.get("placement"),
             "question": figure.get("research_question"),
             "reader_summary": (

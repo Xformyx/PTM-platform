@@ -14,7 +14,7 @@ import re
 from typing import Any, Iterable, Mapping
 
 
-AUTHORING_PACKET_VERSION = "reader_authoring_packet.v1"
+AUTHORING_PACKET_VERSION = "reader_authoring_packet.v2"
 VALID_CLAIM_TIERS = {"O1", "O2", "C1", "L1", "H1", "D1"}
 
 # The reader-facing manuscript has one stable story arc.  These are authoring
@@ -73,6 +73,10 @@ _INTERNAL_TERM_RE = re.compile(
     flags=re.IGNORECASE,
 )
 _EVIDENCE_MARKER_RE = re.compile(r"\s*\[EVID:([A-Za-z0-9_.:-]+)\]")
+_MALFORMED_EVIDENCE_MARKER_RE = re.compile(
+    r"\s*\[EVID(?:\s*:\s*(?:[A-Za-z0-9_.:-]+|<[^>\n]*>)?)?\]?",
+    re.IGNORECASE,
+)
 _REFERENCE_MARKER_RE = re.compile(r"\[REF:(pmid:[^\]]+|doi:[^\]]+|title:[^\]]+)\]", re.IGNORECASE)
 _DIRECT_OR_CAUSAL_RE = re.compile(
     r"\b(?:direct(?:ly)?|causes?|drives?|proves?|establishes?|"
@@ -483,17 +487,16 @@ def build_authoring_packet(
     has_traceable_literature = bool(reference_cards)
     figure_manifest = _as_mapping(state.get("figure_manifest"))
     figure_cards = []
-    main_number = 1
-    supplementary_number = 1
     for figure in figure_manifest.get("figures") or []:
-        if not isinstance(figure, Mapping) or figure.get("placement") not in {"main", "supplementary"}:
+        if (
+            not isinstance(figure, Mapping)
+            or figure.get("placement") != "main"
+            or not bool(figure.get("insertion_verified"))
+            or not str(figure.get("image_path") or "").strip()
+        ):
             continue
-        placement = str(figure.get("placement"))
-        figure_label = f"Figure {main_number}" if placement == "main" else f"Supplementary Figure {supplementary_number}"
-        if placement == "main":
-            main_number += 1
-        else:
-            supplementary_number += 1
+        placement = "main"
+        figure_label = str(figure.get("display_label") or f"Figure {len(figure_cards) + 1}")
         figure_cards.append({
             "figure_key": figure.get("figure_key"),
             "figure_label": figure_label,
@@ -529,7 +532,7 @@ def build_authoring_packet(
         "section_claim_budget": section_claim_budget,
         "section_story_contract": story_contract,
         "authoring_rules": {
-            "required_evidence_anchor": "[EVID:<evidence_id>] after each factual sentence; this anchor is removed before reader rendering.",
+            "required_evidence_anchor": "End each factual paragraph with one or more complete evidence markers copied exactly from supplied cards, for example [EVID:study.frame]. Never emit an incomplete marker or a placeholder.",
             "citation_marker": "Use [REF:pmid:*], [REF:doi:*], or [REF:title:*] only for supplied literature cards.",
             "directness": "Do not claim direct kinase–substrate regulation, causal propagation, catalytic activation, isoform-specific attribution, or perturbation outcome.",
             "de_novo": "Control-undetected rows are detection/LOD context only and must not be placed on conventional Log2FC axes or magnitude rankings.",
@@ -552,7 +555,7 @@ def format_authoring_packet_for_llm(packet: Mapping[str, Any], section_type: str
         "Use only these evidence cards and citations; do not add background knowledge.",
         "Write connected paragraphs, not an evidence-card inventory, a technical status list, or a bullet summary.",
         "Follow the stated narrative sequence so this section continues the same study question as the rest of the manuscript.",
-        "Every factual sentence must end with one supplied [EVID:<id>] marker. These markers will be removed before rendering.",
+        "End each factual paragraph with complete [EVID:exact.supplied.id] markers copied from the cards used in that paragraph. Never emit [EVID:<id>], [EVID:, or an invented ID. These draft-only markers are removed before rendering.",
         "Use supplied [REF:*] markers for every literature-context sentence. Never cite a source not listed below.",
         "Do not expose implementation codes, raw diagnostic field names, serialized status strings, or temporal internal identifiers.",
         "Do not make direct/causal/activation/isoform/perturbation claims. Use candidate-context or testable-hypothesis language where appropriate.",
@@ -585,6 +588,30 @@ def format_authoring_packet_for_llm(packet: Mapping[str, Any], section_type: str
                 f"question={figure.get('question')}; use at most one eligible figure per paragraph."
             )
     if plan:
+        lines.extend([
+            "",
+            "Manuscript-wide narrative spine:",
+            "- Central question: " + _clean_text(plan.get("central_question")),
+            "- Bounded central answer: " + _clean_text(plan.get("central_answer")),
+        ])
+        section_finding_ids = list(_as_mapping(plan.get("section_finding_map")).get(section_type) or [])
+        if section_finding_ids:
+            lines.append("- Findings assigned to this section: " + ", ".join(str(item) for item in section_finding_ids))
+        for finding in plan.get("key_findings") or []:
+            if not isinstance(finding, Mapping) or (section_finding_ids and finding.get("finding_id") not in section_finding_ids):
+                continue
+            lines.append(
+                f"  - {finding.get('finding_id')}: observation={finding.get('observation')}; "
+                f"evidence={', '.join(finding.get('evidence_ids') or [])}; "
+                f"figures={', '.join(finding.get('figure_keys') or []) or 'none'}; "
+                f"boundary={finding.get('alternative_explanation') or 'retain the stated claim ceiling'}; "
+                f"next test={finding.get('next_test')}"
+            )
+        bridge = _as_mapping(plan.get("bridge_commitments")).get(section_type)
+        if bridge:
+            lines.append("- Required section bridge: " + _clean_text(bridge))
+        if plan.get("do_not_repeat"):
+            lines.append("- Do not repeat: " + "; ".join(_clean_text(item) for item in plan.get("do_not_repeat") or []))
         claim_map = _as_mapping(plan.get("sections")).get(section_type)
         if claim_map:
             lines.extend(["", "Section plan:", _clean_text(claim_map)])
@@ -609,10 +636,99 @@ def deterministic_authoring_plan(packet: Mapping[str, Any]) -> dict:
         default_sections[section] = str(
             contract.get("sequence") or default_sections.get(section) or "study frame → observation → bounded interpretation"
         )
+    study_card = next(
+        (card for card in cards if isinstance(card, Mapping) and card.get("category") == "study_frame"),
+        {},
+    )
+    central_question = _clean_text(study_card.get("reader_summary")) or (
+        "How do the recorded phosphorylation and linked protein-abundance measurements change across the sampled study design?"
+    )
+    category_priority = (
+        "quantitative_landscape",
+        "temporal_profile",
+        "quantitative_observation",
+        "kinase_context",
+        "candidate_discovery",
+    )
+    selected_cards: list[Mapping[str, Any]] = []
+    for category in category_priority:
+        candidate = next(
+            (
+                card for card in cards
+                if isinstance(card, Mapping)
+                and card.get("category") == category
+                and "not generated" not in str(card.get("reader_summary") or "").lower()
+            ),
+            None,
+        )
+        if candidate:
+            selected_cards.append(candidate)
+        if len(selected_cards) >= 3:
+            break
+    figure_cards = [figure for figure in packet.get("figure_cards") or [] if isinstance(figure, Mapping)]
+
+    def figure_keys_for(card: Mapping[str, Any]) -> list[str]:
+        category = str(card.get("category") or "")
+        desired = {
+            "quantitative_landscape": {"reader_quantitative_heatmap"},
+            "temporal_profile": {"reader_temporal_profiles", "reader_interval_concordance"},
+            "quantitative_observation": {"reader_protein_context"},
+        }.get(category, set())
+        return [str(figure.get("figure_key")) for figure in figure_cards if figure.get("figure_key") in desired]
+
+    def next_test_for(category: str) -> str:
+        if category == "temporal_profile":
+            return "repeat the time course with biological replicates and denser sampling around the selected profile changes"
+        if category == "quantitative_observation":
+            return "test the matched PTM/protein pattern with an explicitly paired quantitative contrast model"
+        if category in {"kinase_context", "candidate_discovery"}:
+            return "evaluate the candidate in a matched vehicle–stimulus–intervention time course without changing the discovery result"
+        return "repeat the measured contrast in an independent experiment using the same preprocessing and reporting contract"
+
+    key_findings = []
+    for index, card in enumerate(selected_cards, 1):
+        category = str(card.get("category") or "")
+        key_findings.append({
+            "finding_id": f"F{index}",
+            "category": category,
+            "observation": _clean_text(card.get("reader_summary")),
+            "evidence_ids": [str(item) for item in card.get("evidence_ids") or []],
+            "figure_keys": figure_keys_for(card),
+            "citation_ids": [str(item) for item in card.get("citation_ids") or []],
+            "allowed_interpretation": "retain the card claim tier and reader-facing verbs",
+            "alternative_explanation": _clean_text(card.get("counterevidence")) or "the observed pattern can reflect multiple biological and measurement processes",
+            "next_test": next_test_for(category),
+        })
+    central_answer = " ".join(str(finding.get("observation") or "") for finding in key_findings[:3]).strip()
+    finding_ids = [str(finding.get("finding_id")) for finding in key_findings]
     return {
         "source": "deterministic_fallback",
         "sections": default_sections,
         "available_categories": sorted(categories),
+        "central_question": central_question,
+        "central_answer": central_answer or "The available reader-safe evidence supports a bounded descriptive answer and a defined next experiment.",
+        "key_findings": key_findings,
+        "section_finding_map": {
+            "abstract": finding_ids,
+            "introduction": [],
+            "methods": [],
+            "results": finding_ids,
+            "discussion": finding_ids,
+            "conclusion": finding_ids,
+            "research_question_answers": finding_ids,
+        },
+        "bridge_commitments": {
+            "introduction": "End with the exact current-study objective that Results addresses.",
+            "methods": "End by stating that the analysis separates measured patterns, candidate context and testable hypotheses.",
+            "results": "End with the bounded unresolved interpretation that Discussion evaluates.",
+            "discussion": "End with the single most discriminating next experiment shared by the selected findings.",
+            "conclusion": "Return to the central question without introducing a new number, pathway or candidate.",
+        },
+        "do_not_repeat": [
+            "raw event totals outside the one Results paragraph where they are first defined",
+            "the same no-call or evidence-unavailable sentence in more than one section",
+            "figure descriptions without adding section-specific interpretation",
+        ],
     }
 
 
@@ -630,11 +746,38 @@ def apply_llm_authoring_plan(planned_text: str, fallback: Mapping[str, Any] | No
         "source": str(base.get("source") or "deterministic_fallback"),
         "sections": sections,
         "available_categories": list(base.get("available_categories") or []),
+        "central_question": str(base.get("central_question") or ""),
+        "central_answer": str(base.get("central_answer") or ""),
+        "key_findings": list(base.get("key_findings") or []),
+        "section_finding_map": dict(_as_mapping(base.get("section_finding_map"))),
+        "bridge_commitments": dict(_as_mapping(base.get("bridge_commitments"))),
+        "do_not_repeat": list(base.get("do_not_repeat") or []),
     }
     text = str(planned_text or "").strip()
     if not text:
         return result
     result["gemini_plan"] = text
+    json_text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.IGNORECASE).strip()
+    try:
+        parsed_json = json.loads(json_text)
+    except Exception:
+        parsed_json = None
+    if isinstance(parsed_json, Mapping):
+        parsed_sections = _as_mapping(parsed_json.get("sections"))
+        if len(parsed_sections) >= 3:
+            sections.update({str(key): _clean_text(value) for key, value in parsed_sections.items() if _clean_text(value)})
+            result["sections"] = sections
+            result["source"] = "gemini_structured_with_deterministic_evidence_spine"
+        # The model may reorder supplied finding IDs, but it may not invent or
+        # rewrite their factual observations/evidence bindings.
+        known_ids = {str(item.get("finding_id")) for item in result["key_findings"] if isinstance(item, Mapping)}
+        section_map = _as_mapping(parsed_json.get("section_finding_map"))
+        for section, ids in section_map.items():
+            if isinstance(ids, list):
+                filtered = [str(item) for item in ids if str(item) in known_ids]
+                if filtered:
+                    result["section_finding_map"][str(section)] = filtered
+        return result
     matches = list(_PLAN_SECTION_RE.finditer(text))
     parsed: dict[str, str] = {}
     for index, match in enumerate(matches):
@@ -696,6 +839,11 @@ def _split_sentences(text: str) -> list[str]:
     return [sentence.strip() for sentence in re.split(r"(?<=[.!?])\s+", text or "") if sentence.strip()]
 
 
+def _split_paragraphs(text: str) -> list[str]:
+    """Return non-empty manuscript paragraphs without flattening their order."""
+    return [paragraph.strip() for paragraph in re.split(r"\n\s*\n+", text or "") if paragraph.strip()]
+
+
 def validate_and_repair_sections(
     sections: Mapping[str, Any],
     packet: Mapping[str, Any],
@@ -722,67 +870,79 @@ def validate_and_repair_sections(
             validated[section_name] = content
             continue
         allowed_tiers = set(budgets.get(section_name) or ["O1", "O2"])
-        retained: list[str] = []
-        for sentence_index, sentence in enumerate(_split_sentences(content), 1):
-            if sentence.startswith("#"):
-                retained.append(sentence)
+        repaired_paragraphs: list[str] = []
+        sentence_index = 0
+        for paragraph_index, paragraph in enumerate(_split_paragraphs(content), 1):
+            if paragraph.startswith("#") and "\n" not in paragraph:
+                repaired_paragraphs.append(paragraph)
                 continue
-            evidence_ids = _EVIDENCE_MARKER_RE.findall(sentence)
-            citations = [item.lower() for item in _REFERENCE_MARKER_RE.findall(sentence)]
-            actions: list[str] = []
-            reasons: list[str] = []
-            invalid_evidence = [item for item in evidence_ids if item not in known_evidence]
-            invalid_citations = [item for item in citations if item not in known_references]
-            if invalid_evidence:
-                sentence = _EVIDENCE_MARKER_RE.sub("", sentence)
-                actions.append("remove_invalid_evidence_anchor")
-                reasons.append("unknown_evidence_id")
-                evidence_ids = [item for item in evidence_ids if item in known_evidence]
-            if invalid_citations:
-                sentence = _REFERENCE_MARKER_RE.sub("", sentence)
-                actions.append("remove_invalid_citation")
-                reasons.append("unknown_citation_id")
-                citations = [item for item in citations if item in known_references]
-            if _INTERNAL_TERM_RE.search(sentence):
-                sentence = _clean_text(sentence)
-                actions.append("remove_internal_terminology")
-                reasons.append("reader_body_internal_leakage")
-            direct_claim = bool(_DIRECT_OR_CAUSAL_RE.search(sentence))
-            if direct_claim and "D1" not in allowed_tiers:
-                sentence = _replace_unsafe_terms(sentence)
-                actions.append("rewrite_claim_to_candidate_context")
-                reasons.append("directness_or_causality_claim_exceeds_budget")
-            if _DENOVO_AXIS_RE.search(sentence):
-                sentence = (
-                    "Control-undetected features were retained as detection/LOD context and were not used on conventional "
-                    "quantitative axes or magnitude rankings."
-                )
-                actions.append("rewrite_de_novo_axis_claim")
-                reasons.append("de_novo_conventional_axis_or_ranking")
-            if _OCCUPANCY_RE.search(sentence) and not re.search(r"\bnot\b", sentence, flags=re.IGNORECASE):
-                sentence = _OCCUPANCY_RE.sub("protein-abundance-adjusted relative PTM ratio", sentence)
-                actions.append("rewrite_quantitation_interpretation")
-                reasons.append("uncalibrated_occupancy_or_stoichiometry")
-            if _LITERATURE_SIGNAL_RE.search(sentence) and not citations:
-                # Preserve current-study observations but remove an unsupported external-context clause.
-                clauses = re.split(r"(?<=[,;:])\s+|\s+(?=whereas\b|while\b)", sentence, flags=re.IGNORECASE)
-                keep = [clause for clause in clauses if not _LITERATURE_SIGNAL_RE.search(clause)]
-                sentence = " ".join(keep).strip()
-                actions.append("remove_uncited_literature_clause")
-                reasons.append("literature_context_without_stable_citation")
-            if sentence:
-                retained.append(sentence.strip())
-            audit_entries.append({
-                "section": section_name,
-                "sentence_index": sentence_index,
-                "evidence_ids": evidence_ids,
-                "citation_ids": citations,
-                "claim_tier_budget": sorted(allowed_tiers),
-                "validator_action": actions or ["retain"],
-                "reason_code": reasons or ["within_contract"],
-                "retained": bool(sentence),
-            })
-        validated[section_name] = "\n\n".join(retained)
+            retained_sentences: list[str] = []
+            for sentence in _split_sentences(paragraph):
+                sentence_index += 1
+                evidence_ids = _EVIDENCE_MARKER_RE.findall(sentence)
+                citations = [item.lower() for item in _REFERENCE_MARKER_RE.findall(sentence)]
+                actions: list[str] = []
+                reasons: list[str] = []
+                invalid_evidence = [item for item in evidence_ids if item not in known_evidence]
+                invalid_citations = [item for item in citations if item not in known_references]
+                if invalid_evidence:
+                    sentence = _EVIDENCE_MARKER_RE.sub("", sentence)
+                    actions.append("remove_invalid_evidence_anchor")
+                    reasons.append("unknown_evidence_id")
+                    evidence_ids = [item for item in evidence_ids if item in known_evidence]
+                if invalid_citations:
+                    sentence = _REFERENCE_MARKER_RE.sub("", sentence)
+                    actions.append("remove_invalid_citation")
+                    reasons.append("unknown_citation_id")
+                    citations = [item for item in citations if item in known_references]
+                if _INTERNAL_TERM_RE.search(sentence):
+                    sentence = _clean_text(sentence)
+                    actions.append("remove_internal_terminology")
+                    reasons.append("reader_body_internal_leakage")
+                direct_claim = bool(_DIRECT_OR_CAUSAL_RE.search(sentence))
+                if direct_claim and "D1" not in allowed_tiers:
+                    sentence = _replace_unsafe_terms(sentence)
+                    actions.append("rewrite_claim_to_candidate_context")
+                    reasons.append("directness_or_causality_claim_exceeds_budget")
+                if _DENOVO_AXIS_RE.search(sentence):
+                    sentence = (
+                        "Control-undetected features were retained as detection/LOD context and were not used on conventional "
+                        "quantitative axes or magnitude rankings."
+                    )
+                    actions.append("rewrite_de_novo_axis_claim")
+                    reasons.append("de_novo_conventional_axis_or_ranking")
+                if _OCCUPANCY_RE.search(sentence) and not re.search(r"\bnot\b", sentence, flags=re.IGNORECASE):
+                    sentence = _OCCUPANCY_RE.sub("protein-abundance-adjusted relative PTM ratio", sentence)
+                    actions.append("rewrite_quantitation_interpretation")
+                    reasons.append("uncalibrated_occupancy_or_stoichiometry")
+                if _LITERATURE_SIGNAL_RE.search(sentence) and not citations:
+                    # Preserve current-study observations but remove an unsupported external-context clause.
+                    clauses = re.split(r"(?<=[,;:])\s+|\s+(?=whereas\b|while\b)", sentence, flags=re.IGNORECASE)
+                    keep = [clause for clause in clauses if not _LITERATURE_SIGNAL_RE.search(clause)]
+                    sentence = " ".join(keep).strip()
+                    actions.append("remove_uncited_literature_clause")
+                    reasons.append("literature_context_without_stable_citation")
+                if _MALFORMED_EVIDENCE_MARKER_RE.search(sentence):
+                    sentence = _MALFORMED_EVIDENCE_MARKER_RE.sub("", sentence)
+                    actions.append("remove_malformed_evidence_anchor")
+                    reasons.append("malformed_draft_only_anchor")
+                sentence = re.sub(r"\s+([,.;:!?])", r"\1", sentence).strip()
+                if sentence:
+                    retained_sentences.append(sentence)
+                audit_entries.append({
+                    "section": section_name,
+                    "paragraph_index": paragraph_index,
+                    "sentence_index": sentence_index,
+                    "evidence_ids": evidence_ids,
+                    "citation_ids": citations,
+                    "claim_tier_budget": sorted(allowed_tiers),
+                    "validator_action": actions or ["retain"],
+                    "reason_code": reasons or ["within_contract"],
+                    "retained": bool(sentence),
+                })
+            if retained_sentences:
+                repaired_paragraphs.append(" ".join(retained_sentences))
+        validated[section_name] = "\n\n".join(repaired_paragraphs)
     audit = {
         "contract_version": "reader_authoring_validator.v1",
         "packet_version": packet.get("contract_version"),
@@ -796,7 +956,113 @@ def validate_and_repair_sections(
 def strip_authoring_anchors(text: str) -> str:
     """Remove draft-only evidence anchors after validation, preserving citations."""
     text = _EVIDENCE_MARKER_RE.sub("", text or "")
+    text = _MALFORMED_EVIDENCE_MARKER_RE.sub("", text)
+    text = re.sub(r"\s+([,.;:!?])", r"\1", text)
     return re.sub(r"[ \t]{2,}", " ", text).strip()
+
+
+_MAJOR_HEADING_ALIASES = {
+    "abstract": "abstract",
+    "introduction": "introduction",
+    "background": "introduction",
+    "methods": "methods",
+    "materials and methods": "methods",
+    "results": "results",
+    "findings": "results",
+    "discussion": "discussion",
+    "conclusion": "conclusion",
+    "conclusions": "conclusion",
+    "research question answers": "research_question_answers",
+    "appendix: research question answers": "research_question_answers",
+}
+
+
+def audit_report_output_correctness(text: str, figure_manifest: Mapping[str, Any] | None = None) -> dict:
+    """Audit final reader output without changing scientific content.
+
+    The gate checks only rendering/contract correctness.  It does not promote a
+    biological claim or assert that an analysis layer was scientifically valid.
+    """
+    body = str(text or "")
+    major_sequence: list[str] = []
+    heading_labels: list[str] = []
+    for match in re.finditer(r"(?m)^##\s+(.+?)\s*$", body):
+        label = re.sub(r"[*_`]", "", match.group(1)).strip().rstrip(".:")
+        canonical = _MAJOR_HEADING_ALIASES.get(label.lower())
+        if canonical:
+            major_sequence.append(canonical)
+            heading_labels.append(label)
+    duplicate_headings = sorted(
+        heading for heading, count in __import__("collections").Counter(major_sequence).items() if count > 1
+    )
+    expected_order = [
+        "abstract", "introduction", "methods", "results", "discussion", "conclusion", "research_question_answers",
+    ]
+    order_rank = {name: index for index, name in enumerate(expected_order)}
+    observed_ranks = [order_rank[name] for name in major_sequence if name in order_rank]
+    heading_order_valid = observed_ranks == sorted(observed_ranks)
+
+    declared_figures = {
+        re.sub(r"\s+", " ", match.group(1)).strip().lower()
+        for match in re.finditer(r"(?mi)^###\s+((?:Supplementary\s+)?Figure\s+\d+[A-Z]?)\b", body)
+    }
+    mentioned_figures = {
+        re.sub(r"\s+", " ", match.group(0)).strip().lower()
+        for match in re.finditer(r"\b(?:Supplementary\s+)?Figure\s+\d+[A-Z]?\b", body, flags=re.IGNORECASE)
+    }
+    phantom_figure_mentions = sorted(mentioned_figures - declared_figures)
+    missing_image_paths: list[str] = []
+    for image_match in re.finditer(r"!\[[^\]]*\]\(([^)]+)\)", body):
+        path = image_match.group(1).strip()
+        if path.startswith(("http://", "https://")):
+            continue
+        try:
+            if not __import__("pathlib").Path(path).exists():
+                missing_image_paths.append(path)
+        except OSError:
+            missing_image_paths.append(path)
+
+    manifest = _as_mapping(figure_manifest)
+    eligible_missing_paths = sorted(
+        str(figure.get("figure_key") or "unknown")
+        for figure in manifest.get("figures") or []
+        if isinstance(figure, Mapping)
+        and figure.get("placement") in {"main", "supplementary"}
+        and not str(figure.get("image_path") or "").strip()
+    )
+    malformed_anchor_count = len(re.findall(r"\[EVID\b|\[EVID:", body, flags=re.IGNORECASE))
+    unresolved_reference_marker_count = len(re.findall(r"\[REF:", body, flags=re.IGNORECASE))
+    reason_codes: list[str] = []
+    if malformed_anchor_count:
+        reason_codes.append("malformed_evidence_anchor")
+    if unresolved_reference_marker_count:
+        reason_codes.append("unresolved_reference_marker")
+    if duplicate_headings:
+        reason_codes.append("duplicate_major_heading")
+    if not heading_order_valid:
+        reason_codes.append("invalid_major_heading_order")
+    if phantom_figure_mentions:
+        reason_codes.append("phantom_figure_reference")
+    if missing_image_paths:
+        reason_codes.append("missing_rendered_figure_path")
+    if eligible_missing_paths:
+        reason_codes.append("eligible_manifest_figure_missing_path")
+    return {
+        "contract_version": "reader_report_output_correctness.v1",
+        "status": "blocked_for_review" if reason_codes else "release_candidate",
+        "reason_codes": reason_codes,
+        "major_heading_sequence": major_sequence,
+        "major_heading_labels": heading_labels,
+        "duplicate_major_headings": duplicate_headings,
+        "major_heading_order_valid": heading_order_valid,
+        "declared_figure_labels": sorted(declared_figures),
+        "mentioned_figure_labels": sorted(mentioned_figures),
+        "phantom_figure_mentions": phantom_figure_mentions,
+        "missing_image_paths": sorted(set(missing_image_paths)),
+        "eligible_manifest_figures_missing_path": eligible_missing_paths,
+        "malformed_evidence_anchor_count": malformed_anchor_count,
+        "unresolved_reference_marker_count": unresolved_reference_marker_count,
+    }
 
 
 def _summaries_by_category(packet: Mapping[str, Any], *categories: str, limit: int = 4) -> list[str]:
@@ -962,9 +1228,9 @@ def render_data_only_reader_report(
         f"*Generated: {generated_at}*",
         "## Abstract\n\n" + render_reader_section_fallback("abstract", packet),
         "## Introduction\n\n" + render_reader_section_fallback("introduction", packet),
+        "## Methods\n\n" + render_reader_section_fallback("methods", packet),
         "## Results\n\n" + render_reader_section_fallback("results", packet),
         "## Discussion\n\n" + render_reader_section_fallback("discussion", packet),
-        "## Methods\n\n" + render_reader_section_fallback("methods", packet),
         "## Conclusion\n\n" + render_reader_section_fallback("conclusion", packet),
         "## References\n\n"
         "Traceable publication metadata were not available for this Report. No external biological or prior-work claims are included.",
@@ -974,6 +1240,7 @@ def render_data_only_reader_report(
 def assess_narrative_continuity(
     sections: Mapping[str, Any],
     packet: Mapping[str, Any],
+    plan: Mapping[str, Any] | None = None,
 ) -> dict:
     """Audit narrative depth and the shared study arc without rewriting prose.
 
@@ -987,16 +1254,28 @@ def assess_narrative_continuity(
         if isinstance(card, Mapping)
     }
     audits: dict[str, dict] = {}
+    normalized_sentence_locations: dict[str, list[str]] = {}
     for section, rule in contract.items():
         text = str(_as_mapping(sections).get(section) or "").strip()
         words = len(re.findall(r"\b\w+[\w-]*\b", text))
-        paragraphs = len([item for item in re.split(r"\n\s*\n", text) if item.strip()])
+        paragraph_values = [item.strip() for item in re.split(r"\n\s*\n", text) if item.strip() and not item.lstrip().startswith("#")]
+        paragraphs = len(paragraph_values)
+        paragraph_sentence_counts = [len(_split_sentences(item)) for item in paragraph_values]
+        one_sentence_paragraph_fraction = (
+            sum(count <= 1 for count in paragraph_sentence_counts) / len(paragraph_sentence_counts)
+            if paragraph_sentence_counts else 0.0
+        )
+        for sentence in _split_sentences(text):
+            normalized = re.sub(r"[^a-z0-9]+", " ", sentence.lower()).strip()
+            if len(normalized.split()) >= 8:
+                normalized_sentence_locations.setdefault(normalized, []).append(section)
         categories = [str(item) for item in rule.get("categories") or []]
         usable_categories = [item for item in categories if item in observed_categories]
         has_internal_leak = bool(_INTERNAL_TERM_RE.search(text))
         audits[section] = {
             "word_count": words,
             "paragraph_count": paragraphs,
+            "one_sentence_paragraph_fraction": round(one_sentence_paragraph_fraction, 4),
             "target_minimum_words": int(rule.get("minimum_words") or 0),
             "story_sequence": str(rule.get("sequence") or ""),
             "available_story_categories": usable_categories,
@@ -1004,17 +1283,45 @@ def assess_narrative_continuity(
             "status": (
                 "missing" if not text else
                 "review_for_depth" if words < max(60, int(rule.get("minimum_words") or 0) // 2) else
+                "review_for_fragmented_paragraphs" if paragraphs >= 4 and one_sentence_paragraph_fraction > 0.75 else
                 "review_for_internal_leakage" if has_internal_leak else
                 "present"
             ),
         }
+    repeated_across_sections = [
+        {"sentence": sentence, "sections": sorted(set(locations))}
+        for sentence, locations in normalized_sentence_locations.items()
+        if len(set(locations)) > 1
+    ]
+    verified_labels = {
+        str(figure.get("figure_label") or "").lower()
+        for figure in packet.get("figure_cards") or []
+        if isinstance(figure, Mapping) and str(figure.get("figure_label") or "").strip()
+    }
+    mentioned_labels = {
+        match.group(0).lower()
+        for text in _as_mapping(sections).values()
+        for match in re.finditer(r"\bFigure\s+\d+[A-Z]?\b", str(text), flags=re.IGNORECASE)
+    }
     return {
-        "contract_version": "reader_narrative_continuity_audit.v1",
+        "contract_version": "reader_narrative_continuity_audit.v2",
+        "manuscript_plan_source": str(_as_mapping(plan).get("source") or "unavailable"),
+        "central_question": str(_as_mapping(plan).get("central_question") or ""),
+        "selected_finding_ids": [
+            str(item.get("finding_id")) for item in _as_mapping(plan).get("key_findings") or [] if isinstance(item, Mapping)
+        ],
         "sections": audits,
+        "repeated_sentences_across_sections": repeated_across_sections,
+        "unverified_figure_mentions": sorted(mentioned_labels - verified_labels),
         "review_required_sections": [
             section for section, audit in audits.items()
             if audit["status"] != "present"
         ],
+        "manuscript_review_required": bool(
+            any(audit["status"] != "present" for audit in audits.values())
+            or repeated_across_sections
+            or (mentioned_labels - verified_labels)
+        ),
     }
 
 

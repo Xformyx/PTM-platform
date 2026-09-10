@@ -57,7 +57,7 @@ from report_generation.core.reader_authoring import (
     strip_authoring_anchors,
     validate_and_repair_sections,
 )
-from report_generation.core.figure_manifest import build_figure_manifest
+from report_generation.core.figure_manifest import prepare_reader_figure_manifest
 
 logger = logging.getLogger(__name__)
 
@@ -433,9 +433,11 @@ def run_section_writing(state: dict) -> dict:
         candidate_limit=20,
     )
     if reader_authoring_shadow:
-        # A preliminary manifest contains only known figure candidates and is
-        # updated with an actual image path by the final renderer.
-        state["figure_manifest"] = build_figure_manifest(
+        # Prepare actual insertable figures before planning or section writing.
+        # The scientific author and final renderer must consume the same frozen
+        # manifest rather than independently guessing which figures exist.
+        state["temporal_report_evidence_packet"] = temporal_evidence_packet
+        state["figure_manifest"] = prepare_reader_figure_manifest(
             state,
             citation_complete=references_are_citation_complete(state.get("collected_references")),
         )
@@ -486,9 +488,13 @@ def run_section_writing(state: dict) -> dict:
             plan_prompt = (
                 format_authoring_packet_for_llm(authoring_packet, "introduction", authoring_plan)
                 + "\n\n=== SCIENTIFIC AUTHOR PLAN ===\n"
-                "Write a concise six-section plan for Abstract, Introduction, Results, Discussion, Methods, and Conclusion. "
-                "For each section, state its logical role and the supplied evidence-card category it should use. "
-                "Do not introduce external knowledge, directness claims, or citations not present in the packet.\n"
+                "Return one JSON object with keys: central_question, central_answer, key_finding_ids, "
+                "section_finding_map, bridge_commitments, do_not_repeat, and sections. "
+                "Use only the supplied deterministic finding IDs and evidence/figure bindings; do not rewrite their observations. "
+                "The sections object must contain Abstract, Introduction, Methods, Results, Discussion, Conclusion, and Research Question Answers roles. "
+                "Results must introduce each assigned finding once; Discussion must interpret the same findings against supplied citations and alternatives; "
+                "Conclusion must answer the central question without adding a new number or candidate. "
+                "Do not introduce external knowledge, directness claims, or citations not present in the packet. Output JSON only.\n"
                 "=== END SCIENTIFIC AUTHOR PLAN ==="
             )
             planned = llm.generate_with_retry(
@@ -1296,9 +1302,11 @@ def run_section_writing(state: dict) -> dict:
         content = _stabilize_section_citations(content, local_references)
         return section_type, content
 
-    # ── Phase 1: independent sections (parallel) ──
-    # intro, results, methods have no cross-dependencies
-    phase1_set = {"introduction", "results", "methods"}
+    # ── Phase 1: framing sections (parallel) ──
+    # Introduction and Methods share the same frozen manuscript plan. Results is
+    # intentionally written afterwards so Discussion/Conclusion/Abstract can
+    # depend on one final finding registry and one final figure manifest.
+    phase1_set = {"introduction", "methods"}
     phase1_sections = [s for s in SECTION_ORDER if s in phase1_set]
 
     workers = min(_LLM_WORKERS, len(phase1_sections))
@@ -1316,8 +1324,17 @@ def run_section_writing(state: dict) -> dict:
                 cb(74, f"Section {st} done")
             logger.info(f"[writer] Phase 1 done: {st} ({len(content):,} chars)")
 
-    # ── Phase 1.5: discussion (depends only on results, which is now available) ──
-    logger.info("[writer] Phase 1.5: writing discussion (depends on results only)")
+    # ── Phase 1.25: Results (depends on the frozen plan and framing) ──
+    logger.info("[writer] Phase 1.25: writing results from the frozen finding/figure registry")
+    if cb:
+        cb(75, "Writing results")
+    st, content = _write_one("results", dict(prev_sections))
+    sections[st] = content
+    prev_sections[st] = content
+    logger.info(f"[writer] Phase 1.25 done: results ({len(content):,} chars)")
+
+    # ── Phase 1.5: discussion (depends on final Results) ──
+    logger.info("[writer] Phase 1.5: writing discussion (depends on final results)")
     if cb:
         cb(76, "Writing discussion")
     st, content = _write_one("discussion", dict(prev_sections))
@@ -1345,7 +1362,10 @@ def run_section_writing(state: dict) -> dict:
 
     # ── Phase 2: remaining dependent sections (sequential) ──
     # conclusion needs discussion, suggestion needs conclusion, abstract needs all, title needs abstract
-    phase2_sections = [s for s in SECTION_ORDER if s not in phase1_set and s not in {"discussion", "research_question_answers"}]
+    phase2_sections = [
+        s for s in SECTION_ORDER
+        if s not in phase1_set and s not in {"results", "discussion", "research_question_answers"}
+    ]
     logger.info(f"[writer] Phase 2: writing {phase2_sections} sequentially")
     for i, section_type in enumerate(phase2_sections):
         if cb:
@@ -1482,7 +1502,7 @@ def run_section_writing(state: dict) -> dict:
             logger.warning("[report-evidence] Could not save temporal fidelity snapshot: %s", fidelity_snapshot_error)
 
     reader_narrative_continuity_audit = (
-        assess_narrative_continuity(sections, authoring_packet)
+        assess_narrative_continuity(sections, authoring_packet, authoring_plan)
         if reader_authoring_shadow else {}
     )
     if reader_authoring_shadow and reader_narrative_continuity_audit.get("review_required_sections"):
@@ -1507,6 +1527,7 @@ def run_section_writing(state: dict) -> dict:
         "reader_authoring_validator_audit": reader_authoring_validator_audit,
         "reader_authoring_fallback_sections": reader_authoring_fallback_sections,
         "reader_narrative_continuity_audit": reader_narrative_continuity_audit,
+        "figure_manifest": state.get("figure_manifest") or {},
         "reader_authoring_mode": "shadow" if reader_authoring_shadow else "legacy",
     }
 
@@ -2469,28 +2490,33 @@ def _strip_llm_section_heading(content: str, section_type: str) -> str:
         "discussion": ["discussion", "results discussion", "results and discussion"],
         "conclusion": ["conclusion", "conclusions", "concluding remarks", "summary and conclusion"],
         "abstract": ["abstract", "summary"],
+        "methods": ["methods", "materials and methods", "reporting policy"],
+        "research_question_answers": ["research question answers", "answers to research questions"],
         "title": ["title"],
     }
     aliases = section_aliases.get(section_type, [section_type])
 
     for line in lines:
         stripped = line.strip()
-        # Match ## heading lines
-        heading_match = re.match(r'^##\s+(.+)$', stripped)
+        # Match markdown headings or a plain standalone major heading.  The
+        # renderer owns manuscript-level headings, so a model-generated copy is
+        # always removed rather than rendered a second time.
+        heading_match = re.match(r'^(?:#{1,6}\s+)?(.+)$', stripped)
         if heading_match:
-            heading_text = heading_match.group(1).strip().rstrip(":.")
+            heading_text = re.sub(r"[*_`]", "", heading_match.group(1)).strip().rstrip(":.")
             heading_lower = heading_text.lower()
 
-            # Strip the first heading if it matches the section type
-            if not first_heading_stripped and heading_lower in aliases:
+            # Strip every exact copy of the current major section heading.
+            if heading_lower in aliases:
                 first_heading_stripped = True
                 logger.debug(f"Stripped LLM self-generated heading: '{stripped}' from {section_type}")
                 continue  # Skip this line entirely
 
-            # Convert remaining ## headings to ### to avoid section-order conflicts
-            # (but keep ### and deeper headings as-is)
-            cleaned.append(line.replace("## ", "### ", 1))
-            continue
+            # Convert other model-generated ## major headings to subsections to
+            # prevent them from corrupting the authoritative document order.
+            if stripped.startswith("## "):
+                cleaned.append(line.replace("## ", "### ", 1))
+                continue
 
         cleaned.append(line)
 

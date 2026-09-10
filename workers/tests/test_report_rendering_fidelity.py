@@ -1,6 +1,9 @@
 """Focused regression tests for deterministic Report rendering boundaries."""
 
 import re
+from pathlib import Path
+
+from PIL import Image
 
 from report_generation.core.biological_synthesis import (
     build_biological_synthesis_packet,
@@ -20,6 +23,7 @@ from report_generation.core.nodes.temporal_comovement_node import (
 )
 from report_generation.core.nodes.writer_node import _stabilize_section_citations
 from report_generation.core.reader_authoring import (
+    audit_report_output_correctness,
     assess_narrative_continuity,
     apply_llm_authoring_plan,
     build_authoring_packet,
@@ -29,12 +33,14 @@ from report_generation.core.reader_authoring import (
     is_traceable_reference,
     render_data_only_reader_report,
     render_reader_section_fallback,
+    strip_authoring_anchors,
     validate_and_repair_sections,
 )
 from report_generation.core.figure_manifest import (
     FigureEligibilityPolicy,
     build_figure_manifest,
     compile_reader_caption,
+    prepare_reader_figure_manifest,
     select_reader_heatmap_features,
 )
 
@@ -239,6 +245,34 @@ def test_clause_validator_preserves_unanchored_observation_sentences():
     assert "remove_unanchored_factual_sentence" not in str(audit)
 
 
+def test_clause_validator_preserves_paragraphs_and_removes_malformed_draft_anchors():
+    packet = build_authoring_packet(
+        {
+            "experimental_context": {"cell_type": "generic cells", "treatment": "compound X"},
+            "ptm_type": "phosphorylation",
+        },
+        temporal_evidence_packet=build_temporal_evidence_packet(_sidecar()),
+        biological_synthesis_packet=_p5_packet(),
+    )
+    sections, audit = validate_and_repair_sections(
+        {
+            "results": (
+                "The first measured pattern was retained [EVID:study.frame]. "
+                "The second sentence continues the same observation. [EVID:\n\n"
+                "A distinct paragraph describes another sampled-timepoint pattern. [EVID:<id>] "
+                "It remains descriptive."
+            )
+        },
+        packet,
+    )
+    rendered = strip_authoring_anchors(sections["results"])
+    paragraphs = rendered.split("\n\n")
+    assert len(paragraphs) == 2
+    assert all(len(re.findall(r"[.!?](?:\s|$)", paragraph)) >= 2 for paragraph in paragraphs)
+    assert "[EVID" not in rendered
+    assert audit["repaired_sentence_count"] >= 1
+
+
 def test_reader_authoring_system_prompt_forbids_numeric_citations():
     prompt = get_reader_authoring_system_prompt("phosphorylation")
     assert "Do not write numbered citations such as [1] or [2]" in prompt
@@ -261,6 +295,30 @@ def test_apply_llm_authoring_plan_replaces_section_roles():
     assert plan["source"] == "gemini_parsed_with_deterministic_fallback"
     assert "recorded study frame" in plan["sections"]["abstract"]
     assert plan["sections"]["methods"] == fallback["sections"]["methods"]
+
+
+def test_structured_manuscript_plan_keeps_deterministic_findings_and_rejects_invented_ids():
+    packet = build_authoring_packet(
+        {
+            "experimental_context": {"cell_type": "generic cells", "treatment": "compound X"},
+            "ptm_type": "phosphorylation",
+        },
+        temporal_evidence_packet=build_temporal_evidence_packet(_sidecar()),
+        biological_synthesis_packet=_p5_packet(),
+    )
+    fallback = deterministic_authoring_plan(packet)
+    known_ids = [item["finding_id"] for item in fallback["key_findings"]]
+    assert 1 <= len(known_ids) <= 3
+    assert fallback["central_question"]
+    assert fallback["bridge_commitments"]["results"]
+    planned = apply_llm_authoring_plan(
+        '{"sections":{"abstract":"Summarize the bounded answer.","introduction":"State the objective.","methods":"Describe the recorded workflow.","results":"Report F1 once.","discussion":"Interpret F1.","conclusion":"Return to the question."},'
+        '"section_finding_map":{"results":["F1","F999"],"discussion":["F999"]}}',
+        fallback,
+    )
+    assert planned["source"] == "gemini_structured_with_deterministic_evidence_spine"
+    assert "F999" not in planned["section_finding_map"]["results"]
+    assert planned["section_finding_map"]["discussion"] == fallback["section_finding_map"]["discussion"]
 
 
 def test_authoring_packet_ignores_nonbibliographic_chroma_label():
@@ -582,6 +640,87 @@ def test_shadow_renderer_inserts_manifest_selected_heatmap_as_main_figure_one(tm
     audit = (tmp_path / "evidence_and_reproducibility_audit.md").read_text(encoding="utf-8")
     assert "reader_quantitative_heatmap" in audit
     assert '"placement": "main"' in audit
+
+
+def _write_test_png(path: Path, color: str) -> str:
+    Image.new("RGB", (320, 220), color).save(path, compress_level=0)
+    return str(path)
+
+
+def test_prepare_reader_manifest_builds_three_verified_main_figures_and_final_renderer_inserts_them(tmp_path):
+    cluster_figures = []
+    clusters = []
+    transition_rows = []
+    for index, (pattern, color) in enumerate((("early_peak", "#bdd7e7"), ("late_rise", "#bae4b3"), ("biphasic", "#fdae6b")), 1):
+        cluster_figures.append({
+            "path": _write_test_png(tmp_path / f"cluster_{index}.png", color),
+            "type": "cluster_detail",
+            "cluster_id": index,
+            "caption": f"Cluster {index}",
+        })
+        clusters.append({"cluster_id": index, "pattern": pattern})
+        transition_rows.append({
+            "static_wave_id": str(index),
+            "pair_transition_type_counts": {"persistence": index + 2, "recruitment": index, "split": 1},
+        })
+    state = {
+        "reader_authoring_mode": "shadow",
+        "output_dir": str(tmp_path),
+        "ptm_type": "phosphorylation",
+        "vector_plot_raw_data": _complete_conventional_vector_rows(),
+        "kinase_activity_heatmap": {"conditions": ["0min", "15min", "60min"]},
+        "network_analysis": {"timepoints": ["0min", "15min", "60min"]},
+        "comovement_analysis": {"clusters": clusters},
+        "comovement_figures": cluster_figures,
+        "temporal_ptm_protein_analysis": {"dynamic_transition_per_wave": transition_rows},
+    }
+    manifest = prepare_reader_figure_manifest(state, citation_complete=False)
+    main = sorted(
+        [item for item in manifest["figures"] if item.get("placement") == "main"],
+        key=lambda item: item["display_label"],
+    )
+    assert [item["display_label"] for item in main] == ["Figure 1", "Figure 2", "Figure 3"]
+    assert {item["figure_key"] for item in main} == {
+        "reader_quantitative_heatmap", "reader_temporal_profiles", "reader_interval_concordance",
+    }
+    assert all(item["insertion_verified"] and Path(item["image_path"]).exists() for item in main)
+
+    rendered = format_citations({
+        **state,
+        "figure_manifest": manifest,
+        "report_title": "Three reader figures",
+        "experimental_context": {"cell_type": "generic cells", "treatment": "compound X"},
+        "sections": {
+            "title": "Three reader figures",
+            "abstract": "Three descriptive figures summarize the recorded measurements.",
+            "introduction": "The study evaluates measured temporal profiles.",
+            "methods": "Recorded preprocessing and descriptive temporal analysis were used.",
+            "results": "Figure 1 summarizes selected features. Figure 2 shows selected profiles. Figure 3 summarizes Concordance Change.",
+            "discussion": "The observed profiles remain descriptive.",
+            "conclusion": "The recorded response supports a bounded follow-up question.",
+        },
+        "temporal_report_evidence_packet": build_temporal_evidence_packet(_sidecar()),
+        "biological_synthesis_packet": _p5_packet(),
+        "collected_references": [],
+        "signal_flow_figures": [],
+    })
+    report = rendered["final_report"]
+    assert report.count("### Figure 1.") == 1
+    assert report.count("### Figure 2.") == 1
+    assert report.count("### Figure 3.") == 1
+    assert rendered["report_output_correctness"]["status"] == "release_candidate", rendered["report_output_correctness"]
+    assert rendered["report_output_correctness"]["phantom_figure_mentions"] == []
+
+
+def test_output_correctness_gate_blocks_malformed_anchor_duplicate_heading_and_phantom_figure():
+    audit = audit_report_output_correctness(
+        "## Abstract\nObserved [EVID:\n\n## Results\nSee Figure 2.\n\n## Results\nDuplicate.\n\n## Conclusion\nBounded.",
+        {"figures": []},
+    )
+    assert audit["status"] == "blocked_for_review"
+    assert "malformed_evidence_anchor" in audit["reason_codes"]
+    assert "duplicate_major_heading" in audit["reason_codes"]
+    assert "phantom_figure_reference" in audit["reason_codes"]
 
 
 def test_p5_report_renderer_keeps_denovo_detection_context_without_pseudo_log2fc():

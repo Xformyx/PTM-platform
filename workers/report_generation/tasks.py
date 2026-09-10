@@ -981,6 +981,7 @@ def run_report_generation(self, order_id: int, config: dict):
         temporal_fidelity = final_state.get("temporal_report_fidelity") or {}
         temporal_packet = final_state.get("temporal_report_evidence_packet") or {}
         citation_data = final_state.get("citation_data") or {}
+        output_correctness = final_state.get("report_output_correctness") or {}
         citation_completion_status = citation_data.get("completion_status", "unavailable")
         temporal_review_sections = [
             section for section, audit in temporal_fidelity.items()
@@ -1036,6 +1037,16 @@ def run_report_generation(self, order_id: int, config: dict):
                 else "release_candidate"
             ),
         }
+        progress_metadata["report_output_correctness"] = {
+            "status": output_correctness.get("status", "unavailable"),
+            "reason_codes": list(output_correctness.get("reason_codes") or []),
+            "audit_path": final_state.get("report_output_correctness_audit_path"),
+            "release_status": (
+                "blocked_for_review"
+                if output_correctness.get("status") == "blocked_for_review"
+                else "release_candidate"
+            ),
+        }
         if fallback_sections:
             progress_metadata["llm_fallback_sections"] = fallback_sections
             progress_metadata["llm_fallback_warning"] = fallback_warning
@@ -1057,6 +1068,7 @@ def run_report_generation(self, order_id: int, config: dict):
             result_data["llm_fallback_warning"] = fallback_warning
         result_data["temporal_evidence"] = progress_metadata["temporal_evidence"]
         result_data["citation_completeness"] = progress_metadata["citation_completeness"]
+        result_data["report_output_correctness"] = progress_metadata["report_output_correctness"]
 
         # Persist external Co-Scientist packet telemetry for Order UI / operators.
         try:
