@@ -36,7 +36,11 @@ from report_generation.core.reader_authoring import (
     strip_authoring_anchors,
     validate_and_repair_sections,
 )
-from report_generation.core.report_release import resolve_report_release
+from report_generation.core.report_release import (
+    report_artifact_export_allowed,
+    report_release_requires_warning,
+    resolve_report_release,
+)
 from report_generation.core.figure_manifest import (
     FigureEligibilityPolicy,
     attach_reader_heatmap,
@@ -1257,6 +1261,9 @@ def test_final_anchor_sanitizer_and_release_gate_block_unbracketed_evid_residue(
     )
     assert release["status"] == "blocked_final"
     assert release["final_artifact_withheld"] is True
+    assert release["review_artifact_available"] is False
+    assert report_artifact_export_allowed(release) is False
+    assert report_release_requires_warning(release) is True
 
 
 def test_release_gate_allows_clean_shadow_output_and_does_not_gate_legacy_path():
@@ -1290,7 +1297,7 @@ def test_release_gate_keeps_review_draft_available_but_not_publishable_as_final(
     assert release["publish_as_final"] is False
 
 
-def test_release_gate_blocks_clean_prose_when_same_run_manifest_is_missing_or_incompatible():
+def test_release_gate_retains_review_exports_when_same_run_manifest_is_missing_or_incompatible():
     clean = audit_report_output_correctness("## Abstract\n\nA measured observation was reported.")
     missing = resolve_report_release(reader_authoring_shadow=True, output_correctness=clean)
     incompatible = resolve_report_release(
@@ -1298,7 +1305,12 @@ def test_release_gate_blocks_clean_prose_when_same_run_manifest_is_missing_or_in
         output_correctness=clean,
         artifact_manifest={"status": "incompatible", "reason_codes": ["missing_required_artifact:vector_tsv"]},
     )
-    assert missing["status"] == "blocked_final"
+    assert missing["status"] == "draft_review_required"
     assert "same_run_artifact_manifest_missing" in missing["reason_codes"]
-    assert incompatible["status"] == "blocked_final"
+    assert missing["publish_as_final"] is False
+    assert report_artifact_export_allowed(missing) is True
+    assert incompatible["status"] == "draft_review_required"
     assert "missing_required_artifact:vector_tsv" in incompatible["reason_codes"]
+    assert incompatible["publish_as_final"] is False
+    assert report_artifact_export_allowed(incompatible) is True
+    assert report_release_requires_warning(incompatible) is True

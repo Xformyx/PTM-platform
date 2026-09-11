@@ -806,7 +806,11 @@ def run_report_generation(self, order_id: int, config: dict):
         # Shadow reports distinguish a retained diagnostic draft from a
         # user-facing final artifact. Re-check after task-level formatting.
         from report_generation.core.reader_authoring import audit_report_output_correctness
-        from report_generation.core.report_release import resolve_report_release
+        from report_generation.core.report_release import (
+            report_artifact_export_allowed,
+            report_release_requires_warning,
+            resolve_report_release,
+        )
         reader_authoring_shadow = str(
             config.get("reader_authoring_mode")
             or (config.get("report_config") or {}).get("reader_authoring_mode")
@@ -1008,9 +1012,15 @@ def run_report_generation(self, order_id: int, config: dict):
             output_correctness=final_state.get("report_output_correctness"),
             artifact_manifest=artifact_manifest,
         )
-        final_export_allowed = not bool(report_release.get("final_artifact_withheld"))
+        final_export_allowed = report_artifact_export_allowed(report_release)
         if not final_export_allowed:
-            logger.error("[Order %s] Final Report export withheld: %s", order_id, report_release.get("reason_codes"))
+            logger.error("[Order %s] Report artifacts withheld because rendered output is structurally unsafe: %s", order_id, report_release.get("reason_codes"))
+        elif not report_release.get("publish_as_final"):
+            logger.warning(
+                "[Order %s] Review MD/HTML/DOCX will be exported, but final publication approval is blocked: %s",
+                order_id,
+                report_release.get("reason_codes"),
+            )
 
         if final_export_allowed:
             # Convert report to Word (.docx)
@@ -1258,7 +1268,7 @@ def run_report_generation(self, order_id: int, config: dict):
             completion_detail += "; final Report artifact withheld pending output-correctness repair"
         elif report_release.get("status") == "draft_review_required":
             completion_detail += "; review draft generated but not approved for final publication"
-        release_warning = report_release.get("status") in {"draft_review_required", "blocked_for_review"}
+        release_warning = report_release_requires_warning(report_release)
         if llm_failed or citation_completion_status == "blocked_for_review_missing_traceable_references" or release_warning:
             update_order_status(
                 order_id, "completed", progress_pct=100, result_files=result_data,
@@ -1280,7 +1290,7 @@ def run_report_generation(self, order_id: int, config: dict):
                 fallback_warning
                 if llm_failed
                 else (
-                    "Report draft retained; final artifact withheld pending output-correctness repair."
+                            "Report artifacts withheld because the rendered output failed structural correctness checks."
                     if not final_export_allowed
                     else (
                         "Report review draft generated; it is not approved for final publication."
