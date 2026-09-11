@@ -150,6 +150,7 @@ def _study_context_with_override(state: Mapping[str, Any]) -> dict:
     for key in (
         "declared_timepoints", "timepoints", "time_points", "control_design", "control",
         "control_condition", "control_time_matching", "control_time_match", "time_matched_control",
+        "control_reuse", "shared_control_across_timepoints", "control_reused",
         "sample_pairing", "paired_samples", "pairing_design", "replicate_semantics",
         "replicate_type", "replicate_design",
     ):
@@ -319,6 +320,7 @@ def _study_frame_card(state: Mapping[str, Any], synthesis: Mapping[str, Any]) ->
         "study_metadata_contract": metadata,
         "timepoint_interpretation": metadata.get("timepoint_interpretation"),
         "control_design": metadata.get("control_design"),
+        "control_reuse": metadata.get("control_reuse"),
         "control_time_matching": metadata.get("control_time_matching"),
         "sample_pairing": metadata.get("sample_pairing"),
         "replicate_semantics": metadata.get("replicate_semantics"),

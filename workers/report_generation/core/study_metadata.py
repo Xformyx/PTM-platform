@@ -21,6 +21,7 @@ _FIELD_ALIASES = {
     "engineering": ("engineering", "genetic_modification", "transgene", "receptor_status"),
     "treatment": ("treatment", "compound"),
     "control_design": ("control_design", "control", "control_condition", "comparator"),
+    "control_reuse": ("control_reuse", "shared_control_across_timepoints", "control_reused"),
     "control_time_matching": ("control_time_matching", "control_time_match", "time_matched_control"),
     "sample_pairing": ("sample_pairing", "paired_samples", "pairing_design"),
     "replicate_semantics": ("replicate_semantics", "replicate_type", "replicate_design"),
@@ -190,6 +191,8 @@ def build_study_metadata_contract(context: Mapping[str, Any] | None) -> dict[str
         review_reasons.append("declared_timepoints_not_recorded")
     if selected.get("treatment") and not selected.get("control_design"):
         review_reasons.append("control_design_not_recorded")
+    if selected.get("treatment") and not selected.get("control_reuse"):
+        review_reasons.append("control_reuse_not_recorded")
     if selected.get("treatment") and not selected.get("control_time_matching"):
         review_reasons.append("control_time_matching_not_recorded")
     if bool(source.get("replicate_statistics_present")) and not selected.get("replicate_semantics"):
@@ -204,6 +207,7 @@ def build_study_metadata_contract(context: Mapping[str, Any] | None) -> dict[str
         "engineering": selected.get("engineering"),
         "treatment": selected.get("treatment"),
         "control_design": selected.get("control_design"),
+        "control_reuse": selected.get("control_reuse"),
         "control_time_matching": selected.get("control_time_matching"),
         "sample_pairing": selected.get("sample_pairing"),
         "replicate_semantics": selected.get("replicate_semantics"),

@@ -58,6 +58,7 @@ def test_observed_conditions_do_not_become_declared_design_timepoints():
     assert contract["timepoint_interpretation"] == "observed_sampling_labels_not_verified_as_declared_design"
     assert "declared_timepoints_not_recorded" in contract["review_reason_codes"]
     assert "control_design_not_recorded" in contract["review_reason_codes"]
+    assert "control_reuse_not_recorded" in contract["review_reason_codes"]
     assert "control_time_matching_not_recorded" in contract["review_reason_codes"]
     assert "replicate_semantics_not_recorded" in contract["review_reason_codes"]
 
@@ -72,6 +73,7 @@ def test_verified_design_metadata_records_control_and_replicate_semantics_withou
         "verified_metadata": {
             "declared_timepoints": ["1min", "5min"],
             "control_design": "shared vehicle control",
+            "control_reuse": "one shared control reused across treatment timepoints",
             "control_time_matching": "not time matched",
             "sample_pairing": "unpaired",
             "replicate_semantics": "biological replicates",
@@ -80,11 +82,12 @@ def test_verified_design_metadata_records_control_and_replicate_semantics_withou
     })
     assert contract["declared_timepoints"] == ["1min", "5min"]
     assert contract["control_design"] == "shared vehicle control"
+    assert contract["control_reuse"] == "one shared control reused across treatment timepoints"
     assert contract["control_time_matching"] == "not time matched"
     assert contract["sample_pairing"] == "unpaired"
     assert contract["replicate_semantics"] == "biological replicates"
     assert not {
-        "declared_timepoints_not_recorded", "control_design_not_recorded",
+        "declared_timepoints_not_recorded", "control_design_not_recorded", "control_reuse_not_recorded",
         "control_time_matching_not_recorded", "replicate_semantics_not_recorded",
     }.intersection(contract["review_reason_codes"])
     assert contract["field_verification_status"]["control_design"] == "user_verified"
