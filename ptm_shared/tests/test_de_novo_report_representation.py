@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from ptm_shared.de_novo_representation import is_de_novo_representation
+from ptm_shared.de_novo_representation import conventional_quantitation_eligibility, is_de_novo_representation
 from ptm_shared.enrichment_free_temporal_sidecar import _write_wave_membership_audit, build_v2_sidecar
 from report_generation.core.dynamic_prompt_generator import build_ptm_data_summary
 from report_generation.core.nodes.context_loader import _parse_enriched_ptms
@@ -11,6 +11,24 @@ def test_de_novo_representation_uses_provenance_flags_not_numeric_magnitude() ->
     assert is_de_novo_representation({"control_pseudocount_used": 1, "ptm_relative_log2fc": 30.0})
     assert is_de_novo_representation({"activity_class": "de_novo", "ptm_relative_log2fc": 20.0})
     assert not is_de_novo_representation({"Conventional_Log2FC_NA": "false", "ptm_relative_log2fc": 30.0})
+
+
+def test_independent_conventional_na_aliases_are_all_detection_only() -> None:
+    assert is_de_novo_representation({"PTM_Unadjusted_Conventional_Log2FC_NA": True})
+    assert is_de_novo_representation({"ptm_unadjusted_conventional_log2fc_na": "true"})
+    assert is_de_novo_representation({"PTM_Unadjusted_Pseudocount_Used": 1})
+
+
+def test_adjusted_value_does_not_make_control_undetected_row_conventional() -> None:
+    eligibility = conventional_quantitation_eligibility({
+        "ptm_relative_log2fc": 22.98,
+        "ptm_unadjusted_log2fc": None,
+        "ptm_unadjusted_control_n": 0,
+        "ptm_unadjusted_treatment_n": 3,
+        "ptm_unadjusted_conventional_log2fc_na": True,
+    })
+    assert eligibility["eligible"] is False
+    assert "control_undetected_or_pseudocount_representation" in eligibility["reason_codes"]
 
 
 def test_report_legacy_summary_and_loader_keep_conventional_na_extreme_rows_out_of_pseudo_log2fc_paths() -> None:

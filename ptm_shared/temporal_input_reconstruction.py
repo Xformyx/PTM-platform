@@ -20,8 +20,10 @@ from pathlib import Path
 from statistics import median
 from typing import Any, Iterable, Mapping
 
+from ptm_shared.site_form_provenance import audit_enriched_site_form_records
 
-CONTRACT_VERSION = "temporal_input_reconstruction.v1"
+
+CONTRACT_VERSION = "temporal_input_reconstruction.v2"
 STAGE1_FEATURE_SOURCE_CONTRACT = "feature_provenance_stage1_source.v1"
 _SOURCE_PRIORITY = {
     "condition_data": 0,
@@ -197,7 +199,14 @@ def build_temporal_input_bundle(
 ) -> dict[str, Any]:
     """Build an artifact-safe numeric bundle for temporal consumers and reruns."""
 
-    vectors, provenance = reconstruct_ptm_timeseries(rows)
+    input_rows = [dict(row) for row in rows if isinstance(row, Mapping)]
+    site_form_audit = audit_enriched_site_form_records(input_rows)
+    if site_form_audit["status"] == "incompatible":
+        error = ValueError("incompatible_enriched_site_form_provenance")
+        setattr(error, "site_form_provenance_audit", site_form_audit)
+        raise error
+    vectors, provenance = reconstruct_ptm_timeseries(input_rows)
+    provenance["site_form_provenance_audit"] = site_form_audit
     conditions = [str(value) for value in declared_conditions if str(value).strip()]
     return {
         "contract_version": "temporal_input_bundle.v1",

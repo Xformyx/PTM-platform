@@ -805,6 +805,8 @@ class PTMQuantificationAnalyzer:
                     ),
                     "PTM_Unadjusted_Input_Scale": "sample_wise_median_scaled_pr_intensity",
                     "PTM_Unadjusted_Pseudocount_Used": False,
+                    "PTM_Unadjusted_Estimator_ID": "independent_unadjusted_ratio_of_condition_arithmetic_means.v1",
+                    "Quantitation_Estimator_Contract_Version": "ptm_quantitation_estimators.v1",
                 })
 
         if not records:
@@ -1123,9 +1125,18 @@ class PTMQuantificationAnalyzer:
                     "PTM_Unadjusted_Pseudocount_Used": bool(
                         unadjusted.get("PTM_Unadjusted_Pseudocount_Used", False)
                     ),
+                    "PTM_Unadjusted_Estimator_ID": unadjusted.get(
+                        "PTM_Unadjusted_Estimator_ID",
+                        "independent_unadjusted_ratio_of_condition_arithmetic_means.v1",
+                    ),
+                    "PTM_ProteinAdjusted_Estimator_ID": "protein_adjusted_mean_of_sample_ptm_to_protein_ratios.v1",
+                    "PTM_ProteinAdjusted_Aggregation_Order": "sample_ratios_then_condition_means_then_log2_contrast",
+                    "Linked_Protein_Estimator_ID": "linked_protein_ratio_of_condition_arithmetic_means.v1",
                     "PTM_Absolute_Log2FC": ptm_row["Log2FC"] + cmeans.get("Protein_Log2FC", 0),
                     "PTM_Reconstructed_Log2FC": ptm_row["Log2FC"] + cmeans.get("Protein_Log2FC", 0),
                     "PTM_Reconstructed_Calculation_Mode": "protein_adjusted_log2fc_plus_protein_log2fc",
+                    "PTM_Reconstructed_Estimator_ID": "legacy_reconstructed_adjusted_plus_protein.v1",
+                    "Quantitation_Estimator_Contract_Version": "ptm_quantitation_estimators.v1",
                     "Protein_Adjustment_Delta_Log2FC": (
                         float(ptm_row["Log2FC"]) - float(unadjusted.get("PTM_Unadjusted_Log2FC"))
                         if pd.notna(unadjusted.get("PTM_Unadjusted_Log2FC"))

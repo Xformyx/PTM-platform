@@ -717,6 +717,22 @@ def _auto_run_global_analysis(order_id: int, enriched_data: list, config: dict, 
                     file_suffix=file_suffix,
                     declared_conditions=declared_conditions,
                 )
+                from ptm_shared.site_form_provenance import audit_enriched_vector_crosswalk
+
+                vector_crosswalk_audit = audit_enriched_vector_crosswalk(
+                    enriched_data,
+                    feature_provenance_rows,
+                )
+                if vector_crosswalk_audit["status"] != "validated":
+                    error = ValueError("incompatible_enriched_vector_crosswalk")
+                    setattr(error, "site_form_provenance_audit", {
+                        "contract_version": "temporal_input_identity_gate.v1",
+                        "status": "incompatible",
+                        "report_eligible": False,
+                        "site_form_provenance_audit": temporal_bundle["provenance"].get("site_form_provenance_audit"),
+                        "enriched_vector_crosswalk_audit": vector_crosswalk_audit,
+                    })
+                    raise error
                 study_context, context_provenance = resolve_study_temporal_context(
                     experimental_context=config.get("experimental_context") or {},
                     declared_conditions=declared_conditions,
@@ -731,6 +747,7 @@ def _auto_run_global_analysis(order_id: int, enriched_data: list, config: dict, 
                     study_context=study_context,
                     temporal_input_provenance={
                         **temporal_bundle["provenance"],
+                        "enriched_vector_crosswalk_audit": vector_crosswalk_audit,
                         "study_context_resolution": context_provenance,
                         "feature_provenance_input": feature_provenance_input,
                     },
@@ -785,11 +802,19 @@ def _auto_run_global_analysis(order_id: int, enriched_data: list, config: dict, 
                     temporal_sidecar_error,
                     exc_info=True,
                 )
+                site_form_audit = getattr(temporal_sidecar_error, "site_form_provenance_audit", None)
                 temporal_sidecar_summary = {
                     "schema_version": "enrichment_free_temporal_mechanism.v2.sidecar",
                     "full_artifact_available": False,
-                    "status": "unavailable",
-                    "reason": "shared_temporal_ptm_protein_analysis_failed",
+                    "status": (
+                        "stale_incompatible_enriched_site_form_provenance"
+                        if site_form_audit else "unavailable"
+                    ),
+                    "reason": (
+                        "incompatible_enriched_site_form_provenance"
+                        if site_form_audit else "shared_temporal_ptm_protein_analysis_failed"
+                    ),
+                    "site_form_provenance_audit": site_form_audit,
                     "causality_status": "not_tested",
                 }
         heatmap_data["temporal_ptm_protein_analysis"] = temporal_sidecar_summary

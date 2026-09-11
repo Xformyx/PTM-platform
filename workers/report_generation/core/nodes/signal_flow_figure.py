@@ -19,7 +19,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from ptm_shared.de_novo_representation import is_de_novo_representation
+from ptm_shared.de_novo_representation import conventional_quantitation_eligibility, is_de_novo_representation
 
 logger = logging.getLogger(__name__)
 
@@ -999,15 +999,25 @@ def generate_context_aware_ptm_heatmap(
         precursor = str(row.get("Precursor.Id") or row.get("precursor_id") or row.get("source_feature_id") or "").strip()
         sequence = str(row.get("Modified.Sequence") or row.get("modified_sequence") or "").strip()
         condition = (row.get("condition") or "").strip()
-        fc = row.get("ptm_relative_log2fc") or row.get("log2fc") or row.get("Log2FC")
+        fc = (
+            row.get("ptm_protein_adjusted_log2fc")
+            if row.get("ptm_protein_adjusted_log2fc") is not None
+            else row.get("ptm_relative_log2fc")
+            if row.get("ptm_relative_log2fc") is not None
+            else row.get("log2fc")
+            if row.get("log2fc") is not None
+            else row.get("Log2FC")
+        )
         if not gene or not condition:
             continue
         is_denovo = is_de_novo_representation(row)
         lod_rel = row.get("lod_relative_log2") or row.get("LOD_Relative_Log2")
         try:
-            fc_val = float(fc) if fc is not None else 0.0
+            fc_val = float(fc) if fc is not None else None
         except (ValueError, TypeError):
-            fc_val = 0.0
+            fc_val = None
+        if fc_val is None or not math.isfinite(fc_val):
+            continue
         try:
             lod_val = float(lod_rel) if lod_rel not in (None, "", "nan") else None
         except (TypeError, ValueError):
@@ -1020,11 +1030,13 @@ def generate_context_aware_ptm_heatmap(
         site_data[key][condition] = plot_val
         if is_denovo:
             site_data[key]["_denovo"] = True
+        eligibility = conventional_quantitation_eligibility(row)
         if precursor or sequence:
             feature_key = (precursor, sequence, gene.upper(), position)
             if feature_key not in feature_data:
                 feature_data[feature_key] = {}
-            feature_data[feature_key][condition] = plot_val
+            if eligibility["eligible"]:
+                feature_data[feature_key][condition] = plot_val
             if is_denovo:
                 feature_data[feature_key]["_denovo"] = True
         all_genes.add(gene.upper())
@@ -1046,7 +1058,14 @@ def generate_context_aware_ptm_heatmap(
             requested.append((precursor, sequence, gene, position, str(feature.get("display_label") or "")))
         for precursor, sequence, gene, position, display_label in requested:
             fc_dict = feature_data.get((precursor, sequence, gene, position))
-            if fc_dict and not fc_dict.get("_denovo"):
+            expected_conditions = {str(value) for value in feature.get("conditions") or conditions}
+            observed_conditions = {key for key in (fc_dict or {}) if not str(key).startswith("_")}
+            if (
+                feature.get("render_eligible")
+                and fc_dict
+                and not fc_dict.get("_denovo")
+                and expected_conditions.issubset(observed_conditions)
+            ):
                 matched_sites.append((gene, position, fc_dict, display_label or f"{gene} {position}"))
         mentioned_genes = {gene for gene, _, _, _ in matched_sites}
     else:

@@ -15,13 +15,17 @@ def _row(
     precursor=None,
     conventional_na=False,
     reconstructed=99.0,
+    control_n=None,
+    treatment_n=None,
+    q_value=None,
+    sequence="AS(UniMod:21)TYK",
 ):
     return {
         "gene": gene,
         "position": position,
         "condition": condition,
         "Precursor.Id": precursor or f"{gene}_{position}",
-        "Modified.Sequence": "AS(UniMod:21)TYK",
+        "Modified.Sequence": sequence,
         "Protein.Group": f"P_{gene}",
         "ptm_unadjusted_log2fc": unadjusted,
         "ptm_protein_adjusted_log2fc": adjusted,
@@ -30,6 +34,9 @@ def _row(
         "ptm_reconstructed_log2fc": reconstructed,
         "ptm_unadjusted_conventional_log2fc_na": conventional_na,
         "control_pseudocount_used": conventional_na,
+        "ptm_unadjusted_control_n": control_n,
+        "ptm_unadjusted_treatment_n": treatment_n,
+        "ptm_unadjusted_q_value": q_value,
     }
 
 
@@ -51,7 +58,7 @@ def test_feature_cards_name_current_order_features_and_report_time_resolved_valu
     cards = build_feature_observation_cards(_state(), maximum=3)
 
     assert cards
-    assert cards[0]["contract_version"] == "feature_observation_card.v2"
+    assert cards[0]["contract_version"] == "feature_observation_card.v3"
     assert cards[0]["category"] == "measured_feature_observation"
     assert "GENE" in cards[0]["reader_summary"]
     assert "1min" in cards[0]["reader_summary"]
@@ -159,3 +166,48 @@ def test_small_sign_change_remains_descriptive_and_reports_shared_protein_adjust
     assert all(card["biological_direction_inference_allowed"] is False for card in cards)
     assert all(card["shared_linked_protein_record_count"] == 2 for card in cards)
     assert all("shared by 2" in card["reader_summary"] for card in cards)
+
+
+def test_same_gene_residue_different_precursors_are_never_stitched_into_one_trajectory():
+    state = {
+        "vector_plot_raw_data": [
+            _row("GENEA", "S88", "1min", 0.4, 0.3, 0.1, precursor="FORM_CHARGE2", sequence="AS(UniMod:21)TYK"),
+            _row("GENEA", "S88", "5min", 1.1, 0.9, 0.2, precursor="FORM_CHARGE3", sequence="AAS(UniMod:21)TYK"),
+        ]
+    }
+    assert build_feature_observation_cards(state) == []
+
+
+def test_high_quality_incomplete_grid_feature_can_be_reported_without_becoming_cluster_eligible():
+    state = {
+        "vector_plot_raw_data": [
+            _row("CONTEXT", "T185Y187", "5min", 1.0, 0.8, 0.2, precursor="CONTEXT_FORM2", control_n=3, treatment_n=3, q_value=0.01),
+            _row("CONTEXT", "T185Y187", "15min", 1.3, 1.0, 0.3, precursor="CONTEXT_FORM2", control_n=3, treatment_n=3, q_value=0.02),
+            _row("COMPLETE", "S1", "1min", 0.1, 0.1, 0.0, precursor="COMPLETE_FORM2"),
+            _row("COMPLETE", "S1", "5min", 0.2, 0.2, 0.0, precursor="COMPLETE_FORM2"),
+            _row("COMPLETE", "S1", "15min", 0.3, 0.3, 0.0, precursor="COMPLETE_FORM2"),
+        ]
+    }
+    cards = build_feature_observation_cards(state, maximum=2)
+    context = next(card for card in cards if card["feature_identity"]["gene"] == "CONTEXT")
+    assert context["narrative_quality_tier"] == "high"
+    assert context["display_eligible"] is True
+    assert context["clustering_eligible"] is False
+    assert cards[0]["feature_identity"]["gene"] == "CONTEXT"
+
+
+def test_corrupt_legacy_enriched_site_aggregate_is_not_used_as_card_source():
+    state = {
+        "enriched_ptm_data": [{
+            "gene": "LEGACY", "position": "S1", "Precursor.Id": "FORM2", "Modified.Sequence": "AS(UniMod:21)TYK",
+            "site_form_trajectories": [{"site_form_key": "LEGACY_S1|seq=A|z=nan"}],
+            "site_aggregation": {"form_count": 1},
+            "site_form_provenance_audit": {"status": "incompatible", "report_eligible": False},
+            "report_eligible_temporal_site_aggregation": False,
+            "condition_data": [
+                {"condition": "1min", "ptm_relative_log2fc": 0.2},
+                {"condition": "5min", "ptm_relative_log2fc": 0.8},
+            ],
+        }]
+    }
+    assert build_feature_observation_cards(state) == []

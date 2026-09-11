@@ -10,16 +10,36 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 
-REPORT_RELEASE_CONTRACT_VERSION = "reader_report_release.v2"
+REPORT_RELEASE_CONTRACT_VERSION = "reader_report_release.v3"
 
 
 def resolve_report_release(
     *,
     reader_authoring_shadow: bool,
     output_correctness: Mapping[str, Any] | None,
+    artifact_manifest: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     audit = dict(output_correctness or {})
     reasons = list(audit.get("reason_codes") or [])
+    manifest = dict(artifact_manifest or {})
+    if reader_authoring_shadow and manifest and manifest.get("status") != "validated":
+        return {
+            "contract_version": REPORT_RELEASE_CONTRACT_VERSION,
+            "status": "blocked_final",
+            "final_artifact_withheld": True,
+            "publish_as_final": False,
+            "reason_codes": list(manifest.get("reason_codes") or ["same_run_artifact_manifest_incompatible"]),
+            "message": "Reader Report final artifact withheld because the required same-run evidence bundle is incomplete or provenance-incompatible.",
+        }
+    if reader_authoring_shadow and not manifest:
+        return {
+            "contract_version": REPORT_RELEASE_CONTRACT_VERSION,
+            "status": "blocked_final",
+            "final_artifact_withheld": True,
+            "publish_as_final": False,
+            "reason_codes": ["same_run_artifact_manifest_missing"],
+            "message": "Reader Report final artifact withheld because the required same-run evidence manifest was not produced.",
+        }
     if reader_authoring_shadow and audit.get("status") == "blocked_for_review":
         return {
             "contract_version": REPORT_RELEASE_CONTRACT_VERSION,

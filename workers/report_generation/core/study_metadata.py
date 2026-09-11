@@ -12,7 +12,7 @@ import re
 from typing import Any, Mapping
 
 
-STUDY_METADATA_CONTRACT_VERSION = "study_metadata_contract.v2"
+STUDY_METADATA_CONTRACT_VERSION = "study_metadata_contract.v3"
 
 _FIELD_ALIASES = {
     "cell_model": ("cell_model", "cell_type", "cell_line", "tissue"),
@@ -20,6 +20,10 @@ _FIELD_ALIASES = {
     "parent_line": ("parent_line", "parent_cell_line"),
     "engineering": ("engineering", "genetic_modification", "transgene", "receptor_status"),
     "treatment": ("treatment", "compound"),
+    "control_design": ("control_design", "control", "control_condition", "comparator"),
+    "control_time_matching": ("control_time_matching", "control_time_match", "time_matched_control"),
+    "sample_pairing": ("sample_pairing", "paired_samples", "pairing_design"),
+    "replicate_semantics": ("replicate_semantics", "replicate_type", "replicate_design"),
 }
 
 
@@ -44,6 +48,24 @@ def _mapping(value: Any) -> dict[str, Any]:
 
 def _normalise(value: Any) -> str:
     return re.sub(r"[^a-z0-9]+", " ", str(value or "").lower()).strip()
+
+
+def _list_values(value: Any) -> list[str]:
+    if isinstance(value, (list, tuple, set)):
+        raw = value
+    elif value is None:
+        raw = []
+    else:
+        raw = [value]
+    values: list[str] = []
+    seen: set[str] = set()
+    for item in raw:
+        text = _text(item)
+        marker = _normalise(text)
+        if text and marker not in seen:
+            values.append(text)
+            seen.add(marker)
+    return values
 
 
 def _distinct_values(context: Mapping[str, Any], aliases: tuple[str, ...]) -> list[str]:
@@ -115,7 +137,41 @@ def build_study_metadata_contract(context: Mapping[str, Any] | None) -> dict[str
             resolved_conflicts.append(code)
             conflict_records.append({"field": field, "status": "resolved_by_verified_override", "reason_code": code})
 
-    timepoints = list(source.get("timepoints") or source.get("conditions") or [])
+    override_declared_timepoints = _list_values(
+        override.get("declared_timepoints") or override.get("timepoints") or override.get("time_points")
+    )
+    recorded_declared_timepoints = _list_values(
+        source.get("declared_timepoints") or source.get("timepoints") or source.get("time_points")
+    )
+    observed_conditions = _list_values(source.get("observed_conditions") or source.get("conditions"))
+    declared_timepoints = override_declared_timepoints or recorded_declared_timepoints
+    if override_declared_timepoints:
+        timepoint_source = "verified_metadata.declared_timepoints"
+    elif recorded_declared_timepoints:
+        timepoint_source = next(
+            key for key in ("declared_timepoints", "timepoints", "time_points")
+            if source.get(key) is not None
+        )
+    else:
+        timepoint_source = None
+    source_fields["declared_timepoints"] = timepoint_source
+    source_fields["observed_conditions"] = "measured_vector_conditions" if observed_conditions else None
+    field_verification_status = {
+        field: (
+            "user_verified" if str(source_fields.get(field) or "").startswith("verified_metadata.")
+            else "recorded_unverified" if selected.get(field) is not None
+            else "not_recorded"
+        )
+        for field in _FIELD_ALIASES
+    }
+    field_verification_status["declared_timepoints"] = (
+        "user_verified" if override_declared_timepoints
+        else "recorded_unverified" if recorded_declared_timepoints
+        else "not_recorded"
+    )
+    field_verification_status["observed_conditions"] = (
+        "measured_observation" if observed_conditions else "not_observed"
+    )
     verification_source = _text(override.get("verification_source") or override.get("source"))
     verification_reference_ids = [
         str(item).strip() for item in (override.get("reference_ids") or []) if str(item).strip()
@@ -130,6 +186,14 @@ def build_study_metadata_contract(context: Mapping[str, Any] | None) -> dict[str
         review_reasons.append("cell_model_not_recorded")
     if selected.get("cell_model") and not selected.get("organism"):
         review_reasons.append("organism_not_recorded")
+    if observed_conditions and not declared_timepoints:
+        review_reasons.append("declared_timepoints_not_recorded")
+    if selected.get("treatment") and not selected.get("control_design"):
+        review_reasons.append("control_design_not_recorded")
+    if selected.get("treatment") and not selected.get("control_time_matching"):
+        review_reasons.append("control_time_matching_not_recorded")
+    if bool(source.get("replicate_statistics_present")) and not selected.get("replicate_semantics"):
+        review_reasons.append("replicate_semantics_not_recorded")
 
     reader_system_label = _reader_system_label(selected)
     return {
@@ -139,9 +203,20 @@ def build_study_metadata_contract(context: Mapping[str, Any] | None) -> dict[str
         "parent_line": selected.get("parent_line"),
         "engineering": selected.get("engineering"),
         "treatment": selected.get("treatment"),
-        "timepoints": timepoints,
+        "control_design": selected.get("control_design"),
+        "control_time_matching": selected.get("control_time_matching"),
+        "sample_pairing": selected.get("sample_pairing"),
+        "replicate_semantics": selected.get("replicate_semantics"),
+        "declared_timepoints": declared_timepoints,
+        "observed_conditions": observed_conditions,
+        "timepoints": declared_timepoints or observed_conditions,
+        "timepoint_interpretation": (
+            "declared_experimental_design" if declared_timepoints
+            else "observed_sampling_labels_not_verified_as_declared_design"
+        ),
         "reader_system_label": reader_system_label,
         "source_fields": source_fields,
+        "field_verification_status": field_verification_status,
         "metadata_status": metadata_status,
         "verification_source": verification_source,
         "verification_reference_ids": verification_reference_ids,
@@ -152,8 +227,9 @@ def build_study_metadata_contract(context: Mapping[str, Any] | None) -> dict[str
         "lineage_or_species_inference_allowed": False,
         "reader_boundary": (
             "Use only the resolved metadata values and their exact meaning. Do not infer lineage, species, receptor "
-            "status, or engineering history from a cell-model name. A verified override supersedes stale free text; "
-            "an unresolved identity conflict blocks final release."
+            "status, engineering history, time-matched controls, sample pairing, or replicate type from labels or counts. "
+            "Observed condition labels are not a verified experimental-design declaration. A verified override supersedes "
+            "stale free text; an unresolved identity conflict blocks final release."
         ),
     }
 

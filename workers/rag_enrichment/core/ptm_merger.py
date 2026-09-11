@@ -15,6 +15,7 @@ from typing import Dict, List, Optional, Tuple
 
 from ptm_shared.site_form_provenance import (
     aggregate_site_form_trajectories,
+    audit_site_form_record,
     form_identity,
 )
 
@@ -48,6 +49,7 @@ def collapse_ptm_rows_for_enrichment(
         primary = dict(_select_primary(entries))
         condition_data = []
         for entry in entries:
+            identity = form_identity(entry)
             condition_data.append({
                 "condition": entry.get("Condition") or entry.get("condition", ""),
                 "ptm_relative_log2fc": _safe_float(
@@ -122,6 +124,11 @@ def collapse_ptm_rows_for_enrichment(
                 "shared_peptide": entry.get("Shared_Peptide") or entry.get("shared_peptide"),
                 "detection_n": entry.get("Detection_N") or entry.get("detection_n"),
                 "detection_expected": entry.get("Detection_Expected") or entry.get("detection_expected"),
+                "site_form_key": identity["site_form_key"],
+                "form_identity_status": identity["form_identity_status"],
+                "precursor_id": identity["precursor_id"],
+                "modified_sequence": identity["modified_sequence"],
+                "precursor_charge": identity["precursor_charge"],
             })
 
         primary["condition_data"] = condition_data
@@ -141,6 +148,10 @@ def collapse_ptm_rows_for_enrichment(
         primary["site_form_trajectories"] = form_trajectories
         site_aggregate = aggregate_site_form_trajectories(form_trajectories)
         primary["site_aggregation"] = site_aggregate
+        primary["site_form_provenance_audit"] = audit_site_form_record(primary)
+        primary["report_eligible_temporal_site_aggregation"] = bool(
+            primary["site_form_provenance_audit"].get("report_eligible")
+        )
         primary["trajectory"] = (
             _build_trajectory_from_timepoints(site_aggregate["timepoints"])
             if not single_time_point
@@ -351,9 +362,14 @@ def _build_site_form_trajectories(entries: List[dict], single_time_point: bool) 
     forms: List[dict] = []
     for key in sorted(grouped):
         condition_data = []
+        seen_conditions: set[str] = set()
         for entry in grouped[key]:
+            condition = str(entry.get("Condition") or entry.get("condition", "")).strip()
+            if condition in seen_conditions:
+                raise ValueError(f"duplicate precursor-condition row for {key} at {condition}")
+            seen_conditions.add(condition)
             condition_data.append({
-                "condition": entry.get("Condition") or entry.get("condition", ""),
+                "condition": condition,
                 "ptm_relative_log2fc": _safe_float(
                     entry.get("PTM_Relative_Log2FC")
                     if entry.get("PTM_Relative_Log2FC") is not None
@@ -372,6 +388,7 @@ def _build_site_form_trajectories(entries: List[dict], single_time_point: bool) 
             })
         forms.append({
             **identities[key],
+            "condition_data": condition_data,
             "trajectory": (
                 _build_trajectory_from_conditions(condition_data)
                 if not single_time_point

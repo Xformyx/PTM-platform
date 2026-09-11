@@ -25,8 +25,8 @@ from ptm_shared.de_novo_representation import is_de_novo_representation
 from report_generation.core.scientific_semantics import build_trajectory_shape_fact
 
 
-FEATURE_OBSERVATION_CARD_VERSION = "feature_observation_card.v2"
-QUANTITATION_COMPARISON_CARD_VERSION = "quantitation_comparison_card.v2"
+FEATURE_OBSERVATION_CARD_VERSION = "feature_observation_card.v3"
+QUANTITATION_COMPARISON_CARD_VERSION = "quantitation_comparison_card.v3"
 
 
 def _mapping(value: Any) -> dict:
@@ -83,7 +83,18 @@ def _source_rows(state: Mapping[str, Any]) -> list[dict]:
     vector = [dict(row) for row in state.get("vector_plot_raw_data") or [] if isinstance(row, Mapping)]
     if vector:
         return vector
-    return [dict(row) for row in state.get("enriched_ptm_data") or [] if isinstance(row, Mapping)]
+    enriched: list[dict] = []
+    for row in state.get("enriched_ptm_data") or []:
+        if not isinstance(row, Mapping):
+            continue
+        if row.get("site_form_trajectories") or row.get("site_aggregation"):
+            audit = _mapping(row.get("site_form_provenance_audit"))
+            if audit.get("status") != "validated" or not bool(
+                row.get("report_eligible_temporal_site_aggregation", audit.get("report_eligible"))
+            ):
+                continue
+        enriched.append(dict(row))
+    return enriched
 
 
 def _feature_key(row: Mapping[str, Any]) -> tuple[str, str, str, str]:
@@ -120,10 +131,14 @@ def _group_feature_rows(rows: Iterable[Mapping[str, Any]]) -> list[tuple[tuple[s
             # precursor.  Preserve such rows for aggregate legacy summaries, but
             # do not synthesize a named feature card from them.
             continue
-        key = (gene, position, precursor, sequence)
         for condition_row in _condition_rows(row):
             merged = {**row, **condition_row}
-            grouped[key].append(merged)
+            merged_key = _feature_key(merged)
+            if not _has_reader_identity(merged):
+                continue
+            if not merged_key[0] or merged_key[0] in {"?", "UNKNOWN", "UNMAPPED"}:
+                continue
+            grouped[merged_key].append(merged)
     return sorted(grouped.items(), key=lambda item: item[0])
 
 
@@ -190,6 +205,48 @@ def _trajectory_complexity(values: list[float]) -> tuple[int, int]:
     return len(set(signs)), transitions
 
 
+def _point_quality(row: Mapping[str, Any], *, conventional_available: bool) -> dict[str, Any]:
+    control_n = _number(row, "PTM_Unadjusted_Control_N", "ptm_unadjusted_control_n")
+    treatment_n = _number(row, "PTM_Unadjusted_Treatment_N", "ptm_unadjusted_treatment_n")
+    unadjusted_q = _number(row, "PTM_Unadjusted_Q_Value", "ptm_unadjusted_q_value")
+    adjusted_q = _number(row, "PTM_Relative_Q_Value", "ptm_relative_q_value", "q_value")
+    replicate_supported = bool(
+        conventional_available
+        and control_n is not None and control_n >= 2
+        and treatment_n is not None and treatment_n >= 2
+    )
+    q_supported = bool(
+        conventional_available
+        and any(value is not None and value <= 0.05 for value in (unadjusted_q, adjusted_q))
+    )
+    return {
+        "unadjusted_control_n": int(control_n) if control_n is not None else None,
+        "unadjusted_treatment_n": int(treatment_n) if treatment_n is not None else None,
+        "unadjusted_q_value": unadjusted_q,
+        "protein_adjusted_q_value": adjusted_q,
+        "replicate_supported": replicate_supported,
+        "q_supported": q_supported,
+    }
+
+
+def _narrative_quality_tier(points: Iterable[Mapping[str, Any]]) -> tuple[str, dict[str, int]]:
+    point_list = list(points)
+    conventional_count = sum(bool(point.get("conventional_log2fc_available")) for point in point_list)
+    replicate_supported_count = sum(bool(_mapping(point.get("quality")).get("replicate_supported")) for point in point_list)
+    q_supported_count = sum(bool(_mapping(point.get("quality")).get("q_supported")) for point in point_list)
+    if conventional_count >= 2 and replicate_supported_count >= 2 and q_supported_count >= 1:
+        tier = "high"
+    elif conventional_count >= 2 and replicate_supported_count >= 1:
+        tier = "moderate"
+    else:
+        tier = "exploratory"
+    return tier, {
+        "conventional_point_count": conventional_count,
+        "replicate_supported_point_count": replicate_supported_count,
+        "q_supported_point_count": q_supported_count,
+    }
+
+
 def build_feature_observation_cards(
     state: Mapping[str, Any],
     *,
@@ -201,7 +258,13 @@ def build_feature_observation_cards(
     is used after completeness and signed temporal-shape complexity.
     """
     candidates: list[dict] = []
-    for key, rows in _group_feature_rows(_source_rows(state)):
+    grouped_features = _group_feature_rows(_source_rows(state))
+    observed_conditions = sorted({
+        _condition_label(row)
+        for _, rows in grouped_features
+        for row in rows
+    }, key=_condition_sort_key)
+    for key, rows in grouped_features:
         ordered = _identity_complete_condition_rows(rows)
         if ordered is None:
             continue
@@ -232,13 +295,15 @@ def build_feature_observation_cards(
                 de_novo_count += 1
             if adjusted is not None and not de_novo:
                 adjusted_values.append(adjusted)
+            conventional_available = not de_novo and unadjusted is not None
             points.append({
                 "condition": condition,
                 "ptm_unadjusted_log2fc": unadjusted,
                 "ptm_protein_adjusted_log2fc": adjusted,
                 "protein_log2fc": protein,
-                "conventional_log2fc_available": not de_novo and unadjusted is not None,
+                "conventional_log2fc_available": conventional_available,
                 "detection_context_only": bool(de_novo),
+                "quality": _point_quality(row, conventional_available=conventional_available),
             })
         numeric_points = sum(
             point["ptm_protein_adjusted_log2fc"] is not None or point["ptm_unadjusted_log2fc"] is not None
@@ -247,6 +312,8 @@ def build_feature_observation_cards(
         if numeric_points < 2:
             continue
         complexity = _trajectory_complexity(adjusted_values)
+        quality_tier, quality_counts = _narrative_quality_tier(points)
+        candidate_conditions = {point["condition"] for point in points}
         candidates.append({
             "key": key,
             "measurement": measurement,
@@ -254,9 +321,21 @@ def build_feature_observation_cards(
             "numeric_point_count": numeric_points,
             "de_novo_count": de_novo_count,
             "shape_complexity": complexity,
+            "narrative_quality_tier": quality_tier,
+            "quality_counts": quality_counts,
+            "display_eligible": True,
+            "clustering_eligible": bool(
+                observed_conditions
+                and candidate_conditions == set(observed_conditions)
+                and all(point["conventional_log2fc_available"] for point in points)
+            ),
         })
 
+    quality_order = {"high": 0, "moderate": 1, "exploratory": 2}
     candidates.sort(key=lambda item: (
+        quality_order.get(item["narrative_quality_tier"], 99),
+        -item["quality_counts"]["q_supported_point_count"],
+        -item["quality_counts"]["replicate_supported_point_count"],
         -item["numeric_point_count"],
         -item["shape_complexity"][0],
         -item["shape_complexity"][1],
@@ -344,7 +423,11 @@ def build_feature_observation_cards(
             "measurement_provenance": candidate["measurement"],
             "trajectory": candidate["points"],
             "trajectory_shape_fact": trajectory_fact,
-            "selection_rule": "condition coverage; signed temporal-shape diversity; lexical tie-breaker; no magnitude ranking",
+            "display_eligible": candidate["display_eligible"],
+            "clustering_eligible": candidate["clustering_eligible"],
+            "narrative_quality_tier": candidate["narrative_quality_tier"],
+            "quality_summary": candidate["quality_counts"],
+            "selection_rule": "identity completeness; replicate/q-value support; observed condition coverage; signed temporal-shape diversity; lexical tie-breaker; no magnitude ranking",
             "evidence_envelope": envelope,
         })
     return cards
@@ -406,6 +489,10 @@ def build_quantitation_comparison_cards(
                 "adjusted_p_value": _number(row, "PTM_Relative_P_Value", "ptm_relative_p_value", "p_value"),
                 "unadjusted_control_n": _number(row, "PTM_Unadjusted_Control_N", "ptm_unadjusted_control_n"),
                 "unadjusted_treatment_n": _number(row, "PTM_Unadjusted_Treatment_N", "ptm_unadjusted_treatment_n"),
+                "narrative_quality_tier": _narrative_quality_tier([{
+                    "conventional_log2fc_available": True,
+                    "quality": _point_quality(row, conventional_available=True),
+                }])[0],
             })
 
     shared_protein_counts: dict[tuple[str, str, float], int] = defaultdict(int)
@@ -419,6 +506,7 @@ def build_quantitation_comparison_cards(
         "similar_after_protein_adjustment": 3,
     }
     rows.sort(key=lambda row: (
+        {"high": 0, "moderate": 1, "exploratory": 2}.get(row["narrative_quality_tier"], 99),
         class_order.get(row["comparison_class"], 99),
         row["key"],
         _condition_sort_key(row["condition"]),
@@ -509,11 +597,14 @@ def build_quantitation_comparison_cards(
             "unadjusted_q_value": row["unadjusted_q_value"],
             "adjusted_q_value": row["adjusted_q_value"],
             "uncertainty_available": bool(row["unadjusted_q_value"] is not None or row["adjusted_q_value"] is not None),
+            "display_eligible": True,
+            "clustering_eligible": False,
+            "narrative_quality_tier": row["narrative_quality_tier"],
             "biological_direction_inference_allowed": False,
             "shared_linked_protein_record_count": shared_protein_counts[(row["protein_group"], row["condition"], round(row["protein"], 9))],
             "reconstructed_metric_excluded_from_comparison": True,
             "reconstructed_value_for_audit_only": row["reconstructed"],
-            "selection_rule": "matched conventional axes; comparison-class diversity; lexical tie-breaker; no magnitude ranking",
+            "selection_rule": "matched conventional axes; replicate/q-value support; comparison-class diversity; lexical tie-breaker; no magnitude ranking",
             "measurement_provenance": row["measurement"],
         })
     return cards

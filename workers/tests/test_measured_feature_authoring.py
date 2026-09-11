@@ -121,7 +121,7 @@ def test_phase2_prepared_manifest_adds_verified_protein_adjustment_figure(tmp_pa
     manifest = prepare_reader_figure_manifest(state, citation_complete=False)
     figure = next(item for item in manifest["figures"] if item.get("figure_key") == "reader_protein_context")
 
-    assert manifest["contract_version"] == "report_figure_manifest.v3"
+    assert manifest["contract_version"] == "report_figure_manifest.v4"
     assert figure["placement"] == "main"
     assert figure["insertion_verified"] is True
     assert figure["display_label"].startswith("Figure ")

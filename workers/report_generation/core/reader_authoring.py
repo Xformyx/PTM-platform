@@ -13,6 +13,7 @@ import json
 import re
 from typing import Any, Iterable, Mapping
 
+from common.temporal_utils import condition_sort_key
 from report_generation.core.measured_feature_cards import (
     build_feature_observation_cards,
     build_quantitation_comparison_cards,
@@ -24,7 +25,13 @@ from report_generation.core.study_metadata import (
 from report_generation.core.scientific_semantics import (
     audit_language_quality,
     audit_semantic_claims,
+    normalize_reader_prose,
     repair_semantic_sentence,
+)
+from ptm_shared.quantitation_estimator_contract import (
+    build_quantitation_estimator_contract,
+    ensure_quantitation_methods_contract,
+    repair_quantitation_estimator_sentence,
 )
 
 
@@ -140,6 +147,33 @@ def _study_context_with_override(state: Mapping[str, Any]) -> dict:
     """Merge an explicit report-level verified metadata override into context."""
     context = _as_mapping(state.get("experimental_context"))
     report_config = _as_mapping(state.get("report_config"))
+    for key in (
+        "declared_timepoints", "timepoints", "time_points", "control_design", "control",
+        "control_condition", "control_time_matching", "control_time_match", "time_matched_control",
+        "sample_pairing", "paired_samples", "pairing_design", "replicate_semantics",
+        "replicate_type", "replicate_design",
+    ):
+        if context.get(key) is None and report_config.get(key) is not None:
+            context[key] = report_config.get(key)
+    observed_conditions = sorted({
+        str(row.get("condition") or row.get("Condition") or "").strip()
+        for row in state.get("vector_plot_raw_data") or []
+        if isinstance(row, Mapping) and str(row.get("condition") or row.get("Condition") or "").strip()
+    }, key=lambda value: (condition_sort_key(value), value.lower()))
+    if observed_conditions:
+        context["observed_conditions"] = observed_conditions
+    context["replicate_statistics_present"] = any(
+        isinstance(row, Mapping)
+        and any(
+            row.get(key) is not None
+            for key in (
+                "PTM_Unadjusted_Control_N", "ptm_unadjusted_control_n",
+                "PTM_Unadjusted_Treatment_N", "ptm_unadjusted_treatment_n",
+                "PTM_Unadjusted_P_Value", "ptm_unadjusted_p_value", "p_value",
+            )
+        )
+        for row in state.get("vector_plot_raw_data") or []
+    )
     override = _as_mapping(
         state.get("study_metadata_override")
         or report_config.get("study_metadata_override")
@@ -264,7 +298,7 @@ def _study_frame_card(state: Mapping[str, Any], synthesis: Mapping[str, Any]) ->
     metadata = build_study_metadata_contract(context)
     cell_model = str(metadata.get("reader_system_label") or metadata.get("cell_model") or "the recorded experimental system").strip()
     treatment = str(metadata.get("treatment") or frame.get("treatment") or "the recorded perturbation context").strip()
-    timepoints = metadata.get("timepoints") or frame.get("timepoints") or []
+    timepoints = metadata.get("declared_timepoints") or metadata.get("observed_conditions") or frame.get("timepoints") or []
     if isinstance(timepoints, str):
         timepoints = [timepoints]
     time_text = ", ".join(str(item) for item in timepoints if str(item).strip()) or "the recorded sampled conditions"
@@ -283,6 +317,11 @@ def _study_frame_card(state: Mapping[str, Any], synthesis: Mapping[str, Any]) ->
         "forbidden_interpretations": ["caused", "activated", "directly regulates"],
         "counterevidence": "Study-frame metadata define experimental scope rather than a mechanistic conclusion.",
         "study_metadata_contract": metadata,
+        "timepoint_interpretation": metadata.get("timepoint_interpretation"),
+        "control_design": metadata.get("control_design"),
+        "control_time_matching": metadata.get("control_time_matching"),
+        "sample_pairing": metadata.get("sample_pairing"),
+        "replicate_semantics": metadata.get("replicate_semantics"),
     }
 
 
@@ -487,6 +526,18 @@ def build_authoring_packet(
     synthesis = _as_mapping(biological_synthesis_packet or state.get("biological_synthesis_packet"))
     metadata_contract = build_study_metadata_contract(_study_context_with_override(state))
     cards = [_study_frame_card(state, synthesis), *_quantitative_cards(synthesis), _normalization_card(state)]
+    estimator_contract = build_quantitation_estimator_contract()
+    cards.append({
+        "card_id": "quantitation.estimator.contract",
+        "category": "quantitation_provenance",
+        "reader_summary": estimator_contract["deterministic_methods_paragraph"],
+        "claim_tier": "O1",
+        "evidence_ids": ["quantitation.estimator.contract"],
+        "citation_ids": [],
+        "allowed_verbs": ["was calculated", "was retained", "was not identical"],
+        "forbidden_interpretations": ["absolute occupancy", "kinase activity", "adjusted equals unadjusted minus protein"],
+        "counterevidence": estimator_contract["non_equivalence"],
+    })
     cards.extend(build_feature_observation_cards(state, maximum=5))
     cards.extend(build_quantitation_comparison_cards(state, maximum=8))
     for index, record in enumerate(temporal.get("records") or [], 1):
@@ -586,6 +637,7 @@ def build_authoring_packet(
         "mode": "citation_complete" if has_traceable_literature else "data_only",
         "reader_cards": reader_cards,
         "study_metadata_contract": metadata_contract,
+        "quantitation_estimator_contract": estimator_contract,
         "figure_cards": figure_cards,
         "section_claim_budget": section_claim_budget,
         "section_story_contract": story_contract,
@@ -596,7 +648,7 @@ def build_authoring_packet(
             "de_novo": "Control-undetected rows are detection/LOD context only and must not be placed on conventional Log2FC axes or magnitude rankings.",
             "normalization": "Describe the track as protein-abundance-adjusted relative PTM ratio, not absolute occupancy or kinase activity.",
             "measured_features": "Name current-order measured features and report supplied time-resolved values before aggregate counts or availability statements. Do not call a candidate-residue feature a localized phosphosite unless the card does so.",
-            "protein_adjustment": "Compare only the independent unadjusted PTM contrast with the protein-adjusted PTM contrast and linked protein contrast. The reconstructed legacy metric is audit-only and adjustment does not prove biological truth.",
+            "protein_adjustment": "Use the supplied immutable estimator paragraph exactly. The protein-adjusted estimator is a contrast of condition means of sample-wise PTM/protein ratios; it is not generally independent unadjusted Log2FC minus linked protein Log2FC. The reconstructed legacy metric is audit-only and adjustment does not prove biological truth.",
             "study_metadata": "Use only the resolved study metadata label. A user-verified override supersedes stale free text; unresolved identity conflicts prohibit final release. Do not infer lineage, species, receptor status, or engineering history from a cell-model name.",
         },
     }
@@ -931,6 +983,14 @@ def _repair_candidate_residue_site_claim(sentence: str, labels: Iterable[tuple[s
 
 
 def _replace_unsafe_terms(text: str) -> str:
+    if re.search(
+        r"\b(?:(?:does|do|did|can|could|would|should|is|are|was|were|has|have|had)\s+not|"
+        r"cannot|can't|couldn't|didn't|doesn't)\s+(?:directly\s+)?"
+        r"(?:prove|establish|demonstrate|show|activate|cause|drive|support|infer)\b",
+        text,
+        flags=re.IGNORECASE,
+    ):
+        return text
     replacements = [
         (r"\bdirectly activates?\b", "provides candidate context for"),
         (r"\bactivates?\b", "is associated with"),
@@ -1002,6 +1062,12 @@ def validate_and_repair_sections(
                 citations = [item.lower() for item in _REFERENCE_MARKER_RE.findall(sentence)]
                 actions: list[str] = []
                 reasons: list[str] = []
+                if section_name == "methods":
+                    repaired_estimator, estimator_repaired = repair_quantitation_estimator_sentence(sentence)
+                    if estimator_repaired:
+                        sentence = repaired_estimator
+                        actions.append("replace_quantitation_estimator_with_immutable_contract")
+                        reasons.append("quantitation_estimator_paraphrase_mismatch")
                 invalid_evidence = [item for item in evidence_ids if item not in known_evidence]
                 invalid_citations = [item for item in citations if item not in known_references]
                 if invalid_evidence:
@@ -1065,7 +1131,7 @@ def validate_and_repair_sections(
                     sentence = _ANY_EVIDENCE_RESIDUE_RE.sub("", sentence)
                     actions.append("remove_malformed_evidence_anchor")
                     reasons.append("malformed_draft_only_anchor")
-                sentence = re.sub(r"\s+([,.;:!?])", r"\1", sentence).strip()
+                sentence = normalize_reader_prose(sentence)
                 if sentence:
                     retained_sentences.append(sentence)
                 audit_entries.append({
@@ -1081,7 +1147,10 @@ def validate_and_repair_sections(
                 })
             if retained_sentences:
                 repaired_paragraphs.append(" ".join(retained_sentences))
-        validated[section_name] = "\n\n".join(repaired_paragraphs)
+        section_text = "\n\n".join(repaired_paragraphs)
+        if section_name == "methods":
+            section_text = ensure_quantitation_methods_contract(section_text)
+        validated[section_name] = section_text
     audit = {
         "contract_version": "reader_authoring_validator.v1",
         "packet_version": packet.get("contract_version"),
@@ -1096,8 +1165,7 @@ def strip_authoring_anchors(text: str) -> str:
     """Remove draft-only evidence anchors after validation, preserving citations."""
     text = _EVIDENCE_MARKER_RE.sub("", text or "")
     text = _ANY_EVIDENCE_RESIDUE_RE.sub("", text)
-    text = re.sub(r"\s+([,.;:!?])", r"\1", text)
-    return re.sub(r"[ \t]{2,}", " ", text).strip()
+    return normalize_reader_prose(text)
 
 
 _MAJOR_HEADING_ALIASES = {
@@ -1383,10 +1451,12 @@ def render_reader_section_fallback(
         return "\n\n".join(paragraphs)
 
     if section_type == "methods":
+        estimator_contract = _as_mapping(packet.get("quantitation_estimator_contract"))
+        estimator_paragraph = _clean_text(estimator_contract.get("deterministic_methods_paragraph"))
         return "\n\n".join([
             study,
             quantitative,
-            "For each modified-precursor feature and treatment condition, the independent unadjusted PTM contrast was log2(mean normalized PR intensity in treatment / mean normalized PR intensity in control). The protein-adjusted contrast was calculated from sample-wise normalized PTM-to-linked-protein ratios before condition means were contrasted; the linked protein contrast remained a separate quantitative axis. The legacy reconstructed value equaled the protein-adjusted contrast plus the linked protein contrast and was retained only for compatibility, not as an independent measurement.",
+            estimator_paragraph,
             "Welch's unequal-variance t-test was used when both groups contained at least two replicate values, and Benjamini–Hochberg correction was applied to available p-values within the corresponding comparison output. Reported q-values are therefore analysis-specific uncertainty summaries, not evidence of causal regulation. Control-undetected features were not assigned a pseudocount-derived conventional fold change on the independent unadjusted axis.",
             "Hierarchical Clustering of Temporal Phosphorylation Feature Profiles was used to derive descriptive Temporal Profile Clusters. Interval-wise Concordance Analysis summarized retained concordance, concordance gain, and concordance loss across adjacent sampled intervals within fixed clusters, using evaluable within-cluster pair-window comparisons as the denominator. Cluster count and distance settings are retained in the technical audit when available.",
             "Large conventional Log2FC values were retained as measured numeric contrasts but were not used alone to infer biological priority, mechanistic importance, direct regulatory strength, absolute occupancy, or kinase activity. Control-undetected features were kept as detection/LOD context rather than placed on conventional quantitative axes or magnitude ranks.",

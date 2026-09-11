@@ -11,6 +11,8 @@ from __future__ import annotations
 import math
 from typing import Any, Mapping
 
+from ptm_shared.de_novo_representation import conventional_quantitation_eligibility
+
 
 REPORT_VECTOR_PROJECTION_VERSION = "report_vector_projection.v1"
 
@@ -72,7 +74,7 @@ def project_report_vector_row(row: Mapping[str, Any]) -> dict[str, Any]:
         "Conventional_Log2FC_NA",
         "ptm_unadjusted_conventional_log2fc_na",
     )
-    return {
+    projected = {
         "report_vector_projection_version": REPORT_VECTOR_PROJECTION_VERSION,
         # Existing aliases used across legacy Report nodes.
         "gene": gene,
@@ -95,9 +97,13 @@ def project_report_vector_row(row: Mapping[str, Any]) -> dict[str, Any]:
             row, "PTM_Reconstructed_Log2FC", "ptm_reconstructed_log2fc", "PTM_Absolute_Log2FC", "ptm_absolute_log2fc"
         ),
         "ptm_unadjusted_conventional_log2fc_na": conventional_na,
-        "ptm_unadjusted_calculation_mode": _text(
-            row, "PTM_Unadjusted_Calculation_Mode", "ptm_unadjusted_calculation_mode"
-        ),
+        "ptm_unadjusted_calculation_mode": _text(row, "PTM_Unadjusted_Calculation_Mode", "ptm_unadjusted_calculation_mode") or None,
+        "ptm_unadjusted_estimator_id": _text(row, "PTM_Unadjusted_Estimator_ID", "ptm_unadjusted_estimator_id") or None,
+        "ptm_protein_adjusted_estimator_id": _text(row, "PTM_ProteinAdjusted_Estimator_ID", "ptm_protein_adjusted_estimator_id") or None,
+        "ptm_protein_adjusted_aggregation_order": _text(row, "PTM_ProteinAdjusted_Aggregation_Order", "ptm_protein_adjusted_aggregation_order") or None,
+        "linked_protein_estimator_id": _text(row, "Linked_Protein_Estimator_ID", "linked_protein_estimator_id") or None,
+        "ptm_reconstructed_estimator_id": _text(row, "PTM_Reconstructed_Estimator_ID", "ptm_reconstructed_estimator_id") or None,
+        "quantitation_estimator_contract_version": _text(row, "Quantitation_Estimator_Contract_Version", "quantitation_estimator_contract_version") or None,
         "ptm_unadjusted_input_scale": _text(row, "PTM_Unadjusted_Input_Scale", "ptm_unadjusted_input_scale"),
         "ptm_unadjusted_pseudocount_used": _optional_bool(
             row, "PTM_Unadjusted_Pseudocount_Used", "ptm_unadjusted_pseudocount_used"
@@ -122,3 +128,11 @@ def project_report_vector_row(row: Mapping[str, Any]) -> dict[str, Any]:
             None if (source_feature_id or modified_sequence) else "modified_precursor_identity_unavailable_in_vector_projection"
         ),
     }
+    eligibility = conventional_quantitation_eligibility(projected)
+    projected.update({
+        "independent_conventional_eligible": eligibility["eligible"],
+        "detection_context_only": not eligibility["eligible"] and bool(conventional_na),
+        "conventional_eligibility_reason_codes": eligibility["reason_codes"],
+        "figure1_axis_contract": "protein_adjusted_relative_ptm_contrast_with_independent_conventional_eligibility",
+    })
+    return projected

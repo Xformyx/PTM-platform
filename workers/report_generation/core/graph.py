@@ -27,6 +27,7 @@ from .reader_authoring import (
     render_evidence_reproducibility_audit,
     render_reader_section_fallback,
 )
+from .scientific_semantics import enforce_report_word_budgets
 from .figure_manifest import (
     attach_reader_heatmap,
     build_figure_manifest,
@@ -1678,6 +1679,9 @@ def format_citations(state: ReportState) -> dict:
     processed = processor.process(all_text)
     if reference_section:
         processed += "\n\n" + reference_section
+    if reader_authoring_shadow:
+        processed, section_compression_audit = enforce_report_word_budgets(processed)
+        state["reader_section_compression_audit"] = section_compression_audit
 
     report_output_correctness = audit_report_output_correctness(
         processed,

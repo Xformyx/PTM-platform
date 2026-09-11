@@ -13,7 +13,7 @@ from typing import Any, Iterable, Mapping
 
 
 TRAJECTORY_FACT_VERSION = "trajectory_shape_fact.v1"
-SEMANTIC_GUARD_VERSION = "reader_semantic_guard.v1"
+SEMANTIC_GUARD_VERSION = "reader_semantic_guard.v2"
 DEFAULT_BASELINE_BAND_LOG2 = 0.15
 
 
@@ -146,8 +146,17 @@ def repair_semantic_sentence(
         (r"\bgain of activity\b", "gain in pair-level concordance"),
         (r"\bsignaling activation\b", "increase in pair-level concordance"),
         (r"\bpathway reconfiguration\b", "observed local concordance reorganization across sampled intervals"),
+        (r"\bsignificant rewiring\b", "observed local concordance reorganization across sampled intervals"),
+        (r"\b(?:rapid )?(?:initiation and )?propagation\b", "time-ordered measured pattern"),
+        (r"\bwaves? of signaling activity\b", "temporal profile patterns"),
         (r"\bsignaling flow\b", "sampled temporal concordance pattern"),
         (r"\bcoordinated waves? of signaling activity\b", "observed temporal profile and concordance patterns"),
+        (r"\bdephosphorylation\b", "decrease in the measured phosphorylation-feature contrast"),
+        (r"\breturn toward basal state\b", "movement of the measured contrast toward the pre-specified baseline band"),
+        (r"\b(?:activation|resolution|deactivation) phase\b", "sampled temporal interval"),
+        (r"\bprecisely timed molecular events\b", "time-resolved measured changes"),
+        (r"\btightly regulated\b", "temporally structured"),
+        (r"\breliable proxy\b", "descriptive measurement"),
     ]
     for pattern, replacement in replacements:
         if re.search(pattern, text, flags=re.IGNORECASE):
@@ -183,6 +192,147 @@ def repair_semantic_sentence(
         reasons.append("footprint_evaluability_does_not_control_self_ptm_observation")
 
     return text, actions, reasons
+
+
+def normalize_reader_prose(text: str) -> str:
+    """Repair mechanical damage after marker removal without changing claims."""
+    value = str(text or "")
+    value = re.sub(r"[ \t]+([,.;:!?])", r"\1", value)
+    value = re.sub(r"([,;:])\s*\.", ".", value)
+    value = re.sub(r"\.{2,}", ".", value)
+    value = re.sub(r",{2,}", ",", value)
+    value = re.sub(r";{2,}", ";", value)
+    value = re.sub(r":{2,}", ":", value)
+    value = re.sub(r"\?{2,}", "?", value)
+    value = re.sub(r"!{2,}", "!", value)
+    value = re.sub(r"[ \t]{2,}", " ", value)
+    def repair_sentence(sentence: str) -> str:
+        stripped = sentence.strip()
+        stripped = re.sub(
+            r"^(?:whereas|while|which|although|because|and|but|or|thereby|thusly)\s*,?\s+",
+            "",
+            stripped,
+            flags=re.IGNORECASE,
+        )
+        alpha = re.search(r"[A-Za-z]", stripped)
+        if alpha and stripped[alpha.start()].islower():
+            index = alpha.start()
+            stripped = stripped[:index] + stripped[index].upper() + stripped[index + 1:]
+        return stripped
+
+    repaired_lines: list[str] = []
+    for line in value.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith(("#", "|", "![", "- ", "* ", ">")):
+            repaired_lines.append(line.rstrip())
+            continue
+        sentences = [
+            repair_sentence(sentence)
+            for sentence in re.split(r"(?<=[.!?])\s+", stripped)
+            if sentence.strip()
+        ]
+        repaired_lines.append(" ".join(sentence for sentence in sentences if sentence))
+    return "\n".join(repaired_lines).strip()
+
+
+def _word_count(text: str) -> int:
+    return len(re.findall(r"\b\w+[\w'’-]*\b", text or ""))
+
+
+def _compress_plain_section(body: str, maximum_words: int) -> str:
+    paragraphs = [item.strip() for item in re.split(r"\n\s*\n+", body or "") if item.strip()]
+    selected: list[str] = []
+    for paragraph in paragraphs:
+        for sentence in re.split(r"(?<=[.!?])\s+", paragraph):
+            sentence = sentence.strip()
+            if not sentence:
+                continue
+            if _word_count(" ".join([*selected, sentence])) > maximum_words:
+                continue
+            selected.append(sentence)
+    return " ".join(selected)
+
+
+def _compress_question_answers(body: str, maximum_words: int) -> str:
+    parts = re.split(r"(?m)(?=^###\s+Q\d+\b)", body or "")
+    questions = [part.strip() for part in parts if part.strip().startswith("###")]
+    if not questions:
+        return _compress_plain_section(body, maximum_words)
+    heading_word_count = sum(_word_count(question.partition("\n")[0]) for question in questions)
+    available_answer_words = max(0, maximum_words - heading_word_count)
+    per_question = max(5, available_answer_words // len(questions))
+    compressed: list[str] = []
+    for question in questions:
+        heading, _, answer = question.partition("\n")
+        answer_sentences = [
+            sentence.strip()
+            for sentence in re.split(r"(?<=[.!?])\s+", answer.strip())
+            if sentence.strip()
+        ]
+        kept: list[str] = []
+        boundary = next(
+            (sentence for sentence in reversed(answer_sentences) if re.search(r"\b(?:restricted|does not|requires?|next|follow-up|validation)\b", sentence, flags=re.IGNORECASE)),
+            "",
+        )
+        for sentence in answer_sentences:
+            if sentence == boundary:
+                continue
+            if _word_count(" ".join([*kept, sentence, boundary])) > per_question:
+                continue
+            kept.append(sentence)
+            if len(kept) >= 2:
+                break
+        if boundary and _word_count(" ".join([*kept, boundary])) <= per_question:
+            kept.append(boundary)
+        compressed.append(heading + "\n\n" + " ".join(kept))
+    result = "\n\n".join(compressed)
+    return result
+
+
+def enforce_report_word_budgets(text: str) -> tuple[str, dict[str, Any]]:
+    """Deterministically compress only bounded closing/supplementary sections."""
+    source = str(text or "")
+    pattern = re.compile(r"(?m)^##\s+(.+?)\s*$")
+    matches = list(pattern.finditer(source))
+    if not matches:
+        return normalize_reader_prose(source), {"contract_version": "reader_section_compression.v1", "sections": []}
+    output: list[str] = [source[:matches[0].start()]]
+    audit: list[dict[str, Any]] = []
+    budgets = {
+        "conclusion": 180,
+        "research question answers": 260,
+        "supplementary research question answers": 260,
+    }
+    for index, match in enumerate(matches):
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(source)
+        heading = match.group(0)
+        label = match.group(1).strip().lower()
+        body = source[match.end():end].strip()
+        before = _word_count(body)
+        maximum = budgets.get(label)
+        compressed = body
+        if maximum is not None and before > maximum:
+            compressed = (
+                _compress_question_answers(body, maximum)
+                if "question answers" in label
+                else _compress_plain_section(body, maximum)
+            )
+        after = _word_count(compressed)
+        output.append(heading + ("\n\n" + compressed if compressed else "") + "\n\n")
+        if maximum is not None:
+            audit.append({
+                "section": label,
+                "before_words": before,
+                "after_words": after,
+                "maximum_words": maximum,
+                "compressed": after < before,
+                "within_budget": after <= maximum,
+            })
+    return normalize_reader_prose("".join(output).rstrip()), {
+        "contract_version": "reader_section_compression.v1",
+        "sections": audit,
+        "all_within_budget": all(item["within_budget"] for item in audit),
+    }
 
 
 def audit_semantic_claims(text: str, cards: Iterable[Mapping[str, Any]]) -> dict[str, Any]:

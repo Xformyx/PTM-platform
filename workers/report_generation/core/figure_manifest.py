@@ -5,14 +5,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Mapping
 
-from ptm_shared.de_novo_representation import is_de_novo_representation
+from ptm_shared.de_novo_representation import conventional_quantitation_eligibility, is_de_novo_representation
 from report_generation.core.measured_feature_cards import (
     build_quantitation_comparison_cards,
     reader_feature_id,
 )
 
 
-FIGURE_MANIFEST_VERSION = "report_figure_manifest.v3"
+FIGURE_MANIFEST_VERSION = "report_figure_manifest.v4"
 SIGNED_PATTERN_THRESHOLD = 0.25
 """Main-figure signed temporal pattern bin.
 
@@ -35,6 +35,73 @@ def _available_path(value: Any) -> str:
         return ""
 
 
+def _figure_readability_audit(
+    image_path: str,
+    *,
+    label_count: int,
+    labels: list[str] | None = None,
+) -> dict[str, Any]:
+    """Estimate label legibility from the rendered image and label density."""
+    width = height = 0
+    error = None
+    try:
+        from PIL import Image
+
+        with Image.open(str(image_path)) as image:
+            width, height = image.size
+    except Exception as exc:
+        error = type(exc).__name__
+    cleaned_labels = [str(value).strip() for value in labels or [] if str(value).strip()]
+    longest = max((len(value) for value in cleaned_labels), default=0)
+    pixels_per_label = (height / max(label_count, 1)) if height else 0.0
+    readable = bool(
+        width >= 300
+        and height >= 180
+        and label_count > 0
+        and pixels_per_label >= 16.0
+        and (not longest or longest * 6.0 <= width * 0.78)
+    )
+    return {
+        "contract_version": "figure_readability_audit.v1",
+        "status": "readable" if readable else "review_required",
+        "labels_readable": readable,
+        "image_width_px": width or None,
+        "image_height_px": height or None,
+        "label_count": int(label_count),
+        "pixels_per_label": round(pixels_per_label, 2),
+        "longest_label_characters": longest,
+        "dimension_read_error": error,
+    }
+
+
+def _feature_binding_audit(selected_features: list[Mapping[str, Any]]) -> dict[str, Any]:
+    bindings: list[tuple[str, str]] = []
+    for item in selected_features:
+        if not isinstance(item, Mapping):
+            continue
+        feature_id = str(
+            item.get("reader_feature_id")
+            or _mapping(item.get("feature_identity")).get("reader_feature_id")
+            or ""
+        ).strip()
+        condition = str(item.get("condition") or "").strip()
+        bindings.append((feature_id, condition))
+    nonempty = [feature_id for feature_id, _ in bindings if feature_id]
+    record_ids = [f"{feature_id}|{condition}" for feature_id, condition in bindings if feature_id]
+    duplicates = sorted({value for value in record_ids if record_ids.count(value) > 1})
+    valid = bool(selected_features) and len(nonempty) == len(selected_features) and not duplicates
+    return {
+        "contract_version": "figure_feature_binding_audit.v1",
+        "status": "validated" if valid else "incompatible",
+        "binding_valid": valid,
+        "selected_feature_count": len(selected_features),
+        "bound_reader_feature_id_count": len(nonempty),
+        "duplicate_feature_condition_bindings": duplicates,
+        "selected_reader_feature_ids": sorted(set(nonempty)),
+        "feature_condition_binding_count": len(record_ids),
+    }
+
+
 class FigureEligibilityPolicy:
     """Fail-closed policy for researcher-facing Report figure placement."""
 
@@ -55,9 +122,10 @@ class FigureEligibilityPolicy:
             count = int(figure.get("selected_feature_count") or 0)
             labels = bool(figure.get("labels_readable"))
             conventional_only = bool(figure.get("conventional_only"))
-            if 12 <= count <= 20 and labels and conventional_only:
+            binding_valid = bool(_mapping(figure.get("feature_binding_audit")).get("binding_valid"))
+            if 12 <= count <= 20 and labels and conventional_only and binding_valid:
                 return "main", None
-            return "suppressed", "requires_12_to_20_readable_conventional_feature_cards"
+            return "suppressed", "requires_12_to_20_readable_bound_conventional_feature_cards"
         if kind == "reader_temporal_profile":
             profile_count = int(figure.get("selected_profile_count") or 0)
             cluster_count = int(figure.get("selected_cluster_count") or 0)
@@ -71,11 +139,12 @@ class FigureEligibilityPolicy:
             return "suppressed", "requires_3_to_8_readable_cluster_transition_summaries"
         if kind == "reader_protein_context":
             matched_count = int(figure.get("matched_feature_count") or 0)
-            if matched_count >= 2 and bool(figure.get("matched_protein_context")) and bool(figure.get("labels_readable")):
+            binding_valid = bool(_mapping(figure.get("feature_binding_audit")).get("binding_valid"))
+            if matched_count >= 2 and bool(figure.get("matched_protein_context")) and bool(figure.get("labels_readable")) and binding_valid:
                 return "main", None
-            if matched_count == 1 and bool(figure.get("matched_protein_context")) and bool(figure.get("labels_readable")):
+            if matched_count == 1 and bool(figure.get("matched_protein_context")) and bool(figure.get("labels_readable")) and binding_valid:
                 return "supplementary", "single_complete_comparison_retained_as_supplementary_context"
-            return "suppressed", "matched_protein_context_or_readable_labels_unavailable"
+            return "suppressed", "matched_protein_context_readable_labels_or_feature_binding_unavailable"
         if kind == "literature_comparison":
             return ("main", None) if citation_complete else ("suppressed", "traceable_citations_unavailable")
         return "supplementary", "unclassified_legacy_figure"
@@ -125,7 +194,10 @@ def select_reader_heatmap_features(vector_rows: list[Mapping[str, Any]], conditi
     """
     grouped: dict[tuple[str, str, str, str], dict[str, list[Mapping[str, Any]]]] = {}
     for row in vector_rows or []:
-        if not isinstance(row, Mapping) or is_de_novo_representation(row):
+        if not isinstance(row, Mapping):
+            continue
+        eligibility = conventional_quantitation_eligibility(row)
+        if not eligibility["eligible"]:
             continue
         gene = str(row.get("gene") or row.get("gene_name") or "").strip()
         site = str(row.get("position") or row.get("site") or "").strip()
@@ -141,9 +213,20 @@ def select_reader_heatmap_features(vector_rows: list[Mapping[str, Any]], conditi
         if any(condition not in by_condition or len(by_condition[condition]) != 1 for condition in conditions):
             continue
         values: list[float] = []
+        eligibility_records: list[dict] = []
         valid = True
         for condition in conditions:
-            raw = by_condition[condition][0].get("ptm_relative_log2fc")
+            condition_row = by_condition[condition][0]
+            condition_eligibility = conventional_quantitation_eligibility(condition_row)
+            if not condition_eligibility["eligible"]:
+                valid = False
+                break
+            eligibility_records.append(condition_eligibility)
+            raw = (
+                condition_row.get("ptm_protein_adjusted_log2fc")
+                if condition_row.get("ptm_protein_adjusted_log2fc") is not None
+                else condition_row.get("ptm_relative_log2fc")
+            )
             try:
                 value = float(raw)
             except (TypeError, ValueError):
@@ -171,6 +254,10 @@ def select_reader_heatmap_features(vector_rows: list[Mapping[str, Any]], conditi
             "display_label": f"{feature_id} · {gene} {site}",
             "conditions": list(conditions),
             "pattern_class": pattern,
+            "render_axis": "protein_adjusted_relative_ptm_contrast",
+            "render_eligible": True,
+            "eligibility_contract": "conventional_quantitation_eligibility.v1",
+            "eligibility_records": eligibility_records,
             "selection_reason": "unique modified-precursor identity; complete conventional temporal coverage; representative signed profile pattern; lexical tie-breaker",
         })
     candidates.sort(key=lambda item: (item["pattern_class"], item["reader_feature_id"]))
@@ -215,18 +302,23 @@ def build_figure_manifest(state: Mapping[str, Any], *, citation_complete: bool) 
         conditions = sorted({str(row.get("condition") or "") for row in vector_rows if str(row.get("condition") or "")})
     selected_features = select_reader_heatmap_features(vector_rows, conditions)
     if selected_features or vector_rows:
+        initial_binding = _feature_binding_audit(selected_features)
         entries.append(_entry(
             "reader_quantitative_heatmap", "reader_heatmap", "",
             question="Which selected quantitative phosphorylation features show distinct measured profiles across sampled timepoints?",
             evidence_tier="O1", source_evidence_ids=["quantitative.landscape", "temporal.profile_summary"],
             caption_facts={
-                "data_scope": "conventional quantified phosphorylation features with complete selected time-course coverage",
+                "data_scope": "protein-adjusted phosphorylation-feature contrasts with independent conventional eligibility at every displayed condition",
                 "data_unit_scope": "phosphorylation feature aggregate",
-                "visual_encoding": "diverging conventional Log2FC color scale",
+                "visual_encoding": "diverging protein-adjusted relative PTM Log2FC color scale",
                 "interpretation_boundary": "measured contrast is not activation, directness, or biological-priority score; de novo rows are excluded from the numeric color scale",
             },
             selection_rule="complete conventional temporal coverage; representative signed profile pattern; lexical tie-breaker",
-            selected_feature_count=len(selected_features), labels_readable=True, conventional_only=True,
+            selected_feature_count=len(selected_features), labels_readable=True,
+            feature_binding_audit=initial_binding,
+            selected_reader_feature_ids=initial_binding["selected_reader_feature_ids"],
+            conventional_only=bool(selected_features) and all(item.get("render_eligible") for item in selected_features),
+            render_axis="protein_adjusted_relative_ptm_contrast",
             selected_features=selected_features,
         ))
     pathway = _available_path(network.get("pathway_graph_path"))
@@ -347,7 +439,7 @@ def _compose_cluster_panel(selected: list[Mapping[str, Any]], output_dir: str) -
     if not selected or not output_dir:
         return ""
     try:
-        from PIL import Image, ImageDraw
+        from PIL import Image, ImageDraw, ImageFont
     except ImportError:
         return ""
     opened = []
@@ -361,25 +453,34 @@ def _compose_cluster_panel(selected: list[Mapping[str, Any]], output_dir: str) -
         columns = 2
         rows = (len(opened) + columns - 1) // columns
         cell_width = max(image.width for _, image in opened) + 36
-        cell_height = max(image.height for _, image in opened) + 82
+        cell_height = max(image.height for _, image in opened) + 112
         canvas = Image.new("RGB", (columns * cell_width, rows * cell_height), "white")
         draw = ImageDraw.Draw(canvas)
+        try:
+            title_font = ImageFont.truetype("DejaVuSans-Bold.ttf", 18)
+            member_font = ImageFont.truetype("DejaVuSans.ttf", 14)
+        except OSError:
+            title_font = member_font = None
         for index, (item, image) in enumerate(opened):
             row, column = divmod(index, columns)
             x = column * cell_width + 18
-            y = row * cell_height + 54
+            y = row * cell_height + 82
             pattern = str(item.get("pattern") or "unclassified").replace("_", " ")
             draw.text(
                 (x, 10 + row * cell_height),
                 f"{chr(65 + index)}  Temporal Profile Cluster {index + 1} · {pattern}",
                 fill="black",
+                font=title_font,
             )
             member_text = ", ".join(str(value) for value in item.get("representative_members") or [])
             if member_text:
+                if len(member_text) > 82:
+                    member_text = member_text[:79].rstrip() + "…"
                 draw.text(
-                    (x, 30 + row * cell_height),
+                    (x, 42 + row * cell_height),
                     f"Representative measured members (lexical): {member_text}",
                     fill="#4B5563",
+                    font=member_font,
                 )
             canvas.paste(image, (x, y))
         path = Path(output_dir) / "reader_temporal_profile_clusters.png"
@@ -479,11 +580,11 @@ def _generate_concordance_summary(
                 f"{classified}/{denominator}",
                 ha="center",
                 va="bottom",
-                fontsize=7,
+                fontsize=9,
                 color="#374151",
             )
         ax.set_xticks(x)
-        ax.set_xticklabels(labels, rotation=35, ha="right")
+        ax.set_xticklabels(labels, rotation=35, ha="right", fontsize=9)
         ax.set_ylabel("Rate per evaluable within-cluster pair-window")
         ax.set_ylim(0, 1)
         ax.set_title("Interval-wise Concordance Change Rates")
@@ -540,7 +641,7 @@ def _generate_protein_adjustment_comparison(
 
         y = np.arange(len(cards))
         fig_height = max(5.2, 1.9 + 0.56 * len(cards))
-        fig, ax = plt.subplots(figsize=(10.8, fig_height))
+        fig, ax = plt.subplots(figsize=(12.5, fig_height))
         for index in range(len(cards)):
             ax.plot(
                 [unadjusted[index], adjusted[index]],
@@ -554,7 +655,7 @@ def _generate_protein_adjustment_comparison(
         ax.scatter(protein, y, s=48, marker="s", color="#6B7280", label="Linked protein", zorder=3)
         ax.axvline(0.0, color="#222222", linewidth=0.9, alpha=0.55)
         ax.set_yticks(y)
-        ax.set_yticklabels(labels)
+        ax.set_yticklabels(labels, fontsize=9.5)
         ax.invert_yaxis()
         ax.set_xlabel("Conventional log2 contrast", labelpad=10)
         ax.set_title(
@@ -573,12 +674,12 @@ def _generate_protein_adjustment_comparison(
             fontsize=9,
             color="#4B5563",
         )
-        ax.legend(frameon=False, ncol=1, loc="upper right", fontsize=8.5)
+        ax.legend(frameon=False, ncol=1, loc="upper right", fontsize=9.5)
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
         ax.spines["left"].set_visible(False)
         ax.grid(axis="x", alpha=0.18)
-        fig.subplots_adjust(left=0.28, bottom=0.14, top=0.78, right=0.98)
+        fig.subplots_adjust(left=0.38, bottom=0.14, top=0.78, right=0.98)
         path = Path(output_dir) / "reader_protein_adjustment_comparison.png"
         path.parent.mkdir(parents=True, exist_ok=True)
         fig.savefig(path, dpi=220, bbox_inches="tight")
@@ -663,6 +764,12 @@ def prepare_reader_figure_manifest(state: Mapping[str, Any], *, citation_complet
             f"Temporal Profile Cluster {index}": list(item.get("representative_members") or [])
             for index, item in enumerate(selected_clusters, 1)
         }
+        profile_labels = [f"Temporal Profile Cluster {index}" for index in range(1, len(selected_clusters) + 1)]
+        profile_readability = _figure_readability_audit(
+            profile_path,
+            label_count=len(profile_labels),
+            labels=profile_labels,
+        )
         profile_entry = _entry(
             "reader_temporal_profiles", "reader_temporal_profile", profile_path,
             question="Which selected Temporal Profile Clusters represent distinct measured phosphorylation trajectories?",
@@ -679,7 +786,8 @@ def prepare_reader_figure_manifest(state: Mapping[str, Any], *, citation_complet
             selected_cluster_count=len(selected_clusters),
             selected_cluster_ids=[str(item.get("cluster_id")) for item in selected_clusters],
             representative_member_labels=representative_members,
-            labels_readable=True,
+            labels_readable=profile_readability["labels_readable"],
+            readability_audit=profile_readability,
             title="Selected Temporal Profile Clusters",
         )
         placement, reason = FigureEligibilityPolicy().classify(profile_entry, citation_complete=citation_complete)
@@ -690,6 +798,12 @@ def prepare_reader_figure_manifest(state: Mapping[str, Any], *, citation_complet
     selected_ids = [str(item.get("cluster_id")) for item in selected_clusters]
     concordance_path, concordance_ids = _generate_concordance_summary(state, output_dir, selected_ids)
     if concordance_path:
+        concordance_labels = [f"Temporal Profile Cluster {value}" for value in concordance_ids]
+        concordance_readability = _figure_readability_audit(
+            concordance_path,
+            label_count=max(len(concordance_ids), 1),
+            labels=concordance_labels,
+        )
         concordance_entry = _entry(
             "reader_interval_concordance", "reader_concordance", concordance_path,
             question="How did within-cluster activity-state concordance change across adjacent sampled intervals?",
@@ -703,7 +817,8 @@ def prepare_reader_figure_manifest(state: Mapping[str, Any], *, citation_complet
             selection_rule="same selected cluster set as the temporal-profile panel when evaluable; otherwise lexical cluster-ID subset",
             selected_cluster_count=len(concordance_ids),
             selected_cluster_ids=concordance_ids,
-            labels_readable=True,
+            labels_readable=concordance_readability["labels_readable"],
+            readability_audit=concordance_readability,
             title="Interval-wise Concordance Change Summary",
         )
         placement, reason = FigureEligibilityPolicy().classify(concordance_entry, citation_complete=citation_complete)
@@ -713,6 +828,13 @@ def prepare_reader_figure_manifest(state: Mapping[str, Any], *, citation_complet
 
     comparison_path, comparison_cards = _generate_protein_adjustment_comparison(state, output_dir)
     if comparison_path:
+        comparison_labels = [str(card.get("feature_label") or "") for card in comparison_cards]
+        comparison_readability = _figure_readability_audit(
+            comparison_path,
+            label_count=max(len(comparison_cards), 1),
+            labels=comparison_labels,
+        )
+        comparison_binding = _feature_binding_audit(comparison_cards)
         comparison_entry = _entry(
             "reader_protein_context", "reader_protein_context", comparison_path,
             question="For matched current-order features, how did protein adjustment change the independently measured PTM contrast?",
@@ -731,7 +853,9 @@ def prepare_reader_figure_manifest(state: Mapping[str, Any], *, citation_complet
             selection_rule="matched conventional axes; comparison-class diversity; lexical tie-breaker; no magnitude ranking",
             matched_feature_count=len(comparison_cards),
             matched_protein_context=True,
-            labels_readable=True,
+            labels_readable=comparison_readability["labels_readable"],
+            readability_audit=comparison_readability,
+            feature_binding_audit=comparison_binding,
             comparison_classes=sorted({str(card.get("comparison_class") or "") for card in comparison_cards}),
             selected_reader_feature_ids=sorted({
                 str(_mapping(card.get("feature_identity")).get("reader_feature_id") or "")
@@ -764,18 +888,31 @@ def attach_reader_heatmap(manifest: Mapping[str, Any], image_path: str, selected
         ],
     }
     facts = {
-        "data_scope": "conventional quantified phosphorylation features with complete selected time-course coverage",
+        "data_scope": "protein-adjusted phosphorylation-feature contrasts with independent conventional eligibility at every displayed condition",
         "data_unit_scope": "phosphorylation feature aggregate",
-        "visual_encoding": "diverging conventional Log2FC color scale; missingness notation in source renderer",
+        "visual_encoding": "diverging protein-adjusted relative PTM Log2FC color scale; missingness notation in source renderer",
         "interpretation_boundary": "measured contrast is not activation, directness, or biological-priority score; de novo rows are excluded from the numeric color scale",
     }
+    labels = [str(item.get("display_label") or "") for item in selected_features]
+    readability = _figure_readability_audit(
+        image_path,
+        label_count=max(len(selected_features), 1),
+        labels=labels,
+    )
+    binding = _feature_binding_audit(selected_features)
     entry = _entry(
         "reader_quantitative_heatmap", "reader_heatmap", image_path,
         question="Which selected quantitative phosphorylation features show distinct measured profiles across sampled timepoints?",
         evidence_tier="O1", source_evidence_ids=["quantitative.landscape", "temporal.profile_summary"],
         caption_facts=facts,
         selection_rule="complete conventional temporal coverage; representative signed profile pattern; lexical tie-breaker",
-        selected_feature_count=len(selected_features), labels_readable=True, conventional_only=True,
+        selected_feature_count=len(selected_features),
+        labels_readable=readability["labels_readable"],
+        readability_audit=readability,
+        feature_binding_audit=binding,
+        conventional_only=bool(selected_features) and all(item.get("render_eligible") for item in selected_features),
+        render_axis="protein_adjusted_relative_ptm_contrast",
+        selected_reader_feature_ids=binding["selected_reader_feature_ids"],
         selected_features=[dict(item) for item in selected_features],
     )
     placement, reason = FigureEligibilityPolicy().classify(entry, citation_complete=False)

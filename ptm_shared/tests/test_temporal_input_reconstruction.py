@@ -96,6 +96,36 @@ def test_missing_values_are_not_zero_filled_and_bundle_excludes_non_numeric_fiel
         "rag_prose",
         "llm_output",
     ]
+    assert bundle["provenance"]["site_form_provenance_audit"]["status"] == "not_applicable"
+
+
+def test_incompatible_legacy_site_form_artifact_is_rejected_before_temporal_reconstruction() -> None:
+    try:
+        build_temporal_input_bundle(
+            [{
+                "gene": "akt1",
+                "position": "S473",
+                "site_form_trajectories": [{
+                    "site_form_key": "AKT1_S473|seq=A|z=nan",
+                    "trajectory": {"timepoints": [{"timeLabel": "5min", "ptmLog2FC": 1.0}]},
+                }],
+                "site_aggregation": {
+                    "form_count": 1,
+                    "source_form_keys": ["AKT1_S473|seq=A|z=nan"],
+                    "timepoints": [{
+                        "timeLabel": "5min", "ptmLog2FC": 1.0,
+                        "contributing_form_count": 1,
+                        "contributing_form_keys": ["AKT1_S473|seq=A|z=nan"],
+                    }],
+                },
+            }],
+            declared_conditions=["5min"],
+        )
+    except ValueError as exc:
+        assert str(exc) == "incompatible_enriched_site_form_provenance"
+        assert getattr(exc, "site_form_provenance_audit")["status"] == "incompatible"
+    else:
+        raise AssertionError("corrupt legacy aggregation must not feed temporal reconstruction")
 
 
 def test_feature_provenance_rows_require_explicit_precursor_identity_and_exclude_rag_fields() -> None:

@@ -39,6 +39,7 @@ from report_generation.core.reader_authoring import (
 from report_generation.core.report_release import resolve_report_release
 from report_generation.core.figure_manifest import (
     FigureEligibilityPolicy,
+    attach_reader_heatmap,
     build_figure_manifest,
     compile_reader_caption,
     prepare_reader_figure_manifest,
@@ -577,6 +578,10 @@ def _complete_conventional_vector_rows() -> list[dict]:
                 "Modified.Sequence": f"AA(UniMod:21)SEQ{index:02d}",
                 "condition": condition,
                 "ptm_relative_log2fc": value + (index % 3) * 0.1,
+                "ptm_unadjusted_log2fc": value + (index % 3) * 0.1,
+                "ptm_unadjusted_control_n": 3,
+                "ptm_unadjusted_treatment_n": 3,
+                "ptm_unadjusted_conventional_log2fc_na": False,
             })
     rows.extend([
         {"gene": "DENOVO", "position": "S99", "Precursor.Id": "DENOVO_PRECURSOR", "Modified.Sequence": "DENOVO(UniMod:21)SEQ", "condition": "0min", "ptm_relative_log2fc": 99.0, "Conventional_Log2FC_NA": True},
@@ -603,6 +608,62 @@ def test_figure_manifest_selects_12_to_20_complete_conventional_feature_cards_wi
     assert heatmap["suppression_reason"] is None
     caption = compile_reader_caption(heatmap)
     assert "Data unit and scope" in caption and "Visual encoding" in caption and "Interpretation boundary" in caption
+
+
+def test_figure_one_excludes_control_undetected_row_even_when_adjusted_value_is_extreme():
+    rows = _complete_conventional_vector_rows()
+    for row in rows:
+        if row["gene"] != "DENOVO":
+            row.update({
+                "ptm_unadjusted_log2fc": row["ptm_relative_log2fc"],
+                "ptm_unadjusted_control_n": 3,
+                "ptm_unadjusted_treatment_n": 3,
+                "ptm_unadjusted_conventional_log2fc_na": False,
+            })
+    rows.extend([
+        {
+            "gene": "CONTROLZERO", "position": "S498", "Precursor.Id": "CONTROLZERO_PRECURSOR",
+            "Modified.Sequence": "LQS(UniMod:21)WTPAGR", "condition": condition,
+            "ptm_relative_log2fc": 22.98, "ptm_unadjusted_log2fc": None,
+            "ptm_unadjusted_control_n": 0, "ptm_unadjusted_treatment_n": 3,
+            "ptm_unadjusted_conventional_log2fc_na": True,
+        }
+        for condition in ("0min", "15min", "60min")
+    ])
+    selected = select_reader_heatmap_features(rows, ["0min", "15min", "60min"])
+    assert len(selected) == 12
+    assert all(item["gene"] != "CONTROLZERO" for item in selected)
+    assert all(item["render_axis"] == "protein_adjusted_relative_ptm_contrast" for item in selected)
+    assert all(item["render_eligible"] is True for item in selected)
+
+
+def test_reader_heatmap_manifest_computes_readability_and_unique_feature_binding(tmp_path):
+    from PIL import Image
+
+    image_path = tmp_path / "reader_heatmap.png"
+    Image.new("RGB", (1400, 1000), "white").save(image_path, compress_level=0)
+    selected = select_reader_heatmap_features(
+        _complete_conventional_vector_rows(), ["0min", "15min", "60min"]
+    )
+    manifest = attach_reader_heatmap({"figures": []}, str(image_path), selected)
+    figure = manifest["figures"][0]
+    assert figure["readability_audit"]["status"] == "readable"
+    assert figure["feature_binding_audit"]["status"] == "validated"
+    assert len(figure["selected_reader_feature_ids"]) == len(set(figure["selected_reader_feature_ids"])) == 12
+
+
+def test_reader_heatmap_with_unreadable_density_is_suppressed(tmp_path):
+    from PIL import Image
+
+    image_path = tmp_path / "reader_heatmap_tiny.png"
+    Image.new("RGB", (320, 180), "white").save(image_path, compress_level=0)
+    selected = select_reader_heatmap_features(
+        _complete_conventional_vector_rows(), ["0min", "15min", "60min"]
+    )
+    manifest = attach_reader_heatmap({"figures": []}, str(image_path), selected)
+    figure = manifest["figures"][0]
+    assert figure["labels_readable"] is False
+    assert figure["placement"] == "suppressed"
 
 
 def test_figure_policy_suppresses_uncited_context_and_routes_dense_network_to_technical_audit():
@@ -1189,14 +1250,22 @@ def test_final_anchor_sanitizer_and_release_gate_block_unbracketed_evid_residue(
     assert audit["status"] == "blocked_for_review"
     assert "malformed_evidence_anchor" in audit["reason_codes"]
 
-    release = resolve_report_release(reader_authoring_shadow=True, output_correctness=audit)
+    release = resolve_report_release(
+        reader_authoring_shadow=True,
+        output_correctness=audit,
+        artifact_manifest={"status": "validated", "reason_codes": []},
+    )
     assert release["status"] == "blocked_final"
     assert release["final_artifact_withheld"] is True
 
 
 def test_release_gate_allows_clean_shadow_output_and_does_not_gate_legacy_path():
     clean = audit_report_output_correctness("## Abstract\n\nA measured observation was reported.")
-    shadow = resolve_report_release(reader_authoring_shadow=True, output_correctness=clean)
+    shadow = resolve_report_release(
+        reader_authoring_shadow=True,
+        output_correctness=clean,
+        artifact_manifest={"status": "validated", "reason_codes": []},
+    )
     legacy = resolve_report_release(reader_authoring_shadow=False, output_correctness={"status": "blocked_for_review"})
 
     assert shadow["status"] == "final_ready"
@@ -1209,9 +1278,27 @@ def test_release_gate_keeps_review_draft_available_but_not_publishable_as_final(
         "## Abstract\nwhereas the recorded observation differed.\n\n## Conclusion\nBounded conclusion.",
         {"figures": []},
     )
-    release = resolve_report_release(reader_authoring_shadow=True, output_correctness=audit)
+    release = resolve_report_release(
+        reader_authoring_shadow=True,
+        output_correctness=audit,
+        artifact_manifest={"status": "validated", "reason_codes": []},
+    )
 
     assert audit["status"] == "draft_review_required"
     assert release["status"] == "draft_review_required"
     assert release["final_artifact_withheld"] is False
     assert release["publish_as_final"] is False
+
+
+def test_release_gate_blocks_clean_prose_when_same_run_manifest_is_missing_or_incompatible():
+    clean = audit_report_output_correctness("## Abstract\n\nA measured observation was reported.")
+    missing = resolve_report_release(reader_authoring_shadow=True, output_correctness=clean)
+    incompatible = resolve_report_release(
+        reader_authoring_shadow=True,
+        output_correctness=clean,
+        artifact_manifest={"status": "incompatible", "reason_codes": ["missing_required_artifact:vector_tsv"]},
+    )
+    assert missing["status"] == "blocked_final"
+    assert "same_run_artifact_manifest_missing" in missing["reason_codes"]
+    assert incompatible["status"] == "blocked_final"
+    assert "missing_required_artifact:vector_tsv" in incompatible["reason_codes"]

@@ -440,11 +440,13 @@ def run_report_generation(self, order_id: int, config: dict):
         substrate_go_localization_from_db = {}
         # v10.1: Load vector_plot_raw_data (full TSV) for LLM access
         vector_plot_raw_data = []
+        vector_source_path = None
         ptm_type_for_suffix = (config.get("experimental_context") or {}).get("ptm_type", "phosphorylation")
         _vp_suffix = "_phospho" if ptm_type_for_suffix == "phosphorylation" else "_ubi"
         for _vp_name in (f"ptm_vector_data_normalized{_vp_suffix}.tsv", f"ptm_vector_data_with_motifs{_vp_suffix}.tsv"):
             _vp_path = order_output / _vp_name
             if _vp_path.exists():
+                vector_source_path = str(_vp_path)
                 import csv as _csv
                 with open(_vp_path, "r", encoding="utf-8") as _vf:
                     _reader = _csv.DictReader(_vf, delimiter="\t")
@@ -582,6 +584,7 @@ def run_report_generation(self, order_id: int, config: dict):
             "order_id": order_id,
             "enriched_ptm_data": enriched_data,
             "enriched_json_path": enriched_path,
+            "vector_source_path": vector_source_path,
             "md_report_path": config.get("md_report_path", ""),
             "tsv_data_path": config.get("tsv_data_path", ""),
             "experimental_context": experimental_context,
@@ -942,9 +945,68 @@ def run_report_generation(self, order_id: int, config: dict):
                     "postprocess_audit_count": len(postprocessed_audits),
                 }
 
+        artifact_manifest = None
+        if reader_authoring_shadow:
+            correctness_path = order_output / "report_output_correctness_audit.json"
+            try:
+                correctness_path.write_text(
+                    json.dumps(final_state.get("report_output_correctness") or {}, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
+                final_state["report_output_correctness_audit_path"] = str(correctness_path)
+            except Exception as correctness_write_error:
+                logger.warning(
+                    "[Order %s] Could not persist exact postprocessed output-correctness audit: %s",
+                    order_id,
+                    correctness_write_error,
+                )
+            temporal_sidecar_path = next(
+                (
+                    candidate for candidate in (
+                        order_output / "temporal_ptm_protein_analysis_v2.json",
+                        rag_dir / "temporal_ptm_protein_analysis_v2.json",
+                    )
+                    if candidate.exists()
+                ),
+                None,
+            )
+            try:
+                from report_generation.core.report_artifact_manifest import build_report_artifact_manifest
+
+                artifact_manifest = build_report_artifact_manifest(
+                    order_id=order_id,
+                    output_dir=order_output,
+                    report_markdown_paths=report_markdown,
+                    vector_path=vector_source_path,
+                    enriched_path=enriched_path,
+                    temporal_sidecar_path=temporal_sidecar_path,
+                    evidence_audit_path=final_state.get("evidence_reproducibility_audit_path"),
+                    prose_trace_path=final_state.get("report_prose_trace_path"),
+                    output_correctness_path=final_state.get("report_output_correctness_audit_path"),
+                    report_config={
+                        "experimental_context": config.get("experimental_context") or {},
+                        "report_config": config.get("report_config") or {},
+                        "temporal_contract": config.get("temporal_contract"),
+                        "analysis_mode": config.get("analysis_mode"),
+                        "ptm_mode": config.get("ptm_mode"),
+                    },
+                    temporal_required=not bool(config.get("single_time_point", False)),
+                )
+                final_state["report_artifact_manifest"] = artifact_manifest
+                final_state["report_artifact_manifest_path"] = artifact_manifest.get("manifest_path")
+            except Exception as manifest_error:
+                logger.exception("[Order %s] Could not build same-run Report artifact manifest", order_id)
+                artifact_manifest = {
+                    "contract_version": "reader_report_artifact_manifest.v1",
+                    "status": "incompatible",
+                    "report_eligible": False,
+                    "reason_codes": [f"artifact_manifest_build_failed:{type(manifest_error).__name__}"],
+                }
+
         report_release = resolve_report_release(
             reader_authoring_shadow=reader_authoring_shadow,
             output_correctness=final_state.get("report_output_correctness"),
+            artifact_manifest=artifact_manifest,
         )
         final_export_allowed = not bool(report_release.get("final_artifact_withheld"))
         if not final_export_allowed:
@@ -1126,6 +1188,13 @@ def run_report_generation(self, order_id: int, config: dict):
             "publish_as_final": bool(report_release.get("publish_as_final")),
         }
         progress_metadata["report_release"] = report_release
+        if artifact_manifest:
+            progress_metadata["report_artifact_manifest"] = {
+                "status": artifact_manifest.get("status"),
+                "reason_codes": list(artifact_manifest.get("reason_codes") or []),
+                "report_run_fingerprint": artifact_manifest.get("report_run_fingerprint"),
+                "manifest_path": artifact_manifest.get("manifest_path"),
+            }
         if fallback_sections:
             progress_metadata["llm_fallback_sections"] = fallback_sections
             progress_metadata["llm_fallback_warning"] = fallback_warning
@@ -1149,6 +1218,8 @@ def run_report_generation(self, order_id: int, config: dict):
         result_data["citation_completeness"] = progress_metadata["citation_completeness"]
         result_data["report_output_correctness"] = progress_metadata["report_output_correctness"]
         result_data["report_release"] = report_release
+        if artifact_manifest:
+            result_data["report_artifact_manifest"] = progress_metadata.get("report_artifact_manifest")
         if not final_export_allowed:
             result_data["draft_files"] = [path.name for path in report_markdown]
 

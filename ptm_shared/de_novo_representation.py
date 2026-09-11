@@ -202,8 +202,12 @@ def is_de_novo_representation(row: Mapping[str, Any] | None) -> bool:
         for key in (
             "conventional_log2fc_na",
             "Conventional_Log2FC_NA",
+            "ptm_unadjusted_conventional_log2fc_na",
+            "PTM_Unadjusted_Conventional_Log2FC_NA",
             "control_pseudocount_used",
             "Control_Pseudocount_Used",
+            "ptm_unadjusted_pseudocount_used",
+            "PTM_Unadjusted_Pseudocount_Used",
             "de_novo",
             "De_Novo",
         )
@@ -212,6 +216,59 @@ def is_de_novo_representation(row: Mapping[str, Any] | None) -> bool:
     return str(row.get("activity_class") or row.get("Activity_Class") or "").strip().lower() in {
         "de_novo",
         "denovo",
+    }
+
+
+def conventional_quantitation_eligibility(row: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Return the render-time conventional-axis eligibility for one row.
+
+    A finite protein-adjusted value does not make a control-undetected row a
+    conventional measurement. The independent axis must have a finite value,
+    non-zero control and treatment support, and no de-novo/pseudocount flag.
+    """
+    record = row if isinstance(row, Mapping) else {}
+
+    def _finite(*keys: str) -> float | None:
+        for key in keys:
+            value = record.get(key)
+            if value is None or str(value).strip().lower() in {"", "nan", "none", "null", "na"}:
+                continue
+            try:
+                number = float(value)
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(number):
+                return number
+        return None
+
+    control_n = _finite("ptm_unadjusted_control_n", "PTM_Unadjusted_Control_N")
+    treatment_n = _finite("ptm_unadjusted_treatment_n", "PTM_Unadjusted_Treatment_N")
+    unadjusted = _finite("ptm_unadjusted_log2fc", "PTM_Unadjusted_Log2FC")
+    adjusted = _finite(
+        "ptm_protein_adjusted_log2fc",
+        "PTM_ProteinAdjusted_Log2FC",
+        "ptm_relative_log2fc",
+        "PTM_Relative_Log2FC",
+    )
+    reasons: list[str] = []
+    if is_de_novo_representation(record):
+        reasons.append("control_undetected_or_pseudocount_representation")
+    if unadjusted is None:
+        reasons.append("independent_unadjusted_contrast_unavailable")
+    if control_n is not None and control_n <= 0:
+        reasons.append("independent_control_detection_absent")
+    if treatment_n is not None and treatment_n <= 0:
+        reasons.append("independent_treatment_detection_absent")
+    if adjusted is None:
+        reasons.append("protein_adjusted_contrast_unavailable")
+    return {
+        "contract_version": "conventional_quantitation_eligibility.v1",
+        "eligible": not reasons,
+        "reason_codes": sorted(set(reasons)),
+        "independent_unadjusted_log2fc": unadjusted,
+        "protein_adjusted_log2fc": adjusted,
+        "independent_control_n": int(control_n) if control_n is not None else None,
+        "independent_treatment_n": int(treatment_n) if treatment_n is not None else None,
     }
 
 
