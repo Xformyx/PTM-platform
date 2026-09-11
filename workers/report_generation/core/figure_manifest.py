@@ -6,7 +6,10 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from ptm_shared.de_novo_representation import is_de_novo_representation
-from report_generation.core.measured_feature_cards import build_quantitation_comparison_cards
+from report_generation.core.measured_feature_cards import (
+    build_quantitation_comparison_cards,
+    reader_feature_id,
+)
 
 
 FIGURE_MANIFEST_VERSION = "report_figure_manifest.v3"
@@ -120,24 +123,27 @@ def select_reader_heatmap_features(vector_rows: list[Mapping[str, Any]], conditi
     followed by lexical completion. This avoids a sole |Log2FC| ranking while
     supplying a reproducible, readable 12–20 feature display candidate set.
     """
-    grouped: dict[tuple[str, str], dict[str, Mapping[str, Any]]] = {}
+    grouped: dict[tuple[str, str, str, str], dict[str, list[Mapping[str, Any]]]] = {}
     for row in vector_rows or []:
         if not isinstance(row, Mapping) or is_de_novo_representation(row):
             continue
         gene = str(row.get("gene") or row.get("gene_name") or "").strip()
         site = str(row.get("position") or row.get("site") or "").strip()
+        precursor = str(row.get("Precursor.Id") or row.get("precursor_id") or row.get("source_feature_id") or "").strip()
+        sequence = str(row.get("Modified.Sequence") or row.get("modified_sequence") or "").strip()
         condition = str(row.get("condition") or "").strip()
-        if not gene or not site or condition not in conditions:
+        if not gene or not site or not (precursor or sequence) or condition not in conditions:
             continue
-        grouped.setdefault((gene.upper(), site), {})[condition] = row
+        grouped.setdefault((gene.upper(), site, precursor, sequence), {}).setdefault(condition, []).append(row)
     candidates: list[dict] = []
-    for (gene, site), by_condition in grouped.items():
-        if any(condition not in by_condition for condition in conditions):
+    for key, by_condition in grouped.items():
+        gene, site, precursor, sequence = key
+        if any(condition not in by_condition or len(by_condition[condition]) != 1 for condition in conditions):
             continue
         values: list[float] = []
         valid = True
         for condition in conditions:
-            raw = by_condition[condition].get("ptm_relative_log2fc")
+            raw = by_condition[condition][0].get("ptm_relative_log2fc")
             try:
                 value = float(raw)
             except (TypeError, ValueError):
@@ -155,14 +161,19 @@ def select_reader_heatmap_features(vector_rows: list[Mapping[str, Any]], conditi
             else "0"
             for value in values
         )
+        feature_id = reader_feature_id(key)
         candidates.append({
             "gene": gene,
             "position": site,
+            "source_feature_id": precursor or None,
+            "modified_sequence": sequence or None,
+            "reader_feature_id": feature_id,
+            "display_label": f"{feature_id} · {gene} {site}",
             "conditions": list(conditions),
             "pattern_class": pattern,
-            "selection_reason": "complete conventional temporal coverage; representative signed profile pattern; lexical tie-breaker",
+            "selection_reason": "unique modified-precursor identity; complete conventional temporal coverage; representative signed profile pattern; lexical tie-breaker",
         })
-    candidates.sort(key=lambda item: (item["pattern_class"], item["gene"], item["position"]))
+    candidates.sort(key=lambda item: (item["pattern_class"], item["reader_feature_id"]))
     selected: list[dict] = []
     seen_patterns: set[str] = set()
     for candidate in candidates:
@@ -173,9 +184,9 @@ def select_reader_heatmap_features(vector_rows: list[Mapping[str, Any]], conditi
         if len(selected) >= maximum:
             break
     if len(selected) < minimum:
-        selected_keys = {(item["gene"], item["position"]) for item in selected}
+        selected_keys = {item["reader_feature_id"] for item in selected}
         for candidate in candidates:
-            key = (candidate["gene"], candidate["position"])
+            key = candidate["reader_feature_id"]
             if key in selected_keys:
                 continue
             selected.append(candidate)
@@ -291,11 +302,23 @@ def _select_cluster_figures(state: Mapping[str, Any], *, minimum: int = 3, maxim
             continue
         cluster = metadata.get(cluster_id, {})
         pattern = str(cluster.get("pattern") or cluster.get("pattern_type") or "unclassified")
+        members = []
+        for member in cluster.get("member_details") or []:
+            if not isinstance(member, Mapping):
+                continue
+            if str(member.get("activity_class") or "").lower() == "de_novo" or bool(member.get("control_pseudocount_used")):
+                continue
+            gene = str(member.get("gene") or "").strip()
+            site = str(member.get("site") or member.get("position") or "").strip()
+            label = " ".join(part for part in (gene, site) if part).strip() or str(member.get("key") or "").strip()
+            if label:
+                members.append(label)
         candidates.append({
             "path": path,
             "cluster_id": cluster_id,
             "pattern": pattern,
             "caption": str(figure.get("caption") or ""),
+            "representative_members": sorted(set(members))[:3],
         })
     candidates.sort(key=lambda item: (item["pattern"], item["cluster_id"]))
     selected: list[dict] = []
@@ -338,14 +361,26 @@ def _compose_cluster_panel(selected: list[Mapping[str, Any]], output_dir: str) -
         columns = 2
         rows = (len(opened) + columns - 1) // columns
         cell_width = max(image.width for _, image in opened) + 36
-        cell_height = max(image.height for _, image in opened) + 60
+        cell_height = max(image.height for _, image in opened) + 82
         canvas = Image.new("RGB", (columns * cell_width, rows * cell_height), "white")
         draw = ImageDraw.Draw(canvas)
         for index, (item, image) in enumerate(opened):
             row, column = divmod(index, columns)
             x = column * cell_width + 18
-            y = row * cell_height + 34
-            draw.text((x, 10 + row * cell_height), f"{chr(65 + index)}  Temporal Profile Cluster {index + 1}", fill="black")
+            y = row * cell_height + 54
+            pattern = str(item.get("pattern") or "unclassified").replace("_", " ")
+            draw.text(
+                (x, 10 + row * cell_height),
+                f"{chr(65 + index)}  Temporal Profile Cluster {index + 1} · {pattern}",
+                fill="black",
+            )
+            member_text = ", ".join(str(value) for value in item.get("representative_members") or [])
+            if member_text:
+                draw.text(
+                    (x, 30 + row * cell_height),
+                    f"Representative measured members (lexical): {member_text}",
+                    fill="#4B5563",
+                )
             canvas.paste(image, (x, y))
         path = Path(output_dir) / "reader_temporal_profile_clusters.png"
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -384,11 +419,24 @@ def _generate_concordance_summary(
     ]
     if len(matched) < 3:
         matched = sorted(rows, key=lambda row: str(row.get("static_wave_id") or row.get("cluster_id") or ""))[:8]
+    cluster_rank = {str(cluster_id): index for index, cluster_id in enumerate(selected_cluster_ids)}
+    matched.sort(key=lambda row: (
+        cluster_rank.get(str(row.get("static_wave_id") or row.get("cluster_id") or ""), len(cluster_rank)),
+        str(row.get("from_window") or ""),
+        str(row.get("to_window") or ""),
+    ))
     matched = matched[:8]
     labels: list[str] = []
+    denominators: list[int] = []
+    included_cluster_ids: list[str] = []
     retained: list[float] = []
     gained: list[float] = []
     lost: list[float] = []
+    cluster_order = {
+        str(cluster_id): index + 1
+        for index, cluster_id in enumerate(selected_cluster_ids)
+        if str(cluster_id)
+    }
     for row in matched:
         rates = _mapping(row.get("concordance_change_rates"))
         denominator = int(row.get("evaluable_pair_window_comparison_count") or 0)
@@ -396,7 +444,15 @@ def _generate_concordance_summary(
             continue
         from_window = str(row.get("from_window") or "")
         to_window = str(row.get("to_window") or "")
-        labels.append(f"Cluster {len(labels) + 1}\n{from_window} → {to_window}")
+        cluster_id = str(row.get("static_wave_id") or row.get("cluster_id") or "")
+        cluster_number = cluster_order.get(cluster_id)
+        if cluster_number is None:
+            cluster_number = len(cluster_order) + 1
+            cluster_order[cluster_id] = cluster_number
+        labels.append(f"Cluster {cluster_number}\n{from_window} | {to_window}")
+        denominators.append(denominator)
+        if cluster_id and cluster_id not in included_cluster_ids:
+            included_cluster_ids.append(cluster_id)
         retained.append(float(rates.get("retained") or 0.0))
         gained.append(float(rates.get("gain") or 0.0))
         lost.append(float(rates.get("loss") or 0.0))
@@ -414,21 +470,33 @@ def _generate_concordance_summary(
         ax.bar(x, gained, bottom=retained, label="Gain", color="#59A14F")
         stacked = np.array(retained) + np.array(gained)
         ax.bar(x, lost, bottom=stacked, label="Loss", color="#E15759")
+        totals = np.array(retained) + np.array(gained) + np.array(lost)
+        for index, denominator in enumerate(denominators):
+            classified = int(round(float(totals[index]) * denominator))
+            ax.text(
+                x[index],
+                min(float(totals[index]) + 0.025, 0.97),
+                f"{classified}/{denominator}",
+                ha="center",
+                va="bottom",
+                fontsize=7,
+                color="#374151",
+            )
         ax.set_xticks(x)
         ax.set_xticklabels(labels, rotation=35, ha="right")
         ax.set_ylabel("Rate per evaluable within-cluster pair-window")
         ax.set_ylim(0, 1)
         ax.set_title("Interval-wise Concordance Change Rates")
-        ax.legend(frameon=False, ncol=3, loc="upper right")
+        ax.legend(frameon=False, ncol=3, loc="lower right", bbox_to_anchor=(1.0, 1.015))
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
         ax.grid(axis="y", alpha=0.2)
-        fig.tight_layout()
+        fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.93))
         path = Path(output_dir) / "reader_interval_concordance_change_summary.png"
         path.parent.mkdir(parents=True, exist_ok=True)
         fig.savefig(path, dpi=220, bbox_inches="tight")
         plt.close(fig)
-        return _available_path(path), labels
+        return _available_path(path), included_cluster_ids
     except Exception:
         return "", []
 
@@ -458,10 +526,14 @@ def _generate_protein_adjustment_comparison(
         protein = []
         for card in cards:
             identity = _mapping(card.get("feature_identity"))
+            feature_id = str(identity.get("reader_feature_id") or "")
             gene = str(identity.get("gene") or "feature")
             residue = str(identity.get("candidate_residue_annotation") or "").strip()
             condition = str(card.get("condition") or "recorded condition")
-            labels.append(f"{gene}{' ' + residue if residue else ''} · {condition}")
+            labels.append(
+                f"{feature_id + ' · ' if feature_id else ''}{gene}"
+                f"{' ' + residue if residue else ''} · {condition}"
+            )
             unadjusted.append(float(card["ptm_unadjusted_log2fc"]))
             adjusted.append(float(card["ptm_protein_adjusted_log2fc"]))
             protein.append(float(card["protein_log2fc"]))
@@ -587,6 +659,10 @@ def prepare_reader_figure_manifest(state: Mapping[str, Any], *, citation_complet
     selected_clusters = _select_cluster_figures(state)
     profile_path = _compose_cluster_panel(selected_clusters, output_dir)
     if profile_path:
+        representative_members = {
+            f"Temporal Profile Cluster {index}": list(item.get("representative_members") or [])
+            for index, item in enumerate(selected_clusters, 1)
+        }
         profile_entry = _entry(
             "reader_temporal_profiles", "reader_temporal_profile", profile_path,
             question="Which selected Temporal Profile Clusters represent distinct measured phosphorylation trajectories?",
@@ -596,11 +672,13 @@ def prepare_reader_figure_manifest(state: Mapping[str, Any], *, citation_complet
                 "data_unit_scope": "conventional quantified phosphorylation-feature profiles",
                 "visual_encoding": "cluster-specific sampled-timepoint trajectories and cluster summaries",
                 "interpretation_boundary": "descriptive temporal profiles; not common regulation, kinase activity, pathway function, or causal order",
+                "representative_members": representative_members,
             },
             selection_rule="distinct temporal pattern class; readable existing cluster plot; lexical cluster-ID tie-breaker",
             selected_profile_count=len(selected_clusters),
             selected_cluster_count=len(selected_clusters),
             selected_cluster_ids=[str(item.get("cluster_id")) for item in selected_clusters],
+            representative_member_labels=representative_members,
             labels_readable=True,
             title="Selected Temporal Profile Clusters",
         )
@@ -655,6 +733,11 @@ def prepare_reader_figure_manifest(state: Mapping[str, Any], *, citation_complet
             matched_protein_context=True,
             labels_readable=True,
             comparison_classes=sorted({str(card.get("comparison_class") or "") for card in comparison_cards}),
+            selected_reader_feature_ids=sorted({
+                str(_mapping(card.get("feature_identity")).get("reader_feature_id") or "")
+                for card in comparison_cards
+                if str(_mapping(card.get("feature_identity")).get("reader_feature_id") or "")
+            }),
             reconstructed_metric_excluded=True,
             de_novo_excluded=True,
             title="Independent PTM and Protein-Adjustment Comparison",
@@ -726,6 +809,14 @@ def figure_cards_from_manifest(manifest: Mapping[str, Any]) -> list[dict]:
             "forbidden_interpretation": "activation, direct kinase–substrate relation, causal order, isoform-specific activity",
             "citation_ids": list(figure.get("citation_ids") or []),
             "source_evidence_ids": list(figure.get("source_evidence_ids") or []),
+            "selected_reader_feature_ids": list(
+                figure.get("selected_reader_feature_ids")
+                or [
+                    str(item.get("reader_feature_id") or "")
+                    for item in figure.get("selected_features") or []
+                    if str(item.get("reader_feature_id") or "")
+                ]
+            ),
         })
     return cards
 

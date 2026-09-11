@@ -21,9 +21,14 @@ from report_generation.core.study_metadata import (
     build_study_metadata_contract,
     repair_unrecorded_metadata_claim,
 )
+from report_generation.core.scientific_semantics import (
+    audit_language_quality,
+    audit_semantic_claims,
+    repair_semantic_sentence,
+)
 
 
-AUTHORING_PACKET_VERSION = "reader_authoring_packet.v3"
+AUTHORING_PACKET_VERSION = "reader_authoring_packet.v4"
 VALID_CLAIM_TIERS = {"O1", "O2", "C1", "L1", "H1", "D1"}
 
 # The reader-facing manuscript has one stable story arc.  These are authoring
@@ -51,9 +56,10 @@ SECTION_STORY_CONTRACT = {
     },
     "research_question_answers": {
         "categories": ("study_frame", "measured_feature_observation", "quantitation_comparison", "temporal_profile", "kinase_context", "candidate_discovery"),
-        "minimum_words": 140,
-        "role": "Answer each supplied research question directly from the available cards, distinguishing observation from a proposed follow-up test.",
-        "sequence": "question → direct evidence-bound answer → alternative interpretation or boundary → discriminating next measurement",
+        "minimum_words": 80,
+        "maximum_words": 220,
+        "role": "Provide concise supplementary answers to at most three non-duplicative research questions after the main conclusion.",
+        "sequence": "question → one evidence-bound answer → one boundary or discriminating next measurement",
     },
     "discussion": {
         "categories": ("measured_feature_observation", "quantitation_comparison", "quantitative_provenance", "temporal_profile", "kinase_context", "candidate_discovery", "traceable_literature"),
@@ -63,14 +69,15 @@ SECTION_STORY_CONTRACT = {
     },
     "methods": {
         "categories": ("study_frame", "quantitation_provenance", "quantitation_comparison", "temporal_profile"),
-        "minimum_words": 180,
+        "minimum_words": 260,
         "role": "Describe only recorded quantitative and temporal analysis procedures and their interpretation boundaries.",
-        "sequence": "study design → recorded quantitation track → temporal descriptive method → reporting boundary",
+        "sequence": "study design → normalization and replicate unit → explicit contrast equations → Welch/BH uncertainty → clustering and interval concordance denominator → missingness/de-novo policy → reporting boundary",
     },
     "conclusion": {
         "categories": ("study_frame", "measured_feature_observation", "quantitation_comparison", "temporal_profile", "kinase_context", "candidate_discovery"),
-        "minimum_words": 150,
-        "role": "Close the same study question with the observed advance, the bounded interpretation, and the testable next step.",
+        "minimum_words": 80,
+        "maximum_words": 170,
+        "role": "Close the same study question in no more than two short paragraphs with the observed advance, the bounded interpretation, and one testable next step.",
         "sequence": "study question → observed advance → bounded interpretation → next validation",
     },
 }
@@ -118,10 +125,29 @@ _DENOVO_AXIS_RE = re.compile(
     flags=re.IGNORECASE,
 )
 _OCCUPANCY_RE = re.compile(r"\b(?:absolute occupancy|occupancy|stoichiometry)\b", re.IGNORECASE)
+_READER_TECHNICAL_RECORD_RE = re.compile(
+    r"\b(?:status=|candidate pairs=|pair-transition records=|feature-level status records=|"
+    r"non-evaluable pair windows=|p=None|n_eff|LOTO)\b",
+    flags=re.IGNORECASE,
+)
 
 
 def _as_mapping(value: Any) -> dict:
     return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _study_context_with_override(state: Mapping[str, Any]) -> dict:
+    """Merge an explicit report-level verified metadata override into context."""
+    context = _as_mapping(state.get("experimental_context"))
+    report_config = _as_mapping(state.get("report_config"))
+    override = _as_mapping(
+        state.get("study_metadata_override")
+        or report_config.get("study_metadata_override")
+        or context.get("verified_metadata")
+    )
+    if override:
+        context["verified_metadata"] = override
+    return context
 
 
 def _clean_text(value: Any) -> str:
@@ -210,6 +236,8 @@ def _record_card(record: Mapping[str, Any], index: int) -> dict | None:
     text = _clean_text(record.get("reader_summary") or record.get("text"))
     if not evidence_id or not text:
         return None
+    if _READER_TECHNICAL_RECORD_RE.search(text):
+        return None
     lowered = evidence_id.lower()
     if any(token in lowered for token in ("kinase", "footprint", "attribution")):
         tier, category = "C1", "kinase_context"
@@ -231,12 +259,12 @@ def _record_card(record: Mapping[str, Any], index: int) -> dict | None:
 
 
 def _study_frame_card(state: Mapping[str, Any], synthesis: Mapping[str, Any]) -> dict:
-    context = _as_mapping(state.get("experimental_context"))
+    context = _study_context_with_override(state)
     frame = _as_mapping(synthesis.get("study_frame"))
     metadata = build_study_metadata_contract(context)
-    cell_model = str(frame.get("cell_model") or metadata.get("cell_model") or "the recorded experimental system").strip()
-    treatment = str(frame.get("treatment") or context.get("treatment") or context.get("compound") or "the recorded perturbation context").strip()
-    timepoints = frame.get("timepoints") or context.get("timepoints") or context.get("conditions") or []
+    cell_model = str(metadata.get("reader_system_label") or metadata.get("cell_model") or "the recorded experimental system").strip()
+    treatment = str(metadata.get("treatment") or frame.get("treatment") or "the recorded perturbation context").strip()
+    timepoints = metadata.get("timepoints") or frame.get("timepoints") or []
     if isinstance(timepoints, str):
         timepoints = [timepoints]
     time_text = ", ".join(str(item) for item in timepoints if str(item).strip()) or "the recorded sampled conditions"
@@ -457,6 +485,7 @@ def build_authoring_packet(
     """
     temporal = _as_mapping(temporal_evidence_packet or state.get("temporal_report_evidence_packet"))
     synthesis = _as_mapping(biological_synthesis_packet or state.get("biological_synthesis_packet"))
+    metadata_contract = build_study_metadata_contract(_study_context_with_override(state))
     cards = [_study_frame_card(state, synthesis), *_quantitative_cards(synthesis), _normalization_card(state)]
     cards.extend(build_feature_observation_cards(state, maximum=5))
     cards.extend(build_quantitation_comparison_cards(state, maximum=8))
@@ -527,6 +556,14 @@ def build_authoring_packet(
             "forbidden_interpretation": "activation, direct kinase–substrate relation, causal order, isoform-specific activity",
             "citation_ids": list(figure.get("citation_ids") or []),
             "source_evidence_ids": list(figure.get("source_evidence_ids") or []),
+            "selected_reader_feature_ids": list(
+                figure.get("selected_reader_feature_ids")
+                or [
+                    str(item.get("reader_feature_id") or "")
+                    for item in figure.get("selected_features") or []
+                    if str(item.get("reader_feature_id") or "")
+                ]
+            ),
         })
     section_claim_budget = {
         "abstract": ["O1", "O2", "C1", "H1"] + (["L1"] if has_traceable_literature else []),
@@ -548,7 +585,7 @@ def build_authoring_packet(
         "contract_version": AUTHORING_PACKET_VERSION,
         "mode": "citation_complete" if has_traceable_literature else "data_only",
         "reader_cards": reader_cards,
-        "study_metadata_contract": build_study_metadata_contract(_as_mapping(state.get("experimental_context"))),
+        "study_metadata_contract": metadata_contract,
         "figure_cards": figure_cards,
         "section_claim_budget": section_claim_budget,
         "section_story_contract": story_contract,
@@ -560,7 +597,7 @@ def build_authoring_packet(
             "normalization": "Describe the track as protein-abundance-adjusted relative PTM ratio, not absolute occupancy or kinase activity.",
             "measured_features": "Name current-order measured features and report supplied time-resolved values before aggregate counts or availability statements. Do not call a candidate-residue feature a localized phosphosite unless the card does so.",
             "protein_adjustment": "Compare only the independent unadjusted PTM contrast with the protein-adjusted PTM contrast and linked protein contrast. The reconstructed legacy metric is audit-only and adjustment does not prove biological truth.",
-            "study_metadata": "Repeat only recorded cell-model and organism metadata. Do not infer lineage, species, receptor status, or engineering history from a cell-model name.",
+            "study_metadata": "Use only the resolved study metadata label. A user-verified override supersedes stale free text; unresolved identity conflicts prohibit final release. Do not infer lineage, species, receptor status, or engineering history from a cell-model name.",
         },
     }
 
@@ -706,7 +743,18 @@ def deterministic_authoring_plan(packet: Mapping[str, Any]) -> dict:
             "measured_feature_observation": {"reader_quantitative_heatmap"},
             "quantitation_comparison": {"reader_protein_context"},
         }.get(category, set())
-        return [str(figure.get("figure_key")) for figure in figure_cards if figure.get("figure_key") in desired]
+        feature_id = str(_as_mapping(card.get("feature_identity")).get("reader_feature_id") or "")
+        matches: list[str] = []
+        for figure in figure_cards:
+            if figure.get("figure_key") not in desired:
+                continue
+            selected_ids = {
+                str(value) for value in figure.get("selected_reader_feature_ids") or [] if str(value)
+            }
+            if feature_id and selected_ids and feature_id not in selected_ids:
+                continue
+            matches.append(str(figure.get("figure_key")))
+        return matches
 
     def next_test_for(category: str) -> str:
         if category == "temporal_profile":
@@ -727,6 +775,7 @@ def deterministic_authoring_plan(packet: Mapping[str, Any]) -> dict:
             "category": category,
             "observation": _clean_text(card.get("reader_summary")),
             "evidence_ids": [str(item) for item in card.get("evidence_ids") or []],
+            "reader_feature_id": str(_as_mapping(card.get("feature_identity")).get("reader_feature_id") or "") or None,
             "figure_keys": figure_keys_for(card),
             "citation_ids": [str(item) for item in card.get("citation_ids") or []],
             "allowed_interpretation": "retain the card claim tier and reader-facing verbs",
@@ -997,6 +1046,14 @@ def validate_and_repair_sections(
                     sentence = repaired_measurement
                     actions.append("rewrite_candidate_residue_as_modified_precursor_feature")
                     reasons.append("candidate_residue_not_localized_site")
+                semantic_repaired, semantic_actions, semantic_reasons = repair_semantic_sentence(
+                    sentence,
+                    packet.get("reader_cards") or [],
+                )
+                if semantic_actions:
+                    sentence = semantic_repaired
+                    actions.extend(semantic_actions)
+                    reasons.extend(semantic_reasons)
                 if _LITERATURE_SIGNAL_RE.search(sentence) and not citations:
                     # Preserve current-study observations but remove an unsupported external-context clause.
                     clauses = re.split(r"(?<=[,;:])\s+|\s+(?=whereas\b|while\b)", sentence, flags=re.IGNORECASE)
@@ -1055,11 +1112,17 @@ _MAJOR_HEADING_ALIASES = {
     "conclusion": "conclusion",
     "conclusions": "conclusion",
     "research question answers": "research_question_answers",
+    "supplementary research question answers": "research_question_answers",
     "appendix: research question answers": "research_question_answers",
 }
 
 
-def audit_report_output_correctness(text: str, figure_manifest: Mapping[str, Any] | None = None) -> dict:
+def audit_report_output_correctness(
+    text: str,
+    figure_manifest: Mapping[str, Any] | None = None,
+    metadata_contract: Mapping[str, Any] | None = None,
+    reader_cards: Iterable[Mapping[str, Any]] | None = None,
+) -> dict:
     """Audit final reader output without changing scientific content.
 
     The gate checks only rendering/contract correctness.  It does not promote a
@@ -1129,10 +1192,34 @@ def audit_report_output_correctness(text: str, figure_manifest: Mapping[str, Any
         reason_codes.append("missing_rendered_figure_path")
     if eligible_missing_paths:
         reason_codes.append("eligible_manifest_figure_missing_path")
+    metadata = _as_mapping(metadata_contract)
+    metadata_blocking_conflicts = list(metadata.get("release_blocking_conflicts") or [])
+    metadata_review_reasons = list(metadata.get("review_reason_codes") or [])
+    if metadata_blocking_conflicts:
+        reason_codes.append("unresolved_study_metadata_conflict")
+    review_reason_codes: list[str] = []
+    if metadata_review_reasons:
+        review_reason_codes.append("study_metadata_review_required")
+    semantic_audit = audit_semantic_claims(body, reader_cards or [])
+    language_audit = audit_language_quality(body)
+    if semantic_audit.get("violation_count"):
+        reason_codes.append("unrepaired_scientific_semantic_claim")
+    if language_audit.get("fragment_count"):
+        review_reason_codes.append("sentence_fragment_review_required")
+    if language_audit.get("lowercase_sentence_start_count"):
+        review_reason_codes.append("lowercase_sentence_start_review_required")
+    if language_audit.get("doubled_punctuation_count"):
+        review_reason_codes.append("punctuation_damage_review_required")
+    if language_audit.get("section_word_budget_violation_count"):
+        review_reason_codes.append("section_word_budget_review_required")
+    reason_codes = sorted(set(reason_codes))
+    review_reason_codes = sorted(set(review_reason_codes))
+    status = "blocked_for_review" if reason_codes else "draft_review_required" if review_reason_codes else "release_candidate"
     return {
-        "contract_version": "reader_report_output_correctness.v1",
-        "status": "blocked_for_review" if reason_codes else "release_candidate",
+        "contract_version": "reader_report_output_correctness.v2",
+        "status": status,
         "reason_codes": reason_codes,
+        "review_reason_codes": review_reason_codes,
         "major_heading_sequence": major_sequence,
         "major_heading_labels": heading_labels,
         "duplicate_major_headings": duplicate_headings,
@@ -1144,6 +1231,11 @@ def audit_report_output_correctness(text: str, figure_manifest: Mapping[str, Any
         "eligible_manifest_figures_missing_path": eligible_missing_paths,
         "malformed_evidence_anchor_count": malformed_anchor_count,
         "unresolved_reference_marker_count": unresolved_reference_marker_count,
+        "study_metadata_status": metadata.get("metadata_status"),
+        "study_metadata_blocking_conflicts": metadata_blocking_conflicts,
+        "study_metadata_review_reasons": metadata_review_reasons,
+        "semantic_claim_audit": semantic_audit,
+        "language_quality_audit": language_audit,
     }
 
 
@@ -1266,12 +1358,13 @@ def render_reader_section_fallback(
         if not prompt_questions:
             prompt_questions = ["What does the current experiment establish, and what requires a discriminating follow-up measurement?"]
         answers: list[str] = []
-        for index, question in enumerate(prompt_questions, 1):
-            evidence = temporal if index == 1 else kinase if index == 2 else candidates
+        evidence_cycle = [measured, adjustment, temporal]
+        for index, question in enumerate(prompt_questions[:3], 1):
+            evidence = evidence_cycle[index - 1]
             answers.append(
                 f"### Q{index}. {question}\n\n"
-                f"{study} {evidence} This answer is restricted to the supplied quantitative evidence. "
-                "A matched temporal measurement, orthogonal assay, or pre-specified perturbation design is required before promoting this observation to a direct regulatory conclusion."
+                f"{evidence} This supplementary answer is restricted to the supplied quantitative evidence; "
+                "a matched temporal measurement, orthogonal assay, or pre-specified perturbation design is required before a direct regulatory conclusion."
             )
         return "\n\n".join(answers)
 
@@ -1293,9 +1386,16 @@ def render_reader_section_fallback(
         return "\n\n".join([
             study,
             quantitative,
-            "The independent unadjusted PTM contrast was computed from normalized modified-precursor replicate intensities. It was compared with the protein-adjusted relative PTM contrast and the linked protein contrast only when all three conventional values were available. The legacy reconstructed metric was excluded from this comparison, and arithmetic differences were not treated as proof that adjustment improved biological truth.",
-            "Hierarchical Clustering of Temporal Phosphorylation Feature Profiles was used to derive descriptive Temporal Profile Clusters. Interval-wise Concordance Analysis then summarized retained concordance, concordance gain, and concordance loss across adjacent sampled intervals within those fixed clusters.",
+            "For each modified-precursor feature and treatment condition, the independent unadjusted PTM contrast was log2(mean normalized PR intensity in treatment / mean normalized PR intensity in control). The protein-adjusted contrast was calculated from sample-wise normalized PTM-to-linked-protein ratios before condition means were contrasted; the linked protein contrast remained a separate quantitative axis. The legacy reconstructed value equaled the protein-adjusted contrast plus the linked protein contrast and was retained only for compatibility, not as an independent measurement.",
+            "Welch's unequal-variance t-test was used when both groups contained at least two replicate values, and Benjamini–Hochberg correction was applied to available p-values within the corresponding comparison output. Reported q-values are therefore analysis-specific uncertainty summaries, not evidence of causal regulation. Control-undetected features were not assigned a pseudocount-derived conventional fold change on the independent unadjusted axis.",
+            "Hierarchical Clustering of Temporal Phosphorylation Feature Profiles was used to derive descriptive Temporal Profile Clusters. Interval-wise Concordance Analysis summarized retained concordance, concordance gain, and concordance loss across adjacent sampled intervals within fixed clusters, using evaluable within-cluster pair-window comparisons as the denominator. Cluster count and distance settings are retained in the technical audit when available.",
             "Large conventional Log2FC values were retained as measured numeric contrasts but were not used alone to infer biological priority, mechanistic importance, direct regulatory strength, absolute occupancy, or kinase activity. Control-undetected features were kept as detection/LOD context rather than placed on conventional quantitative axes or magnitude ranks.",
+        ])
+
+    if section_type == "conclusion":
+        return "\n\n".join([
+            f"{measured} {adjustment} Together, these observations answer the study question at the level of measured modified-precursor and linked protein contrasts.",
+            f"{temporal} The interpretation remains descriptive rather than causal. The next step is one matched, pre-specified validation experiment that directly tests the principal selected finding.",
         ])
 
     return "\n\n".join([

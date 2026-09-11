@@ -878,22 +878,67 @@ def run_report_generation(self, order_id: int, config: dict):
             if path and Path(path).exists() and str(path).endswith(".md")
         ]
         if reader_authoring_shadow and report_markdown:
+            try:
+                prose_trace_path = order_output / "report_prose_trace.json"
+                prose_trace_path.write_text(
+                    json.dumps(
+                        {
+                            "contract_version": "reader_prose_trace.v1",
+                            "sections": final_state.get("reader_prose_snapshots") or {},
+                            "final_document_sources": [
+                                {
+                                    "path": str(path),
+                                    "text": path.read_text(encoding="utf-8", errors="replace"),
+                                }
+                                for path in report_markdown
+                            ],
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                    ),
+                    encoding="utf-8",
+                )
+                final_state["report_prose_trace_path"] = str(prose_trace_path)
+            except Exception as prose_trace_error:
+                logger.warning("[Order %s] Could not save reader prose trace: %s", order_id, prose_trace_error)
+        if reader_authoring_shadow and report_markdown:
+            metadata_contract = (
+                (final_state.get("authoring_packet") or final_state.get("reader_authoring_packet") or {}).get("study_metadata_contract")
+            )
+            reader_cards = (
+                (final_state.get("authoring_packet") or final_state.get("reader_authoring_packet") or {}).get("reader_cards") or []
+            )
             postprocessed_audits = [
                 audit_report_output_correctness(
                     path.read_text(encoding="utf-8", errors="replace"),
                     final_state.get("figure_manifest"),
+                    metadata_contract,
+                    reader_cards,
                 )
                 for path in report_markdown
             ]
             postprocess_reasons = sorted({
                 code for audit in postprocessed_audits for code in audit.get("reason_codes") or []
             })
+            postprocess_review_reasons = sorted({
+                code for audit in postprocessed_audits for code in audit.get("review_reason_codes") or []
+            })
             if postprocess_reasons:
                 final_state["report_output_correctness"] = {
                     **dict(final_state.get("report_output_correctness") or {}),
-                    "contract_version": "reader_report_output_correctness.v1",
+                    "contract_version": "reader_report_output_correctness.v2",
                     "status": "blocked_for_review",
                     "reason_codes": postprocess_reasons,
+                    "review_reason_codes": postprocess_review_reasons,
+                    "postprocess_audit_count": len(postprocessed_audits),
+                }
+            elif postprocess_review_reasons:
+                final_state["report_output_correctness"] = {
+                    **dict(final_state.get("report_output_correctness") or {}),
+                    "contract_version": "reader_report_output_correctness.v2",
+                    "status": "draft_review_required",
+                    "reason_codes": [],
+                    "review_reason_codes": postprocess_review_reasons,
                     "postprocess_audit_count": len(postprocessed_audits),
                 }
 
@@ -1075,12 +1120,10 @@ def run_report_generation(self, order_id: int, config: dict):
         progress_metadata["report_output_correctness"] = {
             "status": output_correctness.get("status", "unavailable"),
             "reason_codes": list(output_correctness.get("reason_codes") or []),
+            "review_reason_codes": list(output_correctness.get("review_reason_codes") or []),
             "audit_path": final_state.get("report_output_correctness_audit_path"),
-            "release_status": (
-                "blocked_for_review"
-                if output_correctness.get("status") == "blocked_for_review"
-                else "release_candidate"
-            ),
+            "release_status": report_release.get("status"),
+            "publish_as_final": bool(report_release.get("publish_as_final")),
         }
         progress_metadata["report_release"] = report_release
         if fallback_sections:
@@ -1142,7 +1185,10 @@ def run_report_generation(self, order_id: int, config: dict):
             completion_detail += "; citation completeness blocked for review (no traceable references)"
         if not final_export_allowed:
             completion_detail += "; final Report artifact withheld pending output-correctness repair"
-        if llm_failed or citation_completion_status == "blocked_for_review_missing_traceable_references" or not final_export_allowed:
+        elif report_release.get("status") == "draft_review_required":
+            completion_detail += "; review draft generated but not approved for final publication"
+        release_warning = report_release.get("status") in {"draft_review_required", "blocked_for_review"}
+        if llm_failed or citation_completion_status == "blocked_for_review_missing_traceable_references" or release_warning:
             update_order_status(
                 order_id, "completed", progress_pct=100, result_files=result_data,
                 error_message=(
@@ -1150,7 +1196,7 @@ def run_report_generation(self, order_id: int, config: dict):
                     if llm_failed
                     else (
                         report_release.get("message")
-                        if not final_export_allowed
+                        if release_warning
                         else "Citation completeness blocked for review: no traceable references were resolved."
                     )
                 ),
@@ -1164,7 +1210,12 @@ def run_report_generation(self, order_id: int, config: dict):
                 if llm_failed
                 else (
                     "Report draft retained; final artifact withheld pending output-correctness repair."
-                    if not final_export_allowed else "Report completed with citation-completeness warning."
+                    if not final_export_allowed
+                    else (
+                        "Report review draft generated; it is not approved for final publication."
+                        if report_release.get("status") == "draft_review_required"
+                        else "Report completed with citation-completeness warning."
+                    )
                 ),
             )
             logger.warning(

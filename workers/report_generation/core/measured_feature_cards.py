@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import math
 import re
+import hashlib
 from collections import defaultdict
 from typing import Any, Iterable, Mapping
 
@@ -21,10 +22,11 @@ from ptm_shared.evidence_contracts import (
     build_measurement_provenance,
 )
 from ptm_shared.de_novo_representation import is_de_novo_representation
+from report_generation.core.scientific_semantics import build_trajectory_shape_fact
 
 
-FEATURE_OBSERVATION_CARD_VERSION = "feature_observation_card.v1"
-QUANTITATION_COMPARISON_CARD_VERSION = "quantitation_comparison_card.v1"
+FEATURE_OBSERVATION_CARD_VERSION = "feature_observation_card.v2"
+QUANTITATION_COMPARISON_CARD_VERSION = "quantitation_comparison_card.v2"
 
 
 def _mapping(value: Any) -> dict:
@@ -90,6 +92,12 @@ def _feature_key(row: Mapping[str, Any]) -> tuple[str, str, str, str]:
     precursor = _text(row, "Precursor.Id", "precursor_id", "source_feature_id")
     sequence = _text(row, "Modified.Sequence", "modified_sequence")
     return gene, position, precursor, sequence
+
+
+def reader_feature_id(key: tuple[str, str, str, str]) -> str:
+    """Return a stable reader-facing ID without exposing raw precursor strings."""
+    identity = "|".join(str(value or "") for value in key)
+    return f"PF-{hashlib.sha1(identity.encode('utf-8')).hexdigest()[:8].upper()}"
 
 
 def _has_reader_identity(row: Mapping[str, Any]) -> bool:
@@ -275,6 +283,8 @@ def build_feature_observation_cards(
     cards: list[dict] = []
     for index, candidate in enumerate(selected, 1):
         label = _display_label(candidate["key"], candidate["measurement"])
+        feature_id = reader_feature_id(candidate["key"])
+        trajectory_fact = build_trajectory_shape_fact(candidate["points"])
         fragments = []
         for point in candidate["points"][:8]:
             if point["detection_context_only"]:
@@ -309,7 +319,10 @@ def build_feature_observation_cards(
             "contract_version": FEATURE_OBSERVATION_CARD_VERSION,
             "card_id": evidence_id,
             "category": "measured_feature_observation",
-            "reader_summary": f"{label} showed the following current-order measurements: " + "; ".join(fragments) + ".",
+            "reader_summary": (
+                f"{label} showed the following current-order measurements: " + "; ".join(fragments) + ". "
+                + str(trajectory_fact.get("reader_summary") or "")
+            ).strip(),
             "claim_tier": "O1",
             "evidence_ids": [evidence_id],
             "citation_ids": [],
@@ -321,6 +334,7 @@ def build_feature_observation_cards(
             ),
             "feature_label": label,
             "feature_identity": {
+                "reader_feature_id": feature_id,
                 "gene": candidate["key"][0],
                 "candidate_residue_annotation": candidate["key"][1] or None,
                 "source_feature_id": candidate["key"][2] or None,
@@ -329,6 +343,7 @@ def build_feature_observation_cards(
             },
             "measurement_provenance": candidate["measurement"],
             "trajectory": candidate["points"],
+            "trajectory_shape_fact": trajectory_fact,
             "selection_rule": "condition coverage; signed temporal-shape diversity; lexical tie-breaker; no magnitude ranking",
             "evidence_envelope": envelope,
         })
@@ -384,7 +399,18 @@ def build_quantitation_comparison_cards(
                 "delta": adjusted - unadjusted,
                 "comparison_class": _comparison_class(unadjusted, adjusted),
                 "measurement": measurement,
+                "protein_group": _text(row, "Protein.Group", "protein_group", "protein_accession"),
+                "unadjusted_q_value": _number(row, "PTM_Unadjusted_Q_Value", "ptm_unadjusted_q_value"),
+                "adjusted_q_value": _number(row, "PTM_Relative_Q_Value", "ptm_relative_q_value", "Q_Value", "q_value"),
+                "unadjusted_p_value": _number(row, "PTM_Unadjusted_P_Value", "ptm_unadjusted_p_value"),
+                "adjusted_p_value": _number(row, "PTM_Relative_P_Value", "ptm_relative_p_value", "p_value"),
+                "unadjusted_control_n": _number(row, "PTM_Unadjusted_Control_N", "ptm_unadjusted_control_n"),
+                "unadjusted_treatment_n": _number(row, "PTM_Unadjusted_Treatment_N", "ptm_unadjusted_treatment_n"),
             })
+
+    shared_protein_counts: dict[tuple[str, str, float], int] = defaultdict(int)
+    for row in rows:
+        shared_protein_counts[(row["protein_group"], row["condition"], round(row["protein"], 9))] += 1
 
     class_order = {
         "direction_changed_after_protein_adjustment": 0,
@@ -416,8 +442,21 @@ def build_quantitation_comparison_cards(
                 break
 
     cards: list[dict] = []
+    comparison_labels = {
+        "direction_changed_after_protein_adjustment": "a direction change outside the ±0.15 descriptive tolerance",
+        "attenuated_after_protein_adjustment": "attenuation beyond the ±0.15 descriptive tolerance",
+        "amplified_after_protein_adjustment": "amplification beyond the ±0.15 descriptive tolerance",
+        "similar_after_protein_adjustment": "similar magnitude within the ±0.15 descriptive tolerance, irrespective of a small numerical sign difference",
+    }
+    allowed_verbs = {
+        "direction_changed_after_protein_adjustment": ["differed from", "changed direction outside the descriptive tolerance"],
+        "attenuated_after_protein_adjustment": ["differed from", "was attenuated beyond the descriptive tolerance"],
+        "amplified_after_protein_adjustment": ["differed from", "was amplified beyond the descriptive tolerance"],
+        "similar_after_protein_adjustment": ["differed numerically from", "remained similar within the descriptive tolerance"],
+    }
     for index, row in enumerate(selected, 1):
         label = _display_label(row["key"], row["measurement"])
+        feature_id = reader_feature_id(row["key"])
         evidence_id = f"quantitation.comparison.{index}"
         cards.append({
             "contract_version": QUANTITATION_COMPARISON_CARD_VERSION,
@@ -428,12 +467,13 @@ def build_quantitation_comparison_cards(
                 f"{_format_signed(row['unadjusted'])}, the protein-adjusted PTM contrast was "
                 f"{_format_signed(row['adjusted'])}, and the linked protein contrast was "
                 f"{_format_signed(row['protein'])}; this was classified descriptively as "
-                f"{row['comparison_class'].replace('_', ' ')}."
+                f"{comparison_labels[row['comparison_class']]}. "
+                f"The linked protein contrast was shared by {shared_protein_counts[(row['protein_group'], row['condition'], round(row['protein'], 9))]} matched modified-precursor record(s) represented in the comparison input."
             ),
             "claim_tier": "O1",
             "evidence_ids": [evidence_id],
             "citation_ids": [],
-            "allowed_verbs": ["differed from", "was attenuated", "was amplified", "changed direction"],
+            "allowed_verbs": allowed_verbs[row["comparison_class"]],
             "forbidden_interpretations": ["proved correction", "improved truth", "absolute occupancy", "kinase activity"],
             "counterevidence": (
                 "This arithmetic comparison describes how protein adjustment changed the reported contrast. "
@@ -441,6 +481,7 @@ def build_quantitation_comparison_cards(
             ),
             "feature_label": label,
             "feature_identity": {
+                "reader_feature_id": feature_id,
                 "gene": row["key"][0],
                 "candidate_residue_annotation": row["key"][1] or None,
                 "source_feature_id": row["key"][2] or None,
@@ -453,6 +494,23 @@ def build_quantitation_comparison_cards(
             "protein_log2fc": row["protein"],
             "protein_adjustment_delta_log2fc": row["delta"],
             "comparison_class": row["comparison_class"],
+            "comparison_tolerance_log2": 0.15,
+            "replicate_support": {
+                "unadjusted_control_n": int(row["unadjusted_control_n"]) if row["unadjusted_control_n"] is not None else None,
+                "unadjusted_treatment_n": int(row["unadjusted_treatment_n"]) if row["unadjusted_treatment_n"] is not None else None,
+            },
+            "statistical_support": {
+                "unadjusted_p_value": row["unadjusted_p_value"],
+                "unadjusted_q_value": row["unadjusted_q_value"],
+                "protein_adjusted_p_value": row["adjusted_p_value"],
+                "protein_adjusted_q_value": row["adjusted_q_value"],
+                "test_family": "Welch unequal-variance t-test with Benjamini-Hochberg correction when replicate support was sufficient",
+            },
+            "unadjusted_q_value": row["unadjusted_q_value"],
+            "adjusted_q_value": row["adjusted_q_value"],
+            "uncertainty_available": bool(row["unadjusted_q_value"] is not None or row["adjusted_q_value"] is not None),
+            "biological_direction_inference_allowed": False,
+            "shared_linked_protein_record_count": shared_protein_counts[(row["protein_group"], row["condition"], round(row["protein"], 9))],
             "reconstructed_metric_excluded_from_comparison": True,
             "reconstructed_value_for_audit_only": row["reconstructed"],
             "selection_rule": "matched conventional axes; comparison-class diversity; lexical tie-breaker; no magnitude ranking",

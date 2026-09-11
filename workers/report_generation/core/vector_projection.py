@@ -85,10 +85,23 @@ def project_report_vector_row(row: Mapping[str, Any]) -> dict[str, Any]:
         "protein_log2fc": _optional_float(row, "Protein_Log2FC", "protein_log2fc"),
         # Phase 0 independent and audit-only axes.
         "ptm_unadjusted_log2fc": _optional_float(row, "PTM_Unadjusted_Log2FC", "ptm_unadjusted_log2fc"),
+        "ptm_unadjusted_p_value": _optional_float(row, "PTM_Unadjusted_P_Value", "ptm_unadjusted_p_value"),
+        "ptm_unadjusted_q_value": _optional_float(row, "PTM_Unadjusted_Q_Value", "ptm_unadjusted_q_value"),
+        "ptm_unadjusted_control_n": _optional_float(row, "PTM_Unadjusted_Control_N", "ptm_unadjusted_control_n"),
+        "ptm_unadjusted_treatment_n": _optional_float(row, "PTM_Unadjusted_Treatment_N", "ptm_unadjusted_treatment_n"),
+        "ptm_protein_adjusted_p_value": _optional_float(row, "p_value", "PTM_Relative_P_Value", "ptm_relative_p_value"),
+        "ptm_protein_adjusted_q_value": _optional_float(row, "q_value", "PTM_Relative_Q_Value", "ptm_relative_q_value"),
         "ptm_reconstructed_log2fc": _optional_float(
             row, "PTM_Reconstructed_Log2FC", "ptm_reconstructed_log2fc", "PTM_Absolute_Log2FC", "ptm_absolute_log2fc"
         ),
         "ptm_unadjusted_conventional_log2fc_na": conventional_na,
+        "ptm_unadjusted_calculation_mode": _text(
+            row, "PTM_Unadjusted_Calculation_Mode", "ptm_unadjusted_calculation_mode"
+        ),
+        "ptm_unadjusted_input_scale": _text(row, "PTM_Unadjusted_Input_Scale", "ptm_unadjusted_input_scale"),
+        "ptm_unadjusted_pseudocount_used": _optional_bool(
+            row, "PTM_Unadjusted_Pseudocount_Used", "ptm_unadjusted_pseudocount_used"
+        ),
         "ptm_reconstructed_calculation_mode": _text(
             row, "PTM_Reconstructed_Calculation_Mode", "ptm_reconstructed_calculation_mode"
         ),

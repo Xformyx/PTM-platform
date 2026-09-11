@@ -433,8 +433,10 @@ def test_shadow_final_assembly_fills_only_missing_sections_with_reader_fallback(
     })
     report = rendered["final_report"]
     assert "Validated observed result is retained." in report
-    for heading in ("## Abstract", "## Introduction", "## Results", "## Research Question Answers", "## Discussion", "## Methods", "## Conclusion"):
+    for heading in ("## Abstract", "## Introduction", "## Results", "## Supplementary Research Question Answers", "## Discussion", "## Methods", "## Conclusion"):
         assert heading in report
+    assert "log2(mean normalized PR intensity in treatment / mean normalized PR intensity in control)" in report
+    assert "evaluable within-cluster pair-window comparisons as the denominator" in report
     assert "P0 explicit modified-precursor" not in report
     assert "directly activates" not in report.lower()
     assert not (tmp_path / "evidence_and_reproducibility_audit.md").read_text(encoding="utf-8").startswith("# P0")
@@ -571,13 +573,15 @@ def _complete_conventional_vector_rows() -> list[dict]:
             rows.append({
                 "gene": f"GENE{index:02d}",
                 "position": f"S{index + 1}",
+                "Precursor.Id": f"GENE{index:02d}_PRECURSOR",
+                "Modified.Sequence": f"AA(UniMod:21)SEQ{index:02d}",
                 "condition": condition,
                 "ptm_relative_log2fc": value + (index % 3) * 0.1,
             })
     rows.extend([
-        {"gene": "DENOVO", "position": "S99", "condition": "0min", "ptm_relative_log2fc": 99.0, "Conventional_Log2FC_NA": True},
-        {"gene": "DENOVO", "position": "S99", "condition": "15min", "ptm_relative_log2fc": 99.0, "Conventional_Log2FC_NA": True},
-        {"gene": "DENOVO", "position": "S99", "condition": "60min", "ptm_relative_log2fc": 99.0, "Conventional_Log2FC_NA": True},
+        {"gene": "DENOVO", "position": "S99", "Precursor.Id": "DENOVO_PRECURSOR", "Modified.Sequence": "DENOVO(UniMod:21)SEQ", "condition": "0min", "ptm_relative_log2fc": 99.0, "Conventional_Log2FC_NA": True},
+        {"gene": "DENOVO", "position": "S99", "Precursor.Id": "DENOVO_PRECURSOR", "Modified.Sequence": "DENOVO(UniMod:21)SEQ", "condition": "15min", "ptm_relative_log2fc": 99.0, "Conventional_Log2FC_NA": True},
+        {"gene": "DENOVO", "position": "S99", "Precursor.Id": "DENOVO_PRECURSOR", "Modified.Sequence": "DENOVO(UniMod:21)SEQ", "condition": "60min", "ptm_relative_log2fc": 99.0, "Conventional_Log2FC_NA": True},
     ])
     return rows
 
@@ -587,6 +591,8 @@ def test_figure_manifest_selects_12_to_20_complete_conventional_feature_cards_wi
     selected = select_reader_heatmap_features(rows, ["0min", "15min", "60min"])
     assert len(selected) == 12
     assert all(item["gene"] != "DENOVO" for item in selected)
+    assert all(item["source_feature_id"] and item["reader_feature_id"].startswith("PF-") for item in selected)
+    assert len({item["reader_feature_id"] for item in selected}) == 12
     assert all("representative signed profile pattern" in item["selection_reason"] for item in selected)
     manifest = build_figure_manifest(
         {"vector_plot_raw_data": rows, "network_analysis": {"timepoints": ["0min", "15min", "60min"]}},
@@ -659,7 +665,16 @@ def test_prepare_reader_manifest_builds_three_verified_main_figures_and_final_re
             "cluster_id": index,
             "caption": f"Cluster {index}",
         })
-        clusters.append({"cluster_id": index, "pattern": pattern})
+        clusters.append({
+            "cluster_id": index,
+            "pattern": pattern,
+            "member_details": [{
+                "gene": f"GENE{index:02d}",
+                "site": f"S{index}",
+                "activity_class": "regulated",
+                "control_pseudocount_used": False,
+            }],
+        })
         transition_rows.append({
             "static_wave_id": str(index),
             "from_window": "0min→15min",
@@ -693,8 +708,15 @@ def test_prepare_reader_manifest_builds_three_verified_main_figures_and_final_re
         "reader_quantitative_heatmap", "reader_temporal_profiles", "reader_interval_concordance",
     }
     assert all(item["insertion_verified"] and Path(item["image_path"]).exists() for item in main)
+    profiles = next(item for item in main if item["figure_key"] == "reader_temporal_profiles")
     concordance = next(item for item in main if item["figure_key"] == "reader_interval_concordance")
+    assert profiles["representative_member_labels"]
+    assert all(
+        label.startswith("Temporal Profile Cluster ")
+        for label in profiles["representative_member_labels"]
+    )
     assert "rates per evaluable pair-window" in concordance["caption_facts"]["visual_encoding"]
+    assert concordance["selected_cluster_ids"] == profiles["selected_cluster_ids"]
 
     rendered = format_citations({
         **state,
@@ -732,6 +754,88 @@ def test_output_correctness_gate_blocks_malformed_anchor_duplicate_heading_and_p
     assert "malformed_evidence_anchor" in audit["reason_codes"]
     assert "duplicate_major_heading" in audit["reason_codes"]
     assert "phantom_figure_reference" in audit["reason_codes"]
+
+
+def test_output_correctness_gate_marks_fragment_and_punctuation_damage_as_draft_review():
+    audit = audit_report_output_correctness(
+        "## Abstract\nwhereas the recorded values differed..\n\n## Results\nThe measured contrast remained descriptive.",
+        {"figures": []},
+    )
+    assert audit["status"] == "draft_review_required"
+    assert "sentence_fragment_review_required" in audit["review_reason_codes"]
+    assert "lowercase_sentence_start_review_required" in audit["review_reason_codes"]
+    assert "punctuation_damage_review_required" in audit["review_reason_codes"]
+
+
+def test_output_correctness_gate_marks_overlong_conclusion_and_rqa_as_draft_review():
+    conclusion = " ".join(["bounded"] * 181)
+    rqa = " ".join(["evidence"] * 261)
+    audit = audit_report_output_correctness(
+        f"## Abstract\nRecorded observations.\n\n## Conclusion\n{conclusion}\n\n"
+        f"## Supplementary Research Question Answers\n{rqa}",
+        {"figures": []},
+    )
+    assert audit["status"] == "draft_review_required"
+    assert "section_word_budget_review_required" in audit["review_reason_codes"]
+    assert audit["language_quality_audit"]["section_word_budget_violation_count"] == 2
+
+
+def test_output_correctness_gate_blocks_unrepaired_non_monotonic_claim():
+    cards = [{
+        "category": "measured_feature_observation",
+        "feature_identity": {"gene": "GENEX", "candidate_residue_annotation": "Y70"},
+        "trajectory_shape_fact": {
+            "classification": "non_monotonic",
+            "monotonic_claim_allowed": False,
+            "baseline_return_claim_allowed": False,
+            "reader_summary": "GENEX Y70 showed a non-monotonic trajectory across the sampled conditions.",
+        },
+    }]
+    audit = audit_report_output_correctness(
+        "## Abstract\nGENEX Y70 continued to rise across the sampled conditions.",
+        {"figures": []},
+        reader_cards=cards,
+    )
+    assert audit["status"] == "blocked_for_review"
+    assert "unrepaired_scientific_semantic_claim" in audit["reason_codes"]
+    assert audit["semantic_claim_audit"]["violation_count"] == 1
+
+
+def test_shadow_final_renderer_reads_actual_authoring_packet_for_semantic_gate():
+    result = format_citations({
+        "reader_authoring_mode": "shadow",
+        "report_config": {"reader_authoring_mode": "shadow"},
+        "sections": {
+            "title": "Semantic state-key test",
+            "abstract": "GENEX Y70 continued to rise across the sampled conditions.",
+            "introduction": "The recorded experiment measured temporal phosphorylation features.",
+            "methods": "Conventional numeric contrasts were summarized descriptively.",
+            "results": "GENEX Y70 continued to rise across the sampled conditions.",
+            "discussion": "The observation remains descriptive.",
+            "conclusion": "The result defines a bounded follow-up question.",
+            "research_question_answers": "The current data establish measured contrasts only.",
+        },
+        "authoring_packet": {
+            "study_metadata_contract": {"status": "validated", "fields": {}},
+            "reader_cards": [{
+                "category": "measured_feature_observation",
+                "feature_identity": {"gene": "GENEX", "candidate_residue_annotation": "Y70"},
+                "trajectory_shape_fact": {
+                    "classification": "non_monotonic",
+                    "monotonic_claim_allowed": False,
+                    "baseline_return_claim_allowed": False,
+                    "reader_summary": "GENEX Y70 showed a non-monotonic trajectory across the sampled conditions.",
+                },
+            }],
+        },
+        "network_analysis": {},
+        "signal_flow_figures": [],
+        "figure_manifest": {"figures": []},
+        "collected_references": [],
+    })
+
+    assert result["report_output_correctness"]["status"] == "blocked_for_review"
+    assert "unrepaired_scientific_semantic_claim" in result["report_output_correctness"]["reason_codes"]
 
 
 def test_p5_report_renderer_keeps_denovo_detection_context_without_pseudo_log2fc():
@@ -1098,3 +1202,16 @@ def test_release_gate_allows_clean_shadow_output_and_does_not_gate_legacy_path()
     assert shadow["status"] == "final_ready"
     assert shadow["final_artifact_withheld"] is False
     assert legacy["status"] == "legacy_not_gated"
+
+
+def test_release_gate_keeps_review_draft_available_but_not_publishable_as_final():
+    audit = audit_report_output_correctness(
+        "## Abstract\nwhereas the recorded observation differed.\n\n## Conclusion\nBounded conclusion.",
+        {"figures": []},
+    )
+    release = resolve_report_release(reader_authoring_shadow=True, output_correctness=audit)
+
+    assert audit["status"] == "draft_review_required"
+    assert release["status"] == "draft_review_required"
+    assert release["final_artifact_withheld"] is False
+    assert release["publish_as_final"] is False

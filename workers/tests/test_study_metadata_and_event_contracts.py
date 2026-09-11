@@ -14,6 +14,36 @@ def test_metadata_contract_does_not_infer_species_from_cell_model_label():
     assert "CHO" not in repaired
 
 
+def test_verified_metadata_override_supersedes_stale_free_text_without_hardcoding():
+    contract = build_study_metadata_contract({
+        "cell_type": "model-a",
+        "organism": "species-a",
+        "verified_metadata": {
+            "cell_model": "model-a",
+            "organism": "species-b",
+            "parent_line": "parent-b",
+            "engineering": "recorded transgene-b",
+            "verification_source": "user_verified_source",
+        },
+    })
+    assert contract["metadata_status"] == "verified_override"
+    assert contract["organism"] == "species-b"
+    assert contract["release_blocking_conflicts"] == []
+    assert "organism_conflict_resolved_by_verified_override" in contract["resolved_conflict_reason_codes"]
+    repaired, changed = repair_unrecorded_metadata_claim(
+        "The unrelated hamster cells were analysed.", contract
+    )
+    assert changed is True
+    assert "hamster" not in repaired.lower()
+    assert "model-a" in repaired
+
+
+def test_unresolved_identity_alias_conflict_is_release_blocking():
+    contract = build_study_metadata_contract({"cell_model": "model-a", "cell_type": "model-b"})
+    assert contract["metadata_status"] == "conflict_unresolved"
+    assert "unresolved_cell_model_conflict" in contract["release_blocking_conflicts"]
+
+
 def test_event_specific_summary_keeps_right_censored_exit_distinct_from_onset():
     record = EventRecord(
         site_key="FEATURE_A",

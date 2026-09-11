@@ -460,6 +460,7 @@ def run_section_writing(state: dict) -> dict:
     authoring_plan = deterministic_authoring_plan(authoring_packet)
     reader_authoring_validator_audit: Dict[str, dict] = {}
     reader_authoring_fallback_sections: list[str] = []
+    reader_prose_snapshots: Dict[str, dict] = {}
     _reader_authoring_lock = __import__("threading").Lock()
     packet_output_dir = state.get("output_dir")
     if packet_output_dir:
@@ -1167,6 +1168,8 @@ def run_section_writing(state: dict) -> dict:
                     questions=active_questions,
                 )
 
+        raw_generated_content = content
+        validated_reader_content = content
         llm_draft_fidelity = audit_report_temporal_fidelity(
             content,
             temporal_evidence_packet,
@@ -1234,6 +1237,7 @@ def run_section_writing(state: dict) -> dict:
                 section_authoring_packet,
             )
             content = strip_authoring_anchors(repaired_sections.get(section_type, ""))
+            validated_reader_content = content
             with _reader_authoring_lock:
                 reader_authoring_validator_audit[section_type] = clause_audit
             temporal_report_fidelity[section_type]["legacy_status"] = temporal_report_fidelity[section_type]["status"]
@@ -1300,6 +1304,15 @@ def run_section_writing(state: dict) -> dict:
         # section is merged into the document-wide bibliography.
         local_references = list(chroma_refs or []) + list(all_references or [])
         content = _stabilize_section_citations(content, local_references)
+        if reader_authoring_shadow:
+            with _reader_authoring_lock:
+                reader_prose_snapshots[section_type] = {
+                    "contract_version": "reader_prose_section_trace.v1",
+                    "raw_generated_text": raw_generated_content,
+                    "validated_reader_text": validated_reader_content,
+                    "citation_normalized_writer_text": content,
+                    "fallback_used": section_type in reader_authoring_fallback_sections,
+                }
         return section_type, content
 
     # ── Phase 1: framing sections (parallel) ──
@@ -1527,6 +1540,7 @@ def run_section_writing(state: dict) -> dict:
         "reader_authoring_validator_audit": reader_authoring_validator_audit,
         "reader_authoring_fallback_sections": reader_authoring_fallback_sections,
         "reader_narrative_continuity_audit": reader_narrative_continuity_audit,
+        "reader_prose_snapshots": reader_prose_snapshots,
         "figure_manifest": state.get("figure_manifest") or {},
         "reader_authoring_mode": "shadow" if reader_authoring_shadow else "legacy",
     }

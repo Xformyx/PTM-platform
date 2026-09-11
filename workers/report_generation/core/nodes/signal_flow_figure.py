@@ -991,10 +991,13 @@ def generate_context_aware_ptm_heatmap(
     # Build lookup of available PTM sites
     # Key: (GENE_UPPER, position_str) → {condition: log2fc}
     site_data: Dict[tuple, Dict[str, float]] = {}
+    feature_data: Dict[tuple, Dict[str, float]] = {}
     all_genes = set()
     for row in vector_plot_raw_data:
         gene = (row.get("gene") or row.get("gene_name") or "").strip()
         position = str(row.get("position") or row.get("site") or "").strip()
+        precursor = str(row.get("Precursor.Id") or row.get("precursor_id") or row.get("source_feature_id") or "").strip()
+        sequence = str(row.get("Modified.Sequence") or row.get("modified_sequence") or "").strip()
         condition = (row.get("condition") or "").strip()
         fc = row.get("ptm_relative_log2fc") or row.get("log2fc") or row.get("Log2FC")
         if not gene or not condition:
@@ -1017,6 +1020,13 @@ def generate_context_aware_ptm_heatmap(
         site_data[key][condition] = plot_val
         if is_denovo:
             site_data[key]["_denovo"] = True
+        if precursor or sequence:
+            feature_key = (precursor, sequence, gene.upper(), position)
+            if feature_key not in feature_data:
+                feature_data[feature_key] = {}
+            feature_data[feature_key][condition] = plot_val
+            if is_denovo:
+                feature_data[feature_key]["_denovo"] = True
         all_genes.add(gene.upper())
 
     if not site_data:
@@ -1025,16 +1035,20 @@ def generate_context_aware_ptm_heatmap(
 
     matched_sites = []
     if selected_features:
-        requested_keys = [
-            (str(feature.get("gene") or "").upper(), str(feature.get("position") or ""))
-            for feature in selected_features
-            if str(feature.get("gene") or "").strip() and str(feature.get("position") or "").strip()
-        ]
-        for key in requested_keys:
-            fc_dict = site_data.get(key)
+        requested = []
+        for feature in selected_features:
+            gene = str(feature.get("gene") or "").upper()
+            position = str(feature.get("position") or "")
+            precursor = str(feature.get("source_feature_id") or feature.get("precursor_id") or "")
+            sequence = str(feature.get("modified_sequence") or "")
+            if not gene or not position or not (precursor or sequence):
+                continue
+            requested.append((precursor, sequence, gene, position, str(feature.get("display_label") or "")))
+        for precursor, sequence, gene, position, display_label in requested:
+            fc_dict = feature_data.get((precursor, sequence, gene, position))
             if fc_dict and not fc_dict.get("_denovo"):
-                matched_sites.append((key[0], key[1], fc_dict))
-        mentioned_genes = {gene for gene, _, _ in matched_sites}
+                matched_sites.append((gene, position, fc_dict, display_label or f"{gene} {position}"))
+        mentioned_genes = {gene for gene, _, _, _ in matched_sites}
     else:
         # Extract gene names mentioned in text (case-insensitive match against known genes)
         mentioned_genes = set()
@@ -1049,7 +1063,7 @@ def generate_context_aware_ptm_heatmap(
             if gene in mentioned_genes:
                 # Check if any condition has non-zero FC
                 if any(abs(v) > 0.01 for k, v in fc_dict.items() if k != "_denovo" and isinstance(v, (int, float))):
-                    matched_sites.append((gene, pos, fc_dict))
+                    matched_sites.append((gene, pos, fc_dict, None))
 
     if not matched_sites:
         logger.info(f"[CTX-HEATMAP] No PTM sites matched from {len(mentioned_genes)} mentioned genes — skipping")
@@ -1074,9 +1088,9 @@ def generate_context_aware_ptm_heatmap(
     site_labels = []
 
     denovo_rows = []
-    for i, (gene, pos, fc_dict) in enumerate(matched_sites):
+    for i, (gene, pos, fc_dict, selected_label) in enumerate(matched_sites):
         is_denovo = bool(fc_dict.get("_denovo"))
-        label = f"{gene} {pos}" if pos else gene
+        label = selected_label or (f"{gene} {pos}" if pos else gene)
         if is_denovo:
             label = f"★ {label}"
         site_labels.append(label)

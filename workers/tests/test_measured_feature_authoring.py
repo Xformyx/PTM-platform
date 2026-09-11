@@ -52,7 +52,7 @@ def test_phase2_authoring_packet_contains_named_feature_and_independent_adjustme
     packet = _packet()
     categories = [card["category"] for card in packet["reader_cards"]]
 
-    assert packet["contract_version"] == "reader_authoring_packet.v3"
+    assert packet["contract_version"] == "reader_authoring_packet.v4"
     assert "measured_feature_observation" in categories
     assert "quantitation_comparison" in categories
     assert any("GENEA" in card["reader_summary"] for card in packet["reader_cards"])
@@ -65,6 +65,8 @@ def test_phase2_manuscript_spine_prioritizes_named_measurements_over_count_inven
 
     assert plan["key_findings"][0]["category"] == "measured_feature_observation"
     assert plan["key_findings"][1]["category"] == "quantitation_comparison"
+    assert plan["key_findings"][0]["reader_feature_id"].startswith("PF-")
+    assert plan["key_findings"][0]["reader_feature_id"] == plan["key_findings"][1]["reader_feature_id"]
     assert "GENEA" in plan["central_answer"]
     assert "quantitative landscape comprised" not in plan["central_answer"].lower()
 
@@ -135,6 +137,13 @@ def test_phase2_prepared_manifest_adds_verified_protein_adjustment_figure(tmp_pa
         references=[],
     )
     assert any(card["figure_key"] == "reader_protein_context" for card in packet["figure_cards"])
+    comparison_figure = next(card for card in packet["figure_cards"] if card["figure_key"] == "reader_protein_context")
+    comparison_finding = next(
+        finding for finding in deterministic_authoring_plan(packet)["key_findings"]
+        if finding["category"] == "quantitation_comparison"
+    )
+    assert comparison_finding["reader_feature_id"] in comparison_figure["selected_reader_feature_ids"]
+    assert comparison_finding["figure_keys"] == ["reader_protein_context"]
 
 
 def test_phase2_manifest_suppresses_adjustment_figure_when_independent_axis_is_missing(tmp_path):

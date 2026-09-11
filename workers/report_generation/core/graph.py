@@ -95,6 +95,8 @@ class ReportState(TypedDict, total=False):
     reader_authoring_plan: dict            # scientific author section plan
     reader_authoring_validator_audit: dict # clause-level repair log; technical audit only
     reader_narrative_continuity_audit: dict # paragraph/repetition/figure-reference audit; technical audit only
+    reader_prose_snapshots: dict           # raw -> validated -> citation-normalized section trace
+    report_prose_trace_path: str           # task-level final document source trace
     reader_authoring_mode: str             # legacy | shadow
     evidence_reproducibility_audit_path: str  # separate technical audit sidecar
     figure_manifest: dict                  # final insertable main figures prepared before writing
@@ -1039,7 +1041,7 @@ def format_citations(state: ReportState) -> dict:
         "abstract": "## Abstract",
         "introduction": "## Introduction",
         "results": "## Results",
-        "research_question_answers": "## Research Question Answers",
+        "research_question_answers": "## Supplementary Research Question Answers",
         "discussion": "## Discussion",
         "methods": "## Methods",
         "conclusion": "## Conclusion",
@@ -1670,7 +1672,7 @@ def format_citations(state: ReportState) -> dict:
             "Results",
             "Discussion",
             "Conclusion",
-            "Research Question Answers",
+            "Supplementary Research Question Answers",
             "References",
         ]
     processed = processor.process(all_text)
@@ -1680,6 +1682,16 @@ def format_citations(state: ReportState) -> dict:
     report_output_correctness = audit_report_output_correctness(
         processed,
         figure_manifest if reader_authoring_shadow else None,
+        (
+            (state.get("authoring_packet") or state.get("reader_authoring_packet") or {}).get("study_metadata_contract")
+            if reader_authoring_shadow
+            else None
+        ),
+        (
+            (state.get("authoring_packet") or state.get("reader_authoring_packet") or {}).get("reader_cards")
+            if reader_authoring_shadow
+            else None
+        ),
     )
     state["report_output_correctness"] = report_output_correctness
     correctness_path = None

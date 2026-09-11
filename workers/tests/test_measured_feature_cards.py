@@ -51,7 +51,7 @@ def test_feature_cards_name_current_order_features_and_report_time_resolved_valu
     cards = build_feature_observation_cards(_state(), maximum=3)
 
     assert cards
-    assert cards[0]["contract_version"] == "feature_observation_card.v1"
+    assert cards[0]["contract_version"] == "feature_observation_card.v2"
     assert cards[0]["category"] == "measured_feature_observation"
     assert "GENE" in cards[0]["reader_summary"]
     assert "1min" in cards[0]["reader_summary"]
@@ -59,6 +59,9 @@ def test_feature_cards_name_current_order_features_and_report_time_resolved_valu
     assert cards[0]["selection_rule"].endswith("no magnitude ranking")
     assert cards[0]["claim_tier"] == "O1"
     assert "direct kinase attribution" in cards[0]["forbidden_interpretations"]
+    assert cards[0]["trajectory_shape_fact"]["classification"] in {
+        "non_monotonic", "monotonic_increase", "monotonic_decrease", "approximately_stable_within_descriptive_band"
+    }
 
 
 def test_feature_cards_do_not_call_candidate_residue_features_localized_sites_without_localization_evidence():
@@ -127,3 +130,32 @@ def test_named_feature_cards_withhold_duplicate_feature_condition_rows():
 
     assert build_feature_observation_cards(state) == []
     assert build_quantitation_comparison_cards(state) == []
+
+
+def test_non_monotonic_trajectory_fact_prevents_continued_rise_summary():
+    state = {
+        "vector_plot_raw_data": [
+            _row("GENEX", "Y70", "5min", 0.5, 0.496, 0.0, precursor="px"),
+            _row("GENEX", "Y70", "15min", 0.1, 0.032, 0.0, precursor="px"),
+            _row("GENEX", "Y70", "30min", 0.7, 0.679, 0.0, precursor="px"),
+            _row("GENEX", "Y70", "180min", 0.8, 0.751, 0.0, precursor="px"),
+        ]
+    }
+    card = build_feature_observation_cards(state, maximum=1)[0]
+    assert card["trajectory_shape_fact"]["classification"] == "non_monotonic"
+    assert card["trajectory_shape_fact"]["monotonic_claim_allowed"] is False
+    assert "non-monotonic" in card["reader_summary"]
+
+
+def test_small_sign_change_remains_descriptive_and_reports_shared_protein_adjustment():
+    state = {
+        "vector_plot_raw_data": [
+            _row("GENEA", "S1", "180min", -0.485, 0.157, -0.634, precursor="pa"),
+            _row("GENEA", "S2", "180min", -0.300, 0.200, -0.634, precursor="pb"),
+        ]
+    }
+    cards = build_quantitation_comparison_cards(state)
+    assert cards
+    assert all(card["biological_direction_inference_allowed"] is False for card in cards)
+    assert all(card["shared_linked_protein_record_count"] == 2 for card in cards)
+    assert all("shared by 2" in card["reader_summary"] for card in cards)
