@@ -845,6 +845,29 @@ def test_output_correctness_gate_marks_overlong_conclusion_and_rqa_as_draft_revi
     assert audit["language_quality_audit"]["section_word_budget_violation_count"] == 2
 
 
+def test_output_correctness_gate_ignores_guarded_words_in_reference_titles():
+    audit = audit_report_output_correctness(
+        "## Abstract\nRecorded phosphorylation contrasts were summarized descriptively.\n\n"
+        "## Results\nThe measured contrast remained descriptive.\n\n"
+        "## References\n\n"
+        "Turewicz M et al Temporal phosphoproteomics reveals circuitry of phased propagation in insulin signaling.\n"
+        "*Nature Communications* (2025).\n",
+        {"figures": []},
+    )
+    assert "unrepaired_scientific_semantic_claim" not in audit["reason_codes"]
+    assert audit["semantic_claim_audit"]["violation_count"] == 0
+
+
+def test_output_correctness_gate_still_blocks_body_propagation_claim():
+    audit = audit_report_output_correctness(
+        "## Abstract\nThe data show rapid initiation and propagation across the sampled interval.\n\n"
+        "## References\n\nNone.\n",
+        {"figures": []},
+    )
+    assert audit["status"] == "blocked_for_review"
+    assert "unrepaired_scientific_semantic_claim" in audit["reason_codes"]
+
+
 def test_output_correctness_gate_blocks_unrepaired_non_monotonic_claim():
     cards = [{
         "category": "measured_feature_observation",

@@ -335,9 +335,25 @@ def enforce_report_word_budgets(text: str) -> tuple[str, dict[str, Any]]:
     }
 
 
+_REFERENCE_SECTION_RE = re.compile(r"(?ms)^#{1,3}\s+References\b.*\Z")
+
+
+def prose_without_reference_section(text: str) -> str:
+    """Drop the bibliography before semantic-claim audit.
+
+    Citation titles are not reader scientific claims. A paper title that
+    contains a guarded word such as "propagation" must not withhold MD/HTML/DOCX.
+
+    docs/implementation_log.md [2026-09-12] References 제목은 semantic withhold 대상이 아님.
+    """
+
+    return _REFERENCE_SECTION_RE.sub("", str(text or "")).rstrip()
+
+
 def audit_semantic_claims(text: str, cards: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
     violations: list[dict[str, Any]] = []
-    for index, sentence in enumerate(re.split(r"(?<=[.!?])\s+", str(text or "")), 1):
+    body = prose_without_reference_section(text)
+    for index, sentence in enumerate(re.split(r"(?<=[.!?])\s+", body), 1):
         repaired, actions, reasons = repair_semantic_sentence(sentence, cards)
         if actions and repaired != sentence:
             violations.append({"sentence_index": index, "actions": actions, "reason_codes": reasons})

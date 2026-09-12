@@ -2604,3 +2604,16 @@
 - **결정성:** 결정적. 패턴 bin = conventional Log2FC `> 0.25` / `< -0.25`.
   문헌 complete = PMID 또는 DOI 또는 authors+year+journal+title.
 
+### [2026-09-12] References 제목은 semantic withhold 대상에서 제외
+
+- **분류:** 정정
+- **대상:** `workers/report_generation/core/scientific_semantics.py`
+- **구현 대상 설계:** 해당 없음 (reader Report 배포 게이트 오탐 정정)
+- **사전등록 상태:** 해당 없음
+- **내용:** `audit_semantic_claims`가 `## References` 이후 서지 제목을
+  본문 과학 주장으로 보지 않게 했다. 본문의 guarded wording은 그대로 차단한다.
+- **논문에서의 용도:** 사용 안 함 (배포 게이트)
+- **해석 한계:** 측정 수치, TMM, locked score를 바꾸지 않는다.
+  본문에 남은 과잉 해석 문장은 계속 withhold된다.
+- **결정성:** 해당 없음
+
