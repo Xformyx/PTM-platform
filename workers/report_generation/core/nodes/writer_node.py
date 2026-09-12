@@ -7,6 +7,8 @@ Each section uses LLM with published literature context for integration.
 """
 
 import json
+from common.section_budgets import SECTION_BUDGETS, section_content_issues
+from ..quantitative_claims import (SENTENCE_RESPONSE_FORMAT, decode_sentence_draft, structured_authoring_instructions)
 import logging
 import os
 import re
@@ -178,17 +180,7 @@ def _get_budget_multiplier(provider: str, model: str) -> float:
     return 1.0
 
 # Minimum word counts for generate_with_retry per section
-SECTION_MIN_WORDS = {
-    "abstract": 200,
-    "introduction": 800,
-    "results": 1200,
-    "research_question_answers": 250,
-    "discussion": 1000,
-    "conclusion": 300,
-    "methods": 400,
-    "suggestion": 400,
-    "title": 3,
-}
+SECTION_MIN_WORDS = {section: budget["minimum_words"] for section, budget in SECTION_BUDGETS.items()}
 
 # Legacy SYSTEM_PROMPT kept as fallback; prefer get_system_prompt_for_ptm(ptm_type)
 SYSTEM_PROMPT = (
@@ -1117,9 +1109,12 @@ def run_section_writing(state: dict) -> dict:
 
         max_tok = section_max_tokens.get(section_type, 8192)
 
+        if section_authoring_packet is not None:
+            prompt += structured_authoring_instructions(section_authoring_packet)
+
         # v9.31: Final safety truncation (should rarely trigger with budget system)
         prompt_len = len(prompt)
-        if prompt_len > MAX_PROMPT_CHARS:
+        if prompt_len > MAX_PROMPT_CHARS and section_authoring_packet is None:
             logger.warning(
                 f"[v9.31] {section_type} prompt exceeds absolute limit ({prompt_len:,} > {MAX_PROMPT_CHARS:,}). "
                 f"Truncating."
@@ -1135,15 +1130,34 @@ def run_section_writing(state: dict) -> dict:
 
         # v9.30: Use generate_with_retry for robust LLM calls
         min_words = SECTION_MIN_WORDS.get(section_type, 100)
-        content = llm.generate_with_retry(
-            prompt,
-            system_prompt=ptm_system_prompt,
-            temperature=llm_temperature,
-            max_tokens=max_tok,
-            min_words=min_words,
-            section_name=section_type.capitalize(),
-            max_retries=2,
-        )
+        structured_audit = []
+        structured_raw_content = None
+        generation_kwargs = {}
+        if section_authoring_packet is not None:
+            def validate_draft(draft):
+                prose, records = decode_sentence_draft(draft, section_authoring_packet)
+                return (["invalid_bound_sentence"] if any(not r["retained"] for r in records) else []) + section_content_issues(prose, section_type)
+            generation_kwargs = {"response_format": SENTENCE_RESPONSE_FORMAT, "content_validator": validate_draft}
+        if section_authoring_packet is not None and prompt_len > MAX_PROMPT_CHARS:
+            # Never cut a JSON schema or its reference catalog mid-record.
+            content = None
+            structured_audit = [{"reason_code": "authoring_packet_exceeds_prompt_budget", "retained": False}]
+        else:
+            content = llm.generate_with_retry(
+                prompt,
+                system_prompt=ptm_system_prompt,
+                temperature=llm_temperature,
+                max_tokens=max_tok,
+                min_words=min_words,
+                section_name=section_type.capitalize(),
+                max_retries=2,
+                **generation_kwargs,
+            )
+        if section_authoring_packet is not None and content and not content.startswith("[LLM Error"):
+            structured_raw_content = content
+            content, structured_audit = decode_sentence_draft(content, section_authoring_packet)
+            if not content:
+                content = None
 
         if content is None or content.startswith("[LLM Error"):
             error_detail = content if content else "generate_with_retry returned None"
@@ -1239,6 +1253,7 @@ def run_section_writing(state: dict) -> dict:
             content = strip_authoring_anchors(repaired_sections.get(section_type, ""))
             validated_reader_content = content
             with _reader_authoring_lock:
+                clause_audit["structured_sentence_audit"] = structured_audit
                 reader_authoring_validator_audit[section_type] = clause_audit
             temporal_report_fidelity[section_type]["legacy_status"] = temporal_report_fidelity[section_type]["status"]
             temporal_report_fidelity[section_type]["status"] = "shadow_clause_validated"
@@ -1308,7 +1323,11 @@ def run_section_writing(state: dict) -> dict:
             with _reader_authoring_lock:
                 reader_prose_snapshots[section_type] = {
                     "contract_version": "reader_prose_section_trace.v1",
-                    "raw_generated_text": raw_generated_content,
+                    "raw_generated_text": structured_raw_content or raw_generated_content,
+                    "resolved_provider": llm.provider,
+                    "resolved_model": llm.model,
+                    "temperature": llm_temperature,
+                    "response_schema": "reader_quantitative_claim.v1" if generation_kwargs else None,
                     "validated_reader_text": validated_reader_content,
                     "citation_normalized_writer_text": content,
                     "fallback_used": section_type in reader_authoring_fallback_sections,

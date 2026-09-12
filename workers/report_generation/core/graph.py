@@ -1692,7 +1692,7 @@ def format_citations(state: ReportState) -> dict:
             else None
         ),
         (
-            (state.get("authoring_packet") or state.get("reader_authoring_packet") or {}).get("reader_cards")
+            authoring_packet.get("reader_cards")
             if reader_authoring_shadow
             else None
         ),

@@ -23,7 +23,8 @@ import logging
 import os
 import threading
 import time
-from typing import Optional
+from typing import Optional, Callable
+from .section_budgets import section_content_issues
 
 import requests
 
@@ -302,6 +303,7 @@ class LLMClient:
         system_prompt: Optional[str] = None,
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
+        response_format: Optional[dict] = None,
     ) -> str:
         """Generate text using the configured LLM provider.
 
@@ -312,9 +314,9 @@ class LLMClient:
         tokens = max_tokens if max_tokens is not None else self.max_tokens
 
         if self.provider == "ollama":
-            return self._generate_ollama(prompt, system_prompt, temp, tokens)
+            return self._generate_ollama(prompt, system_prompt, temp, tokens, response_format=response_format)
         else:
-            return self._generate_openai_compatible(prompt, system_prompt, temp, tokens)
+            return self._generate_openai_compatible(prompt, system_prompt, temp, tokens, response_format=response_format)
 
     def is_available(self) -> bool:
         """Check if the configured LLM provider is available."""
@@ -336,7 +338,7 @@ class LLMClient:
     # Ollama
     # ------------------------------------------------------------------
 
-    def _generate_ollama(self, prompt: str, system_prompt: Optional[str], temp: float, max_tokens: int) -> str:
+    def _generate_ollama(self, prompt: str, system_prompt: Optional[str], temp: float, max_tokens: int, response_format=None) -> str:
         payload = {
             "model": self.model,
             "prompt": prompt,
@@ -346,6 +348,8 @@ class LLMClient:
                 "num_predict": max_tokens,
             },
         }
+        if response_format:
+            payload["format"] = response_format["json_schema"]["schema"]
         if system_prompt:
             payload["system"] = system_prompt
 
@@ -386,117 +390,58 @@ class LLMClient:
     # ------------------------------------------------------------------
 
     def generate_with_retry(
-        self,
-        prompt: str,
-        system_prompt: Optional[str] = None,
-        temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None,
-        min_words: int = 200,
-        section_name: str = "Section",
-        max_retries: int = 3,
-        retry_boost_prompt: str = "",
+        self, prompt: str, system_prompt: Optional[str] = None,
+        temperature: Optional[float] = None, max_tokens: Optional[int] = None,
+        min_words: int = 200, section_name: str = "Section", max_retries: int = 3,
+        retry_boost_prompt: str = "", response_format: Optional[dict] = None,
+        content_validator: Optional[Callable[[str], list[str]]] = None,
     ) -> Optional[str]:
-        """Generate text with automatic retry when output is too short.
+        """Retry actual errors or missing content, with fixed model settings.
 
-        If the LLM returns ``None`` or fewer than *min_words* words, retries
-        up to *max_retries* times with progressively stronger instructions.
-
-        Returns the generated text, or ``None`` if all retries fail.
+        min_words is retained for caller compatibility and is authoring guidance
+        only. Never prefer a draft merely because it is longer.
         """
-        best_result: Optional[str] = None
-        best_word_count = 0
         base_temp = temperature if temperature is not None else self.temperature
-
-        for attempt in range(1, max_retries + 1):
-            logger.info(
-                "[v95] %s: LLM call attempt %d/%d (provider=%s, model=%s)",
-                section_name, attempt, max_retries, self.provider, self.model,
-            )
-
+        issues = []
+        best_result = None
+        fewest_issues = float("inf")
+        for attempt in range(max_retries):
             current_prompt = prompt
-            if attempt > 1:
-                boost = (
-                    f"\n## CRITICAL: YOUR PREVIOUS RESPONSE WAS TOO SHORT "
-                    f"(attempt {attempt}/{max_retries})\n"
-                    f"Your previous response contained only {best_word_count} words, "
-                    f"which is FAR below the minimum requirement of {min_words} words.\n"
-                    f"You MUST write a comprehensive, detailed {section_name} section "
-                    f"with AT LEAST {min_words} words.\n"
-                    f"Do NOT summarize — provide FULL detailed analysis with specific "
-                    f"protein names, Log2FC values, and biological interpretation.\n"
-                    f"Every subsection MUST contain at least 2-3 sentences of "
-                    f"substantive content.\n"
-                )
-                if retry_boost_prompt:
-                    boost += f"\n{retry_boost_prompt}\n"
-                current_prompt = prompt + boost
-
-            current_temp = min(base_temp + (attempt - 1) * 0.1, 0.8)
-
-            result = self.generate(
-                prompt=current_prompt,
-                system_prompt=system_prompt,
-                temperature=current_temp,
-                max_tokens=max_tokens,
-            )
-
+            if issues:
+                current_prompt += ("\nCorrect only the following validation failures; preserve valid facts, "
+                                   "identifiers, citations, limitations and next tests. Do not add filler.\n"
+                                   + "\n".join(issues) + "\n" + retry_boost_prompt)
+            kwargs = dict(prompt=current_prompt, system_prompt=system_prompt,
+                          temperature=base_temp, max_tokens=max_tokens)
+            if response_format is not None:
+                kwargs["response_format"] = response_format
+            result = self.generate(**kwargs)
             if result is None or result.startswith("[LLM Error"):
-                logger.warning(
-                    "[v95] %s: LLM returned error on attempt %d: %s",
-                    section_name, attempt, result[:200] if result else "None",
-                )
-                if result and ("timed out" in result or "timeout" in result.lower()):
-                    continue
-                break
-
-            word_count = len(result.strip().split())
-            logger.info(
-                "[v95] %s: Attempt %d produced %d words (min: %d)",
-                section_name, attempt, word_count, min_words,
-            )
-
-            if word_count > best_word_count:
-                best_result = result
-                best_word_count = word_count
-
-            if word_count >= min_words:
-                logger.info(
-                    "[v95] %s: Accepted with %d words on attempt %d",
-                    section_name, word_count, attempt,
-                )
+                issues = ["generation_failed"]
+                if result and "timeout" not in result.lower() and "timed out" not in result.lower():
+                    break
+                continue
+            issues = (content_validator(result) if content_validator else section_content_issues(result, section_name))
+            if not issues:
                 return result
-
-            logger.warning(
-                "[v95] %s: %d words < %d minimum, retrying...",
-                section_name, word_count, min_words,
-            )
-
-        if best_result and best_word_count > 0:
-            logger.warning(
-                "[v95] %s: All %d retries exhausted. Using best result (%d words)",
-                section_name, max_retries, best_word_count,
-            )
-            return best_result
-
-        logger.error(
-            "[v95] %s: All %d retries failed completely (provider=%s, model=%s)",
-            section_name, max_retries, self.provider, self.model,
-        )
-        return None
+            if len(issues) < fewest_issues:
+                best_result, fewest_issues = result, len(issues)
+            logger.warning("%s validation attempt %d: %s", section_name, attempt + 1, issues)
+        return best_result
 
     # ------------------------------------------------------------------
     # OpenAI-compatible (OpenAI, Gemini)
     # ------------------------------------------------------------------
 
-    def _generate_openai_compatible(self, prompt: str, system_prompt: Optional[str], temp: float, max_tokens: int) -> str:
+    def _generate_openai_compatible(self, prompt: str, system_prompt: Optional[str], temp: float, max_tokens: int, response_format=None) -> str:
         return self._generate_openai_compat_with(
             prompt, system_prompt, temp, max_tokens,
-            base_url=self.base_url, api_key=self.api_key, model=self.model,
+            base_url=self.base_url, api_key=self.api_key, model=self.model, response_format=response_format,
         )
 
     def _generate_openai_compat_with(
         self, prompt: str, system_prompt: Optional[str], temp: float, max_tokens: int,
-        base_url: str, api_key: str, model: str,
+        base_url: str, api_key: str, model: str, response_format=None,
     ) -> str:
         messages = []
         if system_prompt:
@@ -522,6 +467,9 @@ class LLMClient:
             "temperature": temp,
             token_key: effective_max_tokens,
         }
+
+        if response_format is not None:
+            payload["response_format"] = response_format
 
         headers = {
             "Content-Type": "application/json",

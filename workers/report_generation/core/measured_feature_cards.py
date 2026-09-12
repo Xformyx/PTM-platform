@@ -23,6 +23,7 @@ from ptm_shared.evidence_contracts import (
 )
 from ptm_shared.de_novo_representation import is_de_novo_representation
 from report_generation.core.scientific_semantics import build_trajectory_shape_fact
+from .quantitative_fields import axis_number, axis_support, QUANTITATIVE_SCHEMA_VERSION
 
 
 FEATURE_OBSERVATION_CARD_VERSION = "feature_observation_card.v3"
@@ -159,24 +160,7 @@ def _identity_complete_condition_rows(rows: Iterable[Mapping[str, Any]]) -> list
 
 
 def _condition_value(row: Mapping[str, Any], axis: str) -> float | None:
-    aliases = {
-        "unadjusted": ("PTM_Unadjusted_Log2FC", "ptm_unadjusted_log2fc"),
-        "adjusted": (
-            "PTM_ProteinAdjusted_Log2FC",
-            "ptm_protein_adjusted_log2fc",
-            "PTM_Relative_Log2FC",
-            "ptm_relative_log2fc",
-        ),
-        "protein": ("Protein_Log2FC", "protein_log2fc"),
-        "reconstructed": (
-            "PTM_Reconstructed_Log2FC",
-            "ptm_reconstructed_log2fc",
-            "PTM_Absolute_Log2FC",
-            "ptm_absolute_log2fc",
-        ),
-        "q_value": ("PTM_Unadjusted_Q_Value", "ptm_unadjusted_q_value", "q_value"),
-    }
-    return _number(row, *aliases[axis])
+    return axis_number(row, axis, "value")
 
 
 def _condition_label(row: Mapping[str, Any]) -> str:
@@ -206,27 +190,28 @@ def _trajectory_complexity(values: list[float]) -> tuple[int, int]:
 
 
 def _point_quality(row: Mapping[str, Any], *, conventional_available: bool) -> dict[str, Any]:
-    control_n = _number(row, "PTM_Unadjusted_Control_N", "ptm_unadjusted_control_n")
-    treatment_n = _number(row, "PTM_Unadjusted_Treatment_N", "ptm_unadjusted_treatment_n")
-    unadjusted_q = _number(row, "PTM_Unadjusted_Q_Value", "ptm_unadjusted_q_value")
-    adjusted_q = _number(row, "PTM_Relative_Q_Value", "ptm_relative_q_value", "q_value")
-    replicate_supported = bool(
-        conventional_available
-        and control_n is not None and control_n >= 2
-        and treatment_n is not None and treatment_n >= 2
-    )
-    q_supported = bool(
-        conventional_available
-        and any(value is not None and value <= 0.05 for value in (unadjusted_q, adjusted_q))
-    )
-    return {
-        "unadjusted_control_n": int(control_n) if control_n is not None else None,
-        "unadjusted_treatment_n": int(treatment_n) if treatment_n is not None else None,
-        "unadjusted_q_value": unadjusted_q,
-        "protein_adjusted_q_value": adjusted_q,
-        "replicate_supported": replicate_supported,
-        "q_supported": q_supported,
-    }
+    support = axis_support(row)
+    axes = {}
+    for axis in ("unadjusted", "protein_adjusted", "protein"):
+        replicate = all(support[f"{axis}_{group}_n"] is not None and support[f"{axis}_{group}_n"] >= 2
+                        for group in ("control", "treatment"))
+        q = support[f"{axis}_q_value"]
+        axes[axis] = {"replicate_supported": bool(conventional_available and replicate),
+                      "q_supported": bool(conventional_available and q is not None and q < .05)}
+    ptm_axes = [axes[axis] for axis in ("unadjusted", "protein_adjusted")]
+    return {**support, "axis_support": axes,
+            "replicate_supported": any(item["replicate_supported"] for item in ptm_axes),
+            "q_supported": any(item["q_supported"] for item in ptm_axes),
+            "matched_axis_support": any(item["replicate_supported"] and item["q_supported"] for item in ptm_axes)}
+
+
+def _comparison_quality_tier(quality: Mapping[str, Any]) -> str:
+    """Rank one feature-condition; this is support, not a test of adjustment."""
+    if quality["matched_axis_support"]:
+        return "high"
+    if quality["replicate_supported"]:
+        return "moderate"
+    return "exploratory"
 
 
 def _narrative_quality_tier(points: Iterable[Mapping[str, Any]]) -> tuple[str, dict[str, int]]:
@@ -234,7 +219,8 @@ def _narrative_quality_tier(points: Iterable[Mapping[str, Any]]) -> tuple[str, d
     conventional_count = sum(bool(point.get("conventional_log2fc_available")) for point in point_list)
     replicate_supported_count = sum(bool(_mapping(point.get("quality")).get("replicate_supported")) for point in point_list)
     q_supported_count = sum(bool(_mapping(point.get("quality")).get("q_supported")) for point in point_list)
-    if conventional_count >= 2 and replicate_supported_count >= 2 and q_supported_count >= 1:
+    matched_axis_count = sum(bool(_mapping(point.get("quality")).get("matched_axis_support")) for point in point_list)
+    if conventional_count >= 2 and replicate_supported_count >= 2 and matched_axis_count >= 1:
         tier = "high"
     elif conventional_count >= 2 and replicate_supported_count >= 1:
         tier = "moderate"
@@ -298,6 +284,7 @@ def build_feature_observation_cards(
             conventional_available = not de_novo and unadjusted is not None
             points.append({
                 "condition": condition,
+                "measurement_provenance": _mapping(row.get("measurement_provenance")) or build_measurement_provenance(row),
                 "ptm_unadjusted_log2fc": unadjusted,
                 "ptm_protein_adjusted_log2fc": adjusted,
                 "protein_log2fc": protein,
@@ -396,11 +383,12 @@ def build_feature_observation_cards(
         )
         cards.append({
             "contract_version": FEATURE_OBSERVATION_CARD_VERSION,
+            "quantitative_schema_version": QUANTITATIVE_SCHEMA_VERSION,
             "card_id": evidence_id,
             "category": "measured_feature_observation",
             "reader_summary": (
-                f"{label} showed the following current-order measurements: " + "; ".join(fragments) + ". "
-                + str(trajectory_fact.get("reader_summary") or "")
+                f"{label} ({feature_id}) showed the following current-order measurements: " + "; ".join(fragments) + ". "
+                + f"{feature_id}: " + str(trajectory_fact.get("reader_summary") or "")
             ).strip(),
             "claim_tier": "O1",
             "evidence_ids": [evidence_id],
@@ -483,16 +471,11 @@ def build_quantitation_comparison_cards(
                 "comparison_class": _comparison_class(unadjusted, adjusted),
                 "measurement": measurement,
                 "protein_group": _text(row, "Protein.Group", "protein_group", "protein_accession"),
-                "unadjusted_q_value": _number(row, "PTM_Unadjusted_Q_Value", "ptm_unadjusted_q_value"),
-                "adjusted_q_value": _number(row, "PTM_Relative_Q_Value", "ptm_relative_q_value", "Q_Value", "q_value"),
-                "unadjusted_p_value": _number(row, "PTM_Unadjusted_P_Value", "ptm_unadjusted_p_value"),
-                "adjusted_p_value": _number(row, "PTM_Relative_P_Value", "ptm_relative_p_value", "p_value"),
-                "unadjusted_control_n": _number(row, "PTM_Unadjusted_Control_N", "ptm_unadjusted_control_n"),
-                "unadjusted_treatment_n": _number(row, "PTM_Unadjusted_Treatment_N", "ptm_unadjusted_treatment_n"),
-                "narrative_quality_tier": _narrative_quality_tier([{
-                    "conventional_log2fc_available": True,
-                    "quality": _point_quality(row, conventional_available=True),
-                }])[0],
+                "quality": _point_quality(row, conventional_available=True),
+                **axis_support(row),
+                "adjusted_q_value": axis_number(row, "adjusted", "q"),
+                "adjusted_p_value": axis_number(row, "adjusted", "p"),
+                "narrative_quality_tier": _comparison_quality_tier(_point_quality(row, conventional_available=True)),
             })
 
     shared_protein_counts: dict[tuple[str, str, float], int] = defaultdict(int)
@@ -548,10 +531,11 @@ def build_quantitation_comparison_cards(
         evidence_id = f"quantitation.comparison.{index}"
         cards.append({
             "contract_version": QUANTITATION_COMPARISON_CARD_VERSION,
+            "quantitative_schema_version": QUANTITATIVE_SCHEMA_VERSION,
             "card_id": evidence_id,
             "category": "quantitation_comparison",
             "reader_summary": (
-                f"For {label} at {row['condition']}, the independently calculated unadjusted PTM contrast was "
+                f"For {label} ({feature_id}) at {row['condition']}, the independently calculated unadjusted PTM contrast was "
                 f"{_format_signed(row['unadjusted'])}, the protein-adjusted PTM contrast was "
                 f"{_format_signed(row['adjusted'])}, and the linked protein contrast was "
                 f"{_format_signed(row['protein'])}; this was classified descriptively as "
@@ -583,17 +567,11 @@ def build_quantitation_comparison_cards(
             "protein_adjustment_delta_log2fc": row["delta"],
             "comparison_class": row["comparison_class"],
             "comparison_tolerance_log2": 0.15,
-            "replicate_support": {
-                "unadjusted_control_n": int(row["unadjusted_control_n"]) if row["unadjusted_control_n"] is not None else None,
-                "unadjusted_treatment_n": int(row["unadjusted_treatment_n"]) if row["unadjusted_treatment_n"] is not None else None,
-            },
-            "statistical_support": {
-                "unadjusted_p_value": row["unadjusted_p_value"],
-                "unadjusted_q_value": row["unadjusted_q_value"],
-                "protein_adjusted_p_value": row["adjusted_p_value"],
-                "protein_adjusted_q_value": row["adjusted_q_value"],
-                "test_family": "Welch unequal-variance t-test with Benjamini-Hochberg correction when replicate support was sufficient",
-            },
+            "replicate_support": {key: value for key, value in row["quality"].items() if key.endswith("_n")},
+            "statistical_support": {key: value for key, value in row["quality"].items() if key.endswith(("_p_value", "_q_value"))},
+            "axis_support": row["quality"]["axis_support"],
+            "quality_evaluation_unit": "single_feature_condition",
+            "adjustment_effect_tested": False,
             "unadjusted_q_value": row["unadjusted_q_value"],
             "adjusted_q_value": row["adjusted_q_value"],
             "uncertainty_available": bool(row["unadjusted_q_value"] is not None or row["adjusted_q_value"] is not None),

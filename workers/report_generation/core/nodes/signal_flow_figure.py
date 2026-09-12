@@ -1055,8 +1055,8 @@ def generate_context_aware_ptm_heatmap(
             sequence = str(feature.get("modified_sequence") or "")
             if not gene or not position or not (precursor or sequence):
                 continue
-            requested.append((precursor, sequence, gene, position, str(feature.get("display_label") or "")))
-        for precursor, sequence, gene, position, display_label in requested:
+            requested.append((precursor, sequence, gene, position, str(feature.get("display_label") or ""), feature))
+        for precursor, sequence, gene, position, display_label, feature in requested:
             fc_dict = feature_data.get((precursor, sequence, gene, position))
             expected_conditions = {str(value) for value in feature.get("conditions") or conditions}
             observed_conditions = {key for key in (fc_dict or {}) if not str(key).startswith("_")}
@@ -1115,7 +1115,7 @@ def generate_context_aware_ptm_heatmap(
         site_labels.append(label)
         denovo_rows.append(is_denovo)
         for j, c in enumerate(conditions):
-            matrix[i, j] = float(fc_dict.get(c, 0.0) or 0.0)
+            matrix[i, j] = float(fc_dict[c]) if c in fc_dict else np.nan
 
     # ── Step 3: Simple hierarchical clustering of rows ──
     try:
@@ -1177,8 +1177,7 @@ def generate_context_aware_ptm_heatmap(
     # Labels
     ax.set_xticks(range(n_conds))
     ax.set_xticklabels(conditions, fontsize=9, rotation=45, ha="right", color="#333333")
-    label_stride = max(1, int(np.ceil(n_sites / 18)))
-    visible_label_indices = list(range(0, n_sites, label_stride))
+    visible_label_indices = list(range(n_sites))
     ax.set_yticks(visible_label_indices)
     ax.set_yticklabels([site_labels[i] for i in visible_label_indices], fontsize=7, color="#333333")
 
@@ -1199,7 +1198,7 @@ def generate_context_aware_ptm_heatmap(
 
     # Colorbar
     cbar = fig.colorbar(im, ax=ax, shrink=0.7, pad=0.02)
-    cbar.set_label("Log₂FC (PTM-level)", fontsize=8, color="#4b5563")
+    cbar.set_label("Protein-adjusted relative PTM log2 contrast", fontsize=8, color="#4b5563")
     cbar.ax.yaxis.set_tick_params(color="#4b5563", labelsize=7)
     plt.setp(cbar.ax.yaxis.get_ticklabels(), color="#4b5563")
 
@@ -1209,14 +1208,14 @@ def generate_context_aware_ptm_heatmap(
         (
             f"Heatmap of {n_sites} conventional PTM feature aggregates selected by the FigureManifest. "
             f"Red/blue = conventional Log₂FC. De novo / detection-LOD rows are excluded from this display and color scale. "
-            f"{'Dense display: cell labels and alternating site labels are suppressed for readability.' if dense_display else ''}"
+            f"{'Dense display: cell values are omitted; all feature labels are retained.' if dense_display else ''}"
         )
         if selected_features
         else (
             f"Heatmap of {n_sites} PTM feature aggregates referenced in the report text. "
             f"Red/blue = quantified Log₂FC. ★ de novo cells are LOD-relative lower bounds, not fold-change. "
             f"Colormap scale excludes de novo. "
-            f"{'Dense display: cell labels and alternating site labels are suppressed for readability.' if dense_display else ''}"
+            f"{'Dense display: cell values are omitted; all feature labels are retained.' if dense_display else ''}"
         ),
         fontsize=7, color="#6b7280", ha="center", va="bottom", style="italic",
     )

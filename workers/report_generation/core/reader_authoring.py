@@ -13,7 +13,9 @@ import json
 import re
 from typing import Any, Iterable, Mapping
 
+from common.section_budgets import SECTION_BUDGETS
 from common.temporal_utils import condition_sort_key
+from .quantitative_claims import quantitative_records, validate_quantitative_sentence
 from report_generation.core.measured_feature_cards import (
     build_feature_observation_cards,
     build_quantitation_comparison_cards,
@@ -27,6 +29,8 @@ from report_generation.core.scientific_semantics import (
     audit_semantic_claims,
     normalize_reader_prose,
     repair_semantic_sentence,
+    sentence_evidence_scope,
+    is_negated_boundary,
 )
 from ptm_shared.quantitation_estimator_contract import (
     build_quantitation_estimator_contract,
@@ -45,49 +49,42 @@ VALID_CLAIM_TIERS = {"O1", "O2", "C1", "L1", "H1", "D1"}
 SECTION_STORY_CONTRACT = {
     "abstract": {
         "categories": ("study_frame", "measured_feature_observation", "quantitation_comparison", "temporal_profile", "kinase_context", "candidate_discovery"),
-        "minimum_words": 170,
         "role": "Summarize the study frame, the most informative observed pattern, its bounded significance, and the discriminating next question.",
         "sequence": "study frame → measured landscape → selected observation → bounded candidate context → next question",
     },
     "introduction": {
         "categories": ("study_frame", "quantitation_provenance", "traceable_literature", "temporal_profile"),
-        "minimum_words": 320,
         "role": "Establish the recorded biological question, why time-resolved PTM and protein measurements are informative, the traceable background, and the study objective.",
         "sequence": "study problem → measurement rationale → cited context → unresolved question → present study objective",
     },
     "results": {
         "categories": ("quantitative_landscape", "quantitative_provenance", "measured_feature_observation", "quantitation_comparison", "temporal_profile", "kinase_context", "candidate_discovery"),
-        "minimum_words": 350,
         "role": "Report measured scope before selected temporal observations, protein-linked context, and any eligible candidate context.",
         "sequence": "coverage → selected temporal observation → protein-linked quantitative context → candidate context → observation boundary",
     },
     "research_question_answers": {
         "categories": ("study_frame", "measured_feature_observation", "quantitation_comparison", "temporal_profile", "kinase_context", "candidate_discovery"),
-        "minimum_words": 80,
-        "maximum_words": 220,
         "role": "Provide concise supplementary answers to at most three non-duplicative research questions after the main conclusion.",
         "sequence": "question → one evidence-bound answer → one boundary or discriminating next measurement",
     },
     "discussion": {
         "categories": ("measured_feature_observation", "quantitation_comparison", "quantitative_provenance", "temporal_profile", "kinase_context", "candidate_discovery", "traceable_literature"),
-        "minimum_words": 300,
         "role": "Interpret current observations in the selected literature context, state the alternative explanation that remains, and identify the next discriminating experiment.",
         "sequence": "principal observation → cited comparison → bounded interpretation → remaining alternative → discriminating validation",
     },
     "methods": {
         "categories": ("study_frame", "quantitation_provenance", "quantitation_comparison", "temporal_profile"),
-        "minimum_words": 260,
         "role": "Describe only recorded quantitative and temporal analysis procedures and their interpretation boundaries.",
         "sequence": "study design → normalization and replicate unit → explicit contrast equations → Welch/BH uncertainty → clustering and interval concordance denominator → missingness/de-novo policy → reporting boundary",
     },
     "conclusion": {
         "categories": ("study_frame", "measured_feature_observation", "quantitation_comparison", "temporal_profile", "kinase_context", "candidate_discovery"),
-        "minimum_words": 80,
-        "maximum_words": 170,
         "role": "Close the same study question in no more than two short paragraphs with the observed advance, the bounded interpretation, and one testable next step.",
         "sequence": "study question → observed advance → bounded interpretation → next validation",
     },
 }
+for _section, _contract in SECTION_STORY_CONTRACT.items():
+    _contract.update(SECTION_BUDGETS[_section])
 
 _INTERNAL_TERM_RE = re.compile(
     r"\b(?:P[0-5]|M[0-4]|R[0-4]|TW-\d+|wave_[\w-]+|cowave_[\w-]+|"
@@ -679,7 +676,7 @@ def format_authoring_packet_for_llm(packet: Mapping[str, Any], section_type: str
         "Allowed claim tiers: " + ", ".join(sorted(allowed)),
         "Narrative role: " + str(section_contract.get("role") or "Write a bounded evidence-guided manuscript section."),
         "Required narrative sequence: " + str(section_contract.get("sequence") or "study frame → observation → bounded interpretation"),
-        "Target minimum length: approximately " + str(section_contract.get("minimum_words") or 120) + " words unless available evidence is genuinely sparse.",
+        "Target minimum length: approximately " + str(section_contract.get("minimum_words") or 120) + " words; maximum_words=" + str(section_contract.get("maximum_words") or "unbounded") + ". A shorter complete section is acceptable. Never pad evidence. Conclusion must retain finding, interpretation, limitation and next validation.",
         "Evidence cards:",
     ]
     for card in packet.get("reader_cards") or []:
@@ -695,12 +692,16 @@ def format_authoring_packet_for_llm(packet: Mapping[str, Any], section_type: str
         if card.get("counterevidence"):
             line += f"; boundary={card['counterevidence']}"
         lines.append(line)
+        records = quantitative_records(card)
+        if records:
+            lines.append("  Quantitative references: " + json.dumps(records, ensure_ascii=False))
+    lines.append("Every quantitative clause must identify PF ID, condition and axis before the value. Different precursors at the same gene/site are separate observations. Missing p/q/n is unknown, never zero or non-significant. The ±0.15 tolerance is descriptive, not a significance test.")
     if packet.get("figure_cards"):
         lines.extend(["", "Eligible figure cards:"])
         for figure in packet["figure_cards"]:
             lines.append(
                 f"- {figure.get('figure_label')}: key={figure.get('figure_key')}; placement={figure.get('placement')}; "
-                f"question={figure.get('question')}; use at most one eligible figure per paragraph."
+                f"question={figure.get('question')}; selected_reader_feature_ids={figure.get('selected_reader_feature_ids', [])}; use at most one eligible figure per paragraph."
             )
     if plan:
         lines.extend([
@@ -984,36 +985,6 @@ def _repair_candidate_residue_site_claim(sentence: str, labels: Iterable[tuple[s
     return repaired, changed
 
 
-def _replace_unsafe_terms(text: str) -> str:
-    if re.search(
-        r"\b(?:(?:does|do|did|can|could|would|should|is|are|was|were|has|have|had)\s+not|"
-        r"cannot|can't|couldn't|didn't|doesn't)\s+(?:directly\s+)?"
-        r"(?:prove|establish|demonstrate|show|activate|cause|drive|support|infer)\b",
-        text,
-        flags=re.IGNORECASE,
-    ):
-        return text
-    replacements = [
-        (r"\bdirectly activates?\b", "provides candidate context for"),
-        (r"\bactivates?\b", "is associated with"),
-        (r"\bcauses?\b", "is consistent with"),
-        (r"\bdrives?\b", "is associated with"),
-        (r"\bproves?\b", "is compatible with"),
-        (r"\bestablishes?\b", "summarizes"),
-        (r"\bcausal propagation\b", "observed temporal pattern"),
-        (r"\bsignal propagation\b", "time-resolved observation"),
-        (r"\bactivation loop\b", "candidate regulatory-site context"),
-        (r"\bcatalytic activity\b", "candidate-context score"),
-        (r"\bisoform[- ]specific\b", "kinase-family"),
-        (r"\bkinase[- ]substrate(?: relationship| regulation| attribution)?\b", "kinase-family candidate context"),
-        (r"\bkinase activity\b", "kinase-family candidate context"),
-        (r"\bpathway activation\b", "pathway-membership context"),
-    ]
-    for pattern, replacement in replacements:
-        text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
-    return text
-
-
 def _split_sentences(text: str) -> list[str]:
     return [sentence.strip() for sentence in re.split(r"(?<=[.!?])\s+", text or "") if sentence.strip()]
 
@@ -1060,6 +1031,7 @@ def validate_and_repair_sections(
             retained_sentences: list[str] = []
             for sentence in _split_sentences(paragraph):
                 sentence_index += 1
+                source_sentence = sentence
                 evidence_ids = _EVIDENCE_MARKER_RE.findall(sentence)
                 citations = [item.lower() for item in _REFERENCE_MARKER_RE.findall(sentence)]
                 actions: list[str] = []
@@ -1086,9 +1058,17 @@ def validate_and_repair_sections(
                     sentence = _clean_text(sentence)
                     actions.append("remove_internal_terminology")
                     reasons.append("reader_body_internal_leakage")
+                quantitative_reasons = validate_quantitative_sentence(sentence, packet)
+                if quantitative_reasons:
+                    sentence = ""
+                    actions.append("withhold_unbound_quantitative_sentence")
+                    reasons.extend(quantitative_reasons)
+                evidence_scope = sentence_evidence_scope(sentence)
+                protected_context = is_negated_boundary(sentence) or evidence_scope in {"literature_context", "hypothesis"}
                 direct_claim = bool(_DIRECT_OR_CAUSAL_RE.search(sentence))
-                if direct_claim and "D1" not in allowed_tiers:
-                    sentence = _replace_unsafe_terms(sentence)
+                if direct_claim and "D1" not in allowed_tiers and not protected_context:
+                    immutable = re.search(r"PF-[A-Z0-9]+|\d|\[REF:", _EVIDENCE_MARKER_RE.sub("", sentence), re.I)
+                    sentence = "" if immutable else "The supplied evidence supports descriptive observations and candidate context; it does not establish direct regulation."
                     actions.append("rewrite_claim_to_candidate_context")
                     reasons.append("directness_or_causality_claim_exceeds_budget")
                 if _DENOVO_AXIS_RE.search(sentence):
@@ -1098,18 +1078,17 @@ def validate_and_repair_sections(
                     )
                     actions.append("rewrite_de_novo_axis_claim")
                     reasons.append("de_novo_conventional_axis_or_ranking")
-                if _OCCUPANCY_RE.search(sentence) and not re.search(r"\bnot\b", sentence, flags=re.IGNORECASE):
-                    sentence = _OCCUPANCY_RE.sub("protein-abundance-adjusted relative PTM ratio", sentence)
+                if _OCCUPANCY_RE.search(sentence) and not protected_context:
+                    sentence = ""
                     actions.append("rewrite_quantitation_interpretation")
                     reasons.append("uncalibrated_occupancy_or_stoichiometry")
-                repaired_metadata, metadata_repaired = repair_unrecorded_metadata_claim(sentence, metadata_contract)
+                repaired_metadata, metadata_repaired = ((sentence, False) if protected_context else repair_unrecorded_metadata_claim(sentence, metadata_contract))
                 if metadata_repaired:
                     sentence = repaired_metadata
                     actions.append("remove_unrecorded_metadata_inference")
                     reasons.append("study_metadata_lineage_or_species_not_recorded")
-                repaired_measurement, measurement_repaired = _repair_candidate_residue_site_claim(
-                    sentence, candidate_residue_labels
-                )
+                repaired_measurement, measurement_repaired = ((sentence, False) if protected_context else
+                    _repair_candidate_residue_site_claim(sentence, candidate_residue_labels))
                 if measurement_repaired:
                     sentence = repaired_measurement
                     actions.append("rewrite_candidate_residue_as_modified_precursor_feature")
@@ -1123,12 +1102,16 @@ def validate_and_repair_sections(
                     actions.extend(semantic_actions)
                     reasons.extend(semantic_reasons)
                 if _LITERATURE_SIGNAL_RE.search(sentence) and not citations:
-                    # Preserve current-study observations but remove an unsupported external-context clause.
-                    clauses = re.split(r"(?<=[,;:])\s+|\s+(?=whereas\b|while\b)", sentence, flags=re.IGNORECASE)
-                    keep = [clause for clause in clauses if not _LITERATURE_SIGNAL_RE.search(clause)]
-                    sentence = " ".join(keep).strip()
-                    actions.append("remove_uncited_literature_clause")
+                    sentence = ""
+                    actions.append("withhold_uncited_literature_sentence")
                     reasons.append("literature_context_without_stable_citation")
+                # Recheck after local repair; no postprocessor may move a valid
+                # number onto another feature, timepoint or axis.
+                repaired_quantitative_reasons = validate_quantitative_sentence(sentence, packet)
+                if repaired_quantitative_reasons:
+                    sentence = ""
+                    actions.append("withhold_unbound_repaired_sentence")
+                    reasons.extend(repaired_quantitative_reasons)
                 if _ANY_EVIDENCE_RESIDUE_RE.search(sentence):
                     sentence = _ANY_EVIDENCE_RESIDUE_RE.sub("", sentence)
                     actions.append("remove_malformed_evidence_anchor")
@@ -1140,9 +1123,12 @@ def validate_and_repair_sections(
                     "section": section_name,
                     "paragraph_index": paragraph_index,
                     "sentence_index": sentence_index,
+                    "source_sentence": source_sentence,
+                    "validated_sentence": sentence,
                     "evidence_ids": evidence_ids,
                     "citation_ids": citations,
                     "claim_tier_budget": sorted(allowed_tiers),
+                    "evidence_scope": evidence_scope,
                     "validator_action": actions or ["retain"],
                     "reason_code": reasons or ["within_contract"],
                     "retained": bool(sentence),
@@ -1154,7 +1140,7 @@ def validate_and_repair_sections(
             section_text = ensure_quantitation_methods_contract(section_text)
         validated[section_name] = section_text
     audit = {
-        "contract_version": "reader_authoring_validator.v1",
+        "contract_version": "reader_authoring_validator.v2",
         "packet_version": packet.get("contract_version"),
         "entries": audit_entries,
         "removed_sentence_count": sum(1 for entry in audit_entries if not entry["retained"]),
@@ -1270,10 +1256,24 @@ def audit_report_output_correctness(
     review_reason_codes: list[str] = []
     if metadata_review_reasons:
         review_reason_codes.append("study_metadata_review_required")
+    quantitative_packet = {"reader_cards": list(reader_cards or []), "figure_cards": manifest.get("figures") or []}
+    quantitative_violations = []
+    from .scientific_semantics import prose_without_reference_section
+    for line in prose_without_reference_section(body).splitlines():
+        if line.lstrip().startswith(("#", "|", "![")):
+            continue
+        for sentence in _split_sentences(line):
+            issues = validate_quantitative_sentence(sentence, quantitative_packet)
+            if issues:
+                quantitative_violations.append({"sentence": sentence, "reason_codes": issues})
+    if quantitative_violations:
+        reason_codes.append("unbound_quantitative_claim")
     semantic_audit = audit_semantic_claims(body, reader_cards or [])
     language_audit = audit_language_quality(body)
     if semantic_audit.get("violation_count"):
         reason_codes.append("unrepaired_scientific_semantic_claim")
+    if language_audit.get("duplicate_quantitation_phrase_count"):
+        reason_codes.append("duplicate_quantitation_phrase")
     if language_audit.get("fragment_count"):
         review_reason_codes.append("sentence_fragment_review_required")
     if language_audit.get("lowercase_sentence_start_count"):
@@ -1304,6 +1304,7 @@ def audit_report_output_correctness(
         "study_metadata_status": metadata.get("metadata_status"),
         "study_metadata_blocking_conflicts": metadata_blocking_conflicts,
         "study_metadata_review_reasons": metadata_review_reasons,
+        "quantitative_claim_violations": quantitative_violations,
         "semantic_claim_audit": semantic_audit,
         "language_quality_audit": language_audit,
     }

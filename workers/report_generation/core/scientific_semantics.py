@@ -10,6 +10,7 @@ from __future__ import annotations
 import math
 import re
 from typing import Any, Iterable, Mapping
+from common.section_budgets import closing_section_maxima, word_count, conclusion_roles, REQUIRED_CONCLUSION_ROLES
 
 
 TRAJECTORY_FACT_VERSION = "trajectory_shape_fact.v1"
@@ -77,6 +78,11 @@ def build_trajectory_shape_fact(
         "maximum": {"condition": ordered[max(range(len(values)), key=values.__getitem__)]["condition"], "value": max(values)},
         "minimum": {"condition": ordered[min(range(len(values)), key=values.__getitem__)]["condition"], "value": min(values)},
     }
+    axis_label = {
+        "ptm_protein_adjusted_log2fc": "protein-adjusted PTM contrast",
+        "ptm_unadjusted_log2fc": "unadjusted PTM contrast",
+        "protein_log2fc": "linked protein contrast",
+    }.get(axis, axis.replace("_", " "))
     point_text = "; ".join(f"{item['condition']} {item['value']:+.3f}" for item in ordered)
     if classification == "non_monotonic":
         interpretation = "showed a non-monotonic trajectory across the sampled conditions"
@@ -91,7 +97,7 @@ def build_trajectory_shape_fact(
         "axis": axis,
         "classification": classification,
         "baseline_band_log2": baseline_band_log2,
-        "reader_summary": f"The {axis.replace('_', ' ')} {interpretation}: {point_text}.",
+        "reader_summary": f"The {axis_label} {interpretation}: {point_text}.",
         "monotonic_claim_allowed": classification in {"monotonic_increase", "monotonic_decrease"},
         "baseline_return_claim_allowed": baseline_return_claim_allowed,
         "baseline_return_conditions": [ordered[index]["condition"] for index in baseline_return_indices],
@@ -101,18 +107,32 @@ def build_trajectory_shape_fact(
 
 
 def _matching_feature_fact(sentence: str, cards: Iterable[Mapping[str, Any]]) -> Mapping[str, Any] | None:
-    lowered = sentence.lower()
-    for card in cards:
-        if str(card.get("category")) != "measured_feature_observation":
-            continue
-        identity = card.get("feature_identity") or {}
-        tokens = [str(identity.get("gene") or ""), str(identity.get("candidate_residue_annotation") or "")]
-        tokens = [token.lower() for token in tokens if token]
-        if tokens and all(token in lowered for token in tokens):
-            fact = card.get("trajectory_shape_fact")
-            if isinstance(fact, Mapping):
-                return fact
-    return None
+    from .quantitative_claims import matching_cards
+    matches = matching_cards(sentence, cards)
+    identities = {c.get("feature_identity", {}).get("reader_feature_id") for c in matches}
+    if len(identities) != 1:
+        return None
+    return next((c["trajectory_shape_fact"] for c in matches if isinstance(c.get("trajectory_shape_fact"), Mapping)), None)
+
+
+def sentence_evidence_scope(sentence: str) -> str:
+    # Citations alone cannot exempt a statement about the present measurements.
+    current = re.search(r"\b(?:our|these|this (?:study|analysis|experiment)|current|the (?:measured|observed)|data show)\b|PF-[A-Z0-9]+", sentence, re.I)
+    if not current and re.search(r"\[REF:|\[\d+(?:[,–-]\d+)*\]|\b(?:published|literature|prior work)\b", sentence, re.I):
+        return "literature_context"
+    if re.search(r"\b(?:hypothes\w*|propose to test|could be tested|test whether)\b", sentence, re.I):
+        return "hypothesis"
+    return "observation"
+
+
+def is_negated_boundary(sentence: str) -> bool:
+    # A later affirmative clause is validated separately instead of inheriting
+    # an earlier negation ("does not prove X, but demonstrates Y").
+    return bool(re.search(r"\b(?:does not|do not|did not|cannot|could not|doesn't|can't)\s+(?:directly\s+)?(?:prove|establish|demonstrate|show|imply|measure|support|infer)\b", sentence, re.I)) and not re.search(r"\b(?:but|however|yet)\b", sentence, re.I)
+
+
+def _protected_sentence(text: str) -> bool:
+    return is_negated_boundary(text) or sentence_evidence_scope(text) in {"literature_context", "hypothesis"}
 
 
 def repair_semantic_sentence(
@@ -124,6 +144,8 @@ def repair_semantic_sentence(
     actions: list[str] = []
     reasons: list[str] = []
 
+    if _protected_sentence(text):
+        return text, actions, reasons
     fact = _matching_feature_fact(text, cards)
     monotonic_signal = re.search(
         r"\b(?:continued to rise|continued rising|steadily (?:rose|increased)|monotonic(?:ally)? (?:rise|increase)|"
@@ -142,27 +164,23 @@ def repair_semantic_sentence(
             actions.append("rewrite_baseline_claim_from_deterministic_fact")
             reasons.append("baseline_return_not_supported_by_predeclared_band")
 
-    replacements = [
-        (r"\bgain of activity\b", "gain in pair-level concordance"),
-        (r"\bsignaling activation\b", "increase in pair-level concordance"),
-        (r"\bpathway reconfiguration\b", "observed local concordance reorganization across sampled intervals"),
-        (r"\bsignificant rewiring\b", "observed local concordance reorganization across sampled intervals"),
-        (r"\b(?:rapid )?(?:initiation and )?propagation\b", "time-ordered measured pattern"),
-        (r"\bwaves? of signaling activity\b", "temporal profile patterns"),
-        (r"\bsignaling flow\b", "sampled temporal concordance pattern"),
-        (r"\bcoordinated waves? of signaling activity\b", "observed temporal profile and concordance patterns"),
-        (r"\bdephosphorylation\b", "decrease in the measured phosphorylation-feature contrast"),
-        (r"\breturn toward basal state\b", "movement of the measured contrast toward the pre-specified baseline band"),
-        (r"\b(?:activation|resolution|deactivation) phase\b", "sampled temporal interval"),
-        (r"\bprecisely timed molecular events\b", "time-resolved measured changes"),
-        (r"\btightly regulated\b", "temporally structured"),
-        (r"\breliable proxy\b", "descriptive measurement"),
-    ]
-    for pattern, replacement in replacements:
-        if re.search(pattern, text, flags=re.IGNORECASE):
-            text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
-            actions.append("bound_concordance_interpretation")
-            reasons.append("concordance_is_descriptive_not_activation_or_flow")
+    # Reject an unsupported mechanism as a whole sentence. Keep ordinary
+    # phosphorylation/dephosphorylation background intact.
+    overreach = re.search(
+        r"\b(?:gain of activity|signaling activation|pathway reconfiguration|significant rewiring|"
+        r"propagation|waves? of signaling activity|signaling flow|return toward basal state|"
+        r"signal termination|negative feedback|post-receptor signaling defects)\b", text, re.I)
+    current_dephosphorylation = re.search(r"\b(?:measured|observed|our|these|current)\b", text, re.I) and re.search(r"\bdephosphorylation\b", text, re.I)
+    if overreach or current_dephosphorylation:
+        # Never replace a sentence containing immutable facts with unrelated
+        # prose. Such sentences are withheld for an evidence-bound rewrite.
+        protected = re.search(r"PF-[A-Z0-9]+|\d|\[REF:", text, re.I)
+        text = "" if protected else (
+            "The observed local concordance reorganization and temporal profile patterns describe a "
+            "time-ordered measured pattern across sampled intervals; they do not establish a mechanism."
+        )
+        actions.append("bound_concordance_interpretation")
+        reasons.append("current_data_mechanism_not_supported")
 
     if re.search(r"\b\d[\d,]*\s+candidate pairs\b", text, flags=re.IGNORECASE) and not re.search(
         r"\bunique\s+candidate pairs\b", text, flags=re.IGNORECASE
@@ -197,6 +215,8 @@ def repair_semantic_sentence(
 def normalize_reader_prose(text: str) -> str:
     """Repair mechanical damage after marker removal without changing claims."""
     value = str(text or "")
+    value = re.sub(r"[,;:]\.+\s+(?=(?:whereas|while|although)\b)", ", ", value, flags=re.I)
+    value = re.sub(r"([.!?])\s*[,;:]", r"\1", value)
     value = re.sub(r"[ \t]+([,.;:!?])", r"\1", value)
     value = re.sub(r"([,;:])\s*\.", ".", value)
     value = re.sub(r"\.{2,}", ".", value)
@@ -208,12 +228,6 @@ def normalize_reader_prose(text: str) -> str:
     value = re.sub(r"[ \t]{2,}", " ", value)
     def repair_sentence(sentence: str) -> str:
         stripped = sentence.strip()
-        stripped = re.sub(
-            r"^(?:whereas|while|which|although|because|and|but|or|thereby|thusly)\s*,?\s+",
-            "",
-            stripped,
-            flags=re.IGNORECASE,
-        )
         alpha = re.search(r"[A-Za-z]", stripped)
         if alpha and stripped[alpha.start()].islower():
             index = alpha.start()
@@ -236,21 +250,32 @@ def normalize_reader_prose(text: str) -> str:
 
 
 def _word_count(text: str) -> int:
-    return len(re.findall(r"\b\w+[\w'’-]*\b", text or ""))
+    return word_count(text)
 
 
 def _compress_plain_section(body: str, maximum_words: int) -> str:
-    paragraphs = [item.strip() for item in re.split(r"\n\s*\n+", body or "") if item.strip()]
-    selected: list[str] = []
-    for paragraph in paragraphs:
-        for sentence in re.split(r"(?<=[.!?])\s+", paragraph):
-            sentence = sentence.strip()
-            if not sentence:
-                continue
-            if _word_count(" ".join([*selected, sentence])) > maximum_words:
-                continue
-            selected.append(sentence)
-    return " ".join(selected)
+    sentences = list(dict.fromkeys(s.strip() for s in re.split(r"(?<=[.!?])\s+", body or "") if s.strip()))
+    # Reserve one complete sentence for each role, including the ending boundary
+    # and next test. No truncation or fabricated replacement of protected facts.
+    required = set()
+    covered = set()
+    for role in REQUIRED_CONCLUSION_ROLES:
+        if role in covered:
+            continue
+        options = [(i, sentence) for i, sentence in enumerate(sentences) if role in conclusion_roles(sentence)]
+        if options:
+            i, sentence = min(options, key=lambda item: word_count(item[1]))
+            required.add(i)
+            covered.update(conclusion_roles(sentence))
+    selected = set(required)
+    used = sum(word_count(sentences[i]) for i in selected)
+    for i, sentence in enumerate(sentences):
+        if i not in selected and used + word_count(sentence) <= maximum_words:
+            selected.add(i)
+            used += word_count(sentence)
+    # If required sentences alone exceed the budget, preserve them and let the
+    # audit fail visibly. A passing length audit must not erase limitations.
+    return " ".join(sentences[i] for i in sorted(selected))
 
 
 def _compress_question_answers(body: str, maximum_words: int) -> str:
@@ -298,11 +323,7 @@ def enforce_report_word_budgets(text: str) -> tuple[str, dict[str, Any]]:
         return normalize_reader_prose(source), {"contract_version": "reader_section_compression.v1", "sections": []}
     output: list[str] = [source[:matches[0].start()]]
     audit: list[dict[str, Any]] = []
-    budgets = {
-        "conclusion": 180,
-        "research question answers": 260,
-        "supplementary research question answers": 260,
-    }
+    budgets = closing_section_maxima()
     for index, match in enumerate(matches):
         end = matches[index + 1].start() if index + 1 < len(matches) else len(source)
         heading = match.group(0)
@@ -327,6 +348,8 @@ def enforce_report_word_budgets(text: str) -> tuple[str, dict[str, Any]]:
                 "maximum_words": maximum,
                 "compressed": after < before,
                 "within_budget": after <= maximum,
+                "preserved_roles": sorted(conclusion_roles(compressed)) if label == "conclusion" else [],
+                "missing_roles": sorted(set(REQUIRED_CONCLUSION_ROLES) - conclusion_roles(compressed)) if label == "conclusion" else [],
             })
     return normalize_reader_prose("".join(output).rstrip()), {
         "contract_version": "reader_section_compression.v1",
@@ -369,6 +392,7 @@ def audit_language_quality(text: str) -> dict[str, Any]:
     fragment_records: list[dict[str, Any]] = []
     lowercase_records: list[dict[str, Any]] = []
     doubled_punctuation: list[dict[str, Any]] = []
+    duplicate_quantitation_phrases: list[dict[str, Any]] = []
     section_lines: dict[str, list[str]] = {}
     current_section = ""
     index = 0
@@ -390,15 +414,13 @@ def audit_language_quality(text: str) -> dict[str, Any]:
             alpha = re.search(r"[A-Za-z]", sentence)
             if alpha and sentence[alpha.start()].islower():
                 lowercase_records.append({"sentence_index": index, "text": sentence[:160]})
-            if re.match(r"^(?:whereas|while|which|although|because|and|but|or|thereby|thusly)\b", sentence, flags=re.IGNORECASE):
+            if re.match(r"^(?:which|thereby|thusly)\b", sentence, flags=re.IGNORECASE) or (re.match(r"^(?:whereas|while|although|because)\b", sentence, re.I) and "," not in sentence):
                 fragment_records.append({"sentence_index": index, "text": sentence[:160]})
-            if re.search(r"(?:\.{2,}|,{2,}|;{2,}|:{2,}|\?{2,}|!{2,}|[;,]\s*\.)", sentence):
+            if re.search(r"(?:\.{2,}|,{2,}|;{2,}|:{2,}|\?{2,}|!{2,}|[;,]\s*\.|[.!?]\s*[,;:])", sentence):
                 doubled_punctuation.append({"sentence_index": index, "text": sentence[:160]})
-    section_word_budgets = {
-        "conclusion": 180,
-        "supplementary research question answers": 260,
-        "research question answers": 260,
-    }
+            if re.search(r"phosphorylation\s+protein-abundance-adjusted relative PTM ratio|(?:relative PTM ratio\s*){2}", sentence, re.I):
+                duplicate_quantitation_phrases.append({"sentence_index": index, "text": sentence[:160]})
+    section_word_budgets = closing_section_maxima()
     section_word_budget_violations = []
     for section, maximum in section_word_budgets.items():
         word_count = len(re.findall(r"\b\w+[\w'’-]*\b", " ".join(section_lines.get(section) or [])))
@@ -413,6 +435,7 @@ def audit_language_quality(text: str) -> dict[str, Any]:
         "fragment_count": len(fragment_records),
         "lowercase_sentence_start_count": len(lowercase_records),
         "doubled_punctuation_count": len(doubled_punctuation),
+        "duplicate_quantitation_phrase_count": len(duplicate_quantitation_phrases),
         "section_word_budget_violation_count": len(section_word_budget_violations),
         "fragments": fragment_records,
         "lowercase_sentence_starts": lowercase_records,

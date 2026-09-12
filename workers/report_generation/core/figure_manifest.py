@@ -179,7 +179,7 @@ def _entry(
     }
 
 
-def select_reader_heatmap_features(vector_rows: list[Mapping[str, Any]], conditions: list[str], *, minimum: int = 12, maximum: int = 20) -> list[dict]:
+def select_reader_heatmap_features(vector_rows: list[Mapping[str, Any]], conditions: list[str], *, minimum: int = 12, maximum: int = 16) -> list[dict]:
     """Select complete conventional features by temporal shape, not effect magnitude.
 
     구현 대상: docs/official_temporal_terminology_contract.md § Reader-facing
@@ -190,7 +190,7 @@ def select_reader_heatmap_features(vector_rows: list[Mapping[str, Any]], conditi
 
     One lexical representative is retained per distinct signed time-course pattern,
     followed by lexical completion. This avoids a sole |Log2FC| ranking while
-    supplying a reproducible, readable 12–20 feature display candidate set.
+    supplying a reproducible, readable 12–16 feature display candidate set.
     """
     grouped: dict[tuple[str, str, str, str], dict[str, list[Mapping[str, Any]]]] = {}
     for row in vector_rows or []:

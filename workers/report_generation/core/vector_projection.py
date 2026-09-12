@@ -12,6 +12,8 @@ import math
 from typing import Any, Mapping
 
 from ptm_shared.de_novo_representation import conventional_quantitation_eligibility
+from ptm_shared.evidence_contracts import build_measurement_provenance
+from .quantitative_fields import project_axis_fields, QUANTITATIVE_SCHEMA_VERSION
 
 
 REPORT_VECTOR_PROJECTION_VERSION = "report_vector_projection.v1"
@@ -81,21 +83,7 @@ def project_report_vector_row(row: Mapping[str, Any]) -> dict[str, Any]:
         "position": position,
         "condition": _text(row, "Condition", "condition", "Comparison") or "",
         "ptm_relative_log2fc": _optional_float(row, "PTM_Relative_Log2FC", "ptm_relative_log2fc"),
-        "ptm_protein_adjusted_log2fc": _optional_float(
-            row, "PTM_ProteinAdjusted_Log2FC", "ptm_protein_adjusted_log2fc", "PTM_Relative_Log2FC"
-        ),
-        "protein_log2fc": _optional_float(row, "Protein_Log2FC", "protein_log2fc"),
-        # Phase 0 independent and audit-only axes.
-        "ptm_unadjusted_log2fc": _optional_float(row, "PTM_Unadjusted_Log2FC", "ptm_unadjusted_log2fc"),
-        "ptm_unadjusted_p_value": _optional_float(row, "PTM_Unadjusted_P_Value", "ptm_unadjusted_p_value"),
-        "ptm_unadjusted_q_value": _optional_float(row, "PTM_Unadjusted_Q_Value", "ptm_unadjusted_q_value"),
-        "ptm_unadjusted_control_n": _optional_float(row, "PTM_Unadjusted_Control_N", "ptm_unadjusted_control_n"),
-        "ptm_unadjusted_treatment_n": _optional_float(row, "PTM_Unadjusted_Treatment_N", "ptm_unadjusted_treatment_n"),
-        "ptm_protein_adjusted_p_value": _optional_float(row, "p_value", "PTM_Relative_P_Value", "ptm_relative_p_value"),
-        "ptm_protein_adjusted_q_value": _optional_float(row, "q_value", "PTM_Relative_Q_Value", "ptm_relative_q_value"),
-        "ptm_reconstructed_log2fc": _optional_float(
-            row, "PTM_Reconstructed_Log2FC", "ptm_reconstructed_log2fc", "PTM_Absolute_Log2FC", "ptm_absolute_log2fc"
-        ),
+        # Independent axes and their statistics are projected by the shared schema below.
         "ptm_unadjusted_conventional_log2fc_na": conventional_na,
         "ptm_unadjusted_calculation_mode": _text(row, "PTM_Unadjusted_Calculation_Mode", "ptm_unadjusted_calculation_mode") or None,
         "ptm_unadjusted_estimator_id": _text(row, "PTM_Unadjusted_Estimator_ID", "ptm_unadjusted_estimator_id") or None,
@@ -128,6 +116,9 @@ def project_report_vector_row(row: Mapping[str, Any]) -> dict[str, Any]:
             None if (source_feature_id or modified_sequence) else "modified_precursor_identity_unavailable_in_vector_projection"
         ),
     }
+    projected.update(project_axis_fields(row))
+    projected["quantitative_schema_version"] = QUANTITATIVE_SCHEMA_VERSION
+    projected["measurement_provenance"] = dict(row.get("measurement_provenance") or build_measurement_provenance(row))
     eligibility = conventional_quantitation_eligibility(projected)
     projected.update({
         "independent_conventional_eligible": eligibility["eligible"],
