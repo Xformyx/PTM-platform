@@ -591,9 +591,10 @@ def attach_de_novo_fields(
                     grp.get("PTM_Relative_Abundance", pd.Series(dtype=float)),
                     errors="coerce",
                 )
-                intensity = intensity[intensity > 0].dropna()
-                rel = rel[rel > 0].dropna()
-                detected = int(grp["Sample"].nunique()) if "Sample" in grp.columns else int(len(intensity))
+                observed = np.isfinite(intensity) & (intensity > 0)
+                intensity = intensity[observed]
+                rel = rel[np.isfinite(rel) & (rel > 0)]
+                detected = int(grp.loc[observed, "Sample"].nunique()) if "Sample" in grp.columns else int(len(intensity))
                 mean_intensity = float(intensity.mean()) if len(intensity) else None
                 mean_rel = float(rel.mean()) if len(rel) else None
                 cv = None

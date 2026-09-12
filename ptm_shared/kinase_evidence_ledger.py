@@ -327,6 +327,7 @@ def build_feature_provenance_ledger(
 def attach_temporal_context(
     ledger: Mapping[str, Any], wave_contract: Mapping[str, Any] | None,
     tmm_contribution_matrix: Mapping[str, Any] | None = None,
+    feature_identities: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Annotate aggregate-level temporal/TMM context without tier promotion."""
     result = {key: value for key, value in dict(ledger).items() if key != "feature_records"}
@@ -343,7 +344,16 @@ def attach_temporal_context(
         temporal = dict(record.get("temporal_evidence") or {})
         tmm_context = dict(record.get("tmm_candidate_context") or {})
         aggregate = str(record.get("nominal_aggregate_key") or "")
-        if aggregate in members:
+        context_key = aggregate
+        if feature_identities is not None:
+            identity = record.get("identity_provenance") or {}
+            matches = [key for key, candidate in feature_identities.items()
+                       if candidate.get("site_key") == aggregate
+                       and all(str(candidate.get(field) or "") == str(identity.get(field) or "")
+                               for field in ("protein_group", "modified_sequence", "precursor_charge", "precursor_id"))]
+            context_key = matches[0] if len(matches) == 1 else None
+            record["temporal_feature_key"] = context_key
+        if context_key in members:
             temporal.update({
                 "evidence_tier": TEMPORAL_ASSOCIATION_TIER,
                 "status": "static_wave_member_observational_context",
@@ -354,7 +364,7 @@ def attach_temporal_context(
                 "evidence_tier": "not_wave_member_or_not_evaluable",
                 "status": "not_qualified_for_static_wave_context",
             })
-        if aggregate in contribution_keys:
+        if context_key in contribution_keys:
             tmm_context.update({
                 "status": "aggregate_present_in_candidate_contribution_matrix",
                 "claim_boundary": "TMM candidate contribution is conditional attribution context and cannot promote direct kinase evidence tier",

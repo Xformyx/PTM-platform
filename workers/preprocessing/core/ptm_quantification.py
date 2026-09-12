@@ -132,8 +132,6 @@ class PTMQuantificationAnalyzer:
 
             self._progress(0.60, "Protein-level changes")
             all_protein_changes, ptm_protein_changes = self.calculate_protein_level_changes()
-            if all_protein_changes.empty:
-                return False
 
             self._progress(0.75, "PTM vector data")
             ptm_vector_df = self.create_ptm_vector_data(
@@ -431,6 +429,7 @@ class PTMQuantificationAnalyzer:
     # ------------------------------------------------------------------
 
     def calculate_site_level_relative_quantification(self, ptm_precursors: pd.DataFrame) -> pd.DataFrame:
+        """Retain the sample grid and independent PR, PG and paired-ratio masks."""
         results = []
         for _, row in ptm_precursors.iterrows():
             protein_group = row["Protein.Group"]
@@ -439,17 +438,16 @@ class PTMQuantificationAnalyzer:
             ptm_type = self._determine_ptm_type(modified_sequence)
             ptm_position = self._extract_ptm_position(protein_group, modified_sequence, ptm_type)
 
+            protein_rows = self.pg_matrix_normalized[
+                self.pg_matrix_normalized["Protein.Group"] == protein_group
+            ]
+            protein_row = protein_rows.iloc[0] if not protein_rows.empty else {}
             for sample in self.sample_columns:
-                ptm_intensity = row[sample] if pd.notna(row[sample]) and row[sample] > 0 else 0
-                if ptm_intensity <= 0:
-                    continue
-
-                protein_row = self.pg_matrix_normalized[self.pg_matrix_normalized["Protein.Group"] == protein_group]
-                if protein_row.empty:
-                    continue
-                protein_intensity = protein_row.iloc[0][sample]
-                if not (pd.notna(protein_intensity) and protein_intensity > 0):
-                    continue
+                ptm_intensity = row.get(sample, np.nan)
+                protein_intensity = protein_row.get(sample, np.nan)
+                pr_observed = bool(pd.notna(ptm_intensity) and np.isfinite(ptm_intensity) and ptm_intensity > 0)
+                pg_observed = bool(pd.notna(protein_intensity) and np.isfinite(protein_intensity) and protein_intensity > 0)
+                paired = pr_observed and pg_observed
 
                 results.append({
                     "Protein.Group": protein_group,
@@ -459,9 +457,15 @@ class PTMQuantificationAnalyzer:
                     "PTM_Position": ptm_position,
                     "Sample": sample,
                     "Condition": self.condition_map.get(sample, "Unknown"),
-                    "PTM_Intensity": ptm_intensity,
-                    "Protein_Intensity": protein_intensity,
-                    "PTM_Relative_Abundance": ptm_intensity / protein_intensity,
+                    "PTM_Intensity": ptm_intensity if pr_observed else np.nan,
+                    "Protein_Intensity": protein_intensity if pg_observed else np.nan,
+                    "PR_Observed": pr_observed,
+                    "PG_Observed": pg_observed,
+                    "Paired_Ratio_Observed": paired,
+                    "PTM_Relative_Abundance": ptm_intensity / protein_intensity if paired else np.nan,
+                    "Adjusted_Missing_Reason": (
+                        "" if paired else "protein_denominator_unavailable" if pr_observed else "ptm_not_detected"
+                    ),
                 })
 
         if results:
@@ -742,7 +746,7 @@ class PTMQuantificationAnalyzer:
             values: List[float] = []
             for sample in samples:
                 value = row.get(sample)
-                if pd.notna(value) and float(value) > 0:
+                if pd.notna(value) and math.isfinite(float(value)) and float(value) > 0:
                     values.append(float(value))
             return values
 
@@ -832,19 +836,20 @@ class PTMQuantificationAnalyzer:
         3. Apply Benjamini-Hochberg correction for multiple testing
         4. Output p_value and q_value columns
         """
+        if relative_quant_df.empty:
+            return pd.DataFrame()
         # --- Build replicate-level grouped data (keep individual replicates) ---
         id_cols = ["Protein.Group", "Precursor.Id", "Modified.Sequence", "PTM_Type", "PTM_Position"]
 
         # Condition means (for Log2FC calculation, same as before)
         condition_means = relative_quant_df.groupby(
-            id_cols + ["Condition"]
+            id_cols + ["Condition"], dropna=False,
         )["PTM_Relative_Abundance"].mean().reset_index()
 
-        pivot_df = condition_means.pivot_table(
+        pivot_df = condition_means.pivot(
             index=id_cols,
             columns="Condition",
             values="PTM_Relative_Abundance",
-            fill_value=np.nan,
         ).reset_index()
 
         control_pseudo_count = None
@@ -861,7 +866,7 @@ class PTMQuantificationAnalyzer:
         # --- Build replicate-level lookup for t-test ---
         # Group replicate values by (PTM site, Condition)
         replicate_groups = relative_quant_df.groupby(
-            id_cols + ["Condition"]
+            id_cols + ["Condition"], dropna=False,
         )["PTM_Relative_Abundance"].apply(list).reset_index()
         replicate_groups.rename(columns={"PTM_Relative_Abundance": "replicate_values"}, inplace=True)
 
@@ -869,7 +874,13 @@ class PTMQuantificationAnalyzer:
         replicate_lookup = {}
         for _, rrow in replicate_groups.iterrows():
             key = (rrow["Protein.Group"], rrow["Precursor.Id"], rrow["Condition"])
-            replicate_lookup[key] = rrow["replicate_values"]
+            replicate_lookup[key] = [v for v in rrow["replicate_values"] if pd.notna(v) and np.isfinite(v) and v > 0]
+        pr_lookup = {}
+        pg_lookup = {}
+        for key, group in relative_quant_df.groupby(["Protein.Group", "Precursor.Id", "Condition"], dropna=False):
+            for column, lookup in (("PTM_Intensity", pr_lookup), ("Protein_Intensity", pg_lookup)):
+                values = pd.to_numeric(group[column], errors="coerce")
+                lookup[key] = int((np.isfinite(values) & (values > 0)).sum())
 
         results = []
         for treatment in treatments:
@@ -878,18 +889,28 @@ class PTMQuantificationAnalyzer:
             for _, row in pivot_df.iterrows():
                 control_value = row["Control"]
                 treatment_value = row[treatment]
-                control_adj = control_value if pd.notna(control_value) and control_value > 0 else control_pseudo_count
-                if not (pd.notna(treatment_value) and treatment_value > 0):
+                control_key = (row["Protein.Group"], row["Precursor.Id"], "Control")
+                treatment_key = (row["Protein.Group"], row["Precursor.Id"], treatment)
+                if not pr_lookup.get(treatment_key, 0):
                     continue
-
-                log2_fc = np.log2(treatment_value / control_adj)
-                used_pc = not (pd.notna(control_value) and control_value > 0)
+                ctrl_reps = replicate_lookup.get(control_key, [])
+                treat_reps = replicate_lookup.get(treatment_key, [])
+                denominator_unavailable = (
+                    (pr_lookup.get(control_key, 0) > 0 and not ctrl_reps)
+                    or not treat_reps
+                )
+                # Pseudocounts remain an audit-only representation for genuine PR
+                # control nondetection. Missing PG never triggers this branch.
+                used_pc = bool(not denominator_unavailable and not pr_lookup.get(control_key, 0))
+                control_adj = control_pseudo_count if used_pc else control_value
+                log2_fc = np.log2(treatment_value / control_adj) if not denominator_unavailable else np.nan
+                missing_reason = (
+                    "protein_denominator_unavailable" if denominator_unavailable
+                    else "control_not_detected" if used_pc else ""
+                )
 
                 # --- Welch's t-test ---
                 p_value = np.nan
-                ctrl_reps = replicate_lookup.get((row["Protein.Group"], row["Precursor.Id"], "Control"), [])
-                treat_reps = replicate_lookup.get((row["Protein.Group"], row["Precursor.Id"], treatment), [])
-
                 if len(ctrl_reps) >= 2 and len(treat_reps) >= 2:
                     try:
                         _, p_value = stats.ttest_ind(
@@ -918,6 +939,14 @@ class PTMQuantificationAnalyzer:
                     "p_value": p_value,
                     "Control_N": len(ctrl_reps),
                     "Treatment_N": len(treat_reps),
+                    "PTM_ProteinAdjusted_Control_N": len(ctrl_reps),
+                    "PTM_ProteinAdjusted_Treatment_N": len(treat_reps),
+                    "PTM_ProteinAdjusted_Missing_Reason": missing_reason,
+                    "PTM_ProteinAdjusted_Conventional_Log2FC_NA": bool(denominator_unavailable or used_pc),
+                    "PR_Control_N": pr_lookup.get(control_key, 0),
+                    "PR_Treatment_N": pr_lookup.get(treatment_key, 0),
+                    "PG_Control_N": pg_lookup.get(control_key, 0),
+                    "PG_Treatment_N": pg_lookup.get(treatment_key, 0),
                 })
 
         if results:
@@ -976,11 +1005,11 @@ class PTMQuantificationAnalyzer:
 
             pg = self.pg_matrix_normalized.copy()
             ctrl_cols = [c for c in control_samples if c in pg.columns]
-            pg["Control_Mean"] = pg[ctrl_cols].replace(0, np.nan).mean(axis=1) if ctrl_cols else np.nan
+            pg["Control_Mean"] = pg[ctrl_cols].where(np.isfinite(pg[ctrl_cols]) & (pg[ctrl_cols] > 0)).mean(axis=1) if ctrl_cols else np.nan
 
             for treatment, samples in treatment_samples_dict.items():
                 tcols = [c for c in samples if c in pg.columns]
-                pg[f"{treatment}_Mean"] = pg[tcols].replace(0, np.nan).mean(axis=1) if tcols else np.nan
+                pg[f"{treatment}_Mean"] = pg[tcols].where(np.isfinite(pg[tcols]) & (pg[tcols] > 0)).mean(axis=1) if tcols else np.nan
 
             changes = []
             for idx, row in pg.iterrows():
@@ -1008,6 +1037,8 @@ class PTMQuantificationAnalyzer:
                         })
 
             all_df = pd.DataFrame(changes)
+            if all_df.empty:
+                return all_df, all_df.copy()
             ptm_df = all_df[all_df["Has_PTM"] == True].copy()
             logger.info(f"Protein-level: all={len(all_df)}, ptm={len(ptm_df)}")
             return all_df, ptm_df
@@ -1063,11 +1094,13 @@ class PTMQuantificationAnalyzer:
                 pchange = ptm_protein_changes[
                     (ptm_protein_changes["Protein.Group"] == protein_group)
                     & (ptm_protein_changes["Condition"] == condition)
-                ]
-                if pchange.empty:
-                    continue
-
-                pc = pchange.iloc[0]
+                ] if not ptm_protein_changes.empty else pd.DataFrame()
+                pc = pchange.iloc[0] if not pchange.empty else {
+                    "Protein.Name": self._resolve_protein_name(protein_group),
+                    "Gene.Name": self._resolve_gene_name(protein_group),
+                    "Control_Mean": np.nan, "Treatment_Mean": np.nan,
+                    "Log2FC": np.nan, "Fold_Change": np.nan,
+                }
                 occupancy = occupancy_lookup.get((
                     str(protein_group), str(ptm_row["Modified.Sequence"]), str(condition)
                 ), {})
@@ -1105,6 +1138,11 @@ class PTMQuantificationAnalyzer:
                     "Comparison": ptm_row["Comparison"],
                     "PTM_Relative_Log2FC": ptm_row["Log2FC"],
                     "PTM_ProteinAdjusted_Log2FC": ptm_row["Log2FC"],
+                    "PTM_ProteinAdjusted_Control_N": ptm_row.get("PTM_ProteinAdjusted_Control_N", ptm_row.get("Control_N", np.nan)),
+                    "PTM_ProteinAdjusted_Treatment_N": ptm_row.get("PTM_ProteinAdjusted_Treatment_N", ptm_row.get("Treatment_N", np.nan)),
+                    "PTM_ProteinAdjusted_Missing_Reason": ptm_row.get("PTM_ProteinAdjusted_Missing_Reason", ""),
+                    "PTM_ProteinAdjusted_Conventional_Log2FC_NA": ptm_row.get("PTM_ProteinAdjusted_Conventional_Log2FC_NA", False),
+                    **{field: ptm_row.get(field, np.nan) for field in ("PR_Control_N", "PR_Treatment_N", "PG_Control_N", "PG_Treatment_N")},
                     "PTM_Unadjusted_Log2FC": unadjusted.get("PTM_Unadjusted_Log2FC", np.nan),
                     "PTM_Unadjusted_Control_Mean": unadjusted.get("PTM_Unadjusted_Control_Mean", np.nan),
                     "PTM_Unadjusted_Treatment_Mean": unadjusted.get("PTM_Unadjusted_Treatment_Mean", np.nan),

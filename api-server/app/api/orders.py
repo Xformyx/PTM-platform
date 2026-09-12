@@ -7676,7 +7676,7 @@ async def kinase_activity_heatmap(
 
     dynamic_transition_config_sha = dynamic_transition_config_sha256(DYNAMIC_COWAVE_CONFIG)
     dynamic_analysis_cache_contract = (
-        f"unified_temporal_ptm_protein.v3|{DYNAMIC_COWAVE_CONTRACT_VERSION}|"
+        f"unified_temporal_ptm_protein.v3|temporal_feature_input.v1|observed_tmm.v1|{DYNAMIC_COWAVE_CONTRACT_VERSION}|"
         f"{dynamic_transition_config_sha}|{KINASE_FEATURE_LEDGER_CONTRACT_VERSION}|"
         f"{KINASE_FOOTPRINT_DIAGNOSTICS_CONTRACT_VERSION}"
     )
@@ -7711,7 +7711,7 @@ async def kinase_activity_heatmap(
             )
             if cached.get("_cache_hash") == cache_hash:
                 return {**cached, "_cached": True}
-            if not cached_dynamic_ready or not cached_ledger_ready:
+            if not cached_dynamic_ready or not cached_ledger_ready or (cached.get("temporal_feature_input") or {}).get("contract_version") != "temporal_feature_input.v1":
                 # A legacy/static cache must not block dynamic-transition
                 # or provenance-ledger rollout.  Rebuild automatically;
                 # parameter mismatches that already have current contracts
@@ -7776,6 +7776,11 @@ async def kinase_activity_heatmap(
                         rel_fc,
                     )
                     vector_data.append({
+                        "source_quantitation": {
+                            field: value for field, value in row.items()
+                            if field.startswith(("PTM_", "PR_", "PG_", "Occupancy_", "Detection_"))
+                            or field in {"p_value", "q_value", "Conventional_Log2FC_NA", "Control_Pseudocount_Used"}
+                        },
                         "gene": gene, "position": str(pos),
                         "condition": cond, "log2fc": footprint_value, "q_value": q_val,
                         "is_de_novo_representation": is_denovo,
@@ -7803,75 +7808,17 @@ async def kinase_activity_heatmap(
     if not vector_data:
         raise HTTPException(status_code=400, detail="No vector data found. Run preprocessing first.")
 
-    # Build PTM key → condition → log2fc map
-    ptm_timeseries: dict[str, dict[str, float]] = {}
-    ptm_qvalues: dict[str, dict[str, float | None]] = {}
-    ptm_is_denovo: dict[str, bool] = {}
-    ptm_condition_records: dict[str, dict[str, dict]] = {}
-    # Track 1 intentionally keeps missing values absent.  Its parallel wave/TMM
-    # path below only accepts complete observed-only vectors and never turns a
-    # missing modified/unmodified counterpart into zero.
-    occupancy_timeseries: dict[str, dict[str, float]] = {}
-    occupancy_qvalues: dict[str, dict[str, float | None]] = {}
-    all_conditions: set[str] = set()
-    for row in vector_data:
-        key = f"{row['gene'].upper()}_{row['position'].upper()}"
-        cond = row["condition"]
-        all_conditions.add(cond)
-        # A blank/non-finite PTM value is missing, not zero.  Keep the row for
-        # provenance masks but do not create a temporal observation.
-        if row["log2fc"] is None:
-            continue
-        if key not in ptm_timeseries:
-            ptm_timeseries[key] = {}
-            ptm_qvalues[key] = {}
-            ptm_condition_records[key] = {}
-        # A mixed representation fails closed for the footprint layer as well:
-        # one de novo row prevents any pseudocount conventional value from
-        # becoming a score source for the gene-site.
-        ptm_is_denovo[key] = bool(ptm_is_denovo.get(key) or row.get("is_de_novo_representation"))
-        # The value is conventional only for conventional rows; de novo rows
-        # were converted above to the frozen capped LOD/confidence representation.
-        _raw_fc_raw = row["log2fc"]
-        try:
-            _raw_fc = float(_raw_fc_raw) if _raw_fc_raw is not None else 0.0
-        except (ValueError, TypeError):
-            _raw_fc = 0.0
-        ptm_condition_records[key][cond] = {
-            "value": _raw_fc,
-            "q_value": row["q_value"],
-            "is_de_novo_representation": bool(row.get("is_de_novo_representation")),
-        }
-        _occupancy = row.get("occupancy_logit_delta")
-        if (
-            row.get("pair_quality_tier") in {"O1", "O2"}
-            and _occupancy is not None
-            and np.isfinite(_occupancy)
-        ):
-            occupancy_timeseries.setdefault(key, {})[cond] = float(_occupancy)
-            occupancy_qvalues.setdefault(key, {})[cond] = row.get("occupancy_q_value")
-
-    # Apply the mixed-representation fail-closed rule after all rows have been
-    # observed. If any condition uses detection/LOD representation, only those
-    # conditions contribute to the heatmap and TMM footprint for the gene-site.
-    for key, by_condition in ptm_condition_records.items():
-        selected = (
-            {
-                condition: record
-                for condition, record in by_condition.items()
-                if record.get("is_de_novo_representation")
-            }
-            if ptm_is_denovo.get(key)
-            else by_condition
-        )
-        ptm_timeseries[key] = {
-            condition: float(record["value"])
-            for condition, record in selected.items()
-        }
-        ptm_qvalues[key] = {
-            condition: record.get("q_value")
-            for condition, record in selected.items()
-        }
+    from ptm_shared.temporal_feature_input import (
+        build_temporal_feature_inputs, bind_modules_to_features, member_key,
+    )
+    temporal_inputs = build_temporal_feature_inputs(vector_data)
+    ptm_timeseries = temporal_inputs["ptm_timeseries"]
+    ptm_qvalues = temporal_inputs["ptm_qvalues"]
+    ptm_is_denovo = temporal_inputs["ptm_is_denovo"]
+    occupancy_timeseries = temporal_inputs["occupancy_timeseries"]
+    occupancy_qvalues = temporal_inputs["occupancy_qvalues"]
+    all_conditions = set(temporal_inputs["conditions"])
+    kinase_modules = bind_modules_to_features(kinase_modules, temporal_inputs)
 
     # Sort conditions by actual time value (unit-aware: sec/min/hr/day)
     import re
@@ -7898,7 +7845,7 @@ async def kinase_activity_heatmap(
             return float(m2.group(1))
         # Non-time string → sort last
         return float('inf')
-    conditions_sorted = sorted(all_conditions, key=_cond_sort_key)
+    conditions_sorted = sorted(all_conditions, key=lambda c: (_cond_sort_key(c), c))
     occupancy_complete_timeseries = {
         key: values for key, values in occupancy_timeseries.items()
         if all(condition in values and np.isfinite(values[condition]) for condition in conditions_sorted)
@@ -7956,7 +7903,7 @@ async def kinase_activity_heatmap(
         kn = km.get("kinase", "")
         canonical_kn = str(km.get("canonical") or kn).upper()
         for ptm in km.get("ptms", []):
-            pk = f"{ptm.get('gene', '').upper()}_{str(ptm.get('position', '')).upper()}"
+            pk = member_key(ptm)
             ptm_to_kinases.setdefault(pk, []).append(kn)
             probability = ptm.get("candidate_probability")
             if probability is not None:
@@ -7979,7 +7926,7 @@ async def kinase_activity_heatmap(
         if not canonical:
             continue
         kinase_to_site_keys.setdefault(canonical, []).extend(
-            f"{str(member.get('gene') or '').upper()}_{str(member.get('position') or '').upper()}"
+            member_key(member)
             for member in module.get("ptms", [])
             if str(member.get("gene") or "").strip() and str(member.get("position") or "").strip()
         )
@@ -8070,7 +8017,9 @@ async def kinase_activity_heatmap(
         for pk in ptm_keys_list:
             ts = ptm_timeseries.get(pk, {})
             if ts:
-                row = [ts.get(c, 0.0) for c in conditions_sorted]
+                if not all(c in ts for c in conditions_sorted):
+                    continue
+                row = [ts[c] for c in conditions_sorted]
                 if any(v != 0 for v in row):
                     vectors.append(row)
         if len(vectors) < 2:
@@ -8129,16 +8078,24 @@ async def kinase_activity_heatmap(
         """
         valid_keys = []
         raw_vectors = []
+        partial_keys = []
         for ptm in ptm_list:
-            pk = f"{ptm.get('gene', '').upper()}_{str(ptm.get('position', '')).upper()}"
+            pk = member_key(ptm)
             ts = ptm_timeseries.get(pk, {})
             if not ts:
                 continue
-            row = [ts.get(c, 0.0) for c in conditions_sorted]
+            if not all(c in ts for c in conditions_sorted):
+                partial_keys.append(pk)
+                continue
+            row = [ts[c] for c in conditions_sorted]
             if any(v != 0 for v in row):
                 valid_keys.append(pk)
                 raw_vectors.append(row)
         if not valid_keys:
+            if partial_keys:
+                return [{"ptm_keys": partial_keys, "cluster_id": -1, "size": len(partial_keys),
+                         "coherence": 0.0, "is_dominant": True, "tier": "partial_observations",
+                         "clustering_eligible": False, "reason": "incomplete_observed_grid"}]
             return []
         n_subs = len(valid_keys)
 
@@ -8387,9 +8344,8 @@ async def kinase_activity_heatmap(
                 if not ts:
                     continue
                 for c in conditions_sorted:
-                    fc = ts.get(c, 0.0)
-                    if fc != 0 or abs(fc) >= FC_THRESHOLD:
-                        _raw_fc[c].append(fc)
+                    if c in ts:
+                        _raw_fc[c].append(ts[c])
             scores = {}
             for c in conditions_sorted:
                 vals = _raw_fc[c]
@@ -8402,7 +8358,7 @@ async def kinase_activity_heatmap(
                 elif vals:
                     scores[c] = round(float(np.mean(vals)), 4)
                 else:
-                    scores[c] = 0.0
+                    continue
             if scores:
                 peak_cond = max(scores, key=lambda c: abs(scores[c]))
                 peak_score = scores[peak_cond]
@@ -8411,6 +8367,7 @@ async def kinase_activity_heatmap(
                 peak_score = 0.0
 
         # Legacy up_sums/down_sums for backward compatibility + temporal pattern
+        observation_counts = {c: sum(c in ptm_timeseries.get(pk, {}) for pk in dominant_keys) for c in conditions_sorted}
         up_sums: dict[str, float] = {c: 0.0 for c in conditions_sorted}
         down_sums: dict[str, float] = {c: 0.0 for c in conditions_sorted}
         up_counts: dict[str, int] = {c: 0 for c in conditions_sorted}
@@ -8440,7 +8397,9 @@ async def kinase_activity_heatmap(
                 continue
             is_exclusive = len(ptm_to_kinases.get(pk, [])) <= 1
             for c in conditions_sorted:
-                fc = ts.get(c, 0.0)
+                if c not in ts:
+                    continue
+                fc = ts[c]
                 q_val = ptm_qvalues.get(pk, {}).get(c)
                 passes_threshold = False
                 if q_val is not None and q_val < Q_THRESHOLD:
@@ -8540,8 +8499,9 @@ async def kinase_activity_heatmap(
                         "peak_score": round(_stc_peak_score, 4),
                         "substrates": [
                             {
-                                "gene": pk.split("_")[0] if "_" in pk else pk,
-                                "site": pk.split("_", 1)[1] if "_" in pk else "",
+                                "gene": temporal_inputs["features"][pk]["gene"],
+                                "site": temporal_inputs["features"][pk]["position"],
+                                "feature_id": pk,
                                 "peak_fc": round(float(max(
                                     (ptm_timeseries.get(pk, {}).get(c, 0.0) for c in conditions_sorted),
                                     key=abs, default=0.0
@@ -8583,13 +8543,14 @@ async def kinase_activity_heatmap(
         kinase_gene_upper = kinase_name.strip().upper()
         # Find all PTM keys matching the kinase gene name
         for ptm_key_sp, ts_sp in ptm_timeseries.items():
-            sp_gene = ptm_key_sp.split("_")[0] if "_" in ptm_key_sp else ptm_key_sp
+            sp_gene = temporal_inputs["features"][ptm_key_sp]["gene"]
             if sp_gene.upper() != kinase_gene_upper:
                 continue
-            sp_site = ptm_key_sp.split("_", 1)[1] if "_" in ptm_key_sp else ""
+            sp_site = temporal_inputs["features"][ptm_key_sp]["position"]
             # Build temporal vectors for correlation
-            self_vec = [ts_sp.get(c, 0.0) for c in conditions_sorted]
-            activity_vec = [scores.get(c, 0.0) for c in conditions_sorted]
+            paired_conditions = [c for c in conditions_sorted if c in ts_sp and c in scores]
+            self_vec = [ts_sp[c] for c in paired_conditions]
+            activity_vec = [scores[c] for c in paired_conditions]
             # Skip if self-PTM has no signal
             if not any(abs(v) >= 0.3 for v in self_vec):
                 continue
@@ -8598,7 +8559,7 @@ async def kinase_activity_heatmap(
             try:
                 self_arr = np.array(self_vec)
                 act_arr = np.array(activity_vec)
-                if np.std(self_arr) > 1e-9 and np.std(act_arr) > 1e-9:
+                if len(paired_conditions) >= 3 and np.std(self_arr) > 1e-9 and np.std(act_arr) > 1e-9:
                     sp_corr = float(np.corrcoef(self_arr, act_arr)[0, 1])
                     if np.isnan(sp_corr):
                         sp_corr = 0.0
@@ -8618,10 +8579,11 @@ async def kinase_activity_heatmap(
                 "ptm_key": ptm_key_sp,
                 "gene": sp_gene,
                 "site": sp_site,
-                "timeseries": {c: round(ts_sp.get(c, 0.0), 4) for c in conditions_sorted},
+                "timeseries": {c: round(v, 4) for c, v in ts_sp.items()},
                 "peak_condition": sp_peak_c,
                 "peak_fc": round(sp_peak_fc, 4),
                 "correlation_with_activity": round(sp_corr, 4),
+                "correlation_observed_conditions": paired_conditions,
                 "relationship": sp_relationship,
             })
         # Sort by absolute correlation (most informative first)
@@ -8630,6 +8592,9 @@ async def kinase_activity_heatmap(
         kinase_scores.append({
             "kinase": kinase_name,
             "scores": scores,
+            "observation_counts": observation_counts,
+            "missing_conditions": [c for c in conditions_sorted if not observation_counts[c]],
+            "peak_is_provisional": any(not observation_counts[c] for c in conditions_sorted),
             "up_sums": up_sums,
             "down_sums": down_sums,
             "up_counts": up_counts,
@@ -8664,14 +8629,15 @@ async def kinase_activity_heatmap(
                 *[
                     {
                         "ptm_key": pk,
-                        "gene": pk.split("_")[0] if "_" in pk else pk,
-                        "site": pk.split("_", 1)[1] if "_" in pk else "",
+                        "gene": temporal_inputs["features"][pk]["gene"],
+                        "site": temporal_inputs["features"][pk]["position"],
+                        "feature_id": pk,
                         "peak_fc": round(float(max(
                             (ptm_timeseries.get(pk, {}).get(c, 0.0) for c in conditions_sorted),
                             key=abs, default=0.0
                         )), 3),
                         # v11.3.5b: Include full temporal vector for interactive time-column selection
-                        "temporal": {c: round(ptm_timeseries.get(pk, {}).get(c, 0.0), 3) for c in conditions_sorted},
+                        "temporal": {c: round(v, 3) for c, v in ptm_timeseries.get(pk, {}).items()},
                         # Also include peak condition for tooltip
                         "peak_condition": max(conditions_sorted, key=lambda c, _pk=pk: abs(ptm_timeseries.get(_pk, {}).get(c, 0.0))) if conditions_sorted else "",
                         "cluster": "dominant",
@@ -8683,13 +8649,14 @@ async def kinase_activity_heatmap(
                 *[
                     {
                         "ptm_key": pk,
-                        "gene": pk.split("_")[0] if "_" in pk else pk,
-                        "site": pk.split("_", 1)[1] if "_" in pk else "",
+                        "gene": temporal_inputs["features"][pk]["gene"],
+                        "site": temporal_inputs["features"][pk]["position"],
+                        "feature_id": pk,
                         "peak_fc": round(float(max(
                             (ptm_timeseries.get(pk, {}).get(c, 0.0) for c in conditions_sorted),
                             key=abs, default=0.0
                         )), 3),
-                        "temporal": {c: round(ptm_timeseries.get(pk, {}).get(c, 0.0), 3) for c in conditions_sorted},
+                        "temporal": {c: round(v, 3) for c, v in ptm_timeseries.get(pk, {}).items()},
                         "peak_condition": max(conditions_sorted, key=lambda c, _pk=pk: abs(ptm_timeseries.get(_pk, {}).get(c, 0.0))) if conditions_sorted else "",
                         "cluster": "non_dominant_nuclear",
                         "nuclear_tier": 1 if (pk.split("_")[0].upper() if "_" in pk else pk.upper()) in _NUCLEAR_TIER1_GENES else 2,
@@ -8787,8 +8754,9 @@ async def kinase_activity_heatmap(
                     "substrates": [
                         {
                             "ptm_key": pk,
-                            "gene": pk.split("_")[0] if "_" in pk else pk,
-                            "site": pk.split("_", 1)[1] if "_" in pk else "",
+                            "gene": temporal_inputs["features"][pk]["gene"],
+                            "site": temporal_inputs["features"][pk]["position"],
+                            "feature_id": pk,
                             "peak_fc": round(float(max(
                                 (ptm_timeseries.get(pk, {}).get(c, 0.0) for c in conditions_sorted),
                                 key=abs, default=0.0
@@ -8895,6 +8863,9 @@ async def kinase_activity_heatmap(
 
     n_conds = len(conditions_sorted)
     for ks_entry in kinase_scores:
+        if ks_entry.get("missing_conditions"):
+            ks_entry["temporal_pattern"] = ["partial_observations"]
+            continue
         up_s = ks_entry.get("up_sums", {})
         dn_s = ks_entry.get("down_sums", {})
         # Net signal per condition (positive = net up, negative = net down)
@@ -9211,8 +9182,7 @@ async def kinase_activity_heatmap(
         for km in kinase_modules:
             _members = km.get("ptms", [])
             _keys = [
-                f"{(p.get('gene','') if isinstance(p,dict) else p.split('_')[0]).upper()}_"
-                f"{(str(p.get('position','')) if isinstance(p,dict) else p.split('_',1)[1] if '_' in p else '').upper()}"
+                member_key(p)
                 for p in _members
             ]
             _tmm_modules.append({
@@ -9368,6 +9338,8 @@ async def kinase_activity_heatmap(
                 }
 
                 # TMM metadata fields
+                ks_entry["tmm_observation_counts"] = tmm["observation_counts"]
+                ks_entry["tmm_profile_support_by_condition"] = tmm["profile_support_by_condition"]
                 ks_entry["tmm_weighted_up_sums"] = w_up
                 ks_entry["tmm_weighted_down_sums"] = w_dn
                 ks_entry["tmm_weighted_up_counts"] = w_uc
@@ -9525,6 +9497,7 @@ async def kinase_activity_heatmap(
         "dual_track_evidence_contract": dual_track_contract,
         "available_patterns": sorted(all_patterns),
         "translocation_candidates": translocation_candidates,
+        "temporal_feature_input": temporal_inputs,
         "scoring_method": "stratified_winsorized_mean_v11.3+tmm_deconvolution",
         "scoring_threshold": {"q_value": Q_THRESHOLD, "fc_abs": FC_THRESHOLD},
         "tmm_config": effective_tmm_config,
@@ -9560,6 +9533,16 @@ async def kinase_activity_heatmap(
         unified_sidecar = (
             None if local_reference_access else load_preservable_local_reference_sidecar(unified_path)
         )
+        if unified_sidecar is not None:
+            saved_input = (unified_sidecar.get("provenance") or {}).get("temporal_input") or {}
+            if saved_input.get("feature_input_sha256") != temporal_inputs["input_sha256"]:
+                # Preserve the previously validated reference artifact, but do
+                # not attach aggregate-era values to new precursor trajectories.
+                previous_sha = hashlib.sha256(unified_path.read_bytes()).hexdigest()[:16]
+                previous_path = unified_path.with_name(f"{unified_path.stem}.previous-{previous_sha}.json")
+                if not previous_path.exists():
+                    atomic_write_json(previous_path, unified_sidecar, sort_keys=True, default=None, ensure_ascii=False)
+                unified_sidecar = None
         if unified_sidecar is None:
             unified_sidecar = build_production_temporal_ptm_protein_analysis(
                 output_dir=output_dir,
@@ -9568,6 +9551,12 @@ async def kinase_activity_heatmap(
                 conditions=conditions_sorted,
                 tmm_result=result_data,
                 feature_provenance_rows=feature_provenance_rows,
+                feature_identities=temporal_inputs["features"],
+                temporal_input_provenance={
+                    "contract_version": temporal_inputs["contract_version"],
+                    "feature_input_sha256": temporal_inputs["input_sha256"],
+                    "aggregation_rule": "none_feature_level_only",
+                },
                 mapping_source_bundle_path=os.getenv("PTM_MAPPING_SOURCE_BUNDLE_PATH"),
                 mapping_snapshot_root=os.getenv("PTM_MAPPING_SNAPSHOT_ROOT"),
                 relation_source_bundle_path=os.getenv("PTM_RELATION_SOURCE_BUNDLE_PATH"),

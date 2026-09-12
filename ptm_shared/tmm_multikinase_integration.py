@@ -81,6 +81,10 @@ def build_tmm_evidence_profile(tmm: Mapping[str, Any]) -> dict[str, Any]:
         tier = "tmm_sparse_data_anchored"
         flags.append("exclusive_anchor_count_below_recommended_minimum")
         interpretation = "Data-derived profile is available but has sparse exclusive-substrate support."
+    elif profile_type == "partial_data_driven":
+        tier = "tmm_partial_data_anchored"
+        flags.append("partially_observed_profile_no_full_grid_peak")
+        interpretation = "Profile uses observed timepoints only; missing intervals do not establish a trough or a precise full-course peak."
     elif profile_type == "iterative_data_assisted":
         tier = "tmm_iterative_data_assisted"
         flags.append("shared_site_iterative_profile_not_direct_anchor")

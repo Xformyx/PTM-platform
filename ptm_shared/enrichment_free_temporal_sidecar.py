@@ -787,6 +787,7 @@ def _write_wave_membership_audit(output_dir: Path, wave_contract: Mapping[str, A
 def build_production_site_observations(
     ptm_timeseries: Mapping[str, Mapping[str, Any]],
     conditions: Iterable[str],
+    feature_identities: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
     """Normalize ordinary-order PTM vectors into the shared sidecar input.
 
@@ -802,7 +803,10 @@ def build_production_site_observations(
         key = str(raw_key or "").strip().upper()
         if "_" not in key:
             continue
-        gene, site = key.rsplit("_", 1)
+        identity = (feature_identities or {}).get(raw_key, {})
+        gene, site = key.split("__PF-", 1)[0].rsplit("_", 1)
+        gene = identity.get("gene") or gene
+        site = identity.get("position") or site
         values = {
             condition: parsed
             for condition in ordered_conditions
@@ -815,6 +819,9 @@ def build_production_site_observations(
         observations.append(
             {
                 "site_key": key,
+                "feature_id": identity.get("feature_id"),
+                "precursor_id": identity.get("precursor_id"),
+                "annotation_site_key": identity.get("site_key", f"{gene}_{site}"),
                 "gene": gene,
                 "site": site,
                 "temporal_values": values,
@@ -845,6 +852,7 @@ def build_production_temporal_ptm_protein_analysis(
     raw_replicate_fc_series: Mapping[str, Any] | None = None,
     temporal_input_provenance: Mapping[str, Any] | None = None,
     feature_provenance_rows: Iterable[Mapping[str, Any]] | None = None,
+    feature_identities: Mapping[str, Mapping[str, Any]] | None = None,
     mapping_source_bundle_path: str | Path | None = None,
     mapping_snapshot_root: str | Path | None = None,
     relation_source_bundle_path: str | Path | None = None,
@@ -873,6 +881,7 @@ def build_production_temporal_ptm_protein_analysis(
     observations, observed_vectors = build_production_site_observations(
         ptm_timeseries,
         ordered_conditions,
+        feature_identities,
     )
     wave_vectors, input_projection = project_temporal_wave_input(
         observed_vectors,
@@ -916,6 +925,7 @@ def build_production_temporal_ptm_protein_analysis(
         build_feature_provenance_ledger(feature_provenance_rows or (), ordered_conditions),
         wave_contract,
         dict(tmm_result or {}).get("relative_site_contribution_matrix") or {},
+        feature_identities=feature_identities,
     )
     feature_ledger = attach_mapping_context(
         feature_ledger,

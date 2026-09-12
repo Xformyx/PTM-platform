@@ -88,6 +88,8 @@ def project_report_vector_row(row: Mapping[str, Any]) -> dict[str, Any]:
         "ptm_unadjusted_calculation_mode": _text(row, "PTM_Unadjusted_Calculation_Mode", "ptm_unadjusted_calculation_mode") or None,
         "ptm_unadjusted_estimator_id": _text(row, "PTM_Unadjusted_Estimator_ID", "ptm_unadjusted_estimator_id") or None,
         "ptm_protein_adjusted_estimator_id": _text(row, "PTM_ProteinAdjusted_Estimator_ID", "ptm_protein_adjusted_estimator_id") or None,
+        "ptm_protein_adjusted_missing_reason": _text(row, "PTM_ProteinAdjusted_Missing_Reason", "ptm_protein_adjusted_missing_reason") or None,
+        "ptm_protein_adjusted_conventional_log2fc_na": _optional_bool(row, "PTM_ProteinAdjusted_Conventional_Log2FC_NA", "ptm_protein_adjusted_conventional_log2fc_na"),
         "ptm_protein_adjusted_aggregation_order": _text(row, "PTM_ProteinAdjusted_Aggregation_Order", "ptm_protein_adjusted_aggregation_order") or None,
         "linked_protein_estimator_id": _text(row, "Linked_Protein_Estimator_ID", "linked_protein_estimator_id") or None,
         "ptm_reconstructed_estimator_id": _text(row, "PTM_Reconstructed_Estimator_ID", "ptm_reconstructed_estimator_id") or None,

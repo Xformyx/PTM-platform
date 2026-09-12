@@ -1009,6 +1009,28 @@ def _gaussian_kinase_profile(
     return profile / norm if norm > 0 else profile
 
 
+def _observed_vector(series, conditions):
+    """Internal NaN plus an explicit mask; a measured zero remains finite."""
+    values = []
+    for condition in conditions:
+        try:
+            value = float(series.get(condition))
+        except (TypeError, ValueError):
+            value = np.nan
+        values.append(value if np.isfinite(value) else np.nan)
+    return np.asarray(values, dtype=float)
+
+
+def _observed_fit(series, conditions, design, target_transform):
+    values = _observed_vector(series, conditions)
+    mask = np.isfinite(values) & np.all(np.isfinite(design), axis=1)
+    return (
+        _tmm_target_vector(values[mask], target_transform=target_transform),
+        design[mask],
+        [c for c, observed in zip(conditions, mask) if observed],
+    )
+
+
 def build_kinase_profiles_from_data(
     kinase_modules: list[dict],
     ptm_timeseries: dict[str, dict[str, float]],
@@ -1021,8 +1043,8 @@ def build_kinase_profiles_from_data(
     """Build per-kinase temporal activity profiles from exclusive substrates.
 
     For each kinase module, identify substrates that are assigned to that kinase
-    ONLY (exclusive substrates) and compute their mean time-series as the kinase's
-    empirical activity profile.
+    ONLY (exclusive substrates) and compute an observed-only median profile.
+    A condition with insufficient exclusive support remains missing.
 
     Falls back to a Gaussian profile centred at typical_peak_min when there are
     fewer than MIN_EXCLUSIVE_FOR_PROFILE exclusive substrates.
@@ -1030,7 +1052,7 @@ def build_kinase_profiles_from_data(
     Returns:
         dict[canonical_name → {
             "profile": np.ndarray,          # shape (n_conditions,), normalised to [0,1]
-            "profile_type": "data_driven" | "gaussian_fallback",
+            "profile_type": "data_driven" | "partial_data_driven" | "gaussian_fallback",
             "n_exclusive": int,             # number of exclusive substrates used
             "exclusive_keys": list[str],    # PTM keys used to build profile
             "peak_condition": str,          # condition with highest profile value
@@ -1047,7 +1069,7 @@ def build_kinase_profiles_from_data(
             continue
 
         # Collect all PTM keys in this kinase module
-        all_keys = [m.get("key", "") for m in km.get("members", []) if m.get("key")]
+        all_keys = sorted({m.get("key", "") for m in km.get("members", []) if m.get("key")})
 
         # Exclusive: assigned to this kinase only
         exclusive_keys = [
@@ -1062,23 +1084,33 @@ def build_kinase_profiles_from_data(
                 ts = ptm_timeseries.get(pk, {})
                 if not ts:
                     continue
-                row = np.array([ts.get(c, 0.0) for c in conditions_sorted], dtype=float)
+                row = _observed_vector(ts, conditions_sorted)
+                if not np.isfinite(row).any():
+                    continue
                 # Use absolute value — we care about the temporal shape, not direction
                 vectors.append(np.abs(row))
 
-            if vectors:
+            if len(vectors) >= min_exclusive_for_profile:
                 mat = np.stack(vectors, axis=0)  # shape (n_exclusive, n_cond)
-                # Robust profile: median across exclusive substrates
-                profile = np.median(mat, axis=0)
-                norm = profile.max()
+                counts = np.isfinite(mat).sum(axis=0)
+                profile = np.array([
+                    np.median(column[np.isfinite(column)]) if count >= min_exclusive_for_profile else np.nan
+                    for column, count in zip(mat.T, counts)
+                ])
+                observed = np.isfinite(profile)
+                norm = np.nanmax(profile) if observed.any() else 0.
                 profile = profile / norm if norm > 0 else profile
-                peak_idx = int(np.argmax(profile))
+                peak_indices = np.flatnonzero(profile == np.nanmax(profile)) if observed.any() else []
+                peak_condition = conditions_sorted[peak_indices[0]] if observed.all() and len(peak_indices) == 1 else None
                 profiles[canonical] = {
                     "profile": profile,
-                    "profile_type": "data_driven",
+                    "profile_type": "data_driven" if observed.all() else "partial_data_driven",
+                    "observed_mask": observed.tolist(),
+                    "support_by_condition": dict(zip(conditions_sorted, map(int, counts))),
                     "n_exclusive": len(vectors),
                     "exclusive_keys": exclusive_keys[:20],  # cap for storage
-                    "peak_condition": conditions_sorted[peak_idx],
+                    "peak_condition": peak_condition,
+                    "peak_status": "unique_observed_complete_grid" if peak_condition else "withheld_partial_or_tied",
                     "profile_config": {
                         "min_exclusive_for_profile": min_exclusive_for_profile,
                         "gaussian_sigma_log": gaussian_sigma_log,
@@ -1086,7 +1118,7 @@ def build_kinase_profiles_from_data(
                 }
                 _log.debug(
                     f"[TMM] {canonical}: data-driven profile from {len(vectors)} "
-                    f"exclusive substrates, peak={conditions_sorted[peak_idx]}"
+                    f"exclusive substrates, peak={peak_condition}"
                 )
                 continue
 
@@ -1110,6 +1142,12 @@ def build_kinase_profiles_from_data(
         profiles[canonical] = {
             "profile": profile,
             "profile_type": "gaussian_fallback",
+            "observed_mask": [False] * n_cond,
+            "support_by_condition": {
+                c: int(sum(np.isfinite(_observed_vector(ptm_timeseries.get(pk, {}), [c]))[0] for pk in exclusive_keys))
+                for c in conditions_sorted
+            },
+            "peak_status": "prior_assumed",
             "n_exclusive": len(exclusive_keys),
             "exclusive_keys": exclusive_keys,
             "peak_condition": conditions_sorted[peak_idx],
@@ -1206,17 +1244,20 @@ def attribute_shared_ptm(
         return None
 
     ts = ptm_timeseries.get(ptm_key, {})
-    y = _tmm_target_vector(
-        [ts.get(c, 0.0) for c in conditions_sorted],
-        target_transform=target_transform,
-    )
+    y, design, observed_conditions = _observed_fit(ts, conditions_sorted, design, target_transform)
     attribution = ambiguity_aware_attribution(ptm_key, y, design, names, n_bootstrap=0)
+    if len(observed_conditions) < 2:
+        attribution.attribution_supported = False
+        attribution.unsupported_reason = "insufficient_observed_timepoints"
+        for entry in attribution.per_kinase.values():
+            entry.update(attribution_supported=False, ratio=None, reason=attribution.unsupported_reason)
     singleton_required = any(
         len(group.members) == 1 and bool(group.required)
         for group in attribution.groups
     )
     repeats = max(0, int(uncertainty_bootstrap_repeats))
-    if repeats > 0 and attribution.attribution_supported and singleton_required:
+    bootstrap_evaluated = bool(repeats > 0 and attribution.attribution_supported and singleton_required)
+    if bootstrap_evaluated:
         attribution = ambiguity_aware_attribution(
             ptm_key,
             y,
@@ -1235,9 +1276,9 @@ def attribute_shared_ptm(
         bool(uncertainty_loto_enabled)
         and attribution.attribution_supported
         and singleton_required
-        and len(conditions_sorted) >= 3
+        and len(observed_conditions) >= 3
     ):
-        for omitted_index, omitted_condition in enumerate(conditions_sorted):
+        for omitted_index, omitted_condition in enumerate(observed_conditions):
             reduced = ambiguity_aware_attribution(
                 f"{ptm_key}__loto_{omitted_index}",
                 np.delete(y, omitted_index),
@@ -1258,9 +1299,14 @@ def attribute_shared_ptm(
     reduced_diagnosis = attribution.reduced_diagnosis
     attribution.uncertainty = {
         "contract_version": "adaptive_tmm_uncertainty.v1",
-        "evaluated": bool(repeats > 0 or loto_records),
+        "observed_conditions": observed_conditions,
+        "missing_conditions": [c for c in conditions_sorted if c not in observed_conditions],
+        "n_observed_timepoints": len(observed_conditions),
+        "n_requested_timepoints": len(conditions_sorted),
+        "missingness_policy": "fit_only_finite_target_and_candidate_profile_rows",
+        "evaluated": bool(bootstrap_evaluated or loto_records),
         "selection_gate": "attribution_supported_and_required_singleton_group",
-        "bootstrap_repeats": repeats if singleton_required else 0,
+        "bootstrap_repeats": repeats if bootstrap_evaluated else 0,
         "bootstrap_top1_stability": (
             reduced_diagnosis.top1_stability if reduced_diagnosis is not None else None
         ),
@@ -1305,11 +1351,6 @@ def deconvolve_shared_ptm(
         equal = 1.0 / max(len(candidate_kinases), 1)
         return {k: equal for k in candidate_kinases}
 
-    y = _tmm_target_vector(
-        [ts.get(c, 0.0) for c in conditions_sorted],
-        target_transform=target_transform,
-    )
-
     A, valid_kinases = _build_kinase_design(
         candidate_kinases,
         kinase_profiles,
@@ -1320,6 +1361,13 @@ def deconvolve_shared_ptm(
     if not valid_kinases:
         equal = 1.0 / max(len(candidate_kinases), 1)
         return {k: equal for k in candidate_kinases}
+
+    y, A, observed_conditions = _observed_fit(ts, conditions_sorted, A, target_transform)
+    n_cond = len(observed_conditions)
+    if n_cond < 2:
+        # Diagnostic attribution withholds this result; no precise split is fitted.
+        equal = 1.0 / len(valid_kinases)
+        return {k: equal for k in valid_kinases}
 
     # Solve NNLS: min ||Ax - y||  s.t. x ≥ 0
     if _HAS_SCIPY and n_cond >= 2:
@@ -1499,11 +1547,8 @@ def refine_kinase_profiles_iteratively(
             entry = attribution.per_kinase.get(top_kinase) if attribution is not None else None
             if not entry or not entry.get("attribution_supported") or entry.get("ambiguous"):
                 continue
-            values = np.abs(np.asarray([
-                ptm_timeseries[site].get(condition, 0.0)
-                for condition in conditions_sorted
-            ], dtype=float))
-            scale = float(values.max())
+            values = np.abs(_observed_vector(ptm_timeseries[site], conditions_sorted))
+            scale = float(np.nanmax(values))
             if scale <= 0:
                 continue
             support.setdefault(top_kinase, []).append(values / scale)
@@ -1515,21 +1560,36 @@ def refine_kinase_profiles_iteratively(
         for kinase, vectors in support.items():
             if len(vectors) < minimum_shared_support or kinase not in profiles:
                 continue
-            empirical = np.median(np.stack(vectors, axis=0), axis=0)
-            empirical_scale = float(empirical.max())
+            mat = np.stack(vectors, axis=0)
+            empirical = np.array([
+                np.median(column[np.isfinite(column)]) if np.isfinite(column).sum() >= minimum_shared_support else np.nan
+                for column in mat.T
+            ])
+            if not np.isfinite(empirical).any():
+                continue
+            empirical_scale = float(np.nanmax(empirical))
             if empirical_scale <= 0:
                 continue
             empirical = empirical / empirical_scale
             previous = np.asarray(profiles[kinase]["profile"], dtype=float)
-            updated = (1.0 - blend) * previous + blend * empirical
-            updated_scale = float(updated.max())
+            updated = previous.copy()
+            shared = np.isfinite(previous) & np.isfinite(empirical)
+            new = ~np.isfinite(previous) & np.isfinite(empirical)
+            updated[shared] = (1.0 - blend) * previous[shared] + blend * empirical[shared]
+            updated[new] = empirical[new]
+            updated_scale = float(np.nanmax(updated))
             if updated_scale > 0:
                 updated = updated / updated_scale
-            delta = float(np.max(np.abs(updated - previous)))
+            delta = max(float(np.max(np.abs(updated[shared] - previous[shared]))) if shared.any() else 0., 1. if new.any() else 0.)
             maximum_delta = max(maximum_delta, delta)
             base_type = str(profiles[kinase].get("base_profile_type") or profiles[kinase].get("profile_type"))
             profiles[kinase].update({
                 "profile": updated,
+                "observed_mask": (
+                    np.asarray(profiles[kinase].get("observed_mask", np.isfinite(previous)), dtype=bool)
+                    | np.isfinite(empirical)
+                ).tolist(),
+                "iterative_support_by_condition": dict(zip(conditions_sorted, map(int, np.isfinite(mat).sum(axis=0)))),
                 "profile_type": "iterative_data_assisted",
                 "base_profile_type": base_type,
                 "iterative_shared_support": len(vectors),
@@ -1659,13 +1719,14 @@ def compute_weighted_kinase_scores(
         if not canonical:
             continue
 
-        all_keys = [m.get("key", "") for m in km.get("members", []) if m.get("key")]
+        all_keys = sorted({m.get("key", "") for m in km.get("members", []) if m.get("key")})
 
         w_up_sums = {c: 0.0 for c in conditions_sorted}
         w_dn_sums = {c: 0.0 for c in conditions_sorted}
         w_up_cnts = {c: 0.0 for c in conditions_sorted}
         w_dn_cnts = {c: 0.0 for c in conditions_sorted}
         w_shared_sums = {c: 0.0 for c in conditions_sorted}
+        observation_counts = {c: 0 for c in conditions_sorted}
         contribution_details = []
         # Transient, endpoint-local input for footprint robustness diagnostics.
         # This is intentionally not a published per-edge attribution payload.
@@ -1682,6 +1743,9 @@ def compute_weighted_kinase_scores(
             ts = ptm_timeseries.get(pk, {})
             if not ts:
                 continue
+            ts = {c: float(v) for c, v in zip(conditions_sorted, _observed_vector(ts, conditions_sorted)) if np.isfinite(v)}
+            for c in ts:
+                observation_counts[c] += 1
 
             # Determine contribution ratio for this PTM
             other_kinases = [k for k in ptm_to_kinases.get(pk, []) if k != canonical]
@@ -1713,6 +1777,8 @@ def compute_weighted_kinase_scores(
                 "ptm_key": pk,
                 "contribution_ratio": round(ratio, 4),
                 "profile_type": profile_type,
+                "observed_conditions": list(ts),
+                "missing_conditions": [c for c in conditions_sorted if c not in ts],
                 "n_competing_kinases": len(other_kinases),
                 "candidate_prior_weight": round(
                     float(ptm_candidate_weights.get(pk, {}).get(canonical, 0.0)),
@@ -1747,12 +1813,18 @@ def compute_weighted_kinase_scores(
                         )
                         attribution_cache[pk] = None
                 attribution = attribution_cache[pk]
+                if attribution is not None:
+                    detail["observation_support"] = attribution.uncertainty
                 entry = (
                     attribution.per_kinase.get(canonical)
                     if attribution is not None
                     else None
                 )
-                if attribution is None or entry is None:
+                if attribution is not None and not attribution.attribution_supported:
+                    detail["resolution"] = "unsupported"
+                    detail["unsupported_reason"] = attribution.unsupported_reason
+                    n_unsupported += 1
+                elif attribution is None or entry is None:
                     detail["resolution"] = "unannotated"
                 elif not entry.get("attribution_supported"):
                     detail["resolution"] = "unsupported"
@@ -1797,9 +1869,11 @@ def compute_weighted_kinase_scores(
                     w_shared_sums[c] += ts.get(c, 0.0) * ratio
 
             # Accumulate weighted sums
-            site_profile = {condition: 0.0 for condition in conditions_sorted}
+            site_profile = {condition: 0.0 for condition in ts}
             for c in conditions_sorted:
-                fc = ts.get(c, 0.0)
+                if c not in ts:
+                    continue
+                fc = ts[c]
                 q_val = ptm_qvalues.get(pk, {}).get(c)
                 passes = (q_val is not None and q_val < q_threshold) or (abs(fc) >= fc_threshold)
                 if not passes:
@@ -1842,8 +1916,10 @@ def compute_weighted_kinase_scores(
             "n_exclusive": n_exclusive,
             "n_shared": n_shared,
             "profile_type": _profile_type,
+            "observation_counts": observation_counts,
+            "profile_support_by_condition": (kinase_profiles.get(canonical) or {}).get("support_by_condition", {}),
             "profile_values": {
-                condition: round(float(value), 8)
+                condition: round(float(value), 8) if np.isfinite(value) else None
                 for condition, value in zip(
                     conditions_sorted,
                     np.asarray((kinase_profiles.get(canonical) or {}).get("profile", []), dtype=float),
