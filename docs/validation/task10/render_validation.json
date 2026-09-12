@@ -1,0 +1,126 @@
+{
+  "contract_version": "task10_synthetic_render_validation.v1",
+  "verified_at_utc": "2026-09-12T15:24:40.874553+00:00",
+  "verification_time_zone": "Asia/Seoul",
+  "base_commit": "29563def4bfbeddae82c62459800bcdba3795185",
+  "working_tree_changes_included": true,
+  "fixture_generator": "scripts/render_task10_fixture.py",
+  "fixture_generator_sha256": "0caad64226f75fbe3daf0ce5e7e51515a30f99579f9a8c5a594640a57bfa0b43",
+  "scope": "Synthetic 3-feature packet/finding/fallback/validator/final formatter/export run. PR/PG calculation was separately exercised by regression tests; no full production order or actual Gemini/retrieval run.",
+  "python": "3.14.6",
+  "renderers": {
+    "docx": "LibreOffice 26.8.0; documents render_docx.py; Poppler page PNGs",
+    "html": "Chrome 152 headless print-to-PDF; Poppler page PNGs"
+  },
+  "libreoffice_dmg_sha256": "8858d8058da4f862f47559486814e65efc27294da67c5e4bb56b006b1ee59f89",
+  "temporary_artifact_directory": "/tmp/ptm-task10-render",
+  "artifacts": [
+    {
+      "relative_path": "task10_fixture.md",
+      "bytes": 11323,
+      "sha256": "d73ad838e280c4f3946bd07f44dcf942841f9990d42027a97eb79731b40e709e"
+    },
+    {
+      "relative_path": "task10_fixture.docx",
+      "bytes": 348331,
+      "sha256": "082c015f1e789109857a5f027be0f63c88dbd03753d2563565c92c1d00045d5d"
+    },
+    {
+      "relative_path": "task10_fixture.html",
+      "bytes": 489841,
+      "sha256": "08fc618963edec186044977f0578951f9469e411e85fb64ddb27c590f0a670e5"
+    },
+    {
+      "relative_path": "pages-final/task10_fixture.pdf",
+      "bytes": 478432,
+      "sha256": "b6d5290af0b1bdd47faf47bff2c8b05ec2b76b604fd34baf31184ed8d09cd297"
+    },
+    {
+      "relative_path": "html-final.pdf",
+      "bytes": 486167,
+      "sha256": "b9b50c55508c9c4ffbe4fabd4b49df161d5910388263a1a8773317b904cd8138"
+    },
+    {
+      "relative_path": "authoring_packet.json",
+      "bytes": 170053,
+      "sha256": "9cc0ef5ee2c9ec7fe41b8d8f8755c3c801632f2454642fcd54807858c1c1343a"
+    },
+    {
+      "relative_path": "authoring_plan.json",
+      "bytes": 15650,
+      "sha256": "0e7553e2e436c1c82b7b22f002253b2f980cc0c8cfb8ef60e033d37df37878dd"
+    },
+    {
+      "relative_path": "figure_manifest.json",
+      "bytes": 44365,
+      "sha256": "e27195b92d97fa12cce2de1f1ba5c1c4e4df16ee657ce9d49107de688792499b"
+    },
+    {
+      "relative_path": "validator.json",
+      "bytes": 47831,
+      "sha256": "5d4eaed3ca052284d3904a13391e0285cc7b0e4da1b448f084101167fdebca3d"
+    },
+    {
+      "relative_path": "output_correctness.json",
+      "bytes": 3880,
+      "sha256": "42647188e8a2e22d6e40809f32fe61cb17b7321ff675d91ab85d4e5eb3cbfa46"
+    },
+    {
+      "relative_path": "reader_joint_trajectories.png",
+      "bytes": 191299,
+      "sha256": "1240f8922c116b614d85573417cc8c0e7137646ac90bdd108f7b33c1e4adefdb"
+    },
+    {
+      "relative_path": "reader_protein_adjustment_comparison.png",
+      "bytes": 157946,
+      "sha256": "2c2a099e17242e112b07dc623a4a5cc576855f68b61ffc45476a19691fab3ac2"
+    }
+  ],
+  "visual_review": {
+    "docx_pages_reviewed": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
+    "html_print_pages_reviewed": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
+    "checks_passed": [
+      "all PF labels and U/P/A axes readable at final page size",
+      "actual 5/40/180 minute spacing",
+      "opposing forms shown separately",
+      "n/q/NA table and repeated DOCX header",
+      "legends do not cover observations",
+      "HTML print controls/sidebar hidden",
+      "caption localization and occupancy/activity boundary retained",
+      "conclusion limitation and next measurement retained"
+    ],
+    "not_checked": [
+      "Microsoft Word rendering",
+      "interactive browser resizing/zoom across devices",
+      "production study layout"
+    ]
+  },
+  "exported_figure_keys": [
+    "reader_protein_context",
+    "reader_joint_trajectories"
+  ],
+  "output_correctness": {
+    "status": "draft_review_required",
+    "reason_codes": [],
+    "review_reason_codes": [
+      "study_metadata_review_required"
+    ]
+  },
+  "finding_coverage_status": "covered",
+  "publication_status": "not validated; synthetic fixture lacks actual study metadata and literature",
+  "related_test_inventory": "validation.json"
+}

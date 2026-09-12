@@ -540,6 +540,10 @@ class LLMClient:
                         logger.error(error_msg)
                         return f"[LLM Error: {error_msg}]"
                     message = choices[0].get("message", {})
+                    finish_reason = choices[0].get("finish_reason")
+                    if finish_reason and str(finish_reason).lower() not in {"stop", "completed", "end_turn"}:
+                        # Even parseable JSON may be an incomplete interpretation.
+                        return f"[LLM Error: incomplete completion; finish_reason={finish_reason}]"
                     # Gemini 2.5 thinking models may put content in 'parts' or omit 'content'
                     content = message.get("content")
                     if content is None:

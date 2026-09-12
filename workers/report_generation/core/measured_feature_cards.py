@@ -23,7 +23,8 @@ from ptm_shared.evidence_contracts import (
 )
 from ptm_shared.de_novo_representation import is_de_novo_representation
 from report_generation.core.scientific_semantics import build_trajectory_shape_fact
-from .quantitative_fields import axis_number, axis_support, QUANTITATIVE_SCHEMA_VERSION
+from .quantitative_fields import axis_number, axis_support, axis_evidence, QUANTITATIVE_SCHEMA_VERSION
+from .temporal_analysis import observed_time_minutes, summarize_observed_pattern, joint_axis_pattern
 
 
 FEATURE_OBSERVATION_CARD_VERSION = "feature_observation_card.v3"
@@ -69,8 +70,8 @@ def _condition_sort_key(value: str) -> tuple[int, float, str]:
     lowered = label.lower()
     if lowered in {"control", "baseline", "0", "0min", "0 min"}:
         return (0, 0.0, lowered)
-    match = re.search(r"[-+]?\d+(?:\.\d+)?", label)
-    return (1, float(match.group(0)) if match else math.inf, lowered)
+    minutes = observed_time_minutes({"condition": label})
+    return (1, minutes if minutes is not None else math.inf, lowered)
 
 
 def _condition_rows(row: Mapping[str, Any]) -> list[dict]:
@@ -237,6 +238,7 @@ def build_feature_observation_cards(
     state: Mapping[str, Any],
     *,
     maximum: int = 5,
+    minimum_points: int = 2,
 ) -> list[dict]:
     """Select named measured features by coverage and temporal-shape diversity.
 
@@ -269,6 +271,12 @@ def build_feature_observation_cards(
         de_novo_count = 0
         for row in ordered:
             condition = _condition_label(row)
+            design_conditions = (state.get("sample_manifest") or {}).get("conditions") or []
+            recorded_design = next((d for d in design_conditions if isinstance(d, Mapping) and d.get("condition") == condition), {})
+            time_source = {**recorded_design, **row, "condition": condition}
+            # Projection's absent optional field must not hide an explicit design time.
+            if time_source.get("time_minutes") is None and recorded_design.get("time_minutes") is not None:
+                time_source["time_minutes"] = recorded_design["time_minutes"]
             adjusted = _condition_value(row, "adjusted")
             unadjusted = _condition_value(row, "unadjusted")
             protein = _condition_value(row, "protein")
@@ -282,8 +290,25 @@ def build_feature_observation_cards(
             if adjusted is not None and not de_novo:
                 adjusted_values.append(adjusted)
             conventional_available = not de_novo and unadjusted is not None
+            axes = {axis: axis_evidence(row, axis, state.get("sample_manifest") or {}) for axis in ("unadjusted", "protein", "adjusted")}
+            if de_novo:
+                for axis in ("unadjusted", "adjusted"):
+                    axes[axis].update(value=None, available=False, missing_reason="detection_context_only")
+            support_sets = [tuple(axes[axis].get(f"{group}_sample_ids") or ()) for axis in axes for group in ("control", "treatment")]
             points.append({
                 "condition": condition,
+                "time_minutes": observed_time_minutes(time_source),
+                "reference_id": row.get("reference_id") or recorded_design.get("reference_id"),
+                "axes": axes,
+                "joint_pattern": joint_axis_pattern(axes, tolerance=float(state.get("pattern_tolerance", .15))),
+                "support_sets_differ": any(
+                    axes["unadjusted"].get(f"{group}_sample_ids") != axes["adjusted"].get(f"{group}_sample_ids")
+                    for group in ("control", "treatment")
+                    if axes["unadjusted"].get(f"{group}_sample_ids") is not None and axes["adjusted"].get(f"{group}_sample_ids") is not None
+                ),
+                "support_set_status": "recorded" if all(support_sets) else "partially_or_not_recorded",
+                "common_sample_sensitivity": {"status": "not_computed", "reason": "replicate_level_reanalysis_required"},
+                "denominator_qc": {key: row.get(key) for key in ("protein_denominator_qc", "low_denominator", "qc_flags") if key in row},
                 "measurement_provenance": _mapping(row.get("measurement_provenance")) or build_measurement_provenance(row),
                 "ptm_unadjusted_log2fc": unadjusted,
                 "ptm_protein_adjusted_log2fc": adjusted,
@@ -292,11 +317,13 @@ def build_feature_observation_cards(
                 "detection_context_only": bool(de_novo),
                 "quality": _point_quality(row, conventional_available=conventional_available),
             })
+        points.sort(key=lambda p: (p["time_minutes"] if p["time_minutes"] is not None else math.inf, p["condition"]))
+        adjusted_values = [p["ptm_protein_adjusted_log2fc"] for p in points if p["ptm_protein_adjusted_log2fc"] is not None and not p["detection_context_only"]]
         numeric_points = sum(
             point["ptm_protein_adjusted_log2fc"] is not None or point["ptm_unadjusted_log2fc"] is not None
             for point in points
         )
-        if numeric_points < 2:
+        if numeric_points < minimum_points:
             continue
         complexity = _trajectory_complexity(adjusted_values)
         quality_tier, quality_counts = _narrative_quality_tier(points)
@@ -304,6 +331,8 @@ def build_feature_observation_cards(
         candidates.append({
             "key": key,
             "measurement": measurement,
+            "mapping_identity": {key: first.get(key) for key in ("accession", "fasta_taxonomy_id", "isoform")},
+            "parent_protein_ids": sorted({_text(row, "Protein.Group", "protein_group") for row in ordered if _text(row, "Protein.Group", "protein_group")}),
             "points": points,
             "numeric_point_count": numeric_points,
             "de_novo_count": de_novo_count,
@@ -401,6 +430,7 @@ def build_feature_observation_cards(
             ),
             "feature_label": label,
             "feature_identity": {
+                **candidate["mapping_identity"],
                 "reader_feature_id": feature_id,
                 "gene": candidate["key"][0],
                 "candidate_residue_annotation": candidate["key"][1] or None,
@@ -410,6 +440,10 @@ def build_feature_observation_cards(
             },
             "measurement_provenance": candidate["measurement"],
             "trajectory": candidate["points"],
+            "axis_patterns": {axis: summarize_observed_pattern(
+                [{**point, "pattern_value": point["axes"][axis]["value"]} for point in candidate["points"]], value_key="pattern_value")
+                for axis in ("unadjusted", "protein", "adjusted")},
+            "parent_protein_ids": candidate["parent_protein_ids"],
             "trajectory_shape_fact": trajectory_fact,
             "display_eligible": candidate["display_eligible"],
             "clustering_eligible": candidate["clustering_eligible"],
@@ -419,6 +453,62 @@ def build_feature_observation_cards(
             "evidence_envelope": envelope,
         })
     return cards
+
+
+def select_finding_cards(cards: Iterable[Mapping[str, Any]], *, maximum: int = 4) -> tuple[list[dict], dict]:
+    """Freeze descriptive findings using quality, parent and pattern diversity.
+
+    A parent or repeated control is a dependency, never an independent replicate.
+    No canonical/unknown quota and no magnitude-only priority is imposed.
+    """
+    unique: dict[str, dict] = {}
+    excluded = []
+    for source in cards:
+        card = dict(source)
+        fid = str(_mapping(card.get("feature_identity")).get("reader_feature_id") or "")
+        eligible = any(any(_mapping(point.get("axes")).get(axis, {}).get("available")
+                           for axis in ("unadjusted", "adjusted")) for point in card.get("trajectory") or [])
+        if not fid or not eligible:
+            excluded.append({"card_id": card.get("card_id"), "reason": "no_bound_numeric_observation"})
+            continue
+        if fid in unique:
+            # The adapter adds discovery context to the same measured feature.
+            if card.get("category") == "candidate_discovery":
+                card["evidence_ids"] = sorted(set(card.get("evidence_ids", []) + unique[fid].get("evidence_ids", [])))
+                unique[fid] = card
+            continue
+        unique[fid] = card
+    selected = []
+    parents_seen: set[str] = set()
+    patterns_seen: set[tuple] = set()
+
+    def parents(card):
+        return set(card.get("parent_protein_ids") or [str(_mapping(card.get("feature_identity")).get("gene") or "unknown_parent")])
+
+    def pattern(card):
+        return tuple(sorted({str(p.get("joint_pattern")) for p in card.get("trajectory") or []}))
+
+    def priority(item):
+        fid, card = item
+        quality = _mapping(card.get("quality_summary"))
+        return ({"high": 0, "moderate": 1, "exploratory": 2}.get(card.get("narrative_quality_tier"), 3),
+                -int(quality.get("q_supported_point_count") or 0),
+                -int(quality.get("replicate_supported_point_count") or 0),
+                bool(parents(card) & parents_seen), pattern(card) in patterns_seen, fid)
+
+    remaining = dict(unique)
+    while remaining and len(selected) < maximum:
+        fid, card = min(remaining.items(), key=priority)
+        selected.append(card)
+        parents_seen.update(parents(card))
+        patterns_seen.add(pattern(card))
+        del remaining[fid]
+    excluded.extend({"reader_feature_id": fid, "reason": "quality_parent_pattern_diversity_capacity"} for fid in sorted(remaining))
+    return selected, {"contract_version": "report_finding_selection.v1", "input_unique_feature_count": len(unique),
+                      "selected_count": len(selected), "selected_reader_feature_ids": [c["feature_identity"]["reader_feature_id"] for c in selected],
+                      "parent_count": len(parents_seen), "independent_sample_count": None,
+                      "rule": "quality_then_parent_and_joint_pattern_diversity_then_stable_feature_id",
+                      "exclusions": excluded}
 
 
 def _comparison_class(unadjusted: float, adjusted: float, *, tolerance: float = 0.15) -> str:

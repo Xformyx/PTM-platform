@@ -82,6 +82,11 @@ def project_report_vector_row(row: Mapping[str, Any]) -> dict[str, Any]:
         "gene": gene,
         "position": position,
         "condition": _text(row, "Condition", "condition", "Comparison") or "",
+        "time_minutes": _optional_float(row, "time_minutes", "Time_Minutes"),
+        "reference_id": _text(row, "reference_id", "Reference_ID") or None,
+        "accession": _text(row, "accession", "FASTA_Accession", "Protein.Ids") or None,
+        "isoform": _text(row, "isoform", "Isoform") or None,
+        "protein_denominator_qc": row.get("protein_denominator_qc"),
         "ptm_relative_log2fc": _optional_float(row, "PTM_Relative_Log2FC", "ptm_relative_log2fc"),
         # Independent axes and their statistics are projected by the shared schema below.
         "ptm_unadjusted_conventional_log2fc_na": conventional_na,

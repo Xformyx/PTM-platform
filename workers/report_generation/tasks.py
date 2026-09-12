@@ -588,6 +588,7 @@ def run_report_generation(self, order_id: int, config: dict):
             "md_report_path": config.get("md_report_path", ""),
             "tsv_data_path": config.get("tsv_data_path", ""),
             "experimental_context": experimental_context,
+            "sample_manifest": config.get("sample_manifest") or experimental_context.get("sample_manifest") or {},
             "research_questions": config.get("research_questions", []),
             "chromadb_collections": config.get("chromadb_collections", []),
             "collection_names": config.get("chromadb_collections", []),
@@ -921,6 +922,8 @@ def run_report_generation(self, order_id: int, config: dict):
                     final_state.get("figure_manifest"),
                     metadata_contract,
                     reader_cards,
+                    authoring_plan=final_state.get("reader_authoring_plan"),
+                    generation_failures=list(final_state.get("reader_authoring_fallback_sections") or []) + list(final_state.get("reader_authoring_final_fallback_sections") or []),
                 )
                 for path in report_markdown
             ]
@@ -1022,6 +1025,7 @@ def run_report_generation(self, order_id: int, config: dict):
                 report_release.get("reason_codes"),
             )
 
+        rendered_paths = []
         if final_export_allowed:
             # Convert report to Word (.docx)
             try:
@@ -1030,6 +1034,7 @@ def run_report_generation(self, order_id: int, config: dict):
                     if rpt_path and Path(rpt_path).exists() and rpt_path.endswith(".md"):
                         docx_out = convert_report_to_docx(rpt_path, str(order_output))
                         if docx_out:
+                            rendered_paths.append(docx_out)
                             logger.info(f"[Order {order_id}] Word export: {Path(docx_out).name}")
             except Exception as docx_err:
                 logger.warning(f"[Order {order_id}] Word export skipped: {docx_err}")
@@ -1047,10 +1052,16 @@ def run_report_generation(self, order_id: int, config: dict):
                             api_base_url="/api",
                         )
                         if html_out:
+                            rendered_paths.append(html_out)
                             logger.info(f"[Order {order_id}] HTML export: {Path(html_out).name}")
                             break
             except Exception as html_err:
                 logger.warning(f"[Order {order_id}] HTML export skipped: {html_err}")
+
+        if artifact_manifest and final_export_allowed:
+            from report_generation.core.report_artifact_manifest import finalize_rendered_artifacts
+            artifact_manifest = finalize_rendered_artifacts(artifact_manifest, rendered_paths, final_state.get("figure_manifest") or {})
+            final_state["report_artifact_manifest"] = artifact_manifest
 
         # Collect output files
         report_files = final_state.get("report_files", [])

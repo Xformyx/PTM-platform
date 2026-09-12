@@ -355,8 +355,8 @@ body {{ font-family: Georgia, serif; margin: 0; padding: 0; background: #fafafa;
 .zoomable-image.dragging {{ cursor: grabbing; }}
 .zoomable-image-inner {{ display: inline-block; transform-origin: 0 0; }}
 .zoomable-image img {{ display: block; max-width: 100%; }}
-.zoom-controls {{ position: absolute; bottom: 8px; right: 8px; display: flex; gap: 4px; }}
-.zoom-btn {{ width: 28px; height: 28px; border: 1px solid #cbd5e1; background: #fff; border-radius: 4px; cursor: pointer; font-size: 1rem; line-height: 1; }}
+.zoom-controls {{ position: relative; display: flex; justify-content: flex-end; gap: 4px; padding: 8px; background: #fff; }}
+.zoom-btn {{ min-width: 28px; height: 28px; padding: 0 6px; border: 1px solid #cbd5e1; background: #fff; border-radius: 4px; cursor: pointer; font-size: 1rem; line-height: 1; }}
 .zoom-btn:hover {{ background: #f1f5f9; }}
 .md-table-wrap {{ margin: 1rem 0; overflow-x: auto; }}
 .md-table {{ width: 100%; border-collapse: collapse; border: 1px solid #e2e8f0; font-size: 0.9rem; background: #fff; }}
@@ -370,6 +370,21 @@ body {{ font-family: Georgia, serif; margin: 0; padding: 0; background: #fafafa;
 #article-modal .modal-close {{ float: right; cursor: pointer; font-size: 1.5rem; }}
 #article-modal h4 {{ margin-top: 0; }}
 #article-modal .abstract {{ font-size: 0.9rem; color: #475569; margin-top: 0.5rem; line-height: 1.5; }}
+@media print {{
+  @page {{ margin: 16mm; }}
+  body {{ background: #fff; font-size: 10pt; }}
+  .sidebar, .sidebar-resize, .zoom-controls, #article-modal {{ display: none !important; }}
+  .layout {{ display: block; min-height: 0; }}
+  .main {{ padding: 0; }}
+  .main-inner {{ max-width: none; }}
+  .main h1, .main h2, .main h3 {{ break-after: avoid; }}
+  .zoomable-image {{ break-inside: avoid; overflow: visible; border: 0; }}
+  .zoomable-image-inner {{ display: block; transform: none !important; }}
+  .md-table-wrap {{ overflow: visible; }}
+  .md-table {{ font-size: 8pt; }}
+  .md-table thead {{ display: table-header-group; }}
+  .md-table tr {{ break-inside: avoid; }}
+}}
 </style>
 </head>
 <body>

@@ -7,12 +7,88 @@ Ported from ptm-chromadb-web/python_backend/ptm_nonptm_network_command.py
 """
 
 import logging
+import math
+import re
 from typing import Any, Dict, List, Optional
 
 from common.temporal_utils import tp_to_minutes
 from ptm_shared.directed_temporal_relationship import analyze_directed_temporal_relationship
 
 logger = logging.getLogger(__name__)
+
+OBSERVED_PATTERN_VERSION = "observed_joint_pattern.v1"
+
+
+def observed_time_minutes(point):
+    """Parse elapsed time, never a sample-name rank. Unknown time stays unknown."""
+    explicit = point.get("time_minutes")
+    if explicit is not None:
+        try:
+            value = float(explicit)
+            return value if math.isfinite(value) else None
+        except (ValueError, TypeError):
+            return None
+    if point.get("elapsed_time") is not None and point.get("time_unit"):
+        label = str(point["elapsed_time"]) + str(point["time_unit"])
+    else:
+        label = str(point.get("condition") or point.get("Condition") or "").strip()
+    match = re.fullmatch(r"(-?\d+(?:\.\d+)?)\s*(s|sec|secs|seconds?|m|min|mins|minutes?|h|hr|hrs|hours?|d|days?)", label, re.I)
+    if not match:
+        return None
+    unit = match[2].lower()
+    scale = 1 / 60 if unit.startswith("s") else 60 if unit.startswith("h") else 1440 if unit.startswith("d") else 1
+    return float(match[1]) * scale
+
+
+def summarize_observed_pattern(points, *, value_key="ptm_relative_log2fc", tolerance=0.15):
+    """Describe sampled levels; point-wise q values are never a pattern test."""
+    rows = sorted(points, key=lambda p: (observed_time_minutes(p) if observed_time_minutes(p) is not None else math.inf, str(p.get("condition"))))
+    valid = [p for p in rows if isinstance(p.get(value_key), (int, float)) and math.isfinite(p[value_key])]
+    timed = [p for p in valid if observed_time_minutes(p) is not None]
+    values = [p[value_key] for p in valid]
+    label = "single-observation"
+    if len(values) >= 2:
+        if len(valid) != len(rows):
+            label = "partial-observation"
+        elif max(values) - min(values) <= 1e-9:
+            label = "stable-near-reference" if abs(values[0]) <= 1e-9 else "constant-positive-level" if values[0] > 0 else "constant-negative-level"
+        elif len(timed) != len(valid):
+            label = "time-unavailable"
+        elif sum(math.isclose(abs(v), max(map(abs, values)), abs_tol=1e-9) for v in values) > 1:
+            label = "tied-observed-extrema"
+        else:
+            index = max(range(len(values)), key=lambda i: abs(values[i]))
+            label = "early-maximal" if index == 0 else "late-maximal" if index == len(values) - 1 else "transient-intermediate"
+    maxima = [p for p in timed if abs(p[value_key]) == max((abs(p[value_key]) for p in timed), default=0)]
+    extrema = [{"condition": p.get("condition"), "time_minutes": observed_time_minutes(p),
+                "value": p[value_key], "kind": "positive_observed_maximum" if p[value_key] > 0 else "negative_observed_trough" if p[value_key] < 0 else "zero_level"} for p in maxima]
+    return {"contract_version": OBSERVED_PATTERN_VERSION, "label": label,
+            "claim_scope": "descriptive_pattern", "pattern_q_value": None, "pattern_ci": None,
+            "statistical_status": "no_pattern_level_test_supplied", "descriptive_tolerance": tolerance,
+            "tolerance_source": "configurable_existing_quantitation_comparison_tolerance_not_significance",
+            "observed_times_minutes": [observed_time_minutes(p) for p in timed],
+            "unknown_time_conditions": [p.get("condition") for p in rows if observed_time_minutes(p) is None],
+            "missing_conditions": [p.get("condition") for p in rows if p not in valid],
+            "observed_extrema": extrema,
+            "peak_status": "sampled_extrema_only_no_biological_peak_or_interpolation",
+            "interpretation_boundary": "Observation-window description, not causal order, kinase activity, or population reproducibility."}
+
+
+def joint_axis_pattern(axes, *, tolerance=0.15):
+    """Classify already calculated U/P/A; this does not calculate an adjusted value."""
+    u, p, a = [axes[key].get("value") for key in ("unadjusted", "protein", "adjusted")]
+    if u is None or p is None or a is None:
+        return "incomplete_axes_observation"
+    near = lambda value: abs(value) <= tolerance
+    if near(u) and p < -tolerance and a > tolerance:
+        return "ptm_maintained_protein_decreased_adjusted_increased"
+    if near(u - p) and near(a) and not near(u):
+        return "ptm_protein_co_movement"
+    if u > tolerance and near(p) and a > tolerance:
+        return "ptm_increased_with_stable_protein"
+    if near(u) and near(p) and near(a):
+        return "near_reference_all_axes"
+    return "joint_axis_change"
 
 
 def _directed_relationship(

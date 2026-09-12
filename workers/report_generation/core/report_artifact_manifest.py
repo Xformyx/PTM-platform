@@ -149,3 +149,40 @@ def build_report_artifact_manifest(
     output_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     manifest["manifest_path"] = str(output_path)
     return manifest
+
+
+def finalize_rendered_artifacts(manifest: Mapping[str, Any], rendered_paths, figure_manifest):
+    """Seal only files returned by this export, not stale files found by glob."""
+    result = dict(manifest)
+    records = [_artifact("rendered_" + Path(path).suffix.lstrip("."), path, required=True)
+               for path in sorted(set(map(str, rendered_paths)))]
+    for figure in figure_manifest.get("figures") or []:
+        if figure.get("placement") == "main" and figure.get("insertion_verified"):
+            record = _artifact("figure:" + str(figure.get("figure_key")), figure.get("image_path"), required=True)
+            record["quantitative_binding_sha256"] = hashlib.sha256(json.dumps(figure.get("quantitative_bindings") or [], sort_keys=True, default=str).encode()).hexdigest()
+            records.append(record)
+    stale_sources = [item["role"] for item in result.get("artifacts") or [] if item.get("sha256")
+                     and (not Path(item["path"]).is_file() or _sha256(Path(item["path"])) != item["sha256"])]
+    result["render_contract_version"] = "report_rendered_artifacts.v1"
+    result["rendered_artifacts"] = records
+    result["render_status"] = "recorded" if rendered_paths and records and all(r["exists"] for r in records) and not stale_sources else "incomplete"
+    result["changed_source_artifacts"] = stale_sources
+    # Artifact integrity and scientific/publication status remain distinct.
+    if stale_sources:
+        result["report_eligible"] = False
+        result["reason_codes"] = sorted(set(result.get("reason_codes") or []) | {"source_changed_before_export"})
+    path = result.get("manifest_path")
+    if path:
+        target = Path(path)
+        temporary = target.with_suffix(target.suffix + ".tmp")
+        temporary.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+        temporary.replace(target)
+    return result
+
+
+def verify_rendered_artifacts(manifest):
+    mismatches = [r["role"] for r in manifest.get("rendered_artifacts") or []
+                  if not r.get("sha256") or not r.get("path") or not Path(r["path"]).is_file()
+                  or _sha256(Path(r["path"])) != r["sha256"]]
+    return {"status": "mismatch" if mismatches else "verified" if manifest.get("rendered_artifacts") else "unavailable",
+            "mismatched_roles": mismatches}

@@ -52,7 +52,7 @@ def test_phase2_authoring_packet_contains_named_feature_and_independent_adjustme
     packet = _packet()
     categories = [card["category"] for card in packet["reader_cards"]]
 
-    assert packet["contract_version"] == "reader_authoring_packet.v4"
+    assert packet["contract_version"] == "reader_authoring_packet.v5"
     assert "measured_feature_observation" in categories
     assert "quantitation_comparison" in categories
     assert any("GENEA" in card["reader_summary"] for card in packet["reader_cards"])
@@ -64,9 +64,9 @@ def test_phase2_manuscript_spine_prioritizes_named_measurements_over_count_inven
     plan = deterministic_authoring_plan(packet)
 
     assert plan["key_findings"][0]["category"] == "measured_feature_observation"
-    assert plan["key_findings"][1]["category"] == "quantitation_comparison"
+    assert len(plan["key_findings"]) == 1  # One precursor, not duplicate findings per axis/card.
     assert plan["key_findings"][0]["reader_feature_id"].startswith("PF-")
-    assert plan["key_findings"][0]["reader_feature_id"] == plan["key_findings"][1]["reader_feature_id"]
+    assert plan["finding_selection_audit"]["selected_count"] == 1
     assert "GENEA" in plan["central_answer"]
     assert "quantitative landscape comprised" not in plan["central_answer"].lower()
 
@@ -74,10 +74,11 @@ def test_phase2_manuscript_spine_prioritizes_named_measurements_over_count_inven
 def test_phase2_results_fallback_reports_named_features_and_adjustment_before_temporal_status():
     results = render_reader_section_fallback("results", _packet())
 
-    assert "### Named current-order feature observations" in results
-    assert "### Protein-adjustment comparison" in results
+    assert "unadjusted PTM contrast" in results
+    assert "protein-adjusted relative PTM log2 contrast" in results
+    assert "linked protein contrast" in results
     assert "GENEA" in results
-    assert "independently calculated unadjusted PTM contrast" in results
+    assert results.count("GENEA modified-precursor") == 1
     assert "PTM_Absolute_Log2FC" not in results
 
 
@@ -121,7 +122,7 @@ def test_phase2_prepared_manifest_adds_verified_protein_adjustment_figure(tmp_pa
     manifest = prepare_reader_figure_manifest(state, citation_complete=False)
     figure = next(item for item in manifest["figures"] if item.get("figure_key") == "reader_protein_context")
 
-    assert manifest["contract_version"] == "report_figure_manifest.v4"
+    assert manifest["contract_version"] == "report_figure_manifest.v5"
     assert figure["placement"] == "main"
     assert figure["insertion_verified"] is True
     assert figure["display_label"].startswith("Figure ")
@@ -140,10 +141,10 @@ def test_phase2_prepared_manifest_adds_verified_protein_adjustment_figure(tmp_pa
     comparison_figure = next(card for card in packet["figure_cards"] if card["figure_key"] == "reader_protein_context")
     comparison_finding = next(
         finding for finding in deterministic_authoring_plan(packet)["key_findings"]
-        if finding["category"] == "quantitation_comparison"
+        if finding["category"] == "measured_feature_observation"
     )
     assert comparison_finding["reader_feature_id"] in comparison_figure["selected_reader_feature_ids"]
-    assert comparison_finding["figure_keys"] == ["reader_protein_context"]
+    assert set(comparison_finding["figure_keys"]) == {"reader_protein_context", "reader_joint_trajectories"}
 
 
 def test_phase2_manifest_suppresses_adjustment_figure_when_independent_axis_is_missing(tmp_path):

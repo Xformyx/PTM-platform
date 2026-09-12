@@ -51,6 +51,9 @@ from report_generation.core.reader_authoring import (
     apply_llm_authoring_plan,
     build_authoring_packet,
     deterministic_authoring_plan,
+    refresh_finding_context,
+    focus_authoring_packet,
+    audit_finding_coverage,
     format_authoring_packet_for_llm,
     get_reader_authoring_system_prompt,
     is_traceable_reference,
@@ -429,6 +432,7 @@ def run_section_writing(state: dict) -> dict:
         # The scientific author and final renderer must consume the same frozen
         # manifest rather than independently guessing which figures exist.
         state["temporal_report_evidence_packet"] = temporal_evidence_packet
+        state["biological_synthesis_packet"] = biological_synthesis_packet
         state["figure_manifest"] = prepare_reader_figure_manifest(
             state,
             citation_complete=references_are_citation_complete(state.get("collected_references")),
@@ -902,6 +906,7 @@ def run_section_writing(state: dict) -> dict:
                 biological_synthesis_packet=biological_synthesis_packet,
                 references=chroma_refs,
             )
+            section_authoring_packet = focus_authoring_packet(section_authoring_packet, authoring_plan)
             prompt = format_authoring_packet_for_llm(
                 section_authoring_packet,
                 section_type,
@@ -1136,7 +1141,8 @@ def run_section_writing(state: dict) -> dict:
         if section_authoring_packet is not None:
             def validate_draft(draft):
                 prose, records = decode_sentence_draft(draft, section_authoring_packet)
-                return (["invalid_bound_sentence"] if any(not r["retained"] for r in records) else []) + section_content_issues(prose, section_type)
+                missing = audit_finding_coverage({section_type: prose}, section_authoring_packet, authoring_plan)["missing_finding_ids"]
+                return (["invalid_bound_sentence"] if any(not r["retained"] for r in records) else []) + section_content_issues(prose, section_type) + [f"missing_finding:{fid}" for fid in missing]
             generation_kwargs = {"response_format": SENTENCE_RESPONSE_FORMAT, "content_validator": validate_draft}
         if section_authoring_packet is not None and prompt_len > MAX_PROMPT_CHARS:
             # Never cut a JSON schema or its reference catalog mid-record.
@@ -1533,6 +1539,8 @@ def run_section_writing(state: dict) -> dict:
         except Exception as fidelity_snapshot_error:
             logger.warning("[report-evidence] Could not save temporal fidelity snapshot: %s", fidelity_snapshot_error)
 
+    if reader_authoring_shadow:
+        authoring_plan = refresh_finding_context(authoring_plan, authoring_packet)
     reader_narrative_continuity_audit = (
         assess_narrative_continuity(sections, authoring_packet, authoring_plan)
         if reader_authoring_shadow else {}

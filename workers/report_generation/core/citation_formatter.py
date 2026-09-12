@@ -583,6 +583,14 @@ class ReportPostProcessor:
                 return f"{message}{(' ' + citations) if citations else ''}"
 
             for sentence in sentences:
+                from .scientific_semantics import is_negated_boundary, sentence_evidence_scope
+                scope = sentence_evidence_scope(sentence)
+                literature_background = scope == "literature_context" and (
+                    re.search(r"\b(?:published|literature|prior work|previous study)\b", sentence, re.I)
+                    or not re.search(r"log2|measured|contrast", sentence, re.I))
+                if is_negated_boundary(sentence) or literature_background or scope == "hypothesis":
+                    normalized.append(sentence)
+                    continue
                 lowered = sentence.lower()
                 has_temporal_membership = any(term in lowered for term in ("co-wave", "co wave", "wave tw-", "co-membership", "within-cluster concordance", "trajectory concordance", "interval-wise concordance", "activity-state concordance", "transition-supported", "loto", "lot o"))
                 has_mechanistic_promotion = any(term in lowered for term in (

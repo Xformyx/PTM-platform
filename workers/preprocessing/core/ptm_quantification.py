@@ -11,6 +11,7 @@ Changes from original:
 
 import logging
 import math
+import json
 import os
 import re
 from pathlib import Path
@@ -802,6 +803,9 @@ class PTMQuantificationAnalyzer:
                     "PTM_Unadjusted_P_Value": p_value,
                     "PTM_Unadjusted_Control_N": len(control_values),
                     "PTM_Unadjusted_Treatment_N": len(current_values),
+                    "PTM_Unadjusted_Control_Sample_IDs": json.dumps(sorted(s for s in control_samples if positive_values(row, [s]))),
+                    "PTM_Unadjusted_Treatment_Sample_IDs": json.dumps(sorted(s for s in treatment_samples.get(treatment, []) if positive_values(row, [s]))),
+                    "PTM_Unadjusted_Method": "Welch sample-level test; BH across valid unadjusted feature-condition comparisons" if pd.notna(p_value) else "test_unavailable",
                     "PTM_Unadjusted_Status": status,
                     "PTM_Unadjusted_Conventional_Log2FC_NA": not bool(control_values),
                     "PTM_Unadjusted_Calculation_Mode": (
@@ -877,7 +881,9 @@ class PTMQuantificationAnalyzer:
             replicate_lookup[key] = [v for v in rrow["replicate_values"] if pd.notna(v) and np.isfinite(v) and v > 0]
         pr_lookup = {}
         pg_lookup = {}
+        paired_samples = {}
         for key, group in relative_quant_df.groupby(["Protein.Group", "Precursor.Id", "Condition"], dropna=False):
+            paired_samples[key] = sorted(group.loc[np.isfinite(group["PTM_Relative_Abundance"]) & (group["PTM_Relative_Abundance"] > 0), "Sample"].astype(str).unique())
             for column, lookup in (("PTM_Intensity", pr_lookup), ("Protein_Intensity", pg_lookup)):
                 values = pd.to_numeric(group[column], errors="coerce")
                 lookup[key] = int((np.isfinite(values) & (values > 0)).sum())
@@ -941,6 +947,9 @@ class PTMQuantificationAnalyzer:
                     "Treatment_N": len(treat_reps),
                     "PTM_ProteinAdjusted_Control_N": len(ctrl_reps),
                     "PTM_ProteinAdjusted_Treatment_N": len(treat_reps),
+                    "PTM_ProteinAdjusted_Control_Sample_IDs": json.dumps(paired_samples.get(control_key, [])),
+                    "PTM_ProteinAdjusted_Treatment_Sample_IDs": json.dumps(paired_samples.get(treatment_key, [])),
+                    "PTM_ProteinAdjusted_Method": "Welch sample-level test; BH across valid adjusted feature-condition comparisons" if pd.notna(p_value) else "test_unavailable",
                     "PTM_ProteinAdjusted_Missing_Reason": missing_reason,
                     "PTM_ProteinAdjusted_Conventional_Log2FC_NA": bool(denominator_unavailable or used_pc),
                     "PR_Control_N": pr_lookup.get(control_key, 0),
@@ -1034,6 +1043,11 @@ class PTMQuantificationAnalyzer:
                             "Treatment_Mean": treatment_mean,
                             "Log2FC": log2fc,
                             "Fold_Change": 2 ** log2fc,
+                            "Protein_Control_Sample_IDs": json.dumps(sorted(s for s in ctrl_cols if pd.notna(row[s]) and np.isfinite(row[s]) and row[s] > 0)),
+                            "Protein_Treatment_Sample_IDs": json.dumps(sorted(s for s in treatment_samples_dict[treatment] if s in row and pd.notna(row[s]) and np.isfinite(row[s]) and row[s] > 0)),
+                            "Protein_Control_N": sum(pd.notna(row[s]) and np.isfinite(row[s]) and row[s] > 0 for s in ctrl_cols),
+                            "Protein_Treatment_N": sum(s in row and pd.notna(row[s]) and np.isfinite(row[s]) and row[s] > 0 for s in treatment_samples_dict[treatment]),
+                            "Protein_Method": "ratio_of_condition_arithmetic_means; no_protein_test_computed",
                         })
 
             all_df = pd.DataFrame(changes)
@@ -1138,6 +1152,9 @@ class PTMQuantificationAnalyzer:
                     "Comparison": ptm_row["Comparison"],
                     "PTM_Relative_Log2FC": ptm_row["Log2FC"],
                     "PTM_ProteinAdjusted_Log2FC": ptm_row["Log2FC"],
+                    **{f"PTM_ProteinAdjusted_{suffix}": ptm_row.get(f"PTM_ProteinAdjusted_{suffix}") for suffix in ("Control_Sample_IDs", "Treatment_Sample_IDs", "Method")},
+                    **{f"PTM_Unadjusted_{suffix}": unadjusted.get(f"PTM_Unadjusted_{suffix}") for suffix in ("Control_Sample_IDs", "Treatment_Sample_IDs", "Method")},
+                    **{f"Protein_{suffix}": pc.get(f"Protein_{suffix}") for suffix in ("Control_Sample_IDs", "Treatment_Sample_IDs", "Control_N", "Treatment_N", "Method")},
                     "PTM_ProteinAdjusted_Control_N": ptm_row.get("PTM_ProteinAdjusted_Control_N", ptm_row.get("Control_N", np.nan)),
                     "PTM_ProteinAdjusted_Treatment_N": ptm_row.get("PTM_ProteinAdjusted_Treatment_N", ptm_row.get("Treatment_N", np.nan)),
                     "PTM_ProteinAdjusted_Missing_Reason": ptm_row.get("PTM_ProteinAdjusted_Missing_Reason", ""),

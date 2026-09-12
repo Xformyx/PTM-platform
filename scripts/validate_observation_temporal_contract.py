@@ -26,11 +26,22 @@ REPORT_FILES = [
     "test_report_artifact_manifest.py", "test_evidence_contracts.py",
     "test_observation_denominator_contract.py", "test_dual_track_ptm_quantification.py",
 ]
+TASK10_IMPLEMENTATION_FILES = [
+    "workers/common/llm_client.py", "workers/common/markdown_to_docx.py", "workers/common/markdown_to_html.py",
+    "workers/report_generation/core/biological_synthesis.py", "workers/report_generation/core/citation_formatter.py",
+    "workers/report_generation/core/figure_manifest.py", "workers/report_generation/core/graph.py",
+    "workers/report_generation/core/measured_feature_cards.py", "workers/report_generation/core/nodes/writer_node.py",
+    "workers/report_generation/core/quantitative_claims.py", "workers/report_generation/core/quantitative_fields.py",
+    "workers/report_generation/core/reader_authoring.py", "workers/report_generation/core/report_artifact_manifest.py",
+    "workers/report_generation/core/temporal_analysis.py", "workers/report_generation/tasks.py",
+    "scripts/render_task10_fixture.py",
+]
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", type=Path, default=ROOT / "docs/validation/task01-02")
+    parser.add_argument("--include-task10", action="store_true", help="Include discovery/finding/render regression fixtures")
     args = parser.parse_args()
     args.output_dir.mkdir(parents=True, exist_ok=True)
     worker_files = {ROOT / "workers/tests" / name for name in REPORT_FILES}
@@ -40,6 +51,9 @@ def main():
     worker_files.update(ROOT / "ptm_shared/tests" / name for name in (
         "test_de_novo_report_representation.py", "test_kinase_evidence_ledger.py",
     ))
+    if args.include_task10:
+        worker_files.update((ROOT / "workers/tests").glob("test_task10*.py"))
+        worker_files.update(ROOT / "workers/tests" / name for name in ("test_biological_synthesis_packet.py", "test_r1_footprint_final_renderer.py"))
     api_files = set()
     for pattern in ("test_tmm*.py", "test_temporal*.py"):
         api_files.update((ROOT / "api-server/tests").glob(pattern))
@@ -60,6 +74,8 @@ def main():
         "workers/report_generation/core/vector_projection.py",
     ]
     reviewed_files = worker_files | api_files | {ROOT / path for path in implementation_files} | {Path(__file__)}
+    if args.include_task10:
+        reviewed_files.update(ROOT / path for path in TASK10_IMPLEMENTATION_FILES)
     evidence["source_sha256"] = {str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest()
                                   for path in sorted(reviewed_files)}
     exit_code = 0
@@ -67,7 +83,7 @@ def main():
         junit = args.output_dir.resolve() / f"{name}.xml"
         command = [sys.executable, "-m", "pytest", *[str(p.relative_to(ROOT)) for p in sorted(files)],
                    "-q", "--tb=short", f"--junitxml={junit}"]
-        env = {**os.environ, "PYTHONPATH": "api-server:workers:.", "MPLCONFIGDIR": "/tmp/ptm-review-mpl"}
+        env = {**os.environ, "PYTHONPATH": "api-server:workers:workers/tests:.", "MPLCONFIGDIR": "/tmp/ptm-review-mpl"}
         result = subprocess.run(command, cwd=ROOT, env=env)
         suites = ET.parse(junit).getroot().iter("testsuite")
         counts = {field: 0 for field in ("tests", "failures", "errors", "skipped")}

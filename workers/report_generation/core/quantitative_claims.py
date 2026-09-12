@@ -38,6 +38,7 @@ def quantitative_records(card: Mapping[str, Any]) -> list[dict]:
         support = point.get("quality") or {**(card.get("replicate_support") or {}), **(card.get("statistical_support") or {})}
         for axis in AXIS_LABELS:
             prefix = "protein_adjusted" if axis == "adjusted" else axis
+            axis_support = (point.get("axes") or {}).get(axis) or {}
             records.append({
                 "evidence_id": (card.get("evidence_ids") or [card.get("card_id")])[0],
                 "feature_id": fid, "condition": point.get("condition"), "axis": axis,
@@ -46,6 +47,9 @@ def quantitative_records(card: Mapping[str, Any]) -> list[dict]:
                 "control_n": support.get(f"{prefix}_control_n"), "treatment_n": support.get(f"{prefix}_treatment_n"),
                 "measurement_unit": point_measurement.get("reader_measurement_unit"),
                 "localization": point_measurement.get("localization_evidence"),
+                "support": axis_support,
+                "time_minutes": point.get("time_minutes"),
+                "support_sets_differ": point.get("support_sets_differ"),
             })
     return records
 
@@ -88,6 +92,12 @@ def validate_quantitative_sentence(sentence: str, packet: Mapping[str, Any]) -> 
         return ["precursor_identity_ambiguous_or_stitched"]
     if not ids:
         return ["quantitative_missing_precursor_identity"] if _NUMBER.search(sentence) else []
+    from .scientific_semantics import is_negated_boundary
+    if not is_negated_boundary(sentence) and sentence_evidence_scope(sentence) == "observation":
+        if re.search(r"biologically reproducible|biological reproducibility|population[- ](?:level )?confidence interval", sentence, re.I):
+            return ["pattern_population_inference_not_established"]
+        if re.search(r"(?:no[- ]call|not evaluable|no annotation).*?kinase.*?inactive", sentence, re.I):
+            return ["kinase_no_call_is_not_inactivity"]
     for figure_label in re.findall(r"\b(?:Supplementary\s+)?Figure\s+\d+[A-Z]?\b", sentence, re.I):
         figure = next((f for f in packet.get("figure_cards") or []
                        if (f.get("figure_label") or f.get("display_label") or "").lower() == figure_label.lower()), None)
@@ -125,6 +135,15 @@ def validate_quantitative_sentence(sentence: str, packet: Mapping[str, Any]) -> 
         candidates = [r for r in records if r["feature_id"] == fid and _condition(r["condition"]) == _condition(condition) and r["axis"] == axis]
         if not candidates:
             return ["quantitative_feature_condition_axis_unbound"]
+        for figure_label in re.findall(r"\bFigure\s+\d+[A-Z]?\b", sentence, re.I):
+            figure = next((f for f in packet.get("figure_cards") or [] if
+                           (f.get("figure_label") or f.get("display_label") or "").lower() == figure_label.lower()), {})
+            if figure.get("quantitative_bindings") and not any(
+                b.get("feature_id") == fid and _condition(b.get("condition")) == _condition(condition)
+                and b.get("axis") == axis and b.get("value") is not None
+                for b in figure["quantitative_bindings"]
+            ):
+                return ["quantitative_figure_condition_axis_mismatch"]
         if significance and not any(r["q"] is not None and r["q"] < .05 for r in candidates):
             return ["quantitative_axis_significance_unsupported"]
         printed = number[0].replace("−", "-")
@@ -142,7 +161,8 @@ def value_token_catalog(packet: Mapping[str, Any]) -> dict[str, dict]:
 
 def render_value_record(record: Mapping[str, Any]) -> str:
     """An indivisible clause keeps a source value attached to its actual axis."""
-    return (f"{record['feature_id']} at {record['condition']} had a {AXIS_LABELS[record['axis']]} "
+    article = "an" if record["axis"] == "unadjusted" else "a"
+    return (f"{record['feature_id']} at {record['condition']} had {article} {AXIS_LABELS[record['axis']]} "
             f"of {record['value']:+.3f}")
 
 
@@ -204,6 +224,13 @@ def decode_sentence_draft(content: str, packet: Mapping[str, Any]) -> tuple[str,
         refs = [catalog[token] for token in tokens if token in catalog]
         if refs and item["scope"] != "observation":
             reasons.append("quantitative_reference_scope_mismatch")
+        if item["scope"] == "hypothesis":
+            observation_ids = {eid for c in packet.get("reader_cards") or [] if c.get("trajectory") for eid in c.get("evidence_ids") or []}
+            citation_ids = {eid.lower() for c in packet.get("reader_cards") or [] for eid in c.get("citation_ids") or []}
+            cited = {v.lower() for v in re.findall(r"\[REF:([^\]]+)\]", text)}
+            if (not observation_ids.intersection(item["evidence_ids"]) or not cited or not cited.issubset(citation_ids)
+                    or not re.search(r"predict|test|distinguish|discriminat", text, re.I)):
+                reasons.append("hypothesis_observation_literature_prediction_unbound")
         if set(re.findall(r"\{\{(V\d+)\}\}", text)) != set(tokens) or any(token not in catalog for token in tokens):
             reasons.append("unknown_or_unbound_value_token")
         if not set(item["evidence_ids"]).issubset(evidence) or any(r["evidence_id"] not in item["evidence_ids"] for r in refs):

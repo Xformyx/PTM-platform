@@ -158,7 +158,7 @@ def test_candidate_discovery_packet_reserves_annotation_negative_candidates_unde
     )
     discovery = packet["candidate_discovery_packet"]
     cards = discovery["selected_cards"]
-    assert discovery["contract_version"] == "candidate_discovery_packet.v1"
+    assert discovery["contract_version"] == "candidate_discovery_packet.v2"
     assert {card["gene"] for card in cards}.issuperset({"NEW1", "NEW2"})
     new1 = next(card for card in cards if card["gene"] == "NEW1")
     new2 = next(card for card in cards if card["gene"] == "NEW2")

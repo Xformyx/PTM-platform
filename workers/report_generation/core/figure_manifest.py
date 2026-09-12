@@ -10,9 +10,10 @@ from report_generation.core.measured_feature_cards import (
     build_quantitation_comparison_cards,
     reader_feature_id,
 )
+from .quantitative_claims import quantitative_records
 
 
-FIGURE_MANIFEST_VERSION = "report_figure_manifest.v4"
+FIGURE_MANIFEST_VERSION = "report_figure_manifest.v5"
 SIGNED_PATTERN_THRESHOLD = 0.25
 """Main-figure signed temporal pattern bin.
 
@@ -112,6 +113,13 @@ class FigureEligibilityPolicy:
             return "suppressed", "image_missing"
         if kind in {"dense_network", "kinase_diagnostic", "technical_atlas"}:
             return "technical_audit", "dense_or_diagnostic_visualization"
+        if kind == "reader_joint_trajectory":
+            binding = _mapping(figure.get("feature_binding_audit"))
+            if (path and figure.get("labels_readable") and binding.get("binding_valid")
+                    and binding.get("contract_version") == "joint_trajectory_binding.v1"
+                    and figure.get("quantitative_bindings") and figure.get("prepared_from_finding_selection")):
+                return "main", None
+            return "suppressed", "joint_trajectory_measurement_binding_or_render_unavailable"
         if kind in {"context_map", "cascade_context"}:
             if not citation_complete:
                 return "suppressed", "traceable_citations_unavailable"
@@ -674,7 +682,8 @@ def _generate_protein_adjustment_comparison(
             fontsize=9,
             color="#4B5563",
         )
-        ax.legend(frameon=False, ncol=1, loc="upper right", fontsize=9.5)
+        fig.legend(*ax.get_legend_handles_labels(), frameon=False, ncol=3,
+                   loc="upper center", bbox_to_anchor=(.5, .99), fontsize=9.5)
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
         ax.spines["left"].set_visible(False)
@@ -689,12 +698,113 @@ def _generate_protein_adjustment_comparison(
         return "", []
 
 
+def _generate_joint_trajectory_entry(state, output_dir):
+    """Plot the frozen finding features, preserving actual minutes and NA gaps."""
+    from .reader_authoring import build_authoring_packet
+    from .measured_feature_cards import select_finding_cards
+    packet = build_authoring_packet(state)
+    cards, selection = select_finding_cards(packet["reader_cards"])
+    if not cards:
+        return None
+    bindings = [r for card in cards for r in quantitative_records(card) if r["time_minutes"] is not None]
+    ids = sorted({r["feature_id"] for r in bindings})
+    keys = [(r["feature_id"], r["condition"], r["axis"]) for r in bindings]
+    time_keys = [(r["feature_id"], r["time_minutes"], r["axis"]) for r in bindings]
+    valid = (len(keys) == len(set(keys)) and len(time_keys) == len(set(time_keys)) and bool(bindings)
+             and all(any(r["feature_id"] == fid and r["value"] is not None for r in bindings) for fid in ids))
+    entry = _entry("reader_joint_trajectories", "reader_joint_trajectory", "",
+        question="How do independent PTM, linked protein and protein-adjusted PTM measurements differ over the observed time window?",
+        evidence_tier="O1", source_evidence_ids=sorted({e for c in cards for e in c["evidence_ids"]}),
+        caption_facts={"data_scope": "selected precursor/form contrasts at recorded elapsed times; candidate residue labels do not independently establish localization",
+                       "visual_encoding": "U: independent unadjusted PTM; P: linked protein; A: protein-adjusted relative PTM log2 contrast; separate columns with shared relative scale. Points are observations, dashed segments are visual guides, gaps are unavailable values",
+                       "interpretation_boundary": "the sampled contrasts do not establish absolute concentrations, occupancy, biological peaks or direct kinase activity. Different features are not on a common absolute MS intensity scale; sample counts and axis-specific q values are recorded separately"},
+        selection_rule="observation quality followed by parent and joint-pattern diversity, with stable feature identity as the tie-breaker", selected_reader_feature_ids=ids,
+        quantitative_bindings=bindings, prepared_from_finding_selection=selection,
+        feature_binding_audit={"contract_version": "joint_trajectory_binding.v1", "binding_valid": valid,
+                               "selected_reader_feature_ids": ids, "unknown_time_conditions": sorted({p["condition"] for c in cards for p in c["trajectory"] if p.get("time_minutes") is None})},
+        title="Selected PTM–protein time responses", labels_readable=False)
+    if valid and output_dir:
+        try:
+            import matplotlib
+            matplotlib.use("Agg")
+            import matplotlib.pyplot as plt
+            import numpy as np
+            from PIL import Image
+            visible = sorted([c for c in cards if c["feature_identity"]["reader_feature_id"] in ids],
+                             key=lambda c: (c.get("parent_protein_ids") or [c["feature_identity"]["gene"]], c["feature_identity"]["reader_feature_id"]))
+            times = sorted({r["time_minutes"] for r in bindings})
+            values = [abs(r["value"]) for r in bindings if r["value"] is not None]
+            extent = max(values + [.2]) * 1.15
+            fig, axes = plt.subplots(len(visible), 3, figsize=(6.5, 1 + 1.7 * len(visible)), squeeze=False)
+            for i, card in enumerate(visible):
+                fid = card["feature_identity"]["reader_feature_id"]
+                for j, (axis, label, color) in enumerate((("unadjusted", "U · Independent PTM", "#1764ab"), ("protein", "P · Linked protein", "#706573"), ("adjusted", "A · Protein-adjusted PTM", "#b64518"))):
+                    ax = axes[i, j]
+                    lookup = {r["time_minutes"]: r["value"] for r in bindings if r["feature_id"] == fid and r["axis"] == axis}
+                    ax.plot(times, [lookup.get(t) if lookup.get(t) is not None else np.nan for t in times], "o--", color=color, lw=1, ms=4)
+                    ax.axhline(0, color="#888888", lw=.6)
+                    ax.set_ylim(-extent, extent)
+                    ax.set_xticks(times)
+                    ax.tick_params(labelsize=8)
+                    ax.set_title(label if i == 0 else "", fontsize=9)
+                    ax.set_xlabel("Elapsed time (min)", fontsize=8)
+                    if j == 0:
+                        identity = card["feature_identity"]
+                        ax.set_ylabel(f"{identity['gene']} {identity.get('candidate_residue_annotation') or ''}\n{fid}\nRelative log2 contrast", fontsize=8)
+                    if not any(v is not None for v in lookup.values()):
+                        ax.text(.5, .7, "Unavailable", ha="center", transform=ax.transAxes, fontsize=8)
+            fig.tight_layout(pad=1.2)
+            path = Path(output_dir) / "reader_joint_trajectories.png"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            fig.savefig(path, dpi=300)
+            plt.close(fig)
+            with Image.open(path) as img:
+                img.verify()
+            entry.update(image_path=str(path), labels_readable=True, render_status="rendered")
+        except Exception as exc:
+            entry.update(render_status="renderer_failed", render_error=type(exc).__name__)
+    entry["placement"], entry["suppression_reason"] = FigureEligibilityPolicy().classify(entry, citation_complete=False)
+    return entry
+
+
+def joint_trajectory_evidence_table(figure):
+    """Compact displayed n/q table; full sample sets and CI remain in the packet."""
+    if figure.get("kind") != "reader_joint_trajectory":
+        return ""
+    grouped = {}
+    for row in figure.get("quantitative_bindings") or []:
+        grouped.setdefault((row["feature_id"], row["condition"]), {})[row["axis"]] = row
+    lines = ["| Feature / condition | U: value; n; q | P: value; n; q | A: value; n; q |",
+             "|---|---|---|---|"]
+    def cell(record):
+        value = record.get("value")
+        support = record.get("support") or {}
+        n = "/".join(f"{record[f'{g}_n']:g}" if record.get(f"{g}_n") is not None else "NA" for g in ("control", "treatment"))
+        q = record.get("q")
+        return f"{value:+.3f}; {n}; {q:.3g}" if value is not None and q is not None else f"{value:+.3f}; {n}; NA" if value is not None else "NA (" + str(support.get("missing_reason") or "not available").replace("_", " ") + ")"
+    for (fid, condition), records in grouped.items():
+        lines.append("| " + fid + " / " + condition + " | " + " | ".join(cell(records.get(axis, {})) for axis in ("unadjusted", "protein", "adjusted")) + " |")
+    return "\n".join(lines) + "\n\nCounts are axis-specific contributing sample observations (control/treatment), not inferred biological replicates. NA denotes unavailable, not zero or non-significance. Point q-values do not test a trajectory or the adjustment effect.\n"
+
+
+def render_verified_reader_figures(manifest):
+    figures = [f for f in manifest.get("figures") or [] if f.get("placement") == "main"
+               and f.get("insertion_verified") and _available_path(f.get("image_path"))]
+    blocks = []
+    for figure in sorted(figures, key=lambda f: int(str(f.get("display_label") or "Figure 0").split()[-1])):
+        title = figure.get("title") or figure.get("research_question") or "Reader Figure"
+        blocks.append(f"### {figure['display_label']}. {title}\n\n![{title}]({figure['image_path']})\n\n"
+                      f"**Figure legend.** {compile_reader_caption(figure)}\n\n" + joint_trajectory_evidence_table(figure))
+    return "\n\n".join(blocks)
+
+
 def _assign_reader_figure_labels(manifest: Mapping[str, Any]) -> dict:
     preferred = {
         "reader_quantitative_heatmap": 0,
         "reader_temporal_profiles": 1,
         "reader_interval_concordance": 2,
         "reader_protein_context": 3,
+        "reader_joint_trajectories": 4,
     }
     figures = [dict(item) for item in manifest.get("figures") or [] if isinstance(item, Mapping)]
     main = sorted(
@@ -874,6 +984,9 @@ def prepare_reader_figure_manifest(state: Mapping[str, Any], *, citation_complet
         comparison_entry["suppression_reason"] = reason
         manifest["figures"].append(comparison_entry)
 
+    joint = _generate_joint_trajectory_entry(state, output_dir)
+    if joint:
+        manifest["figures"].append(joint)
     manifest["prepared_before_writer"] = True
     return _assign_reader_figure_labels(manifest)
 
@@ -946,6 +1059,7 @@ def figure_cards_from_manifest(manifest: Mapping[str, Any]) -> list[dict]:
             "forbidden_interpretation": "activation, direct kinase–substrate relation, causal order, isoform-specific activity",
             "citation_ids": list(figure.get("citation_ids") or []),
             "source_evidence_ids": list(figure.get("source_evidence_ids") or []),
+            "quantitative_bindings": list(figure.get("quantitative_bindings") or []),
             "selected_reader_feature_ids": list(
                 figure.get("selected_reader_feature_ids")
                 or [

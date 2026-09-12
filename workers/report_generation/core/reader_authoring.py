@@ -15,10 +15,11 @@ from typing import Any, Iterable, Mapping
 
 from common.section_budgets import SECTION_BUDGETS
 from common.temporal_utils import condition_sort_key
-from .quantitative_claims import quantitative_records, validate_quantitative_sentence
+from .quantitative_claims import quantitative_records, validate_quantitative_sentence, render_value_record
 from report_generation.core.measured_feature_cards import (
     build_feature_observation_cards,
     build_quantitation_comparison_cards,
+    select_finding_cards,
 )
 from report_generation.core.study_metadata import (
     build_study_metadata_contract,
@@ -39,7 +40,7 @@ from ptm_shared.quantitation_estimator_contract import (
 )
 
 
-AUTHORING_PACKET_VERSION = "reader_authoring_packet.v4"
+AUTHORING_PACKET_VERSION = "reader_authoring_packet.v5"
 VALID_CLAIM_TIERS = {"O1", "O2", "C1", "L1", "H1", "D1"}
 
 # The reader-facing manuscript has one stable story arc.  These are authoring
@@ -502,6 +503,44 @@ def _kinase_context_cards(state: Mapping[str, Any]) -> list[dict]:
     return cards
 
 
+def adapt_discovery_candidates(synthesis: Mapping[str, Any], *, maximum: int = 5, state: Mapping[str, Any] | None = None) -> tuple[list[dict], dict]:
+    """Adapt production trajectories, with an explicit legacy schema boundary."""
+    packet = _as_mapping(synthesis.get("candidate_discovery_packet"))
+    field = next((key for key in ("selected_cards", "candidate_cards", "cards") if key in packet), None)
+    candidates = list(packet.get(field) or []) if field else []
+    audit = {"contract_version": "candidate_reader_adapter.v1", "source_contract": packet.get("contract_version", "legacy_unversioned"),
+             "source_field": field, "input_count": len(candidates), "eligible_count": 0,
+             "reader_card_count": 0, "body_selected_count": 0, "exclusions": []}
+    cards = []
+    for index, candidate in enumerate(candidates):
+        candidate = _as_mapping(candidate)
+        identity = _as_mapping(candidate.get("feature_identity"))
+        rows = [{**candidate, "precursor_id": identity.get("source_feature_id") or candidate.get("precursor_id"),
+                 "position": candidate.get("position") or identity.get("candidate_residue_annotation"),
+                 "gene": candidate.get("gene") or identity.get("gene"), **_as_mapping(point)}
+                for point in candidate.get("trajectory") or []]
+        observed = build_feature_observation_cards({**dict(state or {}), "vector_plot_raw_data": rows}, maximum=1, minimum_points=1)
+        if not observed:
+            audit["exclusions"].append({"input_index": index, "reason": "no_identity_complete_numeric_observation"})
+            continue
+        audit["eligible_count"] += 1
+        if len(cards) >= maximum:
+            audit["exclusions"].append({"input_index": index, "reason": "reader_capacity"})
+            continue
+        card = observed[0]
+        key = "candidate." + card["feature_identity"]["reader_feature_id"]
+        rationale = candidate.get("discovery_rationale") or []
+        card.update(card_id=key, evidence_ids=[key], category="candidate_discovery",
+                    discovery_rationale=list(rationale), candidate_contract=packet.get("contract_version", "legacy_unversioned"),
+                    primary_bucket=candidate.get("primary_bucket"), annotation_context=candidate.get("annotation_context"))
+        card["mechanistic_status"] = candidate.get("kinase_evaluation_status") or "not_evaluated"
+        card["mechanistic_reason"] = candidate.get("kinase_no_call_reason") or "no_feature_bound_attribution_result_supplied"
+        cards.append(card)
+    audit["reader_card_count"] = len(cards)
+    audit["status"] = "available" if cards else "no_eligible_candidates" if candidates else "not_supplied"
+    return cards, audit
+
+
 def build_authoring_packet(
     state: Mapping[str, Any],
     *,
@@ -537,7 +576,7 @@ def build_authoring_packet(
         "forbidden_interpretations": ["absolute occupancy", "kinase activity", "adjusted equals unadjusted minus protein"],
         "counterevidence": estimator_contract["non_equivalence"],
     })
-    cards.extend(build_feature_observation_cards(state, maximum=5))
+    cards.extend(build_feature_observation_cards(state, maximum=20, minimum_points=1))
     cards.extend(build_quantitation_comparison_cards(state, maximum=8))
     for index, record in enumerate(temporal.get("records") or [], 1):
         if len([card for card in cards if card["category"] == "temporal_profile"]) >= 5:
@@ -548,39 +587,14 @@ def build_authoring_packet(
                 cards.append(card)
     cards.extend(_kinase_context_cards(state))
 
-    candidate_packet = _as_mapping(synthesis.get("candidate_discovery_packet"))
-    selection_summary = _as_mapping(candidate_packet.get("selection_summary"))
-    candidate_cards = candidate_packet.get("candidate_cards") or candidate_packet.get("cards") or []
-    for index, candidate in enumerate(candidate_cards[:5], 1):
-        candidate = _as_mapping(candidate)
-        summary = _clean_text(candidate.get("reader_summary") or candidate.get("summary") or candidate.get("selection_rationale"))
-        if not summary:
-            continue
-        cards.append({
-            "card_id": f"candidate.{index}",
-            "category": "candidate_discovery",
-            "reader_summary": summary,
-            "claim_tier": "H1",
-            "evidence_ids": [str(candidate.get("evidence_id") or f"candidate.{index}")],
-            "citation_ids": [],
-            "allowed_verbs": ["prioritized", "nominated", "proposed for testing"],
-            "forbidden_interpretations": ["confirmed substrate", "direct target", "validated mechanism"],
-            "counterevidence": _clean_text(candidate.get("counterevidence")),
-        })
-    if selection_summary and not candidate_cards:
-        cards.append({
-            "card_id": "candidate.availability",
-            "category": "candidate_discovery",
-            "reader_summary": "A pre-specified discovery candidate summary was not generated for this analysis run.",
-            "claim_tier": "O1",
-            "evidence_ids": ["candidate.availability"],
-            "citation_ids": [],
-            "allowed_verbs": ["was not generated"],
-            "forbidden_interpretations": ["no candidates exist"],
-            "counterevidence": "Absence of a summary is not evidence of biological absence.",
-        })
+    candidate_cards, candidate_transfer_audit = adapt_discovery_candidates(synthesis, state=state, maximum=20)
+    cards.extend(candidate_cards)
 
-    reference_cards = _literature_cards(references or state.get("collected_references") or [])
+    source_references = list(references if references is not None else state.get("collected_references") or [])
+    reference_cards = _literature_cards(source_references)
+    for card in cards:
+        if card.get("trajectory"):
+            card["literature_comparison"] = _finding_literature_context(card, source_references, state.get("literature_retrieval_status"))
     cards.extend(reference_cards)
     reader_cards = [card for card in cards if card.get("reader_summary") and not _INTERNAL_TERM_RE.search(card["reader_summary"])]
     has_traceable_literature = bool(reference_cards)
@@ -606,6 +620,7 @@ def build_authoring_packet(
             "forbidden_interpretation": "activation, direct kinase–substrate relation, causal order, isoform-specific activity",
             "citation_ids": list(figure.get("citation_ids") or []),
             "source_evidence_ids": list(figure.get("source_evidence_ids") or []),
+            "quantitative_bindings": list(figure.get("quantitative_bindings") or []),
             "selected_reader_feature_ids": list(
                 figure.get("selected_reader_feature_ids")
                 or [
@@ -633,9 +648,11 @@ def build_authoring_packet(
     }
     return {
         "contract_version": AUTHORING_PACKET_VERSION,
+        "study_design": dict(state.get("sample_manifest") or {}),
         "mode": "citation_complete" if has_traceable_literature else "data_only",
         "reader_cards": reader_cards,
         "study_metadata_contract": metadata_contract,
+        "candidate_transfer_audit": candidate_transfer_audit,
         "quantitation_estimator_contract": estimator_contract,
         "figure_cards": figure_cards,
         "section_claim_budget": section_claim_budget,
@@ -695,6 +712,8 @@ def format_authoring_packet_for_llm(packet: Mapping[str, Any], section_type: str
         records = quantitative_records(card)
         if records:
             lines.append("  Quantitative references: " + json.dumps(records, ensure_ascii=False))
+            lines.append("  Observed pattern contract: " + json.dumps(card.get("axis_patterns") or {}, ensure_ascii=False))
+            lines.append("  Literature comparison: " + json.dumps(card.get("literature_comparison") or {}, ensure_ascii=False))
     lines.append("Every quantitative clause must identify PF ID, condition and axis before the value. Different precursors at the same gene/site are separate observations. Missing p/q/n is unknown, never zero or non-significant. The ±0.15 tolerance is descriptive, not a significance test.")
     if packet.get("figure_cards"):
         lines.extend(["", "Eligible figure cards:"])
@@ -723,6 +742,8 @@ def format_authoring_packet_for_llm(packet: Mapping[str, Any], section_type: str
                 f"boundary={finding.get('alternative_explanation') or 'retain the stated claim ceiling'}; "
                 f"next test={finding.get('next_test')}"
             )
+            lines.append("  Finding claim contract: " + json.dumps({key: finding.get(key) for key in
+                ("claim_scope", "pattern_support", "biological_reproducibility_claim_allowed", "opposing_feature_ids", "dependencies", "hypothesis_contract", "literature_comparison")}, ensure_ascii=False))
         bridge = _as_mapping(plan.get("bridge_commitments")).get(section_type)
         if bridge:
             lines.append("- Required section bridge: " + _clean_text(bridge))
@@ -733,6 +754,66 @@ def format_authoring_packet_for_llm(packet: Mapping[str, Any], section_type: str
             lines.extend(["", "Section plan:", _clean_text(claim_map)])
     lines.append("=== END READER-READY AUTHORING PACKET ===")
     return "\n".join(lines)
+
+
+def _finding_literature_context(card, references, retrieval_status):
+    """Keep supplied feature comparisons separate from measured facts.
+
+    A citation identity is necessary, not proof that a comparison is correct.
+    Empty retrieval never establishes novelty or a negative biological result.
+    """
+    fid = _as_mapping(card.get("feature_identity")).get("reader_feature_id")
+    comparisons = []
+    for ref in references:
+        if not isinstance(ref, Mapping) or not is_traceable_reference(ref):
+            continue
+        for value in ref.get("feature_comparisons") or []:
+            if not isinstance(value, Mapping) or value.get("reader_feature_id") != fid:
+                continue
+            if value.get("relationship") not in {"known_agreement", "disagreement", "not_explained_by_retrieved_evidence"}:
+                continue
+            if not value.get("external_finding") or not value.get("observation"):
+                continue
+            comparisons.append({**dict(value), "citation_id": _stable_reference_id(ref),
+                                "claim_scope": "literature_context", "measured_relation": False,
+                                "condition_differences": list(value.get("condition_differences") or []),
+                                "comparison_status": "supplied_comparison_requires_source_review"})
+    return {"contract_version": "finding_literature_comparison.v1",
+            "status": "comparisons_available" if comparisons else "not_explained_by_retrieved_evidence" if retrieval_status == "completed" or any(is_traceable_reference(r) for r in references) else "retrieval_unavailable",
+            "comparisons": comparisons, "novelty_claim_allowed": False,
+            "retrieval_scope": "supplied_records_only", "conditions_not_matched_by_default": True}
+
+
+def _finding_metadata(card, selected):
+    fid = _as_mapping(card.get("feature_identity")).get("reader_feature_id")
+    parents = set(card.get("parent_protein_ids") or [])
+    opposing = []
+    own = {p["condition"]: p for p in card.get("trajectory") or []}
+    for other in selected:
+        other_id = _as_mapping(other.get("feature_identity")).get("reader_feature_id")
+        if other_id == fid or not parents.intersection(other.get("parent_protein_ids") or []):
+            continue
+        for point in other.get("trajectory") or []:
+            left = own.get(point.get("condition"), {})
+            if any(left.get(field) is not None and point.get(field) is not None and left[field] * point[field] < 0
+                   for field in ("ptm_unadjusted_log2fc", "ptm_protein_adjusted_log2fc")):
+                opposing.append(other_id)
+                break
+    return {"contract_version": "report_finding.v1", "claim_scope": "descriptive_pattern",
+            "pattern_ids": [f"{fid}:{axis}:observed_joint_pattern.v1" for axis in card.get("axis_patterns") or {}],
+            "supporting_feature_ids": [fid] if fid else [], "opposing_feature_ids": sorted(set(opposing)),
+            "measurement_unit": _as_mapping(card.get("measurement_provenance")).get("reader_measurement_unit"),
+            "dependencies": {"parent_protein_ids": sorted(parents), "shared_control": "retain_recorded_sample_ids",
+                             "independent_sample_count": None, "sensitivity_status": "not_computed"},
+            "pattern_q_value": None, "pattern_support": "descriptive_observations_no_pattern_level_test",
+            "biological_reproducibility_claim_allowed": False,
+            "mechanistic_status": card.get("mechanistic_status", "not_evaluated"),
+            "mechanistic_reason": card.get("mechanistic_reason", "no_feature_bound_attribution_result_supplied"),
+            "literature_comparison": card.get("literature_comparison", _finding_literature_context(card, [], None)),
+            "hypothesis_contract": {"scope": "mechanistic_hypothesis", "requires": ["observation_evidence_ids", "citation_ids", "alternative_explanation", "discriminating_prediction"],
+                                    "direct_regulation_claim_allowed": False},
+            "claim_stage_mapping": {"O1": "observed_or_descriptive_pattern", "O2": "supported_only_with_claim_specific_analysis",
+                                    "L1": "literature_context", "H1": "mechanistic_hypothesis", "D1": "requires_separate_perturbation_evidence"}}
 
 
 def deterministic_authoring_plan(packet: Mapping[str, Any]) -> dict:
@@ -759,34 +840,20 @@ def deterministic_authoring_plan(packet: Mapping[str, Any]) -> dict:
     central_question = _clean_text(study_card.get("reader_summary")) or (
         "How do the recorded phosphorylation and linked protein-abundance measurements change across the sampled study design?"
     )
-    phase2_named_categories = {"measured_feature_observation", "quantitation_comparison"}
-    has_phase2_named_evidence = any(
-        isinstance(card, Mapping) and card.get("category") in phase2_named_categories
-        for card in cards
-    )
-    category_priority = (
-        "measured_feature_observation",
-        "quantitation_comparison",
-        "temporal_profile",
-        "quantitative_observation",
-        "kinase_context",
-        "candidate_discovery",
-    ) + (() if has_phase2_named_evidence else ("quantitative_landscape",))
-    selected_cards: list[Mapping[str, Any]] = []
-    for category in category_priority:
-        candidate = next(
-            (
-                card for card in cards
-                if isinstance(card, Mapping)
-                and card.get("category") == category
-                and "not generated" not in str(card.get("reader_summary") or "").lower()
-            ),
-            None,
-        )
-        if candidate:
-            selected_cards.append(candidate)
-        if len(selected_cards) >= 3:
-            break
+    selected_cards, selection_audit = select_finding_cards(cards)
+    if not selected_cards:
+        # Preserve the existing aggregate fallback only when no named observation
+        # can be bound. Availability/kinase no-call is never itself a discovery.
+        selected_cards = [card for card in cards if isinstance(card, Mapping)
+                          and card.get("category") in {"temporal_profile", "quantitative_landscape"}][:3]
+    transfer = packet.get("candidate_transfer_audit")
+    if isinstance(transfer, dict):
+        selected_ids = set(selection_audit["selected_reader_feature_ids"])
+        transferred = [card for card in cards if card.get("category") == "candidate_discovery"]
+        transfer["body_selected_count"] = sum(card["feature_identity"]["reader_feature_id"] in selected_ids for card in transferred)
+        transfer["body_exclusions"] = [{"reader_feature_id": card["feature_identity"]["reader_feature_id"],
+                                         "reason": "finding_selection_capacity_or_diversity"}
+                                        for card in transferred if card["feature_identity"]["reader_feature_id"] not in selected_ids]
     figure_cards = [figure for figure in packet.get("figure_cards") or [] if isinstance(figure, Mapping)]
 
     def figure_keys_for(card: Mapping[str, Any]) -> list[str]:
@@ -795,7 +862,8 @@ def deterministic_authoring_plan(packet: Mapping[str, Any]) -> dict:
             "quantitative_landscape": {"reader_quantitative_heatmap"},
             "temporal_profile": {"reader_temporal_profiles", "reader_interval_concordance"},
             "quantitative_observation": {"reader_protein_context"},
-            "measured_feature_observation": {"reader_quantitative_heatmap"},
+            "measured_feature_observation": {"reader_joint_trajectories", "reader_quantitative_heatmap", "reader_protein_context"},
+            "candidate_discovery": {"reader_joint_trajectories", "reader_quantitative_heatmap", "reader_protein_context"},
             "quantitation_comparison": {"reader_protein_context"},
         }.get(category, set())
         feature_id = str(_as_mapping(card.get("feature_identity")).get("reader_feature_id") or "")
@@ -826,6 +894,7 @@ def deterministic_authoring_plan(packet: Mapping[str, Any]) -> dict:
     for index, card in enumerate(selected_cards, 1):
         category = str(card.get("category") or "")
         key_findings.append({
+            **_finding_metadata(card, selected_cards),
             "finding_id": f"F{index}",
             "category": category,
             "observation": _clean_text(card.get("reader_summary")),
@@ -846,6 +915,7 @@ def deterministic_authoring_plan(packet: Mapping[str, Any]) -> dict:
         "central_question": central_question,
         "central_answer": central_answer or "The available reader-safe evidence supports a bounded descriptive answer and a defined next experiment.",
         "key_findings": key_findings,
+        "finding_selection_audit": selection_audit,
         "section_finding_map": {
             "abstract": finding_ids,
             "introduction": [],
@@ -887,6 +957,7 @@ def apply_llm_authoring_plan(planned_text: str, fallback: Mapping[str, Any] | No
         "central_question": str(base.get("central_question") or ""),
         "central_answer": str(base.get("central_answer") or ""),
         "key_findings": list(base.get("key_findings") or []),
+        "finding_selection_audit": dict(base.get("finding_selection_audit") or {}),
         "section_finding_map": dict(_as_mapping(base.get("section_finding_map"))),
         "bridge_commitments": dict(_as_mapping(base.get("bridge_commitments"))),
         "do_not_repeat": list(base.get("do_not_repeat") or []),
@@ -913,7 +984,7 @@ def apply_llm_authoring_plan(planned_text: str, fallback: Mapping[str, Any] | No
         for section, ids in section_map.items():
             if isinstance(ids, list):
                 filtered = [str(item) for item in ids if str(item) in known_ids]
-                if filtered:
+                if filtered and (section not in {"results", "discussion"} or set(filtered) == known_ids):
                     result["section_finding_map"][str(section)] = filtered
         return result
     matches = list(_PLAN_SECTION_RE.finditer(text))
@@ -931,6 +1002,33 @@ def apply_llm_authoring_plan(planned_text: str, fallback: Mapping[str, Any] | No
     else:
         result["source"] = "deterministic_fallback_unparsed_gemini_plan"
     return result
+
+
+def refresh_finding_context(plan, packet):
+    """Refresh retrieved context without changing the frozen finding selection."""
+    candidates, _ = select_finding_cards(packet.get("reader_cards") or [], maximum=100)
+    by_id = {c["feature_identity"]["reader_feature_id"]: c for c in candidates}
+    result = dict(plan)
+    result["key_findings"] = []
+    for finding in plan.get("key_findings") or []:
+        card = by_id.get(finding.get("reader_feature_id"))
+        result["key_findings"].append({**finding, **(_finding_metadata(card, candidates) if card else {})})
+    # Update transfer counts for this exact packet, including final rebuilt packets.
+    selected_ids = {f.get("reader_feature_id") for f in result["key_findings"]}
+    transfer = packet.get("candidate_transfer_audit")
+    if isinstance(transfer, dict):
+        transferred = [c for c in packet.get("reader_cards") or [] if c.get("category") == "candidate_discovery"]
+        transfer["body_selected_count"] = sum(c["feature_identity"]["reader_feature_id"] in selected_ids for c in transferred)
+        transfer["body_exclusions"] = [{"reader_feature_id": c["feature_identity"]["reader_feature_id"], "reason": "not_in_frozen_finding_selection"}
+                                       for c in transferred if c["feature_identity"]["reader_feature_id"] not in selected_ids]
+    return result
+
+
+def focus_authoring_packet(packet, plan):
+    """Limit model-visible numeric facts to frozen findings, retaining the full audit packet."""
+    selected = {f.get("reader_feature_id") for f in plan.get("key_findings") or []}
+    return {**packet, "reader_cards": [c for c in packet.get("reader_cards") or []
+            if not c.get("feature_identity") or c["feature_identity"].get("reader_feature_id") in selected]}
 
 
 def _known_evidence_ids(packet: Mapping[str, Any]) -> set[str]:
@@ -1145,8 +1243,40 @@ def validate_and_repair_sections(
         "entries": audit_entries,
         "removed_sentence_count": sum(1 for entry in audit_entries if not entry["retained"]),
         "repaired_sentence_count": sum(1 for entry in audit_entries if entry["validator_action"] != ["retain"] and entry["retained"]),
+        "finding_coverage": audit_finding_coverage(validated, packet),
     }
     return validated, audit
+
+
+def audit_finding_coverage(sections, packet, plan=None):
+    """Check that repair/assembly has not erased the selected observations."""
+    plan = plan or deterministic_authoring_plan(packet)
+    findings = [f for f in plan.get("key_findings") or [] if f.get("reader_feature_id")]
+    sentences = _split_sentences(str(sections.get("results") or ""))
+    missing, unlinked, duplicates, discussion_missing = [], [], [], []
+    links = []
+    for finding in findings:
+        fid = finding["reader_feature_id"]
+        evidence = set(finding.get("evidence_ids") or [])
+        matched = [s for s in sentences if (fid in s or evidence.intersection(_EVIDENCE_MARKER_RE.findall(s)))
+                   and not validate_quantitative_sentence(s, packet)
+                   and re.search(r"\b(?:contrast|PTM|protein)\b.*?[+−-]?\d+\.\d+", s, re.I)]
+        if "results" in sections and not matched:
+            missing.append(finding["finding_id"])
+        if "results" in sections and not finding.get("figure_keys"):
+            unlinked.append(finding["finding_id"])
+        if len(matched) != len(set(matched)):
+            duplicates.append(finding["finding_id"])
+        if "discussion" in sections and fid not in str(sections.get("discussion") or "") and not evidence.intersection(_EVIDENCE_MARKER_RE.findall(str(sections.get("discussion") or ""))):
+            discussion_missing.append(finding["finding_id"])
+        links.append({"finding_id": finding["finding_id"], "reader_feature_id": fid,
+                      "evidence_ids": sorted(evidence), "figure_keys": finding.get("figure_keys") or [],
+                      "results_sentences": list(dict.fromkeys(matched))})
+    return {"contract_version": "finding_coverage_audit.v1", "status": "review_required" if missing or unlinked or duplicates or discussion_missing else "covered",
+            "missing_finding_ids": missing, "figure_unlinked_finding_ids": unlinked,
+            "discussion_missing_finding_ids": discussion_missing,
+            "duplicate_finding_ids": duplicates, "sentence_evidence_links": links,
+            "scope": "selected_descriptive_findings_not_a_scientific_validity_proof"}
 
 
 def strip_authoring_anchors(text: str) -> str:
@@ -1178,6 +1308,8 @@ def audit_report_output_correctness(
     figure_manifest: Mapping[str, Any] | None = None,
     metadata_contract: Mapping[str, Any] | None = None,
     reader_cards: Iterable[Mapping[str, Any]] | None = None,
+    authoring_plan: Mapping[str, Any] | None = None,
+    generation_failures: Iterable[str] | None = None,
 ) -> dict:
     """Audit final reader output without changing scientific content.
 
@@ -1282,6 +1414,22 @@ def audit_report_output_correctness(
         review_reason_codes.append("punctuation_damage_review_required")
     if language_audit.get("section_word_budget_violation_count"):
         review_reason_codes.append("section_word_budget_review_required")
+    finding_coverage = None
+    if authoring_plan:
+        sections = {}
+        headings = list(re.finditer(r"(?m)^##\s+(.+?)\s*$", body))
+        for i, heading in enumerate(headings):
+            section = _MAJOR_HEADING_ALIASES.get(heading[1].strip().lower())
+            if section:
+                section_body = body[heading.end():headings[i + 1].start() if i + 1 < len(headings) else len(body)]
+                # Figure captions/tables cannot stand in for a Results finding.
+                sections[section] = re.split(r"(?m)^###\s+(?:Supplementary\s+)?Figure\b", section_body)[0]
+        sections.setdefault("results", "")
+        finding_coverage = audit_finding_coverage(sections, quantitative_packet, authoring_plan)
+        if finding_coverage["status"] != "covered":
+            review_reason_codes.append("finding_coverage_review_required")
+    if generation_failures:
+        review_reason_codes.append("interpretation_generation_incomplete")
     reason_codes = sorted(set(reason_codes))
     review_reason_codes = sorted(set(review_reason_codes))
     status = "blocked_for_review" if reason_codes else "draft_review_required" if review_reason_codes else "release_candidate"
@@ -1307,6 +1455,8 @@ def audit_report_output_correctness(
         "quantitative_claim_violations": quantitative_violations,
         "semantic_claim_audit": semantic_audit,
         "language_quality_audit": language_audit,
+        "finding_coverage": finding_coverage,
+        "generation_fallback_sections": list(generation_failures or []),
     }
 
 
@@ -1344,6 +1494,88 @@ def _default_summary(values: list[str], default: str) -> str:
     return " ".join(values) if values else default
 
 
+def _joint_description(card):
+    patterns = {p.get("joint_pattern") for p in card.get("trajectory") or [] if not p.get("detection_context_only")}
+    descriptions = {
+        "ptm_maintained_protein_decreased_adjusted_increased": "The independent PTM contrast remained near the reference level while linked protein was lower and the protein-adjusted contrast was higher; the modified precursor itself did not show a corresponding increase.",
+        "ptm_protein_co_movement": "Independent PTM and linked protein changed together, while the protein-adjusted contrast remained near the reference level.",
+        "ptm_increased_with_stable_protein": "Independent and protein-adjusted PTM contrasts were higher while linked protein remained near the reference level.",
+        "near_reference_all_axes": "The three relative contrasts remained near their reference levels within the descriptive tolerance.",
+        "incomplete_axes_observation": "Available PTM observations were retained, with unavailable axes excluded from joint interpretation.",
+    }
+    return descriptions.get(next(iter(patterns)) if len(patterns) == 1 else "", "The separate PTM and protein axes define the observed response within the sampled window.")
+
+
+def _render_finding_section(section_type, packet, study):
+    plan = deterministic_authoring_plan(packet)
+    cards, _ = select_finding_cards(packet.get("reader_cards") or [])
+    if not cards or section_type not in {"results", "discussion", "conclusion", "abstract", "introduction"}:
+        return None
+    if section_type == "introduction":
+        return (study + "\n\nRepeated measurements of modified precursors and linked proteins allow the relative response of each layer to be compared over time. "
+                "The study question is whether changes in measured PTM abundance accompany protein abundance, persist after protein adjustment, or differ among forms linked to the same parent. "
+                "The interpretation is limited to the sampled conditions and to the mapping and uncertainty recorded with each observation.\n\n" +
+                (_literature_context_for_fallback(packet) or "A feature-specific comparison with prior work requires traceable literature matched to the experimental system and sampling window.") +
+                " The current objective is to identify measured PTM–protein patterns and define the next observation that could distinguish their possible explanations.")
+    figures = {f["figure_key"]: f for f in packet.get("figure_cards") or []}
+    paragraphs = []
+    discussed_form_groups = set()
+    for card, finding in zip(cards, plan["key_findings"]):
+        fid = finding["reader_feature_id"]
+        description = _joint_description(card)
+        if section_type == "results":
+            records = [r for r in quantitative_records(card) if r["value"] is not None]
+            # A compact illustrative condition; the bound Figure/table retains
+            # every supplied timepoint and axis, including unavailable values.
+            condition = records[-1]["condition"] if records else None
+            clauses = "; ".join(render_value_record(r) for r in records if r["condition"] == condition)
+            display_keys = ["reader_joint_trajectories"] if "reader_joint_trajectories" in finding["figure_keys"] else finding["figure_keys"]
+            labels = [figures[key].get("figure_label") for key in display_keys if key in figures]
+            reference = " See " + ", ".join(labels) + " for the full sampled trajectory." if labels else ""
+            paragraphs.append(f"{card['feature_label']} ({fid}). {clauses}. {description}{reference}")
+        elif section_type == "discussion":
+            context = finding["literature_comparison"]
+            form_group = tuple(sorted({fid, *finding["opposing_feature_ids"]}))
+            already_discussed = len(form_group) > 1 and form_group in discussed_form_groups
+            if already_discussed and not context["comparisons"]:
+                continue
+            discussed_form_groups.add(form_group)
+            literature = []
+            for comparison in context["comparisons"]:
+                relation = "agreed with" if comparison["relationship"] == "known_agreement" else "differed from" if comparison["relationship"] == "disagreement" else "was not explained by"
+                differences = "; ".join(comparison["condition_differences"]) or "experimental comparability has not been established"
+                comparison_text = f"For {fid}, the supplied literature comparison {relation} the recorded observation: {comparison['external_finding']}"
+                comparison_sentences = _split_sentences(comparison_text) + [f"Conditions differ in {differences}."]
+                # Bind the source to each claim before sentence validation;
+                # a trailing paragraph citation must not orphan the comparison.
+                for sentence in comparison_sentences:
+                    punctuation = sentence[-1] if sentence.endswith((".", "!", "?")) else "."
+                    clause = sentence[:-1] if sentence.endswith((".", "!", "?")) else sentence
+                    literature.append(f"{clause} [REF:{comparison['citation_id']}]{punctuation}")
+            if not literature:
+                literature = ["Traceable feature-specific literature comparison was unavailable." if context["status"] == "retrieval_unavailable" else "The supplied retrieval did not explain this pattern; that search result does not establish novelty."]
+            alternative = ("A change in the available protein denominator and differences in sample support can contribute to the adjusted contrast. "
+                           "To distinguish this contribution from a change in modified precursor abundance, the next measurement should quantify the same precursor and linked protein in matched independent biological samples.")
+            if finding["opposing_feature_ids"]:
+                alternative = ("Opposing form responses were also recorded for " + ", ".join(finding["opposing_feature_ids"]) +
+                               ". Shared parent abundance and mapping ambiguity remain relevant competing explanations. A targeted comparison of these exact forms, with localization and denominator quality checked, would test whether the divergence persists.")
+            elif {p.get("joint_pattern") for p in card.get("trajectory") or []} == {"ptm_protein_co_movement"}:
+                alternative = ("The parallel PTM and protein observations are compatible with an abundance contribution to the measured PTM contrast. "
+                               "The small adjusted contrast does not make the response biologically irrelevant. Repeating matched measurements across independent preparations would test whether this correspondence is robust to sample support and denominator variation.")
+            paragraphs.append(f"For {fid}, the retained observation provides a testable PTM–protein response. " + " ".join(literature) + ("" if already_discussed else " " + alternative))
+        elif section_type == "abstract":
+            paragraphs.append(f"For {fid}, {description[0].lower() + description[1:]}")
+    if section_type == "conclusion":
+        main = cards[0]
+        description = _joint_description(main)
+        return (f"The recorded time course distinguishes changes in modified precursor abundance from changes relative to linked protein. For {main['feature_identity']['reader_feature_id']}, {description[0].lower() + description[1:]} "
+                "These sampled relative contrasts do not establish causality, absolute occupancy, or biological reproducibility. "
+                "The next validation should repeat paired measurements of the same precursor and parent protein in independent biological samples, with denominator quality and mapping checked explicitly.")
+    if section_type == "abstract":
+        return study + " " + " ".join(paragraphs) + " These observations are descriptive; independent paired validation is needed to distinguish regulation from denominator and sampling effects."
+    return "\n\n".join(paragraphs)
+
+
 def render_reader_section_fallback(
     section_type: str,
     packet: Mapping[str, Any],
@@ -1362,6 +1594,9 @@ def render_reader_section_fallback(
         _summaries_by_category(packet, "study_frame", limit=1),
         "The report evaluates the recorded PTM and linked total-protein measurements in the stated experimental system.",
     )
+    finding_section = _render_finding_section(section_type, packet, study)
+    if finding_section is not None:
+        return finding_section
     quantitative = _default_summary(
         _summaries_by_category(packet, "quantitative_landscape", "quantitative_provenance", limit=3),
         "The available quantitative data are interpreted as recorded PTM measurements with linked protein-abundance context.",
@@ -1456,12 +1691,18 @@ def render_reader_section_fallback(
     if section_type == "methods":
         estimator_contract = _as_mapping(packet.get("quantitation_estimator_contract"))
         estimator_paragraph = _clean_text(estimator_contract.get("deterministic_methods_paragraph"))
+        axis_methods = sorted({str(r["support"].get("method")) for c in packet.get("reader_cards") or []
+                               for r in quantitative_records(c) if r.get("support", {}).get("method")})
+        methods = ("Recorded axis-specific calculation and test methods: " + "; ".join(axis_methods) + ".") if axis_methods else "Axis-specific test metadata were not recorded in the supplied vector; p/q fields remain attached to their original axes and unavailable values remain unspecified."
+        design = packet.get("study_design") or {}
+        design_text = ("Biological units, technical injections, batches and pairing are taken only from the explicit sample manifest. Technical injections and precursor counts are not biological replication.") if design.get("samples") else "The report input did not include an explicit biological-unit and technical-injection manifest; this is a provenance limitation, not evidence that the experiment lacked biological replication."
         return "\n\n".join([
             study,
             quantitative,
             estimator_paragraph,
-            "Welch's unequal-variance t-test was used when both groups contained at least two replicate values, and Benjamini–Hochberg correction was applied to available p-values within the corresponding comparison output. Reported q-values are therefore analysis-specific uncertainty summaries, not evidence of causal regulation. Control-undetected features were not assigned a pseudocount-derived conventional fold change on the independent unadjusted axis.",
-            "Hierarchical Clustering of Temporal Phosphorylation Feature Profiles was used to derive descriptive Temporal Profile Clusters. Interval-wise Concordance Analysis summarized retained concordance, concordance gain, and concordance loss across adjacent sampled intervals within fixed clusters, using evaluable within-cluster pair-window comparisons as the denominator. Cluster count and distance settings are retained in the technical audit when available.",
+            methods + " " + design_text,
+            ("Hierarchical Clustering of Temporal Phosphorylation Feature Profiles and Interval-wise Concordance Analysis are interpreted as recorded descriptive analyses. The latter uses evaluable within-cluster pair-window comparisons as the denominator." if any(c.get("category") == "temporal_profile" for c in packet.get("reader_cards") or []) else "No cluster or concordance result was supplied for this report input. When applied, Interval-wise Concordance Analysis uses evaluable within-cluster pair-window comparisons as the denominator."),
+            "Feature selection considered recorded observation and point-statistical support before parent and joint-pattern diversity. Pattern labels use elapsed time and the configurable descriptive tolerance; they are not pattern-level hypothesis tests. Missing measurements are not zero. Shared parents, controls and differing axis sample sets are retained as dependencies; no common-sample sensitivity estimate or population confidence interval was computed by this reporting step.",
             "Large conventional Log2FC values were retained as measured numeric contrasts but were not used alone to infer biological priority, mechanistic importance, direct regulatory strength, absolute occupancy, or kinase activity. Control-undetected features were kept as detection/LOD context rather than placed on conventional quantitative axes or magnitude ranks.",
         ])
 
@@ -1491,6 +1732,7 @@ def render_data_only_reader_report(
     the same reader cards as the LLM path and therefore never exposes internal
     provenance status in the researcher-facing body.
     """
+    from .figure_manifest import render_verified_reader_figures
     return "\n\n".join([
         f"# {title}",
         f"*Generated: {generated_at}*",
@@ -1498,6 +1740,7 @@ def render_data_only_reader_report(
         "## Introduction\n\n" + render_reader_section_fallback("introduction", packet),
         "## Methods\n\n" + render_reader_section_fallback("methods", packet),
         "## Results\n\n" + render_reader_section_fallback("results", packet),
+        render_verified_reader_figures(state.get("figure_manifest") or {}),
         "## Discussion\n\n" + render_reader_section_fallback("discussion", packet),
         "## Conclusion\n\n" + render_reader_section_fallback("conclusion", packet),
         "## References\n\n"

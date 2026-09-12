@@ -13,6 +13,10 @@ import math
 import re
 from typing import Any, Mapping, Sequence
 
+from .quantitative_fields import axis_number
+from .measured_feature_cards import _feature_key as _reader_key, reader_feature_id, build_feature_observation_cards
+from .temporal_analysis import observed_time_minutes, summarize_observed_pattern
+
 from ptm_shared.de_novo_representation import (
     LOD_INDUCTION_RANK_CAP,
     narrative_eligible_denovo,
@@ -20,7 +24,7 @@ from ptm_shared.de_novo_representation import (
 
 
 BIOLOGICAL_SYNTHESIS_CONTRACT = "biological_synthesis_packet.v2"
-CANDIDATE_DISCOVERY_PACKET_CONTRACT = "candidate_discovery_packet.v1"
+CANDIDATE_DISCOVERY_PACKET_CONTRACT = "candidate_discovery_packet.v2"
 DEFAULT_CANDIDATE_BUCKET_QUOTAS = {
     "canonical_context_anchor": 6,
     "annotation_negative_discovery": 10,
@@ -76,34 +80,14 @@ def _denovo_selection_effect(row: Mapping[str, Any]) -> float | None:
 
 
 def _time_sort_key(label: Any) -> tuple[float, str]:
-    text = str(label or "")
-    match = re.search(r"(\d+(?:\.\d+)?)\s*(min|m|h|hr|hour)?", text, re.IGNORECASE)
-    if not match:
-        return (float("inf"), text)
-    value = float(match.group(1))
-    unit = (match.group(2) or "").lower()
-    if unit in {"h", "hr", "hour"}:
-        value *= 60
-    return (value, text)
+    from .temporal_analysis import observed_time_minutes
+    value = observed_time_minutes({"condition": label})
+    return (value if value is not None else math.inf, str(label or ""))
 
 
 def _profile_label(points: Sequence[Mapping[str, Any]]) -> str:
-    values = [point.get("ptm_relative_log2fc") for point in points]
-    finite = [value for value in values if isinstance(value, (int, float)) and math.isfinite(value)]
-    if len(finite) < 2:
-        return "single-observation"
-    peak_index = max(range(len(finite)), key=lambda index: abs(finite[index]))
-    if peak_index == 0:
-        return "early-maximal"
-    if peak_index == len(finite) - 1:
-        return "late-maximal"
-    if abs(finite[peak_index]) >= abs(finite[0]) + 0.4 and abs(finite[peak_index]) >= abs(finite[-1]) + 0.4:
-        return "transient-intermediate"
-    if finite[-1] > finite[0] + 0.4:
-        return "progressive-increase"
-    if finite[-1] < finite[0] - 0.4:
-        return "progressive-decrease"
-    return "distributed-or-stable"
+    from .temporal_analysis import summarize_observed_pattern
+    return summarize_observed_pattern(points)["label"]
 
 
 def _feature_key(gene: Any, position: Any) -> str:
@@ -172,6 +156,7 @@ def _card_sort_key(card: Mapping[str, Any]) -> tuple:
     best_q = components.get("best_q_value")
     best_q_key = float(best_q) if isinstance(best_q, (int, float)) and math.isfinite(best_q) else float("inf")
     return (
+        {"high": 0, "moderate": 1, "exploratory": 2}.get(str(card.get("narrative_quality_tier")), 3),
         -int(components.get("finite_condition_count") or 0),
         -float(components.get("selection_effect") or 0.0),
         -int(components.get("finite_q_value_count") or 0),
@@ -207,16 +192,18 @@ def _select_candidate_cards(
         "special_discovery": ["multi_site_divergent", "ptm_protein_decoupled"],
     }
     selected_by_quota: dict[str, int] = {}
+    best_quality = min((_card_sort_key(card)[0] for card in cards), default=3)
     for quota_bucket, source_buckets in bucket_groups.items():
         picked = 0
         pool = sorted(
-            (card for source in source_buckets for card in cards_by_bucket.get(source, [])),
+            (card for source in source_buckets for card in cards_by_bucket.get(source, [])
+             if _card_sort_key(card)[0] == best_quality),
             key=_card_sort_key,
         )
         for card in pool:
             if len(selected) >= limit or picked >= requested[quota_bucket]:
                 break
-            key = _feature_key(card.get("gene"), card.get("position"))
+            key = (card.get("feature_identity") or {}).get("reader_feature_id") or _feature_key(card.get("gene"), card.get("position"))
             if key in selected_keys:
                 continue
             selected.append(card)
@@ -229,7 +216,7 @@ def _select_candidate_cards(
     for card in all_cards:
         if len(selected) >= limit:
             break
-        key = _feature_key(card.get("gene"), card.get("position"))
+        key = (card.get("feature_identity") or {}).get("reader_feature_id") or _feature_key(card.get("gene"), card.get("position"))
         if key in selected_keys:
             continue
         selected.append(card)
@@ -257,7 +244,7 @@ def _candidate_cards(
 ) -> tuple[list[dict], dict]:
     annotation_index = _annotation_context_index(global_kinase_modules)
     divergent_keys = _multisite_divergent_feature_keys(multisite_divergence)
-    grouped: dict[tuple[str, str], list[dict]] = defaultdict(list)
+    grouped: dict[tuple, list[dict]] = defaultdict(list)
     for row in vector_rows or []:
         if not isinstance(row, Mapping):
             continue
@@ -265,14 +252,16 @@ def _candidate_cards(
         position = str(row.get("position") or row.get("PTM_Position") or "").strip()
         if not gene or gene.lower() in {"unknown", "nan"}:
             continue
-        ptm_value = _as_float(row.get("ptm_relative_log2fc", row.get("PTM_Relative_Log2FC")))
-        protein_value = _as_float(row.get("protein_log2fc", row.get("Protein_Log2FC")))
+        ptm_value = axis_number(row, "adjusted")
+        protein_value = axis_number(row, "protein")
         is_denovo = _is_denovo_row(row)
-        grouped[(gene, position)].append({
+        key = _reader_key(row)
+        grouped[key].append({
+            **dict(row),
             "condition": str(row.get("condition") or row.get("Condition") or "unspecified"),
             "ptm_relative_log2fc": ptm_value,
             "protein_log2fc": protein_value,
-            "q_value": _as_float(row.get("q_value", row.get("Q_Value"))),
+            "q_value": axis_number(row, "adjusted", "q"),
             "is_de_novo": is_denovo,
             "denovo_confidence": _denovo_confidence(row) if is_denovo else None,
             "denovo_selection_effect": _denovo_selection_effect(row) if is_denovo else None,
@@ -283,10 +272,12 @@ def _candidate_cards(
         })
 
     cards: list[dict] = []
-    for (gene, position), points in grouped.items():
-        points = sorted(points, key=lambda point: _time_sort_key(point.get("condition")))
+    for identity_key, points in grouped.items():
+        gene, position, precursor, sequence = identity_key
+        points = sorted(points, key=lambda point: (observed_time_minutes(point) if observed_time_minutes(point) is not None else math.inf, str(point.get("condition"))))
         is_denovo = any(point.get("is_de_novo") for point in points)
-        finite_ptm = [abs(point["ptm_relative_log2fc"]) for point in points if point["ptm_relative_log2fc"] is not None]
+        finite_ptm = [abs(value) for point in points
+                      if (value := axis_number(point, "unadjusted") if axis_number(point, "unadjusted") is not None else point["ptm_relative_log2fc"]) is not None]
         denovo_effects = [
             float(point["denovo_selection_effect"])
             for point in points
@@ -316,7 +307,7 @@ def _candidate_cards(
             primary_rationale = "computed within-gene multi-site divergence"
         elif is_decoupled:
             primary_bucket = "ptm_protein_decoupled"
-            primary_rationale = "measured PTM–protein contrast meets the declared discovery threshold"
+            primary_rationale = "adjusted PTM versus linked protein coordinate distance meets the declared descriptive threshold"
         elif annotation_context == "annotation_negative":
             primary_bucket = "annotation_negative_discovery"
             primary_rationale = "no known or motif-context kinase annotation was supplied by the legacy annotation module"
@@ -331,12 +322,21 @@ def _candidate_cards(
                 "de novo representation uses the preregistered confidence-weighted, capped LOD-relative selection effect; conventional log2FC is excluded"
             )
         declared_denovo_peak = next((point["peak_condition"] for point in points if point.get("peak_condition")), "")
+        pattern = summarize_observed_pattern(points)
+        unique_extremum = pattern["observed_extrema"] if pattern["label"] in {"early-maximal", "late-maximal", "transient-intermediate"} else []
         cards.append({
             "gene": gene,
+            "precursor_id": precursor or None,
+            "modified_sequence": sequence or None,
+            "feature_identity": {"reader_feature_id": reader_feature_id(identity_key) if precursor or sequence else None,
+                                 "source_feature_id": precursor or None, "gene": gene,
+                                 "candidate_residue_annotation": position, "modified_sequence": sequence or None},
+            "identity_status": "recorded" if precursor or sequence else "legacy_site_context_only",
             "position": position or "site_not_specified",
             "trajectory": points,
-            "profile_label": "de_novo_detection_context" if is_denovo else _profile_label(points),
-            "peak_condition": declared_denovo_peak or points[max_index]["condition"],
+            "profile_label": "de_novo_detection_context" if is_denovo else pattern["label"],
+            "peak_condition": (declared_denovo_peak or points[max_index]["condition"]) if is_denovo else (unique_extremum[0]["condition"] if len(unique_extremum) == 1 else None),
+            "extremum_scope": "de_novo_detection_context" if is_denovo else "sampled_extremum_only_not_biological_peak",
             "max_abs_ptm_log2fc": None if is_denovo else round(max(finite_ptm), 4),
             "is_de_novo": is_denovo,
             "source": "vector_plot_raw_data",
@@ -361,9 +361,23 @@ def _candidate_cards(
                 "multisite_divergent": is_divergent,
                 "ptm_protein_decoupled": is_decoupled,
                 "ptm_protein_decoupling_threshold": ptm_protein_decoupling_threshold,
+                "decoupling_metric_version": "absolute_adjusted_minus_protein_coordinate_distance.v1",
+                "decoupling_metric_boundary": "Coordinate distance only; neither independent U/P discordance nor a re-adjusted PTM estimator",
             },
         })
-    return _select_candidate_cards(cards, limit=limit, bucket_quotas=bucket_quotas)
+    observations = build_feature_observation_cards({"vector_plot_raw_data": vector_rows}, maximum=max(len(vector_rows), 1), minimum_points=1)
+    observation_index = {c["feature_identity"]["reader_feature_id"]: c for c in observations}
+    for card in cards:
+        observation = observation_index.get(card["feature_identity"].get("reader_feature_id"))
+        if observation:
+            for field in ("axis_patterns", "narrative_quality_tier", "quality_summary", "parent_protein_ids"):
+                card[field] = observation[field]
+        card["data_eligibility"] = "observed" if observation else "legacy_context_identity_unresolved"
+    selected, audit = _select_candidate_cards(cards, limit=limit, bucket_quotas=bucket_quotas)
+    audit.update(input_feature_count=len(grouped), candidate_count=len(cards), selected_count=len(selected),
+                 selection_rule_version="quality_first_feature_discovery.v2",
+                 excluded_candidates=[{"feature_id": c["feature_identity"].get("reader_feature_id"), "reason": "selection_capacity_or_diversity"} for c in cards if c not in selected])
+    return selected, audit
 
 
 def _pathway_anchors(network_analysis: Mapping[str, Any] | None, *, limit: int) -> list[dict]:
@@ -588,7 +602,7 @@ def format_biological_synthesis_packet_for_llm(packet: Mapping[str, Any] | None,
         lines.append(
             f"- {card.get('gene')} {card.get('position')}: bucket={card.get('primary_bucket')}; "
             f"annotation context={card.get('annotation_context')}; rationale={reasons}; "
-            f"profile={card.get('profile_label')}; peak={card.get('peak_condition')}; "
+            f"profile={card.get('profile_label')}; observed extremum condition={card.get('peak_condition')}; scope={card.get('extremum_scope')}; "
             f"selection effect ({components.get('selection_effect_type')})={components.get('selection_effect')}; "
             f"max |PTM-protein contrast|={components.get('max_abs_ptm_protein_contrast')}; {q_text}; {trajectory}"
         )
@@ -703,7 +717,7 @@ def format_candidate_discovery_packet_for_report(
             )
         else:
             observed = (
-                f"profile={_report_cell(card.get('profile_label'))}; peak={_report_cell(card.get('peak_condition'))}; "
+                f"profile={_report_cell(card.get('profile_label'))}; sampled extremum={_report_cell(card.get('peak_condition'))}; "
                 f"max |measured PTM log2FC|={_report_cell(components.get('max_abs_ptm_log2fc'))}"
             )
             quality = (

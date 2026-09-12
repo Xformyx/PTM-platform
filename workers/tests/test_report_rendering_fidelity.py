@@ -768,9 +768,9 @@ def test_prepare_reader_manifest_builds_three_verified_main_figures_and_final_re
         [item for item in manifest["figures"] if item.get("placement") == "main"],
         key=lambda item: item["display_label"],
     )
-    assert [item["display_label"] for item in main] == ["Figure 1", "Figure 2", "Figure 3"]
+    assert [item["display_label"] for item in main] == ["Figure 1", "Figure 2", "Figure 3", "Figure 4"]
     assert {item["figure_key"] for item in main} == {
-        "reader_quantitative_heatmap", "reader_temporal_profiles", "reader_interval_concordance",
+        "reader_quantitative_heatmap", "reader_temporal_profiles", "reader_interval_concordance", "reader_joint_trajectories",
     }
     assert all(item["insertion_verified"] and Path(item["image_path"]).exists() for item in main)
     profiles = next(item for item in main if item["figure_key"] == "reader_temporal_profiles")
@@ -790,6 +790,7 @@ def test_prepare_reader_manifest_builds_three_verified_main_figures_and_final_re
         "experimental_context": {"cell_type": "generic cells", "treatment": "compound X"},
         "sections": {
             "title": "Three reader figures",
+            "research_question_answers": "The recorded measurements support descriptive comparisons within the sampled time window.",
             "abstract": "Three descriptive figures summarize the recorded measurements.",
             "introduction": "The study evaluates measured temporal profiles.",
             "methods": "Recorded preprocessing and descriptive temporal analysis were used.",
@@ -806,6 +807,7 @@ def test_prepare_reader_manifest_builds_three_verified_main_figures_and_final_re
     assert report.count("### Figure 1.") == 1
     assert report.count("### Figure 2.") == 1
     assert report.count("### Figure 3.") == 1
+    assert report.count("### Figure 4.") == 1
     assert rendered["report_output_correctness"]["status"] == "release_candidate", rendered["report_output_correctness"]
     assert rendered["report_output_correctness"]["phantom_figure_mentions"] == []
 

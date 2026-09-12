@@ -63,6 +63,8 @@ def setup_document_styles(doc: 'Document'):
     title_font.color.rgb = RGBColor(0, 0, 0)
     title_style.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.CENTER
     title_style.paragraph_format.space_after = Pt(12)
+    for border in title_style.element.xpath('./w:pPr/w:pBdr'):
+        border.getparent().remove(border)
     
     # Heading 1 (## sections like Abstract, Introduction, etc.)
     h1_style = doc.styles['Heading 1']
@@ -94,6 +96,10 @@ def setup_document_styles(doc: 'Document'):
     h3_font.color.rgb = RGBColor(0, 0, 0)
     h3_style.paragraph_format.space_before = Pt(8)
     h3_style.paragraph_format.space_after = Pt(4)
+    for name in ('Title', 'Heading 1', 'Heading 2', 'Heading 3'):
+        for fonts in doc.styles[name].element.xpath('./w:rPr/w:rFonts'):
+            for attribute in ('asciiTheme', 'hAnsiTheme'):
+                fonts.attrib.pop(qn('w:' + attribute), None)
     
     # Set page margins (1 inch = 2.54 cm)
     for section in doc.sections:
@@ -324,6 +330,9 @@ def add_table_to_doc(doc: 'Document', rows: List[List[str]]):
     
     # Style the table
     table.style = 'Table Grid'
+    table.rows[0]._tr.get_or_add_trPr().append(parse_xml(f'<w:tblHeader {nsdecls("w")}/>'))
+    for row in table.rows:
+        row._tr.get_or_add_trPr().append(parse_xml(f'<w:cantSplit {nsdecls("w")}/>'))
     
     for i, row in enumerate(rows):
         for j, cell_text in enumerate(row):

@@ -33,6 +33,7 @@ from .figure_manifest import (
     build_figure_manifest,
     compile_reader_caption,
     prepare_reader_figure_manifest,
+    joint_trajectory_evidence_table,
 )
 
 logger = logging.getLogger(__name__)
@@ -51,6 +52,8 @@ class ReportState(TypedDict, total=False):
     md_report_path: str
     tsv_data_path: str
     experimental_context: dict
+    sample_manifest: dict
+    literature_retrieval_status: str
     research_questions: List[str]
     chromadb_collections: List[str]
     output_dir: str
@@ -96,6 +99,8 @@ class ReportState(TypedDict, total=False):
     reader_authoring_plan: dict            # scientific author section plan
     reader_authoring_validator_audit: dict # clause-level repair log; technical audit only
     reader_narrative_continuity_audit: dict # paragraph/repetition/figure-reference audit; technical audit only
+    reader_authoring_fallback_sections: list
+    reader_authoring_final_fallback_sections: list
     reader_prose_snapshots: dict           # raw -> validated -> citation-normalized section trace
     report_prose_trace_path: str           # task-level final document source trace
     reader_authoring_mode: str             # legacy | shadow
@@ -1141,6 +1146,7 @@ def format_citations(state: ReportState) -> dict:
                         f"\n\n### {display_label}. {title}\n\n"
                         f"![{title}]({image_path})\n\n"
                         f"**Figure legend.** {caption}\n\n---\n"
+                        + joint_trajectory_evidence_table(figure)
                     )
                 logger.info(
                     "[FORMAT-CIT] Inserted %s verified reader main figure(s) from frozen manifest",
@@ -1696,6 +1702,8 @@ def format_citations(state: ReportState) -> dict:
             if reader_authoring_shadow
             else None
         ),
+        authoring_plan=state.get("reader_authoring_plan") if reader_authoring_shadow else None,
+        generation_failures=(list(state.get("reader_authoring_fallback_sections") or []) + list(state.get("reader_authoring_final_fallback_sections") or [])) if reader_authoring_shadow else None,
     )
     state["report_output_correctness"] = report_output_correctness
     correctness_path = None
