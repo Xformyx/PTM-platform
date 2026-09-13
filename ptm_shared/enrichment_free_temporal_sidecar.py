@@ -801,12 +801,13 @@ def build_production_site_observations(
     observed_vectors: dict[str, dict[str, Any]] = {}
     for raw_key, raw_values in sorted(ptm_timeseries.items()):
         key = str(raw_key or "").strip().upper()
-        if "_" not in key:
-            continue
         identity = (feature_identities or {}).get(raw_key, {})
-        gene, site = key.split("__PF-", 1)[0].rsplit("_", 1)
-        gene = identity.get("gene") or gene
-        site = identity.get("position") or site
+        if identity.get("gene") and identity.get("position"):
+            gene, site = identity["gene"], identity["position"]
+        elif "_" in key and not key.startswith("FEATURE-"):
+            gene, site = key.split("__PF-", 1)[0].rsplit("_", 1)
+        else:
+            continue
         values = {
             condition: parsed
             for condition in ordered_conditions

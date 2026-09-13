@@ -18,7 +18,7 @@ CLAIM_SCHEMA_VERSION = "reader_quantitative_claim.v1"
 AXIS_LABELS = {"unadjusted": "unadjusted PTM contrast",
                "adjusted": "protein-adjusted relative PTM log2 contrast",
                "protein": "linked protein contrast"}
-_ID = re.compile(r"\bPF-[A-Z0-9]{8}\b", re.I)
+_ID = re.compile(r"\bPF-(?:[A-Z0-9]{20}|[A-Z0-9]{8})\b", re.I)
 _TIME = re.compile(r"\b\d+(?:\.\d+)?\s*(?:min(?:utes?)?|h(?:ours?)?|s(?:ec(?:onds?)?)?)\b", re.I)
 _AXIS = re.compile(r"\b(unadjusted(?: PTM)?|protein[- ]adjusted(?: relative)?(?: PTM)?(?: log2)?|linked protein|protein)(?: contrast| log2fc)?\b", re.I)
 _NUMBER = re.compile(r"(?<![\w.])[+−-]?\d+(?:\.\d+)?(?:e[-+]?\d+)?(?!\w|\.\d)", re.I)
@@ -42,6 +42,8 @@ def quantitative_records(card: Mapping[str, Any]) -> list[dict]:
             records.append({
                 "evidence_id": (card.get("evidence_ids") or [card.get("card_id")])[0],
                 "feature_id": fid, "condition": point.get("condition"), "axis": axis,
+                "canonical_feature_id": identity.get("feature_id"),
+                "feature_identity_version": identity.get("feature_identity_version"),
                 "value": axis_number(point, axis),
                 "p": support.get(f"{prefix}_p_value"), "q": support.get(f"{prefix}_q_value"),
                 "control_n": support.get(f"{prefix}_control_n"), "treatment_n": support.get(f"{prefix}_treatment_n"),

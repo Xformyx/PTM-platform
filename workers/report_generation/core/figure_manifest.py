@@ -710,7 +710,7 @@ def _generate_joint_trajectory_entry(state, output_dir):
     ids = sorted({r["feature_id"] for r in bindings})
     keys = [(r["feature_id"], r["condition"], r["axis"]) for r in bindings]
     time_keys = [(r["feature_id"], r["time_minutes"], r["axis"]) for r in bindings]
-    valid = (len(keys) == len(set(keys)) and len(time_keys) == len(set(time_keys)) and bool(bindings)
+    valid = (len(keys) == len(set(keys)) and bool(bindings)
              and all(any(r["feature_id"] == fid and r["value"] is not None for r in bindings) for fid in ids))
     entry = _entry("reader_joint_trajectories", "reader_joint_trajectory", "",
         question="How do independent PTM, linked protein and protein-adjusted PTM measurements differ over the observed time window?",
@@ -740,8 +740,18 @@ def _generate_joint_trajectory_entry(state, output_dir):
                 fid = card["feature_identity"]["reader_feature_id"]
                 for j, (axis, label, color) in enumerate((("unadjusted", "U · Independent PTM", "#1764ab"), ("protein", "P · Linked protein", "#706573"), ("adjusted", "A · Protein-adjusted PTM", "#b64518"))):
                     ax = axes[i, j]
-                    lookup = {r["time_minutes"]: r["value"] for r in bindings if r["feature_id"] == fid and r["axis"] == axis}
-                    ax.plot(times, [lookup.get(t) if lookup.get(t) is not None else np.nan for t in times], "o--", color=color, lw=1, ms=4)
+                    axis_records = sorted([r for r in bindings if r["feature_id"] == fid and r["axis"] == axis],
+                                          key=lambda r: (r["time_minutes"], r["condition"]))
+                    xs = [r["time_minutes"] for r in axis_records]
+                    ys = [r["value"] if r["value"] is not None else np.nan for r in axis_records]
+                    # Simultaneous conditions are separate observations, not a
+                    # last-row-wins trajectory at the same elapsed time.
+                    simultaneous = len(set(xs)) != len(xs)
+                    ax.plot(xs, ys, "o" if simultaneous else "o--", color=color, lw=1, ms=4)
+                    if simultaneous:
+                        for r in axis_records:
+                            if r["value"] is not None:
+                                ax.annotate(r["condition"], (r["time_minutes"], r["value"]), fontsize=6)
                     ax.axhline(0, color="#888888", lw=.6)
                     ax.set_ylim(-extent, extent)
                     ax.set_xticks(times)
@@ -751,7 +761,7 @@ def _generate_joint_trajectory_entry(state, output_dir):
                     if j == 0:
                         identity = card["feature_identity"]
                         ax.set_ylabel(f"{identity['gene']} {identity.get('candidate_residue_annotation') or ''}\n{fid}\nRelative log2 contrast", fontsize=8)
-                    if not any(v is not None for v in lookup.values()):
+                    if not any(r["value"] is not None for r in axis_records):
                         ax.text(.5, .7, "Unavailable", ha="center", transform=ax.transAxes, fontsize=8)
             fig.tight_layout(pad=1.2)
             path = Path(output_dir) / "reader_joint_trajectories.png"
@@ -781,7 +791,10 @@ def joint_trajectory_evidence_table(figure):
         support = record.get("support") or {}
         n = "/".join(f"{record[f'{g}_n']:g}" if record.get(f"{g}_n") is not None else "NA" for g in ("control", "treatment"))
         q = record.get("q")
-        return f"{value:+.3f}; {n}; {q:.3g}" if value is not None and q is not None else f"{value:+.3f}; {n}; NA" if value is not None else "NA (" + str(support.get("missing_reason") or "not available").replace("_", " ") + ")"
+        text = f"{value:+.3f}; {n}; {q:.3g}" if value is not None and q is not None else f"{value:+.3f}; {n}; NA" if value is not None else "NA (" + str(support.get("missing_reason") or "not available").replace("_", " ") + ")"
+        if all(support.get(f"{g}_biological_n") is not None for g in ("control", "treatment")):
+            text += f"; biological n {support['control_biological_n']}/{support['treatment_biological_n']}"
+        return text
     for (fid, condition), records in grouped.items():
         lines.append("| " + fid + " / " + condition + " | " + " | ".join(cell(records.get(axis, {})) for axis in ("unadjusted", "protein", "adjusted")) + " |")
     return "\n".join(lines) + "\n\nCounts are axis-specific contributing sample observations (control/treatment), not inferred biological replicates. NA denotes unavailable, not zero or non-significance. Point q-values do not test a trajectory or the adjustment effect.\n"

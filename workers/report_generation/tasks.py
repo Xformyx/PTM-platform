@@ -812,11 +812,8 @@ def run_report_generation(self, order_id: int, config: dict):
             report_release_requires_warning,
             resolve_report_release,
         )
-        reader_authoring_shadow = str(
-            config.get("reader_authoring_mode")
-            or (config.get("report_config") or {}).get("reader_authoring_mode")
-            or ""
-        ).strip().lower() == "shadow"
+        from ptm_shared.report_mode import is_reader_mode
+        reader_authoring_shadow = is_reader_mode(config)
 
         # v11.8: Save TF inference data to signal_propagation_data (append tf_inferences key)
         _tf_inf = final_state.get("tf_inference_data") or {}
@@ -1010,72 +1007,23 @@ def run_report_generation(self, order_id: int, config: dict):
                     "reason_codes": [f"artifact_manifest_build_failed:{type(manifest_error).__name__}"],
                 }
 
-        report_release = resolve_report_release(
-            reader_authoring_shadow=reader_authoring_shadow,
-            output_correctness=final_state.get("report_output_correctness"),
-            artifact_manifest=artifact_manifest,
+        from report_generation.core.report_finalization import finalize_report_revision
+        finalization = finalize_report_revision(
+            source_paths=final_state.get("report_files") or [], output_dir=order_output,
+            correctness=final_state.get("report_output_correctness"), manifest=artifact_manifest,
+            figure_manifest=final_state.get("figure_manifest") or {}, reader_mode=reader_authoring_shadow,
+            requested_formats=(config.get("report_config") or {}).get("requested_formats", ["docx", "html"]),
+            references=final_state.get("collected_references") or [],
         )
+        artifact_manifest = finalization["manifest"]
+        report_release = finalization["release"]
         final_export_allowed = report_artifact_export_allowed(report_release)
-        if not final_export_allowed:
-            logger.error("[Order %s] Report artifacts withheld because rendered output is structurally unsafe: %s", order_id, report_release.get("reason_codes"))
-        elif not report_release.get("publish_as_final"):
-            logger.warning(
-                "[Order %s] Review MD/HTML/DOCX will be exported, but final publication approval is blocked: %s",
-                order_id,
-                report_release.get("reason_codes"),
-            )
-
-        rendered_paths = []
-        if final_export_allowed:
-            # Convert report to Word (.docx)
-            try:
-                from common.markdown_to_docx import convert_report_to_docx
-                for rpt_path in final_state.get("report_files", []):
-                    if rpt_path and Path(rpt_path).exists() and rpt_path.endswith(".md"):
-                        docx_out = convert_report_to_docx(rpt_path, str(order_output))
-                        if docx_out:
-                            rendered_paths.append(docx_out)
-                            logger.info(f"[Order {order_id}] Word export: {Path(docx_out).name}")
-            except Exception as docx_err:
-                logger.warning(f"[Order {order_id}] Word export skipped: {docx_err}")
-
-            # Convert report to HTML (interactive: ref links, article modal, zoom, sidebar)
-            try:
-                from common.markdown_to_html import convert_report_to_html
-                refs = final_state.get("collected_references") or []
-                for rpt_path in final_state.get("report_files", []):
-                    if rpt_path and Path(rpt_path).exists() and rpt_path.endswith(".md"):
-                        html_out = convert_report_to_html(
-                            rpt_path,
-                            output_dir=str(order_output),
-                            references=refs,
-                            api_base_url="/api",
-                        )
-                        if html_out:
-                            rendered_paths.append(html_out)
-                            logger.info(f"[Order {order_id}] HTML export: {Path(html_out).name}")
-                            break
-            except Exception as html_err:
-                logger.warning(f"[Order {order_id}] HTML export skipped: {html_err}")
-
-        if artifact_manifest and final_export_allowed:
-            from report_generation.core.report_artifact_manifest import finalize_rendered_artifacts
-            artifact_manifest = finalize_rendered_artifacts(artifact_manifest, rendered_paths, final_state.get("figure_manifest") or {})
-            final_state["report_artifact_manifest"] = artifact_manifest
-
-        # Collect output files
-        report_files = final_state.get("report_files", [])
-        output_file_names = [Path(f).name for f in report_files if f] if final_export_allowed else []
-        if final_export_allowed:
-            for f in order_output.glob("*.docx"):
-                if f.name not in output_file_names:
-                    output_file_names.append(f.name)
-            for rpt_path in final_state.get("report_files", []):
-                if rpt_path and str(rpt_path).endswith(".md"):
-                    html_name = Path(rpt_path).stem + ".html"
-                    if (order_output / html_name).exists() and html_name not in output_file_names:
-                        output_file_names.append(html_name)
-                    break
+        final_state["pre_export_release"] = finalization["pre_export_release"]
+        final_state["report_artifact_manifest"] = artifact_manifest
+        final_state["report_release"] = report_release
+        report_files = finalization["files"]
+        final_state["report_files"] = report_files
+        output_file_names = [Path(f).name for f in report_files]
 
         elapsed = round(time.time() - start_time, 1)
 
@@ -1209,12 +1157,17 @@ def run_report_generation(self, order_id: int, config: dict):
             "publish_as_final": bool(report_release.get("publish_as_final")),
         }
         progress_metadata["report_release"] = report_release
+        progress_metadata["pre_export_release"] = finalization["pre_export_release"]
         if artifact_manifest:
             progress_metadata["report_artifact_manifest"] = {
                 "status": artifact_manifest.get("status"),
                 "reason_codes": list(artifact_manifest.get("reason_codes") or []),
                 "report_run_fingerprint": artifact_manifest.get("report_run_fingerprint"),
                 "manifest_path": artifact_manifest.get("manifest_path"),
+                "render_status": artifact_manifest.get("render_status"),
+                "requested_formats": artifact_manifest.get("requested_formats"),
+                "actual_formats": artifact_manifest.get("actual_formats"),
+                "export_failures": artifact_manifest.get("export_failures"),
             }
         if fallback_sections:
             progress_metadata["llm_fallback_sections"] = fallback_sections
@@ -1226,7 +1179,10 @@ def run_report_generation(self, order_id: int, config: dict):
             metadata=progress_metadata,
         )
 
-        all_output_files = [f.name for f in order_output.iterdir() if f.is_file() and f.suffix in (".md", ".docx", ".html", ".json", ".tsv", ".txt", ".png")]
+        all_output_files = sorted(set(output_file_names) | {
+            f.name for f in order_output.iterdir() if f.is_file()
+            and f.suffix in (".json", ".tsv", ".txt", ".png")
+        })
         result_data = {
             "report_files": output_file_names,
             "all_files": all_output_files,
@@ -1239,6 +1195,7 @@ def run_report_generation(self, order_id: int, config: dict):
         result_data["citation_completeness"] = progress_metadata["citation_completeness"]
         result_data["report_output_correctness"] = progress_metadata["report_output_correctness"]
         result_data["report_release"] = report_release
+        result_data["pre_export_release"] = finalization["pre_export_release"]
         if artifact_manifest:
             result_data["report_artifact_manifest"] = progress_metadata.get("report_artifact_manifest")
         if not final_export_allowed:

@@ -1,3 +1,5 @@
+import { QuantitationEvidenceTable } from "../components/QuantitationEvidenceTable";
+import { sampledExtremumIndex, expandContextSelection, featureKey, axisValue, axisQ, axisPrefix, axisLabel, finite, supportedChange, type QuantAxis, type QuantRow } from "../lib/quantitation";
 import { useEffect, useRef, useState, useMemo } from "react";
 /**
  * Design: evidence-first analysis workspace. New Atlas views use an asymmetric
@@ -929,7 +931,7 @@ function VectorPlotImage({ orderId, filename }: { orderId: number; filename: str
 
 const SCATTER_PALETTE = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf"];
 
-type VectorRow = {
+type VectorRow = QuantRow & {
   gene: string;
   position: string;
   condition: string;
@@ -952,7 +954,7 @@ type VectorRow = {
 function ScatterPlotsInteractive({ orderId, orderStatus }: { orderId: number; orderStatus?: string }) {
   const [data, setData] = useState<{ vector_data: VectorRow[] } | null>(null);
   const [loading, setLoading] = useState(true);
-  const [metric, setMetric] = useState<"relative" | "absolute" | "occupancy">("relative");
+  const [metric, setMetric] = useState<"relative" | "unadjusted" | "occupancy">("relative");
   const [zoom, setZoom] = useState(1); // 1 = auto, zoom in = narrower range
 
   useEffect(() => {
@@ -989,31 +991,32 @@ function ScatterPlotsInteractive({ orderId, orderStatus }: { orderId: number; or
   ).sort((a, b) => parseTimeOrder(a) - parseTimeOrder(b));
 
   const yKey = metric === "relative"
-    ? "ptm_relative_log2fc"
-    : metric === "absolute"
-      ? "ptm_absolute_log2fc"
+    ? "ptm_protein_adjusted_log2fc"
+    : metric === "unadjusted"
+      ? "ptm_unadjusted_log2fc"
       : "occupancy_logit_delta";
   const occupancyAvailable = data.vector_data.some((row) => (
     row.pair_quality_tier === "O1" || row.pair_quality_tier === "O2"
   ) && row.occupancy_logit_delta != null);
   const metricLabel = metric === "relative"
-    ? "PTM Relative"
-    : metric === "absolute"
-      ? "PTM Absolute"
+    ? "Protein-adjusted PTM (A)"
+    : metric === "unadjusted"
+      ? "Independent PTM (U)"
       : "Paired Occupancy (apparent)";
 
   const chartsByCond = conditions.map((cond) => {
     const rows = data.vector_data.filter((r) => (
-      r.condition === cond
+      r.condition === cond && finite(r.protein_log2fc) && finite(r[yKey])
+      && (metric === "occupancy" || axisValue(r, metric) !== null)
       && (metric !== "occupancy" || (
         (r.pair_quality_tier === "O1" || r.pair_quality_tier === "O2")
         && r.occupancy_logit_delta != null
       ))
     ));
     const points = rows.map((r) => ({
-      x: r.protein_log2fc ?? 0,
-      y: (r[yKey as keyof VectorRow] as number) ?? 0,
-      name: `${r.gene} ${r.position}`.trim() || `${r.gene}${r.position}`,
+      x: r.protein_log2fc,
+      y: r[yKey] as number,
+      name: `${r.gene} ${r.position} · ${featureKey(r)}`,
       pairTier: r.pair_quality_tier || "O0",
       calibration: r.occupancy_calibration_type || "none",
       occupancyPercent: r.occupancy_percent,
@@ -1027,12 +1030,12 @@ function ScatterPlotsInteractive({ orderId, orderStatus }: { orderId: number; or
       && row.occupancy_logit_delta != null
     ))
     : data.vector_data;
-  const allX = metricRows.map((r) => r.protein_log2fc ?? 0);
-  const allY = metricRows.map((r) => (r[yKey as keyof VectorRow] as number) ?? 0);
-  const xMin = Math.min(...allX);
-  const xMax = Math.max(...allX);
-  const yMin = Math.min(...allY);
-  const yMax = Math.max(...allY);
+  const allX = chartsByCond.flatMap(c => c.points.map(p => p.x));
+  const allY = chartsByCond.flatMap(c => c.points.map(p => p.y));
+  const xMin = allX.length ? Math.min(...allX) : -1;
+  const xMax = allX.length ? Math.max(...allX) : 1;
+  const yMin = allY.length ? Math.min(...allY) : -1;
+  const yMax = allY.length ? Math.max(...allY) : 1;
   const pad = Math.max(0.3, (Math.max(xMax - xMin, yMax - yMin) || 2) * 0.1);
   const domainPadding = pad / zoom;
   const xDomain = [xMin - domainPadding, xMax + domainPadding];
@@ -1047,14 +1050,14 @@ function ScatterPlotsInteractive({ orderId, orderStatus }: { orderId: number; or
             size="sm"
             onClick={() => setMetric("relative")}
           >
-            PTM Relative
+            Protein-adjusted PTM (A)
           </Button>
           <Button
-            variant={metric === "absolute" ? "default" : "outline"}
+            variant={metric === "unadjusted" ? "default" : "outline"}
             size="sm"
-            onClick={() => setMetric("absolute")}
+            onClick={() => setMetric("unadjusted")}
           >
-            PTM Absolute
+            Independent PTM (U)
           </Button>
           <Button
             variant={metric === "occupancy" ? "default" : "outline"}
@@ -1105,7 +1108,7 @@ function ScatterPlotsInteractive({ orderId, orderStatus }: { orderId: number; or
                     <YAxis
                       type="number"
                       dataKey="y"
-                      name={metric === "occupancy" ? "Occupancy logit delta" : metric === "relative" ? "PTM Relative Log2FC" : "PTM Absolute Log2FC"}
+                      name={metric === "occupancy" ? "Occupancy logit delta" : metric === "relative" ? "Protein-adjusted PTM (A) Log2FC" : "Independent PTM (U) Log2FC"}
                       domain={yDomain}
                       tick={{ fontSize: 10 }}
                     />
@@ -1128,7 +1131,7 @@ function ScatterPlotsInteractive({ orderId, orderStatus }: { orderId: number; or
                       <ReferenceLine key={y} y={y} stroke="#ef4444" strokeDasharray={y === 0 ? undefined : "3 3"} strokeOpacity={0.5} />
                     ))}
                     {metric === "relative" && <ReferenceLine x={0} stroke="#ef4444" strokeDasharray="3 3" strokeOpacity={0.5} />}
-                    {metric === "absolute" && (
+                    {metric === "unadjusted" && (
                       <>
                         <ReferenceLine x={0} stroke="#ef4444" strokeDasharray="3 3" strokeOpacity={0.5} />
                         <ReferenceLine y={0} stroke="#ef4444" strokeDasharray="3 3" strokeOpacity={0.5} />
@@ -1377,7 +1380,7 @@ function RoleBadge({ role, ubiContext, confidence, isUbi }: { role: string; ubiC
 }
 
 /** API vector-plot row (numeric columns + optional stats from preprocessing v9.25+) */
-type TopNVectorPlotRow = {
+type TopNVectorPlotRow = QuantRow & {
   gene: string;
   position: string;
   condition: string;
@@ -1423,8 +1426,8 @@ type DivergencePattern =
 
 interface SitePairEntry {
   gene: string;
-  siteA: { position: string; label: string; waveLabel: string; peakCondition: string; peakFC: number; isDeNovo: boolean; activityClass: "de_novo" | "regulated" | "minor" };
-  siteB: { position: string; label: string; waveLabel: string; peakCondition: string; peakFC: number; isDeNovo: boolean; activityClass: "de_novo" | "regulated" | "minor" };
+  siteA: { feature_id?: string; position: string; label: string; waveLabel: string; peakCondition: string; peakFC: number; isDeNovo: boolean; activityClass: "de_novo" | "regulated" | "minor" };
+  siteB: { feature_id?: string; position: string; label: string; waveLabel: string; peakCondition: string; peakFC: number; isDeNovo: boolean; activityClass: "de_novo" | "regulated" | "minor" };
   pattern: DivergencePattern;
   description: string;
   // v12.1 enhancements
@@ -1529,7 +1532,7 @@ function canonicalDivergenceToEntry(pair: any): SitePairEntry | null {
 }
 
 function computeMultiSiteDivergence(
-  uniquePtms: Array<{ gene: string; position: string; label: string }>,
+  uniquePtms: Array<{ feature_id?: string; gene: string; position: string; label: string }>,
   vectorByPtm: Map<string, VectorPlotPoint[]>,
   conditions: string[],
   ptmActivityClass: Map<string, "de_novo" | "regulated" | "minor">,
@@ -1540,18 +1543,13 @@ function computeMultiSiteDivergence(
   // Assign each PTM to a wave module (peak condition index)
   const ptmPeak = new Map<string, { condIdx: number; peakCondition: string; peakFC: number }>();
   uniquePtms.forEach((p) => {
-    const key = `${p.gene}_${p.position}`;
+    const key = featureKey(p);
     const arr = vectorByPtm.get(key);
-    if (!arr) return;
-    let bestIdx = 0;
-    let bestAbs = 0;
-    conditions.forEach((cond, idx) => {
-      const row = arr.find((r) => r.condition === cond);
-      const v = row?.value ?? 0;
-      if (Math.abs(v) > bestAbs) { bestAbs = Math.abs(v); bestIdx = idx; }
-    });
-    const peakRow = arr.find((r) => r.condition === conditions[bestIdx]);
-    ptmPeak.set(key, { condIdx: bestIdx, peakCondition: conditions[bestIdx], peakFC: peakRow?.value ?? 0 });
+    if (!arr || conditions.some(c => !arr.some(r => r.condition === c && finite(r.value)))) return;
+    const values = conditions.map(cond => arr.find(r => r.condition === cond)?.value ?? null);
+    const bestIdx = sampledExtremumIndex(values);
+    if (bestIdx === null) return;
+    ptmPeak.set(key, { condIdx: bestIdx, peakCondition: conditions[bestIdx], peakFC: values[bestIdx]! });
   });
 
   // Group PTMs by gene
@@ -1570,8 +1568,8 @@ function computeMultiSiteDivergence(
       for (let j = i + 1; j < sites.length; j++) {
         const pA = sites[i];
         const pB = sites[j];
-        const keyA = `${pA.gene}_${pA.position}`;
-        const keyB = `${pB.gene}_${pB.position}`;
+        const keyA = featureKey(pA);
+        const keyB = featureKey(pB);
         const pairKey = [keyA, keyB].sort().join("|");
         if (seenPairs.has(pairKey)) continue;
         seenPairs.add(pairKey);
@@ -1653,42 +1651,15 @@ function computeMultiSiteDivergence(
         // v12.1 #5: Resolution warning
         const resolutionWarning = conditions.length <= 3 ? `LOW RESOLUTION: Only ${conditions.length} timepoints` : null;
 
-        // v12.1 #6: Permutation p-value
-        let pValue: number | null = null;
-        let isSignificant: boolean | null = null;
-        const keyEarly = `${gene}_${early.position}`;
-        const keyLate = `${gene}_${late.position}`;
-        const arrEarly = vectorByPtm.get(keyEarly);
-        const arrLate = vectorByPtm.get(keyLate);
-        if (arrEarly && arrLate && conditions.length >= 3) {
-          const valsE = conditions.map((c) => arrEarly.find((r) => r.condition === c)?.value ?? 0);
-          const valsL = conditions.map((c) => arrLate.find((r) => r.condition === c)?.value ?? 0);
-          const obsDivergence = valsE.reduce((sum, v, i) => sum + (v - valsL[i]) ** 2, 0);
-          const combined = [...valsE, ...valsL];
-          const half = valsE.length;
-          let countGE = 0;
-          const nPerm = 500; // reduced for frontend performance
-          // Simple seeded PRNG (xorshift32)
-          let seed = 42;
-          const xorshift = () => { seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5; return (seed >>> 0) / 4294967296; };
-          for (let p = 0; p < nPerm; p++) {
-            // Fisher-Yates shuffle
-            const perm = [...combined];
-            for (let i = perm.length - 1; i > 0; i--) {
-              const j = Math.floor(xorshift() * (i + 1));
-              [perm[i], perm[j]] = [perm[j], perm[i]];
-            }
-            const permDiv = perm.slice(0, half).reduce((sum, v, i) => sum + (v - perm[half + i]) ** 2, 0);
-            if (permDiv >= obsDivergence) countGE++;
-          }
-          pValue = Math.round(((countGE + 1) / (nPerm + 1)) * 10000) / 10000;
-          isSignificant = pValue < 0.05;
-        }
+        // Timepoints and forms are not independent biological units. The
+        // browser reports descriptive separation, without a pooled-time p-value.
+        const pValue = null;
+        const isSignificant = null;
 
         results.push({
           gene,
-          siteA: { position: early.position, label: early.label, waveLabel: `Trajectory peak (${earlyPeak.peakCondition})`, peakCondition: earlyPeak.peakCondition, peakFC: earlyPeak.peakFC, isDeNovo: earlyDeNovo, activityClass: earlyAC },
-          siteB: { position: late.position, label: late.label, waveLabel: `Trajectory peak (${latePeak.peakCondition})`, peakCondition: latePeak.peakCondition, peakFC: latePeak.peakFC, isDeNovo: lateDeNovo, activityClass: lateAC },
+          siteA: { feature_id: early.feature_id, position: early.position, label: early.label, waveLabel: `Trajectory peak (${earlyPeak.peakCondition})`, peakCondition: earlyPeak.peakCondition, peakFC: earlyPeak.peakFC, isDeNovo: earlyDeNovo, activityClass: earlyAC },
+          siteB: { feature_id: late.feature_id, position: late.position, label: late.label, waveLabel: `Trajectory peak (${latePeak.peakCondition})`, peakCondition: latePeak.peakCondition, peakFC: latePeak.peakFC, isDeNovo: lateDeNovo, activityClass: lateAC },
           pattern,
           description,
           confidenceTier,
@@ -1738,6 +1709,7 @@ function SiteSpark({
   isActivating: boolean;
 }) {
   if (values.length < 2) return null;
+  if (!values.every(finite)) return <span className="text-xs">Partial observations — see time chart</span>;
   const maxAbs = Math.max(...values.map(Math.abs), 0.1);
   const pad = 3;
   const w = width - pad * 2;
@@ -1778,7 +1750,7 @@ function MultiSiteDivergencePanel({
   canonicalPairs,
   onHighlightPtms,
 }: {
-  uniquePtms: Array<{ gene: string; position: string; label: string }>;
+  uniquePtms: Array<{ feature_id?: string; gene: string; position: string; label: string }>;
   vectorByPtm: Map<string, VectorPlotPoint[]>;
   conditions: string[];
   ptmActivityClass: Map<string, "de_novo" | "regulated" | "minor">;
@@ -1816,12 +1788,12 @@ function MultiSiteDivergencePanel({
     const siteMap = new Map<string, (typeof geneSites extends Map<string, Array<infer T>> ? T : never)>();
     geneEntries.forEach((e) => {
       [e.siteA, e.siteB].forEach((s) => {
-        if (!siteMap.has(s.position)) {
-          const key = `${gene}_${s.position}`;
+        if (!siteMap.has(s.feature_id || s.label)) {
+          const key = featureKey({ gene, position: s.position, feature_id: s.feature_id });
           const arr = vectorByPtm.get(key) ?? [];
-          const values = conditions.map((c) => arr.find((r) => r.condition === c)?.value ?? 0);
+          const values = conditions.map((c) => arr.find((r) => r.condition === c)?.value ?? Number.NaN);
           const peakCondIdx = conditions.indexOf(s.peakCondition);
-          siteMap.set(s.position, {
+          siteMap.set(s.feature_id || s.label, {
             position: s.position,
             label: s.label,
             peakFC: s.peakFC,
@@ -1994,7 +1966,7 @@ function MultiSiteDivergencePanel({
 
               // Build a map for connector endpoint lookup
               const siteYMap = new Map<string, { cx: number; cy: number; r: number }>();
-              sitePositions.forEach((s) => siteYMap.set(s.position, { cx: s.cx, cy: s.cy, r: s.r }));
+              sitePositions.forEach((s) => siteYMap.set(s.label, { cx: s.cx, cy: s.cy, r: s.r }));
 
               return (
                 <div
@@ -2028,16 +2000,16 @@ function MultiSiteDivergencePanel({
                       stroke="currentColor" strokeOpacity="0.12" strokeWidth="1"
                     />
                     {/* Activation zone label */}
-                    <text x={4} y={Math.max(12, centerY - 6)} fontSize="8" fill="#ef4444" opacity="0.5" fontWeight="600">ACT</text>
+                    <text x={4} y={Math.max(12, centerY - 6)} fontSize="8" fill="#ef4444" opacity="0.5" fontWeight="600">POS</text>
                     {/* Inhibition zone label */}
-                    <text x={4} y={Math.min(totalH - 4, centerY + 14)} fontSize="8" fill="#3b82f6" opacity="0.5" fontWeight="600">INH</text>
+                    <text x={4} y={Math.min(totalH - 4, centerY + 14)} fontSize="8" fill="#3b82f6" opacity="0.5" fontWeight="600">NEG</text>
 
                     {/* Connector lines between paired sites */}
                     {geneEntries
                       .filter((e) => patternFilter === "all" || e.pattern === patternFilter)
                       .map((e, ei) => {
-                        const posA = siteYMap.get(e.siteA.position);
-                        const posB = siteYMap.get(e.siteB.position);
+                        const posA = siteYMap.get(e.siteA.label);
+                        const posB = siteYMap.get(e.siteB.label);
                         if (!posA || !posB) return null;
                         const color = connectorColor(e.pattern);
                         const markerId = `arrow-${gene}-${ei}`;
@@ -2099,7 +2071,7 @@ function MultiSiteDivergencePanel({
 
                       return (
                         <g
-                          key={site.position}
+                          key={site.label}
                           className="cursor-pointer"
                           onClick={() => onHighlightPtms([site.label])}
                         >
@@ -2145,7 +2117,7 @@ function MultiSiteDivergencePanel({
                       const isAct = site.peakFC > 0;
                       return (
                         <div
-                          key={site.position}
+                          key={site.label}
                           className="flex items-center gap-1 cursor-pointer"
                           onClick={() => onHighlightPtms([site.label])}
                           title={`${site.label} time-series`}
@@ -2228,6 +2200,7 @@ function MultiSiteDivergencePanel({
 function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId: number; ptmType?: string }) {
   const isUbi = ptmType.toLowerCase().includes("ubiquityl") || ptmType.toLowerCase().includes("ubiquitin");
   type TopNPtmMeta = {
+    feature_id?: string;
     gene: string;
     position: string;
     label: string;
@@ -2245,7 +2218,7 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
   const [data, setData] = useState<{ vector_data: TopNVectorPlotRow[]; top_n_ptms: TopNPtmMeta[]; suggested_n?: number | null; top_n_setting?: number; source?: string; inferred_receptors?: Array<{ name: string; receptor_class: string; downstream_ptm_count: number; downstream_ptms: string[]; via_kinases?: string[]; pathway?: string; signaling_pathway?: string; source?: string }>; divergence_pairs?: any[] } | null>(null);
   const [loading, setLoading] = useState(true);
   const [checked, setChecked] = useState<Record<string, boolean>>({});
-  const [metric, setMetric] = useState<"relative" | "absolute">("relative");
+  const [metric, setMetric] = useState<QuantAxis>("relative");
   const [trendFilter, setTrendFilter] = useState<TrendCategory | "all">("all");
   const [yZoom, setYZoom] = useState(1); // 1 = default, <1 = zoom in (narrower range), >1 = zoom out (wider range)
   const [hoveredPtm, setHoveredPtm] = useState<string | null>(null);
@@ -2296,11 +2269,11 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
           source: d.source,
           inferred_receptors: d.inferred_receptors || [],
         });
-        // Deduplicate by gene_position key — keep first occurrence
+        // Deduplicate canonical feature metadata
         const seen = new Set<string>();
         const init: Record<string, boolean> = {};
         (d.top_n_ptms || []).forEach((p) => {
-          const key = `${p.gene}_${p.position}`;
+          const key = featureKey(p);
           if (!seen.has(key)) {
             seen.add(key);
             init[key] = true;
@@ -2334,18 +2307,18 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
     );
   }
 
-  const valueKey = metric === "relative" ? "ptm_relative_log2fc" : "ptm_absolute_log2fc";
 
-  // Deduplicate top_n_ptms by gene_position
+
+  // Deduplicate top_n_ptms by canonical feature identity
   const seenKeys = new Set<string>();
   const uniquePtms = data.top_n_ptms.filter((p) => {
-    const key = `${p.gene}_${p.position}`;
+    const key = featureKey(p);
     if (seenKeys.has(key)) return false;
     seenKeys.add(key);
     return true;
   });
 
-  const topNSet = new Set(uniquePtms.map((p) => `${p.gene}_${p.position}`));
+  const topNSet = new Set(uniquePtms.map((p) => featureKey(p)));
   const vectorByPtm = new Map<string, Array<{
     condition: string;
     value: number;
@@ -2357,14 +2330,14 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
   // Track which PTMs had control pseudocount imputation (de novo flag from preprocessing)
   const ptmPseudocountUsed = new Map<string, boolean>();
   // v9.25: Track minimum q_value per PTM across conditions
-  const ptmMinQValue = new Map<string, number | null>();
+
 
   data.vector_data.forEach((row) => {
-    const key = `${row.gene}_${row.position}`;
+    const key = featureKey(row);
     if (!topNSet.has(key)) return;
     if (!vectorByPtm.has(key)) vectorByPtm.set(key, []);
-    const isDenovo = Boolean(row.conventional_log2fc_na || row.control_pseudocount_used);
-    let value = row[valueKey as keyof typeof row] as number;
+    const isDenovo = metric !== "protein" && Boolean(row.conventional_log2fc_na || row.control_pseudocount_used);
+    let value = axisValue(row, metric);
     let axis: "log2fc" | "lod_relative" | "log2_intensity" = "log2fc";
     if (isDenovo) {
       if (activityFilter === "de_novo" && row.normalized_log2_intensity != null) {
@@ -2374,10 +2347,11 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
         value = row.lod_relative_log2;
         axis = "lod_relative";
       } else {
-        value = 0;
+        value = null;
         axis = "lod_relative";
       }
     }
+    if (!finite(value)) return;
     vectorByPtm.get(key)!.push({
       condition: row.condition,
       value,
@@ -2387,12 +2361,8 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
       lodRelative: row.lod_relative_log2,
     });
     // If any condition row for this PTM has control_pseudocount_used=true, mark it
-    if (row.control_pseudocount_used || row.conventional_log2fc_na) ptmPseudocountUsed.set(key, true);
-    // Track minimum q_value across conditions for this PTM
-    if (row.q_value != null && !isNaN(row.q_value)) {
-      const prev = ptmMinQValue.get(key);
-      if (prev == null || row.q_value < prev) ptmMinQValue.set(key, row.q_value);
-    }
+    if (isDenovo) ptmPseudocountUsed.set(key, true);
+
   });
 
   const conditions = Array.from(
@@ -2403,83 +2373,34 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
   const p1PatternMap = new Map<string, string>();
   data.top_n_ptms.forEach((p) => {
     const pat = (p as any).p1_pattern as string | undefined;
-    if (pat) p1PatternMap.set(`${p.gene}_${p.position}`, pat);
+    if (metric === "relative" && pat) p1PatternMap.set(featureKey(p), pat);
   });
 
   // Classify each PTM trend — prefer P1 server pattern when available
   const ptmTrends = new Map<string, TrendCategory>();
   uniquePtms.forEach((p) => {
-    const key = `${p.gene}_${p.position}`;
+    const key = featureKey(p);
     // P1 adapter: use server-side canonical pattern when present
     const p1Trend = p1PatternToTrend(p1PatternMap.get(key));
     if (p1Trend !== null) { ptmTrends.set(key, p1Trend); return; }
     const arr = vectorByPtm.get(key);
     if (!arr) { ptmTrends.set(key, "other"); return; }
-    const sorted = conditions.map((c) => arr.find((r) => r.condition === c)?.value ?? 0);
-    ptmTrends.set(key, classifyTrend(sorted));
+    const sorted = conditions.map((c) => arr.find((r) => r.condition === c)?.value);
+    ptmTrends.set(key, sorted.every(finite) ? classifyTrend(sorted) : "other");
   });
 
-  // v9.25: Bimodal activity classification per PTM (updated with q_value support)
-  // ── 2-pass activity classification (matches RAG worker logic) ──────────────
-  // Pass 1: Strict (q_value < 0.05 AND |FC| >= 1.0)
-  // Pass 2: If Pass 1 yields 0 regulated, relax to |FC| >= 0.8
+  // Pointwise effect and q are evaluated together on the displayed axis.
   const ptmActivityClass = new Map<string, "de_novo" | "regulated" | "minor">();
-  const _hasAnyQValue = Array.from(ptmMinQValue.values()).some((v) => v != null);
-
-  // Pass 1: classify all PTMs
-  uniquePtms.forEach((p) => {
-    const key = `${p.gene}_${p.position}`;
-    const arr = vectorByPtm.get(key);
-    if (!arr || !conditions.length) { ptmActivityClass.set(key, "minor"); return; }
-    const maxVal = Math.max(...arr.map((r) => r.value));
-    const minVal = Math.min(...arr.map((r) => r.value));
-    const baselineVal = arr.find((r) => r.condition === conditions[0])?.value ?? 0;
-    const maxAbsLog2FC = Math.max(Math.abs(maxVal), Math.abs(minVal));
-    const minQVal = ptmMinQValue.get(key);
-    const hasQValue = minQVal != null;
-
-    // Primary: use preprocessing imputation flag (most accurate for de novo)
-    if (ptmPseudocountUsed.get(key)) {
-      ptmActivityClass.set(key, "de_novo");
-    } else if (hasQValue) {
-      // q_value available: Regulated = |Log2FC| >= 1.0 AND q_value < 0.05
-      if (maxAbsLog2FC >= 1.0 && minQVal < 0.05) {
-        ptmActivityClass.set(key, "regulated");
-      } else {
-        ptmActivityClass.set(key, "minor");
-      }
-    } else {
-      // Fallback (old data without q_value): use maxAbsChange > 0.8
-      const maxAbsChange = Math.max(Math.abs(maxVal - baselineVal), Math.abs(minVal - baselineVal));
-      if (maxAbsChange > 0.8) {
-        ptmActivityClass.set(key, "regulated");
-      } else {
-        ptmActivityClass.set(key, "minor");
-      }
-    }
+  uniquePtms.forEach(p => {
+    const key = featureKey(p);
+    const rows = data.vector_data.filter(row => featureKey(row) === key);
+    ptmActivityClass.set(key, ptmPseudocountUsed.get(key) ? "de_novo" : supportedChange(rows, metric) ? "regulated" : "minor");
   });
-
-  // Pass 2: if q_value data exists but yielded 0 regulated, re-classify with |FC| >= 0.8
-  const _regulatedCount = Array.from(ptmActivityClass.values()).filter((v) => v === "regulated").length;
-  if (_hasAnyQValue && _regulatedCount === 0) {
-    uniquePtms.forEach((p) => {
-      const key = `${p.gene}_${p.position}`;
-      if (ptmActivityClass.get(key) === "de_novo") return; // keep de_novo
-      const arr = vectorByPtm.get(key);
-      if (!arr || !conditions.length) return;
-      const maxAbsLog2FC = Math.max(...arr.map((r) => Math.abs(r.value)));
-      if (maxAbsLog2FC >= 0.8) {
-        ptmActivityClass.set(key, "regulated");
-      } else {
-        ptmActivityClass.set(key, "minor");
-      }
-    });
-  }
 
   // Convert highlighted label set → gene_position key set (for KinaseModuleAnalysis button state)
   const highlightedPtmKeySet = (() => {
     if (highlightedModulePtmLabels.size === 0) return new Set<string>();
-    const labelToKey = new Map(uniquePtms.map((p) => [p.label, `${p.gene}_${p.position}`]));
+    const labelToKey = new Map(uniquePtms.map((p) => [p.label, featureKey(p)]));
     const keys = new Set<string>();
     highlightedModulePtmLabels.forEach((lbl) => {
       const k = labelToKey.get(lbl);
@@ -2490,25 +2411,25 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
 
   // Filter PTMs by trend category AND activity filter
   const filteredPtms = uniquePtms.filter((p) => {
-    const key = `${p.gene}_${p.position}`;
+    const key = featureKey(p);
     const trendOk = trendFilter === "all" || ptmTrends.get(key) === trendFilter;
     const actOk = activityFilter === "all" || ptmActivityClass.get(key) === activityFilter;
     return trendOk && actOk;
   });
 
   const chartData = conditions.map((cond) => {
-    const point: Record<string, string | number> = { condition: cond };
+    const point: Record<string, string | number | null> = { condition: cond };
     filteredPtms.forEach((p) => {
-      const key = `${p.gene}_${p.position}`;
+      const key = featureKey(p);
       if (!checked[key]) return;
       const arr = vectorByPtm.get(key);
       const row = arr?.find((r) => r.condition === cond);
-      point[p.label] = row ? row.value : 0;
+      point[p.label] = row ? row.value : null;
     });
     return point;
   });
 
-  const visibleLabels = filteredPtms.filter((p) => checked[`${p.gene}_${p.position}`]).map((p) => p.label);
+  const visibleLabels = filteredPtms.filter((p) => checked[featureKey(p)]).map((p) => p.label);
 
   // v9.28: Activity class-based color palettes
   const AC_PALETTES: Record<string, string[]> = {
@@ -2526,7 +2447,7 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
   const colorMap = new Map<string, string>();
   const _acIdx: Record<string, number> = { de_novo: 0, regulated: 0, minor: 0 };
   uniquePtms.forEach((p) => {
-    const key = `${p.gene}_${p.position}`;
+    const key = featureKey(p);
     const ac = ptmActivityClass.get(key) || "minor";
     const palette = AC_PALETTES[ac] || AC_PALETTES.minor;
     colorMap.set(p.label, palette[_acIdx[ac] % palette.length]);
@@ -2536,27 +2457,27 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
   // Map label to activity class for line style lookup
   const labelToAC = new Map<string, string>();
   uniquePtms.forEach((p) => {
-    const key = `${p.gene}_${p.position}`;
+    const key = featureKey(p);
     labelToAC.set(p.label, ptmActivityClass.get(key) || "minor");
   });
 
   const toggle = (key: string) => setChecked((c) => ({ ...c, [key]: !c[key] }));
 
-  const allChecked = filteredPtms.every((p) => checked[`${p.gene}_${p.position}`]);
-  const noneChecked = filteredPtms.every((p) => !checked[`${p.gene}_${p.position}`]);
+  const allChecked = filteredPtms.every((p) => checked[featureKey(p)]);
+  const noneChecked = filteredPtms.every((p) => !checked[featureKey(p)]);
 
   const toggleAll = () => {
     const newVal = !allChecked;
     setChecked((c) => {
       const next = { ...c };
-      filteredPtms.forEach((p) => { next[`${p.gene}_${p.position}`] = newVal; });
+      filteredPtms.forEach((p) => { next[featureKey(p)] = newVal; });
       return next;
     });
   };
 
   // Compute Y-axis domain with padding and zoom
   const allValues = visibleLabels.flatMap((label) =>
-    chartData.map((d) => (typeof d[label] === "number" ? (d[label] as number) : 0))
+    chartData.map((d) => d[label]).filter(finite)
   );
   const yMin = allValues.length > 0 ? Math.min(...allValues) : -1;
   const yMax = allValues.length > 0 ? Math.max(...allValues) : 1;
@@ -2574,7 +2495,7 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
   // Count per trend category
   const trendCounts: Record<string, number> = { all: uniquePtms.length };
   uniquePtms.forEach((p) => {
-    const t = ptmTrends.get(`${p.gene}_${p.position}`) || "other";
+    const t = ptmTrends.get(featureKey(p)) || "other";
     trendCounts[t] = (trendCounts[t] || 0) + 1;
   });
 
@@ -2583,7 +2504,7 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
   const p1HasAny = p1PatternMap.size > 0;
   if (p1HasAny) {
     uniquePtms.forEach((p) => {
-      const key = `${p.gene}_${p.position}`;
+      const key = featureKey(p);
       const cat = ptmTrends.get(key) || "other";
       const pat = p1PatternMap.get(key);
       if (!pat) return;
@@ -2595,7 +2516,7 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
   // v9.23: Count per activity class
   const activityCounts: Record<string, number> = { all: uniquePtms.length, de_novo: 0, regulated: 0, minor: 0 };
   uniquePtms.forEach((p) => {
-    const a = ptmActivityClass.get(`${p.gene}_${p.position}`) || "minor";
+    const a = ptmActivityClass.get(featureKey(p)) || "minor";
     activityCounts[a] = (activityCounts[a] || 0) + 1;
   });
 
@@ -2630,15 +2551,16 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
             size="sm"
             onClick={() => setMetric("relative")}
           >
-            {isUbi ? "Ubi Site Relative Log2FC" : "PTM Relative Log2FC"}
+            {axisLabel.relative}
           </Button>
           <Button
-            variant={metric === "absolute" ? "default" : "outline"}
+            variant={metric === "unadjusted" ? "default" : "outline"}
             size="sm"
-            onClick={() => setMetric("absolute")}
+            onClick={() => setMetric("unadjusted")}
           >
-            {isUbi ? "Ubi Site Absolute Log2FC" : "PTM Absolute Log2FC"}
+            {axisLabel.unadjusted}
           </Button>
+          <Button variant={metric === "protein" ? "default" : "outline"} size="sm" onClick={() => setMetric("protein")}>{axisLabel.protein}</Button>
         </div>
         <Separator orientation="vertical" className="h-6" />
         <div className="flex flex-wrap gap-1.5">
@@ -2711,9 +2633,9 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
             className="text-xs h-7 px-2"
             style={activityFilter === "minor" ? { backgroundColor: "#2E7D32", borderColor: "#2E7D32" } : {}}
             onClick={() => setActivityFilter("minor")}
-            title="Small change — low significance"
+            title="Does not meet the displayed pointwise effect and q rule; missing q is not evidence of no change"
           >
-            Minor ({activityCounts.minor})
+            Other observations ({activityCounts.minor})
           </Button>
         </div>
         <div className="ml-auto">
@@ -2782,7 +2704,7 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
                 label={{
                   value: activityFilter === "de_novo"
                     ? "Normalized log2 intensity (de novo)"
-                    : "Log2FC (quantified) / LOD-relative ≥ (de novo)",
+                    : `${axisLabel[metric]} log2 contrast / LOD-relative ≥`,
                   angle: -90,
                   position: "insideLeft",
                   style: { fontSize: 10, fill: "hsl(var(--muted-foreground))" },
@@ -2809,7 +2731,7 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
                       <p style={{ margin: 0, fontWeight: 600, marginBottom: 4 }}>Time: {label}</p>
                       {(() => {
                         const meta = uniquePtms.find((p) => p.label === target.name);
-                        const key = meta ? `${meta.gene}_${meta.position}` : "";
+                        const key = meta ? featureKey(meta) : "";
                         const row = key ? vectorByPtm.get(key)?.find((r) => r.condition === label) : undefined;
                         const isDenovo = key ? ptmActivityClass.get(key) === "de_novo" : false;
                         const conf = (meta as { denovo_confidence?: string } | undefined)?.denovo_confidence
@@ -2872,13 +2794,15 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
                     return (
                       <Line
                         key={label}
-                        type="monotone"
+                        type="linear"
+                        connectNulls={false}
                         dataKey={label}
                         stroke={lineColor}
                         strokeWidth={baseWidth}
                         strokeDasharray={style.strokeDasharray}
                         dot={(dotProps: { cx?: number; cy?: number; payload?: Record<string, unknown> }) => {
-                          const key = `${filteredPtms.find((p) => p.label === label)?.gene}_${filteredPtms.find((p) => p.label === label)?.position}`;
+                          const meta = filteredPtms.find((p) => p.label === label);
+                          const key = meta ? featureKey(meta) : "";
                           const detN = vectorByPtm.get(key)?.find((r) => r.condition === dotProps.payload?.condition)?.detectionN;
                           const r = detN != null ? 2 + Number(detN) : dotR;
                           return (
@@ -2910,7 +2834,7 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
           </ResponsiveContainer>
           {hoveredPtm && (() => {
             const meta = uniquePtms.find((p) => p.label === hoveredPtm) as TopNPtmMeta | undefined;
-            const key = meta ? `${meta.gene}_${meta.position}` : "";
+            const key = meta ? featureKey(meta) : "";
             if (!meta || ptmActivityClass.get(key) !== "de_novo") return null;
             const pattern = meta.detection_pattern || vectorByPtm.get(key)?.map((r) => r.detection).filter(Boolean).join(" → ");
             if (!pattern) return null;
@@ -3002,7 +2926,7 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
           </details>
           <div className="max-h-[calc(100vh-400px)] min-h-[300px] overflow-y-auto space-y-0.5 rounded border p-2">
             {filteredPtms.map((p) => {
-              const key = `${p.gene}_${p.position}`;
+              const key = featureKey(p);
               const trend = ptmTrends.get(key) || "other";
               const actCls = ptmActivityClass.get(key) || "minor";
               const pc = p.protein_class;
@@ -3294,21 +3218,26 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
         />
       )}
 
+      <QuantitationEvidenceTable rows={data.vector_data.filter(row => checked[featureKey(row)])} />
+
       {/* ── Kinase / E3 Ligase Module Analysis Panel ── */}
       {conditions.length >= 3 && (
+        <div>
+        <p className="mb-2 text-xs text-muted-foreground">Kinase module analysis uses protein-adjusted PTM (A). The U/P/A selector above changes the observation chart; highlighted precursors keep the same identity.</p>
         <KinaseModuleAnalysis
           orderId={orderId}
           ptmType={ptmType}
           highlightedKinase={selectedHighlightKinase}
           inferredReceptors={data.inferred_receptors || []}
           ipOverlayData={ipOverlayData}
-          vectorData={data.vector_data.map((row) => ({
+          vectorData={data.vector_data.filter(row => axisValue(row, "relative") !== null).map((row) => ({
+            feature_id: row.feature_id,
             gene: row.gene,
             position: row.position,
             condition: row.condition,
-            value: row[valueKey as keyof typeof row] as number,
+            value: axisValue(row, "relative")!,
             control_pseudocount_used: row.control_pseudocount_used,
-            q_value: row.q_value,
+            q_value: axisQ(row, "relative"),
           }))}
           topNPtms={uniquePtms}
           checkedPtms={checked}
@@ -3316,9 +3245,9 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
           highlightedPtmKeys={highlightedPtmKeySet}
           onSelectPtms={(keys) => {
             // Convert PTM keys (gene_position) → labels for chart highlight
-            const keySet = new Set(keys);
+            const keySet = new Set(expandContextSelection(keys, uniquePtms));
             const labels = uniquePtms
-              .filter((p) => keySet.has(`${p.gene}_${p.position}`))
+              .filter((p) => keySet.has(featureKey(p)))
               .map((p) => p.label);
             setHighlightedModulePtmLabels((prev) => {
               // Toggle: if same set already highlighted, clear
@@ -3327,6 +3256,7 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
             });
           }}
         />
+        </div>
       )}
     </div>
   );

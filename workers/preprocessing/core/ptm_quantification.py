@@ -46,6 +46,7 @@ class PTMQuantificationAnalyzer:
         ptm_mode: str = "phospho",
         condition_map: Optional[Dict[str, str]] = None,
         progress_callback: Optional[Callable[[float, str], None]] = None,
+        sample_manifest: Optional[dict] = None,
     ):
         self.fasta_path = fasta_path
         self.output_dir = Path(output_dir)
@@ -66,6 +67,7 @@ class PTMQuantificationAnalyzer:
         self.pr_matrix_normalized = None
         self.pg_matrix_normalized = None
         self.sample_columns = None
+        self.sample_manifest = sample_manifest or {}
         self.condition_map = condition_map if condition_map else {}
         self.external_condition_map = condition_map is not None
         self.available_conditions: List[str] = []
@@ -105,6 +107,9 @@ class PTMQuantificationAnalyzer:
             if not self.load_data():
                 return False
 
+            from ptm_shared.sample_manifest import validate_sample_manifest
+            if self.sample_manifest.get("samples"):
+                self.sample_manifest = validate_sample_manifest(self.sample_manifest, self.condition_map, self.pr_matrix.columns, self.pg_matrix.columns)
             self._progress(0.10, "Median normalization")
             if not self.apply_median_normalization():
                 return False
@@ -563,6 +568,7 @@ class PTMQuantificationAnalyzer:
 
             pair_key = f"{protein_group}|{backbone}|{modified_sequence}"
             condition_values: Dict[str, List[float]] = {}
+            condition_samples = {}
             missing_reasons: Dict[str, str] = {}
             for sample in self.sample_columns:
                 condition = self.condition_map.get(sample, "Unknown")
@@ -586,6 +592,7 @@ class PTMQuantificationAnalyzer:
                     missing_reasons.setdefault(condition, "invalid_pair_denominator")
                     continue
                 condition_values.setdefault(condition, []).append(modified_intensity / denominator)
+                condition_samples.setdefault(condition, {})[sample] = modified_intensity / denominator
 
             observed_conditions = [condition for condition, values in condition_values.items() if len(values) >= PAIR_MIN_REPLICATES]
             expected_count = max(len(expected_conditions), 1)
@@ -618,12 +625,9 @@ class PTMQuantificationAnalyzer:
                 values = condition_values[condition]
                 occupancy_mean = float(np.mean(values))
                 occupancy_logit = math.log(np.clip(occupancy_mean, 1e-6, 1 - 1e-6) / (1 - np.clip(occupancy_mean, 1e-6, 1 - 1e-6)))
-                p_value = np.nan
-                if len(values) >= PAIR_MIN_REPLICATES and len(condition_values["Control"]) >= PAIR_MIN_REPLICATES:
-                    try:
-                        _, p_value = stats.ttest_ind(values, condition_values["Control"], equal_var=False, nan_policy="omit")
-                    except Exception:
-                        p_value = np.nan
+                from ptm_shared.sample_manifest import compare_sample_units
+                test = compare_sample_units(condition_samples["Control"], condition_samples[condition], getattr(self, "sample_manifest", None))
+                p_value = test["p_value"] if test["p_value"] is not None else np.nan
                 records.append({
                     "Protein.Group": protein_group,
                     "Precursor.Id": modified_precursor_ids,
@@ -638,6 +642,8 @@ class PTMQuantificationAnalyzer:
                     "Occupancy_Delta_PP": (occupancy_mean - control_mean) * 100.0,
                     "Occupancy_Logit_Delta": occupancy_logit - control_logit,
                     "Occupancy_Calibration_Type": "none",
+                    "Occupancy_Statistical_Unit": test["statistical_unit"],
+                    "Occupancy_Test_Status": test["status"],
                     "Pair_Quality_Tier": tier,
                     "Pair_Missingness": 1.0 - completeness,
                     "Occupancy_P_Value": p_value,
@@ -777,17 +783,12 @@ class PTMQuantificationAnalyzer:
                     if control_values
                     else "control_not_detected_conventional_log2fc_na"
                 )
-                p_value = np.nan
-                if len(control_values) >= 2 and len(current_values) >= 2:
-                    try:
-                        _, p_value = stats.ttest_ind(
-                            control_values,
-                            current_values,
-                            equal_var=False,
-                            nan_policy="omit",
-                        )
-                    except Exception:
-                        p_value = np.nan
+                from ptm_shared.sample_manifest import compare_sample_units
+                test = compare_sample_units(
+                    {s: row[s] for s in control_samples if positive_values(row, [s])},
+                    {s: row[s] for s in treatment_samples.get(treatment, []) if positive_values(row, [s])},
+                    getattr(self, "sample_manifest", None))
+                p_value = test["p_value"] if test["p_value"] is not None else np.nan
 
                 records.append({
                     "Protein.Group": protein_group,
@@ -805,7 +806,9 @@ class PTMQuantificationAnalyzer:
                     "PTM_Unadjusted_Treatment_N": len(current_values),
                     "PTM_Unadjusted_Control_Sample_IDs": json.dumps(sorted(s for s in control_samples if positive_values(row, [s]))),
                     "PTM_Unadjusted_Treatment_Sample_IDs": json.dumps(sorted(s for s in treatment_samples.get(treatment, []) if positive_values(row, [s]))),
-                    "PTM_Unadjusted_Method": "Welch sample-level test; BH across valid unadjusted feature-condition comparisons" if pd.notna(p_value) else "test_unavailable",
+                    "PTM_Unadjusted_Method": test["method"] + "; BH across valid unadjusted feature-condition comparisons",
+                    "PTM_Unadjusted_Statistical_Unit": test["statistical_unit"],
+                    "PTM_Unadjusted_Test_Status": test["status"],
                     "PTM_Unadjusted_Status": status,
                     "PTM_Unadjusted_Conventional_Log2FC_NA": not bool(control_values),
                     "PTM_Unadjusted_Calculation_Mode": (
@@ -882,7 +885,9 @@ class PTMQuantificationAnalyzer:
         pr_lookup = {}
         pg_lookup = {}
         paired_samples = {}
+        paired_values = {}
         for key, group in relative_quant_df.groupby(["Protein.Group", "Precursor.Id", "Condition"], dropna=False):
+            paired_values[key] = {str(r["Sample"]): float(r["PTM_Relative_Abundance"]) for _, r in group.iterrows() if pd.notna(r["PTM_Relative_Abundance"]) and np.isfinite(r["PTM_Relative_Abundance"]) and r["PTM_Relative_Abundance"] > 0}
             paired_samples[key] = sorted(group.loc[np.isfinite(group["PTM_Relative_Abundance"]) & (group["PTM_Relative_Abundance"] > 0), "Sample"].astype(str).unique())
             for column, lookup in (("PTM_Intensity", pr_lookup), ("Protein_Intensity", pg_lookup)):
                 values = pd.to_numeric(group[column], errors="coerce")
@@ -915,19 +920,9 @@ class PTMQuantificationAnalyzer:
                     else "control_not_detected" if used_pc else ""
                 )
 
-                # --- Welch's t-test ---
-                p_value = np.nan
-                if len(ctrl_reps) >= 2 and len(treat_reps) >= 2:
-                    try:
-                        _, p_value = stats.ttest_ind(
-                            ctrl_reps, treat_reps, equal_var=False, nan_policy="omit"
-                        )
-                    except Exception:
-                        p_value = np.nan
-                elif used_pc:
-                    # De novo PTMs: no control replicates → p_value stays NaN
-                    pass
-                # If only 1 replicate per group, p_value stays NaN
+                from ptm_shared.sample_manifest import compare_sample_units
+                test = compare_sample_units(paired_values.get(control_key, {}), paired_values.get(treatment_key, {}), getattr(self, "sample_manifest", None))
+                p_value = test["p_value"] if test["p_value"] is not None else np.nan
 
                 results.append({
                     "Protein.Group": row["Protein.Group"],
@@ -949,7 +944,9 @@ class PTMQuantificationAnalyzer:
                     "PTM_ProteinAdjusted_Treatment_N": len(treat_reps),
                     "PTM_ProteinAdjusted_Control_Sample_IDs": json.dumps(paired_samples.get(control_key, [])),
                     "PTM_ProteinAdjusted_Treatment_Sample_IDs": json.dumps(paired_samples.get(treatment_key, [])),
-                    "PTM_ProteinAdjusted_Method": "Welch sample-level test; BH across valid adjusted feature-condition comparisons" if pd.notna(p_value) else "test_unavailable",
+                    "PTM_ProteinAdjusted_Method": test["method"] + "; BH across valid adjusted feature-condition comparisons",
+                    "PTM_ProteinAdjusted_Statistical_Unit": test["statistical_unit"],
+                    "PTM_ProteinAdjusted_Test_Status": test["status"],
                     "PTM_ProteinAdjusted_Missing_Reason": missing_reason,
                     "PTM_ProteinAdjusted_Conventional_Log2FC_NA": bool(denominator_unavailable or used_pc),
                     "PR_Control_N": pr_lookup.get(control_key, 0),
@@ -1152,8 +1149,8 @@ class PTMQuantificationAnalyzer:
                     "Comparison": ptm_row["Comparison"],
                     "PTM_Relative_Log2FC": ptm_row["Log2FC"],
                     "PTM_ProteinAdjusted_Log2FC": ptm_row["Log2FC"],
-                    **{f"PTM_ProteinAdjusted_{suffix}": ptm_row.get(f"PTM_ProteinAdjusted_{suffix}") for suffix in ("Control_Sample_IDs", "Treatment_Sample_IDs", "Method")},
-                    **{f"PTM_Unadjusted_{suffix}": unadjusted.get(f"PTM_Unadjusted_{suffix}") for suffix in ("Control_Sample_IDs", "Treatment_Sample_IDs", "Method")},
+                    **{f"PTM_ProteinAdjusted_{suffix}": ptm_row.get(f"PTM_ProteinAdjusted_{suffix}") for suffix in ("Control_Sample_IDs", "Treatment_Sample_IDs", "Method", "Statistical_Unit", "Test_Status")},
+                    **{f"PTM_Unadjusted_{suffix}": unadjusted.get(f"PTM_Unadjusted_{suffix}") for suffix in ("Control_Sample_IDs", "Treatment_Sample_IDs", "Method", "Statistical_Unit", "Test_Status")},
                     **{f"Protein_{suffix}": pc.get(f"Protein_{suffix}") for suffix in ("Control_Sample_IDs", "Treatment_Sample_IDs", "Control_N", "Treatment_N", "Method")},
                     "PTM_ProteinAdjusted_Control_N": ptm_row.get("PTM_ProteinAdjusted_Control_N", ptm_row.get("Control_N", np.nan)),
                     "PTM_ProteinAdjusted_Treatment_N": ptm_row.get("PTM_ProteinAdjusted_Treatment_N", ptm_row.get("Treatment_N", np.nan)),

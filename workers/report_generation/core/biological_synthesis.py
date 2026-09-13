@@ -15,6 +15,7 @@ from typing import Any, Mapping, Sequence
 
 from .quantitative_fields import axis_number
 from .measured_feature_cards import _feature_key as _reader_key, reader_feature_id, build_feature_observation_cards
+from ptm_shared.feature_identity import canonical_feature_identity, FIELDS
 from .temporal_analysis import observed_time_minutes, summarize_observed_pattern
 
 from ptm_shared.de_novo_representation import (
@@ -273,7 +274,7 @@ def _candidate_cards(
 
     cards: list[dict] = []
     for identity_key, points in grouped.items():
-        gene, position, precursor, sequence = identity_key
+        gene, position, precursor, sequence = identity_key[:4]
         points = sorted(points, key=lambda point: (observed_time_minutes(point) if observed_time_minutes(point) is not None else math.inf, str(point.get("condition"))))
         is_denovo = any(point.get("is_de_novo") for point in points)
         finite_ptm = [abs(value) for point in points
@@ -328,10 +329,10 @@ def _candidate_cards(
             "gene": gene,
             "precursor_id": precursor or None,
             "modified_sequence": sequence or None,
-            "feature_identity": {"reader_feature_id": reader_feature_id(identity_key) if precursor or sequence else None,
+            "feature_identity": {**canonical_feature_identity(dict(zip(FIELDS, identity_key))),
                                  "source_feature_id": precursor or None, "gene": gene,
                                  "candidate_residue_annotation": position, "modified_sequence": sequence or None},
-            "identity_status": "recorded" if precursor or sequence else "legacy_site_context_only",
+            "identity_status": "recorded" if canonical_feature_identity(dict(zip(FIELDS, identity_key)))["feature_id"] else "legacy_site_context_only",
             "position": position or "site_not_specified",
             "trajectory": points,
             "profile_label": "de_novo_detection_context" if is_denovo else pattern["label"],

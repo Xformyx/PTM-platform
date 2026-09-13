@@ -1291,12 +1291,16 @@ def test_final_anchor_sanitizer_and_release_gate_block_unbracketed_evid_residue(
     assert report_release_requires_warning(release) is True
 
 
-def test_release_gate_allows_clean_shadow_output_and_does_not_gate_legacy_path():
+def test_release_gate_allows_clean_shadow_output_and_does_not_gate_legacy_path(tmp_path):
     clean = audit_report_output_correctness("## Abstract\n\nA measured observation was reported.")
+    from report_generation.core.report_artifact_manifest import finalize_rendered_artifacts, _artifact
+    html = tmp_path / "report.html"
+    html.write_text("<p>A measured observation was reported.</p>")
+    manifest = finalize_rendered_artifacts({"status": "validated", "report_eligible": True, "artifacts": [_artifact("fixture_source", html, required=True)]}, [html], {}, requested_formats=["html"])
     shadow = resolve_report_release(
         reader_authoring_shadow=True,
         output_correctness=clean,
-        artifact_manifest={"status": "validated", "reason_codes": []},
+        artifact_manifest=manifest,
     )
     legacy = resolve_report_release(reader_authoring_shadow=False, output_correctness={"status": "blocked_for_review"})
 

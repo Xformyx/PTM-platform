@@ -11,7 +11,7 @@ import math
 from collections import defaultdict
 
 
-CONTRACT_VERSION = "temporal_feature_input.v1"
+CONTRACT_VERSION = "temporal_feature_input.v2"
 
 
 def finite(value):
@@ -45,19 +45,13 @@ def build_temporal_feature_inputs(rows):
         if not condition:
             continue
         conditions.add(condition)
-        identity = {field: _text(row.get(field)) for field in (
-            "precursor_id", "modified_sequence", "precursor_charge", "protein_group",
-        )}
-        identity.update(gene=_text(row.get("gene")).upper(), position=_text(row.get("position")).upper())
-        # Sequence alone may conflate charges/forms. Keep unresolved rows in the
-        # audit without assigning them an apparently unique quantitative trajectory.
-        if not identity["precursor_id"] and not (identity["modified_sequence"] and identity["precursor_charge"]):
+        from .feature_identity import canonical_feature_identity
+        identity = canonical_feature_identity(row)
+        if not identity["feature_id"]:
             rejected.append({"site_key": site_key(row), "condition": condition, "reason": "precursor_identity_unavailable"})
             continue
-        digest = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()[:20].upper()
-        key = f"{site_key(row)}__PF-{digest}"
-        identities[key] = {**identity, "feature_id": key, "site_key": site_key(row),
-                           "measurement_unit": "modified_precursor"}
+        key = identity["feature_id"]
+        identities[key] = {**identity, "site_key": site_key(row), "measurement_unit": "modified_precursor"}
         clean = {name: (finite(value) if isinstance(value, float) else value) for name, value in row.items()}
         grouped[key][condition].append(clean)
 

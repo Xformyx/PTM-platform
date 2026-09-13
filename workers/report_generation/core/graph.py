@@ -53,6 +53,7 @@ class ReportState(TypedDict, total=False):
     tsv_data_path: str
     experimental_context: dict
     sample_manifest: dict
+    finding_literature_retrieval: dict
     literature_retrieval_status: str
     research_questions: List[str]
     chromadb_collections: List[str]
@@ -927,11 +928,8 @@ def format_citations(state: ReportState) -> dict:
 
     collected_refs = state.get("collected_references", [])
     source_sections = state.get("sections", {})
-    reader_authoring_shadow = str(
-        state.get("reader_authoring_mode")
-        or (state.get("report_config") or {}).get("reader_authoring_mode")
-        or ""
-    ).strip().lower() in {"shadow", "opt_in_shadow"}
+    from ptm_shared.report_mode import is_reader_mode
+    reader_authoring_shadow = is_reader_mode(state)
     if reader_authoring_shadow:
         # The shadow path has already applied sentence-local validation. Do not
         # replace its researcher-facing narrative with legacy compact diagnostics.

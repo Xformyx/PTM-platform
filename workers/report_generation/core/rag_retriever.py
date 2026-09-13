@@ -280,24 +280,30 @@ class RAGRetriever:
         return self._resolved_names
 
     def query(
-        self, query_text: str, n_results: int = 5, relevance_threshold: float = 0.5
+        self, query_text: str, n_results: int = 5, relevance_threshold: float = 0.5, *, strict: bool = False
     ) -> List[dict]:
         """Query all collections and return merged, scored results."""
-        cache_key = f"{query_text}:{n_results}:{relevance_threshold}"
+        cache_key = f"{query_text}:{n_results}:{relevance_threshold}:{strict}"
         with self._cache_lock:
             if cache_key in self._cache:
                 return self._cache[cache_key]
 
         if not self.is_available():
+            if strict:
+                raise RuntimeError("retrieval_service_unavailable")
             logger.warning("ChromaDB not available — returning empty results")
             return []
 
         coll_names = self._resolve_existing_collections()
+        if strict and set(coll_names) != set(self.collection_names):
+            raise RuntimeError("requested_collection_unavailable")
         all_results = []
         for coll_name in coll_names:
             try:
                 coll = self._get_collection(coll_name)
                 if coll is None:
+                    if strict:
+                        raise RuntimeError("collection_unavailable")
                     continue
 
                 spec = collection_embedding_spec(coll)
@@ -313,7 +319,8 @@ class RAGRetriever:
                 metas = results.get("metadatas", [[]])[0]
                 dists = results.get("distances", [[]])[0]
 
-                for doc, meta, dist in zip(docs, metas, dists):
+                source_ids = results.get("ids", [[]])[0]
+                for result_index, (doc, meta, dist) in enumerate(zip(docs, metas, dists)):
                     relevance = max(0, 1.0 - dist)
                     if relevance >= relevance_threshold:
                         raw_result = {"metadata": meta or {}, "title": (meta or {}).get("title", "")}
@@ -324,6 +331,8 @@ class RAGRetriever:
                         }}
                         all_results.append({
                             "document": doc[:500],
+                            "source_id": source_ids[result_index] if result_index < len(source_ids) else None,
+                            "collection_version": (getattr(coll, "metadata", None) or {}).get("version"),
                             "metadata": enriched_meta,
                             "relevance": round(relevance, 3),
                             "collection": coll_name,
@@ -339,6 +348,8 @@ class RAGRetriever:
                         })
 
             except Exception as e:
+                if strict:
+                    raise RuntimeError("finding_retrieval_failed") from e
                 logger.warning(
                     f"ChromaDB query failed for collection '{coll_name}' "
                     f"(embedding contract enforced): {e}"

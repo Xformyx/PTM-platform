@@ -42,7 +42,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", type=Path, default=ROOT / "docs/validation/task01-02")
     parser.add_argument("--include-task10", action="store_true", help="Include discovery/finding/render regression fixtures")
+    parser.add_argument("--include-flow-review", action="store_true", help="Include API/UI, finalization, identity, design and finding-search regressions")
     args = parser.parse_args()
+    args.include_task10 = args.include_task10 or args.include_flow_review
     args.output_dir.mkdir(parents=True, exist_ok=True)
     worker_files = {ROOT / "workers/tests" / name for name in REPORT_FILES}
     for pattern in ("test_report_review_*.py", "test_tmm*.py", "test_temporal*.py", "test_site_form*.py"):
@@ -57,6 +59,9 @@ def main():
     api_files = set()
     for pattern in ("test_tmm*.py", "test_temporal*.py"):
         api_files.update((ROOT / "api-server/tests").glob(pattern))
+    if args.include_flow_review:
+        worker_files.update((ROOT / "workers/tests").glob("test_flow_*.py"))
+        api_files.update((ROOT / "api-server/tests").glob("test_vector_plot*.py"))
     # The worker audit suite asserts that the production API module was never
     # imported. Keep API tests in their own process; do not relax that assertion.
     groups = {"worker-shared": worker_files, "api": api_files}
@@ -76,6 +81,11 @@ def main():
     reviewed_files = worker_files | api_files | {ROOT / path for path in implementation_files} | {Path(__file__)}
     if args.include_task10:
         reviewed_files.update(ROOT / path for path in TASK10_IMPLEMENTATION_FILES)
+    if args.include_flow_review:
+        evidence["scope"] = "Selected worker/shared regressions; FastAPI HTTP->React markup with synthetic DB/storage; mocked RAG/Gemini; no production services"
+        reviewed_files.update((ROOT / "ptm_shared").glob("*.py"))
+        reviewed_files.update((ROOT / "workers/report_generation/core").glob("*.py"))
+        reviewed_files.update(ROOT / path for path in ("workers/preprocessing/tasks.py", "frontend/src/pages/OrderDetail.tsx", "frontend/src/components/KinaseModuleAnalysis.tsx", "frontend/src/components/QuantitationEvidenceTable.tsx", "frontend/src/lib/quantitation.ts", "frontend/tests/quantitation.test.ts"))
     evidence["source_sha256"] = {str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest()
                                   for path in sorted(reviewed_files)}
     exit_code = 0

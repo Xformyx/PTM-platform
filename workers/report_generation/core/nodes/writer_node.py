@@ -266,7 +266,8 @@ def run_section_writing(state: dict) -> dict:
     # Load report_config from state for dynamic settings
     report_config = state.get("report_config", {})
     reader_authoring_mode = str(report_config.get("reader_authoring_mode", "")).strip().lower()
-    reader_authoring_shadow = reader_authoring_mode in {"shadow", "opt_in_shadow"}
+    from ptm_shared.report_mode import is_reader_mode
+    reader_authoring_shadow = is_reader_mode(reader_authoring_mode)
     llm_tokens_cfg = report_config.get("llm_tokens", {})
     section_max_tokens = {
         "abstract": llm_tokens_cfg.get("abstract", SECTION_MAX_TOKENS["abstract"]),
@@ -288,7 +289,8 @@ def run_section_writing(state: dict) -> dict:
         model=state.get("llm_model"),
     )
 
-    if not llm.is_available():
+    llm_available = llm.is_available()
+    if not llm_available:
         logger.error(
             f"LLM not available: provider='{llm.provider}', model='{llm.model}', url='{llm.base_url}'. "
             "All sections will use fallback text. Check that Ollama is running and the model is installed."
@@ -454,6 +456,20 @@ def run_section_writing(state: dict) -> dict:
         references=[],
     )
     authoring_plan = deterministic_authoring_plan(authoring_packet)
+    finding_references = []
+    if reader_authoring_shadow:
+        from ..finding_literature import retrieve_finding_literature
+        selected_ids = {f["reader_feature_id"] for f in authoring_plan.get("key_findings") or []}
+        selected_cards = [c for c in authoring_packet.get("reader_cards") or []
+                          if c.get("category") == "measured_feature_observation"
+                          and (c.get("feature_identity") or {}).get("reader_feature_id") in selected_ids]
+        retrieval = retrieve_finding_literature(selected_cards, retriever, context, llm=llm if llm_available else None)
+        finding_references = retrieval.pop("references")
+        state["finding_literature_retrieval"] = retrieval
+        authoring_packet = build_authoring_packet(state, temporal_evidence_packet=temporal_evidence_packet,
+            biological_synthesis_packet=biological_synthesis_packet, references=finding_references)
+        authoring_plan = deterministic_authoring_plan(authoring_packet)
+
     reader_authoring_validator_audit: Dict[str, dict] = {}
     reader_authoring_fallback_sections: list[str] = []
     reader_prose_snapshots: Dict[str, dict] = {}
@@ -904,7 +920,7 @@ def run_section_writing(state: dict) -> dict:
                 state,
                 temporal_evidence_packet=temporal_evidence_packet,
                 biological_synthesis_packet=biological_synthesis_packet,
-                references=chroma_refs,
+                references=chroma_refs + finding_references,
             )
             section_authoring_packet = focus_authoring_packet(section_authoring_packet, authoring_plan)
             prompt = format_authoring_packet_for_llm(
@@ -1461,7 +1477,7 @@ def run_section_writing(state: dict) -> dict:
     # In reader-authoring shadow mode, the bibliography is limited to the
     # selected ChromaDB collection identities that entered authoring packets.
     unified_references = (
-        [ref for ref in unique_chroma_refs if is_traceable_reference(ref)]
+        [ref for ref in unique_chroma_refs + finding_references if is_traceable_reference(ref)]
         if reader_authoring_shadow
         else unique_chroma_refs + (all_references or [])
     )
@@ -1470,7 +1486,7 @@ def run_section_writing(state: dict) -> dict:
             state,
             temporal_evidence_packet=temporal_evidence_packet,
             biological_synthesis_packet=biological_synthesis_packet,
-            references=unique_chroma_refs,
+            references=unique_chroma_refs + finding_references,
         )
 
     # Addendum mode does not alter the LLM-written core sections. Its content is
@@ -1563,6 +1579,7 @@ def run_section_writing(state: dict) -> dict:
         "temporal_report_fidelity": temporal_report_fidelity,
         "temporal_report_fidelity_snapshot": str(temporal_fidelity_snapshot_path) if temporal_fidelity_snapshot_path else None,
         "authoring_packet": authoring_packet,
+        "finding_literature_retrieval": state.get("finding_literature_retrieval"),
         "reader_authoring_plan": authoring_plan,
         "reader_authoring_validator_audit": reader_authoring_validator_audit,
         "reader_authoring_fallback_sections": reader_authoring_fallback_sections,

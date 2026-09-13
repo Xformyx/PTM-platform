@@ -15,6 +15,32 @@ from ptm_shared.enrichment_free_temporal_sidecar import build_production_site_ob
 from ptm_shared.temporal_wave_input_projection import project_temporal_wave_input
 
 
+def test_csv_temporal_and_report_share_taxon_isoform_identity(tmp_path):
+    import csv
+    from ptm_shared.kinase_footprint_diagnostics import detection_aware_footprint_value
+    from ptm_shared.vector_projection import project_report_vector_row
+    path = Path(__file__).parents[1] / "app/api/orders.py"
+    route = next(n for n in ast.parse(path.read_text()).body
+                 if isinstance(n, ast.AsyncFunctionDef) and n.name == "kinase_activity_heatmap")
+    loop = next(n for n in route.body if isinstance(n, ast.For) and ast.unparse(n.target) == "name")
+    rows = [{"Gene.Name": "G", "PTM_Position": "S1", "Modified.Sequence": "AS[Phospho]K",
+             "Precursor.Charge": z, "FASTA_Taxonomy_ID": "9606", "Isoform": "P1-2", "Protein.Group": "PG1",
+             "Condition": "5min", "PTM_ProteinAdjusted_Log2FC": "", "PTM_Relative_Log2FC": 9}
+            for z in (2, 3)]
+    with (tmp_path / "ptm_vector_data_normalized_phospho.tsv").open("w") as f:
+        writer = csv.DictWriter(f, fieldnames=rows[0], delimiter="\t")
+        writer.writeheader()
+        writer.writerows(rows)
+    env = {"output_dir": tmp_path, "file_suffix": "_phospho", "vector_data": [],
+           "_optional_finite": lambda v: float(v) if v not in (None, "") else None,
+           "detection_aware_footprint_value": detection_aware_footprint_value}
+    exec(compile(ast.Module(body=[loop], type_ignores=[]), str(path), "exec"), env)
+    assert all(r["log2fc"] is None for r in env["vector_data"])
+    temporal = route_input(env["vector_data"])["temporal_inputs"]
+    assert len(temporal["features"]) == 2
+    assert set(temporal["features"]) == {project_report_vector_row(r)["feature_id"] for r in rows}
+
+
 def route_input(rows):
     path = Path(__file__).parents[1] / "app/api/orders.py"
     tree = ast.parse(path.read_text())
@@ -64,6 +90,19 @@ def test_route_clustering_never_fills_partial_feature_with_zero():
     assert len(clusters) == 1
     assert not clusters[0]["clustering_eligible"]
     assert clusters[0]["reason"] == "incomplete_observed_grid"
+
+
+def test_production_tmm_dispatch_accepts_canonical_opaque_feature_ids():
+    rows = [dict(gene="G", position="S1", precursor_id=p, condition="5min", log2fc=v)
+            for p, v in (("P1", 1), ("P2", -1))]
+    env = route_input(rows)
+    path = Path(__file__).parents[1] / "app/api/orders.py"
+    tree = ast.parse(path.read_text())
+    loop = next(n for n in ast.walk(tree) if isinstance(n, ast.For)
+                and "_tmm_modules.append" in ast.unparse(n) and ast.unparse(n.target) == "km")
+    env["_tmm_modules"] = []
+    exec(compile(ast.Module(body=[loop], type_ignores=[]), str(path), "exec"), env)
+    assert len(env["_tmm_modules"][0]["members"]) == 2
 
 
 def test_old_sidecar_is_preserved_but_not_reused_for_new_feature_values(tmp_path):

@@ -205,6 +205,21 @@ def _validate_order_code(code: str) -> None:
         )
 
 
+def _validated_order_sample_manifest(order, context=None):
+    from ptm_shared.sample_manifest import validate_sample_manifest
+    context = context if context is not None else (order.analysis_context or {})
+    manifest = context.get("sample_manifest")
+    try:
+        columns = []
+        for path in (order.pr_matrix_path, order.pg_matrix_path) if manifest else ():
+            with open(path, encoding="utf-8-sig") as handle:
+                columns.append(next(csv.reader(handle, delimiter="\t")))
+        return validate_sample_manifest(manifest, _build_condition_map(order.sample_config),
+                                        *(columns or [None, None]))
+    except (ValueError, OSError, StopIteration, TypeError) as error:
+        raise HTTPException(status_code=422, detail="Invalid sample manifest or input columns: " + str(error)) from error
+
+
 def _build_condition_map(sample_cfg: dict | list | None) -> dict:
     """Build {filename: condition_label} from sample_config.
 
@@ -821,6 +836,7 @@ async def update_order_options(
             detail=f"Cannot update order while running (status: '{order.status}'). Stop first.",
         )
     if body.analysis_context is not None:
+        _validated_order_sample_manifest(order, body.analysis_context)
         order.analysis_context = body.analysis_context
     if body.analysis_options is not None:
         order.analysis_options = body.analysis_options
@@ -1052,6 +1068,7 @@ async def create_order(
             secondary_sample_config=secondary_sample_config_data,
         )
 
+        _validated_order_sample_manifest(order)
         db.add(order)
         await db.commit()
         await db.refresh(order)
@@ -1192,6 +1209,7 @@ async def start_order(
             status_code=400, detail=f"Cannot start order in '{order.status}' status"
         )
 
+    validated_sample_manifest = _validated_order_sample_manifest(order)
     prev_status = order.status
     claimed = await _claim_order_dispatch(
         db,
@@ -1254,6 +1272,7 @@ async def start_order(
         "secondary_pg_matrix_path": order.secondary_pg_matrix_path,
         "ptm_mode": ptm_mode,
         "condition_map": condition_map if condition_map else None,
+        "sample_manifest": validated_sample_manifest,
         "single_time_point": sample_cfg.get("single_time_point", False),
         "species_tax_id": species_context.taxonomy_id,
         "kegg_organism": species_context.kegg_organism,
@@ -1513,6 +1532,7 @@ async def run_stage(
         body.stage == "report_generation"
         and temporal_evidence_readiness["status"] != "ready"
     )
+    validated_sample_manifest = _validated_order_sample_manifest(order)
     dispatch_stage = "rag_enrichment" if temporal_preparation_required else body.stage
     new_status = "rag_enrichment" if temporal_preparation_required else (
         "report_generation" if body.stage == "report_generation" else "queued"
@@ -1600,6 +1620,7 @@ async def run_stage(
             "species_label": species_context.label,
             "custom_reference": species_context.custom_reference,
             "analysis_options": order.analysis_options,
+            "sample_manifest": validated_sample_manifest,
             "experimental_context": {**(order.analysis_context or {}), "ptm_type": order.ptm_type},
             "top_n_ptms": (order.report_options or {}).get("top_n_ptms", 50),
             "ptm_selection_mode": (order.report_options or {}).get("ptm_selection_mode", "top_n"),
@@ -1638,6 +1659,7 @@ async def run_stage(
             "preprocessing_output_dir": str(order_output),
             "ptm_mode": ptm_mode,
             "single_time_point": single_time_point,
+            "sample_manifest": validated_sample_manifest,
             "experimental_context": {**(order.analysis_context or {}), "ptm_type": order.ptm_type},
             "top_n_ptms": (order.report_options or {}).get("top_n_ptms", 50),
             "ptm_selection_mode": (order.report_options or {}).get("ptm_selection_mode", "top_n"),
@@ -1689,6 +1711,7 @@ async def run_stage(
             "enriched_json_path": str(enriched_json),
             "md_report_path": str(md_report) if md_report.exists() else None,
             "single_time_point": single_time_point,
+            "sample_manifest": validated_sample_manifest,
             "experimental_context": {**(order.analysis_context or {}), "ptm_type": order.ptm_type},
             "research_questions": report_opts.get("research_questions", []),
             "chromadb_collections": active_collections,
@@ -2472,121 +2495,20 @@ async def get_vector_plot_data(
             with open(p, "r", encoding="utf-8") as f:
                 reader = csv.DictReader(f, delimiter="\t")
                 for row in reader:
-                    gene = row.get("Gene.Name", row.get("gene", ""))
-                    pos = row.get("PTM_Position", row.get("position", ""))
-                    cond = row.get("Condition", "")
-                    rel_fc = row.get("PTM_Relative_Log2FC", "")
-                    abs_fc = row.get("PTM_Absolute_Log2FC", "")
-                    prot_fc = row.get("Protein_Log2FC", "")
-
-                    def _safe_float_zero(v: str) -> float:
-                        """Convert TSV float string, returning 0 for nan/inf/empty."""
-                        import math
-                        if not v or str(v).strip().lower() in ("nan", "inf", "-inf", "infinity", "-infinity"):
-                            return 0.0
-                        try:
-                            f = float(v)
-                            return f if math.isfinite(f) else 0.0
-                        except (ValueError, TypeError):
-                            return 0.0
-
-                    rel_fc = _safe_float_zero(rel_fc)
-                    abs_fc = _safe_float_zero(abs_fc)
-                    prot_fc = _safe_float_zero(prot_fc)
-                    pc_used_raw = row.get("Control_Pseudocount_Used", "")
-                    pc_used = pc_used_raw.strip().lower() in ("true", "1", "yes") if pc_used_raw else False
-                    # p_value / q_value (v9.25: Welch's t-test + BH correction)
-                    p_val_raw = row.get("p_value", "")
-                    q_val_raw = row.get("q_value", "")
-                    try:
-                        p_val = float(p_val_raw) if p_val_raw and p_val_raw.strip().lower() not in ("", "nan") else None
-                    except (ValueError, TypeError):
-                        p_val = None
-                    try:
-                        q_val = float(q_val_raw) if q_val_raw and q_val_raw.strip().lower() not in ("", "nan") else None
-                    except (ValueError, TypeError):
-                        q_val = None
-
-                    def _optional_vector_float(column: str):
-                        raw = row.get(column, "")
-                        try:
-                            return float(raw) if raw and str(raw).strip().lower() not in ("", "nan") else None
-                        except (ValueError, TypeError):
-                            return None
-
-                    def _optional_text(column: str):
-                        raw = row.get(column, "")
-                        return str(raw).strip() if raw and str(raw).strip().lower() not in ("", "nan", "none") else ""
-
-                    conventional_na = str(row.get("Conventional_Log2FC_NA", "")).strip().lower() in ("true", "1", "yes") or pc_used
-                    vector_data.append({
-                        "gene": gene,
-                        "position": str(pos),
-                        "condition": cond,
-                        "protein_log2fc": prot_fc,
-                        "ptm_relative_log2fc": rel_fc,
-                        "ptm_protein_adjusted_log2fc": (
-                            _optional_vector_float("PTM_ProteinAdjusted_Log2FC")
-                            if _optional_vector_float("PTM_ProteinAdjusted_Log2FC") is not None
-                            else rel_fc
-                        ),
-                        "ptm_unadjusted_log2fc": _optional_vector_float("PTM_Unadjusted_Log2FC"),
-                        "ptm_unadjusted_control_mean": _optional_vector_float("PTM_Unadjusted_Control_Mean"),
-                        "ptm_unadjusted_treatment_mean": _optional_vector_float("PTM_Unadjusted_Treatment_Mean"),
-                        "ptm_unadjusted_p_value": _optional_vector_float("PTM_Unadjusted_P_Value"),
-                        "ptm_unadjusted_q_value": _optional_vector_float("PTM_Unadjusted_Q_Value"),
-                        "ptm_unadjusted_control_n": _optional_vector_float("PTM_Unadjusted_Control_N"),
-                        "ptm_unadjusted_treatment_n": _optional_vector_float("PTM_Unadjusted_Treatment_N"),
-                        "ptm_unadjusted_status": _optional_text("PTM_Unadjusted_Status"),
-                        "ptm_unadjusted_conventional_log2fc_na": str(
-                            row.get("PTM_Unadjusted_Conventional_Log2FC_NA", "")
-                        ).strip().lower() in ("true", "1", "yes"),
-                        "ptm_unadjusted_calculation_mode": _optional_text("PTM_Unadjusted_Calculation_Mode"),
-                        "ptm_unadjusted_input_scale": _optional_text("PTM_Unadjusted_Input_Scale"),
-                        "ptm_absolute_log2fc": abs_fc,
-                        "ptm_reconstructed_log2fc": (
-                            _optional_vector_float("PTM_Reconstructed_Log2FC")
-                            if _optional_vector_float("PTM_Reconstructed_Log2FC") is not None
-                            else abs_fc
-                        ),
-                        "ptm_reconstructed_calculation_mode": _optional_text(
-                            "PTM_Reconstructed_Calculation_Mode"
-                        ),
-                        "protein_adjustment_delta_log2fc": _optional_vector_float(
-                            "Protein_Adjustment_Delta_Log2FC"
-                        ),
-                        "control_pseudocount_used": pc_used,
-                        "conventional_log2fc_na": conventional_na,
-                        "denovo_confidence": _optional_text("DeNovo_Confidence"),
-                        "detection_control": _optional_text("Detection_Control"),
-                        "detection_treatment": _optional_text("Detection_Treatment"),
-                        "detection_pattern": _optional_text("Detection_Pattern"),
-                        "lod_relative_log2": _optional_vector_float("LOD_Relative_Log2"),
-                        "lod_intensity": _optional_vector_float("LOD_Intensity"),
-                        "normalized_log2_intensity": _optional_vector_float("Normalized_Log2_Intensity"),
-                        "peak_condition": _optional_text("Peak_Condition"),
-                        "onset_condition": _optional_text("Onset_Condition"),
-                        "reliable_onset_condition": _optional_text("Reliable_Onset_Condition"),
-                        "ranking_score": _optional_vector_float("Ranking_Score"),
-                        "detection_n": _optional_vector_float("Detection_N"),
-                        "detection_expected": _optional_vector_float("Detection_Expected"),
-                        "shared_peptide": str(row.get("Shared_Peptide", "")).strip().lower() in ("true", "1", "yes"),
-                        "p_value": p_val,
-                        "q_value": q_val,
-                        "quantification_track": row.get("Quantification_Track", "protein_normalized_relative_ptm"),
-                        "paired_peptide_key": row.get("Paired_Peptide_Key", ""),
-                        "paired_form_level": row.get("Paired_Form_Level", ""),
-                        "occupancy_fraction": _optional_vector_float("Occupancy_Fraction"),
-                        "occupancy_percent": _optional_vector_float("Occupancy_Percent"),
-                        "occupancy_delta_pp": _optional_vector_float("Occupancy_Delta_PP"),
-                        "occupancy_logit_delta": _optional_vector_float("Occupancy_Logit_Delta"),
-                        "occupancy_calibration_type": row.get("Occupancy_Calibration_Type", "none"),
-                        "pair_quality_tier": row.get("Pair_Quality_Tier", "O0"),
-                        "pair_missingness": _optional_vector_float("Pair_Missingness"),
-                        "occupancy_p_value": _optional_vector_float("Occupancy_P_Value"),
-                        "occupancy_q_value": _optional_vector_float("Occupancy_Q_Value"),
-                    })
+                    from ptm_shared.vector_plot import project_plot_row
+                    vector_data.append(project_plot_row(row))
             break
+
+    from ptm_shared.vector_plot import normalize_plot_records
+    vector_data = normalize_plot_records(vector_data)
+    from ptm_shared.quantitative_fields import axis_evidence
+    design = (getattr(order, "analysis_context", None) or {}).get("sample_manifest") or {}
+    for row in vector_data:
+        for axis, prefix in (("unadjusted", "ptm_unadjusted"), ("protein", "protein"), ("adjusted", "ptm_protein_adjusted")):
+            support = axis_evidence(row, axis, design)
+            for group in ("control", "treatment"):
+                row[f"{prefix}_{group}_biological_n"] = support[f"{group}_biological_n"]
+
 
     # Load Top N PTMs — prefer enriched JSON, fall back to TSV-based selection
     top_n_ptms = []
@@ -2641,7 +2563,7 @@ async def get_vector_plot_data(
                 key=lambda r: (
                     r.get("ranking_score")
                     if r.get("ranking_score") is not None
-                    else (0.0 if r.get("conventional_log2fc_na") else abs(r["ptm_relative_log2fc"]))
+                    else (0.0 if r.get("conventional_log2fc_na") else abs(r["ptm_relative_log2fc"]) if r["ptm_relative_log2fc"] is not None else 0.0)
                 ),
                 reverse=True,
             )
@@ -2653,6 +2575,9 @@ async def get_vector_plot_data(
                 "position": pos,
                 "label": f"{gene} {pos}".strip(),
             })
+
+    from ptm_shared.vector_plot import plot_feature_metadata
+    top_n_ptms = plot_feature_metadata(vector_data, top_n_ptms)
 
     # ── v9.18 + v9.19: Infer upstream receptors ──────────────────────────────
     # Three sources:
@@ -2691,8 +2616,12 @@ async def get_vector_plot_data(
 
     if _use_cached:
         inferred_receptors = _cached_receptors
-        _cowave_analysis = _cached_receptor_data.get("cowave_analysis")  # v9.42: restore from cache
-        _divergence_pairs = _cached_receptor_data.get("divergence_pairs", [])  # v12.0: restore from cache
+        from ptm_shared.vector_plot import quantitative_cache_key
+        _quant_cache_current = _cached_receptor_data.get("quantitative_input_sha256") == quantitative_cache_key(vector_data)
+        # A locked receptor annotation is reusable as context. Old measured
+        # co-wave/divergence values cannot be rebound to new precursor IDs.
+        _cowave_analysis = _cached_receptor_data.get("cowave_analysis") if _quant_cache_current else None
+        _divergence_pairs = _cached_receptor_data.get("divergence_pairs", []) if _quant_cache_current else []
 
     if not _use_cached:
         # --- Source A: upstream_regulators (existing, kept for backward compat) ---
@@ -3519,13 +3448,19 @@ async def get_vector_plot_data(
             _parseable = [c for c in _cond_order if _parse_time_minutes(c) != float('inf')]
             _is_multi_tp = len(_parseable) >= 3  # re-check after parsing
 
+        # External site annotations are context memberships. Expand them to
+        # exact form labels without merging quantitative trajectories.
+        for kinase, members in list(kinase_ptm_map.items()):
+            kinase_ptm_map[kinase] = {p["label"] for p in top_n_ptms
+                if p["label"] in members or f"{p['gene']} {p['position']}".strip() in members}
+
         if _is_multi_tp and top_n_ptms:
             # ── Build PTM × Time matrix ──
             _ptm_labels_set = set(p["label"] for p in top_n_ptms)
             _ptm_time_matrix: dict = {}  # ptm_label → {cond: fc}
             for r in vector_data:
-                _lbl = f"{r['gene']} {r['position']}".strip()
-                if _lbl in _ptm_labels_set:
+                _lbl = f"{r['gene']} {r['position']} · {r.get('reader_feature_id')}"
+                if _lbl in _ptm_labels_set and r.get("axis_eligibility", {}).get("adjusted", {}).get("eligible") and r["ptm_relative_log2fc"] is not None:
                     if _lbl not in _ptm_time_matrix:
                         _ptm_time_matrix[_lbl] = {}
                     _ptm_time_matrix[_lbl][r["condition"]] = r["ptm_relative_log2fc"]
@@ -3533,7 +3468,7 @@ async def get_vector_plot_data(
             # Only proceed if enough PTMs have full time-series
             _full_ts_ptms = [
                 lbl for lbl, conds in _ptm_time_matrix.items()
-                if len([c for c in _parseable if c in conds]) >= 3
+                if len(_parseable) >= 3 and all(c in conds for c in _parseable)
             ]
 
             if len(_full_ts_ptms) >= 5:
@@ -3546,15 +3481,12 @@ async def get_vector_plot_data(
                     from ptm_shared.temporal_wave_engine import analyze_temporal_waves
 
                     _canonical_series = {
-                        lbl: {condition: _ptm_time_matrix[lbl].get(condition, 0.0) for condition in _parseable}
+                        lbl: {condition: _ptm_time_matrix[lbl][condition] for condition in _parseable}
                         for lbl in _full_ts_ptms
                     }
                     _canonical_metadata = {
-                        lbl: {
-                            "gene": lbl.rsplit(" ", 1)[0] if " " in lbl else lbl,
-                            "site": lbl.rsplit(" ", 1)[1] if " " in lbl else "",
-                        }
-                        for lbl in _full_ts_ptms
+                        p["label"]: {"gene": p["gene"], "site": p["position"], "feature_id": p["feature_id"]}
+                        for p in top_n_ptms if p["label"] in _full_ts_ptms
                     }
                     _canonical_wave_contract = analyze_temporal_waves(
                         _canonical_series,
@@ -3580,7 +3512,7 @@ async def get_vector_plot_data(
                     )
                     import math as _cw_math
                     _vectors: dict = {
-                        lbl: [_ptm_time_matrix[lbl].get(c, 0.0) for c in _parseable]
+                        lbl: [_ptm_time_matrix[lbl][c] for c in _parseable]
                         for lbl in _full_ts_ptms
                     }
 
@@ -3666,7 +3598,7 @@ async def get_vector_plot_data(
                     # Average FC per time point for this cluster
                     _avg_fc = []
                     for c in _parseable:
-                        vals = [_ptm_time_matrix[lbl].get(c, 0.0) for lbl in cl if lbl in _ptm_time_matrix]
+                        vals = [_ptm_time_matrix[lbl][c] for lbl in cl if lbl in _ptm_time_matrix]
                         _avg_fc.append(sum(vals) / max(len(vals), 1))
                     # Classify pattern
                     if len(_avg_fc) >= 3:
@@ -3753,24 +3685,28 @@ async def get_vector_plot_data(
         _ptm_max_abs_fc: dict = {}  # ptm_label -> max |FC| across conditions
         _ptm_is_denovo: set = set()
         for r in vector_data:
-            _lbl = f"{r['gene']} {r['position']}".strip()
+            _lbl = f"{r['gene']} {r['position']} · {r.get('reader_feature_id')}"
             if r.get("control_pseudocount_used"):
                 _ptm_is_denovo.add(_lbl)
             _cur_fc = abs(r.get("ptm_relative_log2fc", 0) or 0)
             if _lbl not in _ptm_max_abs_fc or _cur_fc > _ptm_max_abs_fc[_lbl]:
                 _ptm_max_abs_fc[_lbl] = _cur_fc
         # Classify each PTM
+        _ptm_supported_effect: set = set()
         _ptm_min_q: dict = {}
         for r in vector_data:
-            _lbl = f"{r['gene']} {r['position']}".strip()
-            _q = r.get("q_value")
+            _lbl = f"{r['gene']} {r['position']} · {r.get('reader_feature_id')}"
+            _q = r.get("ptm_protein_adjusted_q_value")
+            _effect = r.get("ptm_protein_adjusted_log2fc")
+            if _q is not None and 0 <= _q < .05 and _effect is not None and abs(_effect) >= 1 and r.get("axis_eligibility", {}).get("adjusted", {}).get("eligible"):
+                _ptm_supported_effect.add(_lbl)
             if _q is not None and (not isinstance(_q, float) or not __import__("math").isnan(_q)):
                 if _lbl not in _ptm_min_q or _q < _ptm_min_q[_lbl]:
                     _ptm_min_q[_lbl] = _q
         for _lbl in _ptm_max_abs_fc:
             if _lbl in _ptm_is_denovo:
                 _ptm_activity_class[_lbl] = "de_novo"
-            elif _ptm_min_q.get(_lbl, 1.0) < 0.05 and _ptm_max_abs_fc[_lbl] >= 1.0:
+            elif _lbl in _ptm_supported_effect:
                 _ptm_activity_class[_lbl] = "regulated"
             else:
                 _ptm_activity_class[_lbl] = "minor"
@@ -4057,11 +3993,13 @@ async def get_vector_plot_data(
 
         # v9.20: Persist receptor inference to DB so report_generation can use it
         try:
+            from ptm_shared.vector_plot import quantitative_cache_key
             order.receptor_inference_data = {
                 "receptors": inferred_receptors,
                 "top_n_setting": top_n_setting,
                 "locked": lock_receptor,
                 "cowave_analysis": _cowave_analysis,
+                "quantitative_input_sha256": quantitative_cache_key(vector_data),
                 "divergence_pairs": _divergence_pairs[:50],  # v12.0: limit storage
                 "saved_at": __import__('datetime').datetime.utcnow().isoformat(),
             }
@@ -4078,15 +4016,15 @@ async def get_vector_plot_data(
     suggested_n = None
     if vector_data:
         import math
-        all_fc = [abs(r["ptm_relative_log2fc"]) for r in vector_data if r["ptm_relative_log2fc"] != 0]
+        all_fc = [abs(r["ptm_relative_log2fc"]) for r in vector_data if r["ptm_relative_log2fc"] is not None and r["ptm_relative_log2fc"] != 0]
         if all_fc:
             mean_fc = sum(all_fc) / len(all_fc)
             std_fc = math.sqrt(sum((x - mean_fc) ** 2 for x in all_fc) / len(all_fc)) if len(all_fc) > 1 else 0
             threshold = mean_fc + 2 * std_fc if std_fc > 0 else mean_fc * 2
             significant_keys = set()
             for r in vector_data:
-                if abs(r["ptm_relative_log2fc"]) >= threshold:
-                    significant_keys.add((r["gene"], r["position"]))
+                if r["ptm_relative_log2fc"] is not None and abs(r["ptm_relative_log2fc"]) >= threshold:
+                    significant_keys.add(r.get("feature_id"))
             suggested_n = len(significant_keys) if significant_keys else None
 
     import math
@@ -4105,7 +4043,9 @@ async def get_vector_plot_data(
             return [_sanitize_floats(v) for v in obj]
         return obj
 
+    from ptm_shared.feature_identity import audit_feature_identities
     return _sanitize_floats({
+        "feature_identity_audit": audit_feature_identities(vector_data),
         "vector_data": vector_data,
         "top_n_ptms": top_n_ptms,
         "suggested_n": suggested_n,
@@ -7709,9 +7649,11 @@ async def kinase_activity_heatmap(
                 (cached_sidecar.get("kinase_feature_evidence_ledger_summary") or {}).get("contract_version")
                 == KINASE_FEATURE_LEDGER_CONTRACT_VERSION
             )
-            if cached.get("_cache_hash") == cache_hash:
+            from ptm_shared.temporal_feature_input import CONTRACT_VERSION as feature_input_version
+            cached_identity_ready = (cached.get("temporal_feature_input") or {}).get("contract_version") == feature_input_version
+            if cached.get("_cache_hash") == cache_hash and cached_identity_ready:
                 return {**cached, "_cached": True}
-            if not cached_dynamic_ready or not cached_ledger_ready or (cached.get("temporal_feature_input") or {}).get("contract_version") != "temporal_feature_input.v1":
+            if not cached_dynamic_ready or not cached_ledger_ready or not cached_identity_ready:
                 # A legacy/static cache must not block dynamic-transition
                 # or provenance-ledger rollout.  Rebuild automatically;
                 # parameter mismatches that already have current contracts
@@ -7744,11 +7686,13 @@ async def kinase_activity_heatmap(
             with open(p, "r", encoding="utf-8") as f:
                 reader = csv.DictReader(f, delimiter="\t")
                 for row in reader:
+                    from ptm_shared.feature_identity import canonical_feature_identity
+                    from ptm_shared.quantitative_fields import axis_number
                     gene = row.get("Gene.Name", row.get("gene", ""))
                     pos = row.get("PTM_Position", row.get("position", ""))
                     cond = row.get("Condition", "")
-                    rel_fc = row.get("PTM_Relative_Log2FC", "")
-                    q_val_raw = row.get("q_value", "")
+                    rel_fc = axis_number(row, "adjusted", "value")
+                    q_val_raw = axis_number(row, "adjusted", "q")
                     occupancy_logit_raw = row.get("Occupancy_Logit_Delta", "")
                     occupancy_q_raw = row.get("Occupancy_Q_Value", "")
                     rel_fc = _optional_finite(rel_fc)
@@ -7791,6 +7735,7 @@ async def kinase_activity_heatmap(
                         "modified_sequence": row.get("Modified.Sequence", ""),
                         "precursor_charge": row.get("Precursor.Charge", ""),
                         "precursor_id": row.get("Precursor.Id", ""),
+                        **canonical_feature_identity(row),
                         "all_reported_ptm_positions": row.get(
                             "PTM_Positions",
                             row.get("PTM_Sites", row.get("PTM_Position", str(pos))),
@@ -8522,7 +8467,7 @@ async def kinase_activity_heatmap(
             for cl in clusters:
                 cl_id = cl.get("cluster_id", 0)
                 for pk in cl.get("ptm_keys", []):
-                    gene_part = pk.split("_")[0].upper() if "_" in pk else pk.upper()
+                    gene_part = temporal_inputs["features"].get(pk, {}).get("gene") or (pk.split("_")[0].upper() if "_" in pk else pk.upper())
                     _gene_cluster_map[gene_part] = cl_id
             dominant_cluster_id = dominant.get("cluster_id", 0)
             # Annotate tier1/tier2 genes with in_dominant flag
@@ -8659,12 +8604,12 @@ async def kinase_activity_heatmap(
                         "temporal": {c: round(v, 3) for c, v in ptm_timeseries.get(pk, {}).items()},
                         "peak_condition": max(conditions_sorted, key=lambda c, _pk=pk: abs(ptm_timeseries.get(_pk, {}).get(c, 0.0))) if conditions_sorted else "",
                         "cluster": "non_dominant_nuclear",
-                        "nuclear_tier": 1 if (pk.split("_")[0].upper() if "_" in pk else pk.upper()) in _NUCLEAR_TIER1_GENES else 2,
+                        "nuclear_tier": 1 if (temporal_inputs["features"].get(pk, {}).get("gene") or (pk.split("_")[0].upper() if "_" in pk else pk.upper())) in _NUCLEAR_TIER1_GENES else 2,
                     }
                     for cl in clusters if not cl["is_dominant"]
                     for pk in cl.get("ptm_keys", [])
-                    if (pk.split("_")[0].upper() if "_" in pk else pk.upper()) in _NUCLEAR_TIER1_GENES
-                    or (pk.split("_")[0].upper() if "_" in pk else pk.upper()) in _NUCLEAR_TIER2_GENES
+                    if (temporal_inputs["features"].get(pk, {}).get("gene") or (pk.split("_")[0].upper() if "_" in pk else pk.upper())) in _NUCLEAR_TIER1_GENES
+                    or (temporal_inputs["features"].get(pk, {}).get("gene") or (pk.split("_")[0].upper() if "_" in pk else pk.upper())) in _NUCLEAR_TIER2_GENES
                 ],
             ],
         })
@@ -9189,7 +9134,7 @@ async def kinase_activity_heatmap(
                 "canonical": km.get("kinase", "").upper(),
                 "kinase": km.get("kinase", ""),
                 # Guard: skip keys with trailing underscore (missing position)
-                "members": [{"key": k} for k in _keys if k and not k.endswith("_") and "_" in k],
+                "members": [{"key": k} for k in _keys if k in temporal_inputs["features"]],
             })
         tmm_scores = compute_weighted_kinase_scores(
             kinase_modules=_tmm_modules,
@@ -9218,8 +9163,8 @@ async def kinase_activity_heatmap(
             from ptm_shared.temporal_wave_engine import analyze_temporal_waves
             _occupancy_metadata = {
                 key: {
-                    "gene": key.rsplit("_", 1)[0],
-                    "site": key.rsplit("_", 1)[1] if "_" in key else "",
+                    "gene": temporal_inputs["features"].get(key, {}).get("gene", ""),
+                    "site": temporal_inputs["features"].get(key, {}).get("position", ""),
                     "quantification_track": "apparent_paired_occupancy",
                 }
                 for key in occupancy_complete_timeseries

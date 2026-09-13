@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import json
 import re
+from ptm_shared.feature_identity import audit_feature_identities
+
 from typing import Any, Iterable, Mapping
 
 from common.section_budgets import SECTION_BUDGETS
@@ -594,7 +596,7 @@ def build_authoring_packet(
     reference_cards = _literature_cards(source_references)
     for card in cards:
         if card.get("trajectory"):
-            card["literature_comparison"] = _finding_literature_context(card, source_references, state.get("literature_retrieval_status"))
+            card["literature_comparison"] = _finding_literature_context(card, source_references, (state.get("finding_literature_retrieval") or {}).get("records", {}).get((card.get("feature_identity") or {}).get("reader_feature_id")))
     cards.extend(reference_cards)
     reader_cards = [card for card in cards if card.get("reader_summary") and not _INTERNAL_TERM_RE.search(card["reader_summary"])]
     has_traceable_literature = bool(reference_cards)
@@ -649,6 +651,7 @@ def build_authoring_packet(
     return {
         "contract_version": AUTHORING_PACKET_VERSION,
         "study_design": dict(state.get("sample_manifest") or {}),
+        "feature_identity_audit": audit_feature_identities(state.get("vector_plot_raw_data") or []),
         "mode": "citation_complete" if has_traceable_literature else "data_only",
         "reader_cards": reader_cards,
         "study_metadata_contract": metadata_contract,
@@ -777,11 +780,12 @@ def _finding_literature_context(card, references, retrieval_status):
             comparisons.append({**dict(value), "citation_id": _stable_reference_id(ref),
                                 "claim_scope": "literature_context", "measured_relation": False,
                                 "condition_differences": list(value.get("condition_differences") or []),
-                                "comparison_status": "supplied_comparison_requires_source_review"})
+                                "comparison_status": value.get("comparison_status", "supplied_comparison_requires_source_review")})
     return {"contract_version": "finding_literature_comparison.v1",
-            "status": "comparisons_available" if comparisons else "not_explained_by_retrieved_evidence" if retrieval_status == "completed" or any(is_traceable_reference(r) for r in references) else "retrieval_unavailable",
+            "status": (retrieval_status or {}).get("status", "comparisons_available" if comparisons else "retrieval_unavailable") if isinstance(retrieval_status, Mapping) else "comparisons_available" if comparisons else "retrieval_unavailable",
+            "retrieval_record": dict(retrieval_status) if isinstance(retrieval_status, Mapping) else None,
             "comparisons": comparisons, "novelty_claim_allowed": False,
-            "retrieval_scope": "supplied_records_only", "conditions_not_matched_by_default": True}
+            "retrieval_scope": "finding_scoped_search" if isinstance(retrieval_status, Mapping) else "supplied_records_only", "conditions_not_matched_by_default": True}
 
 
 def _finding_metadata(card, selected):
@@ -1544,7 +1548,7 @@ def _render_finding_section(section_type, packet, study):
             for comparison in context["comparisons"]:
                 relation = "agreed with" if comparison["relationship"] == "known_agreement" else "differed from" if comparison["relationship"] == "disagreement" else "was not explained by"
                 differences = "; ".join(comparison["condition_differences"]) or "experimental comparability has not been established"
-                comparison_text = f"For {fid}, the supplied literature comparison {relation} the recorded observation: {comparison['external_finding']}"
+                comparison_text = f"For {fid}, the {comparison.get('reference_scope', 'supplied')}-level literature comparison {relation} the recorded observation: {comparison['external_finding']}"
                 comparison_sentences = _split_sentences(comparison_text) + [f"Conditions differ in {differences}."]
                 # Bind the source to each claim before sentence validation;
                 # a trailing paragraph citation must not orphan the comparison.
@@ -1553,7 +1557,12 @@ def _render_finding_section(section_type, packet, study):
                     clause = sentence[:-1] if sentence.endswith((".", "!", "?")) else sentence
                     literature.append(f"{clause} [REF:{comparison['citation_id']}]{punctuation}")
             if not literature:
-                literature = ["Traceable feature-specific literature comparison was unavailable." if context["status"] == "retrieval_unavailable" else "The supplied retrieval did not explain this pattern; that search result does not establish novelty."]
+                literature = [{
+                    "not_searched": "A feature-specific literature search was not performed.",
+                    "retrieval_failed": "The feature-specific literature search failed; literature coverage remains unknown.",
+                    "retrieved_comparison_pending": "Literature was retrieved, but a source-anchored feature comparison remains incomplete.",
+                    "not_explained_by_retrieved_evidence": "The searched evidence did not explain this pattern within the recorded search scope; this does not establish novelty.",
+                }.get(context["status"], "Traceable feature-specific literature comparison was unavailable.")]
             alternative = ("A change in the available protein denominator and differences in sample support can contribute to the adjusted contrast. "
                            "To distinguish this contribution from a change in modified precursor abundance, the next measurement should quantify the same precursor and linked protein in matched independent biological samples.")
             if finding["opposing_feature_ids"]:

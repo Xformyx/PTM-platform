@@ -151,7 +151,7 @@ def build_report_artifact_manifest(
     return manifest
 
 
-def finalize_rendered_artifacts(manifest: Mapping[str, Any], rendered_paths, figure_manifest):
+def finalize_rendered_artifacts(manifest: Mapping[str, Any], rendered_paths, figure_manifest, *, requested_formats=None, export_failures=None):
     """Seal only files returned by this export, not stale files found by glob."""
     result = dict(manifest)
     records = [_artifact("rendered_" + Path(path).suffix.lstrip("."), path, required=True)
@@ -163,11 +163,21 @@ def finalize_rendered_artifacts(manifest: Mapping[str, Any], rendered_paths, fig
             records.append(record)
     stale_sources = [item["role"] for item in result.get("artifacts") or [] if item.get("sha256")
                      and (not Path(item["path"]).is_file() or _sha256(Path(item["path"])) != item["sha256"])]
-    result["render_contract_version"] = "report_rendered_artifacts.v1"
+    requested = set(requested_formats if requested_formats is not None else ("docx", "html"))
+    actual = {Path(r["path"]).suffix.lstrip(".") for r in records if r["exists"] and r["role"].startswith("rendered_")}
+    missing = sorted(requested - actual)
+    result["requested_formats"] = sorted(requested)
+    result["actual_formats"] = sorted(actual)
+    result["export_failures"] = list(export_failures or [])
+    result["missing_formats"] = missing
+    result["render_contract_version"] = "report_rendered_artifacts.v2"
     result["rendered_artifacts"] = records
-    result["render_status"] = "recorded" if rendered_paths and records and all(r["exists"] for r in records) and not stale_sources else "incomplete"
+    result["render_status"] = "recorded" if rendered_paths and records and all(r["exists"] for r in records) and not stale_sources and not missing and not export_failures else "incomplete"
     result["changed_source_artifacts"] = stale_sources
     # Artifact integrity and scientific/publication status remain distinct.
+    if missing or export_failures:
+        result["report_eligible"] = False
+        result["reason_codes"] = sorted(set(result.get("reason_codes") or []) | {"requested_export_incomplete"})
     if stale_sources:
         result["report_eligible"] = False
         result["reason_codes"] = sorted(set(result.get("reason_codes") or []) | {"source_changed_before_export"})
@@ -181,7 +191,8 @@ def finalize_rendered_artifacts(manifest: Mapping[str, Any], rendered_paths, fig
 
 
 def verify_rendered_artifacts(manifest):
-    mismatches = [r["role"] for r in manifest.get("rendered_artifacts") or []
+    records = list(manifest.get("rendered_artifacts") or []) + [r for r in manifest.get("artifacts") or [] if r.get("sha256") or r.get("required")]
+    mismatches = [r["role"] for r in records
                   if not r.get("sha256") or not r.get("path") or not Path(r["path"]).is_file()
                   or _sha256(Path(r["path"])) != r["sha256"]]
     return {"status": "mismatch" if mismatches else "verified" if manifest.get("rendered_artifacts") else "unavailable",

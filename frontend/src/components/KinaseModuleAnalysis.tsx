@@ -1,3 +1,4 @@
+import { featureKey, finite } from "../lib/quantitation";
 /**
  * KinaseModuleAnalysis.tsx
  * ────────────────────────────────────────────────────────────────────────────
@@ -65,6 +66,7 @@ import { TEMPORAL_TERMS, formatLocalTransitionStatus, formatTemporalClusterLabel
 // ── Types ────────────────────────────────────────────────────────────────────
 
 interface PtmTimeSeriesRow {
+  feature_id?: string | null;
   gene: string;
   position: string;
   condition: string;
@@ -74,6 +76,7 @@ interface PtmTimeSeriesRow {
 }
 
 interface PtmInfo {
+  feature_id?: string | null;
   gene: string;
   position: string;
   label: string;
@@ -437,39 +440,28 @@ function detectCoWaveModules(
   // v9.44: compute activity_class per PTM from vectorData with co-wave confidence boost
   const ptmActivityClassMap = new Map<string, "de_novo" | "regulated" | "coordinated" | "minor">();
   ptms.forEach((p) => {
-    const key = `${p.gene}_${p.position}`;
+    const key = featureKey(p);
     const series = conditions.map((cond) => {
       const row = vectorData.find(
-        (r) => r.gene === p.gene && r.position === p.position && r.condition === cond
+        (r) => featureKey(r) === featureKey(p) && r.condition === cond
       );
-      return row?.value ?? 0;
+      return row?.value;
     });
+    if (!series.every(finite)) return; // Partial observations stay in the main U/P/A view.
     ptmSeries.set(key, series);
 
     // Determine base activity_class: check all rows for this PTM across conditions
-    const rows = vectorData.filter((r) => r.gene === p.gene && r.position === p.position);
+    const rows = vectorData.filter((r) => featureKey(r) === featureKey(p));
     const isDenovo = rows.some((r) => r.control_pseudocount_used === true);
-    const maxAbsFC = Math.max(...series.map(Math.abs));
-    const qValues = rows.map((r) => r.q_value).filter((v): v is number => v != null && !isNaN(v));
-    const minQValue = qValues.length > 0 ? Math.min(...qValues) : null;
-    const hasQValue = minQValue != null;
-    let actClass: "de_novo" | "regulated" | "coordinated" | "minor";
-    if (isDenovo) {
-      actClass = "de_novo";
-    } else if (hasQValue) {
-      actClass = (minQValue < 0.05 && maxAbsFC >= 1.0) ? "regulated" : "minor";
-    } else {
-      const baselineVal = series[0] ?? 0;
-      const maxAbsChange = Math.max(...series.map((v) => Math.abs(v - baselineVal)));
-      actClass = maxAbsChange > 0.8 ? "regulated" : "minor";
-    }
+    const actClass = isDenovo ? "de_novo" : rows.some(r => finite(r.value) && Math.abs(r.value) >= 1 && finite(r.q_value) && r.q_value >= 0 && r.q_value < .05) ? "regulated" : "minor";
     ptmActivityClassMap.set(key, actClass);
   });
 
   const peakGroups = new Map<string, PtmInfo[]>();
   ptms.forEach((p) => {
-    const key = `${p.gene}_${p.position}`;
+    const key = featureKey(p);
     const series = ptmSeries.get(key) || [];
+    if (!series.length || Math.max(...series) === Math.min(...series)) return;
     const maxIdx = series.reduce(
       (best, v, i) => (Math.abs(v) > Math.abs(series[best]) ? i : best),
       0
@@ -492,7 +484,7 @@ function detectCoWaveModules(
     moduleId++;
 
     const amplitudes = groupPtms.map((p) => {
-      const key = `${p.gene}_${p.position}`;
+      const key = featureKey(p);
       const series = ptmSeries.get(key) || [];
       const idx = conditions.indexOf(peakCond);
       return idx >= 0 ? series[idx] : 0;
@@ -508,7 +500,7 @@ function detectCoWaveModules(
     if (conditions.length >= 3 && groupPtms.length >= 3) {
       const condAmplitudes = conditions.map((cond) =>
         groupPtms.map((p) => {
-          const key = `${p.gene}_${p.position}`;
+          const key = featureKey(p);
           const series = ptmSeries.get(key) || [];
           const idx = conditions.indexOf(cond);
           return idx >= 0 ? Math.abs(series[idx]) : 0;
@@ -533,7 +525,7 @@ function detectCoWaveModules(
     //   - PTM has |Log2FC| >= 0.5 at peak (not just noise)
     //   - At least 1 other PTM in the group is de_novo or regulated (anchor signal)
     const hasAnchorSignal = groupPtms.some((p) => {
-      const ac = ptmActivityClassMap.get(`${p.gene}_${p.position}`) ?? "minor";
+      const ac = ptmActivityClassMap.get(featureKey(p)) ?? "minor";
       return ac === "de_novo" || ac === "regulated";
     });
     const groupSizeThreshold = 3;
@@ -541,7 +533,7 @@ function detectCoWaveModules(
 
     if (groupPtms.length >= groupSizeThreshold && hasAnchorSignal) {
       groupPtms.forEach((p) => {
-        const key = `${p.gene}_${p.position}`;
+        const key = featureKey(p);
         const currentClass = ptmActivityClassMap.get(key) ?? "minor";
         if (currentClass === "minor") {
           // Check if this PTM has meaningful signal at peak
@@ -560,7 +552,7 @@ function detectCoWaveModules(
     // v9.44: activity class statistics (includes coordinated)
     const class_counts = { de_novo: 0, regulated: 0, coordinated: 0, minor: 0 };
     groupPtms.forEach((p) => {
-      const key = `${p.gene}_${p.position}`;
+      const key = featureKey(p);
       const ac = ptmActivityClassMap.get(key) ?? "minor";
       p.activity_class = ac; // ensure PtmInfo reflects final class
       class_counts[ac] = (class_counts[ac] ?? 0) + 1;
@@ -680,7 +672,7 @@ export default function KinaseModuleAnalysis({
 
   // ── Co-wave module detection ─────────────────────────────────────────────
   const checkedPtmList = useMemo(
-    () => topNPtms.filter((p) => checkedPtms[`${p.gene}_${p.position}`]),
+    () => topNPtms.filter((p) => checkedPtms[featureKey(p)]),
     [topNPtms, checkedPtms]
   );
 
@@ -722,7 +714,7 @@ export default function KinaseModuleAnalysis({
 
   // ── Manual (Kinase Lookup) motif annotation call ────────────────────────
   const runManualAnnotation = useCallback(async () => {
-    const selectedPtms = topNPtms.filter((p) => manualSelection.has(`${p.gene}_${p.position}`));
+    const selectedPtms = topNPtms.filter((p) => manualSelection.has(featureKey(p)));
     if (selectedPtms.length === 0) return;
     setManualAnnotationLoading(true);
     setMotifError(null);
@@ -786,7 +778,7 @@ export default function KinaseModuleAnalysis({
       const cowaveModulesPayload = coWaveModules.map((m) => ({
         id: m.id,
         label: m.label,
-        ptms: m.ptms.map((p) => `${p.gene}_${p.position}`),
+        ptms: m.ptms.map((p) => featureKey(p)),
       }));
 
       // If PTM count is small enough, do a single call (no batching needed)
@@ -1399,7 +1391,7 @@ export default function KinaseModuleAnalysis({
                     </div>
                     <div className="flex items-center gap-2">
                       {onSelectPtms && (() => {
-                        const modKeys = mod.ptms.map((p) => `${p.gene}_${p.position}`);
+                        const modKeys = mod.ptms.map((p) => featureKey(p));
                         const isActive = highlightedPtmKeys && highlightedPtmKeys.size > 0 &&
                           modKeys.every((k) => highlightedPtmKeys.has(k)) &&
                           modKeys.length === highlightedPtmKeys.size;
@@ -1454,7 +1446,7 @@ export default function KinaseModuleAnalysis({
                       {/* PTM list with annotation status */}
                       <div className="flex flex-wrap gap-1">
                         {mod.ptms.map((p) => {
-                          const ptmKey = `${p.gene}_${p.position}`;
+                          const ptmKey = featureKey(p);
                           const ann = annotation?.annotations?.find(
                             (a) => a.gene === p.gene && a.position === p.position
                           );
@@ -1550,7 +1542,7 @@ export default function KinaseModuleAnalysis({
             </p>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-1 max-h-48 overflow-y-auto border rounded p-2">
               {topNPtms.map((p) => {
-                const key = `${p.gene}_${p.position}`;
+                const key = featureKey(p);
                 const isSelected = manualSelection.has(key);
                 return (
                   <label
@@ -1594,7 +1586,7 @@ export default function KinaseModuleAnalysis({
                     setManualSelection(new Set());
                     setManualAnnotation(null);
                     if (onSelectPtms) {
-                      onSelectPtms(topNPtms.map((p) => `${p.gene}_${p.position}`));
+                      onSelectPtms(topNPtms.map((p) => featureKey(p)));
                     }
                   }}
                 >
@@ -3244,11 +3236,11 @@ function GlobalKinaseModulesPanel({
                       {mod.members.map((m) => {
                         const timeValues = conditions.map((c) => {
                           const row = vectorData.find(
-                            (v) => v.gene === m.gene && v.position === m.position && v.condition === c
+                            (v) => featureKey(v) === featureKey(m) && v.condition === c
                           );
-                          return row?.value ?? 0;
+                          return row?.value ?? NaN;
                         });
-                        const maxVal = Math.max(...timeValues.map(Math.abs), 1);
+                        const maxVal = Math.max(...timeValues.filter(finite).map(Math.abs), 1);
                         const chainType = isUbi ? ((m as any).chain_type || "unknown").toLowerCase() : null;
                         const chainKey = chainType ? (chainType.startsWith("k") ? chainType.toUpperCase() : chainType) : null;
                         const chainColor = chainKey ? (CHAIN_TYPE_COLORS[chainKey] || CHAIN_TYPE_COLORS.unknown) : null;
@@ -3286,7 +3278,7 @@ function GlobalKinaseModulesPanel({
                             </TableCell>
                             <TableCell className="py-1">
                               <div className="flex items-end gap-[2px] h-5">
-                                {timeValues.map((v, ti) => (
+                                {timeValues.map((v, ti) => !finite(v) ? <span key={ti} className="w-2" title={`${conditions[ti]}: unavailable`}>·</span> : (
                                   <div
                                     key={ti}
                                     className={`w-2 rounded-t ${v >= 0 ? "bg-blue-400" : "bg-red-400"}`}
@@ -3430,7 +3422,7 @@ function SignalFlowView({
 }: {
   inferredReceptors: InferredReceptor[];
   globalKinaseResult: GlobalKinaseModuleResponse | null;
-  topNPtms: { gene: string; position: string; label: string }[];
+  topNPtms: { feature_id?: string | null; gene: string; position: string; label: string }[];
   vectorData?: PtmTimeSeriesRow[];
   conditions?: string[];
   coWaveModules?: CoWaveModule[];
@@ -3469,35 +3461,21 @@ function SignalFlowView({
     const map: Record<string, "de_novo" | "regulated" | "coordinated" | "minor"> = {};
     if (!vectorData.length || !conditions.length) return map;
     const baseline = conditions[0];
-    const ptmKeys = new Set(vectorData.map(r => `${r.gene}_${r.position}`));
+    const ptmKeys = new Set(vectorData.map(r => featureKey(r)));
 
     // Step 1: Compute base class (same as before)
     for (const key of ptmKeys) {
-      const rows = vectorData.filter(r => `${r.gene}_${r.position}` === key);
+      const rows = vectorData.filter(r => featureKey(r) === key);
       const hasPseudocount = rows.some(r => r.control_pseudocount_used === true);
-      const maxVal = Math.max(...rows.map(r => r.value));
-      const minVal = Math.min(...rows.map(r => r.value));
-      const maxAbsLog2FC = Math.max(Math.abs(maxVal), Math.abs(minVal));
-      const qValues = rows.map(r => r.q_value).filter((v): v is number => v != null && !isNaN(v));
-      const minQVal = qValues.length > 0 ? Math.min(...qValues) : null;
-      const hasQValue = minQVal != null;
+      map[key] = hasPseudocount ? "de_novo" : rows.some(r => finite(r.value) && Math.abs(r.value) >= 1 && finite(r.q_value) && r.q_value >= 0 && r.q_value < .05) ? "regulated" : "minor";
 
-      if (hasPseudocount) {
-        map[key] = "de_novo";
-      } else if (hasQValue) {
-        map[key] = (maxAbsLog2FC >= 1.0 && minQVal < 0.05) ? "regulated" : "minor";
-      } else {
-        const baselineVal = rows.find(r => r.condition === baseline)?.value ?? 0;
-        const maxAbsChange = Math.max(Math.abs(maxVal - baselineVal), Math.abs(minVal - baselineVal));
-        map[key] = maxAbsChange > 0.8 ? "regulated" : "minor";
-      }
     }
 
     // Step 2: Co-wave Confidence Boost — use pre-computed classes from coWaveModules
     // coWaveModules already applied the boost in detectCoWaveModules (v9.44)
     for (const mod of coWaveModules) {
       for (const ptm of mod.ptms) {
-        const key = `${ptm.gene}_${ptm.position}`;
+        const key = featureKey(ptm);
         if (ptm.activity_class === "coordinated" && map[key] === "minor") {
           map[key] = "coordinated";
         }
@@ -3513,7 +3491,7 @@ function SignalFlowView({
     const map: Record<string, { moduleId: number; label: string; peakCondition: string; groupSize: number; dominantClass: string }[]> = {};
     for (const mod of coWaveModules) {
       for (const ptm of mod.ptms) {
-        const key = `${ptm.gene}_${ptm.position}`;
+        const key = featureKey(ptm);
         if (!map[key]) map[key] = [];
         map[key].push({
           moduleId: mod.id,
@@ -3541,14 +3519,17 @@ function SignalFlowView({
 
   // Build kinase → PTM mapping from globalKinaseResult
   const kinaseToPtms = useMemo(() => {
-    const map: Record<string, { gene: string; position: string; label: string; membership: string }[]> = {};
+    const map: Record<string, { feature_id?: string | null; gene: string; position: string; label: string; membership: string }[]> = {};
     if (!globalKinaseResult) return map;
     for (const mod of globalKinaseResult.kinase_modules) {
       const key = (mod.canonical || mod.kinase).toUpperCase();
       if (!map[key]) map[key] = [];
       for (const member of mod.members) {
-        const ptmInfo = topNPtms.find(p => p.gene === member.gene && p.position === member.position);
+        const exact = topNPtms.find(p => featureKey(p) === featureKey(member));
+        const matching = topNPtms.filter(p => p.gene === member.gene && p.position === member.position);
+        const ptmInfo = exact || (matching.length === 1 ? matching[0] : undefined);
         map[key].push({
+          feature_id: ptmInfo?.feature_id,
           gene: member.gene,
           position: member.position,
           label: ptmInfo?.label || `${member.gene}_${member.position}`,
@@ -4206,7 +4187,7 @@ function SignalFlowView({
                             // v9.43: Count co-wave groups among this kinase's substrates
                             const kinaseCowaveGroups = new Map<number, { label: string; count: number; peakCondition: string }>();
                             for (const ptm of ptms) {
-                              const key = `${ptm.gene}_${ptm.position}`;
+                              const key = featureKey(ptm);
                               const cwInfos = ptmCoWaveMap[key] || [];
                               for (const cw of cwInfos) {
                                 if (!kinaseCowaveGroups.has(cw.moduleId)) {
@@ -4243,7 +4224,7 @@ function SignalFlowView({
                               </div>
                               <div className="flex flex-wrap gap-1 ml-3">
                                 {ptms.map(ptm => {
-                                  const ptmKey = `${ptm.gene}_${ptm.position}`;
+                                  const ptmKey = featureKey(ptm);
                                   const actClass = ptmActivityClass[ptmKey] || "minor";
                                   const chipStyle =
                                     actClass === "de_novo"

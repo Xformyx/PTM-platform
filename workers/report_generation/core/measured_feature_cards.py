@@ -99,33 +99,22 @@ def _source_rows(state: Mapping[str, Any]) -> list[dict]:
     return enriched
 
 
-def _feature_key(row: Mapping[str, Any]) -> tuple[str, str, str, str]:
-    gene = _text(row, "gene", "Gene.Name", "gene_name").upper()
-    position = _text(row, "position", "PTM_Position", "site").upper()
-    precursor = _text(row, "Precursor.Id", "precursor_id", "source_feature_id")
-    sequence = _text(row, "Modified.Sequence", "modified_sequence")
-    return gene, position, precursor, sequence
+from ptm_shared.feature_identity import feature_key as _feature_key, canonical_feature_identity, reader_id, FIELDS
 
 
-def reader_feature_id(key: tuple[str, str, str, str]) -> str:
-    """Return a stable reader-facing ID without exposing raw precursor strings."""
-    identity = "|".join(str(value or "") for value in key)
-    return f"PF-{hashlib.sha1(identity.encode('utf-8')).hexdigest()[:8].upper()}"
+def reader_feature_id(key):
+    return reader_id(key)
 
 
-def _has_reader_identity(row: Mapping[str, Any]) -> bool:
-    """Require a source feature identity before reader-facing aggregation."""
-    explicit = row.get("identity_complete_for_reader_cards")
-    if isinstance(explicit, bool):
-        return explicit
-    return bool(_text(row, "Precursor.Id", "precursor_id", "source_feature_id", "Modified.Sequence", "modified_sequence"))
+def _has_reader_identity(row):
+    return canonical_feature_identity(row)["identity_complete_for_reader_cards"]
 
 
 def _group_feature_rows(rows: Iterable[Mapping[str, Any]]) -> list[tuple[tuple[str, str, str, str], list[dict]]]:
     grouped: dict[tuple[str, str, str, str], list[dict]] = defaultdict(list)
     for source in rows:
         row = _mapping(source)
-        gene, position, precursor, sequence = _feature_key(row)
+        gene, position, precursor, sequence = _feature_key(row)[:4]
         if not gene or gene in {"?", "UNKNOWN", "UNMAPPED"}:
             continue
         if not _has_reader_identity(row):
@@ -144,7 +133,7 @@ def _group_feature_rows(rows: Iterable[Mapping[str, Any]]) -> list[tuple[tuple[s
     return sorted(grouped.items(), key=lambda item: item[0])
 
 
-def _identity_complete_condition_rows(rows: Iterable[Mapping[str, Any]]) -> list[dict] | None:
+def _identity_complete_condition_rows(rows: Iterable[Mapping[str, Any]], *, allow_partial_conflicts=False) -> list[dict] | None:
     """Return one identity-complete row per condition or withhold the group.
 
     Multiple rows for one `(modified precursor, condition)` can be genuine
@@ -154,9 +143,18 @@ def _identity_complete_condition_rows(rows: Iterable[Mapping[str, Any]]) -> list
     """
     per_condition: dict[str, list[dict]] = defaultdict(list)
     for row in rows:
-        per_condition[_condition_label(row)].append(dict(row))
-    if any(len(items) != 1 for items in per_condition.values()):
-        return None
+        if dict(row) not in per_condition[_condition_label(row)]:
+            per_condition[_condition_label(row)].append(dict(row))
+    for condition, items in per_condition.items():
+        if len(items) > 1:
+            if not allow_partial_conflicts:
+                return None
+            missing = {**dict(zip(FIELDS, _feature_key(items[0]))), "condition": condition,
+                       "condition_identity_status": "conflicting_feature_condition"}
+            for prefix in ("ptm_unadjusted", "ptm_protein_adjusted", "protein"):
+                missing[f"{prefix}_log2fc"] = None
+                missing[f"{prefix}_missing_reason"] = "conflicting_feature_condition"
+            per_condition[condition] = [missing]
     return [items[0] for _, items in sorted(per_condition.items(), key=lambda item: _condition_sort_key(item[0]))]
 
 
@@ -169,7 +167,7 @@ def _condition_label(row: Mapping[str, Any]) -> str:
 
 
 def _display_label(key: tuple[str, str, str, str], measurement: Mapping[str, Any]) -> str:
-    gene, position, _, _ = key
+    gene, position = key[:2]
     reader_unit = str(measurement.get("reader_measurement_unit") or "")
     if reader_unit == "localized_ptm_site_feature" and position:
         return f"{gene} {position} localized phosphorylation feature"
@@ -190,20 +188,31 @@ def _trajectory_complexity(values: list[float]) -> tuple[int, int]:
     return len(set(signs)), transitions
 
 
-def _point_quality(row: Mapping[str, Any], *, conventional_available: bool) -> dict[str, Any]:
+def _point_quality(row: Mapping[str, Any], *, conventional_available: bool, sample_manifest=None) -> dict[str, Any]:
     support = axis_support(row)
     axes = {}
     for axis in ("unadjusted", "protein_adjusted", "protein"):
         replicate = all(support[f"{axis}_{group}_n"] is not None and support[f"{axis}_{group}_n"] >= 2
                         for group in ("control", "treatment"))
+        evidence = axis_evidence(row, "adjusted" if axis == "protein_adjusted" else axis, sample_manifest)
+        biological_n = [evidence[f"{group}_biological_n"] for group in ("control", "treatment")]
+        biological_supported = all(n is not None and n >= 2 for n in biological_n)
+        technical_supported = replicate
+        if sample_manifest and sample_manifest.get("samples"):
+            replicate = biological_supported
         q = support[f"{axis}_q_value"]
-        axes[axis] = {"replicate_supported": bool(conventional_available and replicate),
-                      "q_supported": bool(conventional_available and q is not None and q < .05)}
+        axes[axis] = {"biological_supported": biological_supported, "biological_n": biological_n,
+                      "technical_precision_supported": technical_supported,
+                      "test_unit_matches_support": (not (sample_manifest and sample_manifest.get("samples"))
+                                                     or evidence.get("statistical_unit") == "biological_unit"),
+                      "support_scope": "biological_units" if sample_manifest and sample_manifest.get("samples") else "sample_observations_design_unavailable",
+                      "replicate_supported": bool(conventional_available and replicate),
+                      "q_supported": bool(conventional_available and q is not None and 0 <= q < .05)}
     ptm_axes = [axes[axis] for axis in ("unadjusted", "protein_adjusted")]
     return {**support, "axis_support": axes,
             "replicate_supported": any(item["replicate_supported"] for item in ptm_axes),
             "q_supported": any(item["q_supported"] for item in ptm_axes),
-            "matched_axis_support": any(item["replicate_supported"] and item["q_supported"] for item in ptm_axes)}
+            "matched_axis_support": any(item["replicate_supported"] and item["q_supported"] and item["test_unit_matches_support"] for item in ptm_axes)}
 
 
 def _comparison_quality_tier(quality: Mapping[str, Any]) -> str:
@@ -252,11 +261,24 @@ def build_feature_observation_cards(
         for _, rows in grouped_features
         for row in rows
     }, key=_condition_sort_key)
+    design_conditions = (state.get("sample_manifest") or {}).get("conditions") or []
+    declared = [str(d["condition"]) for d in design_conditions if isinstance(d, Mapping) and d.get("condition")]
+    grid_source = "sample_manifest" if declared else "observed_execution_conditions"
+    observed_conditions = sorted(set(observed_conditions) | set(declared), key=_condition_sort_key)
     for key, rows in grouped_features:
-        ordered = _identity_complete_condition_rows(rows)
+        ordered = _identity_complete_condition_rows(rows, allow_partial_conflicts=True)
         if ordered is None:
             continue
         first = ordered[0]
+        present_conditions = {_condition_label(row) for row in ordered}
+        for condition in observed_conditions:
+            if condition not in present_conditions:
+                missing = {**dict(zip(FIELDS, key)), "condition": condition, "observation_status": "unavailable"}
+                for prefix in ("ptm_unadjusted", "ptm_protein_adjusted", "protein"):
+                    missing[f"{prefix}_log2fc"] = None
+                    missing[f"{prefix}_missing_reason"] = "feature_condition_unavailable"
+                ordered.append(missing)
+
         measurement = _mapping(first.get("measurement_provenance")) or build_measurement_provenance(
             first,
             feature_id=_text(first, "Precursor.Id", "precursor_id") or None,
@@ -315,7 +337,7 @@ def build_feature_observation_cards(
                 "protein_log2fc": protein,
                 "conventional_log2fc_available": conventional_available,
                 "detection_context_only": bool(de_novo),
-                "quality": _point_quality(row, conventional_available=conventional_available),
+                "quality": _point_quality(row, conventional_available=conventional_available, sample_manifest=state.get("sample_manifest")),
             })
         points.sort(key=lambda p: (p["time_minutes"] if p["time_minutes"] is not None else math.inf, p["condition"]))
         adjusted_values = [p["ptm_protein_adjusted_log2fc"] for p in points if p["ptm_protein_adjusted_log2fc"] is not None and not p["detection_context_only"]]
@@ -331,7 +353,7 @@ def build_feature_observation_cards(
         candidates.append({
             "key": key,
             "measurement": measurement,
-            "mapping_identity": {key: first.get(key) for key in ("accession", "fasta_taxonomy_id", "isoform")},
+            "mapping_identity": {**canonical_feature_identity(first), "accession": first.get("accession")},
             "parent_protein_ids": sorted({_text(row, "Protein.Group", "protein_group") for row in ordered if _text(row, "Protein.Group", "protein_group")}),
             "points": points,
             "numeric_point_count": numeric_points,
@@ -447,6 +469,7 @@ def build_feature_observation_cards(
             "trajectory_shape_fact": trajectory_fact,
             "display_eligible": candidate["display_eligible"],
             "clustering_eligible": candidate["clustering_eligible"],
+            "condition_grid": {"conditions": observed_conditions, "source": grid_source},
             "narrative_quality_tier": candidate["narrative_quality_tier"],
             "quality_summary": candidate["quality_counts"],
             "selection_rule": "identity completeness; replicate/q-value support; observed condition coverage; signed temporal-shape diversity; lexical tie-breaker; no magnitude ranking",
@@ -561,11 +584,11 @@ def build_quantitation_comparison_cards(
                 "comparison_class": _comparison_class(unadjusted, adjusted),
                 "measurement": measurement,
                 "protein_group": _text(row, "Protein.Group", "protein_group", "protein_accession"),
-                "quality": _point_quality(row, conventional_available=True),
+                "quality": _point_quality(row, conventional_available=True, sample_manifest=state.get("sample_manifest")),
                 **axis_support(row),
                 "adjusted_q_value": axis_number(row, "adjusted", "q"),
                 "adjusted_p_value": axis_number(row, "adjusted", "p"),
-                "narrative_quality_tier": _comparison_quality_tier(_point_quality(row, conventional_available=True)),
+                "narrative_quality_tier": _comparison_quality_tier(_point_quality(row, conventional_available=True, sample_manifest=state.get("sample_manifest"))),
             })
 
     shared_protein_counts: dict[tuple[str, str, float], int] = defaultdict(int)
@@ -643,6 +666,7 @@ def build_quantitation_comparison_cards(
             ),
             "feature_label": label,
             "feature_identity": {
+                **canonical_feature_identity(dict(zip(FIELDS, row["key"]))),
                 "reader_feature_id": feature_id,
                 "gene": row["key"][0],
                 "candidate_residue_annotation": row["key"][1] or None,

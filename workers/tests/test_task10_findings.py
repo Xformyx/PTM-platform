@@ -54,7 +54,8 @@ def test_t10_11_literature_agreement_and_opposition_keep_source_and_conditions()
     assert "different cell model" in prose["discussion"]
     assert not any("withhold_uncited_literature_sentence" in e["validator_action"] for e in audit["entries"])
     empty = build_authoring_packet({**state, "literature_retrieval_status": "completed"}, references=[])
-    assert deterministic_authoring_plan(empty)["key_findings"][0]["literature_comparison"]["status"] == "not_explained_by_retrieved_evidence"
+    # A global completion flag does not prove this feature was searched.
+    assert deterministic_authoring_plan(empty)["key_findings"][0]["literature_comparison"]["status"] == "retrieval_unavailable"
 
 
 def test_t10_12_finding_count_follows_available_evidence():

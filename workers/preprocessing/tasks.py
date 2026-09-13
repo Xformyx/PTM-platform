@@ -296,6 +296,7 @@ def run_preprocessing(self, order_id: int, config: dict):
                 ptm_mode=ptm_mode,
                 condition_map=condition_map,
                 progress_callback=quant_cb,
+                sample_manifest=config.get("sample_manifest") or (config.get("experimental_context") or {}).get("sample_manifest"),
             )
 
             success = analyzer.run_analysis(pr_path, pg_path)
