@@ -126,7 +126,10 @@ def test_phase2_prepared_manifest_adds_verified_protein_adjustment_figure(tmp_pa
     assert figure["placement"] == "main"
     assert figure["insertion_verified"] is True
     assert figure["display_label"].startswith("Figure ")
-    assert figure["matched_feature_count"] == 3
+    assert figure["matched_feature_count"] == 2
+    assert figure["quantitative_bindings"]
+    joint = next(f for f in manifest["figures"] if f["figure_key"] == "reader_joint_trajectories")
+    assert set(figure["selected_reader_feature_ids"]).issubset(joint["selected_reader_feature_ids"])
     assert figure["reconstructed_metric_excluded"] is True
     assert figure["de_novo_excluded"] is True
     assert tmp_path.joinpath("reader_protein_adjustment_comparison.png").stat().st_size > 1000

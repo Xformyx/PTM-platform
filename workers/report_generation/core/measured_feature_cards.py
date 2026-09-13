@@ -498,6 +498,7 @@ def select_finding_cards(cards: Iterable[Mapping[str, Any]], *, maximum: int = 4
             # The adapter adds discovery context to the same measured feature.
             if card.get("category") == "candidate_discovery":
                 card["evidence_ids"] = sorted(set(card.get("evidence_ids", []) + unique[fid].get("evidence_ids", [])))
+                card["question_ids"] = sorted(set(card.get("question_ids", []) + unique[fid].get("question_ids", [])))
                 unique[fid] = card
             continue
         unique[fid] = card
@@ -509,15 +510,20 @@ def select_finding_cards(cards: Iterable[Mapping[str, Any]], *, maximum: int = 4
         return set(card.get("parent_protein_ids") or [str(_mapping(card.get("feature_identity")).get("gene") or "unknown_parent")])
 
     def pattern(card):
-        return tuple(sorted({str(p.get("joint_pattern")) for p in card.get("trajectory") or []}))
+        joint = tuple(sorted({str(p.get("joint_pattern")) for p in card.get("trajectory") or []}))
+        temporal = tuple((axis, summary.get("label"), tuple((p.get("time_minutes"), p.get("kind")) for p in summary.get("observed_extrema") or []))
+                         for axis, summary in sorted((card.get("axis_patterns") or {}).items()))
+        return joint, temporal
 
     def priority(item):
         fid, card = item
         quality = _mapping(card.get("quality_summary"))
         return ({"high": 0, "moderate": 1, "exploratory": 2}.get(card.get("narrative_quality_tier"), 3),
+                not bool(card.get("question_ids")),
+                bool(parents(card) & parents_seen), pattern(card) in patterns_seen,
                 -int(quality.get("q_supported_point_count") or 0),
                 -int(quality.get("replicate_supported_point_count") or 0),
-                bool(parents(card) & parents_seen), pattern(card) in patterns_seen, fid)
+                fid)
 
     remaining = dict(unique)
     while remaining and len(selected) < maximum:
@@ -527,10 +533,10 @@ def select_finding_cards(cards: Iterable[Mapping[str, Any]], *, maximum: int = 4
         patterns_seen.add(pattern(card))
         del remaining[fid]
     excluded.extend({"reader_feature_id": fid, "reason": "quality_parent_pattern_diversity_capacity"} for fid in sorted(remaining))
-    return selected, {"contract_version": "report_finding_selection.v1", "input_unique_feature_count": len(unique),
+    return selected, {"contract_version": "report_finding_selection.v3", "input_unique_feature_count": len(unique),
                       "selected_count": len(selected), "selected_reader_feature_ids": [c["feature_identity"]["reader_feature_id"] for c in selected],
                       "parent_count": len(parents_seen), "independent_sample_count": None,
-                      "rule": "quality_then_parent_and_joint_pattern_diversity_then_stable_feature_id",
+                      "rule": "quality_then_question_relevance_parent_and_observed_temporal_diversity_then_point_support_and_stable_feature_id",
                       "exclusions": excluded}
 
 

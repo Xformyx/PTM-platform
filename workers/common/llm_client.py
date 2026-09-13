@@ -363,8 +363,15 @@ class LLMClient:
                 )
                 logger.error(error_msg)
                 return f"[LLM Error: {error_msg}]"
-            return r.json().get("response", "").strip()
+            response = r.json()
+            from common.generation_trace import record_generation_event
+            record_generation_event(response=response, resolved_model=response.get("model", self.model),
+                                    finish_reason=response.get("done_reason"),
+                                    usage={k: response.get(k) for k in ("prompt_eval_count", "eval_count")})
+            return response.get("response", "").strip()
         except requests.Timeout:
+            from common.generation_trace import record_generation_event
+            record_generation_event(exception_type="Timeout")
             error_msg = (
                 f"Ollama request timed out ({OLLAMA_TIMEOUT}s) for model '{self.model}' "
                 f"at {self.base_url}. The model may be too slow for this prompt size."
@@ -372,6 +379,8 @@ class LLMClient:
             logger.error(error_msg)
             return f"[LLM Error: {error_msg}]"
         except requests.ConnectionError:
+            from common.generation_trace import record_generation_event
+            record_generation_event(exception_type="ConnectionError")
             error_msg = (
                 f"Cannot connect to Ollama at {self.base_url}. "
                 f"Please verify: (1) Ollama is running ('ollama serve'), "
@@ -394,7 +403,7 @@ class LLMClient:
         temperature: Optional[float] = None, max_tokens: Optional[int] = None,
         min_words: int = 200, section_name: str = "Section", max_retries: int = 3,
         retry_boost_prompt: str = "", response_format: Optional[dict] = None,
-        content_validator: Optional[Callable[[str], list[str]]] = None,
+        content_validator: Optional[Callable[[str], list[str]]] = None, trace_sink: Optional[list] = None,
     ) -> Optional[str]:
         """Retry actual errors or missing content, with fixed model settings.
 
@@ -404,6 +413,7 @@ class LLMClient:
         base_temp = temperature if temperature is not None else self.temperature
         issues = []
         best_result = None
+        previous_draft = None
         fewest_issues = float("inf")
         for attempt in range(max_retries):
             current_prompt = prompt
@@ -411,17 +421,36 @@ class LLMClient:
                 current_prompt += ("\nCorrect only the following validation failures; preserve valid facts, "
                                    "identifiers, citations, limitations and next tests. Do not add filler.\n"
                                    + "\n".join(issues) + "\n" + retry_boost_prompt)
+                if previous_draft and len(current_prompt) + len(previous_draft) + 100 < 200_000:
+                    current_prompt += "\nPrior draft to repair (retain valid sentences and their references):\n" + previous_draft
             kwargs = dict(prompt=current_prompt, system_prompt=system_prompt,
                           temperature=base_temp, max_tokens=max_tokens)
             if response_format is not None:
                 kwargs["response_format"] = response_format
-            result = self.generate(**kwargs)
+            from common.generation_trace import capture_generation
+            with capture_generation() as transport:
+                started = time.monotonic()
+                exception_type = None
+                try:
+                    result = self.generate(**kwargs)
+                except Exception as exc:
+                    exception_type = type(exc).__name__
+                    result = None
+            event = {"attempt": attempt + 1, "provider_raw_text": result, "transport": transport,
+                     "exception_type": exception_type, "latency_seconds": time.monotonic() - started,
+                     "repair_request": list(issues), "resolved_model": getattr(self, "model", None),
+                     "resolved_provider": getattr(self, "provider", None), "requested_max_tokens": max_tokens}
+            if trace_sink is not None:
+                trace_sink.append(event)
             if result is None or result.startswith("[LLM Error"):
                 issues = ["generation_failed"]
+                event["validation_issues"] = list(issues)
                 if result and "timeout" not in result.lower() and "timed out" not in result.lower():
                     break
                 continue
+            previous_draft = result
             issues = (content_validator(result) if content_validator else section_content_issues(result, section_name))
+            event["validation_issues"] = list(issues)
             if not issues:
                 return result
             if len(issues) < fewest_issues:
@@ -489,6 +518,10 @@ class LLMClient:
                     f"{base_url}/chat/completions",
                     json=payload, headers=headers, timeout=timeout,
                 )
+                from common.generation_trace import record_generation_event
+                if r.status_code >= 400:
+                    record_generation_event(transport_attempt=attempt, http_status=r.status_code,
+                                            response_body=getattr(r, "text", ""), exception_type="HTTPError")
                 # Handle 429 TooManyRequests with retry
                 if r.status_code == 429:
                     retry_after = r.headers.get("Retry-After")
@@ -526,7 +559,18 @@ class LLMClient:
                         continue
 
                 r.raise_for_status()
-                resp_json = r.json()
+                try:
+                    resp_json = r.json()
+                except ValueError as exc:
+                    record_generation_event(transport_attempt=attempt, response_body=getattr(r, "text", ""),
+                                            exception_type=type(exc).__name__, json_decode_status="failed")
+                    raise
+                from common.generation_trace import record_generation_event
+                record_generation_event(response=resp_json, request_id=resp_json.get("id"),
+                                        usage=resp_json.get("usage"), resolved_model=resp_json.get("model", model),
+                                        finish_reason=((resp_json.get("choices") or [{}])[0]).get("finish_reason"),
+                                        transport_attempt=attempt,
+                                        request_settings={"temperature": temp, token_key: effective_max_tokens})
                 # v11.9: Robust response parsing — Gemini OpenAI-compat endpoint
                 # may return different structures (thinking models, refusals, etc.)
                 try:
@@ -593,6 +637,8 @@ class LLMClient:
                 logger.error(f"OpenAI-compatible generation failed: {error_msg}")
                 return f"[LLM Error: {error_msg}]"
             except requests.ConnectionError:
+                from common.generation_trace import record_generation_event
+                record_generation_event(exception_type="ConnectionError")
                 error_msg = (
                     f"Cannot connect to {base_url}. "
                     f"Please check network connectivity and API endpoint URL."
@@ -600,6 +646,8 @@ class LLMClient:
                 logger.error(error_msg)
                 return f"[LLM Error: {error_msg}]"
             except requests.Timeout:
+                from common.generation_trace import record_generation_event
+                record_generation_event(exception_type="Timeout")
                 error_msg = (
                     f"Request to {model}@{base_url} timed out ({timeout}s). "
                     f"Prompt size: {total_prompt_chars:,} chars. "
@@ -613,6 +661,8 @@ class LLMClient:
                     continue
                 return f"[LLM Error: {error_msg}]"
             except Exception as e:
+                from common.generation_trace import record_generation_event
+                record_generation_event(exception_type=type(e).__name__)
                 error_msg = (
                     f"OpenAI-compatible generation failed ({model}@{base_url}): {e}. "
                     f"Prompt size: {total_prompt_chars:,} chars."

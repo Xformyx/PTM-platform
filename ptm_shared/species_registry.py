@@ -51,7 +51,7 @@ _ALIASES = {
 
 def resolve_species_context(label: str | None) -> SpeciesContext:
     """Resolve a persisted species label without silently defaulting to mouse."""
-    raw = (label or "mouse").strip().lower()
+    raw = (label or "").strip().lower()
     canonical = _ALIASES.get(raw, raw.replace("-", "_"))
     if canonical not in _REGISTRY:
         raise ValueError(

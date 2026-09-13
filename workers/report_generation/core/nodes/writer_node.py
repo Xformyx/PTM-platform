@@ -8,7 +8,7 @@ Each section uses LLM with published literature context for integration.
 
 import json
 from common.section_budgets import SECTION_BUDGETS, section_content_issues
-from ..quantitative_claims import (SENTENCE_RESPONSE_FORMAT, decode_sentence_draft, structured_authoring_instructions)
+from ..quantitative_claims import (CLAIM_SCHEMA_VERSION, SENTENCE_RESPONSE_FORMAT, decode_sentence_draft, structured_authoring_instructions)
 import logging
 import os
 import re
@@ -473,6 +473,7 @@ def run_section_writing(state: dict) -> dict:
     reader_authoring_validator_audit: Dict[str, dict] = {}
     reader_authoring_fallback_sections: list[str] = []
     reader_prose_snapshots: Dict[str, dict] = {}
+    authoring_plan_attempts: list[dict] = []
     _reader_authoring_lock = __import__("threading").Lock()
     packet_output_dir = state.get("output_dir")
     if packet_output_dir:
@@ -499,12 +500,12 @@ def run_section_writing(state: dict) -> dict:
         )
         try:
             plan_prompt = (
-                format_authoring_packet_for_llm(authoring_packet, "introduction", authoring_plan)
+                format_authoring_packet_for_llm(focus_authoring_packet(authoring_packet, authoring_plan), "introduction", authoring_plan)
                 + "\n\n=== SCIENTIFIC AUTHOR PLAN ===\n"
                 "Return one JSON object with keys: central_question, central_answer, key_finding_ids, "
                 "section_finding_map, bridge_commitments, do_not_repeat, and sections. "
                 "Use only the supplied deterministic finding IDs and evidence/figure bindings; do not rewrite their observations. "
-                "The sections object must contain Abstract, Introduction, Methods, Results, Discussion, Conclusion, and Research Question Answers roles. "
+                "The sections object must contain Abstract, Introduction, Methods, Results, Discussion and Conclusion roles. Integrate research questions into the related Results and Discussion paragraphs. "
                 "Results must introduce each assigned finding once; Discussion must interpret the same findings against supplied citations and alternatives; "
                 "Conclusion must answer the central question without adding a new number or candidate. "
                 "Do not introduce external knowledge, directness claims, or citations not present in the packet. Output JSON only.\n"
@@ -518,6 +519,7 @@ def run_section_writing(state: dict) -> dict:
                 min_words=60,
                 section_name="Scientific author plan",
                 max_retries=1,
+                trace_sink=authoring_plan_attempts,
             )
             if planned and not planned.startswith("[LLM Error"):
                 authoring_plan = apply_llm_authoring_plan(planned, authoring_plan)
@@ -927,7 +929,11 @@ def run_section_writing(state: dict) -> dict:
                 section_authoring_packet,
                 section_type,
                 authoring_plan,
+                include_quantitative_records=False,
             )
+            if section_type in {"discussion", "conclusion", "abstract"}:
+                dependencies = {k: v for k, v in snap_prev.items() if k in {"results", "discussion"}}
+                prompt += "\nValidated prior sections (continue this argument; do not introduce new observations):\n" + json.dumps(dependencies, ensure_ascii=False)
             if active_questions and section_type == "research_question_answers":
                 prompt += "\n\nUser research questions to answer strictly from the supplied cards:\n" + "\n".join(
                     f"- {question}" for question in active_questions
@@ -1153,12 +1159,17 @@ def run_section_writing(state: dict) -> dict:
         min_words = SECTION_MIN_WORDS.get(section_type, 100)
         structured_audit = []
         structured_raw_content = None
+        generation_attempts = []
+        fallback_text = None
         generation_kwargs = {}
         if section_authoring_packet is not None:
             def validate_draft(draft):
                 prose, records = decode_sentence_draft(draft, section_authoring_packet)
-                missing = audit_finding_coverage({section_type: prose}, section_authoring_packet, authoring_plan)["missing_finding_ids"]
-                return (["invalid_bound_sentence"] if any(not r["retained"] for r in records) else []) + section_content_issues(prose, section_type) + [f"missing_finding:{fid}" for fid in missing]
+                coverage = audit_finding_coverage({section_type: prose}, section_authoring_packet, authoring_plan)
+                missing = coverage["missing_finding_ids"] + coverage["discussion_missing_finding_ids"]
+                rejected = ["repair_rejected_sentence:" + json.dumps({"sentence": r.get("sentence"), "reasons": r.get("reason_codes") or [r.get("reason_code")]}, ensure_ascii=False)
+                            for r in records if not r["retained"]]
+                return rejected + section_content_issues(prose, section_type) + [f"missing_finding:{fid}" for fid in missing]
             generation_kwargs = {"response_format": SENTENCE_RESPONSE_FORMAT, "content_validator": validate_draft}
         if section_authoring_packet is not None and prompt_len > MAX_PROMPT_CHARS:
             # Never cut a JSON schema or its reference catalog mid-record.
@@ -1173,13 +1184,21 @@ def run_section_writing(state: dict) -> dict:
                 min_words=min_words,
                 section_name=section_type.capitalize(),
                 max_retries=2,
+                trace_sink=generation_attempts,
                 **generation_kwargs,
             )
+        provider_result = content
         if section_authoring_packet is not None and content and not content.startswith("[LLM Error"):
             structured_raw_content = content
             content, structured_audit = decode_sentence_draft(content, section_authoring_packet)
             if not content:
                 content = None
+        if section_authoring_packet is not None and generation_attempts:
+            from ..quantitative_claims import merge_valid_sentence_drafts
+            recovered, structured_audit = merge_valid_sentence_drafts(
+                [a.get("provider_raw_text") for a in generation_attempts], section_authoring_packet)
+            if recovered:
+                content = recovered
 
         if content is None or content.startswith("[LLM Error"):
             error_detail = content if content else "generate_with_retry returned None"
@@ -1203,6 +1222,7 @@ def run_section_writing(state: dict) -> dict:
                     section_type, research_results, validated_hypotheses, parsed_ptms,
                     questions=active_questions,
                 )
+            fallback_text = content
 
         raw_generated_content = content
         validated_reader_content = content
@@ -1272,14 +1292,23 @@ def run_section_writing(state: dict) -> dict:
                 {section_type: content},
                 section_authoring_packet,
             )
+            from ..reader_authoring import restore_missing_finding_paragraphs
+            repaired_sections[section_type], recovery_audit = restore_missing_finding_paragraphs(
+                section_type, repaired_sections.get(section_type, ""), section_authoring_packet, authoring_plan)
+            clause_audit["missing_role_recovery"] = recovery_audit
+            if recovery_audit:
+                with _reader_authoring_lock:
+                    if section_type not in reader_authoring_fallback_sections:
+                        reader_authoring_fallback_sections.append(section_type)
             content = strip_authoring_anchors(repaired_sections.get(section_type, ""))
             validated_reader_content = content
             with _reader_authoring_lock:
                 clause_audit["structured_sentence_audit"] = structured_audit
                 reader_authoring_validator_audit[section_type] = clause_audit
             temporal_report_fidelity[section_type]["legacy_status"] = temporal_report_fidelity[section_type]["status"]
-            temporal_report_fidelity[section_type]["status"] = "shadow_clause_validated"
-            temporal_report_fidelity[section_type]["recommended_action"] = "local_repair_complete"
+            temporal_report_fidelity[section_type]["clause_validation_status"] = "checked"
+            temporal_report_fidelity[section_type]["content_quality_issues"] = section_content_issues(content, section_type)
+            temporal_report_fidelity[section_type]["recommended_action"] = "review_remaining_temporal_and_content_gaps"
             temporal_report_fidelity[section_type]["reader_authoring_mode"] = "shadow"
         if temporal_report_fidelity[section_type].get("unsafe_temporal_claim_count", 0) > 0 and not reader_authoring_shadow:
             temporal_report_fidelity[section_type]["status"] = "blocked_for_review"
@@ -1344,12 +1373,16 @@ def run_section_writing(state: dict) -> dict:
         if reader_authoring_shadow:
             with _reader_authoring_lock:
                 reader_prose_snapshots[section_type] = {
-                    "contract_version": "reader_prose_section_trace.v1",
-                    "raw_generated_text": structured_raw_content or raw_generated_content,
+                    "contract_version": "reader_prose_section_trace.v2",
+                    "prompt_characters": prompt_len,
+                    "raw_generated_text": provider_result,
+                    "provider_attempts": generation_attempts,
+                    "fallback_text": fallback_text,
+                    "structured_decode_audit": structured_audit,
                     "resolved_provider": llm.provider,
                     "resolved_model": llm.model,
                     "temperature": llm_temperature,
-                    "response_schema": "reader_quantitative_claim.v1" if generation_kwargs else None,
+                    "response_schema": CLAIM_SCHEMA_VERSION if generation_kwargs else None,
                     "validated_reader_text": validated_reader_content,
                     "citation_normalized_writer_text": content,
                     "fallback_used": section_type in reader_authoring_fallback_sections,
@@ -1396,23 +1429,8 @@ def run_section_writing(state: dict) -> dict:
     prev_sections[st] = content
     logger.info(f"[writer] Phase 1.5 done: discussion ({len(content):,} chars)")
 
-    # ── Phase 1.75: answer every user Research Question in bounded batches ──
-    # A question batch has its own token budget so a ten-question report cannot
-    # silently stop after the first few answers when Results is lengthy.
-    if questions:
-        question_batches = [questions[i:i + 2] for i in range(0, len(questions), 2)]
-        answer_parts = []
-        logger.info("[writer] Generating explicit answers for %d user RQs in %d batch(es)", len(questions), len(question_batches))
-        for batch_index, question_batch in enumerate(question_batches, 1):
-            if cb:
-                cb(77, f"Answering research questions batch {batch_index}/{len(question_batches)}")
-            _, answer_content = _write_one(
-                "research_question_answers", dict(prev_sections), question_batch
-            )
-            answer_parts.append(answer_content)
-        sections["research_question_answers"] = "\n\n".join(answer_parts)
-        prev_sections["research_question_answers"] = sections["research_question_answers"]
-        logger.info("[writer] Research Question Answers done: %d chars", len(sections["research_question_answers"]))
+    # Research questions are routed through the evidence map in Results and
+    # Discussion. No independent Q&A generation or supplementary output.
 
     # ── Phase 2: remaining dependent sections (sequential) ──
     # conclusion needs discussion, suggestion needs conclusion, abstract needs all, title needs abstract
@@ -1585,6 +1603,7 @@ def run_section_writing(state: dict) -> dict:
         "reader_authoring_fallback_sections": reader_authoring_fallback_sections,
         "reader_narrative_continuity_audit": reader_narrative_continuity_audit,
         "reader_prose_snapshots": reader_prose_snapshots,
+        "reader_authoring_plan_attempts": authoring_plan_attempts,
         "figure_manifest": state.get("figure_manifest") or {},
         "reader_authoring_mode": "shadow" if reader_authoring_shadow else "legacy",
     }

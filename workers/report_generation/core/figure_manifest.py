@@ -31,7 +31,7 @@ def _mapping(value: Any) -> dict:
 def _available_path(value: Any) -> str:
     path = Path(str(value or ""))
     try:
-        return str(path) if path.exists() and path.stat().st_size > 1000 else ""
+        return str(path) if path.is_file() and path.stat().st_size > 1000 else ""
     except OSError:
         return ""
 
@@ -135,16 +135,17 @@ class FigureEligibilityPolicy:
                 return "main", None
             return "suppressed", "requires_12_to_20_readable_bound_conventional_feature_cards"
         if kind == "reader_temporal_profile":
+            if not figure.get("quantitative_bindings"):
+                return "technical_audit", "legacy_cluster_image_measurements_unbound"
             profile_count = int(figure.get("selected_profile_count") or 0)
             cluster_count = int(figure.get("selected_cluster_count") or 0)
             if 3 <= profile_count <= 5 and 3 <= cluster_count <= 5 and bool(figure.get("labels_readable")):
                 return "main", None
             return "supplementary", "requires_preselected_profile_and_cluster_cards"
         if kind == "reader_concordance":
-            cluster_count = int(figure.get("selected_cluster_count") or 0)
-            if 3 <= cluster_count <= 8 and bool(figure.get("labels_readable")):
-                return "main", None
-            return "suppressed", "requires_3_to_8_readable_cluster_transition_summaries"
+            if figure.get("quantitative_bindings") and figure.get("labels_readable"):
+                return "supplementary", "descriptive_pair_transition_context"
+            return "suppressed", "observed_counts_or_readability_unavailable"
         if kind == "reader_protein_context":
             matched_count = int(figure.get("matched_feature_count") or 0)
             binding_valid = bool(_mapping(figure.get("feature_binding_audit")).get("binding_valid"))
@@ -187,108 +188,53 @@ def _entry(
     }
 
 
-def select_reader_heatmap_features(vector_rows: list[Mapping[str, Any]], conditions: list[str], *, minimum: int = 12, maximum: int = 16) -> list[dict]:
-    """Select complete conventional features by temporal shape, not effect magnitude.
-
-    구현 대상: docs/official_temporal_terminology_contract.md § Reader-facing
-    selected-feature heatmap encoding.
-    사전등록: 2026-09-07 표시 계약. 결과 기반 primary 승격 아님.
-    해석 한계: 선택된 행은 가독성 있는 관측 카드이며 우선순위 또는 직접성 순위가 아니다.
-    주장 금지: 이 선택으로 kinase 예측이나 생물학적 중요도 향상을 주장하지 않는다.
-
-    One lexical representative is retained per distinct signed time-course pattern,
-    followed by lexical completion. This avoids a sole |Log2FC| ranking while
-    supplying a reproducible, readable 12–16 feature display candidate set.
-    """
-    grouped: dict[tuple[str, str, str, str], dict[str, list[Mapping[str, Any]]]] = {}
-    for row in vector_rows or []:
-        if not isinstance(row, Mapping):
+def select_reader_heatmap_features(vector_rows, conditions, *, minimum=12, maximum=16, selected_reader_feature_ids=()):
+    """Finding-first display with partial observations; clustering stays separate."""
+    from .measured_feature_cards import build_feature_observation_cards
+    cards = build_feature_observation_cards({"vector_plot_raw_data": vector_rows}, maximum=max(len(vector_rows), maximum), minimum_points=1)
+    candidates = []
+    for card in cards:
+        identity = card["feature_identity"]
+        records = [r for r in quantitative_records(card) if r["axis"] == "adjusted" and r["condition"] in conditions]
+        if not any(r["value"] is not None for r in records):
             continue
-        eligibility = conventional_quantitation_eligibility(row)
-        if not eligibility["eligible"]:
-            continue
-        gene = str(row.get("gene") or row.get("gene_name") or "").strip()
-        site = str(row.get("position") or row.get("site") or "").strip()
-        precursor = str(row.get("Precursor.Id") or row.get("precursor_id") or row.get("source_feature_id") or "").strip()
-        sequence = str(row.get("Modified.Sequence") or row.get("modified_sequence") or "").strip()
-        condition = str(row.get("condition") or "").strip()
-        if not gene or not site or not (precursor or sequence) or condition not in conditions:
-            continue
-        grouped.setdefault((gene.upper(), site, precursor, sequence), {}).setdefault(condition, []).append(row)
-    candidates: list[dict] = []
-    for key, by_condition in grouped.items():
-        gene, site, precursor, sequence = key
-        if any(condition not in by_condition or len(by_condition[condition]) != 1 for condition in conditions):
-            continue
-        values: list[float] = []
-        eligibility_records: list[dict] = []
-        valid = True
-        for condition in conditions:
-            condition_row = by_condition[condition][0]
-            condition_eligibility = conventional_quantitation_eligibility(condition_row)
-            if not condition_eligibility["eligible"]:
-                valid = False
-                break
-            eligibility_records.append(condition_eligibility)
-            raw = (
-                condition_row.get("ptm_protein_adjusted_log2fc")
-                if condition_row.get("ptm_protein_adjusted_log2fc") is not None
-                else condition_row.get("ptm_relative_log2fc")
-            )
-            try:
-                value = float(raw)
-            except (TypeError, ValueError):
-                valid = False
-                break
-            if value != value or abs(value) == float("inf"):
-                valid = False
-                break
-            values.append(value)
-        if not valid:
-            continue
-        pattern = "".join(
-            "+" if value > SIGNED_PATTERN_THRESHOLD
-            else "-" if value < -SIGNED_PATTERN_THRESHOLD
-            else "0"
-            for value in values
-        )
-        feature_id = reader_feature_id(key)
-        candidates.append({
-            "gene": gene,
-            "position": site,
-            "source_feature_id": precursor or None,
-            "modified_sequence": sequence or None,
-            "reader_feature_id": feature_id,
-            "display_label": f"{feature_id} · {gene} {site}",
-            "conditions": list(conditions),
-            "pattern_class": pattern,
-            "render_axis": "protein_adjusted_relative_ptm_contrast",
-            "render_eligible": True,
-            "eligibility_contract": "conventional_quantitation_eligibility.v1",
-            "eligibility_records": eligibility_records,
-            "selection_reason": "unique modified-precursor identity; complete conventional temporal coverage; representative signed profile pattern; lexical tie-breaker",
-        })
-    candidates.sort(key=lambda item: (item["pattern_class"], item["reader_feature_id"]))
-    selected: list[dict] = []
-    seen_patterns: set[str] = set()
-    for candidate in candidates:
-        if candidate["pattern_class"] in seen_patterns:
-            continue
-        seen_patterns.add(candidate["pattern_class"])
-        selected.append(candidate)
-        if len(selected) >= maximum:
-            break
-    if len(selected) < minimum:
-        selected_keys = {item["reader_feature_id"] for item in selected}
-        for candidate in candidates:
-            key = candidate["reader_feature_id"]
-            if key in selected_keys:
-                continue
-            selected.append(candidate)
-            selected_keys.add(key)
-            if len(selected) >= maximum:
-                break
+        values = {r["condition"]: r["value"] for r in records}
+        candidates.append({**identity, "source_feature_id": identity.get("source_feature_id") or identity.get("precursor_id"),
+            "position": identity.get("candidate_residue_annotation") or identity.get("position"),
+            "reader_feature_id": identity["reader_feature_id"],
+            "display_label": identity["gene"] + " " + str(identity.get("candidate_residue_annotation") or identity.get("position") or "") + " · " + identity["reader_feature_id"][-4:],
+            "conditions": list(conditions), "values": values, "quantitative_bindings": records,
+            "render_axis": "protein_adjusted_relative_ptm_contrast", "render_eligible": True,
+            "partial_observation_display": True, "clustering_eligible": card.get("clustering_eligible"),
+            "pattern_class": "".join("?" if values.get(c) is None else "+" if values[c] > SIGNED_PATTERN_THRESHOLD else "-" if values[c] < -SIGNED_PATTERN_THRESHOLD else "0" for c in conditions),
+            "selection_reason": "selected finding first, then observed shape diversity; missingness is displayed"})
+    candidates.sort(key=lambda c: (c["reader_feature_id"] not in selected_reader_feature_ids, c["pattern_class"], c["reader_feature_id"]))
+    selected = [c for c in candidates if c["reader_feature_id"] in selected_reader_feature_ids][:maximum]
+    seen = {c["pattern_class"] for c in selected}
+    for card in candidates:
+        if len(selected) >= maximum: break
+        if card not in selected and card["pattern_class"] not in seen:
+            selected.append(card); seen.add(card["pattern_class"])
+    for card in candidates:
+        if len(selected) >= maximum: break
+        if card not in selected: selected.append(card)
     return selected if len(selected) >= minimum else []
+
+
+def order_reader_conditions(conditions, rows):
+    """Order by measured elapsed time; unknown/conflicting times remain labels."""
+    from .temporal_analysis import observed_time_minutes
+    times = {}
+    for row in rows:
+        condition = str(row.get("condition") or "")
+        value = observed_time_minutes(row)
+        if value is not None:
+            times.setdefault(condition, set()).add(value)
+    def key(condition):
+        values = times.get(condition, set())
+        value = next(iter(values)) if len(values) == 1 else observed_time_minutes({"condition": condition}) if not values else None
+        return (value is None, value if value is not None else 0, condition)
+    return sorted(dict.fromkeys(conditions), key=key)
 
 
 def build_figure_manifest(state: Mapping[str, Any], *, citation_complete: bool) -> dict:
@@ -308,7 +254,8 @@ def build_figure_manifest(state: Mapping[str, Any], *, citation_complete: bool) 
     conditions = [str(value) for value in heatmap.get("conditions") or network.get("timepoints") or [] if str(value).strip()]
     if not conditions:
         conditions = sorted({str(row.get("condition") or "") for row in vector_rows if str(row.get("condition") or "")})
-    selected_features = select_reader_heatmap_features(vector_rows, conditions)
+    conditions = order_reader_conditions(conditions, vector_rows)
+    selected_features = select_reader_heatmap_features(vector_rows, conditions, selected_reader_feature_ids=state.get("_selected_finding_ids") or [])
     if selected_features or vector_rows:
         initial_binding = _feature_binding_audit(selected_features)
         entries.append(_entry(
@@ -321,7 +268,7 @@ def build_figure_manifest(state: Mapping[str, Any], *, citation_complete: bool) 
                 "visual_encoding": "diverging protein-adjusted relative PTM Log2FC color scale",
                 "interpretation_boundary": "measured contrast is not activation, directness, or biological-priority score; de novo rows are excluded from the numeric color scale",
             },
-            selection_rule="complete conventional temporal coverage; representative signed profile pattern; lexical tie-breaker",
+            selection_rule="selected findings first, then observed shape diversity; partial observations retain gaps",
             selected_feature_count=len(selected_features), labels_readable=True,
             feature_binding_audit=initial_binding,
             selected_reader_feature_ids=initial_binding["selected_reader_feature_ids"],
@@ -512,100 +459,61 @@ def _dynamic_transition_rows(state: Mapping[str, Any]) -> list[dict]:
     return [dict(row) for row in rows if isinstance(row, Mapping)]
 
 
-def _generate_concordance_summary(
-    state: Mapping[str, Any],
-    output_dir: str,
-    selected_cluster_ids: list[str],
-) -> tuple[str, list[str]]:
-    """Plot retained/gain/loss rates by cluster and adjacent sampled interval."""
-    rows = _dynamic_transition_rows(state)
-    if not rows or not output_dir:
-        return "", []
-    selected_set = {str(value) for value in selected_cluster_ids if str(value)}
-    matched = [
-        row for row in rows
-        if not selected_set or str(row.get("static_wave_id") or row.get("cluster_id") or "") in selected_set
-    ]
-    if len(matched) < 3:
-        matched = sorted(rows, key=lambda row: str(row.get("static_wave_id") or row.get("cluster_id") or ""))[:8]
-    cluster_rank = {str(cluster_id): index for index, cluster_id in enumerate(selected_cluster_ids)}
-    matched.sort(key=lambda row: (
-        cluster_rank.get(str(row.get("static_wave_id") or row.get("cluster_id") or ""), len(cluster_rank)),
-        str(row.get("from_window") or ""),
-        str(row.get("to_window") or ""),
-    ))
-    matched = matched[:8]
-    labels: list[str] = []
-    denominators: list[int] = []
-    included_cluster_ids: list[str] = []
-    retained: list[float] = []
-    gained: list[float] = []
-    lost: list[float] = []
-    cluster_order = {
-        str(cluster_id): index + 1
-        for index, cluster_id in enumerate(selected_cluster_ids)
-        if str(cluster_id)
-    }
-    for row in matched:
-        rates = _mapping(row.get("concordance_change_rates"))
-        denominator = int(row.get("evaluable_pair_window_comparison_count") or 0)
-        if denominator <= 0 or not rates:
+def concordance_bindings(state, selected_cluster_ids=()):
+    """Preserve observed integer counts, never reconstruct them from rates."""
+    import re
+    records = []
+    for row in _dynamic_transition_rows(state):
+        cluster = str(row.get("static_wave_id") or row.get("cluster_id") or "")
+        if selected_cluster_ids and cluster not in selected_cluster_ids:
             continue
-        from_window = str(row.get("from_window") or "")
-        to_window = str(row.get("to_window") or "")
-        cluster_id = str(row.get("static_wave_id") or row.get("cluster_id") or "")
-        cluster_number = cluster_order.get(cluster_id)
-        if cluster_number is None:
-            cluster_number = len(cluster_order) + 1
-            cluster_order[cluster_id] = cluster_number
-        labels.append(f"Cluster {cluster_number}\n{from_window} | {to_window}")
-        denominators.append(denominator)
-        if cluster_id and cluster_id not in included_cluster_ids:
-            included_cluster_ids.append(cluster_id)
-        retained.append(float(rates.get("retained") or 0.0))
-        gained.append(float(rates.get("gain") or 0.0))
-        lost.append(float(rates.get("loss") or 0.0))
-    if len(labels) < 3:
+        counts = row.get("pair_transition_type_counts")
+        denominator = row.get("evaluable_pair_window_comparison_count")
+        if (not isinstance(counts, Mapping) or not isinstance(denominator, int)
+                or denominator <= 0 or any(not isinstance(n, int) or n < 0 for n in counts.values())):
+            continue
+        retained = counts.get("persistence", 0)
+        gain = counts.get("recruitment", 0) + counts.get("merge", 0)
+        loss = counts.get("split", 0)
+        if retained + gain + loss > denominator:
+            continue
+        records.append({"cluster_id": cluster, "from_window": row.get("from_window"),
+                        "to_window": row.get("to_window"), "denominator": denominator,
+                        "counts": dict(counts), "retained": retained, "gain": gain, "loss": loss,
+                        "other_or_no_transition": denominator - retained - gain - loss,
+                        "source": "temporal_ptm_protein_analysis.dynamic_transition_per_wave"})
+    def interval_key(label):
+        return tuple(float(n) for n in re.findall(r"\d+(?:\.\d+)?", str(label)))
+    return sorted(records, key=lambda r: (r["cluster_id"], interval_key(r["from_window"]), interval_key(r["to_window"])))
+
+
+def _generate_concordance_summary(state, output_dir, selected_cluster_ids):
+    """All supplied adjacent comparisons; separate rates are not a 100% stack."""
+    rows = concordance_bindings(state, selected_cluster_ids)
+    if not rows or not output_dir:
         return "", []
     try:
         import matplotlib
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
         import numpy as np
-
-        x = np.arange(len(labels))
-        fig, ax = plt.subplots(figsize=(max(8.5, len(labels) * 1.25), 5.4))
-        ax.bar(x, retained, label="Retained", color="#4C78A8")
-        ax.bar(x, gained, bottom=retained, label="Gain", color="#59A14F")
-        stacked = np.array(retained) + np.array(gained)
-        ax.bar(x, lost, bottom=stacked, label="Loss", color="#E15759")
-        totals = np.array(retained) + np.array(gained) + np.array(lost)
-        for index, denominator in enumerate(denominators):
-            classified = int(round(float(totals[index]) * denominator))
-            ax.text(
-                x[index],
-                min(float(totals[index]) + 0.025, 0.97),
-                f"{classified}/{denominator}",
-                ha="center",
-                va="bottom",
-                fontsize=9,
-                color="#374151",
-            )
-        ax.set_xticks(x)
-        ax.set_xticklabels(labels, rotation=35, ha="right", fontsize=9)
-        ax.set_ylabel("Rate per evaluable within-cluster pair-window")
-        ax.set_ylim(0, 1)
-        ax.set_title("Interval-wise Concordance Change Rates")
-        ax.legend(frameon=False, ncol=3, loc="lower right", bbox_to_anchor=(1.0, 1.015))
-        ax.spines["top"].set_visible(False)
-        ax.spines["right"].set_visible(False)
-        ax.grid(axis="y", alpha=0.2)
-        fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.93))
+        labels = [f"{r['cluster_id']} · {r['from_window']} → {r['to_window']}" for r in rows]
+        rates = np.array([[r[k] / r["denominator"] for k in ("retained", "gain", "loss")] for r in rows])
+        fig, ax = plt.subplots(figsize=(6.5, max(2.5, 1.2 + .34 * len(rows))))
+        ax.imshow(rates, vmin=0, vmax=1, cmap="Blues", aspect="auto")
+        ax.set_xticks(range(3), ["Retained", "Gain", "Loss"], fontsize=10)
+        ax.set_yticks(range(len(rows)), labels, fontsize=8)
+        for i, r in enumerate(rows):
+            for j, key in enumerate(("retained", "gain", "loss")):
+                ax.text(j, i, f"{r[key]}/{r['denominator']}", ha="center", va="center", fontsize=8,
+                        color="white" if rates[i, j] > .55 else "black")
+        ax.set_title("Within-cluster pair transitions", fontsize=11)
+        fig.tight_layout()
         path = Path(output_dir) / "reader_interval_concordance_change_summary.png"
         path.parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(path, dpi=220, bbox_inches="tight")
+        fig.savefig(path, dpi=300)
         plt.close(fig)
-        return _available_path(path), included_cluster_ids
+        return _available_path(path), sorted({r["cluster_id"] for r in rows})
     except Exception:
         return "", []
 
@@ -620,7 +528,12 @@ def _generate_protein_adjustment_comparison(
     in ``build_quantitation_comparison_cards``.  The legacy reconstructed metric
     and de-novo rows never enter this visual axis.
     """
-    cards = build_quantitation_comparison_cards(state, maximum=12)
+    from .reader_authoring import finding_observation_conditions
+    cards = build_quantitation_comparison_cards(state, maximum=max(12, len(state.get("vector_plot_raw_data") or [])))
+    choices = {(c["feature_identity"]["reader_feature_id"], condition) for c in state.get("_selected_finding_cards") or [] for condition in finding_observation_conditions(c)}
+    if choices:
+        cards = [c for c in cards if (c["feature_identity"]["reader_feature_id"], c.get("condition")) in choices]
+    cards = cards[:12]
     if not cards or not output_dir:
         return "", []
     try:
@@ -640,8 +553,8 @@ def _generate_protein_adjustment_comparison(
             residue = str(identity.get("candidate_residue_annotation") or "").strip()
             condition = str(card.get("condition") or "recorded condition")
             labels.append(
-                f"{feature_id + ' · ' if feature_id else ''}{gene}"
-                f"{' ' + residue if residue else ''} · {condition}"
+                f"{gene}"
+                f"{' ' + residue if residue else ''} · {feature_id[-4:]} · {condition}"
             )
             unadjusted.append(float(card["ptm_unadjusted_log2fc"]))
             adjusted.append(float(card["ptm_protein_adjusted_log2fc"]))
@@ -649,7 +562,7 @@ def _generate_protein_adjustment_comparison(
 
         y = np.arange(len(cards))
         fig_height = max(5.2, 1.9 + 0.56 * len(cards))
-        fig, ax = plt.subplots(figsize=(12.5, fig_height))
+        fig, ax = plt.subplots(figsize=(6.5, max(4.0, .37 * len(cards) + 1.8)))
         for index in range(len(cards)):
             ax.plot(
                 [unadjusted[index], adjusted[index]],
@@ -658,16 +571,16 @@ def _generate_protein_adjustment_comparison(
                 linewidth=1.5,
                 zorder=1,
             )
-        ax.scatter(unadjusted, y, s=58, color="#2F5597", label="Independent unadjusted PTM", zorder=3)
+        ax.scatter(unadjusted, y, s=105, facecolors="none", edgecolors="#2F5597", linewidths=1.2, label="Independent unadjusted PTM", zorder=5)
         ax.scatter(adjusted, y, s=62, marker="D", color="#D97706", label="Protein-adjusted PTM", zorder=4)
         ax.scatter(protein, y, s=48, marker="s", color="#6B7280", label="Linked protein", zorder=3)
         ax.axvline(0.0, color="#222222", linewidth=0.9, alpha=0.55)
         ax.set_yticks(y)
-        ax.set_yticklabels(labels, fontsize=9.5)
+        ax.set_yticklabels(labels, fontsize=8)
         ax.invert_yaxis()
         ax.set_xlabel("Conventional log2 contrast", labelpad=10)
         ax.set_title(
-            "How Protein Adjustment Changed Matched PTM Contrasts",
+            "Matched PTM contrasts",
             loc="left",
             weight="bold",
             pad=34,
@@ -675,20 +588,20 @@ def _generate_protein_adjustment_comparison(
         ax.text(
             0.0,
             1.01,
-            "Lines connect independent unadjusted and protein-adjusted PTM values; squares show linked protein contrasts.",
+            "",
             transform=ax.transAxes,
             ha="left",
             va="bottom",
             fontsize=9,
             color="#4B5563",
         )
-        fig.legend(*ax.get_legend_handles_labels(), frameon=False, ncol=3,
-                   loc="upper center", bbox_to_anchor=(.5, .99), fontsize=9.5)
+        fig.legend(*ax.get_legend_handles_labels(), frameon=False, ncol=1,
+                   loc="upper center", bbox_to_anchor=(.64, .99), fontsize=8)
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
         ax.spines["left"].set_visible(False)
         ax.grid(axis="x", alpha=0.18)
-        fig.subplots_adjust(left=0.38, bottom=0.14, top=0.78, right=0.98)
+        fig.subplots_adjust(left=0.40, bottom=0.14, top=0.72, right=0.98)
         path = Path(output_dir) / "reader_protein_adjustment_comparison.png"
         path.parent.mkdir(parents=True, exist_ok=True)
         fig.savefig(path, dpi=220, bbox_inches="tight")
@@ -700,10 +613,11 @@ def _generate_protein_adjustment_comparison(
 
 def _generate_joint_trajectory_entry(state, output_dir):
     """Plot the frozen finding features, preserving actual minutes and NA gaps."""
-    from .reader_authoring import build_authoring_packet
+    from .reader_authoring import build_authoring_packet, finding_observation_conditions
     from .measured_feature_cards import select_finding_cards
     packet = build_authoring_packet(state)
     cards, selection = select_finding_cards(packet["reader_cards"])
+    cards = state.get("_selected_finding_cards") or cards
     if not cards:
         return None
     bindings = [r for card in cards for r in quantitative_records(card) if r["time_minutes"] is not None]
@@ -720,6 +634,7 @@ def _generate_joint_trajectory_entry(state, output_dir):
                        "interpretation_boundary": "the sampled contrasts do not establish absolute concentrations, occupancy, biological peaks or direct kinase activity. Different features are not on a common absolute MS intensity scale; sample counts and axis-specific q values are recorded separately"},
         selection_rule="observation quality followed by parent and joint-pattern diversity, with stable feature identity as the tie-breaker", selected_reader_feature_ids=ids,
         quantitative_bindings=bindings, prepared_from_finding_selection=selection,
+        table_conditions={c["feature_identity"]["reader_feature_id"]: finding_observation_conditions(c) for c in cards},
         feature_binding_audit={"contract_version": "joint_trajectory_binding.v1", "binding_valid": valid,
                                "selected_reader_feature_ids": ids, "unknown_time_conditions": sorted({p["condition"] for c in cards for p in c["trajectory"] if p.get("time_minutes") is None})},
         title="Selected PTM–protein time responses", labels_readable=False)
@@ -735,42 +650,91 @@ def _generate_joint_trajectory_entry(state, output_dir):
             times = sorted({r["time_minutes"] for r in bindings})
             values = [abs(r["value"]) for r in bindings if r["value"] is not None]
             extent = max(values + [.2]) * 1.15
-            fig, axes = plt.subplots(len(visible), 3, figsize=(6.5, 1 + 1.7 * len(visible)), squeeze=False)
+            separate = (state.get("report_options") or {}).get("joint_trajectory_layout") == "separate_axes"
+            columns = 3 if separate else 2
+            rows = len(visible) if separate else (len(visible) + 1) // 2
+            fig, axes = plt.subplots(rows, columns, figsize=(6.5, 1.0 + 2.8 * rows), squeeze=False)
+            styles = (("unadjusted", "U · PTM", "#1764ab", "o"),
+                      ("protein", "P · Protein", "#706573", "s"),
+                      ("adjusted", "A · Adjusted PTM", "#b64518", "D"))
+            early = [t for t in times if 0 < t <= 30]
+            early_zoom = len(early) >= 3 and max(times) > 60
+            mixed_range = any(
+                min([r["value"] for r in bindings if r["feature_id"] == c["feature_identity"]["reader_feature_id"] and r["value"] is not None], default=0) < -extent * .25
+                and max([r["value"] for r in bindings if r["feature_id"] == c["feature_identity"]["reader_feature_id"] and r["value"] is not None], default=0) > extent * .25
+                for c in visible)
+            log_time = early_zoom and mixed_range and min(times) > 0
+            early_zoom = early_zoom and not log_time
+            tick_axes = []
+            def plot_axis(ax, fid, styles_to_plot, *, zoom=False):
+                for axis, label, color, marker in styles_to_plot:
+                    data = sorted([r for r in bindings if r["feature_id"] == fid and r["axis"] == axis],
+                                  key=lambda r: (r["time_minutes"], r["condition"]))
+                    xs = [r["time_minutes"] for r in data]
+                    ys = [r["value"] if r["value"] is not None else np.nan for r in data]
+                    ax.plot(xs, ys, marker=marker, linestyle="None" if len(set(xs)) != len(xs) else "--",
+                            color=color, lw=.9, ms=5 if axis == "unadjusted" else 3,
+                            markerfacecolor="none" if axis == "unadjusted" else color, label=label)
+                ax.axhline(0, color="#888888", lw=.6)
+                ax.set_ylim(-extent, extent)
+                ax.tick_params(labelsize=7)
+                if zoom:
+                    ax.set_xlim(min(early) - .7, max(early) + 1)
+                    ax.set_xticks(early)
+                    ax.set_title("Early observations (min)", fontsize=7)
+                else:
+                    ax.set_xlim(min(times) * .85 if log_time else min(times) - 1, max(times) * 1.05)
+                    # Actual elapsed times, selected ticks; inset resolves the
+                    # early measurements without forcing crowded tick labels.
+                    ticks = [min(times)] + [t for t in times if t >= 60] if early_zoom else times
+                    ax.set_xticks(ticks)
+                    if log_time:
+                        from matplotlib.ticker import ScalarFormatter, NullLocator
+                        ax.set_xscale("log")
+                        ax.set_xticks(times)
+                        ax.xaxis.set_major_formatter(ScalarFormatter())
+                        ax.xaxis.set_minor_locator(NullLocator())
+                        ax.tick_params(axis="x", labelrotation=35)
+                    ax.set_xlabel("Elapsed time (min, log scale)" if log_time else "Elapsed time (min)", fontsize=8)
+                tick_axes.append(ax)
             for i, card in enumerate(visible):
                 fid = card["feature_identity"]["reader_feature_id"]
-                for j, (axis, label, color) in enumerate((("unadjusted", "U · Independent PTM", "#1764ab"), ("protein", "P · Linked protein", "#706573"), ("adjusted", "A · Protein-adjusted PTM", "#b64518"))):
-                    ax = axes[i, j]
-                    axis_records = sorted([r for r in bindings if r["feature_id"] == fid and r["axis"] == axis],
-                                          key=lambda r: (r["time_minutes"], r["condition"]))
-                    xs = [r["time_minutes"] for r in axis_records]
-                    ys = [r["value"] if r["value"] is not None else np.nan for r in axis_records]
-                    # Simultaneous conditions are separate observations, not a
-                    # last-row-wins trajectory at the same elapsed time.
-                    simultaneous = len(set(xs)) != len(xs)
-                    ax.plot(xs, ys, "o" if simultaneous else "o--", color=color, lw=1, ms=4)
-                    if simultaneous:
-                        for r in axis_records:
-                            if r["value"] is not None:
-                                ax.annotate(r["condition"], (r["time_minutes"], r["value"]), fontsize=6)
-                    ax.axhline(0, color="#888888", lw=.6)
-                    ax.set_ylim(-extent, extent)
-                    ax.set_xticks(times)
-                    ax.tick_params(labelsize=8)
-                    ax.set_title(label if i == 0 else "", fontsize=9)
-                    ax.set_xlabel("Elapsed time (min)", fontsize=8)
-                    if j == 0:
-                        identity = card["feature_identity"]
-                        ax.set_ylabel(f"{identity['gene']} {identity.get('candidate_residue_annotation') or ''}\n{fid}\nRelative log2 contrast", fontsize=8)
-                    if not any(r["value"] is not None for r in axis_records):
-                        ax.text(.5, .7, "Unavailable", ha="center", transform=ax.transAxes, fontsize=8)
-            fig.tight_layout(pad=1.2)
+                identity = card["feature_identity"]
+                selected_axes = list(axes[i]) if separate else [axes.flat[i]]
+                for j, ax in enumerate(selected_axes):
+                    plot_axis(ax, fid, [styles[j]] if separate else styles)
+                    ax.set_title(f"{identity['gene']} {identity.get('candidate_residue_annotation') or ''} · {fid[-4:]}" + (f" / {styles[j][1]}" if separate else ""), fontsize=9, loc="left")
+                    ax.set_ylabel("Relative log2 contrast", fontsize=8)
+                    if early_zoom:
+                        values_for_feature = [r["value"] for r in bindings if r["feature_id"] == fid and r["value"] is not None]
+                        inset_y = .10 if sum(values_for_feature) >= 0 else .62
+                        inset = ax.inset_axes([.26, inset_y, .68, .24])
+                        plot_axis(inset, fid, [styles[j]] if separate else styles, zoom=True)
+            if not separate:
+                for ax in axes.flat[len(visible):]:
+                    ax.set_visible(False)
+            fig.legend(*axes.flat[0].get_legend_handles_labels(), loc="upper center", ncol=3, frameon=False, fontsize=8)
+            fig.tight_layout(rect=(0, 0, 1, .93), pad=1.2)
+            fig.canvas.draw()
+            renderer = fig.canvas.get_renderer()
+            overlaps = []
+            for ax_index, ax in enumerate(tick_axes):
+                boxes = [t.get_window_extent(renderer) for t in ax.get_xticklabels() if t.get_visible() and t.get_text()]
+                for left, right in zip(boxes, boxes[1:]):
+                    if left.overlaps(right):
+                        overlaps.append(ax_index)
             path = Path(output_dir) / "reader_joint_trajectories.png"
             path.parent.mkdir(parents=True, exist_ok=True)
             fig.savefig(path, dpi=300)
             plt.close(fig)
             with Image.open(path) as img:
                 img.verify()
-            entry.update(image_path=str(path), labels_readable=True, render_status="rendered")
+            entry.update(image_path=str(path), labels_readable=not overlaps, render_status="rendered",
+                         readability_audit={"contract_version": "figure_text_bounds.v1", "tick_overlap_axes": overlaps,
+                                            "intended_width_inches": 6.5, "page_visual_review": "required"},
+                         layout="separate_axes" if separate else "overlaid_axes_log_time" if log_time else "overlaid_axes_with_early_inset" if early_zoom else "overlaid_axes",
+                         displayed_feature_labels={c["feature_identity"]["reader_feature_id"]: c["feature_identity"]["gene"] + " · " + c["feature_identity"]["reader_feature_id"][-4:] for c in visible})
+            entry["caption_facts"]["visual_encoding"] = "U: independent PTM; P: linked protein; A: protein-adjusted PTM, all in relative log2 contrast. Actual elapsed minutes; dashed segments join observations and gaps remain unavailable." + (" Insets enlarge early observations." if early_zoom else " Time is shown on an explicitly logarithmic scale." if log_time else "")
         except Exception as exc:
             entry.update(render_status="renderer_failed", render_error=type(exc).__name__)
     entry["placement"], entry["suppression_reason"] = FigureEligibilityPolicy().classify(entry, citation_complete=False)
@@ -778,30 +742,45 @@ def _generate_joint_trajectory_entry(state, output_dir):
 
 
 def joint_trajectory_evidence_table(figure):
-    """Compact displayed n/q table; full sample sets and CI remain in the packet."""
+    """Show the selected observation times; complete statistics stay bound."""
     if figure.get("kind") != "reader_joint_trajectory":
         return ""
     grouped = {}
-    for row in figure.get("quantitative_bindings") or []:
+    bindings = figure.get("quantitative_bindings") or []
+    protein = [r for r in bindings if r["axis"] == "protein"]
+    hide_protein_q = bool(protein) and all(r.get("q") is None for r in protein)
+    protein_test_absent = bool(protein) and all((r.get("support") or {}).get("test_status") == "not_computed" for r in protein)
+    for row in bindings:
+        chosen = (figure.get("table_conditions") or {}).get(row["feature_id"])
+        if chosen is not None and row["condition"] not in chosen:
+            continue
         grouped.setdefault((row["feature_id"], row["condition"]), {})[row["axis"]] = row
-    lines = ["| Feature / condition | U: value; n; q | P: value; n; q | A: value; n; q |",
+    lines = ["| Feature / condition | U: value; n; q | P: value; n" + ("" if hide_protein_q else "; q") + " | A: value; n; q |",
              "|---|---|---|---|"]
-    def cell(record):
+    def cell(record, axis):
         value = record.get("value")
         support = record.get("support") or {}
-        n = "/".join(f"{record[f'{g}_n']:g}" if record.get(f"{g}_n") is not None else "NA" for g in ("control", "treatment"))
-        q = record.get("q")
-        text = f"{value:+.3f}; {n}; {q:.3g}" if value is not None and q is not None else f"{value:+.3f}; {n}; NA" if value is not None else "NA (" + str(support.get("missing_reason") or "not available").replace("_", " ") + ")"
-        if all(support.get(f"{g}_biological_n") is not None for g in ("control", "treatment")):
-            text += f"; biological n {support['control_biological_n']}/{support['treatment_biological_n']}"
+        n = "/".join(f"{record[f'{g}_n']:g}" if record.get(f"{g}_n") is not None else "unrecorded" for g in ("control", "treatment"))
+        if n == "unrecorded/unrecorded":
+            n = "n unrecorded"
+        if value is None:
+            return "Unavailable: " + str(support.get("missing_reason") or "quantitation unavailable").replace("_", " ")
+        text = f"{value:+.3f}; {n}"
+        if axis != "protein" or not hide_protein_q:
+            q = record.get("q")
+            text += f"; {q:.3g}" if q is not None else "; not tested" if support.get("test_status") == "not_computed" else "; test unavailable"
         return text
     for (fid, condition), records in grouped.items():
-        lines.append("| " + fid + " / " + condition + " | " + " | ".join(cell(records.get(axis, {})) for axis in ("unadjusted", "protein", "adjusted")) + " |")
-    return "\n".join(lines) + "\n\nCounts are axis-specific contributing sample observations (control/treatment), not inferred biological replicates. NA denotes unavailable, not zero or non-significance. Point q-values do not test a trajectory or the adjustment effect.\n"
+        label = (figure.get("displayed_feature_labels") or {}).get(fid, fid)
+        lines.append("| " + label + " / " + condition + " | " + " | ".join(cell(records.get(axis, {}), axis) for axis in ("unadjusted", "protein", "adjusted")) + " |")
+    note = "Values and statistics refer to the selected first response, sampled extremum and late observation; all times and full feature identifiers remain in the evidence table. Counts are contributing sample observations (control/treatment); biological design is not inferred from injection counts. Point q-values do not test the trajectory or adjustment effect."
+    if hide_protein_q:
+        note += " Protein q-values are omitted because " + ("a separate protein test was not computed." if protein_test_absent else "protein statistical support was not supplied; this does not imply missing protein measurements.")
+    return "\n".join(lines) + "\n\n" + note + "\n"
 
 
-def render_verified_reader_figures(manifest):
-    figures = [f for f in manifest.get("figures") or [] if f.get("placement") == "main"
+def render_verified_reader_figures(manifest, *, placement="main"):
+    figures = [f for f in manifest.get("figures") or [] if f.get("placement") == placement
                and f.get("insertion_verified") and _available_path(f.get("image_path"))]
     blocks = []
     for figure in sorted(figures, key=lambda f: int(str(f.get("display_label") or "Figure 0").split()[-1])):
@@ -833,6 +812,7 @@ def _assign_reader_figure_labels(manifest: Mapping[str, Any]) -> dict:
         item["insertion_verified"] = bool(_available_path(item.get("image_path")))
     for index, item in enumerate(supplementary, 1):
         item["display_label"] = f"Supplementary Figure {index}"
+        item["insertion_verified"] = bool(_available_path(item.get("image_path")))
     labelled = {str(item.get("figure_key")): item for item in main + supplementary}
     result = []
     for item in figures:
@@ -847,6 +827,12 @@ def _assign_reader_figure_labels(manifest: Mapping[str, Any]) -> dict:
 
 def prepare_reader_figure_manifest(state: Mapping[str, Any], *, citation_complete: bool) -> dict:
     """Generate and freeze insertable reader figures before scientific writing."""
+    from .reader_authoring import build_authoring_packet
+    from .measured_feature_cards import select_finding_cards
+    state = dict(state)
+    selected_cards, _ = select_finding_cards(build_authoring_packet(state)["reader_cards"])
+    state["_selected_finding_cards"] = selected_cards
+    state["_selected_finding_ids"] = [c["feature_identity"]["reader_feature_id"] for c in selected_cards]
     output_dir = str(state.get("output_dir") or "")
     manifest = build_figure_manifest(state, citation_complete=citation_complete)
     vector_rows = [row for row in state.get("vector_plot_raw_data") or [] if isinstance(row, Mapping)]
@@ -855,6 +841,7 @@ def prepare_reader_figure_manifest(state: Mapping[str, Any], *, citation_complet
     conditions = [str(value) for value in heatmap.get("conditions") or network.get("timepoints") or [] if str(value).strip()]
     if not conditions:
         conditions = sorted({str(row.get("condition") or "") for row in vector_rows if str(row.get("condition") or "")})
+    conditions = order_reader_conditions(conditions, vector_rows)
     selected_features = next((list(item.get("selected_features") or []) for item in manifest.get("figures") or [] if item.get("figure_key") == "reader_quantitative_heatmap"), [])
     if output_dir and selected_features:
         try:
@@ -934,10 +921,11 @@ def prepare_reader_figure_manifest(state: Mapping[str, Any], *, citation_complet
             caption_facts={
                 "data_scope": "observed within-cluster pair transitions normalized by evaluable pair-window comparisons in each adjacent sampled interval",
                 "data_unit_scope": "eligible within-cluster feature pairs",
-                "visual_encoding": "stacked retained, gain and loss rates per evaluable pair-window by Temporal Profile Cluster and adjacent sampled interval",
+                "visual_encoding": "separate retained, gain and loss rates with observed integer numerator/denominator; the remainder comprises other or no recorded transitions",
                 "interpretation_boundary": "Concordance Change is descriptive; persistence is distinct from change, and rates do not establish common regulation, causal order, kinase switching, or pathway rewiring",
             },
-            selection_rule="same selected cluster set as the temporal-profile panel when evaluable; otherwise lexical cluster-ID subset",
+            selection_rule="all supplied intervals for selected clusters, sorted by elapsed time",
+            quantitative_bindings=concordance_bindings(state, selected_ids),
             selected_cluster_count=len(concordance_ids),
             selected_cluster_ids=concordance_ids,
             labels_readable=concordance_readability["labels_readable"],
@@ -971,14 +959,15 @@ def prepare_reader_figure_manifest(state: Mapping[str, Any], *, citation_complet
                 "data_scope": "matched conventional current-order feature-condition records with independent unadjusted PTM, protein-adjusted PTM, and linked protein contrasts",
                 "data_unit_scope": "modified-precursor feature-condition comparison",
                 "visual_encoding": "paired unadjusted and protein-adjusted PTM points connected within each record; linked protein contrast shown as a separate square",
-                "interpretation_boundary": "arithmetic change after adjustment does not prove improved biological truth, absolute occupancy, kinase activity, direct regulation, or biological priority; de-novo and reconstructed values are excluded",
+                "interpretation_boundary": "axis-specific point tests do not test the adjustment effect; de-novo and reconstructed values are excluded",
             },
-            selection_rule="matched conventional axes; comparison-class diversity; lexical tie-breaker; no magnitude ranking",
+            selection_rule="selected finding features at first response, sampled extremum and final observed time; independent matched axes",
             matched_feature_count=len(comparison_cards),
             matched_protein_context=True,
             labels_readable=comparison_readability["labels_readable"],
             readability_audit=comparison_readability,
             feature_binding_audit=comparison_binding,
+            quantitative_bindings=[r for card in comparison_cards for r in quantitative_records(card)],
             comparison_classes=sorted({str(card.get("comparison_class") or "") for card in comparison_cards}),
             selected_reader_feature_ids=sorted({
                 str(_mapping(card.get("feature_identity")).get("reader_feature_id") or "")
@@ -1016,7 +1005,7 @@ def attach_reader_heatmap(manifest: Mapping[str, Any], image_path: str, selected
     facts = {
         "data_scope": "protein-adjusted phosphorylation-feature contrasts with independent conventional eligibility at every displayed condition",
         "data_unit_scope": "phosphorylation feature aggregate",
-        "visual_encoding": "diverging protein-adjusted relative PTM Log2FC color scale; missingness notation in source renderer",
+        "visual_encoding": "protein-adjusted relative PTM log2 contrast; grey denotes unavailable values, white the reference level; equally spaced columns are condition labels ordered by elapsed time, not a proportional time axis",
         "interpretation_boundary": "measured contrast is not activation, directness, or biological-priority score; de novo rows are excluded from the numeric color scale",
     }
     labels = [str(item.get("display_label") or "") for item in selected_features]
@@ -1031,7 +1020,7 @@ def attach_reader_heatmap(manifest: Mapping[str, Any], image_path: str, selected
         question="Which selected quantitative phosphorylation features show distinct measured profiles across sampled timepoints?",
         evidence_tier="O1", source_evidence_ids=["quantitative.landscape", "temporal.profile_summary"],
         caption_facts=facts,
-        selection_rule="complete conventional temporal coverage; representative signed profile pattern; lexical tie-breaker",
+        selection_rule="selected findings first, then observed shape diversity; partial observations retain gaps",
         selected_feature_count=len(selected_features),
         labels_readable=readability["labels_readable"],
         readability_audit=readability,
@@ -1040,6 +1029,7 @@ def attach_reader_heatmap(manifest: Mapping[str, Any], image_path: str, selected
         render_axis="protein_adjusted_relative_ptm_contrast",
         selected_reader_feature_ids=binding["selected_reader_feature_ids"],
         selected_features=[dict(item) for item in selected_features],
+        quantitative_bindings=[r for item in selected_features for r in item.get("quantitative_bindings") or []],
     )
     placement, reason = FigureEligibilityPolicy().classify(entry, citation_complete=False)
     entry["placement"] = placement
@@ -1088,9 +1078,7 @@ def figure_cards_from_manifest(manifest: Mapping[str, Any]) -> list[dict]:
 def compile_reader_caption(figure: Mapping[str, Any]) -> str:
     """Compile mandatory factual caption clauses for a reader-facing figure."""
     facts = _mapping(figure.get("caption_facts"))
-    question = str(figure.get("research_question") or "").strip()
     scope = str(facts.get("data_scope") or facts.get("data_unit_scope") or "recorded evidence").strip()
     encoding = str(facts.get("visual_encoding") or "display encoding").strip()
-    rule = str(figure.get("selection_rule") or "pre-specified manifest selection").strip()
     boundary = str(facts.get("interpretation_boundary") or "interpretation is bounded by the stated evidence tier").strip()
-    return f"Question: {question} Data unit and scope: {scope}. Visual encoding: {encoding}. Selection rule: {rule}. Interpretation boundary: {boundary}."
+    return f"{scope[:1].upper() + scope[1:]}. {encoding[:1].upper() + encoding[1:]}. {boundary[:1].upper() + boundary[1:]}."

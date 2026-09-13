@@ -1057,14 +1057,15 @@ def generate_context_aware_ptm_heatmap(
                 continue
             requested.append((precursor, sequence, gene, position, str(feature.get("display_label") or ""), feature))
         for precursor, sequence, gene, position, display_label, feature in requested:
-            fc_dict = feature_data.get((precursor, sequence, gene, position))
+            fc_dict = ({c: v for c, v in feature["values"].items() if v is not None}
+                       if "values" in feature else feature_data.get((precursor, sequence, gene, position)))
             expected_conditions = {str(value) for value in feature.get("conditions") or conditions}
             observed_conditions = {key for key in (fc_dict or {}) if not str(key).startswith("_")}
             if (
                 feature.get("render_eligible")
                 and fc_dict
                 and not fc_dict.get("_denovo")
-                and expected_conditions.issubset(observed_conditions)
+                and (expected_conditions.issubset(observed_conditions) or feature.get("partial_observation_display"))
             ):
                 matched_sites.append((gene, position, fc_dict, display_label or f"{gene} {position}"))
         mentioned_genes = {gene for gene, _, _, _ in matched_sites}
@@ -1131,8 +1132,8 @@ def generate_context_aware_ptm_heatmap(
         pass  # Skip clustering if scipy not available
 
     # ── Step 4: Plot ──
-    fig_width = max(9, min(16, 3.5 + n_conds * 1.3))
-    fig_height = max(6, min(22, 2 + n_sites * 0.4))
+    fig_width = 6.5 if selected_features else max(9, min(16, 3.5 + n_conds * 1.3))
+    fig_height = max(4, 1.4 + n_sites * .26) if selected_features else max(6, min(22, 2 + n_sites * 0.4))
 
     fig, ax = plt.subplots(1, 1, figsize=(fig_width, fig_height))
     fig.patch.set_facecolor("white")
@@ -1141,6 +1142,7 @@ def generate_context_aware_ptm_heatmap(
     # Diverging colormap: Blue → White → Red
     colors_div = ["#1e3a5f", "#3b82f6", "#93c5fd", "#ffffff", "#fca5a5", "#ef4444", "#7f1d1d"]
     cmap_div = LinearSegmentedColormap.from_list("ptm_fc", colors_div)
+    cmap_div.set_bad("#d6d6d6")
 
     quantified = matrix.copy()
     for i, is_denovo in enumerate(denovo_rows):
@@ -1172,14 +1174,14 @@ def generate_context_aware_ptm_heatmap(
             if abs(val) >= 0.3:
                 text_color = "white" if abs(val) > max_abs * 0.55 else "#333333"
                 ax.text(j, i, f"{val:+.1f}", ha="center", va="center",
-                        fontsize=6, color=text_color, fontweight="bold")
+                        fontsize=8 if selected_features else 6, color=text_color, fontweight="bold")
 
     # Labels
     ax.set_xticks(range(n_conds))
     ax.set_xticklabels(conditions, fontsize=9, rotation=45, ha="right", color="#333333")
     visible_label_indices = list(range(n_sites))
     ax.set_yticks(visible_label_indices)
-    ax.set_yticklabels([site_labels[i] for i in visible_label_indices], fontsize=7, color="#333333")
+    ax.set_yticklabels([site_labels[i] for i in visible_label_indices], fontsize=8 if selected_features else 7, color="#333333")
 
     # Grid
     for i in range(n_sites + 1):
@@ -1190,8 +1192,7 @@ def generate_context_aware_ptm_heatmap(
     mod_label = "Ubiquitylation" if ptm_type.lower().strip() in ("ubiquitylation", "ubiquitination") else "Phosphorylation"
     title_suffix = "Selected conventional feature cards" if selected_features else "Key sites discussed in this Report"
     ax.set_title(
-        f"{mod_label} Feature Profiles — {title_suffix} "
-        f"(conventional Log₂FC scale)",
+        "Protein-adjusted PTM contrasts" if selected_features else f"{mod_label} Feature Profiles — {title_suffix} (conventional Log₂FC scale)",
         fontsize=11, fontweight="bold", color="#1f2937", pad=12,
     )
     ax.set_xlabel("Condition / Timepoint", fontsize=9, color="#4b5563")
@@ -1203,7 +1204,7 @@ def generate_context_aware_ptm_heatmap(
     plt.setp(cbar.ax.yaxis.get_ticklabels(), color="#4b5563")
 
     # Footer
-    fig.text(
+    footer = fig.text(
         0.5, 0.005,
         (
             f"Heatmap of {n_sites} conventional PTM feature aggregates selected by the FigureManifest. "
@@ -1219,6 +1220,8 @@ def generate_context_aware_ptm_heatmap(
         ),
         fontsize=7, color="#6b7280", ha="center", va="bottom", style="italic",
     )
+    if selected_features:
+        footer.set_visible(False)  # The document caption carries this scope once.
 
     # ── Save ──
     output_path = Path(output_dir) / "context_ptm_heatmap.png"

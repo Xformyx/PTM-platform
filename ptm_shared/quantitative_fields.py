@@ -94,6 +94,11 @@ def axis_evidence(row: Mapping[str, Any], axis: str, sample_manifest: Mapping[st
         all_resolved = bool(ids) and all(s in samples and samples[s].get("biological_unit") for s in ids)
         evidence[f"{group}_biological_n"] = len(units) if all_resolved else None
     evidence["available"] = evidence["value"] is not None
+    evidence["value_status"] = "observed" if evidence["available"] else "unavailable"
+    if not evidence.get("test_status"):
+        evidence["test_status"] = ("computed" if evidence["p"] is not None or evidence["q"] is not None
+                                   else "not_computed" if "no_protein_test_computed" in str(evidence.get("method"))
+                                   else "statistical_support_unavailable")
     evidence["ci_status"] = "recorded" if evidence["ci"] is not None else "not_available"
     evidence["missing_reason"] = evidence["missing_reason"] or (None if evidence["available"] else "axis_not_available")
     return evidence

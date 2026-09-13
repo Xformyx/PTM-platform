@@ -57,7 +57,7 @@ def test_compression_preserves_limitation_and_next_validation():
     assert "does not establish causality" in result
     assert "Independent targeted measurements" in result
     assert audit["all_within_budget"]
-    assert audit["sections"][0]["maximum_words"] == 170
+    assert audit["sections"][0]["maximum_words"] == 160
 
 
 def test_short_complete_conclusion_never_retries_for_length(monkeypatch):

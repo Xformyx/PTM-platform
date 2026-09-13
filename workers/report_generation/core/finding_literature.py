@@ -1,10 +1,11 @@
 """Finding-scoped retrieval and quote-anchored comparison using the existing RAG client."""
 import hashlib
 import json
+import time
 from copy import deepcopy
 from datetime import datetime, timezone
 
-VERSION = "finding_retrieval.v1"
+VERSION = "finding_retrieval.v2"
 CONTEXT_FIELDS = ("species", "cell_type", "insulin_dose", "time", "readout", "perturbation")
 PROPERTIES = {key: {"type": "string"} for key in ("quote", "external_finding", "reference_scope", "relationship", *CONTEXT_FIELDS)}
 SCHEMA = {"type": "object", "properties": {"comparisons": {"type": "array", "items": {
@@ -19,7 +20,11 @@ def retrieve_finding_literature(cards, retriever, study, *, llm=None):
     The application verifies literal source anchors and reference scope. A
     model's semantic comparison still requires scientific source review.
     """
-    records, references = {}, []
+    from ptm_shared.annotation_species import annotation_scope
+    scope = annotation_scope(context=study)
+    study = {**study, "species": scope["native_species"], "annotation_species_scope": scope,
+             "cell_type": study.get("cell_type") or study.get("cell_model") or study.get("cell_line")}
+    records, references, search_cache = {}, [], {}
     for card in cards:
         identity = card.get("feature_identity") or {}
         fid = identity["reader_feature_id"]
@@ -32,11 +37,32 @@ def retrieve_finding_literature(cards, retriever, study, *, llm=None):
         records[fid] = record
         if not record["collections"]:
             continue
-        try:
-            hits = deepcopy(retriever.query(query, n_results=4, strict=True))
-        except Exception as error:
-            record.update(status="retrieval_failed", failure_type=type(error).__name__)
+        layers = [("literature_background", " ".join(str(study.get(k) or "") for k in ("treatment", "cell_type", "species")) + " signaling time course"),
+                  ("gene_function_context", str(identity.get("gene") or "") + " protein function localization trafficking translation cytoskeleton"),
+                  ("direct_site_evidence", query)]
+        hits, seen = [], set()
+        record["searches"] = []
+        for layer, layer_query in layers:
+            key = (layer, layer_query, tuple(record["collections"]))
+            cache_hit = key in search_cache
+            try:
+                if not cache_hit:
+                    search_cache[key] = retriever.query(layer_query, n_results=8 if layer == "literature_background" else 4, strict=True)
+                found = deepcopy(search_cache[key])
+            except Exception as error:
+                record["searches"].append({"layer": layer, "query": layer_query, "status": "retrieval_failed", "failure_type": type(error).__name__})
+                continue
+            record["searches"].append({"layer": layer, "query": layer_query, "cache_hit": cache_hit, "retrieved_count": len(found)})
+            for hit in found:
+                hkey = hit.get("source_id") or hit.get("doi") or hit.get("pmid") or hashlib.sha256(str(hit.get("document", "")).encode()).hexdigest()
+                if hkey not in seen:
+                    hit["retrieval_layer"] = layer
+                    hits.append(hit)
+                    seen.add(hkey)
+        if not hits and all(r.get("status") == "retrieval_failed" for r in record["searches"]):
+            record.update(status="retrieval_failed")
             continue
+        record["partial_retrieval_failure"] = any(r.get("status") == "retrieval_failed" for r in record["searches"])
         record.update(status="retrieved_comparison_pending", retrieved_count=len(hits))
         record["coverage"] = [{"collection": h.get("collection"), "collection_version": h.get("collection_version"),
                                "source_id": h.get("source_id"), "source_sha256": hashlib.sha256(str(h.get("document", "")).encode()).hexdigest()} for h in hits]
@@ -47,20 +73,31 @@ def retrieve_finding_literature(cards, retriever, study, *, llm=None):
         if llm is None:
             continue
         prompt = ("Compare this measured feature with the retrieved excerpts. Return JSON only. "
-                  "Use exact contiguous source quotes; external_finding and each context field must be a literal substring of its quote, or empty if unrecorded. "
-                  "Do not infer absent species, dose, site or direct regulation. reference_scope is gene or site. "
-                  "relationship is known_agreement or disagreement; condition differences remain context, not proof of a defect. "
+                  "Use exact contiguous source quotes. Paraphrase external_finding within the source scope; do not copy unsupported mechanisms into it. Context fields must be source substrings or empty if unrecorded. "
+                  "Do not infer absent species, dose, site or direct regulation. reference_scope is study, pathway, gene or site. "
+                  "relationship is known_agreement, disagreement, literature_background, gene_function_context, pathway_context, compatible_pattern, context_difference, direct_site_evidence or contradictory_evidence; condition differences remain context, not proof of a defect. "
                   "Return an empty comparisons array when the excerpts do not support a comparison.\n" +
                   json.dumps({"observation": card.get("reader_summary"), "study": study,
                               "sources": [{"source_index": i, "text": h.get("document"), "metadata": h.get("metadata")} for i, h in enumerate(hits)]}, default=str))
+        from common.generation_trace import capture_generation
+        started = time.monotonic()
+        generation = {"provider_raw_text": None, "resolved_model": getattr(llm, "model", None),
+                      "resolved_provider": getattr(llm, "provider", None), "requested_max_tokens": 4096}
+        record["comparison_generation"] = generation
         try:
-            draft = json.loads(llm.generate(prompt, max_tokens=4096, response_format={"type": "json_schema", "json_schema": {"name": "finding_comparison", "strict": True, "schema": SCHEMA}}))
+            with capture_generation() as transport:
+                generation["transport"] = transport
+                generation["provider_raw_text"] = llm.generate(prompt, max_tokens=4096, response_format={"type": "json_schema", "json_schema": {"name": "finding_comparison", "strict": True, "schema": SCHEMA}})
+            draft = json.loads(generation["provider_raw_text"])
             candidates = draft["comparisons"]
             if not isinstance(candidates, list):
                 raise ValueError("comparison_array_required")
         except Exception as error:
             record.update(comparison_failure_type=type(error).__name__)
+            generation["exception_type"] = type(error).__name__
             continue
+        finally:
+            generation["latency_seconds"] = time.monotonic() - started
         for candidate in candidates:
             if not isinstance(candidate, dict) or not all(isinstance(candidate.get(k), str) for k in PROPERTIES):
                 record["excluded_comparisons"].append({"reason": "invalid_comparison_schema"})
@@ -72,10 +109,11 @@ def retrieve_finding_literature(cards, retriever, study, *, llm=None):
             scope = candidate.get("reference_scope")
             site = str(identity.get("candidate_residue_annotation") or "")
             gene = str(identity.get("gene") or "")
-            valid = (quote and quote in document and gene.lower() in quote.lower()
-                     and scope in {"gene", "site"} and (scope != "site" or site and site.lower() in quote.lower())
-                     and candidate.get("relationship") in {"known_agreement", "disagreement"}
-                     and candidate.get("external_finding") and candidate["external_finding"] in quote
+            valid = (quote and quote in document and (scope in {"study", "pathway"} or gene.lower() in quote.lower())
+                     and scope in {"study", "pathway", "gene", "site"} and (scope != "site" or site and site.lower() in quote.lower())
+                     and candidate.get("relationship") in {"known_agreement", "disagreement", "literature_background", "gene_function_context", "pathway_context", "compatible_pattern", "context_difference", "direct_site_evidence", "contradictory_evidence"}
+                     and candidate.get("external_finding")
+                     and (candidate.get("relationship") != "direct_site_evidence" or scope == "site")
                      and (hit.get("doi") or hit.get("pmid"))
                      and all(not candidate.get(k) or candidate[k] in quote for k in CONTEXT_FIELDS))
             if not valid:
@@ -89,7 +127,7 @@ def retrieve_finding_literature(cards, retriever, study, *, llm=None):
                           "comparison_status": "source_anchored_semantic_review_required", "measured_relation": False}
             hit.setdefault("feature_comparisons", []).append(comparison)
             record["comparisons"].append({"source_index": index, "relationship": comparison["relationship"], "reference_scope": scope})
-        relations = {c["relationship"] for c in record["comparisons"]}
+        relations = {c["relationship"] for c in record["comparisons"] if c["relationship"] in {"known_agreement", "disagreement"}}
         record["status"] = ("agreement_and_disagreement" if len(relations) > 1 else next(iter(relations)) if relations else
-                            "retrieved_comparison_pending" if record["excluded_comparisons"] else "not_explained_by_retrieved_evidence")
+                            "context_available" if record["comparisons"] else "retrieved_comparison_pending" if record["excluded_comparisons"] else "not_explained_by_retrieved_evidence")
     return {"schema_version": VERSION, "records": records, "references": references}

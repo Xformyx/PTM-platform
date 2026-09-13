@@ -222,6 +222,20 @@ def parse_inline_formatting(text: str) -> List[Tuple[str, dict]]:
     Parse inline markdown formatting (bold, italic, code) and return segments.
     Each segment is (text, format_dict) where format_dict has keys like 'bold', 'italic', 'code'.
     """
+    # Preserve web references as native Word hyperlinks, including common DOI
+    # URLs with parenthesized suffixes. Do not leave Markdown link syntax in a
+    # bibliography paragraph or turn a URL into an ordinary text run.
+    links = list(re.finditer(r'(?<!!)\[([^\]\n]+)\]\((https?://[^\s()]+(?:\([^\s()]*\)[^\s()]*)*)\)', text))
+    if links:
+        segments, end = [], 0
+        for match in links:
+            if match.start() > end:
+                segments.extend(parse_inline_formatting(text[end:match.start()]))
+            segments.extend((label, {**fmt, 'url': match[2]}) for label, fmt in parse_inline_formatting(match[1]))
+            end = match.end()
+        if end < len(text):
+            segments.extend(parse_inline_formatting(text[end:]))
+        return segments
     # v45: Convert HTML tags to markdown equivalents first
     text = _convert_html_tags(text)
     # v42: Convert LaTeX symbols
@@ -274,6 +288,29 @@ def add_formatted_paragraph(doc: 'Document', segments: List[Tuple[str, dict]], s
         p.paragraph_format.left_indent = Inches(0.5 * indent_level)
     
     for text, fmt in segments:
+        if fmt.get('url'):
+            from docx.oxml import OxmlElement
+            from docx.oxml.ns import qn
+            from docx.opc.constants import RELATIONSHIP_TYPE
+            hyperlink = OxmlElement('w:hyperlink')
+            hyperlink.set(qn('r:id'), p.part.relate_to(fmt['url'], RELATIONSHIP_TYPE.HYPERLINK, is_external=True))
+            element = OxmlElement('w:r')
+            properties = OxmlElement('w:rPr')
+            for key, value in (('w:color', '305A8C'), ('w:sz', '22'), ('w:u', 'single')):
+                node = OxmlElement(key)
+                node.set(qn('w:val'), value)
+                properties.append(node)
+            for key in ('bold', 'italic'):
+                if fmt.get(key):
+                    properties.append(OxmlElement('w:b' if key == 'bold' else 'w:i'))
+            element.append(properties)
+            node = OxmlElement('w:t')
+            node.set(qn('xml:space'), 'preserve')
+            node.text = text
+            element.append(node)
+            hyperlink.append(element)
+            p._p.append(hyperlink)
+            continue
         run = p.add_run(text)
         run.font.name = 'Times New Roman'
         run.font.size = Pt(11)
@@ -551,7 +588,11 @@ def convert_markdown_to_docx(markdown_content: str, output_path: str, title: str
                 if success:
                     images_embedded += 1
                     # Add caption below image if alt_text is meaningful
-                    if alt_text and alt_text.strip():
+                    following = next((value.strip() for value in lines[i + 1:] if value.strip()), "")
+                    explicit_legend = following.lower().startswith(("**figure legend", "figure legend"))
+                    if explicit_legend:
+                        doc.paragraphs[-1].paragraph_format.keep_with_next = True
+                    if alt_text and alt_text.strip() and not explicit_legend:
                         cap_p = doc.add_paragraph()
                         cap_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
                         cap_run = cap_p.add_run(alt_text)
@@ -604,7 +645,8 @@ def convert_markdown_to_docx(markdown_content: str, output_path: str, title: str
         if line_type == 'heading_3':
             # ### Subsection heading
             text = segments[0][0] if segments else ''
-            doc.add_heading(text, level=2)
+            heading = doc.add_heading(text, level=2)
+            heading.paragraph_format.keep_with_next = True
             i += 1
             continue
         

@@ -1,0 +1,37 @@
+{
+  "scope": "Agent visual QA of the synthetic fixture, not human acceptance of Order 74",
+  "source_export_sha256": {
+    "researcher_fixture.md": "1d29d9573e696b1cdf198d80bd53a4e29b15ca9f8c039f475e6b736b5c77d528",
+    "researcher_fixture.docx": "56373727226b190ded9a47e0f7b21557f60331d93e085b06e0a0a13f15e23a74",
+    "researcher_fixture.html": "ba1a31491ead3ecf2a1f6480179e96f6f2683a58a743fa9644c3fc7a0f5c2cfb"
+  },
+  "docx_pages": 8,
+  "html_print_pages": 8,
+  "docx_pdf_sha256": "5790150d7eeb5223d8b7d28cf4ee5d776a069bc66a389673aec12efb809df641",
+  "html_pdf_sha256": "880e41fd235a5c0c66444a4c655e39abf38bf9fa0c7f31ecb99ec1d3ec16c923",
+  "page_png_sha256": {
+    "pages/page-1.png": "ba788acc2405d00f42aae1ecdb0586ea00b4038cced985e34619e7284ee77a92",
+    "pages/page-2.png": "1be1883fed6d9e19455a8bd65d33bf8b3907db846b4a21444a8f62f1153a3c0e",
+    "pages/page-3.png": "327545d23c4100634f995f7efc4372cf71662295d0015e97103af602329eb200",
+    "pages/page-4.png": "1cb631976ba3d442d6bb7633325374223c6495db1d72840953608ce36b926ce9",
+    "pages/page-5.png": "c9da77675ffcf9132ce79812b21e99cbbce036b6bedd27db9f1de0852cc88fd5",
+    "pages/page-6.png": "d2dfbd3254147a6e2862e66e9222710f85af19d3cd36307d752dd88b4a81c3c5",
+    "pages/page-7.png": "f8e3021ad00a11d6e785ef9fcac42bad5b5efb73efc10d5da93bfca3258309f1",
+    "pages/page-8.png": "2c939a3038fd2070ac1842fdd5580213c584220b4eb62577eb03c1c91cbf909a"
+  },
+  "checks": [
+    "heatmap ordered by elapsed time; all 16 labels visible",
+    "U/A coincidence remains visible with open U markers",
+    "early inset ticks readable; inset avoids main curves in this fixture",
+    "missing 60-minute observation is a gap",
+    "figure heading/image/caption kept together",
+    "table repeats header across pages; unavailable protein q explained once",
+    "no independent Q&A heading in MD/DOCX/HTML"
+  ],
+  "limitations": [
+    "Synthetic labels and no real literature; biological interpretation not evaluated",
+    "Table spans pages; layout must be rechecked for actual Order 74 labels and selected finding count",
+    "Automatic bounding-box checks cover ticks, not all document typography"
+  ],
+  "libreoffice_version": "26.8.0.3"
+}

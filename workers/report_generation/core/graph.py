@@ -103,6 +103,7 @@ class ReportState(TypedDict, total=False):
     reader_authoring_fallback_sections: list
     reader_authoring_final_fallback_sections: list
     reader_prose_snapshots: dict           # raw -> validated -> citation-normalized section trace
+    reader_authoring_plan_attempts: list   # provider responses/errors for the shared manuscript plan
     report_prose_trace_path: str           # task-level final document source trace
     reader_authoring_mode: str             # legacy | shadow
     evidence_reproducibility_audit_path: str  # separate technical audit sidecar
@@ -949,7 +950,7 @@ def format_citations(state: ReportState) -> dict:
         preexisting_body = "\n".join(
             str(source_sections.get(section) or "")
             for section in (
-                "abstract", "introduction", "results", "research_question_answers",
+                "abstract", "introduction", "results",
                 "discussion", "methods", "conclusion",
             )
         )
@@ -963,7 +964,7 @@ def format_citations(state: ReportState) -> dict:
             }
         final_fallback_sections: list[str] = []
         for required_section in (
-            "abstract", "introduction", "results", "research_question_answers",
+            "abstract", "introduction", "results",
             "discussion", "methods", "conclusion",
         ):
             if str(sections.get(required_section) or "").strip():
@@ -1030,7 +1031,7 @@ def format_citations(state: ReportState) -> dict:
         f"*Generated: {_dt.now().strftime('%Y-%m-%d %H:%M')}*\n",
     ]
 
-    section_order = ["abstract", "introduction", "results", "research_question_answers", "discussion", "conclusion"]
+    section_order = ["abstract", "introduction", "results", "discussion", "conclusion"]
     if reader_authoring_shadow:
         section_order = [
             "abstract",
@@ -1039,7 +1040,6 @@ def format_citations(state: ReportState) -> dict:
             "results",
             "discussion",
             "conclusion",
-            "research_question_answers",
         ]
     section_headings = {
         "abstract": "## Abstract",
@@ -1625,6 +1625,12 @@ def format_citations(state: ReportState) -> dict:
     # v8.7: Append ALL supplementary figures at the very end
     supp_combined = "\n\n## Supplementary Figures\n\n"
     has_supp = False
+    if reader_authoring_shadow:
+        from .figure_manifest import render_verified_reader_figures
+        reader_supplementary = render_verified_reader_figures(figure_manifest, placement="supplementary")
+        if reader_supplementary:
+            supp_combined += reader_supplementary
+            has_supp = True
 
     # Co-movement supplementary (heatmap, extra clusters)
     if comovement_supp_items:

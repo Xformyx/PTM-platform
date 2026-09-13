@@ -120,7 +120,7 @@ def sentence_evidence_scope(sentence: str) -> str:
     current = re.search(r"\b(?:our|these|this (?:study|analysis|experiment)|current|the (?:measured|observed)|data show)\b|PF-[A-Z0-9]+", sentence, re.I)
     if not current and re.search(r"\[REF:|\[\d+(?:[,–-]\d+)*\]|\b(?:published|literature|prior work)\b", sentence, re.I):
         return "literature_context"
-    if re.search(r"\b(?:hypothes\w*|propose to test|could be tested|test whether)\b", sentence, re.I):
+    if re.search(r"\b(?:hypothes\w*|we predict|we propose|propose to test|could be tested|test whether)\b", sentence, re.I):
         return "hypothesis"
     return "observation"
 
@@ -309,6 +309,10 @@ def _compress_question_answers(body: str, maximum_words: int) -> str:
                 break
         if boundary and _word_count(" ".join([*kept, boundary])) <= per_question:
             kept.append(boundary)
+        # Preserve an answer even when long legacy headings consume the budget.
+        # The final content audit reports overflow; an empty answer is not success.
+        if not kept and answer_sentences:
+            kept = [answer_sentences[0]]
         compressed.append(heading + "\n\n" + " ".join(kept))
     result = "\n\n".join(compressed)
     return result

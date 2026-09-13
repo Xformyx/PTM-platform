@@ -14,7 +14,7 @@ from typing import Any, Mapping
 
 from .quantitative_fields import axis_number
 
-CLAIM_SCHEMA_VERSION = "reader_quantitative_claim.v1"
+CLAIM_SCHEMA_VERSION = "reader_quantitative_claim.v2"
 AXIS_LABELS = {"unadjusted": "unadjusted PTM contrast",
                "adjusted": "protein-adjusted relative PTM log2 contrast",
                "protein": "linked protein contrast"}
@@ -81,7 +81,18 @@ def validate_quantitative_sentence(sentence: str, packet: Mapping[str, Any]) -> 
     from .scientific_semantics import sentence_evidence_scope
     if sentence_evidence_scope(sentence) == "literature_context":
         return []
+    if (re.search(r"\bpathway\b.*\bsignifican|\bsignifican\w*\b.*\bpathway\b", sentence, re.I)
+            and not re.search(r"\b(?:not|no|without)\b", sentence, re.I)):
+        pathway_facts = packet.get("pathway_statistical_evidence") or []
+        if not any(f.get("pathway_name") and str(f["pathway_name"]).lower() in sentence.lower()
+                   and f.get("q_value") is not None and f["q_value"] < f.get("alpha", .05)
+                   and f.get("source_artifact_sha256") for f in pathway_facts):
+            return ["pathway_significance_not_bound_to_evaluable_test"]
     cards = matching_cards(sentence, packet.get("reader_cards") or [])
+    if re.search(r"(?:no|without|unavailable|not available|not recorded).{0,70}(?:independent |unadjusted )+PTM|(?:independent |unadjusted )+PTM.{0,70}(?:unavailable|not available|not recorded)", sentence, re.I):
+        scope_cards = cards or packet.get("reader_cards") or []
+        if any(r["axis"] == "unadjusted" and r["value"] is not None for c in scope_cards for r in quantitative_records(c)):
+            return ["available_unadjusted_observation_denied"]
     explicit_ids = set(_ID.findall(sentence.upper()))
     known_ids = {c.get("feature_identity", {}).get("reader_feature_id") for c in packet.get("reader_cards") or []}
     if explicit_ids - known_ids:
@@ -90,6 +101,9 @@ def validate_quantitative_sentence(sentence: str, packet: Mapping[str, Any]) -> 
         measured_number = re.search(r"\b(?:contrast|log2fc)\s*(?:(?:of|was|is|=)\s*)?[+−-]?\d", sentence, re.I)
         return ["quantitative_missing_precursor_identity"] if measured_number else []
     ids = {c["feature_identity"].get("reader_feature_id") for c in cards} - {None}
+    if re.search(r"\b(?:single|only one|singly)[- ]?(?:phosphorylated|phosphorylation|site|residue)", sentence, re.I):
+        if any(str(c["feature_identity"].get("modified_sequence") or "").lower().count("unimod:21") > 1 for c in cards):
+            return ["multimodified_precursor_cannot_be_reduced_to_single_site"]
     if len(ids) > 1 and (not explicit_ids or re.search(r"\b(?:same|single)\b.*?\b(?:feature|precursor|trajectory)\b", sentence, re.I)):
         return ["precursor_identity_ambiguous_or_stitched"]
     if not ids:
@@ -177,7 +191,10 @@ def structured_authoring_instructions(packet: Mapping[str, Any]) -> str:
               "List only figures supporting this sentence in figure_keys. Use separate sentences for background, "
               "current observations and hypotheses. Preserve [REF:*] citations in text. Group sentences with paragraph integers. "
               "Do not emit numeric feature measurements outside tokens.\nImmutable token references: "
-            + json.dumps(value_token_catalog(packet), ensure_ascii=False))
+            + json.dumps(value_token_catalog(packet), ensure_ascii=False, separators=(",", ":"))
+            + "\nUnavailable observations (not value tokens; preserve the supplied reasons): "
+            + json.dumps([r for c in packet.get("reader_cards") or [] for r in quantitative_records(c)
+                          if r["value"] is None], ensure_ascii=False, separators=(",", ":")))
 
 
 SENTENCE_RESPONSE_FORMAT = {"type": "json_schema", "json_schema": {
@@ -187,7 +204,7 @@ SENTENCE_RESPONSE_FORMAT = {"type": "json_schema", "json_schema": {
             "type": "object", "additionalProperties": False,
             "required": ["text", "paragraph", "scope", "evidence_ids", "value_tokens", "figure_keys"],
             "properties": {"text": {"type": "string"}, "paragraph": {"type": "integer"},
-                "scope": {"type": "string", "enum": ["observation", "literature_context", "hypothesis"]},
+                "scope": {"type": "string", "enum": ["observation", "literature_context", "hypothesis", "study_rationale", "biological_interpretation", "testable_hypothesis"]},
                 "evidence_ids": {"type": "array", "items": {"type": "string"}},
                 "value_tokens": {"type": "array", "items": {"type": "string"}},
                 "figure_keys": {"type": "array", "items": {"type": "string"}}}}}}}}}
@@ -214,7 +231,7 @@ def decode_sentence_draft(content: str, packet: Mapping[str, Any]) -> tuple[str,
         if not isinstance(item, dict) or not isinstance(item.get("text"), str) or not isinstance(item.get("paragraph"), int) or any(
             not isinstance(item.get(key), list) or any(not isinstance(v, str) for v in item[key])
             for key in ("evidence_ids", "value_tokens", "figure_keys")
-        ) or item.get("scope") not in {"observation", "literature_context", "hypothesis"}:
+        ) or item.get("scope") not in {"observation", "literature_context", "hypothesis", "study_rationale", "biological_interpretation", "testable_hypothesis"}:
             audit.append({"reason_code": "invalid_sentence_record", "retained": False})
             continue
         text = item["text"]
@@ -226,13 +243,6 @@ def decode_sentence_draft(content: str, packet: Mapping[str, Any]) -> tuple[str,
         refs = [catalog[token] for token in tokens if token in catalog]
         if refs and item["scope"] != "observation":
             reasons.append("quantitative_reference_scope_mismatch")
-        if item["scope"] == "hypothesis":
-            observation_ids = {eid for c in packet.get("reader_cards") or [] if c.get("trajectory") for eid in c.get("evidence_ids") or []}
-            citation_ids = {eid.lower() for c in packet.get("reader_cards") or [] for eid in c.get("citation_ids") or []}
-            cited = {v.lower() for v in re.findall(r"\[REF:([^\]]+)\]", text)}
-            if (not observation_ids.intersection(item["evidence_ids"]) or not cited or not cited.issubset(citation_ids)
-                    or not re.search(r"predict|test|distinguish|discriminat", text, re.I)):
-                reasons.append("hypothesis_observation_literature_prediction_unbound")
         if set(re.findall(r"\{\{(V\d+)\}\}", text)) != set(tokens) or any(token not in catalog for token in tokens):
             reasons.append("unknown_or_unbound_value_token")
         if not set(item["evidence_ids"]).issubset(evidence) or any(r["evidence_id"] not in item["evidence_ids"] for r in refs):
@@ -244,7 +254,49 @@ def decode_sentence_draft(content: str, packet: Mapping[str, Any]) -> tuple[str,
             if token in catalog:
                 text = text.replace("{{" + token + "}}", render_value_record(catalog[token]))
         reasons.extend(validate_quantitative_sentence(text, packet))
-        if not reasons:
-            paragraphs.setdefault(item["paragraph"], []).append(text + " " + " ".join(f"[EVID:{eid}]" for eid in item["evidence_ids"]))
-        audit.append({"sentence": item, "references": refs, "reason_codes": reasons, "retained": not reasons})
+        audit.append({"sentence": item, "references": refs, "reason_codes": reasons, "retained": not reasons, "resolved_text": text})
+    # Only individually valid observation/context sentences can support another
+    # sentence. A rejected sibling cannot donate a citation or fabricated fact.
+    observation_ids = {eid for c in packet.get("reader_cards") or [] if c.get("trajectory") for eid in c.get("evidence_ids") or []}
+    citation_ids = {eid.lower() for c in packet.get("reader_cards") or [] for eid in c.get("citation_ids") or []}
+    for record in audit:
+        if not record["retained"]:
+            continue
+        item = record["sentence"]
+        if item["scope"] in {"hypothesis", "testable_hypothesis", "biological_interpretation"}:
+            group = [r["sentence"] for r in audit if r["retained"] and r["sentence"]["paragraph"] == item["paragraph"]
+                     and (r["sentence"]["scope"] in {"observation", "literature_context"} or r is record)]
+            group_text = " ".join(s["text"] for s in group)
+            group_evidence = {eid for s in group for eid in s["evidence_ids"]}
+            cited = {v.lower() for v in re.findall(r"\[REF:([^\]]+)\]", group_text)}
+            if (not observation_ids.intersection(group_evidence) or not cited or not cited.issubset(citation_ids)
+                    or (item["scope"] != "biological_interpretation" and not re.search(r"predict|test|distinguish|discriminat", group_text, re.I))):
+                record["reason_codes"].append("hypothesis_observation_literature_prediction_unbound")
+                record["retained"] = False
+        if record["retained"]:
+            paragraphs.setdefault(item["paragraph"], []).append(record["resolved_text"] + " " + " ".join(f"[EVID:{eid}]" for eid in item["evidence_ids"]))
     return "\n\n".join(" ".join(paragraphs[k]) for k in sorted(paragraphs)), audit
+
+
+def merge_valid_sentence_drafts(drafts, packet):
+    """Keep validated text from all attempts, with sentence-level rejection trace."""
+    kept, audit = [], []
+    for attempt, draft in enumerate(drafts, 1):
+        if not draft or str(draft).startswith("[LLM Error"):
+            continue
+        prose, records = decode_sentence_draft(draft, packet)
+        audit.extend({**r, "attempt": attempt} for r in records)
+        for paragraph in prose.split("\n\n"):
+            if not paragraph:
+                continue
+            # A repair commonly extends a previously valid paragraph. Keep the
+            # complete supported replacement without repeating its old prefix.
+            # Do not assemble isolated hypotheses from unrelated paragraphs.
+            sentences = set(re.split(r"(?<=[.!?])\s+", paragraph))
+            if any(sentences <= prior for _, prior in kept):
+                continue
+            superseded = [i for i, (_, prior) in enumerate(kept) if prior <= sentences]
+            position = min(superseded) if superseded else len(kept)
+            kept = [entry for i, entry in enumerate(kept) if i not in superseded]
+            kept.insert(position, (paragraph, sentences))
+    return "\n\n".join(paragraph for paragraph, _ in kept), audit

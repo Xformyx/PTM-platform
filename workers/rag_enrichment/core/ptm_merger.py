@@ -10,6 +10,7 @@ enabling:
 """
 
 import logging
+import json
 import math
 from typing import Dict, List, Optional, Tuple
 
@@ -47,6 +48,13 @@ def collapse_ptm_rows_for_enrichment(
     collapsed: List[dict] = []
     for entries in groups.values():
         primary = dict(_select_primary(entries))
+        from ptm_shared.feature_identity import canonical_feature_identity
+        feature_provenance = {}
+        for entry in entries:
+            identity_record = canonical_feature_identity(entry)
+            key = identity_record["feature_id"] or json.dumps(identity_record, sort_keys=True)
+            feature_provenance[key] = identity_record
+        primary["annotation_feature_provenance"] = [feature_provenance[key] for key in sorted(feature_provenance)]
         condition_data = []
         for entry in entries:
             identity = form_identity(entry)

@@ -11,6 +11,44 @@ from typing import Any, Mapping
 MANIFEST_VERSION = "reader_report_artifact_manifest.v1"
 
 
+def report_runtime_provenance():
+    """Read allowlisted runtime identifiers; never serialize environment secrets."""
+    import os
+    import subprocess
+    from datetime import datetime, timezone
+    from common.section_budgets import SECTION_BUDGET_VERSION
+    from .quantitative_claims import CLAIM_SCHEMA_VERSION
+    commit = os.getenv("PTM_GIT_COMMIT") or os.getenv("GIT_COMMIT_SHA")
+    dirty = None
+    try:
+        root = Path(__file__).resolve().parents[3]
+        commit = commit or subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True, stderr=subprocess.DEVNULL, timeout=3).strip()
+        dirty = bool(subprocess.check_output(["git", "status", "--porcelain", "--untracked-files=no"], cwd=root, text=True, stderr=subprocess.DEVNULL, timeout=3).strip())
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return {"git_commit_sha": commit, "tracked_worktree_dirty": dirty,
+            "container_digest": os.getenv("PTM_CONTAINER_DIGEST"),
+            "worker_version": os.getenv("PTM_WORKER_VERSION"),
+            "generated_at": datetime.now(timezone.utc).isoformat(), "generation_timezone": "UTC",
+            "section_budget_version": SECTION_BUDGET_VERSION, "claim_schema_version": CLAIM_SCHEMA_VERSION}
+
+
+def persist_report_packets(state, output_dir):
+    """Snapshot only current-state derived evidence, without discovering old files."""
+    keys = ("authoring_packet", "reader_authoring_plan", "biological_synthesis_packet",
+            "finding_literature_retrieval", "figure_manifest", "pathway_expansion",
+            "ptm_representation_benchmark", "temporal_report_evidence_packet")
+    paths = {}
+    for key in keys:
+        value = state.get(key)
+        if value is None:
+            continue
+        path = Path(output_dir) / ("report_" + key + ".json")
+        path.write_text(json.dumps(value, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+        paths[key] = str(path)
+    return paths
+
+
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -97,6 +135,7 @@ def build_report_artifact_manifest(
     output_correctness_path: str | Path | None,
     report_config: Mapping[str, Any] | None,
     temporal_required: bool,
+    derived_packet_paths: Mapping[str, str | Path] | None = None,
 ) -> dict[str, Any]:
     artifacts = [
         _artifact("vector_tsv", vector_path, required=True),
@@ -110,6 +149,7 @@ def build_report_artifact_manifest(
         _artifact(f"report_markdown_{index}", path, required=True)
         for index, path in enumerate(report_markdown_paths, 1)
     )
+    artifacts.extend(_artifact(role, path, required=True) for role, path in (derived_packet_paths or {}).items())
     reasons = [
         f"missing_required_artifact:{item['role']}"
         for item in artifacts
@@ -144,6 +184,7 @@ def build_report_artifact_manifest(
         "artifacts": artifacts,
         "enriched_provenance": enriched_status,
         "temporal_provenance": temporal_status,
+        "runtime_provenance": report_runtime_provenance(),
     }
     output_path = Path(output_dir) / "report_artifact_manifest.json"
     output_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -157,9 +198,11 @@ def finalize_rendered_artifacts(manifest: Mapping[str, Any], rendered_paths, fig
     records = [_artifact("rendered_" + Path(path).suffix.lstrip("."), path, required=True)
                for path in sorted(set(map(str, rendered_paths)))]
     for figure in figure_manifest.get("figures") or []:
-        if figure.get("placement") == "main" and figure.get("insertion_verified"):
+        if figure.get("placement") in {"main", "supplementary"} and figure.get("insertion_verified"):
             record = _artifact("figure:" + str(figure.get("figure_key")), figure.get("image_path"), required=True)
             record["quantitative_binding_sha256"] = hashlib.sha256(json.dumps(figure.get("quantitative_bindings") or [], sort_keys=True, default=str).encode()).hexdigest()
+            record["quantitative_source_artifacts"] = {a["role"]: a["sha256"] for a in result.get("artifacts") or []
+                                                        if a["role"] in {"vector_tsv", "temporal_sidecar", "enriched_json"} and a.get("sha256")}
             records.append(record)
     stale_sources = [item["role"] for item in result.get("artifacts") or [] if item.get("sha256")
                      and (not Path(item["path"]).is_file() or _sha256(Path(item["path"])) != item["sha256"])]

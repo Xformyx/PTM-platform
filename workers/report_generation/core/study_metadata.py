@@ -16,7 +16,8 @@ STUDY_METADATA_CONTRACT_VERSION = "study_metadata_contract.v3"
 
 _FIELD_ALIASES = {
     "cell_model": ("cell_model", "cell_type", "cell_line", "tissue"),
-    "organism": ("organism", "species", "taxonomy"),
+    "organism": ("host_organism", "organism", "species", "taxonomy"),
+    "transgene_species": ("transgene_species",),
     "parent_line": ("parent_line", "parent_cell_line"),
     "engineering": ("engineering", "genetic_modification", "transgene", "receptor_status"),
     "treatment": ("treatment", "compound"),
@@ -199,7 +200,12 @@ def build_study_metadata_contract(context: Mapping[str, Any] | None) -> dict[str
         review_reasons.append("replicate_semantics_not_recorded")
 
     reader_system_label = _reader_system_label(selected)
+    from ptm_shared.annotation_species import annotation_scope
+    species_scope = annotation_scope(context={**source, **override})
+    if species_scope["status"] != "resolved":
+        review_reasons.append("annotation_species_unresolved")
     return {
+        "annotation_species_scope": species_scope,
         "contract_version": STUDY_METADATA_CONTRACT_VERSION,
         "cell_model": selected.get("cell_model") or "the recorded experimental system",
         "organism": selected.get("organism"),

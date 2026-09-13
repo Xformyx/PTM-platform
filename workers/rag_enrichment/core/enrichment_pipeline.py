@@ -194,7 +194,7 @@ class RAGEnrichmentPipeline:
         rag_llm_provider: Optional[str] = None,
         llm_provider: str = "ollama",
         llm_model: Optional[str] = None,
-        species: str = "mouse",
+        species: str = "unknown",
     ):
         self.mcp = mcp_client
         self.reg_extractor = RegulationExtractor()
@@ -264,6 +264,7 @@ class RAGEnrichmentPipeline:
                 self.functional_impact = LLMFunctionalImpact(llm_client=llm)
         if enable_fulltext:
             self.fulltext_analyzer = FullTextAnalyzer()
+        self.study_species = species
         if enable_ptm_validation:
             self.ptm_validator = PTMValidator(mcp_client=mcp_client, species=species)
         # Log local data availability
@@ -681,34 +682,16 @@ class RAGEnrichmentPipeline:
         gene = ptm.get("gene") or ptm.get("Gene.Name", "Unknown")
         position = ptm.get("position") or ptm.get("PTM_Position", "Unknown")
         ptm_type = ptm.get("ptm_type") or ptm.get("PTM_Type", "Phosphorylation")
-        species = (context or {}).get("organism") or (context or {}).get("species", "")
-        # A single order may intentionally use a mixed FASTA, for example a
-        # human receptor transgene in rat cells. FASTA-native provenance takes
-        # priority for this PTM's external annotations but never changes the
-        # order-level discovery species.
-        _fasta_taxon = str(ptm.get("FASTA_Taxonomy_ID") or "").split(";")[0].strip()
-        _fasta_organism = str(ptm.get("FASTA_Organism") or "").split(";")[0].strip()
-        if _fasta_taxon == "9606":
-            species = "human"
-        elif _fasta_taxon == "10116":
-            species = "rat"
-        elif _fasta_taxon == "10090":
-            species = "mouse"
-        elif _fasta_organism and _fasta_organism.lower() != "unknown":
-            species = _fasta_organism
-        # Derive KEGG organism code and NCBI tax_id from species string
-        _sp_lower = species.lower() if species else ""
-        _kegg_org = (
-            "rno" if "rat" in _sp_lower or "rattus" in _sp_lower
-            else "hsa" if "human" in _sp_lower or "homo" in _sp_lower
-            else "mmu"  # default mouse
-        )
-        _tax_id = (
-            10116 if "rat" in _sp_lower or "rattus" in _sp_lower
-            else 9606 if "human" in _sp_lower or "homo" in _sp_lower
-            else 10090
-        )
-        _is_human = ("human" in _sp_lower or "homo" in _sp_lower)
+        from ptm_shared.annotation_species import annotation_scope
+        scope = annotation_scope(ptm, {"species": getattr(self, "study_species", "unknown"), **(context or {})})
+        ptm["annotation_species_scope"] = scope
+        ptm["native_species"] = scope["native_species"]
+        ptm["species"] = scope["native_species"]
+        species = scope["native_species"]
+        _tax_id = int(scope["annotation_taxonomy_id"]) if scope["annotation_taxonomy_id"] else None
+        _kegg_org = scope["kegg_organism"]
+        _is_human = _tax_id == 9606
+        cache_namespace = scope["cache_namespace"]
         protein_id = ptm.get("protein_id") or ptm.get("Protein.Group", "")
 
         # ══════════════════════════════════════════════════════════════
@@ -721,6 +704,8 @@ class RAGEnrichmentPipeline:
             return {**payload, "_phase_a_state": state}
 
         def _iptmnet():
+            if not _tax_id:
+                return _source_result({"query_status": "unavailable", "reason": "annotation_species_unresolved"}, "skipped")
             try:
                 iptmnet_data = self.mcp.query_iptmnet(gene=gene, position=position, organism=species)
                 return _source_result(
@@ -732,7 +717,9 @@ class RAGEnrichmentPipeline:
                 return _source_result({}, "error")
 
         def _kegg():
-            cache_key = f"{gene}__kegg__{_kegg_org}"
+            if not _tax_id:
+                return _source_result({"query_status": "unavailable", "reason": "annotation_species_unresolved"}, "skipped")
+            cache_key = f"{cache_namespace}__{gene}__kegg__{_kegg_org}"
             cached = self._gene_cache.get(cache_key)
             if cached is not None:
                 logger.debug(f"[CACHE HIT] KEGG for {gene}")
@@ -752,7 +739,9 @@ class RAGEnrichmentPipeline:
                 return _source_result(result, "error")
 
         def _stringdb():
-            cache_key = f"{gene}__stringdb__{species}"
+            if not _tax_id:
+                return _source_result({"query_status": "unavailable", "reason": "annotation_species_unresolved"}, "skipped")
+            cache_key = f"{cache_namespace}__{gene}__stringdb__{species}"
             cached = self._gene_cache.get(cache_key)
             if cached is not None:
                 logger.debug(f"[CACHE HIT] STRING-DB for {gene}")
@@ -772,9 +761,11 @@ class RAGEnrichmentPipeline:
                 return _source_result(result, "error")
 
         def _uniprot():
+            if ";" in str(protein_id) or scope["status"] == "mixed_or_ambiguous":
+                return _source_result({"query_status": "unavailable", "reason": "ambiguous_accession_scope"}, "skipped")
             if not protein_id:
                 return _source_result({"uniprot_info": {}}, "skip")
-            cache_key = f"{protein_id}__uniprot"
+            cache_key = f"{cache_namespace}__{protein_id}__uniprot"
             cached = self._gene_cache.get(cache_key)
             if cached is not None:
                 logger.debug(f"[CACHE HIT] UniProt for {protein_id}")
@@ -796,7 +787,7 @@ class RAGEnrichmentPipeline:
             if not _is_human:
                 logger.debug(f"[SKIP] HPA for {gene}: non-human species ({species})")
                 return _source_result({"hpa_data": {}}, "skip")
-            cache_key = f"{gene}__hpa"
+            cache_key = f"{cache_namespace}__{gene}__hpa"
             cached = self._gene_cache.get(cache_key)
             if cached is not None:
                 logger.debug(f"[CACHE HIT] HPA for {gene}")
@@ -817,7 +808,7 @@ class RAGEnrichmentPipeline:
             if not _is_human:
                 logger.debug(f"[SKIP] GTEx for {gene}: non-human species ({species})")
                 return _source_result({"gtex_data": {}}, "skip")
-            cache_key = f"{gene}__gtex"
+            cache_key = f"{cache_namespace}__{gene}__gtex"
             cached = self._gene_cache.get(cache_key)
             if cached is not None:
                 logger.debug(f"[CACHE HIT] GTEx for {gene}")
@@ -834,7 +825,9 @@ class RAGEnrichmentPipeline:
                 return _source_result(result, "error")
 
         def _biogrid():
-            cache_key = f"{gene}__biogrid__{_tax_id}"
+            if not _tax_id:
+                return _source_result({"query_status": "unavailable", "reason": "annotation_species_unresolved"}, "skipped")
+            cache_key = f"{cache_namespace}__{gene}__biogrid__{_tax_id}"
             cached = self._gene_cache.get(cache_key)
             if cached is not None:
                 logger.debug(f"[CACHE HIT] BioGRID for {gene}")
@@ -851,13 +844,15 @@ class RAGEnrichmentPipeline:
                 return _source_result(result, "error")
 
         def _reactome():
-            cache_key = f"{gene}__reactome"
+            if not _tax_id:
+                return _source_result({"query_status": "unavailable", "reason": "annotation_species_unresolved"}, "skipped")
+            cache_key = f"{cache_namespace}__{gene}__reactome"
             cached = self._gene_cache.get(cache_key)
             if cached is not None:
                 logger.debug(f"[CACHE HIT] Reactome for {gene}")
                 return _source_result(cached, "cache_hit")
             try:
-                reactome_data = self.mcp.query_reactome(gene)
+                reactome_data = self.mcp.query_reactome(gene, organism=scope["scientific_name"])
                 reactome_count = reactome_data.get("total_count", 0)
                 signaling_count = reactome_data.get("signaling_count", 0)
                 reactome_pw_names = [p.get("name", "?") for p in reactome_data.get("signaling_pathways", [])[:5]]
@@ -967,7 +962,7 @@ class RAGEnrichmentPipeline:
                 # A human lookup is expensive and inferential. It is limited to
                 # selected discovery/regulation trajectories, never the broad
                 # All PTMs or Minor annotation universe, and cached per site.
-                ortholog_cache_key = f"{gene}__{position}__{native_species}_human_ortholog_iptmnet"
+                ortholog_cache_key = f"{cache_namespace}__{gene}__{position}__{native_species}_human_ortholog_iptmnet"
                 cached_ortholog = self._gene_cache.get(ortholog_cache_key)
                 if cached_ortholog is not None:
                     cross_species_iptmnet = {**cached_ortholog, "cache_hit": True}
@@ -1290,9 +1285,9 @@ class RAGEnrichmentPipeline:
         # PHASE C: Conditional STRING indirect (depends on KEGG count)
         # ══════════════════════════════════════════════════════════════
         string_indirect_data = {}
-        if len(kegg_pathways) < 3:
+        if len(kegg_pathways) < 3 and _tax_id:
             self._phase_event(gene, position, "C", "running", "STRING indirect (KEGG < 3)")
-            cache_key = f"{gene}__string_indirect"
+            cache_key = f"{cache_namespace}__{gene}__string_indirect"
             cached = self._gene_cache.get(cache_key)
             _phase_c_err = False
             if cached is not None:
@@ -1300,7 +1295,7 @@ class RAGEnrichmentPipeline:
                 logger.debug(f"[CACHE HIT] STRING indirect for {gene}")
             else:
                 try:
-                    string_indirect_data = self.mcp.query_string_indirect(gene)
+                    string_indirect_data = self.mcp.query_string_indirect(gene, species=int(_tax_id))
                     inferred_pws = string_indirect_data.get("signaling_pathways", [])
                     inferred_names = [p.get("pathway_name", p) if isinstance(p, dict) else str(p) for p in inferred_pws[:5]]
                     logger.info(
@@ -1391,6 +1386,9 @@ class RAGEnrichmentPipeline:
             "diseases": regulation.get("diseases", []),
             "localization": uniprot_info.get("subcellular_location", []),
             "function_summary": uniprot_info.get("function_summary", ""),
+            "function_comments": uniprot_info.get("function_comments", []),
+            "function_schema_version": uniprot_info.get("function_schema_version"),
+            "annotation_species_scope": scope,
             "aliases": uniprot_info.get("gene_synonyms", []),
             "keywords": uniprot_info.get("keywords", []),           # v9.17: UniProt keywords for protein class
             "protein_families": uniprot_info.get("protein_families", []),  # v9.17: family annotations

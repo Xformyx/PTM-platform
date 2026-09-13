@@ -157,7 +157,8 @@ def test_citation_complete_observation_only_order_replaces_llm_sections_determin
         }],
     })["final_report"]
     assert "Quantitative coverage and evidence status" in final
-    assert "Evidence-bounded answers" in final
+    assert "Evidence-bounded answers" not in final
+    assert "## Research Question Answers" not in final
     assert "Observational conclusion" in final
     assert "molecular switch proves" not in final.lower()
     assert "kinase x directly drives" not in final.lower()
@@ -438,7 +439,8 @@ def test_shadow_final_assembly_fills_only_missing_sections_with_reader_fallback(
     })
     report = rendered["final_report"]
     assert "Validated observed result is retained." in report
-    for heading in ("## Abstract", "## Introduction", "## Results", "## Supplementary Research Question Answers", "## Discussion", "## Methods", "## Conclusion"):
+    assert "## Supplementary Research Question Answers" not in report
+    for heading in ("## Abstract", "## Introduction", "## Results", "## Discussion", "## Methods", "## Conclusion"):
         assert heading in report
     assert "log2(mean normalized PR intensity in treatment / mean normalized PR intensity in control)" in report
     assert "evaluable within-cluster pair-window comparisons as the denominator" in report
@@ -602,7 +604,8 @@ def test_figure_manifest_selects_12_to_20_complete_conventional_feature_cards_wi
     assert all(item["gene"] != "DENOVO" for item in selected)
     assert all(item["source_feature_id"] and item["reader_feature_id"].startswith("PF-") for item in selected)
     assert len({item["reader_feature_id"] for item in selected}) == 12
-    assert all("representative signed profile pattern" in item["selection_reason"] for item in selected)
+    assert all("observed shape diversity" in item["selection_reason"] for item in selected)
+    assert all(item["quantitative_bindings"] for item in selected)
     manifest = build_figure_manifest(
         {"vector_plot_raw_data": rows, "network_analysis": {"timepoints": ["0min", "15min", "60min"]}},
         citation_complete=False,
@@ -611,7 +614,8 @@ def test_figure_manifest_selects_12_to_20_complete_conventional_feature_cards_wi
     assert heatmap["placement"] == "main"
     assert heatmap["suppression_reason"] is None
     caption = compile_reader_caption(heatmap)
-    assert "Data unit and scope" in caption and "Visual encoding" in caption and "Interpretation boundary" in caption
+    assert "protein-adjusted" in caption.lower() and "measured" in caption.lower()
+    assert "Question:" not in caption and "Selection rule:" not in caption
 
 
 def test_figure_one_excludes_control_undetected_row_even_when_adjusted_value_is_extreme():
@@ -703,7 +707,8 @@ def test_shadow_renderer_inserts_manifest_selected_heatmap_as_main_figure_one(tm
         }],
     })
     assert "### Figure 1. Quantitative Phosphorylation-Feature Landscape" in final["final_report"]
-    assert "Selection rule:" in final["final_report"]
+    assert "Selection rule:" not in final["final_report"]
+    assert "protein-adjusted" in final["final_report"].lower()
     manifest = final["figure_manifest"]
     heatmap = next(item for item in manifest["figures"] if item["figure_key"] == "reader_quantitative_heatmap")
     assert heatmap["placement"] == "main"
@@ -768,20 +773,24 @@ def test_prepare_reader_manifest_builds_three_verified_main_figures_and_final_re
         [item for item in manifest["figures"] if item.get("placement") == "main"],
         key=lambda item: item["display_label"],
     )
-    assert [item["display_label"] for item in main] == ["Figure 1", "Figure 2", "Figure 3", "Figure 4"]
+    assert [item["display_label"] for item in main] == ["Figure 1", "Figure 2"]
     assert {item["figure_key"] for item in main} == {
-        "reader_quantitative_heatmap", "reader_temporal_profiles", "reader_interval_concordance", "reader_joint_trajectories",
+        "reader_quantitative_heatmap", "reader_joint_trajectories",
     }
     assert all(item["insertion_verified"] and Path(item["image_path"]).exists() for item in main)
-    profiles = next(item for item in main if item["figure_key"] == "reader_temporal_profiles")
-    concordance = next(item for item in main if item["figure_key"] == "reader_interval_concordance")
+    profiles = next(item for item in manifest["figures"] if item["figure_key"] == "reader_temporal_profiles")
+    assert profiles["placement"] == "technical_audit"
+    assert profiles["suppression_reason"] == "legacy_cluster_image_measurements_unbound"
+    concordance = next(item for item in manifest["figures"] if item["figure_key"] == "reader_interval_concordance")
+    assert concordance["placement"] == "supplementary"
+    assert concordance["quantitative_bindings"]
     assert profiles["representative_member_labels"]
     assert all(
         label.startswith("Temporal Profile Cluster ")
         for label in profiles["representative_member_labels"]
     )
-    assert "rates per evaluable pair-window" in concordance["caption_facts"]["visual_encoding"]
-    assert concordance["selected_cluster_ids"] == profiles["selected_cluster_ids"]
+    assert "observed integer numerator/denominator" in concordance["caption_facts"]["visual_encoding"]
+    assert concordance["selected_cluster_ids"] == sorted(profiles["selected_cluster_ids"])
 
     rendered = format_citations({
         **state,
@@ -794,7 +803,7 @@ def test_prepare_reader_manifest_builds_three_verified_main_figures_and_final_re
             "abstract": "Three descriptive figures summarize the recorded measurements.",
             "introduction": "The study evaluates measured temporal profiles.",
             "methods": "Recorded preprocessing and descriptive temporal analysis were used.",
-            "results": "Figure 1 summarizes selected features. Figure 2 shows selected profiles. Figure 3 summarizes Concordance Change.",
+            "results": "Figure 1 summarizes selected features. Figure 2 shows selected precursor trajectories. Supplementary Figure 1 summarizes concordance changes.",
             "discussion": "The observed profiles remain descriptive.",
             "conclusion": "The recorded response supports a bounded follow-up question.",
         },
@@ -806,9 +815,10 @@ def test_prepare_reader_manifest_builds_three_verified_main_figures_and_final_re
     report = rendered["final_report"]
     assert report.count("### Figure 1.") == 1
     assert report.count("### Figure 2.") == 1
-    assert report.count("### Figure 3.") == 1
-    assert report.count("### Figure 4.") == 1
-    assert rendered["report_output_correctness"]["status"] == "release_candidate", rendered["report_output_correctness"]
+    assert report.count("### Supplementary Figure 1.") == 1
+    assert report.count("### Figure 3.") == 0
+    assert rendered["report_output_correctness"]["status"] == "draft_review_required"
+    assert "section_content_quality_incomplete" in rendered["report_output_correctness"]["review_reason_codes"]
     assert rendered["report_output_correctness"]["phantom_figure_mentions"] == []
 
 
@@ -1291,7 +1301,7 @@ def test_final_anchor_sanitizer_and_release_gate_block_unbracketed_evid_residue(
     assert report_release_requires_warning(release) is True
 
 
-def test_release_gate_allows_clean_shadow_output_and_does_not_gate_legacy_path(tmp_path):
+def test_release_gate_keeps_short_report_draft_and_does_not_gate_legacy_path(tmp_path):
     clean = audit_report_output_correctness("## Abstract\n\nA measured observation was reported.")
     from report_generation.core.report_artifact_manifest import finalize_rendered_artifacts, _artifact
     html = tmp_path / "report.html"
@@ -1304,8 +1314,10 @@ def test_release_gate_allows_clean_shadow_output_and_does_not_gate_legacy_path(t
     )
     legacy = resolve_report_release(reader_authoring_shadow=False, output_correctness={"status": "blocked_for_review"})
 
-    assert shadow["status"] == "final_ready"
-    assert shadow["final_artifact_withheld"] is False
+    assert shadow["status"] == "draft_review_required"
+    assert shadow["publish_as_final"] is False
+    assert shadow["review_artifact_available"] is True
+    assert "section_content_quality_incomplete" in clean["review_reason_codes"]
     assert legacy["status"] == "legacy_not_gated"
 
 

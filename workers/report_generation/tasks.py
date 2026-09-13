@@ -888,8 +888,9 @@ def run_report_generation(self, order_id: int, config: dict):
                 prose_trace_path.write_text(
                     json.dumps(
                         {
-                            "contract_version": "reader_prose_trace.v1",
+                            "contract_version": "reader_prose_trace.v2",
                             "sections": final_state.get("reader_prose_snapshots") or {},
+                            "authoring_plan_attempts": final_state.get("reader_authoring_plan_attempts") or [],
                             "final_document_sources": [
                                 {
                                     "path": str(path),
@@ -975,7 +976,7 @@ def run_report_generation(self, order_id: int, config: dict):
                 None,
             )
             try:
-                from report_generation.core.report_artifact_manifest import build_report_artifact_manifest
+                from report_generation.core.report_artifact_manifest import build_report_artifact_manifest, persist_report_packets
 
                 artifact_manifest = build_report_artifact_manifest(
                     order_id=order_id,
@@ -995,6 +996,7 @@ def run_report_generation(self, order_id: int, config: dict):
                         "ptm_mode": config.get("ptm_mode"),
                     },
                     temporal_required=not bool(config.get("single_time_point", False)),
+                    derived_packet_paths=persist_report_packets(final_state, order_output),
                 )
                 final_state["report_artifact_manifest"] = artifact_manifest
                 final_state["report_artifact_manifest_path"] = artifact_manifest.get("manifest_path")

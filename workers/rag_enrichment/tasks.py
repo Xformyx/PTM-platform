@@ -2307,7 +2307,7 @@ def run_rag_enrichment(self, order_id: int, config: dict):
         report_llm_provider = config.get("llm_provider", "ollama")
         _order_species = (experimental_context.get("organism") or
                           experimental_context.get("species") or
-                          config.get("species") or "mouse")
+                          config.get("species") or "unknown")
 
         def _env_bool(name: str, default: bool = True) -> bool:
             return os.getenv(name, "true" if default else "false").lower() not in ("false", "0", "no")

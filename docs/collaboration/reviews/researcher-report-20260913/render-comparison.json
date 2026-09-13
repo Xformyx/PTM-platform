@@ -1,0 +1,281 @@
+{
+  "scope": "Synthetic same-input renderer comparison, not Order 74 regeneration or a Gemini evaluation",
+  "base_commit": "3ba713c80c7705b75135fd52481a125ea369c069",
+  "fixture_input_sha256": "75c3dfed76eb85f5c9c95e49c839f4b688eff756e89cd305ec019ee0e0912d7f",
+  "before": {
+    "section_words": {
+      "abstract": 108,
+      "introduction": 110,
+      "methods": 282,
+      "results": 266,
+      "discussion": 224,
+      "conclusion": 71
+    },
+    "reference_count": 0,
+    "qa_heading_count": 1,
+    "export_sha256": {
+      "researcher_fixture.md": "57a220d7ffde70ac90f82c10784ca7fe5fa29548cc3c732cdb5de6d91d7c40a6",
+      "researcher_fixture.docx": "3144939e2e2b71128c868b35e57cc5bf899da91c6c357004a26e32e3018f89c2",
+      "researcher_fixture.html": "86e2c1f61838ac37e9c9529e2f50825ce0cc4505959f8bf7b431d03130d2b641"
+    }
+  },
+  "after": {
+    "section_words": {
+      "abstract": 158,
+      "introduction": 110,
+      "methods": 282,
+      "results": 680,
+      "discussion": 296,
+      "conclusion": 87
+    },
+    "reference_count": 0,
+    "qa_heading_count": 0,
+    "export_sha256": {
+      "researcher_fixture.md": "1d29d9573e696b1cdf198d80bd53a4e29b15ca9f8c039f475e6b736b5c77d528",
+      "researcher_fixture.docx": "56373727226b190ded9a47e0f7b21557f60331d93e085b06e0a0a13f15e23a74",
+      "researcher_fixture.html": "ba1a31491ead3ecf2a1f6480179e96f6f2683a58a743fa9644c3fc7a0f5c2cfb"
+    },
+    "runtime": {
+      "git_commit_sha": "3ba713c80c7705b75135fd52481a125ea369c069",
+      "tracked_worktree_dirty": true,
+      "container_digest": null,
+      "worker_version": null,
+      "generated_at": "2026-09-13T12:06:04.817674+00:00",
+      "generation_timezone": "UTC",
+      "section_budget_version": "reader_section_budget.v2",
+      "claim_schema_version": "reader_quantitative_claim.v2"
+    }
+  },
+  "figures": [
+    {
+      "key": "reader_quantitative_heatmap",
+      "placement": "main",
+      "bindings": 96,
+      "readability": {
+        "contract_version": "figure_readability_audit.v1",
+        "status": "readable",
+        "labels_readable": true,
+        "image_width_px": 1249,
+        "image_height_px": 1025,
+        "label_count": 16,
+        "pixels_per_label": 64.06,
+        "longest_label_characters": 16,
+        "dimension_read_error": null
+      },
+      "feature_ids": [
+        "PF-0075571C",
+        "PF-1CEFE4BC",
+        "PF-21593D93",
+        "PF-3AB00307",
+        "PF-54133C15",
+        "PF-5C6BBF71",
+        "PF-6F1EB987",
+        "PF-7B751DCC",
+        "PF-7BDDE392",
+        "PF-85A19E4E",
+        "PF-88A78B9A",
+        "PF-9FDDEEDD",
+        "PF-A0601819",
+        "PF-B791D33F",
+        "PF-D3A5A69C",
+        "PF-F45181A4"
+      ]
+    },
+    {
+      "key": "reader_protein_context",
+      "placement": "main",
+      "bindings": 30,
+      "readability": {
+        "contract_version": "figure_readability_audit.v1",
+        "status": "readable",
+        "labels_readable": true,
+        "image_width_px": 1230,
+        "image_height_px": 1174,
+        "label_count": 10,
+        "pixels_per_label": 117.4,
+        "longest_label_characters": 70,
+        "dimension_read_error": null
+      },
+      "feature_ids": [
+        "PF-0075571C",
+        "PF-1CEFE4BC",
+        "PF-21593D93",
+        "PF-D3A5A69C"
+      ]
+    },
+    {
+      "key": "reader_joint_trajectories",
+      "placement": "main",
+      "bindings": 72,
+      "readability": {
+        "contract_version": "figure_text_bounds.v1",
+        "tick_overlap_axes": [],
+        "intended_width_inches": 6.5,
+        "page_visual_review": "required"
+      },
+      "feature_ids": [
+        "PF-0075571C",
+        "PF-1CEFE4BC",
+        "PF-21593D93",
+        "PF-D3A5A69C"
+      ]
+    }
+  ],
+  "question_coverage": {
+    "schema_version": "research_question_evidence_map.v1",
+    "questions": [
+      {
+        "question_id": "RQ-001",
+        "original_text": "How does protein adjustment change the observed GENE0 PTM contrasts?",
+        "normalized_question": "How does protein adjustment change the observed GENE0 PTM contrasts?",
+        "origin": "user",
+        "related_question_ids": [],
+        "merged_original_texts": [],
+        "entities": [
+          "GENE0"
+        ],
+        "requested_times": [],
+        "feature_ids": [
+          "PF-D3A5A69C"
+        ],
+        "finding_ids": [
+          "F1"
+        ],
+        "evidence_ids": [
+          "feature.observation.16"
+        ],
+        "literature_evidence_ids": [],
+        "answer_status": "answered",
+        "descriptive_answerable": true,
+        "results_paragraph_ids": [
+          "results:3c5812cc9749"
+        ],
+        "discussion_paragraph_ids": [
+          "discussion:23842335bc37"
+        ],
+        "unresolved_reason": null,
+        "coverage_status": "integrated"
+      },
+      {
+        "question_id": "RQ-002",
+        "original_text": "Does SRC, EGFR or PTK2 activation explain the response?",
+        "normalized_question": "Does SRC, EGFR or PTK2 activation explain the response?",
+        "origin": "user",
+        "related_question_ids": [],
+        "merged_original_texts": [],
+        "entities": [
+          "EGFR",
+          "PTK2",
+          "SRC"
+        ],
+        "requested_times": [],
+        "feature_ids": [],
+        "finding_ids": [],
+        "evidence_ids": [],
+        "literature_evidence_ids": [],
+        "answer_status": "unanswered",
+        "descriptive_answerable": false,
+        "results_paragraph_ids": [],
+        "discussion_paragraph_ids": [
+          "discussion:118f00864fe2"
+        ],
+        "unresolved_reason": "No matching measured feature or question-specific analysis was supplied.",
+        "coverage_status": "integrated"
+      }
+    ],
+    "status": "review_required"
+  },
+  "correctness": {
+    "status": "draft_review_required",
+    "reason_codes": [],
+    "review_reason_codes": [
+      "interpretation_generation_incomplete",
+      "literature_coverage_below_product_target",
+      "research_question_coverage_incomplete",
+      "section_content_quality_incomplete",
+      "study_metadata_review_required"
+    ],
+    "section_content_quality": {
+      "abstract": [
+        "below_section_target"
+      ],
+      "introduction": [
+        "below_section_target"
+      ],
+      "methods": [
+        "below_section_target"
+      ],
+      "results": [
+        "below_section_target"
+      ],
+      "discussion": [
+        "below_section_target",
+        "repeated_interpretation_template"
+      ],
+      "conclusion": [
+        "below_section_target",
+        "missing_conclusion_interpretation"
+      ]
+    },
+    "literature_coverage": {
+      "distinct_references": 0,
+      "cited_reference_count": 0,
+      "target_range": [
+        20,
+        30
+      ],
+      "padding_allowed": false,
+      "evidence_types": []
+    }
+  },
+  "actual_order74": {
+    "regenerated": false,
+    "gemini_called": false,
+    "verified_parent_artifacts": {
+      "enriched_json": {
+        "sha256": "d3c1cef41b747a43bed975c0fd8fdc9a48d5d74a256b7238d9940b1556c6b61e",
+        "verified": true
+      },
+      "temporal_sidecar": {
+        "sha256": "877834ab29e702363aef42c07b155661fe8fa97f9e925976039141120f7c8c5d",
+        "verified": true
+      },
+      "prose_trace": {
+        "sha256": "1ee23c8c37b3f09d53cc474212987e71fe7f22c4e656d804a844434932492585",
+        "verified": true
+      },
+      "output_correctness_audit": {
+        "sha256": "45f58ae3e60a0152f124556ef1cf2cdf6be9c4915553ae5c42c85d8bb10ce421",
+        "verified": true
+      },
+      "rendered_docx": {
+        "sha256": "0091051afbe1f49133057014e27c37a96e134339cffc432418292746a78efbeb",
+        "verified": true
+      }
+    },
+    "manifest_sha256": "0eeb7ed6634878f835e7dfc5263fccb23bc6348bf6cd641ebb558c0ed4523a01",
+    "required_vector_sha256": "dccfe77ff4d82152183770ca50109fc4dc0b10b14e0324022524ff6cf54d9be9",
+    "required_vector_size": 52331204,
+    "local_vector_found": false,
+    "missing_configuration": [
+      "resolved report/model configuration",
+      "sample manifest and metadata",
+      "verified host/FASTA annotation routing"
+    ]
+  },
+  "runtime": {
+    "python": "3.14.6",
+    "packages": {
+      "numpy": "2.5.3",
+      "pandas": "3.0.5",
+      "scipy": "1.18.1",
+      "matplotlib": "3.11.2",
+      "Pillow": "12.3.0",
+      "python-docx": "1.2.0",
+      "requests": "2.34.2",
+      "fastapi": "0.141.1",
+      "aiohttp": "3.14.3",
+      "beautifulsoup4": "4.15.0"
+    }
+  }
+}

@@ -2,9 +2,8 @@
 Species Auto-Detector (v2.1)
 Ported from ptm-vector-ai/src/fileUtils.ts.
 
-Detects species from TSV data using two strategies:
-  1. KEGG Pathway identifiers (mmu/hsa/rno) — high confidence
-  2. Gene name format analysis (Title Case = Mouse, UPPERCASE = Human) — medium confidence
+Resolves explicit FASTA taxonomy when unambiguous. Prior KEGG annotations and
+gene capitalization are hints only, not evidence resolving the host organism.
 """
 
 import logging
@@ -38,7 +37,18 @@ def detect_species_from_tsv(df: pd.DataFrame) -> Tuple[str, str, str]:
         confidence: 'high' | 'medium' | 'low'
         details: human-readable explanation
     """
-    # Strategy 1: KEGG Pathway identifiers
+    # FASTA-native provenance can identify supplied reference entries. Do not
+    # resolve a mixed protein group by majority vote or its first accession.
+    from ptm_shared.annotation_species import normalize_species, NAMES
+    for column in ("FASTA_Taxonomy_ID", "fasta_taxonomy_id", "FASTA_Organism"):
+        if column in df:
+            taxa = {normalize_species(part) for value in df[column].dropna()
+                    for part in re.split(r"[;,]", str(value)) if part.strip()}
+            if len(taxa) == 1 and None not in taxa:
+                return NAMES[next(iter(taxa))][0], "high", "Explicit FASTA-native taxonomy"
+            if taxa:
+                return "unknown", "low", "Mixed or unresolved FASTA-native taxonomy; retain per-feature scope"
+    # Existing annotations are not independent evidence of the study organism.
     kegg_col = None
     for col in df.columns:
         if "kegg" in col.lower():
@@ -57,46 +67,11 @@ def detect_species_from_tsv(df: pd.DataFrame) -> Tuple[str, str, str]:
         if any(counts.values()):
             best = max(counts, key=counts.get)  # type: ignore[arg-type]
             if counts[best] > 0:
-                logger.info(f"Species detected via KEGG: {best} (counts={counts})")
-                return best, "high", f"KEGG pathway analysis: {counts}"
+                logger.info(f"Prior KEGG species hint: {best}; host taxonomy remains unresolved (counts={counts})")
+                return "unknown", "low", f"Prior KEGG annotation hint only: {counts}; explicit host or FASTA taxonomy required"
 
-    # Strategy 2: Gene name format
-    gene_col = None
-    for col in df.columns:
-        if col.lower() in ("gene.name", "gene_name", "gene", "genename"):
-            gene_col = col
-            break
-
-    if gene_col and not df[gene_col].dropna().empty:
-        genes = df[gene_col].dropna().astype(str).tolist()
-        total = len(genes)
-        if total == 0:
-            return "unknown", "low", "No gene names found"
-
-        title_case = sum(1 for g in genes if re.match(r"^[A-Z][a-z]", g))
-        upper_case = sum(1 for g in genes if re.match(r"^[A-Z]{2,}$", g))
-
-        title_ratio = title_case / total
-        upper_ratio = upper_case / total
-
-        if title_ratio > 0.7:
-            logger.info(f"Species detected via gene format: mouse (title_case={title_ratio:.1%})")
-            return "mouse", "medium", f"Gene name format: {title_ratio:.0%} Title Case (Mouse pattern)"
-        elif upper_ratio > 0.7:
-            # Both human and rat use UPPERCASE gene names.
-            # Disambiguate using rat-specific identifier prefixes (RGD, LOC, ENSRNOG, RT1, NEWGENE).
-            _RAT_MARKERS = ("RT1", "LOC", "NEWGENE", "RGD", "ENSRNOG")
-            rat_marker_hits = sum(
-                1 for g in genes
-                if any(g.upper().startswith(m) for m in _RAT_MARKERS)
-            )
-            if rat_marker_hits / total > 0.02:  # >2% rat-specific identifiers
-                logger.info(f"Species detected via gene format: rat (upper_case={upper_ratio:.1%}, rat_markers={rat_marker_hits})")
-                return "rat", "medium", f"Gene name format: UPPERCASE with {rat_marker_hits} rat-specific markers"
-            logger.info(f"Species detected via gene format: human (upper_case={upper_ratio:.1%})")
-            return "human", "medium", f"Gene name format: {upper_ratio:.0%} UPPERCASE (Human pattern)"
-
-    return "unknown", "low", "Could not auto-detect species"
+    # Capitalization cannot resolve host taxonomy (rat and mouse overlap).
+    return "unknown", "low", "No explicit species evidence; gene capitalization is only a naming hint"
 
 
 def detect_species_from_file(tsv_path: str) -> Tuple[str, str, str]:

@@ -16,7 +16,7 @@ async def query_uniprot(
     timeout: float = 15.0,
 ) -> dict:
     clean_id = _clean_protein_id(protein_id)
-    cache_key = f"uniprot:{clean_id}"
+    cache_key = f"uniprot:function-v2:{clean_id}"
 
     if redis:
         cached = await redis.get(cache_key)
@@ -78,6 +78,7 @@ async def _fetch_uniprot_info(protein_id: str, timeout: float) -> dict:
         "protein_id": protein_id,
         "subcellular_location": [],
         "function_summary": "",
+        "function_comments": [],
         "go_terms_bp": [],
         "go_terms_mf": [],
         "go_terms_cc": [],
@@ -104,8 +105,10 @@ async def _fetch_uniprot_info(protein_id: str, timeout: float) -> dict:
                     result["subcellular_location"].append(loc)
         elif ctype == "FUNCTION":
             texts = comment.get("texts", [])
-            if texts:
-                result["function_summary"] = texts[0].get("value", "")[:500]
+            result["function_comments"].append({
+                "molecule": comment.get("molecule"), "scope": "isoform" if comment.get("molecule") else "general",
+                "texts": texts, "source_comment": comment,
+            })
         elif ctype == "ALTERNATIVE PRODUCTS":
             # Extract isoform information
             for iso_event in comment.get("isoforms", []):
@@ -161,6 +164,14 @@ async def _fetch_uniprot_info(protein_id: str, timeout: float) -> dict:
         if kw_id and kw_name:
             result["keywords"].append({"id": kw_id, "name": kw_name})
 
+    import json
+    result["function_comments"].sort(key=lambda c: (c["scope"] != "general", str(c["molecule"]), json.dumps(c, sort_keys=True)))
+    result["function_summary"] = " ".join(t.get("value", "") for c in result["function_comments"]
+                                          if c["scope"] == "general" for t in c["texts"])
+    result["function_summary_status"] = "general_function" if result["function_summary"] else "general_function_unavailable"
+    result["organism"] = data.get("organism")
+    result["entry_audit"] = data.get("entryAudit")
+    result["function_schema_version"] = "uniprot_function.v2"
     # No limit on GO terms — return all available for comprehensive analysis
     return result
 
@@ -170,6 +181,7 @@ def _empty_result(protein_id: str) -> dict:
         "protein_id": protein_id,
         "subcellular_location": [],
         "function_summary": "",
+        "function_comments": [],
         "go_terms_bp": [],
         "go_terms_mf": [],
         "go_terms_cc": [],

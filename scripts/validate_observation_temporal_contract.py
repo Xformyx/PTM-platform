@@ -43,7 +43,9 @@ def main():
     parser.add_argument("--output-dir", type=Path, default=ROOT / "docs/validation/task01-02")
     parser.add_argument("--include-task10", action="store_true", help="Include discovery/finding/render regression fixtures")
     parser.add_argument("--include-flow-review", action="store_true", help="Include API/UI, finalization, identity, design and finding-search regressions")
+    parser.add_argument("--include-researcher-review", action="store_true", help="Also verify species/annotation, questions, narrative recovery and researcher figures")
     args = parser.parse_args()
+    args.include_flow_review = args.include_flow_review or args.include_researcher_review
     args.include_task10 = args.include_task10 or args.include_flow_review
     args.output_dir.mkdir(parents=True, exist_ok=True)
     worker_files = {ROOT / "workers/tests" / name for name in REPORT_FILES}
@@ -62,6 +64,10 @@ def main():
     if args.include_flow_review:
         worker_files.update((ROOT / "workers/tests").glob("test_flow_*.py"))
         api_files.update((ROOT / "api-server/tests").glob("test_vector_plot*.py"))
+    if args.include_researcher_review:
+        worker_files.update(ROOT / "workers/tests" / name for name in (
+            "test_species_registry.py", "test_mixed_species_fasta.py", "test_cross_species_iptmnet.py", "test_rag_input_collapse.py"))
+        worker_files.add(ROOT / "ptm_shared/tests/test_species_site_mapping.py")
     # The worker audit suite asserts that the production API module was never
     # imported. Keep API tests in their own process; do not relax that assertion.
     groups = {"worker-shared": worker_files, "api": api_files}
@@ -86,6 +92,11 @@ def main():
         reviewed_files.update((ROOT / "ptm_shared").glob("*.py"))
         reviewed_files.update((ROOT / "workers/report_generation/core").glob("*.py"))
         reviewed_files.update(ROOT / path for path in ("workers/preprocessing/tasks.py", "frontend/src/pages/OrderDetail.tsx", "frontend/src/components/KinaseModuleAnalysis.tsx", "frontend/src/components/QuantitationEvidenceTable.tsx", "frontend/src/lib/quantitation.ts", "frontend/tests/quantitation.test.ts"))
+    if args.include_researcher_review:
+        reviewed_files.update(ROOT / path for path in (
+            "workers/common/generation_trace.py", "workers/common/section_budgets.py", "workers/common/species_detector.py",
+            "workers/rag_enrichment/tasks.py", "workers/rag_enrichment/core/ptm_merger.py", "workers/rag_enrichment/core/enrichment_pipeline.py",
+            "mcp-server/app/tools/uniprot.py", "scripts/render_researcher_fixture.py"))
     evidence["source_sha256"] = {str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest()
                                   for path in sorted(reviewed_files)}
     exit_code = 0
