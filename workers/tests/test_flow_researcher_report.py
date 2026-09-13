@@ -395,3 +395,50 @@ def test_gene_context_retrieval_survives_a_failed_site_search():
     assert record['status'] == 'context_available' and record['partial_retrieval_failure']
     comparison = result['references'][0]['feature_comparisons'][0]
     assert comparison['reference_scope'] == 'gene' and comparison['measured_relation'] is False
+
+
+def test_fenced_sentence_json_is_decoded_instead_of_section_fallback():
+    import json
+    from report_generation.core.quantitative_claims import decode_sentence_draft
+    packet = {'reader_cards': [], 'figure_cards': []}
+    sentence = {'text': 'The experiment compares recorded precursor contrasts.', 'scope': 'study_rationale',
+                'paragraph': 1, 'evidence_ids': [], 'value_tokens': [], 'figure_keys': []}
+    fenced = 'Here is the draft:\n```json\n' + json.dumps({'sentences': [sentence]}) + '\n```\n'
+    prose, audit = decode_sentence_draft(fenced, packet)
+    assert sentence['text'] in prose
+    assert all(r.get('retained') for r in audit if 'sentence' in r)
+
+
+def test_kinase_accuracy_question_is_not_rewritten_as_protein_adjustment():
+    from report_generation.core.research_questions import build_question_map
+    mapped = build_question_map(['Can we identify the kinase accurately without bias?'], [])
+    question = mapped['questions'][0]
+    assert 'kinase' in question['normalized_question'].lower()
+    assert 'protein adjustment' not in question['normalized_question'].lower()
+    assert question['answer_status'] == 'unanswered'
+
+
+def test_discovery_category_does_not_drop_selected_finding_from_literature_search():
+    from report_generation.core.finding_literature import cards_for_selected_findings
+    observation = {'category': 'measured_feature_observation', 'feature_identity': {'reader_feature_id': 'PF-1'},
+                   'trajectory': [{'ptm_unadjusted_log2fc': 0.2}]}
+    discovery = {'category': 'candidate_discovery', 'feature_identity': {'reader_feature_id': 'PF-1'}}
+    cards = cards_for_selected_findings([discovery, observation], {'PF-1'})
+    assert len(cards) == 1
+    assert cards[0]['category'] == 'measured_feature_observation'
+
+
+def test_literature_target_and_short_complete_sections_are_product_goals_not_empty_defects():
+    from report_generation.core.reader_authoring import audit_report_output_correctness
+    body = (
+        '## Abstract\n\nObserved precursor contrasts were retained for comparison.\n\n'
+        '## Introduction\n\nThe study asks which recorded PTM and protein contrasts change together.\n\n'
+        '## Methods\n\nIndependent unadjusted, protein, and adjusted contrasts were kept separate.\n\n'
+        '## Results\n\nPF-ABCDEF12 showed a recorded contrast of +0.20 on the unadjusted PTM contrast.\n\n'
+        '## Discussion\n\nFor PF-ABCDEF12 the observed contrast remained near the reference level.\n\n'
+        '## Conclusion\n\nMeasured contrasts describe the sampled window and do not establish the next validation.\n'
+    )
+    result = audit_report_output_correctness(body, {'figures': []})
+    assert 'literature_coverage_below_product_target' not in result['review_reason_codes']
+    assert 'section_content_quality_incomplete' not in result['review_reason_codes']
+    assert any('below_section_target' in issues for issues in result['section_content_quality'].values())

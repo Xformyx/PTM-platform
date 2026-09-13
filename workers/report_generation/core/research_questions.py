@@ -14,8 +14,6 @@ def build_question_map(questions, cards):
         if not original:
             continue
         normalized = re.sub(r"^(?:Q\d+[.:]?\s*)", "", original, flags=re.I)
-        if re.search(r"(?:unbiased|bias.free|without bias|accurat\w*|정확|bias 없이).*kinase|kinase.*(?:unbiased|bias.free|without bias|accurat\w*|정확|bias 없이)", normalized, re.I):
-            normalized = "How does protein adjustment change the interpretation of the observed PTM contrasts?"
         entities = sorted(set(re.findall(r"\b[A-Z][A-Z0-9]{1,11}\b", normalized)) - STOP)
         aliases = {"ERK": ["MAPK1", "MAPK3"], "AKT": ["AKT1", "AKT2", "AKT3"]}
         for name, genes in aliases.items():

@@ -458,11 +458,9 @@ def run_section_writing(state: dict) -> dict:
     authoring_plan = deterministic_authoring_plan(authoring_packet)
     finding_references = []
     if reader_authoring_shadow:
-        from ..finding_literature import retrieve_finding_literature
+        from ..finding_literature import cards_for_selected_findings, retrieve_finding_literature
         selected_ids = {f["reader_feature_id"] for f in authoring_plan.get("key_findings") or []}
-        selected_cards = [c for c in authoring_packet.get("reader_cards") or []
-                          if c.get("category") == "measured_feature_observation"
-                          and (c.get("feature_identity") or {}).get("reader_feature_id") in selected_ids]
+        selected_cards = cards_for_selected_findings(authoring_packet.get("reader_cards") or [], selected_ids)
         retrieval = retrieve_finding_literature(selected_cards, retriever, context, llm=llm if llm_available else None)
         finding_references = retrieval.pop("references")
         state["finding_literature_retrieval"] = retrieval

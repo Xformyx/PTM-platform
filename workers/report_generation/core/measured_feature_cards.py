@@ -495,11 +495,17 @@ def select_finding_cards(cards: Iterable[Mapping[str, Any]], *, maximum: int = 4
             excluded.append({"card_id": card.get("card_id"), "reason": "no_bound_numeric_observation"})
             continue
         if fid in unique:
-            # The adapter adds discovery context to the same measured feature.
-            if card.get("category") == "candidate_discovery":
-                card["evidence_ids"] = sorted(set(card.get("evidence_ids", []) + unique[fid].get("evidence_ids", [])))
-                card["question_ids"] = sorted(set(card.get("question_ids", []) + unique[fid].get("question_ids", [])))
-                unique[fid] = card
+            existing = unique[fid]
+            primary, extra = (
+                (card, existing)
+                if card.get("category") == "measured_feature_observation"
+                and existing.get("category") != "measured_feature_observation"
+                else (existing, card)
+            )
+            primary = dict(primary)
+            primary["evidence_ids"] = sorted(set(primary.get("evidence_ids", []) + extra.get("evidence_ids", [])))
+            primary["question_ids"] = sorted(set(primary.get("question_ids", []) + extra.get("question_ids", [])))
+            unique[fid] = primary
             continue
         unique[fid] = card
     selected = []

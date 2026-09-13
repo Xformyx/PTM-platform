@@ -12,6 +12,8 @@ import re
 from decimal import Decimal
 from typing import Any, Mapping
 
+from common.model_json import parse_model_json
+
 from .quantitative_fields import axis_number
 
 CLAIM_SCHEMA_VERSION = "reader_quantitative_claim.v2"
@@ -214,7 +216,7 @@ def decode_sentence_draft(content: str, packet: Mapping[str, Any]) -> tuple[str,
     """Validate JSON and resolve immutable references; fail closed per sentence."""
     catalog = value_token_catalog(packet)
     try:
-        parsed = json.loads(content)
+        parsed = parse_model_json(content)
         if not isinstance(parsed, dict):
             raise ValueError("draft must be an object")
         sentences = parsed["sentences"]
@@ -264,18 +266,35 @@ def decode_sentence_draft(content: str, packet: Mapping[str, Any]) -> tuple[str,
             continue
         item = record["sentence"]
         if item["scope"] in {"hypothesis", "testable_hypothesis", "biological_interpretation"}:
-            group = [r["sentence"] for r in audit if r["retained"] and r["sentence"]["paragraph"] == item["paragraph"]
-                     and (r["sentence"]["scope"] in {"observation", "literature_context"} or r is record)]
-            group_text = " ".join(s["text"] for s in group)
-            group_evidence = {eid for s in group for eid in s["evidence_ids"]}
+            siblings = [r["sentence"] for r in audit if r["retained"] and r["sentence"]["paragraph"] == item["paragraph"]
+                        and r["sentence"]["scope"] in {"observation", "literature_context"}]
+            group_text = " ".join(s["text"] for s in siblings + [item])
+            group_evidence = {eid for s in siblings for eid in s["evidence_ids"]}
             cited = {v.lower() for v in re.findall(r"\[REF:([^\]]+)\]", group_text)}
-            if (not observation_ids.intersection(group_evidence) or not cited or not cited.issubset(citation_ids)
+            if (not siblings or not observation_ids.intersection(group_evidence) or not cited
+                    or not cited.issubset(citation_ids)
                     or (item["scope"] != "biological_interpretation" and not re.search(r"predict|test|distinguish|discriminat", group_text, re.I))):
                 record["reason_codes"].append("hypothesis_observation_literature_prediction_unbound")
                 record["retained"] = False
         if record["retained"]:
             paragraphs.setdefault(item["paragraph"], []).append(record["resolved_text"] + " " + " ".join(f"[EVID:{eid}]" for eid in item["evidence_ids"]))
     return "\n\n".join(" ".join(paragraphs[k]) for k in sorted(paragraphs)), audit
+
+
+_ABBREVIATION_END = re.compile(r"\b(?:Fig|Figs|e\.g|i\.e|vs|Ref|Dr|Prof)\.$", re.I)
+
+
+def _split_draft_sentences(paragraph: str) -> list[str]:
+    """Split on sentence ends without treating Fig./e.g. as a boundary."""
+    merged: list[str] = []
+    for piece in re.split(r"(?<=[.!?])\s+", str(paragraph or "").strip()):
+        if not piece:
+            continue
+        if merged and _ABBREVIATION_END.search(merged[-1]):
+            merged[-1] = f"{merged[-1]} {piece}"
+        else:
+            merged.append(piece)
+    return merged
 
 
 def merge_valid_sentence_drafts(drafts, packet):
@@ -292,7 +311,7 @@ def merge_valid_sentence_drafts(drafts, packet):
             # A repair commonly extends a previously valid paragraph. Keep the
             # complete supported replacement without repeating its old prefix.
             # Do not assemble isolated hypotheses from unrelated paragraphs.
-            sentences = set(re.split(r"(?<=[.!?])\s+", paragraph))
+            sentences = set(_split_draft_sentences(paragraph))
             if any(sentences <= prior for _, prior in kept):
                 continue
             superseded = [i for i, (_, prior) in enumerate(kept) if prior <= sentences]

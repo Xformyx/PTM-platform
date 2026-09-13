@@ -7620,9 +7620,18 @@ async def kinase_activity_heatmap(
         f"{dynamic_transition_config_sha}|{KINASE_FEATURE_LEDGER_CONTRACT_VERSION}|"
         f"{KINASE_FOOTPRINT_DIAGNOSTICS_CONTRACT_VERSION}"
     )
+    from ptm_shared.vector_plot import vector_tsv_cache_fingerprint
+
+    settings = get_settings()
+    output_dir = Path(settings.OUTPUT_DIR) / order.order_code
+    file_suffix = "_phospho" if order.ptm_type == "phosphorylation" else "_ubi"
+    vector_fingerprint = vector_tsv_cache_fingerprint(output_dir, file_suffix)
     km_keys = sorted([m.get("kinase", "") for m in kinase_modules])
     tmm_config_key = json.dumps(effective_tmm_config, sort_keys=True, separators=(",", ":"))
-    hash_input = f"{order_id}|{len(kinase_modules)}|{'|'.join(km_keys[:30])}|{temporal.name}|{tmm_config_key}|{dynamic_analysis_cache_contract}"
+    hash_input = (
+        f"{order_id}|{len(kinase_modules)}|{'|'.join(km_keys[:30])}|{temporal.name}|"
+        f"{tmm_config_key}|{dynamic_analysis_cache_contract}|{vector_fingerprint}"
+    )
     cache_hash = hashlib.md5(hash_input.encode()).hexdigest()[:12]
 
     # Check cache — v11.3 Pure Renderer pattern:
@@ -7663,11 +7672,7 @@ async def kinase_activity_heatmap(
                 return {**cached, "_cached": True, "_stale": True}
 
     # Load vector data (time-series)
-    from app.config import get_settings
     import numpy as np
-    settings = get_settings()
-    output_dir = Path(settings.OUTPUT_DIR) / order.order_code
-    file_suffix = "_phospho" if order.ptm_type == "phosphorylation" else "_ubi"
 
     from ptm_shared.kinase_footprint_diagnostics import detection_aware_footprint_value
 

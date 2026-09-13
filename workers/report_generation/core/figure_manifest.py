@@ -14,6 +14,14 @@ from .quantitative_claims import quantitative_records
 
 
 FIGURE_MANIFEST_VERSION = "report_figure_manifest.v5"
+HEATMAP_MAIN_MIN_FEATURES = 12
+HEATMAP_MAIN_MAX_FEATURES = 16
+"""Main heatmap row range.
+
+docs/official_temporal_terminology_contract.md § Reader-facing selected-feature
+heatmap encoding, declared 2026-09-14. Selection maximum and eligibility are
+the same 12–16 window. Not a biological priority threshold.
+"""
 SIGNED_PATTERN_THRESHOLD = 0.25
 """Main-figure signed temporal pattern bin.
 
@@ -131,9 +139,9 @@ class FigureEligibilityPolicy:
             labels = bool(figure.get("labels_readable"))
             conventional_only = bool(figure.get("conventional_only"))
             binding_valid = bool(_mapping(figure.get("feature_binding_audit")).get("binding_valid"))
-            if 12 <= count <= 20 and labels and conventional_only and binding_valid:
+            if HEATMAP_MAIN_MIN_FEATURES <= count <= HEATMAP_MAIN_MAX_FEATURES and labels and conventional_only and binding_valid:
                 return "main", None
-            return "suppressed", "requires_12_to_20_readable_bound_conventional_feature_cards"
+            return "suppressed", "requires_12_to_16_readable_bound_conventional_feature_cards"
         if kind == "reader_temporal_profile":
             if not figure.get("quantitative_bindings"):
                 return "technical_audit", "legacy_cluster_image_measurements_unbound"
@@ -188,7 +196,7 @@ def _entry(
     }
 
 
-def select_reader_heatmap_features(vector_rows, conditions, *, minimum=12, maximum=16, selected_reader_feature_ids=()):
+def select_reader_heatmap_features(vector_rows, conditions, *, minimum=HEATMAP_MAIN_MIN_FEATURES, maximum=HEATMAP_MAIN_MAX_FEATURES, selected_reader_feature_ids=()):
     """Finding-first display with partial observations; clustering stays separate."""
     from .measured_feature_cards import build_feature_observation_cards
     cards = build_feature_observation_cards({"vector_plot_raw_data": vector_rows}, maximum=max(len(vector_rows), maximum), minimum_points=1)

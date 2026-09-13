@@ -12,7 +12,9 @@ class Retriever:
     def __init__(self, fail=False):
         self.fail = fail
     def query(self, query, *, n_results, strict):
-        assert "CANDIDATE0" in query and strict
+        assert strict
+        if "opposing results" in query or "protein function" in query:
+            assert "CANDIDATE0" in query
         if self.fail:
             raise RuntimeError("mock unavailable")
         return [{"title": "Synthetic source", "doi": "10.1000/fixture", "authors": "Fixture", "year": "2026",
@@ -68,3 +70,27 @@ def test_fabricated_quote_cannot_become_a_literature_comparison():
     record = next(iter(result["records"].values()))
     assert not record["comparisons"]
     assert record["excluded_comparisons"][0]["reason"] == "unbound_quote_context_or_scope"
+
+
+def test_agreement_cannot_paraphrase_outside_the_source_quote():
+    class Paraphrase(Model):
+        def generate(self, prompt, **kwargs):
+            return json.dumps({"comparisons": [{"source_index": 0,
+                "quote": "CANDIDATE0 S7 increased in mouse cells after insulin at 5min.",
+                "relationship": "known_agreement", "reference_scope": "site",
+                "external_finding": "insulin directly activates this site",
+                "species": "mouse", "cell_type": "mouse cells", "time": "5min",
+                "insulin_dose": "", "readout": "", "perturbation": "insulin"}]})
+    result = retrieve_finding_literature(build_feature_observation_cards(finding_state()), Retriever(), {}, llm=Paraphrase())
+    record = next(iter(result["records"].values()))
+    assert not record["comparisons"]
+    assert record["excluded_comparisons"][0]["reason"] == "unbound_quote_context_or_scope"
+
+
+def test_fenced_comparison_json_is_accepted():
+    class Fenced(Model):
+        def generate(self, prompt, **kwargs):
+            return "```json\n" + super().generate(prompt, **kwargs) + "\n```"
+    result = retrieve_finding_literature(build_feature_observation_cards(finding_state()), Retriever(), {}, llm=Fenced())
+    record = next(iter(result["records"].values()))
+    assert record["comparisons"]

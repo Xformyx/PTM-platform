@@ -4,14 +4,50 @@ import json
 import time
 from copy import deepcopy
 from datetime import datetime, timezone
+from typing import Iterable, Mapping
 
-VERSION = "finding_retrieval.v2"
+from common.model_json import parse_model_json
+
+VERSION = "finding_retrieval.v3"
+QUOTE_BOUND_RELATIONSHIPS = {
+    "known_agreement", "disagreement", "direct_site_evidence", "contradictory_evidence",
+}
+BACKGROUND_RELATIONSHIPS = {
+    "literature_background", "gene_function_context", "pathway_context",
+    "compatible_pattern", "context_difference",
+}
+ALLOWED_RELATIONSHIPS = QUOTE_BOUND_RELATIONSHIPS | BACKGROUND_RELATIONSHIPS
 CONTEXT_FIELDS = ("species", "cell_type", "insulin_dose", "time", "readout", "perturbation")
 PROPERTIES = {key: {"type": "string"} for key in ("quote", "external_finding", "reference_scope", "relationship", *CONTEXT_FIELDS)}
 SCHEMA = {"type": "object", "properties": {"comparisons": {"type": "array", "items": {
     "type": "object", "properties": {"source_index": {"type": "integer"}, **PROPERTIES},
     "required": ["source_index", *PROPERTIES], "additionalProperties": False}}},
     "required": ["comparisons"], "additionalProperties": False}
+
+
+def cards_for_selected_findings(cards: Iterable[Mapping], selected_ids) -> list[dict]:
+    """Keep one card per frozen finding ID so discovery context cannot drop search.
+
+    구현 대상: docs/official_temporal_terminology_contract.md § Finding literature
+    사전등록: 2026-09-14 표시 계약.
+    해석 한계: 검색 대상 선정이지 문헌 일치의 증명이 아니다.
+    주장 금지: 검색 성공을 kinase 귀속으로 해석하지 않는다.
+    """
+    wanted = {str(fid) for fid in (selected_ids or []) if fid}
+    chosen: dict[str, Mapping] = {}
+    for card in cards or []:
+        if not isinstance(card, Mapping):
+            continue
+        fid = str((card.get("feature_identity") or {}).get("reader_feature_id") or "")
+        if fid not in wanted:
+            continue
+        current = chosen.get(fid)
+        if current is None or (
+            card.get("category") == "measured_feature_observation"
+            and current.get("category") != "measured_feature_observation"
+        ):
+            chosen[fid] = card
+    return [dict(chosen[fid]) for fid in wanted if fid in chosen]
 
 
 def retrieve_finding_literature(cards, retriever, study, *, llm=None):
@@ -88,7 +124,9 @@ def retrieve_finding_literature(cards, retriever, study, *, llm=None):
             with capture_generation() as transport:
                 generation["transport"] = transport
                 generation["provider_raw_text"] = llm.generate(prompt, max_tokens=4096, response_format={"type": "json_schema", "json_schema": {"name": "finding_comparison", "strict": True, "schema": SCHEMA}})
-            draft = json.loads(generation["provider_raw_text"])
+            draft = parse_model_json(generation["provider_raw_text"])
+            if not isinstance(draft, dict):
+                raise ValueError("comparison_object_required")
             candidates = draft["comparisons"]
             if not isinstance(candidates, list):
                 raise ValueError("comparison_array_required")
@@ -109,11 +147,15 @@ def retrieve_finding_literature(cards, retriever, study, *, llm=None):
             scope = candidate.get("reference_scope")
             site = str(identity.get("candidate_residue_annotation") or "")
             gene = str(identity.get("gene") or "")
+            relationship = candidate.get("relationship")
+            finding_text = candidate.get("external_finding") or ""
+            quote_bound = relationship not in QUOTE_BOUND_RELATIONSHIPS or finding_text in quote
             valid = (quote and quote in document and (scope in {"study", "pathway"} or gene.lower() in quote.lower())
                      and scope in {"study", "pathway", "gene", "site"} and (scope != "site" or site and site.lower() in quote.lower())
-                     and candidate.get("relationship") in {"known_agreement", "disagreement", "literature_background", "gene_function_context", "pathway_context", "compatible_pattern", "context_difference", "direct_site_evidence", "contradictory_evidence"}
-                     and candidate.get("external_finding")
-                     and (candidate.get("relationship") != "direct_site_evidence" or scope == "site")
+                     and relationship in ALLOWED_RELATIONSHIPS
+                     and finding_text
+                     and quote_bound
+                     and (relationship != "direct_site_evidence" or scope == "site")
                      and (hit.get("doi") or hit.get("pmid"))
                      and all(not candidate.get(k) or candidate[k] in quote for k in CONTEXT_FIELDS))
             if not valid:

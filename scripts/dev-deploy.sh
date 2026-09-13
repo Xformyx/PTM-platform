@@ -202,9 +202,49 @@ export VERSION_WORKERS="$_v"
 git rev-parse --short HEAD > "$REPO_ROOT/GIT_HASH" 2>/dev/null || true
 git log -1 --format="%cI" HEAD 2>/dev/null | tr -d '\n' > "$REPO_ROOT/GIT_DATE" || true
 
+# Image layers change only for Dockerfiles and install specs. Bind-mounted
+# Python (api-server/app, workers/, ptm_shared) is picked up by restart.
+_image_input_changed() {
+  local component="$1"
+  local paths=()
+  case "$component" in
+    api-server) paths=(api-server/Dockerfile api-server/pyproject.toml api-server/entrypoint.sh) ;;
+    workers) paths=(workers/Dockerfile workers/pyproject.toml) ;;
+    mcp-server) paths=(mcp-server/Dockerfile mcp-server/pyproject.toml) ;;
+    frontend) return 0 ;;
+    benchmarking) paths=(benchmarking/Dockerfile workers/pyproject.toml) ;;
+    compose-file) return 0 ;;
+    *) return 1 ;;
+  esac
+  local marker="$LAST_DEV_BUILD"
+  local old_commit=""
+  [[ -f "$LAST_DEV_COMMIT" ]] && old_commit=$(tr -d ' \n\r' < "$LAST_DEV_COMMIT")
+  local p
+  for p in "${paths[@]}"; do
+    [[ -f "$REPO_ROOT/$p" ]] || continue
+    if [[ -n "$old_commit" ]] && git diff --name-only "$old_commit" HEAD -- "$p" 2>/dev/null | grep -q .; then
+      return 0
+    fi
+    if git diff --name-only HEAD -- "$p" 2>/dev/null | grep -q .; then
+      return 0
+    fi
+    if git diff --name-only --cached HEAD -- "$p" 2>/dev/null | grep -q .; then
+      return 0
+    fi
+    if [[ -f "$marker" && "$REPO_ROOT/$p" -nt "$marker" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 # Build
 BUILD_SERVICES=()
 for c in "${CHANGED[@]}"; do
+  if ! $FORCE_ALL && ! _image_input_changed "$c"; then
+    echo "Build skip $c (bind-mounted source; restart is enough)"
+    continue
+  fi
   case "$c" in
     api-server)    BUILD_SERVICES+=(api-server benchmark-tmm-runner) ;;
     mcp-server)    BUILD_SERVICES+=(mcp-server) ;;

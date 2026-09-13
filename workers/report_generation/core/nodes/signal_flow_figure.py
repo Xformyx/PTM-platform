@@ -1208,7 +1208,7 @@ def generate_context_aware_ptm_heatmap(
         0.5, 0.005,
         (
             f"Heatmap of {n_sites} conventional PTM feature aggregates selected by the FigureManifest. "
-            f"Red/blue = conventional Log₂FC. De novo / detection-LOD rows are excluded from this display and color scale. "
+            f"Red/blue = protein-adjusted relative PTM log2 contrast. De novo / detection-LOD rows are excluded from this display and color scale. "
             f"{'Dense display: cell values are omitted; all feature labels are retained.' if dense_display else ''}"
         )
         if selected_features

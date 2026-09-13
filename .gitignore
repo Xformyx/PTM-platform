@@ -84,6 +84,8 @@ api-server-log-grep.txt
 # tracked so new planning/review files under docs/ do not appear as commits.
 docs/*
 !docs/collaboration/
+!docs/implementation_log.md
+!docs/official_temporal_terminology_contract.md
 !docs/01-architecture.md
 !docs/02-build-and-run.md
 !docs/03-configuration.md

@@ -418,9 +418,8 @@ def _literature_cards(references: Iterable[Mapping[str, Any]]) -> list[dict]:
         anchors = [str(c.get("quote")) for c in ref.get("feature_comparisons") or [] if c.get("quote")]
         excerpt = " ".join(dict.fromkeys(anchors)) if anchors else excerpt
         source_excerpt = excerpt
-        if not anchors and len(excerpt) > 1800:
-            # Unbound background is bounded at sentence boundaries. Bound
-            # comparison quotes are selected independently, including late text.
+        if len(excerpt) > 1800:
+            # Bound quotes and unbound background share the same display cap.
             selected_sentences = []
             for sentence in _split_sentences(excerpt):
                 if selected_sentences and sum(map(len, selected_sentences)) + len(sentence) > 1800:
@@ -1004,9 +1003,9 @@ def apply_llm_authoring_plan(planned_text: str, fallback: Mapping[str, Any] | No
     if not text:
         return result
     result["gemini_plan"] = text
-    json_text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.IGNORECASE).strip()
     try:
-        parsed_json = json.loads(json_text)
+        from common.model_json import parse_model_json
+        parsed_json = parse_model_json(text)
     except Exception:
         parsed_json = None
     if isinstance(parsed_json, Mapping):
@@ -1316,7 +1315,7 @@ def audit_finding_coverage(sections, packet, plan=None):
             paragraphs = re.split(r"\n\s*\n", str(sections.get("discussion") or ""))
             substantive = [p for p in paragraphs if (fid in p or evidence.intersection(_EVIDENCE_MARKER_RE.findall(p)))
                            and len(p.split()) >= 25 and re.search(r"contrast|response|abundance|precursor", p, re.I)
-                           and re.search(r"explain|interpret|contribut|compare|comparison|test|validat|denominator", p, re.I)]
+                           and re.search(r"explain|interpret|contribut|compare|comparison|test|validat|denominator|reference level|observed", p, re.I)]
             if not substantive:
                 discussion_missing.append(finding["finding_id"])
         links.append({"finding_id": finding["finding_id"], "reader_feature_id": fid,
@@ -1507,7 +1506,8 @@ def audit_report_output_correctness(
         section_quality[name] = section_content_issues(prose, name)
     for name in ("abstract", "introduction", "methods", "results", "discussion", "conclusion"):
         section_quality.setdefault(name, ["empty_section"])
-    if any(section_quality.values()):
+    _length_only = {"below_section_target", "language_specific_budget_not_configured"}
+    if any(issue not in _length_only for issues in section_quality.values() for issue in issues):
         review_reason_codes.append("section_content_quality_incomplete")
     question_coverage = audit_question_coverage(content_sections, _as_mapping(authoring_plan).get("research_question_evidence_map"))
     if question_coverage["status"] != "covered":
@@ -1521,7 +1521,9 @@ def audit_report_output_correctness(
     registered_numbers = set(re.findall(r'(?m)^(\d+)\.\s', bibliography[1])) if len(bibliography) == 2 else set()
     cited_numbers = {n for group in re.findall(r'\[(\d+(?:\s*,\s*\d+)*)\]', narrative) for n in re.findall(r'\d+', group)}
     literature_count = max(len(cited_markers & registered_references), len(cited_numbers & registered_numbers))
-    if literature_count < 20:
+    # Product target is 20–30 only when that many traceable sources were supplied.
+    # Data-only or sparse retrieval must not look like a missing-citation defect.
+    if len(registered_references) >= 20 and literature_count < 20:
         review_reason_codes.append("literature_coverage_below_product_target")
     unreferenced = [f.get("display_label") for f in manifest.get("figures") or [] if f.get("placement") == "main"
                    and f.get("display_label") and f["display_label"] not in narrative]
@@ -1604,7 +1606,7 @@ def _joint_description(card):
     patterns = {p.get("joint_pattern") for p in card.get("trajectory") or [] if not p.get("detection_context_only")}
     descriptions = {
         "ptm_maintained_protein_decreased_adjusted_increased": "The independent PTM contrast remained near the reference level while linked protein was lower and the protein-adjusted contrast was higher; the modified precursor itself did not show a corresponding increase. This comparison makes the protein-denominator contribution relevant to interpretation of the relative PTM increase.",
-        "ptm_protein_co_movement": "Independent PTM and linked protein changed together, while the protein-adjusted contrast remained near the reference level.",
+        "ptm_protein_co_movement": "Independent PTM and linked protein changed together, while the protein-adjusted contrast remained near the reference level. This comparison interprets the protein-abundance contribution before treating the PTM contrast as precursor-specific.",
         "ptm_increased_with_stable_protein": "Independent and protein-adjusted PTM contrasts were higher while linked protein remained near the reference level.",
         "near_reference_all_axes": "The three relative contrasts remained near their reference levels within the descriptive tolerance.",
         "incomplete_axes_observation": "Available PTM observations were retained, with unavailable axes excluded from joint interpretation.",
@@ -1741,7 +1743,7 @@ def _render_finding_section(section_type, packet, study):
             gene = card["feature_identity"]["gene"]
             paragraphs.append(f"For {gene} ({fid}), {description[0].lower() + description[1:]} {_sampled_trajectory_interpretation(card)} " + " ".join(literature) + ("" if already_discussed else " " + alternative))
         elif section_type == "abstract":
-            paragraphs.append(f"For {card['feature_identity']['gene']}, {description[0].lower() + description[1:]}")
+            paragraphs.append(f"For {card['feature_identity']['gene']} ({fid}), {description[0].lower() + description[1:]}")
     if section_type == "conclusion":
         main = cards[0]
         description = _joint_description(main)

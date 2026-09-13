@@ -89,3 +89,14 @@ def test_conflict_normalization_does_not_mutate_input_and_cache_tracks_values():
     assert normalized[0]["ptm_unadjusted_log2fc"] is None
     assert quantitative_cache_key(rows) == quantitative_cache_key(rows[::-1])
     assert quantitative_cache_key(rows) != quantitative_cache_key(normalized)
+
+
+def test_tmm_vector_fingerprint_changes_when_tsv_bytes_change(tmp_path):
+    from ptm_shared.vector_plot import vector_tsv_cache_fingerprint
+    path = tmp_path / "ptm_vector_data_normalized_phospho.tsv"
+    path.write_text("gene\tcondition\tvalue\nA\t1min\t0.1\n", encoding="utf-8")
+    first = vector_tsv_cache_fingerprint(tmp_path, "_phospho")
+    path.write_text("gene\tcondition\tvalue\nA\t1min\t0.2\n", encoding="utf-8")
+    second = vector_tsv_cache_fingerprint(tmp_path, "_phospho")
+    assert first != second
+    assert first.startswith("precursor_identity.v2:")

@@ -13,6 +13,29 @@ def quantitative_cache_key(rows):
     return hashlib.sha256(json.dumps([FEATURE_IDENTITY_VERSION, records]).encode()).hexdigest()
 
 
+def vector_tsv_cache_fingerprint(output_dir, file_suffix: str) -> str:
+    """Hash the first available vector TSV so TMM cache follows preprocessing.
+
+    구현 대상: docs/official_temporal_terminology_contract.md § TMM heatmap cache
+    사전등록: 2026-09-14 표시/캐시 계약. 결과 열람 후 임계 변경 아님.
+    해석 한계: 파일 hash는 관측 규칙이 TSV에 기록된 뒤에만 무효화된다.
+    주장 금지: 재계산을 하류 개선이나 kinase 정확도 향상으로 해석하지 않는다.
+    """
+    from pathlib import Path
+
+    destination = Path(output_dir)
+    for name in (f"ptm_vector_data_normalized{file_suffix}.tsv", f"ptm_vector_data_with_motifs{file_suffix}.tsv"):
+        path = destination / name
+        if not path.is_file():
+            continue
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return f"{FEATURE_IDENTITY_VERSION}:{name}:{digest.hexdigest()}"
+    return f"{FEATURE_IDENTITY_VERSION}:missing"
+
+
 def normalize_plot_records(rows):
     """Deduplicate identical exports and withhold conflicting condition values."""
     grouped = {}
