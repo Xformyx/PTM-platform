@@ -424,6 +424,8 @@ def audit_language_quality(text: str) -> dict[str, Any]:
                 doubled_punctuation.append({"sentence_index": index, "text": sentence[:160]})
             if re.search(r"phosphorylation\s+protein-abundance-adjusted relative PTM ratio|(?:relative PTM ratio\s*){2}", sentence, re.I):
                 duplicate_quantitation_phrases.append({"sentence_index": index, "text": sentence[:160]})
+    from ptm_shared.feature_identity import scan_reader_technical_id_leaks
+    technical_identifier_leaks = scan_reader_technical_id_leaks(text)
     section_word_budgets = closing_section_maxima()
     section_word_budget_violations = []
     for section, maximum in section_word_budgets.items():
@@ -445,4 +447,6 @@ def audit_language_quality(text: str) -> dict[str, Any]:
         "lowercase_sentence_starts": lowercase_records,
         "doubled_punctuation": doubled_punctuation,
         "section_word_budget_violations": section_word_budget_violations,
+        "technical_identifier_leaks": technical_identifier_leaks,
+        "technical_identifier_leak_count": len(technical_identifier_leaks),
     }

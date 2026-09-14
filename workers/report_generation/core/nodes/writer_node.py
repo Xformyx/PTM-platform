@@ -59,9 +59,11 @@ from report_generation.core.reader_authoring import (
     is_traceable_reference,
     references_are_citation_complete,
     render_reader_section_fallback,
+    required_section_roles,
     strip_authoring_anchors,
     validate_and_repair_sections,
 )
+from report_generation.core.section_model_packet import compose_compacted_section_prompt
 from report_generation.core.figure_manifest import prepare_reader_figure_manifest
 
 logger = logging.getLogger(__name__)
@@ -923,24 +925,29 @@ def run_section_writing(state: dict) -> dict:
                 references=chroma_refs + finding_references,
             )
             section_authoring_packet = focus_authoring_packet(section_authoring_packet, authoring_plan)
-            prompt = format_authoring_packet_for_llm(
+            extra_suffix = ""
+            if section_type in {"discussion", "conclusion", "abstract"}:
+                dependencies = {k: v for k, v in snap_prev.items() if k in {"results", "discussion"}}
+                extra_suffix += "\nValidated prior sections (continue this argument; do not introduce new observations):\n" + json.dumps(dependencies, ensure_ascii=False)
+            if active_questions and section_type == "research_question_answers":
+                extra_suffix += "\n\nUser research questions to answer strictly from the supplied cards:\n" + "\n".join(
+                    f"- {question}" for question in active_questions
+                )
+            extra_suffix += (
+                "\n\nWrite this section as cohesive manuscript prose. Keep current-study observations distinct from "
+                "cited external context. Do not add a technical audit, implementation status, raw feature list, "
+                "or figure not supplied by the packet. Follow the required paragraph roles and do not emit PF- or FEATURE- identifiers."
+            )
+            prompt, compaction_trace = compose_compacted_section_prompt(
                 section_authoring_packet,
                 section_type,
                 authoring_plan,
-                include_quantitative_records=False,
+                extra_suffix=extra_suffix,
+                max_chars=MAX_PROMPT_CHARS,
             )
-            if section_type in {"discussion", "conclusion", "abstract"}:
-                dependencies = {k: v for k, v in snap_prev.items() if k in {"results", "discussion"}}
-                prompt += "\nValidated prior sections (continue this argument; do not introduce new observations):\n" + json.dumps(dependencies, ensure_ascii=False)
-            if active_questions and section_type == "research_question_answers":
-                prompt += "\n\nUser research questions to answer strictly from the supplied cards:\n" + "\n".join(
-                    f"- {question}" for question in active_questions
-                )
-            prompt += (
-                "\n\nWrite this section as cohesive manuscript prose. Keep current-study observations distinct from "
-                "cited external context. Do not add a technical audit, implementation status, raw feature list, "
-                "or figure not supplied by the packet."
-            )
+            section_compaction_trace = compaction_trace
+        else:
+            section_compaction_trace = {}
 
         # v10.8: Thread-safe accumulation of ChromaDB refs
         if chroma_refs:
@@ -1134,7 +1141,7 @@ def run_section_writing(state: dict) -> dict:
 
         max_tok = section_max_tokens.get(section_type, 8192)
 
-        if section_authoring_packet is not None:
+        if section_authoring_packet is not None and not section_compaction_trace:
             prompt += structured_authoring_instructions(section_authoring_packet)
 
         # v9.31: Final safety truncation (should rarely trigger with budget system)
@@ -1159,6 +1166,8 @@ def run_section_writing(state: dict) -> dict:
         structured_raw_content = None
         generation_attempts = []
         fallback_text = None
+        missing_roles = []
+        generation_degraded = bool(section_compaction_trace.get("generation_degraded"))
         generation_kwargs = {}
         if section_authoring_packet is not None:
             def validate_draft(draft):
@@ -1169,22 +1178,17 @@ def run_section_writing(state: dict) -> dict:
                             for r in records if not r["retained"]]
                 return rejected + section_content_issues(prose, section_type) + [f"missing_finding:{fid}" for fid in missing]
             generation_kwargs = {"response_format": SENTENCE_RESPONSE_FORMAT, "content_validator": validate_draft}
-        if section_authoring_packet is not None and prompt_len > MAX_PROMPT_CHARS:
-            # Never cut a JSON schema or its reference catalog mid-record.
-            content = None
-            structured_audit = [{"reason_code": "authoring_packet_exceeds_prompt_budget", "retained": False}]
-        else:
-            content = llm.generate_with_retry(
-                prompt,
-                system_prompt=ptm_system_prompt,
-                temperature=llm_temperature,
-                max_tokens=max_tok,
-                min_words=min_words,
-                section_name=section_type.capitalize(),
-                max_retries=2,
-                trace_sink=generation_attempts,
-                **generation_kwargs,
-            )
+        content = llm.generate_with_retry(
+            prompt,
+            system_prompt=ptm_system_prompt,
+            temperature=llm_temperature,
+            max_tokens=max_tok,
+            min_words=min_words,
+            section_name=section_type.capitalize(),
+            max_retries=2,
+            trace_sink=generation_attempts,
+            **generation_kwargs,
+        )
         provider_result = content
         if section_authoring_packet is not None and content and not content.startswith("[LLM Error"):
             structured_raw_content = content
@@ -1197,6 +1201,51 @@ def run_section_writing(state: dict) -> dict:
                 [a.get("provider_raw_text") for a in generation_attempts], section_authoring_packet)
             if recovered:
                 content = recovered
+
+        if (
+            reader_authoring_shadow
+            and section_authoring_packet is not None
+            and content
+            and not str(content).startswith("[LLM Error")
+        ):
+            roles = required_section_roles(section_type)
+            paragraphs = [part.strip() for part in re.split(r"\n\s*\n", content) if part.strip()]
+            if roles and len(paragraphs) < len(roles):
+                missing_roles = list(roles[len(paragraphs):])
+                role_prompt = (
+                    prompt
+                    + "\n\nRegenerate only these missing paragraph roles as JSON sentences. "
+                    + "Do not rewrite retained paragraphs. Roles: "
+                    + ", ".join(missing_roles)
+                )
+                role_draft = llm.generate_with_retry(
+                    role_prompt,
+                    system_prompt=ptm_system_prompt,
+                    temperature=llm_temperature,
+                    max_tokens=max_tok,
+                    min_words=40,
+                    section_name=f"{section_type.capitalize()} missing roles",
+                    max_retries=1,
+                    trace_sink=generation_attempts,
+                    **generation_kwargs,
+                )
+                if role_draft and not str(role_draft).startswith("[LLM Error"):
+                    role_prose, role_audit = decode_sentence_draft(role_draft, section_authoring_packet)
+                    structured_audit.extend(role_audit)
+                    if role_prose:
+                        content = content.rstrip() + "\n\n" + role_prose
+                    else:
+                        generation_degraded = True
+                else:
+                    generation_degraded = True
+                    fallback_roles = render_reader_section_fallback(
+                        section_type,
+                        section_authoring_packet,
+                        questions=active_questions,
+                    )
+                    extra = [part.strip() for part in re.split(r"\n\s*\n", fallback_roles) if part.strip()]
+                    if extra:
+                        content = content.rstrip() + "\n\n" + "\n\n".join(extra[len(paragraphs):] or extra[-len(missing_roles):])
 
         if content is None or content.startswith("[LLM Error"):
             error_detail = content if content else "generate_with_retry returned None"
@@ -1221,6 +1270,7 @@ def run_section_writing(state: dict) -> dict:
                     questions=active_questions,
                 )
             fallback_text = content
+            generation_degraded = True
 
         raw_generated_content = content
         validated_reader_content = content
@@ -1371,8 +1421,18 @@ def run_section_writing(state: dict) -> dict:
         if reader_authoring_shadow:
             with _reader_authoring_lock:
                 reader_prose_snapshots[section_type] = {
-                    "contract_version": "reader_prose_section_trace.v2",
+                    "contract_version": "reader_prose_section_trace.v3",
                     "prompt_characters": prompt_len,
+                    "prompt_compaction_stage": section_compaction_trace.get("prompt_compaction_stage"),
+                    "prompt_character_count": section_compaction_trace.get("prompt_character_count", prompt_len),
+                    "retained_evidence_ids": section_compaction_trace.get("retained_evidence_ids") or [],
+                    "omitted_evidence_ids_and_reason": section_compaction_trace.get("omitted_evidence_ids_and_reason") or [],
+                    "provider_attempt_count": len(generation_attempts),
+                    "provider_response_parse_status": "decoded" if content and not fallback_text else "fallback",
+                    "retained_sentence_count": sum(1 for item in structured_audit if item.get("retained")),
+                    "fallback_reason": "provider_or_recovery_failed" if fallback_text else section_compaction_trace.get("fallback_reason"),
+                    "generation_degraded": bool(generation_degraded or fallback_text or missing_roles),
+                    "missing_roles": missing_roles,
                     "raw_generated_text": provider_result,
                     "provider_attempts": generation_attempts,
                     "fallback_text": fallback_text,
@@ -1384,6 +1444,7 @@ def run_section_writing(state: dict) -> dict:
                     "validated_reader_text": validated_reader_content,
                     "citation_normalized_writer_text": content,
                     "fallback_used": section_type in reader_authoring_fallback_sections,
+                    "display_policy": section_compaction_trace.get("section_model_packet", {}).get("display_policy"),
                 }
         return section_type, content
 

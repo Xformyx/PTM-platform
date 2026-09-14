@@ -41,6 +41,9 @@ def resolve_report_release(
     reasons = set(audit.get("reason_codes") or []) | set(audit.get("review_reason_codes") or [])
     reasons.update(manifest.get("reason_codes") or [])
     blocked = audit.get("status") == "blocked_for_review"
+    generation_degraded = bool(audit.get("generation_degraded") or manifest.get("generation_degraded"))
+    if generation_degraded:
+        reasons.add("generation_degraded")
     if reader_authoring_shadow:
         if audit.get("status") not in {"release_candidate", "draft_review_required", "blocked_for_review"}:
             reasons.add("output_correctness_audit_unavailable_or_unrecognized")
@@ -67,7 +70,8 @@ def resolve_report_release(
     return {
         "contract_version": REPORT_RELEASE_CONTRACT_VERSION, "phase": phase, "status": status,
         "final_artifact_withheld": blocked, "review_artifact_available": not blocked,
-        "publish_as_final": status == "final_ready", "reason_codes": sorted(reasons),
+        "publish_as_final": status == "final_ready", "generation_degraded": generation_degraded,
+        "reason_codes": sorted(reasons),
         "message": {
             "blocked_final": "Report export withheld; structural or artifact integrity repair is required.",
             "draft_review_required": "Report requires review; final publication checks are incomplete.",

@@ -75,8 +75,9 @@ def test_feature_cards_do_not_call_candidate_residue_features_localized_sites_wi
     cards = build_feature_observation_cards(_state(), maximum=3)
     labels = [card["feature_label"] for card in cards]
 
-    assert any("candidate residue annotation" in label for label in labels)
+    assert any("annotated at" in label for label in labels)
     assert all("localized phosphorylation feature" not in label for label in labels)
+    assert all("PF-" not in card["reader_summary"] for card in cards)
 
 
 def test_quantitation_comparison_uses_independent_axis_and_excludes_de_novo_and_reconstructed_values():

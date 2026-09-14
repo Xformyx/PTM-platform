@@ -1708,6 +1708,10 @@ def format_citations(state: ReportState) -> dict:
         ),
         authoring_plan=state.get("reader_authoring_plan") if reader_authoring_shadow else None,
         generation_failures=(list(state.get("reader_authoring_fallback_sections") or []) + list(state.get("reader_authoring_final_fallback_sections") or [])) if reader_authoring_shadow else None,
+        generation_degraded=any(
+            bool((snapshot or {}).get("generation_degraded"))
+            for snapshot in (state.get("reader_prose_snapshots") or {}).values()
+        ) if reader_authoring_shadow else False,
     )
     state["report_output_correctness"] = report_output_correctness
     correctness_path = None

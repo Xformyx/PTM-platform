@@ -434,8 +434,8 @@ def test_literature_target_and_short_complete_sections_are_product_goals_not_emp
         '## Abstract\n\nObserved precursor contrasts were retained for comparison.\n\n'
         '## Introduction\n\nThe study asks which recorded PTM and protein contrasts change together.\n\n'
         '## Methods\n\nIndependent unadjusted, protein, and adjusted contrasts were kept separate.\n\n'
-        '## Results\n\nPF-ABCDEF12 showed a recorded contrast of +0.20 on the unadjusted PTM contrast.\n\n'
-        '## Discussion\n\nFor PF-ABCDEF12 the observed contrast remained near the reference level.\n\n'
+        '## Results\n\nGENEA modified-precursor feature annotated at S10 showed a recorded contrast of +0.20 on the unadjusted PTM contrast.\n\n'
+        '## Discussion\n\nFor GENEA modified-precursor feature annotated at S10 the observed contrast remained near the reference level.\n\n'
         '## Conclusion\n\nMeasured contrasts describe the sampled window and do not establish the next validation.\n'
     )
     result = audit_report_output_correctness(body, {'figures': []})

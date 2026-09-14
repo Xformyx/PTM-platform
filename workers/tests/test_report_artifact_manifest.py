@@ -77,3 +77,11 @@ def test_same_run_manifest_blocks_legacy_temporal_sidecar_without_charge_crosswa
     assert manifest["status"] == "incompatible"
     assert "enriched_site_form_provenance_not_validated" in manifest["reason_codes"]
     assert "temporal_site_form_and_vector_provenance_not_validated" in manifest["reason_codes"]
+
+
+def test_manifest_runtime_records_declared_display_policy():
+    from report_generation.core.report_artifact_manifest import report_runtime_provenance
+    provenance = report_runtime_provenance()
+    assert provenance["display_policy"]["policy_version"] == "reader_display_policy.v1"
+    assert provenance["display_policy"]["policy_sha256"]
+    assert provenance["display_policy"]["per_paragraph_named_feature_limit"] == 3

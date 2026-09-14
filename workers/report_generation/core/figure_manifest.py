@@ -7,11 +7,27 @@ from typing import Any, Mapping
 
 from ptm_shared.de_novo_representation import conventional_quantitation_eligibility, is_de_novo_representation
 from ptm_shared.evidence_record_contract import typed_record
+from ptm_shared.feature_identity import project_reader_display_identity
 from report_generation.core.measured_feature_cards import (
     build_quantitation_comparison_cards,
     reader_feature_id,
 )
 from .quantitative_claims import quantitative_records
+
+
+def _reader_figure_label(identity: Mapping[str, Any], *, condition: str | None = None) -> str:
+    """Public figure label. Hidden PF/source suffixes stay off the rendered image."""
+    record = dict(identity or {})
+    label = record.get("reader_display_identity") or project_reader_display_identity(
+        record,
+        disambiguator=record.get("reader_disambiguator"),
+    )
+    disambiguator = str(record.get("reader_disambiguator") or "").strip()
+    if disambiguator and disambiguator not in str(label):
+        label = f"{label} {disambiguator}"
+    if condition:
+        label = f"{label} · {condition}"
+    return label
 
 
 FIGURE_MANIFEST_VERSION = "report_figure_manifest.v5"
@@ -211,7 +227,7 @@ def select_reader_heatmap_features(vector_rows, conditions, *, minimum=HEATMAP_M
         candidates.append({**identity, "source_feature_id": identity.get("source_feature_id") or identity.get("precursor_id"),
             "position": identity.get("candidate_residue_annotation") or identity.get("position"),
             "reader_feature_id": identity["reader_feature_id"],
-            "display_label": identity["gene"] + " " + str(identity.get("candidate_residue_annotation") or identity.get("position") or "") + " · " + identity["reader_feature_id"][-4:],
+            "display_label": _reader_figure_label(identity),
             "conditions": list(conditions), "values": values, "quantitative_bindings": records,
             "render_axis": "protein_adjusted_relative_ptm_contrast", "render_eligible": True,
             "partial_observation_display": True, "clustering_eligible": card.get("clustering_eligible"),
@@ -558,14 +574,8 @@ def _generate_protein_adjustment_comparison(
         protein = []
         for card in cards:
             identity = _mapping(card.get("feature_identity"))
-            feature_id = str(identity.get("reader_feature_id") or "")
-            gene = str(identity.get("gene") or "feature")
-            residue = str(identity.get("candidate_residue_annotation") or "").strip()
             condition = str(card.get("condition") or "recorded condition")
-            labels.append(
-                f"{gene}"
-                f"{' ' + residue if residue else ''} · {feature_id[-4:]} · {condition}"
-            )
+            labels.append(_reader_figure_label(identity, condition=condition))
             unadjusted.append(float(card["ptm_unadjusted_log2fc"]))
             adjusted.append(float(card["ptm_protein_adjusted_log2fc"]))
             protein.append(float(card["protein_log2fc"]))
@@ -713,7 +723,7 @@ def _generate_joint_trajectory_entry(state, output_dir):
                 selected_axes = list(axes[i]) if separate else [axes.flat[i]]
                 for j, ax in enumerate(selected_axes):
                     plot_axis(ax, fid, [styles[j]] if separate else styles)
-                    ax.set_title(f"{identity['gene']} {identity.get('candidate_residue_annotation') or ''} · {fid[-4:]}" + (f" / {styles[j][1]}" if separate else ""), fontsize=9, loc="left")
+                    ax.set_title(_reader_figure_label(identity) + (f" / {styles[j][1]}" if separate else ""), fontsize=9, loc="left")
                     ax.set_ylabel("Relative log2 contrast", fontsize=8)
                     if early_zoom:
                         values_for_feature = [r["value"] for r in bindings if r["feature_id"] == fid and r["value"] is not None]
@@ -743,7 +753,7 @@ def _generate_joint_trajectory_entry(state, output_dir):
                          readability_audit={"contract_version": "figure_text_bounds.v1", "tick_overlap_axes": overlaps,
                                             "intended_width_inches": 6.5, "page_visual_review": "required"},
                          layout="separate_axes" if separate else "overlaid_axes_log_time" if log_time else "overlaid_axes_with_early_inset" if early_zoom else "overlaid_axes",
-                         displayed_feature_labels={c["feature_identity"]["reader_feature_id"]: c["feature_identity"]["gene"] + " · " + c["feature_identity"]["reader_feature_id"][-4:] for c in visible})
+                         displayed_feature_labels={c["feature_identity"]["reader_feature_id"]: _reader_figure_label(c["feature_identity"]) for c in visible})
             entry["caption_facts"]["visual_encoding"] = "U: independent PTM; P: linked protein; A: protein-adjusted PTM, all in relative log2 contrast. Actual elapsed minutes; dashed segments join observations and gaps remain unavailable." + (" Insets enlarge early observations." if early_zoom else " Time is shown on an explicitly logarithmic scale." if log_time else "")
         except Exception as exc:
             entry.update(render_status="renderer_failed", render_error=type(exc).__name__)

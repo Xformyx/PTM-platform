@@ -39,8 +39,10 @@ def test_explicitly_distinct_precursors_and_exact_values_are_allowed():
     text = (f"Two distinct AARSD1 S88 precursors were measured: {first_id(p)} at 1min had an unadjusted PTM contrast of +0.141; "
             f"{other} at 5min had an unadjusted PTM contrast of -0.296.")
     result, audit = validate_and_repair_sections({"results": text}, p)
-    assert result["results"] == text
     assert audit["removed_sentence_count"] == 0
+    assert "AARSD1" in result["results"]
+    assert "+0.141" in result["results"] and "-0.296" in result["results"]
+    assert "PF-" not in result["results"]
 
 
 def test_prompt_contains_axis_statistics_identity_and_figure_membership():

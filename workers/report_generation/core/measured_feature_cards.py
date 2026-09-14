@@ -99,7 +99,15 @@ def _source_rows(state: Mapping[str, Any]) -> list[dict]:
     return enriched
 
 
-from ptm_shared.feature_identity import feature_key as _feature_key, canonical_feature_identity, reader_id, FIELDS
+from ptm_shared.feature_identity import (
+    FIELDS,
+    assign_local_disambiguators,
+    canonical_feature_identity,
+    feature_key as _feature_key,
+    project_reader_display_identity,
+    reader_id,
+    technical_crosswalk_reference,
+)
 
 
 def reader_feature_id(key):
@@ -166,14 +174,30 @@ def _condition_label(row: Mapping[str, Any]) -> str:
     return _text(row, "Condition", "condition", "Comparison") or "recorded condition"
 
 
-def _display_label(key: tuple[str, str, str, str], measurement: Mapping[str, Any]) -> str:
-    gene, position = key[:2]
-    reader_unit = str(measurement.get("reader_measurement_unit") or "")
-    if reader_unit == "localized_ptm_site_feature" and position:
-        return f"{gene} {position} localized phosphorylation feature"
-    if position:
-        return f"{gene} modified-precursor feature with candidate residue annotation {position}"
-    return f"{gene} modified-precursor feature"
+def _display_label(
+    key: tuple[str, str, str, str],
+    measurement: Mapping[str, Any],
+    *,
+    disambiguator: str | None = None,
+) -> str:
+    return project_reader_display_identity(
+        {"gene": key[0], "position": key[1]},
+        reader_measurement_unit=measurement.get("reader_measurement_unit"),
+        disambiguator=disambiguator,
+    )
+
+
+def _attach_display_identity(identity: Mapping[str, Any], measurement: Mapping[str, Any], *, disambiguator: str | None = None) -> dict:
+    record = dict(identity or {})
+    record["reader_disambiguator"] = disambiguator
+    record["reader_display_identity"] = project_reader_display_identity(
+        record,
+        reader_measurement_unit=(measurement or {}).get("reader_measurement_unit"),
+        disambiguator=disambiguator,
+        gene_ambiguous=not record.get("main_named_finding_eligible", True),
+    )
+    record["technical_crosswalk_reference"] = technical_crosswalk_reference(record)
+    return record
 
 
 def _format_signed(value: float | None) -> str:
@@ -397,9 +421,28 @@ def build_feature_observation_cards(
             if len(selected) >= maximum:
                 break
 
+    disambiguated = assign_local_disambiguators([
+        {
+            **candidate["mapping_identity"],
+            "gene": candidate["key"][0],
+            "position": candidate["key"][1],
+            "candidate_residue_annotation": candidate["key"][1] or None,
+            "precursor_id": candidate["key"][2],
+            "modified_sequence": candidate["key"][3],
+            "reader_feature_id": reader_feature_id(candidate["key"]),
+        }
+        for candidate in selected
+    ])
+    for candidate, identity in zip(selected, disambiguated):
+        candidate["reader_disambiguator"] = identity.get("reader_disambiguator")
+
     cards: list[dict] = []
     for index, candidate in enumerate(selected, 1):
-        label = _display_label(candidate["key"], candidate["measurement"])
+        label = _display_label(
+            candidate["key"],
+            candidate["measurement"],
+            disambiguator=candidate.get("reader_disambiguator"),
+        )
         feature_id = reader_feature_id(candidate["key"])
         trajectory_fact = build_trajectory_shape_fact(candidate["points"])
         fragments = []
@@ -438,8 +481,8 @@ def build_feature_observation_cards(
             "card_id": evidence_id,
             "category": "measured_feature_observation",
             "reader_summary": (
-                f"{label} ({feature_id}) showed the following current-order measurements: " + "; ".join(fragments) + ". "
-                + f"{feature_id}: " + str(trajectory_fact.get("reader_summary") or "")
+                f"{label} showed the following current-order measurements: " + "; ".join(fragments) + ". "
+                + str(trajectory_fact.get("reader_summary") or "")
             ).strip(),
             "claim_tier": "O1",
             "evidence_ids": [evidence_id],
@@ -451,15 +494,19 @@ def build_feature_observation_cards(
                 "mechanistic importance, direct regulatory strength, occupancy, or causality."
             ),
             "feature_label": label,
-            "feature_identity": {
-                **candidate["mapping_identity"],
-                "reader_feature_id": feature_id,
-                "gene": candidate["key"][0],
-                "candidate_residue_annotation": candidate["key"][1] or None,
-                "source_feature_id": candidate["key"][2] or None,
-                "modified_sequence": candidate["key"][3] or None,
-                "condition_identity_status": "unique_per_feature_condition",
-            },
+            "feature_identity": _attach_display_identity(
+                {
+                    **candidate["mapping_identity"],
+                    "reader_feature_id": feature_id,
+                    "gene": candidate["key"][0],
+                    "candidate_residue_annotation": candidate["key"][1] or None,
+                    "source_feature_id": candidate["key"][2] or None,
+                    "modified_sequence": candidate["key"][3] or None,
+                    "condition_identity_status": "unique_per_feature_condition",
+                },
+                candidate["measurement"],
+                disambiguator=candidate.get("reader_disambiguator"),
+            ),
             "measurement_provenance": candidate["measurement"],
             "trajectory": candidate["points"],
             "axis_patterns": {axis: summarize_observed_pattern(
@@ -650,8 +697,23 @@ def build_quantitation_comparison_cards(
         "amplified_after_protein_adjustment": ["differed from", "was amplified beyond the descriptive tolerance"],
         "similar_after_protein_adjustment": ["differed numerically from", "remained similar within the descriptive tolerance"],
     }
+    disambiguated = assign_local_disambiguators([
+        {
+            "gene": row["key"][0],
+            "position": row["key"][1],
+            "candidate_residue_annotation": row["key"][1] or None,
+            "precursor_id": row["key"][2],
+            "modified_sequence": row["key"][3],
+            "reader_feature_id": reader_feature_id(row["key"]),
+            "feature_id": reader_feature_id(row["key"]),
+        }
+        for row in selected
+    ])
+    for row, identity in zip(selected, disambiguated):
+        row["reader_disambiguator"] = identity.get("reader_disambiguator")
+
     for index, row in enumerate(selected, 1):
-        label = _display_label(row["key"], row["measurement"])
+        label = _display_label(row["key"], row["measurement"], disambiguator=row.get("reader_disambiguator"))
         feature_id = reader_feature_id(row["key"])
         evidence_id = f"quantitation.comparison.{index}"
         cards.append({
@@ -660,7 +722,7 @@ def build_quantitation_comparison_cards(
             "card_id": evidence_id,
             "category": "quantitation_comparison",
             "reader_summary": (
-                f"For {label} ({feature_id}) at {row['condition']}, the independently calculated unadjusted PTM contrast was "
+                f"For {label} at {row['condition']}, the independently calculated unadjusted PTM contrast was "
                 f"{_format_signed(row['unadjusted'])}, the protein-adjusted PTM contrast was "
                 f"{_format_signed(row['adjusted'])}, and the linked protein contrast was "
                 f"{_format_signed(row['protein'])}; this was classified descriptively as "
@@ -677,15 +739,19 @@ def build_quantitation_comparison_cards(
                 "It does not prove that the adjusted value is biologically truer. The legacy reconstructed value is excluded."
             ),
             "feature_label": label,
-            "feature_identity": {
-                **canonical_feature_identity(dict(zip(FIELDS, row["key"]))),
-                "reader_feature_id": feature_id,
-                "gene": row["key"][0],
-                "candidate_residue_annotation": row["key"][1] or None,
-                "source_feature_id": row["key"][2] or None,
-                "modified_sequence": row["key"][3] or None,
-                "condition_identity_status": "unique_per_feature_condition",
-            },
+            "feature_identity": _attach_display_identity(
+                {
+                    **canonical_feature_identity(dict(zip(FIELDS, row["key"]))),
+                    "reader_feature_id": feature_id,
+                    "gene": row["key"][0],
+                    "candidate_residue_annotation": row["key"][1] or None,
+                    "source_feature_id": row["key"][2] or None,
+                    "modified_sequence": row["key"][3] or None,
+                    "condition_identity_status": "unique_per_feature_condition",
+                },
+                row["measurement"],
+                disambiguator=row.get("reader_disambiguator"),
+            ),
             "condition": row["condition"],
             "ptm_unadjusted_log2fc": row["unadjusted"],
             "ptm_protein_adjusted_log2fc": row["adjusted"],

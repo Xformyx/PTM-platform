@@ -15,10 +15,11 @@ def test_each_selected_feature_uses_its_own_conditions_and_eligibility(tmp_path,
              "protein_log2fc": .1, "ptm_unadjusted_conventional_log2fc_na": False}
             for gene, condition in (("EARLY", "1min"), ("LATE", "5min"), ("HIDDEN", "1min"))]
     selected = [{"gene": gene, "position": "S1", "source_feature_id": gene,
-                 "modified_sequence": "AS(UniMod:21)K", "display_label": gene + " PF-00000001",
+                 "modified_sequence": "AS(UniMod:21)K", "display_label": gene + " modified-precursor feature annotated at S1",
                  "conditions": [condition], "render_eligible": eligible}
                 for gene, condition, eligible in (("EARLY", "1min", True), ("LATE", "5min", True), ("HIDDEN", "1min", False))]
     output = generate_context_aware_ptm_heatmap({}, rows, ["1min", "5min"], str(tmp_path), selected_features=selected)
     assert output
-    assert "EARLY PF-00000001" in captured and "LATE PF-00000001" in captured
-    assert "HIDDEN PF-00000001" not in captured
+    assert any("EARLY" in label for label in captured) and any("LATE" in label for label in captured)
+    assert all("HIDDEN" not in label for label in captured)
+    assert all("PF-" not in label for label in captured)

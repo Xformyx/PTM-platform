@@ -9,6 +9,20 @@ from typing import Iterable, Mapping
 from common.model_json import parse_model_json
 
 VERSION = "finding_retrieval.v3"
+FINDING_RETRIEVAL_BACKOFF_SECONDS = 0.25
+"""Bounded pause between retrieval layers.
+
+구현 대상: docs/개발_업무지시서_연구자용_PTM_Report의_Identity_Projection·서사·생성.md §4.E-3
+사전등록: 2026-09-14 표시 계약.
+해석 한계: backoff는 runtime 보호이며 문헌 일치의 증명이 아니다.
+주장 금지: 검색 성공을 kinase 귀속으로 해석하지 않는다.
+"""
+LAYER_RESULT_QUOTA = {
+    "literature_background": 8,
+    "gene_function_context": 4,
+    "direct_site_evidence": 4,
+    "counterevidence": 4,
+}
 QUOTE_BOUND_RELATIONSHIPS = {
     "known_agreement", "disagreement", "direct_site_evidence", "contradictory_evidence",
 }
@@ -89,7 +103,13 @@ def retrieve_finding_literature(cards, retriever, study, *, llm=None):
             cache_hit = key in search_cache
             try:
                 if not cache_hit:
-                    search_cache[key] = retriever.query(layer_query, n_results=8 if layer == "literature_background" else 4, strict=True)
+                    search_cache[key] = retriever.query(
+                        layer_query,
+                        n_results=LAYER_RESULT_QUOTA.get(layer, 4),
+                        strict=True,
+                    )
+                    if FINDING_RETRIEVAL_BACKOFF_SECONDS:
+                        time.sleep(FINDING_RETRIEVAL_BACKOFF_SECONDS)
                 found = deepcopy(search_cache[key])
             except Exception as error:
                 record["searches"].append({"layer": layer, "query": layer_query, "status": "retrieval_failed", "failure_type": type(error).__name__})
@@ -178,4 +198,30 @@ def retrieve_finding_literature(cards, retriever, study, *, llm=None):
         relations = {c["relationship"] for c in record["comparisons"] if c["relationship"] in {"known_agreement", "disagreement"}}
         record["status"] = ("agreement_and_disagreement" if len(relations) > 1 else next(iter(relations)) if relations else
                             "context_available" if record["comparisons"] else "retrieved_comparison_pending" if record["excluded_comparisons"] else "not_explained_by_retrieved_evidence")
-    return {"schema_version": VERSION, "records": records, "references": references}
+    return {
+        "schema_version": VERSION,
+        "records": records,
+        "references": references,
+        "retrieval_status_card": compact_literature_status_card(records),
+    }
+
+
+def compact_literature_status_card(records: Mapping[str, Mapping] | None) -> dict:
+    """One compact reader status for pending/failed retrieval; do not repeat it per finding."""
+    rows = list((records or {}).values())
+    pending = sum(1 for row in rows if row.get("status") == "retrieved_comparison_pending")
+    failed = sum(1 for row in rows if row.get("status") == "retrieval_failed")
+    anchored = sum(1 for row in rows if row.get("comparisons"))
+    return {
+        "card_id": "literature.retrieval_status",
+        "category": "traceable_literature",
+        "pending_count": pending,
+        "failed_count": failed,
+        "source_anchored_count": anchored,
+        "selected_finding_count": len(rows),
+        "reader_summary": (
+            f"Literature retrieval: {anchored} source-anchored comparison(s), "
+            f"{pending} comparison-pending, {failed} failed of {len(rows)} selected finding(s). "
+            "Pending or failed retrieval does not erase measured observations."
+        ),
+    }

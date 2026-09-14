@@ -11,7 +11,11 @@ from __future__ import annotations
 
 import json
 import re
-from ptm_shared.feature_identity import audit_feature_identities
+from ptm_shared.feature_identity import (
+    audit_feature_identities,
+    project_reader_display_identity,
+    scan_reader_technical_id_leaks,
+)
 from ptm_shared.evidence_record_contract import typed_record
 from .companion_evidence import (
     atlas_cards,
@@ -29,7 +33,7 @@ from typing import Any, Iterable, Mapping
 
 from common.section_budgets import SECTION_BUDGETS
 from common.temporal_utils import condition_sort_key
-from .quantitative_claims import quantitative_records, validate_quantitative_sentence, render_value_record
+from .quantitative_claims import AXIS_LABELS, quantitative_records, validate_quantitative_sentence, render_value_record
 from report_generation.core.measured_feature_cards import (
     build_feature_observation_cards,
     build_quantitation_comparison_cards,
@@ -76,11 +80,23 @@ SECTION_STORY_CONTRACT = {
         "categories": ("quantitative_landscape", "quantitative_provenance", "measured_feature_observation", "quantitation_comparison", "temporal_profile", "kinase_context", "protein_context", "pathway_context", "candidate_discovery"),
         "role": "Report measured scope before selected temporal observations, protein-linked context, and any eligible candidate context.",
         "sequence": "coverage → selected temporal observation → protein-linked quantitative context → candidate context → observation boundary",
+        "paragraph_roles": (
+            "measurement_scope_and_quantitative_landscape",
+            "principal_observed_temporal_pattern",
+            "protein_linked_quantitative_context",
+            "temporal_profile_and_interval_concordance",
+            "candidate_family_context",
+        ),
     },
     "discussion": {
         "categories": ("measured_feature_observation", "quantitation_comparison", "quantitative_provenance", "temporal_profile", "kinase_context", "protein_context", "pathway_context", "candidate_discovery", "traceable_literature"),
         "role": "Interpret current observations in the selected literature context, state the alternative explanation that remains, and identify the next discriminating experiment.",
         "sequence": "principal observation → cited comparison → bounded interpretation → remaining alternative → discriminating validation",
+        "paragraph_roles": (
+            "principal_observation_and_source_anchored_literature",
+            "competing_explanation_and_current_limitation",
+            "discriminating_next_experiment",
+        ),
     },
     "methods": {
         "categories": ("study_frame", "quantitation_provenance", "quantitation_comparison", "temporal_profile"),
@@ -491,6 +507,7 @@ def _kinase_context_cards(state: Mapping[str, Any]) -> list[dict]:
             "category": "kinase_context",
             "reader_summary": (
                 "Independent footprint diagnostics were not evaluable on this stored heatmap. "
+                "The stored heatmap did not support a stable evaluation of kinase footprint candidate context. "
                 "Stored candidate rankings and any signed interval comparisons remain observational context only."
             ),
             "claim_tier": "O1",
@@ -537,10 +554,15 @@ def _kinase_context_cards(state: Mapping[str, Any]) -> list[dict]:
         if group_id in emitted:
             continue
         emitted.add(group_id)
-        family_label = " / ".join(names) + " family" if len(names) >= 2 else f"{candidate} family"
         footprint_status = str(_as_mapping(row.get("footprint_diagnostics")).get("status") or "not_evaluable")
         trajectory = _as_mapping(row.get("trajectory_evidence"))
         trajectory_status = str(trajectory.get("support_status") or "legacy_unavailable")
+        named_ok = footprint_status == "computed" or trajectory_status == "computed"
+        family_label = (
+            (" / ".join(names) + " family" if len(names) >= 2 else f"{candidate} family")
+            if named_ok
+            else "stored candidate"
+        )
         concordance = trajectory.get("median_direction_concordance_fraction")
         correlation = trajectory.get("median_signed_profile_correlation")
         n_targets = trajectory.get("n_targets_evaluable")
@@ -566,7 +588,7 @@ def _kinase_context_cards(state: Mapping[str, Any]) -> list[dict]:
             footprint_clause = f"A contribution-weighted {family_label} footprint provided kinase-family candidate context across the sampled conditions. "
         else:
             footprint_clause = (
-                f"A stored {family_label} ranking provided kinase-family candidate context. "
+                "A stored candidate ranking provided kinase-family candidate context. "
                 "Independent footprint diagnostics were not evaluable on this stored heatmap. "
             )
         value_records = [
@@ -1017,14 +1039,23 @@ def format_authoring_packet_for_llm(packet: Mapping[str, Any], section_type: str
                 lines.append("  Quantitative references: " + json.dumps(records, ensure_ascii=False))
             lines.append("  Observed pattern contract: " + json.dumps(card.get("axis_patterns") or {}, ensure_ascii=False))
             lines.append("  Literature comparison: " + json.dumps(card.get("literature_comparison") or {}, ensure_ascii=False))
-    lines.append("Every quantitative clause must identify PF ID, condition and axis before the value. Different precursors at the same gene/site are separate observations. Missing p/q/n is unknown, never zero or non-significant. The ±0.15 tolerance is descriptive, not a significance test.")
+    lines.append("Every quantitative clause must identify the reader display identity, condition and axis before the value. Different precursors at the same gene/site remain separate observations. Do not emit PF- or FEATURE- identifiers in reader prose. Missing p/q/n is unknown, never zero or non-significant. The ±0.15 tolerance is descriptive, not a significance test.")
     if packet.get("figure_cards"):
         lines.extend(["", "Eligible figure cards:"])
         for figure in packet["figure_cards"]:
-            lines.append(
+            selected_labels = figure.get("selected_display_identities") or [
+                item.get("display_label") or item.get("reader_display_identity")
+                for item in figure.get("selected_features") or []
+                if isinstance(item, dict)
+            ]
+            figure_line = (
                 f"- {figure.get('figure_label')}: key={figure.get('figure_key')}; placement={figure.get('placement')}; "
-                f"question={figure.get('question')}; selected_reader_feature_ids={figure.get('selected_reader_feature_ids', [])}; use at most one eligible figure per paragraph."
+                f"question={figure.get('question')}; selected_display_identities={selected_labels}"
             )
+            if packet.get("packet_role") != "section_model" and figure.get("selected_reader_feature_ids"):
+                figure_line += f"; selected_reader_feature_ids={figure.get('selected_reader_feature_ids', [])}"
+            figure_line += "; use at most one eligible figure per paragraph."
+            lines.append(figure_line)
     if plan:
         lines.extend([
             "",
@@ -1392,7 +1423,11 @@ def refresh_finding_context(plan, packet):
 
 
 def focus_authoring_packet(packet, plan):
-    """Limit model-visible numeric facts to frozen findings, retaining the full audit packet."""
+    """Filter reader cards to frozen findings while retaining the full audit mapping.
+
+    Model-visible context must be built with build_section_model_packet(); this
+    function keeps hidden identities and audit fields for validators and decode.
+    """
     selected = {f.get("reader_feature_id") for f in plan.get("key_findings") or []}
     selected_evidence = {
         str(evidence_id)
@@ -1438,8 +1473,83 @@ def _candidate_residue_feature_labels(packet: Mapping[str, Any]) -> list[tuple[s
         gene = str(identity.get("gene") or "").strip()
         residue = str(identity.get("candidate_residue_annotation") or "").strip()
         if gene and residue:
-            labels.append((gene, residue, f"{gene} modified-precursor feature with candidate residue annotation {residue}"))
+            labels.append((
+                gene,
+                residue,
+                identity.get("reader_display_identity")
+                or project_reader_display_identity(
+                    identity,
+                    reader_measurement_unit=measurement.get("reader_measurement_unit"),
+                ),
+            ))
     return labels
+
+
+def _card_display_identity(card: Mapping[str, Any]) -> str:
+    identity = _as_mapping(card.get("feature_identity"))
+    display = str(identity.get("reader_display_identity") or card.get("feature_label") or "").strip()
+    disambiguator = str(identity.get("reader_disambiguator") or "").strip()
+    if display and disambiguator and disambiguator not in display:
+        return f"{display} {disambiguator}"
+    return display or project_reader_display_identity(identity)
+
+
+def _replace_known_technical_ids(sentence: str, packet: Mapping[str, Any]) -> tuple[str, bool, list[str]]:
+    """Map known hidden IDs to display identity. Unknown leaks stay and are audited."""
+    leaks = scan_reader_technical_id_leaks(sentence)
+    if not leaks:
+        return sentence, False, []
+    lookup = {}
+    for card in packet.get("reader_cards") or []:
+        if not isinstance(card, Mapping):
+            continue
+        identity = _as_mapping(card.get("feature_identity"))
+        display = _card_display_identity(card)
+        for key in (
+            identity.get("reader_feature_id"),
+            identity.get("feature_id"),
+            identity.get("legacy_reader_feature_id"),
+        ):
+            if key and display:
+                lookup[str(key).upper()] = display
+    repaired = sentence
+    unknown: list[str] = []
+    for leak in leaks:
+        display = lookup.get(leak.upper())
+        if display:
+            repaired = re.sub(re.escape(leak), display, repaired, flags=re.IGNORECASE)
+        else:
+            unknown.append(leak.upper())
+    return repaired, repaired != sentence, unknown
+
+
+def audit_named_feature_ceiling(text: str, cards: Iterable[Mapping[str, Any]] | None = None, *, limit: int = 3) -> list[dict]:
+    displays = []
+    for card in cards or []:
+        if not isinstance(card, Mapping):
+            continue
+        if card.get("category") not in {"measured_feature_observation", "quantitation_comparison", "candidate_discovery"}:
+            continue
+        label = _card_display_identity(card)
+        if label:
+            displays.append(label)
+    violations = []
+    for index, paragraph in enumerate(_split_paragraphs(text), 1):
+        named = [label for label in dict.fromkeys(displays) if label.lower() in paragraph.lower()]
+        leaks = scan_reader_technical_id_leaks(paragraph)
+        if len(named) > limit or leaks:
+            violations.append({
+                "paragraph_index": index,
+                "named_feature_count": len(named),
+                "named_features": named,
+                "technical_id_leaks": leaks,
+                "limit": limit,
+            })
+    return violations
+
+
+def required_section_roles(section_type: str) -> tuple[str, ...]:
+    return tuple(_as_mapping(SECTION_STORY_CONTRACT.get(section_type)).get("paragraph_roles") or ())
 
 
 def _repair_candidate_residue_site_claim(sentence: str, labels: Iterable[tuple[str, str, str]]) -> tuple[str, bool]:
@@ -1599,6 +1709,13 @@ def validate_and_repair_sections(
                     sentence = _ANY_EVIDENCE_RESIDUE_RE.sub("", sentence)
                     actions.append("remove_malformed_evidence_anchor")
                     reasons.append("malformed_draft_only_anchor")
+                if sentence:
+                    repaired_ids, ids_replaced, unknown_ids = _replace_known_technical_ids(sentence, packet)
+                    if ids_replaced:
+                        sentence = repaired_ids
+                        actions.append("replace_technical_id_with_display_identity")
+                    if unknown_ids:
+                        reasons.append("reader_technical_identifier_leak")
                 sentence = normalize_reader_prose(sentence)
                 if sentence:
                     retained_sentences.append(sentence)
@@ -1785,6 +1902,7 @@ def audit_report_output_correctness(
     reader_cards: Iterable[Mapping[str, Any]] | None = None,
     authoring_plan: Mapping[str, Any] | None = None,
     generation_failures: Iterable[str] | None = None,
+    generation_degraded: bool = False,
 ) -> dict:
     """Audit final reader output without changing scientific content.
 
@@ -1938,6 +2056,19 @@ def audit_report_output_correctness(
         review_reason_codes.append("main_figure_not_referenced_in_prose")
     if generation_failures:
         review_reason_codes.append("interpretation_generation_incomplete")
+    if generation_degraded:
+        review_reason_codes.append("generation_degraded")
+    technical_leaks = scan_reader_technical_id_leaks(narrative)
+    named_feature_violations = []
+    for name in ("results", "discussion"):
+        named_feature_violations.extend(
+            {"section": name, **item}
+            for item in audit_named_feature_ceiling(content_sections.get(name, ""), reader_cards)
+        )
+    if technical_leaks:
+        reason_codes.append("reader_technical_identifier_leak")
+    if named_feature_violations:
+        review_reason_codes.append("named_feature_ceiling_exceeded")
     reason_codes = sorted(set(reason_codes))
     review_reason_codes = sorted(set(review_reason_codes))
     status = "blocked_for_review" if reason_codes else "draft_review_required" if review_reason_codes else "release_candidate"
@@ -1946,6 +2077,9 @@ def audit_report_output_correctness(
         "status": status,
         "reason_codes": reason_codes,
         "review_reason_codes": review_reason_codes,
+        "generation_degraded": bool(generation_degraded),
+        "reader_technical_identifier_leaks": technical_leaks,
+        "named_feature_ceiling_violations": named_feature_violations,
         "major_heading_sequence": major_sequence,
         "major_heading_labels": heading_labels,
         "duplicate_major_headings": duplicate_headings,
@@ -2070,6 +2204,183 @@ def _sampled_trajectory_interpretation(card):
     return extrema + f" The last recorded contrast at {last_time} {change}; this comparison does not locate a continuous-time biological peak."
 
 
+def _named_finding_clause(card, finding=None, *, maximum_conditions=3):
+    records = [r for r in quantitative_records(card) if r.get("value") is not None]
+    conditions = finding_observation_conditions(card)[:maximum_conditions]
+    compact = []
+    for condition in conditions:
+        values = [
+            f"{AXIS_LABELS.get(r['axis'], r['axis'])} {r['value']:+.3f}"
+            for r in records
+            if r.get("condition") == condition and r.get("value") is not None
+        ]
+        if values:
+            compact.append(f"{condition}: " + ", ".join(values))
+    description = _joint_description(card)
+    label = _card_display_identity(card)
+    clause = f"{label} {description[0].lower() + description[1:]}"
+    if compact:
+        clause += " Recorded contrasts were " + "; ".join(compact) + "."
+    return clause
+
+
+def _evidence_bound_bridge(kind: str) -> str:
+    return {
+        "quantitation": (
+            "These selected measurements are next compared with the independently calculated "
+            "unadjusted, protein-adjusted, and linked protein contrasts."
+        ),
+        "time": (
+            "The same sampled intervals also support a descriptive temporal-profile and "
+            "interval-concordance description."
+        ),
+        "scope": (
+            "Candidate-family context is retained only as observational context and does not "
+            "establish a direct kinase–substrate assignment."
+        ),
+        "literature": (
+            "The selected source-anchored comparisons remain limited to their recorded experimental scope."
+        ),
+    }.get(kind, "")
+
+
+def _literature_status_card(packet) -> str:
+    statuses = []
+    pending = 0
+    anchored = 0
+    for card in packet.get("reader_cards") or []:
+        context = _as_mapping(card.get("literature_comparison"))
+        status = str(context.get("status") or "")
+        if not status:
+            continue
+        statuses.append(status)
+        if status == "retrieved_comparison_pending":
+            pending += 1
+        if context.get("comparisons"):
+            anchored += 1
+    if not statuses:
+        return "A compact literature-status summary was not available for the selected findings."
+    if pending and not anchored:
+        return (
+            "Retrieved literature remains comparison-pending for the selected findings; "
+            "this status does not erase the measured observations."
+        )
+    if anchored:
+        return f"Source-anchored comparisons were available for {anchored} selected finding(s)."
+    return "Traceable feature-specific literature comparison remained incomplete for the selected findings."
+
+
+def _render_role_based_results(packet, study, cards, plan, figures):
+    landscape = _default_summary(
+        _summaries_by_category(packet, "quantitative_landscape", "quantitation_provenance", "study_frame", limit=2),
+        study,
+    )
+    named = cards[:3]
+    observation = " ".join(_named_finding_clause(card, finding) for card, finding in zip(named, plan.get("key_findings") or []))
+    if not observation.strip():
+        observation = "Selected current-order feature observations were not available for narrative display."
+    figure_bits = []
+    for finding in (plan.get("key_findings") or [])[:3]:
+        for key in finding.get("figure_keys") or []:
+            figure = figures.get(key) or {}
+            label = figure.get("figure_label")
+            if label and label not in figure_bits:
+                figure_bits.append(label)
+    if figure_bits:
+        observation += " " + "; ".join(figure_bits) + " display the corresponding measured evidence."
+    comparison_cards = [c for c in packet.get("reader_cards") or [] if c.get("category") == "quantitation_comparison"][:2]
+    if comparison_cards:
+        protein_context = (
+            "Independently calculated unadjusted PTM contrasts, protein-adjusted relative PTM log2 contrasts, "
+            "and linked protein contrasts were compared for the selected features. "
+            "The descriptive comparison classes record how protein adjustment changed the reported contrast; "
+            "they do not prove that the adjusted value is biologically truer."
+        )
+    else:
+        protein_context = (
+            "An independent unadjusted-versus-protein-adjusted comparison was not available "
+            "for the selected findings; the three quantitative tracks remain distinct."
+        )
+    temporal = _default_summary(
+        _summaries_by_category(packet, "temporal_profile", limit=2),
+        "Temporal Profile Clustering and Interval-wise Concordance Analysis remain descriptive summaries of the sampled intervals.",
+    )
+    supporting = _supporting_context_cards(packet.get("reader_cards") or [])
+    kinase = " ".join(
+        (_kinase_interval_sentence(card) or str(card.get("reader_summary") or ""))
+        for card in supporting[:2]
+    )
+    if not kinase.strip():
+        kinase = _default_summary(
+            _summaries_by_category(packet, "kinase_context", "candidate_discovery", limit=2),
+            "No eligible candidate-family context was available beyond the measured feature observations.",
+        )
+    return "\n\n".join([
+        landscape,
+        _evidence_bound_bridge("quantitation"),
+        observation,
+        protein_context,
+        _evidence_bound_bridge("time"),
+        temporal,
+        _evidence_bound_bridge("scope"),
+        "Supplementary Figure 2 reports within-cluster pair-window counts. "
+        "The kinase signed-interval fractions are a separate substrate-anchor comparison. "
+        + kinase,
+    ])
+
+
+def _render_role_based_discussion(packet, cards, plan):
+    named = cards[:2]
+    observation = " ".join(_joint_description(card) for card in named) or "Selected current-order observations remain the interpretation anchor."
+    literature_bits = []
+    for finding in (plan.get("key_findings") or [])[:2]:
+        context = _as_mapping(finding.get("literature_comparison"))
+        for comparison in (context.get("comparisons") or [])[:2]:
+            relation = "agreed with" if comparison.get("relationship") == "known_agreement" else "differed from" if comparison.get("relationship") == "disagreement" else "provided biological context for"
+            differences = "; ".join(comparison.get("condition_differences") or []) or "experimental comparability has not been established"
+            literature_bits.append(
+                f"The {comparison.get('reference_scope', 'supplied')}-level literature comparison {relation} "
+                f"the recorded observation: {comparison.get('external_finding')} "
+                f"[REF:{comparison.get('citation_id')}]. Conditions differ in {differences}."
+            )
+    if not literature_bits:
+        literature_bits.append(_literature_status_card(packet))
+    opposing = []
+    for finding in plan.get("key_findings") or []:
+        opposing.extend(finding.get("opposing_feature_ids") or [])
+    if opposing:
+        alternative = (
+            "Shared parent abundance, mapping ambiguity, and distinct precursor forms remain competing explanations. "
+            "A targeted comparison of the exact recorded forms, with localization and denominator quality checked, "
+            "would test whether the divergence persists."
+        )
+    else:
+        alternative = (
+            "A change in the available protein denominator and differences in sample support can contribute to the adjusted contrast. "
+            "These alternatives remain open because the current measurements do not separate occupancy, mapping error, and regulation."
+        )
+    next_experiment = (
+        "The discriminating next experiment should quantify the same precursor and linked protein in matched independent "
+        "biological samples, with the mapping and denominator quality recorded in advance."
+    )
+    unresolved = unresolved_question_paragraphs(packet.get("research_question_evidence_map"))
+    paragraphs = [
+        observation + " " + " ".join(literature_bits),
+        _evidence_bound_bridge("literature"),
+        alternative,
+        next_experiment,
+    ]
+    paragraphs.extend(unresolved)
+    supporting = _supporting_context_cards(packet.get("reader_cards") or [])
+    if supporting:
+        paragraphs.insert(
+            1,
+            (_kinase_interval_sentence(supporting[0]) or supporting[0]["reader_summary"])
+            + " This remains observational candidate context.",
+        )
+    return "\n\n".join(paragraphs)
+
+
 def _render_finding_section(section_type, packet, study):
     plan = deterministic_authoring_plan(packet)
     cards, _ = select_finding_cards(packet.get("reader_cards") or [])
@@ -2082,102 +2393,27 @@ def _render_finding_section(section_type, packet, study):
                 (_literature_context_for_fallback(packet) or "A feature-specific comparison with prior work requires traceable literature matched to the experimental system and sampling window.") +
                 " The current objective is to identify measured PTM–protein patterns and define the next observation that could distinguish their possible explanations.")
     figures = {f["figure_key"]: f for f in packet.get("figure_cards") or []}
+    if section_type == "results":
+        return _render_role_based_results(packet, study, cards, plan, figures)
+    if section_type == "discussion":
+        return _render_role_based_discussion(packet, cards, plan)
     paragraphs = []
-    discussed_form_groups = set()
-    shared_followups = set()
-    search_status_explained = False
-    for card, finding in zip(cards, plan["key_findings"]):
-        fid = finding["reader_feature_id"]
+    for card, finding in zip(cards[:3], plan["key_findings"][:3]):
         description = _joint_description(card)
-        if section_type == "results":
-            records = [r for r in quantitative_records(card) if r["value"] is not None]
-            # A compact illustrative condition; the bound Figure/table retains
-            # every supplied timepoint and axis, including unavailable values.
-            conditions = finding_observation_conditions(card)
-            clauses = ". ".join("; ".join(render_value_record(r) for r in records if r["condition"] == condition) for condition in conditions)
-            display_keys = finding["figure_keys"]
-            labels = [figures[key].get("figure_label") for key in display_keys if key in figures]
-            roles = {"reader_joint_trajectories": "the observed PTM–protein time responses", "reader_quantitative_heatmap": "the adjusted feature within the selected temporal profiles", "reader_protein_context": "the matched independent and adjusted contrasts"}
-            reference = " " + "; ".join(f"{figures[key].get('figure_label')} shows {roles.get(key, 'the corresponding measured evidence')}" for key in display_keys if key in figures) + "." if labels else ""
-            missing = sorted({c for pattern in (card.get("axis_patterns") or {}).values() for c in pattern.get("missing_conditions") or []})
-            gaps = " Unavailable conditions interrupt the observed trajectory; the lines do not establish a continuous response." if missing else ""
-            paragraphs.append(f"{card['feature_label']} ({fid}). {clauses}. {description} These examples span the first observed response, sampled extremum and late observation where available.{gaps}{reference}")
-        elif section_type == "discussion":
-            context = finding["literature_comparison"]
-            form_group = tuple(sorted({fid, *finding["opposing_feature_ids"]}))
-            already_discussed = len(form_group) > 1 and form_group in discussed_form_groups
-            if already_discussed and not context["comparisons"]:
-                continue
-            discussed_form_groups.add(form_group)
-            literature = []
-            for comparison in context["comparisons"]:
-                relation = "agreed with" if comparison["relationship"] == "known_agreement" else "differed from" if comparison["relationship"] == "disagreement" else "provided biological context for"
-                differences = "; ".join(comparison["condition_differences"]) or "experimental comparability has not been established"
-                comparison_text = f"For {fid}, the {comparison.get('reference_scope', 'supplied')}-level literature comparison {relation} the recorded observation: {comparison['external_finding']}"
-                comparison_sentences = _split_sentences(comparison_text) + [f"Conditions differ in {differences}."]
-                # Bind the source to each claim before sentence validation;
-                # a trailing paragraph citation must not orphan the comparison.
-                for sentence in comparison_sentences:
-                    punctuation = sentence[-1] if sentence.endswith((".", "!", "?")) else "."
-                    clause = sentence[:-1] if sentence.endswith((".", "!", "?")) else sentence
-                    literature.append(f"{clause} [REF:{comparison['citation_id']}]{punctuation}")
-            if not literature:
-                literature = [{
-                    "not_searched": "A feature-specific literature search was not performed.",
-                    "retrieval_failed": "The feature-specific literature search failed; literature coverage remains unknown.",
-                    "retrieved_comparison_pending": "Literature was retrieved, but a source-anchored feature comparison remains incomplete.",
-                    "not_explained_by_retrieved_evidence": "The searched evidence did not explain this pattern within the recorded search scope; this does not establish novelty.",
-                }.get(context["status"], "Traceable feature-specific literature comparison was unavailable.")]
-            alternative = ("A change in the available protein denominator and differences in sample support can contribute to the adjusted contrast. "
-                           "To distinguish this contribution from a change in modified precursor abundance, the next measurement should quantify the same precursor and linked protein in matched independent biological samples.")
-            if finding["opposing_feature_ids"]:
-                alternative = ("Opposing form responses were also recorded for " + ", ".join(finding["opposing_feature_ids"]) +
-                               ". Shared parent abundance and mapping ambiguity remain relevant competing explanations. A targeted comparison of these exact forms, with localization and denominator quality checked, would test whether the divergence persists.")
-            elif {p.get("joint_pattern") for p in card.get("trajectory") or []} == {"ptm_protein_co_movement"}:
-                alternative = ("The parallel PTM and protein observations are compatible with an abundance contribution to the measured PTM contrast. "
-                               "The small adjusted contrast does not make the response biologically irrelevant. Repeating matched measurements across independent preparations would test whether this correspondence is robust to sample support and denominator variation.")
-            # Common uncertainty and validation advice is shared rather than
-            # copied into every protein paragraph. Full per-finding metadata is
-            # retained in the plan, even when the prose explains it once.
-            if not context["comparisons"]:
-                if search_status_explained:
-                    literature = []
-                search_status_explained = True
-            if alternative in shared_followups:
-                alternative = ""
-            elif not already_discussed:
-                shared_followups.add(alternative)
-            gene = card["feature_identity"]["gene"]
-            paragraphs.append(f"For {gene} ({fid}), {description[0].lower() + description[1:]} {_sampled_trajectory_interpretation(card)} " + " ".join(literature) + ("" if already_discussed else " " + alternative))
-        elif section_type == "abstract":
-            paragraphs.append(f"For {card['feature_identity']['gene']} ({fid}), {description[0].lower() + description[1:]}")
+        label = _card_display_identity(card)
+        paragraphs.append(f"For {label}, {description[0].lower() + description[1:]}")
     supporting = _supporting_context_cards(packet.get("reader_cards") or [])
-    if supporting and section_type == "results":
-        paragraphs.append(
-            "Supplementary Figure 2 reports within-cluster pair-window counts. "
-            "The kinase signed-interval fractions below are a separate substrate-anchor comparison, "
-            "not a direct kinase–substrate assignment."
-        )
-        for card in supporting:
-            paragraphs.append(_kinase_interval_sentence(card) or card["reader_summary"])
-    elif supporting and section_type == "discussion":
-        for card in supporting:
-            paragraphs.append(
-                (_kinase_interval_sentence(card) or card["reader_summary"])
-                + " This remains observational candidate context."
-            )
-    elif supporting and section_type == "abstract":
+    if supporting and section_type == "abstract":
         paragraphs.append(_kinase_interval_sentence(supporting[0]) or supporting[0]["reader_summary"])
     if section_type == "conclusion":
         main = cards[0]
         description = _joint_description(main)
-        return (f"The recorded time course distinguishes changes in modified precursor abundance from changes relative to linked protein. For {main['feature_identity']['reader_feature_id']}, {description[0].lower() + description[1:]} "
+        label = _card_display_identity(main)
+        return (f"The recorded time course distinguishes changes in modified precursor abundance from changes relative to linked protein. For {label}, {description[0].lower() + description[1:]} "
                 "These sampled relative contrasts do not establish causality, absolute occupancy, or biological reproducibility. "
                 "The next validation should repeat paired measurements of the same precursor and parent protein in independent biological samples, with denominator quality and mapping checked explicitly.")
     if section_type == "abstract":
         return study + " " + " ".join(paragraphs) + " These observations are descriptive; independent paired validation is needed to distinguish regulation from denominator and sampling effects."
-    if section_type == "discussion":
-        paragraphs.extend(unresolved_question_paragraphs(packet.get("research_question_evidence_map")))
     return "\n\n".join(paragraphs)
 
 

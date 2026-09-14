@@ -34,16 +34,36 @@ _TYPED_RECORD_TYPES = {
 }
 
 
+def _display_identity(identity: Mapping[str, Any], card: Mapping[str, Any] | None = None) -> str:
+    display = str(identity.get("reader_display_identity") or "").strip()
+    disambiguator = str(identity.get("reader_disambiguator") or "").strip()
+    if display and disambiguator and disambiguator not in display:
+        return f"{display} {disambiguator}"
+    if display:
+        return display
+    if card and card.get("feature_label"):
+        return str(card["feature_label"])
+    gene = str(identity.get("gene") or "").strip()
+    residue = str(identity.get("candidate_residue_annotation") or identity.get("position") or "").strip()
+    if gene and residue:
+        return f"{gene} modified-precursor feature annotated at {residue}"
+    return gene or str(identity.get("reader_feature_id") or "measured feature")
+
+
 def quantitative_records(card: Mapping[str, Any]) -> list[dict]:
     typed = [dict(record) for record in card.get("value_records") or [] if isinstance(record, Mapping)]
     identity = card.get("feature_identity") or {}
     fid = identity.get("reader_feature_id")
     if not fid:
         return typed
+    display = _display_identity(identity, card)
     measurement = card.get("measurement_provenance") or {}
     records = []
-    for point in card.get("trajectory") or [card]:
-        if point.get("detection_context_only"):
+    raw_points = card.get("trajectory") or [card]
+    if isinstance(raw_points, Mapping):
+        raw_points = [raw_points.get("first"), raw_points.get("peak"), raw_points.get("last")]
+    for point in raw_points:
+        if not isinstance(point, Mapping) or point.get("detection_context_only"):
             continue
         point_measurement = point.get("measurement_provenance") or measurement
         support = point.get("quality") or {**(card.get("replicate_support") or {}), **(card.get("statistical_support") or {})}
@@ -53,6 +73,7 @@ def quantitative_records(card: Mapping[str, Any]) -> list[dict]:
             records.append({
                 "evidence_id": (card.get("evidence_ids") or [card.get("card_id")])[0],
                 "feature_id": fid, "condition": point.get("condition"), "axis": axis,
+                "display_identity": display,
                 "canonical_feature_id": identity.get("feature_id"),
                 "feature_identity_version": identity.get("feature_identity_version"),
                 "value": axis_number(point, axis),
@@ -71,17 +92,27 @@ def quantitative_records(card: Mapping[str, Any]) -> list[dict]:
 def matching_cards(sentence: str, cards) -> list[Mapping[str, Any]]:
     ids = set(_ID.findall(sentence.upper()))
     matched = []
+    display_matched = []
     for card in cards:
         identity = card.get("feature_identity") or {}
         if not identity:
             continue
+        display = _display_identity(identity, card)
         if ids:
-            match = identity.get("reader_feature_id") in ids
+            match = identity.get("reader_feature_id") in ids or identity.get("feature_id") in ids
+        elif display and display.lower() in sentence.lower():
+            match = True
+            display_matched.append(card)
         else:
             labels = [identity.get("gene"), identity.get("candidate_residue_annotation")]
-            match = all(label and re.search(r"(?<!\w)" + re.escape(label) + r"(?!\w)", sentence, re.I) for label in labels)
+            match = all(label and re.search(r"(?<!\w)" + re.escape(str(label)) + r"(?!\w)", sentence, re.I) for label in labels)
+            disambiguator = str(identity.get("reader_disambiguator") or "").strip()
+            if match and disambiguator and disambiguator.lower() not in sentence.lower():
+                match = False
         if match:
             matched.append(card)
+    if display_matched and not ids:
+        return display_matched
     return matched
 
 
@@ -104,7 +135,16 @@ def validate_quantitative_sentence(sentence: str, packet: Mapping[str, Any]) -> 
     if typed_errors:
         return typed_errors
     cards = matching_cards(sentence, packet.get("reader_cards") or [])
-    if re.search(r"(?:no|without|unavailable|not available|not recorded).{0,70}(?:independent |unadjusted )+PTM|(?:independent |unadjusted )+PTM.{0,70}(?:unavailable|not available|not recorded)", sentence, re.I):
+    if not cards:
+        ambiguous = []
+        for card in packet.get("reader_cards") or []:
+            identity = card.get("feature_identity") or {}
+            labels = [identity.get("gene"), identity.get("candidate_residue_annotation")]
+            if all(label and re.search(r"(?<!\w)" + re.escape(str(label)) + r"(?!\w)", sentence, re.I) for label in labels):
+                ambiguous.append(card)
+        if len({(c.get("feature_identity") or {}).get("reader_feature_id") for c in ambiguous}) > 1:
+            return ["precursor_identity_ambiguous_or_stitched"]
+    if re.search(r"(?:(?<!\w)no(?!\w)|without|unavailable|not available|not recorded).{0,70}(?:independent |unadjusted )+PTM|(?:independent |unadjusted )+PTM.{0,70}(?:unavailable|not available|not recorded)", sentence, re.I):
         scope_cards = cards or packet.get("reader_cards") or []
         if any(r["axis"] == "unadjusted" and r["value"] is not None for c in scope_cards for r in quantitative_records(c)):
             return ["available_unadjusted_observation_denied"]
@@ -152,7 +192,19 @@ def validate_quantitative_sentence(sentence: str, packet: Mapping[str, Any]) -> 
         if number[0] in {"0.15", "+0.15", "-0.15"} and re.search(r"descriptive (?:tolerance|band)", sentence, re.I):
             continue
         preceding_ids = list(_ID.finditer(before))
-        fid = preceding_ids[-1][0].upper() if preceding_ids else (next(iter(ids)) if len(ids) == 1 else None)
+        fid = preceding_ids[-1][0].upper() if preceding_ids else None
+        if fid is None:
+            display_matches = []
+            for card in cards:
+                display = _display_identity(card.get("feature_identity") or {}, card)
+                hidden = (card.get("feature_identity") or {}).get("reader_feature_id")
+                if display and display.lower() in before.lower() and hidden:
+                    display_matches.append(hidden)
+            unique_displays = list(dict.fromkeys(display_matches))
+            if len(unique_displays) == 1:
+                fid = unique_displays[0]
+            elif len(ids) == 1:
+                fid = next(iter(ids))
         condition_patterns = [_TIME.pattern] + [r"(?<!\w)" + re.escape(str(r["condition"])) + r"(?!\w)" for r in records if r["condition"]]
         condition_pattern = re.compile("|".join(condition_patterns), re.I)
         times = list(condition_pattern.finditer(before))
@@ -199,7 +251,8 @@ def render_value_record(record: Mapping[str, Any]) -> str:
         unit = record.get("unit") or ""
         return f"{entity} had {metric} {record['value']} {unit} at {where}".strip()
     article = "an" if record["axis"] == "unadjusted" else "a"
-    return (f"{record['feature_id']} at {record['condition']} had {article} {AXIS_LABELS[record['axis']]} "
+    label = record.get("display_identity") or record.get("feature_id") or "measured feature"
+    return (f"{label} at {record['condition']} had {article} {AXIS_LABELS[record['axis']]} "
             f"of {record['value']:+.3f}")
 
 
@@ -279,7 +332,7 @@ def structured_authoring_instructions(packet: Mapping[str, Any]) -> str:
     return ("\nReturn a JSON object with sentences matching this schema: "
             + json.dumps(SENTENCE_RESPONSE_FORMAT["json_schema"]["schema"])
             + "\nEach sentence carries evidence_ids and scope. Use {{V1}} style tokens for quantitative clauses; "
-              "each token expands to a COMPLETE clause containing PF ID, condition, axis and source value. "
+              "each token expands to a COMPLETE clause containing reader display identity, condition, axis and source value. "
               "Do not attach another condition, feature or axis to a token. List tokens in value_tokens. "
               "List only figures supporting this sentence in figure_keys. Use separate sentences for background, "
               "current observations and hypotheses. Preserve [REF:*] citations in text. Group sentences with paragraph integers. "

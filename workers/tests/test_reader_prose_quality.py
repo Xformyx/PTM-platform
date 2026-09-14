@@ -70,3 +70,9 @@ def test_multi_question_compression_preserves_all_question_headings():
     assert audit["all_within_budget"] is True
     for index in range(1, 5):
         assert f"### Q{index}. Question {index}?" in compressed
+
+
+def test_language_audit_flags_technical_identifier_leaks():
+    audit = audit_language_quality("## Results\n\nPF-ABCDEF12 increased after stimulation.")
+    assert audit["technical_identifier_leak_count"] == 1
+    assert "PF-ABCDEF12" in audit["technical_identifier_leaks"]

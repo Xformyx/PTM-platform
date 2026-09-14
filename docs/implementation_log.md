@@ -2759,3 +2759,64 @@
 - **해석 한계:** 합성 재생이 다음 live Gemini 성공을 보장하지 않는다.
 - **결정성:** 회귀 입력은 저장된 11:33 잘림 문장과 동일 heatmap fixture.
 
+### [2026-09-14] 8월 대비 실주문 리포트 회귀 감사
+
+- **분류:** 측정
+- **대상:** `docs/collaboration/reviews/2026-09-14_insulin_report_regression_audit_ko.md`
+- **구현 대상 설계:** 신규 사후 진단 — 2026-08-28 11:47 및
+  2026-09-14 11:33 HIRc-B insulin 리포트의 분량·근거·코드 경로 비교.
+- **사전등록 상태:** 결과 열람 후 (탐색적, primary 금지).
+- **내용:** 두 리포트의 절별 단어 수, kinase 용어, figure 및 TSV
+  feature-condition overlap을 비교하고 8월 29일 Git 기준과 현재
+  reader-authoring 경로를 추적했다. 최신 핵심 절의 prompt-budget
+  초과와 deterministic fallback, 질문 coverage 및 kinase trajectory
+  전달 손실을 주원인으로 판정했다.
+- **논문에서의 용도:** limitation / 구현 품질 감사 / primary results에
+  사용 안 함.
+- **해석 한계:** 과거 문장별 외부 문헌 진위를 전수 검증하지 않았고,
+  최신 manifest에 Git SHA가 없어 11:33 실행의 exact source snapshot은
+  확정할 수 없다. 이 감사는 kinase 귀속 정확도나 분석 성능을 측정하지
+  않는다.
+- **결정성:** seed·solver 없음. UTF-8 MD/DOCX 추출문과 TSV를 Python
+  `csv`/`zipfile`로 읽고 복합 키
+  `(Protein.Group, Gene.Name, Modified.Sequence, PTM_Position,
+  Condition)`로 비교했다. 비교 문서 SHA256은 이전
+  `e76eddc6cd50c27f3902fe228fa96d9ab4455963727175f2e17d373bc911b28e`,
+  최신
+  `707eaf7964628e65ff81025e54bead3346e404e4cf542b672780d5165094df38`.
+
+### [2026-09-14] 연구자용 Report identity projection·서사·생성 복원
+
+- **분류:** 구현
+- **대상:** `ptm_shared/feature_identity.py`,
+  `workers/common/report_display_policy.py`,
+  `workers/report_generation/core/section_model_packet.py`,
+  `workers/report_generation/core/measured_feature_cards.py`,
+  `workers/report_generation/core/quantitative_claims.py`,
+  `workers/report_generation/core/reader_authoring.py`,
+  `workers/report_generation/core/figure_manifest.py`,
+  `workers/report_generation/core/nodes/writer_node.py`,
+  `workers/report_generation/core/report_release.py`,
+  `workers/report_generation/core/finding_literature.py`
+- **구현 대상 설계:**
+  `docs/개발_업무지시서_연구자용_PTM_Report의_Identity_Projection·서사·생성.md`
+  §4.A–E (2026-09-14 선언). 측정 공식 변경 아님.
+- **사전등록 상태:** 결과 열람 전 표시·생성 계약. primary 승격 금지.
+  Frozen Order 65는 재생성 대상이 아니다.
+- **내용:** hidden `feature_id`/`reader_feature_id`는 audit binding으로 유지하고
+  reader 본문·Figure에는 `reader_display_identity`와 조건부 form
+  구분만 노출한다. full AuthoringAuditPacket과 SectionModelPacket을
+  분리하고 prompt compaction 후 provider를 시도한다. structured
+  decode는 valid sibling sentence를 보존하고 missing role만 재시도한다.
+  Results/Discussion fallback은 role graph와 evidence-bound bridge를
+  쓴다. `generation_degraded`는 review artifact는 허용하고
+  `final_ready`는 불허한다.
+- **논문에서의 용도:** methods (표시·전달 계약) / 사용 안 함 (kinase 성능)
+- **해석 한계:** 이 변경은 TMM/Contribution-Weighted Kinase Footprint,
+  Temporal Profile Clustering, Interval-wise Concordance의 전달
+  가독성을 위한 Report-layer 계약이다. prediction accuracy나 kinase
+  귀속 정확도를 주장하지 않는다.
+- **결정성:** 표시 정책 SHA는
+  `reader_display_policy.v1`의 사전 선언 상수 집합이며 데이터셋
+  결과를 본 뒤 임계를 바꾸지 않는다. 새 추정량·seed·solver 없음.
+

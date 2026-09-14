@@ -92,6 +92,11 @@ def build_question_map(questions, cards):
             c["feature_identity"]["reader_feature_id"]
             for c in matches if (c.get("feature_identity") or {}).get("reader_feature_id")
         })
+        display_identities = sorted({
+            str((c.get("feature_identity") or {}).get("reader_display_identity") or c.get("feature_label") or "").strip()
+            for c in matches
+            if str((c.get("feature_identity") or {}).get("reader_display_identity") or c.get("feature_label") or "").strip()
+        })
         matched_genes = {
             c["feature_identity"]["gene"]
             for c in matches if (c.get("feature_identity") or {}).get("gene")
@@ -109,7 +114,8 @@ def build_question_map(questions, cards):
         entry = {"question_id": qid, "original_text": original, "normalized_question": normalized,
                  "origin": record.get("origin", "user"), "related_question_ids": [], "merged_original_texts": [],
                  "intent": intent,
-                 "entities": sorted(set(entities)), "requested_times": requested_times, "feature_ids": feature_ids, "finding_ids": [],
+                 "entities": sorted(set(entities)), "requested_times": requested_times, "feature_ids": feature_ids,
+                 "display_identities": display_identities, "finding_ids": [],
                  "evidence_ids": sorted({eid for c in matches for eid in c.get("evidence_ids") or []}),
                  "literature_evidence_ids": [],
                  "answer_status": "partially_answerable" if observational_match and not causal else "unanswered",
@@ -133,7 +139,12 @@ def audit_question_coverage(sections, question_map):
             paragraphs = [p for p in re.split(r"\n\s*\n", sections.get(section, "")) if p.strip() and not p.startswith("#")]
             matched = []
             for p in paragraphs:
-                bound = any(fid in p for fid in question["feature_ids"]) or any(f"[EVID:{eid}]" in p for eid in question["evidence_ids"])
+                bound = (
+                    any(fid in p for fid in question["feature_ids"])
+                    or any(label and label in p for label in question.get("display_identities") or [])
+                    or any(entity in p for entity in question.get("entities") or [] if entity)
+                    or any(f"[EVID:{eid}]" in p for eid in question["evidence_ids"])
+                )
                 # An unanswered question is covered only as an explicitly
                 # unresolved contextual paragraph about its actual entities.
                 unresolved = section == "discussion" and question["entities"] and all(g in p for g in question["entities"]) and bool(re.search(r"not available|not supplied|missing|requires?|unresolved|cannot", p, re.I))
@@ -163,6 +174,8 @@ def unresolved_question_paragraphs(question_map):
         subject = ", ".join(q["entities"]) if q["entities"] else "the requested temporal or pathway relationship"
         if subject in {"SSB", "TW"} or len(str(subject)) <= 3:
             continue
-        paragraphs.append(f"For {subject}, matching observations or a question-specific analysis were not supplied. "
-                          "Resolving this question requires the corresponding precursor trajectories and mapping or pathway membership evidence; unrelated protein contrasts cannot answer it.")
+        paragraphs.append(
+            f"For {subject}, matching observations or a question-specific analysis were not supplied, so the requested distinction remains unresolved. "
+            "The next measurement that would distinguish this question is the corresponding precursor trajectory with mapping or pathway membership evidence; unrelated protein contrasts cannot answer it."
+        )
     return paragraphs

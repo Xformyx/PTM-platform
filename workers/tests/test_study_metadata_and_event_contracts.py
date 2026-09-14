@@ -166,6 +166,6 @@ def test_validator_rewrites_candidate_residue_phosphosite_claim_without_localiza
     repaired, audit = validate_and_repair_sections(
         {"results": "GENEA S10 phosphosite increased in the recorded cell model."}, packet
     )
-    assert "candidate residue annotation S10" in repaired["results"]
+    assert "annotated at S10" in repaired["results"] or "modified-precursor feature annotated at S10" in repaired["results"]
     assert "phosphosite" not in repaired["results"].lower()
     assert any("candidate_residue_not_localized_site" in entry["reason_code"] for entry in audit["entries"])

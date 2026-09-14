@@ -17,6 +17,7 @@ def report_runtime_provenance():
     import subprocess
     from datetime import datetime, timezone
     from common.section_budgets import SECTION_BUDGET_VERSION
+    from common.report_display_policy import effective_display_policy
     from .quantitative_claims import CLAIM_SCHEMA_VERSION
     commit = os.getenv("PTM_GIT_COMMIT") or os.getenv("GIT_COMMIT_SHA")
     dirty = None
@@ -30,7 +31,8 @@ def report_runtime_provenance():
             "container_digest": os.getenv("PTM_CONTAINER_DIGEST"),
             "worker_version": os.getenv("PTM_WORKER_VERSION"),
             "generated_at": datetime.now(timezone.utc).isoformat(), "generation_timezone": "UTC",
-            "section_budget_version": SECTION_BUDGET_VERSION, "claim_schema_version": CLAIM_SCHEMA_VERSION}
+            "section_budget_version": SECTION_BUDGET_VERSION, "claim_schema_version": CLAIM_SCHEMA_VERSION,
+            "display_policy": effective_display_policy("shadow")}
 
 
 def persist_report_packets(state, output_dir):
